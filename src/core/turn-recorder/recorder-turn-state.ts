@@ -119,7 +119,10 @@ export async function beginOpenTurn(
       depthLimitedDirectories: discovery.depthLimitedDirectories,
       ...(discovery.worktreeDiscovery ? { worktreeDiscovery: discovery.worktreeDiscovery } : {})
     }
-    open.captures = await Promise.all(discovery.repositories.map(async (repository) => ({
+    // Repositories a previous turn already proved this session changes are baselined again here:
+    // they can sit below the configured discovery depth (a Friday stage worktree, for example).
+    const repositories = [...new Set([...discovery.repositories, ...(session.captureRepositories ?? [])])]
+    open.captures = await Promise.all(repositories.map(async (repository) => ({
       repository,
       capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
     })))
