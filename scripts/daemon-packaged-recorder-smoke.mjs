@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { readLaunch } from './b4v/process-identity.mjs'
@@ -20,7 +19,10 @@ if (!target.ok) throw new Error(`packaged_daemon_fixture_missing: ${JSON.stringi
 const privateCli = join(target.resources, 'bin', 'scry')
 if (!existsSync(privateCli)) throw new Error(`packaged_daemon_fixture_missing: ${privateCli}`)
 
-const root = mkdtempSync(join(tmpdir(), 'scry-packaged-recorder-'))
+// A short root, as daemon-mode-smoke uses: the daemon refuses socket paths over 100 bytes
+// (daemon_socket_path_too_long, exit 4), and macOS's os.tmpdir() under /var/folders made
+// <root>/live-state/enroll.sock 101 bytes, which looked like a startup failure.
+const root = realpathSync(mkdtempSync('/tmp/scry-pkg-rec-'))
 const fakeBin = join(root, 'fake-bin')
 mkdirSync(fakeBin, { recursive: true })
 writeFileSync(join(fakeBin, 'scry'), '#!/bin/sh\nexit 77\n')
