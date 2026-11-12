@@ -1,0 +1,85 @@
+{
+  "sourceRevision": "62a736ea",
+  "case": "e1-hook-1",
+  "backup": "complete before launch, original absolute paths preserved",
+  "before": {
+    "journalPhase": "prepared",
+    "turnStatus": "interrupted",
+    "providerTurnIdPresent": true,
+    "hookLifecycleCounts": [
+      {
+        "event": "QueryEnd",
+        "stage": "hook_response",
+        "count": 3
+      },
+      {
+        "event": "QueryEnd",
+        "stage": "hook_started",
+        "count": 3
+      },
+      {
+        "event": "SessionEnd",
+        "stage": "hook_response",
+        "count": 7
+      },
+      {
+        "event": "SessionEnd",
+        "stage": "hook_started",
+        "count": 7
+      },
+      {
+        "event": "SessionStart",
+        "stage": "hook_progress",
+        "count": 1
+      },
+      {
+        "event": "SessionStart",
+        "stage": "hook_response",
+        "count": 7
+      },
+      {
+        "event": "SessionStart",
+        "stage": "hook_started",
+        "count": 7
+      }
+    ],
+    "unknownHookEvents": [
+      "QueryEnd"
+    ],
+    "recordCount": 0
+  },
+  "after": {
+    "recordCount": 1,
+    "status": "interrupted",
+    "providerTurnIdPresent": true,
+    "termination": {
+      "status": "partial",
+      "quality": "estimated",
+      "source": [
+        "scry_run_boundary"
+      ]
+    },
+    "recordHookEvents": {
+      "SessionStart": 10,
+      "QueryEnd": 3,
+      "SessionEnd": 6
+    },
+    "journalsRemaining": {
+      "trace-turn-progress": [],
+      "managed-turn-progress": [],
+      "managed-turn-commits": []
+    }
+  },
+  "runtime": {
+    "observedCliVersion": "1.1.88",
+    "requestedCliVersion": "1.1.86",
+    "followUpDispatchedOnce": true,
+    "followUpTerminalVerified": false,
+    "appClosed": true
+  },
+  "secondCase": {
+    "case": "e4-tools",
+    "backup": "complete",
+    "originalNotLaunched": true
+  }
+}
