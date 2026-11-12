@@ -1,4 +1,20 @@
-# 第五轮待核验（E1/E2 未通过，清单未放开）
+# 第六轮进行中（recorder 已修，待真机复测）
+
+**审查方对第五轮的核验（2026-11-12）。** E3 的并发隔离成立，E4 的业务执行成功，所以守护进程本身可用。剩下的失败都在 managed recorder，维护者授权审查方修改：
+
+- E2 `/plugins reload`：改为命令型轮次，不进 `.scry/records`（`5d2d7f6e`）。
+- E1 hook-1：只跑过会话级 hook 时，按观测到的中断落盘；遇到 `UserPromptSubmit` 或工具 hook 时仍然 pending，并在报错里说明原因（`f87c91b9`）。
+- E4 `invalid canonical record`：现在会报出字段路径（`a99c2fa1`），用仓库夹具没能复现，**未修**，等这一轮在真机上拿到字段。
+- E3 第四轮 A 消失的原因：本轮不再追查。
+- E5 未放开清单：判断正确。
+
+`managed-turn-commit.ts` 超过 20KB，已按职责拆分，行为不变（`b25573e7`）。容器内的验证结果：main 2,900 条测试通过（另有 2 条已知失败，是 root 身份绕过目录权限所致），recorder 600 条通过，`typecheck` 与 `build:cli` 通过；负对照下，新增的 6 个用例在旧代码上全部失败。**没有在已登录的 Qoder 上验证。**
+
+第六轮做法见 [R6.md](R6.md)，启动提示见 [PROMPT-R6.md](PROMPT-R6.md)。
+
+---
+
+## 第五轮报告（E1/E2 未通过，清单未放开）
 
 第五轮 E1–E5 已逐包提交并推送，等待审查方核验。E1 停止窗口触发 recorder open identity 错误；E2 `/plugins reload` 触发 recorder canonical 时点错误；E3 旧 A 守护进程退出原因仍无当时的 stop 日志；E4 仅部分通过。因此 E5 按前提**没有**把 Qoder 标成 `supported`。门禁 typecheck、renderer UI、pack 通过，unit 有 12 条 5 秒超时（退出码 1）。详见 [E1](reports/E1.md)、[E2](reports/E2.md)、[E3](reports/E3.md)、[E4](reports/E4.md)、[E5](reports/E5.md)。
 
