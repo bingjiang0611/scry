@@ -2,7 +2,7 @@ import { observedInterruptionRecordId, reserveObservedInterruption } from './man
 import { isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { isAgentTurnRecord, type TurnEvidence, type AgentTurnRecord } from '../../shared/turn-record.js'
+import { isAgentTurnRecord, validateAgentTurnRecord, type TurnEvidence, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { resolveRecorderEnablement } from './config.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState, recorderOpenPath, SESSION_LOCK_WAIT_MS, recorderPendingHealth, recorderQuarantinedOpenTurns, type RecorderSessionState, recorderStatePath } from './runtime-state.js'
@@ -240,7 +240,12 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
         omissionReason: 'no Provider lifecycle start was captured; this interrupted attempt uses the durable Scry run boundary, not a Provider turn identity'
       }
     }
-    if (!isAgentTurnRecord({ ...draft, sequence: 1 })) throw new Error('managed recorder produced an invalid canonical record')
+    const validation = validateAgentTurnRecord({ ...draft, sequence: 1 })
+    if (!validation.ok) {
+      // Field paths and fixed messages only: enough to locate the gap, no turn content.
+      const where = validation.issues.slice(0, 5).map((issue) => `${issue.path} ${issue.message}`).join('; ')
+      throw new Error(`managed recorder produced an invalid canonical record: ${where}`)
+    }
     const handoff: ManagedTurnHandoff = {
       schemaVersion: 1,
       phase: 'prepared',
