@@ -9,6 +9,8 @@ struct SidebarDrawer: View {
   let onCollapse: () -> Void
   let onNewSession: (ExecutionTargetScope, String?) -> Void
   let onOpenSettings: () -> Void
+  let isPresented: Bool
+  @AccessibilityFocusState private var newSessionFocused: Bool
 
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run
@@ -52,6 +54,7 @@ struct SidebarDrawer: View {
     }
     // The shell owns `targets.setHomeVisible(_:)`: the list counts as visible
     // only while the drawer is open, and the shell outlives one collapse.
+    .onChange(of: isPresented, initial: true) { _, open in newSessionFocused = open }
     .onDisappear { refreshToastVisible = false }
     .sheet(item: $refreshDetails) { details in
       CatalogRefreshDetails(failure: details.failure, lastFullRefresh: details.lastFullRefresh,
@@ -141,6 +144,7 @@ struct SidebarDrawer: View {
     }
     .buttonStyle(.plain)
     .accessibilityIdentifier("drawer-new-session")
+    .accessibilityFocused($newSessionFocused)
     .padding(.horizontal, 12).padding(.top, 4)
   }
 
@@ -237,14 +241,11 @@ struct SidebarDrawer: View {
   }
 
   private func open(_ row: ExecutionTargetCoordinator.HomeSession) {
-    guard let external = row.session.externalSessionId, !external.isEmpty else { return }
+    guard let opened = row.openedSession else { return }
     // The session opens behind the drawer, so the list must not stay on top of it.
     onCollapse()
     targets.select(row.scope)
-    model.open(OpenedSession(providerId: row.session.providerId, agentProfileId: row.session.agentProfileId,
-      cwd: row.session.cwd, externalSessionId: external, label: row.session.label,
-      isActive: row.session.isActive == true, scope: row.scope.isLocal ? nil : row.scope),
-      run: targets.store(for: row.scope))
+    model.open(opened, run: targets.store(for: row.scope))
   }
 
   private func handle(_ row: ExecutionTargetCoordinator.HomeSession, _ action: SessionRowAction) {

@@ -16,7 +16,7 @@ enum Motion {
   enum Effect: CaseIterable {
     case press, select, confirm, enter, exit, tab, reorder
     case disclosureOpen, disclosureClose, chevron, rowIn, streamIn
-    case drawerOpen, drawerClose, drawerRelease, reset, scroll, page, sheet
+    case drawerOpen, drawerClose, reset, scroll, page, sheet
   }
 
   static func easeOut(duration: Double) -> Animation {
@@ -53,8 +53,6 @@ enum Motion {
     case .disclosureClose: return easeIn(duration: exitSmall)
     case .drawerOpen: return easeOut(duration: medium)
     case .drawerClose: return easeIn(duration: exitMedium)
-    // SwiftUI owns the spring; this call path has no release-velocity input.
-    case .drawerRelease: return .spring(duration: 0.38, bounce: 0.12)
     case .page, .sheet: return easeOut(duration: large)
     }
   }
@@ -69,8 +67,39 @@ enum Motion {
     }
   }
 
+  static func arrival(reduceMotion: Bool) -> Animation {
+    animation(.enter, reduceMotion: reduceMotion).delay(reduceMotion ? 0 : large * 0.5)
+  }
+
+  struct DrawerRelease {
+    let velocity: CGFloat
+    let remaining: CGFloat
+  }
+
+  static func drawerAnimation(open: Bool, release: DrawerRelease?, reduceMotion: Bool) -> Animation {
+    if let release { return drawerRelease(velocity: release.velocity, remaining: release.remaining, reduceMotion: reduceMotion) }
+    return animation(open ? .drawerOpen : .drawerClose, reduceMotion: reduceMotion)
+  }
+
+  static func drawerRelease(velocity: CGFloat, remaining: CGFloat, reduceMotion: Bool) -> Animation {
+    if reduceMotion { return easeOut(duration: reducedDuration) }
+    let initialVelocity = abs(remaining) > 0.001 ? velocity / remaining : 0
+    return .interpolatingSpring(duration: 0.38, bounce: 0.12, initialVelocity: initialVelocity)
+  }
+
   static func rowDelay(index: Int) -> Double {
     Double(min(max(index, 0), 9)) * 0.016
+  }
+}
+
+// Pure gesture geometry, also exercised by the offline motion check.
+enum DrawerPosition {
+  static func progress(origin: CGFloat, translation: CGFloat, width: CGFloat) -> CGFloat {
+    min(1, max(0, origin + translation / width))
+  }
+
+  static func opens(origin: CGFloat, predictedTranslation: CGFloat, width: CGFloat) -> Bool {
+    progress(origin: origin, translation: predictedTranslation, width: width) >= 0.5
   }
 }
 
@@ -98,6 +127,40 @@ private struct ListRowEntrance: ViewModifier {
       }
   }
 }
+
+#if os(iOS)
+// Keep the system presenter, detents, interactive dismissal and accessibility.
+// iOS 17 deliberately retains its existing presentation, as agreed for this feature.
+private struct SourceZoom: ViewModifier {
+  let id: AnyHashable
+  let namespace: Namespace.ID
+  let destination: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(iOS 18.0, *), !reduceMotion {
+      if destination {
+        content.navigationTransition(.zoom(sourceID: id, in: namespace))
+      } else {
+        content.matchedTransitionSource(id: id, in: namespace)
+      }
+    } else {
+      content
+    }
+  }
+}
+
+extension View {
+  @ViewBuilder func zoomSource(_ id: some Hashable, in namespace: Namespace.ID?) -> some View {
+    if let namespace { modifier(SourceZoom(id: AnyHashable(id), namespace: namespace, destination: false)) }
+    else { self }
+  }
+
+  func zoomDestination(_ id: some Hashable, in namespace: Namespace.ID) -> some View {
+    modifier(SourceZoom(id: AnyHashable(id), namespace: namespace, destination: true))
+  }
+}
+#endif
 
 extension View {
   func listRowEntrance(index: Int, enabled: Bool = true) -> some View {

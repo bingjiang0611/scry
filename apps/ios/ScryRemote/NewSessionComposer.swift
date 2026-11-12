@@ -14,9 +14,11 @@ struct NewSessionComposer: View {
   @Environment(RemoteRunStore.self) private var run
   @Environment(ExecutionTargetCoordinator.self) private var targets
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.conversationTransition) private var transition
   @State private var visible = false
   @State private var showProjects = false
   @State private var showProviders = false
+  @Namespace private var selectionTransition
 
   private var composer: Binding<AppModel.ComposerDraft> {
     model.composerDraft(for: .newTask(targets.newTaskScope))
@@ -56,7 +58,7 @@ struct NewSessionComposer: View {
                       projectLabel: run.chosen?.label ?? ConnectionCopy.composerNeedsProject,
                       onProject: { showProjects = true }, providerId: run.chosenProvider?.id,
                       contextLabel: run.chosenProvider?.label ?? ConnectionCopy.composerNeedsProvider,
-                      onContext: { showProviders = true },
+                      onContext: { showProviders = true }, selectionTransition: selectionTransition,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue, onModel: { run.chooseModel($0) },
                       effortOptions: run.effortOptions, selectedEffort: run.chosenEffort,
@@ -71,7 +73,7 @@ struct NewSessionComposer: View {
                                            agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
                       },
-                      focusTicket: focusTicket) { send() }
+                      focusTicket: focusTicket, transitionSource: true) { send() }
     }
     .padding(.horizontal, 12).padding(.bottom, 6)
     // A discovered target can become ready without changing its identity.
@@ -83,9 +85,11 @@ struct NewSessionComposer: View {
     }
     .sheet(isPresented: $showProjects) {
       ProjectPickerSheet { run.chooseProject($0); showProjects = false }
+        .zoomDestination("project", in: selectionTransition)
     }
     .sheet(isPresented: $showProviders) {
       ProviderPickerSheet { run.chooseProvider($0); showProviders = false }
+        .zoomDestination("provider", in: selectionTransition)
     }
   }
 
@@ -93,6 +97,7 @@ struct NewSessionComposer: View {
     guard let providerId = run.chosenProvider?.id else { return }
     let payload = composer.wrappedValue.attachments.map(\.wireValue)
     if run.submit(prompt: draft, providerId: providerId, attachments: payload) {
+      if let identity = run.activeSessionIdentity { transition?.state.begin(.submission(identity)) }
       composer.wrappedValue = .init()
       targets.focusNewTask()
       model.route = .chat

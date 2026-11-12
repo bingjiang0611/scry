@@ -1,6 +1,18 @@
 import SwiftUI
 import RemoteTransport
 
+extension ExecutionTargetCoordinator.HomeSession {
+  // Catalog row identity includes its host scope. Navigation deliberately uses
+  // the external session id and an unscoped local owner; transitions must match
+  // that actual destination, not substitute the catalog key.
+  var openedSession: OpenedSession? {
+    guard let external = session.externalSessionId, !external.isEmpty else { return nil }
+    return OpenedSession(providerId: session.providerId, agentProfileId: session.agentProfileId,
+      cwd: session.cwd, externalSessionId: external, label: session.label,
+      isActive: session.isActive == true, scope: scope.isLocal ? nil : scope)
+  }
+}
+
 enum HomeTab: String, CaseIterable, Identifiable {
   case projects, activity
   var id: String { rawValue }
@@ -80,6 +92,7 @@ struct HomeSessions: View {
   @State private var defaultResolved = false
   @Namespace private var tabUnderline
   @Namespace private var activityRows
+  @Namespace private var projectRows
   @State private var displayed: HomeSessionCatalog?
   @State private var seenRows: Set<RemoteRunStore.SessionIdentity> = []
   @State private var initialEntranceFinished = false
@@ -205,7 +218,7 @@ struct HomeSessions: View {
       if !catalog.pinned.isEmpty {
         section(ConnectionCopy.sectionPinned, directory: true)
         ForEach(Array(catalog.pinned.enumerated()), id: \.element.id) { index, row in
-          sessionRow(row, index: index, pinned: true)
+          projectSessionRow(row, index: index, pinned: true)
         }
       }
       section(ConnectionCopy.tabProjects, directory: true)
@@ -221,6 +234,16 @@ struct HomeSessions: View {
       }
       Text(ConnectionCopy.toolsNote).font(Typography.meta).foregroundStyle(Palette.dim2).padding(.top, 10)
     }
+    .animation(reduceMotion ? nil : Motion.animation(.reorder, reduceMotion: false), value: catalog.rows.map(\.id))
+    .animation(reduceMotion ? nil : Motion.animation(.reorder, reduceMotion: false), value: catalog.pinned.map(\.id))
+    .homeContentFade(trigger: catalog.rows.map(\.id) + catalog.pinned.map(\.id), reduceMotion: reduceMotion)
+  }
+
+  private func projectSessionRow(_ row: HomeSessionCatalog.Row, index: Int = 0, pinned: Bool = false, indent: CGFloat = 0) -> some View {
+    sessionRow(row, index: index, pinned: pinned, indent: indent)
+      // Pinned rows are excluded from project buckets, so each ID has one source.
+      .matchedGeometryEffect(id: row.id, in: projectRows, properties: reduceMotion ? [] : .position)
+      .transition(Motion.fade.animation(Motion.animation(.exit, reduceMotion: reduceMotion)))
   }
 
   private func projectSection(_ project: HomeSessionCatalog.Project) -> some View {
@@ -254,7 +277,7 @@ struct HomeSessions: View {
         }.buttonStyle(HomeRowButtonStyle()).accessibilityLabel(ConnectionCopy.newTaskInProject(projectName(project.cwd)))
       }
       if expanded {
-        ForEach(project.sessions) { row in sessionRow(row, indent: 18) }
+        ForEach(project.sessions) { row in projectSessionRow(row, indent: 18) }
           .transition(Motion.fade)
       }
     }

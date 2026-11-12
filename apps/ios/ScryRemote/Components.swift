@@ -147,6 +147,9 @@ struct RemoteHeader<Right: View>: View {
   var providerId: String?
   var link: HostLink?
   var titleLineLimit = 1
+  var transitionIdentity: RemoteRunStore.SessionIdentity?
+  @Environment(\.conversationTransition) private var transition
+  @AccessibilityFocusState private var titleFocused: Bool
   var backAction: (() -> Void)?
   var menuAction: (() -> Void)?
   @ViewBuilder let right: () -> Right
@@ -160,10 +163,17 @@ struct RemoteHeader<Right: View>: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(title).font(Typography.headerTitle).lineLimit(titleLineLimit)
           .fixedSize(horizontal: false, vertical: true)
+          .conversationElement(transitionIdentity.map(ConversationTransition.Element.sessionTitle), source: false)
+          .accessibilityAddTraits(.isHeader)
+          .accessibilityFocused($titleFocused)
+          .onAppear {
+            if let transitionIdentity, transition?.state.destination == .session(transitionIdentity) { titleFocused = true }
+          }
         if let subtitle {
           HStack(spacing: 5) {
             if let providerId {
               Image(systemName: ProviderSymbol.name(providerId)).foregroundStyle(Palette.provider(providerId))
+                .conversationElement(transitionIdentity.map(ConversationTransition.Element.sessionProvider), source: false)
             }
             else if let link { StatusDot(link: link) }
             Text(subtitle).lineLimit(1)
@@ -174,6 +184,7 @@ struct RemoteHeader<Right: View>: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       right()
         .frame(minWidth: 44, minHeight: 44)
+        .conversationArrival()
     }
     .padding(.horizontal, 10)
     .frame(minHeight: 56)
@@ -388,6 +399,7 @@ struct TurnUserBubble: View {
     VStack(alignment: .leading, spacing: 8) {
       if !attachments.isEmpty { SentAttachmentList(attachments: attachments) }
       Text(text).font(Typography.bubble).lineSpacing(3)
+        .submittedElement(.submittedText)
     }
     .foregroundStyle(Palette.fg)
     .padding(.vertical, 10).padding(.horizontal, 14)
