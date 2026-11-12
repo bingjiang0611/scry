@@ -38,6 +38,23 @@ describe('b4v second start on the same profile', () => {
     expect(exclusionHolds(classified)).toBe(false)
   })
 
+  it('the daemon shapes seen in mutual-exclusion: a start that resolved for a run the window never sees stays unknown', () => {
+    // Before the start waited for admission: it resolved at the bind, the daemon then
+    // refused the run in admission, and the window had no view of it at all.
+    const resolvedThenInvisible = classifySecondStart({
+      startError: null, whileFirstLive: { done: null, error: null, output: false }, firstStillLive: true,
+      afterFirstStopped: { done: null, error: null, output: false }
+    })
+    expect(resolvedThenInvisible.outcome).toBe('unknown')
+    // Now: the start rejects with the admission's own message and the ledger ended the run.
+    const rejected = classifySecondStart({
+      startError: "Error invoking remote method 'agent:start': Error: 同一会话已有一轮正在运行",
+      recordedDespiteError: false, ledger: { terminal: 'failed' }, firstStillLive: true
+    })
+    expect(rejected.outcome).toBe('refused')
+    expect(exclusionHolds(rejected)).toBe(true)
+  })
+
   it('only refused and queued satisfy the exclusion', () => {
     expect(exclusionHolds({ outcome: 'refused' })).toBe(true)
     expect(exclusionHolds({ outcome: 'queued' })).toBe(true)
