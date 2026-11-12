@@ -41,6 +41,17 @@ npm run test:unit -- src/cli/managed-tool-hooks.test.ts src/core/turn-recorder/c
 
 一次新增回归开发轮出现2项失败：旧的双Node启动到5秒时限，前一测试异步finally恢复spy影响后一测试。现在afterEach显式join该回归自己的测试体；保留Node/shell父进程、真实存活子孙、256KiB阻塞stdin和无关进程控制，用POSIX fd3阻塞的shell leaf替代多余的第二次Node启动。没有缩小输入或删除行为断言、扩大时限。
 
-最新两文件并行轮仍有3个5秒超时；commit-environment全部通过，无EPERM/ENOENT/AggregateError清理失败。负载28.91→24.59，不能宣称已解决所有超时或把它直接归因于负载。原始资料增加delivery-after-review.*、delivery-review-typecheck.log、delivery-group-error-joined-regressions.log及delivery-group-error-negative.*。若信号真实被拒绝且进程不退出，清理仍须等待/失败，不删除仍可能使用的目录。
+最新两文件并行轮仍有3个5秒超时；commit-environment全部通过，无EPERM/ENOENT/AggregateError清理失败。
+
+对应`delivery-after-review.json`，macOS arm64、10逻辑核，UTC 2026-11-12 09:36:18–09:37:13，load 28.91→24.59、highLoad=true。三个用例均位于`src/cli/managed-tool-hooks.test.ts`：
+
+| 用例 | 实测耗时 | 原时限 |
+|---|---:|---:|
+| `preserves tool delivery outside identity-scoped managed Claude ('claude', { SCRY_MANAGED_RUN_ID: '' })` | 5158.049ms | 5000ms |
+| `preserves tool delivery outside identity-scoped managed Claude ('claude', { SCRY_MANAGED_PROMPT_HASH: '' })` | 5006.782ms | 5000ms |
+| `does not invent Hook activity/health; retained Stop closes the managed identity without prematurely committing` | 5011.370ms | 5000ms |
+
+没有扩大时限、加入sleep/自动重试，也没有把负载相关性当作已确认根因。原始JSON与timing-run记录保留；b2e400df的独立CI全部通过，不替代这份本机失败记录。
+负载28.91→24.59，不能宣称已解决所有超时或把它直接归因于负载。原始资料增加delivery-after-review.*、delivery-review-typecheck.log、delivery-group-error-joined-regressions.log及delivery-group-error-negative.*。若信号真实被拒绝且进程不退出，清理仍须等待/失败，不删除仍可能使用的目录。
 
 Linux结果在独立PR的CI中单独观察；本机通过不等于Linux验收。修改仅为fixture/test及本文，不产生App/CLI运行产物，因此未构建安装App、未发布CLI。自查确认没有改默认超时、重试、Provider授权、trust/fingerprint或产品delivery实现。
