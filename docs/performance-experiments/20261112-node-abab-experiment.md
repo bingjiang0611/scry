@@ -28,7 +28,7 @@ benchmark-only wrapper调用真实 fs与execFile，保留参数、返回、错�
 - 本机完整同源码握手最小实验先暴露split export错误并修正；修正后在预热阶段遇到既有resources-shell的1秒子进程预算（SIGKILL/timedOut），没有得到完整本机计时。未增大该预算、重试到绿或把失败当测量成功。
 - 三轮原始JSON、worker日志、失败与comparison分别保存。测量失败与真实回归分开标识。实际远端结果、revision及运行链接见下。
 
-## 同一runner连续三轮：实测结果
+## 初版 a0672e0f：同一runner三轮（原记录保留）
 
 运行：[43187744081](https://github.com/bingjiang0611/scry/actions/runs/43187744081)；单一Ubuntu job，4 vCPU，AMD EPYC 7763，Node 24.22.2。测量wrapper总墙钟76067ms，load 1.26→1.60，highLoad=false。
 
@@ -114,3 +114,94 @@ persistence.archive与workspace.files每侧每轮分别丢弃20680、15640条详
 | 3 | renderer.batch | 0.525 | 0.523 | 10.525 | pass |
 
 原始样本、每批阶段、worker日志与comparison位于该run的performance-abab-results artifact，本机副本为/tmp/scry-approved-followups/abab-remote/。三轮完成且通过证明本实验可运行，不证明已消除噪声；首轮与后两轮的绝对耗时仍明显不同。新实验的CPU、runtime、采样和诊断方式均不同于原失败，不能跨运行比较绝对耗时，也不能倒推原53.858ms峰值的底层原因。实验未合入main，正式门限、预算文件与native测量未修改。
+
+## 最新 b7ce1aa7：完整阶段汇总后的连续三轮
+
+运行：[43197574995](https://github.com/bingjiang0611/scry/actions/runs/43197574995)。一个job、同一4 vCPU Linux runner，INTEL XEON PLATINUM 8573C，Node 24.22.2。wrapper总墙钟68902ms，load 1.41→2.01，highLoad=false。
+
+A仍为5a63338480769aa9cd12abd0254aa17fc31f3a96，B为b7ce1aa7c7ee683b6ccbcaf1b9bccbe3eab60c8a。17场景、每侧每场景20样本、三轮，每轮61项比较全部通过。此版本只补齐诊断汇总，不改workload、正式预算、门限公式或native测量。以上初版结果保留，不跨两台runner比较绝对耗时。
+
+| 轮次 | A P95 | B P95 | A最大 | B最大 | 原公式门限 | 结果 |
+|---|---:|---:|---:|---:|---:|---|
+| 1 | 37.758 | 36.663 | 44.661 | 36.725 | 56.637 | pass |
+| 2 | 199.853 | 269.040 | 237.860 | 503.115 | 299.780 | pass |
+| 3 | 37.664 | 45.950 | 41.309 | 59.268 | 56.497 | pass |
+
+### 阶段记录完整性
+
+独立读取全部2040批次验证：每批汇总count等于详细stage数+droppedStageCount，totalMs/maxMs均有限且非负，汇总时长不小于保留明细时长。覆盖301200个已观测API调用；83280条详细区间保留、217920条被上限截断，但**阶段汇总不截断**。240个批次触发详细上限。校验器对缺少stageTotals的初版artifact确定失败，当前版本全部通过。
+
+汇总只覆盖列出的benchmark-worker API；不冒充全部文件syscall、FileHandle方法或Git内部I/O。Git/file/process各类的区间可能重叠，不是独占总耗时。原始JSON保留每批总时长、完整阶段汇总和最多256条明细。
+
+### source-control各侧最大批次（ms）
+
+这些是各侧自己的最大批次，不是同一A/B配对。每批2次原迭代；CPU为worker自身、不是Git子进程CPU。
+
+| 轮次 | 侧/批次 | 批次wall | Git区间和（非独占） | 文件区间和（非独占） | worker CPU | GC重叠数 |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | A/A1 | 89.321 | 86.790 | 9.531 | 93.171 | 2 |
+| 1 | B/B15 | 73.449 | 74.466 | 3.396 | 39.515 | 0 |
+| 2 | A/A2 | 475.720 | 408.089 | 12.563 | 52.079 | 0 |
+| 2 | B/B2 | 1006.230 | 573.908 | 325.859 | 48.836 | 0 |
+| 3 | A/A1 | 82.619 | 81.961 | 4.983 | 88.241 | 2 |
+| 3 | B/B5 | 118.535 | 119.594 | 3.443 | 41.515 | 0 |
+
+第2轮两侧都明显变慢。候选B2的writeFileSync区间173.460ms，整个批次wall1006.230ms，worker CPU48.836ms，GC重叠0。阶段证据已把等待落到真实API区间，但不能区分文件系统I/O、线程停调度或虚拟化暂停；也不能据此倒推原运行53.858ms峰值的原因。三次通过不代表环境噪声已消失。
+
+### 最新三轮全部场景P95（ms）
+
+| 轮次 | 场景 | A P95 | B P95 | 门限 | 结果 |
+|---|---|---:|---:|---:|---|
+| 1 | startup.recovery | 1.555 | 1.531 | 11.555 | pass |
+| 1 | providers.catalog | 0.178 | 0.202 | 10.178 | pass |
+| 1 | navigation.catalog | 0.412 | 0.419 | 10.412 | pass |
+| 1 | history.page | 0.117 | 0.111 | 10.117 | pass |
+| 1 | compose.drafts | 0.745 | 0.753 | 10.745 | pass |
+| 1 | persistence.archive | 18.067 | 15.824 | 28.067 | pass |
+| 1 | evidence.projection | 0.193 | 0.223 | 10.193 | pass |
+| 1 | analytics.stats | 0.713 | 0.735 | 10.713 | pass |
+| 1 | workspace.files | 35.949 | 52.064 | 53.924 | pass |
+| 1 | source-control.diff | 37.758 | 36.663 | 56.637 | pass |
+| 1 | terminal.delivery | 0.391 | 0.407 | 10.391 | pass |
+| 1 | send.codex-fixture | 36.284 | 35.774 | 54.426 | pass |
+| 1 | controls.stop-lifecycle | 38.269 | 38.562 | 57.404 | pass |
+| 1 | remote.loopback | 1.457 | 1.335 | 11.457 | pass |
+| 1 | resources-shell.process | 32.842 | 32.277 | 49.263 | pass |
+| 1 | trace.delivery | 2.073 | 1.982 | 12.073 | pass |
+| 1 | renderer.batch | 0.573 | 0.430 | 10.573 | pass |
+| 2 | startup.recovery | 1.664 | 1.572 | 11.664 | pass |
+| 2 | providers.catalog | 0.150 | 0.186 | 10.150 | pass |
+| 2 | navigation.catalog | 0.426 | 0.419 | 10.426 | pass |
+| 2 | history.page | 0.100 | 0.100 | 10.100 | pass |
+| 2 | compose.drafts | 0.709 | 0.700 | 10.709 | pass |
+| 2 | persistence.archive | 15.519 | 15.420 | 25.519 | pass |
+| 2 | evidence.projection | 0.224 | 0.218 | 10.224 | pass |
+| 2 | analytics.stats | 0.690 | 0.693 | 10.690 | pass |
+| 2 | workspace.files | 45.747 | 49.574 | 68.621 | pass |
+| 2 | source-control.diff | 199.853 | 269.040 | 299.780 | pass |
+| 2 | terminal.delivery | 0.468 | 0.399 | 10.468 | pass |
+| 2 | send.codex-fixture | 37.007 | 35.457 | 55.511 | pass |
+| 2 | controls.stop-lifecycle | 38.135 | 35.776 | 57.203 | pass |
+| 2 | remote.loopback | 1.412 | 2.858 | 11.412 | pass |
+| 2 | resources-shell.process | 32.149 | 33.592 | 48.223 | pass |
+| 2 | trace.delivery | 2.054 | 2.023 | 12.054 | pass |
+| 2 | renderer.batch | 0.719 | 0.623 | 10.719 | pass |
+| 3 | startup.recovery | 1.488 | 1.477 | 11.488 | pass |
+| 3 | providers.catalog | 0.147 | 0.191 | 10.147 | pass |
+| 3 | navigation.catalog | 0.412 | 0.422 | 10.412 | pass |
+| 3 | history.page | 0.121 | 0.126 | 10.121 | pass |
+| 3 | compose.drafts | 0.844 | 0.874 | 10.844 | pass |
+| 3 | persistence.archive | 14.795 | 14.871 | 24.795 | pass |
+| 3 | evidence.projection | 0.199 | 0.349 | 10.199 | pass |
+| 3 | analytics.stats | 0.720 | 0.723 | 10.720 | pass |
+| 3 | workspace.files | 28.381 | 26.463 | 42.571 | pass |
+| 3 | source-control.diff | 37.664 | 45.950 | 56.497 | pass |
+| 3 | terminal.delivery | 0.392 | 0.443 | 10.392 | pass |
+| 3 | send.codex-fixture | 43.169 | 36.940 | 64.754 | pass |
+| 3 | controls.stop-lifecycle | 37.986 | 38.575 | 56.979 | pass |
+| 3 | remote.loopback | 1.351 | 1.442 | 11.351 | pass |
+| 3 | resources-shell.process | 33.726 | 33.956 | 50.590 | pass |
+| 3 | trace.delivery | 1.960 | 2.044 | 11.960 | pass |
+| 3 | renderer.batch | 0.581 | 0.630 | 10.581 | pass |
+
+新artifact仍为performance-abab-results，本机副本/tmp/scry-approved-followups/abab-aggregated-remote/。独立校验脚本/tmp/scry-approved-followups/verify-stage-totals.py及结果abab-stage-totals-verification.json保留。复跑数据没有替代初版，也未合入main。
