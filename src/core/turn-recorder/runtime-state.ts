@@ -19,6 +19,8 @@ export interface RecorderSessionState {
   lastTurnIndex: number
   lastCommittedRecordId?: string
   committedProviderTurnIds?: string[]
+  /** Repositories discovered from files this session touched; later turns baseline them too. */
+  captureRepositories?: string[]
 }
 
 export interface RecorderOpenTurnState {

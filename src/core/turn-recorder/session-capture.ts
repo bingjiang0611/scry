@@ -10,6 +10,7 @@ import { recorderOpenPath, recorderSessionRoot, withRecorderSessionLock, type Re
 import { beginCaptureTurn } from './recorder-turn-state.js'
 import { sessionIdOf, transcriptPathOf } from './recorder-contracts.js'
 import { captureReceiverSource } from './session-capture-receiver.js'
+import { recordCaptureRepositories } from './session-capture-discovery.js'
 import { canonicalDataRoot, canonicalWorkspaceRoot, ensureWorkspaceConfig } from './session-capture-workspace.js'
 import {
   CaptureRequestError,
@@ -221,6 +222,9 @@ export async function applySessionCaptureHook(args: {
     deferDelivery: args.deferDelivery,
     env: args.env
   })
+  // The edited file names the repository; its PreToolUse arrives before the write, so the baseline
+  // taken here is the pre-edit state.
+  if (args.event === 'PreToolUse') await recordCaptureRepositories(enablement, args.provider, sessionId, args.payload)
   return {
     status: 'accepted',
     ack: {
