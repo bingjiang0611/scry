@@ -1,0 +1,74 @@
+{
+  "branch": "f2f11334",
+  "cli": "1.1.86",
+  "ps": {
+    "before": [
+      {
+        "pid": 23558,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:26 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterReload": [
+      {
+        "pid": 24211,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:28 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 25048,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:30 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 27090,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:37 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterFollow": [
+      {
+        "pid": 24211,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:28 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 25048,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:30 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "atClose": [
+      {
+        "pid": 24211,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:28 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      },
+      {
+        "pid": 25048,
+        "ppid": 22931,
+        "started": "Thu Nov 12 03:41:30 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterClose": []
+  },
+  "reloadPane": "本机 | workspace | /plugins reload | Q | Qoder | run · run-mwdh96bs-0 | 运行中 | 插件已重载：6 个插件，84 条命令 | 运行中 | 可继续输入，新消息将加入队列 | 00:18 | 停止本轮 | Qoder 1.1.86：Qoder SDK 1.0.59 守护进程模式：已验证 qodercli 1.1.80 与 1.1.86 的启动与握手，真实轮次证据尚未验证；推荐版本 >=1.1.80 <1.2.0 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+  "pendingAfterReload": [],
+  "followPane": "本机 | workspace | /plugins reload | Q | Qoder | run · run-mwdh96bs-0 | tok | 0 | tools | 0 | 插件已重载：6 个插件，84 条命令 | 模型已完成，但 Scry 精确记录提交失败：managed recorder requires canonical Provider or observed interruption timing | → 不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复 | tools | 0 | 等待运行 | 1 | 当前任务结束后依次发送 | 1 | 只回复：收到。不要用工具。 | ↳ Steer | Error invoking remote method 'agent:start': AgentRuntimeError: 上一轮精确记录尚未安全落盘，已拒绝继续；这条消息仍保留在队列，队列已暂停 | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main"
+}

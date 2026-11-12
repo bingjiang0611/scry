@@ -35,7 +35,7 @@
 | 包 | 条目 | 状态 | 报告 |
 |---|---|---|---|
 | E1 | 三种时机的停止，之后能再发 | 未通过、按必须停下条件停止本包 | [reports/E1.md](reports/E1.md)：启动窗口 3 次，Hook 窗口两次有效中断；一次 `managed recorder open identity is not available yet`，未达到三种时机各 3 次。native hook 帧 55 个非空 ID、0 空串、0 缺失。 |
-| E2 | `/plugins reload` 后能再发 | 未开始 | |
+| E2 | `/plugins reload` 后能再发 | 未通过、按必须停下条件停止本包 | [reports/E2.md](reports/E2.md)：Provider 重载成功（6 插件、84 命令），recorder 报 `requires canonical Provider or observed interruption timing`；后续消息留在暂停队列。 |
 | E3 | 两个会话并发的采证 | 未开始 | |
 | E4 | 第四轮其余项与未验证项 | 未开始 | |
 | E5 | 全部通过才改清单；干净依赖门禁 | 未开始 | |
