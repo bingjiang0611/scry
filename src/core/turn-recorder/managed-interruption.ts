@@ -8,6 +8,15 @@ export function observedInterruptionRecordId(workspaceId: string, input: Prepare
   return stableHash({ workspace: workspaceId, provider: input.provider, sessionId: input.sessionId, managedRunId: input.runId }).slice(0, 32)
 }
 
+/**
+ * Session-level hooks that a Qoder session runs around a turn without opening one: they
+ * carry no prompt and are not the recorder's own lifecycle. A stop after one of these, but
+ * before UserPromptSubmit, still has no native lifecycle to wait for. UserPromptSubmit and
+ * tool hooks are deliberately absent: with them a lifecycle should exist, so a missing open
+ * identity stays pending (fail closed) instead of being papered over.
+ */
+export const OBSERVED_INTERRUPTION_HOOK_EVENTS: ReadonlySet<string> = new Set(['SessionStart', 'SessionEnd', 'Stop', 'Notification'])
+
 /** Reserve a host-observed interrupted attempt, not a fabricated Provider hook.
  * The caller must prove that its durable trace contains only local launch/diff events.
  * No Provider identity, transcript, tool evidence or Git baseline is reconstructed.
@@ -27,8 +36,9 @@ export async function reserveObservedInterruption(
     end.value.completedAtSource !== 'recorder_observed_terminal' ||
     end.value.observedAt !== input.timing.completedAt ||
     evidence.assistant.value?.text || evidence.usage.value ||
-    [evidence.tools, evidence.skills, evidence.mcps, evidence.hooks, evidence.modelSegments, evidence.compactions]
-      .some((section) => (section?.value?.length ?? 0) > 0)
+    [evidence.tools, evidence.skills, evidence.mcps, evidence.modelSegments, evidence.compactions]
+      .some((section) => (section?.value?.length ?? 0) > 0) ||
+    (evidence.hooks.value ?? []).some((hook) => !OBSERVED_INTERRUPTION_HOOK_EVENTS.has(hook.event))
   ) return undefined
 
   // The session lock is held by prepare. Rebuild the high-water marks too: a lost

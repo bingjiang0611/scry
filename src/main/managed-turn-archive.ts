@@ -16,6 +16,7 @@ import {
   type ManagedTurnTiming
 } from '../core/turn-recorder/managed.js'
 import { readJson } from '../core/turn-recorder/io.js'
+import { OBSERVED_INTERRUPTION_HOOK_EVENTS } from '../core/turn-recorder/managed-interruption.js'
 import { stableHash } from '../core/turn-recorder/store.js'
 import {
   upsertTraceArchiveTurnAsync,
@@ -287,15 +288,30 @@ export function canonicalOrObservedTurnTiming(
 }
 
 
+const OBSERVED_INTERRUPTION_HARNESS_STAGES = new Set(['runtime:controls', 'runtime:turn_wall', 'turn_diff', 'session_diff'])
+
 /**
- * A resumed Qoder run may stop before UserPromptSubmit. The previous session ID is still
- * known, but there is no native lifecycle to wait for. Preserve the interrupted attempt in
- * both stores using explicit host provenance. Unknown/result/hook/model events never qualify.
+ * Why this terminal request may not be kept as a host-observed interruption; empty when it
+ * may. A Qoder run can stop before UserPromptSubmit (a resumed session, or after only
+ * session-level hooks ran). The session ID is known, but there is no native lifecycle to wait
+ * for, so the interrupted attempt is preserved in both stores with explicit host provenance.
+ * Result, model, tool, agent, unknown events and prompt/tool hooks never qualify. Reasons
+ * name event kinds and stages only, never content, so they are safe to show in an error.
  */
+export function managedObservedInterruptionBlockers(request: ManagedTurnJournal['request']): string[] {
+  const blockers = new Set<string>()
+  if (request.providerId !== 'qoder') blockers.add(`provider:${request.providerId}`)
+  if (request.status !== 'interrupted') blockers.add(`status:${request.status}`)
+  if (request.providerTurnId || request.turn.providerTurnId) blockers.add('provider_turn_id')
+  if (request.turn.forkTurnId) blockers.add('fork_turn_id')
+  for (const event of request.turn.items) {
+    if (event.kind === 'harness' && OBSERVED_INTERRUPTION_HARNESS_STAGES.has(event.stage)) continue
+    if (event.kind === 'hook' && event.hookEvent && OBSERVED_INTERRUPTION_HOOK_EVENTS.has(event.hookEvent)) continue
+    blockers.add(event.kind === 'hook' ? `hook:${event.hookEvent ?? 'unknown'}` : `${event.kind}:${event.stage}`)
+  }
+  return [...blockers]
+}
+
 export function managedObservedInterruptionAllowed(request: ManagedTurnJournal['request']): boolean {
-  return request.providerId === 'qoder' && request.status === 'interrupted' &&
-    !request.providerTurnId && !request.turn.providerTurnId && !request.turn.forkTurnId &&
-    request.turn.items.every((event) => event.kind === 'harness' &&
-      (event.stage === 'runtime:controls' || event.stage === 'runtime:turn_wall' ||
-        event.stage === 'turn_diff' || event.stage === 'session_diff'))
+  return managedObservedInterruptionBlockers(request).length === 0
 }

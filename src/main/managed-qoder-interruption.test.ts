@@ -128,3 +128,50 @@ describe('Qoder stop before native recorder open', () => {
     await expect(commitManagedTraceTurn(completed, { waitMs: 0 })).rejects.toThrow('authoritative Provider turn id')
   })
 })
+
+describe('Qoder stop after session-level hooks only', () => {
+  function addHook(request: ManagedTraceTurnCommitInput, hookEvent: string, n: number): void {
+    const hookId = `qoder-log:${hookEvent}:${n}`
+    for (const stage of ['hook_started', 'hook_response'] as const) {
+      addEvent(request, {
+        id: `${hookId}:${stage}`, kind: 'hook', stage, name: hookEvent, hookId, hookName: `hook-${n}`, hookEvent,
+        hookOutcome: stage === 'hook_started' ? 'started' : 'success', ...(stage === 'hook_response' ? { durationMs: 12 } : {}),
+        runtimeMetadata: { source: 'qoder_cli_log' }
+      })
+    }
+  }
+
+  it('keeps the interrupted attempt with its real hook evidence and no invented Provider turn', async () => {
+    const request = await fixture()
+    addHook(request, 'SessionStart', 1)
+    addHook(request, 'Stop', 2)
+    await expect(commitManagedTraceTurn(request, { waitMs: 0 })).resolves.toMatchObject({ recorder: 'committed' })
+    const [record] = await listRecords(join(request.cwd, '.scry'))
+    expect(record).toMatchObject({ status: 'interrupted', durationMs: 2266 })
+    expect(record.providerTurnId).toBeUndefined()
+    expect(record.assistant.value?.text).toBeUndefined()
+    expect(record.usage.status).toBe('unavailable')
+    expect(record.termination).toMatchObject({ status: 'partial', quality: 'estimated', source: ['scry_run_boundary'] })
+    expect(record.hooks.value?.map((hook) => hook.event).sort()).toEqual(['SessionStart', 'Stop'])
+    expect(readTraceArchive(request)?.turns[0]).toMatchObject({ status: 'interrupted' })
+  })
+
+  it.each(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Hook'])('stays pending after a %s hook and names it', async (hookEvent) => {
+    const request = await fixture()
+    addHook(request, 'SessionStart', 1)
+    addHook(request, hookEvent, 2)
+    await expect(commitManagedTraceTurn(request, { waitMs: 0 })).rejects.toThrow(
+      `open identity is not available yet; observed interruption not eligible: hook:${hookEvent}`
+    )
+    expect(await listRecords(join(request.cwd, '.scry'))).toHaveLength(0)
+  })
+
+  it('names every non-local event kind in the pending error, without content', async () => {
+    const request = await fixture()
+    addEvent(request, { kind: 'model', stage: 'text_delta', text: 'secret model output' })
+    addEvent(request, { kind: 'harness', stage: 'result', text: 'secret result' })
+    const error = await commitManagedTraceTurn(request, { waitMs: 0 }).then(() => undefined, (cause: Error) => cause)
+    expect(error?.message).toContain('observed interruption not eligible: model:text_delta, harness:result')
+    expect(error?.message).not.toContain('secret')
+  })
+})

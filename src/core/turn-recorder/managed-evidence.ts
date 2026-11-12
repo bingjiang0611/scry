@@ -42,7 +42,7 @@ export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider:
 export interface PrepareManagedTurnInput {
   /** Main is replaying a validated, terminal canonical journal after its provisional lifecycle was lost. */
   allowCanonicalJournalRecovery?: boolean
-  /** Main proved the durable Qoder interruption trace contains only local launch/diff events. */
+  /** Main proved the durable Qoder interruption trace holds only local launch/diff events and session-level hooks. */
   allowObservedInterruption?: boolean
   /** How the App established this turn's end. Omitted by pre-0.2.38 callers. */
   termination?: Evidence<TurnTermination>

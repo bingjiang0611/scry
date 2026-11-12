@@ -36,6 +36,7 @@ import {
   assertProgressIdentity,
   existingTurnDisposition,
   managedObservedInterruptionAllowed,
+  managedObservedInterruptionBlockers,
   managedTermination,
   matchingArchiveTurn,
   protectManagedInput
@@ -81,7 +82,14 @@ async function prepareJournalRecord(
       throw new Error(`managed recorder became disabled while a canonical journal was pending: ${prepared.reason}`)
     }
     if ('recordId' in prepared) return { ...journal, recordId: prepared.recordId }
-    if (Date.now() >= deadline) throw new Error(prepared.reason)
+    if (Date.now() >= deadline) {
+      // Say why the observed-interruption path did not apply, so a pending open identity is
+      // diagnosable from the error alone (kinds and stages only; no content).
+      const blockers = managedObservedInterruptionBlockers(request)
+      throw new Error(blockers.length > 0 && request.status === 'interrupted'
+        ? `${prepared.reason}; observed interruption not eligible: ${blockers.slice(0, 6).join(', ')}`
+        : prepared.reason)
+    }
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
