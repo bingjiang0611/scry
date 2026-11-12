@@ -19,6 +19,8 @@ const records: Array<{ kind: string; start: number; end?: number; failed?: boole
 function request<T>(kind: string, value: () => T): Promise<T> {
   const record = { kind, start: performance.now() } as (typeof records)[number]
   records.push(record)
+  // Sample after the current commit without depending on a frame beating a fast read.
+  if (kind === 'session') queueMicrotask(() => window.dispatchEvent(new Event('loading-fixture-session-read')))
   const rejectRead = fail
   return new Promise((resolve, reject) => setTimeout(() => {
     record.end = performance.now(); record.failed = rejectRead
