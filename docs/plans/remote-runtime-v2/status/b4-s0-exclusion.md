@@ -51,3 +51,9 @@
   预期：`same-session-excluded` 两边都是 `refused`（daemon 模式 `startError` 为 `…Error: 同一会话已有一轮正在运行`，ledger 终态 `failed`，`recordedDespiteError: false`）；`new-session-observed` 两边都是 `parallel`；`matches-in-process` 通过。
 - 真实 Provider、iOS 未运行。
 - 另见：`daemon-run-runtime.ts` 在本步 trace 读取之前就把 ledger 终态写入 cursor，视图可能在最后一段文字应用之前显示 `done: true`（单元测试 `daemon-run-stream.test.ts` 依赖时序才通过）。本次未改，记为待办。
+
+## 补充：结束状态先于最后一段文字（已修复，2026-11-12）
+
+本 lane 提出的竞态已确认并修复：`daemon-run-runtime.ts` 在一次 step 里先记下账本的结束状态，再去读这一步的 trace；trace 还在路上时，窗口读 view 会先看到 `done: true`，最后一段文字随后才到。现在这一步的 trace 应用之后才记结束状态。回归测试 `src/main/daemon-run-runtime-terminal.test.ts`：修复前失败，把赋值放回原处（对照）也失败，修复后连续 3 次通过。
+
+错误名差异（进程内显示 `AgentRuntimeError: 同一会话已有一轮正在运行`，daemon 模式显示 `同一会话已有一轮正在运行`）待维护者决定。

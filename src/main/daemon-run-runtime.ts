@@ -279,7 +279,7 @@ export class DaemonRunRuntime {
         cursor.output = Math.max(cursor.output, watch.output.cursor)
         changed = true
       }
-      if (watch.state !== cursor.lifecycle) { cursor.lifecycle = watch.state; changed = true }
+      if (watch.state !== cursor.lifecycle) changed = true
       for (const entry of watch.events) {
         noteAdmission(cursor, entry)
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
@@ -302,7 +302,7 @@ export class DaemonRunRuntime {
           }
         }
       }
-      if (cursor.context === undefined) return { changed, lifecycle: cursor.lifecycle }
+      if (cursor.context === undefined) { cursor.lifecycle = watch.state; return { changed, lifecycle: cursor.lifecycle } }
       // The trace is addressed by the canonical id its events carry. The ledger id the
       // watch polls uses is a different id and finds no run there.
       const read = await this.#deps.transport.trace({
@@ -310,11 +310,11 @@ export class DaemonRunRuntime {
       })
       if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
       if (this.#apply(read, cursor)) changed = true
+      // Terminal only after this step's trace: no `done` before the last text.
+      cursor.lifecycle = watch.state
       await this.#publishQuestions(cursor)
-      // The step boundary is where the App knows it has the whole read, so the batch
-      // built from it is handed over here instead of waiting for the batching timer.
-      // Batching still applies - every event of one step travels in one batch - and
-      // backpressure still applies, because flush() respects the same high water.
+      // The step boundary holds the whole read: hand its batch over now, not on the
+      // batching timer. One batch per step; flush() keeps the same high water.
       if (changed) this.#bridge.flush()
       if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
       return { changed, lifecycle: cursor.lifecycle }
