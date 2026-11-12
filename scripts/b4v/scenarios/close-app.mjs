@@ -1,11 +1,17 @@
 // B4-V「关闭 App 窗口和进程」: the run keeps going without the App and settles in the
-// daemon; the daemon survives; a terminal keeps running; (a remote device still sees it).
+// daemon; the daemon survives; (a remote device still sees it). Terminals follow the
+// maintainer's 2026-11-11 decision (P3-terminal.md), which replaces B4-V's「终端继续」:
+// shells never outlive the App, so a graceful quit ends them and a crash leaves them to
+// the daemon's reclaim.
 import { attempt, crashApp, quitApp } from '../app.mjs'
 import { daemonHolder } from '../fixture.mjs'
 import { Abort, PACED_PROMPT, openChecked, runScenario, startRun, startTerminal, stillAlive, waitLedger } from '../kit.mjs'
+import { waitGone } from '../process-identity.mjs'
 import { recordNotRun, recordStep } from '../report.mjs'
 
-export const TERMINAL_SPEC_CONFLICT = 'P3-terminal.md: a graceful App quit calls terminalFeed.shutdown, so shells end with the App; only a crashed App leaves them to the ~90 s reclaim. B4-V says the terminal continues. Until the maintainer picks one, a failure of terminal-after-quit is that conflict, not a regression.'
+// The App's quit asks the daemon to shut its terminals down (bounded at 3 s); a shell
+// may then take a moment to exit. Past this, the shell outlived the App: a failure.
+export const TERMINAL_QUIT_GONE_MS = 10_000
 
 export const plan = [
   { id: 'terminal-started', expected: 'a terminal starts in the workspace before the App closes (pty identity recorded)' },
@@ -13,7 +19,7 @@ export const plan = [
   { id: 'app-quit', expected: 'SIGTERM (Electron app.quit, same cleanup as Cmd+Q) ends the App main within 20 s, its renderer/GPU children with it' },
   { id: 'daemon-survives-quit', expected: 'after the quit, daemon.lock still names the same verified daemon process' },
   { id: 'run-settles-after-quit', expected: 'the daemon ledger records run_settled for the run, timestamped after the App exited' },
-  { id: 'terminal-after-quit', expected: 'B4-V: the terminal process started before the quit is still alive after it' },
+  { id: 'terminal-after-quit', expected: 'P3-terminal (2026-11-11): the terminal process started before the graceful quit is gone within 10 s after it (shells do not outlive the App)' },
   { id: 'new-app-reads-settled', expected: 'a new App attaches to the same daemon and lists no active run (the run is settled)' },
   { id: 'run-settles-after-crash', expected: 'App SIGKILL during a paced run: the ledger records run_settled after the kill' },
   { id: 'terminal-after-crash', expected: 'App SIGKILL: the terminal process is alive right after the crash (before the ~90 s reclaim)' },
@@ -64,8 +70,9 @@ export async function run(ctx) {
     recordSettledAfter(scenario, 'run-settles-after-quit', settled, quit.exitedAt, 'the App exited')
 
     if (terminal.ok) {
-      recordStep(scenario, { id: 'terminal-after-quit', actual: { pid: terminal.pid, alive: stillAlive(terminal.identity) },
-        pass: stillAlive(terminal.identity), note: TERMINAL_SPEC_CONFLICT })
+      const live = await waitGone([terminal.identity], TERMINAL_QUIT_GONE_MS)
+      recordStep(scenario, { id: 'terminal-after-quit', actual: { pid: terminal.pid, stillAlive: live.length > 0, waitedUpToMs: TERMINAL_QUIT_GONE_MS },
+        pass: live.length === 0 })
     } else {
       recordNotRun(scenario, { id: 'terminal-after-quit', reason: `no terminal was started: ${terminal.error}` })
     }

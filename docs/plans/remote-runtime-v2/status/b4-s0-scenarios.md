@@ -26,7 +26,7 @@ node scripts/b4v-scenarios.mjs --out /tmp/b4v-report.json
 # 只跑部分场景
 node scripts/b4v-scenarios.mjs --only sigkill,upgrade --out /tmp/b4v-sigkill.json
 
-# S0-1 的按钮落地后，若自动识别到多个候选，显式指定 window.scry 上的路径
+# 若自动识别到多个候选，显式指定 window.scry 上的路径（S0-1 的方法名是 restartBackgroundService / quitWithBackgroundService）
 node scripts/b4v-scenarios.mjs --only upgrade,quit-all --restart-api <path> --quit-api <path>
 
 # 用真正的旧构建做升级场景：在另一个 worktree 检出旧提交并 npm run build
@@ -54,24 +54,26 @@ node .agents/skills/scry-performance-climb/scripts/timing-run.mjs b4s-startup --
 
 | 场景 | 主要步骤 | 现在预计 not-run 的步骤 |
 |---|---|---|
-| `close-app` 关闭 App | 优雅退出（SIGTERM → `app.quit`）后 daemon 身份不变；paced run 在 ledger 里于 App 退出之后 `run_settled`；新 App 接入同一 daemon；App 被 SIGKILL 时 run 同样继续、shell 仍在 | `remote-device-visibility`：没有针对 daemon 模式宿主的配对设备夹具 |
+| `close-app` 关闭 App | 优雅退出（SIGTERM → `app.quit`）后 daemon 身份不变；paced run 在 ledger 里于 App 退出之后 `run_settled`；新 App 接入同一 daemon；正常退出后 10 s 内 shell 结束（shell 不活过 App）；App 被 SIGKILL 时 run 同样继续、shell 在回收之前仍在 | `remote-device-visibility`：没有针对 daemon 模式宿主的配对设备夹具 |
 | `reopen` 重新打开 | 第二个 App 接入同一 daemon（同 pid、同身份）、只有一个 daemon；接管仍在等问题的 run；第一个 App 已显示的条目在第二个 App 中各出现一次，缺失时必须由流健康（degraded / resyncRequired / skippedEvents）如实标出；从第二个 App 停止 run | — |
 | `sigkill` | daemon 冻结（SIGSTOP）后从窗口发出 stop，再 SIGKILL；新 daemon 接管；run 变为 `run_failed`，detail 以 `host_restarted` 开头；一个 fence run 结束后该 run 仍只有一次 `run_dispatched`；未确认的 stop 报 `daemon_outcome_unknown` / `daemon_stop_not_confirmed` / `daemon_submit_unknown` | — |
-| `upgrade` | 先直接启动一个宣称旧版本（`0.0.0-b4v-old`）的 daemon，再开新 App：第一次 run 调用报 `daemon_version_mismatch`；旧 daemon 不被悄悄替换 | `restart-action-present`、`recovered-after-restart`：「重启后台服务」由 S0-1 实现，`window.scry` 上还没有 |
-| `quit-all` | 有 run 时调用后 5 s 内 App、daemon、run 都还在（需要二次确认）；无 run 时 App 与 daemon 在 30 s 内退出；不留进程、`daemon.lock`、`scry-userdata.lock`、socket、remote lease | 除 `action-present` 外全部：「退出 Scry 与后台服务」由 S0-1 实现。若调用 15 s 不返回（原生确认框），记 not-run，需要人工点一次并记录文案 |
+| `upgrade` | 先直接启动一个宣称旧版本（`0.0.0-b4v-old`）的 daemon，再开新 App：第一次 run 调用报 `daemon_version_mismatch`；旧 daemon 不被悄悄替换 | `restart-action-present`、`recovered-after-restart`：仅当识别不到「重启后台服务」（S0-1 的 `restartBackgroundService`）时 not-run |
+| `quit-all` | 有 run 时调用后 5 s 内 App、daemon、run 都还在（需要二次确认）；无 run 时 App 与 daemon 在 30 s 内退出；不留进程、`daemon.lock`、`scry-userdata.lock`、socket、remote lease | 仅当识别不到「退出 Scry 与后台服务」（S0-1 的 `quitWithBackgroundService`）时，除 `action-present` 外全部 not-run。若调用 15 s 不返回（原生确认框），记 not-run，需要人工点一次并记录文案 |
 | `mutual-exclusion`（含对照） | 同一 provider/profile/工作区：第二次启动接入第一个 run 的活动 session，必须排队或被拒绝；新 session 的第二次启动只分类；两种分类都要与开关关闭的对照一致 | `auth-versus-run`（smoke Provider 没有登录流程）、`local-plus-remote`（没有设备夹具） |
 | `trust-gate`（含对照） | `.codex/config.toml` 里安全的仓库 MCP：run 正常结束；改成 env 带 `NODE_OPTIONS` 的配置：启动被拒、错误点名 `NODE_OPTIONS`、没有 Provider 输出，ledger 里不是 `settled`；再改成另一份安全配置：重新校验后放行；三个结果与对照一致 | — |
 | `renderer-isolation`（含对照） | 页面里没有 `require` / `process` / `module` / `Buffer`；`window.scry` 只有类型化方法；被拦下的请求报告的 CSP 含 `connect-src 'none'`、`script-src 'self'` 且无 `unsafe-eval`；`fetch` / XHR / WebSocket 访问 `local.sock` 全部失败；renderer 进程没有 `--no-sandbox`；CSP 文本与 `window.scry` 表面和对照完全相同 | — |
 
-### 已知的规格冲突（需要维护者确认，不是脚本能决定的）
+### 与 B4-V 原文不同的地方（都按更晚的决定或 CLAUDE.md 断言）
 
-1. **终端在 App 正常退出后是否继续。** B4-V 写「终端继续」；[P3-terminal](../P3-terminal.md) 的决定是 App 正常退出时调用 `terminalFeed.shutdown`，shell 随 App 结束，只有 App 崩溃时才留到约 90 s 的回收。脚本按 B4-V 断言 `terminal-after-quit`，失败时步骤里带有这条说明；`terminal-after-crash` 按两份文档都一致的语义断言。
+1. **终端在 App 正常退出后是否继续（已按维护者决定处理）。** B4-V 原文写「终端继续」；维护者 2026-11-11 的终端决定（[P3-terminal](../P3-terminal.md)）是 shell 不活过 App：正常退出时调用 `terminalFeed.shutdown`，只有 App 崩溃时才留到约 90 s 的回收。后者是更晚的决定，脚本按它断言：`terminal-after-quit` 要求 shell 在退出后 10 s 内结束，`terminal-after-crash` 要求崩溃后 shell 在回收之前仍在。
 2. **「指纹变化拒绝执行」。** CLAUDE.md（2026-09-21）规定仓库 MCP / Codex Hook / OpenCode plugin 自动授权，指纹变化后重新校验，只有校验失败才拒绝。脚本按 CLAUDE.md：不安全的变化必须拒绝，安全的变化重新校验后放行（`changed-safe-config-reverified` 带说明）。
 3. **「同 profile 互斥」的范围。** 产品的冲突域是 session，不是工作区（`run-admission.ts`：同一 cwd 的不同 session 可以并行）。脚本对「同 session」断言排队或拒绝，对「新 session」只要求与进程内一致。
 
 ### 需要产品接口（报告里以 `needsProductHook` 标出）
 
-- `window.scry` 上的「重启后台服务」与「退出 Scry 与后台服务」（S0-1）。脚本按名字识别（含 daemon / background / service / host 字样的 restart、quit / exit / shutdown），多个候选时不猜，要求用 `--restart-api` / `--quit-api` 指定。识别不到时相关步骤 not-run。
+S0-1 已合入（`45cfdd7`），按名字能识别到下面两个动作；仍然识别不到时才 not-run。
+
+- `window.scry` 上的「重启后台服务」与「退出 Scry 与后台服务」（S0-1：`restartBackgroundService`、`quitWithBackgroundService`）。脚本按名字识别（含 daemon / background / service / host 字样的 restart、quit / exit / shutdown），多个候选时不猜，要求用 `--restart-api` / `--quit-api` 指定。识别不到时相关步骤 not-run。
 - 远程设备相关的两步需要一个能与 daemon 模式宿主配对的设备夹具；当前 `desktop-remote-host-smoke` 只配对进程内宿主。
 
 ## 报告字段（`b4v-scenarios`）
