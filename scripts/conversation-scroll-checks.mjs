@@ -13,6 +13,7 @@ export async function exerciseConversationScroll({ cdp, evaluate, ready, wait, c
     atLatest: ${CONVERSATION_AT_LATEST}, scrollHeight: el?.scrollHeight ?? null,
     clientHeight: el?.clientHeight ?? null, scrollTop: el?.scrollTop ?? null,
     viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
+    conversationId: document.querySelector('.unified-conversation')?.dataset.conversationId ?? null,
     turns: document.querySelectorAll('.conversation-chat .turn').length
   } })()`)
   const overflowing = state => state.scrollHeight - state.clientHeight > 32
@@ -41,7 +42,8 @@ export async function exerciseConversationScroll({ cdp, evaluate, ready, wait, c
       assert.equal(position.top, 0, `layout changes must preserve the user reading older output: ${JSON.stringify(position)}`)
     }
   } catch (error) {
-    console.error('[scry] initial transcript scroll geometry', initialScrollState)
+    const [current] = await Promise.allSettled([geometry()])
+    console.error('[scry] transcript scroll geometry', { expectedConversationId: conversationId, initial: initialScrollState, current })
     throw error
   } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
 }

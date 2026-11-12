@@ -41,7 +41,24 @@ it('fails on a lost pin instead of shrinking again or repairing it', async () =>
   options.ready.mockImplementationOnce(async () => undefined).mockRejectedValueOnce(new Error('bottom readiness timed out'))
   await expect(exerciseConversationScroll(options)).rejects.toThrow('bottom readiness timed out')
   expect(options.cdp.send.mock.calls.map(([method]) => method)).toEqual(['Emulation.setDeviceMetricsOverride', 'Emulation.clearDeviceMetricsOverride'])
-  expect(diagnostic).toHaveBeenCalledWith('[scry] initial transcript scroll geometry', expect.objectContaining({ atLatest: false, scrollTop: 96 }))
+  expect(diagnostic).toHaveBeenCalledWith('[scry] transcript scroll geometry', expect.objectContaining({
+    expectedConversationId: 'target',
+    initial: expect.objectContaining({ atLatest: false, scrollTop: 96 }),
+    current: { status: 'fulfilled', value: expect.objectContaining({ atLatest: false, scrollTop: 96 }) }
+  }))
+})
+
+it('keeps the readiness failure when collecting current geometry also fails', async () => {
+  const options = fixture()
+  const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const unavailable = new Error('renderer diagnostic unavailable')
+  options.evaluate.mockResolvedValueOnce({ ...options.state }).mockRejectedValue(unavailable)
+  options.ready.mockImplementationOnce(async () => undefined).mockRejectedValueOnce(new Error('bottom readiness timed out'))
+  await expect(exerciseConversationScroll(options)).rejects.toThrow('bottom readiness timed out')
+  expect(diagnostic).toHaveBeenCalledWith('[scry] transcript scroll geometry', expect.objectContaining({
+    current: { status: 'rejected', reason: unavailable }
+  }))
+  expect(options.cdp.send).toHaveBeenLastCalledWith('Emulation.clearDeviceMetricsOverride')
 })
 
 it('retains the independent overflow/bottom assertion even if readiness incorrectly returns early', async () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { chatBottomStickinessAfterScroll, scrollChatToBottomIfNeeded, transcriptGrowthAboveEdge } from './chat-scroll'
+import { chatBottomStickinessAfterScroll, scrollChatTargetIntoView, scrollChatToBottomIfNeeded, transcriptGrowthAboveEdge } from './chat-scroll'
 
 function scrollBox() {
   const element = {
@@ -15,6 +15,20 @@ describe('automatic bottom scroll events', () => {
     const remote = readFileSync(new URL('./components/RemoteChatPresentation.tsx', import.meta.url), 'utf8')
     expect(remote).toContain('chatBottomStickinessAfterScroll(history, openingLatest.current)')
     expect(remote).not.toContain('chatBottomStickinessAfterScroll(position, openingLatest.current)')
+  })
+
+  it('keeps the automatic offset through repeated notifications and a viewport shrink', () => {
+    const element = scrollBox()
+    element.clientHeight = 591
+    scrollChatToBottomIfNeeded(element, true)
+    expect(element.scrollTop).toBe(96)
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(true)
+    element.clientHeight = 365
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(true)
+    element.scrollTop = 0
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
+    element.scrollTop = 96
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
   })
 
   it('keeps following when a queued pin arrives after the viewport shrinks', () => {
@@ -32,6 +46,20 @@ describe('automatic bottom scroll events', () => {
     element.scrollTop = 0
     expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
     element.scrollTop = 142
+    expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
+  })
+
+  it('retires the pin when explicit turn navigation owns scrolling', () => {
+    const element = Object.assign(scrollBox(), { getBoundingClientRect: () => ({ top: 0 }) })
+    element.clientHeight = 591
+    scrollChatToBottomIfNeeded(element, true)
+    expect(element.scrollTop).toBe(96)
+    element.clientHeight = 365
+    scrollChatTargetIntoView(element, { getBoundingClientRect: () => ({ top: -80 }) })
+    expect(element.scrollTop).toBe(0)
+    // Navigation suppresses stickiness callbacks; the next reader event may
+    // pass through the former automatic offset without returning to latest.
+    element.scrollTop = 96
     expect(chatBottomStickinessAfterScroll(element, false)).toBe(false)
   })
 
