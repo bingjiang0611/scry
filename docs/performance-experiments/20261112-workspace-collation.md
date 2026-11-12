@@ -47,6 +47,14 @@ It measured workspace P95 30.509ms → 31.268ms and median 20.687ms → 18.894ms
 
 Raw local evidence is retained in `/tmp/scry-pr63-collation-{before,after}-counts.json`, `/tmp/scry-pr63-collation-abab-dir.txt`, `/tmp/scry-pr63-collation-abab.log` and the ordering negative-control/test logs. Final Linux L2 and acceptance are the PR's latest-head complete CI/Performance evidence, not this high-load local run.
 
+## Linux L2 follow-up
+
+PR head `e415c4a7` completed formal Node comparison in run [43242847350](https://github.com/bingjiang0611/scry/actions/runs/43242847350). Report identity: baseline `73c1cd992c222007b2c9e96e9314ac31fe9dc069`, candidate CI merge `35315f629759384951b69cd9cdb056a299d28250` (not the PR head), unchanged harness `a3e02bb594e10973060abf9209f048d5e379f6f808490c7101fa4731a577a73a`. Environment: Node22.23.4, Linux x64, four allocated cores; the timing lock recorded `highLoad: false`, load 2.17 → 1.99.
+
+All 20 samples and original workload/oracles remained in use. `workspace.files.batchMeanP95Ms` was 72.986 → 57.351ms (-21.4%), ceiling 109.479ms; entry/whole-file/page counters remained 122 / 1048576 / 65539. The Node report passed. This supplies Linux L2 evidence for that artifact and run, not a promise for every machine. Raw report: `/tmp/scry-pr63-node-e415.55fI3m/report.md.json`.
+
+The overall Performance run still failed Native assertions (including baseline failures), with all 12 Native timing locks marked high-load. Do not turn the Node result into a claim that the full gate passed. Follow-up Markdown context work and its limits are recorded in [the separate experiment](20261112-markdown-context-identity.md); every new PR head still requires its own full acceptance.
+
 ## Delivery
 
-L1 is verified. Stable L2 must come from the latest-head CI artifact. The daily App was not installed or changed, so L3 field-use improvement is unverified. No ledger ceiling, timeout, workload, sample count or runner version is changed by this experiment.
+L1 and the above Linux L2 point are verified. At this record update the PR is not merged; current gate/merge state is authoritative at [PR #63](https://github.com/bingjiang0611/scry/pull/63). The daily App was not installed or changed, so L3 field-use improvement is unverified. No ledger ceiling, timeout, workload, sample count or runner version is changed by this experiment.
