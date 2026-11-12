@@ -79,7 +79,8 @@ struct RootView: View {
     }
   }
 
-  var body: some View {
+  // Keep transition composition separate so Xcode 26.3 can type-check the root.
+  private var transitioningContent: some View {
     ZStack {
       routeContent
         .transition(Motion.none)
@@ -113,6 +114,10 @@ struct RootView: View {
       if viewportWidth != 0, viewportWidth != width { transition.cancel() }
       viewportWidth = width
     }
+  }
+
+  var body: some View {
+    transitioningContent
     .foregroundStyle(Palette.fg)
     .background(Palette.main.ignoresSafeArea())
     .tint(Palette.accent)
