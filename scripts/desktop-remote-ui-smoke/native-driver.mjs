@@ -1,10 +1,12 @@
+import { createUiReady } from '../ui-ready.mjs'
+
 export function createNativeDriver(contents, pointer, capture) {
   const check = (condition, message) => { if (!condition) throw new Error(message) }
   const read = (expression) => contents.executeJavaScript(expression)
   const wait = async (expression, label = expression) => {
     const deadline = Date.now() + 7000
     while (!await read(expression)) {
-      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; DOM=${await read('JSON.stringify({ focus: document.activeElement?.tagName, selects: [...document.querySelectorAll("select")].map(node => ({value:node.value, options:[...node.options].map(option => ({text:option.text, value:option.value}))})), text: document.body.innerText.slice(-2000), events: window.desktopRemoteFixture.uiEvents, navigation: window.desktopRemoteFixture.navigationGeometry })')}`)
+      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; DOM=${await read('JSON.stringify({ focus: document.activeElement?.tagName, selects: [...document.querySelectorAll("select")].map(node => ({value:node.value, options:[...node.options].map(option => ({text:option.text, value:option.value}))})), text: document.body?.innerText.slice(-2000), events: window.desktopRemoteFixture?.uiEvents, navigation: window.desktopRemoteFixture?.navigationGeometry })')}`)
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
@@ -38,7 +40,7 @@ export function createNativeDriver(contents, pointer, capture) {
   }
   const fixture = () => read('window.desktopRemoteFixture')
   const bodyText = () => read('document.body.textContent')
-  return { contents, capture, check, read, wait, pointFor, send, click, key, insert, pasteImage, formEnter, fixture, bodyText,
+  return { contents, capture, check, read, wait, ready: createUiReady(wait), pointFor, send, click, key, insert, pasteImage, formEnter, fixture, bodyText,
     remoteShown: 'document.querySelector(".execution-location.is-remote") != null',
     sendDisabled: 'document.querySelector(".runtime-composer button.send").disabled',
     composerValue: 'document.querySelector(\'textarea[aria-label="描述任务"]\').value' }

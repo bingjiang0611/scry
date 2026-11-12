@@ -1,6 +1,9 @@
 export async function runComposerHistory({ driver }) {
   const { read, wait, check, click, key, insert, fixture, composerValue } = driver
-    await wait('document.querySelector(".chat-transcript")?.textContent.includes("latest remote prompt")', 'remote prompt history')
+    await driver.ready({
+      body: 'document.querySelector(".chat-transcript")?.textContent.includes("latest remote prompt")',
+      target: 'document.querySelector(\'[data-remote-session="old-native"].active\') != null'
+    })
     await click('textarea[aria-label="描述任务"]')
     await key('ArrowUp')
     await wait(`${composerValue} === 'latest remote prompt'`, 'recall latest remote prompt')
@@ -11,7 +14,10 @@ export async function runComposerHistory({ driver }) {
       await wait('document.querySelector(".composer-notice")?.textContent.includes("未连接")', 'history refresh disconnect')
       await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
       await wait(`window.desktopRemoteFixture.historyCalls.length > ${reads} && !document.querySelector(".composer-notice:not(.is-info)")`, 'history refresh reconnect')
-      await wait(`document.querySelector(".chat-transcript")?.textContent.includes(${JSON.stringify(prompts.at(-1))})`, 'updated remote history')
+      await driver.ready({
+        body: `document.querySelector(".chat-transcript")?.textContent.includes(${JSON.stringify(prompts.at(-1))})`,
+        target: 'document.querySelector(\'[data-remote-session="old-native"].active\') != null'
+      })
     }
     await refreshHistory(['older remote prompt', 'latest remote prompt', 'arrived while browsing'])
     await key('ArrowUp')

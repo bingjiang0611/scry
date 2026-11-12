@@ -101,6 +101,18 @@ describe('bounded UI campaign', () => {
     await expect(pending).rejects.toThrow(SyntaxError)
   })
 
+  it.each([[-11, null], [null, 'SIGSEGV']])('retains crash status %s/%s and the child stderr stack', async (code, signal) => {
+    const child = fakeChild()
+    control.child = child
+    const pending = campaign()
+    const stack = 'Fatal Python error: Segmentation fault\nCurrent thread:\n  File "fixture.py", line 7 in exercise'
+    child.stderr.emit('data', stack)
+    child.emit('close', code, signal)
+    await expect(pending).rejects.toThrow(`Hidden UI fixture failed (${code ?? signal})`)
+    await expect(pending).rejects.toThrow(stack)
+    expect(child.kill).not.toHaveBeenCalled()
+  })
+
   it('propagates the spawn error unchanged', async () => {
     const child = fakeChild()
     control.child = child

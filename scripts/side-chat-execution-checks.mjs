@@ -224,9 +224,8 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
 
 export async function verifySideChatRestart({ cdp, evaluate, check, documentEpoch, childId,
   ipcCountsPath, inputsPath, callsPath, expectedComposerValue = '' }) {
-  const { capture, click, clickAt, idle, wait } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, label: 'Side-chat restart' })
-  await wait(`performance.timeOrigin !== ${json(documentEpoch)} && Boolean(window.scry?.conversations && document.querySelector('.sidebar'))`)
-  await wait(`document.querySelectorAll('.sb-sess').length > 0`)
+  const { capture, click, clickAt, idle, wait, ready } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, label: 'Side-chat restart' })
+  await ready({ documentEpoch, body: "Boolean(window.scry?.conversations) && document.querySelectorAll('.sb-sess').length > 0" })
   await idle()
   const rows = await evaluate(`[...document.querySelectorAll('.sb-sess')].map(row => ({ text: row.textContent, active: row.classList.contains('active') }))`)
   check(rows.length >= 2, `the restart must still list its parents: ${json(rows)}`)

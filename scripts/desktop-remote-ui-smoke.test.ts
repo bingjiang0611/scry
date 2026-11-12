@@ -18,7 +18,7 @@ function unboundNames(): { actual: string[]; control: string[] } {
   host.getSourceFile = (file, languageVersion, onError, shouldCreateNewSourceFile) => {
     if (file === control) {
       const original = readFileSync(resolve(directory, 'initial-controls.mjs'), 'utf8')
-      return ts.createSourceFile(file, original.replace('click, wait, check, fixture', 'click, wait, fixture'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS)
+      return ts.createSourceFile(file, original.replace('click, wait, ready, check, fixture', 'click, wait, ready, fixture'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS)
     }
     return getSourceFile(file, languageVersion, onError, shouldCreateNewSourceFile)
   }

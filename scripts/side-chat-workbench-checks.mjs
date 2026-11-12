@@ -1,4 +1,4 @@
-import { SIDE_CHAT_SURFACE, json, sideChatDriver } from './side-chat-driving.mjs'
+import { CHILD_PANEL, SIDE_CHAT_SURFACE, json, sideChatDriver } from './side-chat-driving.mjs'
 
 /**
  * The workbench as the user sees it plus the row the App really saved for it.
@@ -41,11 +41,10 @@ export const readWorkbench = (evaluate, wanted) => evaluate(`(() => {
  */
 export async function verifySideChatWorkbenchAfterRestart({ cdp, evaluate, check, ipcCountsPath, inputsPath,
   callsPath, documentEpoch, prepared, rendererFailures = [] }) {
-  const { capture, clickAt, idle, wait } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath,
+  const { capture, clickAt, idle, wait, ready } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath,
     callsPath, rendererFailures, label: 'Side-chat workbench restart' })
   const layout = prepared.workbench
-  await wait(`performance.timeOrigin !== ${json(documentEpoch)} && Boolean(window.scry?.conversations && document.querySelector('.sidebar'))`)
-  await wait(`document.querySelectorAll('.sb-sess').length > 0`)
+  await ready({ documentEpoch, body: "Boolean(window.scry?.conversations) && document.querySelectorAll('.sb-sess').length > 0" })
   await idle()
   const savedOnly = await readWorkbench(evaluate, layout.children)
   check(savedOnly.saved != null && json(savedOnly.saved.sideChats) === json(layout.children),
@@ -63,7 +62,11 @@ export async function verifySideChatWorkbenchAfterRestart({ cdp, evaluate, check
   if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {
     await clickAt(`document.querySelector('.panel-pill:not(.summary-pill)')`)
   }
-  await wait(`document.querySelector('${SIDE_CHAT_SURFACE} .surface-tabs [role="tab"]') != null`)
+  await ready({
+    body: `document.querySelector('${CHILD_PANEL} .chat-transcript[aria-busy="false"][data-history-source="authoritative"]') != null`,
+    panel: CHILD_PANEL,
+    target: `document.querySelector('${SIDE_CHAT_SURFACE} [data-side-chat-tab-id="${layout.active}"] [aria-selected="true"]') != null`
+  })
   await idle()
   const shown = await readWorkbench(evaluate, layout.children)
   await capture('workbench-restored')

@@ -80,13 +80,18 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   await click('[data-host-project-b]')
   await wait(`${remoteShown} && document.querySelector(".location-button")?.getAttribute("aria-label") === "执行位置：Fixture desktop / /fixture/project-b"`, 'host project opens a remote draft')
 
+  const documentEpoch = await read('performance.timeOrigin')
   await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
-  await wait('document.querySelector("[data-app-fixture]") != null', 'fixture reload')
+  await driver.ready({ documentEpoch, body: 'document.querySelector("[data-app-fixture]") != null' })
   await click('[data-app-fixture]')
-  await wait('document.querySelector(\'[data-remote-session="old-native"]\') != null', 'saved host sessions after renderer reload')
+  await driver.ready({ documentEpoch, target: 'document.querySelector(\'[data-remote-session="old-native"]\') != null' })
   const historyBefore = (await fixture()).historyCalls.length
   await click('[data-remote-session="old-native"]')
-  await wait(`window.desktopRemoteFixture.historyCalls.length > ${historyBefore}`, 'sidebar remote session loads history')
+  await driver.ready({
+    documentEpoch,
+    body: 'document.querySelector(\'.chat-transcript[aria-busy="false"][data-history-source="authoritative"]\') != null',
+    target: `window.desktopRemoteFixture.historyCalls.length > ${historyBefore} && document.querySelector('[data-remote-session="old-native"].active') != null`
+  })
   check((await fixture()).historyCalls.at(-1).externalSessionId === 'old-native', 'Sidebar session loaded the wrong history')
   await wait('document.querySelector(".clibtn")?.disabled === true', 'bound session context')
   check(!(await read('document.querySelector(".location-button")')), 'Bound session exposed the location picker')

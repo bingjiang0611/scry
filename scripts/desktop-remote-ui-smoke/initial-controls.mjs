@@ -1,4 +1,4 @@
-export async function runInitialControls({ contents, click, wait, check, fixture, read }, options) {
+export async function runInitialControls({ contents, click, wait, ready, check, fixture, read }, options) {
   await wait('document.querySelector(".desktop-remote__host button")?.textContent.includes("启用")', 'disabled host enable action')
   await click('.desktop-remote__host button')
   await wait('document.querySelector(".desktop-remote__invite")?.textContent.includes("scry-desktop1:fixture")', 'enabled host invitation')
@@ -24,7 +24,11 @@ export async function runInitialControls({ contents, click, wait, check, fixture
       if (!await read('document.querySelector(".app.has-right-panel:not(.right-panel-hidden)") != null')) {
         await click('button[aria-label="右侧工作区"]')
       }
-      await wait('document.querySelector(".app.has-right-panel:not(.right-panel-hidden)") != null', 'logical overview revealed')
+      await ready({
+        body: 'document.querySelectorAll(".transcript-turn").length === 40',
+        panel: '#right-surface-pane',
+        target: 'document.querySelector("[data-conversation-id=navigation-conversation].active") != null'
+      })
       await wait('[...document.querySelectorAll("#right-surface-pane .turn-call-open")].some(button => button.textContent === "T05")', 'logical overview contains target turn')
       await click('#right-surface-pane .turn-call-open', 'T05')
     }
