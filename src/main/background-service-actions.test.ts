@@ -18,6 +18,8 @@ interface Script {
   stopped?: StopOutcome
   answer?: boolean
   after?: BackgroundServiceConnection
+  /** Whether the App still has a stored local credential. */
+  credential?: boolean
 }
 
 function harness(script: Script = {}) {
@@ -38,6 +40,7 @@ function harness(script: Script = {}) {
     reconnect: async () => { steps.push('reconnect'); return script.after ?? { state: 'ready' } },
     discardLocalCredential: async () => { steps.push('discard') },
     requestLocalEnrollment: async () => { steps.push('request') },
+    hasLocalCredential: async () => { steps.push('credential'); return script.credential ?? true },
     reportLeftovers: async (left) => { steps.push(`leftovers:${left.join(',')}`) },
     quitApp: () => { steps.push('quit') }
   }
@@ -48,7 +51,7 @@ describe('restart background service', () => {
   it('stops the verified holder without asking when the daemon reports no active run, then reconnects', async () => {
     const { deps, steps, holds } = harness({ activeRuns: 0 })
     await expect(restartBackgroundService(deps)).resolves.toEqual({ status: 'done' })
-    expect(steps).toEqual(['prepare', 'activeRuns', 'hold', 'stop:4242:held=1', 'release', 'reconnect'])
+    expect(steps).toEqual(['prepare', 'activeRuns', 'hold', 'stop:4242:held=1', 'credential', 'release', 'reconnect'])
     expect(holds()).toBe(0)
   })
 
@@ -96,7 +99,28 @@ describe('restart background service', () => {
   it('starts the service when none is running, and reports a daemon that still mismatches', async () => {
     const { deps, steps } = harness({ prepared: { status: 'not-running' }, after: { state: 'version-mismatch', running: '1.0.0', expected: '2.0.0' } })
     await expect(restartBackgroundService(deps)).resolves.toMatchObject({ status: 'failed', reason: 'daemon_version_mismatch' })
-    expect(steps).toEqual(['prepare', 'reconnect'])
+    expect(steps).toEqual(['prepare', 'credential', 'reconnect'])
+  })
+
+  it('asks the restarted service for a secret when the App holds no credential, after the verified stop (B4-S A6)', async () => {
+    // An enrollment-time mismatch spends the one-time secret and leaves the old daemon a
+    // live grant this App never stored: without the request the new daemon writes none.
+    const { deps, steps, holds } = harness({ activeRuns: undefined, answer: true, credential: false })
+    await expect(restartBackgroundService(deps)).resolves.toEqual({ status: 'done' })
+    expect(steps).toEqual(['prepare', 'activeRuns', 'confirm:restart:null', 'hold', 'stop:4242:held=1', 'credential', 'request', 'release', 'reconnect'])
+    expect(holds()).toBe(0)
+  })
+
+  it('asks for a secret only when the App holds no credential, and never after a refused stop', async () => {
+    const kept = harness({ activeRuns: 0 })
+    await restartBackgroundService(kept.deps)
+    expect(kept.steps).not.toContain('request')
+    const refused = harness({ activeRuns: 0, credential: false, stopped: { status: 'refused', reason: 'identity-changed' } })
+    await expect(restartBackgroundService(refused.deps)).resolves.toMatchObject({ status: 'failed', reason: 'identity-changed' })
+    expect(refused.steps).not.toContain('request')
+    const none = harness({ prepared: { status: 'not-running' }, credential: false })
+    await restartBackgroundService(none.deps)
+    expect(none.steps).toEqual(['prepare', 'credential', 'hold', 'request', 'release', 'reconnect'])
   })
 
   it('is unavailable with the switch off', async () => {

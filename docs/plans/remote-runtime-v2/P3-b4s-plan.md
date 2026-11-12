@@ -106,3 +106,11 @@ S0 里可以并行的：S0-1（界面）、S0-3（场景脚本）、S0-6（性�
 3. App 启动时检测到版本不一致，**弹一次原生对话框**，提供「重启后台服务」（走 S0-1 的同一个重启动作）与「稍后」。
 4. 通道名 `remote:backgroundService:*` 保持不变。
 5. `daemon-packaged-recorder-smoke.mjs` 改为运行 asar 内的 daemon 入口（已完成，见 [status/b4-s0-packaged](status/b4-s0-packaged.md)）。
+
+## S0 复验后的决定（2026-11-12，按执行方建议）
+
+1. 启动改为等后台服务的准入结果再回答（与进程内一致），账本新增 `admitted` 标记；超过 30 s 之后才被拒的 run，窗口显示「已结束、无内容、带账本里的拒绝原因」。见 [status/b4-s0-trust-gate](status/b4-s0-trust-gate.md)。
+2. 「重新连接本机后台服务」在已有本机授权时也可以生成一次入网 secret：只在用户确认、并按身份复核停止旧后台服务之后，由一次性请求文件触发。见 [status/b4-s0-handshake](status/b4-s0-handshake.md)。
+3. 构建号覆盖整个 `src/`，宁可多一次重启。
+4. App 没有保存的凭据时，「重启后台服务」在复核停止之后也写入同一个请求，一步恢复。空闲时的重启没有二次确认框，用户点击按钮本身就是这次操作的意愿。
+5. 发送失败的提示两种模式一致：渲染端去掉 Electron 的 IPC 前缀和 `AgentRuntimeError:` 类名，只显示原因本身（进程内原先显示的是带前缀的原始文本）。

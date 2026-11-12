@@ -1,5 +1,5 @@
 import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
-import { rm } from 'node:fs/promises'
+import { access, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BackgroundServiceActionResult, BackgroundServiceConnection } from '../../shared/background-service'
 import { daemonClientPaths } from '../daemon-client'
@@ -71,6 +71,7 @@ export function registerBackgroundServiceHandlers(input: {
     // The credential the daemon refused; its 0600 file is the App's own (daemon-client.ts).
     discardLocalCredential: () => rm(daemonClientPaths(stopDeps.paths.stateDirectory, userDataDir).statePath, { force: true }),
     requestLocalEnrollment: () => requestLocalEnrollment(stopDeps.paths.stateDirectory),
+    hasLocalCredential: () => access(daemonClientPaths(stopDeps.paths.stateDirectory, userDataDir).statePath).then(() => true, () => false),
     reportLeftovers: async (leftovers) => { await show(leftoverNotice(leftovers)) },
     // After the IPC reply is sent; before-quit runs the usual bounded cleanup.
     quitApp: () => { setImmediate(() => app.quit()) }

@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { rm } from 'node:fs/promises'
+import { access, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { startTestDaemon, type TestDaemon } from './host-process.harness'
@@ -8,7 +8,7 @@ import { requestLocalEnrollment } from './local-enrollment-request'
 import { createLazyDaemonRunSurface } from '../main/bootstrap/daemon-run-lazy'
 import type { DaemonRunModeDeps } from '../main/bootstrap/daemon-run-mode'
 import { connectionFromMode } from '../main/background-service-status'
-import { reconnectBackgroundService, type BackgroundServiceActionDeps } from '../main/background-service-actions'
+import { reconnectBackgroundService, restartBackgroundService, type BackgroundServiceActionDeps } from '../main/background-service-actions'
 import { DaemonClient, daemonClientPaths } from '../main/daemon-client'
 
 // A6 against a real daemon: the App was connected, quit (the daemon stayed), and its
@@ -105,6 +105,7 @@ describe('an App that lost its stored grant, facing a live daemon (A6)', () => {
       reconnect: async () => connectionFromMode(await app.restart(), 'test'),
       discardLocalCredential: () => rm(paths.statePath, { force: true }),
       requestLocalEnrollment: () => requestLocalEnrollment(stateDirectory),
+      hasLocalCredential: () => access(paths.statePath).then(() => true, () => false),
       reportLeftovers: async () => undefined,
       quitApp: () => undefined
     }
@@ -117,6 +118,48 @@ describe('an App that lost its stored grant, facing a live daemon (A6)', () => {
       await expect(app.activeRuns()).resolves.toEqual([])
       // One local grant stays active: the new enrollment revoked the one the lost
       // credential held (and the fixture's own).
+      const local = second!.host.service.controller.authority.inspectLocal().grants.filter((grant) => grant.scope === 'local' && grant.revokedAt === null)
+      expect(local).toHaveLength(1)
+    } finally { app.dispose() }
+  }, 60_000)
+
+  it('recovers with 「重启后台服务」 alone when the App holds no credential (maintainer 2026-11-12)', async () => {
+    const first = await startTestDaemon()
+    daemons.push(first)
+    process.env.SCRY_HOST_DAEMON = '1'
+    const { stateDirectory, paths } = await connectedThenQuit(first)
+    await rm(paths.statePath)
+    let second: TestDaemon | undefined
+    const launch = vi.fn(async () => {
+      second = await startTestDaemon({ root: first.root })
+      daemons.push(second)
+      return { status: 'started' as const }
+    })
+    const app = lazyApp(first, launch)
+    const holder = { pid: 4242, startedAt: 's', identityKey: '4242:s', startedBy: 'test' }
+    const confirmations: string[] = []
+    const deps: BackgroundServiceActionDeps = {
+      daemonMode: true,
+      connection: async () => connectionFromMode(await app.ready(), 'test'),
+      activeRuns: async () => undefined,
+      prepareStop: async () => ({ status: 'running', holder }),
+      stop: async () => { await first.dispose(); return { status: 'stopped', holder, leftovers: [] } },
+      confirm: async (action) => { confirmations.push(action); return true },
+      holdLaunches: () => app.holdLaunches(),
+      reconnect: async () => connectionFromMode(await app.restart(), 'test'),
+      discardLocalCredential: () => rm(paths.statePath, { force: true }),
+      requestLocalEnrollment: () => requestLocalEnrollment(stateDirectory),
+      hasLocalCredential: () => access(paths.statePath).then(() => true, () => false),
+      reportLeftovers: async () => undefined,
+      quitApp: () => undefined
+    }
+    try {
+      await expect(app.ready()).resolves.toMatchObject({ status: 'device-not-authorized' })
+      // Runs unknown without a grant: the restart is confirmed, then one step recovers.
+      await expect(restartBackgroundService(deps)).resolves.toEqual({ status: 'done' })
+      expect(confirmations).toEqual(['restart'])
+      expect(launch).toHaveBeenCalledTimes(1)
+      await expect(app.activeRuns()).resolves.toEqual([])
       const local = second!.host.service.controller.authority.inspectLocal().grants.filter((grant) => grant.scope === 'local' && grant.revokedAt === null)
       expect(local).toHaveLength(1)
     } finally { app.dispose() }

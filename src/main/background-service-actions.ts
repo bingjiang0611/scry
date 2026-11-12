@@ -32,6 +32,8 @@ export interface BackgroundServiceActionDeps {
    * (daemon/local-enrollment-request.ts). Written only here: confirmed, daemon stopped.
    */
   requestLocalEnrollment(): Promise<void>
+  /** Whether the App still has its stored local credential (the file, not its validity). */
+  hasLocalCredential(): Promise<boolean>
   /** What the stopped daemon left behind, before the App quits. */
   reportLeftovers(leftovers: string[]): Promise<void>
   quitApp(): void
@@ -61,10 +63,25 @@ export async function restartBackgroundService(deps: BackgroundServiceActionDeps
     if (runs !== 0 && !await deps.confirm('restart', runs)) return cancelled
     const release = deps.holdLaunches()
     let stopped: StopOutcome
-    try { stopped = await deps.stop(prepared.holder) } finally { release() }
+    try {
+      stopped = await deps.stop(prepared.holder)
+      if (stopped.status === 'stopped') await requestIfNoCredential(deps)
+    } finally { release() }
     if (stopped.status === 'refused') return failed(stopped.reason)
+  } else if (!await deps.hasLocalCredential()) {
+    const release = deps.holdLaunches()
+    try { await deps.requestLocalEnrollment() } finally { release() }
   }
   return connectionResult(await deps.reconnect())
+}
+
+// An App with no stored credential cannot enroll with a daemon that holds a live local
+// grant (an enrollment-time mismatch spent the secret, or the credential was lost), and
+// the restarted daemon would write no secret. The user asked for this restart, and the
+// daemon was stopped after its identity was verified: ask the next start for one, as the
+// reconnect action does (maintainer 2026-11-12).
+async function requestIfNoCredential(deps: BackgroundServiceActionDeps): Promise<void> {
+  if (!await deps.hasLocalCredential()) await deps.requestLocalEnrollment()
 }
 
 export async function quitWithBackgroundService(deps: BackgroundServiceActionDeps): Promise<BackgroundServiceActionResult> {
