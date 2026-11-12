@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { locatePiNativeSession, nativeLines } from './pi-native-history'
+import { hashNativeFile, locatePiNativeSession, nativeLines, PiNativeHistoryStaleError } from './pi-native-history'
 import { piCreditEntries, type PiCreditEntry } from './pi-credit-usage'
 
 function compactEntry(entry: PiCreditEntry): PiCreditEntry {
@@ -41,7 +42,8 @@ export async function readPiCreditRequests(args: {
     const budget = args.budget ?? { remainingEntries: 1_000_000 }
     const entries: PiCreditEntry[] = []
     let incomplete = false
-    for await (const { line } of nativeLines(file, info.size)) {
+    const scannedHash = createHash('sha256')
+    for await (const { line } of nativeLines(file, info.size, undefined, 0, scannedHash)) {
       const text = line.toString('utf8').trim()
       if (!text) continue
       if (entries.length >= 1_000_000 || budget.remainingEntries <= 0) throw new Error('Pi credit entry budget reached')
@@ -57,6 +59,9 @@ export async function readPiCreditRequests(args: {
       }
       entries.push(compactEntry(entry))
     }
+    // A growing live tail is allowed, but a rewrite must not combine revisions.
+    const verified = await hashNativeFile(file, info.size, 0)
+    if (verified.contentHash !== scannedHash.digest('hex')) throw new PiNativeHistoryStaleError()
     return piCreditEntries(entries, args, args.turns, incomplete)
   } finally { await file.close() }
 }

@@ -180,7 +180,7 @@ async function assertNativeSourceStable(file: FileHandle, canonical: string, exp
   return actual
 }
 
-async function hashNativeFile(file: FileHandle, size: number, prefixSize: number, signal?: AbortSignal): Promise<{ contentHash: string; prefixHash: string }> {
+export async function hashNativeFile(file: FileHandle, size: number, prefixSize: number, signal?: AbortSignal): Promise<{ contentHash: string; prefixHash: string }> {
   const content = createHash('sha256')
   const prefix = createHash('sha256')
   let position = 0

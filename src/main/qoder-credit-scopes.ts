@@ -22,7 +22,7 @@ export function qoderCreditScope(row: QoderCreditScope & { creditMetadata: strin
     credits: creditUsage.value!.amount ?? null,
     knownRequests: creditUsage.value!.knownRequests,
     missingRequests: creditUsage.value!.missingRequests,
-    matchedTurns: 1, totalTurns: 1,
+    matchedTurns: creditUsage.value!.knownRequests + creditUsage.value!.missingRequests > 0 ? 1 : 0, totalTurns: 1,
     source: scope.providerId === 'pi' ? 'pi_qoder_credit_observation' : 'qoder_recorded_usage',
     completeness: 'partial', omissionReason: creditUsage.omissionReason
   } }

@@ -51,6 +51,15 @@ describe('persisted Qoder credit scopes', () => {
     expect(reconcileQoderCreditRows([changed], [recovered])[0].evidence).toMatchObject({ credits: null, missingRequests: 2 })
   })
 
+  it('does not mark persisted evidence with no observed requests as matched', async () => {
+    const missing = creditUsageEvidence([], 'pi_qoder_credit_observation')
+    const scope = qoderCreditScope({ runId: 'run', sessionId: 'session', cwd: '/repo', tsStart: 1, providerId: 'pi',
+      creditMetadata: JSON.stringify({ creditUsage: missing }) })
+    const [row] = await readQoderCreditRows({ scopes: [scope], userDataDir: '/absent', projectsDir: '/absent' })
+    expect(row.evidence).toMatchObject({ credits: null, knownRequests: 0, missingRequests: 0,
+      matchedTurns: 0, totalTurns: 1, omissionReason: missing.omissionReason })
+  })
+
   it('new persisted evidence wins over an in-flight native snapshot; transport-mismatched evidence is rejected', () => {
     const raw = { runId: 'run', sessionId: 'session', cwd: '/repo', tsStart: 1, providerId: 'pi' as const,
       creditMetadata: JSON.stringify({ creditUsage: evidence(3) }) }

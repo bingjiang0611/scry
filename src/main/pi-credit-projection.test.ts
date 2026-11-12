@@ -1,18 +1,22 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { open, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { creditUsageEvidence, isCreditUsageEvidence } from '../shared/credit-usage'
 import type { LoadedSessionTurn } from '../shared/session-history'
 import { enrichPiHistoryCredits, readPiCreditUsage } from './pi-credit-projection'
 import { readPiCreditRequests } from './pi-credit-reader'
+import * as nativeHistory from './pi-native-history'
 import { piCreditRequests } from './pi-credit-usage'
 import { readQoderCreditRows } from './qoder-credits'
 import { upsertTraceArchiveTurn } from './transcript-archive'
 
 const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+afterEach(() => {
+  vi.restoreAllMocks()
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'scry-pi-credit-projection-'))
   roots.push(root)
@@ -130,6 +134,32 @@ describe('Pi Credit delivery and historical projection', () => {
     await expect(readPiCreditRequests({ ...f, turns, budget: { remainingEntries: 2 } })).rejects.toThrow('entry budget')
     writeFileSync(f.sessionFile, source + '\n{broken}\n{"type":')
     expect((await readPiCreditUsage({ ...f, turns })).get('run-1')!.status).toBe('unavailable')
+  })
+
+  it('rejects a same-size rewrite before releasing streamed credit evidence', async () => {
+    const f = fixture()
+    const lines = nativeHistory.nativeLines
+    vi.spyOn(nativeHistory, 'nativeLines').mockImplementationOnce(async function* (...args) {
+      yield* lines(...args)
+      writeFileSync(f.sessionFile, f.entries.map(entry => JSON.stringify(entry)).join('\n').replace('"credits":2.5', '"credits":7.5') + '\n')
+    })
+    const evidence = (await readPiCreditUsage({ ...f, turns: [{ runId: 'run-1', providerTurnId: 'u1' }] })).get('run-1')!
+    expect(evidence.status).toBe('unavailable')
+    expect(evidence.value!.amount).toBeUndefined()
+    expect(evidence.omissionReason).toContain(new nativeHistory.PiNativeHistoryStaleError().message)
+  })
+
+  it('allows tail growth while verifying only the original credit snapshot', async () => {
+    const f = fixture()
+    const lines = nativeHistory.nativeLines
+    vi.spyOn(nativeHistory, 'nativeLines').mockImplementationOnce(async function* (...args) {
+      yield* lines(...args)
+      appendFileSync(f.sessionFile, JSON.stringify({ ...f.entries[2], id: 'c2', parentId: 'a1',
+        data: { ...f.entries[2].data, requestId: 'request-2', credits: 5 } }) + '\n')
+    })
+    const args = { ...f, turns: [{ runId: 'run-1', providerTurnId: 'u1' }] }
+    expect((await readPiCreditUsage(args)).get('run-1')!.value!.amount).toBe(2.5)
+    expect((await readPiCreditUsage(args)).get('run-1')!.value!.amount).toBe(7.5)
   })
 
   it('preserves a complete prefix with an explicitly incomplete tail', async () => {
