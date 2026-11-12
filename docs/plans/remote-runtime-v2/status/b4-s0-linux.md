@@ -6,8 +6,8 @@
 
 - **Ubuntu 容器 + Xvfb 下，daemon 模式在真实 Electron 中跑通**：开发布局完整 smoke 连续 3 次通过；打包布局（`dist/linux-unpacked`）用探针跑通 daemon 启动、终端、录制和一次 run。全程没有 `--no-sandbox`，renderer 在 Chromium sandbox 内。
 - **目标桌面有阻断项（F1，2026-11-12 已按方案 A 修复，目标机未验证）**：Electron 42 在 `XDG_CURRENT_DESKTOP=Hyprland` 时把 `safeStorage` 选成 `basic_text`，**即使 gnome-keyring 已解锁也是如此**。daemon 模式会因此 fail closed（`daemon_credential_unavailable:unsafe_credential_storage`），所有 run、终端调用都失败。Omarchy 用的就是 Hyprland。在 S1 + S3 之后，daemon 是唯一路径、没有逃生开关，这一项不解决，Linux 目标机就无法运行任何 Agent。维护者 2026-11-12 批准方案 A（Linux 上按桌面追加 `--password-store=gnome-libsecret`），**没有批准方案 B（明文/放宽凭据）**。改动与本容器结果见 F1。
-- **建议**：按维护者决定第 5 条，**Linux 先不随 macOS 切换**，在状态里写明 F1/F2。另外需要维护者决定：S3 删除进程内管线后，"Linux 保持关闭"靠什么实现。F1 的代码修复只在 Xvfb 容器内验证过，Omarchy 默认是否运行并解锁 Secret Service 密钥环仍未确认（第 16 项）。
-- GitHub Actions 的 `packaged-linux` job 已加入 daemon 模式 smoke（见“CI 改动”）。真实 runner 的结果要等第一次 CI 运行，目前记为 **pending**，不当作通过。
+- **建议（已过时，保留记录）**：这一条写于 F1 修复与 Ubuntu runner 验收之前，当时建议 Linux 先不随 macOS 切换。F1 的代码修复只在 Xvfb 容器内验证过，Omarchy 默认是否运行并解锁 Secret Service 密钥环仍未确认（第 16 项）。
+- **Ubuntu runner 验收通过（2026-11-12）**：draft PR bingjiang0611/scry#73（只为跑 CI），CI run 43257105084，提交 `55edec9`，`packaged-linux`（ubuntu-latest）全部步骤成功：正式打包（`SCRY_RELEASE_BUILD=1`，含 pacman）、`check:packaged-app`、`check:pacman-package`、setuid sandbox、`daemon-config-smoke`、开发布局 daemon smoke、**打包产物（`dist/linux-unpacked/scry`）daemon smoke**。这满足维护者决定第 5 条「Ubuntu runner 验收通过」的前提；Arch/Omarchy 目标机仍未验证（F1/F2、第 16 项）。
 
 ## 环境
 
