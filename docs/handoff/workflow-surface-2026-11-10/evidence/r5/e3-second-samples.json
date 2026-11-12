@@ -1,0 +1,774 @@
+{
+  "psTimeline": [
+    {
+      "seconds": 0,
+      "pids": []
+    },
+    {
+      "seconds": 1,
+      "pids": [
+        95263
+      ]
+    },
+    {
+      "seconds": 2,
+      "pids": [
+        95263
+      ]
+    },
+    {
+      "seconds": 4,
+      "pids": [
+        95263
+      ]
+    },
+    {
+      "seconds": 5,
+      "pids": [
+        95263
+      ]
+    },
+    {
+      "seconds": 6,
+      "pids": [
+        95263
+      ]
+    },
+    {
+      "seconds": 7,
+      "pids": [
+        95263,
+        96285
+      ]
+    },
+    {
+      "seconds": 8,
+      "pids": [
+        95263,
+        96285
+      ]
+    },
+    {
+      "seconds": 10,
+      "pids": [
+        95263,
+        96285
+      ]
+    },
+    {
+      "seconds": 11,
+      "pids": [
+        95263,
+        96285,
+        97970
+      ]
+    },
+    {
+      "seconds": 12,
+      "pids": [
+        95263,
+        96285,
+        97970
+      ]
+    },
+    {
+      "seconds": 13,
+      "pids": [
+        95263,
+        96285,
+        97970
+      ]
+    },
+    {
+      "seconds": 15,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 16,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 17,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 19,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 20,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 21,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 22,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 23,
+      "pids": [
+        95263,
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 24,
+      "pids": [
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 25,
+      "pids": [
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 27,
+      "pids": [
+        96285,
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 28,
+      "pids": [
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 29,
+      "pids": [
+        97970,
+        99330
+      ]
+    },
+    {
+      "seconds": 30,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 31,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 32,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 33,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 34,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 35,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 36,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 37,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 38,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 39,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 40,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 42,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 43,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 44,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 45,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 46,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 47,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 48,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 49,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 50,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 51,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 53,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 54,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 55,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 56,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 57,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 58,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 59,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 60,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 61,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 62,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 63,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 64,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 65,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 66,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 67,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 68,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 70,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 71,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 72,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 73,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 74,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 75,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 76,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 77,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 78,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 79,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 80,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 81,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 82,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 84,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 85,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 86,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 87,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 88,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 89,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 90,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 91,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 92,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 93,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 94,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 95,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 97,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 98,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 99,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 100,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 101,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 102,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 103,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 104,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 105,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 106,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 108,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 109,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 110,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 111,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 112,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 113,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 114,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 115,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 116,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 117,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 118,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 119,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 120,
+      "pids": [
+        99330
+      ]
+    },
+    {
+      "seconds": 122,
+      "pids": [
+        99330
+      ]
+    }
+  ],
+  "psIdentity": {
+    "95263": {
+      "pid": 95263,
+      "ppid": 93754,
+      "started": "Thu Nov 12 03:55:36 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    "96285": {
+      "pid": 96285,
+      "ppid": 93754,
+      "started": "Thu Nov 12 03:55:41 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    "97970": {
+      "pid": 97970,
+      "ppid": 93754,
+      "started": "Thu Nov 12 03:55:44 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    },
+    "99330": {
+      "pid": 99330,
+      "ppid": 93754,
+      "started": "Thu Nov 12 03:55:48 2026",
+      "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+      "sdk": true
+    }
+  },
+  "checkpoints": {
+    "boundA": true,
+    "beforeA": [
+      {
+        "pid": 95263,
+        "ppid": 93754,
+        "started": "Thu Nov 12 03:55:36 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "aOutput": null,
+    "aPane": "本机 | workspace | 请连续写 9000 字分析城市排水管网维护，分 90 段，每段至少 100 字。不要用工具。 | Q | Qoder | run · run-mwdhrkd9-0 | 运行中 | 本轮 Hook | 1 个周期 · 4 个处理器实例 | 运行中 | 可继续输入，新消息将加入队列 | 01:52 | 停止本轮 | 版本探测超时（5s） | 重新检测 | 默认审批 | Qoder | 自动模型 | 默认 | 当前工作区 | main",
+    "aPids": [
+      {
+        "pid": 99330,
+        "ppid": 93754,
+        "started": "Thu Nov 12 03:55:48 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "atClose": [
+      {
+        "pid": 99330,
+        "ppid": 93754,
+        "started": "Thu Nov 12 03:55:48 2026",
+        "command": "/private/tmp/scry-b2/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ~/.nvm/versions/node/v24.18.0/lib/node_modules/@qoder-ai/qodercli/bundle/qodercli.js --sdk",
+        "sdk": true
+      }
+    ],
+    "afterClose": []
+  },
+  "error": "Error: A never streamed before switch",
+  "appStopLog": []
+}
