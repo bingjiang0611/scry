@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.248",
+  "version": "0.2.249",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "desktopName": "scry.desktop",
   "private": true,
@@ -73,7 +73,7 @@
     "check:packaged-app": "node scripts/check-packaged-app.mjs",
     "check:pacman-package": "node scripts/check-pacman-package.mjs",
     "smoke:session-restore": "node scripts/session-restore-provider-smoke.mjs",
-    "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/renderer-crash-recovery-smoke.mjs && node scripts/electron-security-smoke.mjs && node scripts/electron-security-smoke.mjs --files-only && node scripts/desktop-remote-host-smoke.mjs",
+    "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/renderer-crash-recovery-smoke.mjs && node scripts/electron-security-smoke.mjs && node scripts/electron-security-smoke.mjs --files-only && node scripts/electron-security-smoke.mjs --steer-only && node scripts/desktop-remote-host-smoke.mjs",
     "install:mac": "npm run pack:release && node scripts/install-macos.mjs --require-release",
     "install:mac:dev": "npm run pack && node scripts/install-macos.mjs",
     "test:history-autoload:ui": "node scripts/history-autoload-ui-smoke.mjs",

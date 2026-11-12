@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { exerciseUnified } from './electron-security-unified.mjs'
+import { exerciseTerminalSteer } from './terminal-steer-queue-smoke.mjs'
 import { exerciseOwnership } from './electron-security-ownership.mjs'
 import { exerciseMeta } from './electron-security-meta.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
@@ -31,6 +32,7 @@ import { lostReplyPath, writeConversationFaultEntry, writeFileOpenEntry, writeIp
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 
+const steerOnly = ['--dev-steer-only', '--steer-only'].includes(process.argv[2])
 const structureOnly = process.argv[2] === '--dev-structure-only'
 const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
 const largeHistoryOnly = process.argv[2] === '--dev-side-chat-large-history-only'
@@ -53,8 +55,8 @@ if (devQuestionOnly && !foreground) {
 }
 const devFilesOnly = process.argv[2] === '--dev-files-only'
 const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || process.argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
-const packagedAppArgument = ['--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(process.argv[2]) ? undefined : process.argv[2]
+const devApp = process.argv[2] === '--dev-steer-only' || sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || process.argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
+const packagedAppArgument = ['--steer-only', '--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(process.argv[2]) ? undefined : process.argv[2]
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
@@ -192,6 +194,7 @@ async function main() {
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
         SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
+        ...(steerOnly ? { SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs } : {}),
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
         ...(sideChatMode ? sideChatMode.env : {}),
@@ -247,6 +250,7 @@ async function main() {
   if (fileHistoryOnly) return exerciseFileHistory(context())
   if (nativeHistoryOnly) return exerciseNativeHistory(context())
   if (performanceOnly) return exerciseProductionPerformance(context())
+  if (steerOnly) return exerciseTerminalSteer(context())
   const discovered = await evaluate(`Promise.all([window.scry.detectFast(), window.scry.detect(), window.scry.providerDescriptors()]).then((groups) => groups.map((group) => group.map((item) => item.id)))`)
   assert.deepEqual(discovered, [['codex'], ['codex'], ['codex']], 'smoke discovery must use only the fixture adapter')
   const disabledCapabilities = await evaluate(`Promise.all(['claude', 'qoder', 'opencode', 'pi'].map(async (providerId) => {

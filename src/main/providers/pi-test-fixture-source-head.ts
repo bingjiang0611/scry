@@ -209,13 +209,14 @@ process.stdin.on('data', (chunk) => {
         continue
       }
       response()
-      if (command.message === 'provider-fetch-failed' || command.message === 'provider-http-413') {
+      if (['provider-fetch-failed', 'provider-http-413', 'provider-account-changed'].includes(command.message)) {
         const payloadTooLarge = command.message === 'provider-http-413'
+        const accountChanged = command.message === 'provider-account-changed'
         send({ type: 'message_start', message: { role: 'assistant' } })
         send({ type: 'message_end', message: {
           role: 'assistant', provider: 'openai-codex', model: 'test-model', stopReason: 'error',
-          errorMessage: payloadTooLarge ? 'Qoder: http_413' : 'fetch failed', content: [],
-          ...(payloadTooLarge ? {} : { diagnostics: [{ type: 'provider_transport_failure', error: { message: 'WebSocket error' } }] }),
+          errorMessage: accountChanged ? 'Qoder: account_changed_start_new_session' : payloadTooLarge ? 'Qoder: http_413' : 'fetch failed', content: [],
+          ...(payloadTooLarge || accountChanged ? {} : { diagnostics: [{ type: 'provider_transport_failure', error: { message: 'WebSocket error' } }] }),
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }
         } })
         send({ type: 'agent_end', willRetry: false })

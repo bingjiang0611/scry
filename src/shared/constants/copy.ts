@@ -34,6 +34,10 @@ function detail(result: WorkspaceDiffState): string {
 
 const count = (value: number): string => `${value} 个工作区文件的 Git 净改动`
 
+export const piRuntimeCopy = {
+  qoderAccountChanged: 'Qoder 登录身份与会话绑定不一致。请新建会话后发送；在当前会话重试不会解除绑定。'
+}
+
 export const historyCopy = {
   nativeArchiveFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生历史未能核对：${detail}`,
   nativeBodyFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生正文未能核对：${detail}`,

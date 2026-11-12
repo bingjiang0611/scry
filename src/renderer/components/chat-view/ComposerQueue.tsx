@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import type { ChatViewProps } from './types'
 import { useFlipList } from '../../hooks/useFlipList'
 import { Icon } from '../primitives/Icon'
-import { steerStateForMessage } from '../../steer'
+import { canDismissUnknownSteer, isSteerRemovalBlocked, steerStateForMessage } from '../../steer'
 import { QUEUE_COPY } from '../../constants/copy'
 
 type ComposerQueueProps = Pick<ChatViewProps,
@@ -58,6 +58,7 @@ export function ComposerQueue({
                 const steerState = steerStateForMessage(prompt.steer, evidence)
                 const pending = steerState?.status === 'pending'
                 const unknown = steerState?.status === 'unknown'
+                const dismissible = canDismissUnknownSteer(steerState, evidence)
                 const rejected = steerState?.status === 'rejected'
                 const editing = editingQueuedId === prompt.messageId
                 const hasConcurrentSteer = steerInFlightMessageIds.size > 0
@@ -150,9 +151,9 @@ export function ComposerQueue({
                           type="button"
                           className="queue-remove"
                           onClick={() => onRemoveQueuedPrompt(prompt.messageId)}
-                          disabled={pending || unknown}
-                          title={pending ? QUEUE_COPY.removeTitlePending : unknown ? QUEUE_COPY.removeTitleUnknown : QUEUE_COPY.remove}
-                          aria-label={QUEUE_COPY.removeLabel(index + 1)}
+                          disabled={steerInFlightMessageIds.has(prompt.messageId) || isSteerRemovalBlocked(steerState, evidence)}
+                          title={dismissible ? QUEUE_COPY.dismissUnknown : pending ? QUEUE_COPY.removeTitlePending : unknown ? QUEUE_COPY.removeTitleUnknown : QUEUE_COPY.remove}
+                          aria-label={dismissible ? QUEUE_COPY.dismissUnknownLabel(index + 1) : QUEUE_COPY.removeLabel(index + 1)}
                         >
                           <Icon name="x" />
                         </button>
