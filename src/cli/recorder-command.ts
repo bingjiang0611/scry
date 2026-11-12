@@ -1,4 +1,6 @@
-import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print } from './command-args.js'
+import { join, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print, listFlags } from './command-args.js'
 import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon, RecorderHookRejected } from '../core/turn-recorder/daemon.js'
 import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth, type RecorderRecoveryScope } from '../core/turn-recorder/recorder.js'
 import { recordError, drainCommitNotifications, retryCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
@@ -6,6 +8,8 @@ import { resolveCommitHookActivation, commitHookEnv, revokeCommitHookGrant, insp
 import { runIdleAutoUpdate } from './update.js'
 import { readHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
 import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
+import { repairRecordContent } from '../core/turn-recorder/content-repair.js'
+import { appTraceContentRoots } from '../core/turn-recorder/app-trace-content.js'
 
 
 export async function hookCommand(args: ParsedArgs): Promise<number> {
@@ -90,6 +94,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
 export async function recorderCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1]
   if (action === 'hook') return hookCommand(args)
+  if (action === 'content') return contentCommand(args)
   if (action === 'recover') {
     const providerFlag = flag(args, 'provider')
     const sessionId = flag(args, 'session-id')
@@ -256,3 +261,41 @@ export async function commitHookCommand(args: ParsedArgs): Promise<number> {
   return activation.status === 'bundle-invalid' ? 5 : 0
 }
 
+/** App 的 userData 默认目录，与 Electron `app.getPath('userData')` 的平台规则一致。 */
+export function defaultAppDataDir(platform: NodeJS.Platform = process.platform): string {
+  const home = homedir()
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'scry')
+  if (platform === 'win32') return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'scry')
+  return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'scry')
+}
+
+/**
+ * 修复记录引用、但本库缺失的正文。默认只读演练：报告汇总与未命中清单，`--apply` 才按 sha256 从
+ * App trace 库复制（读时校验长度与摘要）。它不重写记录：记录语义仍由提交边界决定。
+ */
+async function contentCommand(args: ParsedArgs): Promise<number> {
+  if (args.positionals[2] !== 'repair') {
+    throw new Error('usage: scry recorder content repair [--apply] [--record-id <id>]... [--app-data <dir>] [--workspace <root>]')
+  }
+  const workspace = workspaceOf(args)
+  const enablement = await recorderEnablement(workspace)
+  if (!enablement.enabled) {
+    print({ action: 'content-repair', workspace, status: 'unavailable', reason: enablement.reason })
+    return 2
+  }
+  const appData = resolve(flag(args, 'app-data') ?? defaultAppDataDir())
+  const report = await repairRecordContent({
+    dataRoot: enablement.dataRoot,
+    sourceRoots: await appTraceContentRoots(appData),
+    recordIds: listFlags(args, 'record-id'),
+    apply: args.flags.has('apply')
+  })
+  print({
+    action: 'content-repair',
+    workspace,
+    appData,
+    status: report.missing > 0 ? (report.applied ? 'applied-with-missing' : 'missing') : report.applied ? 'applied' : 'planned',
+    ...report
+  })
+  return report.missing > 0 ? 3 : 0
+}

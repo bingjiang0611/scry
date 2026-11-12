@@ -1,0 +1,123 @@
+import { readRecorderContent, writeRecorderContent } from './content-store.js'
+import { findRecordById, listRecords, recordContentItems } from './store.js'
+import type { ToolContentRef } from '../../shared/tool-content.js'
+import type { AgentTurnRecord } from '../../shared/turn-record.js'
+
+const MISSING_ITEM_LIMIT = 200
+
+export interface ContentRepairMissingItem {
+  recordId: string
+  path: string
+  sha256: string
+  bytes: number
+}
+
+export interface ContentRepairReport {
+  /** 真正复制了字节；dry run 时 false，报告的是“会复制什么”。 */
+  applied: boolean
+  records: number
+  refs: number
+  present: number
+  repairable: number
+  missing: number
+  repaired: number
+  /** 可修复正文的总字节数：dry run 为将要复制，`--apply` 为已复制。 */
+  bytes: number
+  /** 被查询过的来源内容根；未命中清单与它对读。 */
+  sources: string[]
+  missingItems: ContentRepairMissingItem[]
+  missingItemsTruncated: boolean
+}
+
+export interface ContentRepairOptions {
+  dataRoot: string
+  /** 其他内容根（App trace 库）；只按 sha256 与长度取字节，不信任路径之外的任何信息。 */
+  sourceRoots: string[]
+  /** 只修复指定记录；未找到的记录直接报错，不静默跳过。 */
+  recordIds?: string[]
+  apply?: boolean
+}
+
+async function selectedRecords(dataRoot: string, recordIds: string[] | undefined): Promise<AgentTurnRecord[]> {
+  if (!recordIds?.length) return listRecords(dataRoot)
+  const records: AgentTurnRecord[] = []
+  for (const recordId of new Set(recordIds)) {
+    const record = await findRecordById(dataRoot, recordId)
+    if (!record) throw new Error(`record not found: ${recordId}`)
+    records.push(record)
+  }
+  return records
+}
+
+/**
+ * 修复正式记录引用但本库缺失的正文：先按 sha256 在给定来源库中找同一份字节（读时已校验长度与摘要），
+ * 命中才复制进本库；未命中的只列清单。默认只读演练，`--apply` 才写盘。
+ *
+ * 这里不改写任何记录：要么把正文补回本库使既有引用重新可解析，要么报告它仍然缺。
+ * 记录是否需要降级由提交边界（`resolveRecordContentRefs`）决定，不在修复工具里替用户决定证据语义。
+ */
+export async function repairRecordContent(options: ContentRepairOptions): Promise<ContentRepairReport> {
+  const apply = options.apply === true
+  const records = await selectedRecords(options.dataRoot, options.recordIds)
+  const report: ContentRepairReport = {
+    applied: false,
+    records: records.length,
+    refs: 0,
+    present: 0,
+    repairable: 0,
+    missing: 0,
+    repaired: 0,
+    bytes: 0,
+    sources: options.sourceRoots,
+    missingItems: [],
+    missingItemsTruncated: false
+  }
+  // 同一份正文可能被多字段引用：按引用只处理一次，但未命中清单保留字段位置，便于定位记录。
+  const seen = new Map<string, ToolContentRef>()
+  for (const record of records) {
+    for (const item of recordContentItems(record)) {
+      if (seen.has(item.ref.sha256)) continue
+      seen.set(item.ref.sha256, item.ref)
+      report.refs++
+      try {
+        await readRecorderContent(options.dataRoot, item.ref)
+        report.present++
+        continue
+      } catch {
+        // 缺失或校验失败都表示本库无法兑现这条引用：按缺失处理，继续找来源库。
+      }
+      const content = await readFromSources(options.sourceRoots, item.ref)
+      if (content === undefined) {
+        report.missing++
+        if (report.missingItems.length < MISSING_ITEM_LIMIT) {
+          report.missingItems.push({ recordId: record.recordId, path: item.path, sha256: item.ref.sha256, bytes: item.ref.bytes })
+        } else {
+          report.missingItemsTruncated = true
+        }
+        continue
+      }
+      report.repairable++
+      report.bytes += item.ref.bytes
+      if (!apply) continue
+      const written = await writeRecorderContent(options.dataRoot, content, item.ref.encoding)
+      if (written.sha256 !== item.ref.sha256 || written.bytes !== item.ref.bytes) {
+        throw new Error(`recorder content repair mismatch: ${item.ref.sha256}`)
+      }
+      report.repaired++
+    }
+  }
+  report.applied = apply
+  return report
+}
+
+/** 返回第一个能兑现这条引用的来源字节；读时已由内容库校验长度与摘要。 */
+async function readFromSources(sourceRoots: string[], ref: ToolContentRef): Promise<string | undefined> {
+  for (const root of sourceRoots) {
+    try {
+      return await readRecorderContent(root, ref)
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}

@@ -86,6 +86,44 @@ CLI / daemon 自行采集 Git diff 后，新生成的记录把完整 patch 保�
 不能把空预览当成完整正文。方案 C 只删除记录内的重复副本，内容库仍保存正文，读取大记录时仍需
 加载内联正文。
 
+### 单条记录的传输预算（提交边界）
+
+`commitRecord` 是 App managed 与独立 CLI 唯一的提交口。写入前它把一条记录收敛到接收方校验的
+传输封装内：超限时**优先省略外置引用**（字段已有的有界预览原样保留），只有在省略引用后仍超限时才
+把 diff 内联正文裁到 8 KiB 预览。三个上限定义在 `src/core/turn-recorder/record-content-budget.ts`
+并导出，uploader 直接引用，不再各自维护一份：
+
+| 常量 | 值 | 语义 |
+|---|---|---|
+| `RECORDER_CONTENT_MAX_BYTES` | 8 MiB | 单个正文 blob；更大的正文只能留预览 |
+| `RECORDER_CONTENT_MAX_REFS` | 512 | 一条记录最多引用多少个不同 SHA-256 |
+| `RECORDER_TRANSPORT_MAX_BYTES` | 16 MiB | 最终封装：record JSON + base64 正文 + JSON 开销 |
+
+被省略的字段按既有合同表达：`ToolContent.storage` 变 `truncated`/`omitted` 并追加 `turn_budget`
+；transcript 引用没有内联副本，省略后该证据变为 `unavailable`；所在分区标 `partial` 并写
+`omissionReason`。内容库里的 blob 不删，记录提交后也不回写旧记录。内联副本本来就是完整正文
+（diff patch）时，省略引用不损失任何字节，因此该字段不降级。
+
+### 引用必须在本库兑现
+
+同一条不变式在 `commitHandoff` 里、`commitRecord` 之前再守一次（`resolveRecordContentRefs`）：
+记录里的每个引用都要能在本工作区内容库解析。可解析 → 放行；引用缺失但字段内还带着完整正文 →
+先把字节写回本库；两者都不成立 → 走同一套降级语义（`unavailable` + 分区 `partial`）。准备、恢复与
+重复提交共用这一次遍历，所以旧版本准备的 handoff 或只在 App trace 库存有字节的证据，都不会变成
+悬空引用。
+
+修复既有 store 时用同一个 sha256 契约找回字节，默认只读演练：
+
+```bash
+scry recorder content repair --workspace "$PWD"                        # 只报告汇总与未命中清单，不写盘
+scry recorder content repair --apply --workspace "$PWD"                # 从 App trace 库复制命中项
+scry recorder content repair --record-id <recordId> --apply            # 只修指定记录（可重复给出）
+```
+
+它按 sha256 在 `--app-data`(默认是 App 的 userData 目录)下的 `trace-content-v1/*/content/sha256/`
+查找正文，读时校验长度与摘要，命中才复制进本库。未命中的只列清单（退出 3），**不改写任何记录**：
+记录是否降级仍由提交边界决定，修复工具不替用户改证据语义。`--record-id` 指向不存在的记录会直接报错。
+
 可选的 `storage` 配置提供软 quota、retention 候选和孤立文件宽限期：
 
 ```json

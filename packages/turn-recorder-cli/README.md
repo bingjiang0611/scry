@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.66
+npm install -g scry-turn-recorder@0.2.67
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
@@ -56,6 +56,7 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 记录文件不要手动删除或移走：序号是上传去重键，也是投递游标。删除后新轮次仍从已发号的下一号继续（`.scry/sequence-watermark.json`），`doctor` 的 `records.sequence` 会 warn 说明被删的记录永远不会再投递；移出旧记录只走 `scry records archive`。
 | `scry records maintain [--apply]` | 检查 quota/retention，安全回收孤立正文与压缩轮转日志 |
+| `scry recorder content repair [--apply] [--record-id <id>]...` | 演练/修复引用但本库缺失的正文（见[引用必须在本库兑现](docs/storage-and-performance.md#引用必须在本库兑现)） |
 | `scry support-bundle create` | 脱敏排障包 |
 | `scry recorder status\|stop\|restart\|recover\|notify-drain\|notify-retry` | daemon 与恢复 |
 | `scry integrations diff\|repair\|uninstall` | 托管 hook 的漂移检查与修复 |
