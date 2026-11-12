@@ -1,4 +1,6 @@
-# 第五轮进行中（E1 未通过，见 reports/E1.md）
+# 第五轮待核验（E1/E2 未通过，清单未放开）
+
+第五轮 E1–E5 已逐包提交并推送，等待审查方核验。E1 停止窗口触发 recorder open identity 错误；E2 `/plugins reload` 触发 recorder canonical 时点错误；E3 旧 A 守护进程退出原因仍无当时的 stop 日志；E4 仅部分通过。因此 E5 按前提**没有**把 Qoder 标成 `supported`。门禁 typecheck、renderer UI、pack 通过，unit 有 12 条 5 秒超时（退出码 1）。详见 [E1](reports/E1.md)、[E2](reports/E2.md)、[E3](reports/E3.md)、[E4](reports/E4.md)、[E5](reports/E5.md)。
 
 **第四轮四包都已执行完毕并 push，等审查方核验。D1 未通过、D3 据此不改、D2 的跨版本对照缺一半、D4 有一道门禁被本机负载拖成超时。**
 
@@ -38,7 +40,7 @@
 | E2 | `/plugins reload` 后能再发 | 未通过、按必须停下条件停止本包 | [reports/E2.md](reports/E2.md)：Provider 重载成功（6 插件、84 命令），recorder 报 `requires canonical Provider or observed interruption timing`；后续消息留在暂停队列。 |
 | E3 | 两个会话并发的采证 | 部分完成，旧 A 退出原因未知 | [reports/E3.md](reports/E3.md)：新样本 A 已输出后切 B，两个 PID 独立；B 停止后 12 秒 A PID 仍存活，但切回未读到新增正文。旧样本无 native 终态或 main stop 日志，不能归因。 |
 | E4 | 第四轮其余项与未验证项 | 部分通过 | [reports/E4.md](reports/E4.md)：审批拒绝及重启后续发通过；普通工具轮次成功写文件但 recorder 报 invalid canonical record；分支未证实新会话；两后台 Agent 完成但根轮次 aborted。 |
-| E5 | 全部通过才改清单；干净依赖门禁 | 未开始 | |
+| E5 | 全部通过才改清单；干净依赖门禁 | 清单未改，门禁三过一失败 | [reports/E5.md](reports/E5.md)：干净 worktree `npm ci`；typecheck/renderer UI/pack 退出 0，unit 12 条超时退出 1。 |
 
 ## 审查方对第四轮的核验（2026-11-12）
 
