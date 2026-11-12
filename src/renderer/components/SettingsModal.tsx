@@ -16,8 +16,9 @@ import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
 import type { AppTheme } from '../theme'
 import { ModalFrame, requestModalClose } from './ModalFrame'
 import { ArchivedChatsPanel } from './ArchivedChatsPanel'
+import { BackgroundServiceSettings } from './BackgroundServiceSettings'
 
-export type SettingsTab = 'appearance' | 'archived' | 'remote'
+export type SettingsTab = 'appearance' | 'archived' | 'remote' | 'service'
 
 export function SettingsModal({
   theme,
@@ -88,6 +89,15 @@ export function SettingsModal({
           >
             <Icon name="globe" /> {remoteCopy.settingsTab}
           </button>
+          <button
+            type="button"
+            ref={initialTab === 'service' ? initialTabRef : undefined}
+            className={`settings-tab ${tab === 'service' ? 'active' : ''}`}
+            aria-current={tab === 'service' ? 'page' : undefined}
+            onClick={() => setTab('service')}
+          >
+            <Icon name="server" /> 后台服务
+          </button>
         </nav>
         <div className="settings-pane">
           {tab === 'appearance' ? (
@@ -139,6 +149,8 @@ export function SettingsModal({
               />
               <ArchivedRemoteChatsPanel groups={remoteArchived} />
             </div>
+          ) : tab === 'service' ? (
+            <BackgroundServiceSettings />
           ) : (
             <RemotePairing onNewSession={onNewRemoteSession} />
           )}
