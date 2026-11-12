@@ -72,7 +72,9 @@ export async function observeInfrastructure({ github, context, core }) {
   for (const history of histories.values()) {
     history.sort((left, right) => right.run_attempt - left.run_attempt || right.id - left.id)
     const job = history[0]
-    if (job.conclusion !== 'failure' && job.conclusion !== 'startup_failure') continue
+    // Hosted allocation failures can be reported as cancelled without a runner.
+    const unassignedCancellation = job.conclusion === 'cancelled' && !job.runner_id
+    if (job.conclusion !== 'failure' && job.conclusion !== 'startup_failure' && !unassignedCancellation) continue
     let annotations = []
     if (job.check_run_url) {
       const checkRunId = Number(job.check_run_url.split('/').at(-1))

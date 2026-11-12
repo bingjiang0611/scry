@@ -23,13 +23,14 @@ describe('CI failure classification', () => {
   })
 })
 
-function fixture(attempt = 1) {
+function fixture(attempt = 1, annotations: Array<{ message: string }> = []) {
   const jobs = [
     { ...setup, id: 1, name: 'packaged-linux', run_attempt: 1, conclusion: 'failure' },
     { id: 2, name: 'unit', runner_id: 43, run_attempt: 1, conclusion: 'failure', steps: [{ ...failedStep, name: 'Unit tests' }] }
   ]
+  const listAnnotations = vi.fn()
   const github = {
-    paginate: vi.fn(async () => jobs),
+    paginate: vi.fn(async (method: unknown) => method === listAnnotations ? annotations : jobs),
     rest: {
       actions: {
         getWorkflowRun: vi.fn(async () => ({ data: { status: 'completed', run_attempt: attempt } })),
@@ -37,7 +38,7 @@ function fixture(attempt = 1) {
         downloadJobLogsForWorkflowRun: vi.fn(async ({ job_id }: { job_id: number }) => ({ data: `2026-01-01T00:01:05.1234567Z ${job_id === 2 ? 'AssertionError' : 'Temporary failure resolving archive.ubuntu.com'}` })),
         reRunJobForWorkflowRun: vi.fn(async () => ({}))
       },
-      checks: { listAnnotations: vi.fn() }
+      checks: { listAnnotations }
     }
   }
   const summary = { addHeading: vi.fn().mockReturnThis(), addLink: vi.fn().mockReturnThis(), addTable: vi.fn().mockReturnThis(), write: vi.fn() }
@@ -54,6 +55,30 @@ it('reruns only the infrastructure job once, never the failed test job', async (
   expect(options.core.summary.addTable).toHaveBeenCalledWith(expect.arrayContaining([
     expect.arrayContaining(['assertion', 'no retry'])
   ]))
+})
+
+it.each([
+  { message: 'The job was not acquired by Runner of type hosted even after multiple attempts', retry: true },
+  { message: 'The operation was canceled.', retry: false }
+])('handles an unassigned cancelled job only with explicit runner evidence: $retry', async ({ message, retry }) => {
+  const options = fixture(1, [{ message }])
+  Object.assign(options.jobs[0], { runner_id: 0, conclusion: 'cancelled', steps: [],
+    check_run_url: 'https://api.github.com/repos/example/test/check-runs/101' })
+  await observeInfrastructure(options)
+  if (retry) {
+    expect(options.github.rest.actions.reRunJobForWorkflowRun).toHaveBeenCalledExactlyOnceWith({ owner: 'example', repo: 'test', job_id: 1 })
+    expect(options.core.notice).toHaveBeenCalledWith('Infrastructure retry (1/1): packaged-linux')
+  } else expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
+  expect(options.github.rest.actions.downloadJobLogsForWorkflowRun).not.toHaveBeenCalledWith(expect.objectContaining({ job_id: 1 }))
+})
+
+it('does not treat a cancellation after runner assignment as a runner-start failure', async () => {
+  const options = fixture(1, [{ message: 'The job was not acquired by Runner of type hosted even after multiple attempts' }])
+  Object.assign(options.jobs[0], { conclusion: 'cancelled', steps: [],
+    check_run_url: 'https://api.github.com/repos/example/test/check-runs/101' })
+  await observeInfrastructure(options)
+  expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
+  expect(options.github.paginate).toHaveBeenCalledOnce()
 })
 
 it('classifies a second attempt but does not retry it', async () => {
@@ -135,6 +160,7 @@ it('rejects unscoped or ambiguous boundary logs instead of guessing their step',
 it('never executes the observed PR revision in the privileged observer', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci-infrastructure.yml', import.meta.url), 'utf8')
   expect(workflow).toContain('workflow_run:')
+  expect(workflow).toContain('workflows: [CI, Performance, Remote G0 local contracts]')
   expect(workflow).toContain('ref: ${{ github.event.repository.default_branch }}')
   expect(workflow).toContain('persist-credentials: false')
   expect(workflow).not.toMatch(/ref:.*head_sha|pull_request_target|download-artifact/)
