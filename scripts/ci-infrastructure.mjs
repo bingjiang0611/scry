@@ -27,8 +27,8 @@ export function classifyFailure(job, log = '', annotations = []) {
     /runner.*(never (acquired|started)|not (acquired|started)|failed to (acquire|start))|failed to (?:start|acquire) (?:a |the )?(?:hosted )?runner|job was not acquired by runner|runner.*did not pick up/i.test(messages)) {
     return { category: 'infrastructure', reason: 'runner did not start' }
   }
-  // Download errors printed by tests may be expected negative controls. Only a
-  // failed dependency/provisioning step is eligible; assertions never retry.
+  // Any assertion evidence vetoes retry, even at an ambiguous step boundary.
+  // Only positive infrastructure evidence needs unique failed-step attribution.
   if (/AssertionError|FAIL\s+.*(?:test|spec)|tests? failed|expected .+ to (?:be|equal)/i.test(log)) {
     return { category: 'assertion', reason: 'assertion evidence; no automatic retry' }
   }
@@ -36,10 +36,11 @@ export function classifyFailure(job, log = '', annotations = []) {
   if (failed.length === 0 || failed.some(step => !setup.test(step.name))) {
     return { category: 'unknown', reason: 'not a proven provisioning failure; inspect the original failure' }
   }
-  if (/EAI_AGAIN|ENOTFOUND|Could not resolve host|Temporary failure resolving|Could not resolve ['"]|unable to resolve host/i.test(log)) {
+  const evidence = failedStepLog(job, log)
+  if (/EAI_AGAIN|ENOTFOUND|Could not resolve host|Temporary failure resolving|Could not resolve ['"]|unable to resolve host/i.test(evidence)) {
     return { category: 'infrastructure', reason: 'dependency host DNS failure' }
   }
-  if (/ECONNRESET|ETIMEDOUT|ERR_SOCKET_TIMEOUT|E: Failed to fetch https?:\/\/|npm (?:ERR!|error) (?:code )?(?:E503|E502)|The remote server returned an error: \((?:502|503|504)\)/i.test(log)) {
+  if (/ECONNRESET|ETIMEDOUT|ERR_SOCKET_TIMEOUT|E: Failed to fetch https?:\/\/|npm (?:ERR!|error) (?:code )?(?:E503|E502)|The remote server returned an error: \((?:502|503|504)\)/i.test(evidence)) {
     return { category: 'infrastructure', reason: 'dependency download failure' }
   }
   return { category: 'unknown', reason: 'no recognized infrastructure evidence; no automatic retry' }
@@ -83,7 +84,7 @@ export async function observeInfrastructure({ github, context, core }) {
       const response = await github.rest.actions.downloadJobLogsForWorkflowRun({ ...repo, job_id: job.id })
       log = typeof response.data === 'string' ? response.data : Buffer.from(response.data).toString('utf8')
     }
-    const result = classifyFailure(job, failedStepLog(job, log), annotations)
+    const result = classifyFailure(job, log, annotations)
     const eligible = result.category === 'infrastructure' && history.length === 1 && job.run_attempt === 1
     let action = 'no retry'
     if (eligible) {

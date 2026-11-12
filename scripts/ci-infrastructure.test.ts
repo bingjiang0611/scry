@@ -8,7 +8,7 @@ describe('CI failure classification', () => {
   it.each(['Temporary failure resolving archive.ubuntu.com', 'EAI_AGAIN', 'ENOTFOUND registry.npmjs.org',
     'E: Failed to fetch https://mirror/ubuntu.deb', 'npm error code ECONNRESET'])(
     'recognizes dependency infrastructure: %s', log => {
-      expect(classifyFailure(setup, log).category).toBe('infrastructure')
+      expect(classifyFailure(setup, `2026-01-01T00:01:05Z ${log}`).category).toBe('infrastructure')
     })
   it('recognizes an unstarted runner only with explicit annotation evidence', () => {
     expect(classifyFailure({ runner_id: 0, steps: [] }, '', [{ message: 'The job was not acquired by runner' }]).category).toBe('infrastructure')
@@ -105,6 +105,20 @@ it('does not use successful-step DNS logs to retry an unrelated failed install c
   expect(options.core.summary.addTable).toHaveBeenCalledWith(expect.arrayContaining([
     expect.arrayContaining(['unknown', 'no retry'])
   ]))
+})
+
+it('retains assertion vetoes even when the final step boundary is ambiguous', async () => {
+  const options = fixture()
+  options.jobs[0].steps.push({
+    name: 'Cleanup', conclusion: 'success',
+    started_at: failedStep.completed_at, completed_at: '2026-01-01T00:01:20Z'
+  })
+  const log = '2026-01-01T00:01:05Z ENOTFOUND; recovered\n2026-01-01T00:01:10.500Z AssertionError: expected false to be true'
+  expect(failedStepLog(options.jobs[0], log)).not.toContain('AssertionError')
+  expect(classifyFailure(options.jobs[0], log).category).toBe('assertion')
+  options.github.rest.actions.downloadJobLogsForWorkflowRun.mockResolvedValue({ data: log })
+  await observeInfrastructure(options)
+  expect(options.github.rest.actions.reRunJobForWorkflowRun).not.toHaveBeenCalled()
 })
 
 it('rejects unscoped or ambiguous boundary logs instead of guessing their step', () => {
