@@ -60,6 +60,22 @@ describe('BackgroundServicePanel', () => {
     expect(html.match(/class="unknown"/g)?.length).toBe(5)
   })
 
+  it('names the system keyring when the local credential cannot be kept, and does not push a restart (B4-S F2)', () => {
+    const status = daemon({
+      connection: { state: 'unavailable', reason: 'daemon_credential_unavailable:unsafe_credential_storage' },
+      version: null, pid: null, startedAt: null, devices: null, activeRuns: null
+    })
+    const linux = render(status, { platform: 'linux' })
+    expect(linux).toContain('系统密钥环不可用')
+    expect(linux).toContain('无法保存本机后台服务的连接凭据')
+    expect(linux).toContain('gnome-keyring')
+    expect(linux).toContain('不可用（daemon_credential_unavailable:unsafe_credential_storage）')
+    // Restarting the daemon does not bring a keyring; the restart button stays, but secondary.
+    expect(linux).not.toContain('class="btn primary "')
+    expect(buttons(linux)).toEqual(['刷新', '重启后台服务', '退出 Scry 与后台服务'])
+    expect(render(status, { platform: 'macos' })).not.toContain('gnome-keyring')
+  })
+
   it('says remote access is off instead of counting zero devices', () => {
     const html = render(daemon({ devices: { state: 'remote-disabled' } }))
     expect(html).toContain('远程访问未启用')

@@ -54,3 +54,23 @@ export type BackgroundServiceActionResult =
   // Nothing was done, or the action stopped where it failed; `reason` is a machine code
   // and `message` the readable sentence for it.
   | { status: 'failed'; reason: string; message: string }
+
+const DAEMON_CREDENTIAL_UNAVAILABLE = 'daemon_credential_unavailable'
+
+/** The App could not keep its local daemon grant (B4-S F2); any suffix is the cause code. */
+export function isDaemonCredentialUnavailable(reason: string): boolean {
+  return reason === DAEMON_CREDENTIAL_UNAVAILABLE || reason.startsWith(`${DAEMON_CREDENTIAL_UNAVAILABLE}:`)
+}
+
+/**
+ * One sentence for that refusal, used by the error line, the «后台服务» section and its
+ * action results alike. It says only what the App established: safeStorage refused (not
+ * available, or Linux's plaintext `basic_text`). The Linux line names what the App needs,
+ * not a diagnosis of which keyring is missing; other platforms get no advice that was
+ * never checked there.
+ */
+export function daemonCredentialUnavailableMessage(reason: string, linux: boolean): string {
+  const base = `系统密钥环不可用，Scry 无法保存本机后台服务的连接凭据，因此不能连接后台服务（${reason}）。`
+  if (!linux) return base
+  return `${base}Linux 上需要一个正在运行且已解锁的 Secret Service 密钥环（例如 gnome-keyring），然后重启 Scry。`
+}

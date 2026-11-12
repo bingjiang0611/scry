@@ -3,7 +3,7 @@ import type { BackgroundServiceConnection } from '../shared/background-service'
 import type { DaemonLockRecord } from '../daemon/ledger-lock'
 import type { PreparedStop, StopOutcome } from './background-service-stop'
 import { quitWithBackgroundService, reconnectBackgroundService, restartBackgroundService, type BackgroundServiceActionDeps } from './background-service-actions'
-import { confirmPrompt } from './background-service-copy'
+import { confirmPrompt, reasonMessage } from './background-service-copy'
 
 // Order and consent for the three actions: who is asked, when, and what may happen
 // before and after the user answers. Every step is recorded so the sequence is checked.
@@ -73,6 +73,17 @@ describe('restart background service', () => {
     expect((result as { message: string }).message).toContain('没有再次发送信号')
     expect(steps).not.toContain('reconnect')
     expect(holds()).toBe(0)
+  })
+
+  it('names the system keyring when the restarted service still has no local credential (B4-S F2)', async () => {
+    const reason = 'daemon_credential_unavailable:unsafe_credential_storage'
+    const { deps } = harness({ after: { state: 'unavailable', reason } })
+    const result = await restartBackgroundService(deps)
+    expect(result).toMatchObject({ status: 'failed', reason })
+    expect((result as { message: string }).message).toContain('系统密钥环不可用')
+    expect(reasonMessage(reason, 'linux')).toContain('Secret Service 密钥环（例如 gnome-keyring）')
+    expect(reasonMessage(reason, 'darwin')).not.toContain('gnome-keyring')
+    expect(reasonMessage('daemon_credential_unavailable', 'darwin')).toContain('（daemon_credential_unavailable）')
   })
 
   it('refuses before asking when the holder cannot be identified', async () => {

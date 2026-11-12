@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BackgroundServiceAction, BackgroundServiceStatus } from '../../shared/background-service'
 import { describeActionResult, projectBackgroundService, type BackgroundServiceNotice } from '../background-service-view'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
+import type { RendererPlatform } from '../platform'
 import './background-service.css'
 
 // Settings «后台服务» (B4-S S0-1). The section only shows and asks: every confirmation
@@ -15,17 +16,19 @@ const LABELS: Record<BackgroundServiceAction, string> = {
 }
 
 export function BackgroundServicePanel({
-  status, readError, busy, result, now, onRefresh, onAction
+  status, readError, busy, result, now, platform, onRefresh, onAction
 }: {
   status: BackgroundServiceStatus | null
   readError: string | null
   busy: BackgroundServiceAction | 'reading' | null
   result: BackgroundServiceNotice | null
   now: number
+  /** Detected when omitted; only chooses whether the Linux keyring advice is shown. */
+  platform?: RendererPlatform
   onRefresh: () => void
   onAction: (action: BackgroundServiceAction) => void
 }): JSX.Element {
-  const view = status ? projectBackgroundService(status, now) : null
+  const view = status ? projectBackgroundService(status, now, platform) : null
   const button = (action: BackgroundServiceAction, primary = false) => (
     <button
       type="button"

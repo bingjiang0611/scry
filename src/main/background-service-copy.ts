@@ -1,4 +1,4 @@
-import type { BackgroundServiceAction } from '../shared/background-service'
+import { daemonCredentialUnavailableMessage, isDaemonCredentialUnavailable, type BackgroundServiceAction } from '../shared/background-service'
 import { BACKGROUND_SERVICE_STOP_TIMEOUT_MS } from './background-service-stop'
 
 // Words for the «后台服务» confirmations and failures. background-service-actions.ts
@@ -79,9 +79,10 @@ const REASONS: Readonly<Record<string, string>> = {
 }
 
 /** One readable sentence for a machine reason; unknown reasons keep their code visible. */
-export function reasonMessage(reason: string): string {
+export function reasonMessage(reason: string, platform: NodeJS.Platform = process.platform): string {
   const known = REASONS[reason]
   if (known) return known
+  if (isDaemonCredentialUnavailable(reason)) return daemonCredentialUnavailableMessage(reason, platform === 'linux')
   return `后台服务操作没有完成（${reason}）。`
 }
 

@@ -21,6 +21,20 @@ describe('IPC error copy', () => {
       .toBe('后台服务未在运行，请稍后重试（daemon_not_running）')
   })
 
+  it('says the system keyring is the reason when the local daemon credential cannot be kept (B4-S F2)', () => {
+    const raw = new Error("Error invoking remote method 'agent:start': Error: daemon_credential_unavailable:unsafe_credential_storage")
+    const linux = ipcErrorMessage(raw, 'linux')
+    expect(linux).toContain('系统密钥环不可用')
+    expect(linux).toContain('无法保存本机后台服务的连接凭据')
+    expect(linux).toContain('Secret Service 密钥环（例如 gnome-keyring）')
+    expect(linux).toContain('（daemon_credential_unavailable:unsafe_credential_storage）')
+    // The Linux advice is not offered where it was never checked.
+    const mac = ipcErrorMessage(raw, 'macos')
+    expect(mac).toContain('系统密钥环不可用')
+    expect(mac).not.toContain('gnome-keyring')
+    expect(ipcErrorMessage(new Error('daemon_credential_unavailable'), 'linux')).toContain('（daemon_credential_unavailable）')
+  })
+
   it('never answers with an empty line', () => {
     expect(ipcErrorMessage(new Error("Error invoking remote method 'x:y': Error: "))).toBe('未知错误')
     expect(ipcErrorMessage('plain')).toBe('plain')

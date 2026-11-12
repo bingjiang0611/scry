@@ -1,4 +1,8 @@
-import type { BackgroundServiceAction, BackgroundServiceActionResult, BackgroundServiceStatus } from '../shared/background-service'
+import {
+  daemonCredentialUnavailableMessage, isDaemonCredentialUnavailable,
+  type BackgroundServiceAction, type BackgroundServiceActionResult, type BackgroundServiceStatus
+} from '../shared/background-service'
+import { detectRendererPlatform, type RendererPlatform } from './platform'
 
 // What the «后台服务» section shows for one status read. Values main could not establish
 // arrive as null and are shown as 未知, never as 0 or as a healthy default.
@@ -31,7 +35,12 @@ export function formatUptime(startedAt: number | null, now: number): string | nu
   return `${rest} 分钟`
 }
 
-export function projectBackgroundService(status: BackgroundServiceStatus, now: number): BackgroundServiceView {
+/** `platform` only decides whether the Linux keyring advice is shown. */
+export function projectBackgroundService(
+  status: BackgroundServiceStatus,
+  now: number,
+  platform: RendererPlatform = detectRendererPlatform()
+): BackgroundServiceView {
   if (status.mode === 'in-process') {
     return {
       rows: [row('数据目录', status.userDataDir)],
@@ -42,6 +51,7 @@ export function projectBackgroundService(status: BackgroundServiceStatus, now: n
   const { connection } = status
   let state: string
   let notice: BackgroundServiceNotice | undefined
+  let credentialRefused = false
   if (connection.state === 'ready') {
     state = '已连接'
   } else if (connection.state === 'version-mismatch') {
@@ -56,6 +66,11 @@ export function projectBackgroundService(status: BackgroundServiceStatus, now: n
       tone: 'bad',
       text: '后台服务拒绝了本 App 的连接：本机连接已被撤销，或已在另一个 Scry 实例入网。Scry 不会自动重新连接；需要时点「重新连接本机后台服务」。'
     }
+  } else if (isDaemonCredentialUnavailable(connection.reason)) {
+    // Restarting the daemon does not give the App a keyring, so it is not offered as the fix.
+    credentialRefused = true
+    state = `不可用（${connection.reason}）`
+    notice = { tone: 'bad', text: daemonCredentialUnavailableMessage(connection.reason, platform === 'linux') }
   } else {
     state = `不可用（${connection.reason}）`
     notice = { tone: 'bad', text: `无法连接后台服务（${connection.reason}）。可以尝试重启后台服务。` }
@@ -76,7 +91,7 @@ export function projectBackgroundService(status: BackgroundServiceStatus, now: n
     ...(notice ? { notice } : {}),
     actions: {
       restart: true,
-      restartPrimary: connection.state === 'version-mismatch' || connection.state === 'unavailable',
+      restartPrimary: connection.state === 'version-mismatch' || (connection.state === 'unavailable' && !credentialRefused),
       reconnect: connection.state === 'device-not-authorized',
       quit: true
     }
