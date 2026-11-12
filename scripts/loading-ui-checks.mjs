@@ -38,6 +38,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   }
   const arm = async target => read(`(() => {
     window.__loadingObserver?.disconnect(); cancelAnimationFrame(window.__loadingFrame)
+    window.__loadingReadObservation?.abort()
     const state = window.__loadingState = { since:performance.now(), seen:false, pending:false, badControls:false, identityStable:true, preview:true, authority:false, visible:true, shifted:false, replacement:false, draft:null, top:null, reserved:null }
     // The timeline's own session-history status. ChatView renders it as standard flow content
     // above .chat-transcript-content while sessionLoading || sessionCacheVisible, so it moves the
@@ -82,6 +83,8 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       }
       state.replacement ||= document.getAnimations().some(a=>a.id==='scry-structure' && a.effect.getTiming().duration===400 && a.effect.getKeyframes().every(frame=>!('transform' in frame)))
     }
+    window.__loadingReadObservation = new AbortController()
+    window.addEventListener('loading-fixture-session-read', scan, { signal: window.__loadingReadObservation.signal })
     window.__loadingObserver=new MutationObserver(mutations => {
       // Include transient insertions: polling the current DOM cannot disprove a flash.
       const request=window.loadingFixture.records.find(r=>r.kind==='session' && r.start>=state.since)
@@ -96,7 +99,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     window.__loadingFrame=requestAnimationFrame(frame)
   })()`)
   const report = async () => {
-    await read('window.__loadingObserver.disconnect(); cancelAnimationFrame(window.__loadingFrame)')
+    await read('window.__loadingObserver.disconnect(); cancelAnimationFrame(window.__loadingFrame); window.__loadingReadObservation.abort()')
     return read('window.__loadingState')
   }
   const measured = async (id, delay, fail = false) => {
