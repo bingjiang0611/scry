@@ -1,7 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { performanceAbabHarnessFiles } from './performance-abab-harness.mjs'
 
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (source: string) => unknown }
 const root = resolve(import.meta.dirname, '..')
@@ -29,9 +32,26 @@ describe('Node performance formal ABAB workflow', () => {
 
   it('freezes the ABAB harness into the baseline without copying production files', () => {
     const freeze = steps.find(entry => entry.name === 'Freeze candidate harness for both source revisions')!
-    expect(freeze.run).toContain('performanceAbabHarnessFiles')
-    expect(freeze.run).toContain('baseline/$(dirname')
-    expect(freeze.run).not.toContain('cp -R candidate/src')
+    const directory = mkdtempSync(join(tmpdir(), 'scry-freeze-contract-'))
+    const put = (path: string, content: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content) }
+    try {
+      for (const file of performanceAbabHarnessFiles) {
+        put(join(directory, 'candidate', file), file === 'scripts/performance-abab-harness.mjs'
+          ? readFileSync(new URL('./performance-abab-harness.mjs', import.meta.url), 'utf8') : `candidate:${file}`)
+        put(join(directory, 'baseline', file), `baseline:${file}`)
+      }
+      put(join(directory, 'candidate/src/production.ts'), 'candidate production')
+      put(join(directory, 'candidate/src/candidate-only.ts'), 'must not copy')
+      put(join(directory, 'baseline/src/production.ts'), 'baseline production')
+      execFileSync('/bin/bash', ['-e', '-c', freeze.run!], { cwd: directory })
+      for (const file of performanceAbabHarnessFiles) {
+        expect(readFileSync(join(directory, 'baseline', file))).toEqual(readFileSync(join(directory, 'candidate', file)))
+      }
+      expect(readFileSync(join(directory, 'baseline/src/production.ts'), 'utf8')).toBe('baseline production')
+      expect(existsSync(join(directory, 'baseline/src/candidate-only.ts'))).toBe(false)
+      rmSync(join(directory, 'candidate', performanceAbabHarnessFiles.at(-1)!))
+      expect(() => execFileSync('/bin/bash', ['-e', '-c', freeze.run!], { cwd: directory, stdio: 'pipe' })).toThrow()
+    } finally { rmSync(directory, { recursive: true, force: true }) }
   })
 
   it('uses one round and retains incomplete evidence for the report step', () => {

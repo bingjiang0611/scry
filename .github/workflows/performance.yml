@@ -69,10 +69,7 @@ jobs:
           node candidate/scripts/performance-ratchet.mjs guard "$base" candidate/scripts/performance-ratchet.json | tee performance-results/ratchet-guard.json
       - name: Freeze candidate harness for both source revisions
         run: |
-          while IFS= read -r file; do
-            mkdir -p "baseline/$(dirname "$file")"
-            cp "candidate/$file" "baseline/$file"
-          done < <(cd candidate && node --input-type=module -e "import { performanceAbabHarnessFiles } from './scripts/performance-abab-harness.mjs'; for (const file of performanceAbabHarnessFiles) console.log(file)")
+          node candidate/scripts/performance-abab-harness.mjs candidate baseline
       - name: Measure one formal serial ABAB round on the same runner
         id: node_measurements
         run: |
