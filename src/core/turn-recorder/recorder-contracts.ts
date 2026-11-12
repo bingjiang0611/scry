@@ -77,6 +77,12 @@ export interface TranscriptRead {
   }
   observed: boolean
   identityMatched?: boolean
+  /**
+   * Background tasks this window launched and has not seen report. A Stop while this is non-empty is
+   * not the end of the turn: the transcript will gain the wake's rows, and publishing now would split
+   * one burst of Agent work into two records.
+   */
+  pendingBackgroundTasks?: string[]
   providerTurnId?: string
   complete?: boolean
   terminalStatus?: AgentTurnRecord['status']
@@ -311,6 +317,13 @@ export const STOP_HOOK_ACTIVE_PROVIDERS = new Set<ProviderId>(['claude', 'codex'
 export const SESSION_END_EVENTS = new Set(['SessionEnd', 'session.end', 'session_end', 'session.exited', 'process.exit'])
 export const TERMINAL_CLOCK_SKEW_MS = 60_000
 export const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
+
+/**
+ * Providers that keep writing into one logical turn after its Stop when a background task reports.
+ * The wake arrives as another prompt event, so a recorder that treats it as a new turn both
+ * truncates the original turn and creates one whose identity the transcript never has.
+ */
+export const BACKGROUND_WAKE_PROVIDERS = new Set<ProviderId>(['qoder'])
 export const STALE_TERMINAL_WINDOW_MS = 30_000
 export const DEFERRED_TERMINAL_GRACE_MS = 180_000
 export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000

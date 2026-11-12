@@ -45,13 +45,14 @@ export async function beginOpenTurn(
   staleTerminalProtection = false,
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment,
   capture?: SessionCaptureContext,
-  claim?: CaptureClaimIdentity
+  claim?: CaptureClaimIdentity,
+  continuation?: import('./runtime-state.js').RecorderContinuation
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
   const generation = session.lastGeneration + 1
   const turnIndex = session.lastTurnIndex + 1
-  const prompt = claim?.userText ?? promptOf(payload)
+  const prompt = continuation ? undefined : claim?.userText ?? promptOf(payload)
   const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
   const rawManagedRunId = managedByScry ? stringAt(payload, 'scry_managed_run_id') : undefined
   const rawManagedPromptHash = managedByScry ? stringAt(payload, 'scry_managed_prompt_hash') : undefined
@@ -101,6 +102,7 @@ export async function beginOpenTurn(
     ...(requestSetId ? { requestSetId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
+    ...(continuation ? { continuation } : {}),
     uploadEnvironment,
     captures: []
   }
@@ -111,7 +113,9 @@ export async function beginOpenTurn(
     await writeJsonAtomic(openPath(root), open)
   })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
-  if (!managedByScry && enablement.config.capture.diff) {
+  // A continuation segment has no baseline of its own: its predecessor's sealed end state is the
+  // boundary, and a fresh baseline taken at a wake hook would attribute that hook's latency to Git.
+  if (!managedByScry && !continuation && enablement.config.capture.diff) {
     const captureDir = join(turnRoot(root, generation), 'captures')
     const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
     open.repositoryDiscovery = {

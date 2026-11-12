@@ -13,6 +13,25 @@ import {
 import { safeKey } from './store.js'
 import { recorderHasRetryableInbox, recorderInboxEntries } from './inbox.js'
 
+/**
+ * The last segment this session sealed. A background wake that arrives after the seal opens a
+ * continuation segment from here: it slices content past what the sealed turn already published and
+ * links back to the turn that asked the user's original question.
+ */
+export interface RecorderSealedSegment {
+  recordId: string
+  /** The turn that owns the user's question; every continuation of it points here. */
+  rootRecordId: string
+  at: string
+  providerTurnId?: string
+  transcriptPath?: string
+  /**
+   * Transcript items the sealed record already published. Absent when the seal could not measure
+   * its own boundary, which is the one case a continuation cannot slice at.
+   */
+  publishedEvents?: number
+}
+
 export interface RecorderSessionState {
   schemaVersion: 1
   lastGeneration: number
@@ -21,6 +40,19 @@ export interface RecorderSessionState {
   committedProviderTurnIds?: string[]
   /** Repositories discovered from files this session touched; later turns baseline them too. */
   captureRepositories?: string[]
+  lastSegment?: RecorderSealedSegment
+}
+
+/** What a continuation segment inherits from the sealed segment it continues. */
+export interface RecorderContinuation {
+  rootRecordId: string
+  sealedRecordId: string
+  /** Items the sealed segment already published; content before this point belongs to it. */
+  publishedEvents?: number
+  /** The continued turn's native identity, used to read the transcript this segment sits in. */
+  providerTurnId?: string
+  /** The wake's own request set, which is this segment's identity. */
+  requestSetId?: string
 }
 
 export interface RecorderOpenTurnState {
@@ -58,8 +90,18 @@ export interface RecorderOpenTurnState {
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalEventId?: string
+  /** Why this Stop is held rather than published, so recovery and health can name it. */
+  deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks'
+  /** Present when a background notification opened this segment instead of a user prompt. */
+  continuation?: RecorderContinuation
   /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
   terminalIdentityConfirmedBySessionEnd?: boolean
+  /**
+   * When the Provider session ended while this turn was still open. A session end closes the turn on
+   * the evidence it has even when an earlier terminal already claimed `endReason`; it never rewrites
+   * that earlier verdict.
+   */
+  sessionEndedAt?: string
   repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories' | 'worktreeDiscovery'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
   /**
