@@ -35,6 +35,7 @@ import { runStartupRecovery } from './startup-recovery'
 import { appStartupWriters } from './app-startup-writers'
 import { shutdownDaemonTerminals } from './terminal-daemon'
 import { claimAppUserDataWithDialog } from './userdata-owner-dialog'
+import { applyLinuxPasswordStore } from './linux-password-store'
 
 export function initializeAppEnvironment(__dirname: string, getWindow: () => BrowserWindow | null) {
   // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
@@ -69,6 +70,10 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
       app.setAccessibilitySupportFeatures(['nativeAPIs', 'webContents', 'extendedProperties', 'html', 'screenReader'])
     })
   }
+  // Linux: ask for libsecret on Hyprland or an unnamed desktop, where Chromium would pick
+  // basic_text and daemon mode would refuse every run. Fail closed without a keyring.
+  const passwordStore = applyLinuxPasswordStore(app.commandLine)
+  if (passwordStore) console.info(`[scry] safeStorage: --password-store=${passwordStore} (desktop not recognised by Chromium)`)
   // Isolated automation stays hidden: showInactive still displays a native window.
   if (isOwnedTestApp && process.platform === 'darwin') app.setActivationPolicy('prohibited')
   const primaryInstance = isOwnedTestApp || app.requestSingleInstanceLock()
