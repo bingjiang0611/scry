@@ -1,5 +1,5 @@
 import { readRecorderContent, writeRecorderContent } from './content-store.js'
-import { findRecordById, listRecords, recordContentItems } from './store.js'
+import { findRecordById, listRecordsReport, recordContentItems, type SkippedRecordFile } from './store.js'
 import type { ToolContentRef } from '../../shared/tool-content.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 
@@ -27,6 +27,8 @@ export interface ContentRepairReport {
   sources: string[]
   missingItems: ContentRepairMissingItem[]
   missingItemsTruncated: boolean
+  /** 记录目录里不是记录、或读不出来的文件；只看不修，列出来是为了让“少几条记录”可解释。 */
+  skipped: SkippedRecordFile[]
 }
 
 export interface ContentRepairOptions {
@@ -38,15 +40,18 @@ export interface ContentRepairOptions {
   apply?: boolean
 }
 
-async function selectedRecords(dataRoot: string, recordIds: string[] | undefined): Promise<AgentTurnRecord[]> {
-  if (!recordIds?.length) return listRecords(dataRoot)
+async function selectedRecords(
+  dataRoot: string,
+  recordIds: string[] | undefined
+): Promise<{ records: AgentTurnRecord[]; skipped: SkippedRecordFile[] }> {
+  if (!recordIds?.length) return listRecordsReport(dataRoot)
   const records: AgentTurnRecord[] = []
   for (const recordId of new Set(recordIds)) {
     const record = await findRecordById(dataRoot, recordId)
     if (!record) throw new Error(`record not found: ${recordId}`)
     records.push(record)
   }
-  return records
+  return { records, skipped: [] }
 }
 
 /**
@@ -58,7 +63,7 @@ async function selectedRecords(dataRoot: string, recordIds: string[] | undefined
  */
 export async function repairRecordContent(options: ContentRepairOptions): Promise<ContentRepairReport> {
   const apply = options.apply === true
-  const records = await selectedRecords(options.dataRoot, options.recordIds)
+  const { records, skipped } = await selectedRecords(options.dataRoot, options.recordIds)
   const report: ContentRepairReport = {
     applied: false,
     records: records.length,
@@ -70,7 +75,8 @@ export async function repairRecordContent(options: ContentRepairOptions): Promis
     bytes: 0,
     sources: options.sourceRoots,
     missingItems: [],
-    missingItemsTruncated: false
+    missingItemsTruncated: false,
+    skipped
   }
   // 同一份正文可能被多字段引用：按引用只处理一次，但未命中清单保留字段位置，便于定位记录。
   const seen = new Map<string, ToolContentRef>()

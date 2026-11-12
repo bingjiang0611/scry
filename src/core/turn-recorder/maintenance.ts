@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import { readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type { RecorderConfig } from './config.js'
-import { listRecords, recordContentItems } from './store.js'
+import { listRecordsReport, recordContentItems, type SkippedRecordFile } from './store.js'
 import { withDirectoryLock, writeFileAtomicExclusive } from './io.js'
 
 const gzip = promisify(gzipCallback)
@@ -18,6 +18,8 @@ export interface RecorderMaintenanceReport {
   retentionEligible: Array<{ sequence: number; completedAt: string }>
   orphanContent: Array<{ path: string; bytes: number }>
   staleTemps: Array<{ path: string; bytes: number }>
+  /** 记录目录里被跳过的文件（`.tmp`、读不出来的半成品）：维护不能因为它们而拒绝工作。 */
+  skippedRecords: SkippedRecordFile[]
   compressedLogs: string[]
   reclaimedBytes: number
 }
@@ -71,7 +73,7 @@ export async function maintainRecorderStore(
   return withDirectoryLock(join(dataRoot, 'locks', 'maintenance.lock'), () =>
     withDirectoryLock(join(dataRoot, 'locks', 'commit.lock'), async () => {
     const blockedBy = await blockers(dataRoot, graceCutoff)
-    const records = await listRecords(dataRoot)
+    const { records, skipped: skippedRecords } = await listRecordsReport(dataRoot)
     const referenced = new Set(records.flatMap(recordContentItems).map((item) => item.ref.sha256))
     const orphanContent: RecorderMaintenanceReport['orphanContent'] = []
     const staleTemps: RecorderMaintenanceReport['staleTemps'] = []
@@ -127,6 +129,7 @@ export async function maintainRecorderStore(
       retentionEligible,
       orphanContent,
       staleTemps,
+      skippedRecords,
       compressedLogs,
       reclaimedBytes
     }

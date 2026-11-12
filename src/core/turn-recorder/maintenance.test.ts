@@ -65,6 +65,8 @@ describe('recorder store maintenance', () => {
     expect(plan.orphanContent).toHaveLength(1)
     expect(plan.orphanContent[0].path).toContain(orphan.sha256)
     expect(plan.staleTemps).toHaveLength(1)
+    // 枚举记录时跳过并报告非记录文件：维护不能因为一条 0 字节残渣而拒绝工作。
+    expect(plan.skippedRecords).toEqual([{ name: 'abandoned.tmp', reason: 'unrecognized_name' }])
     await expect(access(contentPath(dataRoot, orphan.sha256))).resolves.toBeUndefined()
 
     const applied = await maintainRecorderStore(dataRoot, config, { now, apply: true })

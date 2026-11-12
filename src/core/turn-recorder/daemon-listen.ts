@@ -9,6 +9,7 @@ import { appendRotatingLog, readJson, writeJsonAtomic, writeTextAtomic } from '.
 import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
+import { pruneStaleTemps } from './temp-prune.js'
 import {
   PROTOCOL_VERSION, HOOK_EVENT_PATH, RECORDER_VERSION_HEADER, daemonRequest, writeJson, header, readJsonBody, recorderSocketPath
 } from './daemon-transport.js'
@@ -290,6 +291,10 @@ export async function listenRecorderDaemon(args: {
     await removeOwnedMarker(markerPath, instanceId)
     throw error
   }
+  // 常驻进程起来时顺手清理一次中断写盘留下的 `.tmp`：排队的 hook 事件很多时，下一个提交通知可能要
+  // 等很久。与提交路径的按天清理互不依赖，失败也只是这次不清理。等待它完成，避免进程在别处收尾时
+  // 还有一次目录遍历在写标记文件。
+  await pruneStaleTemps(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)
   return { socketPath, closed, close }

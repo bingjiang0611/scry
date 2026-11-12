@@ -2,11 +2,23 @@ import { join } from 'node:path'
 import { type ParsedArgs, workspaceOf, print, flag, dataRootOf, intFlag } from './command-args.js'
 import { recorderEnablement } from '../core/turn-recorder/recorder.js'
 import { maintainRecorderStore } from '../core/turn-recorder/maintenance.js'
-import { listRecords, commitNotificationStatus, archiveRecords, verifyStore, readArchiveState, showRecord, exportRecords, exportRecordBundle, recordContentItem, readHealth } from '../core/turn-recorder/store.js'
+import { listRecords, skippedRecordFiles, commitNotificationStatus, archiveRecords, verifyStore, readArchiveState, showRecord, exportRecords, exportRecordBundle, recordContentItem, readHealth, type SkippedRecordFile } from '../core/turn-recorder/store.js'
 import { resolveCommitHookActivation, commitHookEnv } from '../core/turn-recorder/commit-hook-grant.js'
 import { compactModelTiming, turnTimeline, summarizeTurnRecords, summarizeIdentity } from '../core/turn-recorder/turns-summary.js'
 import { readRecorderContentPage } from '../core/turn-recorder/content-store.js'
 
+
+/**
+ * `.scry/records` 里还会躺着中断写盘留下的 `.tmp`。按目录枚举记录的命令必须说清楚自己跳过了什么：
+ * 悄悄少一条记录和“压根没有这条记录”看起来一样。名字合规但读不出来的文件不在这里处理——那种
+ * 情况严格读取会直接失败，因为损坏的证据不能被当成“不存在”。
+ */
+async function reportSkippedNames(dataRoot: string): Promise<void> {
+  const skipped: SkippedRecordFile[] = await skippedRecordFiles(dataRoot)
+  if (skipped.length === 0) return
+  const shown = skipped.slice(0, 5).map((item) => item.name).join(', ')
+  process.stderr.write(`scry: skipped ${skipped.length} file(s) in .scry/records that are not record files: ${shown}${skipped.length > 5 ? ', ...' : ''}\n`)
+}
 
 export function cutoffFrom(value: string): string {
   const relative = /^(\d+)d$/.exec(value.trim())
@@ -35,6 +47,8 @@ export async function recordsCommand(args: ParsedArgs): Promise<number> {
   const before = flag(args, 'before')
   if (!before) throw new Error('--before is required, e.g. --before 30d')
   const cutoff = cutoffFrom(before)
+  await reportSkippedNames(enablement.dataRoot)
+  // 严格读取：一条读不出来的记录就足够让归档停下，移动周边记录只会让缺口无法解释。
   const records = await listRecords(enablement.dataRoot)
   // Only a contiguous prefix may go: an interior hole cannot be explained by an archive floor.
   const candidates: typeof records = []
@@ -101,6 +115,7 @@ export async function turnsCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1]
   const dataRoot = await dataRootOf(workspaceOf(args))
   if (action === 'list') {
+    await reportSkippedNames(dataRoot)
     const records = await listRecords(dataRoot)
     print(records.map((record) => ({
       sequence: record.sequence,
@@ -145,6 +160,7 @@ export async function turnsCommand(args: ParsedArgs): Promise<number> {
     if (args.positionals[2] && args.flags.has('all')) {
       throw new Error('scry turns summary accepts either <sessionId> or --all, not both')
     }
+    await reportSkippedNames(dataRoot)
     const records = await listRecords(dataRoot)
     const sessionId = args.positionals[2] ?? (args.flags.has('all') ? undefined : records.at(-1)?.sessionId)
     print(summarizeTurnRecords(records, sessionId, args.flags.has('all') ? { scope: 'workspace' } : {}))

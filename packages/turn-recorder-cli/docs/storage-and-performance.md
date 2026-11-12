@@ -124,6 +124,19 @@ scry recorder content repair --record-id <recordId> --apply            # 只修�
 查找正文，读时校验长度与摘要，命中才复制进本库。未命中的只列清单（退出 3），**不改写任何记录**：
 记录是否降级仍由提交边界决定，修复工具不替用户改证据语义。`--record-id` 指向不存在的记录会直接报错。
 
+`records/` 里并不只有记录：中断的原子写会留下 `.tmp`，崩溃也可能留下半成品。修复与维护命令只认
+`<20 位序号>-<recordId>.json` 这种合规文件名，读不出来的文件同样跳过，并在输出的 `skipped`
+（维护命令里是 `skippedRecords`）中列出文件名与原因：`unrecognized_name` 或 `unreadable_record`。
+跳过不等于删除,清理走下面的维护命令。
+
+### 中断写盘留下的临时文件
+
+`writeJsonAtomic` 先写 `<path>.<pid>.<uuid>.tmp` 再 `rename` 上屏。进程被杀会留下永不生效的
+`.tmp`（可能 0 字节）。recorder 在日常路径上自动清理**超过一天**的这类文件：每次提交（App 托管与
+独立 CLI 共用 `commitRecord`）检查一次，标记文件 `runtime/stale-temp-prune.json` 保证目录遍历最多
+每天发生一次，daemon 启动时也做一次。更短命的文件可能属于正在写盘的进程，绝不会被碰；清理失败只
+影响这次卫生，不阻断提交。`scry records maintain --apply` 仍然是显式、可审计的那条路径。
+
 可选的 `storage` 配置提供软 quota、retention 候选和孤立文件宽限期：
 
 ```json

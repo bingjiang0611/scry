@@ -4,11 +4,12 @@ import { join, resolve } from 'node:path'
 import { type ToolContentRef } from '../../shared/tool-content.js'
 import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn-record.js'
 import { copyRecorderContent } from './content-store.js'
-import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
-import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs } from './store-index.js'
+import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog, listFiles } from './io.js'
+import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
 import { applyRecordContentBudget } from './record-content-budget.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
+import { pruneStaleTemps } from './temp-prune.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
 export { type RecordCommittedNotification, type CommitNotificationStatus, type CommitNotificationScope, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
@@ -73,6 +74,9 @@ export async function commitRecord(
     if (uploadEnvironment !== undefined) await persistUploadEnvironment(dataRoot, record.recordId, uploadEnvironment)
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
     invalidateRecordIndex(dataRoot)
+    // 中断的写入会留下永不 rename 上屏的 `.tmp`（0 字节也算）：它们不是记录，但会被按目录枚举的
+    // 脚本读到。提交是所有写入方唯一的收敛点，所以在这里按天清理一次；失败只影响这次卫生。
+    await pruneStaleTemps(dataRoot).catch(() => undefined)
     return { status: 'committed' as const, record }
   })
 }
@@ -144,11 +148,54 @@ export async function exportRecordBundle(dataRoot: string, target: string): Prom
   }
 }
 
+/**
+ * 严格读出每条正式记录。名字合规但内容读不出来的文件必须让读取失败：静默跳过等于把损坏的证据
+ * 显示成“没有这条记录”。需要跑完并如实报告跳过了什么的路径用 `listRecordsReport`。
+ */
 export async function listRecords(dataRoot: string): Promise<AgentTurnRecord[]> {
   const files = await recordFiles(dataRoot)
   const records: AgentTurnRecord[] = []
   for (const file of files) records.push(await readRecordFile(join(dataRoot, 'records', file.name)))
   return records
+}
+
+/** 只按文件名判断：这些文件根本不是记录（`.tmp`、手工产物），不需要读内容就能报出来。 */
+export async function skippedRecordFiles(dataRoot: string): Promise<SkippedRecordFile[]> {
+  return (await listFiles(join(dataRoot, 'records')))
+    .filter((name) => !parseRecordName(name))
+    .sort()
+    .map((name) => ({ name, reason: 'unrecognized_name' as const }))
+}
+
+export interface SkippedRecordFile {
+  name: string
+  /** `unrecognized_name`：不符合 `<20 位序号>-<recordId>.json`，例如中断留下的 `.tmp`。
+   *  `unreadable_record`：名字合规但读不出来（截断、损坏、不是合法记录）。 */
+  reason: 'unrecognized_name' | 'unreadable_record'
+}
+
+/**
+ * 枚举正式记录，并告诉调用方跳过了多少文件、为什么。记录目录不是只有记录：原子写盘会在同一目录里
+ * 留下 `.tmp`，崩溃也可能留下半成品。报告型路径（修复、维护、诊断）必须能跑完并如实列出这些文件，
+ * 而不是在第一条上崩掉。导出路径仍直接读 `recordFiles` 并让校验错误抛出，避免静默少传记录。
+ */
+export async function listRecordsReport(dataRoot: string): Promise<{ records: AgentTurnRecord[]; skipped: SkippedRecordFile[] }> {
+  const records: AgentTurnRecord[] = []
+  const skipped: SkippedRecordFile[] = []
+  const names = (await listFiles(join(dataRoot, 'records'))).sort()
+  for (const name of names) {
+    if (!parseRecordName(name)) {
+      skipped.push({ name, reason: 'unrecognized_name' })
+      continue
+    }
+    try {
+      records.push(await readRecordFile(join(dataRoot, 'records', name)))
+    } catch {
+      skipped.push({ name, reason: 'unreadable_record' })
+    }
+  }
+  records.sort((left, right) => left.sequence - right.sequence)
+  return { records, skipped }
 }
 
 export async function showRecord(dataRoot: string, selector: string): Promise<AgentTurnRecord | null> {

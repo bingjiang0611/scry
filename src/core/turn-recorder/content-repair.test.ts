@@ -169,4 +169,26 @@ describe('recorder content repair', () => {
 
     await expect(repairRecordContent({ dataRoot, sourceRoots: [], recordIds: ['nothing'] })).rejects.toThrow('record not found: nothing')
   })
+
+  it('only counts conforming records and reports what it skipped', async () => {
+    const dataRoot = await tempRoot('scry-repair-store-')
+    const present = body('present body')
+    await writeRecorderContent(dataRoot, present.content, 'utf8')
+    await writeRecord(dataRoot, record(1, 'a1'.repeat(16), [content('present body')]))
+    // 写盘中辍的两种残留：永不 rename 上屏的 `.tmp`，以及名字合规但内容不完整的文件。
+    const leftover = `00000000000000002328-${'a2'.repeat(16)}.json.4242.6f1e.tmp`
+    const truncated = `00000000000000000002-${'a3'.repeat(16)}.json`
+    await writeFile(join(dataRoot, 'records', leftover), '')
+    await writeFile(join(dataRoot, 'records', truncated), '{"schemaVersion":1}')
+
+    const report = await repairRecordContent({ dataRoot, sourceRoots: [], apply: true })
+
+    expect(report).toMatchObject({ records: 1, refs: 1, present: 1, missing: 0 })
+    expect(report.skipped).toEqual([
+      { name: truncated, reason: 'unreadable_record' },
+      { name: leftover, reason: 'unrecognized_name' }
+    ])
+    // 跳过不等于删除：修复工具只补正文，存库卫生属于维护命令。
+    expect(await readdir(join(dataRoot, 'records'))).toContain(leftover)
+  })
 })
