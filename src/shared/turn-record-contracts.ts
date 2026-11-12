@@ -248,6 +248,18 @@ export interface AgentTurnRecord extends TurnEvidence {
   linkedTaskGeneration?: string
   taskLinkStatus?: 'bound' | 'unbound' | 'conflict'
   /**
+   * Session-capture provenance. Present only for turns recorded under an explicit claim, so a record
+   * states which claim opened the session, why, and which task string the caller supplied. Absent
+   * means ordinary recording — never "captured without a claim".
+   */
+  capture?: {
+    protocol: string
+    captureId: string
+    /** Verbatim caller string; it is not interpreted as a REQ or any other identifier. */
+    source: string
+    task: string | null
+  }
+  /**
    * Whether this turn's role in the session was structurally observed.
    *
    * `unobserved` is the honest default: a provider that reports no role gives

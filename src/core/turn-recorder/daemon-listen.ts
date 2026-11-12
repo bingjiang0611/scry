@@ -14,6 +14,8 @@ import {
   PROTOCOL_VERSION, HOOK_EVENT_PATH, RECORDER_VERSION_HEADER, daemonRequest, writeJson, header, readJsonBody, recorderSocketPath
 } from './daemon-transport.js'
 import { ownerPath, type DaemonOwner, processAlive, removeOwnedMarker, pathExists } from './daemon-owner.js'
+import { serveCaptureRequest } from './daemon-capture.js'
+import { SESSION_CAPTURE_PROTOCOL } from './session-capture-contract.js'
 
 const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
@@ -192,7 +194,8 @@ export async function listenRecorderDaemon(args: {
     if (idleTimer) clearTimeout(idleTimer)
     try {
       if (request.method === 'GET' && request.url === '/v1/status') {
-        writeJson(response, 200, { running: true, protocol: PROTOCOL_VERSION, recorderVersion: RECORDER_VERSION, pid: process.pid, startedAt, requestCount, errorCount, lastRequestAt })
+        // `captureProtocol` tells CodeLens' guard whether this daemon serves session capture at all.
+        writeJson(response, 200, { running: true, protocol: PROTOCOL_VERSION, captureProtocol: SESSION_CAPTURE_PROTOCOL, recorderVersion: RECORDER_VERSION, pid: process.pid, startedAt, requestCount, errorCount, lastRequestAt })
         return
       }
       if (request.method === 'POST' && request.url === '/v1/stop') {
@@ -226,10 +229,23 @@ export async function listenRecorderDaemon(args: {
         writeJson(response, 400, { ok: false, error: 'invalid provider or event' })
         return
       }
+      const captureMode = header(request, 'x-scry-capture-mode')
+      if (captureMode !== undefined && captureMode !== 'session') {
+        writeJson(response, 400, { ok: false, error: 'unsupported capture mode' })
+        return
+      }
       const { payload, env: requestEnv } = await readJsonBody(request)
+      const hookEnv = applyHookEnvironment(env, requestEnv)
+      if (captureMode === 'session') {
+        await serveCaptureRequest({
+          enablement, provider, event, payload, env: hookEnv, response,
+          recovery: () => scheduleRecovery(true), deliveries: deliveryInFlight
+        })
+        return
+      }
       const result = await handleRecorderHook({
         provider, event, workspace: enablement.workspaceRoot, payload,
-        env: applyHookEnvironment(env, requestEnv), deferDelivery: true
+        env: hookEnv, deferDelivery: true
       })
       scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })

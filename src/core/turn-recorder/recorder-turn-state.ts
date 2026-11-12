@@ -14,6 +14,16 @@ import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
+import { stableTranscript } from './recorder-transcript-cache.js'
+import type { SessionCaptureContext } from './session-capture-contract.js'
+
+/** What the claim itself supplies: the turn identity read from the transcript, not a hook payload. */
+export interface CaptureClaimIdentity {
+  startedAt?: string
+  userText?: string
+  providerTurnId?: string
+  baselineAt?: string
+}
 import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
@@ -33,13 +43,15 @@ export async function beginOpenTurn(
   payload: Record<string, unknown>,
   managedByScry = false,
   staleTerminalProtection = false,
-  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
+  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment,
+  capture?: SessionCaptureContext,
+  claim?: CaptureClaimIdentity
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
   const generation = session.lastGeneration + 1
   const turnIndex = session.lastTurnIndex + 1
-  const prompt = promptOf(payload)
+  const prompt = claim?.userText ?? promptOf(payload)
   const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
   const rawManagedRunId = managedByScry ? stringAt(payload, 'scry_managed_run_id') : undefined
   const rawManagedPromptHash = managedByScry ? stringAt(payload, 'scry_managed_prompt_hash') : undefined
@@ -49,7 +61,7 @@ export async function beginOpenTurn(
   const managedPromptHash = rawManagedPromptHash && /^[a-f0-9]{64}$/.test(rawManagedPromptHash)
     ? rawManagedPromptHash
     : undefined
-  const providerTurnId = providerTurnIdOf(payload, provider)
+  const providerTurnId = claim?.providerTurnId ?? providerTurnIdOf(payload, provider)
   const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? 0 : undefined
@@ -66,8 +78,18 @@ export async function beginOpenTurn(
     generation,
     turnIndex,
     status: 'open',
-    startedAt: timestampOf(payload),
-    startFingerprint: startFingerprintOf(provider, event, payload),
+    startedAt: claim?.startedAt ?? timestampOf(payload),
+    startFingerprint: capture ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
+    ...(capture ? {
+      capture: {
+        protocol: capture.protocol,
+        captureId: capture.captureId,
+        source: capture.source,
+        task: capture.task,
+        openedAt: capture.openedAt,
+        ...(claim?.baselineAt ? { baselineAt: claim.baselineAt } : {})
+      }
+    } : {}),
     ...(enablement.config.capture.prompt && prompt ? { prompt } : {}),
     ...(promptHash ? { promptHash } : {}),
     ...(managedRunId ? { managedRunId } : {}),
@@ -104,6 +126,56 @@ export async function beginOpenTurn(
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   return open
+}
+
+/**
+ * Open the turn a capture claim landed in. The boundary comes from the provider transcript the
+ * claim points at, not from a synthesized UserPromptSubmit: the question this turn already asked
+ * and everything the turn already did stay part of the record, while earlier turns stay out.
+ */
+export async function beginCaptureTurn(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  provider: ProviderId,
+  sessionId: string,
+  context: SessionCaptureContext,
+  transcriptPath: string,
+  payload: Record<string, unknown>
+): Promise<OpenTurnState> {
+  const root = sessionRoot(enablement.dataRoot, provider, sessionId)
+  const open = await readJson<OpenTurnState>(openPath(root))
+  if (open) {
+    // A repeated claim adopts the turn it already opened; the boundary never moves.
+    if (!open.capture) {
+      await writeJsonAtomic(openPath(root), {
+        ...open,
+        capture: {
+          protocol: context.protocol,
+          captureId: context.captureId,
+          source: context.source,
+          task: context.task,
+          openedAt: context.openedAt
+        }
+      }, { sync: false })
+    }
+    return readJson<OpenTurnState>(openPath(root)).then((value) => value ?? open)
+  }
+  const transcript = await stableTranscript(
+    transcriptPath,
+    `${provider}:${sessionId}:capture`,
+    provider,
+    undefined,
+    undefined,
+    0,
+    undefined,
+    sessionId,
+    enablement.workspaceRoot
+  ).catch(() => null)
+  return beginOpenTurn(enablement, provider, sessionId, 'CaptureStart', payload, false, false, undefined, context, {
+    ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
+    ...(transcript?.userText ? { userText: transcript.userText } : {}),
+    ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
+    baselineAt: new Date().toISOString()
+  })
 }
 
 /** A timestamp is usable as an end time only inside this turn's own window. */

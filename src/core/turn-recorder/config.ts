@@ -20,6 +20,13 @@ export interface RecorderConfig {
     orphanGraceHours: number
   }
   capture: {
+    /**
+     * `opt-in` records nothing from ordinary Provider hooks; only an explicitly opened session
+     * (`recorder hook --capture-mode session` with a claimed capture) is recorded. Absent means the
+     * legacy behavior (record every hook this workspace receives). Older readers ignore the key,
+     * which is why the session guard, not this field, is what keeps un-opened sessions silent.
+     */
+    sessions?: 'opt-in'
     prompt: boolean
     assistant: boolean
     toolOutput: 'none' | 'summary' | 'full'
@@ -39,7 +46,7 @@ export interface RecorderCommitHookConfig {
 
 export type RecorderEnablement =
   | { enabled: true; workspaceRoot: string; dataRoot: string; config: RecorderConfig }
-  | { enabled: false; reason: 'sentinel' | 'environment' | 'missing_config' | 'config_disabled' | 'invalid_config'; detail?: string }
+  | { enabled: false; reason: 'sentinel' | 'environment' | 'missing_config' | 'config_disabled' | 'invalid_config' | 'capture_opt_in'; detail?: string }
 
 export type RecorderLocation =
   | { valid: true; workspaceRoot: string; dataRoot: string; config: RecorderConfig }
@@ -92,6 +99,9 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     ...(retentionDays != null ? { retentionDays } : {}),
     orphanGraceHours: boundedStorageInteger(storageRaw.orphanGraceHours, 'storage.orphanGraceHours', 1, 8_760) ?? 24
   } : undefined
+  if (captureRaw.sessions !== undefined && captureRaw.sessions !== 'opt-in') {
+    throw new Error('capture.sessions must be opt-in when present')
+  }
   const patchExcludeBasenames = [...new Set(stringArray(captureRaw.patchExcludeBasenames).map((item) => item.trim()))]
   if (patchExcludeBasenames.some((item) => item.includes('/') || item.includes('\\'))) {
     throw new Error('capture.patchExcludeBasenames entries must be basenames')
@@ -104,7 +114,10 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     ...(commitHook ? { commitHook } : {}),
     repositories: { mode, maxDepth, exclude: stringArray(repositories.exclude) },
     ...(storage ? { storage } : {}),
-    capture: resolveCapture(captureRaw, patchExcludeBasenames)
+    capture: {
+      ...resolveCapture(captureRaw, patchExcludeBasenames),
+      ...(captureRaw.sessions === 'opt-in' ? { sessions: 'opt-in' as const } : {})
+    }
   }
 }
 
@@ -199,9 +212,15 @@ export async function resolveRecorderLocation(workspace: string): Promise<Record
   }
 }
 
+/**
+ * `ordinaryHook` marks a Provider hook that carries no session-capture context. An opt-in workspace
+ * records only sessions that claimed themselves, so such an event is not recorded — it is not a
+ * configuration error either, and diagnostics still see the workspace as enabled.
+ */
 export async function resolveRecorderEnablement(
   workspace: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  ordinaryHook = false
 ): Promise<RecorderEnablement> {
   const workspaceRoot = resolve(workspace)
   if (await exists(join(workspaceRoot, '.scry-disabled'))) return { enabled: false, reason: 'sentinel' }
@@ -209,6 +228,7 @@ export async function resolveRecorderEnablement(
   const location = await resolveRecorderLocation(workspaceRoot)
   if (!location.valid) return { enabled: false, reason: location.reason, detail: location.detail }
   if (!location.config.enabled) return { enabled: false, reason: 'config_disabled' }
+  if (ordinaryHook && location.config.capture.sessions === 'opt-in') return { enabled: false, reason: 'capture_opt_in' }
   return { enabled: true, workspaceRoot: location.workspaceRoot, dataRoot: location.dataRoot, config: location.config }
 }
 
