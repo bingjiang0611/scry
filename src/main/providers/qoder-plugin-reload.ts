@@ -73,15 +73,14 @@ export function runQoderPluginReload(
         onPluginsReloaded()
         const errorCount = Number(result.error_count ?? 0)
         const text = `插件已重载：${result.plugins.length} 个插件，${result.commands.length} 条命令${errorCount > 0 ? `，${errorCount} 个错误` : ''}`
-        request.emit({
-          id: newId(), runId: request.runId, ts: new Date().toISOString(),
-          kind: 'model', stage: 'text', text,
-          runtimeMetadata: { source: 'qoder_sdk_control', localCommand: '/plugins reload' }
-        })
+        // A control answer, not model output: no model event, and the result says so, which
+        // keeps this turn out of `.scry/records` (there is no canonical model turn to commit).
         request.emit(qoderTrace({
           id: newId(), runId: request.runId, ts: new Date().toISOString(),
           kind: 'harness', stage: 'result', text,
           isError: errorCount > 0,
+          providerId: 'qoder', runtimeProvider: 'qoder_cli',
+          providerCommand: { name: 'plugins reload', source: 'control', modelTurn: 'unobserved' },
           runtimeMetadata: { source: 'qoder_sdk_control', localCommand: '/plugins reload' }
         }))
         providerResult = {

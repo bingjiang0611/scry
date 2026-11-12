@@ -212,8 +212,12 @@ export interface TraceEvent {
   providerStopReason?: string
   /** Pi RPC tool result explicitly ended execution; this is not proof of Goal completion. */
   toolTermination?: { tool: string; message: string }
-  /** Pi acknowledged its extension handler without an observed model turn; not an agent_settled result. */
-  providerCommand?: { name: string; source: 'extension'; modelTurn: 'unobserved' }
+  /**
+   * A provider command finished without an observed model turn; not an agent_settled result.
+   * `extension`: Pi acknowledged its extension handler. `control`: Qoder answered an SDK
+   * control request (for example `/plugins reload`), which sends no model input at all.
+   */
+  providerCommand?: { name: string; source: 'extension' | 'control'; modelTurn: 'unobserved' }
   runtimeMetadata?: Record<string, unknown>
   backgroundWork?: BackgroundWork
   intervention?: AgentIntervention

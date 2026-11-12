@@ -59,6 +59,24 @@ describe('providerless terminal recovery regression matrix', () => {
     expect(shouldUseManagedTerminalPersistence(true, { ...turn, items: [] })).toBe(true)
   })
 
+  it('keeps a Qoder control command local, and only that provider/runtime/source triple', () => {
+    const command: TraceEvent = {
+      ...harness, providerId: 'qoder', runtimeProvider: 'qoder_cli', isError: false,
+      providerCommand: { name: 'plugins reload', source: 'control', modelTurn: 'unobserved' }
+    }
+    const turn = { status: 'completed' as const, items: [command] }
+    expect(shouldUseManagedTerminalPersistence(true, turn)).toBe(false)
+    expect(shouldUseManagedTerminalPersistence(false, turn)).toBe(false)
+    for (const items of [
+      [{ ...command, providerCommand: { ...command.providerCommand!, source: 'extension' as const } }],
+      [{ ...command, runtimeProvider: 'pi_rpc' as const }],
+      [{ ...command, providerId: 'pi' as const, runtimeProvider: 'pi_rpc' as const }],
+      [{ ...command, stage: 'runtime:notice' }],
+      [command, { ...harness, kind: 'model' as const, stage: 'text', text: 'reply' }]
+    ]) expect(shouldUseManagedTerminalPersistence(true, { ...turn, items })).toBe(true)
+    expect(shouldUseManagedTerminalPersistence(true, { ...turn, providerTurnId: 'native-turn' })).toBe(true)
+  })
+
   it.each(['failed', 'cancelled', 'interrupted'] as const)('clears %s only in the matching scope, then remains idempotent', async (status) => {
     for (const items of [[], [harness]]) {
       const { root, path, bytes } = await fixture(status, items)

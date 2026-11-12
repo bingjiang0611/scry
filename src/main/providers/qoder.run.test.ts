@@ -118,16 +118,17 @@ describe('Qoder provider adapter · managed runs, plugins and commands', () => {
     expect(reloadPlugins).toHaveBeenCalledOnce()
     expect(sdk.query.mock.calls[0][0].prompt).not.toBe('/plugins reload')
     expect(result).toMatchObject({ externalSessionId: 'qoder-session', status: 'completed' })
-    expect(events).toContainEqual(expect.objectContaining({
-      kind: 'model',
-      stage: 'text',
-      text: '插件已重载：1 个插件，11 条命令',
-      runtimeMetadata: expect.objectContaining({ source: 'qoder_sdk_control' })
-    }))
+    // A control answer is not model output: nothing may claim a model turn happened.
+    expect(events.filter((event) => event.kind === 'model')).toEqual([])
     expect(events).toContainEqual(expect.objectContaining({
       kind: 'harness',
       stage: 'result',
-      isError: false
+      text: '插件已重载：1 个插件，11 条命令',
+      isError: false,
+      providerId: 'qoder',
+      runtimeProvider: 'qoder_cli',
+      providerCommand: { name: 'plugins reload', source: 'control', modelTurn: 'unobserved' },
+      runtimeMetadata: expect.objectContaining({ localCommand: '/plugins reload' })
     }))
   })
 

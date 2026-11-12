@@ -44,6 +44,21 @@ it.each([
     expect(rendered).not.toContain('Pi 命令')
     if (isError) expect(rendered).toContain(`${label} · 错误`)
   })
+it('Qoder 控制命令结果按命令反馈展示，其他 Provider 或缺少命令标记时不冒充', () => {
+    const command = ev({
+      id: 'qoder-reload', kind: 'harness', stage: 'result', providerId: 'qoder', runtimeProvider: 'qoder_cli',
+      text: '插件已重载：1 个插件，2 条命令', providerCommand: { name: 'plugins reload', source: 'control', modelTurn: 'unobserved' }
+    })
+    const render = (item: typeof command) => renderToStaticMarkup(
+      <AssistantTurn turn={{ runId: 'qoder-reload', userText: '/plugins reload', done: true, items: [item] }} selectedId={null} onSelect={() => {}} />
+    )
+    const rendered = render(command)
+    expect(rendered).toContain('aria-label="Qoder 命令反馈"')
+    expect(rendered).toContain('插件已重载：1 个插件，2 条命令')
+    for (const other of [{ ...command, providerCommand: undefined }, { ...command, providerId: 'codex' as const, runtimeProvider: 'codex_cli' as const }]) {
+      expect(render(other)).not.toContain('命令反馈')
+    }
+  })
 it('routes abbreviated file links through their own turn evidence, not another turn or the active project', () => {
     const historyTurn: Turn = {
       runId: 'history-links', cwd: '/repo', userText: '设计原型', done: true,

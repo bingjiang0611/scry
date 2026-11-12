@@ -89,19 +89,26 @@ export function isProviderlessTerminalTurn(
   return turn.items.every((item) => item.kind === 'harness')
 }
 
+/** Only these provider/runtime/source triples can end a turn with a command and no model turn. */
+function isProviderCommandResult(item: TraceArchiveTurn['items'][number]): boolean {
+  const command = item.providerCommand
+  if (item.kind !== 'harness' || item.stage !== 'result' || command?.modelTurn !== 'unobserved') return false
+  return (item.providerId === 'pi' && item.runtimeProvider === 'pi_rpc' && command.source === 'extension') ||
+    (item.providerId === 'qoder' && item.runtimeProvider === 'qoder_cli' && command.source === 'control')
+}
+
 /**
  * A managed Provider failure before its native turn boundary has no canonical turn to commit.
- * Keep that diagnostic turn, or an acknowledged Pi command without a model turn, in Scry's
- * local progress/archive path. Neither is a canonical model turn in `.scry/records`.
+ * Keep that diagnostic turn, or an acknowledged provider command without a model turn (a Pi
+ * extension command, a Qoder SDK control command), in Scry's local progress/archive path.
+ * Neither is a canonical model turn in `.scry/records`.
  */
 export function shouldUseManagedTerminalPersistence(
   managedPolicy: boolean,
   turn: Pick<TraceArchiveTurn, 'status' | 'items' | 'providerTurnId' | 'forkTurnId'>
 ): boolean {
   const commandOnly = !turn.providerTurnId && !turn.forkTurnId &&
-    turn.items.some((item) => item.kind === 'harness' && item.stage === 'result' &&
-      item.providerId === 'pi' && item.runtimeProvider === 'pi_rpc' &&
-      item.providerCommand?.source === 'extension' && item.providerCommand.modelTurn === 'unobserved') &&
+    turn.items.some(isProviderCommandResult) &&
     !turn.items.some((item) => item.kind === 'model' || item.kind === 'agent' || item.kind === 'tool')
   return managedPolicy && !isProviderlessTerminalTurn(turn) && !commandOnly
 }
