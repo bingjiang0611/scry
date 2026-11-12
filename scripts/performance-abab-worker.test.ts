@@ -22,13 +22,20 @@ type Stage = {
   endedAtMs: number
   provenance: 'vitest-mock-real-call'
 }
-type BatchContext = { side: string; scenario: string; batchId: string; startedAtMs: number; stages: Stage[]; droppedStageCount: number }
+type StageTotals = Record<string, { count: number; totalMs: number; maxMs: number }>
+type BatchContext = { side: string; scenario: string; batchId: string; startedAtMs: number; stages: Stage[]; stageTotals: StageTotals; droppedStageCount: number }
 let batchContext: BatchContext | undefined
 const stageLimit = 256
 
 function recordStage(context: BatchContext | undefined, kind: string, operation: string, startedAtMs: number): void {
   if (!context) return
   const endedAtMs = performance.now()
+  const durationMs = Math.max(0, endedAtMs - startedAtMs)
+  // Aggregate every observed API call; only the detailed intervals are capped.
+  const total = context.stageTotals[kind] ??= { count: 0, totalMs: 0, maxMs: 0 }
+  total.count++
+  total.totalMs += durationMs
+  total.maxMs = Math.max(total.maxMs, durationMs)
   if (context.stages.length >= stageLimit) {
     context.droppedStageCount++
     return
@@ -39,7 +46,7 @@ function recordStage(context: BatchContext | undefined, kind: string, operation:
     batchId: context.batchId,
     kind,
     operation,
-    durationMs: Math.max(0, endedAtMs - startedAtMs),
+    durationMs,
     startedAtMs,
     endedAtMs,
     provenance: 'vitest-mock-real-call'
@@ -135,6 +142,7 @@ type Batch = {
   endedAtMs: number
   counters: Record<string, number>
   stages: Stage[]
+  stageTotals: StageTotals
   droppedStageCount: number
   cpuUserMs: number
   cpuSystemMs: number
@@ -173,7 +181,7 @@ async function runBatch(request: Request): Promise<Batch> {
   const cpuBefore = process.cpuUsage()
   const loopBefore = performance.eventLoopUtilization()
   const startedAtMs = performance.now()
-  const context: BatchContext = { side, scenario: request.scenario, batchId: request.batchId, startedAtMs, stages: [], droppedStageCount: 0 }
+  const context: BatchContext = { side, scenario: request.scenario, batchId: request.batchId, startedAtMs, stages: [], stageTotals: {}, droppedStageCount: 0 }
   batchContext = context
   let counters: Record<string, number> | undefined
   try {
@@ -189,7 +197,7 @@ async function runBatch(request: Request): Promise<Batch> {
   return {
     scenario: request.scenario, batchId: request.batchId, side,
     durationMs: (endedAtMs - startedAtMs) / scenario.iterations, startedAtMs, endedAtMs,
-    counters, stages: context.stages, droppedStageCount: context.droppedStageCount,
+    counters, stages: context.stages, stageTotals: context.stageTotals, droppedStageCount: context.droppedStageCount,
     cpuUserMs: cpu.user / 1000, cpuSystemMs: cpu.system / 1000,
     eventLoopActiveMs: loop.active, eventLoopIdleMs: loop.idle
   }
@@ -227,7 +235,7 @@ function artifact(): Record<string, unknown> {
       garbageCollections,
       droppedGarbageCollections,
       stageDurationsAreNotExclusiveWallTime: true,
-      stageCoverage: 'listed sync and async fs APIs and Git execFile calls in the benchmark worker; excludes FileHandle methods and child-internal syscalls; droppedStageCount marks capped batches'
+      stageCoverage: 'listed sync and async fs APIs and Git execFile calls in the benchmark worker; excludes FileHandle methods and child-internal syscalls; stageTotals aggregates every observed call, while droppedStageCount marks capped detailed intervals'
     }
   }
 }

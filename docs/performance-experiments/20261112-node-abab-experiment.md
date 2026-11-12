@@ -19,7 +19,7 @@
 
 benchmark-only wrapper调用真实 fs与execFile，保留参数、返回、错误以及promisified execFile的原Promise/child属性。它记录命名同步/异步fs API和真实Git命令区间，不改产品代码。普通Node/shell exec不冒充Git。
 
-每批最多256个stage，超过后明确记录droppedStageCount；GC最多512条并记录丢弃数。区间可能并发，不能把duration之和当作独占总耗时。覆盖范围不包括FileHandle方法、native模块与子进程内部syscall，不是完整文件审计。若待分析峰值对应批次有丢弃或残余时间无法归因，应增加按操作聚合或定向FileHandle诊断，再作根因结论；不能用未记录解释为“没有操作”。
+每批最多256个详细stage，超过后明确记录droppedStageCount；触发上限后已增加stageTotals，对所有被观测调用按固定的Git/file/process三类保留完整count、非独占totalMs和maxMs，不截断汇总。GC最多512条并记录丢弃数。区间可能并发，不能把duration之和当作独占总耗时。覆盖范围不包括FileHandle方法、native模块与子进程内部syscall，不是完整文件审计。若待分析峰值对应批次有丢弃或残余时间无法归因，应增加按操作聚合或定向FileHandle诊断，再作根因结论；不能用未记录解释为“没有操作”。
 
 ## 验证设计
 
@@ -55,7 +55,7 @@ A：`5a63338480769aa9cd12abd0254aa17fc31f3a96`；B：`a0672e0f9bf1b3438b761adfc5
 | 3 | A / A6 | 116.399 | 122.118 | 3.663 | 0 |
 | 3 | B / B1 | 122.130 | 130.848 | 4.836 | 0 |
 
-persistence.archive与workspace.files每侧每轮分别丢弃20680、15640条详细stage；这些场景的逐操作区间是partial，不能据此对完整文件阶段作根因结论。三个round的GC丢弃数均0。批次总耗时和20个原样本仍完整。若需归因这两个场景，应先增加全量按操作聚合，再扩大详细区间采集。
+persistence.archive与workspace.files每侧每轮分别丢弃20680、15640条详细stage；这些场景的逐操作区间是partial，不能据此对完整文件阶段作根因结论。三个round的GC丢弃数均0。批次总耗时和20个原样本仍完整。这是a0672e0f初版的限制；后续已增加不截断的阶段汇总，补测结果另列，原三轮不覆盖。
 
 ### 全部场景 P95 / 原公式门限（ms）
 
