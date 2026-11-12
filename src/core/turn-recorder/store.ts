@@ -6,6 +6,7 @@ import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn
 import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs } from './store-index.js'
+import { applyRecordContentBudget } from './record-content-budget.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
@@ -13,7 +14,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, type C
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.66'
+export const RECORDER_VERSION = '0.2.67'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -57,7 +58,9 @@ export async function commitRecord(
     // acknowledged ones), which cannot be re-committed.
     const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
     const sequence = await nextSequence(dataRoot, { liveMax: files.at(-1)?.sequence ?? 0, archivedThrough })
-    const record: AgentTurnRecord = { ...draft, sequence }
+    // Both the App-managed path and the standalone CLI publish here, so one convergence point keeps
+    // every committed record inside the transport envelope the receiver validates.
+    const record = applyRecordContentBudget({ ...draft, sequence })
     const validation = validateAgentTurnRecord(record)
     if (!validation.ok) {
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
