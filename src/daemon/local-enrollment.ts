@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:net'
+import { trackConnections } from './socket-server-close'
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { timingSafeEqual, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
@@ -129,6 +130,8 @@ export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): 
         })
     })
   })
+  // Tracked from the first connection, so close() can end every one of them.
+  const tracked = trackConnections(server)
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(socketPath, () => { server.off('error', reject); resolve() })
@@ -142,8 +145,10 @@ export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): 
   return {
     socketPath,
     close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      // Stop accepting and free the path first; then end what is still connected.
+      const closing = tracked.close()
       rmSync(socketPath, { force: true })
+      await closing
     }
   }
 }
