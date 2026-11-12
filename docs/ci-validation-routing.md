@@ -33,7 +33,7 @@ Ubuntu 保持 `ubuntu-latest`。`packaged-linux` 已优先加入 kernel.org Ubun
 
 `scripts/ui-ready.mjs` 提供同一个被动等待：文档/正文加载、面板实际可见、目标会话匹配可组合在同一断言中；reload/restart 可同时要求不同的 `performance.timeOrigin`。它复用各 harness 原有 deadline，不重试失败、不增加超时、不点击或重建目标。CDP reload 先等 `Page.loadEventFired`，避免在旧 execution context 中等待一个不可能改变的文档 epoch；加载和就绪共用原 deadline，保留 crash 事件失败。
 
-桌面远程场景统一从该等待进入；正文历史、右面板与 host reload，以及本机 side-chat 的面板、正文、theme reload、restart/workbench 共用此函数。专门验证 loading/preview 的用例不强制等到 authoritative，以免跳过要测试的中间状态。恢复检查在读持久化状态前不打开 child/history 来“修复”现场。
+桌面远程场景统一从该等待进入；正文历史、右面板与 host reload，以及本机 side-chat 的面板、正文、theme reload、restart/workbench 和统一对话的进入、reload、正文底部跟随共用此函数。缩放后的滚动就绪检查等待实际底部位置，不用固定帧数，不代替产品执行滚动；原有 overflow/底部跟随/用户滚离后的定位断言保留。专门验证 loading/preview 的用例不强制等到 authoritative，以免跳过要测试的中间状态。恢复检查在读持久化状态前不打开 child/history 来“修复”现场。
 
 现有 Node/Electron 子进程失败仍输出退出码或 signal 与 stderr 尾部；回归测试覆盖 `-11`、`SIGSEGV` 与 Python 栈文本不会被改成成功或重试。CI 设置 `PYTHONFAULTHANDLER=1`，让 Python 子进程在 signal 11 崩溃时输出栈。仓库中没有找到旧的 Python `-11` 专用诊断实现，因此不能声称已验证某个 Python 调用链；不删除或替换已有诊断。
 

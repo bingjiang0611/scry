@@ -17,7 +17,7 @@ export function createUiReady(wait) {
 
 // Page.reload only acknowledges dispatch. Start renderer-side readiness after
 // loadEventFired, not inside the execution context navigation is about to destroy.
-export async function reloadUi(cdp, ready, options) {
+export async function reloadUi(cdp, ready, options, reloadParams = {}) {
   const timeoutMs = options.timeoutMs ?? 20000
   const deadline = Date.now() + timeoutMs
   await cdp.send('Page.enable')
@@ -31,7 +31,7 @@ export async function reloadUi(cdp, ready, options) {
     timer = setTimeout(() => reject(new Error('Renderer reload did not finish before its readiness deadline')), timeoutMs)
   })
   try {
-    await Promise.all([loaded, cdp.send('Page.reload', {})])
+    await Promise.all([loaded, cdp.send('Page.reload', reloadParams)])
     await ready({ ...options, timeoutMs: Math.max(1, deadline - Date.now()) })
   } finally {
     clearTimeout(timer)

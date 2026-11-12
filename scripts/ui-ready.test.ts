@@ -74,14 +74,28 @@ function cdpFixture() {
 it('does not start readiness in the old context when reload only acknowledges dispatch', async () => {
   const { cdp, emit, listeners } = cdpFixture()
   const ready = vi.fn(async () => undefined)
-  const pending = reloadUi(cdp, ready, { documentEpoch: 1, target: 'restored', timeoutMs: 30000 })
-  await vi.waitFor(() => expect(cdp.send).toHaveBeenCalledWith('Page.reload', {}))
+  const pending = reloadUi(cdp, ready, { documentEpoch: 1, target: 'restored', timeoutMs: 30000 }, { ignoreCache: true })
+  await vi.waitFor(() => expect(cdp.send).toHaveBeenCalledWith('Page.reload', { ignoreCache: true }))
   expect(ready).not.toHaveBeenCalled()
   emit('Page.loadEventFired')
   await pending
   expect(ready).toHaveBeenCalledWith({ documentEpoch: 1, target: 'restored', timeoutMs: expect.any(Number) })
   expect(ready.mock.calls[0][0].timeoutMs).toBeLessThanOrEqual(30000)
   expect(listeners.size).toBe(0)
+})
+
+it('waits for actual bottom following after resize without scrolling on the test behalf', async () => {
+  const scroller = { scrollHeight: 687, clientHeight: 365, scrollTop: 96, scrollTo: vi.fn() }
+  const wait = vi.fn(async (expression: string) => {
+    const context = { document: { readyState: 'complete', body: {}, querySelector: () => scroller } }
+    expect(runInNewContext(expression, context)).toBe(false)
+    // A delayed ResizeObserver pin, not a fixed number of frames in the test.
+    scroller.scrollTop = 322
+    expect(runInNewContext(expression, context)).toBe(true)
+  })
+  await createUiReady(wait)({ body: "(() => { const el = document.querySelector('.chat'); return el && el.scrollHeight - el.clientHeight - el.scrollTop < 2 })()" })
+  expect(scroller.scrollTo).not.toHaveBeenCalled()
+  expect(wait).toHaveBeenCalledOnce()
 })
 
 it('reports a renderer crash during reload, without readiness retry or a leaked listener', async () => {

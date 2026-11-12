@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
 import { exerciseConversationFork } from './conversation-fork-smoke.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
+import { CONVERSATION_AT_LATEST as atLatest, exerciseConversationScroll } from './conversation-scroll-checks.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
 import { exercisePiAgentSwitch, exerciseConversationImages } from './conversation-agent-switch-smoke.mjs'
 import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
@@ -13,8 +15,8 @@ import { exerciseConversationDeletion, verifyConversationDeletionRestart } from 
 const json = JSON.stringify
 const inputs = (fixture) => existsSync(fixture.inputsFile) ? readFileSync(fixture.inputsFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : []
 const ledger = (fixture, id) => JSON.parse(readFileSync(join(fixture.userData, 'conversations', `${id}.json`), 'utf8'))
-const wait = async (probe, label) => {
-  const deadline = Date.now() + 20_000
+const wait = async (probe, label, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const result = await probe()
     if (result) return result
@@ -35,7 +37,8 @@ const sendRequest = (view, commandId, prompt, selectedItems = view.missingItems.
 })
 
 export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
-  await wait(() => evaluate(`Boolean(window.scry?.conversations && document.querySelector('.sidebar'))`), 'production App ready')
+  const ready = createUiReady((expression, timeoutMs) => wait(() => evaluate(expression), expression, timeoutMs))
+  await ready({ body: "Boolean(window.scry?.conversations && document.querySelector('.sidebar'))" })
   const click = async (selector) => {
     if (await evaluate(`Boolean(document.querySelector(${json(selector)})?.closest('.conversation-options:not([open]) .unified-management'))`)) {
       await click('.conversation-options > summary')
@@ -112,20 +115,15 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId === ${json(id)}`), 'return to original draft')
   assert.equal(await evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value`), 'desktop remote write one')
   const documentEpoch = await evaluate('performance.timeOrigin')
-  await cdp.send('Page.enable')
-  await cdp.send('Page.reload', { ignoreCache: true })
-  await wait(async () => {
-    try { return await evaluate(`performance.timeOrigin !== ${documentEpoch} && Boolean(window.scry?.conversations && document.querySelector('.sidebar'))`) }
-    catch (error) {
-      if (/context.*destroyed|Cannot find.*context|Inspected target navigated/i.test(String(error))) return false
-      throw error
-    }
-  }, 'renderer reload')
+  await reloadUi(cdp, ready, {
+    documentEpoch,
+    body: "Boolean(window.scry?.conversations && document.querySelector('.sidebar'))"
+  }, { ignoreCache: true })
   await wait(() => evaluate(`Boolean(document.querySelector(${json(rootSelector)}))`), 'workspace after reload')
   if (!await evaluate(`document.querySelector(${json(rootSelector)}).getAttribute('aria-expanded') === 'true'`)) await click(rootSelector)
   await wait(() => evaluate(`Boolean(document.querySelector(${json(originalEntry)}))`), 'logical entry after reload')
   await click(originalEntry)
-  await wait(() => evaluate(`document.querySelector('.unified-conversation')?.dataset.conversationId === ${json(id)}`), 'draft restored after reload')
+  await ready({ documentEpoch, target: `document.querySelector('.unified-conversation')?.dataset.conversationId === ${json(id)}` })
   assert.equal(await evaluate(`document.querySelector('textarea[aria-label="描述任务"]').value`), 'desktop remote write one')
   assert.equal(inputs(fixture).length, 0, 'switching and reloading drafts must not send')
   await evaluate(`window.__unifiedLegacyFocus = []; window.scry.onFocusedRun(run => window.__unifiedLegacyFocus.push(run.runId))`)
@@ -159,43 +157,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   assert.equal(second.turns[1].providerId, 'codex')
   assert.equal(readFileSync(join(fixture.workspace, 'remote-second.txt'), 'utf8'), 'remote-second.txt\n')
 
-  const atLatest = `(() => { const el=document.querySelector('.conversation-chat .chat'); return el && el.scrollHeight-el.clientHeight-el.scrollTop < 2 })()`
-  await wait(() => evaluate(`document.querySelectorAll('.conversation-chat .turn').length === 2 && ${atLatest}`), 'new output follows the transcript bottom')
-  // The bottom-follow policy allows 32px of slack, so this check only means something when the
-  // transcript really scrolls: two turns do not overflow every viewport, so shrink until they do.
-  const geometry = () => evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return {
-    atLatest: ${atLatest}, scrollHeight: el?.scrollHeight ?? null,
-    clientHeight: el?.clientHeight ?? null, scrollTop: el?.scrollTop ?? null,
-    viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
-    turns: document.querySelectorAll('.conversation-chat .turn').length
-  } })()`)
-  const overflowing = (state) => state.scrollHeight - state.clientHeight > 32
-  let initialScrollState
-  try {
-    // Shrink only while the transcript cannot scroll. A viewport that already scrolls is the
-    // one this check is about, so a lost bottom-follow there must fail instead of shrinking on.
-    for (const height of [700, 640, 560]) {
-      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1, mobile: false })
-      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-      initialScrollState = await geometry()
-      if (overflowing(initialScrollState)) break
-    }
-    assert.ok(overflowing(initialScrollState), `the transcript must overflow to test bottom following: ${JSON.stringify(initialScrollState)}`)
-    assert.ok(initialScrollState.atLatest, `scrollable transcript follows the bottom: ${JSON.stringify(initialScrollState)}`)
-    const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.conversation-chat .chat').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelPoint, deltaX: 0, deltaY: -10000 })
-    await wait(() => evaluate(`document.querySelector('.conversation-chat .chat').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
-    for (const height of [760, 640]) {
-      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1, mobile: false })
-      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-      const position = await evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight } })()`)
-      assert.equal(position.top, 0, `layout changes must preserve the user reading older output: ${JSON.stringify(position)}`)
-    }
-  } catch (error) {
-    // Keep the first failure and distinguish no overflow from lost bottom-follow.
-    console.error('[scry] initial transcript scroll geometry', initialScrollState)
-    throw error
-  } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
+  await exerciseConversationScroll({ cdp, evaluate, ready, wait, conversationId: id })
 
   const aPreview = await preview(evaluate, id, 'claude')
   assert.equal(aPreview.continuation.kind, 'resume')
