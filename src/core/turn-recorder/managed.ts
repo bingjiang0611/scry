@@ -6,12 +6,15 @@ import { isAgentTurnRecord, type TurnEvidence, type AgentTurnRecord } from '../.
 import { resolveRecorderEnablement } from './config.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState, recorderOpenPath, SESSION_LOCK_WAIT_MS, recorderPendingHealth, recorderQuarantinedOpenTurns, type RecorderSessionState, recorderStatePath } from './runtime-state.js'
-import { clearRuntimeTurn, updateHealth, commitRecord, drainCommitNotifications, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type CommitNotificationScope } from './store.js'
-import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, applyCapturePolicy, CONTENT_MISSING_REASON, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, type ManagedTurnTiming } from './managed-evidence.js'
+import { clearRuntimeTurn, updateHealth, commitRecord } from './store.js'
+import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, applyCapturePolicy, CONTENT_MISSING_REASON, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, resolveRecordContentRefs, type ManagedTurnTiming } from './managed-evidence.js'
 import { recordById, recordByProviderTurnId, advanceProviderTurnIndex } from './managed-index.js'
+import { applyRecordContentBudget } from './record-content-budget.js'
 import { reserveCanonicalJournalRecovery } from './managed-recovery.js'
+import { type CommitNotificationDelivery, deliverCommitNotifications, recordKeepsToolBodies } from './managed-notifications.js'
 export { type ManagedTurnTiming, type ManagedRecorderProviderId, isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, isManagedProviderRuntimePair, type PrepareManagedTurnInput, type ManagedTurnResult, type ManagedTurnCancellationResult } from './managed-evidence.js'
 export { recoverManagedRecorderTurns } from './managed-recovery.js'
+export { type CommitNotificationDelivery, deliverCommitNotifications } from './managed-notifications.js'
 
 
 export function canonicalPath(root: string, generation: number): string {
@@ -263,9 +266,18 @@ export async function commitHandoff(
 ): Promise<Extract<ManagedTurnResult, { status: 'committed' | 'duplicate' }>> {
   if (handoff.phase !== 'archive_committed') throw new Error('managed recorder handoff archive is not committed')
   if (!isAgentTurnRecord({ ...handoff.record, sequence: 1 })) throw new Error('managed recorder handoff contains an invalid record')
-  const committed = await commitRecord(enablement.dataRoot, handoff.record, handoff.uploadEnvironment)
+  // 提交前最后一道不变式：引用必须在本库可解析，否则先落盘内联正文或降级。旧版本准备的 handoff
+  // 与恢复路径也走这里，所以去重比较用归一化后的表示——与本次真正要提交的记录一致。
+  const { record, resolution } = await resolveRecordContentRefs(handoff.record, enablement.dataRoot)
+  // `commitRecord` 还会按传输信封收缩这份记录。同一份收缩必须发生在比较之前，否则崩溃后重放一份
+  // 超限的 handoff 会因为“存下来的记录与 handoff 不同”而报错，而不是命中 duplicate。
+  const budgeted = applyRecordContentBudget(record)
+  const resolvedHandoff = resolution.restored + resolution.unavailable + (budgeted === record ? 0 : 1) > 0
+    ? { ...handoff, record: budgeted }
+    : handoff
+  const committed = await commitRecord(enablement.dataRoot, budgeted, handoff.uploadEnvironment)
   if (committed.status === 'duplicate') {
-    assertCommittedRecordMatchesHandoff(committed.record, handoff)
+    assertCommittedRecordMatchesHandoff(committed.record, resolvedHandoff)
   }
   await advanceProviderTurnIndex(enablement.dataRoot, root, committed.record)
   const session = await readJson<RecorderSessionState>(recorderStatePath(root)) ?? {
@@ -292,41 +304,6 @@ export async function commitHandoff(
     lastError: undefined
   })
   return { status: committed.status, recordId: committed.record.recordId, record: committed.record }
-}
-
-/**
- * 提交通知的投递位置。`await` 用于 CLI/recover：进程随后就退出，必须先把这一批投递完。
- * `detach` 用于常驻 App：record 已经落盘，向仓库回调投递只是下游观测，绝不能挂在用户看到
- * 轮次收口之前——每条通知都要起一次仓库回调进程，积压时会把“运行中”拖到分钟级。剩余积压由
- * 下一次 hook、`recorder recover` 或 `recorder notify-drain` 继续投递，ACK 游标是持久化的，
- * 因此不会丢证据。
- */
-export type CommitNotificationDelivery = 'await' | 'detach'
-
-export async function deliverCommitNotifications(
-  dataRoot: string,
-  env: NodeJS.ProcessEnv | undefined,
-  delivery: CommitNotificationDelivery,
-  scope?: CommitNotificationScope
-): Promise<void> {
-  const drain = (): Promise<unknown> => drainCommitNotifications(dataRoot, env, {
-    maxRecords: HOOK_DRAIN_MAX_RECORDS,
-    budgetMs: HOOK_DRAIN_BUDGET_MS,
-    ...(scope ? { scope } : {})
-  })
-  if (delivery === 'detach') {
-    void drain().catch(() => undefined)
-    return
-  }
-  await drain()
-}
-
-function recordKeepsToolBodies(record: AgentTurnRecord): boolean {
-  // Presence, not content: a full-policy turn whose body was lost keeps the omitted envelope, while
-  // the summary policy removes the output field entirely.
-  return [record.tools, record.skills, record.mcps]
-    .flatMap((section) => section.value ?? [])
-    .some((call) => 'outputContent' in call)
 }
 
 export async function commitManagedRecorderTurn(input: {

@@ -4,9 +4,30 @@ import { type ServerResponse, type IncomingMessage, request as httpRequest } fro
 import { tmpdir } from 'node:os'
 import { isAbsolute, resolve, join } from 'node:path'
 import { type ProviderId } from '../../shared/provider.js'
+import { RECORDER_VERSION } from './store.js'
 
 
 export const PROTOCOL_VERSION = '2'
+/**
+ * Versioned event endpoint. A daemon older than this path answers 404, and a daemon of another
+ * version answers 409 before it applies anything: both tell the hook that the event was not
+ * applied, so replacing the owner cannot lose or double-apply it.
+ */
+export const HOOK_EVENT_PATH = '/v2/hook'
+/** The hook's own recorder version, checked before an event is applied. */
+export const RECORDER_VERSION_HEADER = 'x-scry-recorder-version'
+
+/** A completed daemon response that proves the event was not applied. */
+export class RecorderHookRejected extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly detail: string,
+    /** 404 = legacy daemon without the versioned path; 409 = explicit version handshake refusal. */
+    readonly replaceDaemon: boolean
+  ) {
+    super(`recorder daemon rejected hook (${statusCode}): ${detail}`)
+  }
+}
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_SOCKET_BYTES = 100
 
@@ -132,10 +153,11 @@ export async function sendRecorderDaemonHook(args: {
   const socketPath = recorderSocketPath(args.workspace, args.env)
   const response = await daemonRequest(socketPath, {
     method: 'POST',
-    path: '/v1/hook',
+    path: HOOK_EVENT_PATH,
     timeoutMs: args.timeoutMs ?? 5_000,
     headers: {
       'x-scry-protocol': PROTOCOL_VERSION,
+      [RECORDER_VERSION_HEADER]: RECORDER_VERSION,
       'x-scry-provider': args.provider,
       'x-scry-event': args.event,
       'content-type': 'application/octet-stream'
@@ -143,7 +165,11 @@ export async function sendRecorderDaemonHook(args: {
     body: encodeHookEnvironment(args.env ?? process.env, args.payload)
   })
   if (response.statusCode < 200 || response.statusCode >= 300 || response.body.ok !== true) {
-    throw new Error(`recorder daemon rejected hook (${response.statusCode}): ${String(response.body.error ?? 'missing ACK')}`)
+    throw new RecorderHookRejected(
+      response.statusCode,
+      String(response.body.error ?? 'missing ACK'),
+      response.statusCode === 404 || response.statusCode === 409
+    )
   }
   return response.body
 }

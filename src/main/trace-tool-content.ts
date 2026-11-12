@@ -1,9 +1,10 @@
-import { createHash } from 'node:crypto'
-import { join } from 'node:path'
 import type { TraceEvent } from '../shared/trace'
 import { isToolContentRef, type RecorderContentPageRequest } from '../shared/tool-content'
 import { persistToolEventContent } from '../core/turn-recorder/tool-content'
+import { appTraceContentRoot } from '../core/turn-recorder/app-trace-content'
 import { readRecorderContentPage, writeRecorderContentCopies } from '../core/turn-recorder/content-store'
+
+export { appTraceContentRoot }
 
 export const APP_TRACE_CONTENT_SOURCE = 'scry_app_trace'
 export const TRACE_TOOL_CONTENT_POLICY = {
@@ -14,9 +15,6 @@ export const TRACE_TOOL_CONTENT_POLICY = {
 
 // The main process supplies a catalog-authorized canonical cwd, never a renderer path.
 // Separate roots keep even a known digest from granting access to another workspace.
-export function appTraceContentRoot(userDataDir: string, cwd: string): string {
-  return join(userDataDir, 'trace-content-v1', createHash('sha256').update(cwd).digest('hex'))
-}
 
 /**
  * A workspace recorder owns the turn: its store must hold every body the record keeps. Tool input is

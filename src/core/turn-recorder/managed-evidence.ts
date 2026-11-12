@@ -271,5 +271,7 @@ export {
   applyCapturePolicy,
   degradedSection,
   isDegradedContent,
-  type CaptureTrim
+  resolveRecordContentRefs,
+  type CaptureTrim,
+  type ContentResolution
 } from './managed-capture.js'
