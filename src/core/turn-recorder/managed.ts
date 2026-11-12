@@ -9,6 +9,7 @@ import { recorderTurnRoot, recorderSessionRoot, withRecorderSessionLock, type Re
 import { clearRuntimeTurn, updateHealth, commitRecord } from './store.js'
 import { type ManagedRecorderProviderId, type ManagedTurnCancellationResult, type ManagedTurnHandoff, type EnabledRecorder, assertStrictCapture, type PrepareManagedTurnInput, type ManagedTurnResult, assertProtectedToolEvidence, applyCapturePolicy, CONTENT_MISSING_REASON, assertExactText, assertOptionalAssistantText, assertTiming, assertDuplicateMatchesInput, managedProvisionalMatches, managedRecorderAllowsMissingProviderTurnId, recordDraft, assertCommittedRecordMatchesHandoff, resolveRecordContentRefs, type ManagedTurnTiming } from './managed-evidence.js'
 import { recordById, recordByProviderTurnId, advanceProviderTurnIndex } from './managed-index.js'
+import { applyRecordContentBudget } from './record-content-budget.js'
 import { reserveCanonicalJournalRecovery } from './managed-recovery.js'
 import { type CommitNotificationDelivery, deliverCommitNotifications, recordKeepsToolBodies } from './managed-notifications.js'
 export { type ManagedTurnTiming, type ManagedRecorderProviderId, isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, isManagedProviderRuntimePair, type PrepareManagedTurnInput, type ManagedTurnResult, type ManagedTurnCancellationResult } from './managed-evidence.js'
@@ -268,8 +269,13 @@ export async function commitHandoff(
   // 提交前最后一道不变式：引用必须在本库可解析，否则先落盘内联正文或降级。旧版本准备的 handoff
   // 与恢复路径也走这里，所以去重比较用归一化后的表示——与本次真正要提交的记录一致。
   const { record, resolution } = await resolveRecordContentRefs(handoff.record, enablement.dataRoot)
-  const resolvedHandoff = resolution.restored + resolution.unavailable > 0 ? { ...handoff, record } : handoff
-  const committed = await commitRecord(enablement.dataRoot, record, handoff.uploadEnvironment)
+  // `commitRecord` 还会按传输信封收缩这份记录。同一份收缩必须发生在比较之前，否则崩溃后重放一份
+  // 超限的 handoff 会因为“存下来的记录与 handoff 不同”而报错，而不是命中 duplicate。
+  const budgeted = applyRecordContentBudget(record)
+  const resolvedHandoff = resolution.restored + resolution.unavailable + (budgeted === record ? 0 : 1) > 0
+    ? { ...handoff, record: budgeted }
+    : handoff
+  const committed = await commitRecord(enablement.dataRoot, budgeted, handoff.uploadEnvironment)
   if (committed.status === 'duplicate') {
     assertCommittedRecordMatchesHandoff(committed.record, resolvedHandoff)
   }

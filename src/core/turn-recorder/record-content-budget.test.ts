@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { isAgentTurnRecord } from '../../shared/turn-record.js'
 import type { ToolContent, ToolContentRef } from '../../shared/tool-content.js'
 import { commitRecord } from './store.js'
+import { readRecorderContent, writeRecorderContent } from './content-store.js'
 import {
   CONTENT_ENVELOPE_REASON,
   RECORDER_CONTENT_MAX_BYTES,
@@ -13,6 +14,7 @@ import {
   RECORDER_INLINE_PREVIEW_BYTES,
   RECORDER_TRANSPORT_MAX_BYTES,
   applyRecordContentBudget,
+  recordContentRefs,
   recordTransportBytes
 } from './record-content-budget.js'
 
@@ -239,9 +241,19 @@ describe('record content budget at the shared commit boundary', () => {
     expect(Buffer.byteLength(file.patch!)).toBeLessThanOrEqual(RECORDER_INLINE_PREVIEW_BYTES)
     expect(file.patchContent!.storage).toBe('truncated')
     expect(file.patchStatus).toBe('truncated')
+    // 这个 patch 现在只剩预览，diff 分区不能再声称 exact：证据状态必须跟着实际可读范围走。
+    expect(bounded.diff.status).toBe('partial')
+    expect(bounded.diff.quality).not.toBe('exact')
+    expect(bounded.diff.omissionReason).toContain(CONTENT_ENVELOPE_REASON)
     expect(recordTransportBytes(bounded)).toBeLessThanOrEqual(RECORDER_TRANSPORT_MAX_BYTES)
     expect(isAgentTurnRecord(bounded)).toBe(true)
   }, 60_000)
+
+  it('counts the envelope wrapper even when nothing is referenced', () => {
+    const draft = record({})
+    // 没有引用时仍要把外层封装算进去：接收方量的是封装，不是裸 record 字符串。
+    expect(recordTransportBytes(draft as never)).toBeGreaterThan(Buffer.byteLength(JSON.stringify(draft)))
+  })
 
   it('keeps a complete inline diff body and only drops its now-redundant reference', () => {
     const text = `@@ -1 +1 @@\n-${'old\n'.repeat(100)}+${'new\n'.repeat(100)}`
@@ -314,6 +326,20 @@ describe('record content budget at the shared commit boundary', () => {
       }
     }
   }, 120_000)
+
+  it('keeps every reference the committed record still carries resolvable in the workspace store', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-content-budget-'))
+    roots.push(root)
+    const bodies = ['a'.repeat(6 * 1024 * 1024), 'b'.repeat(6 * 1024 * 1024)]
+    const refs = await Promise.all(bodies.map((text) => writeRecorderContent(root, text, 'utf8')))
+    const bodies2 = refs.map((ref) => preview('body', 4))
+    for (const [index, field] of bodies2.entries()) field.contentRef = refs[index]
+    const { record: committed } = await commitRecord(root, withCalls(bodies2) as never)
+    // 预算可能丢掉引用，但留下来的每一条都必须能在这个库里兑现。
+    const kept = recordContentRefs(committed)
+    expect(kept.length).toBeLessThan(refs.length)
+    for (const ref of kept) await expect(readRecorderContent(root, ref)).resolves.toBe(bodies[refs.indexOf(ref)])
+  }, 60_000)
 
   it('applies the same budget when the record is committed, and the stored record passes the uploader', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-content-budget-'))

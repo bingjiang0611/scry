@@ -88,6 +88,37 @@ it('a stale protocol header is refused before apply, and the event still lands e
   expect(await readFile(`${f.socket}.owner.json`, 'utf8')).toContain(JSON.stringify(RECORDER_VERSION))
 }, 30_000)
 
+it('queues the event instead of applying it in-process when the daemon response is unknown', async () => {
+  const f = await fixture()
+  const entry = join(f.root, 'cli.mjs')
+  await build({ entryPoints: [resolve('src/cli/scry.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
+  // 5xx 是“可能已经应用”：守护进程可能先落了状态再失败。CLI 不能在同一进程里再应用一次。
+  let hookRequests = 0
+  const owner: HttpServer = createHttpServer((request, response) => {
+    request.resume()
+    if (request.url === HOOK_EVENT_PATH) { hookRequests++; response.writeHead(500, { 'content-type': 'application/json' }); response.end(JSON.stringify({ ok: false, error: 'storage failed' })); return }
+    if (request.url === '/v1/status') { response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ running: true, protocol: '2', recorderVersion: RECORDER_VERSION, pid: process.pid, socketPath: f.socket })); return }
+    response.writeHead(404, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ ok: false, error: 'not found' }))
+  })
+  servers.push(owner)
+  await new Promise<void>(resolve => owner.listen(f.socket, resolve))
+  // 直接跑 CLI（不经 shell 快路径）：只有它能决定“未知投递”是否在本进程里再应用一次。
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [entry, 'recorder', 'hook', '--event', 'UserPromptSubmit', '--provider', 'pi', '--workspace', f.root], { env: f.env, stdio: ['pipe', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr.on('data', chunk => { stderr += chunk })
+    child.on('error', reject)
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`cli exit ${code}: ${stderr}`)))
+    child.stdin.end(JSON.stringify({ session_id: 'protocol', prompt: 'fixture' }))
+  })
+  const sessionRoot = join(f.root, '.scry/runtime/pi', safeKey('protocol'))
+  expect(hookRequests).toBe(1)
+  // 只排队：没有开出轮次，也没有在可能已应用的前提下再应用一次。
+  expect((await recorderInboxEntries(sessionRoot)).length).toBe(1)
+  await expect(readFile(join(sessionRoot, 'open.json'), 'utf8')).rejects.toThrow()
+}, 60_000)
+
 it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, then applies the event once', async () => {
   const f = await fixture()
   const entry = join(f.root, 'cli.mjs')
@@ -134,8 +165,10 @@ it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, the
     expect(open.prompt).toBe('fixture')
     expect(await recorderInboxEntries(sessionRoot)).toEqual([])
     expect((await readHealth(join(f.root, '.scry'))).droppedEvents).toBe(0)
-    process.kill(owner.pid, 'SIGTERM')
   } finally {
     if (!legacyClosed) await new Promise<void>(resolve => legacy.close(() => resolve()))
+    // 断言失败时也必须停掉刚起的 owner，否则它会留在后台继续占着 socket。
+    const owner = JSON.parse(await readFile(`${f.socket}.owner.json`, 'utf8').catch(() => '{"pid":0}')) as { pid: number }
+    if (owner.pid > 0) try { process.kill(owner.pid, 'SIGTERM') } catch { /* already gone */ }
   }
 }, 60_000)

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -51,6 +51,29 @@ describe('recorder stale temp files', () => {
     const nextDay = await pruneStaleTemps(dataRoot, { now: now + STALE_TEMP_AGE_MS, olderThanMs: 0 })
     expect(nextDay.scanned).toBe(true)
     expect(nextDay.removed).toBe(2)
+  })
+
+  it('never walks the content store or the archive looking for temps', async () => {
+    const dataRoot = await tempRoot('scry-temp-prune-scope-')
+    await mkdir(join(dataRoot, 'records'), { recursive: true })
+    const shard = join(dataRoot, 'content', 'sha256', 'ab')
+    await mkdir(shard, { recursive: true })
+    const archived = join(dataRoot, 'archive', 'old')
+    await mkdir(archived, { recursive: true })
+    // 这类目录里有几十万个文件，而且从不产生 `.tmp`：哪怕有同名的旧文件，也不该为清理去遍历它们。
+    const inContent = join(shard, 'stray.tmp')
+    const inArchive = join(archived, 'stray.tmp')
+    await writeFile(inContent, '')
+    await writeFile(inArchive, '')
+    const old = new Date(Date.now() - 3 * day)
+    await utimes(inContent, old, old)
+    await utimes(inArchive, old, old)
+
+    const result = await pruneStaleTemps(dataRoot)
+
+    expect(result).toMatchObject({ removed: 0, scanned: true })
+    await expect(stat(inContent)).resolves.toBeTruthy()
+    await expect(stat(inArchive)).resolves.toBeTruthy()
   })
 
   it('cleans leftovers at commit time, where every writer converges', async () => {

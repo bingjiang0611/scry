@@ -154,6 +154,27 @@ describe('recorder content repair', () => {
     await expect(readRecorderContent(dataRoot, appOnly.ref)).rejects.toThrow()
   })
 
+  it('reports a corrupt local blob instead of overwriting or deleting evidence', async () => {
+    const dataRoot = await tempRoot('scry-repair-store-')
+    const appRoot = await tempRoot('scry-repair-app-')
+    const appOnly = body('the real body')
+    await writeRecorderContent(appRoot, appOnly.content, 'utf8')
+    // 本库已有这个地址的文件，但字节与地址不符：这不是缺失，是损坏的证据。
+    const path = join(dataRoot, 'content', 'sha256', appOnly.ref.sha256.slice(0, 2), `${appOnly.ref.sha256}.bin`)
+    await mkdir(join(dataRoot, 'content', 'sha256', appOnly.ref.sha256.slice(0, 2)), { recursive: true })
+    await writeFile(path, 'x'.repeat(appOnly.ref.bytes))
+    await writeRecord(dataRoot, record(1, 'f0'.repeat(16), [content('the real body')]))
+
+    const report = await repairRecordContent({ dataRoot, sourceRoots: [appRoot], apply: true })
+
+    expect(report).toMatchObject({ repairable: 1, repaired: 0, corrupt: 1, missing: 0 })
+    expect(report.corruptItems).toEqual([
+      { recordId: 'f0'.repeat(16), path: 'tools.0.output', sha256: appOnly.ref.sha256, bytes: appOnly.ref.bytes }
+    ])
+    // 字节原样保留：删除或覆盖已存在的证据需要人来做。
+    expect(await readFile(path, 'utf8')).toBe('x'.repeat(appOnly.ref.bytes))
+  })
+
   it('--record-id narrows the work and an unknown id fails instead of being skipped', async () => {
     const dataRoot = await tempRoot('scry-repair-store-')
     const first = body('first body')

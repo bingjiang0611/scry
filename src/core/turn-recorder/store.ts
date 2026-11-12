@@ -1,10 +1,10 @@
 import { persistUploadEnvironment } from './commit-environment.js'
-import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { type ToolContentRef } from '../../shared/tool-content.js'
 import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn-record.js'
 import { copyRecorderContent } from './content-store.js'
-import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog, listFiles } from './io.js'
+import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
 import { applyRecordContentBudget } from './record-content-budget.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
@@ -61,7 +61,7 @@ export async function commitRecord(
     const sequence = await nextSequence(dataRoot, { liveMax: files.at(-1)?.sequence ?? 0, archivedThrough })
     // Both the App-managed path and the standalone CLI publish here, so one convergence point keeps
     // every committed record inside the transport envelope the receiver validates.
-    const record = applyRecordContentBudget({ ...draft, sequence })
+    const record: AgentTurnRecord = { ...applyRecordContentBudget(draft), sequence }
     const validation = validateAgentTurnRecord(record)
     if (!validation.ok) {
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
@@ -159,11 +159,23 @@ export async function listRecords(dataRoot: string): Promise<AgentTurnRecord[]> 
   return records
 }
 
+/**
+ * 记录目录的文件名列表。`listFiles` 会把任何错误都当成空目录，而“没有记录”和“目录读不了”是两件
+ * 完全不同的事：报告路径必须让后者失败。
+ */
+async function recordFileNames(dataRoot: string): Promise<string[]> {
+  try {
+    return (await readdir(join(dataRoot, 'records'), { encoding: 'utf8' })).sort()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
 /** 只按文件名判断：这些文件根本不是记录（`.tmp`、手工产物），不需要读内容就能报出来。 */
 export async function skippedRecordFiles(dataRoot: string): Promise<SkippedRecordFile[]> {
-  return (await listFiles(join(dataRoot, 'records')))
+  return (await recordFileNames(dataRoot))
     .filter((name) => !parseRecordName(name))
-    .sort()
     .map((name) => ({ name, reason: 'unrecognized_name' as const }))
 }
 
@@ -182,7 +194,7 @@ export interface SkippedRecordFile {
 export async function listRecordsReport(dataRoot: string): Promise<{ records: AgentTurnRecord[]; skipped: SkippedRecordFile[] }> {
   const records: AgentTurnRecord[] = []
   const skipped: SkippedRecordFile[] = []
-  const names = (await listFiles(join(dataRoot, 'records'))).sort()
+  const names = await recordFileNames(dataRoot)
   for (const name of names) {
     if (!parseRecordName(name)) {
       skipped.push({ name, reason: 'unrecognized_name' })

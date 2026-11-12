@@ -102,6 +102,23 @@ describe('recorder store maintenance', () => {
     await expect(access(contentPath(dataRoot, orphan.sha256))).resolves.toBeUndefined()
   })
 
+  it('refuses to collect bodies while a record file cannot be read', async () => {
+    const { dataRoot, config } = await fixture()
+    const now = Date.parse('2026-02-01T00:00:00.000Z')
+    const old = new Date(now - 2 * 60 * 60 * 1_000)
+    const orphan = await writeRecorderContent(dataRoot, 'looks orphaned', 'utf8')
+    await utimes(contentPath(dataRoot, orphan.sha256), old, old)
+    // 名字合规但读不出来的记录：不知道它引用了什么，就不能判断任何正文是孤儿。
+    await writeFile(join(dataRoot, 'records', `00000000000000000009-${'ab'.repeat(16)}.json`), '{"schemaVersion":1}')
+
+    const report = await maintainRecorderStore(dataRoot, config, { now, apply: true })
+
+    expect(report.applied).toBe(false)
+    expect(report.blockedBy).toContain('unreadable_record')
+    expect(report.skippedRecords).toEqual([{ name: `00000000000000000009-${'ab'.repeat(16)}.json`, reason: 'unreadable_record' }])
+    await expect(access(contentPath(dataRoot, orphan.sha256))).resolves.toBeUndefined()
+  })
+
   it('does not collect while archive recovery or another recorder lock has unknown ownership', async () => {
     const { dataRoot, config } = await fixture()
     const now = Date.parse('2026-02-01T00:00:00.000Z')

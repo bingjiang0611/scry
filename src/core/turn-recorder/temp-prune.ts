@@ -11,7 +11,7 @@ export const STALE_TEMP_AGE_MS = 24 * 60 * 60 * 1_000
 
 const MARKER = 'stale-temp-prune.json'
 /** 这些目录放的是小 JSON 与正文之外的元数据；`content/` 与 `archive/` 不在其中。 */
-const SCAN_ROOTS = ['', 'records', 'runtime', 'notifications', 'upload', 'locks']
+const SCAN_DIRS = ['records', 'runtime', 'notifications', 'upload', 'locks']
 const MAX_DEPTH = 4
 
 export interface StaleTempPruneResult {
@@ -21,7 +21,13 @@ export interface StaleTempPruneResult {
   scanned: boolean
 }
 
-async function pruneDir(dir: string, cutoff: number, depth: number, out: StaleTempPruneResult): Promise<void> {
+async function pruneDir(
+  dir: string,
+  cutoff: number,
+  depth: number,
+  out: StaleTempPruneResult,
+  recurse = true
+): Promise<void> {
   let entries
   try {
     entries = await readdir(dir, { withFileTypes: true })
@@ -31,7 +37,7 @@ async function pruneDir(dir: string, cutoff: number, depth: number, out: StaleTe
   for (const entry of entries) {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (depth < MAX_DEPTH) await pruneDir(path, cutoff, depth + 1, out)
+      if (recurse && depth < MAX_DEPTH) await pruneDir(path, cutoff, depth + 1, out)
       continue
     }
     if (!entry.isFile() || !entry.name.endsWith('.tmp')) continue
@@ -62,7 +68,11 @@ export async function pruneStaleTemps(
   const marker = await readJson<{ at?: unknown }>(markerPath)
   if (typeof marker?.at === 'string' && now - Date.parse(marker.at) < ageMs) return { removed: 0, bytes: 0, scanned: false }
   const result: StaleTempPruneResult = { removed: 0, bytes: 0, scanned: true }
-  for (const root of SCAN_ROOTS) await pruneDir(join(dataRoot, root), now - ageMs, 0, result)
+  const cutoff = now - ageMs
+  // 数据根只扫它自己这一层的临时文件：往下一层就是 `content/`（几十万个 blob）和 `archive/`
+  // （历史证据），既不产生这类临时文件，也不该为了清理临时文件去遍历。
+  await pruneDir(dataRoot, cutoff, 0, result, false)
+  for (const dir of SCAN_DIRS) await pruneDir(join(dataRoot, dir), cutoff, 0, result)
   await writeJsonAtomic(markerPath, { at: new Date(now).toISOString() })
   return result
 }

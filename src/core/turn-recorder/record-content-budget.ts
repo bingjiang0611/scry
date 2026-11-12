@@ -26,6 +26,9 @@ export const RECORDER_TRANSPORT_ENCODING = 'recorder-content-v1'
 /** Reason recorded on a field or section whose complete body this budget dropped. */
 export const CONTENT_ENVELOPE_REASON = 'record transport budget dropped complete bodies'
 
+/** The budget is size-driven, so it applies to a prepared draft exactly as it does to a committed record. */
+type RecordDraft = Omit<AgentTurnRecord, 'sequence'>
+
 function base64Bytes(bytes: number): number {
   return 4 * Math.ceil(bytes / 3)
 }
@@ -42,14 +45,16 @@ function entryBytes(ref: ToolContentRef): number {
  * character that JSON would escape, so the two parts stay additive.
  */
 function envelopeBytes(recordJson: string, refs: readonly ToolContentRef[]): number {
-  if (refs.length === 0) return Buffer.byteLength(recordJson)
+  // The wrapper itself counts even when nothing is referenced: the receiver measures the envelope,
+  // and escaping the record string into it is real bytes. Returning the bare record length here
+  // would undercount exactly the case with no slack from base64.
   const contentJson = JSON.stringify(refs.map(({ sha256, bytes }) => ({ sha256, bytes, dataBase64: '' })))
   return Buffer.byteLength(JSON.stringify({ scryEncoding: RECORDER_TRANSPORT_ENCODING, recordJson, contentJson })) +
     refs.reduce((sum, ref) => sum + base64Bytes(ref.bytes), 0)
 }
 
 /** The bodies this record would transmit if nothing were dropped. */
-export function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
+export function recordContentRefs(record: RecordDraft): ToolContentRef[] {
   const refs = new Map<string, ToolContentRef>()
   for (const { ref } of recordContentItems(record)) {
     const previous = refs.get(ref.sha256)
@@ -60,7 +65,7 @@ export function recordContentRefs(record: AgentTurnRecord): ToolContentRef[] {
 }
 
 /** Size the receiver will check: record JSON plus every referenced body in its transport encoding. */
-export function recordTransportBytes(record: AgentTurnRecord): number {
+export function recordTransportBytes(record: RecordDraft): number {
   return envelopeBytes(JSON.stringify(record), recordContentRefs(record))
 }
 
@@ -170,7 +175,7 @@ function transcriptSection(
   }
 }
 
-function applyDrops(record: AgentTurnRecord, dropped: Set<string>): AgentTurnRecord {
+function applyDrops(record: RecordDraft, dropped: Set<string>): RecordDraft {
   return {
     ...record,
     tools: callsSection(record.tools, dropped),
@@ -191,7 +196,7 @@ function applyDrops(record: AgentTurnRecord, dropped: Set<string>): AgentTurnRec
  * alone could not bring the envelope down, shrink the largest patch previews, keeping the complete
  * body only where a retained reference still points at it.
  */
-function shrinkInlineDiffBodies(record: AgentTurnRecord, overBy: number): AgentTurnRecord {
+function shrinkInlineDiffBodies(record: RecordDraft, overBy: number): RecordDraft {
   const candidates: Array<{ snapshot: number; file: number; bytes: number }> = []
   for (const [snapshotIndex, snapshot] of (record.diff.value ?? []).entries()) {
     for (const [fileIndex, file] of snapshot.files.entries()) {
@@ -204,6 +209,7 @@ function shrinkInlineDiffBodies(record: AgentTurnRecord, overBy: number): AgentT
   candidates.sort((left, right) => right.bytes - left.bytes)
   let remaining = overBy
   let next = record
+  let lost = false
   for (const candidate of candidates) {
     if (remaining <= 0) break
     const snapshot = next.diff.value![candidate.snapshot]
@@ -211,6 +217,9 @@ function shrinkInlineDiffBodies(record: AgentTurnRecord, overBy: number): AgentT
     const field = file.patchContent!
     const target = Math.max(RECORDER_INLINE_PREVIEW_BYTES, field.savedBytes - remaining)
     const shrunk = limitToolContent(field, target, 'turn_budget')
+    // A shrunk body without a retained reference makes this patch incomplete, so the section can no
+    // longer claim exact evidence: the record now holds a preview of a larger patch.
+    if (!shrunk.contentRef) lost = true
     remaining -= field.savedBytes - shrunk.savedBytes
     const files = [...snapshot.files]
     files[candidate.file] = {
@@ -223,14 +232,14 @@ function shrinkInlineDiffBodies(record: AgentTurnRecord, overBy: number): AgentT
     value[candidate.snapshot] = { ...snapshot, files }
     next = { ...next, diff: { ...next.diff, value } }
   }
-  return next
+  return lost ? { ...next, diff: degradedSection(next.diff, CONTENT_ENVELOPE_REASON) } : next
 }
 
 /**
  * Converge one record onto the transport budget. Returns the record unchanged when it already
  * fits, so the common path allocates nothing.
  */
-export function applyRecordContentBudget(record: AgentTurnRecord): AgentTurnRecord {
+export function applyRecordContentBudget(record: RecordDraft): RecordDraft {
   const refs = recordContentRefs(record)
   const kept = new Map<string, ToolContentRef>()
   const dropped = new Set<string>()
@@ -247,7 +256,7 @@ export function applyRecordContentBudget(record: AgentTurnRecord): AgentTurnReco
     kept.delete(victim.sha256)
     dropped.add(victim.sha256)
     size = kept.size === 0
-      ? Buffer.byteLength(recordJson)
+      ? envelopeBytes(recordJson, [])
       : size - base64Bytes(victim.bytes) - entryBytes(victim)
   }
   if (dropped.size === 0 && size <= RECORDER_TRANSPORT_MAX_BYTES) return record

@@ -124,6 +124,9 @@ scry recorder content repair --record-id <recordId> --apply            # 只修�
 查找正文，读时校验长度与摘要，命中才复制进本库。未命中的只列清单（退出 3），**不改写任何记录**：
 记录是否降级仍由提交边界决定，修复工具不替用户改证据语义。`--record-id` 指向不存在的记录会直接报错。
 
+本库已有同名 blob 但校验不过（同名不同字节）时不删除也不覆盖：那是损坏的证据，修复工具把它列在
+`corrupt` / `corruptItems` 里，状态为 `corrupt`（演练）或 `applied-with-corrupt`（`--apply`），同样退出 3。
+
 `records/` 里并不只有记录：中断的原子写会留下 `.tmp`，崩溃也可能留下半成品。修复与维护命令只认
 `<20 位序号>-<recordId>.json` 这种合规文件名，读不出来的文件同样跳过，并在输出的 `skipped`
 （维护命令里是 `skippedRecords`）中列出文件名与原因：`unrecognized_name` 或 `unreadable_record`。

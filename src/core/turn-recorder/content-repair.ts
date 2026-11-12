@@ -21,12 +21,16 @@ export interface ContentRepairReport {
   repairable: number
   missing: number
   repaired: number
+  /** 本库已有这份 blob 但校验不过（同名不同字节）。工具不删也不覆盖它，只如实报告。 */
+  corrupt: number
   /** 可修复正文的总字节数：dry run 为将要复制，`--apply` 为已复制。 */
   bytes: number
   /** 被查询过的来源内容根；未命中清单与它对读。 */
   sources: string[]
   missingItems: ContentRepairMissingItem[]
   missingItemsTruncated: boolean
+  corruptItems: ContentRepairMissingItem[]
+  corruptItemsTruncated: boolean
   /** 记录目录里不是记录、或读不出来的文件；只看不修，列出来是为了让“少几条记录”可解释。 */
   skipped: SkippedRecordFile[]
 }
@@ -72,10 +76,13 @@ export async function repairRecordContent(options: ContentRepairOptions): Promis
     repairable: 0,
     missing: 0,
     repaired: 0,
+    corrupt: 0,
     bytes: 0,
     sources: options.sourceRoots,
     missingItems: [],
     missingItemsTruncated: false,
+    corruptItems: [],
+    corruptItemsTruncated: false,
     skipped
   }
   // 同一份正文可能被多字段引用：按引用只处理一次，但未命中清单保留字段位置，便于定位记录。
@@ -105,11 +112,24 @@ export async function repairRecordContent(options: ContentRepairOptions): Promis
       report.repairable++
       report.bytes += item.ref.bytes
       if (!apply) continue
-      const written = await writeRecorderContent(options.dataRoot, content, item.ref.encoding)
-      if (written.sha256 !== item.ref.sha256 || written.bytes !== item.ref.bytes) {
-        throw new Error(`recorder content repair mismatch: ${item.ref.sha256}`)
+      try {
+        const written = await writeRecorderContent(options.dataRoot, content, item.ref.encoding)
+        if (written.sha256 !== item.ref.sha256 || written.bytes !== item.ref.bytes) {
+          throw new Error(`recorder content collision or corruption: ${item.ref.sha256}`)
+        }
+        report.repaired++
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // 本库同名 blob 与它的地址不符：那是损坏的字节，不是缺失。删除或覆盖它属于证据处理，
+        // 修复工具不做这件事，只把它单独报出来，让用户自己决定。
+        if (!message.includes('collision or corruption')) throw error
+        report.corrupt++
+        if (report.corruptItems.length < MISSING_ITEM_LIMIT) {
+          report.corruptItems.push({ recordId: record.recordId, path: item.path, sha256: item.ref.sha256, bytes: item.ref.bytes })
+        } else {
+          report.corruptItemsTruncated = true
+        }
       }
-      report.repaired++
     }
   }
   report.applied = apply

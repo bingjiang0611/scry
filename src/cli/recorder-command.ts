@@ -29,6 +29,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     // The shell fast path already saw an explicit pre-apply refusal (404 on a legacy daemon, or the
     // version handshake): replace the owner and deliver once instead of repeating that attempt.
     const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
+    let daemonUnknownDelivery = false
     const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
       provider,
       event,
@@ -43,29 +44,47 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       // Existing replacement path: stop the current owner, wait for the socket, start this CLI.
       return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
     }
+    // `delivered` 已应用；`not-applied` 有证据证明守护进程没收到或明确拒绝；`unknown` 可能是
+    // “已经应用但响应没回来”。只有前两种能直接落到本进程，最后一种必须排队重放，绝不重发。
+    type SendOutcome = 'delivered' | 'not-applied' | 'unknown'
+    const classify = (error: unknown): SendOutcome => {
+      // A completed non-2xx answer without a replacement hint is a refusal before apply only for the
+      // pre-apply statuses the daemon uses; anything else (5xx, missing ACK) may follow a partial apply.
+      if (error instanceof RecorderHookRejected) {
+        return error.statusCode >= 500 ? 'unknown' : 'not-applied'
+      }
+      // Never connected: the request cannot have been applied.
+      const code = (error as NodeJS.ErrnoException | undefined)?.code
+      return code === 'ENOENT' || code === 'ECONNREFUSED' ? 'not-applied' : 'unknown'
+    }
     if (daemonEnabled && !daemonTried) {
-      const redeliver = async (): Promise<boolean> => {
-        if (daemonRejected && !await replaceDaemon()) return false
+      const redeliver = async (): Promise<SendOutcome> => {
+        if (daemonRejected && !await replaceDaemon()) return 'not-applied'
+        let outcome: SendOutcome
         try {
           const result = await send()
           if (verbose) print(result)
-          return true
+          return 'delivered'
         } catch (error) {
-          if (daemonRejected) return false
+          outcome = classify(error)
+          if (daemonRejected || outcome === 'unknown') return outcome
           // Only a completed 404/409 proves the event was not applied; replace the owner and resend
           // exactly once. A timeout stays unknown delivery and is never resent.
-          if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return false
-          if (!await replaceDaemon()) return false
+          if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return outcome
+          if (!await replaceDaemon()) return 'not-applied'
           try {
             const result = await send()
             if (verbose) print(result)
-            return true
-          } catch {
-            return false
+            return 'delivered'
+          } catch (retryError) {
+            return classify(retryError)
           }
         }
       }
-      if (await redeliver()) return 0
+      const outcome = await redeliver()
+      if (outcome === 'delivered') return 0
+      // The daemon may already hold this event: queue it for replay instead of applying it here.
+      if (outcome === 'unknown') daemonUnknownDelivery = true
     }
     delegatedToCore = true
     const result = await handleRecorderHook({
@@ -74,7 +93,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       workspace,
       payload,
       managed,
-      queueOnly: daemonTried
+      queueOnly: daemonTried || daemonUnknownDelivery
     })
     // A failed curl response is unknown delivery, not permission to stop/restart a live peer.
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
@@ -294,8 +313,16 @@ async function contentCommand(args: ParsedArgs): Promise<number> {
     action: 'content-repair',
     workspace,
     appData,
-    status: report.missing > 0 ? (report.applied ? 'applied-with-missing' : 'missing') : report.applied ? 'applied' : 'planned',
+    // 缺失与损坏是两件事：前者是“本库没有这份字节”，后者是“有这个名字的字节但不对”。两者都
+    // 意味着引用仍无法兑现，所以都退出 3，但报告必须分开。
+    status: report.missing > 0 && report.corrupt > 0
+      ? (report.applied ? 'applied-with-unresolved' : 'unresolved')
+      : report.missing > 0
+        ? (report.applied ? 'applied-with-missing' : 'missing')
+        : report.corrupt > 0
+          ? (report.applied ? 'applied-with-corrupt' : 'corrupt')
+          : report.applied ? 'applied' : 'planned',
     ...report
   })
-  return report.missing > 0 ? 3 : 0
+  return report.missing > 0 || report.corrupt > 0 ? 3 : 0
 }

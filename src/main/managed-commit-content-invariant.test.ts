@@ -5,6 +5,7 @@ import { commitHandoff, handoffs, managedRecorderMode, prepareManagedRecorderTur
 import { CONTENT_MISSING_REASON } from '../core/turn-recorder/managed-evidence'
 import { recorderSessionRoot } from '../core/turn-recorder/runtime-state'
 import { listRecords } from '../core/turn-recorder/store'
+import { writeRecorderContent } from '../core/turn-recorder/content-store'
 import { fixture, input, startManaged } from './managed-turn-tests/fixture.test'
 
 const fullCapture = JSON.stringify({
@@ -84,6 +85,72 @@ describe('managed commit content invariant', () => {
 
     // 同一份旧 handoff 再走一次恢复：命中 duplicate，而不是因为“表示不同”抛错。
     const retry = await commitHandoff(mode.enablement, root, mangled)
+    expect(retry).toMatchObject({ status: 'duplicate', recordId: committed.recordId })
+  })
+
+  it('compares a budgeted handoff with what the commit boundary actually stores', async () => {
+    const { workspace, userDataDir } = await fixture()
+    await writeFile(join(workspace, 'scry.config.json'), fullCapture)
+    await startManaged(workspace)
+    const base = input(workspace, userDataDir)
+    const dataRoot = join(workspace, '.scry')
+    await prepareManagedRecorderTurn({
+      workspace,
+      provider: 'codex',
+      sessionId: base.sessionId,
+      providerTurnId: base.providerTurnId,
+      runId: base.turn.runId,
+      userText: base.turn.userText,
+      evidence: base.turn.turnEvidence!,
+      timing: base.timing,
+      status: base.status,
+      archiveFingerprint: 'fingerprint-commit-budget',
+      toolContentPolicy: { toolOutput: 'full', toolContentFieldBytes: 8 * 1024 * 1024, toolContentTurnBytes: 16 * 1024 * 1024 }
+    })
+    const mode = await managedRecorderMode(workspace, {})
+    if (mode.status !== 'enabled') throw new Error('fixture recorder must be enabled')
+    const root = recorderSessionRoot(dataRoot, 'codex', base.sessionId)
+    const [onDisk] = await handoffs(root)
+    // 两份各 6 MiB 的正文：单独都在 8 MiB 上限内，一起放进 16 MiB 信封就超了，提交边界会丢掉一条引用。
+    const refs = await Promise.all([
+      writeRecorderContent(dataRoot, 'a'.repeat(6 * 1024 * 1024), 'utf8'),
+      writeRecorderContent(dataRoot, 'b'.repeat(6 * 1024 * 1024), 'utf8')
+    ])
+    const oversized = {
+      ...onDisk.handoff,
+      phase: 'archive_committed' as const,
+      record: {
+        ...onDisk.handoff.record,
+        tools: {
+          ...onDisk.handoff.record.tools,
+          value: refs.map((ref, index) => ({
+            id: `call-${index}`,
+            name: 'Bash',
+            status: 'success' as const,
+            outputContent: {
+              content: 'preview',
+              contentRef: ref,
+              encoding: 'utf8' as const,
+              savedBytes: 7,
+              source: 'fixture',
+              sourceCompleteness: 'complete' as const,
+              redaction: 'disabled' as const,
+              storage: 'truncated' as const,
+              reasons: []
+            }
+          }))
+        }
+      }
+    }
+
+    const committed = await commitHandoff(mode.enablement, root, oversized)
+
+    expect(committed.status).toBe('committed')
+    const [record] = await listRecords(dataRoot)
+    // 预算丢掉了正文引用，因此存下来的记录必然与 handoff 不同；重放必须命中 duplicate 而不是抛错。
+    expect(record.tools.value).toHaveLength(2)
+    expect(record.tools.value!.filter((call) => call.outputContent?.contentRef).length).toBeLessThan(2)
+    const retry = await commitHandoff(mode.enablement, root, oversized)
     expect(retry).toMatchObject({ status: 'duplicate', recordId: committed.recordId })
   })
 })

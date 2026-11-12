@@ -42,7 +42,7 @@ async function filesBelow(root: string): Promise<string[]> {
   return output
 }
 
-async function blockers(dataRoot: string, graceCutoff: number): Promise<string[]> {
+async function blockers(dataRoot: string, graceCutoff: number): Promise<Set<string>> {
   const blocked = new Set<string>()
   for (const path of await filesBelow(join(dataRoot, 'runtime'))) {
     if (path.endsWith('/open.json') || path.endsWith('/pending-open.json')) blocked.add('open_turn')
@@ -59,7 +59,7 @@ async function blockers(dataRoot: string, graceCutoff: number): Promise<string[]
     const info = await stat(path)
     if (info.mtimeMs > graceCutoff) blocked.add('recent_temp')
   }
-  return [...blocked].sort()
+  return blocked
 }
 
 export async function maintainRecorderStore(
@@ -72,8 +72,12 @@ export async function maintainRecorderStore(
   const graceCutoff = now - graceMs
   return withDirectoryLock(join(dataRoot, 'locks', 'maintenance.lock'), () =>
     withDirectoryLock(join(dataRoot, 'locks', 'commit.lock'), async () => {
-    const blockedBy = await blockers(dataRoot, graceCutoff)
+    const blocked = await blockers(dataRoot, graceCutoff)
     const { records, skipped: skippedRecords } = await listRecordsReport(dataRoot)
+    // 读不出来的记录仍可能引用任何一份正文；不知道它引用了什么就不能回收，否则会把还在被引用的
+    // 字节删掉。非记录文件（`.tmp`）不参与判定：它们不是记录，本来也不引用内容。
+    if (skippedRecords.some((item) => item.reason === 'unreadable_record')) blocked.add('unreadable_record')
+    const blockedBy = [...blocked].sort()
     const referenced = new Set(records.flatMap(recordContentItems).map((item) => item.ref.sha256))
     const orphanContent: RecorderMaintenanceReport['orphanContent'] = []
     const staleTemps: RecorderMaintenanceReport['staleTemps'] = []
