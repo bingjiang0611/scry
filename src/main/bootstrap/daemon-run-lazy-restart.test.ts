@@ -35,6 +35,32 @@ describe('lazy daemon surface: restart and held launches', () => {
     lazy.dispose()
   })
 
+  it('tells observers each outcome it connects to by itself, never the outcome of restart()', async () => {
+    const outcomes: DaemonRunModeResult[] = [
+      { status: 'version-mismatch', running: '1.0.0', expected: '2.0.0', action: 'restart_daemon' },
+      { status: 'version-mismatch', running: '1.0.0', expected: '2.0.0', action: 'restart_daemon' },
+      { status: 'unavailable', reason: 'daemon_ready_timeout' },
+      { status: 'ready' }
+    ]
+    const lazy = createLazyDaemonRunSurface(baseDeps(undefined), vi.fn(async () => outcomes.shift()!))
+    const seen: string[] = []
+    const stop = lazy.onOutcome((result) => { seen.push(result.status) })
+    lazy.onOutcome(() => { throw new Error('an observer failing must not break the run surface') })
+    await lazy.ready()
+    await lazy.ready()
+    // Remembered for the session: no second connect, no second notice.
+    expect(seen).toEqual(['version-mismatch'])
+    // A restart the user asked for reports through its own action, not here.
+    expect((await lazy.restart()).status).toBe('version-mismatch')
+    expect(seen).toEqual(['version-mismatch'])
+    expect((await lazy.restart()).status).toBe('unavailable')
+    // `unavailable` is asked again on the next call: that connect is the surface's own.
+    expect((await lazy.ready()).status).toBe('ready')
+    expect(seen).toEqual(['version-mismatch', 'ready'])
+    stop()
+    lazy.dispose()
+  })
+
   it('refuses launches while held, for every mode it builds, and launches again once released', async () => {
     const launch = vi.fn(async () => ({ status: 'started' as const }))
     let seen: DaemonRunModeDeps | undefined

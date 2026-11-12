@@ -8,6 +8,7 @@ import { prepareBackgroundServiceStop, stopBackgroundService, type BackgroundSer
 import { connectionFromMode, parseSelfReport, readBackgroundServiceStatus } from '../background-service-status'
 import { quitWithBackgroundService, reconnectBackgroundService, restartBackgroundService, type BackgroundServiceActionDeps } from '../background-service-actions'
 import { CONFIRM_BUTTON, confirmPrompt, leftoverNotice, reasonMessage, type BackgroundServicePrompt } from '../background-service-copy'
+import { createVersionMismatchPrompt } from '../background-service-mismatch-prompt'
 import type { LazyDaemonRunSurface } from './daemon-run-lazy'
 
 // Electron edge of the «后台服务» settings section (B4-S S0-1). The decisions live in
@@ -86,8 +87,9 @@ export function registerBackgroundServiceHandlers(input: {
       return await run()
     })
   }
+  const restart = exclusive(() => restartBackgroundService(actionDeps))
   register('remote:backgroundService:status', status)
-  register('remote:backgroundService:restart', exclusive(() => restartBackgroundService(actionDeps)))
+  register('remote:backgroundService:restart', restart)
   register('remote:backgroundService:quit', exclusive(() => quitWithBackgroundService(actionDeps)))
   register('remote:backgroundService:reconnect', exclusive(() => reconnectBackgroundService(actionDeps)))
   // Switch on: the gate routes the status channel to the daemon; the App's part comes
@@ -96,6 +98,21 @@ export function registerBackgroundServiceHandlers(input: {
     installDaemonChannelGuard('remote:backgroundService:status', async (args) => {
       refuseArguments(args)
       return { result: await status() }
+    })
+    // The one startup prompt for a daemon of another version (approved 2026-11-12): told
+    // by the lazy surface when it connects on its own, so no probe is added and nothing
+    // waits on the answer. 重启后台服务 is the restart channel's own action.
+    const promptMismatch = createVersionMismatchPrompt({
+      daemonMode: true,
+      ask: show,
+      restart,
+      reportFailure: async (prompt) => { await show(prompt) },
+      actionInProgress: () => busy
+    })
+    daemon.onOutcome((result) => {
+      void promptMismatch(connectionFromMode(result, appVersion)).catch((error: unknown) => {
+        console.warn('[background-service] version mismatch prompt failed', error)
+      })
     })
   }
 }

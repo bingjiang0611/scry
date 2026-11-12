@@ -29,6 +29,12 @@ export interface LazyDaemonRunSurface extends DaemonRunSurface {
    * a retried read must not bring the stopped daemon back. Each release is idempotent.
    */
   holdLaunches(): () => void
+  /**
+   * Observe each outcome this surface connects to on its own (first use, `unavailable`
+   * asked again, a reconnect after the daemon went away), never restart()'s: that one is
+   * reported by the action the user started. Observers cannot fail a run call.
+   */
+  onOutcome(listener: (result: DaemonRunModeResult) => void): () => void
   dispose(): void
 }
 
@@ -51,6 +57,17 @@ export function createLazyDaemonRunSurface(
   const deps: DaemonRunModeDeps = launch
     ? { ...modeDeps, launch: async () => holds > 0 ? { status: 'failed' as const, reason: 'daemon_stopping' } : await launch() }
     : modeDeps
+  const listeners = new Set<(result: DaemonRunModeResult) => void>()
+  const connect = (): Promise<DaemonRunModeResult> => {
+    const result = createMode(deps)
+    void result.then((value) => {
+      for (const listener of [...listeners]) {
+        // Fail open: an observer is told, it does not take part in the connect.
+        try { listener(value) } catch { /* observer failures stay with the observer */ }
+      }
+    }, () => undefined)
+    return result
+  }
   let pending: Promise<DaemonRunModeResult> | undefined
   const remember = (result: Promise<DaemonRunModeResult>): Promise<DaemonRunModeResult> => {
     pending = result
@@ -65,10 +82,10 @@ export function createLazyDaemonRunSurface(
       // and its runtime holds cursors into a dead connection.
       return remember(ensure().then((previous) => {
         previous.dispose?.()
-        return createMode(deps)
+        return connect()
       }))
     }
-    return pending ?? remember(createMode(deps))
+    return pending ?? remember(connect())
   }
   const surface = async (reconnect = false): Promise<DaemonRunSurface> => {
     const result = await ensure(reconnect)
@@ -101,6 +118,10 @@ export function createLazyDaemonRunSurface(
       holds += 1
       let released = false
       return () => { if (!released) { released = true; holds -= 1 } }
+    },
+    onOutcome(listener): () => void {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
     },
     start(payload: AgentStartRequest): Promise<AgentStartResult> {
       // One intent id per logical start, fixed BEFORE the first attempt: the retry path

@@ -100,3 +100,43 @@ export function leftoverNotice(leftovers: readonly string[]): BackgroundServiceP
     cancelId: 0
   }
 }
+
+export const MISMATCH_RESTART_BUTTON = 0
+export const MISMATCH_LATER_BUTTON = 1
+
+/**
+ * Shown once per App process when the daemon turns out to be another version (approved
+ * 2026-11-12). `running` is null when the daemon refused before saying its version: the
+ * prompt says so instead of naming one.
+ */
+export function versionMismatchPrompt(running: string | null, expected: string): BackgroundServicePrompt {
+  const versions = running
+    ? `正在运行的后台服务版本是 ${running}，本 App 的版本是 ${expected}。`
+    : `正在运行的后台服务版本未知（它没有报告自己的版本），与本 App 的版本 ${expected} 不一致。`
+  return {
+    type: 'warning',
+    title: '后台服务版本不一致',
+    message: '正在运行的后台服务来自另一个版本的 Scry',
+    detail: [
+      versions,
+      '运行任务和终端需要与本 App 版本一致的后台服务。重启后台服务会停止旧版本，再启动与本 App 一致的版本；如果后台服务里可能有正在运行的任务，Scry 会先请你确认。',
+      '选择「稍后」不做任何操作，本次运行期间不会再提示；之后可以在「设置 → 后台服务」中重启。'
+    ].join('\n\n'),
+    buttons: ['重启后台服务', '稍后'],
+    defaultId: MISMATCH_RESTART_BUTTON,
+    cancelId: MISMATCH_LATER_BUTTON
+  }
+}
+
+/** A restart started from the startup prompt did not finish; `message` is reasonMessage(). */
+export function restartFailedNotice(message: string): BackgroundServicePrompt {
+  return {
+    type: 'warning',
+    title: '重启后台服务没有完成',
+    message: '后台服务没有重启',
+    detail: [message, 'Scry 不会自动重试。可以在「设置 → 后台服务」中查看状态后再试。'].join('\n\n'),
+    buttons: ['好'],
+    defaultId: 0,
+    cancelId: 0
+  }
+}

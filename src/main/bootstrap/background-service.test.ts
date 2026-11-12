@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
 const { registerTrustedIpcHandler } = await import('../ipc-trust')
 const { installDaemonChannelForwarder } = await import('../daemon-channel-gate')
 const { registerBackgroundServiceHandlers } = await import('./background-service')
+const { MISMATCH_RESTART_BUTTON, versionMismatchPrompt } = await import('../background-service-copy')
 type Lazy = Parameters<typeof registerBackgroundServiceHandlers>[0]['daemon']
 
 const roots: string[] = []
@@ -31,10 +32,14 @@ afterEach(() => {
 })
 
 function fakeDaemon(ready: Record<string, unknown>) {
+  const listeners: Array<(result: unknown) => void> = []
   return {
     ready: vi.fn(async () => ready),
     restart: vi.fn(async () => ({ status: 'ready' })),
-    holdLaunches: vi.fn(() => () => undefined)
+    holdLaunches: vi.fn(() => () => undefined),
+    onOutcome: vi.fn((listener: (result: unknown) => void) => { listeners.push(listener); return () => undefined }),
+    /** What the lazy surface reports after connecting on its own. */
+    emit: (result: Record<string, unknown>) => { for (const listener of listeners) listener(result) }
   }
 }
 
@@ -54,7 +59,7 @@ function register(daemon: ReturnType<typeof fakeDaemon> | undefined, daemonMode:
   })
   const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!(event, ...args)
-  return { handlers, invoke, event }
+  return { handlers, invoke, event, win }
 }
 
 describe('background service channels', () => {
@@ -128,5 +133,35 @@ describe('background service channels', () => {
     await expect(invoke('remote:backgroundService:restart')).resolves.toEqual({ status: 'done' })
     expect(daemon.restart).toHaveBeenCalledTimes(1)
     expect(electron.showMessageBox).not.toHaveBeenCalled()
+  })
+
+  it('shows one startup prompt on the main window for a detected mismatch, and 重启后台服务 runs the restart action', async () => {
+    const daemon = fakeDaemon({ status: 'ready' })
+    const { win } = register(daemon, true)
+    electron.showMessageBox.mockResolvedValueOnce({ response: MISMATCH_RESTART_BUTTON })
+    daemon.emit({ status: 'version-mismatch', running: '1.0.0', expected: '2.0.0', action: 'restart_daemon' })
+    // No daemon.lock in this userData: the action has nothing to signal and reconnects.
+    await vi.waitFor(() => expect(daemon.restart).toHaveBeenCalledTimes(1))
+    expect(electron.showMessageBox).toHaveBeenCalledExactlyOnceWith(win, versionMismatchPrompt('1.0.0', '2.0.0'))
+    daemon.emit({ status: 'version-mismatch', running: 'unknown', expected: '2.0.0', action: 'restart_daemon' })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(1)
+    expect(daemon.restart).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing for 稍后, and shows nothing for a daemon of the same version', async () => {
+    const daemon = fakeDaemon({ status: 'ready' })
+    register(daemon, true)
+    daemon.emit({ status: 'ready' })
+    daemon.emit({ status: 'device-not-authorized', reason: 'daemon_device_not_authorized' })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(electron.showMessageBox).not.toHaveBeenCalled()
+    // The default mock answers 稍后 (index 1).
+    daemon.emit({ status: 'version-mismatch', running: 'unknown', expected: '2.0.0', action: 'restart_daemon' })
+    await vi.waitFor(() => expect(electron.showMessageBox).toHaveBeenCalledTimes(1))
+    expect(electron.showMessageBox.mock.calls[0][1]).toEqual(versionMismatchPrompt(null, '2.0.0'))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(daemon.restart).not.toHaveBeenCalled()
+    expect(daemon.holdLaunches).not.toHaveBeenCalled()
   })
 })
