@@ -1,5 +1,6 @@
 // Real Chromium layout/interaction fixture, run in an isolated Electron window by the colocated test.
 import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import MarkdownImpl, { WorkspaceFileLinkProvider } from '../MarkdownImpl'
 import type { WorkspaceFileTarget } from '../../workspace-links'
 import '../../styles.css'
@@ -87,6 +88,45 @@ async function run(): Promise<void> {
 
   const browserLink = document.querySelector<HTMLAnchorElement>(`a[href="${browserUrl}"]`)
   assert(browserLink?.target === '_blank', 'HTTP code span must be an external browser link')
+
+  // Workspace discovery can return fresh arrays containing exactly the same targets.
+  // Count real MarkdownChunk executions, not just DOM mutations or final text.
+  const contextOpened: WorkspaceFileTarget[] = []
+  let secondCallbackCalls = 0
+  const firstOpen = (target: WorkspaceFileTarget): void => { contextOpened.push(target) }
+  const secondOpen = (target: WorkspaceFileTarget): void => {
+    secondCallbackCalls += 1
+    contextOpened.push(target)
+  }
+  const renderContext = (rootPath: string, path: string, onOpen = firstOpen): void => {
+    flushSync(() => root.render(
+      <WorkspaceFileLinkProvider workspaces={[rootPath]} onOpen={onOpen}>
+        <WorkspaceFileLinkProvider workspaces={[]} filePaths={[path]}>
+          <MarkdownImpl>{'`report.md`'}</MarkdownImpl>
+        </WorkspaceFileLinkProvider>
+      </WorkspaceFileLinkProvider>
+    ))
+  }
+  const beforeContext = Number(document.body.dataset.markdownChunks)
+  renderContext('/repo', 'docs/report.md')
+  const initialChunks = Number(document.body.dataset.markdownChunks)
+  assert(initialChunks > beforeContext, 'Markdown work counter must observe the initial parse')
+  for (let index = 0; index < 10; index++) renderContext('/repo', 'docs/report.md')
+  const repeatedChunks = Number(document.body.dataset.markdownChunks) - initialChunks
+  assert(repeatedChunks === 0, `Equivalent workspace targets must not reparse Markdown: ${repeatedChunks} executions`)
+  const openContextLink = (): WorkspaceFileTarget => {
+    document.querySelector<HTMLButtonElement>('.md-file-ref')!.click()
+    return contextOpened.at(-1)!
+  }
+  assert(JSON.stringify(openContextLink()) === JSON.stringify({ cwd: '/repo', path: 'docs/report.md' }), 'Unchanged targets must remain operable')
+  renderContext('/next', 'docs/report.md')
+  assert(JSON.stringify(openContextLink()) === JSON.stringify({ cwd: '/next', path: 'docs/report.md' }), 'Changed parent workspace must reach nested Markdown')
+  renderContext('/next', 'moved/report.md')
+  assert(JSON.stringify(openContextLink()) === JSON.stringify({ cwd: '/next', path: 'moved/report.md' }), 'Changed file index must refresh Markdown targets')
+  renderContext('/next', 'moved/report.md', secondOpen)
+  openContextLink()
+  assert(secondCallbackCalls === 1, 'Changed parent callback must replace the previous callback')
+  console.log('SCRY_MARKDOWN_CONTEXT_WORK', JSON.stringify({ equivalentRefreshes: 10, repeatedChunks }))
 
   // Exercise selection with Chromium input, not Range.addRange(), which bypasses user-select.
   root.render(

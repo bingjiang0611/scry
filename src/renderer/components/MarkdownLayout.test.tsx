@@ -12,6 +12,16 @@ it('keeps Markdown readable, selectable and file links operable in real Chromium
     await build({
       configFile: false,
       logLevel: 'silent',
+      plugins: [{
+        name: 'count-markdown-context-work',
+        transform(code, id) {
+          if (id !== resolve('src/renderer/components/MarkdownImpl.tsx')) return null
+          const marker = '  const incremental = streaming &&'
+          if (!code.includes(marker)) throw new Error('Markdown work counter anchor missing')
+          return code.replace(marker,
+            "  document.body.dataset.markdownChunks = String(Number(document.body.dataset.markdownChunks ?? 0) + 1)\n" + marker)
+        }
+      }],
       define: { 'process.env.NODE_ENV': JSON.stringify('production') },
       resolve: { alias: { '@shared': resolve('src/shared') } },
       esbuild: { jsx: 'automatic', jsxDev: false },
@@ -131,6 +141,7 @@ it('keeps Markdown readable, selectable and file links operable in real Chromium
         : reject(new Error(`Electron fixture exited ${code}: ${text}`)))
     })
     expect(output).toContain('SCRY_MARKDOWN_LAYOUT_TEST_OK')
+    expect(output).toContain('SCRY_MARKDOWN_CONTEXT_WORK {"equivalentRefreshes":10,"repeatedChunks":0}')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
