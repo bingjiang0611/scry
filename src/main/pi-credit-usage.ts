@@ -1,6 +1,6 @@
 import type { CreditRequest } from '../shared/credit-usage'
 
-interface PiEntry {
+export interface PiCreditEntry {
   type: string
   id: string
   parentId?: string | null
@@ -18,11 +18,11 @@ interface PiEntry {
 export function piCreditRequests(content: string, identity: { sessionId: string; cwd: string },
   turns: Array<{ runId: string; providerTurnId?: string }>): { requests: CreditRequest[]; matched: Set<string>; incomplete: boolean } {
   const lines = content.split('\n')
-  const entries: PiEntry[] = []
+  const entries: PiCreditEntry[] = []
   let incomplete = false
   for (const [index, line] of lines.entries()) {
     if (!line.trim()) continue
-    try { entries.push(JSON.parse(line) as PiEntry) }
+    try { entries.push(JSON.parse(line) as PiCreditEntry) }
     catch (error) {
       // A live append can expose one unfinished last entry. Keep the proven
       // prefix, but do not treat corruption within completed JSONL as valid.
@@ -30,11 +30,17 @@ export function piCreditRequests(content: string, identity: { sessionId: string;
       incomplete = true
     }
   }
+  return piCreditEntries(entries, identity, turns, incomplete)
+}
+
+// The file reader retains topology and metering only, never message/tool bodies.
+export function piCreditEntries(entries: PiCreditEntry[], identity: { sessionId: string; cwd: string },
+  turns: Array<{ runId: string; providerTurnId?: string }>, incomplete = false): ReturnType<typeof piCreditRequests> {
   const header = entries.shift()
   if (header?.type !== 'session' || header.version !== 3 || header.id !== identity.sessionId || header.cwd !== identity.cwd) {
     throw new Error('Pi credit session identity mismatch')
   }
-  const byId = new Map<string, PiEntry>()
+  const byId = new Map<string, PiCreditEntry>()
   for (const entry of entries) {
     if (!entry.id || byId.has(entry.id)) throw new Error('Pi credit entry identity is missing or duplicated')
     byId.set(entry.id, entry)
@@ -47,7 +53,7 @@ export function piCreditRequests(content: string, identity: { sessionId: string;
   // Memoize ownership, not entire ancestry arrays: long tool-heavy turns must
   // not repeatedly traverse their growing transcript on the main thread.
   const owners = new Map<string, string | undefined>()
-  const ownerOf = (entry: PiEntry): string | undefined => {
+  const ownerOf = (entry: PiCreditEntry): string | undefined => {
     const path = new Set<string>()
     let current = entry
     let owner: string | undefined

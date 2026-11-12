@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, type MutableRefObject, type RefObject, type Dispatch, type SetStateAction } from 'react'
 import type { SlashCmd, TraceEvent } from '@shared/trace'
-import type { AgentSteerEvidence } from '@shared/runtime'
+import type { RendererSteerEvidence } from './steer'
 import type { AgentStartRequest } from '@shared/runtime'
 import type { useAgentSession } from './hooks/useAgentSession'
 import type { useIntegrations } from './hooks/useIntegrations'
@@ -70,7 +70,7 @@ export interface AppComposerContext {
   editingQueuedPromptId: string | null
   setEditingQueuedPromptId: Dispatch<SetStateAction<string | null>>
   setMovedQueuedPromptId: Dispatch<SetStateAction<string | null>>
-  steerEvidenceByMessageId: ReadonlyMap<string, AgentSteerEvidence & { eventId: string }>
+  steerEvidenceByMessageId: ReadonlyMap<string, RendererSteerEvidence>
 }
 
 export function useAppComposer(context: AppComposerContext) {

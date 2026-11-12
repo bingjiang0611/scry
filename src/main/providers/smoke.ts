@@ -285,6 +285,7 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
         getInputReceipt: () => history.snapshot(),
         ...(inputsFile ? { steer: async (input: AgentSteerInput) => {
           appendFileSync(inputsFile, `${JSON.stringify({ operation: 'steer', providerId, runId: request.runId, prompt: input.prompt })}\n`)
+          if (input.prompt === 'steer-unknown') return { status: 'unknown' as const, message: 'Synthetic lost receipt' }
           return { status: 'accepted' as const }
         } } : {})
       }

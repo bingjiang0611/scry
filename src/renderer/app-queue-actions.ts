@@ -10,7 +10,7 @@ import { focusComposerUnlessFocusMoved } from './composer-focus'
 import type { DraftAttachment, QueuedPrompt, SessionPromptQueues } from './app-model'
 import { appendWorkspaceReference } from './app-model'
 import { QUEUE_COPY } from './constants/copy'
-import { activeSteerIdentityMatches, isSteerRemovalBlocked, latestSteerCapability, steerStateForMessage, updateQueuedPromptByMessageId } from './steer'
+import { activeSteerIdentityMatches, isSteerRemovalBlocked, latestSteerCapability, steerStateForMessage, updateQueuedPromptByMessageId, type RendererSteerEvidence } from './steer'
 import { workspaceReferenceToken } from './components/WorkspacePanel'
 
 export interface AppQueueContext {
@@ -21,7 +21,7 @@ export interface AppQueueContext {
   activeSessionIdRef: MutableRefObject<string | null>
   sessionPromptQueues: SessionPromptQueues
   setSessionPromptQueues: Dispatch<SetStateAction<SessionPromptQueues>>
-  steerEvidenceByMessageId: ReadonlyMap<string, import('@shared/runtime').AgentSteerEvidence & { eventId: string }>
+  steerEvidenceByMessageId: ReadonlyMap<string, RendererSteerEvidence>
   steerInFlightRef: MutableRefObject<Set<string>>
   queuedStartInFlightRef: MutableRefObject<boolean>
   queuedStartPendingRef: MutableRefObject<boolean>
@@ -159,9 +159,10 @@ export function useAppQueueActions(context: AppQueueContext) {
       return
     }
     const prompt = queuedPrompts[index]
-    const state = steerStateForMessage(prompt.steer, steerEvidenceByMessageId.get(messageId))
-    if (steerInFlightRef.current.has(messageId) || isSteerRemovalBlocked(state)) {
-      setComposerError(state?.status === 'unknown' ? '结果未知的 Steer 不能移除；请先核对 Provider 回执' : 'Steer 正在提交，完成前不能移除')
+    const evidence = steerEvidenceByMessageId.get(messageId)
+    const state = steerStateForMessage(prompt.steer, evidence)
+    if (steerInFlightRef.current.has(messageId) || isSteerRemovalBlocked(state, evidence)) {
+      setComposerError(state?.status === 'unknown' ? QUEUE_COPY.removeTitleUnknown : QUEUE_COPY.removeTitlePending)
       return
     }
     if (index === 0) queuedStartPendingRef.current = false
