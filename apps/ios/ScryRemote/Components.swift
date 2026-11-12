@@ -167,7 +167,7 @@ struct RemoteHeader<Right: View>: View {
           .accessibilityAddTraits(.isHeader)
           .accessibilityFocused($titleFocused)
           .onAppear {
-            if let transitionIdentity, transition?.state.destination == .session(transitionIdentity) { titleFocused = true }
+            if let transitionIdentity, transition?.state.focusDestination == .session(transitionIdentity) { titleFocused = true }
           }
         if let subtitle {
           HStack(spacing: 5) {

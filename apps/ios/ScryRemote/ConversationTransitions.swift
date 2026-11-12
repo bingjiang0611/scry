@@ -18,11 +18,14 @@ import UIKit
 
   private(set) var destination: Destination?
   private(set) var ticket: UUID?
+  // Navigation focus survives reduced motion and visual-flight cleanup.
+  private(set) var focusDestination: Destination?
 
-  func begin(_ destination: Destination) {
+  func begin(_ destination: Destination, reduceMotion: Bool) {
     cancel()
+    focusDestination = destination
+    guard !reduceMotion else { return }
     #if canImport(UIKit)
-    guard !UIAccessibility.isReduceMotionEnabled else { return }
     captureSources(for: destination)
     #endif
     self.destination = destination

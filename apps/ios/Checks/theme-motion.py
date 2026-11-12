@@ -107,14 +107,16 @@ enum Route: Hashable { case home, newSession, chat, transcript, settings }
     let second = RemoteRunStore.SessionIdentity(key: "host-b/session")
     let transition = ConversationTransition()
     precondition(!transition.contains(.sessionTitle(first), route: .transcript))
-    transition.begin(.session(first))
+    transition.begin(.session(first), reduceMotion: false)
+    precondition(transition.focusDestination == .session(first))
     let ticket = transition.ticket
     precondition(transition.contains(.sessionTitle(first), route: .transcript))
     precondition(transition.contains(.sessionProvider(first), route: .transcript))
     precondition(!transition.contains(.sessionTitle(second), route: .transcript))
     precondition(!transition.contains(.sessionTitle(first), route: .home))
     precondition(!transition.accepts(first))
-    transition.begin(.submission(second))
+    transition.begin(.submission(second), reduceMotion: false)
+    precondition(transition.focusDestination == .submission(second))
     precondition(transition.ticket != ticket)
     precondition(transition.accepts(second) && !transition.accepts(first) && !transition.accepts(nil))
     precondition(transition.contains(.submittedText, route: .chat))
@@ -125,10 +127,26 @@ enum Route: Hashable { case home, newSession, chat, transcript, settings }
     transition.cancel()
     precondition(transition.destination == nil && transition.ticket == nil)
     precondition(!transition.contains(.composerSurface, route: .chat))
-    print("PASS colors, motion/reduced motion, row delays, fonts; drawer position/release; scoped route identities, replacement and cancellation")
+    transition.begin(.session(first), reduceMotion: true)
+    precondition(transition.focusDestination == .session(first))
+    precondition(transition.destination == nil && transition.ticket == nil)
+    precondition(!transition.contains(.sessionTitle(first), route: .transcript))
+    transition.cancel()
+    precondition(transition.focusDestination == .session(first))
+    transition.begin(.submission(second), reduceMotion: true)
+    precondition(transition.focusDestination == .submission(second))
+    precondition(transition.destination == nil && !transition.accepts(second))
+    print("PASS colors, motion/reduced motion, row delays, fonts; drawer position/release; scoped route identities, replacement and cancellation; focus independent of motion")
   }
 }
 '''
+row = (root / 'apps/ios/ScryRemote/SessionRow.swift').read_text()
+for element in ['sessionTitle', 'sessionProvider']:
+    assert f'.conversationElement(session.label.isEmpty ? nil : destinationIdentity.map(ConversationTransition.Element.{element}))' in row
+header = (root / 'apps/ios/ScryRemote/Components.swift').read_text()
+assert 'transition?.state.focusDestination == .session(transitionIdentity)' in header
+print('PASS empty-title source parity and motion-independent header focus wiring')
+
 workspace = (root / 'apps/ios/ScryRemote/WorkspaceShell.swift').read_text()
 assert '.offset(x: reduceMotion ? 0 : (drawerProgress - 1) * width)' in workspace
 assert '.opacity(reduceMotion ? drawerProgress : 1)' in workspace

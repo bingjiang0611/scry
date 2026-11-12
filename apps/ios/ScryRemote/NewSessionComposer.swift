@@ -15,6 +15,7 @@ struct NewSessionComposer: View {
   @Environment(ExecutionTargetCoordinator.self) private var targets
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.conversationTransition) private var transition
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var visible = false
   @State private var showProjects = false
   @State private var showProviders = false
@@ -97,7 +98,7 @@ struct NewSessionComposer: View {
     guard let providerId = run.chosenProvider?.id else { return }
     let payload = composer.wrappedValue.attachments.map(\.wireValue)
     if run.submit(prompt: draft, providerId: providerId, attachments: payload) {
-      if let identity = run.activeSessionIdentity { transition?.state.begin(.submission(identity)) }
+      if let identity = run.activeSessionIdentity { transition?.state.begin(.submission(identity), reduceMotion: reduceMotion) }
       composer.wrappedValue = .init()
       targets.focusNewTask()
       model.route = .chat

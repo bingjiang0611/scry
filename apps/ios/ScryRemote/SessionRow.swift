@@ -16,6 +16,7 @@ struct SessionRowView: View {
 
   @Environment(ExecutionTargetCoordinator.self) private var targets
   @Environment(\.conversationTransition) private var transition
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var session: G0Transport.RunSessionRef { row.session }
   private var store: RemoteRunStore { targets.store(for: row.scope) }
@@ -24,14 +25,14 @@ struct SessionRowView: View {
 
   var body: some View {
     Button {
-      if let destinationIdentity { transition?.state.begin(.session(destinationIdentity)) }
+      if let destinationIdentity { transition?.state.begin(.session(destinationIdentity), reduceMotion: reduceMotion) }
       onOpen()
     } label: {
       HStack(spacing: 10) {
         Image(systemName: ProviderSymbol.name(session.providerId)).resizable().scaledToFit()
           .foregroundStyle(Palette.provider(session.providerId))
           .frame(width: 16, height: 16).accessibilityLabel(ConnectionCopy.providerLabel(session.providerId))
-          .conversationElement(destinationIdentity.map(ConversationTransition.Element.sessionProvider))
+          .conversationElement(session.label.isEmpty ? nil : destinationIdentity.map(ConversationTransition.Element.sessionProvider))
         Text(session.label.isEmpty ? ConnectionCopy.noPreview : session.label)
           .font(Typography.rowTitle).foregroundStyle(openable && !completed ? Palette.fg : Palette.dim)
           .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
