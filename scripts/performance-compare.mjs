@@ -12,11 +12,13 @@ const NODE_TIMING_NOISE_MS = 10
 const sameKeys = (left, right) => JSON.stringify(Object.keys(left).sort()) === JSON.stringify(Object.keys(right).sort())
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
 
-export function comparePerformance(base, head, policy) {
+export function comparePerformance(base, head, policy, expectedSamples = 15) {
+  if (!Number.isInteger(expectedSamples) || (expectedSamples !== 15 && expectedSamples < 20)) throw new Error('Unsupported sample contract')
+  if (expectedSamples >= 20 && (!base.measurement?.interleaved || !head.measurement?.interleaved)) throw new Error('Experimental samples require interleaved measurement')
   if (base.schema !== 1 || head.schema !== 1 || policy.schema !== 2) throw new Error('Unsupported benchmark schema')
   if (base.harness !== head.harness || !base.harness) throw new Error('Harness differs: run the same frozen fixture/config on both source revisions')
   if (JSON.stringify(base.environment) !== JSON.stringify(head.environment)) throw new Error('Environment differs: timings require the same runner and runtime')
-  if (JSON.stringify(base.measurement) !== JSON.stringify(head.measurement) || base.measurement?.kind !== 'batch-mean-ms' || base.measurement.warmups !== 3 || base.measurement.samples !== 15 || base.measurement.iterationsPerSample !== 20) throw new Error('Timing methodology differs or is missing')
+  if (JSON.stringify(base.measurement) !== JSON.stringify(head.measurement) || base.measurement?.kind !== 'batch-mean-ms' || base.measurement.warmups !== 3 || base.measurement.samples !== expectedSamples || base.measurement.iterationsPerSample !== 20) throw new Error('Timing methodology differs or is missing')
   checkBenchmarkCoverage(policy)
   if (!sameKeys(base.results, policy.scenarios) || !sameKeys(head.results, policy.scenarios)) throw new Error('Missing or unexpected benchmark scenarios')
   const rows = []
@@ -61,7 +63,9 @@ export function formatComparison(report) {
     ...report.rows.map(row => `| ${row.scenario} | ${row.metric} | ${format(row.baseline)} | ${format(row.candidate)} | ${row.baseline === 0 ? 'n/a' : `${((row.candidate / row.baseline - 1) * 100).toFixed(1)}%`} | ${format(row.ceiling)} | ${row.status} |`),
     '',
     'Fixed local production-path workloads across all 16 path groups. Domain lanes measure computation/projection; disk/process lanes use temporary files, archives and Git. This is not native UI paint, network wire bytes, real Provider latency or real-device acceptance.',
-    'Each scenario carries an explicit lane, workload, warmup, sample and iteration count. Domain trace scenarios use three warmups and fifteen measured samples; disk/process lanes use bounded local iterations and seven samples. Counter ceilings plus base-relative checks prevent gradual drift. Never increase budgets just to make a failing PR green.',
+    report.measurement?.interleaved
+      ? `ABAB experiment: each side retains all ${report.measurement.samples} samples per scenario, with the original workload, warmups and iterations. Stage timings are nonexclusive diagnostics. Counter ceilings and the P95 threshold formula are unchanged.`
+      : 'Each scenario carries an explicit lane, workload, warmup, sample and iteration count. Domain trace scenarios use three warmups and fifteen measured samples; disk/process lanes use bounded local iterations and seven samples. Counter ceilings plus base-relative checks prevent gradual drift. Never increase budgets just to make a failing PR green.',
     ''
   ].join('\n')
 }
