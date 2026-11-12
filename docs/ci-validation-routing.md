@@ -55,4 +55,6 @@ Ubuntu 保持 `ubuntu-latest`。`packaged-linux` 已优先加入 kernel.org Ubun
 gh workflow run ci.yml --ref <task-branch> -f recorder_base=<implementation-commit-sha>
 ```
 
+计时 dispatch 使用独立的 `Recorder timing Check` 聚合 context，不与正常 PR/push/默认手动验证的必需 `Check` 同名。避免同一 SHA 的缩窄计时与完整验收发布同名、不同范围的结果；计时成功不能作为完整 PR 验收通过的替代。
+
 `recorder_base` 只能用于手动计时：必须是 HEAD 的严格祖先、40 位 SHA，且到 HEAD 的 diff 必须非空并仅触及 recorder 白名单/文档；包含任何桌面/未知路径则失败。PR/push 忽略该输入，默认手动/桌面发布验证也不使用它。报告比较 base/head、运行链接、结果、`created_at → completed_at` 墙钟耗时及各必跑 job 时间；排队算在墙钟内，不把并行 job 时长相加当作耗时。
