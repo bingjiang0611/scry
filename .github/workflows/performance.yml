@@ -128,6 +128,8 @@ jobs:
     # Same frozen driver, two real source builds, one runner, serial measurements.
     runs-on: macos-latest
     timeout-minutes: 30
+    outputs:
+      verdict: ${{ steps.native_verdict.outputs.verdict }}
     env:
       QODER_SKIP_DOWNLOAD: '1'
     steps:
@@ -244,6 +246,7 @@ jobs:
           mkdir -p native-results
           if [ -d "$HOME/.npm/_logs" ]; then cp -R "$HOME/.npm/_logs" native-results/npm-logs; fi
       - name: Retain native measurements, including failed lanes
+        id: native_retained
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -251,6 +254,16 @@ jobs:
           path: native-results/
           if-no-files-found: error
           retention-days: 30
+      # Classifies, never re-measures: the job stays failed. Performance Check may accept a
+      # failure only when every failing row is a timing row of a complete, retained run.
+      - name: Classify the native result for the Performance Check
+        id: native_verdict
+        if: always()
+        env:
+          NATIVE_MEASUREMENTS: ${{ steps.native_measurements.outcome }}
+          NATIVE_COMPARISON: ${{ steps.native_comparison.outcome }}
+          NATIVE_RETAINED: ${{ steps.native_retained.outcome }}
+        run: node candidate/scripts/performance-native-verdict.mjs native-results/report.md.json
 
   check:
     name: Performance Check
@@ -265,15 +278,20 @@ jobs:
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           # Every job must succeed, except jobs proven unaffected, which must be skipped.
-          echo "$RESULTS" | jq -e --argjson desktop '["native"]' '
+          # Native timing rows are advisory (docs/performance-native.md): a native failure
+          # passes only when its own verdict proves timing-only rows on complete evidence.
+          echo "$RESULTS" | jq -e --argjson desktop '["native"]' --argjson advisory '["native"]' '
             length == 3 and .changes.result == "success" and
             (.changes.outputs as $out
               | ($out.required == "true" and ($out.desktop == "true" or $out.desktop == "false"))
                 or ($out.required == "false" and $out.desktop == "false")) and
             (.changes.outputs as $out | del(.changes) | to_entries | all(.[];
-              .key as $job | .value.result == (
+              .key as $job | .value as $job_result | (
                 if $out.required == "false" or ($out.desktop == "false" and any($desktop[]; . == $job))
-                then "skipped" else "success" end)))' > /dev/null
+                then "skipped" else "success" end) as $expected |
+              $job_result.result == $expected or
+              ($expected == "success" and any($advisory[]; . == $job) and
+                $job_result.result == "failure" and $job_result.outputs.verdict == "timing-only")))' > /dev/null
 
   comment:
     # Fork PRs retain a read-only summary/artifact. Never run PR code with a write token.
@@ -293,6 +311,7 @@ jobs:
         env:
           NODE_RESULT: ${{ needs.compare.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
+          NATIVE_VERDICT: ${{ needs.native.outputs.verdict }}
         with:
           script: |
             const fs = require('node:fs')
@@ -301,7 +320,9 @@ jobs:
               if (label === 'Native' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured: this diff cannot reach the packaged App (validation changes reported desktop=false).`
               return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `## ${label}\nNo valid comparison was produced. Missing measurements are not a pass.`
             })
-            const body = (`<!-- scry-performance -->\nNode job: ${process.env.NODE_RESULT} · Native job: ${process.env.NATIVE_RESULT}\n\n` + sections.join('\n\n')).slice(0, 60000)
+            const advisory = process.env.NATIVE_RESULT === 'failure' && process.env.NATIVE_VERDICT === 'timing-only'
+              ? ' (timing rows only: advisory, not blocking; work rows, evidence and lanes still block)' : ''
+            const body = (`<!-- scry-performance -->\nNode job: ${process.env.NODE_RESULT} · Native job: ${process.env.NATIVE_RESULT}${advisory}\n\n` + sections.join('\n\n')).slice(0, 60000)
             const params = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number }
             const comments = await github.paginate(github.rest.issues.listComments, params)
             const previous = comments.find(comment => comment.user.type === 'Bot' && comment.body.startsWith('<!-- scry-performance -->'))

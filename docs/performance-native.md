@@ -102,3 +102,12 @@ CI 的 baseline/candidate 均经同一冻结版本的 `timing-run.mjs` 及其 `t
 Node 侧的同日证据相同：`startup.recovery` 七批中六批为 1.2–1.35ms、一批 5.4ms，工作量计数始终是 4 个文件；同产物重测没有这一尖峰。原先固定余量只有 2ms，单次调度或缺页尖峰就会让 p95 判错。经同一维护者批准，固定余量提高为 10ms（仍受每场景绝对上限约束，且只在基线低于 10ms 时起作用）；11.4ms 上限与 12ms 失败由单元测试固定。计数器仍是主门禁。
 
 2026-10-30 的 [CI 41045559281](https://github.com/bingjiang0611/scry/actions/runs/41045559281) 有 29 个相关计时行超出比较门槛；其中 paged 首次 complete 的 start receipt 为 428ms、terminal 为 688ms。与上一轮相比，同一 baseline 产物的 short-heavy startup 也从约 1064ms 变为 3843ms。这证明存在明显波动，但没有证明宿主争用、GC 或排除 App 瓶颈；不能把下一次绿灯当作本次问题已修复。新增的是归因证据，不是性能修复，门禁算法与固定负载不变。
+
+## 计时行暂不阻塞（2026-11-13 维护者批准）
+
+最近 36 次运行中，29 次有效 native 比较失败 23 次；运行过的 23 次同产物 A/A 对照全部失败，且与是否改动 App 无关（[波动分析](performance-experiments/20261113-native-gate-noise.md)）。经维护者批准，native 计时行暂改为只报告：
+
+- native job 结束前由 `scripts/performance-native-verdict.mjs` 分类，输出 `pass`、`timing-only`、`blocking` 或 `invalid`。job 本身仍按原结果失败；报告、样本、A/A 对照和预算都不变。
+- `Performance Check` 只在 native 为 `failure` 且分类为 `timing-only` 时放行。`timing-only` 要求测量完成、产物已保留、比较报告完整，并且所有失败行都是毫秒行。
+- `domNodes` 等工作量行回归、证据缺失、lane 失败、上传失败、取消或跳过仍然拦截；Node 比较与计数器门禁不受影响。PR 评论会标明计时回归属于参考信息。
+- 恢复条件：选定长期方案（多轮交替采样，或可隔离的 macOS 测量容量），并有同产物对照通过的证据后，由维护者批准恢复阻塞。在此之前不得把 native 绿灯写成性能通过。
