@@ -50,7 +50,9 @@ async function exercise(contents) {
   contents.focus()
   await wait(`document.querySelector('.prompt-queue') != null && document.querySelectorAll('.queue-item').length === 4`)
   console.log('Steer UI: fixture loaded')
-  check(await read('document.hasFocus()'), 'Fixture document did not receive focus')
+  // contents.focus() on the hidden fixture window is delivered asynchronously; a busy macOS
+  // runner can still report false on the very next read. Wait for it within the normal bound.
+  await wait('document.hasFocus()').catch((error) => { throw new Error(`Fixture document did not receive focus: ${error.message}`) })
   check(await read(`document.querySelector('.steer-evidence[data-steer-message-id="accepted-evidence"]')?.textContent.includes(${JSON.stringify('请先保留当前工作')})`), 'Accepted Steer evidence is missing')
   check(await read(`document.querySelector('.steer-evidence[data-steer-message-id="accepted-evidence"]')?.textContent.includes(${JSON.stringify('不能只显示成提示')})`), 'Accepted evidence lost the full user supplement')
 

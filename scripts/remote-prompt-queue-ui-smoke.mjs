@@ -47,7 +47,9 @@ async function exercise(contents) {
   contents.focus()
   await wait(`document.querySelectorAll('.queue-item').length === 3`)
   console.log('Remote queue UI: fixture loaded')
-  check(await read('document.hasFocus()'), 'Fixture document did not receive focus')
+  // contents.focus() on the hidden fixture window is delivered asynchronously; a busy macOS
+  // runner can still report false on the very next read. Wait for it within the normal bound.
+  await wait('document.hasFocus()').catch((error) => { throw new Error(`Fixture document did not receive focus: ${error.message}`) })
 
   // 铅笔在远端队列里必须可用：这是本次补的能力，之前 RemoteChat 没传编辑回调。
   check(await read(`(() => { const button = document.querySelectorAll('.queue-item')[0].querySelector('.queue-edit'); return button != null && !button.disabled })()`), 'Remote queue pencil is missing or disabled')
