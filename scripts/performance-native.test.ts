@@ -13,7 +13,7 @@ function report() {
   return {
     schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors,
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
+      scenario, mode: 'in-process', turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
       sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
       counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), mutationControl: { baseline: 0, extra: 2 }, passed: true },
@@ -101,6 +101,18 @@ describe('native performance evidence gate', () => {
     expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
       'src/main/providers/smoke.ts', 'src/main/providers/smoke-history-reader.ts'
     ]))
+  })
+
+  it('covers the daemon-mode modules in the harness hash and keeps daemon results out of the gate', () => {
+    expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
+      'scripts/session-open-bench-mode.mjs', 'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-lifecycle.mjs'
+    ]))
+    const daemon = report()
+    daemon.results.short.mode = 'daemon'
+    expect(() => validateNative(daemon)).toThrow('in-process measurements only')
+    const unlabelled = report()
+    Reflect.deleteProperty(unlabelled.results.short, 'mode')
+    expect(() => validateNative(unlabelled)).toThrow('in-process measurements only')
   })
 
   it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {
