@@ -23,6 +23,18 @@ it('restores the tested child after keyboard tab activation before composition a
   expect(input).not.toContain("driver.pointerAt(`document.querySelector('${CHILD_PANEL} .chat-body')`)")
 })
 
+it('exercises late archived text after the active run clears without weakening markup checks', () => {
+  const input = readFileSync(new URL('./side-chat-input-checks.mjs', import.meta.url), 'utf8')
+  expect(input).toMatch(/setArchiveVisibility\(false\)[\s\S]*?fixture: archive pending[\s\S]*?setArchiveVisibility\(true\)/)
+  expect(input).toContain('recorded.summary.activeRunId == null')
+  expect(input).toContain('recorded.turns.at(-1)?.history?.userText === prompt')
+  expect(input).toContain('check(injected.img === 0 && injected.script === 0')
+  expect(input).toContain('check(injected.text,')
+  const entry = readFileSync(new URL('./smoke-app-entries.mjs', import.meta.url), 'utf8')
+  const late = entry.slice(entry.indexOf("if (channel === 'conversation:read'"), entry.indexOf('// The marker is written'))
+  expect(late.indexOf('const marker = JSON.parse')).toBeLessThan(late.indexOf('Promise.resolve(listener'))
+})
+
 it('awaits the restored child, visible panel and loaded transcript before measuring', async () => {
   let restore!: () => void
   let reveal!: () => void
