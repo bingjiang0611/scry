@@ -297,5 +297,9 @@ export function registerContinuationSuite(): void {
     expect(records[1].turnRole).toMatchObject({ role: 'continuation', parentId: records[0].recordId })
     expect(records[1].assistant.value?.text).toBe('Captured task finished.')
     expect(records[1].tools.value ?? []).toEqual([])
+    // One capture, one source: the wake continues the captured session instead of looking like a
+    // second, unrelated recording of the same work.
+    expect(records[1].capture).toEqual(records[0].capture)
+    expect(records[1].capture).toMatchObject({ captureId: 'capture-1', source: 'manual', task: 'REQ-123' })
   })
 }

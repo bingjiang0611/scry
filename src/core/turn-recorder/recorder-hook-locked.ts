@@ -11,6 +11,7 @@ import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './record
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
 import { holdSeal, refreshSealWindow } from './recorder-segment.js'
+import { resumeAfterStorage } from './git.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 
 export async function applyHookLocked(
@@ -196,6 +197,9 @@ export async function applyHookLocked(
     delete open.deferredTerminalAt
     delete open.deferredTerminalEventId
     delete open.terminalDiffs
+    // Dropping the chain also drops its frozen end states: this turn keeps its own baseline.
+    for (const { capture } of open.captures) resumeAfterStorage(capture)
+    delete open.frozenDiffs
     delete open.terminalIdentityConfirmedBySessionEnd
     delete open.staleTerminalProtection
     await writeJsonAtomic(openPath(root), open, { sync: false })
