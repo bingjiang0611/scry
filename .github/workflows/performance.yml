@@ -181,6 +181,9 @@ jobs:
           (cd candidate && ./node_modules/.bin/electron-builder install-app-deps) 2>&1 | tee native-results/candidate-native-deps.log
           (cd baseline && npm run build) 2>&1 | tee native-results/baseline-build.log
           (cd candidate && npm run build) 2>&1 | tee native-results/candidate-build.log
+      - name: Observe runner processes before Native measurements
+        continue-on-error: true
+        run: node candidate/scripts/performance-runner-snapshot.mjs before-native > native-results/runner-before.json
       - name: Measure baseline then candidate, retaining failures
         id: native_measurements
         run: |
@@ -201,6 +204,10 @@ jobs:
           (cd baseline && node scripts/performance-native-run.mjs combine ../native-results/baseline.json "${baseline_shards[@]}") 2>&1 | tee native-results/baseline-combine.log || status=$?
           (cd candidate && node scripts/performance-native-run.mjs combine ../native-results/candidate.json "${candidate_shards[@]}") 2>&1 | tee native-results/candidate-combine.log || status=$?
           exit "$status"
+      - name: Observe runner processes after Native measurements
+        if: always()
+        continue-on-error: true
+        run: node candidate/scripts/performance-runner-snapshot.mjs after-native > native-results/runner-after.json
       - name: Compare native evidence and budgets
         id: native_comparison
         if: always()
