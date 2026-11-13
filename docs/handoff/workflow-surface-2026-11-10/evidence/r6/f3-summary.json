@@ -1,0 +1,59 @@
+[
+  {
+    "mode": "tools",
+    "cli": "1.1.88",
+    "eventFrames": {
+      "canonical": 172,
+      "native": 38,
+      "log": 1
+    },
+    "workflowActivity": 0,
+    "recordSummaries": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true
+      }
+    ],
+    "errorPresent": false,
+    "approvalAllowCount": 3,
+    "fileMatchesRequested": true,
+    "settled": true
+  },
+  {
+    "mode": "deny",
+    "cli": "1.1.88",
+    "eventFrames": {
+      "canonical": 70,
+      "native": 28,
+      "log": 1
+    },
+    "workflowActivity": 0,
+    "recordSummaries": [],
+    "errorPresent": false,
+    "approvalDeniedCount": 1,
+    "fileExists": false,
+    "formRemaining": false,
+    "settled": true
+  },
+  {
+    "mode": "forkagents",
+    "cli": "1.1.88",
+    "eventFrames": {
+      "canonical": 331,
+      "native": 100,
+      "log": 4
+    },
+    "workflowActivity": 0,
+    "recordSummaries": [],
+    "errorPresent": false,
+    "firstSettled": true,
+    "forkButton": true,
+    "sidebarSessionCountAfterFork": 1,
+    "forkReplyObserved": true,
+    "agentSurfaceCompletedCount": 2,
+    "rootOperationAborted": true,
+    "resumeListed": true,
+    "resumeSettled": true,
+    "resumeReplyObserved": true
+  }
+]
