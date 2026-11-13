@@ -28,6 +28,19 @@ export async function updateCaptureRepositories(
 }
 
 /**
+ * 这一段证明过的仓库留在会话上：段链的 object store 被清掉之后，接续段仍要说得出自己缺的是
+ * 哪几段的基线，而不是只报一句「没有抓到 diff」。托管轮没有仓库，不动会话里的列表。
+ */
+export function segmentCaptureRepositories(
+  session: RecorderSessionState,
+  open: RecorderOpenTurnState
+): string[] | undefined {
+  if (open.managedByScry) return undefined
+  const merged = [...new Set([...(session.captureRepositories ?? []), ...open.captures.map((item) => item.repository)])]
+  return merged.length > 0 ? merged.slice(0, CAPTURE_REPOSITORY_LIMIT) : undefined
+}
+
+/**
  * Baseline a repository the moment the turn is about to change it. The PreToolUse that names the
  * file arrives before the write, so this baseline is the pre-edit state, not an approximation.
  */

@@ -9,6 +9,7 @@ import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, par
 import { applyRecordContentBudget, recordTransportBytes, RECORDER_TRANSPORT_MAX_BYTES } from './record-content-budget.js'
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
+import { pruneStaleSegmentChains } from './segment-prune.js'
 import { pruneStaleTemps } from './temp-prune.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
 export { type RecordCommittedNotification, type CommitNotificationStatus, type CommitNotificationScope, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
@@ -82,6 +83,9 @@ export async function commitRecord(
     // 中断的写入会留下永不 rename 上屏的 `.tmp`（0 字节也算）：它们不是记录，但会被按目录枚举的
     // 脚本读到。提交是所有写入方唯一的收敛点，所以在这里按天清理一次；失败只影响这次卫生。
     await pruneStaleTemps(dataRoot).catch(() => undefined)
+    // 段链的 object store 也有同样的收敛点问题：真实提问开新链时才整条释放，会话被直接关掉
+    // 就没有那个时刻。它与 `.tmp` 共用这条按天路径，失败同样只影响这次卫生。
+    await pruneStaleSegmentChains(dataRoot).catch(() => undefined)
     return { status: 'committed' as const, record }
   })
 }

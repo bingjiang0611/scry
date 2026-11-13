@@ -1,14 +1,17 @@
-import { appendFile, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { it, expect } from 'vitest'
 import { handleRecorderHook } from '../recorder'
 import { listRecords } from '../store'
 import { recorderSessionRoot, recorderStatePath } from '../runtime-state'
+import { STALE_SEGMENT_CHAIN_AGE_MS, pruneStaleSegmentChains } from '../segment-prune'
 import { diffAt, gitWorkspace } from './worktree-fixture'
 import {
   assistantText, launchReceipt, notification, notificationPrompt, sealQuietSegment, session, start, stop, toolUse, user
 } from './state-machine-continuation-fixture'
+
+const up = (path: string): string => join(path, '..')
 
 const stateFile = (root: string): string =>
   recorderStatePath(recorderSessionRoot(join(root, '.scry'), 'qoder', session))
@@ -133,6 +136,49 @@ export function registerSegmentDiffSuite(): void {
     const patch = diffAt(records[2], root).files[0].patchContent?.content ?? ''
     expect(patch).toContain('-one')
     expect(patch).toContain('+one, edited later')
+  }, 20_000)
+
+  it('段链被清掉后，下一段如实标 no_baseline，而不是把更晚的工作区当成本段基线', async () => {
+    const root = await gitWorkspace(false)
+    const transcript = join(await mkdtemp(join(tmpdir(), 'scry-segment-diff-pruned-')), 'qoder.jsonl')
+    const hook = (event: string, payload: Record<string, unknown>) =>
+      handleRecorderHook({ provider: 'qoder', event, workspace: root, payload })
+    await writeFile(transcript, `${[
+      user('prompt-1', 'ship it', { requestSetId: 'request-1' }),
+      toolUse('prompt-1', 'call-bg-1', 'sleep 300'),
+      launchReceipt('call-bg-1', 'task-1')
+    ].join('\n')}\n`)
+    await hook('UserPromptSubmit', start(transcript, 'request-1', 'ship it', '2026-07-19T12:00:00.000Z'))
+    await writeFile(join(root, 'first.txt'), 'one\n')
+    await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'pending' })
+    await sealQuietSegment(root)
+    const [store] = await frozen(root)
+    expect(store).toBeDefined()
+
+    // 会话再也没有真实提问：按时间清理把这条链整条删掉（这里用直接调用模拟到期，年龄由目录时间决定）。
+    const old = new Date(Date.now() - 4 * 24 * 60 * 60 * 1_000)
+    await utimes(up(store.tempDir), old, old)
+    // 提交路径已经写过当天的清理标记；按时间推进到下一次到期，才是真实会扫描的那一次。
+    await pruneStaleSegmentChains(join(root, '.scry'), { now: Date.now() + STALE_SEGMENT_CHAIN_AGE_MS + 1_000 })
+    await expect(exists(store.tempDir)).resolves.toBe(false)
+
+    await appendFile(transcript, `${[
+      notification('prompt-2', 'task-1', 'call-bg-1'),
+      assistantText('prompt-2', 'Build finished; applying the fix.')
+    ].join('\n')}\n`)
+    await expect(hook('UserPromptSubmit', start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z')))
+      .resolves.toMatchObject({ status: 'started' })
+    await writeFile(join(root, 'second.txt'), 'two\n')
+    await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'committed' })
+
+    const records = await listRecords(join(root, '.scry'))
+    expect(records.map((record) => record.diff.status)).toEqual(['available', 'unavailable'])
+    // 没有基线就说没有基线：不是 git 报错，也不是一个看起来正常的空 diff。
+    expect(records[1].diff.status).toBe('unavailable')
+    expect((records[1].diff as { omissionReason?: string }).omissionReason)
+      .toContain('published no end state for this repository')
+    expect(records[1].turnRole).toMatchObject({ role: 'continuation', parentId: records[0].recordId })
+    expect(records[1].user.status).toBe('unavailable')
   }, 20_000)
 
   it('接续段只算自己改的文件：上一段开始前就没提交的改动不重复计入', async () => {
