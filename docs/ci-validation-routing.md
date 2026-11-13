@@ -49,6 +49,8 @@ Ubuntu 保持 `ubuntu-latest`。`packaged-linux` 已优先加入 kernel.org Ubun
 
 Workspace/picker、reference-only diff、diff pressure、activity history 和 terminal adoption 的旧 reload 路径也共用此函数。所有托管 CDP reload 只由 `reloadUi` 发出，源码回归禁止其他 `.mjs` 绕过它。Activity 保留 10 秒、terminal 保留 15 秒，其余保留原 20 秒预算；workspace 的 wait 接收 reload 剩余预算。Terminal 不再吞掉所有求值异常，崩溃和 API 失败会保留为原始失败；就绪后仍独立断言原 PTY 存活。
 
+维护者单独批准 `SessionRename.test.tsx` 的计时边界例外：原先启动、加载和交互共用内层 15 秒；现在 Main 启动/加载与加载后的交互各最多 15 秒，且始终截断到原 30 秒测试总 deadline（从 fixture 创建/build 前开始）。每个业务条件仍限 4 秒，全部原断言、sandbox/CSP 和后台运行约束不变；这不是其他 UI 或性能预算的通用豁免。实际 CJS 入口的固定时钟回归覆盖启动卡住、总预算耗尽、迟到 ready/load/成功及崩溃；失败日志记录各阶段墙钟、deadline 和最后条件，测试结束清理自己仍在运行的子进程。Linux ARM64 受控启动延迟可产生旧 CI 的错误形态，但旧 CI 缺少 Main 启动时间戳，不能据此唯一归因，也不能代替 Linux x64 的新 CI 验收。
+
 现有 Node/Electron 子进程失败仍输出退出码或 signal 与 stderr 尾部；回归测试覆盖 `-11`、`SIGSEGV` 与 Python 栈文本不会被改成成功或重试。CI 设置 `PYTHONFAULTHANDLER=1`，让 Python 子进程在 signal 11 崩溃时输出栈。仓库中没有找到旧的 Python `-11` 专用诊断实现，因此不能声称已验证某个 Python 调用链；不删除或替换已有诊断。
 
 ## 历史计时与当前验收
