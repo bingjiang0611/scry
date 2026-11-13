@@ -128,29 +128,33 @@ jobs:
     # Same frozen driver, two real source builds, one runner, serial measurements.
     runs-on: macos-latest
     timeout-minutes: 30
+    # Exclude only this job's checkout trees from Spotlight, not the host volume.
+    defaults:
+      run:
+        working-directory: native.noindex
     env:
       QODER_SKIP_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          path: candidate
+          path: native.noindex/candidate
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha || inputs.baseline }}
-          path: baseline
+          path: native.noindex/baseline
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: candidate/package-lock.json
-      - uses: ./candidate/.github/actions/cache-electron
+          cache-dependency-path: native.noindex/candidate/package-lock.json
+      - uses: ./native.noindex/candidate/.github/actions/cache-electron
         id: electron-cache
         with:
           lockfiles: |
-            candidate/package-lock.json
-            baseline/package-lock.json
+            ${{ github.workspace }}/native.noindex/candidate/package-lock.json
+            ${{ github.workspace }}/native.noindex/baseline/package-lock.json
       - name: Install dependencies and freeze native harness
         run: |
           set -o pipefail
@@ -261,7 +265,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: performance-native-results
-          path: native-results/
+          path: native.noindex/native-results/
           if-no-files-found: error
           retention-days: 30
 

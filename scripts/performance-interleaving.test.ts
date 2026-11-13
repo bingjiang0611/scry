@@ -5,10 +5,10 @@ import { describe, expect, it } from 'vitest'
 
 // js-yaml is already installed by the build toolchain; no second YAML parser/config format.
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown }
-interface Step { name?: string; id?: string; if?: string; run?: string }
+interface Step { name?: string; id?: string; if?: string; run?: string; uses?: string; with?: Record<string, unknown> }
 const root = resolve(import.meta.dirname, '..')
 const nativeJob = (load(readFileSync(join(root, '.github/workflows/performance.yml'), 'utf8')) as {
-  jobs: { native: { steps: Step[] } }
+  jobs: { native: { steps: Step[]; defaults?: { run: { 'working-directory': string } } } }
 }).jobs.native
 const source = (name: string) => {
   const step = nativeJob.steps.find(step => step.name === name)
@@ -18,6 +18,15 @@ const source = (name: string) => {
 const scenarios = 'markdown short short-heavy paged'
 
 describe('native interleaved measurement', () => {
+  it('keeps both full source trees and their dependencies inside the non-indexed native workspace', () => {
+    expect(nativeJob.defaults).toEqual({ run: { 'working-directory': 'native.noindex' } })
+    expect(nativeJob.steps.filter(step => step.uses === 'actions/checkout@v4').map(step => step.with?.path))
+      .toEqual(['native.noindex/candidate', 'native.noindex/baseline'])
+    expect(nativeJob.steps.find(step => step.uses === 'actions/setup-node@v4')?.with?.['cache-dependency-path'])
+      .toBe('native.noindex/candidate/package-lock.json')
+    expect(source('Retain native measurements, including failed lanes').with?.path).toBe('native.noindex/native-results/')
+  })
+
   it('measures each scenario on both sides back to back, then combines each side', () => {
     const primary = source('Measure baseline then candidate, retaining failures')
     const run = primary.run ?? ''

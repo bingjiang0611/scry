@@ -85,6 +85,8 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 
 ### 失败归因证据
 
+Native 两份检出及产物位于 `native.noindex/`，仅排除本 job 的 Spotlight 扫描；未关闭卷索引或改变工作量、阈值。缓存输入和上传路径必须跟随该目录，不能只改 shell cwd。归因、负对照和验证边界见 [2026-11-13 索引实验](performance-experiments/20261113-native-indexer.md)。
+
 Native 输出保留 `artifactFiles` 的逐文件 SHA-256；`lifecycleTraces` 保留现有 stdout 中的启动、start/stop IPC 和 Agent trace。`localRecording.diagnostics` 另保留隔离 App journal 中已有的启动、start IPC、主进程/renderer 资源和 health 丢失记录。两路 trace 可能重复，不能相加；journal 的队列可能丢记录，必须结合 health 判断，不能假称完整。
 
 上述记录只在测量完成并退出 App 后导出；不改变日常采集内容、频率、格式、保留策略或预算。空记录或关闭记录表示该证据不可用，不表示耗时或资源占用为零。

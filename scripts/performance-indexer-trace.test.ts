@@ -10,11 +10,12 @@ describe('read-only indexer attribution', () => {
     const counts = await countIndexerEvents([
       'header',
       '04:00:00.123456 open /fixture work/candidate/node_modules/secret-name 0.001 mdworker_shared',
+      '04:00:00.123456 open /fixture work/native.noindex/candidate/node_modules/secret-name 0.001 mdworker_shared',
       '04:00:00.123456 open /fixture work/baseline/source.ts 0.001 mdworker_shared',
       '04:00:00.123456 read F=3 0.001 mdworker_shared',
       '04:00:00.123456 open /private/unrelated/secret-name 0.001 mdworker_shared'
     ], '/fixture work')
-    expect(counts).toEqual({ eventLines: 4, workspaceNodeModules: 1, workspaceOther: 1, withoutWorkspacePath: 2 })
+    expect(counts).toEqual({ eventLines: 5, workspaceNodeModules: 2, workspaceOther: 1, withoutWorkspacePath: 2 })
     expect(JSON.stringify(finalizeIndexerTrace(counts, 0))).not.toContain('secret-name')
     expect(finalizeIndexerTrace(counts, 1)).toMatchObject({ status: 'unavailable', collectorExit: 1 })
     expect(finalizeIndexerTrace(counts, 1)).not.toHaveProperty('counts')

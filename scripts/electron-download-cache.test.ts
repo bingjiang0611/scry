@@ -118,8 +118,11 @@ describe('Electron download cache', () => {
     const performance = yaml('.github/workflows/performance.yml') as Workflow
     expect(performance.jobs.compare.steps?.some(step => step.uses?.includes('cache-electron'))).toBe(false)
     const native = performance.jobs.native.steps!
-    const cache = native.find(step => step.uses === './candidate/.github/actions/cache-electron')!
-    expect(cache.with?.lockfiles.trim().split(/\s+/)).toEqual(['candidate/package-lock.json', 'baseline/package-lock.json'])
+    const cache = native.find(step => step.uses === './native.noindex/candidate/.github/actions/cache-electron')!
+    expect(cache.with?.lockfiles.trim().split('\n')).toEqual([
+      '${{ github.workspace }}/native.noindex/candidate/package-lock.json',
+      '${{ github.workspace }}/native.noindex/baseline/package-lock.json'
+    ])
     expect(native.indexOf(cache)).toBeLessThan(native.findIndex(step => step.run?.includes('(cd baseline && npm ci)')))
     const ready = native.findIndex(step => step.name === 'Prepare Electron executables')
     expect(native[ready].run).toContain("(cd baseline && node -e \"require('node:fs').accessSync(require('electron'))\")")
