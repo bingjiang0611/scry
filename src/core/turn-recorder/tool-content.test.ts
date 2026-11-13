@@ -13,6 +13,42 @@ function events(output?: string, input: unknown = { command: 'echo hello' }): Tr
 }
 
 describe('full raw tool content', () => {
+  it('captures primitive strings without allocating a cycle-detection set, but still inspects objects', () => {
+    const NativeSet = globalThis.Set
+    let allocations = 0
+    vi.stubGlobal('Set', class<T> extends NativeSet<T> {
+      constructor(values?: Iterable<T> | null) { super(values); allocations++ }
+    })
+    let text: ReturnType<typeof captureToolContent>
+    let json: ReturnType<typeof captureToolContent>
+    let textAllocations: number
+    let objectAllocations: number
+    try {
+      text = captureToolContent('正文😀', { source: 'fixture', maxBytes: null })
+      textAllocations = allocations
+      json = captureToolContent({ body: '正文😀' }, { source: 'fixture', maxBytes: null })
+      objectAllocations = allocations - textAllocations
+    } finally { vi.unstubAllGlobals() }
+    expect(text).toStrictEqual({ encoding: 'utf8', savedBytes: 10, source: 'fixture',
+      sourceCompleteness: 'unknown', redaction: 'disabled', storage: 'complete', reasons: [], content: '正文😀' })
+    expect(json.content).toBe('{"body":"正文😀"}')
+    expect(textAllocations).toBe(0)
+    expect(objectAllocations).toBe(1)
+  })
+
+  it('inspects the same descriptor snapshot without allocating entry tuples', () => {
+    const entries = vi.spyOn(Object, 'entries')
+    let captured: ReturnType<typeof captureToolContent>
+    let allocations: number
+    try {
+      captured = captureToolContent({ nested: { body: '正文😀' }, list: [1, 2] }, { source: 'fixture', maxBytes: null })
+      allocations = entries.mock.calls.length
+    } finally { entries.mockRestore() }
+    expect(captured.storage).toBe('complete')
+    expect(JSON.parse(captured.content!)).toEqual({ nested: { body: '正文😀' }, list: [1, 2] })
+    expect(allocations).toBe(0)
+  })
+
   it('keeps output beyond 500 characters, independently of input', () => {
     const output = '正文😀'.repeat(400)
     const evidence = aggregateTurnEvidence({ events: events(output), toolContentPolicy: policy })

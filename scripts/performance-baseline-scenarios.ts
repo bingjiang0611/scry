@@ -25,6 +25,22 @@ import { createRelayConnect } from '../src/main/remote/relay-connect'
 import { execFileOutcome } from '../src/main/claude-locate'
 import { activeTurn, assertCompleteProjection, deliverTrace, events, history, terminalChunks, timestamp, type Fixture, type Scenario } from './performance-baseline-fixture'
 
+export async function runWorkspaceFilesWorkload(workspace: string) {
+  const listed = await listWorkspace({ cwd: workspace, path: '', limit: 200 })
+  const file = await readWorkspaceFile({ cwd: workspace, path: 'large-fixed.txt' })
+  const page = await readWorkspaceFilePage({ cwd: workspace, path: 'large-fixed.txt', limit: 64 * 1024 })
+  expect(['x', 'y']).toContain(file.content[0])
+  expect(file.content).toBe(file.content[0].repeat(1024 * 1024))
+  const content = (file.content[0] === 'x' ? 'y' : 'x').repeat(1024 * 1024)
+  const saved = await writeWorkspaceFile({ cwd: workspace, path: 'large-fixed.txt', content, expectedRevision: file.revision })
+  expect(listed.entries).toHaveLength(122)
+  expect(listed.entries.some(entry => entry.path === 'large-fixed.txt' && entry.size === 1024 * 1024)).toBe(true)
+  expect(page.content.startsWith(file.content.slice(0, 64 * 1024))).toBe(true)
+  expect(saved.content).toBe(content)
+  expect(readFileSync(join(workspace, 'large-fixed.txt'), 'utf8')).toBe(content)
+  return { entries: listed.entries.length, bytes: file.size, pageBytes: Buffer.byteLength(page.content) }
+}
+
 export function scenariosFor(fixture: Fixture): Record<string, Scenario> {
   let archiveWrite = 0
   return {
@@ -195,21 +211,7 @@ export function scenariosFor(fixture: Fixture): Record<string, Scenario> {
     },
     'workspace.files': {
       lane: 'disk', workload: 'directory=122;file=1MiB;page=64KiB', iterations: 2,
-      run: async () => {
-        const listed = await listWorkspace({ cwd: fixture.workspace, path: '', limit: 200 })
-        const file = await readWorkspaceFile({ cwd: fixture.workspace, path: 'large-fixed.txt' })
-        const page = await readWorkspaceFilePage({ cwd: fixture.workspace, path: 'large-fixed.txt', limit: 64 * 1024 })
-        expect(['x', 'y']).toContain(file.content[0])
-        expect(file.content).toBe(file.content[0].repeat(1024 * 1024))
-        const content = (file.content[0] === 'x' ? 'y' : 'x').repeat(1024 * 1024)
-        const saved = await writeWorkspaceFile({ cwd: fixture.workspace, path: 'large-fixed.txt', content, expectedRevision: file.revision })
-        expect(listed.entries).toHaveLength(122)
-        expect(listed.entries.some(entry => entry.path === 'large-fixed.txt' && entry.size === 1024 * 1024)).toBe(true)
-        expect(page.content.startsWith(file.content.slice(0, 64 * 1024))).toBe(true)
-        expect(saved.content).toBe(content)
-        expect(readFileSync(join(fixture.workspace, 'large-fixed.txt'), 'utf8')).toBe(content)
-        return { entries: listed.entries.length, bytes: file.size, pageBytes: Buffer.byteLength(page.content) }
-      }
+      run: () => runWorkspaceFilesWorkload(fixture.workspace)
     },
     'source-control.diff': {
       lane: 'process', workload: 'git-worktree=1;changed-files=1', iterations: 2,

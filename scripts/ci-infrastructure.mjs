@@ -1,0 +1,143 @@
+// Runs only from the default branch in a workflow_run observer. Never import or
+// execute code from the observed PR with the observer's actions:write token.
+// Job logs mix every step. GitHub timestamps step boundaries at second precision;
+// only lines whose second belongs exclusively to a failed step are attributable.
+// Shared boundary seconds and missing metadata stay unknown, never retry evidence.
+export function failedStepLog(job, log) {
+  const steps = (job.steps ?? []).filter(step => step.conclusion !== 'skipped')
+  const ranges = steps.map(step => ({
+    failed: step.conclusion === 'failure',
+    start: Math.floor(Date.parse(step.started_at) / 1000),
+    end: Math.floor(Date.parse(step.completed_at) / 1000)
+  }))
+  if (ranges.some(range => !Number.isFinite(range.start) || !Number.isFinite(range.end))) return ''
+  return log.split('\n').filter(line => {
+    const timestamp = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z /)?.[1]
+    if (!timestamp) return false
+    const second = Date.parse(`${timestamp}Z`) / 1000
+    const owners = ranges.filter(range => second >= range.start && second <= range.end)
+    return owners.length === 1 && owners[0].failed
+  }).join('\n')
+}
+
+export function classifyFailure(job, log = '', annotations = []) {
+  const failed = (job.steps ?? []).filter(step => step.conclusion === 'failure')
+  const messages = annotations.map(item => item.message).join('\n')
+  if (failed.length === 0 && !job.runner_id &&
+    /runner.*(never (acquired|started)|not (acquired|started)|failed to (acquire|start))|failed to (?:start|acquire) (?:a |the )?(?:hosted )?runner|job was not acquired by runner|runner.*did not pick up/i.test(messages)) {
+    return { category: 'infrastructure', reason: 'runner did not start' }
+  }
+  // Any assertion evidence vetoes retry, even at an ambiguous step boundary.
+  // Only positive infrastructure evidence needs unique failed-step attribution.
+  if (/AssertionError|FAIL\s+.*(?:test|spec)|tests? failed|expected .+ to (?:be|equal)/i.test(log)) {
+    return { category: 'assertion', reason: 'assertion evidence; no automatic retry' }
+  }
+  const setup = /^(Run npm ci(?: |$)|Install (?:archive tools|dependencies)$|Set up job$|Set up Node|Run actions\/(?:checkout|setup-node)@|Prepare Electron executable$)/i
+  if (failed.length === 0 || failed.some(step => !setup.test(step.name))) {
+    return { category: 'unknown', reason: 'not a proven provisioning failure; inspect the original failure' }
+  }
+  const evidence = failedStepLog(job, log)
+  if (/EAI_AGAIN|ENOTFOUND|Could not resolve host|Temporary failure resolving|Could not resolve ['"]|unable to resolve host/i.test(evidence)) {
+    return { category: 'infrastructure', reason: 'dependency host DNS failure' }
+  }
+  if (/ECONNRESET|ETIMEDOUT|ERR_SOCKET_TIMEOUT|E: Failed to fetch https?:\/\/|npm (?:ERR!|error) (?:code )?(?:E503|E502)|The remote server returned an error: \((?:502|503|504)\)/i.test(evidence)) {
+    return { category: 'infrastructure', reason: 'dependency download failure' }
+  }
+  return { category: 'unknown', reason: 'no recognized infrastructure evidence; no automatic retry' }
+}
+
+export async function observeInfrastructure({ github, context, core }) {
+  const run = context.payload.workflow_run
+  const repo = context.repo
+  // Duplicate/late completion events must not start another retry while a new
+  // attempt is running. The observer itself is serialized per workflow run.
+  const current = await github.rest.actions.getWorkflowRun({ ...repo, run_id: run.id })
+  if (current.data.status !== 'completed' || current.data.run_attempt !== run.run_attempt) {
+    core.notice('Stale CI completion event; no retry requested')
+    return
+  }
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+    ...repo, run_id: run.id, filter: 'all', per_page: 100
+  })
+  // CI uses unique job names, including matrix coordinates. Keep all attempts so
+  // a manual retry consumes the same one-retry budget. Ambiguous names fail closed.
+  const histories = new Map()
+  for (const job of jobs) {
+    const history = histories.get(job.name) ?? []
+    history.push(job)
+    histories.set(job.name, history)
+  }
+  const rows = []
+  const attemptStarts = new Map([[run.run_attempt, Date.parse(current.data.run_started_at)]])
+  let retryJob
+  for (const history of histories.values()) {
+    history.sort((left, right) => right.run_attempt - left.run_attempt || right.id - left.id)
+    const latest = history[0]
+    // Hosted allocation failures can be reported as cancelled without a runner.
+    const unassignedCancellation = latest.conclusion === 'cancelled' && !latest.runner_id
+    if (latest.conclusion !== 'failure' && latest.conclusion !== 'startup_failure' && !unassignedCancellation) continue
+    // GitHub copies untouched jobs into later attempts with new IDs but their
+    // original execution timestamps. Count only executions within their attempt.
+    const executions = []
+    let historyKnown = true
+    for (const record of history) {
+      if (!attemptStarts.has(record.run_attempt)) {
+        const { data } = await github.rest.actions.getWorkflowRunAttempt({ ...repo, run_id: run.id, attempt_number: record.run_attempt })
+        attemptStarts.set(record.run_attempt, Date.parse(data.run_started_at))
+      }
+      const started = Date.parse(record.started_at)
+      const attemptStarted = attemptStarts.get(record.run_attempt)
+      if (!Number.isFinite(started) || !Number.isFinite(attemptStarted)) {
+        historyKnown = false
+        break
+      }
+      if (started >= attemptStarted) executions.push(record)
+    }
+    const job = executions[0]
+    if (!historyKnown || !job) {
+      rows.push([latest.name, 'unknown', 'execution history cannot be established', 'no retry'])
+      continue
+    }
+    let annotations = []
+    if (job.check_run_url) {
+      const checkRunId = Number(job.check_run_url.split('/').at(-1))
+      annotations = await github.paginate(github.rest.checks.listAnnotations, { ...repo, check_run_id: checkRunId, per_page: 100 })
+    }
+    let log = ''
+    // An unstarted runner has no logs; annotations are its authoritative evidence.
+    if (job.runner_id) {
+      const response = await github.rest.actions.downloadJobLogsForWorkflowRun({ ...repo, job_id: job.id })
+      log = typeof response.data === 'string' ? response.data : Buffer.from(response.data).toString('utf8')
+    }
+    const result = classifyFailure(job, log, annotations)
+    const eligible = result.category === 'infrastructure' && executions.length === 1
+    let action = 'no retry'
+    if (eligible) {
+      action = retryJob ? 'queued until the next completion' : 'selected for retry (1/1)'
+      retryJob ??= latest
+    }
+    rows.push([job.name, result.category, result.reason, action])
+  }
+  // Write classification before a mutation; API failure must not hide the evidence.
+  await core.summary.addHeading('CI failure classification')
+    .addLink(`Observed run ${run.id}, attempt ${run.run_attempt}`, run.html_url)
+    .addTable([
+      [{ data: 'Job', header: true }, { data: 'Category', header: true }, { data: 'Evidence', header: true }, { data: 'Action', header: true }],
+      ...rows
+    ]).write()
+  if (retryJob) {
+    // A rerun joins the original concurrency group. Check the trusted current tip
+    // immediately before dispatch so an obsolete push does not cancel newer main CI.
+    if (current.data.event === 'push') {
+      const { data: ref } = await github.rest.git.getRef({ ...repo, ref: `heads/${current.data.head_branch}` })
+      if (ref.object.sha !== current.data.head_sha) {
+        core.notice('Superseded push run; no retry requested')
+        return
+      }
+    }
+    // One request per completion avoids racing multiple reruns. The next completed
+    // attempt drains another eligible job, never an unrelated failed assertion.
+    await github.rest.actions.reRunJobForWorkflowRun({ ...repo, job_id: retryJob.id })
+    core.notice(`Infrastructure retry (1/1): ${retryJob.name}`)
+  }
+}

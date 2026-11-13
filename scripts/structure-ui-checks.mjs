@@ -107,7 +107,9 @@ export async function exerciseStructure(contents) {
   await wait(`!JSON.parse(document.getElementById('cache-state').textContent).pending.length`)
   check(await read(`${entryCount} === 0`), 'Focus on the presented session replayed entrance')
   await click(`document.querySelector('.sb-new')`)
-  await wait(`${entries}.length === 0`)
+  // No animation is also true before the native input commits. Wait for the
+  // unbound chat and its completed entrance before measuring the next session.
+  await wait(`document.querySelector('.main-content .chat-transcript .unbound-empty') != null && ${entries}.length === 0`)
   await read(`window.structureEntries = []`)
   await click(row('cache-b'))
   await pending('cache-b')

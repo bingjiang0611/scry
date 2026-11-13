@@ -50,6 +50,12 @@ export function assertCompleteProjection(result: Turn[]): void {
   expect(result[0].items.map(item => item.text ?? '').join('')).toBe(events.map(event => event.text).join(''))
 }
 
+export function populateWorkspaceFixture(workspace: string): void {
+  writeFileSync(join(workspace, '.mcp.json'), JSON.stringify({ mcpServers: { fixed: { command: 'node', args: ['fixed-server.mjs'], env: { FIXED: '1' } } } }))
+  for (let index = 0; index < 120; index++) writeFileSync(join(workspace, `file-${index}.ts`), `export const value${index} = ${index}\n`)
+  writeFileSync(join(workspace, 'large-fixed.txt'), 'x'.repeat(1024 * 1024))
+}
+
 export function makeFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'scry-performance-'))
   const home = join(root, 'home'); const workspace = join(home, 'workspace')
@@ -57,10 +63,7 @@ export function makeFixture(): Fixture {
   for (const path of [home, workspace, userData, workspaceGit]) mkdirSync(path, { recursive: true })
   mkdirSync(join(home, '.claude', 'skills', 'fixed-skill'), { recursive: true })
   writeFileSync(join(home, '.claude', 'skills', 'fixed-skill', 'SKILL.md'), '# Fixed skill\n')
-  writeFileSync(join(workspace, '.mcp.json'), JSON.stringify({ mcpServers: { fixed: { command: 'node', args: ['fixed-server.mjs'], env: { FIXED: '1' } } } }))
-  for (let index = 0; index < 120; index++) writeFileSync(join(workspace, `file-${index}.ts`), `export const value${index} = ${index}\n`)
-  const largeFile = join(workspace, 'large-fixed.txt')
-  writeFileSync(largeFile, 'x'.repeat(1024 * 1024))
+  populateWorkspaceFixture(workspace)
   const gitEnv = { ...process.env, HOME: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_COUNT: '0' }
   execFileSync('git', ['-c', 'init.templateDir=', 'init', '-q', '.'], { cwd: workspaceGit, env: gitEnv })
   writeFileSync(join(workspaceGit, 'changed.ts'), 'export const changed = false\\n')

@@ -1,6 +1,7 @@
 import { CHILD_PANEL, SIDE_CHAT_SURFACE, json, sideChatDriver } from './side-chat-driving.mjs'
 import { exerciseSideChatInput } from './side-chat-input-checks.mjs'
 import { createWindowResize } from './side-chat-window-control.mjs'
+import { reloadUi } from './ui-ready.mjs'
 
 /**
  * Side-chat layout, keyboard and composition acceptance in the isolated production App.
@@ -196,11 +197,16 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   const schemes = {}
   for (const theme of ['light', 'dark']) {
     await evaluate(`localStorage.setItem('scry.theme', ${json(theme)})`)
-    await cdp.send('Page.reload', {})
-    // The reload briefly leaves no document, so the probe must tolerate a missing root.
-    await wait(`document.documentElement?.dataset?.theme === ${json(theme)} && document.querySelector('.sidebar') != null`, 30000)
+    const documentEpoch = await evaluate('performance.timeOrigin')
+    // Passive restoration: selecting/reopening the child here would hide a lost session.
+    await reloadUi(cdp, controls.ready, {
+      documentEpoch,
+      body: `document.documentElement?.dataset?.theme === ${json(theme)} && document.querySelector('${CHILD_PANEL} .chat-transcript[aria-busy="false"][data-history-source="authoritative"]') != null`,
+      panel: CHILD_PANEL,
+      target: `document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`,
+      timeoutMs: 30000
+    })
     await idle()
-    await showChild()
     schemes[theme] = await surfaceColors()
     await capture(`layout-scheme-${theme}`)
   }

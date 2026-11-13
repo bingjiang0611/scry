@@ -16,6 +16,7 @@ export function scrollChatTargetIntoView(
     ? Math.max(0, (chat.clientHeight - (targetRect.height ?? 0)) / 2)
     : 16
   const top = Math.max(0, chat.scrollTop + targetRect.top - chat.getBoundingClientRect().top - offset)
+  automaticBottomScrolls.delete(chat)
   chat.scrollTo({ top, behavior })
 }
 
@@ -53,10 +54,11 @@ export function chatBottomStickinessAfterScroll(
   el: Pick<ChatScrollBox, 'scrollHeight' | 'scrollTop' | 'clientHeight'>,
   openingSession: boolean
 ): boolean {
-  // A queued event from our own pin can arrive after a resize changes the
-  // bottom distance. It is not evidence that the reader scrolled away.
+  // Notifications for the same automatic offset can straddle a layout change.
+  // Retire its provenance only when the offset actually moves away; another
+  // notification at the pinned offset is not evidence of reader scrolling.
   const automaticTop = automaticBottomScrolls.get(el)
-  automaticBottomScrolls.delete(el)
+  if (el.scrollTop !== automaticTop) automaticBottomScrolls.delete(el)
   return openingSession || el.scrollTop === automaticTop || isChatNearBottom(el)
 }
 

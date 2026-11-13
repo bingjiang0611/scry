@@ -61,6 +61,7 @@
 | `validation-changes.yml` | CI/Performance 共用的只读 diff；仅 README.md 与 docs/**/*.md 跳过全部验证；只改测试、Agent 指导、PR/Issue 模板、名单或 apps/ios 时 `desktop=false`，Ubuntu 验证照跑；无法读取 diff 时失败，手动 dispatch 与 main push 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
 | `.github/actions/cache-electron/action.yml` | 仅 Electron runtime jobs 使用；按 OS/架构/锁定 Electron 版本缓存 ZIP 与校验文件，原安装器继续校验 SHA256；不缓存 node_modules、App 或编译输出，不使用宽泛 restore prefix | 不替代运行时校验，首次下载失败仍失败 |
 | `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流的非 README 改动并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
+| `ci-infrastructure.yml` | 默认分支代码分类 CI/Performance/Remote 失败，每 job 最多一次基础设施重试 | 不执行 PR 代码，不重跑断言；[规则](../ci-validation-routing.md) |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
 

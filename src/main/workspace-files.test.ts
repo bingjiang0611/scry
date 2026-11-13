@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -48,6 +48,26 @@ describe('workspace files', () => {
       ['directory', 'src'],
       ['file', 'README.md']
     ]))
+  })
+
+  it('复用排序器后保留默认区域、数字与基字符排序及分页次序', async () => {
+    const root = await fixture()
+    for (const name of ['folder10', 'folder2']) await mkdir(join(root, name))
+    for (const name of ['file10.ts', 'file2.ts', 'File1.ts', 'file01.ts', 'écho3.ts', 'echo03.ts', '文件10.ts', '文件2.ts']) {
+      await writeFile(join(root, name), name)
+    }
+    const expected = (await readdir(root, { withFileTypes: true })).sort((left, right) => {
+      if (left.isDirectory() !== right.isDirectory()) return left.isDirectory() ? -1 : 1
+      return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+    }).map(entry => entry.name)
+    const actual: string[] = []
+    let cursor: string | undefined
+    do {
+      const page = await listWorkspace({ cwd: root, limit: 3, cursor })
+      actual.push(...page.entries.map(entry => entry.name))
+      cursor = page.nextCursor
+    } while (cursor)
+    expect(actual).toEqual(expected)
   })
 
   it('用快照游标分页列出大目录，目录变化后拒绝拼接', async () => {

@@ -21,7 +21,8 @@ import { buildResult } from './result.mjs'
 
 export async function exercise(contents, pointer, capture, options) {
   const driver = createNativeDriver(contents, pointer, capture)
-  const { check, read, wait } = driver
+  const { check, read, wait, ready } = driver
+  await ready()
   if (options.visibilityPollingBaseline) return runVisibilityPollingBaseline(driver)
   if (options.visibilityPollingCheck) return runVisibilityPollingCheck(driver)
 

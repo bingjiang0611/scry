@@ -88,6 +88,14 @@ describe('documentation-only validation skips', () => {
     expect(detect()).toEqual({ status: 0, output: NO_DESKTOP })
   })
 
+  it.each(['src/core/turn-recorder/config.ts', 'src/cli/scry.ts', 'packages/turn-recorder-cli/package.json'])(
+    'keeps main App validation for recorder production input %s', path => {
+      const { write, commit, detect } = fixture()
+      write(path); write('README.md'); commit()
+      expect(detect()).toEqual({ status: 0, output: FULL })
+    }
+  )
+
   it('keeps macOS App gates when an App input is mixed with desktop-free changes', () => {
     const { write, commit, detect } = fixture()
     write('src/main.test.ts'); write('CLAUDE.md'); write('src/main.ts'); commit()
@@ -107,6 +115,22 @@ describe('documentation-only validation skips', () => {
     const { git, commit, detect } = fixture()
     git('rm', 'docs/guide.md'); commit()
     expect(detect()).toEqual({ status: 0, output: SKIP })
+  })
+
+  it('detects recorder code renamed into documentation', () => {
+    const { git, write, commit, detect } = fixture()
+    write('src/cli/scry.ts'); commit()
+    const base = git('rev-parse', 'HEAD')
+    git('mv', 'src/cli/scry.ts', 'docs/renamed-cli.md'); commit()
+    expect(detect(base)).toEqual({ status: 0, output: FULL })
+  })
+
+  it.each(['src/main.ts', 'src/cli/scry.ts'])('requires full validation for deleted production input %s', path => {
+    const { git, write, commit, detect } = fixture()
+    write(path); commit()
+    const base = git('rev-parse', 'HEAD')
+    git('rm', path); commit()
+    expect(detect(base)).toEqual({ status: 0, output: FULL })
   })
 
   it('always validates dispatch, coalesced main pushes and new branches, and fails closed on an unreadable base', () => {

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { createAppDriver } from './app-driving.mjs'
+import { createUiReady } from './ui-ready.mjs'
 import { sideChatRequestsPath } from './smoke-app-entries.mjs'
 
 /**
@@ -71,11 +72,13 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
       throw new Error(`${error.message}: ${json({ state, fixtureRuns: inputs().length - before, rendererFailures })}`)
     })
   }
+  const ready = createUiReady(wait)
   const showPanel = async () => {
+    await ready({ body: "document.querySelector('.app') != null" })
     if (await evaluate(`document.querySelector('.app.right-panel-hidden') != null`)) {
       await click('.panel-pill:not(.summary-pill)')
-      await wait(`document.querySelector('.app.right-panel-hidden') == null`)
     }
+    await ready({ panel: '#right-surface-pane', body: "document.querySelector('.app.has-right-panel:not(.right-panel-hidden)') != null" })
   }
   const openChooser = async () => {
     await showPanel()
@@ -229,9 +232,13 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
     const tab = `[data-side-chat-tab-id="${id}"]`
     if (await evaluate(`document.querySelector(${json(tab)}) != null`)) await click(`${tab} [role="tab"]`)
     else await openChildFromHistory(id)
-    await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(id)}`, 30000)
     // The tab and composer can mount before the asynchronous transcript read completes.
-    await wait(`document.querySelector('${CHILD_PANEL} .chat-transcript[aria-busy="false"][data-history-source="authoritative"]') != null`, 30000)
+    await ready({
+      body: `document.querySelector('${CHILD_PANEL} .chat-transcript[aria-busy="false"][data-history-source="authoritative"]') != null`,
+      panel: CHILD_PANEL,
+      target: `document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(id)}`,
+      timeoutMs: 30000
+    })
     await idle()
   }
   /**
@@ -300,7 +307,7 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
   }
   return {
     driver, capture, click, clickAt, idle, keyStroke, wait, counts, since, inputs, conversation, stopRun, sideChatRequests,
-    type, clearDraft, send, showPanel, openChooser, createChild, selectProvider, waitSettled, seedTurns,
+    ready, type, clearDraft, send, showPanel, openChooser, createChild, selectProvider, waitSettled, seedTurns,
     createChildOf, openChildById, openChildFromHistory, awaitFixtureRun
   }
 }

@@ -10,6 +10,7 @@ import { exerciseDiffWorkbench } from './diff-workbench-ui.mjs'
 import { prepareWorkspaceSessionFixture } from './workspace-session-ui-fixture.mjs'
 import { assertPickerAnchored, assertNewWorktreeDefaults, assertCompactMenus } from './workspace-session-ui-picker.mjs'
 import { wait, sendWorkspacePrompt } from './workspace-session-ui-run.mjs'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
 import { selectDiffScope, exerciseTurnMenu } from './diff-inspector-ui.mjs'
 import { assertHooksIdle, installHookTraps } from './workspace-session-ui-hooks.mjs'
 import { providerInputs, recorderRecord } from './workspace-session-ui-evidence.mjs'
@@ -23,6 +24,7 @@ export async function exerciseWorkspaceSessions(context) {
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', ...args],
   { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim()
+  const ready = createUiReady((expression, timeoutMs) => wait(() => evaluate(expression), 'workspace renderer ready', timeoutMs))
   const inputs = () => providerInputs(conversationInputs)
   const click = async (selector, text = '') => {
     const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, ${json({ text, timeoutMs: 5000, scroll: true, captureReceipt: true })})`)
@@ -110,10 +112,10 @@ export async function exerciseWorkspaceSessions(context) {
     const stored = () => evaluate(`JSON.parse(localStorage.getItem('scry.composer-drafts.v1') || '[]').find(([, draft]) => draft.workspace?.intent?.kind === 'current')?.[1].workspace.operationId`)
     const savedId = await wait(stored, 'workspace-only draft persisted')
     const previousDocument = await evaluate('performance.timeOrigin')
-    await cdp.send('Page.reload')
-    await wait(() => evaluate(`performance.timeOrigin !== ${previousDocument} && Boolean(document.querySelector('.workspace-context-strip'))`), 'fresh renderer document')
+    await reloadUi(cdp, ready, { documentEpoch: previousDocument, panel: '.workspace-context-strip' })
     await newDraft(canonicalWorkspace)
-    await wait(() => evaluate(`document.querySelector('.workspace-context-strip')?.textContent.includes('workspace-feature')`), 'saved workspace intent restored')
+    await ready({ documentEpoch: previousDocument, panel: '.workspace-context-strip',
+      target: `document.querySelector('.workspace-context-strip')?.textContent.includes('workspace-feature')` })
     assert.equal(await stored(), savedId)
     assert.equal(git(workspace, 'branch', '--show-current'), 'main')
     assert.deepEqual(readFileSync(join(workspace, '.git/index')), initialIndex)

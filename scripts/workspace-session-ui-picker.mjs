@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
 
 export async function assertPickerAnchored(evaluate) {
   const geometry = await evaluate(`(() => {
@@ -20,6 +21,7 @@ export async function assertPickerAnchored(evaluate) {
 }
 
 export async function assertCompactMenus({ cdp, evaluate, click, key, wait, screenshot, newDraft, cwd, openPicker }) {
+  const ready = createUiReady((expression, timeoutMs) => wait(() => evaluate(expression), 'picker renderer ready', timeoutMs))
   await click('[data-workspace-menu="refs"]')
   await wait(() => evaluate(`!document.querySelector('.workspace-picker')`), 'trigger toggles its menu closed')
   await click('[data-workspace-menu="workspace"]')
@@ -40,8 +42,9 @@ export async function assertCompactMenus({ cdp, evaluate, click, key, wait, scre
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
   for (const theme of ['light', 'dark']) {
     await evaluate(`localStorage.setItem('scry.theme', ${JSON.stringify(theme)})`)
-    await cdp.send('Page.reload')
-    await wait(() => evaluate(`document.documentElement?.dataset.theme === ${JSON.stringify(theme)} && Boolean(document.querySelector('.workspace-context-strip'))`), `${theme} picker preference after reload`)
+    const documentEpoch = await evaluate('performance.timeOrigin')
+    await reloadUi(cdp, ready, { documentEpoch, panel: '.workspace-context-strip',
+      body: `document.documentElement?.dataset.theme === ${JSON.stringify(theme)}` })
     await newDraft(cwd)
     await openPicker()
     await screenshot(`picker-${theme}-compact`)

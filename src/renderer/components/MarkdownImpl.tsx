@@ -99,11 +99,17 @@ export function WorkspaceFileLinkProvider({
   children: ReactNode
 }) {
   const parent = useContext(WorkspaceFileLinkContext)
+  const open = onOpen ?? parent?.onOpen
+  // Discovery can return fresh arrays with identical targets. Keep context identity
+  // stable so unchanged Markdown is not reparsed; actual target/callback changes still flow.
+  const serializedTargets = useMemo(() => JSON.stringify({
+    workspaces: [...new Set([...workspaces, ...(parent?.workspaces ?? [])])],
+    filePaths: filePaths ?? []
+  }), [workspaces, filePaths, parent?.workspaces])
   const value = useMemo<WorkspaceFileLinkContextValue | null>(() => {
-    const roots = [...new Set([...workspaces, ...(parent?.workspaces ?? [])])]
-    const open = onOpen ?? parent?.onOpen
-    return roots.length > 0 && open ? { workspaces: roots, filePaths: filePaths ?? [], onOpen: open } : null
-  }, [onOpen, workspaces, filePaths, parent])
+    const targets = JSON.parse(serializedTargets) as Omit<WorkspaceFileLinkContextValue, 'onOpen'>
+    return targets.workspaces.length > 0 && open ? { ...targets, onOpen: open } : null
+  }, [serializedTargets, open])
   return <WorkspaceFileLinkContext.Provider value={value}>{children}</WorkspaceFileLinkContext.Provider>
 }
 

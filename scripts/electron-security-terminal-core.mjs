@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { createAppDriver } from './app-driving.mjs'
+import { createUiReady, reloadUi } from './ui-ready.mjs'
 
 export async function exerciseTerminalCore(smokeContext) {
   const { evaluate, cdp, canonicalWorkspace, canonicalHome, workspace, stderr } = smokeContext
@@ -116,21 +118,12 @@ export async function exerciseTerminalCore(smokeContext) {
   assert.equal(terminalSmoke.staleWriteRejected, true)
   assert.ok(terminalSmoke.replay.includes(`__SCRY_TERMINAL_WORKSPACE_OK__:${canonicalWorkspace}`))
 
-  await cdp.send('Page.enable')
-  await cdp.send('Page.reload', { ignoreCache: true })
-  const reloadDeadline = Date.now() + 15_000
-  let activeAfterReload = false
-  while (Date.now() < reloadDeadline && !activeAfterReload) {
-    try {
-      activeAfterReload = await evaluate(`(async () => {
-        if (!window.scry?.terminalActive) return false
-        return (await window.scry.terminalActive()).some((session) => session.id === ${JSON.stringify(terminalSmoke.bound.id)})
-      })()`)
-    } catch {
-      // The old execution context is expected to disappear during reload.
-    }
-    if (!activeAfterReload) await new Promise((resolveWait) => setTimeout(resolveWait, 100))
-  }
+  const documentEpoch = await evaluate('performance.timeOrigin')
+  const ready = createUiReady(createAppDriver({ cdp, evaluate, label: 'terminal reload' }).wait)
+  const terminalTarget = `(await window.scry.terminalActive()).some(session => session.id === ${JSON.stringify(terminalSmoke.bound.id)})`
+  await reloadUi(cdp, ready, { documentEpoch, timeoutMs: 15000,
+    body: 'Boolean(window.scry?.terminalActive)', target: terminalTarget }, { ignoreCache: true })
+  const activeAfterReload = await evaluate(`(async () => (${terminalTarget}))()`)
   assert.equal(activeAfterReload, true, 'renderer reload terminated the active PTY')
   const reloadAdoption = await evaluate(`(async () => {
     const id = ${JSON.stringify(terminalSmoke.bound.id)}

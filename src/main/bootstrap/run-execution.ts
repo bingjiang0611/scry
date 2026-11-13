@@ -253,7 +253,7 @@ export async function startRun(
       const runTerminalState = remoteState.state
       remoteResult = remoteState.remoteResult
       const { finishRemote, markTerminalAttention } = remoteState
-      const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: app.getPath('userData') })
+      const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: app.getPath('userData'), getWindow })
       const runtimePromise = startProviderAfterBaseline({ turnDiffCapture, sessionBaselineReady, markReady: () => firstTextPerf.mark('git_baseline_ready'), runProvider })
       const completionContext = () => ({
         state: runTerminalState,

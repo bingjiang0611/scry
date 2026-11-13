@@ -19,6 +19,7 @@ export function createManagedConversationSettlement(deps: {
   displayPrompt: string
   runState: ActiveRun
   userDataDir: string
+  getWindow: () => BrowserWindow | null
 }) {
   const settleManagedConversation = async (status: 'completed' | 'failed' | 'cancelled' | 'interrupted'): Promise<void> => {
     if (!deps.managedConversation || deps.state.managedSettlementAttempted) return
@@ -55,8 +56,14 @@ export function createManagedConversationSettlement(deps: {
         await deps.managedConversation.onTerminal({ status, finalItems: [], receipt })
       } catch (fallbackError) {
         console.error('[scry] managed conversation settlement failed:', deps.runId, error, fallbackError)
+        return
       }
     }
+    // Fast runs can settle before a view learns their run id. Notify by durable
+    // conversation identity, after onTerminal has committed and released active ownership.
+    deps.getWindow()?.webContents.send('agent:dataUpdated', {
+      kind: 'conversation_changed', conversationId: deps.managedConversation.conversationId
+    })
   }
   return settleManagedConversation
 }
