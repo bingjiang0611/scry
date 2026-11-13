@@ -9,6 +9,8 @@ import { TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 import { limitTurnDiffPatchBytes, finishGitTurnDiff } from './git.js'
 import { turnChangeHints } from './change-journal.js'
 import { persistTurnDiffContent } from './recorder-turn-state.js'
+import { writeJsonAtomic } from './io.js'
+import { recorderOpenPath, recorderSessionRoot } from './runtime-state.js'
 
 /**
  * Segment diff baselines.
@@ -77,9 +79,9 @@ export async function collectTurnDiffs(args: {
   mergedEvents: TraceEvent[]
   worktreeDiffs: Promise<TurnDiffSnapshot[]>
   frozen: FrozenDiffCollector | undefined
-}): Promise<TurnDiffSnapshot[]> {
+}): Promise<{ diffs: TurnDiffSnapshot[]; frozen: RecorderFrozenDiff[] | undefined }> {
   const { enablement, open, frozen } = args
-  return limitTurnDiffPatchBytes(await persistTurnDiffContent(
+  const diffs = limitTurnDiffPatchBytes(await persistTurnDiffContent(
     enablement.dataRoot,
     [
       ...(open.terminalDiffs
@@ -88,6 +90,15 @@ export async function collectTurnDiffs(args: {
       ...await args.worktreeDiffs
     ]
   ))
+  // Durable before the record is committed: a recovery that re-finalizes this generation must keep
+  // the boundary the record was committed with, not re-read a later workspace and leave the gap
+  // between the two unassigned.
+  const sealed = open.frozenDiffs ?? frozen?.list()
+  if (!open.frozenDiffs && sealed?.length) {
+    open.frozenDiffs = sealed
+    await writeJsonAtomic(recorderOpenPath(recorderSessionRoot(enablement.dataRoot, open.provider, open.sessionId)), open, { sync: false })
+  }
+  return { diffs, frozen: sealed }
 }
 
 function liveTurnDiffs(

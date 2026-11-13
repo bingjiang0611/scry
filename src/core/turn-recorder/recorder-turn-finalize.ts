@@ -123,9 +123,11 @@ export async function finalizeOpenTurn(
     open,
     gaveUp: !!options.forcedReason || identityUnmatched
   })
-  const diffs = options.forcedReason || identityUnmatched
-    ? []
+  const collected = options.forcedReason || identityUnmatched
+    ? { diffs: [] as TurnDiffSnapshot[], frozen: undefined }
     : await collectTurnDiffs({ enablement, open, mergedEvents, worktreeDiffs, frozen })
+  const diffs = collected.diffs
+  const sealedFrozen = collected.frozen
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,
@@ -326,9 +328,8 @@ export async function finalizeOpenTurn(
   const sealedBoundary = measured
     ? (continuation?.publishedEvents ?? 0) + transcriptSourceEvents(transcript.events).length
     : undefined
-  // The chain keeps every store a later segment may resolve through; a real user prompt starts a new
-  // chain, which is where the previous one is released. Managed turns must not touch the chain.
-  const sealedFrozen = open.frozenDiffs ?? frozen?.list()
+  // A real user prompt starts a new chain, which releases the previous one; managed turns have no
+  // repositories, so they must not touch the chain.
   const chainStores = open.managedByScry
     ? session.chainStores
     : await releaseSegmentChain(root, session, sealedFrozen, !!open.continuation)

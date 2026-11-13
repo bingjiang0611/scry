@@ -336,6 +336,8 @@ export interface QueuedHook {
   payload: Record<string, unknown>
   managed?: boolean
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
+  /** 会话捕获上下文随条目持久化：重放出来的唤醒仍属于同一个 capture，不是陌生记录。 */
+  capture?: import('./session-capture-contract.js').SessionCaptureContext
   arrivedAt: string
 }
 
