@@ -250,10 +250,7 @@ jobs:
         continue-on-error: true
         env:
           SCRY_TIMING_PROCESS_SNAPSHOTS: '1'
-        run: |
-          set -o pipefail
-          # Instrumented diagnostic only: never combined with primary or A/A reports.
-          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-process-profile -- node scripts/performance-native-run.mjs bench ../native-results/runner-profile.json) 2>&1 | tee native-results/runner-profile-timing.log
+        run: bash candidate/scripts/performance-indexer-profile.sh
       - name: Preserve native npm diagnostics on failure
         if: failure()
         run: |

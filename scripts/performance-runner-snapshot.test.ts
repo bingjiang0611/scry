@@ -99,7 +99,7 @@ describe('bounded Native runner diagnostics', () => {
     const profile = steps.find(step => step.name === 'Profile runner processes in one separate manual diagnostic')!
     expect(profile.if).toBe("always() && github.event_name == 'workflow_dispatch' && steps.native_measurements.outcome == 'success'")
     expect(profile['continue-on-error']).toBe(true)
-    expect(profile.run).toContain('runner-profile.json')
+    expect(profile.run).toBe('bash candidate/scripts/performance-indexer-profile.sh')
     expect(profile.run).not.toContain(' compare ')
     expect(steps[measure].run).not.toContain('snapshot')
     expect(steps[measure].run).not.toContain('runner-profile')
