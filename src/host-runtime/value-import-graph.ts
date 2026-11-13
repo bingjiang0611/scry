@@ -54,4 +54,3 @@ export function electronDependents(entry: string): { files: number; electron: st
   }
   return { files: seen.size, electron: [...new Set(electron)] }
 }
-

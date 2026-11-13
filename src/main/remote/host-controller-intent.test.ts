@@ -168,4 +168,3 @@ describe('HostController intent execution (routing, workspaces, providers, proje
     expect(runProvider).not.toHaveBeenCalled()
   })
 })
-

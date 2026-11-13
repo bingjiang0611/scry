@@ -84,4 +84,3 @@ export function listSessionsPage(context: RemoteGatewaySessionContext, peerCertS
       snapshot: cached.snapshot
     }
   }
-

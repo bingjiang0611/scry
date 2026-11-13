@@ -69,8 +69,8 @@ export type DesktopLaneConnector = (endpoint: DesktopLaneEndpoint) => Promise<De
 
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 const KEEP_ALIVE_PREFIX = '{"keepAlive":true'
-// Close before the host's 30 s idle timeout, so a request is never written into a
-// tunnel the host is about to drop.
+// Close before the host's idle timeout (30 s on older hosts, 75 s since lanes can
+// multiplex), so a request is never written into a tunnel the host is about to drop.
 const IDLE_CLOSE_MS = 20_000
 const MAX_NOT_SENT_RETRIES = 2
 const MAX_LOST_REPLAYS = 1
