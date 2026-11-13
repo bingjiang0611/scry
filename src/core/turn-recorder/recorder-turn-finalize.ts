@@ -326,10 +326,12 @@ export async function finalizeOpenTurn(
   const sealedBoundary = measured
     ? (continuation?.publishedEvents ?? 0) + transcriptSourceEvents(transcript.events).length
     : undefined
-  // The previous segment's store was only the baseline for this one; its diff is durable now.
-  // Managed turns capture no repositories of their own, so they must not touch the chain either.
+  // The chain keeps every store a later segment may resolve through; a real user prompt starts a new
+  // chain, which is where the previous one is released. Managed turns must not touch the chain.
   const sealedFrozen = open.frozenDiffs ?? frozen?.list()
-  if (!open.managedByScry) await releaseSegmentChain(root, session, sealedFrozen)
+  const chainStores = open.managedByScry
+    ? session.chainStores
+    : await releaseSegmentChain(root, session, sealedFrozen, !!open.continuation)
   await writeJsonAtomic(statePath(root), {
     ...session,
     lastCommittedRecordId: committed.record.recordId,
@@ -337,7 +339,8 @@ export async function finalizeOpenTurn(
     lastSegment: {
       ...sealedSegment(open, committed.record.recordId, completedAt, view.providerTurnId ?? transcript.providerTurnId, sealedBoundary),
       ...(sealedFrozen?.length ? { frozenDiffs: sealedFrozen } : {})
-    }
+    },
+    ...(chainStores ? { chainStores } : {})
   }, { sync: false })
   await rm(openPath(root), { force: true })
   // A hook queued while this turn was finalizing still needs a recovery pass, so the index entry is

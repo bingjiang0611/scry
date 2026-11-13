@@ -1,5 +1,5 @@
 import { readdir, rm, rmdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import type { TraceEvent, TurnDiffSnapshot } from '../../shared/trace.js'
 import type { GitAfterTree, GitTurnDiffCapture } from './git-capture.js'
 import type { RecorderEnablement } from './config.js'
@@ -139,19 +139,28 @@ export function preserveSegmentStorage(captures: GitTurnDiffCapture[]): void {
 export async function releaseSegmentChain(
   sessionRoot: string,
   session: RecorderSessionState,
-  frozen: RecorderFrozenDiff[] | undefined
-): Promise<void> {
-  await releaseFrozenDiffs(session.lastSegment?.frozenDiffs)
-  await pruneSegmentCaptures(sessionRoot, frozen)
+  frozen: RecorderFrozenDiff[] | undefined,
+  continuesChain: boolean
+): Promise<string[]> {
+  const own = [...new Set((frozen ?? []).map(entry => entry.tempDir))]
+  // A continuation extends the chain: every earlier store it can still resolve a blob through stays.
+  // A real prompt starts a new chain, which is where the previous one is released — including after a
+  // crashed re-finalize, where the chain already names the store this turn is handing over.
+  const previous = session.chainStores ?? []
+  // A re-finalize after a crash can find the chain already naming this turn's own store: keep it.
+  const stale = previous.filter(tempDir => !own.includes(tempDir))
+  if (!continuesChain) await releaseFrozenDiffs(stale.map(tempDir => ({ tempDir } as RecorderFrozenDiff)))
+  const stores = [...new Set([...(continuesChain ? previous : []), ...own])]
+  await pruneSegmentCaptures(sessionRoot, new Set(stores.map(dirname)))
+  return stores
 }
 
 /**
  * Drop capture directories that no segment chain owns any more: a hidden turn, a quarantined one, or
  * a generation whose store was already released. Only `segment-captures/` is swept.
  */
-export async function pruneSegmentCaptures(sessionRoot: string, frozen: RecorderFrozenDiff[] | undefined): Promise<void> {
+export async function pruneSegmentCaptures(sessionRoot: string, keep: Set<string>): Promise<void> {
   const root = join(sessionRoot, 'segment-captures')
-  const keep = new Set((frozen ?? []).map(entry => dirname(entry.tempDir)))
   const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
   await Promise.all(entries
     .filter(entry => entry.isDirectory() && !keep.has(join(root, entry.name)))
@@ -198,15 +207,17 @@ export async function continuationCaptures(args: {
         }
       }
     }
-    // The frozen tree's blobs are in that segment's own store: its end tree was built from the whole
-    // scope, so even files it did not touch are there.
+    // A frozen tree can name blobs from any earlier segment of the chain: a file this segment did not
+    // touch keeps the blob it had when the previous store was its baseline. The whole chain stays
+    // readable here, and git only writes objects this segment actually changes.
+    const objectDirs = [prior.objectDir, ...(prior.alternateObjectDirs?.split(delimiter) ?? [])]
     const capture = await beginGitTurnDiff(
       prior.requestedRoot,
       TURN_DIFF_BEGIN_DEADLINE_MS,
       args.captureRoot,
       args.excludedPaths,
       false,
-      { commit: prior.tree, at: prior.at, objectDirs: [prior.objectDir] }
+      { commit: prior.tree, at: prior.at, objectDirs }
     )
     return { repository, capture }
   }))

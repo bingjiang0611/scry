@@ -350,9 +350,12 @@ export async function beginGitTurnDiff(
     tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
     const objectDir = join(tempDir, 'objects')
     await mkdir(objectDir)
-    const alternateObjectDirs = [join(commonDir, 'objects'), ...(baseline?.objectDirs ?? []), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
-      .filter((value): value is string => !!value)
-      .join(delimiter)
+    // A segment baseline can hand over the whole chain's stores, which overlap on the repository's own.
+    const alternateObjectDirs = [...new Set([
+      join(commonDir, 'objects'),
+      ...(baseline?.objectDirs ?? []),
+      ...(process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES ? process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES.split(delimiter) : [])
+    ].filter((value): value is string => !!value))].join(delimiter)
     // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
     // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
     // linked worktree 的规则文件在自己的 git 目录（`<common>/worktrees/<id>/info/...`），

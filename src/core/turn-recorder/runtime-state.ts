@@ -58,6 +58,12 @@ export interface RecorderSessionState {
   lastTurnIndex: number
   lastCommittedRecordId?: string
   committedProviderTurnIds?: string[]
+  /**
+   * Object stores kept alive for the active segment chain. A continuation's baseline tree can name
+   * blobs from any earlier segment of the same chain, so they are released only when a real user
+   * prompt starts a new chain (or the session state stops naming them).
+   */
+  chainStores?: string[]
   /** Repositories discovered from files this session touched; later turns baseline them too. */
   captureRepositories?: string[]
   lastSegment?: RecorderSealedSegment

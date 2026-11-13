@@ -20,6 +20,9 @@ const frozen = async (root: string): Promise<Array<{ tempDir: string; tree: stri
   return state.lastSegment?.frozenDiffs ?? []
 }
 
+const chainStores = async (root: string): Promise<string[]> =>
+  ((JSON.parse(await readFile(stateFile(root), 'utf8')) as { chainStores?: string[] }).chainStores ?? [])
+
 const exists = async (path: string): Promise<boolean> => stat(path).then(() => true, () => false)
 
 /**
@@ -61,10 +64,13 @@ export function registerSegmentDiffSuite(): void {
     await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'pending' })
     await sealQuietSegment(root)
     const secondStore = await frozen(root)
-    // The chain keeps one store: the baseline this segment consumed is released once it published.
+    // The chain grows: the earlier store can still hold blobs a later segment's baseline names, so it
+    // stays until a real user prompt starts a new chain.
     expect(secondStore).toHaveLength(1)
     expect(secondStore[0].tempDir).not.toBe(firstStore[0].tempDir)
-    await expect(exists(firstStore[0].tempDir)).resolves.toBe(false)
+    const afterSecond = await chainStores(root)
+    expect(afterSecond).toHaveLength(2)
+    for (const dir of afterSecond) await expect(exists(dir)).resolves.toBe(true)
 
     // Second wake, then a plain Stop: no new background task, so the segment publishes immediately.
     await appendFile(transcript, `${[
@@ -85,6 +91,48 @@ export function registerSegmentDiffSuite(): void {
       expect(record.user.status).toBe('unavailable')
     }
     expect(await frozen(root)).toHaveLength(1)
+    expect(await chainStores(root)).toHaveLength(3)
+  }, 20_000)
+
+  it('三段链：中间段不动上一段新建的文件，第三段改它时仍能解析出本段 diff', async () => {
+    const root = await gitWorkspace(false)
+    const transcript = join(await mkdtemp(join(tmpdir(), 'scry-segment-diff-chain-')), 'qoder.jsonl')
+    const hook = (event: string, payload: Record<string, unknown>) =>
+      handleRecorderHook({ provider: 'qoder', event, workspace: root, payload })
+    await writeFile(transcript, `${[
+      user('prompt-1', 'chain the segments', { requestSetId: 'request-1' }),
+      toolUse('prompt-1', 'call-bg-1', 'sleep 300'),
+      launchReceipt('call-bg-1', 'task-1')
+    ].join('\n')}\n`)
+    await hook('UserPromptSubmit', start(transcript, 'request-1', 'chain the segments', '2026-07-19T12:00:00.000Z'))
+    await writeFile(join(root, 'first.txt'), 'one\n')
+    await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'pending' })
+    await sealQuietSegment(root)
+
+    await appendFile(transcript, `${[
+      notification('prompt-2', 'task-1', 'call-bg-1'),
+      toolUse('prompt-2', 'call-bg-2', 'sleep 300'),
+      launchReceipt('call-bg-2', 'task-2')
+    ].join('\n')}\n`)
+    await hook('UserPromptSubmit', start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z'))
+    await writeFile(join(root, 'second.txt'), 'two\n')
+    await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'pending' })
+    await sealQuietSegment(root)
+
+    // third.txt does not exist yet: the file this segment edits was created by the first segment, and
+    // its blob must still resolve after the first segment's store was released.
+    await appendFile(transcript, `${[
+      notification('prompt-3', 'task-2', 'call-bg-2')
+    ].join('\n')}\n`)
+    await hook('UserPromptSubmit', start(transcript, 'request-3', notificationPrompt('task-2', 'call-bg-2'), '2026-07-19T12:00:42.000Z'))
+    await writeFile(join(root, 'first.txt'), 'one, edited later\n')
+    await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'committed' })
+
+    const records = await listRecords(join(root, '.scry'))
+    expect(records.map((record) => record.diff.status)).toEqual(['available', 'available', 'available'])
+    const patch = diffAt(records[2], root).files[0].patchContent?.content ?? ''
+    expect(patch).toContain('-one')
+    expect(patch).toContain('+one, edited later')
   }, 20_000)
 
   it('接续段只算自己改的文件：上一段开始前就没提交的改动不重复计入', async () => {
