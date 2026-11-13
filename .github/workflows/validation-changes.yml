@@ -9,6 +9,9 @@ on:
       desktop:
         description: Whether the desktop App or its macOS gates may be affected (implies required)
         value: ${{ jobs.changes.outputs.desktop }}
+      node_performance:
+        description: Whether Node performance inputs may be affected (implies required)
+        value: ${{ jobs.changes.outputs.node_performance }}
 
 permissions:
   contents: read
@@ -20,6 +23,7 @@ jobs:
     outputs:
       required: ${{ steps.diff.outputs.required }}
       desktop: ${{ steps.diff.outputs.desktop }}
+      node_performance: ${{ steps.diff.outputs.node_performance }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,7 +38,7 @@ jobs:
           # Dispatch always validates. A new branch has no readable before commit.
           # CI coalesces main pushes, so before..HEAD can omit a cancelled run's commits.
           if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = push ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
-            printf 'required=true\ndesktop=true\n' >> "$GITHUB_OUTPUT"
+            printf 'required=true\ndesktop=true\nnode_performance=true\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Exit 0 when matching paths changed, 1 when none did; an unreadable diff fails closed.
@@ -60,9 +64,13 @@ jobs:
             ':(top,glob,exclude)apps/ios/**'
           )
           if ! changed "${documentation[@]}"; then
-            printf 'required=false\ndesktop=false\n' >> "$GITHUB_OUTPUT"
+            printf 'required=false\ndesktop=false\nnode_performance=false\n' >> "$GITHUB_OUTPUT"
+          # The Node harness does not consume iOS App inputs. Remote Check still
+          # validates iOS; mixed non-documentation inputs retain Node measurements.
+          elif ! changed "${documentation[@]}" ':(top,glob,exclude)apps/ios/**'; then
+            printf 'required=true\ndesktop=false\nnode_performance=false\n' >> "$GITHUB_OUTPUT"
           elif changed "${desktop_free[@]}"; then
-            printf 'required=true\ndesktop=true\n' >> "$GITHUB_OUTPUT"
+            printf 'required=true\ndesktop=true\nnode_performance=true\n' >> "$GITHUB_OUTPUT"
           else
-            printf 'required=true\ndesktop=false\n' >> "$GITHUB_OUTPUT"
+            printf 'required=true\ndesktop=false\nnode_performance=true\n' >> "$GITHUB_OUTPUT"
           fi

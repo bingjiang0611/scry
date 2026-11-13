@@ -22,7 +22,7 @@ jobs:
 
   compare:
     needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
+    if: ${{ needs.changes.outputs.node_performance == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -268,11 +268,12 @@ jobs:
           echo "$RESULTS" | jq -e --argjson desktop '["native"]' '
             length == 3 and .changes.result == "success" and
             (.changes.outputs as $out
-              | ($out.required == "true" and ($out.desktop == "true" or $out.desktop == "false"))
-                or ($out.required == "false" and $out.desktop == "false")) and
+              | ($out.required == "true" and $out.node_performance == "true" and ($out.desktop == "true" or $out.desktop == "false"))
+                or (($out.required == "true" or $out.required == "false") and $out.desktop == "false" and $out.node_performance == "false")) and
             (.changes.outputs as $out | del(.changes) | to_entries | all(.[];
               .key as $job | .value.result == (
                 if $out.required == "false" or ($out.desktop == "false" and any($desktop[]; . == $job))
+                  or ($out.node_performance == "false" and $job == "compare")
                 then "skipped" else "success" end)))' > /dev/null
 
   comment:
@@ -292,13 +293,16 @@ jobs:
       - uses: actions/github-script@v7
         env:
           NODE_RESULT: ${{ needs.compare.result }}
+          NODE_REQUIRED: ${{ needs.changes.outputs.node_performance }}
           NATIVE_RESULT: ${{ needs.native.result }}
+          NATIVE_REQUIRED: ${{ needs.changes.outputs.desktop }}
         with:
           script: |
             const fs = require('node:fs')
             const sections = [['Node', 'performance-results'], ['Native', 'performance-native-results']].map(([label, artifact]) => {
               const file = `reports/${artifact}/report.md`
-              if (label === 'Native' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured: this diff cannot reach the packaged App (validation changes reported desktop=false).`
+              if (label === 'Node' && process.env.NODE_REQUIRED === 'false' && process.env.NODE_RESULT === 'skipped') return `## ${label}\nNot measured: only iOS or documentation inputs changed (validation changes reported node_performance=false).`
+              if (label === 'Native' && process.env.NATIVE_REQUIRED === 'false' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured: this diff cannot reach the packaged App (validation changes reported desktop=false).`
               return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `## ${label}\nNo valid comparison was produced. Missing measurements are not a pass.`
             })
             const body = (`<!-- scry-performance -->\nNode job: ${process.env.NODE_RESULT} · Native job: ${process.env.NATIVE_RESULT}\n\n` + sections.join('\n\n')).slice(0, 60000)

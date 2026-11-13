@@ -91,7 +91,7 @@ describe('required PR checks', () => {
     ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron']],
     ['performance.yml', ['changes', 'compare', 'native'], ['native']]
   ] as const) {
-    const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop } })
+    const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop, node_performance: required } })
     const success = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('true', 'true') : { result: 'success' }]))
     const skipped = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('false', 'false') : { result: 'skipped' }]))
     const isDesktop = (key: string) => (desktopJobs as readonly string[]).includes(key)
@@ -277,7 +277,8 @@ describe('required PR checks', () => {
       for (const [name, job] of Object.entries(jobs)) {
         if (['changes', 'check', 'comment', 'unit-coverage'].includes(name)) continue
         expect(job.needs).toBe('changes')
-        const output = ['packaged-electron', 'native'].includes(name) ? 'desktop' : 'required'
+        const output = name === 'compare' ? 'node_performance'
+          : ['packaged-electron', 'native'].includes(name) ? 'desktop' : 'required'
         expect(job.if).toBe(`\${{ needs.changes.outputs.${output} == 'true' }}`)
       }
     }
