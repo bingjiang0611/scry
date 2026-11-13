@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { combineNativeShards } from './performance-native-run.mjs'
+import { isTimingMetric } from './performance-native-verdict.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
@@ -282,5 +283,14 @@ describe('native performance evidence gate', () => {
     const environment = report()
     environment.environment.node = '24'
     expect(() => compareNative(report(), environment)).toThrow('environment')
+  })
+})
+
+describe('advisory native timing rows', () => {
+  it('treats every comparator row except DOM work as a timing row', () => {
+    const rows = compareNative(report(), report()).rows
+    expect(rows.length).toBeGreaterThan(100)
+    const work = rows.filter((row: { metric: string }) => !isTimingMetric(row.metric))
+    expect(new Set(work.map((row: { metric: string }) => row.metric))).toEqual(new Set(['domNodes.fixtureP95']))
   })
 })
