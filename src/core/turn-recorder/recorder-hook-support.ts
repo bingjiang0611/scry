@@ -7,15 +7,17 @@ import { findRecordById, listRecords, updateHealth, safeKey, stableHash } from '
 import { recorderOpenPath as openPath, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { storeLifecycleEvent } from './recorder-turn-state.js'
+import { refreshSealWindow } from './recorder-segment.js'
 import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, providerTurnIdOf, stringAt, type RecorderHookInput, type RecorderHookResult, transcriptPathOf, observedNow } from './recorder-contracts.js'
 
-export function isClaudeTaskNotification(payload: Record<string, unknown>): boolean {
+/** A `<task-notification>` prompt is a continuation, not a user question, for every Provider. */
+export function isTaskNotificationPrompt(payload: Record<string, unknown>): boolean {
   const origin = nestedRecord(payload, 'origin')
   return stringAt(origin ?? {}, 'kind') === 'task-notification' ||
     (promptOf(payload)?.trimStart().startsWith('<task-notification>') ?? false)
 }
 
-export async function recordClaudeTaskNotification(
+export async function recordTaskNotificationWake(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   root: string,
   open: OpenTurnState | null,
@@ -26,7 +28,9 @@ export async function recordClaudeTaskNotification(
   if (open.managedByScry) return { status: 'recorded', reason: 'managed task continuation kept in canonical Scry turn' }
   await rememberContinuationProviderTurn(root, open, providerTurnId)
   await storeLifecycleEvent(enablement, open, input.event, input.payload)
-  return { status: 'recorded', reason: 'task notification continued the current Claude turn' }
+  // The wake proves the segment is still alive, so a held Stop waits for quiet again.
+  await refreshSealWindow(root, open)
+  return { status: 'recorded', reason: 'task notification continued the open turn' }
 }
 
 export function continuationProviderTurnIds(open: OpenTurnState): string[] {

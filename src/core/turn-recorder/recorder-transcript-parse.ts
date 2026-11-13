@@ -6,9 +6,10 @@ import type { TraceEvent } from '../../shared/trace.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
+import { pendingBackgroundTasks } from './recorder-transcript-background.js'
 import { parseCodexRollout } from './recorder-codex-rollout.js'
 import { qoderSidecarEvents } from './recorder-qoder-sidecars.js'
-import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn } from './recorder-contracts.js'
+import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn, BACKGROUND_WAKE_PROVIDERS } from './recorder-contracts.js'
 import { readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 import { parsePiTranscript } from './recorder-pi-transcript.js'
 
@@ -297,6 +298,7 @@ export async function parseTranscriptSnapshot(args: {
     observed: turns.length > 0,
     ...(identityMatched != null ? { identityMatched } : {}),
     ...(turn?.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
+    ...(BACKGROUND_WAKE_PROVIDERS.has(args.provider) ? { pendingBackgroundTasks: pendingBackgroundTasks(snapshot.content) } : {}),
     complete: stable && !snapshot.truncated && qoderSidecarsComplete,
     ...(turn?.userText ? { userText: turn.userText } : {}),
     events,

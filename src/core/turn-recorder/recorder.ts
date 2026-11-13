@@ -1,5 +1,4 @@
 import { captureUploadEnvironment } from './commit-environment.js'
-import { stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
@@ -12,10 +11,11 @@ import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, updateHealth, safeKey } from './store.js'
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { attentionIndexPresent, markedSessions } from './attention.js'
-import { END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
+import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
 import { queueHook } from './recorder-hook-queue.js'
-import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexInternalTurn, trustedManagedIdentityPayload, isClaudeTaskNotification } from './recorder-hook-support.js'
+import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexInternalTurn, trustedManagedIdentityPayload, isTaskNotificationPrompt } from './recorder-hook-support.js'
+import { CLOSING_TURN_EXPIRED_REASON, closingTurnStalled } from './recorder-closing-window.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 
@@ -25,6 +25,7 @@ export { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
 export { readTranscriptWindow, transcriptReadStats, resetTranscriptReadStats, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 export { transcriptSnapshotCacheStats, resetTranscriptSnapshotCache } from './recorder-transcript-cache.js'
 export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
+export { CLOSING_TURN_EXPIRED_REASON } from './recorder-closing-window.js'
 
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
   // Taken before the lock wait: a hook queued after HOOK_LOCK_WAIT_MS still arrived now.
@@ -47,9 +48,9 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     await recordError(enablement.dataRoot, `missing session id for ${input.event}`)
     return { status: 'ignored', reason: 'missing session id' }
   }
-  const taskNotification = input.provider === 'claude' &&
-    START_EVENTS.has(input.event) &&
-    isClaudeTaskNotification(input.payload)
+  const taskNotification = START_EVENTS.has(input.event) &&
+    (input.provider === 'claude' || BACKGROUND_WAKE_PROVIDERS.has(input.provider)) &&
+    isTaskNotificationPrompt(input.payload)
   if (isSynthetic(input.payload) && !taskNotification) return { status: 'ignored', reason: 'synthetic/meta prompt' }
   if (input.provider === 'codex' && START_EVENTS.has(input.event) && isCodexInternalPrompt(input.payload)) {
     const turnId = providerTurnIdOf(input.payload, input.provider)
@@ -355,22 +356,6 @@ export async function drainRecorderDelivery(
       `${new Date().toISOString()} ERROR deferred delivery: ${message}`
     ).catch(() => undefined)
   })
-}
-
-export const CLOSING_TURN_EXPIRED_REASON =
-  'turn received its terminal event but could not be finalized before the expiry window closed'
-
-/**
- * How long a `closing` turn has been failing to finalize, measured by when the recorder last wrote
- * its state rather than by `closingAt`: that field carries a Provider-supplied clock, and a skewed
- * or stale one must not trigger a decision that discards diff evidence. Every real transition
- * rewrites this file, so its mtime is the recorder's own record of last progress. An unreadable
- * state declines to force, since giving up needs positive proof.
- */
-async function closingTurnStalled(path: string, expiryMs: number, now = Date.now()): Promise<boolean> {
-  const touchedAt = await stat(path).then((info) => info.mtimeMs).catch(() => Number.NaN)
-  if (!Number.isFinite(touchedAt)) return false
-  return now - touchedAt >= expiryMs
 }
 
 export async function recorderEnablement(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<RecorderEnablement> {

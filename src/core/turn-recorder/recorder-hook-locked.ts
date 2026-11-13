@@ -6,21 +6,19 @@ import { findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
+import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
-import { snapshotSessionNetDiff } from './git.js'
-import { terminalSnapshot } from './git-capture.js'
+import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
+import { holdSeal, refreshSealWindow } from './recorder-segment.js'
+import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
   sessionId: string
 ): Promise<RecorderHookResult> {
-  const taskNotification = input.provider === 'claude' &&
-    START_EVENTS.has(input.event) &&
-    isClaudeTaskNotification(input.payload)
+  const taskNotification = START_EVENTS.has(input.event) && isTaskNotificationPrompt(input.payload)
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
   let open = await readJson<OpenTurnState>(openPath(root))
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
@@ -28,7 +26,10 @@ export async function applyHookLocked(
     await isLateQoderTerminalDuplicate(enablement.dataRoot, root, sessionId, input.payload, open)) {
     return { status: 'duplicate' as const, reason: 'late Qoder terminal matches the last completed assistant' }
   }
-  if (taskNotification) return recordClaudeTaskNotification(enablement, root, open, input, incomingProviderTurnId)
+  if (taskNotification && open) return recordTaskNotificationWake(enablement, root, open, input, incomingProviderTurnId)
+  // With the previous segment already sealed, this wake is new Agent work: it becomes a segment of
+  // its own, linked to the turn that asked, not a phantom turn with a prompt nobody sent.
+  if (taskNotification) return openContinuationSegment({ enablement, input, sessionId })
   if (START_EVENTS.has(input.event) && subagentScopedPayload(input.payload)) {
     // A sub-agent prompt is not a new user turn: superseding the open parent turn here would end
     // it early and orphan every later parent event.
@@ -172,6 +173,9 @@ export async function applyHookLocked(
   if (open.deferredTerminalEventId) {
     const identifiedForOpen = !!incomingProviderTurnId && incomingProviderTurnId === open.providerTurnId
     if (endEvent && !sessionEndEvent && !identifiedForOpen) {
+      // Another Stop in this segment restarts the silence window: a burst that keeps stopping and
+      // waking stays one segment.
+      await refreshSealWindow(root, open)
       return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
     }
     if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
@@ -197,9 +201,8 @@ export async function applyHookLocked(
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
-  // Stale-terminal protection weighs one Provider terminal against a possibly newer one. A session
-  // or process end has no such competitor: deferring or discarding it would leave the turn open
-  // for the next prompt to close, which is the inflation this path exists to prevent.
+  // Stale-terminal protection weighs one terminal against a possibly newer one. A session end has
+  // no such competitor: deferring it would leave the turn open for the next prompt to close.
   if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
     return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
   }
@@ -207,40 +210,26 @@ export async function applyHookLocked(
     const terminalAt = explicitTerminalAt ?? timestampOf(input.payload)
     const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
     if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS) {
-      const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
-      open.status = 'closing'
-      open.closingAt = terminalAt
-      open.terminalAt = terminalAt
-      open.terminalAtSource = 'recorder_observed_terminal'
-      open.endReason ??= 'provider_terminal'
-      // Freeze at the Provider boundary without consuming the baseline: a newer
-      // prompt can still cancel this deferred terminal. Keep runtime promise queues
-      // on the temporary view, not in the JSON-persisted capture.
-      open.terminalDiffs = await Promise.all(open.captures.map(async ({ repository, capture }) => {
-        const started = Date.now()
-        try {
-          const snapshot = await snapshotSessionNetDiff({ ...capture, opChain: undefined, finishPromise: undefined }, undefined, {
-            patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-            completePatches: true
-          })
-          return { repository, snapshot }
-        } catch {
-          // A failed boundary capture cannot be replaced by a later worktree view.
-          return { repository, snapshot: terminalSnapshot(capture, 'unavailable', 'git_error', [], terminalAt, Date.now() - started, 'failed') }
-        }
-      }))
-      open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
-      open.deferredTerminalAt = new Date().toISOString()
-      open.deferredTerminalEventId = eventId
-      await writeJsonAtomic(openPath(root), open)
-      return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
+      return holdSeal(enablement, root, open, input, 'stale_terminal', terminalAt)
     }
+  }
+  // A Provider that continues this turn after its Stop must not publish while its own background
+  // work is unreported: the wake's rows belong to this same burst.
+  if (endEvent && !sessionEndEvent) {
+    const held = await holdStopForBackgroundWork({
+      enablement, input, sessionId, open, terminalAt: explicitTerminalAt ?? timestampOf(input.payload)
+    })
+    if (held) return held
   }
   if (sessionEndEvent && open.terminalIdentityConfirmedBySessionEnd) {
     return { status: 'pending' as const, reason: 'session end already confirmed the deferred terminal' }
   }
   await storeLifecycleEvent(enablement, open, input.event, input.payload)
-  if (!endEvent) return { status: 'recorded' as const }
+  if (!endEvent) {
+    // Activity inside a held segment: the silence window measures quiet, not the first Stop.
+    await refreshSealWindow(root, open)
+    return { status: 'recorded' as const }
+  }
   const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
   open.status = 'closing'
   open.closingAt = timestampOf(input.payload)
@@ -251,7 +240,12 @@ export async function applyHookLocked(
   // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
   // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
   // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
-  if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
+  if (sessionEndEvent) {
+    open.terminalFallbackStatus ??= 'interrupted'
+    // The session end is what lets this turn close on the evidence it has; a separate field keeps an
+    // earlier terminal's verdict intact.
+    open.sessionEndedAt ??= timestampOf(input.payload)
+  }
   await writeJsonAtomic(openPath(root), open)
   if (sessionEndEvent) {
     return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }
