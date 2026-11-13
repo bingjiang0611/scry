@@ -1,0 +1,168 @@
+{
+  "case": "E4 original journal startup recovery",
+  "errorField": "$.interventions",
+  "validation": "invalid intervention evidence",
+  "envelope": {
+    "keys": [
+      "status",
+      "quality",
+      "source",
+      "value"
+    ],
+    "status": "available",
+    "quality": "exact",
+    "source": [
+      "scry_provider_adapter"
+    ],
+    "valueType": "array",
+    "valueLength": 2
+  },
+  "elements": [
+    {
+      "type": "object",
+      "keys": {
+        "kind": "<string len=10>",
+        "source": "<string len=22>",
+        "resolution": "<string len=8>",
+        "request": {
+          "type": "object",
+          "keys": {
+            "runId": "<string len=14>",
+            "questionId": "<string len=35>",
+            "questionKind": "<string len=10>",
+            "source": "<string len=22>",
+            "questions": {
+              "type": "array",
+              "length": 1,
+              "elements": [
+                {
+                  "type": "object",
+                  "keys": {
+                    "header": "<string len=11>",
+                    "question": "<string len=17>",
+                    "multiSelect": {
+                      "type": "boolean"
+                    },
+                    "options": {
+                      "type": "array",
+                      "length": 2,
+                      "elements": [
+                        {
+                          "type": "object",
+                          "keys": {
+                            "label": "<string len=4>",
+                            "description": "<string len=618>"
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "keys": {
+                            "label": "<string len=2>",
+                            "description": "<string len=21>"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "providerId": "<string len=5>"
+          }
+        },
+        "response": {
+          "type": "object",
+          "keys": {
+            "runId": "<string len=14>",
+            "questionId": "<string len=35>",
+            "behavior": "<string len=8>",
+            "answers": {
+              "type": "object",
+              "keys": {
+                "<dynamic key len=17>": "<string len=4>"
+              }
+            }
+          }
+        },
+        "openedAt": "<string len=24>",
+        "closedAt": "<string len=24>",
+        "durationMs": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "keys": {
+        "kind": "<string len=10>",
+        "source": "<string len=21>",
+        "resolution": "<string len=8>",
+        "request": {
+          "type": "object",
+          "keys": {
+            "runId": "<string len=14>",
+            "questionId": "<string len=35>",
+            "questionKind": "<string len=10>",
+            "source": "<string len=21>",
+            "questions": {
+              "type": "array",
+              "length": 1,
+              "elements": [
+                {
+                  "type": "object",
+                  "keys": {
+                    "header": "<string len=129>",
+                    "question": "<string len=16>",
+                    "multiSelect": {
+                      "type": "boolean"
+                    },
+                    "options": {
+                      "type": "array",
+                      "length": 2,
+                      "elements": [
+                        {
+                          "type": "object",
+                          "keys": {
+                            "label": "<string len=4>",
+                            "description": "<string len=29>"
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "keys": {
+                            "label": "<string len=2>",
+                            "description": "<string len=21>"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "providerId": "<string len=5>"
+          }
+        },
+        "response": {
+          "type": "object",
+          "keys": {
+            "runId": "<string len=14>",
+            "questionId": "<string len=35>",
+            "behavior": "<string len=8>",
+            "answers": {
+              "type": "object",
+              "keys": {
+                "<dynamic key len=16>": "<string len=4>"
+              }
+            }
+          }
+        },
+        "openedAt": "<string len=24>",
+        "closedAt": "<string len=24>",
+        "durationMs": {
+          "type": "number"
+        }
+      }
+    }
+  ]
+}

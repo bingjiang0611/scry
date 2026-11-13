@@ -1,4 +1,6 @@
-# 第六轮续跑中（F0 已由审查方核验，可继续）
+# 第六轮续跑中（F0 补采完成，F1–F4 待执行）
+
+F0 原路径恢复得到 E4 `$.interventions invalid intervention evidence`；脱敏结构见 [证据](evidence/r6/f0-e4-interventions.json)。hook-1 已提交记录的 19 个元素和备份 journal 的 hookId 配对计数见 [证据](evidence/r6/f0-hook-structure.json)。结论与限制见 [F0 报告](reports/F0.md)。本机 qodercli 1.1.88；F1–F4 仍按 [R6 续跑条款](R6.md#审查方核验-f02026-11-13与续跑) 执行。
 
 **审查方核验 F0（2026-11-13）。** 被提交的 hook-1 带有 Provider turn id，走的是 2026-09 就有的 `reserveCanonicalJournalRecovery`，在启动回放时触发。它不是 `f87c91b9` 引入的，记录也如实。审查方用相同结构写了复现用例，分别在当前代码和第五轮代码 `6ae2e8ea` 上运行，结果一致。执行方停下是因为 R6 的措辞把“未知 hook 保持 pending”写得太宽，责任在审查方。审查方也更正了自己的先前判断：hook-1 不是 `f87c91b9` 处理的情形，那个情形在真机上还没观测到过。续跑要求和新的停下条件见 [R6.md](R6.md) 末尾一节，启动提示见 [PROMPT-R6b.md](PROMPT-R6b.md)。
 

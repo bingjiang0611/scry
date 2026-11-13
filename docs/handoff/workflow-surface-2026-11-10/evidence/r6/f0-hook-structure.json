@@ -1,0 +1,264 @@
+{
+  "recordHooks": [
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 1,
+      "status": "started",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": false
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 1,
+      "status": "started",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": false
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 1,
+      "status": "started",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": false
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 3,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 1,
+      "status": "failed",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": false
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 1,
+      "status": "failed",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": false
+      }
+    },
+    {
+      "event": "SessionStart",
+      "runs": 1,
+      "lifecycleEvents": 1,
+      "status": "failed",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": false
+      }
+    },
+    {
+      "event": "QueryEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "QueryEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "QueryEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "failed",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "runs": 1,
+      "lifecycleEvents": 2,
+      "status": "success",
+      "has": {
+        "name": true,
+        "command": true,
+        "startedAt": true,
+        "completedAt": true
+      }
+    }
+  ],
+  "backupJournalHookIdPairing": [
+    {
+      "event": "QueryEnd",
+      "hookIdCount": 3,
+      "started": 3,
+      "response": 3,
+      "progress": 0,
+      "pairedHookIds": 3,
+      "unpairedHookIds": 0,
+      "allPairedExactlyOnce": true
+    },
+    {
+      "event": "SessionEnd",
+      "hookIdCount": 7,
+      "started": 7,
+      "response": 7,
+      "progress": 0,
+      "pairedHookIds": 7,
+      "unpairedHookIds": 0,
+      "allPairedExactlyOnce": true
+    },
+    {
+      "event": "SessionStart",
+      "hookIdCount": 10,
+      "started": 7,
+      "response": 7,
+      "progress": 1,
+      "pairedHookIds": 4,
+      "unpairedHookIds": 6,
+      "allPairedExactlyOnce": false
+    }
+  ]
+}
