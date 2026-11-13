@@ -23,6 +23,10 @@ def animation_errors(source):
             depth += (source[end] == '(') - (source[end] == ')')
             end += 1
         argument = source[start:end - 1]
+        # Explicitly disabling a View animation creates no unmanaged motion.
+        # The root route requires this guard against the iOS keyboard-layout loop.
+        if match.group().startswith('.animation') and re.match(r'\s*nil\s*(?:,|$)', argument):
+            continue
         if 'Motion.' not in argument or re.search(r'\.(?:easeInOut|easeIn|easeOut|spring|default|linear)\b', argument):
             errors.append(source[match.start():end].splitlines()[0])
     if re.search(r'(?:Linear|Cubic|Spring)Keyframe\([^\n]*duration:\s*[0-9]', source):
@@ -62,6 +66,8 @@ def main():
     assert animation_errors('view.animation(.easeInOut(duration: 0.2), value: changed)')
     assert animation_errors('withAnimation(.default) { changed = true }')
     assert animation_errors('withAnimation { changed = true }')
+    assert not animation_errors('view.animation(nil, value: model.route)')
+    assert animation_errors('view.animation(nil, value: route).animation(.default, value: changed)')
     assert not animation_errors('view.transition(Motion.fade).animation(Motion.animation(.tab, reduceMotion: true), value: changed)')
     print(f'PASS {len(files)} Swift files: Motion-only calls, no legacy aliases; negative/positive scanner controls')
 

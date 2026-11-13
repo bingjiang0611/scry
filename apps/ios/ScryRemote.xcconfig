@@ -1,0 +1,10 @@
+// Shared App target settings. Debug/Release-specific options remain in the project.
+PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote
+INFOPLIST_FILE = ScryRemote/Info.plist
+CODE_SIGN_ENTITLEMENTS = ScryRemote/ScryRemote.entitlements
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+CODE_SIGN_STYLE = Automatic
+TARGETED_DEVICE_FAMILY = 1
+SUPPORTS_MACCATALYST = NO
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks

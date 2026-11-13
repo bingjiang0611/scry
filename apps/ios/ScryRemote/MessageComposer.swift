@@ -19,6 +19,7 @@ struct MessageComposer: View {
   var hostLabel: String?
   var contextLabel: String?
   var onContext: (() -> Void)?
+  var selectionTransition: Namespace.ID?
   var contextLocked = false
   var modelOptions: [G0Transport.RunModelOption] = []
   var selectedModelId: String?
@@ -37,22 +38,25 @@ struct MessageComposer: View {
   // Non-nil asks for the keyboard. The new-session page passes a ticket, so a
   // repeat "new session" request focuses again instead of being a silent no-op.
   var focusTicket: Int?
+  var transitionSource = false
   let onSend: () -> Void
 
   @State private var showModelEffort = false
   @State private var showPhotos = false
   @State private var showFiles = false
   @State private var photoItems: [PhotosPickerItem] = []
-  @State private var attachmentError: String?
-  @State private var previewing: AttachmentPreviewItem?
+  @State var attachmentError: String?
+  @State var previewing: AttachmentPreviewItem?
+  @Namespace var imageTransition
+  @AccessibilityFocusState var previewSource: UUID?
   @FocusState private var inputFocused: Bool
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-  private let maxCount = DraftAttachment.maxCount
-  private let maxEachBytes = DraftAttachment.maxEachBytes
-  private let maxTotalBytes = DraftAttachment.maxTotalBytes
+  let maxCount = DraftAttachment.maxCount
+  let maxEachBytes = DraftAttachment.maxEachBytes
+  let maxTotalBytes = DraftAttachment.maxTotalBytes
 
   private var slashToken: String? {
     guard text.hasPrefix("/") else { return nil }
@@ -74,7 +78,9 @@ struct MessageComposer: View {
       if projectLabel != nil || contextLabel != nil {
         HStack(spacing: 6) {
           if let projectLabel {
-            Button { onProject?() } label: { controlCapsule(projectLabel, symbol: Symbol.folder) }
+            Button { onProject?() } label: {
+              controlCapsule(projectLabel, symbol: Symbol.folder).zoomSource("project", in: selectionTransition)
+            }
               .buttonStyle(.plain).disabled(disabled)
           }
           if let contextLabel { contextControl(contextLabel) }
@@ -98,6 +104,7 @@ struct MessageComposer: View {
           .font(Typography.reply).lineLimit(1...6).disabled(disabled)
           .focused($inputFocused)
           .accessibilityIdentifier("message-input")
+          .conversationElement(transitionSource ? .submittedText : nil, captures: !text.isEmpty)
           .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 6)
         if dynamicTypeSize.isAccessibilitySize {
           HStack(spacing: 2) {
@@ -125,8 +132,11 @@ struct MessageComposer: View {
         if let attachmentError { Text(attachmentError).font(Typography.meta).foregroundStyle(Palette.bad) }
       }.padding(.horizontal, 10).padding(.bottom, 6)
     }
-    .background(Palette.panel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(inputFocused ? Palette.border2 : Palette.border))
+    .conversationArrival()
+    .background {
+      composerSurface
+        .conversationElement(.composerSurface, source: transitionSource, revision: inputFocused ? "focused" : "blurred", snapshot: AnyView(composerSurface))
+    }
     .overlay {
       if inputFocused {
         RoundedRectangle(cornerRadius: 21, style: .continuous).strokeBorder(Palette.accentSoft, lineWidth: 1).padding(-1)
@@ -146,7 +156,17 @@ struct MessageComposer: View {
     }
     .onAppear { if focusTicket != nil { inputFocused = true } }
     .onChange(of: focusTicket) { _, ticket in if ticket != nil { inputFocused = true } }
-    .fullScreenCover(item: $previewing) { AttachmentImagePreview(item: $0) }
+    .fullScreenCover(item: $previewing) { item in
+      AttachmentImagePreview(item: item).zoomDestination(item.id, in: imageTransition)
+    }
+    .onChange(of: previewing?.id) { previous, current in
+      if current == nil { previewSource = previous }
+    }
+  }
+
+  private var composerSurface: some View {
+    RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Palette.panel)
+      .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(inputFocused ? Palette.border2 : Palette.border))
   }
 
   private var slashMenu: some View {
@@ -235,7 +255,9 @@ struct MessageComposer: View {
 
   @ViewBuilder private func contextControl(_ label: String) -> some View {
     if let onContext, !contextLocked {
-      Button(action: onContext) { controlCapsule(label, symbol: ProviderSymbol.name(providerId ?? "")) }
+      Button(action: onContext) {
+        controlCapsule(label, symbol: ProviderSymbol.name(providerId ?? "")).zoomSource("provider", in: selectionTransition)
+      }
         .buttonStyle(.plain).disabled(disabled)
         .accessibilityLabel(ConnectionCopy.composerAgent(label))
     } else {
@@ -324,103 +346,5 @@ struct MessageComposer: View {
     return effortOptions.first(where: { $0.id == selectedEffort })?.label ?? selectedEffort
   }
 
-  private func attachmentChip(_ item: DraftAttachment) -> some View {
-    HStack(spacing: 7) {
-      Button {
-        if item.kind == .image { previewing = AttachmentPreviewItem(name: item.name, data: item.data) }
-      } label: {
-        HStack(spacing: 7) {
-          if item.kind == .image {
-            AttachmentThumbnail(data: item.data, side: 30)
-          } else {
-            Image(systemName: Symbol.file)
-          }
-          VStack(alignment: .leading, spacing: 1) {
-            Text(item.name).font(Typography.meta.weight(.medium)).lineLimit(1)
-            Text(item.detail).font(Typography.meta).foregroundStyle(Palette.dim)
-          }
-        }.frame(minHeight: 44).contentShape(Rectangle())
-      }
-      .buttonStyle(.plain).disabled(item.kind != .image)
-      .accessibilityLabel(item.kind == .image ? ConnectionCopy.viewAttachment(item.name) : item.name)
-      Button { attachments.removeAll { $0.id == item.id } } label: {
-        Image(systemName: "xmark").font(Typography.meta.weight(.semibold))
-          .frame(width: 44, height: 44).contentShape(Rectangle())
-      }
-      .buttonStyle(.plain).accessibilityLabel(ConnectionCopy.removeAttachment(item.name))
-    }
-    .padding(.leading, 9).padding(.trailing, 4).frame(minHeight: 44)
-    .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-  }
 
-  // Errors are only set, never cleared, by an individual item, so a later
-  // successful item in the same batch cannot hide an earlier rejection.
-  @MainActor private func append(_ item: DraftAttachment) {
-    guard attachments.count < maxCount else { attachmentError = ConnectionCopy.attachmentCountLimit; return }
-    guard !item.name.isEmpty && item.name.count <= 160 else { attachmentError = ConnectionCopy.attachmentNameLimit; return }
-    guard item.data.count <= maxEachBytes else { attachmentError = ConnectionCopy.attachmentSizeLimit(item.name); return }
-    guard usedBytes + item.data.count <= maxTotalBytes else {
-      attachmentError = ConnectionCopy.attachmentTotalLimit; return
-    }
-    attachments.append(item)
-  }
-
-  private var usedBytes: Int { attachments.reduce(0) { $0 + $1.data.count } }
-
-  private func imageBudget(remainingImages: Int) -> Int {
-    DraftAttachment.imageBudget(usedBytes: usedBytes, remainingImages: remainingImages)
-  }
-
-  @MainActor private func importPhotos(_ items: [PhotosPickerItem]) async {
-    attachmentError = nil
-    let selected = Array(items.prefix(maxCount - attachments.count))
-    if selected.count < items.count { attachmentError = ConnectionCopy.ignoredExtraImages }
-    var loaded: [Data] = []
-    for item in selected {
-      do {
-        guard let data = try await item.loadTransferable(type: Data.self) else { attachmentError = ConnectionCopy.unreadableImage; continue }
-        loaded.append(data)
-      } catch { attachmentError = ConnectionCopy.imageReadFailed(error.localizedDescription) }
-    }
-    for (index, data) in loaded.enumerated() {
-      guard let jpeg = DraftAttachment.compactJPEG(data, maxBytes: imageBudget(remainingImages: loaded.count - index)) else {
-        attachmentError = ConnectionCopy.imageBudgetFailed; continue
-      }
-      append(.init(kind: .image, name: "photo-\(attachments.count + 1).jpg", mimeType: "image/jpeg", data: jpeg))
-    }
-  }
-
-  @MainActor private func importFiles(_ urls: [URL]) {
-    attachmentError = nil
-    let selected = Array(urls.prefix(maxCount - attachments.count))
-    if selected.count < urls.count { attachmentError = ConnectionCopy.ignoredExtraFiles }
-    // Only used to split the size budget; the scoped read below stays authoritative.
-    var remainingImages = selected.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }.count
-    for url in selected {
-      let scoped = url.startAccessingSecurityScopedResource()
-      defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-      do {
-        let values = try url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey])
-        let type = values.contentType
-        let sourceLimit = type?.conforms(to: .image) == true ? 24 * 1024 * 1024 : maxEachBytes
-        if let size = values.fileSize, size > sourceLimit {
-          attachmentError = ConnectionCopy.sourceFileLimit(url.lastPathComponent); continue
-        }
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        if type?.conforms(to: .image) == true {
-          let budget = imageBudget(remainingImages: remainingImages)
-          remainingImages -= 1
-          guard let jpeg = DraftAttachment.compactJPEG(data, maxBytes: budget) else {
-            attachmentError = ConnectionCopy.fileImageBudgetFailed(url.lastPathComponent); continue
-          }
-          append(.init(kind: .image, name: url.deletingPathExtension().lastPathComponent + ".jpg", mimeType: "image/jpeg", data: jpeg))
-        } else {
-          guard String(data: data, encoding: .utf8) != nil else {
-            attachmentError = ConnectionCopy.nonUTF8File(url.lastPathComponent); continue
-          }
-          append(.init(kind: .text, name: url.lastPathComponent, mimeType: "text/plain", data: data))
-        }
-      } catch { attachmentError = ConnectionCopy.fileReadFailed(error.localizedDescription) }
-    }
-  }
 }

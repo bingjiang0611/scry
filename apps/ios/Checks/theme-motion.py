@@ -29,6 +29,12 @@ for name, values, alphas in [
 
 fixture = '''import SwiftUI
 import AppKit
+// Dependency fixtures for the presentation controller; its actual implementation
+// is compiled below. Identity/route authority remains covered by store tests.
+struct RemoteRunStore {
+  struct SessionIdentity: Hashable { let key: String }
+}
+enum Route: Hashable { case home, newSession, chat, transcript, settings }
 @main struct Check {
   static func check(_ color: Color, _ hex: UInt32, _ alpha: CGFloat, _ appearance: NSAppearance.Name, _ label: String) {
     NSAppearance(named: appearance)!.performAsCurrentDrawingAppearance {
@@ -66,7 +72,6 @@ import AppKit
       (.streamIn, .timingCurve(0, 0, 0.58, 1, duration: 0.20)),
       (.drawerOpen, .timingCurve(0, 0, 0.58, 1, duration: 0.25)),
       (.drawerClose, .timingCurve(0.42, 0, 1, 1, duration: 0.20)),
-      (.drawerRelease, .spring(duration: 0.38, bounce: 0.12)),
       (.reset, .timingCurve(0.42, 0, 0.58, 1, duration: 0.25)),
       (.scroll, .timingCurve(0.42, 0, 0.58, 1, duration: 0.25)),
       (.page, .timingCurve(0, 0, 0.58, 1, duration: 0.40)),
@@ -87,16 +92,76 @@ import AppKit
     precondition(Typography.mono == .system(.footnote, design: .monospaced))
     precondition(Typography.codeBlock == .system(.caption, design: .monospaced))
     precondition(Typography.sheetTitle == .headline)
-    print("PASS 56 color resolutions, provider mapping, 19 motion presets/reduced motion, row delay bounds, 9 font roles")
+    precondition(DrawerPosition.progress(origin: 0, translation: 85, width: 340) == 0.25)
+    precondition(DrawerPosition.progress(origin: 0.6, translation: -34, width: 340) == 0.5)
+    precondition(DrawerPosition.progress(origin: 0, translation: -30, width: 340) == 0)
+    precondition(DrawerPosition.progress(origin: 1, translation: 30, width: 340) == 1)
+    precondition(DrawerPosition.opens(origin: 0, predictedTranslation: 200, width: 340))
+    precondition(!DrawerPosition.opens(origin: 1, predictedTranslation: -200, width: 340))
+    precondition(!DrawerPosition.opens(origin: 0, predictedTranslation: 100, width: 340))
+    precondition(Motion.arrival(reduceMotion: true) == Motion.animation(.enter, reduceMotion: true).delay(0))
+    precondition(Motion.arrival(reduceMotion: false) == Motion.animation(.enter, reduceMotion: false).delay(0.2))
+    precondition(Motion.drawerRelease(velocity: 3, remaining: 0.5, reduceMotion: true) == Motion.easeOut(duration: 0.15))
+    precondition(Motion.drawerRelease(velocity: 3, remaining: 0.5, reduceMotion: false) == .interpolatingSpring(duration: 0.38, bounce: 0.12, initialVelocity: 6))
+    let first = RemoteRunStore.SessionIdentity(key: "host-a/session")
+    let second = RemoteRunStore.SessionIdentity(key: "host-b/session")
+    let transition = ConversationTransition()
+    precondition(!transition.contains(.sessionTitle(first), route: .transcript))
+    transition.begin(.session(first), reduceMotion: false)
+    precondition(transition.focusDestination == .session(first))
+    let ticket = transition.ticket
+    precondition(transition.contains(.sessionTitle(first), route: .transcript))
+    precondition(transition.contains(.sessionProvider(first), route: .transcript))
+    precondition(!transition.contains(.sessionTitle(second), route: .transcript))
+    precondition(!transition.contains(.sessionTitle(first), route: .home))
+    precondition(!transition.accepts(first))
+    transition.begin(.submission(second), reduceMotion: false)
+    precondition(transition.focusDestination == .submission(second))
+    precondition(transition.ticket != ticket)
+    precondition(transition.accepts(second) && !transition.accepts(first) && !transition.accepts(nil))
+    precondition(transition.contains(.submittedText, route: .chat))
+    precondition(transition.contains(.submittedAttachment(0), route: .chat))
+    precondition(transition.contains(.composerSurface, route: .chat))
+    precondition(!transition.contains(.submittedText, route: .transcript))
+    precondition(!transition.contains(.sessionTitle(first), route: .transcript))
+    transition.cancel()
+    precondition(transition.destination == nil && transition.ticket == nil)
+    precondition(!transition.contains(.composerSurface, route: .chat))
+    transition.begin(.session(first), reduceMotion: true)
+    precondition(transition.focusDestination == .session(first))
+    precondition(transition.destination == nil && transition.ticket == nil)
+    precondition(!transition.contains(.sessionTitle(first), route: .transcript))
+    transition.cancel()
+    precondition(transition.focusDestination == .session(first))
+    transition.begin(.submission(second), reduceMotion: true)
+    precondition(transition.focusDestination == .submission(second))
+    precondition(transition.destination == nil && !transition.accepts(second))
+    print("PASS colors, motion/reduced motion, row delays, fonts; drawer position/release; scoped route identities, replacement and cancellation; focus independent of motion")
   }
 }
 '''
+row = (root / 'apps/ios/ScryRemote/SessionRow.swift').read_text()
+for element in ['sessionTitle', 'sessionProvider']:
+    assert f'.conversationElement(session.label.isEmpty ? nil : destinationIdentity.map(ConversationTransition.Element.{element}))' in row
+header = (root / 'apps/ios/ScryRemote/Components.swift').read_text()
+assert 'transition?.state.focusDestination == .session(transitionIdentity)' in header
+transcript = (root / 'apps/ios/ScryRemote/SessionTranscriptView.swift').read_text()
+assert 'transitionIdentity: sessionIdentity,' in transcript
+print('PASS empty-title source parity and motion-independent header focus wiring, including fallback titles')
+
 workspace = (root / 'apps/ios/ScryRemote/WorkspaceShell.swift').read_text()
-assert '.offset(x: reduceMotion || drawerOpen ? 0 : -width)' in workspace
-assert 'if drawerUsesReleaseCurve { return .drawerRelease }' in workspace
-assert workspace.count('Motion.animation(drawerEffect') == 3
-assert 'drawerUsesReleaseCurve = released\n    drawerOpen = open' in workspace
-print('PASS reduced drawer keeps position for opacity; one effect selects button/release curves')
+assert '.offset(x: reduceMotion ? 0 : (drawerProgress - 1) * width)' in workspace
+assert '.opacity(reduceMotion ? drawerProgress : 1)' in workspace
+assert 'dragOrigin = reduceMotion ? drawerProgress : presentedProgress' in workspace
+assert 'if !active, dragOrigin != nil { setDrawer(drawerOpen) }' in workspace
+assert 'value.velocity.width / width' in workspace
+panel = workspace.split('private func drawer(width:', 1)[1].split('private func drawerGesture', 1)[0]
+def observes_translated_panel(source):
+    return source.index('.onGeometryChange(') < source.index('.offset(')
+assert observes_translated_panel(panel)
+# Negative control: the original outside-offset observer cannot measure drag origin.
+assert not observes_translated_panel('.offset(x: 0) .onGeometryChange(for: CGFloat.self)')
+print('PASS reduced drawer has no translation; geometry observes translated subtree; interrupted/cancelled drag contract and negative control')
 
 with tempfile.TemporaryDirectory(prefix='scry-theme-motion-') as temporary:
     source = Path(temporary) / 'Check.swift'
@@ -104,7 +169,8 @@ with tempfile.TemporaryDirectory(prefix='scry-theme-motion-') as temporary:
     source.write_text(fixture)
     subprocess.run(['xcrun', 'swiftc', '-parse-as-library',
                     str(root / 'apps/ios/ScryRemote/Theme.swift'),
-                    str(root / 'apps/ios/ScryRemote/Motion.swift'), str(source),
+                    str(root / 'apps/ios/ScryRemote/Motion.swift'),
+                    str(root / 'apps/ios/ScryRemote/ConversationTransitions.swift'), str(source),
                     '-o', str(executable)], check=True)
     subprocess.run(['codesign', '--force', '--sign', os.environ.get('SCRY_IOS_CHECK_SIGN_IDENTITY', '-'), str(executable)], check=True)
     subprocess.run(['codesign', '--verify', '--strict', str(executable)], check=True)

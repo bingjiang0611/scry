@@ -51,33 +51,73 @@ struct RootView: View {
   private var run: RemoteRunStore { model.route == .newSession ? targets.newTaskStore : targets.selectedStore }
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var transition = ConversationTransition()
+  @State private var viewportWidth: CGFloat = 0
 
-  var body: some View {
-    Group {
-      if !model.canShowWorkspace {
-        PairView()
-      } else {
-        switch model.route {
-        // One page: launch lands on a new session with the list in a collapsed
-        // drawer; `.newSession` only adds the keyboard focus.
-        case .home, .newSession: WorkspaceShell(focusComposer: model.route == .newSession)
-        case .chat: ChatView()
-        case .pair: PairView()
-        case .transcript:
-          // A session switch inside this route (the waiting-decision banner)
-          // must re-run onAppear, which loads and watches the new session.
-          let identity = model.openedSession?.identity
-          if model.readOnlyTranscript {
-            ReadOnlySessionTranscriptView(owner: run).id(identity)
-          } else {
-            SessionTranscriptView().id(identity)
-          }
-        case .settings: SettingsView()
-        case let .toolPanel(kind): ToolPanelView(kind: kind)
+  @ViewBuilder private var routeContent: some View {
+    if !model.canShowWorkspace {
+      PairView()
+    } else {
+      switch model.route {
+      // One page: launch lands on a new session with the list in a collapsed
+      // drawer; `.newSession` only adds the keyboard focus.
+      case .home, .newSession: WorkspaceShell(focusComposer: model.route == .newSession)
+      case .chat: ChatView()
+      case .pair: PairView()
+      case .transcript:
+        // A session switch inside this route (the waiting-decision banner)
+        // must re-run onAppear, which loads and watches the new session.
+        let identity = model.openedSession?.identity
+        if model.readOnlyTranscript {
+          ReadOnlySessionTranscriptView(owner: run).id(identity)
+        } else {
+          SessionTranscriptView().id(identity)
         }
+      case .settings: SettingsView()
+      case let .toolPanel(kind): ToolPanelView(kind: kind)
       }
     }
+  }
+
+  // Keep transition composition separate so Xcode 26.3 can type-check the root.
+  private var transitioningContent: some View {
+    ZStack {
+      routeContent
+        .transition(Motion.none)
+        .animation(nil, value: model.route)
+    }
     .environment(run)
+    .environment(\.conversationTransition, ConversationTransitionContext(state: transition, route: model.route))
+    .overlay { ConversationTransitionOverlay(state: transition) }
+    .task(id: transition.ticket) {
+      guard let ticket = transition.ticket else { return }
+      // Missing destination geometry must not retain captured pixels forever.
+      // Normal completion comes from the overlay, never from delaying routing.
+      do { try await Task.sleep(for: .seconds(Motion.large * 3)) }
+      catch { return }
+      if transition.ticket == ticket { transition.cancel() }
+    }
+    .onChange(of: model.route) { _, route in
+      switch transition.destination {
+      case .session: if route != .transcript { transition.cancel() }
+      case .submission: if route != .chat { transition.cancel() }
+      case nil: break
+      }
+    }
+    .onChange(of: model.openedSession?.identity) { _, identity in
+      if case let .session(expected) = transition.destination, identity != expected { transition.cancel() }
+    }
+    .onChange(of: run.activeSessionIdentity) { _, identity in
+      if case let .submission(expected) = transition.destination, identity != expected { transition.cancel() }
+    }
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+      if viewportWidth != 0, viewportWidth != width { transition.cancel() }
+      viewportWidth = width
+    }
+  }
+
+  var body: some View {
+    transitioningContent
     .foregroundStyle(Palette.fg)
     .background(Palette.main.ignoresSafeArea())
     .tint(Palette.accent)
@@ -146,6 +186,7 @@ struct RootView: View {
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .background:
+        transition.cancel()
         targets.backgrounded()
         Task {
           await RemoteSessionRegistry.shared.setForeground(false)
@@ -168,6 +209,14 @@ struct RootView: View {
       #if DEBUG
       model.applyUIPreviewArguments(runStore: run)
       run.applyUIPreviewArguments()
+      let arguments = ProcessInfo.processInfo.arguments
+      if arguments.contains("-uiPreview"), arguments.contains("-uiMockData"), arguments.contains("-uiDraftAttachments") {
+        // In-memory fixture for removal/reindexing through the real composer.
+        model.composerDraft(for: .newTask(targets.newTaskScope)).wrappedValue.attachments = [
+          DraftAttachment(kind: .text, name: "a.txt", mimeType: "text/plain", data: Data("first".utf8)),
+          DraftAttachment(kind: .text, name: "b.txt", mimeType: "text/plain", data: Data("second".utf8))
+        ]
+      }
       #endif
       resumeRecoveredRun()
       if model.canShowWorkspace { targets.foregrounded() }
