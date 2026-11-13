@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 export const performanceAbabHarnessFiles = [
   'scripts/performance-abab-harness.mjs',
+  'scripts/performance-runner-snapshot.mjs',
   'scripts/performance-abab-protocol.mjs',
   'scripts/performance-abab-worker.test.ts',
   'scripts/performance-baseline.test.ts',

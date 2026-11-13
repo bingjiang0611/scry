@@ -167,7 +167,8 @@ describe('native performance evidence gate', () => {
       'scripts/performance-journal.mjs', 'scripts/performance-path-catalogue.mjs',
       'scripts/performance-paths.json', 'scripts/performance-paths/workbench.json',
       '.agents/skills/scry-performance-climb/scripts/timing-run.mjs',
-      '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs'
+      '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs',
+      'scripts/performance-runner-snapshot.mjs'
     ]))
   })
 

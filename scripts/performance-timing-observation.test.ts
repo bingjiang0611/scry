@@ -24,6 +24,8 @@ describe('timing parent diagnostics', () => {
     const result = finish()
     expect(result.samples).toHaveLength(1)
     expect(result.samples[0].cpuBusyPercent).toBe(50)
+    expect(result.samples[0]).toMatchObject({ cpuTotalTickMs: 100, cpuIdleTickMs: 50 })
+    expect(result.samples[0].windowMs).toBeGreaterThanOrEqual(0)
     expect(result.samples[0].eventLoopMaxMs).toBeNull()
     expect(result.maxEventLoopDelayMs).toBeNull()
     expect(result.samplesTruncated).toBe(false)

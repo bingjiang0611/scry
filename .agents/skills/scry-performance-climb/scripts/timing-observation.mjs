@@ -1,5 +1,6 @@
 import { cpus } from 'node:os'
-import { monitorEventLoopDelay } from 'node:perf_hooks'
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
+import { observeRunnerProcesses } from '../../../../scripts/performance-runner-snapshot.mjs'
 
 const intervalMs = 250
 const sampleLimit = 4096
@@ -17,7 +18,9 @@ function cpuTimes() {
 export function observeTimingEnvironment() {
   const loop = monitorEventLoopDelay({ resolution: 20 })
   const cpuBefore = process.cpuUsage()
+  const finishProcesses = process.env.SCRY_TIMING_PROCESS_SNAPSHOTS === '1' ? observeRunnerProcesses() : null
   let previous = cpuTimes()
+  let previousAt = performance.now()
   let maxEventLoopDelayMs = null
   let samplesTruncated = false
   const samples = []
@@ -25,15 +28,19 @@ export function observeTimingEnvironment() {
 
   function sample() {
     const current = cpuTimes()
+    const sampledAt = performance.now()
     const total = current.total - previous.total
+    const idle = current.idle - previous.idle
     const eventLoopMaxMs = loop.count ? loop.max / 1e6 : null
     if (eventLoopMaxMs !== null) maxEventLoopDelayMs = Math.max(maxEventLoopDelayMs ?? 0, eventLoopMaxMs)
     if (samples.length < sampleLimit) {
       samples.push({ sampledAt: new Date().toISOString(),
-        cpuBusyPercent: total > 0 ? 100 * (1 - (current.idle - previous.idle) / total) : null,
+        windowMs: sampledAt - previousAt, cpuTotalTickMs: total, cpuIdleTickMs: idle,
+        cpuBusyPercent: total > 0 ? 100 * (1 - idle / total) : null,
         eventLoopMaxMs })
     } else samplesTruncated = true
     previous = current
+    previousAt = sampledAt
     loop.reset()
   }
 
@@ -43,8 +50,10 @@ export function observeTimingEnvironment() {
     clearInterval(timer)
     sample()
     loop.disable()
+    const processSnapshots = finishProcesses?.()
     const cpu = process.cpuUsage(cpuBefore)
     return { intervalMs, sampleLimit, samples, samplesTruncated, maxEventLoopDelayMs,
-      observerCpuMs: { user: cpu.user / 1000, system: cpu.system / 1000 } }
+      observerCpuMs: { user: cpu.user / 1000, system: cpu.system / 1000 },
+      ...(processSnapshots ? { processSnapshots } : {}) }
   }
 }

@@ -245,6 +245,15 @@ jobs:
             if (!report.passed) process.exitCode = 1
           }
           JS
+      - name: Profile runner processes in one separate manual diagnostic
+        if: always() && github.event_name == 'workflow_dispatch' && steps.native_measurements.outcome == 'success'
+        continue-on-error: true
+        env:
+          SCRY_TIMING_PROCESS_SNAPSHOTS: '1'
+        run: |
+          set -o pipefail
+          # Instrumented diagnostic only: never combined with primary or A/A reports.
+          (cd candidate && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs native-process-profile -- node scripts/performance-native-run.mjs bench ../native-results/runner-profile.json) 2>&1 | tee native-results/runner-profile-timing.log
       - name: Preserve native npm diagnostics on failure
         if: failure()
         run: |

@@ -49,6 +49,28 @@ export function runnerSnapshot(label) {
   }
 }
 
+// Explicit diagnostic runs only: ordinary timing measurements never start this sampler.
+export function observeRunnerProcesses() {
+  const snapshots = []
+  const intervalMs = 1000
+  const sampleLimit = 128
+  let truncated = false
+  const capture = label => {
+    if (snapshots.length === sampleLimit) { truncated = true; clearInterval(timer); return }
+    const snapshot = runnerSnapshot(label)
+    snapshots.push(snapshot)
+    if (snapshot.status === 'unavailable') clearInterval(timer)
+  }
+  const timer = setInterval(() => capture('interval'), intervalMs)
+  timer.unref()
+  capture('start')
+  return () => {
+    clearInterval(timer)
+    if (snapshots.at(-1).status === 'available') capture('end')
+    return { intervalMs, sampleLimit, truncated, snapshots }
+  }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   console.log(JSON.stringify(runnerSnapshot(process.argv[2])))
 }
