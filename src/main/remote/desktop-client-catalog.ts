@@ -5,6 +5,7 @@ import type { WorkspaceBranchChoice, WorkspaceBranchRef, WorkspaceChoices, Works
 import { DesktopRemoteClientConnections } from './desktop-client-connections'
 import { context, fail, record, text, pathText, HASH, MAX_ITEMS, MAX_PAGES, validateProject, validateProvider, validateSession, validateDeleteSessionResult } from './desktop-client-validation'
 import { validateInfo } from './desktop-client-capabilities'
+import { isUnknownFailure } from './desktop-client-intent-rules'
 
 function scReason(value: unknown): string {
   if (!record(value) || !text(value.reason, 16_384)) fail('invalid_workspace_response')
@@ -210,7 +211,7 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     if (validateInfo({ desktop: info }, item.hostId).sessionFork !== true) fail('desktop_session_fork_unsupported')
     let response: unknown
     try { response = await this.write(connectionIdValue, { op: 'sessionFork', request }) }
-    catch (error) { if (this.isUnknown(error)) fail('desktop_session_operation_unknown'); throw error }
+    catch (error) { if (isUnknownFailure(error)) fail('desktop_session_operation_unknown'); throw error }
     if (!record(response) || !record(response.sessionFork) || !text(response.sessionFork.externalSessionId, 256)) fail('desktop_session_operation_unknown')
     return { externalSessionId: response.sessionFork.externalSessionId }
   }
@@ -223,7 +224,7 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     if (validateInfo({ desktop: info }, item.hostId).sessionDelete !== true) fail('desktop_session_delete_unsupported')
     let response: unknown
     try { response = await this.write(connectionIdValue, { op: 'sessionDelete', request }) }
-    catch (error) { if (this.isUnknown(error)) fail('desktop_session_operation_unknown'); throw error }
+    catch (error) { if (isUnknownFailure(error)) fail('desktop_session_operation_unknown'); throw error }
     if (!record(response) || !record(response.sessionDelete)) fail('desktop_session_operation_unknown')
     try { return validateDeleteSessionResult(response.sessionDelete) }
     catch { return fail('desktop_session_operation_unknown') }

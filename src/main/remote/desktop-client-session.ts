@@ -3,6 +3,7 @@ import type { DesktopRemoteIntent, DesktopRemoteSubmit } from '../../shared/desk
 import { DesktopRemoteClientTrace } from './desktop-client-trace'
 import { canonicalJson, fail, HASH, record, submitFailure, uuid, MAX_RECEIPTS, type EncryptedState } from './desktop-client-validation'
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, normalizeDesktopAttachment } from './desktop-attachments'
+import { assertSubmit, contextFromDetail, isExplicitUnknownIntent, isPreDispatchRejection, targetBinding, workspaceFromDetail } from './desktop-client-intent-rules'
 
 export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
   async intents(connectionIdValue: string): Promise<DesktopRemoteIntent[]> {
@@ -14,7 +15,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     const state = await this.state()
     const targets = state.connections.filter((item) => !item.pending).map((item) => ({
       id: item.id,
-      binding: this.targetBinding(item),
+      binding: targetBinding(item),
       hostId: item.hostId,
       label: item.label,
       state: this.active.get(item.id)?.tunnel.alive === true ? 'connected' as const : 'disconnected' as const
@@ -26,7 +27,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
   async mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown> {
     const state = await this.state()
     const item = this.connection(state, target.id)
-    if (item.pending || this.targetBinding(item) !== target.binding) fail('execution_target_binding_changed')
+    if (item.pending || targetBinding(item) !== target.binding) fail('execution_target_binding_changed')
     if (!this.active.get(item.id)?.tunnel.alive) fail('desktop_not_connected')
     authorizePeer?.()
     const authorize = () => this.authorizeMobileTarget(state, target, authorizePeer)
@@ -45,7 +46,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
       authorize()
       if (!HASH.test(input.phonePeerFingerprint) || !uuid(input.phoneIntentId) || !HASH.test(input.target.binding) || !HASH.test(input.payloadHash)) fail('invalid_submit')
       if (input.request.op !== 'submit' || typeof input.request.detail !== 'string') fail('invalid_submit')
-      const workspace = this.workspaceFromDetail(input.request.detail)
+      const workspace = workspaceFromDetail(input.request.detail)
       const existing = state.intents.find((receipt) => receipt.connectionId === item.id && receipt.origin?.phonePeerFingerprint === input.phonePeerFingerprint &&
         receipt.origin.phoneIntentId === input.phoneIntentId && receipt.origin.targetBinding === input.target.binding)
       if (existing?.origin?.payloadHash !== undefined && existing.origin.payloadHash !== input.payloadHash) fail('intent_payload_conflict')
@@ -59,7 +60,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
       if (!existing && state.intents.some((receipt) => receipt.connectionId === item.id && receipt.status === 'unknown')) fail('unknown_receipts_pending')
       if (!existing && state.intents.length >= MAX_RECEIPTS) fail('intent_receipt_capacity_exceeded')
       const intent: DesktopRemoteIntent = existing ?? {
-        intentId: randomUUID(), connectionId: item.id, context: this.contextFromDetail(input.request.detail), createdAt: Date.now(), status: 'unknown',
+        intentId: randomUUID(), connectionId: item.id, context: contextFromDetail(input.request.detail), createdAt: Date.now(), status: 'unknown',
         origin: { phonePeerFingerprint: input.phonePeerFingerprint, phoneIntentId: input.phoneIntentId, targetBinding: input.target.binding, payloadHash: input.payloadHash }
       }
       if (!existing) { state.intents.push(intent); await this.save(state) }
@@ -67,7 +68,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
       try {
         response = await this.requestForConnection(item.id, { ...input.request, intentId: intent.intentId }, authorize)
       } catch (error) {
-        if (!existing && this.isPreDispatchRejection(error)) {
+        if (!existing && isPreDispatchRejection(error)) {
           state.intents = state.intents.filter((receipt) => receipt.intentId !== intent.intentId)
           await this.save(state)
           throw error
@@ -93,14 +94,14 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
   async mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; authorizePeer?: () => void }): Promise<unknown> {
     const state = await this.state()
     const item = this.connection(state, input.target.id)
-    if (item.pending || this.targetBinding(item) !== input.target.binding) fail('execution_target_binding_changed')
+    if (item.pending || targetBinding(item) !== input.target.binding) fail('execution_target_binding_changed')
     if (!HASH.test(input.phonePeerFingerprint) || !uuid(input.phoneIntentId)) fail('invalid_intent_id')
     const intent = state.intents.find((receipt) => receipt.connectionId === item.id && receipt.origin?.phonePeerFingerprint === input.phonePeerFingerprint && receipt.origin.phoneIntentId === input.phoneIntentId && receipt.origin.targetBinding === input.target.binding)
     if (!intent) fail('unknown_intent')
     const authorize = () => this.authorizeMobileTarget(state, input.target, input.authorizePeer)
     let response: Record<string, unknown>
     try { response = await this.requestForConnection(item.id, { op: 'intentStatus', intentId: intent.intentId }, authorize) }
-    catch (error) { if (this.isExplicitUnknownIntent(error)) throw error; fail('target_delivery_unknown') }
+    catch (error) { if (isExplicitUnknownIntent(error)) throw error; fail('target_delivery_unknown') }
     if (record(response) && record(response.intent) && uuid(response.intent.runId)) {
       intent.runId = response.intent.runId; intent.status = 'recorded'; await this.save(state)
     }
@@ -115,7 +116,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
   }
 
   protected async submitInternal(connectionIdValue: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent> {
-    const state = await this.state(); const item = this.connection(state, connectionIdValue); this.assertSubmit(input)
+    const state = await this.state(); const item = this.connection(state, connectionIdValue); assertSubmit(input)
     const active = this.active.get(connectionIdValue)
     if (input.workspace && active?.tunnel.alive && active.managedWorktrees !== 1) fail('desktop_remote_workspace_selection_unavailable')
     const attachments = (input.attachments ?? []).map(normalizeDesktopAttachment)
@@ -147,7 +148,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     let response: unknown
     try { response = await this.write(connectionIdValue, { op: 'submit', intentId: intent.intentId, detail }) }
     catch (error) {
-      if (!this.isPreDispatchRejection(error)) {
+      if (!isPreDispatchRejection(error)) {
         intent.failure = submitFailure(error)
         await this.save(state)
         return structuredClone(intent)
@@ -173,7 +174,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     if (!local) fail('unknown_intent')
     let response: Record<string, unknown>
     try { response = await this.requestForConnection(connectionIdValue, { op: 'intentStatus', intentId }) }
-    catch (error) { if (this.isExplicitUnknownIntent(error)) return structuredClone(local); throw error }
+    catch (error) { if (isExplicitUnknownIntent(error)) return structuredClone(local); throw error }
     return this.confirmIntent(state, local, response)
   }
 

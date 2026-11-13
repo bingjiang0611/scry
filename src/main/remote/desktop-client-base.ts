@@ -1,17 +1,15 @@
-import { isAgentPermissionMode } from '../../shared/runtime'
-import { type DesktopHostRead, type DesktopPairingResult, type DesktopRemoteCatalog, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopRemoteSubmit } from '../../shared/desktop-remote'
-import { createHash, randomUUID, X509Certificate as NodeCertificate } from 'node:crypto'
+import { type DesktopHostRead, type DesktopPairingResult, type DesktopRemoteCatalog, type DesktopRemoteContext, type DesktopRemoteIntent } from '../../shared/desktop-remote'
+import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel, type DesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneConnector } from './desktop-lane'
 import { framedRequest, protocolFailure } from './remote-protocol'
-import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
-import { context, fail, record, text, uuid, hash, digest, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
+import { DESKTOP_ATTACHMENT_CHUNK_BYTES, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
+import { context, fail, record, text, uuid, hash, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
 import type { DesktopCapabilities } from './desktop-client-capabilities'
+import { isUnknownFailure, targetBinding } from './desktop-client-intent-rules'
 import type { RemoteAttentionTracker } from './remote-attention'
-import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
-import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-input'
 
 function desktopSshRequestError(error: unknown, tunnel: DesktopSshTunnel | undefined, failureSequence: number): unknown {
   const failure = tunnel?.failure
@@ -229,7 +227,7 @@ export abstract class DesktopRemoteClientBase {
   protected async reconcileUnknown(state: EncryptedState, connectionIdValue: string): Promise<void> {
     for (const intent of state.intents.filter((item) => item.connectionId === connectionIdValue && item.status === 'unknown')) {
       try { await this.intentStatus(connectionIdValue, intent.intentId) } catch (error) {
-        if (!this.isUnknown(error)) throw error
+        if (!isUnknownFailure(error)) throw error
       }
     }
   }
@@ -245,17 +243,8 @@ export abstract class DesktopRemoteClientBase {
   protected authorizeMobileTarget(state: EncryptedState, target: { id: string; binding: string }, authorizePeer?: () => void): void {
     authorizePeer?.()
     const current = this.connection(state, target.id)
-    if (current.pending || this.targetBinding(current) !== target.binding) fail('execution_target_binding_changed')
+    if (current.pending || targetBinding(current) !== target.binding) fail('execution_target_binding_changed')
   }
-  protected isUnknown(error: unknown): boolean {
-    if (!(error instanceof Error)) return true
-    return !/^(?:invalid_|desktop_protocol|desktop_capability|desktop_remote_|stop_not_confirmed|answer_not_confirmed|device_not_authorized|pairing_|device_certificate|unknown_|desktop_not_connected|desktop_client)/i.test(error.message)
-  }
-  protected isPreDispatchRejection(error: unknown): boolean {
-    if (!(error instanceof Error)) return false
-    return /^(?:desktop_remote_(?:device_not_authorized|invalid_request|invalid_intent_id|intent_payload_conflict|unknown_op|ledger_capacity_exceeded|attachments_unsupported|workspace_selection_unavailable)|attachment_transfer_failed|attachments_too_large|attachment_invalid|attachment_path_forbidden|desktop_not_connected|desktop_client_disposed|device_not_authorized|execution_target_binding_changed|unknown_connection)$/i.test(error.message)
-  }
-  protected isExplicitUnknownIntent(error: unknown): boolean { return error instanceof Error && /desktop_remote_unknown_intent$/i.test(error.message) }
   protected async uploadAttachments(connectionIdValue: string, intentId: string, attachments: ReturnType<typeof normalizeDesktopAttachment>[]): Promise<unknown[]> {
     const entries: unknown[] = []
     for (const [index, attachment] of attachments.entries()) {
@@ -281,35 +270,5 @@ export abstract class DesktopRemoteClientBase {
     }
     return entries
   }
-  protected assertSubmit(input: DesktopRemoteSubmit): void {
-    if (!record(input) || typeof input.prompt !== 'string' || input.prompt.length > 128_000 || input.prompt.includes('\0')) fail('invalid_submit')
-    if (input.prompt.length === 0 && (!Array.isArray(input.attachments) || input.attachments.length === 0)) fail('invalid_submit')
-    context(input.context)
-    for (const key of ['modelId', 'modelProviderId', 'effort'] as const) if (input[key] !== undefined && !text(input[key], 256)) fail('invalid_submit')
-    if (input.permissionMode !== undefined && !isAgentPermissionMode(input.permissionMode)) fail('invalid_submit')
-    if (input.workspace !== undefined) parseWorkspaceStartSelection(input.workspace)
-    if (input.attachments !== undefined && (!Array.isArray(input.attachments) || input.attachments.length > DESKTOP_ATTACHMENT_MAX_COUNT)) fail('invalid_submit')
-  }
-  protected targetBinding(item: StoredConnection): string {
-    if (!item.certificatePEM) return createHash('sha256').update(`${item.hostId}\0${item.anchorSHA256}\0missing`).digest('hex')
-    let certificate: NodeCertificate
-    try { certificate = new NodeCertificate(item.certificatePEM) } catch { fail('execution_target_binding_changed') }
-    return createHash('sha256').update(`${item.hostId}\0${item.anchorSHA256}\0${digest(certificate.raw)}`).digest('hex')
-  }
-  protected workspaceFromDetail(detail: string): WorkspaceStartSelection | undefined {
-    if (detail.length > 1_310_720) fail('invalid_submit')
-    let value: unknown
-    try { value = JSON.parse(detail) } catch { fail('invalid_submit') }
-    if (!record(value) || value.workspace === undefined) return undefined
-    try { return parseWorkspaceStartSelection(value.workspace) } catch { fail('invalid_submit') }
-  }
-  protected contextFromDetail(detail: string): DesktopRemoteContext {
-    if (detail.length > 1_310_720) fail('invalid_submit')
-    let value: unknown
-    try { value = JSON.parse(detail) } catch { fail('invalid_submit') }
-    if (!record(value) || !text(value.cwd, 16_384) || !text(value.providerId, 256)) fail('invalid_submit')
-    return { cwd: value.cwd, providerId: value.providerId,
-      ...(text(value.agentProfileId, 256) ? { agentProfileId: value.agentProfileId } : {}),
-      ...(text(value.resume, 256) ? { externalSessionId: value.resume } : {}) }
-  }
+
 }

@@ -10,7 +10,7 @@ import { ExecutionTargetRouter } from './execution-targets'
 import { PairingTransport } from './pairing-transport'
 import type { LocalEndpointHandlers } from './host-local-ops'
 import { RelayClient, type RelayDiagnostics } from './relay-client'
-import type { RemoteHostServiceDependencies } from './remote-host-service-deps'
+import { hostControllerDependencies, type RemoteHostServiceDependencies } from './remote-host-service-deps'
 import { RemoteLanListener, type LanAdvertisement } from './remote-lan-listener'
 import type { PairingAuthority } from './pairing'
 import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelayDiagnostics, RemoteStatus } from '../../shared/remote'
@@ -85,41 +85,7 @@ export class RemoteHostService {
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
     const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
-    const binding = await createHostController({
-      stateDirectory: deps.stateDirectory,
-      ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
-      ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
-      ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
-      hostId: identity.hostId,
-      anchorSHA256: identity.anchorSHA256,
-      verifyCSR: identity.verifyCSR,
-      issue: identity.issue,
-      authorizeWorkspace: deps.authorizeWorkspace,
-      startRun: deps.startRun,
-      ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
-      ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
-      gate: deps.gate,
-      attachmentDirectory: join(deps.stateDirectory, 'attachments'),
-      ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),
-      ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
-      ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
-      ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
-      ...(deps.listProvidersFull ? { listProvidersFull: deps.listProvidersFull } : {}),
-      ...(deps.listProviderControls ? { listProviderControls: deps.listProviderControls } : {}),
-      ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
-      ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
-      ...(deps.sessionFork ? { sessionFork: deps.sessionFork } : {}),
-      ...(deps.sessionDelete ? { sessionDelete: deps.sessionDelete } : {}),
-      ...(deps.toolPanels ? { toolPanels: deps.toolPanels } : {}),
-      ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
-      ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
-      ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
-      ...(deps.macRuns ? { macRuns: deps.macRuns } : {}),
-      ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
-      ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
-      ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
-      ...(deps.hasCatalogWarmPool ? { hasCatalogWarmPool: deps.hasCatalogWarmPool } : {}),
-      ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})    })
+    const binding = await createHostController(hostControllerDependencies(deps, identity))
     let host: InnerMtlsHost
     let pairing: PairingTransport
     let server: Awaited<ReturnType<typeof identity.issueHostServer>>
