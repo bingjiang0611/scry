@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import type { ProviderId } from '../../shared/provider.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
+import { isTaskNotificationMessage } from '../../shared/task-notification.js'
 import { type TranscriptRead, nestedRecord, stringAt, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 import { partial, unavailable, type TurnEvidence } from '../../shared/turn-record.js'
 import { readTranscriptWindow, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
@@ -32,7 +33,7 @@ function notificationText(row: Record<string, unknown>): string | undefined {
   const text = queued ?? rowText(row)
   if (!text) return undefined
   const consumable = nestedRecord(row, 'origin')?.kind === 'task-notification' ||
-    text.trimStart().startsWith('<task-notification>')
+    isTaskNotificationMessage(text)
   return consumable ? text.trimStart() : undefined
 }
 

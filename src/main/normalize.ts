@@ -5,6 +5,7 @@ import type { ModelUsageRow, TraceEvent } from '../shared/trace.js'
 import { classifyRunTermination } from '../shared/runtime.js'
 import { claudeTranscriptUsageKey } from '../shared/usage-dedupe.js'
 import { mcpPayloadFailed } from '../shared/trace.js'
+import { isTaskNotificationMessage } from '../shared/task-notification.js'
 import {
   base,
   contextTokensFromUsage,
@@ -270,7 +271,9 @@ function isClaudeTaskNotification(line: Record<string, unknown>, text: string): 
   const originKind = origin && typeof origin === 'object' && !Array.isArray(origin)
     ? (origin as Record<string, unknown>).kind
     : undefined
-  return originKind === 'task-notification' || text.trimStart().startsWith('<task-notification>')
+  // A message that only quotes a notification and then asks something is a person's question, so it
+  // must keep its text and its identity instead of being dropped as a continuation.
+  return originKind === 'task-notification' || isTaskNotificationMessage(text)
 }
 
 function outerToolResultRecord(message: Record<string, unknown>): Record<string, unknown> | undefined {
