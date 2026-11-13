@@ -1,0 +1,552 @@
+[
+  {
+    "case": "f2-startup-1",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 118,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 12,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-startup-2",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 131,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 12,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-startup-3",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 125,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 12,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-startup-4",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 239,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 11,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-startup-5",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 1153,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 12,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-hook-1",
+    "cli": "1.1.88",
+    "triggerObserved": false,
+    "stopClick": false,
+    "elapsedMs": 60164,
+    "stopControlGone": true,
+    "recordSummaries": [],
+    "followUpVerified": false,
+    "nativeHookSessionIdCounts": {},
+    "nativeResultFrames": 0,
+    "errorClass": "version-or-recorder-verification-timeout"
+  },
+  {
+    "case": "f2-hook-2",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 29139,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 18,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-hook-3",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 27423,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 16,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-hook-4",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 23902,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 18,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-output-1",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 85353,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": false,
+    "nativeHookSessionIdCounts": {},
+    "nativeResultFrames": 0,
+    "errorClass": "version-or-recorder-verification-timeout"
+  },
+  {
+    "case": "f2-output-2",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 62544,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 21,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-output-3",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 56758,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 21,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  },
+  {
+    "case": "f2-output-4",
+    "cli": "1.1.88",
+    "triggerObserved": true,
+    "stopClick": true,
+    "elapsedMs": 56192,
+    "stopControlGone": true,
+    "recordSummaries": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        }
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "hookEvents": [
+          "SessionStart",
+          "UserPromptSubmit",
+          "Stop",
+          "QueryEnd",
+          "SessionEnd"
+        ],
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        }
+      }
+    ],
+    "followUpVerified": true,
+    "nativeHookSessionIdCounts": {
+      "present": 21,
+      "empty": 0,
+      "missing": 0,
+      "distinct": 1
+    },
+    "nativeResultFrames": 1,
+    "errorClass": "none"
+  }
+]
