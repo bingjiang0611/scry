@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { isAgentPermissionMode, type AgentStartRequest } from '../shared/runtime'
+import { isAgentPermissionMode, type AgentDataUpdated, type AgentStartRequest } from '../shared/runtime'
 import { configureStorage, initDb } from '../main/db'
 import { createSessionState, createMirrorSessionTranscript } from '../main/bootstrap/session-state'
 import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
@@ -13,8 +13,6 @@ import { configureRunStageTiming } from '../main/run-stage-timing'
 import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
-import { steerObservedRun } from '../main/run-steering'
-import { stopObservedBackgroundTask } from '../main/background-task-control'
 import { SourceControlService } from '../main/source-control/service'
 import { createProviderDiscovery } from '../main/remote/provider-discovery'
 import { listRemoteDirectories, resolveCanonicalRemoteProjectDirectory } from '../main/remote/remote-directory-browser'
@@ -26,7 +24,15 @@ import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
 import { openLocalChannel, type LocalChannel } from './local-channel'
+import { createDaemonConversationSend } from './conversation-send'
+import { daemonLocalEndpoint } from './local-endpoint'
+import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
+import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
+import { createForkOperations } from '../main/bootstrap/run-fork'
+import { remoteHostEnabled } from '../main/remote/remote-defaults'
+import { createDaemonTerminalService, type DaemonTerminalServiceDeps } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
+import { buildIdentity } from '../shared/build-identity'
 
 export interface DaemonHostProcessOptions {
   userDataDir: string
@@ -38,6 +44,8 @@ export interface DaemonHostProcessOptions {
   gatewayLabel?: string
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
   log?: (line: string) => void
+  /** Tests: a fake PTY, recordings in this process, a fixed shell environment, a short reclaim. */
+  terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
 }
 
 export interface DaemonHostProcess {
@@ -74,15 +82,31 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   let remoteHostService: RemoteHostService | null = null
 
   const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
+  // What this daemon tells its App that no run read carries (P3f).
+  // Its unread set is state: a new or resynchronizing App gets it whole (E1b).
+  const events = new AppEventFeed({ state: () => [{ kind: 'attention', snapshot: session.dockBadge.snapshot() }] })
+  const publishData = (event: AgentDataUpdated): void => events.append({ kind: 'data', event })
   const session = createSessionState({
     setBadgeCount: () => true,
-    publishUnreadSessions: () => undefined
+    publishUnreadSessions: (snapshot) => events.append({ kind: 'attention', snapshot })
   })
 
   let loadSessions = (): Array<{ cwd?: string }> => []
   const workspace = createWorkspaceRuntime({
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
+  })
+  // The App's terminals (P3-terminal.md). The recording worker sits beside this entry in
+  // out/main, like the run output worker below.
+  const terminal = createDaemonTerminalService({
+    userDataDir: options.userDataDir,
+    homeDir: workspace.homeDir,
+    recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    notify: () => events.append({ kind: 'terminal' }),
+    idleMs: () => events.idleMs(),
+    log,
+    ...options.terminal
   })
   const pi = createPiProfileRuntime({ userDataDir: options.userDataDir })
   const providers = createProviderRuntime({
@@ -96,15 +120,32 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     resolvePiProfile: pi.resolvePiProfile
   })
 
+  // The conversation service records its sends as ledger intents (P3-conversation-send.md);
+  // the host service exists only later, so the submit resolves it per call.
+  const conversationSend = createDaemonConversationSend({
+    submit: (peer, input) => {
+      if (!remoteHostService) throw new Error('daemon_host_not_ready')
+      return remoteHostService.controller.submitIntent(peer, input)
+    },
+    liveLedgerRunId: (runId) => remoteRunLedgerIds.get(runId)
+  })
+  let forkOperations: ReturnType<typeof createForkOperations> | undefined
   const catalog = createSessionCatalog({
     recentStore: workspace.recentStore,
     projectStore: workspace.projectStore,
     userDataDir: options.userDataDir,
-    publishDataUpdated: () => undefined,
+    publishDataUpdated: publishData,
     unsettledRuns: () => pipeline.runs.unsettledStates(),
     getProviderRegistry: () => providers.providerRegistry,
-    forkManagedConversation: async () => unavailable('fork-session'),
-    startAppRun: (request, startOptions) => pipeline.startAppRun(request, startOptions),
+    // Built below, once the history cache it invalidates exists; resolved per call.
+    forkManagedConversation: (input) => {
+      if (!forkOperations) throw new Error('daemon_capability_unavailable:fork-session')
+      return forkOperations.forkManagedConversation(input)
+    },
+    // Only the conversation service starts runs from the catalog, always with a launch.
+    startAppRun: (request, startOptions) => startOptions?.managedConversation
+      ? conversationSend.startAppRun(request, { managedConversation: startOptions.managedConversation })
+      : Promise.reject(new Error('daemon_catalog_start_requires_conversation')),
     homeDir: workspace.homeDir,
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory
   })
@@ -121,7 +162,16 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const remoteRunLedgerIds = new Map<string, string>()
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
-    renderer: { send: () => undefined, isFocused: () => false },
+    // The pipeline's window notices travel on the App event feed. The trace and questions
+    // reach the App through its own run reads, so they are not sent twice (W1).
+    renderer: {
+      send: (channel, payload) => {
+        if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated)
+        else if (DAEMON_WINDOW_NOTICES.has(channel)) events.append({ kind: 'window', channel, payload })
+      },
+      isFocused: () => false,
+      acceptsNotices: () => true
+    },
     rendererCanReceive: () => false,
     activeRunSessionKey: session.activeRunSessionKey,
     dockBadge: session.dockBadge,
@@ -167,7 +217,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   startupManagedRecovery = runStartupRecovery({
     userDataDir: options.userDataDir,
     recorderCli: daemonPrivateCliPath(options.resourcesPath),
-    startupPerf: { mark: () => undefined, finish: () => undefined },
+    startupPerf: { mark: () => undefined, finish: () => null },
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
     deferMs: 0
@@ -228,13 +278,46 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     get isShuttingDown() { return isShuttingDown }
   }
 
-  // App run controls answer from this process's registry: steering and background-task
-  // stops are bound to the live run, so they cannot be replayed from another process.
-  const runControl = {
-    steer: (payload: unknown) => steerObservedRun(payload, (runId) => pipeline.runs.get(runId)),
-    stopBackgroundTask: (payload: unknown) => stopObservedBackgroundTask(payload, (runId) => pipeline.runs.get(runId)),
-    adopt: (runId: string) => pipeline.runs.get(runId)?.state ?? null
-  }
+  // The conversation ledger table main registers, built over this process's stores.
+  // Only the channels DAEMON_LOCAL_OP_CHANNELS lists are served; the rest of the table
+  // (writes that need App-side deletion and run tracking) stays refused until migrated.
+  // Session history pages, loaded and cached in this process (the cache backs older-page
+  // reads). The window's session selection is reported with the page for the App to apply.
+  const historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown> = {}
+  const history = createHistoryRuntime()
+  history.register({
+    handleTrusted: (channel, listener) => { historyChannels[channel] = listener as unknown as (event: unknown, ...args: never[]) => unknown },
+    appSessionStore: catalog.appSessionStore,
+    providerContextKey: session.providerContextKey,
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    providerRegistry: providers.providerRegistry,
+    getRuns: () => pipeline.runs,
+    rememberProject: workspace.rememberProject,
+    homeDir: workspace.homeDir,
+    userDataDir: options.userDataDir,
+    isShuttingDown: () => isShuttingDown,
+    applySelection: () => undefined,
+    reportSelection: true
+  })
+  // Native fork, as main builds it (index.ts). The daemon has no window selection: a
+  // request without a cwd is filled by the App with the window's (session-lifecycle-
+  // daemon.ts) and re-resolved here, so getCurrentCwd stays empty on purpose.
+  forkOperations = createForkOperations({
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    providerRegistry: providers.providerRegistry,
+    providerOperationGate: session.providerOperationGate,
+    contextAdmission: session.contextAdmission,
+    providerContextKey: session.providerContextKey,
+    unsettledRuns: () => pipeline.runs.unsettledStates(),
+    getCurrentCwd: () => undefined,
+    getStartupManagedRecovery: () => startupManagedRecovery,
+    assertLegacyConversationWriteAllowed: catalog.assertLegacyConversationWriteAllowed,
+    resetSessionContext: session.resetSessionContext,
+    sessionByContext: session.sessionByContext,
+    invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
+    appSessionStore: catalog.appSessionStore,
+    rememberProject: workspace.rememberProject
+  })
 
   await refreshRemoteProviderSnapshot()
   const remoteStateDirectory = join(options.userDataDir, 'remote')
@@ -250,7 +333,20 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
-    runControl,
+    managedLaunches: conversationSend.launches,
+    onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
+    localEndpoint: daemonLocalEndpoint({
+      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
+      runs: () => pipeline.runs,
+      requestRunStop,
+      forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
+      remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
+      startupManagedRecovery: () => startupManagedRecovery,
+      userDataDir: options.userDataDir,
+      appVersion: options.appVersion,
+      sourceControl,
+      providerDiscovery
+    }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
       // This expression stays in the daemon entry (out/main/daemon.js), while the
@@ -263,7 +359,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   await service.start()
   // The App's own endpoint: same controller and TLS materials, marked as the local
   // transport so a locally enrolled grant cannot be replayed over the network.
-  const localHost = service.createLocalHost({ version: options.appVersion })
+  const identity = buildIdentity(options.appVersion)
+  const localHost = service.createLocalHost(identity)
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
@@ -276,7 +373,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     directory: options.daemonStateDirectory,
     enroll: localEnrollHandlers(enrollment, {
       enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
-    }, service.caCertificatePEM, options.appVersion)
+    }, service.caCertificatePEM, identity)
   })
   log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}`)
 
@@ -290,6 +387,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       disposed = true
       isShuttingDown = true
       startupManagedRecovery = Promise.resolve()
+      // A parked App long poll answers now instead of holding the channel open.
+      events.close()
+      // Shells end with the daemon too; their recordings are finished on the way.
+      await terminal.dispose()
       await enrollSocket.close()
       await channel.close()
       await localHost.close()

@@ -1,4 +1,5 @@
-import { handleRunControl, type RunControlHandlers } from './host-run-control'
+import { handleRunControl } from './host-run-control'
+import { handleAppEvents, handleAttentionViewed, handleLocalOp, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
@@ -59,7 +60,7 @@ export async function dispatchRemoteRequest(
   fingerprint: string,
   parsed: unknown,
   executionTargets?: ExecutionTargetRouter,
-  runControl?: RunControlHandlers
+  localEndpoint?: LocalEndpointHandlers
 ): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
@@ -142,10 +143,25 @@ export async function dispatchRemoteRequest(
     if (request.op === 'runControl') {
       // App-only: absent on the network endpoint, where the op is refused rather than
       // silently answered from another process's memory.
-      if (!runControl) return { error: 'unsupported_op' }
+      if (!localEndpoint?.runControl) return { error: 'unsupported_op' }
       const keys = Object.keys(request)
       if (keys.some((key) => !['op', 'keepAlive', 'protocol', 'method', 'runId', 'payload'].includes(key))) return { error: 'invalid_request' }
-      return await handleRunControl(runControl, request)
+      return await handleRunControl(localEndpoint.runControl, request)
+    }
+    if (request.op === 'attentionViewed') {
+      return handleAttentionViewed(localEndpoint?.attention, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'appEvents') {
+      // The App's own event feed (P3f); absent on the network endpoint.
+      return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'terminalFeed') {
+      // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.
+      return await handleTerminalFeed(localEndpoint?.terminal, request as unknown as Record<string, unknown>)
+    }
+    if (isLocalOp(request.op)) {
+      // App channels the daemon answers for its own App; absent on the network endpoint.
+      return await handleLocalOp(localEndpoint?.localOps, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (request.op === 'stop') {
       if (typeof request.runId !== 'string') return { error: 'invalid_request' }

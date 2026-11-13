@@ -4,7 +4,7 @@ import type { RemoteIntentRouting, RemoteProjectRef, RemoteDirectoryListing, Rem
 import type { RelayTransport } from './relay-client'
 import type { RunOutputStore } from './run-output-log'
 import type { ProviderOperationGate } from '../provider-operation-gate'
-import type { RunControlHandlers } from './host-run-control'
+import type { LocalEndpointHandlers } from './host-local-ops'
 
 // What Electron main supplies to RemoteHostService. Kept apart from the service
 // lifecycle so the contract can be read on its own.
@@ -24,6 +24,8 @@ export interface RemoteHostServiceDependencies {
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
   }): Promise<void>
+  onDispatchRefused?: HostControllerFactoryDependencies['onDispatchRefused']
+  onRunActivity?: HostControllerFactoryDependencies['onRunActivity']
   // Snapshot of the host's already directory-picker-authorized project dirs, so
   // the phone's new-session picker chooses only among real authorized targets.
   // Absent => the device sees an honest empty list.
@@ -41,9 +43,10 @@ export interface RemoteHostServiceDependencies {
   sessionCatalogRevision?(): string
   readSessionStatus?: HostControllerFactoryDependencies['readSessionStatus']
   macRuns?: HostControllerFactoryDependencies['macRuns']
-  // App-only run controls over this process's registry (steer, stop one background
-  // task, adopt after reconnect). Served on the local endpoint only.
-  runControl?: RunControlHandlers
+  // App-only work: run controls over this process's registry (steer, stop one
+  // background task, adopt after reconnect) and the App channels it answers (local
+  // ops). Served on the local endpoint only.
+  localEndpoint?: LocalEndpointHandlers
   readHistory?(query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]>
   readHistoryPreview?(query: RemoteHistoryQuery): Promise<RemoteHistoryPreview>
   readHistoryVersion?(query: RemoteHistoryQuery): Promise<import('./remote-gateway').RemoteHistoryVersion>

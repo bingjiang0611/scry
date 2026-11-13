@@ -1,5 +1,5 @@
 import type { TraceEvent } from '../shared/trace'
-import { MAC_RUN_ID } from './remote/desktop-client-validation'
+import { MAC_RUN_ID, UUID } from './remote/desktop-client-validation'
 
 // What the daemon's own evidence says about a run, decoded in one place: the bind marker
 // that names the run, and the growth of a run-view item the renderer already holds.
@@ -17,9 +17,9 @@ export function boundMarker(detail: string): BoundMarker | undefined {
     const marker = JSON.parse(detail) as Record<string, unknown>
     if (marker.event !== 'bound' || typeof marker.scryRunId !== 'string') return undefined
     // The daemon's canonical id for a run it dispatches itself (a device's, or the
-    // App's) is `remote-run-...`; a locally started one is `run-...`. Both are the
-    // same shape the device client accepts, so that pattern decides here too.
-    if (!MAC_RUN_ID.test(marker.scryRunId)) return undefined
+    // App's) is `remote-run-...`; a locally started one is `run-...`. A conversation run
+    // keeps its conversation turn's UUID, as it does in process.
+    if (!MAC_RUN_ID.test(marker.scryRunId) && !UUID.test(marker.scryRunId)) return undefined
     return {
       ...(typeof marker.ledgerRunId === 'string' && marker.ledgerRunId.length > 0 ? { ledgerRunId: marker.ledgerRunId } : {}),
       scryRunId: marker.scryRunId,

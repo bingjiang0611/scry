@@ -4,6 +4,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { TraceBatchReceipt } from '../trace-output'
 import type { DaemonRunSurface } from './daemon-run-surface'
 import { createDaemonRunMode, type DaemonRunModeDeps, type DaemonRunModeResult } from './daemon-run-mode'
+import { installDaemonChannelForwarder, installDaemonRequestForwarder, installDaemonRunFollower } from '../daemon-channel-gate'
 
 // The run channels are registered synchronously at startup, but finding a daemon is
 // not. This surface defers that work to the first run call and keeps one outcome for
@@ -18,6 +19,22 @@ import { createDaemonRunMode, type DaemonRunModeDeps, type DaemonRunModeResult }
 export interface LazyDaemonRunSurface extends DaemonRunSurface {
   /** Resolves once the daemon question is answered; safe to call repeatedly. */
   ready(): Promise<DaemonRunModeResult>
+  /**
+   * Replace the session's outcome with a fresh connect (adopt, launch, enroll). Only the
+   * «后台服务» actions call this, after the user asked to restart or reconnect.
+   */
+  restart(): Promise<DaemonRunModeResult>
+  /**
+   * Refuse daemon launches until every returned release has run: a stop is in flight, and
+   * a retried read must not bring the stopped daemon back. Each release is idempotent.
+   */
+  holdLaunches(): () => void
+  /**
+   * Observe each outcome this surface connects to on its own (first use, `unavailable`
+   * asked again, a reconnect after the daemon went away), never restart()'s: that one is
+   * reported by the action the user started. Observers cannot fail a run call.
+   */
+  onOutcome(listener: (result: DaemonRunModeResult) => void): () => void
   dispose(): void
 }
 
@@ -30,9 +47,27 @@ const FAILURE_STATUS = {
 } as const
 
 export function createLazyDaemonRunSurface(
-  deps: DaemonRunModeDeps,
+  modeDeps: DaemonRunModeDeps,
   createMode: (deps: DaemonRunModeDeps) => Promise<DaemonRunModeResult> = createDaemonRunMode
 ): LazyDaemonRunSurface {
+  // Every mode this surface builds launches through here, including the run mode's own
+  // reconnect, so one hold covers both paths.
+  let holds = 0
+  const launch = modeDeps.launch
+  const deps: DaemonRunModeDeps = launch
+    ? { ...modeDeps, launch: async () => holds > 0 ? { status: 'failed' as const, reason: 'daemon_stopping' } : await launch() }
+    : modeDeps
+  const listeners = new Set<(result: DaemonRunModeResult) => void>()
+  const connect = (): Promise<DaemonRunModeResult> => {
+    const result = createMode(deps)
+    void result.then((value) => {
+      for (const listener of [...listeners]) {
+        // Fail open: an observer is told, it does not take part in the connect.
+        try { listener(value) } catch { /* observer failures stay with the observer */ }
+      }
+    }, () => undefined)
+    return result
+  }
   let pending: Promise<DaemonRunModeResult> | undefined
   const remember = (result: Promise<DaemonRunModeResult>): Promise<DaemonRunModeResult> => {
     pending = result
@@ -47,10 +82,10 @@ export function createLazyDaemonRunSurface(
       // and its runtime holds cursors into a dead connection.
       return remember(ensure().then((previous) => {
         previous.dispose?.()
-        return createMode(deps)
+        return connect()
       }))
     }
-    return pending ?? remember(createMode(deps))
+    return pending ?? remember(connect())
   }
   const surface = async (reconnect = false): Promise<DaemonRunSurface> => {
     const result = await ensure(reconnect)
@@ -70,8 +105,24 @@ export function createLazyDaemonRunSurface(
       return await invoke(await surface(true))
     }
   }
-  return {
+  const lazy: LazyDaemonRunSurface = {
     ready: ensure,
+    restart(): Promise<DaemonRunModeResult> {
+      const previous = pending
+      return remember((previous ?? Promise.resolve(undefined)).then(
+        (value) => { value?.dispose?.(); return createMode(deps) },
+        () => createMode(deps)
+      ))
+    },
+    holdLaunches(): () => void {
+      holds += 1
+      let released = false
+      return () => { if (!released) { released = true; holds -= 1 } }
+    },
+    onOutcome(listener): () => void {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
     start(payload: AgentStartRequest): Promise<AgentStartResult> {
       // One intent id per logical start, fixed BEFORE the first attempt: the retry path
       // below may run the call on a new connection, and a fresh id there would record a
@@ -88,10 +139,26 @@ export function createLazyDaemonRunSurface(
     steer(payload: unknown) { return call((value) => value.steer(payload)) },
     stopBackgroundTask(payload: unknown) { return call((value) => value.stopBackgroundTask(payload)) },
     adopt(runId: string) { return call((value) => value.adopt(runId)) },
+    follow(ledger: { runId: string; seq?: number }) { return call((value) => value.follow(ledger)) },
     ack(receipt: TraceBatchReceipt): Promise<boolean> { return call((value) => value.ack(receipt)) },
     resynchronized(): Promise<true> { return call((value) => value.resynchronized()) },
-    dispose(): void { void ensure().then((result) => result.dispose?.(), () => undefined) }
+    // A local op is retried after a reconnect only when its request provably never left
+    // (daemon_not_running), which `call` already enforces for reads and writes alike.
+    localOp(request) { return call((value) => value.localOp(request)) },
+    forward(request, read) { return call((value) => value.forward(request, read)) },
+    dispose(): void {
+      uninstallForwarder()
+      uninstallRequestForwarder()
+      uninstallFollower()
+      void ensure().then((result) => result.dispose?.(), () => undefined)
+    }
   }
+  // The gated App channels that the daemon answers reach it through this surface.
+  const uninstallForwarder = installDaemonChannelForwarder((request) => lazy.localOp(request))
+  const uninstallRequestForwarder = installDaemonRequestForwarder((request, read) => lazy.forward(request, read))
+  // A conversation send answers with the ledger run that carries it; this window follows it.
+  const uninstallFollower = installDaemonRunFollower((ledger) => lazy.follow(ledger))
+  return lazy
 }
 
 // A daemon that is gone answers nothing: the transport cannot reach the socket, or

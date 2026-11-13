@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "note": "设置页「后台服务」（B4-S S0-1）：本 App 与自己的 daemon 之间的生命周期 channel。确认框、按 daemon.lock 重验身份后的停止信号与 app.quit 留在 main；只有 daemon 知道的状态走本机 op。与 daemon-ipc-routing.json 合并读取；单独成文件以守 20 KB 门禁。",
+  "channels": [
+    {
+      "channel": "remote:backgroundService:quit",
+      "route": "main",
+      "why": "原生二次确认框、向 daemon.lock 登记且身份复核一致的进程发 SIGTERM、app.quit；撤销或停止中 App 无法调用 daemon op"
+    },
+    {
+      "channel": "remote:backgroundService:reconnect",
+      "route": "main",
+      "why": "§13.2 链路：本机 grant 已被撤销，App 不能再调用 daemon 的任何 op；确认框、按身份停止、删除被拒的本机凭据、重新入网都在 App"
+    },
+    {
+      "channel": "remote:backgroundService:restart",
+      "route": "main",
+      "why": "版本不一致时 App 不与 daemon 通话；确认框、按身份停止与启动对应版本的后台服务都在 App"
+    },
+    {
+      "channel": "remote:backgroundService:status",
+      "route": "split",
+      "why": "设置页「后台服务」状态",
+      "main": "连接结果（就绪、版本不一致、未授权、不可用及原因）、userData 位置与 daemon.lock 登记且身份复核一致的 pid 由 App 自己确定；连接就绪时才向 daemon 询问其余字段，问不到的显示为未知",
+      "op": "localBackgroundService",
+      "method": "status"
+    }
+  ]
+}

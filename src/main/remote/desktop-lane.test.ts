@@ -42,10 +42,63 @@ describe('desktop lane routing', () => {
     }
     expect(laneForRequest({ op: 'watch' })).toBe('watch')
     expect(laneForRequest({ op: 'liveRuns' })).toBe('status')
+    // The App's event feed holds a long poll of its own; nothing may queue behind it.
+    expect(laneForRequest({ op: 'appEvents' })).toBe('events')
+    // Marking a session viewed is short and must not queue behind a bulk read.
+    expect(laneForRequest({ op: 'attentionViewed' })).toBe('control')
+    expect(replayableRequest({ op: 'attentionViewed' })).toBe(true)
     expect(laneForRequest({ op: 'desktop', query: { kind: 'info' } })).toBe('control')
     expect(laneForRequest({ op: 'desktop', query: { kind: 'trace' } })).toBe('bulk')
     expect(laneForRequest({ op: 'historyPage' })).toBe('bulk')
     expect(replayableRequest({ op: 'poll' })).toBe(true)
+  })
+
+  it('treats a workbench write as a write, whichever surface carries it', () => {
+    // A lost reply to PTY input, a file write or a Git mutation must not send it again:
+    // the host may already have typed, written or pushed. A push or merge can hold its
+    // lane for the whole 30 s timeout, so workbench writes have a lane of their own and
+    // a stop or an answer on control never waits behind one.
+    for (const [surface, method] of [['terminal', 'terminalWrite'], ['terminal', 'terminalClose'], ['workspace', 'workspaceWrite'], ['sourceControl', 'mutate']]) {
+      const request = { op: 'desktopWorkbench', query: { surface, cwd: '/w', method, args: [] } }
+      expect(replayableRequest(request), method).toBe(false)
+      expect(laneForRequest(request), method).toBe('workbench')
+    }
+    expect(laneForRequest({ op: 'desktopWorkbench' })).toBe('workbench')
+    for (const op of ['stop', 'answerQuestion']) expect(laneForRequest({ op })).toBe('control')
+    // A request without a method is not proven to be a read.
+    expect(replayableRequest({ op: 'desktopWorkbench' })).toBe(false)
+    for (const [surface, method] of [['terminal', 'terminalEvents'], ['workspace', 'workspaceReadPage'], ['sourceControl', 'read']]) {
+      const request = { op: 'desktopWorkbench', query: { surface, cwd: '/w', method, args: [] } }
+      expect(replayableRequest(request), method).toBe(true)
+      expect(laneForRequest(request), method).toBe('bulk')
+    }
+  })
+})
+
+describe('terminal lane (P3-terminal)', () => {
+  it('keeps typing and terminal output off the lanes long reads and pushes hold', () => {
+    for (const method of ['start', 'write', 'resize', 'ready', 'ack', 'close', 'attach', 'active']) {
+      expect(laneForRequest({ op: 'terminal', method }), method).toBe('terminal')
+    }
+    expect(laneForRequest({ op: 'terminalFeed', method: 'read' })).toBe('terminal')
+    // A recording page can be 512 KiB: it reads on bulk, behind nothing a keystroke waits for.
+    for (const method of ['recordingList', 'recordingRead']) expect(laneForRequest({ op: 'terminal', method })).toBe('bulk')
+    // Input is never replayed; reading the feed again from the same cursor is harmless.
+    expect(replayableRequest({ op: 'terminal', method: 'write' })).toBe(false)
+    expect(replayableRequest({ op: 'terminalFeed', method: 'read' })).toBe(true)
+  })
+})
+
+describe('long lane', () => {
+  it('gives MCP the long lane, and replays only the guard scan', () => {
+    for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp', 'mcpGuardScan']) expect(laneForRequest({ op: 'mcp', method }), method).toBe('long')
+    expect(replayableRequest({ op: 'mcp', method: 'mcpGuardScan' })).toBe(true)
+    for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp']) expect(replayableRequest({ op: 'mcp', method }), method).toBe(false)
+  })
+
+  it('takes the billing sync there too, and leaves the quick billing reads on bulk', () => {
+    expect(laneForRequest({ op: 'billing', method: 'syncBillingAdmin' })).toBe('long')
+    for (const method of ['billingState', 'importBillingFixture']) expect(laneForRequest({ op: 'billing', method }), method).toBe('bulk')
   })
 })
 

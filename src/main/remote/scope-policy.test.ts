@@ -35,14 +35,14 @@ async function deviceKeyAndCSR() {
   return { keyPEM: `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`, csrPEM: csr.toString('pem') }
 }
 
-async function harness() {
+async function harness(onDispatchRefused?: (input: { detail?: string; grantScope: 'local' | 'remote'; error: unknown }) => void, onRunActivity?: (runId: string, intentSeq?: number) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'scry-scope-policy-'))
   dirs.push(directory)
   const identity = await ensureHostIdentity(join(directory, 'identity'))
   // The owner's device-only override. A local submit must keep the user's own mode.
   const startRun = vi.fn(async (_input: {
     runId: string
-    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string; forkLastTurn?: AgentStartRequest['forkLastTurn'] }
+    routing: { permissionMode?: AgentStartRequest['permissionMode']; cwd: string; forkLastTurn?: AgentStartRequest['forkLastTurn']; conversation?: { conversationId: string; runId: string } }
     grantScope?: 'local' | 'remote'
   }) => {})
   const sessionDelete = vi.fn(async (_request: DesktopRemoteDeleteSessionRequest, _authorize: () => void, _grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult> => ({ ok: true, deleted: [], retained: [], failed: [] }))
@@ -57,7 +57,9 @@ async function harness() {
     gate: new ProviderOperationGate(),
     readSessionStatus: () => 'not_observed',
     createOutputStore: (dir) => new RunOutputFileStore(dir),
-    sessionDelete
+    sessionDelete,
+    ...(onDispatchRefused ? { onDispatchRefused } : {}),
+    ...(onRunActivity ? { onRunActivity } : {})
   })
   cleanups.push(() => binding.close())
   return { identity, controller: binding.controller, startRun, sessionDelete }
@@ -185,5 +187,73 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     })
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(second.startRun).not.toHaveBeenCalled()
+  })
+
+  it('carries a conversation run marker only from the App', async () => {
+    // A conversation run reuses the turn's run id and the App's in-process launch;
+    // a device must not be able to name either.
+    const marker = { conversationId: 'conversation-1', runId: 'run-conversation-1' }
+    const conversation = JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', conversation: marker })
+    const localRun = await harness()
+    const local = await enrollLocal(localRun.identity, localRun.controller)
+    localRun.controller.submitIntent(local, { intentId: 'local-conversation', detail: conversation })
+    await vi.waitFor(() => expect(localRun.startRun).toHaveBeenCalledTimes(1))
+    expect(localRun.startRun.mock.calls[0]![0].routing.conversation).toEqual(marker)
+
+    const deviceRun = await harness()
+    const phone = await pairDevice(deviceRun.identity, deviceRun.controller)
+    deviceRun.controller.submitIntent(phone, { intentId: 'phone-conversation', detail: conversation })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(deviceRun.startRun).not.toHaveBeenCalled()
+
+    const malformed = await harness()
+    const app = await enrollLocal(malformed.identity, malformed.controller)
+    malformed.controller.submitIntent(app, {
+      intentId: 'local-malformed',
+      detail: JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', conversation: { conversationId: 'c', runId: 7 } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(malformed.startRun).not.toHaveBeenCalled()
+  })
+
+  it('reports a run the ledger refused before it reached the run start, and only that', async () => {
+    // A daemon conversation send waits for its run to start; a policy refusal never
+    // reaches the binding, so the host must say so or the send would wait forever.
+    const refused = vi.fn()
+    const { identity, controller, startRun } = await harness(refused)
+    const local = await enrollLocal(identity, controller)
+    const marker = { conversationId: 'conversation-1', runId: 'run-conversation-1' }
+    controller.submitIntent(local, {
+      intentId: 'local-refused',
+      detail: JSON.stringify({ providerId: 'claude', cwd: '/not-authorized', prompt: 'hello', conversation: marker })
+    })
+    await vi.waitFor(() => expect(refused).toHaveBeenCalledTimes(1))
+    expect(refused.mock.calls[0]![0]).toMatchObject({ grantScope: 'local', detail: expect.stringContaining('run-conversation-1') })
+    expect(startRun).not.toHaveBeenCalled()
+
+    controller.submitIntent(local, { intentId: 'local-started', detail })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(refused).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the run whose ledger events or output changed, for the App event feed', async () => {
+    // P3f E2: the App reads a run when the daemon says it changed. A global "something
+    // changed" would make every run re-read on every chunk of every other run.
+    const activity = vi.fn()
+    const { identity, controller, startRun } = await harness(undefined, activity)
+    startRun.mockImplementationOnce(async (input) => {
+      (input as unknown as { output(chunk: { kind: 'output'; text: string }): void }).output({ kind: 'output', text: 'hello' })
+    })
+    const local = await enrollLocal(identity, controller)
+    const { runId } = controller.submitIntent(local, { intentId: 'local-activity', detail })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(activity.mock.calls.length).toBeGreaterThanOrEqual(3))
+    // Intent, dispatch and output all name this run, and only this run.
+    expect(new Set(activity.mock.calls.map(([id]) => id))).toEqual(new Set([runId]))
+    // E3: every notice carries where the run's evidence starts, so a client that never
+    // saw it can follow it from its intent instead of walking the ledger from 0.
+    const { seq } = controller.submitIntent(local, { intentId: 'local-activity', detail })
+    expect(new Set(activity.mock.calls.map(([, intentSeq]) => intentSeq))).toEqual(new Set([seq]))
   })
 })

@@ -16,7 +16,12 @@ import { certificates } from './fixture.mjs'
 import { loopbackRelay } from './loopback-relay.mjs'
 import { verifyCSR, certificateIssuer } from './enrollment.mjs'
 import { decodeWire } from './generated/wire.mjs'
-import { PairingAuthority } from '../../src/main/remote/pairing.ts'
+import { register } from 'node:module'
+
+// pairing.ts imports its siblings without extensions; register the resolve hook before
+// loading it, so this smoke runs the App's source as it is (ts-resolve.mjs).
+register('./ts-resolve.mjs', import.meta.url)
+const { PairingAuthority } = await import('../../src/main/remote/pairing.ts')
 
 const exec = promisify(execFile)
 const MAX = 262_144

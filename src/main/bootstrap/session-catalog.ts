@@ -118,7 +118,10 @@ export function createSessionCatalog({
     loadTurns: createConversationTurnLoader({ userDataDir }),
     sideChatSource: createSideChatSourceDeps({
       appSessionStore, resolveKnownProjectDirectory, homeDir, userDataDir
-    })
+    }),
+    // The ledger change itself is the notice: `turn_recorded` depends on the SQLite
+    // projection and on the window still knowing the run, so it cannot be the only one.
+    onTurnSettled: (conversationId) => publishDataUpdated({ kind: 'conversation_changed', conversationId })
   })
 
   return {

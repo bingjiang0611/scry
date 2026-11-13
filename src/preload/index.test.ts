@@ -111,6 +111,7 @@ const invokeChannels = {
   start: 'agent:start',
   activeRun: 'agent:activeRun',
   unreadSessions: 'agent:unreadSessions',
+  viewSessions: 'agent:viewSessions',
   activeRuns: 'agent:activeRuns',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
@@ -129,7 +130,11 @@ const invokeChannels = {
   remoteRevokeDevice: 'remote:device:revoke',
   remoteDesktopHostStatus: 'remote:desktop:status',
   remoteDesktopHostInvite: 'remote:desktop:invite',
-  remoteDesktopHostDisable: 'remote:desktop:disable'
+  remoteDesktopHostDisable: 'remote:desktop:disable',
+  backgroundServiceStatus: 'remote:backgroundService:status',
+  restartBackgroundService: 'remote:backgroundService:restart',
+  quitWithBackgroundService: 'remote:backgroundService:quit',
+  reconnectBackgroundService: 'remote:backgroundService:reconnect'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const desktopChannels = {
@@ -192,6 +197,15 @@ describe('preload IPC boundary', () => {
       await callableApi[method]()
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
+    }
+  })
+
+  it('sends no renderer argument on the background service channels', async () => {
+    // Main asks for every confirmation itself; nothing the renderer passes may travel.
+    for (const method of ['backgroundServiceStatus', 'restartBackgroundService', 'quitWithBackgroundService', 'reconnectBackgroundService']) {
+      electron.invoke.mockClear()
+      await callableApi[method]('4242', { confirmed: true })
+      expect(electron.invoke.mock.calls[0], method).toEqual([invokeChannels[method as keyof typeof invokeChannels]])
     }
   })
 

@@ -14,7 +14,7 @@ function inputs(overrides: Record<string, unknown> = {}) {
       renderer: { send: () => {}, isFocused: () => true },
       rendererCanReceive: () => true,
       activeRunSessionKey: () => null,
-      dockBadge: new DockBadgeState(),
+      dockBadge: new DockBadgeState(() => undefined),
       mainEventId: (prefix: string, runId: string) => `${prefix}-${runId}`,
       getWindow: () => null,
       getCurrentCwd: () => '/workspace',

@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { readFile as readFileAsync } from 'node:fs/promises'
 
 /**
  * 进程身份化与后代树诊断。
@@ -136,6 +137,43 @@ export function readProcessIdentitySync(pid: number, options: SyncProcessIdentit
       '/bin/ps', ['-p', String(target), '-o', 'pid=,ppid=,stat=,lstart=,command='],
       { encoding: 'utf8', maxBuffer: 64 * 1024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }
     )))(pid)
+  } catch {
+    return undefined
+  }
+  return parseProcessSnapshot(output).get(pid)
+}
+
+export interface ProcessIdentityOptions {
+  platform?: NodeJS.Platform
+  readFile?: (path: string) => Promise<string>
+  ps?: (pid: number) => Promise<string>
+}
+
+/**
+ * The identity readProcessIdentitySync reads, without blocking: for IPC paths. Same
+ * files on Linux and the same `ps` arguments and zone on macOS, so a key written by the
+ * synchronous reader (daemon.lock) compares equal here.
+ */
+export async function readProcessIdentity(pid: number, options: ProcessIdentityOptions = {}): Promise<ProcessRow | undefined> {
+  const platform = options.platform ?? process.platform
+  if (platform === 'linux') {
+    const read = options.readFile ?? ((path: string) => readFileAsync(path, 'utf8'))
+    const paths = [`/proc/${pid}/stat`, '/proc/sys/kernel/random/boot_id', `/proc/${pid}/cmdline`]
+    const contents = new Map<string, string>()
+    await Promise.all(paths.map(async (path) => { try { contents.set(path, await read(path)) } catch {} }))
+    return linuxProcessRow(pid, (path) => {
+      const value = contents.get(path)
+      if (value === undefined) throw new Error(`process_identity_unreadable:${path}`)
+      return value
+    })
+  }
+  let output: string
+  try {
+    output = await (options.ps ?? ((target) => new Promise<string>((resolve, reject) => {
+      execFile('/bin/ps', ['-p', String(target), '-o', 'pid=,ppid=,stat=,lstart=,command='],
+        { encoding: 'utf8', maxBuffer: 64 * 1024, timeout: PROCESS_IDENTITY_TIMEOUT_MS, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } },
+        (error, stdout) => { if (error) reject(error); else resolve(stdout) })
+    })))(pid)
   } catch {
     return undefined
   }

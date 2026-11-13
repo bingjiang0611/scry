@@ -41,6 +41,16 @@ export interface ExecutionDeps {
   notify(): void
 }
 
+/** Tell the App event feed which run changed; observation only, never fails the run. */
+export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivity'>, runId: string, ledger: Pick<SessionLedger, 'intentSeq'>): void {
+  try { deps.onRunActivity?.(runId, ledger.intentSeq(runId)) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
+}
+
+/** A ledger event wakes parked watchers and names its run for the App event feed. */
+export function ledgerEventObserver(deps: Pick<HostControllerDependencies, 'onRunActivity'>, notify: () => void): (event: { runId: string }, intentSeq?: number) => void {
+  return (event, intentSeq) => { notify(); runActivity(deps, event.runId, { intentSeq: () => intentSeq }) }
+}
+
 export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher } {
   const { deps, ledger, output, fileDownloads, interactions, stops, live, notify } = input
   const gateway = new RemoteGateway({
@@ -66,6 +76,8 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     ...(deps.readHistoryTurnsPage ? { historyTurnsPage: { read: deps.readHistoryTurnsPage } as RemoteHistoryTurnsPageSource } : {})
   })
 
+  // Runs that got as far as the run start; any other failure was a refusal by the ledger.
+  const reached = new Set<string>()
   const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
   const base: RemoteExecutor = {
     execute: async (executorInput: RemoteExecutorInput) => {
@@ -75,6 +87,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       const current: { routing: RemoteIntentRouting; externalSessionId?: string } = { routing }
       stops.set(executorInput.runId, stop)
       live.set(executorInput.runId, current)
+      reached.add(executorInput.runId)
       try {
         await deps.runProvider({
           runId: executorInput.runId,
@@ -111,16 +124,26 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
   const dispatcher = new RemoteDispatcher({
     ledger,
     executor: { execute: async (executorInput) => {
-      const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })
-      try { await gated.execute(executorInput) }
-      finally {
-        // Attachments are per-intent scratch: released after the run, whatever it did.
-        try { await input.releaseAttachments(routing) }
-        catch (error) { console.warn('[scry] remote attachment cleanup failed:', error) }
+      try {
+        const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })
+        try { await gated.execute(executorInput) }
+        finally {
+          // Attachments are per-intent scratch: released after the run, whatever it did.
+          try { await input.releaseAttachments(routing) }
+          catch (error) { console.warn('[scry] remote attachment cleanup failed:', error) }
+        }
+      } catch (error) {
+        if (!reached.has(executorInput.runId)) {
+          try { deps.onDispatchRefused?.({ detail: executorInput.detail, grantScope: gateway.runScope(executorInput.runId), error }) }
+          catch (hookError) { console.warn('[scry] dispatch refusal hook failed:', hookError) }
+        }
+        throw error
+      } finally {
+        reached.delete(executorInput.runId)
       }
     } },
     outputSink: {
-      append: (runId, chunk) => { output.append(runId, chunk); notify() },
+      append: (runId, chunk) => { output.append(runId, chunk); notify(); runActivity(deps, runId, ledger) },
       flush: (runId) => output.flush(runId)
     }
   })

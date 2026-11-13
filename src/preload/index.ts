@@ -3,6 +3,7 @@ import { eventApi } from './event-api'
 import { remoteApi } from './remote-api'
 import { conversationsApi } from './conversations'
 import { runTracesApi } from './run-traces'
+import { backgroundServiceApi } from './background-service'
 import type { GitDiffScope, WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
 import type { DiffCommitPage, DiffCommitPageRequest, DiffCommitSnapshot, DiffCommitSnapshotRequest } from '../shared/diff-history'
 import type { SourceControlApi } from '../shared/source-control'
@@ -269,6 +270,7 @@ const api = {
     ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
   unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
+  viewSessions: (request: { viewId: string; main: boolean; sessionKeys: string[] }): Promise<boolean> => ipcRenderer.invoke('agent:viewSessions', request),
   /** 权威事件快照（忽略 done）：live trace 降级后用它重新对齐，包含终态被跳过的事件。 */
   focusedRunSnapshot: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:focusedRunSnapshot'),
   activeRuns: (): Promise<ActiveRun[]> => ipcRenderer.invoke('agent:activeRuns'),
@@ -280,7 +282,8 @@ const api = {
   stopBackgroundTask: (request: { runId: string; taskId: string }): Promise<BackgroundTaskStopResult> => ipcRenderer.invoke('agent:stopBackgroundTask', request),
   ...eventApi,
   ...remoteApi,
-  ...runTracesApi
+  ...runTracesApi,
+  ...backgroundServiceApi
 }
 
 contextBridge.exposeInMainWorld('scry', api)

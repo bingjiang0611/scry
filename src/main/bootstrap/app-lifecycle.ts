@@ -32,6 +32,10 @@ import type { DesktopRemoteClient } from '../remote/desktop-client'
 import { startRemoteHostIfEnabled, type RemoteHostRuntime } from './remote-host'
 import type { RunControl } from './run-control'
 import { runStartupRecovery } from './startup-recovery'
+import { appStartupWriters } from './app-startup-writers'
+import { shutdownDaemonTerminals } from './terminal-daemon'
+import { claimAppUserDataWithDialog } from './userdata-owner-dialog'
+import { applyLinuxPasswordStore } from './linux-password-store'
 
 export function initializeAppEnvironment(__dirname: string, getWindow: () => BrowserWindow | null) {
   // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
@@ -66,6 +70,10 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
       app.setAccessibilitySupportFeatures(['nativeAPIs', 'webContents', 'extendedProperties', 'html', 'screenReader'])
     })
   }
+  // Linux: ask for libsecret on Hyprland or an unnamed desktop, where Chromium would pick
+  // basic_text and daemon mode would refuse every run. Fail closed without a keyring.
+  const passwordStore = applyLinuxPasswordStore(app.commandLine)
+  if (passwordStore) console.info(`[scry] safeStorage: --password-store=${passwordStore} (desktop not recognised by Chromium)`)
   // Isolated automation stays hidden: showInactive still displays a native window.
   if (isOwnedTestApp && process.platform === 'darwin') app.setActivationPolicy('prohibited')
   const primaryInstance = isOwnedTestApp || app.requestSingleInstanceLock()
@@ -118,7 +126,34 @@ export function registerAppLifecycle({
 
   app.whenReady().then(async () => {
     if (!primaryInstance) return
-    const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
+    const writers = appStartupWriters()
+    const startupTrace = (): PerformanceTrace => new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
+    let startupPerf = startupTrace()
+    if (writers.userDataLock) {
+      // First, before every userData writer below, including performance recording: a
+      // daemon left from a switch-on session may still own this userData (P3 case 1). The
+      // single-instance lock already ran in initializeAppEnvironment, so a second App never
+      // gets here. Cost: one lock read/write and one identity read (/proc on Linux, one
+      // `ps` on macOS), synchronous like the initDb that follows; never on an IPC path.
+      const claim = await claimAppUserDataWithDialog(app.getPath('userData'))
+      if (claim.status === 'quit') {
+        // app.exit, not app.quit: before-quit cleanup would flush stores this App never
+        // opened. Nothing was written, and the lock (if any) belongs to someone else.
+        app.exit(claim.reason === 'user-quit' ? 0 : 1)
+        return
+      }
+      if (claim.status === 'unlocked') {
+        console.warn('[scry] userData lock unavailable; starting without it (no other owner recorded)')
+      } else {
+        // Held until the process ends: `quit` fires after before-quit cleanup has settled,
+        // and `exit` covers paths that skip it. Release only removes this process's record.
+        app.once('quit', claim.release)
+        process.once('exit', claim.release)
+      }
+      // Time spent reading the dialog is the user's, not startup's.
+      if (claim.asked) startupPerf = startupTrace()
+      startupPerf.mark('userdata_owned')
+    }
     await startPerformanceRecording(app.getPath('userData'), app.getVersion(), app.isPackaged, useDevelopmentRenderer)
     startupPerf.mark('performance_recording_ready')
     // 双流事件日志按环境变量装配；未设置时 openProviderEventWriter() 返回 undefined。
@@ -132,8 +167,9 @@ export function registerAppLifecycle({
     // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
     // Storage 的路径由这里注入一次：数据库层不再问 Electron 要 userData。
     configureStorage({ userDataDir: app.getPath('userData'), appPath: app.getAppPath() })
-    initDb()
-    startupPerf.mark('database_ready')
+    // With the switch on the daemon owns scry.db; its channels are answered there.
+    if (writers.database) initDb()
+    startupPerf.mark(writers.database ? 'database_ready' : 'database_owned_by_daemon')
     createWindow()
     performanceResourceMonitor = startPerformanceResourceMonitor({
       enabled: performanceRecordingEnabled(),
@@ -159,13 +195,21 @@ export function registerAppLifecycle({
     void requireDesktopRemoteClient().restoreConnections().catch((error) => {
       console.warn('[scry] desktop connection startup recovery failed:', error)
     })
-    setStartupManagedRecovery(runStartupRecovery({
-      userDataDir: app.getPath('userData'),
-      recorderCli: packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH,
-      startupPerf,
-      conversationStore,
-      runs
-    }))
+    if (writers.startupRecovery) {
+      setStartupManagedRecovery(runStartupRecovery({
+        userDataDir: app.getPath('userData'),
+        recorderCli: packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH,
+        startupPerf,
+        conversationStore,
+        runs
+      }))
+    } else {
+      // The daemon recovers its own userData. Record that instead of recovery stages
+      // main never ran, so the startup trace does not claim them.
+      startupPerf.mark('recovery_owned_by_daemon')
+      startupPerf.finish()
+      setStartupManagedRecovery(Promise.resolve())
+    }
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -183,9 +227,13 @@ export function registerAppLifecycle({
     // replays any recorded-but-undispatched intents.
     const remoteCleanup = Promise.all([getRemoteHostService()?.dispose(), getDesktopRemoteClient()?.dispose()]).then(() => undefined)
     terminalOutput.close()
-    const terminalCleanup = getTerminalManagerInstance()?.shutdown().catch((error) => {
-      console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
-    }) ?? Promise.resolve()
+    const terminalCleanup = Promise.all([
+      getTerminalManagerInstance()?.shutdown().catch((error) => {
+        console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
+      }),
+      // Daemon mode: the App's shells live in the daemon and end with the App (bounded).
+      shutdownDaemonTerminals()
+    ]).then(() => undefined)
     runStopLifecycle.close()
     traceOutput.close()
     // scoped 流与 legacy 桥一同关闭：订阅、额度与定时器都不留到下一个进程。

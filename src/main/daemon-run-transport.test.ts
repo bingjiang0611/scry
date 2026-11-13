@@ -153,4 +153,97 @@ describe('daemon run transport', () => {
     const value = new DaemonRunTransport(vi.fn(async () => { throw new Error('socket hang up') }))
     await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
   })
+
+  it('sends an App channel as a local op and returns the handler result', async () => {
+    const { value, calls } = transport(() => ({ result: ['/w'] }))
+    await expect(value.localOp({ op: 'projectStore', method: 'recentFolders', args: [], read: true })).resolves.toEqual(['/w'])
+    expect(calls[0]!.request).toEqual({ op: 'projectStore', method: 'recentFolders', args: [] })
+    expect(calls[0]!.options).toEqual({ replayable: true })
+  })
+
+  it('keeps the daemon handler message and names an older daemon without the op', async () => {
+    await expect(transport(() => ({ error: '工作区未授权' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow('工作区未授权')
+    await expect(transport(() => ({ error: 'unsupported_op' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow('daemon_capability_unavailable:sessionStore:listSessions')
+    await expect(transport(() => ({ error: 'device_not_authorized' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow(DaemonRunError)
+    // An answer without a result is not an empty success.
+    await expect(transport(() => ({})).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
+      .rejects.toThrow('invalid_daemon_response')
+  })
+
+  it('forwards an existing op for an App channel and maps its errors the same way', async () => {
+    const { value, calls } = transport(() => ({ commands: [] }))
+    await expect(value.forward({ op: 'commands', cwd: '/w' }, true)).resolves.toEqual({ commands: [] })
+    expect(calls.at(-1)).toMatchObject({ request: { op: 'commands', cwd: '/w' } })
+    await expect(transport(() => ({ error: 'unsupported_op' })).value.forward({ op: 'sessionDelete' }, false))
+      .rejects.toThrow('daemon_capability_unavailable:sessionDelete')
+    await expect(transport(() => ({ error: '会话正在运行' })).value.forward({ op: 'sessionDelete' }, false)).rejects.toThrow('会话正在运行')
+    await expect(transport(() => ({ error: 'device_not_authorized' })).value.forward({ op: 'commands' }, true)).rejects.toThrow(DaemonRunError)
+  })
+
+  it('reads the App event feed, keeping only notices it can name', async () => {
+    const { value, calls } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
+      { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
+      { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
+      { kind: 'run', runId: RUN, intentSeq: 12 },
+      // A newer daemon's notice this App does not know yet is skipped, not guessed at.
+      { kind: 'attention', snapshot: {} },
+      { kind: 'run', runId: 7 },
+      { kind: 'data', event: { kind: 'conversation_changed', conversationId: 7 } }
+    ] } }))
+    await expect(value.appEvents({ epoch: 'e1', cursor: 1, waitMs: 20_000 })).resolves.toEqual({
+      epoch: 'e1', cursor: 3, reset: false, items: [
+        { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
+        { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
+        { kind: 'run', runId: RUN, intentSeq: 12 }
+      ]
+    })
+    expect(calls[0]).toEqual({ request: { op: 'appEvents', epoch: 'e1', cursor: 1, waitMs: 20_000 }, options: { replayable: true } })
+    const reset = transport(() => ({ events: { epoch: 'e2', cursor: 0, items: [], reset: true } }))
+    await expect(reset.value.appEvents({ cursor: 0, waitMs: 0 })).resolves.toMatchObject({ reset: true })
+    expect(reset.calls[0]!.request).toEqual({ op: 'appEvents', cursor: 0, waitMs: 0 })
+    const broken = transport(() => ({ events: { cursor: 'x' } }))
+    await expect(broken.value.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
+  })
+
+  it('names the arguments the renderer left out, which JSON would turn into null', async () => {
+    // The preload always passes its optional parameters; an omitted one is undefined,
+    // which a JSON array carries as null. The daemon must see what main would have seen.
+    const { value, calls } = transport(() => ({ result: { ok: true } }))
+    await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', undefined], read: true })
+    // In memory the array still holds undefined; the lane's JSON makes it null.
+    expect(calls[0]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', undefined], absent: [1] })
+    await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', 5], read: true })
+    expect(calls[1]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', 5] })
+    // A real null is the renderer's own value and travels as one.
+    await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', null], read: true })
+    expect(calls[2]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', null] })
+  })
+
+  it('reads the daemon unread set and reports a viewed session (E1b)', async () => {
+    const snapshot = { revision: 4, unreadSessionKeys: ['codex\u0000\u0000/w\u0000s1'] }
+    const { value, calls } = transport((request) => request.op === 'attentionViewed'
+      ? { viewed: true }
+      : { events: { epoch: 'e1', cursor: 1, items: [{ kind: 'attention', snapshot }, { kind: 'attention', snapshot: { revision: 'x' } }] } })
+    await expect(value.appEvents({ cursor: 0, waitMs: 0 })).resolves.toMatchObject({ items: [{ kind: 'attention', snapshot }] })
+    await value.attentionViewed('codex\u0000\u0000/w\u0000s1')
+    // Viewing is idempotent, so a lost reply may be asked again.
+    expect(calls[1]).toEqual({ request: { op: 'attentionViewed', sessionKey: 'codex\u0000\u0000/w\u0000s1' }, options: { replayable: true } })
+    const refused = transport(() => ({ error: 'invalid_request' }))
+    await expect(refused.value.attentionViewed('k')).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
+  })
+
+  it('passes on only the window notices a daemon is meant to forward (W1)', async () => {
+    const { value } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
+      { kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } },
+      // A channel outside the list, or a payload that is not an object, is not passed on.
+      { kind: 'window', channel: 'workspace:openKnownExternal', payload: { path: '/etc' } },
+      { kind: 'window', channel: 'agent:error', payload: 'boom' }
+    ] } }))
+    await expect(value.appEvents({ epoch: 'e1', cursor: 0, waitMs: 0 })).resolves.toMatchObject({
+      items: [{ kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } }]
+    })
+  })
 })

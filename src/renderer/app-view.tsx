@@ -21,6 +21,7 @@ import { useRemoteSessionSelection } from './hooks/useRemoteSessionSelection'
 import { WorkspaceContext } from './components/WorkspacePicker'
 import type { DiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { runStructuralTransition } from './structural-motion'
+import { ipcErrorMessage } from './constants/ipc-error-copy'
 import { animatePaneChange, cancelPaneMotion } from './pane-motion'
 
 export function useAppView(context: AppViewContext) {
@@ -250,7 +251,7 @@ export function useAppView(context: AppViewContext) {
       current={current}
       localCwd={cwd}
       recent={recent}
-      onPickLocal={(dir) => { void pickLocalLocation(dir) }}
+      onPickLocal={(dir) => { void pickLocalLocation(dir).catch((error) => setComposerError(ipcErrorMessage(error))) }}
       onChooseLocalFolder={chooseFolder}
       onRemoveRecent={removeRecentFolder}
       onPickRemote={pickRemoteLocation}

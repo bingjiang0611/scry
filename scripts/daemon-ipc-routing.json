@@ -15,7 +15,9 @@
     },
     {
       "channel": "agent:addPiProfile",
-      "route": "new-op",
+      "route": "split",
+      "why": "Provider 配置随 adapter 一起迁移",
+      "main": "启动器文件选择框与握手失败提示留在 main；daemon 解析启动器、在已知项目目录里做 Pi RPC 握手并写入 profile",
       "op": "piProfile",
       "method": "addPiProfile"
     },
@@ -49,7 +51,7 @@
       "channel": "agent:chooseFolder",
       "route": "split",
       "why": "选择框与持久化分开",
-      "main": "原生目录选择框留在 main；选中后由 daemon 校验 canonical 目录、rememberProject 与 setCurrentCwd",
+      "main": "原生目录选择框与窗口的当前工作区（同 agent:setCwd）留在 main；daemon 只收选择框给出的路径，校验 canonical 目录并 rememberProject，App 在 daemon 回答后再选中该目录",
       "op": "workspaceSelection",
       "method": "chooseFolder"
     },
@@ -66,21 +68,24 @@
     },
     {
       "channel": "agent:deleteSession",
-      "route": "forward",
-      "op": "sessionDelete",
-      "why": "既有 sessionDelete"
+      "route": "new-op",
+      "op": "sessionLifecycle",
+      "method": "deleteSession",
+      "why": "App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用"
     },
     {
       "channel": "agent:detect",
-      "route": "forward",
-      "op": "providers",
-      "why": "adapter 在 daemon"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "detect",
+      "why": "本机要安装路径、版本与兼容判定；远程设备的 providers 元数据不变"
     },
     {
       "channel": "agent:detectFast",
-      "route": "forward",
-      "op": "providers",
-      "why": "adapter 在 daemon"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "detectFast",
+      "why": "快探测只给本机"
     },
     {
       "channel": "agent:focusRun",
@@ -95,9 +100,34 @@
     },
     {
       "channel": "agent:forkSession",
-      "route": "forward",
-      "op": "sessionFork",
-      "why": "既有 sessionFork"
+      "route": "new-op",
+      "op": "sessionLifecycle",
+      "method": "forkSession",
+      "why": "App 语义：没有 cwd 时用窗口当前工作区，空 cwd 会话照旧；设备的 sessionFork 要求非空 cwd，不复用"
+    },
+    {
+      "channel": "agent:gitCommitDiffSnapshot",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitCommitDiffSnapshot"
+    },
+    {
+      "channel": "agent:gitDiff",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitDiff"
+    },
+    {
+      "channel": "agent:gitDiffCommits",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitDiffCommits"
+    },
+    {
+      "channel": "agent:gitDiffSnapshot",
+      "route": "new-op",
+      "op": "workspaceDiff",
+      "method": "gitDiffSnapshot"
     },
     {
       "channel": "agent:importBillingFixture",
@@ -121,9 +151,10 @@
     },
     {
       "channel": "agent:listCommands",
-      "route": "forward",
-      "op": "commands",
-      "why": "既有 commands"
+      "route": "new-op",
+      "op": "providerCommands",
+      "method": "listCommands",
+      "why": "设备 op commands 丢掉 CapabilityEnvelope（unavailable 会变成空列表）；本机要完整 envelope"
     },
     {
       "channel": "agent:listProjects",
@@ -135,9 +166,10 @@
     },
     {
       "channel": "agent:listSessions",
-      "route": "forward",
-      "op": "sessionsPage",
-      "why": "既有 sessionsPage"
+      "route": "new-op",
+      "op": "sessionStore",
+      "method": "listSessions",
+      "why": "本机拿 App 自己的完整会话目录；远程设备的 sessionsPage 投影不变"
     },
     {
       "channel": "agent:listSkills",
@@ -160,15 +192,18 @@
     },
     {
       "channel": "agent:loadSession",
-      "route": "forward",
-      "op": "historyTurnsPage",
-      "why": "既有 historyTurnsPage"
+      "route": "split",
+      "why": "读页与窗口选择分开",
+      "main": "应用 daemon 回报的窗口会话选择（setCurrentCwd、会话镜像、角标）后把页交给 renderer",
+      "op": "sessionHistory",
+      "method": "loadSession"
     },
     {
       "channel": "agent:loadSessionOlder",
-      "route": "forward",
-      "op": "historyPage",
-      "why": "既有 historyPage"
+      "route": "new-op",
+      "op": "sessionHistory",
+      "method": "loadSessionOlder",
+      "why": "翻页读 daemon 自己的历史缓存（由 loadSession 建立）"
     },
     {
       "channel": "agent:mcpGuardScan",
@@ -194,9 +229,10 @@
     },
     {
       "channel": "agent:providerDescriptors",
-      "route": "forward",
-      "op": "providers",
-      "why": "既有 providers"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "providerDescriptors",
+      "why": "本机要完整 descriptors（含 controls 与默认模型）"
     },
     {
       "channel": "agent:reauthenticateMcp",
@@ -236,7 +272,7 @@
       "channel": "agent:removeRecentFolder",
       "route": "split",
       "why": "授权输入单一写者",
-      "main": "窗口只发请求；删除由 daemon 执行并回新 revision",
+      "main": "窗口只发请求；删除由 daemon 执行并回新的最近目录列表",
       "op": "projectStore",
       "method": "removeRecentFolder"
     },
@@ -249,9 +285,10 @@
     },
     {
       "channel": "agent:renameSession",
-      "route": "forward",
-      "op": "sessionAction",
-      "why": "既有 sessionAction"
+      "route": "new-op",
+      "op": "sessionLifecycle",
+      "method": "renameSession",
+      "why": "App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用"
     },
     {
       "channel": "agent:revealProject",
@@ -260,13 +297,16 @@
     },
     {
       "channel": "agent:runControls",
-      "route": "forward",
-      "op": "providers",
-      "why": "providers 的 selected"
+      "route": "new-op",
+      "op": "providerCatalog",
+      "method": "runControls",
+      "why": "本机按用户权限模式取 run controls；远程设备受 SCRY_REMOTE_PERMISSION_MODE 约束的路径不变"
     },
     {
       "channel": "agent:setCwd",
-      "route": "new-op",
+      "route": "split",
+      "why": "窗口选择与已知项目授权分开",
+      "main": "窗口选择留在 main，按发出顺序生效；daemon 按自己的已知项目校验目录、回 canonical 路径，不落盘",
       "op": "workspaceSelection",
       "method": "setCwd"
     },
@@ -279,15 +319,17 @@
     },
     {
       "channel": "agent:setSessionArchived",
-      "route": "forward",
-      "op": "sessionAction",
-      "why": "既有 sessionAction"
+      "route": "new-op",
+      "op": "sessionLifecycle",
+      "method": "setSessionArchived",
+      "why": "App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用"
     },
     {
       "channel": "agent:setSessionPinned",
-      "route": "forward",
-      "op": "sessionAction",
-      "why": "既有 sessionAction"
+      "route": "new-op",
+      "op": "sessionLifecycle",
+      "method": "setSessionPinned",
+      "why": "App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用"
     },
     {
       "channel": "agent:start",
@@ -353,6 +395,11 @@
     },
     {
       "channel": "agent:unreadSessions",
+      "route": "main",
+      "why": "badge 由 main 渲染"
+    },
+    {
+      "channel": "agent:viewSessions",
       "route": "main",
       "why": "badge 由 main 渲染"
     },
@@ -521,18 +568,27 @@
     },
     {
       "channel": "remote:desktop:disable",
-      "route": "main",
-      "why": "DesktopRemoteClient"
+      "route": "new-op",
+      "op": "localDesktopHost",
+      "method": "disable",
+      "path": "remote",
+      "why": "本机宿主的桌面接入：daemon 模式下宿主在 daemon"
     },
     {
       "channel": "remote:desktop:invite",
-      "route": "main",
-      "why": "DesktopRemoteClient"
+      "route": "new-op",
+      "op": "localDesktopHost",
+      "method": "invite",
+      "path": "remote",
+      "why": "本机宿主的桌面接入：daemon 模式下宿主在 daemon"
     },
     {
       "channel": "remote:desktop:status",
-      "route": "main",
-      "why": "DesktopRemoteClient"
+      "route": "new-op",
+      "op": "localDesktopHost",
+      "method": "status",
+      "path": "remote",
+      "why": "本机宿主的桌面接入：daemon 模式下宿主在 daemon"
     },
     {
       "channel": "remote:device:revoke",
@@ -600,188 +656,49 @@
       "why": "main 拉流后分发"
     },
     {
-      "channel": "terminal:ack",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalAck",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:active",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalActive",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:attach",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalAttach",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:close",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalClose",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:ready",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalReady",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:recordingDelete",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalRecordingDelete",
-      "why": "录制在 daemon"
-    },
-    {
-      "channel": "terminal:recordingList",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalRecordingList",
-      "why": "录制在 daemon"
-    },
-    {
-      "channel": "terminal:recordingRead",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalRecordingRead",
-      "why": "录制在 daemon"
-    },
-    {
-      "channel": "terminal:resize",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalResize",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:start",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalStart",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "terminal:write",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "terminal",
-      "method": "terminalWrite",
-      "why": "PTY 在 daemon"
-    },
-    {
-      "channel": "workspace:create",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceCreate",
-      "why": "工作区写入归 daemon"
-    },
-    {
-      "channel": "workspace:list",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceList",
-      "why": "工作区读取归 daemon"
-    },
-    {
-      "channel": "workspace:move",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceMove",
-      "why": "工作区写入归 daemon"
-    },
-    {
-      "channel": "workspace:openExternal",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceOpenExternal",
-      "why": "工作区内交给系统打开"
-    },
-    {
       "channel": "workspace:openKnownExternal",
       "route": "main",
       "why": "main 的只读引用表",
-      "source": "daemon:projectStore+sessionStore"
-    },
-    {
-      "channel": "workspace:read",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceRead",
-      "why": "工作区读取归 daemon"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspace:readKnown",
       "route": "main",
       "why": "main 的只读引用表",
-      "source": "daemon:projectStore+sessionStore"
-    },
-    {
-      "channel": "workspace:readPage",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceReadPage",
-      "why": "工作区读取归 daemon"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspace:readPageKnown",
       "route": "main",
       "why": "main 的只读引用表",
-      "source": "daemon:projectStore+sessionStore"
-    },
-    {
-      "channel": "workspace:rename",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceRename",
-      "why": "工作区写入归 daemon"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
       "channel": "workspace:resolveFile",
       "route": "main",
       "why": "main 签发只读引用",
-      "source": "daemon:projectStore+sessionStore"
+      "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
-      "channel": "workspace:trash",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceTrash",
-      "why": "工作区写入归 daemon"
+      "channel": "workspaceSelection:inspectStart",
+      "route": "new-op",
+      "op": "workspaceSelection",
+      "method": "inspectStart",
+      "why": "准备工作区前检查仓库"
     },
     {
-      "channel": "workspace:write",
-      "route": "forward",
-      "op": "desktopWorkbench",
-      "surface": "workspace",
-      "method": "workspaceWrite",
-      "why": "工作区写入归 daemon"
+      "channel": "workspaceSelection:read",
+      "route": "new-op",
+      "op": "workspaceSelection",
+      "method": "read",
+      "why": "worktree 选择读取 git 状态"
+    },
+    {
+      "channel": "workspaceSelection:validateBranch",
+      "route": "new-op",
+      "op": "workspaceSelection",
+      "method": "validateBranch",
+      "why": "校验新分支名"
     }
   ]
 }

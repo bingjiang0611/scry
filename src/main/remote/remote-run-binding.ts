@@ -4,6 +4,7 @@ import type { TraceEvent } from '../../shared/trace'
 import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest } from '../../shared/runtime'
 import { traceEventToOutputChunk } from './trace-output'
 import { startLegacyRemoteRun } from './remote-run-binding-legacy'
+import { claimConversationLaunch, type ConversationRunMarker, type ManagedLaunch } from './managed-launches'
 
 // The remote binding adapts an authenticated device intent to the canonical
 // App run lifecycle. Production supplies startAppRun from index.ts, so trust,
@@ -19,6 +20,8 @@ import { startLegacyRemoteRun } from './remote-run-binding-legacy'
 //   - The canonical start callback is invoked exactly once with a freshly minted
 //     scry runId. The ledgerRunId <-> scryRunId correlation is emitted as the
 //     FIRST progress marker so the device can join the two ids.
+//   - `admitted` follows once the canonical pipeline registered the run, so a reader
+//     can tell a run refused at admission from one that started and then failed.
 //   - Native Provider clarification, editor, and permission prompts are routed
 //     through the authenticated remote interaction broker. The binding never
 //     synthesizes an approval or substitutes an empty answer.
@@ -48,7 +51,9 @@ export interface RemoteRunCompletion {
   error?: string
 }
 
-export interface RemoteRunBindingDependencies {
+// `M` is the conversation launch payload the host passes through (ManagedConversationStart
+// in the daemon); the binding itself only reads its two ids.
+export interface RemoteRunBindingDependencies<M extends ConversationRunMarker = ConversationRunMarker> {
   // Production enters startAppRun. The optional provider seam below is only for
   // focused protocol tests and older isolated callers.
   startAppRun?(input: {
@@ -66,7 +71,13 @@ export interface RemoteRunBindingDependencies {
     // The verified submitter's scope, forwarded so the pipeline can take the App's
     // path for a local grant instead of inferring it from `origin`.
     grantScope?: 'local' | 'remote'
+    // A conversation run (daemon `conversation:send`): the launch's own settlement
+    // callbacks, and the moment the run is registered so the send can answer.
+    managedConversation?: M
+    onStarted?(runId: string): void
   }): Promise<RemoteRunCompletion>
+  // Daemon mode: claims the launch a conversation intent names (managed-launches.ts).
+  managedLaunch?(runId: string): ManagedLaunch<M> | undefined
   // Legacy seam retained for focused binding tests. Production provides startAppRun.
   run?(providerId: string, request: ProviderRunRequest): ProviderRunHandle
   permissionModeOverride?: AgentStartRequest['permissionMode']
@@ -136,7 +147,7 @@ export interface RemoteRunInput {
 
 const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 
-export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (input: RemoteRunInput) => Promise<void> {
+export function createRemoteRunBinding<M extends ConversationRunMarker = ConversationRunMarker>(deps: RemoteRunBindingDependencies<M>): (input: RemoteRunInput) => Promise<void> {
   let seq = 0
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
   return async function startRemoteRun(input: RemoteRunInput): Promise<void> {
@@ -148,9 +159,12 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
   }
 
   async function startCanonicalRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal, grantScope }: RemoteRunInput): Promise<void> {
+    // A conversation run carries only a marker; its request and run id are the launch's.
+    const launch = routing.conversation ? claimConversationLaunch(deps.managedLaunch, routing) : undefined
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
-    if (prompt.length === 0) throw new Error('remote_run_missing_prompt')
-    const scryRunId = nextScryRunId()
+    if (prompt.length === 0 && !launch) throw new Error('remote_run_missing_prompt')
+    const scryRunId = launch?.managedConversation.runId ?? nextScryRunId()
+    let launchStarted = false
     const resume = typeof routing.resume === 'string' ? routing.resume.trim() : ''
     const routedAttachments = routing.attachments ?? []
     const attachments: AgentInputAttachment[] = routedAttachments
@@ -201,7 +215,7 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
         // Arrived through the ledger, whatever the grant's scope: semantics that differ
         // by scope read `grantScope`, never this.
         origin: 'remote',
-        request: {
+        request: launch?.request ?? {
           prompt, providerId: routing.providerId as AgentStartRequest['providerId'],
           // An App submit may name no directory; the App then uses its own current
           // workspace. Sending an empty string would make the App treat it as a path.
@@ -215,7 +229,15 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
           ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
           ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {})
         },
-        ...(providerPrompt !== prompt ? { providerPrompt } : {}),
+        ...(!launch && providerPrompt !== prompt ? { providerPrompt } : {}),
+        ...(launch ? { managedConversation: launch.managedConversation } : {}),
+        // Admission passed and the run is registered: the moment an in-process start
+        // returns. A refusal before it (trust gate, session conflict) ends the intent
+        // failed with no `admitted`, so the App rejects the start instead of following it.
+        onStarted: (runId: string) => {
+          progress(marker({ event: 'admitted', ledgerRunId, scryRunId: runId }))
+          if (launch) { launchStarted = true; launch.started(runId) }
+        },
         stopSignal: stopSignal ?? new AbortController().signal,
         requestUserInput: async (question, signal) => {
           if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
@@ -230,6 +252,9 @@ export function createRemoteRunBinding(deps: RemoteRunBindingDependencies): (inp
       if (completion.status === 'failed') throw new Error(completion.error ?? 'provider_run_failed')
       progress(marker({ event: 'settled', status: completion.status }))
     } catch (error) {
+      // Before registration the send still waits on this launch; afterwards the run's
+      // own conversation settlement records the outcome.
+      if (launch && !launchStarted) launch.failed(error)
       progress(marker({ event: 'settled', status: 'failed' }))
       throw error
     }

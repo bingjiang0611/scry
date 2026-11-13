@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { generateDesktopDeviceIdentity } from './remote/desktop-transport'
 import { DesktopLanes, type DesktopLaneName } from './remote/desktop-lane'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import { buildIdOf, sameBuild, type BuildIdentity } from '../shared/build-identity'
 
 // Every run-channel frame declares the protocol it speaks; the daemon refuses one that
 // does not (`protocol_mismatch`), which is how an upgraded daemon rejects an old client
@@ -59,6 +60,8 @@ export interface StoredLocalGrant {
 export interface DaemonClientOptions {
   paths: DaemonClientPaths
   appVersion: string
+  /** This App's build id (shared/build-identity.ts); compared with the daemon's alongside the version. */
+  appBuild?: string
   encrypt(value: string): Buffer
   decrypt(value: Buffer): string
   // Injected so tests can drive the same code over a fixture socket.
@@ -81,9 +84,23 @@ export type DaemonClientFailure =
   | 'daemon_device_not_authorized'
   | 'daemon_local_grant_corrupt'
 
+// A version the daemon reported, fit to show the user: short and version-shaped. Anything
+// else stays unknown rather than being echoed into a dialog.
+const SHOWN_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+
 export class DaemonClientError extends Error {
   readonly reason: DaemonClientFailure
-  constructor(reason: DaemonClientFailure) { super(reason); this.reason = reason }
+  /** daemon_version_mismatch only: the version the daemon itself reported, when it did. */
+  readonly running?: string
+  /** daemon_version_mismatch only: the build id the daemon reported, when it did. */
+  readonly runningBuild?: string
+  constructor(reason: DaemonClientFailure, detail: { running?: string; runningBuild?: string } = {}) {
+    super(reason)
+    this.reason = reason
+    if (detail.running !== undefined && SHOWN_VERSION.test(detail.running)) this.running = detail.running
+    const build = buildIdOf(detail.runningBuild)
+    if (build !== undefined) this.runningBuild = build
+  }
 }
 
 function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyPEM?: string } = {}): Promise<LocalSocket> {
@@ -125,15 +142,24 @@ function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyP
   })
 }
 
+// What the daemon said about itself; a build field that is not a build id is dropped,
+// which the comparison then treats as "no build id" (a mismatch for an App that has one).
+function reported(version: string, build: unknown): BuildIdentity {
+  const id = buildIdOf(build)
+  return id === undefined ? { version } : { version, build: id }
+}
+
 export class DaemonClient {
   readonly #options: DaemonClientOptions
   readonly #lanes: DesktopLanes
   #grant: StoredLocalGrant | undefined
   #version: string | undefined
+  readonly #expected: BuildIdentity
 
   constructor(options: DaemonClientOptions) {
     this.#options = options
     this.#lanes = options.lanes ?? new DesktopLanes()
+    this.#expected = options.appBuild === undefined ? { version: options.appVersion } : { version: options.appVersion, build: options.appBuild }
   }
 
   /** Whether a stored grant exists, so a probe may use it instead of enrolling. */
@@ -143,13 +169,13 @@ export class DaemonClient {
   get version(): string | undefined { return this.#version }
 
   /**
-   * Probe, enroll if needed, then confirm the version. Returns the daemon version so
-   * a caller can refuse to continue with a daemon built from other sources.
+   * Probe, enroll if needed, then confirm the version and build. Returns what the daemon
+   * reported so a caller can refuse to continue with a daemon built from other sources.
    */
-  async connect(): Promise<{ version: string; enrolled: boolean }> {
+  async connect(): Promise<BuildIdentity & { enrolled: boolean }> {
     const existing = this.#load()
     if (existing) {
-      let version: string | undefined
+      let version: BuildIdentity | undefined
       try { version = await this.#probe(existing) } catch (error) {
         // A revoked grant is the daemon's answer, not a transient failure: drop the
         // stale credential so the next attempt reports "no grant" instead of looping
@@ -165,8 +191,8 @@ export class DaemonClient {
       }
       this.#requireVersion(version)
       this.#grant = existing
-      this.#version = version
-      return { version, enrolled: false }
+      this.#version = version.version
+      return { ...version, enrolled: false }
     }
     const grant = await this.#enroll()
     const version = await this.#probe(grant)
@@ -174,17 +200,17 @@ export class DaemonClient {
     this.#requireVersion(version)
     this.#save(grant)
     this.#grant = grant
-    this.#version = version
-    return { version, enrolled: true }
+    this.#version = version.version
+    return { ...version, enrolled: true }
   }
 
   /**
-   * The version the daemon answers with the stored grant, or `undefined` when it is
-   * not there. Unlike `connect()`, absence does not discard the grant: a daemon that
+   * The version and build the daemon answers with the stored grant, or `undefined` when
+   * it is not there. Unlike `connect()`, absence does not discard the grant: a daemon that
    * was killed is restarted and re-adopted with the same credential, because its
    * enrollment secret is already spent.
    */
-  async daemonInfo(): Promise<string | undefined> {
+  async daemonInfo(): Promise<BuildIdentity | undefined> {
     const grant = this.#load()
     if (!grant) return undefined
     return await this.#probe(grant)
@@ -203,7 +229,7 @@ export class DaemonClient {
   /** Closing the App's side leaves the daemon running for devices and runs. */
   close(): void { this.#lanes.closeAll() }
 
-  async #probe(grant: StoredLocalGrant): Promise<string | undefined> {
+  async #probe(grant: StoredLocalGrant): Promise<BuildIdentity | undefined> {
     let socket: LocalSocket
     try {
       socket = await (this.#options.connectLocal ?? ((options) => oneShot(options.path, options)))({
@@ -212,10 +238,10 @@ export class DaemonClient {
     } catch { return undefined }
     try {
       const line = await socket.exchange(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'daemonInfo' })}\n`, ENROLL_TIMEOUT_MS)
-      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; error?: unknown }
+      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; error?: unknown }
       if (reply.error === 'device_not_authorized') throw new DaemonClientError('daemon_device_not_authorized')
       if (reply.op !== 'daemonInfo' || typeof reply.version !== 'string') return undefined
-      return reply.version
+      return reported(reply.version, reply.build)
     } catch (error) {
       if (error instanceof DaemonClientError) throw error
       return undefined
@@ -223,19 +249,27 @@ export class DaemonClient {
   }
 
   async #enroll(): Promise<StoredLocalGrant> {
-    const secret = this.#readSecret()
-    const key = await (this.#options.generateKey ?? generateDesktopDeviceIdentity)()
+    // The socket first (A6). The daemon decides on its secret before it opens enroll.sock,
+    // so a daemon that answers here and left no secret is up with a live local grant held by
+    // another credential: daemon_enrollment_unavailable, a state a launch cannot change.
+    // Nothing answering is daemon_not_running, which the supervisor answers by launching.
     let socket: LocalSocket
     try {
       socket = await (this.#options.connectEnroll ?? ((path) => oneShot(path)))(this.#options.paths.enrollSocketPath)
     } catch { throw new DaemonClientError('daemon_not_running') }
-    let reply: { version?: unknown; certificatePEM?: unknown; caCertificatePEM?: unknown; deviceId?: unknown; daemonVersion?: unknown; error?: unknown }
+    let secret: string
+    let key: { keyPEM: string; csrPEM: string; publicKeySHA256: string }
+    try {
+      secret = this.#readSecret()
+      key = await (this.#options.generateKey ?? generateDesktopDeviceIdentity)()
+    } catch (error) { socket.close(); throw error }
+    let reply: { version?: unknown; certificatePEM?: unknown; caCertificatePEM?: unknown; deviceId?: unknown; daemonVersion?: unknown; daemonBuild?: unknown; error?: unknown }
     try {
       const line = await socket.exchange(`${JSON.stringify({ version: 1, secret, csrPEM: key.csrPEM, deviceLabel: `Scry App ${this.#options.appVersion}` })}\n`, ENROLL_TIMEOUT_MS)
       reply = JSON.parse(line) as typeof reply
     } catch { throw new DaemonClientError('daemon_enrollment_unavailable') } finally { socket.close() }
     if (reply.error !== undefined) throw new DaemonClientError('daemon_enrollment_unavailable')
-    if (typeof reply.daemonVersion === 'string') this.#requireVersion(reply.daemonVersion)
+    if (typeof reply.daemonVersion === 'string') this.#requireVersion(reported(reply.daemonVersion, reply.daemonBuild))
     if (reply.version !== 1 || typeof reply.certificatePEM !== 'string' || typeof reply.caCertificatePEM !== 'string' || typeof reply.deviceId !== 'string') {
       throw new DaemonClientError('daemon_enrollment_unavailable')
     }
@@ -245,15 +279,19 @@ export class DaemonClient {
     }
   }
 
-  #requireVersion(remote: string): void {
-    if (remote !== this.#options.appVersion) throw new DaemonClientError('daemon_version_mismatch')
+  // The same version from another build is a mismatch too (A5): a reinstall at an
+  // unchanged version left the previous build's daemon running.
+  #requireVersion(remote: BuildIdentity): void {
+    if (!sameBuild(this.#expected, remote)) {
+      throw new DaemonClientError('daemon_version_mismatch', { running: remote.version, ...(remote.build ? { runningBuild: remote.build } : {}) })
+    }
   }
 
   #readSecret(): string {
     let raw: string
     try { raw = readFileSync(this.#options.paths.secretPath, 'utf8') } catch {
-      // No secret means no pending enrollment: the daemon is starting, has a live
-      // local grant, or was revoked. All three need the user, not a retry loop.
+      // No secret while enroll.sock answers means no pending enrollment: a local grant is
+      // live (another credential holds it) or was revoked. Both need the user, not a retry.
       throw new DaemonClientError('daemon_enrollment_unavailable')
     }
     const parsed = JSON.parse(raw) as { version?: unknown; secret?: unknown }

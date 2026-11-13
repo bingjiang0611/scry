@@ -12,8 +12,10 @@ import { SessionChatView } from './ChatView'
 import { ConversationDeleteDialog } from './ConversationDeleteDialog'
 import { PendingSubmissionDialog } from './PendingSubmissionDialog'
 import { SessionRenameDialog } from './SessionRename'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
+const message = ipcErrorMessage
 
 export function ConversationViewBody({
   conversation, embedded, draftKey, page, before, input, missing, working, managing, pending, pendingHealth, onCheckPending, onResendPending, forkAttempt, renaming, deleting, activeRunId, inherited, firstHandoff, limitation, drafts, live, forkableRunIds, forkUnsupported, error, notice, refreshButton, chatProps, setError, setNotice, setBefore, showLatest, updateMetadata, setRenaming, setDeleting, send, fork, refresh, onOpenConversation, mounted, changedRef, setReload, draftStore, turns, blockedReason, setInput, addPastedImages, addClipboardImage, removeDraftAttachment, liveHealth

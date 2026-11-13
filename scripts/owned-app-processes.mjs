@@ -13,14 +13,16 @@ function processes() {
   return rows
 }
 
-function descendants(rows, root) {
+// `exclude` names processes the App started but does not own (the detached daemon tree
+// in SCRY_HOST_DAEMON=1): they and everything below them stay out of the App's set.
+function descendants(rows, root, exclude = new Set()) {
   const owned = new Map()
   if (!rows.has(root)) return owned
   owned.set(root, rows.get(root))
   for (let changed = true; changed;) {
     changed = false
     for (const row of rows.values()) {
-      if (!owned.has(row.pid) && owned.has(row.parent)) {
+      if (!owned.has(row.pid) && owned.has(row.parent) && !exclude.has(row.pid)) {
         owned.set(row.pid, row)
         changed = true
       }
@@ -78,10 +80,10 @@ export function inspectOwnedApp(child) {
 }
 
 /** Test-only cleanup, outside Electron so the intentional SIGKILL cannot erase ownership. */
-export async function stopOwnedApp(child, { crash = false } = {}) {
+export async function stopOwnedApp(child, { crash = false, exclude = [] } = {}) {
   if (!child) return { tracked: 0 }
   if (child.exitCode !== null || child.signalCode !== null) throw new Error('test App exited before ownership capture; descendant cleanup unknown')
-  const owned = descendants(processes(), child.pid)
+  const owned = descendants(processes(), child.pid, new Set(exclude))
   if (!owned.has(child.pid)) throw new Error('test App identity unavailable; refusing cleanup/restart')
   child.kill(crash ? 'SIGKILL' : 'SIGTERM')
   // A graceful App may close its descendants itself. Crash tests reclaim the saved children here.

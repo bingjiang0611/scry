@@ -2,7 +2,13 @@ import assert from 'node:assert/strict'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
 import { nativeInitialPageTurns } from './performance-native.mjs'
 
-export async function measureHistory({ evaluate, wait, click, cdp, beginCounters, endCounters, metricValues, lastMetrics, sessions, iterations, turnCount, sections, cwd, traces }) {
+// `loadTrace` names the per-open main-process trace. In-process that is the history
+// handler's own `session_history.load` with its counters; with SCRY_HOST_DAEMON=1 the
+// handler runs in the daemon, so the App main's trusted-IPC trace stands in for it and
+// the returned-page counters are unavailable (the page size is still asserted below
+// from the DOM and from a direct loadSession read).
+export async function measureHistory({ evaluate, wait, click, cdp, beginCounters, endCounters, metricValues, lastMetrics, sessions, iterations, turnCount, sections, cwd, traces,
+  loadTrace = 'session_history.load', loadCounters = true }) {
   const pageTurns = Math.min(nativeInitialPageTurns, turnCount)
   const latestIndex = turnCount - 1
   const samples = []
@@ -108,9 +114,11 @@ export async function measureHistory({ evaluate, wait, click, cdp, beginCounters
   await evaluate(`(() => { const scroller = document.querySelector('.chat-transcript'); scroller.scrollTop = scroller.scrollHeight })()`)
   await wait(`document.querySelector('[data-run-id="${currentSession}-turn-${latestIndex}"]')?.textContent.includes('END ${currentSession} ${latestIndex}')`)
   assert.equal(await evaluate(`document.querySelector('textarea').value`), 'draft stays editable')
-  const loads = traces.filter(trace => trace.name === 'session_history.load')
+  const loads = traces.filter(trace => trace.name === loadTrace)
   assert.equal(loads.length, iterations + 2, 'every measured open must have a main-process trace')
-  assert.ok(loads.every(load => load.counters.returnedTurns === pageTurns), 'main must return the full initial page')
+  if (loadCounters) assert.ok(loads.every(load => load.counters.returnedTurns === pageTurns), 'main must return the full initial page')
+  // The IPC stand-in carries no page counters; a completed call is what main can show.
+  else assert.ok(loads.every(load => load.outcome === 'completed'), 'every measured open must complete through main')
   const context = { providerId: 'codex', cwd, externalSessionId: currentSession }
   const history = await evaluate(`window.scry.loadSession(${JSON.stringify(context)})`)
   assert.equal(history.totalTurns, turnCount)

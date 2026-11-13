@@ -8,7 +8,7 @@ import type { HostController } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
 import { PairingTransport } from './pairing-transport'
-import type { RunControlHandlers } from './host-run-control'
+import type { LocalEndpointHandlers } from './host-local-ops'
 import { RelayClient, type RelayDiagnostics } from './relay-client'
 import type { RemoteHostServiceDependencies } from './remote-host-service-deps'
 import type { PairingAuthority } from './pairing'
@@ -37,7 +37,7 @@ export class RemoteHostService {
   #pairing: PairingTransport
   #clients: RelayClient[]
   #relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
-  #runControl: RunControlHandlers | undefined
+  #localEndpoint: LocalEndpointHandlers | undefined
   #starting: Promise<void> | null = null
   #disposing: Promise<void> | null = null
   #disposed = false
@@ -62,7 +62,7 @@ export class RemoteHostService {
     hostId: string
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
     serverCredentials: { certificatePEM: string; privateKeyPEM: string }
-    runControl?: RunControlHandlers
+    localEndpoint?: LocalEndpointHandlers
   }) {
     this.#binding = init.binding
     this.#serverCredentials = init.serverCredentials
@@ -74,7 +74,7 @@ export class RemoteHostService {
     this.caCertificatePEM = init.caCertificatePEM
     this.hostId = init.hostId
     this.#relayAdvertisement = init.relayAdvertisement ?? null
-    this.#runControl = init.runControl
+    this.#localEndpoint = init.localEndpoint
   }
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
@@ -90,6 +90,8 @@ export class RemoteHostService {
       issue: identity.issue,
       authorizeWorkspace: deps.authorizeWorkspace,
       startRun: deps.startRun,
+      ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
+      ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
       gate: deps.gate,
       attachmentDirectory: join(deps.stateDirectory, 'attachments'),
       ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),
@@ -155,7 +157,7 @@ export class RemoteHostService {
       hostId: identity.hostId,
       relayAdvertisement: deps.relayAdvertisement ?? null,
       serverCredentials: { certificatePEM: server.certificatePEM, privateKeyPEM: server.privateKeyPEM },
-      ...(deps.runControl ? { runControl: deps.runControl } : {})
+      ...(deps.localEndpoint ? { localEndpoint: deps.localEndpoint } : {})
     })
   }
 
@@ -173,7 +175,7 @@ export class RemoteHostService {
    * grant enrolled over that socket is refused here if it ever arrives over a network
    * transport instead.
    */
-  createLocalHost(info: { version: string }): InnerMtlsHost {
+  createLocalHost(info: { version: string; build?: string }): InnerMtlsHost {
     return new InnerMtlsHost({
       controller: this.#binding.controller,
       serverCertPEM: this.#serverCredentials.certificatePEM,
@@ -181,7 +183,7 @@ export class RemoteHostService {
       caPEM: this.caCertificatePEM,
       transport: 'local',
       info,
-      ...(this.#runControl ? { runControl: this.#runControl } : {})
+      ...(this.#localEndpoint ? { localEndpoint: this.#localEndpoint } : {})
     })
   }
 

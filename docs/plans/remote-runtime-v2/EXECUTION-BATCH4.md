@@ -134,6 +134,12 @@
 | 性能 | `performance:measure -- --compare <B4 起点>` 与 B4-D 第 4 条的 L2 计时；每个 `worse` 都要说明，回归先修 |
 | Linux | 构建产物验收在 Ubuntu runner 上跑一遍；Arch/Hyprland 目标机不可用时标为 not-run |
 
+三处断言后来被更晚的决定细化，验收按细化后的语义执行（脚本与说明见 [status/b4-s0-scenarios](status/b4-s0-scenarios.md)）：
+
+- 「终端继续」：维护者 2026-11-11 决定 shell 不活过 App（[P3-terminal](P3-terminal.md)）。App 正常退出时终端随之结束；只有 App 崩溃时，终端留到约 90 s 的回收。
+- 「指纹变化拒绝执行」：按 CLAUDE.md（2026-09-21），指纹变化后重新校验，校验失败才拒绝，校验通过照常自动授权。
+- 「同 profile 互斥」：冲突域与进程内一致，是 session；同一 session 的第二次启动排队或被拒绝，不同 session 可以并行。
+
 ## 交付前全局验证
 
 与 Batch 3 同一张表全部重跑：

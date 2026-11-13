@@ -55,7 +55,8 @@ export interface DeleteSessionResult {
 export interface DeleteArchivedSessionsResult {
   ok: boolean
   cancelled?: boolean
-  reason?: 'catalog_unavailable' | 'user_cancelled' | 'partial_failure'
+  // catalog_changed: the archived set changed after the user confirmed (daemon mode); nothing was deleted.
+  reason?: 'catalog_unavailable' | 'catalog_changed' | 'user_cancelled' | 'partial_failure'
   /** 已完整删除的会话数。 */
   deleted: number
   /** 未删除成功的会话；preview 用于在 UI 里指名，reason 沿用单条删除的原因码。 */

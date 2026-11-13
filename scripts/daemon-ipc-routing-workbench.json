@@ -1,0 +1,246 @@
+{
+  "schema": 1,
+  "note": "desktopWorkbench 转发行（workspace / terminal / sourceControl）。与 daemon-ipc-routing.json 合并读取；按 surface 拆出以守 20 KB 门禁。",
+  "channels": [
+    {
+      "channel": "sourceControl:acknowledge",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "acknowledge",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:diff",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "diff",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:loadCommitDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "loadCommitDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:loadDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "loadDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:mutate",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "mutate",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:operations",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "operations",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:pullRequest",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "pullRequest",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:pullRequests",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "pullRequests",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:read",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "read",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:reconcile",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "reconcile",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:saveCommitDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "saveCommitDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "sourceControl:saveDraft",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "saveDraft",
+      "why": "git 与 workspace 授权归 daemon"
+    },
+    {
+      "channel": "terminal:ack",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "ack",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:active",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "active",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:attach",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "attach",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:close",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "close",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:ready",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "ready",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:recordingDelete",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "recordingDelete",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:recordingList",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "recordingList",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:recordingRead",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "recordingRead",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:resize",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "resize",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:start",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "start",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "terminal:write",
+      "route": "new-op",
+      "op": "terminal",
+      "method": "write",
+      "why": "App 终端：main 的同一份处理与录制目录，见 P3-terminal.md"
+    },
+    {
+      "channel": "workspace:create",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceCreate",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:list",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceList",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:move",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceMove",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:openExternal",
+      "route": "main",
+      "why": "daemon 没有 shell：留在 App，仍按窗口工作区授权；跨项目回退的已知项目列表向 daemon 取",
+      "source": "daemon:projectStore（listProjects + recentFolders）"
+    },
+    {
+      "channel": "workspace:read",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceRead",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:readPage",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceReadPage",
+      "why": "工作区读取归 daemon"
+    },
+    {
+      "channel": "workspace:rename",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceRename",
+      "why": "工作区写入归 daemon"
+    },
+    {
+      "channel": "workspace:trash",
+      "route": "main",
+      "why": "daemon 没有 shell：留在 App，按窗口工作区授权后交给系统废纸篓"
+    },
+    {
+      "channel": "workspace:write",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "workspace",
+      "method": "workspaceWrite",
+      "why": "工作区写入归 daemon"
+    }
+  ]
+}

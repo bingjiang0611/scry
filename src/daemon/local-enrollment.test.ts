@@ -158,7 +158,7 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     const store = openLocalEnrollmentStore(directory)
     store.ensure(false)
     const secret = JSON.parse(readFileSync(store.secretPath, 'utf8')).secret
-    const handler = localEnrollHandlers(store, { enrollLocal: (input, consume) => authority.enrollLocal(input, consume) }, ANCHOR)
+    const handler = localEnrollHandlers(store, { enrollLocal: (input, consume) => authority.enrollLocal(input, consume) }, ANCHOR, { version: 'test-daemon' })
     const reply = await handler({ version: 1, secret, csrPEM: 'CSR local', deviceLabel: 'Scry App' }) as Record<string, unknown>
     expect(reply).toMatchObject({ version: 1, caCertificatePEM: ANCHOR, certificateSHA256: '9'.repeat(60) + '0001' })
     expect(JSON.stringify(reply)).not.toContain(secret)

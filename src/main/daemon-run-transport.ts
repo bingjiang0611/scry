@@ -1,8 +1,11 @@
-import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { AgentDataUpdated, AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import { DaemonClientError } from './daemon-client'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
+import type { DaemonEventReply } from './daemon-event-pump'
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -266,10 +269,80 @@ export class DaemonRunTransport {
     return reply.state.state
   }
 
+  /** The App's event feed (P3f): a long poll answered by the daemon on its own lane. */
+  async appEvents(input: { epoch?: string; cursor: number; waitMs: number }, signal?: AbortSignal): Promise<DaemonEventReply> {
+    const reply = await this.#call(
+      { op: 'appEvents', ...(input.epoch !== undefined ? { epoch: input.epoch } : {}), cursor: input.cursor, waitMs: input.waitMs },
+      { replayable: true, ...(signal ? { signal } : {}) }
+    )
+    const events = reply.events
+    if (!record(events) || typeof events.epoch !== 'string' || !Number.isSafeInteger(events.cursor) ||
+        !Array.isArray(events.items) || events.items.length > MAX_ITEMS) throw new DaemonRunError('invalid_daemon_response')
+    const items = events.items.flatMap((raw): DaemonEventReply['items'] => {
+      if (!record(raw)) return []
+      if (raw.kind === 'data' && isDataUpdated(raw.event)) return [{ kind: 'data', event: raw.event }]
+      if (raw.kind === 'run' && isDaemonRunId(raw.runId)) {
+        const intentSeq = Number.isSafeInteger(raw.intentSeq) && (raw.intentSeq as number) > 0 ? raw.intentSeq as number : undefined
+        return [{ kind: 'run', runId: raw.runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }]
+      }
+      if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
+      if (raw.kind === 'terminal') return [{ kind: 'terminal' }]
+      if (raw.kind === 'oauth' && typeof raw.url === 'string' && raw.url.length <= 8192) return [{ kind: 'oauth', url: raw.url }]
+      // Only the notices the daemon is meant to forward, never a channel it names freely.
+      if (raw.kind === 'window' && typeof raw.channel === 'string' && DAEMON_WINDOW_NOTICES.has(raw.channel) && record(raw.payload)) {
+        return [{ kind: 'window', channel: raw.channel, payload: raw.payload }]
+      }
+      return []
+    })
+    return { epoch: events.epoch, cursor: events.cursor as number, items, reset: events.reset === true }
+  }
+
+  /** The App viewed one of the daemon's unread sessions (E1b). Idempotent. */
+  async attentionViewed(sessionKey: string): Promise<void> {
+    const reply = await this.#call({ op: 'attentionViewed', sessionKey }, { replayable: true })
+    if (reply.viewed !== true) throw new DaemonRunError('invalid_daemon_response')
+  }
+
   /** A full run snapshot, used to resynchronise after a gap. */
   async run(runId: string, context: unknown): Promise<ActiveRun | null> {
     const read = await this.trace({ context, runId })
     return read.kind === 'snapshot' ? read.run : fail()
+  }
+
+  /**
+   * One App channel the daemon answers for this App (B4-L4). Transport failures keep the
+   * lane's phase rule; the daemon's own error text is kept as the handler's message, so
+   * the renderer sees what main's handler would have thrown. An older daemon without the
+   * op is a named absence.
+   */
+  async localOp(input: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown> {
+    // JSON carries an omitted (undefined) argument as null. The renderer's own null and
+    // a parameter it left out are different inputs to main's handler, so the positions
+    // left out are named and the daemon restores them.
+    const absent = input.args.flatMap((value, index) => value === undefined ? [index] : [])
+    const reply = await this.forward({ op: input.op, method: input.method, args: input.args, ...(absent.length > 0 ? { absent } : {}) }, input.read)
+    if (!('result' in reply)) throw new DaemonRunError('invalid_daemon_response')
+    return reply.result
+  }
+
+  /**
+   * One request for an op the daemon serves (route `forward` reuses the ops paired
+   * devices use). Errors map as described for localOp; the reply is the caller's to read.
+   */
+  async forward(request: Record<string, unknown>, read: boolean): Promise<Record<string, unknown>> {
+    let reply: unknown
+    try {
+      reply = await this.#request(request, { replayable: read })
+    } catch (error) {
+      throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
+    }
+    if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
+    if (reply.error === 'device_not_authorized') throw new DaemonRunError('daemon_device_not_authorized')
+    if (reply.error === 'unsupported_op') {
+      throw new Error(`daemon_capability_unavailable:${String(request.op)}${typeof request.method === 'string' ? `:${request.method}` : ''}`)
+    }
+    if (typeof reply.error === 'string') throw new Error(reply.error)
+    return reply
   }
 
   async #call(request: Record<string, unknown>, options?: { replayable?: boolean; signal?: AbortSignal }): Promise<Record<string, unknown>> {
@@ -297,4 +370,20 @@ function traceCursor(value: unknown): DesktopTraceCursor | undefined {
 
 function fail(): never {
   throw new DaemonRunError('invalid_daemon_response')
+}
+
+// The notices this App renders. Anything else (a newer daemon's kind) is skipped by the
+// caller rather than passed to the window as a shape it does not know.
+function isDataUpdated(value: unknown): value is AgentDataUpdated {
+  if (!record(value)) return false
+  if (value.kind === 'conversation_changed') return typeof value.conversationId === 'string'
+  if (value.kind === 'catalog_recovered' || value.kind === 'resynchronize') return true
+  return typeof value.runId === 'string' && (value.kind === undefined || value.kind === 'turn_recorded' || value.kind === 'session_deleted')
+}
+
+const MAX_UNREAD_SESSIONS = 10_000
+
+function isAttentionSnapshot(value: unknown): value is SessionAttentionSnapshot {
+  return record(value) && Number.isSafeInteger(value.revision) && Array.isArray(value.unreadSessionKeys) &&
+    value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
 }

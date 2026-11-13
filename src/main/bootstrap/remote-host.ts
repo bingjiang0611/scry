@@ -2,7 +2,6 @@ import { app, shell } from 'electron'
 import type { ProviderId } from '../../shared/provider'
 import type { UsageAnalyticsRangeDays } from '../../shared/trace'
 import { join } from 'node:path'
-import type { RemoteHostService } from '../remote/remote-host-service'
 import { shellEnv, warmShellEnv } from '../claude-locate'
 import { buildMcpExecutionSnapshot } from '../mcp-execution-trust'
 import { isMcpGuardReport } from '../../shared/mcpguard-report'
@@ -10,11 +9,12 @@ import { usageAnalyticsWithCreditsQuery } from '../db'
 import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
 import { resolveRemoteRelay } from './remote-relay'
+import { pairingChannelHandlers } from './pairing-channels'
+import { registerChannelHandlers } from './startup-channels'
 import { createRemoteHistoryHandlers } from './remote-history'
 import { RunOutputWorkerStore } from '../remote/run-output-worker'
-import { remoteHostEnabled } from '../remote/remote-defaults'
+import { inProcessRemoteHostEnabled } from '../remote/remote-defaults'
 import type { IpcMainInvokeEvent } from 'electron'
-import type { RemoteStatus } from '../../shared/remote'
 
 import { createHostRuntime } from '../../host-runtime/host-runtime'
 import type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, RemoteStartOptions } from '../../host-runtime/host-runtime-types'
@@ -22,7 +22,7 @@ import type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, Remo
 export type { RemoteHostRuntime, RemoteRuns, RemoteReceipts, DeleteOptions, RemoteStartOptions }
 export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Promise<void> {
 
-  if (runtime.remoteHostService || !remoteHostEnabled(process.env.SCRY_REMOTE_HOST, app.isPackaged)) return
+  if (runtime.remoteHostService || !inProcessRemoteHostEnabled(process.env, app.isPackaged)) return
   try {
     const stateDirectory = join(app.getPath('userData'), 'remote')
     const relay = await resolveRemoteRelay(stateDirectory)
@@ -96,26 +96,6 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
 type TrustedHandler = <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
 
 export function registerRemoteHostHandlers(handleTrusted: TrustedHandler, runtime: RemoteHostRuntime): void {
-  const requireRemoteHost = (): RemoteHostService => {
-    const service = runtime.remoteHostService
-    if (!service) throw new Error('远程访问未启用')
-    return service
-  }
-  handleTrusted('remote:status', (): RemoteStatus => runtime.remoteHostService ? runtime.remoteHostService.status() : { enabled: false })
-  handleTrusted('remote:desktop:status', () => runtime.remoteHostService?.desktopStatus() ?? { enabled: false })
-  handleTrusted('remote:desktop:invite', () => requireRemoteHost().beginDesktopPairing())
-  handleTrusted('remote:desktop:disable', () => requireRemoteHost().disableDesktop())
-  handleTrusted('remote:pairing:begin', () => requireRemoteHost().beginPairing())
-  handleTrusted('remote:pairing:confirm', (_event, pairingId: unknown, expectedPublicKeySHA256: unknown) => {
-    if (typeof pairingId !== 'string' || typeof expectedPublicKeySHA256 !== 'string') throw new Error('无效的配对确认参数')
-    return requireRemoteHost().confirmPairing(pairingId, expectedPublicKeySHA256)
-  })
-  handleTrusted('remote:pairing:cancel', (_event, pairingId: unknown) => {
-    if (typeof pairingId !== 'string') throw new Error('无效的配对标识')
-    return requireRemoteHost().cancelPairing(pairingId)
-  })
-  handleTrusted('remote:device:revoke', (_event, deviceId: unknown) => {
-    if (typeof deviceId !== 'string') throw new Error('无效的设备标识')
-    return requireRemoteHost().revokeDevice(deviceId)
-  })
+  // Shared with the daemon, which hosts paired devices in daemon mode (pairing-channels.ts).
+  registerChannelHandlers(handleTrusted, pairingChannelHandlers({ host: () => runtime.remoteHostService }))
 }

@@ -1,4 +1,5 @@
 const CHAT_BOTTOM_STICKY_PX = 32
+const automaticBottomScrolls = new WeakMap<object, number>()
 
 interface ChatScrollTarget {
   getBoundingClientRect: () => { top: number; height?: number }
@@ -42,7 +43,9 @@ export function scrollChatToBottomIfNeeded(
   behavior: ScrollBehavior = 'auto'
 ): boolean {
   if (!el || !shouldStick) return false
+  const previousTop = el.scrollTop
   el.scrollTo({ top: el.scrollHeight, behavior })
+  if (el.scrollTop !== previousTop) automaticBottomScrolls.set(el, el.scrollTop)
   return true
 }
 
@@ -50,7 +53,11 @@ export function chatBottomStickinessAfterScroll(
   el: Pick<ChatScrollBox, 'scrollHeight' | 'scrollTop' | 'clientHeight'>,
   openingSession: boolean
 ): boolean {
-  return openingSession || isChatNearBottom(el)
+  // A queued event from our own pin can arrive after a resize changes the
+  // bottom distance. It is not evidence that the reader scrolled away.
+  const automaticTop = automaticBottomScrolls.get(el)
+  automaticBottomScrolls.delete(el)
+  return openingSession || el.scrollTop === automaticTop || isChatNearBottom(el)
 }
 
 interface TranscriptGrowth {

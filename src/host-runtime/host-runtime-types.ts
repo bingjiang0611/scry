@@ -96,6 +96,13 @@ export interface HostRuntimeInputs {
   toolPanels: HostControllerFactoryDependencies['toolPanels']
   // Test/embedding seam. Production omits it and uses the bounded worker-backed store.
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
+  // App-only run controls and local ops. The daemon supplies them; the service serves
+  // them on its local endpoint only.
+  localEndpoint?: RemoteHostServiceDependencies['localEndpoint']
+  // Daemon mode: conversation sends prepared in memory, claimed by their dispatch.
+  // The App event feed's run notices (P3f E2): which ledger run changed.
+  onRunActivity?: (runId: string, intentSeq?: number) => void
+  managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 
 export type { UsageAnalyticsRangeDays, ProviderContext }

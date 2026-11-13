@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
 import { ModalFrame, requestModalClose } from './Modals'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 
 export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   id: string
@@ -19,7 +20,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
     let cancelled = false
     void window.scry.conversations.previewDeletion(id).then(
       preview => { if (!cancelled) setPreview(preview) },
-      error => { if (!cancelled) setError(String(error)) }
+      error => { if (!cancelled) setError(ipcErrorMessage(error)) }
     )
     return () => { cancelled = true }
   }, [id])
@@ -37,7 +38,8 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       setResult(await window.scry.conversations.delete(id, preview.fingerprint))
       onChanged()
     } catch (error) {
-      setError(`${String(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
+      // Readable copy without Electron's wrapper; a daemon refusal is named, not raw.
+      setError(`${ipcErrorMessage(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
       onChanged()
     } finally { pending.current = false; setWorking(false) }
   }

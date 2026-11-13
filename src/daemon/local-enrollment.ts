@@ -1,7 +1,10 @@
 import { createServer, type Server } from 'node:net'
+import { trackConnections } from './socket-server-close'
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { timingSafeEqual, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
+import type { BuildIdentity } from '../shared/build-identity'
+import { takeLocalEnrollmentRequest } from './local-enrollment-request'
 
 // Bootstrapping the App's own device grant. The App has no certificate yet, so it
 // cannot use inner mTLS; enrollment runs over a second unix socket in the same 0700
@@ -22,7 +25,10 @@ const MAX_REQUEST_BYTES = 20_480
 
 export interface LocalEnrollmentStore {
   readonly secretPath: string
-  /** Create a secret when no local grant is live, otherwise delete any stale one. */
+  /**
+   * Create a secret when no local grant is live, otherwise delete any stale one. The one
+   * exception is a request left by the App's confirmed reconnect (local-enrollment-request.ts).
+   */
   ensure(hasValidLocalGrant: boolean): void
   /** True exactly once per secret; deletes the file. */
   consume(secret: unknown): boolean
@@ -63,7 +69,8 @@ export function openLocalEnrollmentStore(directory: string, options: { clock?: (
   return {
     secretPath,
     ensure(hasValidLocalGrant) {
-      if (hasValidLocalGrant) { rmSync(secretPath, { force: true }); return }
+      const requested = takeLocalEnrollmentRequest(directory, (options.clock ?? Date.now)())
+      if (hasValidLocalGrant && !requested) { rmSync(secretPath, { force: true }); return }
       write()
     },
     consume(secret) {
@@ -129,6 +136,8 @@ export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): 
         })
     })
   })
+  // Tracked from the first connection, so close() can end every one of them.
+  const tracked = trackConnections(server)
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(socketPath, () => { server.off('error', reject); resolve() })
@@ -142,8 +151,10 @@ export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): 
   return {
     socketPath,
     close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      // Stop accepting and free the path first; then end what is still connected.
+      const closing = tracked.close()
       rmSync(socketPath, { force: true })
+      await closing
     }
   }
 }
@@ -155,7 +166,7 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
     deviceId: string
     expiresAt: number
   }>
-}, caCertificatePEM: string, daemonVersion: string) {
+}, caCertificatePEM: string, daemon: BuildIdentity) {
   return async (request: unknown): Promise<unknown> => {
     if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('invalid_local_enrollment_request')
     const input = request as { version?: unknown; secret?: unknown; csrPEM?: unknown; deviceLabel?: unknown }
@@ -169,7 +180,9 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
       certificatePEM: grant.certificatePEM,
       certificateSHA256: grant.certificateSHA256,
       caCertificatePEM,
-      daemonVersion,
+      daemonVersion: daemon.version,
+      // Same rule as daemonInfo: the App compares the build too (A5).
+      ...(daemon.build ? { daemonBuild: daemon.build } : {}),
       deviceId: grant.deviceId,
       expiresAt: grant.expiresAt
     }

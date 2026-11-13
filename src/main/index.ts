@@ -13,12 +13,11 @@ import { resolveSessionRunIds } from './db'
 import { SourceControlService } from './source-control/service'
 import { registerSourceControlIpc } from './source-control/ipc'
 import { registerWorkspaceSelectionIpc } from './source-control/workspace-ipc'
-import { readUsageStats } from './usage-jsonl'
 import {
   normalizeAgentForkSessionRequest,
   type AgentForkSessionResult
 } from '../shared/runtime'
-import { type ProviderContext, type ProviderId } from '../shared/provider'
+import { type ProviderId } from '../shared/provider'
 import { providerOperationKey } from './provider-operation-gate'
 import { RemoteHostService } from './remote/remote-host-service'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
@@ -36,6 +35,7 @@ import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
 import { appDaemonModeDeps, daemonModeEnabled } from './bootstrap/daemon-run-mode'
 import { createLazyDaemonRunSurface } from './bootstrap/daemon-run-lazy'
+import { registerBackgroundServiceHandlers } from './bootstrap/background-service'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
@@ -43,6 +43,7 @@ import { createRendererRestartLog } from './bootstrap/renderer-restart'
 import { ensureMcpExecutionAuthorized, authorizedMcpExecution } from './bootstrap/trust'
 import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
+import { catalogChannelHandlers, registerChannelHandlers } from './bootstrap/startup-channels'
 import { registerConversationHandlers } from './bootstrap/conversation'
 import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
@@ -229,21 +230,14 @@ registerProviderHandlers({
   providerOperationKey, providerOperationGate
 })
 
-// 单目录会话列表（当前工作目录）：只列 app 自己起过的会话
-handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
-  return appSessionStore().listSessions(context.cwd ?? '', context.providerId, context.agentProfileId)
-})
-
-// 左侧栏项目目录独立于会话保留；老数据从 recent folders 与 app 会话 catalog 一次性补齐。
-handleTrusted('agent:listProjects', () => listProjectCatalog())
-handleTrusted('agent:catalogHealth', () => appSessionStore().health())
+registerChannelHandlers(handleTrusted, catalogChannelHandlers({ appSessionStore, listProjectCatalog, recentStore }))
 
 const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined }
 const sessionDeletion = registerSessionDeletionHandlers({
   handleTrusted, getRuns: () => runs, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions,
   getWindow: () => win, rendererCanReceive, appUserDataDir: app.getPath('userData'), isOwnedTestApp, requestRunStop,
-  assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge,
+  assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, getCurrentCwd: () => currentCwd,
   prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation)
 })
 const { deleteOneSession, sessionRefFromRequest, changeLegacySessionMetadata } = sessionDeletion
@@ -300,7 +294,8 @@ const {
 } = pipeline
 // 开发开关：daemon 持有台账与 run 时，这些通道由 daemon 的帧回答；未开时保持进程内管线。
 const daemonRun = daemonModeEnabled()
-  ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd }))
+  ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd,
+    dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces }))
   : undefined
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
@@ -311,20 +306,12 @@ registerAgentRuntimeHandlers({
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),
   getRemoteHostService: () => remoteHostService
 })
+registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow: () => win })
 
 // Shared by the Mac stop button and a paired device stopping a Mac run.
 function requestRunStop(runId: string): boolean {
   return pipeline.requestRunStop(runId)
 }
-
-// B2-lite：累计用量统计（读 usage.jsonl 聚合）
-handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
-  readUsageStats(app.getPath('userData'), context ? {
-    providerId: context.providerId,
-    agentProfileId: context.agentProfileId,
-    cwd: context.cwd ?? ''
-  } : {})
-)
 
 // Remote-access subsystem (iOS control client). Packaged builds start it against
 // the official public relay; development remains opt-in and SCRY_REMOTE_HOST=0

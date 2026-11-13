@@ -1,20 +1,20 @@
 import { clipboard, dialog, nativeTheme } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
-import { basename } from 'node:path'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { writeClipboardText } from '../clipboard-text'
 import { isRendererPerformanceSample } from '../../shared/performance'
 import { performanceRecordingEnabled } from '../performance-timing'
 import { recordRendererPerformance } from '../performance-recording'
 import { windowBackgroundColor } from '../window-chrome'
-import { canonicalizePiAgentPaths, resolvePiLauncherExecutable, piProfileForExecutable, createPiAgentProfileStore, type PiAgentProfile } from '../pi-agent-profiles'
-import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
-import { providerIdForAgentId } from '../../shared/runtime'
-import { piRpcEnvironment, probePiAgent } from '../providers/pi'
+import type { createPiAgentProfileStore, PiAgentProfile } from '../pi-agent-profiles'
+import type { DetectedAgent } from '../claude-locate'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
-import { composeProviderDetectionResults } from '../provider-detection'
+import { daemonModeEnabled } from '../daemon-channel-gate'
+import { providerDetectionChannelHandlers, registerChannelHandlers } from './startup-channels'
+import { addPiProfileFromLauncher, piProfileChannelHandlers, recentFolderChannelHandlers, rememberChosenFolder } from './project-channels'
+import { installProjectDaemonWindow } from './project-daemon'
 
 export interface AppAgentBootstrapDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -28,7 +28,7 @@ export interface AppAgentBootstrapDependencies {
   dialog: typeof dialog
   piProfileStore: () => ReturnType<typeof createPiAgentProfileStore>
   invalidateRemoteProviderMetadata: (providerId: 'pi') => void
-  recentStore: () => { load: () => string[]; remove: (cwd: string) => void }
+  recentStore: () => { load: () => string[]; remove: (cwd: string) => string[] }
   canonicalExistingDirectory: (cwd: string) => string
   invalidateSessionHistoryLoad: (reason: string) => void
   rememberProject: (cwd: string) => void
@@ -55,110 +55,54 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     return true
   })
 
-  handleTrusted('agent:detectFast', async () => {
-    if (smokeProviderEnabled) return smokeDetectedAgents
-    const detected = (await canonicalizePiAgentPaths(detectAgentsFast())).flatMap((agent) => {
-      const providerId = providerIdForAgentId(agent.id)
-      if (!providerId) return []
-      return [{
-        ...agent,
-        ...(providerId === 'pi'
-          ? { agentProfileId: agent.id, runtimeProvider: 'pi_rpc' as const, transport: 'JSONL RPC subprocess' }
-          : {})
-      }]
-    })
-    return [
-      ...detected,
-      ...storedPiProfilesNotDetected(detected).map((profile) => ({
-        id: profile.id,
-        name: profile.label,
-        bin: basename(profile.executable),
-        path: profile.executable,
-        agentProfileId: profile.id,
-        runtimeProvider: 'pi_rpc' as const,
-        transport: 'JSONL RPC subprocess'
-      }))
-    ]
-  })
+  registerChannelHandlers(handleTrusted, providerDetectionChannelHandlers({
+    smokeProviderEnabled, smokeDetectedAgents, storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry
+  }))
 
-  handleTrusted('agent:detect', async () => {
-    // 让这次描述用上最新策略；hydrate/refresh 自己吞掉所有失败，不会阻断探测。
-    await providerCompatibility.hydrate()
-    await providerCompatibility.refresh()
-    // 先异步完成 PATH/版本探测，让 descriptor 的同步 fallback 命中已知路径，避免阻塞主进程。
-    // Capability disabling alone does not disable discovery's real --version subprocesses.
-    const detected = smokeProviderEnabled ? smokeDetectedAgents : await detectInstalledAgents()
-    const descriptors = await providerRegistry.describe()
-    return composeProviderDetectionResults({
-      detected,
-      descriptors,
-      storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfilesNotDetected(detected),
-      probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
-        env: await piRpcEnvironment(profile),
-        timeout: PI_VERSION_PROBE_TIMEOUT_MS
-      }),
-      // adapter 自述的版本经常是空，本机真实版本来自 CLI 探测；用最终生效的版本重算判定。
-      compatibility: (providerId, version) => providerCompatibility.advisory(providerId, version)
+  // The pickers and dialogs are this window's; the work after them is shared with the
+  // daemon (project-channels.ts). In daemon mode the daemon does that work and the App
+  // keeps only the window parts (project-daemon.ts).
+  const pickFolder = async (): Promise<string | null> => {
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+  }
+  const pickPiLauncher = async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({ title: '选择 Pi Agent 启动器', properties: ['openFile'] })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  }
+  const notifyPiFailure = async (detail: string): Promise<void> => {
+    const options = { type: 'error' as const, title: '无法添加 Pi Agent', message: '所选启动器未通过 Pi RPC 握手', detail }
+    if (getWindow() && !getWindow()!.isDestroyed()) await dialog.showMessageBox(getWindow()!, options)
+    else await dialog.showMessageBox(options)
+  }
+  if (daemonModeEnabled()) {
+    installProjectDaemonWindow({
+      pickFolder, pickPiLauncher, notifyPiFailure, windowCwd: getCurrentCwd,
+      applyChosenFolder: (dir) => {
+        invalidateSessionHistoryLoad('workspace selection changed')
+        setCurrentCwd(dir)
+      }
     })
-  })
+  }
 
   handleTrusted('agent:addPiProfile', async () => {
-    const result = await dialog.showOpenDialog({ title: '选择 Pi Agent 启动器', properties: ['openFile'] })
-    if (result.canceled || result.filePaths.length === 0) return null
+    const launcher = await pickPiLauncher()
+    if (launcher === null) return null
     try {
-      const profile = piProfileForExecutable(await resolvePiLauncherExecutable(result.filePaths[0]))
-      const versionProbe = await probeCliVersion(profile.executable, ['--version'], {
-        env: await piRpcEnvironment(profile),
-        timeout: PI_VERSION_PROBE_TIMEOUT_MS
-      })
-      await probePiAgent(profile, getCurrentCwd())
-      const stored = piProfileStore().add(profile)
-      invalidateRemoteProviderMetadata('pi')
-      const descriptor = (await providerRegistry.describe()).find((entry) => entry.id === 'pi')
-      if (!descriptor) throw new Error('Pi Provider 未注册')
-      return {
-        id: stored.id,
-        name: stored.label,
-        bin: basename(stored.executable),
-        path: stored.executable,
-        version: versionProbe.version ?? descriptor.version,
-        runtimeProvider: descriptor.runtimeProvider,
-        transport: descriptor.transport,
-        capabilities: descriptor.capabilities,
-        health: descriptor.health,
-        agentProfileId: stored.id
-      }
+      return await addPiProfileFromLauncher({ piProfileStore, providerRegistry, invalidateRemoteProviderMetadata }, launcher, getCurrentCwd())
     } catch (error) {
-      const options = {
-        type: 'error' as const,
-        title: '无法添加 Pi Agent',
-        message: '所选启动器未通过 Pi RPC 握手',
-        detail: String((error as Error).message)
-      }
-      if (getWindow() && !getWindow()!.isDestroyed()) await dialog.showMessageBox(getWindow()!, options)
-      else await dialog.showMessageBox(options)
+      await notifyPiFailure(String((error as Error).message))
       return null
     }
   })
 
-  handleTrusted('agent:removePiProfile', (_event, id: unknown) => {
-    if (typeof id !== 'string' || !/^pi:[a-f0-9]{16}$/.test(id)) throw new Error('无效的 Pi Agent Profile')
-    piProfileStore().remove(id)
-    invalidateRemoteProviderMetadata('pi')
-    return true as const
-  })
-
-  handleTrusted('agent:providerDescriptors', () => providerRegistry.describe())
-
-  handleTrusted('agent:recentFolders', () => recentStore().load())
-  handleTrusted('agent:removeRecentFolder', (_event, dir: string) => recentStore().remove(dir))
+  registerChannelHandlers(handleTrusted, piProfileChannelHandlers({ piProfileStore, invalidateRemoteProviderMetadata }))
+  registerChannelHandlers(handleTrusted, recentFolderChannelHandlers({ recentStore }))
 
   handleTrusted('agent:chooseFolder', async () => {
-    const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
-    if (r.canceled || r.filePaths.length === 0) return null
-    const dir = canonicalExistingDirectory(r.filePaths[0])
-    invalidateSessionHistoryLoad('workspace selection changed')
-    rememberProject(dir)
+    const picked = await pickFolder()
+    if (picked === null) return null
+    const dir = rememberChosenFolder({ canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject }, picked)
     setCurrentCwd(dir)
     return dir
   })

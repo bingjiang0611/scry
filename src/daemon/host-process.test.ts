@@ -1,71 +1,18 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, realpathSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
-import { connect as netConnect, type Socket } from 'node:net'
-import { connect as tlsConnect, type TLSSocket } from 'node:tls'
-import { once } from 'node:events'
-import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
+import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
-import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { createRecentFoldersStore } from '../main/app-store'
-import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
-const dirs: string[] = []
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'scry-daemon-host-'))
-  dirs.push(dir)
-  return dir
-}
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
-
-class MemoryOutputStore implements RunOutputStore {
-  private readonly chunks: OutputChunk[] = []
-  append(chunk: Omit<OutputChunk, 'seq'>): OutputChunk {
-    const next = { ...chunk, seq: (this.chunks.at(-1)?.seq ?? 0) + 1 }
-    this.chunks.push(next)
-    return next
-  }
-  since(runId: string, cursor: number) {
-    const chunks = this.chunks.filter((chunk) => chunk.runId === runId && chunk.seq > cursor)
-    return { chunks, cursor: chunks.at(-1)?.seq ?? cursor }
-  }
-  close(): void {}
-}
-
-// local.sock serves the App's own grant only. A device grant is refused there by the
-// transport rule, so the fixture enrolls the way the App does: present the 0600
-// enrollment secret over the enrollment socket.
-async function enrollLocal(service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service']) {
-  const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-  const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
-  const b64 = Buffer.from(pkcs8).toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n$/, '')
-  const keyPEM = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----\n`
-  const csr = await Pkcs10CertificateRequestGenerator.create({ name: 'CN=daemon-device', keys, signingAlgorithm: { name: 'ECDSA', hash: 'SHA-256' } })
-  const csrPEM = csr.toString('pem')
-  const grant = await service.enrollLocalDevice({ csrPEM, deviceLabel: 'daemon fixture' }, () => true)
-  return { keyPEM, certPEM: grant.certificatePEM }
-}
-
-async function call(socketPath: string, ca: string, cert: string, key: string, request: Record<string, unknown>) {
-  const raw: Socket = netConnect(socketPath)
-  await once(raw, 'connect')
-  const socket: TLSSocket = tlsConnect({ socket: raw, ca, cert, key, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
-  await once(socket, 'secureConnect')
-  socket.write(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request })}\n`)
-  let buffer = ''
-  for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
-  socket.destroy()
-  return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
-}
+afterEach(cleanupTempDirs)
 
 describe('daemon host process', () => {
   it('fails before serving when a packaged daemon has no private recorder CLI', async () => {
@@ -100,7 +47,8 @@ describe('daemon host process', () => {
 
     const workspace = join(root, 'workspace')
     mkdirSync(workspace, { mode: 0o700 })
-    createRecentFoldersStore(userDataDir).push(workspace)
+    // The picker stores canonical paths; on macOS tmpdir is /var → /private/var.
+    createRecentFoldersStore(userDataDir).push(realpathSync(workspace))
     const staleAtomicTemp = join(userDataDir, 'app-sessions.json.tmp')
     writeFileSync(staleAtomicTemp, 'stale', { mode: 0o600 })
     const oldRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
@@ -138,6 +86,157 @@ describe('daemon host process', () => {
       expect(desktop.desktop).not.toHaveProperty('sessionFork')
       expect(desktop.desktop).not.toHaveProperty('sessionDelete')
       expect(desktop.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
+      // The App's run controls are served on the local endpoint only. The daemon used to
+      // build them and then drop them before the host, so every steer, background-task stop
+      // and adopt answered unsupported_op in a real daemon.
+      const adopted = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'runControl', method: 'adopt', runId: 'run-not-here'
+      })
+      expect(adopted.error).toBeUndefined()
+      // App channels the daemon answers for its App (B4-L4), over the same local socket and
+      // grant; the answers come from the handlers main registers, run against daemon state.
+      const recent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'projectStore', method: 'recentFolders', args: []
+      })
+      expect(recent.result).toContain(realpathSync(workspace))
+      const health = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'sessionStore', method: 'catalogHealth', args: []
+      })
+      expect(health.error).toBeUndefined()
+      expect(health.result).toBeTruthy()
+      const descriptors = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'providerCatalog', method: 'providerDescriptors', args: []
+      })
+      expect((descriptors.result as Array<{ id: string }>).map((descriptor) => descriptor.id)).toContain('codex')
+      // Conversation ledger reads are served from the daemon's own store; a write that is
+      // not migrated yet stays refused rather than answered from part of the table.
+      const conversations = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'list', args: [workspace]
+      })
+      expect(conversations.error).toBeUndefined()
+      expect(Array.isArray(conversations.result)).toBe(true)
+      // Ledger writes the daemon can make on its own (B4-L4-2b): create, then read it back
+      // and rename it, all against the daemon's store.
+      // The App's event feed (P3f): a new client starts at the present, then hears of
+      // the daemon's own data changes, which used to be dropped.
+      const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', cursor: 0, waitMs: 0
+      })
+      // It carries the current unread set as state (E1b); nothing is unread yet.
+      expect(handshake.events.items).toEqual([{ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) }])
+      const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'create', args: [workspace]
+      })
+      expect(create.error).toBeUndefined()
+      const created = create.result as { id: string; revision: number }
+      const changed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', epoch: handshake.events.epoch, cursor: handshake.events.cursor, waitMs: 1_000
+      })
+      expect(changed.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
+      const listed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'list', args: [workspace]
+      })
+      expect((listed.result as Array<{ id: string }>).map((item) => item.id)).toContain(created.id)
+      const renamed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'update', args: [created.id, created.revision, { kind: 'rename', title: 'from the App' }]
+      })
+      expect(renamed.error).toBeUndefined()
+      // The sidebar's "new session": the daemon forgets the context it runs.
+      const newSession = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: workspace }]
+      })
+      expect(newSession).toEqual({ result: true })
+      // Fork is served now: main's own validation answers a malformed request.
+      const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'fork', args: [created.id]
+      })
+      expect(refused.error).toBe('统一对话请求格式或字段不受支持；仅支持普通文本和主进程派生的历史引用')
+      // A send runs through this daemon's ledger under the caller's grant, with the
+      // conversation turn's own run id, so the App can follow it like its own runs.
+      const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'preview', args: [created.id, { providerId: 'codex' }]
+      })
+      expect(preview.error).toBeUndefined()
+      const sent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'send', args: [{
+          providerId: 'codex', conversationId: created.id, expectedRevision: preview.result.revision,
+          expectedContinuationKey: preview.result.target.continuationKey, commandId: randomUUID(),
+          prompt: 'from the conversation', selectedItems: [], confirmFresh: true
+        }]
+      })
+      expect(sent.error).toBeUndefined()
+      expect(sent.result).toMatchObject({ disposition: 'created', ledger: { runId: expect.any(String) } })
+      const conversationEvents: Array<{ kind: string; detail?: string }> = []
+      let conversationState = 'dispatched'
+      let conversationCursor = 0
+      // Bounded by time, not by replies: each progress marker wakes the watch, and under
+      // a parallel suite the markers can spend any reply budget before the run settles.
+      const conversationDeadline = Date.now() + 10_000
+      while (Date.now() < conversationDeadline && !['settled', 'failed'].includes(conversationState)) {
+        const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'watch', runId: sent.result.ledger.runId, cursor: conversationCursor, outputCursor: 0, waitMs: 5_000
+        })
+        conversationState = watched.watch.state
+        conversationCursor = watched.watch.poll.cursor
+        conversationEvents.push(...watched.watch.poll.events)
+      }
+      expect(conversationState).toBe('settled')
+      const bound = conversationEvents.map((event) => event.detail ?? '').find((detail) => detail.includes('"event":"bound"'))
+      expect(JSON.parse(bound!)).toMatchObject({ ledgerRunId: sent.result.ledger.runId, scryRunId: sent.result.runId })
+      // The renderer's read(id) leaves its cursor out; over JSON that arrives as null.
+      // Named as absent, the daemon's handler sees what main's does; unnamed, the null
+      // is refused, which is the page read that stalled the daemon-mode conversation view.
+      const unnamed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'read', args: [created.id, null]
+      })
+      expect(unnamed.error).toContain('统一对话分页游标无效')
+      const afterSend = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'conversation', method: 'read', args: [created.id, null], absent: [1]
+      })
+      expect(afterSend.error).toBeUndefined()
+      const turn = afterSend.result.turns.find((candidate: { runId: string }) => candidate.runId === sent.result.runId)
+      expect(turn.delivery.status).toBe('accepted')
+      const afterRun = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', epoch: handshake.events.epoch, cursor: changed.events.cursor, waitMs: 0
+      })
+      // E2: the run that changed is named, under the ledger id the App follows.
+      // E3: with where its evidence starts, so a window that never saw it can follow it.
+      expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId, intentSeq: sent.result.ledger.seq })
+      // W1: the pipeline's own window notices for this run, with the in-process payloads,
+      // which the daemon's window sink used to drop: the turn ended, the session is known.
+      const windowNotices = afterRun.events.items.filter((item: { kind: string }) => item.kind === 'window')
+      expect(windowNotices).toContainEqual({ kind: 'window', channel: 'agent:turnDone', payload: expect.objectContaining({ runId: sent.result.runId, providerId: 'codex' }) })
+      expect(windowNotices).toContainEqual({ kind: 'window', channel: 'agent:session', payload: expect.objectContaining({ runId: sent.result.runId }) })
+      // The run pipeline's own notice, which the daemon's window sink used to drop.
+      expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
+      // E1b: a finished run that nobody viewed is unread in the daemon. This daemon cannot
+      // see the App's window, so the App says when the user viewed it, and the set clears.
+      const fresh = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', cursor: 0, waitMs: 0
+      })
+      const unread = fresh.events.items.find((item: { kind: string }) => item.kind === 'attention')?.snapshot.unreadSessionKeys as string[]
+      // The conversation turn's native session; the directory part may be canonicalized.
+      expect(unread).toHaveLength(1)
+      expect(unread[0]!.startsWith('codex\u0000\u0000')).toBe(true)
+      expect(unread[0]!.endsWith(`\u0000${turn.delivery.nativeSessionId}`)).toBe(true)
+      for (const sessionKey of unread) {
+        const viewed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'attentionViewed', sessionKey
+        })
+        expect(viewed).toEqual({ viewed: true })
+      }
+      const cleared = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'appEvents', epoch: fresh.events.epoch, cursor: fresh.events.cursor, waitMs: 1_000
+      })
+      expect(cleared.events.items).toContainEqual({ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) })
+      // The rename above is announced by the daemon itself; the App no longer stands in.
+      expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
+      // History pages are loaded by the daemon against its own catalog: a session it does
+      // not know is refused by the same check the App ran in process.
+      const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'sessionHistory', method: 'loadSession', args: [{ providerId: 'codex', cwd: workspace, externalSessionId: 'not-in-catalog' }]
+      })
+      expect(history.error).toContain('会话不属于当前 Scry catalog')
       const providers = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providers', detail: 'metadata'
       })
@@ -155,7 +254,8 @@ describe('daemon host process', () => {
       const events: Array<{ kind: string }> = []
       const chunks: unknown[] = []
       let state = 'dispatched'
-      for (let attempt = 0; attempt < 10 && state === 'dispatched'; attempt += 1) {
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline && state === 'dispatched') {
         const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'watch', runId, cursor, outputCursor, waitMs: 5_000
         })

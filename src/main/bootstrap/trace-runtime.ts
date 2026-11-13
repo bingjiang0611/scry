@@ -29,6 +29,9 @@ export interface RunRendererSink {
   send: (channel: string, payload: unknown) => void
   // Whether the owning window has focus; the dock badge only needs this much.
   isFocused: () => boolean
+  // The daemon's sink: no window takes the trace stream here (the App reads runs itself),
+  // but the run's window notices still travel, on the App event feed (P3f W1).
+  acceptsNotices?: () => boolean
 }
 
 export function createTraceRuntime({
@@ -60,7 +63,7 @@ export function createTraceRuntime({
       if (run) run.stopState = state
       // 停止进度只属于拥有这个 run 的视图：legacy 广播留在原处，scoped 视图另走自己的订阅。
       runTraces.publishStopState(state)
-      if (!rendererCanReceive()) return
+      if (!rendererCanReceive() && !renderer.acceptsNotices?.()) return
       flushTraceSend()
       renderer.send('agent:stopState', state)
     },

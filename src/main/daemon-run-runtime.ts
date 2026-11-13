@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { boundMarker } from './daemon-run-evidence'
+import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BUDGET_MS, lateRefusalNotice, noteAdmission } from './daemon-run-admission'
 import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
@@ -8,6 +8,9 @@ import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import { view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
+import { RunWakes } from './daemon-run-wakes'
+import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
+import type { RunTraceRouter } from './run-trace-router'
 
 // The App's own run view, driven by the daemon instead of by an in-process
 // pipeline. The daemon owns execution, the ledger and the canonical run state;
@@ -24,12 +27,13 @@ const DEFAULT_WAIT_MS = 15_000
 // not bound by then is still recorded; the caller gets the ledger id and `bound:
 // false`, and the window resynchronises from `agent:activeRun`.
 const DEFAULT_BIND_BUDGET_MS = 3_000
-const BIND_WAIT_MS = 250
+const TERMINAL = new Set(['settled', 'failed', 'cancelled'])
 
 export interface DaemonStartInput {
   intentId: string
   detail: string
   context: DesktopRemoteContext
+  userText?: string
 }
 
 export interface DaemonStartReceipt {
@@ -46,8 +50,12 @@ export interface DaemonRunRuntimeDeps {
   // Long-poll window. The daemon answers earlier when something changes.
   waitMs?: number
   bindBudgetMs?: number
+  admitBudgetMs?: number
   bridge?: TraceOutputBridge
   onWarn?: (message: string, detail?: unknown) => void
+  // P3f W2: the App's run-level subscriptions (RunTraceRouter). A view that subscribes to
+  // one run (the conversation view) reads this, not the window-wide trace stream.
+  runTraces?: Pick<RunTraceRouter, 'route' | 'settle'> & NonNullable<QuestionSinks['subscription']>
 }
 
 export class DaemonRunRuntime {
@@ -73,6 +81,13 @@ export class DaemonRunRuntime {
     })
   }
 
+  // P3f E2: the App event feed's run notices. While it is live a run reads when woken
+  // instead of holding a long poll on the one watch lane other runs need too.
+  readonly #wakes = new RunWakes()
+  wake(runId: string): void { this.#wakes.wake(runId) }
+  wakeAll(): void { this.#wakes.wakeAll() }
+  setWakesLive(live: boolean): void { this.#wakes.setLive(live) }
+
   /** The batching bridge, so `agent:traceAck` credits the same delivery state. */
   get bridge(): TraceOutputBridge { return this.#bridge }
 
@@ -80,24 +95,63 @@ export class DaemonRunRuntime {
     const stamp = new PerformanceTrace('daemon.run.firstText', input.context ? { provider: input.context.providerId } : {})
     const receipt = await this.#deps.transport.submit({ intentId: input.intentId, detail: input.detail })
     stamp.mark('submitted')
+    this.#track(receipt.runId, input.context, receipt.seq, stamp, input.userText)
+    // The window identifies a run by the canonical id its trace events carry, not
+    // by the ledger id it submitted. Wait for the daemon's bind and admission, and say
+    // so when it did not bind instead of handing back an id the trace will never match.
+    const bound = await this.#awaitBound(receipt.runId)
+    const cursor = this.#runs.get(receipt.runId)
+    if (cursor && admissionPhase(cursor) === 'refused') {
+      // Refused before admission, as an in-process start rejects: no run is handed out.
+      this.#runs.delete(receipt.runId)
+      throw new DaemonRunRefusedError(cursor.failure)
+    }
+    if (cursor && bound !== undefined) cursor.handedOut = true
+    return { ...receipt, runId: bound ?? receipt.runId, bound: bound !== undefined }
+  }
+
+  /**
+   * Follow a run the daemon recorded on this window's behalf (a conversation send): the
+   * same cursor, pump and bind as a run this window submitted. Its context is learned
+   * from the daemon's bind.
+   */
+  async follow(input: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }> {
+    this.#track(input.runId, undefined, input.seq)
+    const bound = await this.#awaitBound(input.runId)
+    return { runId: bound ?? input.runId, bound: bound !== undefined }
+  }
+
+  // Synchronous on purpose: a start answers right after its bind, exactly as before
+  // this was shared, so nothing it awaits moves.
+  #track(runId: string, context: DesktopRemoteContext | undefined, seq: number | undefined, stamp?: PerformanceTrace, userText?: string): void {
     // A duplicate submit is the same logical run: keep its existing cursor rather
     // than restarting the trace from zero.
-    if (!this.#runs.has(receipt.runId)) {
-      this.#runs.set(receipt.runId, {
-        // A run's own evidence cannot predate its submit, so its watch starts at the
-        // intent instead of the session's first page.
-        runId: receipt.runId, context: input.context, lifecycle: 'recorded',
-        watch: receipt.seq !== undefined ? Math.max(0, receipt.seq - 1) : this.#seen, output: 0,
+    if (!this.#runs.has(runId)) {
+      this.#runs.set(runId, {
+        // A run's own evidence cannot predate its intent, so its watch starts there
+        // instead of at the session's first page.
+        runId, context, lifecycle: 'recorded',
+        watch: seq !== undefined ? Math.max(0, seq - 1) : this.#seen, output: 0,
         pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
-        stamp, sawText: false
+        ...(stamp ? { stamp } : {}), ...(userText !== undefined ? { userText } : {}), sawText: false
       })
     }
-    void this.pump(receipt.runId)
-    // The window identifies a run by the canonical id its trace events carry, not
-    // by the ledger id it submitted. Wait for the daemon's bind, and say so when it
-    // did not arrive instead of handing back an id the trace will never match.
-    const bound = await this.#awaitBound(receipt.runId)
-    return { ...receipt, runId: bound ?? receipt.runId, bound: bound !== undefined }
+    void this.pump(runId)
+  }
+
+  /**
+   * W1: deliver one of the daemon pipeline's notices for a run only after the text the
+   * daemon held when it sent it, as in process the trace is flushed before "turn done".
+   * One read without waiting, then a full flush; a run this window does not follow, or
+   * one whose pump already ended (and flushed), is delivered at once.
+   */
+  async deliverAfterRead(runId: string | undefined, deliver: () => void): Promise<void> {
+    const cursor = runId === undefined ? undefined : this.#cursorFor(runId)
+    if (cursor && !cursor.stopped && !this.#disposed) {
+      try { await this.step(cursor.runId, { waitMs: 0 }) } catch (error) { this.#deps.onWarn?.('daemon run read before notice failed', error) }
+      this.#bridge.flushAll()
+    }
+    deliver()
   }
 
   /** Whether this window already follows this run, named by either id. */
@@ -151,22 +205,11 @@ export class DaemonRunRuntime {
     return cursor.latest ?? null
   }
 
-  async #awaitBound(runId: string): Promise<string | undefined> {
-    const budgetMs = this.#deps.bindBudgetMs ?? DEFAULT_BIND_BUDGET_MS
-    const deadline = Date.now() + budgetMs
-    for (;;) {
-      const cursor = this.#runs.get(runId)
-      if (!cursor) return undefined
-      if (cursor.scryRunId) return cursor.scryRunId
-      if (cursor.stopped || Date.now() >= deadline) return undefined
-      try {
-        await this.step(runId, { waitMs: Math.min(BIND_WAIT_MS, Math.max(0, deadline - Date.now())) })
-      } catch {
-        // The intent is already recorded. A denied or broken read must not turn a
-        // recorded submit into a failed start; the pump reports the reason.
-        return undefined
-      }
-    }
+  #awaitBound(runId: string): Promise<string | undefined> {
+    return awaitAdmission({
+      runId, cursor: () => this.#runs.get(runId), step: (waitMs) => this.step(runId, { waitMs }), wakes: this.#wakes,
+      bindBudgetMs: this.#deps.bindBudgetMs ?? DEFAULT_BIND_BUDGET_MS, admitBudgetMs: this.#deps.admitBudgetMs ?? DEFAULT_ADMIT_BUDGET_MS
+    })
   }
 
   /** The run ids the daemon reports as live, whether or not this window started them. */
@@ -201,20 +244,9 @@ export class DaemonRunRuntime {
   }
 
   async answerQuestion(response: AgentQuestionResponse): Promise<boolean> {
-    // The daemon names a pending question by its own id; the renderer's answer
-    // carries exactly that id and never invents one.
     // The renderer answers with the id it was shown, which is the canonical run id the
     // Provider used; the daemon names pending questions by its own ledger run.
-    const cursor = this.#cursorFor(response.runId)
-    // The answer travels inside the request, so it speaks the same id the daemon knows:
-    // its broker refuses a response naming a different run.
-    const ledgerRunId = cursor?.runId ?? response.runId
-    const answerId = cursor?.answerIds.get(response.questionId) ?? randomUUID()
-    const answered = await this.#deps.transport.answerQuestion({
-      runId: ledgerRunId, answerId, response: { ...response, runId: ledgerRunId }
-    })
-    cursor?.askedQuestions.delete(response.questionId)
-    return answered
+    return await answerQuestion(this.#cursorFor(response.runId), response, this.#deps.transport)
   }
 
   // One window at a time per run. The pump and an explicit read share the same
@@ -247,8 +279,9 @@ export class DaemonRunRuntime {
         cursor.output = Math.max(cursor.output, watch.output.cursor)
         changed = true
       }
-      if (watch.state !== cursor.lifecycle) { cursor.lifecycle = watch.state; changed = true }
+      if (watch.state !== cursor.lifecycle) changed = true
       for (const entry of watch.events) {
+        noteAdmission(cursor, entry)
         if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
         const bound = boundMarker(entry.detail)
         if (!bound) continue
@@ -269,7 +302,7 @@ export class DaemonRunRuntime {
           }
         }
       }
-      if (cursor.context === undefined) return { changed, lifecycle: cursor.lifecycle }
+      if (cursor.context === undefined) { cursor.lifecycle = watch.state; return { changed, lifecycle: cursor.lifecycle } }
       // The trace is addressed by the canonical id its events carry. The ledger id the
       // watch polls uses is a different id and finds no run there.
       const read = await this.#deps.transport.trace({
@@ -277,11 +310,11 @@ export class DaemonRunRuntime {
       })
       if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
       if (this.#apply(read, cursor)) changed = true
+      // Terminal only after this step's trace: no `done` before the last text.
+      cursor.lifecycle = watch.state
       await this.#publishQuestions(cursor)
-      // The step boundary is where the App knows it has the whole read, so the batch
-      // built from it is handed over here instead of waiting for the batching timer.
-      // Batching still applies - every event of one step travels in one batch - and
-      // backpressure still applies, because flush() respects the same high water.
+      // The step boundary holds the whole read: hand its batch over now, not on the
+      // batching timer. One batch per step; flush() keeps the same high water.
       if (changed) this.#bridge.flush()
       if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
       return { changed, lifecycle: cursor.lifecycle }
@@ -296,11 +329,16 @@ export class DaemonRunRuntime {
     cursor.pumping = true
     try {
       while (!cursor.stopped && !this.#disposed) {
-        const result = await this.step(runId)
+        // With the event feed live, read without waiting at the daemon and then wait
+        // here for this run's own notice; the fallback bounds a notice that was lost.
+        // Without it, the daemon's long poll is the wait.
+        const live = this.#wakes.live
+        if (live) this.#wakes.consume(runId)
+        const result = await this.step(runId, live ? { waitMs: 0 } : {})
         // A lifecycle the daemon no longer reports and a settled run both end the
         // loop; the renderer re-reads the snapshot to learn the terminal state.
         if (result.lifecycle === null) break
-        if (!cursor.stopped && !result.changed) continue
+        if (live && !cursor.stopped && !result.changed) await this.#wakes.wait(runId, this.#deps.waitMs ?? DEFAULT_WAIT_MS)
       }
     } catch (error) {
       // A revoked grant or a dead daemon is not a run outcome. Keep the reason and
@@ -310,6 +348,11 @@ export class DaemonRunRuntime {
     } finally {
       cursor.pumping = false
       if (cursor.stopped) this.#bridge.flushAll()
+      // The run ended: its subscription gets its end after the last text, as in process.
+      if (cursor.stopped && TERMINAL.has(cursor.lifecycle ?? '')) this.#deps.runTraces?.settle(cursor.scryRunId ?? runId)
+      // Refused after it was handed out: the window gets the in-process failure notice.
+      const refused = cursor.stopped ? lateRefusalNotice(cursor) : undefined
+      if (refused) this.#deps.send('agent:error', refused)
     }
   }
 
@@ -317,6 +360,7 @@ export class DaemonRunRuntime {
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
     this.#bridge.push(event)
+    this.#deps.runTraces?.route(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return
     cursor.sawText = true
@@ -341,33 +385,23 @@ export class DaemonRunRuntime {
     return plan.events.length > 0
   }
 
-  async #publishQuestions(cursor: RunCursor): Promise<void> {
-    const pending = await this.#deps.transport.questions(cursor.runId)
-    for (const request of pending) {
-      if (cursor.askedQuestions.has(request.questionId)) continue
-      cursor.askedQuestions.add(request.questionId)
-      if (!cursor.answerIds.has(request.questionId)) cursor.answerIds.set(request.questionId, randomUUID())
-      // The channel the preload subscribes to (`onQuestion` = agent:userQuestion); a
-      // question sent on a name nobody listens for leaves the run waiting forever.
-      this.#deps.send('agent:userQuestion', request)
-    }
-    for (const asked of [...cursor.askedQuestions]) {
-      if (pending.some((request) => request.questionId === asked)) continue
-      cursor.askedQuestions.delete(asked)
-      cursor.answerIds.delete(asked)
-      this.#deps.send('agent:userQuestionClosed', { runId: cursor.runId, questionId: asked })
-    }
+  #publishQuestions(cursor: RunCursor): Promise<void> {
+    return publishQuestions(cursor, this.#deps.transport, {
+      send: this.#deps.send, ...(this.#deps.runTraces ? { subscription: this.#deps.runTraces } : {})
+    })
   }
 
   /** Forget one run's cursor, e.g. after the view moved to another session. */
   release(runId: string): void {
     const cursor = this.#runs.get(runId)
     if (cursor) cursor.stopped = true
+    this.#wakes.wake(runId)
   }
 
   dispose(): void {
     this.#disposed = true
     for (const cursor of this.#runs.values()) cursor.stopped = true
+    this.#wakes.wakeAll()
     this.#bridge.close()
   }
 }

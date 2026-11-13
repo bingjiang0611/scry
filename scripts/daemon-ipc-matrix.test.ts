@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { MATRIX_DOC, OPS_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderMatrix, renderOps, workbenchMethods } from './daemon-ipc-matrix.mjs'
+import { CONVERSATION_MATRIX_DOC, MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderConversationMatrix, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
 
 const routing = loadRouting()
 const matrix = buildMatrix(routing)
 
 describe('daemon IPC routing matrix', () => {
   it('classifies every privileged channel and only privileged channels', () => {
-    expect(matrix.channels).toBe(119)
+    expect(matrix.channels).toBe(172)
     expect(matrix.defects).toEqual([])
     expect(matrix.rows.filter((row) => row.route === 'main').length).toBeGreaterThan(0)
     expect(matrix.rows.filter((row) => row.route === 'forward').length).toBeGreaterThan(0)
@@ -52,8 +52,27 @@ describe('daemon IPC routing matrix', () => {
     expect(badPath.defects).toContainEqual({ channel: 'agent:steer', problem: expect.stringContaining('unknown user path') })
   })
 
+  it('fails when the preload invokes a channel the registration scan did not find', () => {
+    const invoked = preloadChannels()
+    expect(invoked.size).toBe(172)
+    const missed = buildMatrix(routing, undefined, new Set([...invoked, 'agent:registeredSomeNewWay']))
+    expect(missed.defects).toEqual([{ channel: 'agent:registeredSomeNewWay', problem: expect.stringContaining('registration scan did not find it') }])
+  })
+
   it('reads its own inputs instead of trusting an empty scan', () => {
-    expect(collectChannels().length).toBe(119)
+    const channels = collectChannels().map((entry) => entry.channel)
+    expect(channels.length).toBe(172)
+    // Registered through a handler table and through the `handle(` parameter name; both
+    // were missing from the first scan, which only matched handleTrusted('literal').
+    expect(channels).toContain('sourceControl:read')
+    expect(channels).toContain('sourceControl:loadDraft')
+    expect(channels).toContain('workspaceSelection:validateBranch')
+    // The git diff registrar names its parameter `register`, the desktop client
+    // `registerTrusted` with a method table; the first daemon-mode run refused both.
+    expect(channels).toContain('agent:gitDiff')
+    expect(channels).toContain('agent:gitCommitDiffSnapshot')
+    expect(channels).toContain('desktopRemote:list')
+    expect(channels).toContain('desktopRemote:workbench')
     expect(protocolOps().has('submit')).toBe(true)
     // steer has no device-facing op today, which is exactly why the matrix records a new one.
     expect(protocolOps().has('steer')).toBe(false)
@@ -61,15 +80,34 @@ describe('daemon IPC routing matrix', () => {
     expect(workbenchMethods().get('workspace')?.has('workspaceTrash')).toBe(true)
   })
 
+  it('counts a shared handler table only when main registers it', () => {
+    // The scan reads channel keys from `satisfies ChannelHandlers` tables; that is only
+    // honest if every exported factory is actually registered in main.
+    const tables = readFileSync(new URL('../src/main/bootstrap/startup-channels.ts', import.meta.url), 'utf8')
+    const factories = [...tables.matchAll(/^export function (\w+ChannelHandlers)\(/gm)].map(([, name]) => name).filter((name) => name !== 'registerChannelHandlers')
+    expect(factories.length).toBeGreaterThan(0)
+    // Every production main source, not only files that register a channel literally: a
+    // bootstrap module may now register nothing but shared tables.
+    const mainSources = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) return mainSources(path)
+      return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [readFileSync(path, 'utf8')] : []
+    })
+    const sources = mainSources(join(process.cwd(), 'src/main')).join('\n')
+    for (const factory of factories) expect(sources, `${factory} is never registered in main`).toMatch(new RegExp(`registerChannelHandlers\\(handleTrusted, ${factory}\\(`))
+  })
+
   it('keeps both generated documents up to date', () => {
     expect(readFileSync(MATRIX_DOC, 'utf8')).toBe(renderMatrix(matrix))
+    expect(readFileSync(WORKBENCH_MATRIX_DOC, 'utf8')).toBe(renderWorkbenchMatrix(matrix))
+    expect(readFileSync(CONVERSATION_MATRIX_DOC, 'utf8')).toBe(renderConversationMatrix(matrix))
     expect(readFileSync(OPS_DOC, 'utf8')).toBe(renderOps(matrix, routing))
   })
 
   it('documents every new op next to its channels', () => {
     const ops = readFileSync(OPS_DOC, 'utf8')
     const used = new Set(matrix.rows.filter((row: { route: string }) => row.route === 'new-op').map((row: { target: string }) => row.target.slice(0, row.target.lastIndexOf(':'))))
-    expect(used.size).toBe(17)
+    expect(used.size).toBe(24)
     for (const op of used) expect(ops).toContain(`| \`${op}\` |`)
     expect(join(OPS_DOC).endsWith('P3-ipc-ops.md')).toBe(true)
   })

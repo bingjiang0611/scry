@@ -16,7 +16,7 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { answerOwnerRunQuestion, answerRunQuestion, stopRun, type AnswerInput, type RunControlDeps } from './host-controller-run-controls'
 import { authorizedCwd, isRemoteRun, macRun } from './host-controller-runs'
 import { chunkAttachment, commitAttachment, releaseIntentAttachments, resolveIntentAttachments, startAttachment, type AttachmentDeps } from './host-controller-attachments'
-import { createExecution } from './host-controller-execution'
+import { createExecution, ledgerEventObserver } from './host-controller-execution'
 import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopReadDeps } from './host-controller-desktop-reads'
 import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
@@ -75,7 +75,7 @@ export class HostController {
     this.#sessionFork = deps.sessionFork
     this.#sessionDelete = deps.sessionDelete
     this.#toolPanels = deps.toolPanels
-    this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: () => this.#watchers.notify() })
+    this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: ledgerEventObserver(deps, () => this.#watchers.notify()) })
     this.#attachmentStore = deps.attachmentStore ?? (deps.attachmentDirectory
       ? new DesktopAttachmentStore(deps.attachmentDirectory, (peer, id) => this.#ledger.intentRun(scopedIntentId(peer, id))?.lifecycle)
       : undefined)

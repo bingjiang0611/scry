@@ -298,10 +298,13 @@ export const LOADING_COPY = {
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   skills: '正在读取 Skill…',
   skillsSourceEmpty: '当前来源没有 Skill',
+  // The Provider answered without a list (unknown/unsupported): not the same as none.
+  skillsSourceUnread: '未能读取当前来源的 Skill（原因见上方）',
   skillsEmpty: (scope: string) => `未发现${scope}`,
   skillsNoMatch: (scope: string) => `${scope}中没有匹配结果`,
   mcp: '正在读取 MCP 配置…',
   mcpSourceEmpty: '当前来源没有 MCP',
+  mcpSourceUnread: '未能读取当前来源的 MCP（原因见上方）',
   mcpEmpty: '未发现 MCP 配置',
   refresh: '刷新',
   detecting: '检测中…',

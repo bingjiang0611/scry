@@ -13,6 +13,7 @@ import { ProviderOperationGate } from './provider-operation-gate'
 import { openLocalChannel } from '../daemon/local-channel'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from '../daemon/local-enrollment'
 import { DaemonClient, DaemonClientError, daemonClientPaths, type DaemonClientOptions } from './daemon-client'
+import { buildIdentity } from '../shared/build-identity'
 
 // The App-side client against the daemon's real endpoints: the same inner-mTLS host,
 // the same enrollment socket, the same unix socket. Only the provider runtime is
@@ -21,6 +22,8 @@ type PeculiarCrypto = Parameters<typeof cryptoProvider.set>[0]
 cryptoProvider.set(webcrypto as unknown as PeculiarCrypto)
 
 const VERSION = '0.2.237'
+const BUILD_OLD = '3b04ee8'.padEnd(64, 'a')
+const BUILD_NEW = '0bf3e97'.padEnd(64, 'b')
 const dirs: string[] = []
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -28,7 +31,7 @@ afterEach(async () => {
   for (const directory of dirs.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
 
-async function harness(options: { version?: string } = {}) {
+async function harness(options: { version?: string; build?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'scry-daemon-client-'))
   dirs.push(root)
   const daemonStateDirectory = join(root, 'daemon')
@@ -55,7 +58,7 @@ async function harness(options: { version?: string } = {}) {
     serverKeyPEM: server.privateKeyPEM,
     caPEM: identity.caCertificatePEM,
     transport: 'local',
-    info: { version: options.version ?? VERSION }
+    info: buildIdentity(options.version ?? VERSION, options.build)
   })
   cleanups.push(() => localHost.close())
   const channel = await openLocalChannel({ directory: daemonStateDirectory, serve: (stream) => localHost.serve(stream) })
@@ -65,7 +68,7 @@ async function harness(options: { version?: string } = {}) {
   const enrollSocket = await openLocalEnrollSocket({
     directory: daemonStateDirectory,
     enroll: localEnrollHandlers(store, { enrollLocal: (input, consume) => controller.authority.enrollLocal(input, consume) },
-      identity.caCertificatePEM, options.version ?? VERSION)
+      identity.caCertificatePEM, buildIdentity(options.version ?? VERSION, options.build))
   })
   cleanups.push(() => enrollSocket.close())
   return { root, daemonStateDirectory, userDataDir, controller, store, identity }
@@ -120,9 +123,46 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
   it('reports the daemon version and refuses a daemon built from other sources', async () => {
     const env = await harness({ version: '0.2.199' })
     const mismatch = client(env)
-    await expect(mismatch.connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch' })
+    await expect(mismatch.connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch', running: '0.2.199' })
     // Nothing was persisted: a version mismatch must not leave a usable grant behind.
     expect(existsSync(daemonClientPaths(env.daemonStateDirectory, env.userDataDir).statePath)).toBe(false)
+  })
+
+  // A5: `install:mac:dev` reinstalls without bumping the version, so the old daemon
+  // answered with the same version and the new App adopted it.
+  it('refuses a daemon of the same version built from other sources, before and after enrolling', async () => {
+    // At enrollment: the reply names the daemon's build, and nothing is stored.
+    const fresh = await harness({ build: BUILD_OLD })
+    await expect(client(fresh, { appBuild: BUILD_NEW }).connect())
+      .rejects.toMatchObject({ reason: 'daemon_version_mismatch', running: VERSION, runningBuild: BUILD_OLD })
+    expect(existsSync(daemonClientPaths(fresh.daemonStateDirectory, fresh.userDataDir).statePath)).toBe(false)
+    // With a stored grant (the A5 path): the build the daemon came from enrolled, and the
+    // reinstalled build at the same version meets it on daemonInfo.
+    const env = await harness({ build: BUILD_OLD })
+    const same = client(env, { appBuild: BUILD_OLD })
+    expect(await same.connect()).toEqual({ version: VERSION, build: BUILD_OLD, enrolled: true })
+    same.close()
+    await expect(client(env, { appBuild: BUILD_NEW }).connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch', runningBuild: BUILD_OLD })
+    expect(await client(env, { appBuild: BUILD_NEW }).daemonInfo()).toEqual({ version: VERSION, build: BUILD_OLD })
+    // Control: the refusal kept the grant, and the same build still connects with it.
+    expect(await client(env, { appBuild: BUILD_OLD }).connect()).toEqual({ version: VERSION, build: BUILD_OLD, enrolled: false })
+  })
+
+  it('refuses a daemon that reports no build id when the App has one', async () => {
+    // A daemon from before build ids existed says only its version; that is not proof of
+    // the same build, so it is a mismatch rather than an adoption.
+    const env = await harness()
+    await expect(client(env, { appBuild: BUILD_NEW }).connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch', running: VERSION })
+    const failure = await client(env, { appBuild: BUILD_NEW }).connect().catch((error: unknown) => error) as DaemonClientError
+    expect(failure.runningBuild).toBeUndefined()
+  })
+
+  it('names the running version only when it is version-shaped', () => {
+    expect(new DaemonClientError('daemon_version_mismatch', { running: '0.2.199-beta.1+b7' }).running).toBe('0.2.199-beta.1+b7')
+    for (const shown of ['', ' 1.0', '1.0\n请点这里', '<b>1</b>', 'x'.repeat(65)]) {
+      expect(new DaemonClientError('daemon_version_mismatch', { running: shown }).running).toBeUndefined()
+    }
+    expect(new DaemonClientError('daemon_version_mismatch').running).toBeUndefined()
   })
 
   it('does not re-enroll after the grant is revoked, and clears the stored file', async () => {
@@ -168,7 +208,7 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     // daemon is down must not spend the grant: the daemon is restarted and re-adopted
     // with the same credential, not re-enrolled (its secret is already spent).
     const probing = client(env)
-    expect(await probing.daemonInfo()).toBe(VERSION)
+    expect(await probing.daemonInfo()).toEqual({ version: VERSION })
     probing.close()
     // Now the daemon is gone: same question, same answer shape, and the credential
     // survives so the restarted daemon is re-adopted instead of refused.
@@ -184,7 +224,27 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
   it('reports a daemon that is not running instead of inventing a grant', async () => {
     const env = await harness()
     const offline = client(env, { paths: daemonClientPaths(join(env.root, 'absent'), env.userDataDir) })
-    await expect(offline.connect()).rejects.toMatchObject({ reason: 'daemon_enrollment_unavailable' })
+    // Nothing answers the enrollment socket: that is absence, which the supervisor answers
+    // by launching. It used to read as daemon_enrollment_unavailable, the same name as a
+    // live daemon that has no secret for us, so the two could not be told apart (A6).
+    await expect(offline.connect()).rejects.toMatchObject({ reason: 'daemon_not_running' })
+  })
+
+  it('tells a live daemon whose grant another credential holds from one that is not there (A6)', async () => {
+    const env = await harness()
+    const paths = daemonClientPaths(env.daemonStateDirectory, env.userDataDir)
+    const first = client(env)
+    await first.connect()
+    first.close()
+    // The App lost its stored credential; the daemon still holds the grant issued for it
+    // and, by design, writes no new secret while that grant is live.
+    rmSync(paths.statePath)
+    const lost = client(env)
+    expect(lost.hasGrant).toBe(false)
+    await expect(lost.connect()).rejects.toMatchObject({ reason: 'daemon_enrollment_unavailable' })
+    // Control: with the enrollment socket gone the same client reports absence instead.
+    const gone = client(env, { connectEnroll: async () => { throw new Error('ECONNREFUSED') } })
+    await expect(gone.connect()).rejects.toMatchObject({ reason: 'daemon_not_running' })
   })
 
   it('fails closed on a corrupted stored grant rather than overwriting it', async () => {

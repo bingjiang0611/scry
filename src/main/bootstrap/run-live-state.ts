@@ -192,7 +192,7 @@ export async function createLiveRunState(deps: {
     const liveEvent = sanitizeToolEvents([ev], LIVE_TOOL_CONTENT_POLICY, 'live_renderer')[0]
     appendCoalescedTrace(runState.items, ev)
     ingestion.enqueue(ev, liveEvent)
-    if (ev.backgroundWork && rendererCanReceive()) renderer.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
+    if (ev.backgroundWork && (rendererCanReceive() || renderer.acceptsNotices?.())) renderer.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChangeRef.current()

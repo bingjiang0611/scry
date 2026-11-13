@@ -90,6 +90,7 @@
         "ipc.agent:setSessionArchived",
         "ipc.agent:setSessionPinned",
         "ipc.agent:unreadSessions",
+        "ipc.agent:viewSessions",
         "ipc.agent:catalogHealth",
         "ipc.conversation:create",
         "ipc.conversation:list",

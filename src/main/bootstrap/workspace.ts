@@ -4,8 +4,13 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { WorkspaceCreateRequest, WorkspaceFilePageRequest, WorkspaceListRequest, WorkspaceMoveRequest, WorkspacePathRequest, WorkspaceRenameRequest, WorkspaceWriteRequest } from '../../shared/workspace'
 import type { ProviderContext } from '../../shared/provider'
-import type { TerminalCloseRequest, TerminalRecordingRequest, TerminalRecordingListRequest, TerminalResizeRequest, TerminalStartRequest, TerminalOwnershipRequest, TerminalWriteRequest } from '../../shared/terminal'
-import { authorizedWorkspaceRequest } from '../workspace-authorization'
+import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
+import { callDaemonChannel, daemonModeEnabled } from '../daemon-channel-gate'
+import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
+import { terminalChannelHandlers } from './terminal-channels'
+import { installTerminalDaemonWindow } from './terminal-daemon'
+import { daemonKnownProjectDirectory, daemonSetCwdHandler } from './known-project-daemon'
+import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
 import type { TerminalManager } from '../terminal-manager'
@@ -36,12 +41,16 @@ export interface WorkspaceBootstrapDependencies {
 
 export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies): void {
   const { handleTrusted, getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad, resolveKnownProjectDirectory, homeFileAccess, knownProjectDirectories, openLocalPath, shell, dialog, getWindow, getTerminalManager, isShuttingDown, rendererCanReceive, assertTrustedIpcEvent, terminalOutput, providerRegistry, providerContextKey, resetSessionContext, dockBadge } = deps
+  // Daemon mode: the known projects are the daemon's stores, so these channels ask the
+  // daemon each call (known-project-daemon.ts) and never read the App's copy of them.
+  const daemonKnownProjects = daemonModeEnabled()
+  const knownDirectory: (cwd: string) => string | Promise<string> = daemonKnownProjects ? daemonKnownProjectDirectory : resolveKnownProjectDirectory
   handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
     listWorkspace(authorizedWorkspaceRequest(getCurrentCwd(), request)))
   handleTrusted('workspace:resolveFile', async (_event, request: WorkspacePathRequest) =>
     resolveWorkspaceFileOpenTarget(request.cwd === '~'
       ? request
-      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }, homeFileAccess))
+      : { ...request, cwd: await knownDirectory(request.cwd) }, homeFileAccess))
   handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
     readWorkspaceFile(authorizedWorkspaceRequest(getCurrentCwd(), request)))
   handleTrusted('workspace:readPage', (_event, request: WorkspaceFilePageRequest) =>
@@ -49,17 +58,23 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathRequest) =>
     readWorkspaceFile(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
-      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
+      : { ...request, cwd: await knownDirectory(request.cwd) }))
   handleTrusted('workspace:readPageKnown', async (_event, request: WorkspaceFilePageRequest) =>
     readWorkspaceFilePage(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
-      : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) }))
-  handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) =>
-    openWorkspaceFileExternally(
-      authorizedWorkspaceRequest(getCurrentCwd(), request),
+      : { ...request, cwd: await knownDirectory(request.cwd) }))
+  // Runs in the App in daemon mode too (the daemon has no shell), bound to this window's
+  // selection as always. Only the cross-project fallback differs: the known projects are
+  // the daemon's stores then, asked for when the window's workspace lacks the file.
+  handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) => {
+    const authorized = authorizedWorkspaceRequest(getCurrentCwd(), request)
+    let daemonRoots: readonly string[] = []
+    const resolveChosen = (cwd: string): string => daemonKnownProjects ? knownProjectDirectory(cwd, daemonRoots) : resolveKnownProjectDirectory(cwd)
+    return openWorkspaceFileExternally(
+      authorized,
       openLocalPath,
       {
-        roots: [...knownProjectDirectories()],
+        roots: daemonKnownProjects ? async () => (daemonRoots = await daemonKnownProjectDirectories()) : [...knownProjectDirectories()],
         choose: async (candidates) => {
           const selectable = candidates.length > 0 && candidates.length <= 5
           const options = {
@@ -78,15 +93,16 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
             ? await dialog.showMessageBox(getWindow()!, options)
             : await dialog.showMessageBox(options)
           const selected = selectable ? candidates[result.response - 1] : undefined
-          return selected ? { ...selected, cwd: resolveKnownProjectDirectory(selected.cwd) } : null
+          return selected ? { ...selected, cwd: resolveChosen(selected.cwd) } : null
         }
       }
-    ))
+    )
+  })
   handleTrusted('workspace:openKnownExternal', async (_event, request: WorkspacePathRequest) =>
     openWorkspaceFileExternally(
       homeFileAccess.isReadOnlyTarget(request.cwd)
         ? await homeFileAccess.authorize(request)
-        : { ...request, cwd: resolveKnownProjectDirectory(request.cwd) },
+        : { ...request, cwd: await knownDirectory(request.cwd) },
       openLocalPath
     ))
   handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
@@ -100,118 +116,46 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   handleTrusted('workspace:trash', (_event, request: WorkspacePathRequest) =>
     trashWorkspaceEntry(authorizedWorkspaceRequest(getCurrentCwd(), request), (path) => shell.trashItem(path)))
 
-  handleTrusted('terminal:start', async (event, request: TerminalStartRequest) => {
-    const manager = await getTerminalManager()
-    if (isShuttingDown() || !rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    const session = manager.start(request)
-    const ownershipEpoch = terminalOutput.started(session.id)
-    try {
-      assertTrustedIpcEvent(event)
-      if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    } catch (error) {
-      terminalOutput.detach(session.id)
-      throw error
-    }
-    if (isShuttingDown()) {
-      terminalOutput.terminalClosed(session.id)
-      manager.close({ id: session.id })
-      throw new Error('终端窗口已关闭')
-    }
-    return { ...session, ownershipEpoch }
-  })
-  handleTrusted('terminal:active', async (event) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    return manager.activeSessions()
-  })
-  handleTrusted('terminal:attach', async (event, request: { id: string }) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    const session = manager.session(request?.id)
-    const ownershipEpoch = terminalOutput.attach(session.id)
-    const catchUp = await manager.recordingCheckpoint(session.id)
-    try {
-      assertTrustedIpcEvent(event)
-      if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    } catch (error) {
-      terminalOutput.detach(session.id)
-      throw error
-    }
-    return { ...session, ownershipEpoch, catchUp }
-  })
-  handleTrusted('terminal:write', async (event, request: TerminalWriteRequest) => {
-    const manager = await getTerminalManager()
-    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
-    manager.write(request)
-    return true as const
-  })
-  handleTrusted('terminal:resize', async (event, request: TerminalResizeRequest) => {
-    const manager = await getTerminalManager()
-    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
-    manager.resize(request)
-    return true as const
-  })
-  handleTrusted('terminal:recordingList', async (event, request: TerminalRecordingListRequest) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    const cwd = getCurrentCwd()
-    const page = await manager.listRecordings(request)
-    assertTrustedIpcEvent(event)
-    if (cwd !== getCurrentCwd()) throw new Error('terminal_recording_workspace_changed')
-    return page
-  })
-  handleTrusted('terminal:recordingRead', async (event, request: TerminalRecordingRequest) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    return manager.readRecording(request)
-  })
-  handleTrusted('terminal:recordingDelete', async (event, request: TerminalCloseRequest) => {
-    const manager = await getTerminalManager()
-    assertTrustedIpcEvent(event)
-    await manager.deleteRecording(request?.id)
-    assertTrustedIpcEvent(event)
-    return true as const
-  })
-  handleTrusted('terminal:ready', (_event, request: TerminalOwnershipRequest) => {
-    if (!request || typeof request.id !== 'string' || !request.id.startsWith('terminal-')) throw new Error('终端 ready 无效')
-    return terminalOutput.ready(request.id, request.ownershipEpoch)
-  })
-  handleTrusted('terminal:ack', (_event, request: TerminalOwnershipRequest & { bytes: number }) => {
-    if (!request || typeof request.id !== 'string') throw new Error('终端输出确认无效')
-    return terminalOutput.ack(request.id, request.ownershipEpoch, request.bytes)
-  })
-  handleTrusted('terminal:close', async (event, request: TerminalOwnershipRequest) => {
-    const manager = await getTerminalManager()
-    if (!rendererCanReceive()) throw new Error('终端窗口已关闭')
-    assertTrustedIpcEvent(event)
-    if (!terminalOutput.owns(request?.id, request?.ownershipEpoch)) return false as const
-    terminalOutput.terminalClosed(request.id)
-    manager.close(request)
-    return true as const
-  })
+  const terminal = terminalChannelHandlers<IpcMainInvokeEvent>({ getTerminalManager, terminalOutput, isShuttingDown, rendererCanReceive, assertCaller: assertTrustedIpcEvent, getCurrentCwd })
+  for (const [channel, listener] of Object.entries(terminal)) handleTrusted(channel, listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown)
 
-  handleTrusted('agent:setCwd', (_e, dir: string | null) => {
-    const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
-    if (cwd !== getCurrentCwd()) invalidateSessionHistoryLoad('workspace changed')
-    setCurrentCwd(cwd)
-    return cwd ?? null
-  })
+  // The selection stays this window's; in daemon mode the daemon validates the directory.
+  const setCwd: (event: IpcMainInvokeEvent, dir: string | null) => string | null | Promise<string | null> = daemonKnownProjects
+    ? daemonSetCwdHandler({ getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad })
+    : (_e, dir) => {
+      const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
+      if (cwd !== getCurrentCwd()) invalidateSessionHistoryLoad('workspace changed')
+      setCurrentCwd(cwd)
+      return cwd ?? null
+    }
+  handleTrusted('agent:setCwd', setCwd)
 
   handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
     dockBadge.view(null, Boolean(getWindow()?.isFocused()))
-    const cwd = context?.cwd ?? getCurrentCwd()
-    if (context?.providerId) {
-      const normalizedContext = { ...context, cwd }
-      const key = providerContextKey(context.providerId, cwd ?? '', context.agentProfileId)
-      resetSessionContext(key)
-      await providerRegistry.invalidateContext(normalizedContext)
-    }
-    return true
+    return await resetProviderSession({ providerRegistry, providerContextKey, resetSessionContext, currentCwd: getCurrentCwd }, context)
   })
+  // Daemon mode: the daemon resets the context it runs; the badge part stays here.
+  if (daemonModeEnabled()) viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
+  // Daemon mode: the forwarded workspace channels stay bound to this window's selection,
+  // as the handlers above are; the daemon checks the request against it.
+  if (daemonModeEnabled()) {
+    installWorkbenchWindowCwd(getCurrentCwd)
+    // The terminal runs in the daemon; this window names its workspace and its state.
+    installTerminalDaemonWindow({ windowCwd: getCurrentCwd, rendererCanReceive, isShuttingDown })
+  }
 
+}
+
+/**
+ * What the in-process knownProjectDirectories() reads from the App's own stores (recent
+ * folders, project records, session catalog), asked of the daemon that owns them: its
+ * project list (records and session projects, removed ones left out) and its recent
+ * folders. Narrower than in process at most (sessions of a removed project, managed
+ * worktrees), which only offers fewer candidates. An answer of the wrong shape refuses.
+ */
+async function daemonKnownProjectDirectories(): Promise<string[]> {
+  const [projects, recent] = await Promise.all([callDaemonChannel('agent:listProjects', []), callDaemonChannel('agent:recentFolders', [])])
+  if (!Array.isArray(projects) || !Array.isArray(recent)) throw new Error('invalid_daemon_known_projects')
+  const cwds = [...projects.map((project) => (project as { cwd?: unknown } | null)?.cwd), ...recent]
+  return cwds.filter((cwd): cwd is string => typeof cwd === 'string' && cwd.length > 0)
 }

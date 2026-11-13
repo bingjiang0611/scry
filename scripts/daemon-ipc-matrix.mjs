@@ -10,7 +10,12 @@ import { fileURLToPath } from 'node:url'
 // decision, and a rename cannot drift away from the recorded op/method.
 const root = fileURLToPath(new URL('..', import.meta.url))
 export const MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix.md')
+export const WORKBENCH_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-workbench.md')
+export const CONVERSATION_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-conversation.md')
 const ROUTING = join(root, 'scripts/daemon-ipc-routing.json')
+const ROUTING_WORKBENCH = join(root, 'scripts/daemon-ipc-routing-workbench.json')
+const ROUTING_CLIENT = join(root, 'scripts/daemon-ipc-routing-client.json')
+const ROUTING_SERVICE = join(root, 'scripts/daemon-ipc-routing-service.json')
 const OPS = join(root, 'scripts/daemon-ipc-ops.json')
 const DIFFERENCES = join(root, 'scripts/daemon-ipc-differences.json')
 const APPROVALS = join(root, 'scripts/daemon-ipc-remote-approvals.json')
@@ -29,16 +34,71 @@ function sourceFiles(directory) {
 }
 
 /** Every privileged channel in production source, with the file that registers it. */
+// Registrations whose channel is built from a handler table, e.g. `sourceControl:${method}`.
+// Each prefix names how to read its method list from source; an unknown templated
+// registration fails the scan instead of silently dropping channels.
+const TEMPLATED = {
+  sourceControl: () => {
+    const source = readFileSync(join(root, 'src/main/source-control/ipc.ts'), 'utf8')
+    const start = source.indexOf('export function sourceControlHandlers')
+    const body = source.slice(start, source.indexOf('satisfies Record', start))
+    const methods = [...body.matchAll(/^\s{4}(\w+):/gm)].map(([, name]) => name)
+    if (start < 0 || methods.length === 0) throw new Error('cannot read sourceControlHandlers')
+    return methods
+  },
+  // The App's client to other hosts (remote/desktop-client-ipc.ts) enumerates its methods.
+  desktopRemote: () => {
+    const source = readFileSync(join(root, 'src/main/remote/desktop-client-ipc.ts'), 'utf8')
+    const start = source.indexOf('export const DESKTOP_REMOTE_CLIENT_METHODS = [')
+    const body = source.slice(start, source.indexOf('] as const', start))
+    const methods = [...body.matchAll(/'([a-zA-Z]+)'/g)].map(([, name]) => name)
+    if (start < 0 || methods.length === 0) throw new Error('cannot read DESKTOP_REMOTE_CLIENT_METHODS')
+    return methods
+  }
+}
+
 export function collectChannels(dir = MAIN_DIR) {
   const found = new Map()
+  const add = (channel, file) => {
+    if (found.has(channel)) throw new Error(`duplicate registration: ${channel} in ${relative(root, file)} and ${relative(root, found.get(channel))}`)
+    found.set(channel, file)
+  }
   for (const file of sourceFiles(dir)) {
-    for (const match of readFileSync(file, 'utf8').matchAll(/handleTrusted\(\s*'([a-zA-Z0-9:_-]+)'/g)) {
-      const channel = match[1]
-      if (found.has(channel)) throw new Error(`duplicate registration: ${channel} in ${relative(root, file)} and ${relative(root, found.get(channel))}`)
-      found.set(channel, file)
+    const source = readFileSync(file, 'utf8')
+    // `handle(`, `register(` and `registerTrusted(` are the parameter names the per-area
+    // registrars (workspace selection, git diff, desktop client) give the same trusted
+    // registrar; every spelling reaches registerTrustedIpcHandler.
+    for (const match of source.matchAll(/\b(?:handleTrusted|handle|register|registerTrusted)\(\s*'([a-zA-Z0-9:_-]+)'/g)) add(match[1], file)
+    // Handler tables shared by main and the daemon (bootstrap/startup-channels.ts): each
+    // `return { 'channel': … } satisfies ChannelHandlers` is registered through
+    // registerChannelHandlers, so its keys are production channels.
+    for (const table of source.matchAll(/return \{([\s\S]*?)\} satisfies ChannelHandlers/g)) {
+      for (const key of table[1].matchAll(/^\s+'([a-zA-Z]+:[a-zA-Z:]+)':/gm)) add(key[1], file)
+    }
+    for (const match of source.matchAll(/\b(?:handleTrusted|handle|register|registerTrusted)\(\s*`([a-zA-Z]+):\$\{\w+\}`/g)) {
+      const expand = TEMPLATED[match[1]]
+      if (!expand) throw new Error(`templated registration ${match[1]}:\${...} in ${relative(root, file)} has no expander`)
+      for (const method of expand()) add(`${match[1]}:${method}`, file)
     }
   }
   return [...found.entries()].map(([channel, file]) => ({ channel, file: relative(root, file) })).sort((a, b) => a.channel.localeCompare(b.channel))
+}
+
+const PRELOAD_DIR = join(root, 'src/preload')
+
+/**
+ * Every channel the preload invokes. The registration scan reads several spellings; this
+ * independent list catches a spelling it does not know yet, which would otherwise leave
+ * a channel without a decision and refused by the daemon gate.
+ */
+export function preloadChannels(dir = PRELOAD_DIR) {
+  const channels = new Set()
+  for (const file of sourceFiles(dir)) {
+    const source = readFileSync(file, 'utf8')
+    if (/invoke\(\s*`/.test(source)) throw new Error(`templated invoke in ${relative(root, file)}: list preload channels literally`)
+    for (const match of source.matchAll(/\binvoke\(\s*'([a-zA-Z0-9:_-]+)'/g)) channels.add(match[1])
+  }
+  return channels
 }
 
 /** The device-facing op vocabulary, read from the dispatch chain that serves it. */
@@ -71,25 +131,28 @@ export function performancePaths() {
  * new op looks like, how each forwarded op differs from the device protocol, and which
  * new ops a remote device may reach. Each file stays under the staged size budget.
  */
-export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS) {
+export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH, clientPath = ROUTING_CLIENT, servicePath = ROUTING_SERVICE) {
   const routing = JSON.parse(readFileSync(routingPath, 'utf8'))
+  const workbench = JSON.parse(readFileSync(workbenchPath, 'utf8'))
+  const client = JSON.parse(readFileSync(clientPath, 'utf8'))
+  const service = JSON.parse(readFileSync(servicePath, 'utf8'))
   const ops = JSON.parse(readFileSync(opsPath, 'utf8'))
   const differences = JSON.parse(readFileSync(differencesPath, 'utf8'))
   const approvals = JSON.parse(readFileSync(approvalsPath, 'utf8'))
-  for (const [name, data] of [['routing', routing], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
+  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['client routing', client], ['service routing', service], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
     if (data.schema !== 1) throw new Error(`${name} schema must be 1`)
   }
-  if (!Array.isArray(routing.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
+  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !Array.isArray(client.channels) || !Array.isArray(service.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
     throw new Error('routing inputs are incomplete')
   }
-  return { schema: 1, channels: routing.channels, ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
+  return { schema: 1, channels: [...routing.channels, ...workbench.channels, ...client.channels, ...service.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
 }
 
 /**
  * Join source channels with the recorded decision. Returns rows plus every defect, so
  * the generator and its test report the same reasons instead of throwing on row one.
  */
-export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR) {
+export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR, invoked = dir === MAIN_DIR ? preloadChannels() : new Set()) {
   const channels = collectChannels(dir)
   const ops = protocolOps()
   const surfaces = workbenchMethods()
@@ -159,71 +222,23 @@ export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR) {
     if (!channels.some((entry) => entry.channel === row)) defects.push({ channel: row, problem: 'difference recorded for a channel that is not forwarded' })
   }
   for (const row of recorded.values()) defects.push({ channel: row.channel, problem: 'routed but no longer registered in src/main' })
+  const registered = new Set(channels.map((entry) => entry.channel))
+  for (const channel of invoked) {
+    if (!registered.has(channel)) defects.push({ channel, problem: 'invoked by the preload but the registration scan did not find it' })
+  }
   return { rows, defects, channels: channels.length }
 }
 
 export const OPS_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-ops.md')
 
-export function renderMatrix({ rows, defects, channels }) {
-  const count = (route) => rows.filter((row) => row.route === route).length
-  const lines = [
-    '# P3 附录 · IPC channel 路由矩阵（生成文件）',
-    '',
-    '本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。',
-    '',
-    `- 生产 \`handleTrusted\` channel：${channels} 个（\`src/main/**\`，不含测试）`,
-    `- 留在 main：${count('main')}，一半 main 一半 daemon（\`split\`）：${count('split')}，转发到现有 op：${count('forward')}，需要新增 op：${count('new-op')}`,
-    '- 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)',
-    '',
-    '## 判定规则',
-    '',
-    '| 去向 | 含义 |',
-    '|---|---|',
-    '| `main` | 窗口、菜单、原生对话框、剪贴板、本机只读文件引用，以及连接别的宿主的 `DesktopRemoteClient`。 |',
-    '| `forward` | 能力已在 daemon 里且有现成协议 op；迁移只做转发与 envelope 转换。 |',
-    '| `new-op` | 能力在 daemon 侧已存在或必须存在，但设备协议里还没有对应 op。 |',
-    '| `split` | 一半留 main 一半走 daemon：原生选择框之类只能窗口做，但落盘的是 daemon 的授权输入，必须由 daemon 写。 |',
-    '',
-    '`forward` 沿用该 op 现有鉴权（已验证 peer + 该 op 自己的 payload/cwd 校验），但语义不一定等价，逐行见「差异与分工」。`new-op` 与 `split` 的 op 按 [P3-ipc-ops](P3-ipc-ops.md) 实现，调用方范围由 `scopes` 决定（默认只有 `local`）。都不因「本机」放宽。',
-    '',
-    '## 矩阵',
-    '',
-    '「差异与分工」列：`forward` 行写与设备协议的语义差异（等价也要写），`split` 行写 main 侧做什么，`main` 行写它依赖的 daemon 数据来源。',
-    '',
-    '| channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |',
-    '|---|---|---|---|---|---|'
-  ]
-  for (const row of rows) lines.push(`| \`${row.channel}\` | ${row.route} | \`${row.target}\` | ${row.path} | ${row.note} | ${row.why} |`)
-  if (defects.length > 0) {
-    lines.push('', '## 未分类', '')
-    for (const defect of defects) lines.push(`- \`${defect.channel}\`：${defect.problem}`)
-  }
-  return `${lines.join('\n')}\n`
-}
-
-export function renderOps({ rows }, routing = loadRouting()) {
-  const used = new Set(rows.filter((row) => row.route === 'new-op' || row.route === 'split').map((row) => row.target.slice(0, row.target.lastIndexOf(':'))))
-  const lines = [
-    '# P3 附录 · 新增协议 op（生成文件）',
-    '',
-    '本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑。',
-    '',
-    `列出 [IPC 矩阵](P3-ipc-matrix.md) 判为 \`new-op\` 或 \`split\` 的 op。每个 op 用 \`method\` 区分通道（method 等于 channel 最后一段），与 \`desktopWorkbench\` 的 surface/method 约定一致：一个授权边界一个 op，不为每个 channel 造一个顶层 op。`,
-    '',
-    '`scopes` 是允许调用该 op 的调用方范围：`local` = 本机 App（unix socket + `scope: local` grant），`remote` = 已配对设备。默认只有 `local`；任何新增 `remote` 都要先写进 `scripts/daemon-ipc-remote-approvals.json`，那属于授权扩大，需维护者批准。',
-    '',
-    '| op | 调用方 | 用户路径 | 请求 | 响应 | 授权 |',
-    '|---|---|---|---|---|---|'
-  ]
-  for (const [name, op] of Object.entries(routing.ops)) {
-    if (used.has(name)) lines.push(`| \`${name}\` | ${op.scopes.join(', ')} | ${op.path} | ${op.request} | ${op.response} | ${op.authorize} |`)
-  }
-  return `${lines.join('\n')}\n`
-}
+import { renderConversationMatrix, renderMatrix, renderOps, renderWorkbenchMatrix } from './daemon-ipc-matrix-render.mjs'
+export { renderConversationMatrix, renderMatrix, renderOps, renderWorkbenchMatrix } from './daemon-ipc-matrix-render.mjs'
 
 const DOCS = [
   [MATRIX_DOC, renderMatrix],
-  [OPS_DOC, renderOps]
+  [WORKBENCH_MATRIX_DOC, renderWorkbenchMatrix],
+  [CONVERSATION_MATRIX_DOC, renderConversationMatrix],
+  [OPS_DOC, (matrix) => renderOps(matrix, loadRouting())]
 ]
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

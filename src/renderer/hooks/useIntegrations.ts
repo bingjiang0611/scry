@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { useProviderCapabilities } from './useProviderCapabilities'
 import { useUsageInsights } from './useUsageInsights'
 import { useSessionModels } from './useSessionModels'
@@ -148,7 +149,7 @@ export function useIntegrations(
           ? reconcileSelectedAgentId(current, detected)
           : current)
       })
-      .catch((error: unknown) => setAgentsScanError(error instanceof Error ? error.message : String(error)))
+      .catch((error: unknown) => setAgentsScanError(ipcErrorMessage(error)))
       .finally(() => setAgentsScanning(false))
   }, [])
 

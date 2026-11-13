@@ -4,6 +4,7 @@ import type { ProviderContext } from '@shared/provider'
 import type { DbStats, UsageAnalytics, UsageAnalyticsRangeDays, UsageStats } from '@shared/trace'
 import { contextKey } from './integration-model'
 import { INTEGRATION_COPY } from '../constants/integration-copy'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 export function applyDataUpdatedEffects(effects: {
   loadAnalytics: () => void
   analyticsActive: boolean
@@ -91,7 +92,7 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
         else loadAnalyticsCredits(result, rangeDays, seq)
       })
       .catch((error) => {
-        if (seq === analyticsRequestSeq.current) setAnalyticsError(error instanceof Error ? error.message : String(error))
+        if (seq === analyticsRequestSeq.current) setAnalyticsError(ipcErrorMessage(error))
       })
       .finally(() => {
         analyticsQueryInFlightRef.current = false

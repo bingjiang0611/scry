@@ -126,3 +126,5 @@ G1 把 20 s 写成了 `ContextAdmission` 构造的**默认值**，于是所有�
 | `check-packaged-app`「packaged daemon supervisor 未使用 Electron Node 模式」 | `6fa005eb` | 入口被 rollup 拆成 `chunks/supervisor-*.js` 再 re-export，守卫只读了 `out/main/daemon-supervisor.js` 一个文件 | 守卫顺着入口自己的相对 import 收集同一打包目录内的 chunk 再断言；控制实验：改回只读入口后立刻再次失败 |
 
 两条都用“回到出问题的输入 → 失败、修复后 → 通过”验证，未删断言、未放宽范围。
+
+合并说明（核验方）：`check-packaged-app` 的同一问题在 `claude/scry-performance-optimization-46ngcf` 上由 `0448e68` 先行修复（`scripts/packaged-main-graph.mjs`，带单测；被 import 的模块缺失时报错而不是跳过）。两分支合并时保留 `0448e68` 的实现，本节表中的修法描述与之等价。

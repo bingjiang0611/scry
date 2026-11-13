@@ -6,11 +6,13 @@
 
 ## 13.1 IPC channel 矩阵
 
-`src/main` 现有 119 个生产 `handleTrusted` channel 已逐个判定去向：留在 main **24**、一半 main 一半 daemon（`split`）**3**、转发到现有 op **39**、需要新增 op **53**。
+`src/main` 现有 134 个生产特权 IPC channel 已逐个判定去向：留在 main **24**、一半 main 一半 daemon（`split`）**3**、转发到现有 op **51**、需要新增 op **56**。
 
-- 完整矩阵：[P3-ipc-matrix.md](P3-ipc-matrix.md)（生成）；新增 op 的请求/响应/授权/调用方范围：[P3-ipc-ops.md](P3-ipc-ops.md)（生成）
+更正（B4-L4）：最初的扫描只匹配 `handleTrusted('字面量'`，漏了 15 个同样经 `registerTrustedIpcHandler` 注册的 channel：`sourceControl:*` 12 个（按 `sourceControlHandlers` 表以 `` `sourceControl:${method}` `` 注册）与 `workspaceSelection:*` 3 个（参数名为 `handle`）。扫描器现在两种写法都认，并按表展开模板注册；遇到不认识的模板注册直接失败。`sourceControl:*` 判为转发到 `desktopWorkbench` 的 sourceControl surface（同一 `sourceControlHandlers`，等价），`workspaceSelection:*` 判为新 op `workspaceSelection` 的 `read`/`inspectStart`/`validateBranch`。
+
+- 完整矩阵：[P3-ipc-matrix.md](P3-ipc-matrix.md) 与 [P3-ipc-matrix-workbench.md](P3-ipc-matrix-workbench.md)（生成，`desktopWorkbench` 转发行单列）；新增 op 的请求/响应/授权/调用方范围：[P3-ipc-ops.md](P3-ipc-ops.md)（生成）
 - 手工维护的判定（按职责拆成四个文件，每个都在 20 KB 门禁内）：
-  - `scripts/daemon-ipc-routing.json`：channel → 去向
+  - `scripts/daemon-ipc-routing.json` 与 `scripts/daemon-ipc-routing-workbench.json`：channel → 去向（后者是 `desktopWorkbench` 转发行）
   - `scripts/daemon-ipc-ops.json`：新 op 的 schema 与 `scopes`
   - `scripts/daemon-ipc-differences.json`：每个 `forward` 行与设备协议的语义差异
   - `scripts/daemon-ipc-remote-approvals.json`：允许远程设备调用的新 op（本批为空）

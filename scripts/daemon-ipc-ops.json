@@ -1,6 +1,16 @@
 {
   "schema": 1,
   "ops": {
+    "billing": {
+      "path": "analytics",
+      "request": "{ op:'billing', method, args: [] }（三个通道都没有参数）；同步走 long lane（分页，每页 20 秒）",
+      "response": "main 同一处理函数的 billingState / 同步 / fixture 导入结果",
+      "authorize": "本机 grant；与进程内相同：无额外开关（进程内 fixture 导入也没有开发开关，原文档写错了）；admin key 只从 daemon 的 shell 环境读取",
+      "why": "计费账本在 daemon 持有的 scry.db 里",
+      "scopes": [
+        "local"
+      ]
+    },
     "conversation": {
       "path": "history",
       "request": "{ op:'conversation', method, id?, cwd?, cursor?, request? }",
@@ -11,62 +21,12 @@
         "local"
       ]
     },
-    "providerContext": {
-      "path": "providers",
-      "request": "{ op:'providerContext', method, context }",
-      "response": "context 归一化或 invalidation 结果",
-      "authorize": "已验证 peer + authorize(context.cwd) + provider 白名单",
-      "why": "Provider 运行时不复存在",
-      "scopes": [
-        "local"
-      ]
-    },
-    "piProfile": {
-      "path": "providers",
-      "request": "{ op:'piProfile', method, profile }",
-      "response": "pi profile 列表或错误 envelope",
-      "authorize": "已验证 peer + profile 形状校验（配置文件属 daemon 的 userData）",
-      "why": "Provider 配置随 adapter 一起迁移",
-      "scopes": [
-        "local"
-      ]
-    },
-    "mcp": {
-      "path": "providers",
-      "request": "{ op:'mcp', method, context, targetId? }",
-      "response": "现有 MCP 快照/探测/重认证 envelope（含 unavailable）",
-      "authorize": "已验证 peer + authorize(context.cwd) + 每次重验仓库 trust 与指纹",
-      "why": "MCP 与 trust gate 都在 daemon",
-      "scopes": [
-        "local"
-      ]
-    },
-    "skills": {
-      "path": "providers",
-      "request": "{ op:'skills', method, context }",
-      "response": "现有 skill 列表 envelope",
-      "authorize": "已验证 peer + authorize(context.cwd) + provider 白名单",
-      "why": "daemon 才能读 Provider 的 skill 目录",
-      "scopes": [
-        "local"
-      ]
-    },
-    "usage": {
-      "path": "analytics",
-      "request": "{ op:'usage', method, context?, range? }",
-      "response": "现有 usage 投影（缺失证据仍是 unavailable，不回 0）",
-      "authorize": "已验证 peer + authorize(context.cwd)（有 context 时）+ 结果上限",
-      "why": "usage 来自 daemon 持有的 SQLite 与 usage JSONL",
-      "scopes": [
-        "local"
-      ]
-    },
-    "billing": {
-      "path": "analytics",
-      "request": "{ op:'billing', method, context? }",
-      "response": "现有 billingState / admin 同步结果",
-      "authorize": "已验证 peer + authorize(context.cwd)；fixture 导入额外要求开发开关",
-      "why": "账本与 transcript 在 daemon 侧",
+    "daemonInfo": {
+      "path": "lifecycle",
+      "request": "{ op:'daemonInfo' }",
+      "response": "{ op:'daemonInfo', version, protocol }：daemon 进程的 app 版本与协议版本",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；在 dispatch 之前回答，不进入 controller",
+      "why": "App 要在入网前后判断 daemon 是否由同一套源码构建；版本不一致必须硬失败并提示重启后台服务",
       "scopes": [
         "local"
       ]
@@ -81,32 +41,112 @@
         "local"
       ]
     },
+    "localBackgroundService": {
+      "path": "remote",
+      "request": "{ op:'localBackgroundService', method:'status', args: [] }；带参数返回 invalid_request",
+      "response": "{ version, pid, startedAt（进程启动的 epoch 毫秒）, devices（{ state:'remote-disabled' } 或 { state:'known', paired }）, activeRuns }；paired 只数未撤销、未过期的已配对设备，与 remote:status 一样不含 App 自己的本机连接（scope: local）",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；只读",
+      "why": "版本、进程、运行时长、已配对设备与运行中的 run 只有 daemon 知道",
+      "scopes": [
+        "local"
+      ]
+    },
+    "localHostStatus": {
+      "path": "remote",
+      "request": "{ op:'localHostStatus', method:'status', args: [] }",
+      "response": "main 同一处理的 RemoteStatus；设备列表不含 App 自己的本机连接（scope: local），与进程内一致；远程访问按 main 的规则（remoteHostEnabled）未启用时为 { enabled: false }",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant",
+      "why": "宿主状态由 daemon 持有",
+      "scopes": [
+        "local"
+      ]
+    },
+    "localDesktopHost": {
+      "path": "remote",
+      "request": "{ op:'localDesktopHost', method:'status'|'invite'|'disable', args: [] }",
+      "response": "main 同一处理的 DesktopHostAccess / scry-desktop1 邀请码 / 无",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；远程访问按 main 的规则（remoteHostEnabled）未启用时回答未启用",
+      "why": "让另一台桌面 App 配对到本机：监听与配对 authority 都在 daemon 的宿主上",
+      "scopes": [
+        "local"
+      ]
+    },
+    "localPairing": {
+      "path": "remote",
+      "request": "{ op:'localPairing', method:'begin'|'confirm'|'cancel'|'revoke', args }（渲染端参数原样）",
+      "response": "main 同一处理的 PairingAuthority 结果",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant（见 P3 §13.2）；确认须带用户比对过的公钥指纹，由 authority 校验，失败即拒绝；撤销拒绝 App 自己的本机连接",
+      "why": "配对权威随 daemon 迁移",
+      "scopes": [
+        "local"
+      ]
+    },
+    "mcp": {
+      "path": "providers",
+      "request": "{ op:'mcp', method, args }（渲染端参数原样）；走单独的 long lane（5 分钟超时，容得下 OAuth 登录与首次 npx 安装）",
+      "response": "main 同一处理函数的 envelope（含 unavailable/unsupported）；重认证的 OAuth 页面经事件流 { kind:'oauth', url } 交给 App",
+      "authorize": "本机 grant；与进程内相同：实时快照、探测、重认证每次重建并核对 MCP 执行快照与指纹，失败即拒绝；daemon 先用 isSafeOAuthAuthorizationUrl 校验 OAuth 地址，App 再校验，且只在自己发出的重认证进行中才打开",
+      "why": "MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证",
+      "scopes": [
+        "local"
+      ]
+    },
+    "piProfile": {
+      "path": "providers",
+      "request": "{ op:'piProfile', method:'addPiProfile'|'removePiProfile', args }：addPiProfile 的 args 是 App 选择框给出的启动器路径与窗口工作区（可为 null），不是渲染端参数",
+      "response": "removePiProfile：true；addPiProfile：{ status:'added', agent } 或 { status:'failed', message }（失败由 App 弹窗）",
+      "authorize": "已验证 peer + scope: local；profile id 形状校验；握手目录须是 daemon 已知项目（resolveKnownProjectDirectory），否则按失败回答；配置文件属 daemon 的 userData，不含密钥",
+      "why": "Provider 配置随 adapter 一起迁移",
+      "scopes": [
+        "local"
+      ]
+    },
     "projectStore": {
       "path": "navigation",
-      "request": "{ op:'projectStore', method, cwd, label?, pinned? }",
-      "response": "现有 project store 结果",
-      "authorize": "已验证 peer + scope: local + authorize(cwd)；recentFolders/removeRecentFolder 读写的就是 daemon 的授权输入（knownProjectDirectories），main 不得自己写",
+      "request": "{ op:'projectStore', method, args }（App 渲染端参数原样）",
+      "response": "与 main 同一 handler 的结果（project-channels.ts / startup-channels.ts）：项目列表、最近目录、boolean，removeRecentFolder 回新的最近目录列表",
+      "authorize": "已验证 peer + scope: local；项目目录须为绝对路径（与 main 相同，不要求已授权：只改列表元数据或收窄授权）；recentFolders/removeRecentFolder 读写的就是 daemon 的授权输入（knownProjectDirectories），daemon 模式下 main 不写",
       "why": "设备也读项目目录，必须单一写者",
       "scopes": [
         "local"
       ]
     },
-    "sessionStore": {
-      "path": "navigation",
-      "request": "{ op:'sessionStore', method, context }",
-      "response": "现有 appSessionStore 结果（健康、归档列表）",
-      "authorize": "已验证 peer + authorize(context.cwd) + provider/profile",
-      "why": "会话账本在 daemon 的 SQLite",
+    "providerCatalog": {
+      "path": "providers",
+      "request": "{ op:'providerCatalog', method:'detect'|'detectFast'|'providerDescriptors'|'runControls', args }",
+      "response": "与 main 同一 handler 的结果（startup-channels 的 providerDetectionChannelHandlers / providerControlChannelHandlers）",
+      "authorize": "已验证 peer + scope: local（只在本机端点存在）；runControls 与 Provider 认证同队列（withProviderOperation）",
+      "why": "本机要完整的 Provider 探测与控件；远程设备的 providers op 投影保持不变",
       "scopes": [
         "local"
       ]
     },
-    "sessionPurge": {
-      "path": "navigation",
-      "request": "{ op:'sessionPurge', method, request }",
-      "response": "现有批量删除结果（逐条 preview 与指纹）",
-      "authorize": "已验证 peer + authorize(cwd) + 指纹确认与逐条预览",
-      "why": "批量删除要重放既有 preview/指纹语义",
+    "providerContext": {
+      "path": "providers",
+      "request": "{ op:'providerContext', method, args }（App 渲染端参数原样；invalidateProviderContext 缺 cwd 时由 App 先填窗口工作区）",
+      "response": "true",
+      "authorize": "已验证 peer + scope: local；Provider 须已注册（registry.get），与该 Provider 的认证操作同队列；只清会话选择与 Provider 缓存，不执行仓库代码",
+      "why": "Provider 运行时不复存在",
+      "scopes": [
+        "local"
+      ]
+    },
+    "providerCommands": {
+      "path": "providers",
+      "request": "{ op:'providerCommands', method, args:[context] }",
+      "response": "现有 CapabilityEnvelope<ProviderCommand[]>（state/mode/observedAt 原样；不可用时 data: null + reason）",
+      "authorize": "已验证 peer + scope: local；在该 Provider 的操作队列内读取，与 main 同一份实现",
+      "why": "Provider registry 在 daemon；设备 op commands 是清洗后的投影，不保留 envelope",
+      "scopes": [
+        "local"
+      ]
+    },
+    "recorderContent": {
+      "path": "evidence",
+      "request": "{ op:'recorderContent', method, args:[request, cwd] }：request 为 renderer 原样请求，cwd 由 App 追加（窗口当前工作区，无选择时为空串）",
+      "response": "现有 recorder content page",
+      "authorize": "已验证 peer + scope: local；daemon 用自己的 resolveKnownProjectDirectory 重验 cwd（未知即 recorder_workspace_unavailable）+ `.scry` 路径与记录引用校验；App 在回复后再比对窗口选择",
+      "why": "recorder 记录写在工作区里，由 daemon 读",
       "scopes": [
         "local"
       ]
@@ -121,22 +161,62 @@
         "local"
       ]
     },
-    "workspaceSelection": {
-      "path": "navigation",
-      "request": "{ op:'workspaceSelection', method:'setCwd', cwd }",
-      "response": "归一化后的 cwd",
-      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化，setCwd 只接受已知项目根或用户目录）",
-      "why": "当前工作区是 daemon 授权上下文的一部分",
+    "sessionHistory": {
+      "path": "history",
+      "request": "{ op:'sessionHistory', method:'loadSession'|'loadSessionOlder', args }",
+      "response": "loadSession：{ page, selection }（App 应用 selection 后把 page 交给 renderer）；loadSessionOlder：与 main 同一 handler 的页",
+      "authorize": "已验证 peer + scope: local（只在本机端点存在）；会话须属于 daemon 的 App catalog，cwd 经 resolveKnownProjectDirectory 重验",
+      "why": "历史页与其分页缓存在 daemon；窗口当前会话的状态在 App",
       "scopes": [
         "local"
       ]
     },
-    "recorderContent": {
-      "path": "evidence",
-      "request": "{ op:'recorderContent', method, cwd, cursor }",
-      "response": "现有 recorder content page",
-      "authorize": "已验证 peer + authorize(cwd) + `.scry` 路径校验",
-      "why": "recorder 记录写在工作区里，由 daemon 读",
+    "terminal": {
+      "path": "terminal",
+      "request": "{ op:'terminal', method, args }（渲染端参数原样，末尾附 App 窗口当前 cwd 或 null）；输出另由 { op:'terminalFeed', method:'read', cursor } 按游标读取",
+      "response": "main 同一处理函数的返回值；terminalFeed.read 返回 { cursor, events }（每页不超过 512 KiB）",
+      "authorize": "本机 grant；daemon 用 resolveKnownProjectDirectory 重新解析 App 附上的 cwd，未知目录拒绝；ownership epoch 与 ready/ack 流控和进程内相同",
+      "why": "设备的 desktopWorkbench 终端按证书与工作区分开，列不出全部终端，录制跟着证书走；App 的终端要与进程内同一管理器、同一录制目录（P3-terminal.md）",
+      "scopes": [
+        "local"
+      ]
+    },
+    "sessionLifecycle": {
+      "path": "navigation",
+      "request": "{ op:'sessionLifecycle', method, args }（App 渲染端参数原样）",
+      "response": "main 同一处理函数的返回值（DeleteSessionResult / boolean）",
+      "authorize": "本机 grant；daemon 内与进程内相同的 contextAdmission、统一对话写入校验与运行中会话判定；删除确认框由 App 在发送前弹出",
+      "why": "App 自己的会话语义（空 cwd、确认后删除未存档会话）与设备 sessionAction/sessionDelete 不同，不能复用设备 op",
+      "scopes": [
+        "local"
+      ]
+    },
+    "sessionPurge": {
+      "path": "navigation",
+      "request": "{ op:'sessionPurge', method, request }",
+      "response": "现有批量删除结果（逐条 preview 与指纹）",
+      "authorize": "已验证 peer + authorize(cwd) + 指纹确认与逐条预览",
+      "why": "批量删除要重放既有 preview/指纹语义",
+      "scopes": [
+        "local"
+      ]
+    },
+    "sessionStore": {
+      "path": "navigation",
+      "request": "{ op:'sessionStore', method:'listSessions'|'catalogHealth'|'listArchivedSessions', args }",
+      "response": "现有 appSessionStore 结果（健康、归档列表）",
+      "authorize": "已验证 peer + authorize(context.cwd) + provider/profile",
+      "why": "会话账本在 daemon 的 SQLite",
+      "scopes": [
+        "local"
+      ]
+    },
+    "skills": {
+      "path": "providers",
+      "request": "{ op:'skills', method, context }",
+      "response": "现有 skill 列表 envelope",
+      "authorize": "已验证 peer + authorize(context.cwd) + provider 白名单",
+      "why": "daemon 才能读 Provider 的 skill 目录",
       "scopes": [
         "local"
       ]
@@ -151,32 +231,32 @@
         "local"
       ]
     },
-    "localPairing": {
-      "path": "remote",
-      "request": "{ op:'localPairing', method:'begin'|'confirm'|'cancel'|'revoke', payload }",
-      "response": "现有 PairingAuthority 结果",
-      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant（见 P3 §13.2）",
-      "why": "配对权威随 daemon 迁移",
+    "usage": {
+      "path": "analytics",
+      "request": "{ op:'usage', method, context?, range? }",
+      "response": "现有 usage 投影（缺失证据仍是 unavailable，不回 0）",
+      "authorize": "已验证 peer + authorize(context.cwd)（有 context 时）+ 结果上限",
+      "why": "usage 来自 daemon 持有的 SQLite 与 usage JSONL",
       "scopes": [
         "local"
       ]
     },
-    "localHostStatus": {
-      "path": "remote",
-      "request": "{ op:'localHostStatus', method:'status' }",
-      "response": "现有 host 状态（hostId、监听、租约、设备数）",
-      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant",
-      "why": "宿主状态由 daemon 持有",
+    "workspaceDiff": {
+      "path": "source-control",
+      "request": "{ op:'workspaceDiff', method:'gitDiff'|'gitDiffSnapshot'|'gitDiffCommits'|'gitCommitDiffSnapshot', args }",
+      "response": "现有 WorkspaceDiffResult / WorkspaceDiffSnapshotResult / 提交列表与提交 diff 快照",
+      "authorize": "已验证 peer + scope: local；按 canonical cwd 重验项目授权（与 main 的 authorizeDirectory 相同）",
+      "why": "项目授权归 daemon；git 读取跟随授权",
       "scopes": [
         "local"
       ]
     },
-    "daemonInfo": {
-      "path": "lifecycle",
-      "request": "{ op:'daemonInfo' }",
-      "response": "{ op:'daemonInfo', version, protocol }：daemon 进程的 app 版本与协议版本",
-      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；在 dispatch 之前回答，不进入 controller",
-      "why": "App 要在入网前后判断 daemon 是否由同一套源码构建；版本不一致必须硬失败并提示重启后台服务",
+    "workspaceSelection": {
+      "path": "navigation",
+      "request": "{ op:'workspaceSelection', method:'chooseFolder'|'setCwd'|'read'|'inspectStart'|'validateBranch', args }：chooseFolder 的 args 是 App 目录选择框给出的路径，不是渲染端参数；setCwd 的 args 是窗口要选中或已知项目文件通道请求里的目录；其余为渲染端参数原样",
+      "response": "chooseFolder：daemon 记住的 canonical 目录（App 随后选中）；setCwd：daemon 已知项目的 canonical 目录（目录参数为空时 null），不落盘；read/inspectStart/validateBranch：现有 SourceControlService 的 worktree 选择、准备检查与分支校验结果",
+      "authorize": "已验证 peer + scope: local；按 canonical 目录重验（chooseFolder 由 daemon 校验真实目录并持久化；read 只读 daemon 已知项目；inspectStart/validateBranch 只认 daemon 自己读过的 repositoryId，并重验其根目录授权与仓库身份）；setCwd 用 daemon 自己的 resolveKnownProjectDirectory（最近目录、未移除的项目、会话 cwd）。窗口当前工作区留在 App",
+      "why": "当前工作区是 daemon 授权上下文的一部分",
       "scopes": [
         "local"
       ]

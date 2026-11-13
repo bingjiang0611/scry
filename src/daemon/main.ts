@@ -30,6 +30,7 @@ const startedBy = process.env.SCRY_DAEMON_STARTED_BY ?? 'unknown'
 const daemonEntry = resolve(process.argv[1] ?? '')
 const result = await startDaemon({
   stateDirectory,
+  userDataDir,
   startedBy,
   daemonEntry,
   startHost: () => createDaemonHostProcess({
