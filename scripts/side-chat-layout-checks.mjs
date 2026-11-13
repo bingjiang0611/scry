@@ -230,7 +230,7 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   check(tabKeys.every(entry => entry.selected === 1), `the tab strip lost its single selection while using the keyboard: ${json(tabKeys)}`)
   check(tabKeys.every(entry => entry.focus != null), `a tab key left the focus on nothing: ${json(tabKeys)}`)
 
-  const input = await exerciseSideChatInput({ cdp, evaluate, check, childId, controls, showChild })
+  const input = await exerciseSideChatInput({ cdp, evaluate, check, childId, controls, showChild, ipcCountsPath })
 
   await resize(1400, 900)
   await showChild()

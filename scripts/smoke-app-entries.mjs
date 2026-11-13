@@ -67,6 +67,7 @@ export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sid
     const counts = {}
     const lostReply = ${JSON.stringify(lostReplyPath(countsPath))}
     const lostSendReply = ${JSON.stringify(lostSendReplyPath(countsPath))}
+    const lateHistory = ${JSON.stringify(lateHistoryPath(countsPath))}
     const requestLog = ${JSON.stringify(sideChatRequestsPath ?? '')}
     // Publish through a rename: the acceptance reads this file while the App counts, and a
     // torn read must never look like "no channel was invoked".
@@ -92,6 +93,29 @@ export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sid
         }, (error) => {
           appendFileSync(requestLog, JSON.stringify({ channel, rejected: String(error?.message ?? error) }) + '\\n')
           throw error
+        })
+      }
+      // Model a terminal receipt that precedes availability of its archived body.
+      // The run releases the body only after the renderer has shown that missing state.
+      if (channel === 'conversation:read' && existsSync(lateHistory)) {
+        // A read observes the archive availability at its start, not at its reply.
+        const marker = JSON.parse(readFileSync(lateHistory, 'utf8'))
+        return Promise.resolve(listener(...args)).then((page) => {
+          if (args[1] !== marker.conversationId) return page
+          const turn = page.turns.find(turn => turn.history?.userText === marker.prompt)
+          if (!turn || turn.delivery.outcome !== 'completed' || page.summary.activeRunId === turn.runId) return page
+          if (marker.release) {
+            if (existsSync(lateHistory)) {
+              rmSync(lateHistory)
+              args[0].sender.send('agent:dataUpdated', { kind: 'turn_recorded', runId: turn.runId })
+            }
+            return page
+          }
+          return { ...page, turns: page.turns.map(item => {
+            if (item.runId !== turn.runId) return item
+            const { history, ...pending } = item
+            return { ...pending, unavailableReason: 'fixture: archive pending' }
+          }) }
         })
       }
       // The marker is written by the acceptance run. 'before-commit' models a reply lost
@@ -144,6 +168,11 @@ function windowControlSource(controlPath) {
 /** Marker file the acceptance run writes to lose exactly one create reply. */
 export function lostReplyPath(countsPath) {
   return `${countsPath}.lost-create-reply`
+}
+
+/** Marker for a late archived body in the isolated side-chat acceptance. */
+export function lateHistoryPath(countsPath) {
+  return `${countsPath}.late-history`
 }
 
 /** Every side-chat list request the isolated main process observed, in dispatch order. */

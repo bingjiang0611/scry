@@ -65,6 +65,8 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   const drafts = useSyncExternalStore(draftStore.subscribe, draftStore.getSnapshot)
   const input = drafts.get(draftKey)?.input ?? ''
   const [page, setPage] = useState<ConversationPage>()
+  const pageRef = useRef(page)
+  pageRef.current = page
   const [before, setBefore] = useState<number>()
   const [reload, setReload] = useState(0)
   const [latestRequest, setLatestRequest] = useState(0)
@@ -145,8 +147,10 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       if (event?.kind === 'conversation_changed' && event.conversationId === conversation.id) {
         void refresh().catch(error => { if (!disposed) setError(message(error)) })
       }
-      // 本轮记录真的落库后（turn_recorded）才刷新：没有写记录就不会有这条事件。
-      if (event?.kind === 'turn_recorded' && activeRunId && event.runId === activeRunId) {
+      // 终态可先清除 activeRunId，归档正文随后才可读。本页已结束的轮次仍需
+      // 响应落库通知；不因一次缺失正文的分页快照而永久停留在旧时间线。
+      if (event?.kind === 'turn_recorded' && (event.runId === activeRunId ||
+        pageRef.current?.turns.some(turn => turn.runId === event.runId))) {
         void refresh().catch(error => { if (!disposed) setError(message(error)) })
       }
     })

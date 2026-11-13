@@ -3,17 +3,21 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { setImmediate } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown }
 const root = resolve(import.meta.dirname, '..')
 const workflow = load(readFileSync(join(root, '.github/workflows/validation-changes.yml'), 'utf8')) as {
-  jobs: { changes: { steps: { name?: string; run?: string }[] } }
+  on: { workflow_call: { outputs: Record<string, { value: string }> } }
+  jobs: { changes: { outputs: Record<string, string>; steps: { name?: string; run?: string }[] } }
 }
 const script = workflow.jobs.changes.steps.find(step => step.name === 'Detect executable changes')!.run!
 const temporary: string[] = []
-afterEach(() => {
+afterEach(async () => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true })
+  // Let Vitest service RPC between subprocess-heavy synchronous Git fixtures.
+  await setImmediate()
 })
 function temp() {
   const path = mkdtempSync(join(tmpdir(), 'scry-ci-changes-'))
@@ -49,13 +53,19 @@ function fixture() {
   return { git, write, commit, detect }
 }
 
-const SKIP = 'required=false\ndesktop=false\n'
-const FULL = 'required=true\ndesktop=true\n'
-const NO_DESKTOP = 'required=true\ndesktop=false\n'
+const SKIP = 'required=false\ndesktop=false\nnode_performance=false\n'
+const FULL = 'required=true\ndesktop=true\nnode_performance=true\n'
+const NO_DESKTOP = 'required=true\ndesktop=false\nnode_performance=true\n'
+const IOS_ONLY = 'required=true\ndesktop=false\nnode_performance=false\n'
 
 // Real Git pathspecs, including renames/deletions, not a second matcher.
 // Separate cases keep subprocess-heavy fixtures under the ordinary test deadline.
 describe('documentation-only validation skips', () => {
+  it('exports Node scope through the reusable workflow boundary', () => {
+    expect(workflow.jobs.changes.outputs.node_performance).toBe('${{ steps.diff.outputs.node_performance }}')
+    expect(workflow.on.workflow_call.outputs.node_performance.value).toBe('${{ jobs.changes.outputs.node_performance }}')
+  })
+
   it.each([
     'README.md', 'docs/guide.md', 'docs/nested/guide.md', 'apps/ios/README.md',
     'packages/turn-recorder-cli/README.md', 'experiments/remote-g0/README.md',
@@ -81,11 +91,47 @@ describe('documentation-only validation skips', () => {
     'src/main.test.ts', 'src/renderer/view.test.tsx', 'scripts/ci-workflow.test.ts', 'CLAUDE.md', 'CONTRIBUTING.md',
     'DESIGN.md', 'PRODUCT.md', '.agents/skills/test/SKILL.md', '.claude/skills/test/SKILL.md',
     '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/bug_report.yml', '.github/VOUCHED.td',
-    '.github/TRIAGE_EXEMPTIONS.td', 'apps/ios/ScryRemote/App.swift'
+    '.github/TRIAGE_EXEMPTIONS.td'
   ])('validates on Ubuntu but skips macOS App gates for inputs that cannot reach the App: %s', path => {
     const { write, commit, detect } = fixture()
     write('README.md'); write(path); commit()
     expect(detect()).toEqual({ status: 0, output: NO_DESKTOP })
+  })
+
+  it.each([
+    'apps/ios/ScryRemote/App.swift', 'apps/ios/ScryRemote.xcodeproj/project.pbxproj',
+    'apps/ios/Checks/theme-motion.py', 'apps/ios/ScryRemoteUITests/ContinuityUITests.swift'
+  ])('skips Node measurements only for iOS inputs, retaining other validation: %s', path => {
+    const { write, commit, detect } = fixture()
+    write(path); write('README.md'); commit()
+    expect(detect()).toEqual({ status: 0, output: IOS_ONLY })
+  })
+
+  it.each([
+    ['src/main.ts', FULL], ['package-lock.json', FULL], ['scripts/performance-baseline.test.ts', NO_DESKTOP],
+    ['CLAUDE.md', NO_DESKTOP], ['experiments/remote-g0/generated/wire.ts', FULL],
+    ['.github/workflows/performance.yml', FULL], ['apps/ios-other/main.ts', FULL]
+  ])('retains Node measurement for iOS mixed with %s', (path, expected) => {
+    const { write, commit, detect } = fixture()
+    write('apps/ios/ScryRemote/App.swift'); write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: expected })
+  })
+
+  it('does not hide a Node source renamed into iOS', () => {
+    const { git, write, commit, detect } = fixture()
+    write('apps/ios/README.md'); commit()
+    git('mv', 'src/main.ts', 'apps/ios/moved.ts'); commit()
+    expect(detect()).toEqual({ status: 0, output: FULL })
+  })
+
+  it('handles iOS deletions without hiding a rename out of iOS', () => {
+    const { git, write, commit, detect } = fixture()
+    write('apps/ios/source.swift'); write('apps/ios/deleted.swift'); commit()
+    const base = git('rev-parse', 'HEAD')
+    git('rm', 'apps/ios/deleted.swift'); commit()
+    expect(detect(base)).toEqual({ status: 0, output: IOS_ONLY })
+    git('mv', 'apps/ios/source.swift', 'src/moved.swift'); commit()
+    expect(detect(base)).toEqual({ status: 0, output: FULL })
   })
 
   it('keeps macOS App gates when an App input is mixed with desktop-free changes', () => {
