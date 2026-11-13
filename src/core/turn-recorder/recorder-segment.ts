@@ -1,6 +1,6 @@
 import type { ProviderId } from '../../shared/provider.js'
 import type { TraceEvent } from '../../shared/trace.js'
-import { unavailable, type TurnEvidence, type TurnRole } from '../../shared/turn-record.js'
+import { partial, unavailable, type TurnEvidence, type TurnRole } from '../../shared/turn-record.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import {
   recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath,
@@ -14,6 +14,7 @@ import {
 import { beginOpenTurn, degradeEvidenceSections, storeLifecycleEvent } from './recorder-turn-state.js'
 import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript } from './recorder-transcript-background.js'
 import { snapshotSessionNetDiff } from './git.js'
+import { segmentFreeze } from './recorder-segment-diff.js'
 import { terminalSnapshot } from './git-capture.js'
 
 /**
@@ -26,8 +27,8 @@ export type SealHoldReason = 'stale_terminal' | 'pending_background_tasks'
 export const CONTINUATION_ROLE_SOURCE = 'recorder_background_wake'
 export const CONTINUATION_USER_REASON =
   'this segment was continued by a background task notification, so it has no user prompt'
-export const CONTINUATION_DIFF_REASON =
-  'a continuation segment has no Git baseline of its own; the turn it continues owns the attribution'
+export const CONTINUATION_NO_BASELINE_REASON =
+  'the segment this continues published no end state for this repository, so its changes cannot be separated from this segment'
 
 /** Turn role for a segment opened by a background notification instead of a user prompt. */
 export function continuationRole(open: OpenTurnState): TurnRole | undefined {
@@ -56,12 +57,15 @@ export async function holdSeal(
   open.endReason ??= 'provider_terminal'
   // Freeze at the Provider boundary without consuming the baseline: a newer prompt can still
   // cancel this hold. Runtime promise queues stay on the temporary view, never in the JSON state.
+  // The same boundary is what the next segment diffs against, so its end tree and store are kept.
+  const frozen = segmentFreeze({ enabled: enablement.config.capture.diff, open, gaveUp: false })
   open.terminalDiffs = await Promise.all(open.captures.map(async ({ repository, capture }) => {
     const started = Date.now()
     try {
       const snapshot = await snapshotSessionNetDiff({ ...capture, opChain: undefined, finishPromise: undefined }, undefined, {
         patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-        completePatches: true
+        completePatches: true,
+        ...(frozen ? { onAfter: frozen.option(repository) } : {})
       })
       return { repository, snapshot }
     } catch {
@@ -72,6 +76,10 @@ export async function holdSeal(
       }
     }
   }))
+  if (frozen) {
+    const sealed = frozen.list()
+    if (sealed.length) open.frozenDiffs = sealed
+  }
   open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
   open.deferredTerminalAt = new Date().toISOString()
   open.deferredTerminalEventId = eventId
@@ -107,11 +115,10 @@ export function holdsStopForBackgroundWork(provider: ProviderId): boolean {
  */
 export async function beginContinuationTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
-  provider: ProviderId,
-  sessionId: string,
-  event: string,
-  payload: Record<string, unknown>
+  input: RecorderHookInput,
+  sessionId: string
 ): Promise<OpenTurnState | undefined> {
+  const { provider, event, payload } = input
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await readJson<SessionState>(statePath(root))
   const previous = session?.lastSegment
@@ -120,9 +127,11 @@ export async function beginContinuationTurn(
   const transcriptPath = transcriptPathOf(payload) ?? previous.transcriptPath
   const requestSetId = stringAt(payload, 'request_set_id', 'requestSetId')
   const providerTurnId = providerTurnIdOf(payload, provider)
+  // The wake belongs to the same capture as the turn it continues: a session-capture record keeps
+  // the same source, task and captureId, otherwise the segment would look like a stranger's work.
   const open = await beginOpenTurn(
     enablement, provider, sessionId, event, payload,
-    false, false, undefined, undefined,
+    false, false, input.uploadEnvironment, input.capture,
     { startedAt: timestampOf(payload), ...(providerTurnId ? { providerTurnId } : {}) },
     {
       rootRecordId: previous.rootRecordId,
@@ -184,7 +193,19 @@ export function applyContinuationEvidence(
 ): void {
   if (!open.continuation) return
   evidence.user = unavailable(CONTINUATION_USER_REASON)
-  if (captureDiff && evidence.diff.status !== 'disabled') evidence.diff = unavailable(CONTINUATION_DIFF_REASON)
+  // Every repository but one should have a frozen baseline. Name the exception instead of letting a
+  // generic "some snapshots were unavailable" hide which repository could not be separated.
+  const missing = captureDiff
+    ? open.captures.filter(({ capture }) => capture.status !== 'ready').map(({ repository }) => repository)
+    : []
+  if (missing.length > 0 && evidence.diff.status !== 'disabled') {
+    const reason = [evidence.diff.omissionReason, `${CONTINUATION_NO_BASELINE_REASON}: ${missing.join(', ')}`]
+      .filter(Boolean)
+      .join('; ')
+    evidence.diff = evidence.diff.status === 'partial' && evidence.diff.value
+      ? partial(evidence.diff.value, evidence.diff.source, reason, 'exact')
+      : unavailable(reason, evidence.diff.source)
+  }
   if (!ownsRows) {
     degradeEvidenceSections(
       evidence,

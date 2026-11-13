@@ -235,7 +235,9 @@ export function registerSuite5(): void {
     await writeFile(pluginConfig, 'late actor edit\n')
     await writeFile(openState, JSON.stringify({ ...deferred, deferredTerminalAt: '2000-01-01T00:00:00.000Z' }))
     await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 1, pending: 0 })
-    for (const path of capturePaths) await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    // The sealed segment's store is its published end state: a background wake can still continue
+    // this turn, and then this store is that segment's baseline. It is released by the next seal.
+    for (const path of capturePaths) await expect(access(path)).resolves.toBeUndefined()
 
     const afterDeferred = await listRecords(join(root, '.scry'))
     const deferredRecord = afterDeferred.find((record) => record.user.value?.text === 'successor qoder turn')
@@ -263,6 +265,8 @@ export function registerSuite5(): void {
     expect(nextFile).toMatchObject({ path: expect.stringContaining('plugin.config.json'), added: 1, deleted: 0 })
     expect(nextFile).not.toHaveProperty('patch')
     expect(nextFile?.patchContent?.content).toContain('+next turn edit')
+    // Publishing the next segment releases the baseline it consumed.
+    for (const path of capturePaths) await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' })
   }, 35_000)
 
   it('transcript 仍在增长的长任务不被误判为过期', async () => {

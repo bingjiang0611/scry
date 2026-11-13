@@ -30,6 +30,26 @@ export interface RecorderSealedSegment {
    * its own boundary, which is the one case a continuation cannot slice at.
    */
   publishedEvents?: number
+  /**
+   * Each repository's end state at this seal: the tree the record published plus the store holding
+   * its blobs. The next segment diffs against it, so its record shows only its own work.
+   */
+  frozenDiffs?: RecorderFrozenDiff[]
+}
+
+/**
+ * A sealed segment's per-repository end state. Blobs live in the recorder's isolated object store,
+ * never in the user's repository; `tempDir` owns them until the next segment publishes.
+ */
+export interface RecorderFrozenDiff {
+  requestedRoot: string
+  repoRoot?: string
+  scope?: string
+  tree: string
+  at: string
+  objectDir: string
+  tempDir: string
+  alternateObjectDirs?: string
 }
 
 export interface RecorderSessionState {
@@ -38,6 +58,12 @@ export interface RecorderSessionState {
   lastTurnIndex: number
   lastCommittedRecordId?: string
   committedProviderTurnIds?: string[]
+  /**
+   * Object stores kept alive for the active segment chain. A continuation's baseline tree can name
+   * blobs from any earlier segment of the same chain, so they are released only when a real user
+   * prompt starts a new chain (or the session state stops naming them).
+   */
+  chainStores?: string[]
   /** Repositories discovered from files this session touched; later turns baseline them too. */
   captureRepositories?: string[]
   lastSegment?: RecorderSealedSegment
@@ -94,6 +120,8 @@ export interface RecorderOpenTurnState {
   deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks'
   /** Present when a background notification opened this segment instead of a user prompt. */
   continuation?: RecorderContinuation
+  /** End states frozen at this segment's Stop, before the quiet window decided to publish it. */
+  frozenDiffs?: RecorderFrozenDiff[]
   /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
   terminalIdentityConfirmedBySessionEnd?: boolean
   /**

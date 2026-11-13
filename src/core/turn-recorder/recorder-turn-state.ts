@@ -10,6 +10,7 @@ import { markSessionAttention, withSessionAttentionLock } from './attention.js'
 import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
+import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
@@ -113,10 +114,18 @@ export async function beginOpenTurn(
     await writeJsonAtomic(openPath(root), open)
   })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
-  // A continuation segment has no baseline of its own: its predecessor's sealed end state is the
-  // boundary, and a fresh baseline taken at a wake hook would attribute that hook's latency to Git.
-  if (!managedByScry && !continuation && enablement.config.capture.diff) {
-    const captureDir = join(turnRoot(root, generation), 'captures')
+  // A continuation segment's baseline is its predecessor's sealed end state — never a new baseline
+  // taken at the wake, which would attribute the previous segment's work to this one.
+  if (!managedByScry && continuation && enablement.config.capture.diff) {
+    open.captures = await continuationCaptures({
+      frozen: session.lastSegment?.frozenDiffs,
+      repositories: session.captureRepositories ?? [],
+      captureRoot: segmentCaptureDir(root, generation),
+      excludedPaths: [enablement.dataRoot]
+    })
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  } else if (!managedByScry && !continuation && enablement.config.capture.diff) {
+    const captureDir = segmentCaptureDir(root, generation)
     const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
     open.repositoryDiscovery = {
       maxDepth: discovery.maxDepth,

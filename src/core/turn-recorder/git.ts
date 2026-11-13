@@ -4,7 +4,9 @@ export {
   type GitTurnDiffFinishOptions,
   type GitTurnDiffBaseline,
   cloneGitTurnDiffCapture,
-  beginGitTurnDiff
+  beginGitTurnDiff,
+  preserveAfterStorage,
+  resumeAfterStorage
 } from './git-capture.js'
 export {
   type NewWorktreeBaselineOptions,

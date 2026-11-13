@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { it, expect } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
 import { listRecords } from '../store'
-import { startSessionCapture } from '../session-capture'
+import { applySessionCaptureHook, startSessionCapture } from '../session-capture'
 import { workspace } from './fixture.test'
 import {
   assistantText, captureHook, launchReceipt, notification, notificationPrompt, sealQuietSegment,
@@ -196,7 +196,8 @@ export function registerContinuationSuite(): void {
       provider: 'qoder', event: 'SessionEnd', workspace: root,
       payload: { session_id: session, cwd: '/tmp', transcript_path: transcript, hook_event_name: 'SessionEnd' }
     })).resolves.toMatchObject({ status: 'pending' })
-    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 1, pending: 0 })
+    // Replay starts the continuation segment; the commit below is what proves it was applied.
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ pending: 0 })
 
     const [record] = await listRecords(join(root, '.scry'))
     expect(record).toMatchObject({ status: 'interrupted', user: { value: { text: 'summarise the release' } } })
@@ -250,6 +251,57 @@ export function registerContinuationSuite(): void {
     expect(records[0].assistant.value?.text).toBe('The build finished while I was still writing.')
   })
 
+  it('排队的唤醒重放后仍带着同一个 capture 上下文', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'qoder-queued-capture.jsonl')
+    await writeFile(transcript, `${[
+      user('prompt-1', 'queued wake task', { requestSetId: 'request-1' }),
+      toolUse('prompt-1', 'call-bg-1', 'sleep 30'),
+      launchReceipt('call-bg-1', 'task-1'),
+      assistantText('prompt-1', 'Running in the background.')
+    ].join('\n')}\n`)
+    await startSessionCapture({
+      workspace: root,
+      provider: 'qoder',
+      sessionId: session,
+      dataDir: join(root, '.scry'),
+      context: {
+        protocol: 'codelens.session-capture.v1', captureId: 'capture-queued', sessionId: session,
+        cwd: root, host: 'qoder', transcriptPath: transcript, openedAt: '2026-07-19T12:00:01.000Z',
+        source: 'manual', task: 'REQ-777'
+      },
+      payload: {
+        session_id: session, hook_event_name: 'UserPromptSubmit', transcript_path: transcript,
+        timestamp: '2026-07-19T12:00:01.000Z', prompt: 'queued wake task', request_set_id: 'request-1'
+      },
+      cli: {}
+    })
+    await expect(captureHook(root, 'Stop', stop(transcript)))
+      .resolves.toMatchObject({ status: 'accepted', ack: { result: 'pending' } })
+    await sealQuietSegment(root)
+
+    await appendFile(transcript, `${[
+      notification('prompt-2', 'task-1', 'call-bg-1'),
+      assistantText('prompt-2', 'The queued wake finished the work.')
+    ].join('\n')}\n`)
+    // A daemon delivery the recorder could not confirm is queued instead of applied: the wake is
+    // replayed later, and must still belong to the same capture.
+    await applySessionCaptureHook({
+      workspace: root, provider: 'qoder', event: 'UserPromptSubmit', sessionId: session,
+      dataDir: join(root, '.scry'), queueOnly: true,
+      payload: start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z')
+    })
+    // Replay starts the continuation segment; the committed record below proves it was applied.
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ pending: 0 })
+    await expect(captureHook(root, 'Stop', stop(transcript))).resolves.toMatchObject({ status: 'accepted' })
+
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(2)
+    expect(records[1].turnRole).toMatchObject({ role: 'continuation', parentId: records[0].recordId })
+    expect(records[1].capture).toEqual(records[0].capture)
+    expect(records[1].capture).toMatchObject({ captureId: 'capture-queued', task: 'REQ-777' })
+  })
+
   it('按会话开启模式下同样分段：唤醒后仍然只有一条接续记录且不重复正文', async () => {
     const root = await workspace()
     const transcript = join(root, 'qoder-capture.jsonl')
@@ -297,5 +349,9 @@ export function registerContinuationSuite(): void {
     expect(records[1].turnRole).toMatchObject({ role: 'continuation', parentId: records[0].recordId })
     expect(records[1].assistant.value?.text).toBe('Captured task finished.')
     expect(records[1].tools.value ?? []).toEqual([])
+    // One capture, one source: the wake continues the captured session instead of looking like a
+    // second, unrelated recording of the same work.
+    expect(records[1].capture).toEqual(records[0].capture)
+    expect(records[1].capture).toMatchObject({ captureId: 'capture-1', source: 'manual', task: 'REQ-123' })
   })
 }

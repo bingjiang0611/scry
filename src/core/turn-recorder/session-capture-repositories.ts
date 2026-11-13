@@ -1,7 +1,7 @@
-import { join } from 'node:path'
 import { readJson, writeJsonAtomic } from './io.js'
 import { beginGitTurnDiff } from './git-capture.js'
-import { recorderOpenPath, recorderStatePath, recorderTurnRoot, type RecorderOpenTurnState, type RecorderSessionState } from './runtime-state.js'
+import { recorderOpenPath, recorderStatePath, type RecorderOpenTurnState, type RecorderSessionState } from './runtime-state.js'
+import { segmentCaptureDir } from './recorder-segment-diff.js'
 import type { RecorderEnablement } from './config.js'
 import { TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 
@@ -38,7 +38,9 @@ export async function attachCaptureBaseline(
   sessionRoot: string
 ): Promise<void> {
   const known = new Set(open.captures.map((item) => item.repository))
-  const captureDir = join(recorderTurnRoot(sessionRoot, open.generation), 'captures')
+  // Beside the turn, not inside it: sealing removes the turn directory, and a background wake may
+  // continue this turn with this capture's end state as its baseline.
+  const captureDir = segmentCaptureDir(sessionRoot, open.generation)
   const additions = await Promise.all(repositories.filter((repository) => !known.has(repository)).map(async (repository) => ({
     repository,
     capture: await beginGitTurnDiff(repository, TURN_DIFF_BEGIN_DEADLINE_MS, captureDir, [enablement.dataRoot])

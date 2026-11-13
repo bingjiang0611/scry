@@ -59,6 +59,8 @@ export interface GitTurnDiffCapture {
   objectDir?: string
   alternateObjectDirs?: string
   filterOverrides?: string[]
+  /** 保留 object store 供下一段当基线；随 open 状态持久化，跨进程生效。 */
+  preservedStorage?: boolean
   pathspec?: string[]
   excludedPaths?: string[]
   /** clone 之间共享的只读 baseline object store；引用归零后才删除 owner 根目录。 */
@@ -79,6 +81,11 @@ export interface GitTurnDiffBaseline {
   commit: string
   /** 基线观测时间（ISO），写入 snapshot.beforeAt。 */
   at: string
+  /**
+   * 基线所在的只读 object store（会话内上一段冻结的结束状态）。
+   * 基线树里的 blob 可能只存在于那里，不是本仓库的已提交对象。
+   */
+  objectDirs?: string[]
 }
 
 export interface GitTurnDiffFinishOptions {
@@ -89,6 +96,11 @@ export interface GitTurnDiffFinishOptions {
   completePatches?: boolean
   /** Bounded, read-only workspace inspector; not the recorder retention policy. */
   workspaceSnapshot?: boolean
+  /**
+   * 终态 after-tree 的出口。分段记录用它冻结「本段结束时的状态」，作为下一段的基线；
+   * 共享 after 的重算不触发，因为那时树属于另一个 capture。
+   */
+  onAfter?: (after: GitAfterTree) => void
 }
 
 /**
@@ -188,6 +200,20 @@ export function terminalSnapshot(
 
 const retainedCaptureStorage = new WeakMap<GitTurnDiffCapture, () => Promise<TurnDiffSnapshot['cleanup']>>()
 
+/**
+ * 保留本 capture 的 object store 到本段之后：下一段以本段结束时的树为基线，需要这里的 blob。
+ * 逐段链式保留，释放由下一段封箱负责。标记必须随 open 状态持久化：hold 与封箱是不同进程，
+ * 进程内的 set 在恢复时认不出重新读出来的 capture。
+ */
+export function preserveAfterStorage(capture: GitTurnDiffCapture): void {
+  capture.preservedStorage = true
+}
+
+/** The segment chain was dropped (a real prompt resumed the turn): clean up normally again. */
+export function resumeAfterStorage(capture: GitTurnDiffCapture): void {
+  capture.preservedStorage = false
+}
+
 /** A terminal peer owns one reference to the complete source store, including clone-only objects. */
 export function retainAfterStorage(capture: GitTurnDiffCapture): () => Promise<TurnDiffSnapshot['cleanup']> {
   const owner: GitTurnDiffCapture = { ...capture, finishPromise: undefined, opChain: undefined }
@@ -201,6 +227,13 @@ export function retainAfterStorage(capture: GitTurnDiffCapture): () => Promise<T
 }
 
 export async function cleanupCapture(capture: GitTurnDiffCapture): Promise<TurnDiffSnapshot['cleanup']> {
+  if (capture.preservedStorage) {
+    // The next segment still needs this store. The shared session baseline keeps its reference so
+    // blobs that predate it stay resolvable for that segment's diff.
+    capture.tempDir = undefined
+    capture.sharedStorage = undefined
+    return 'ok'
+  }
   const release = retainedCaptureStorage.get(capture)
   if (release) {
     retainedCaptureStorage.delete(capture)
@@ -317,9 +350,12 @@ export async function beginGitTurnDiff(
     tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
     const objectDir = join(tempDir, 'objects')
     await mkdir(objectDir)
-    const alternateObjectDirs = [join(commonDir, 'objects'), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
-      .filter((value): value is string => !!value)
-      .join(delimiter)
+    // A segment baseline can hand over the whole chain's stores, which overlap on the repository's own.
+    const alternateObjectDirs = [...new Set([
+      join(commonDir, 'objects'),
+      ...(baseline?.objectDirs ?? []),
+      ...(process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES ? process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES.split(delimiter) : [])
+    ].filter((value): value is string => !!value))].join(delimiter)
     // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
     // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
     // linked worktree 的规则文件在自己的 git 目录（`<common>/worktrees/<id>/info/...`），
@@ -328,9 +364,15 @@ export async function beginGitTurnDiff(
     if (baseline) {
       // 显式基线的仓库不需要工作树快照：基线树就是创建提交的树。仍要先建立本 capture 自己的
       // object store，after 快照只能写进这里，不能污染真实仓库。
+      // A frozen segment baseline is a tree object that only exists in that segment's store: it is
+      // not in the repository, so it can only be resolved through the alternates it came from.
       const baselineTree = (await gitCommand(
         ['rev-parse', '--verify', '--end-of-options', `${baseline.commit}^{tree}`],
-        { cwd: repoRoot, env: readEnv, deadline }
+        {
+          cwd: repoRoot,
+          env: baseline.objectDirs?.length ? { ...readEnv, GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateObjectDirs } : readEnv,
+          deadline
+        }
       )).trim()
       return {
         beforeAt: baseline.at,

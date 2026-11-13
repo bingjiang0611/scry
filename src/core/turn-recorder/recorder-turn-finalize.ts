@@ -5,7 +5,7 @@ import { aggregateTurnEvidence } from './aggregate.js'
 import { isCodexAppContextInput } from './recorder-codex-user-input.js'
 import { isFullToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
-import { limitTurnDiffPatchBytes, cancelGitTurnDiff, finishGitTurnDiff } from './git.js'
+import { cancelGitTurnDiff } from './git.js'
 import { appendRotatingLog, writeJsonAtomic } from './io.js'
 import { RECORDER_VERSION, commitRecord, clearRuntimeTurn, stableHash } from './store.js'
 import { releaseStaleAttention, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
@@ -13,11 +13,11 @@ import type { RecorderEnablement } from './config.js'
 import { terminalStatus, type RecorderHookResult, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
-import { degradeEvidenceSections, persistRecorderEventContent, persistTurnDiffContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
+import { degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { unmatchedIdentityReason } from './recorder-transcript-background.js'
 import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
-import { turnChangeHints } from './change-journal.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
+import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { rm } from 'node:fs/promises'
 import { applyCaptureBaselineCaveat, captureRecordMetadata } from './record-capture-metadata.js'
 
@@ -118,24 +118,16 @@ export async function finalizeOpenTurn(
     identityUnmatched || open.terminalDiffs
     ? Promise.resolve([])
     : newWorktreeTurnDiffs(enablement, open, mergedEvents)
-  const diffs = options.forcedReason || identityUnmatched
-    ? []
-    : limitTurnDiffPatchBytes(await persistTurnDiffContent(
-        enablement.dataRoot,
-        [...(open.terminalDiffs
-          ? open.terminalDiffs.map(({ repository, snapshot }) => ({ ...snapshot, requestedRoot: repository }))
-          : await Promise.all(open.captures.map(async ({ repository, capture }) => ({
-              ...await finishGitTurnDiff(capture, undefined, {
-                ...turnChangeHints(repository, mergedEvents),
-                patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-                completePatches: true
-              }),
-              // A failed Git baseline may not resolve repoRoot. Preserve the known request
-              // directory separately, without inventing a successful Git-root observation.
-              requestedRoot: repository
-            })))),
-          ...await worktreeDiffs]
-      ))
+  const frozen = segmentFreeze({
+    enabled: enablement.config.capture.diff,
+    open,
+    gaveUp: !!options.forcedReason || identityUnmatched
+  })
+  const collected = options.forcedReason || identityUnmatched
+    ? { diffs: [] as TurnDiffSnapshot[], frozen: undefined }
+    : await collectTurnDiffs({ enablement, open, mergedEvents, worktreeDiffs, frozen })
+  const diffs = collected.diffs
+  const sealedFrozen = collected.frozen
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,
@@ -330,15 +322,26 @@ export async function finalizeOpenTurn(
     ? [...new Set([...(session.committedProviderTurnIds ?? []), effectiveProviderTurnId])].slice(-200)
     : session.committedProviderTurnIds
   // An unmeasured boundary stays unset: the next segment says it may repeat content, not guess.
-  const measured = transcript.identityMatched !== false && !options.forcedReason
+  // A turn with no transcript at all has no boundary to measure — treating its empty event list as
+  // "published 0" would make the next segment republish everything this one already did.
+  const measured = transcript.observed && transcript.identityMatched !== false && !options.forcedReason
   const sealedBoundary = measured
     ? (continuation?.publishedEvents ?? 0) + transcriptSourceEvents(transcript.events).length
     : undefined
+  // A real user prompt starts a new chain, which releases the previous one; managed turns have no
+  // repositories, so they must not touch the chain.
+  const chainStores = open.managedByScry
+    ? session.chainStores
+    : await releaseSegmentChain(root, session, sealedFrozen, !!open.continuation)
   await writeJsonAtomic(statePath(root), {
     ...session,
     lastCommittedRecordId: committed.record.recordId,
     ...(committedProviderTurnIds ? { committedProviderTurnIds } : {}),
-    lastSegment: sealedSegment(open, committed.record.recordId, completedAt, view.providerTurnId ?? transcript.providerTurnId, sealedBoundary)
+    lastSegment: {
+      ...sealedSegment(open, committed.record.recordId, completedAt, view.providerTurnId ?? transcript.providerTurnId, sealedBoundary),
+      ...(sealedFrozen?.length ? { frozenDiffs: sealedFrozen } : {})
+    },
+    ...(chainStores ? { chainStores } : {})
   }, { sync: false })
   await rm(openPath(root), { force: true })
   // A hook queued while this turn was finalizing still needs a recovery pass, so the index entry is

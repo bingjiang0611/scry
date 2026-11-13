@@ -4,6 +4,7 @@ import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
+import { validQueuedCapture } from './recorder-hook-queue.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
@@ -11,6 +12,7 @@ import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './record
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
 import { holdSeal, refreshSealWindow } from './recorder-segment.js'
+import { resumeAfterStorage } from './git.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 
 export async function applyHookLocked(
@@ -196,6 +198,9 @@ export async function applyHookLocked(
     delete open.deferredTerminalAt
     delete open.deferredTerminalEventId
     delete open.terminalDiffs
+    // The chain is dropped with the hold: this turn keeps its own baseline.
+    for (const { capture } of open.captures) resumeAfterStorage(capture)
+    delete open.frozenDiffs
     delete open.terminalIdentityConfirmedBySessionEnd
     delete open.staleTerminalProtection
     await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -308,7 +313,8 @@ export async function replayQueuedHooks(
         (expectedSessionId !== undefined && queued.sessionId !== expectedSessionId) ||
         typeof queued.event !== 'string' || !queued.payload || typeof queued.payload !== 'object' ||
         Array.isArray(queued.payload) || typeof queued.arrivedAt !== 'string' ||
-        !Number.isFinite(Date.parse(queued.arrivedAt))) {
+        !Number.isFinite(Date.parse(queued.arrivedAt)) ||
+        !validQueuedCapture(queued, provider)) {
         if (expectedSessionId !== undefined && (queued.provider !== provider || queued.sessionId !== expectedSessionId)) {
           throw new Error(`scoped recorder inbox identity differs from requested session: ${entry.name}`)
         }
@@ -320,7 +326,8 @@ export async function replayQueuedHooks(
         workspace: enablement.workspaceRoot,
         payload: queued.payload,
         managed: queued.managed,
-        uploadEnvironment: queued.uploadEnvironment
+        uploadEnvironment: queued.uploadEnvironment,
+        ...(queued.capture ? { capture: queued.capture } : {})
       }, queued.sessionId))
     } catch (error) {
       if (expectedSessionId !== undefined && error instanceof Error && error.message.startsWith('scoped recorder inbox identity')) {

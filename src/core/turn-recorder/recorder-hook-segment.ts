@@ -41,9 +41,7 @@ export async function openContinuationSegment(args: {
   input: RecorderHookInput
   sessionId: string
 }): Promise<RecorderHookResult> {
-  const continuation = await beginContinuationTurn(
-    args.enablement, args.input.provider, args.sessionId, args.input.event, args.input.payload
-  )
+  const continuation = await beginContinuationTurn(args.enablement, args.input, args.sessionId)
   return continuation
     ? { status: 'started', reason: 'background wake continued a sealed turn' }
     : { status: 'ignored', reason: 'background wake has no sealed turn to continue' }
