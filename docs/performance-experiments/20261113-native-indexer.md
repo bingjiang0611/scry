@@ -22,4 +22,20 @@ CPU 下界按 PID + ps 启动时间合并累计 CPU；已确认在窗口内出�
 
 将 Native job 的 baseline/candidate 两份完整检出及产物放进 `native.noindex/`，使用 macOS 的目录级索引排除。不关闭宿主卷索引，不停止系统进程，不改 SIP 或其他安全设置。所有原有 run 命令、完整四场景、primary/A/A、比较器和阈值保持不变；只调整工作目录、checkout、缓存输入及 artifact 路径。Node job 不变。
 
-新增路径合同在旧 workflow 上失败（1 failed / 2 passed），证明能发现遗漏。路径计数器正对照覆盖 `native.noindex/candidate/node_modules`，避免目录改名导致假零。还须在修复后的真实 runner 上验证：完整正式测量、artifact/缓存路径，以及有效追踪窗口内是否仍出现工作区扫描。即使没有匹配，也只是有限窗口证据；不宣称解释或消除所有共享 runner 波动，不用带 profile 开销的毫秒数证明提速。
+新增路径合同在旧 workflow 上失败（1 failed / 2 passed），证明能发现遗漏。路径计数器正对照覆盖 `native.noindex/candidate/node_modules`，避免目录改名导致假零。修复后的真实 runner 结果如下。即使没有匹配，也只是有限窗口证据；不宣称解释或消除所有共享 runner 波动，不用带 profile 开销的毫秒数证明提速。
+
+## 修复验证与剩余阻碍
+
+`a444fef1` 的 [43371962185](https://github.com/bingjiang0611/scry/actions/runs/43371962185) 完成全部正式工作量、构建、缓存与 artifact 上传；Node 比较通过，Native 仍失败：
+
+| 项目 | 实测结果 |
+| --- | --- |
+| 独立 15 秒索引追踪 | collector 退出 0、4,645 条有效事件；工作区 node_modules 和其他工作区匹配均为 0。计数器对新路径的正对照仍通过 |
+| Native paged `nativeOpenMs.fixtureP95` | baseline 55.70 ms；candidate 139.10 ms；上限 105.70 ms，失败 |
+| Native paged `scriptMs.fixtureP95` | baseline 42.53 ms；candidate 108.16 ms；上限 92.53 ms，失败 |
+| A/A | forward 无回归，reverse 11 项；不能覆盖 primary 失败 |
+| paged 产物身份 | baseline/candidate/control 的合同内 artifactSha256 均为 `30be81951449e7ee8f3143318a5230b1e0e8836fe6a0eb44e4ecc69884217838` |
+
+两项 primary 最大值均出现在 candidate 的第一个正式样本（既有两次预热之后）；后五次 nativeOpen 为 44.2–48.0 ms。12 次样本均保留，DOMMutations 均为 142；没有据此增加预热、丢弃早期样本或放宽预算。所有 13 个计时记录仍标 highLoad；这不能单独确定剩余原因。
+
+结论：工作区索引干扰这一项已有定向修复与有限窗口验证，但 Native 门禁尚未修好，不能合并 #82/#74。下一步需要维护者选择并提供可隔离的 macOS 测量容量，先用同一产物与完整协议区分运行环境因素；仓库当前没有 self-hosted runner。不能预先承诺换机就通过，不能擅自开通付费容量，也不继续重复失败断言等待绿灯。
