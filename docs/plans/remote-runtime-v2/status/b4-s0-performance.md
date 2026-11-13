@@ -29,6 +29,8 @@ daemon 已在运行时，App 启动与开关关闭持平；冷启动多约 350 m
 
 ## 未测
 
-- 会话打开（`session-open-timing.mjs`）在 daemon 模式下的毫秒数；
+- 会话打开在 daemon 模式下的毫秒数。入口是 `scripts/session-open-bench.mjs`（`session-open-timing.mjs` 只是它引用的计时函数，单独运行不测任何东西）。先 `npm run build`，better-sqlite3 用 Electron ABI；在计时锁下逐个场景（`markdown`、`short`、`short-heavy`、`paged`）跑两种模式：
+  `node .agents/skills/scry-performance-climb/scripts/timing-run.mjs open-<场景>-daemon -- node scripts/session-open-bench.mjs <场景> --daemon`，
+  对照把标签改成 `open-<场景>-in-process` 并去掉 `--daemon`。输出 JSON 的 `mode` 字段标明模式；`performance-native.mjs` 门禁只收 `in-process`。
 - Linux 毫秒（目标机不可用）；
 - L3 日常记录：维护者决定一步到位、没有观察期，切换后的日常记录才能提供。

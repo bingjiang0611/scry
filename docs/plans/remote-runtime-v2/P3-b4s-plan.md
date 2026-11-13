@@ -31,7 +31,7 @@
 | S0-3 | **B4-V 场景表**，开关打开时全部跑一遍：关闭 App 后 run 继续；重新打开接入同一个 daemon；SIGKILL daemon 后 run 记为 `failed(host_restarted)` 且不二次派发；升级时版本不匹配的流程；退出时不留残留进程、lock 和 lease；同一 profile 互斥；trust gate；renderer 隔离 | 脚本化，在 macOS 上由验证 agent 执行 |
 | S0-4 | **真实数据副本演练**：把维护者真实 userData 的**副本**放到临时目录，用 daemon 模式启动，检查启动恢复、会话列表、历史、统一对话、终端录制、用量是否和进程内一致 | 只读原件，副本只留在本机临时目录，不上传；需要维护者同意 |
 | S0-5 | **打包产物**：`pack:artifact` 之后，在 daemon 模式下跑 smoke，覆盖 worker 路径（run 输出、终端录制）、私有 CLI、资源路径 | `check-packaged-app` 与 daemon smoke |
-| S0-6 | **性能**：`performance:measure -- --compare <B4 起点>`；App 启动（daemon 冷启动与已在运行两种情况）；会话打开（`session-open-timing.mjs`）；S1 首 token 复测一轮 | 每个 `worse` 都要说明，回归先修；毫秒级数据在计时锁下测量 |
+| S0-6 | **性能**：`performance:measure -- --compare <B4 起点>`；App 启动（daemon 冷启动与已在运行两种情况）；会话打开（`node scripts/session-open-bench.mjs <场景> --daemon`，对照不加 `--daemon`；`session-open-timing.mjs` 只是它引用的计时函数，单独运行不测任何东西）；S1 首 token 复测一轮 | 每个 `worse` 都要说明，回归先修；毫秒级数据在计时锁下测量 |
 | S0-7 | **Linux**：在 Ubuntu runner 上做构建产物验收，加 daemon 模式 smoke | Arch/Hyprland 目标机不可用时标为 not-run |
 
 S0 里可以并行的：S0-1（界面）、S0-3（场景脚本）、S0-6（性能脚本准备）、S0-7（Linux）。S0-2 和 S0-4 等维护者授权。
