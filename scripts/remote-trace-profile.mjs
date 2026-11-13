@@ -134,6 +134,7 @@ try {
   })
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    worker: { format: 'es' },
     plugins: [
       instrument('src/renderer/hooks/useVisibilityPolling.ts', '  refreshRef.current = refresh\n', '  window.__visibilityPolls?.set(key, () => refreshRef.current())\n'),
       instrument('src/renderer/components/RemoteChatFoundation.tsx', '  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)\n', '  window.__profileActiveRun = activeRun\n'),
@@ -145,7 +146,7 @@ try {
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false, target: 'es2022',
       lib: { entry: join(root, 'scripts/fixtures/remote-trace-profile.tsx'), formats: ['iife'], name: 'ScryRemoteTraceProfile', fileName: () => 'fixture.js', cssFileName: 'fixture' } }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="fixture.css"><div id="root" style="height:100vh"></div><script src="fixture.js"></script>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="fixture.css"><div id="root" style="height:100vh"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'preload.cjs'), `
     const { contextBridge, ipcRenderer } = require('electron');
     contextBridge.exposeInMainWorld('profileHost', {

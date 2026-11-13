@@ -6,13 +6,26 @@ import type { TraceEvent } from '../../shared/trace.js'
 import { available, partial, type Evidence, type TurnEndReason, type TurnEvidence, type TurnTermination } from '../../shared/turn-record.js'
 import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
+import { markSessionAttention, withSessionAttentionLock } from './attention.js'
+import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
+import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
-import { type StoredLifecycleEvent, observedNow, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
+import { stableTranscript } from './recorder-transcript-cache.js'
+import type { SessionCaptureContext } from './session-capture-contract.js'
+
+/** What the claim itself supplies: the turn identity read from the transcript, not a hook payload. */
+export interface CaptureClaimIdentity {
+  startedAt?: string
+  userText?: string
+  providerTurnId?: string
+  baselineAt?: string
+}
+import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
   const cached = await readJson<SessionState>(statePath(root))
@@ -31,13 +44,16 @@ export async function beginOpenTurn(
   payload: Record<string, unknown>,
   managedByScry = false,
   staleTerminalProtection = false,
-  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
+  uploadEnvironment?: import('./commit-environment.js').UploadEnvironment,
+  capture?: SessionCaptureContext,
+  claim?: CaptureClaimIdentity,
+  continuation?: import('./runtime-state.js').RecorderContinuation
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
   const generation = session.lastGeneration + 1
   const turnIndex = session.lastTurnIndex + 1
-  const prompt = promptOf(payload)
+  const prompt = continuation ? undefined : claim?.userText ?? promptOf(payload)
   const promptHash = prompt ? createHash('sha256').update(prompt).digest('hex') : undefined
   const rawManagedRunId = managedByScry ? stringAt(payload, 'scry_managed_run_id') : undefined
   const rawManagedPromptHash = managedByScry ? stringAt(payload, 'scry_managed_prompt_hash') : undefined
@@ -47,10 +63,11 @@ export async function beginOpenTurn(
   const managedPromptHash = rawManagedPromptHash && /^[a-f0-9]{64}$/.test(rawManagedPromptHash)
     ? rawManagedPromptHash
     : undefined
-  const providerTurnId = providerTurnIdOf(payload, provider)
+  const providerTurnId = claim?.providerTurnId ?? providerTurnIdOf(payload, provider)
   const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
   const transcriptPath = transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? 0 : undefined
+  const piTranscriptAnchor = provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
   const open: OpenTurnState = {
     ...(isFullToolContentPolicy(enablement.config.capture) ? { toolContentPolicy: {
       toolOutput: 'full' as const,
@@ -63,38 +80,118 @@ export async function beginOpenTurn(
     generation,
     turnIndex,
     status: 'open',
-    startedAt: timestampOf(payload),
-    startFingerprint: startFingerprintOf(provider, event, payload),
+    startedAt: claim?.startedAt ?? timestampOf(payload),
+    startFingerprint: capture ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
+    ...(capture ? {
+      capture: {
+        protocol: capture.protocol,
+        captureId: capture.captureId,
+        source: capture.source,
+        task: capture.task,
+        openedAt: capture.openedAt,
+        ...(claim?.baselineAt ? { baselineAt: claim.baselineAt } : {})
+      }
+    } : {}),
     ...(enablement.config.capture.prompt && prompt ? { prompt } : {}),
     ...(promptHash ? { promptHash } : {}),
     ...(managedRunId ? { managedRunId } : {}),
     ...(managedPromptHash ? { managedPromptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
+    ...(piTranscriptAnchor ? { piTranscriptAnchor } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(requestSetId ? { requestSetId } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
+    ...(continuation ? { continuation } : {}),
     uploadEnvironment,
     captures: []
   }
-  // Publish the initial identity durably before acknowledging the start hook.
-  await writeJsonAtomic(openPath(root), open)
+  // Publish the marker first and the initial identity durably before acknowledging the start hook.
+  // Cleanup shares this lock, so it cannot strand a new open turn between those writes.
+  await withSessionAttentionLock(enablement.dataRoot, provider, safeKey(sessionId), async () => {
+    await markSessionAttention(enablement.dataRoot, provider, safeKey(sessionId))
+    await writeJsonAtomic(openPath(root), open)
+  })
   await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
-  if (!managedByScry && enablement.config.capture.diff) {
-    const captureDir = join(turnRoot(root, generation), 'captures')
+  // A continuation segment's baseline is its predecessor's sealed end state — never a new baseline
+  // taken at the wake, which would attribute the previous segment's work to this one.
+  if (!managedByScry && continuation && enablement.config.capture.diff) {
+    open.captures = await continuationCaptures({
+      frozen: session.lastSegment?.frozenDiffs,
+      repositories: session.captureRepositories ?? [],
+      captureRoot: segmentCaptureDir(root, generation),
+      excludedPaths: [enablement.dataRoot]
+    })
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  } else if (!managedByScry && !continuation && enablement.config.capture.diff) {
+    const captureDir = segmentCaptureDir(root, generation)
     const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
     open.repositoryDiscovery = {
       maxDepth: discovery.maxDepth,
-      depthLimitedDirectories: discovery.depthLimitedDirectories
+      depthLimitedDirectories: discovery.depthLimitedDirectories,
+      ...(discovery.worktreeDiscovery ? { worktreeDiscovery: discovery.worktreeDiscovery } : {})
     }
-    open.captures = await Promise.all(discovery.repositories.map(async (repository) => ({
+    // Repositories a previous turn already proved this session changes are baselined again here:
+    // they can sit below the configured discovery depth (a Friday stage worktree, for example).
+    const repositories = [...new Set([...discovery.repositories, ...(session.captureRepositories ?? [])])]
+    open.captures = await Promise.all(repositories.map(async (repository) => ({
       repository,
       capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
     })))
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   return open
+}
+
+/**
+ * Open the turn a capture claim landed in. The boundary comes from the provider transcript the
+ * claim points at, not from a synthesized UserPromptSubmit: the question this turn already asked
+ * and everything the turn already did stay part of the record, while earlier turns stay out.
+ */
+export async function beginCaptureTurn(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  provider: ProviderId,
+  sessionId: string,
+  context: SessionCaptureContext,
+  transcriptPath: string,
+  payload: Record<string, unknown>
+): Promise<OpenTurnState> {
+  const root = sessionRoot(enablement.dataRoot, provider, sessionId)
+  const open = await readJson<OpenTurnState>(openPath(root))
+  if (open) {
+    // A repeated claim adopts the turn it already opened; the boundary never moves.
+    if (!open.capture) {
+      await writeJsonAtomic(openPath(root), {
+        ...open,
+        capture: {
+          protocol: context.protocol,
+          captureId: context.captureId,
+          source: context.source,
+          task: context.task,
+          openedAt: context.openedAt
+        }
+      }, { sync: false })
+    }
+    return readJson<OpenTurnState>(openPath(root)).then((value) => value ?? open)
+  }
+  const transcript = await stableTranscript(
+    transcriptPath,
+    `${provider}:${sessionId}:capture`,
+    provider,
+    undefined,
+    undefined,
+    0,
+    undefined,
+    sessionId,
+    enablement.workspaceRoot
+  ).catch(() => null)
+  return beginOpenTurn(enablement, provider, sessionId, 'CaptureStart', payload, false, false, undefined, context, {
+    ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
+    ...(transcript?.userText ? { userText: transcript.userText } : {}),
+    ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
+    baselineAt: new Date().toISOString()
+  })
 }
 
 /** A timestamp is usable as an end time only inside this turn's own window. */
@@ -210,6 +307,11 @@ export async function storeLifecycleEvent(
   await writeJsonAtomic(join(turnRoot(root, open.generation), 'events', `${id}.json`), stored, { sync: false })
   // 子 agent 线程有自己的 transcript；顶层轮的 transcript 锚点不能被它改写，否则整轮证据会读错文件。
   const transcriptPath = subagentScopedPayload(payload) ? undefined : transcriptPathOf(payload)
+  const piTranscriptAnchor = open.provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
+  if (piTranscriptAnchor) {
+    open.piTranscriptAnchor = { ...open.piTranscriptAnchor, ...piTranscriptAnchor }
+    await writeJsonAtomic(openPath(root), open, { sync: false })
+  }
   if (transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
     open.transcriptStartOffset = 0
@@ -262,22 +364,44 @@ export async function persistTurnDiffContent(
   dataRoot: string,
   snapshots: import('../../shared/trace.js').TurnDiffSnapshot[]
 ): Promise<import('../../shared/trace.js').TurnDiffSnapshot[]> {
-  return Promise.all(snapshots.map(async (snapshot) => ({
+  // The same patch text can appear many times in one turn (a file read twice, a repeated snippet).
+  // Publish each distinct payload once, and publish the distinct payloads concurrently: a turn with
+  // 300 different patches must keep the same publish profile it had before, while a turn with 20
+  // copies of one patch stops re-verifying the copies it just wrote.
+  const prepared = snapshots.map((snapshot) => snapshot.files.map((file) => file.patch
+    ? captureToolContent(file.patch, { source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete' })
+    : undefined))
+  const occurrence = new Map<string, number>()
+  const unique: string[] = []
+  const slotOf: number[][] = snapshots.map((snapshot) => snapshot.files.map(() => -1))
+  snapshots.forEach((snapshot, snapshotIndex) => {
+    snapshot.files.forEach((_, fileIndex) => {
+      const content = prepared[snapshotIndex][fileIndex]?.content
+      if (content === undefined) return
+      let slot = occurrence.get(content)
+      if (slot === undefined) {
+        slot = unique.length
+        unique.push(content)
+        occurrence.set(content, slot)
+      }
+      slotOf[snapshotIndex][fileIndex] = slot
+    })
+  })
+  const refs = await Promise.all(unique.map((content) => writeRecorderContent(dataRoot, content, 'utf8')))
+  return snapshots.map((snapshot, snapshotIndex) => ({
     ...snapshot,
-    files: await Promise.all(snapshot.files.map(async (file) => {
-      if (!file.patch) return file
-      const full = captureToolContent(file.patch, {
-        source: 'git_turn_diff', maxBytes: null, sourceCompleteness: 'complete'
-      })
-      if (full.content === undefined) return file
-      const contentRef = await writeRecorderContent(dataRoot, full.content, 'utf8')
-      const patchContent = { ...full, contentRef }
+    files: snapshot.files.map((file, fileIndex) => {
+      const full = prepared[snapshotIndex][fileIndex]
+      if (full === undefined) return file
+      const patchContent = { ...full, contentRef: refs[slotOf[snapshotIndex][fileIndex]] }
+      // Keep the complete inline body in its evidence envelope, not twice in the record.
+      // Do not mutate the Git snapshot: callers may still use its patch field.
+      const { patch: _patch, ...metadata } = file
       return {
-        ...file,
-        patch: patchContent.content,
+        ...metadata,
         patchContent,
         patchStatus: patchContent.storage === 'complete' ? 'captured' as const : 'truncated' as const
       }
-    }))
-  })))
+    })
+  }))
 }

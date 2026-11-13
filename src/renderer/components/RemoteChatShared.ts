@@ -1,6 +1,6 @@
 import type { AgentPermissionMode, AgentRunControlCatalog, AgentRunControls } from '@shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteIntent, RemoteProviderRef } from '@shared/desktop-remote'
-import { REMOTE_SESSION_COPY } from '../constants/copy'
+import { REMOTE_ACCESS_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
 
 // Minimum gap between poll cycles. The wait now happens on the host: one long
 // poll holds until something changes, so this is only the gap between a reply
@@ -66,7 +66,7 @@ export function remoteControlsValid(provider: RemoteProviderRef | undefined, con
 }
 
 export function errorText(error: unknown, host?: string): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = REMOTE_ACCESS_COPY.errorText(error)
   if (message.includes('desktop_protocol_host_older')) return REMOTE_SESSION_COPY.protocolHostOlder(host ?? '远端主机')
   if (message.includes('desktop_protocol_client_older')) return REMOTE_SESSION_COPY.protocolClientOlder
   if (message.includes('desktop_protocol_mismatch') || message.includes('desktop_protocol_missing')) return REMOTE_SESSION_COPY.protocolMismatch

@@ -21,7 +21,7 @@ export interface AppAgentBootstrapDependencies {
   getWindow: () => BrowserWindow | null
   smokeProviderEnabled: boolean
   smokeDetectedAgents: DetectedAgent[]
-  storedPiProfilesNotDetected: (detected: Array<{ id: string }>) => PiAgentProfile[]
+  storedPiProfiles: () => PiAgentProfile[]
   providerCompatibility: ProviderCompatibilityStore
   detectInstalledAgents: () => Promise<DetectedAgent[]>
   providerRegistry: ProviderRegistry
@@ -38,7 +38,7 @@ export interface AppAgentBootstrapDependencies {
 }
 
 export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): void {
-  const { handleTrusted, getWindow, smokeProviderEnabled, smokeDetectedAgents, storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry, dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject, setCurrentCwd, getCurrentCwd } = deps
+  const { handleTrusted, getWindow, smokeProviderEnabled, smokeDetectedAgents, storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry, dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject, setCurrentCwd, getCurrentCwd } = deps
   handleTrusted('app:setTheme', (_event, theme: unknown) => {
     if (theme !== 'dark' && theme !== 'light') throw new Error('无效的界面主题')
     nativeTheme.themeSource = theme
@@ -56,7 +56,7 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
   })
 
   registerChannelHandlers(handleTrusted, providerDetectionChannelHandlers({
-    smokeProviderEnabled, smokeDetectedAgents, storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry
+    smokeProviderEnabled, smokeDetectedAgents, storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry
   }))
 
   // The pickers and dialogs are this window's; the work after them is shared with the

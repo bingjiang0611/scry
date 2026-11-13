@@ -80,6 +80,23 @@ describe('desktop authenticated evidence source', () => {
     await expect(f.read({ kind: 'history', context: f.context, before: first.history.before, snapshot: first.history.snapshot })).rejects.toThrow('history_snapshot_changed')
   })
 
+  it('advertises managed worktrees only with host-owned readers and reauthorizes every repository request', async () => {
+    const workspaceChoices = vi.fn(async (request) => ({ status: 'unavailable' as const, reason: request.cwd }))
+    const validateWorkspaceBranch = vi.fn(async (request) => ({ status: 'available' as const, data: { name: request.name } }))
+    const f = desktopReaderFixture({ workspaceChoices, validateWorkspaceBranch })
+    roots.push(f.root)
+    await expect(f.read({ kind: 'info' })).resolves.toMatchObject({ managedWorktrees: 1 })
+    const choices = parseDesktopHostRead({ kind: 'workspaceChoices', request: { cwd: f.context.cwd, kind: 'branches', query: '' } })
+    await expect(f.read(choices)).resolves.toEqual({ kind: 'workspaceChoices', value: { status: 'unavailable', reason: f.context.cwd } })
+    const repositoryId = 'a'.repeat(64)
+    const branch = parseDesktopHostRead({ kind: 'validateWorkspaceBranch', request: { cwd: f.context.cwd, repositoryId, name: 'topic' } })
+    await expect(f.read(branch)).resolves.toEqual({ kind: 'validateWorkspaceBranch', value: { status: 'available', data: { name: 'topic' } } })
+    f.revoke()
+    await expect(f.read(choices)).rejects.toThrow('workspace_not_authorized')
+    expect(workspaceChoices).toHaveBeenCalledTimes(1)
+    expect(() => parseDesktopHostRead({ kind: 'workspaceChoices', request: { cwd: f.context.cwd, kind: 'branches', selectedWorktreeId: '../escape' } })).toThrow('invalid_request')
+  })
+
   it('serves trace deltas only on request and keeps the legacy snapshot shape for older clients', async () => {
     const f = fixture()
     expect(await f.read({ kind: 'info' })).toMatchObject({ kind: 'info', traceDelta: 1 })
@@ -191,9 +208,15 @@ describe('desktop authenticated evidence source', () => {
     await expect(f.read({ ...query, chunk: { id: first.id, offset } })).rejects.toThrow('invalid_history_chunk')
   })
 
-  it('caps assembled pages instead of dropping evidence from an oversized turn', async () => {
+  it('caps assembled pages at 512 MiB instead of dropping evidence from an oversized turn', async () => {
     const f = fixture()
-    expect(f.archive(0, 'x'.repeat(DESKTOP_HISTORY_MAX_BYTES))).toBe(true)
+    expect(DESKTOP_HISTORY_MAX_BYTES).toBe(512 * 1024 * 1024)
+    expect(f.archive(0)).toBe(true)
+    const byteLength = Buffer.byteLength
+    vi.spyOn(Buffer, 'byteLength').mockImplementation((value, encoding) =>
+      typeof value === 'string' && value.startsWith('{"kind":"history"')
+        ? DESKTOP_HISTORY_MAX_BYTES + 1
+        : byteLength(value, encoding))
     await expect(f.read({ kind: 'history', context: f.context, byteChunks: true })).rejects.toThrow('desktop_evidence_response_too_large')
   })
 

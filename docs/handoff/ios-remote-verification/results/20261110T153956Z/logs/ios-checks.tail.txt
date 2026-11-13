@@ -1,0 +1,77 @@
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+[2/4] Emitting module RemoteTransport
+Build of product 'scry-remote-probe' complete! (7.87s)
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/RemoteRunStore.swift:1147:23: warning: reference to captured var 'self' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+1145 |           await progress.markPage()
+1146 |           await MainActor.run {
+1147 |             guard let self, self.isCurrentCatalogRequest(requestID, dataGeneration: requestDataGeneration) else { return }
+     |                       `- warning: reference to captured var 'self' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+1148 |             self.recordSuccess()
+1149 |             // Keep a complete old list during refresh. On a cold start, pages
+
+[#SendableClosureCaptures]: <https://docs.swift.org/compiler/documentation/diagnostics/sendable-closure-captures>
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/RemotePairingClient.swift:55:5: warning: no calls to throwing functions occur within 'try' expression
+53 |     // (system roots for public wss), not a code-carried CA. Inner mTLS pins the
+54 |     // host anchor and presents the self-signed bootstrap cert for possession proof.
+55 |     try G0ProbeIdentity(outerCA: Data(), innerCA: Data(code.anchorPEM.utf8),
+   |     `- warning: no calls to throwing functions occur within 'try' expression
+56 |                         certificate: material.bootstrapPEM, privateKey: material.privateKeyPEM)
+57 |   }
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:316:13: warning: no 'async' operations occur within 'await' expression
+314 |           switch progress {
+315 |           case let .awaitingConfirmation(fingerprint):
+316 |             await self?.setPairing(.awaitingConfirmation(fingerprint: fingerprint))
+    |             `- warning: no 'async' operations occur within 'await' expression
+317 |             try await Task.sleep(nanoseconds: 2_000_000_000)
+318 |             progress = try await client.refresh(code: code, deviceLabel: label)
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:324:17: warning: no 'async' operations occur within 'await' expression
+322 |             let connection = RemoteConnection(relayHost: code.relayHost, relayPort: code.relayPort,
+323 |               relayTLS: code.relayTLS.rawValue, hostId: code.hostId, anchorPEM: code.anchorPEM, deviceId: deviceId)
+324 |             try await self?.setPaired(deviceId: deviceId, host: code.relayHost, connection: connection, runStore: runStore)
+    |                 `- warning: no 'async' operations occur within 'await' expression
+325 |             return
+326 |           case let .denied(reason):
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:338:19: warning: no 'async' operations occur within 'await' expression
+336 |                 relayTLS: code.relayTLS.rawValue, hostId: existing.hostId,
+337 |                 anchorPEM: existing.anchorPEM, deviceId: existing.deviceId)
+338 |               try await self?.setPaired(deviceId: existing.deviceId, host: code.relayHost, connection: migrated, runStore: runStore)
+    |                   `- warning: no 'async' operations occur within 'await' expression
+339 |               return
+340 |             }
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:341:13: warning: no 'async' operations occur within 'await' expression
+339 |               return
+340 |             }
+341 |             await self?.setPairing(.failed(Self.pairingDeniedFailure(reason)))
+    |             `- warning: no 'async' operations occur within 'await' expression
+342 |             return
+343 |           case let .revoked(deviceId):
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:344:13: warning: no 'async' operations occur within 'await' expression
+342 |             return
+343 |           case let .revoked(deviceId):
+344 |             await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingRevoked,
+    |             `- warning: no 'async' operations occur within 'await' expression
+345 |                                                   technicalDetail: "deviceId=\(deviceId)")))
+346 |             return
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:349:9: warning: no 'async' operations occur within 'await' expression
+347 |           }
+348 |         }
+349 |         await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingTimeout)))
+    |         `- warning: no 'async' operations occur within 'await' expression
+350 |       } catch {
+351 |         if Task.isCancelled { return }
+
+/Users/<user>/Library/Application Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:a24b5ae3>/apps/ios/ScryRemote/AppModel.swift:352:9: warning: no 'async' operations occur within 'await' expression
+350 |       } catch {
+351 |         if Task.isCancelled { return }
+352 |         await self?.setPairing(.failed(.init(message: ConnectionCopy.pairingConnectionFailed,
+    |         `- warning: no 'async' operations occur within 'await' expression
+353 |                                              technicalDetail: String(reflecting: error))))
+354 |       }
+/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-catalog-binary-hcmebm70/catalog-refresh-checks: replacing existing signature

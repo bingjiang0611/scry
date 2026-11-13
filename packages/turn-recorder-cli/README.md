@@ -9,13 +9,13 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.56
+npm install -g scry-turn-recorder@0.2.69
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
 ```
 
-`init` 创建 `scry.config.json` 与 `.scry/provider-hook.sh`,并把 hook 合并进各 Provider 的项目配置;已有 hook 会保留,重复执行不会重复添加。可用 `--providers claude,codex` 明确指定。Pi 是用户级扩展,另外执行 `scry integrations install-pi`。
+`init` 创建 `scry.config.json` 与 `.scry/provider-hook.sh`,并把 hook 合并进各 Provider 的项目配置;已有 hook 会保留,重复执行不会重复添加。可用 `--providers claude,codex` 明确指定。Pi 是用户级扩展,另外执行 `scry integrations install-pi`。更新后需重新加载 Pi 扩展；它会在进程收到 `SIGINT` 时先提交当前轮次的 `interrupted` 终态，再保留原生信号退出语义。
 
 接入后必须做两件事,CLI 无法代替:
 
@@ -53,13 +53,16 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 | `scry turns content <记录> <正文路径...> --offset 0 --limit 65536` | 按字节分页读取 tool/model/diff/transcript 正文 |
 | `scry turns verify` | 序号连续性与记录完整性 |
 | `scry records archive --before 30d` | 归档旧记录（见[容量与归档](docs/storage-and-performance.md#容量与归档)） |
-
-记录文件不要手动删除或移走：序号是上传去重键，也是投递游标。删除后新轮次仍从已发号的下一号继续（`.scry/sequence-watermark.json`），`doctor` 的 `records.sequence` 会 warn 说明被删的记录永远不会再投递；移出旧记录只走 `scry records archive`。
 | `scry records maintain [--apply]` | 检查 quota/retention，安全回收孤立正文与压缩轮转日志 |
+| `scry recorder content repair [--apply] [--record-id <id>]...` | 演练/修复引用但本库缺失的正文（见[引用必须在本库兑现](docs/storage-and-performance.md#引用必须在本库兑现)） |
 | `scry support-bundle create` | 脱敏排障包 |
 | `scry recorder status\|stop\|restart\|recover\|notify-drain\|notify-retry` | daemon 与恢复 |
 | `scry integrations diff\|repair\|uninstall` | 托管 hook 的漂移检查与修复 |
 | `scry upgrade [--check]` | 升级 CLI |
+
+记录文件不要手动删除或移走：序号是上传去重键，也是投递游标。删除后新轮次仍从已发号的下一号继续（`.scry/sequence-watermark.json`），`doctor` 的 `records.sequence` 会 warn 说明被删的记录永远不会再投递；移出旧记录只走 `scry records archive`。
+
+`records/` 里会出现中断写盘留下的 `.tmp`。recorder 每次提交检查一次、daemon 启动时也检查，自动清理超过一天的这种文件（见[中断写盘留下的临时文件](docs/storage-and-performance.md#中断写盘留下的临时文件)）。按目录枚举记录时只认 `<20 位序号>-<recordId>.json`；`content repair` 与 `records maintain` 会把跳过的文件连同原因列在 `skipped` / `skippedRecords` 里。
 
 所有命令都接受 `--workspace <root>` 或 `--workspace=<root>`,输出为 JSON。未知参数直接报错。
 
@@ -108,6 +111,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 ## 详细参考
 
 - [轮次生命周期、恢复与版本记录](docs/lifecycle.md)
+- [按会话恢复：隔离范围与历史证据限制](docs/scoped-recovery.md)
 - [工具正文、存储容量、归档与性能](docs/storage-and-performance.md)
 - [Commit hook、managed 模式、更新与环境变量](docs/integrations-and-updates.md)
 
@@ -117,6 +121,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 
 - `diff.discovery.requestedRoots`：本轮发现并请求采集的目录清单，数组长度是该清单的数量，不是磁盘上的全部仓库数，也不保证每个目录已解析出有效 Git root。仅在发现阶段有证据时出现。
 - `diff.discovery.maxDepth` 与 `depthLimitedDirectories`：本轮使用的深度上限、因该上限未继续下探的目录数。后者不是“漏掉的仓库数”。默认深度仍为 2，上限 5；排除目录及目录符号链接仍不下探。
+- `diff.discovery.worktreeDiscovery`：所有者或结果触及上限、Git 查询失败时出现；`incomplete: true` 不代表工作区没有其他 worktree。查询最多 32 个已发现仓库，按排序分批、每批最多 4 个 Git 进程；每个所有者最多接纳 128 条工作区内结果，Git 查询共享 5 秒预算。越界和排除目录不进入采集范围。超过上限时应先将关键仓库作为独立 workspace；扩大预算前须测量完整 turn-start，而不是仅看目录扫描时间。
 - `diff.value[]`：逐项查看 `status`（`captured` / `timeout` / `failed` / `unavailable`）及可用的 `reason`。`requestedRoot` 是已知请求目录；`repoRoot` 只在 Git 解析到它时提供。不同仓库即使同时结束也保留独立结果。
 - 深度边界只作为 `discovery` 元数据保留，不单独改变 diff 的 status/quality 或增加 `omissionReason`。`available` 表示已纳入清单的快照可用，不证明磁盘上所有仓库都已采集。真实缺失证据仍按原规则降级并写原因；恢复时无法可信归因 diff，仍为 `unavailable`，不补造快照、耗时或成功状态。没有 `diff.value` 不等于发现了零个仓库。
 
@@ -159,7 +164,7 @@ shell 只追加；CLI 诊断在文件超过 1 MiB 时轮转并保留一代，每
 
 无 open turn 的 SessionEnd/进程退出只是两轮之间的正常会话结束；Claude、Codex、Qoder 的 `Stop` 携带布尔 `stop_hook_active:true` 表示同轮续跑。这两类返回 duplicate，不写 orphan、不加 missingStartTerminals。有 open turn 时仍正常处理终态。其他缺少开始事件的终态不会仅凭会话存在就判为 duplicate。无法通过已提交 turn ID 或已提交轮次的明确时间边界（按时间值而非字符串比较）证明重复时，事件保存到 `runtime/<provider>/<session-key>/orphans/<payload-hash>.json`，`health.json` 的 `missingStartTerminals` 和 `orphanEvents` 各加一，并写 `recorder.log`；相同 payload 重放不重复计数。工具 orphan 同样保存 payload。原始 payload 使用 content envelope，受 `toolContentFieldBytes` / `toolContentTurnBytes` 上限约束；只有 prompt、assistant、完整工具采集都启用时才保存正文，否则标明 `capture_policy` 省略。orphan 不是 record，不会猜测 token、轮首时间或 diff。
 
-OpenCode 插件对同一实例内已投递的 `session.idle` 去重；新 chat.message 或 busy/retry 状态会重置。只记住最近 128 个 idle session；首次、重载或淘汰后无法归属的 idle 仍交给 recorder，不用“没有活动轮”猜测重复。已知投递失败不会抑制后续 idle。此插件更新需要 `scry integrations repair --yes`；上述核心终态判定只需升级 CLI。若实际并发/交错会话超过 128 并造成误报，应先测量重载及淘汰频率，再考虑持久化终态身份，而不是无限扩充内存缓存。
+OpenCode 插件对同一实例内已投递的 `session.idle` 去重；新 chat.message 或 busy/retry 状态会重置。插件把原生 `messageID` 作为同轮 `turn_id` 贯穿 start、tool 与 idle 终态，使已知轮次立即收口；取不到原生身份时仍走保守的陈旧终态防护，不猜测。非交互进程收到 `SIGINT` 且只有一个活动轮次时，会先同步提交 `interrupted` Stop 再保留原生信号退出；多个活动轮次不做目标猜测。只记住最近 128 个 idle session；首次、重载或淘汰后无法归属的 idle 仍交给 recorder，不用“没有活动轮”猜测重复。已知投递失败不会抑制后续 idle。此插件更新需要 `scry integrations repair --yes`；上述核心终态判定只需升级 CLI。若实际并发/交错会话超过 128 并造成误报，应先测量重载及淘汰频率，再考虑持久化终态身份，而不是无限扩充内存缓存。
 
 开始 hook 首次发布 `open.json` / `session.json`，以及终态钉住 `closing` 时，均等待原子写的文件和父目录 fsync；中间工具状态仍不增加 fsync。这保证调用了持久化屏障，不等同于验证所有文件系统上的断电恢复。
 

@@ -11,6 +11,7 @@ import { type DbStats, type UsageAnalytics, type UsageAnalyticsRangeDays } from 
 import { migrateDatabase } from './db-migrations'
 import { storageDbFilePath } from './storage-paths'
 import type { BillingGuardianState } from '../shared/billing'
+import type { QoderCreditScope } from './qoder-credits'
 import type { ProviderId } from '../shared/provider'
 import { deleteSessionDataRows, resolveSessionDataRunIds, type SessionDeleteDatabase } from './session-data-delete'
 
@@ -19,7 +20,11 @@ export let dbFilePath: string | null = null
 export let dataRevision = 0
 export const billingStateCacheSlot: { value?: { revision: number; value: BillingGuardianState } } = { value: undefined }
 export const statsCacheSlot: { value?: { revision: number; observedAt: number; value: DbStats } } = { value: undefined }
-export const usageAnalyticsCache = new Map<UsageAnalyticsRangeDays, { revision: number; toDay: string; value: UsageAnalytics }>()
+// `base` is the analytics before credit projection and `scopes` its persisted credit
+// scopes, so a credits read projects onto the same snapshot it was computed from.
+export const usageAnalyticsCache = new Map<UsageAnalyticsRangeDays, {
+  revision: number; toDay: string; value: UsageAnalytics; base: UsageAnalytics; scopes: QoderCreditScope[]
+}>()
 export const invalidateQueryCaches = (): void => {
   dataRevision++
   billingStateCacheSlot.value = undefined

@@ -1,8 +1,9 @@
-import { useId } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { FileTree, useFileTree } from '@pierre/trees/react'
 import type { DiffFile } from '@shared/trace'
-import { displayDiffPath as displayPath, type DiffScope } from '../turn-diff'
-import { DIFF_COPY as detail } from '../constants/diff-copy'
-import { useFixedVirtualRows } from '../hooks/useFixedVirtualRows'
+import { diffTreePath, type DiffScope } from '../turn-diff'
+import { DIFF_COPY as copy } from '../constants/diff-copy'
+import './pierre-views.css'
 
 export function DiffFiles({ files, selectedPath, select, scope, repoRoot, showTitle = true }: {
   files: DiffFile[]
@@ -12,38 +13,47 @@ export function DiffFiles({ files, selectedPath, select, scope, repoRoot, showTi
   repoRoot?: string
   showTitle?: boolean
 }) {
-  const id = useId()
-  const rows = useFixedVirtualRows(files.length, 38)
-  const selectedIndex = files.findIndex(file => file.path === selectedPath)
-  return (
-    <nav className="diff-file-nav" aria-label={detail.fileList(scope)}>
-      {showTitle && <div className="diff-file-nav-title"><span>{detail.files}</span><span>{files.length}</span></div>}
-      <div ref={rows.ref} className="diff-virtual-files" role="listbox" tabIndex={0} aria-label={detail.fileList(scope)}
-        aria-activedescendant={selectedIndex >= rows.start && selectedIndex < rows.end ? `${id}-${selectedIndex}` : undefined}
-        onKeyDown={event => {
-          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || files.length === 0) return
-          event.preventDefault()
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? files.length - 1
-            : Math.max(0, Math.min(files.length - 1, selectedIndex + (event.key === 'ArrowDown' ? 1 : -1)))
-          select(files[next].path)
-          rows.reveal(next)
-        }}>
-        <div style={{ height: rows.totalHeight, position: 'relative' }}>
-          <div style={{ position: 'absolute', top: rows.offset, left: 0, right: 0 }}>
-            {files.slice(rows.start, rows.end).map((file, index) => (
-              <button type="button" role="option" id={`${id}-${rows.start + index}`} tabIndex={-1}
-                aria-selected={file.path === selectedPath} aria-posinset={rows.start + index + 1} aria-setsize={files.length}
-                className={file.path === selectedPath ? 'active' : ''} onClick={() => select(file.path)}
-                title={file.path} key={file.path}>
-                <span>{displayPath(file.path, repoRoot)}</span>
-                <span className="diff-file-nav-count">
-                  {file.binary ? detail.binary : <><b className="add">{detail.added(file.added)}</b><b className="del">{detail.deleted(file.deleted)}</b></>}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </nav>
-  )
+  const entries = useMemo(() => new Map(files.map(file => [diffTreePath(file.path, repoRoot), file])), [files, repoRoot])
+  const paths = useMemo(() => [...entries.keys()], [entries])
+  const syncing = useRef(false)
+  const latest = useRef({ entries, selectedPath, select })
+  latest.current = { entries, selectedPath, select }
+  const { model } = useFileTree({
+    paths, initialExpansion: 'open', flattenEmptyDirectories: true, search: false,
+    itemHeight: 32,
+    onSelectionChange: selected => {
+      if (syncing.current) return
+      const file = latest.current.entries.get(selected[selected.length - 1])
+      if (file && file.path !== latest.current.selectedPath) latest.current.select(file.path)
+    },
+    renderRowDecoration: ({ item }) => {
+      const file = latest.current.entries.get(item.path)
+      return file ? { text: file.binary ? copy.binary : `${copy.added(file.added)} ${copy.deleted(file.deleted)}` } : null
+    }
+  })
+  useEffect(() => { model.resetPaths(paths, { initialExpandedPaths: paths.flatMap(path => path.split('/').slice(0, -1).map((_, index, parts) => `${parts.slice(0, index + 1).join('/')}/`)) }) }, [model, paths])
+  useEffect(() => {
+    const path = diffTreePath(selectedPath, repoRoot)
+    syncing.current = true
+    for (const previous of model.getSelectedPaths()) if (previous !== path) model.getItem(previous)?.deselect()
+    model.getItem(path)?.select()
+    syncing.current = false
+    model.scrollToPath(path, { focus: false })
+  }, [model, paths, selectedPath, repoRoot])
+  return <nav className="diff-file-nav pierre-file-nav" aria-label={copy.fileList(scope)} onKeyDownCapture={event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    event.stopPropagation()
+    // Pierre's default arrow navigation moves focus only. Drive its public model
+    // once, then select that focused file to keep Scry's code pane in sync.
+    if (event.key === 'ArrowDown') model.focusNextItem()
+    else if (event.key === 'ArrowUp') model.focusPreviousItem()
+    else if (event.key === 'Home') model.focusFirstItem()
+    else model.focusLastItem()
+    const focused = model.getFocusedPath()
+    if (focused && latest.current.entries.has(focused)) model.getItem(focused)?.select()
+  }}>
+    {showTitle && <div className="diff-file-nav-title"><span>{copy.files}</span><span>{files.length}</span></div>}
+    <div className="pierre-file-tree"><FileTree model={model} style={{ height: '100%' }} aria-label={copy.fileList(scope)} /></div>
+  </nav>
 }

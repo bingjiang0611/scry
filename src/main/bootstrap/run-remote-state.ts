@@ -3,6 +3,7 @@ import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { RemoteRunCompletion } from '../remote/remote-run-binding'
 import type { ArchiveTraceTurnArgs } from './archive'
+import { conversationAttentionKey } from '../../shared/session-attention'
 
 export type RunTerminalState = {
   terminalArchiveArgs?: ArchiveTraceTurnArgs
@@ -22,7 +23,10 @@ export function createRemoteRunState(deps: {
   runState: ActiveRun
   getObservedSessionId: () => string | undefined
   isWindowFocused: () => boolean
-  dockBadge: { markAttention: (key: string, value: { windowFocused: boolean; sessionViewed: boolean; needsAttention: boolean }) => void }
+  dockBadge: {
+    markAttention: (key: string, value: { windowFocused: boolean; sessionViewed: boolean; needsAttention: boolean }) => void
+    isViewed: (key: string) => boolean
+  }
   scopedSessionKey: (sessionId: string) => string
   runs: { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
 }) {
@@ -52,9 +56,11 @@ export function createRemoteRunState(deps: {
     if (error) deps.runState.error = error
   }
   const markTerminalAttention = (sessionId: string, needsAttention: boolean): void => {
-    deps.dockBadge.markAttention(deps.scopedSessionKey(sessionId), {
+    const key = deps.runState.attentionKey ?? (deps.runState.conversationId
+      ? conversationAttentionKey(deps.runState.conversationId) : deps.scopedSessionKey(sessionId))
+    deps.dockBadge.markAttention(key, {
       windowFocused: deps.isWindowFocused(),
-      sessionViewed: deps.runs.isViewed(deps.runId),
+      sessionViewed: deps.runState.conversationId ? deps.dockBadge.isViewed(key) : deps.runs.isViewed(deps.runId),
       needsAttention
     })
   }

@@ -7,3 +7,33 @@
 .arch-sections .arch-list {
   overflow: visible;
 }
+
+/* Provider 筛选：自定义菜单取代原生 select，保留品牌图标与当前项对勾。 */
+.arch-provider-filter {
+  position: relative;
+}
+
+.arch-provider-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.arch-provider-trigger .ico {
+  color: var(--dim3);
+}
+
+.arch-provider-menu {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: 0;
+  min-width: 216px;
+  z-index: 30;
+}

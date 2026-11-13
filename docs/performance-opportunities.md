@@ -126,6 +126,7 @@
 | listCommands、runControls、desktopRemote catalog 缺少完整调用链计数 | Git已补受控5000/5001文件基准，但日常规模分层仍缺；Provider热点仍易混入启动/扩展成本 | 先补端到端分段，不用已有离线probe替代真实调用链 |
 | 数据几乎全为 Pi | Claude 主路径无真实数据 | 用 Claude 时同样快照分析 |
 | UI 发送/停止计数随时序波动 | 不能作门禁 | 需要更确定的触发点（例如固定批次的受控流） |
+| 文件树 projection/挂载只有 candidate 与隐藏窗口 L2；真实 IPC/冷缓存、10k+ 文件、绘制与 Linux 无数据 | `workspace.tree` 能发现量级回归，不能判定真实仓库体验 | 先收集 ≥3 个构建的稳定性/敏感性证据再谈升门禁；补真实工作区与 Linux 基线，见[实验记录](performance-experiments/20261108-workspace-tree-renderer-counters.md) |
 | Linux 基线、CPU 指令数 | CI 被账单阻塞，未在 Linux 实测 | CI 恢复后补 |
 
 ## 实验记录

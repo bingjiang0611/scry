@@ -13,6 +13,11 @@ export interface SideChatSummary {
   capturedAt: number
   prefixFingerprint: string
   messageCount: number
+  /**
+   * The managed conversation that now owns a native source, when the Provider session the
+   * child was frozen from was later adopted into one. Its row stands for the source.
+   */
+  parentConversationId?: string
 }
 
 export interface SideChatSnapshotPage extends SideChatSummary {
@@ -165,12 +170,24 @@ export interface ConversationDeletionTarget {
   sharedWith: string[]
 }
 
+/** One side chat a parent deletion takes along; it is deleted by its own plan. */
+export interface SideChatDeletionPreview {
+  conversationId: string
+  title: string
+  revision: number
+  fingerprint: string
+  targets: ConversationDeletionTarget[]
+}
+
 export interface ConversationDeletionPreview {
   reclaim?: true
   conversationId: string
   revision: number
+  /** Covers `sideChats` too: a child that appears, leaves or changes needs a new preview. */
   fingerprint: string
   targets: ConversationDeletionTarget[]
+  /** Side chats of this conversation; a side chat has no entry outside its parent. */
+  sideChats?: SideChatDeletionPreview[]
 }
 
 /**
@@ -194,9 +211,13 @@ export interface SideChatPreview {
   firstSendBlockedReason?: string
 }
 
-/** Optional explicit snapshot boundary and first-send target offered by the preview UI. */
+/**
+ * Optional explicit snapshot boundary and first-send target offered by the preview UI.
+ * The boundary is any terminal turn (a failed or interrupted one included), never a turn
+ * that is still running.
+ */
 export interface SideChatPreviewOptions {
-  completedThroughOrdinal?: number
+  terminalThroughOrdinal?: number
   initialTarget?: SideChatInitialTarget
 }
 
@@ -236,11 +257,28 @@ export interface SideChatList {
 /**
  * Read-only receipt for one side-chat creation command. Creation runs only when the
  * user explicitly asks again; this lookup never creates, adopts or contacts a Provider.
- * `not-found` is not proof that the command was never dispatched.
+ *
+ * `in-flight` means this host is still executing that command (for example after a
+ * renderer reload), so its outcome is not known yet. `not-found` means no child owns the
+ * command and this host is not executing it: a create that already answered, or a host
+ * that restarted since, published nothing under that id.
  */
 export type SideChatCommandReceipt =
   | { commandId: string; status: 'found'; conversation: ConversationSummary }
+  | { commandId: string; status: 'in-flight' }
   | { commandId: string; status: 'not-found' }
+
+/**
+ * Answer of one send attempt.
+ *
+ * `accepted` means the host started the run; `not_sent` means the host refused the
+ * request and proved no Provider input was delivered, so the original text may be sent
+ * again. A lost reply is neither: it stays unknown and is never answered by resending the
+ * same command. The two outcomes are separate values, never parsed out of an error text.
+ */
+export type ConversationSendResult =
+  | { status: 'accepted'; runId: string; disposition: 'created' | 'duplicate' }
+  | { status: 'not_sent'; reason: string }
 
 /** Only these typed operations cross the preload boundary; runtime callbacks stay in main. */
 export interface ConversationApi {
@@ -257,8 +295,9 @@ export interface ConversationApi {
   update(id: string, expectedRevision: number, change: ConversationMetadataChange): Promise<ConversationSummary>
   list(cwd: string): Promise<ConversationSummary[]>
   read(id: string, beforeOrdinal?: number): Promise<ConversationPage>
+  setViewed(id: string | null): Promise<void>
   readSideChatSnapshot(id: string, cursor?: string): Promise<SideChatSnapshotBodyPage>
   readItem(id: string, ref: ConversationItemRef): Promise<string>
   preview(id: string, target: ConversationTargetRequest): Promise<ConversationPreview>
-  send(request: ConversationSendRequest): Promise<{ runId: string; disposition: 'created' | 'duplicate' }>
+  send(request: ConversationSendRequest): Promise<ConversationSendResult>
 }

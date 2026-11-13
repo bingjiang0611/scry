@@ -75,7 +75,7 @@ struct ModelEffortPopover: View {
     .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.08), radius: 24, y: 8)
     .buttonStyle(.plain)
     .opacity(appeared ? 1 : 0)
-    .onAppear { withAnimation(Motion.animation(.select, reduceMotion: reduceMotion)) { appeared = true } }
+    .onAppear { withAnimation(Motion.animation(.enter, reduceMotion: reduceMotion)) { appeared = true } }
     .presentationBackground(Palette.panel2)
     .presentationCornerRadius(16)
     .presentationCompactAdaptation(.popover)

@@ -15,7 +15,7 @@ export function useFirstReadyList(ready: boolean) {
     if (started.current) return
     started.current = true
     setActive(true)
-    timer.current = setTimeout(() => setActive(false), MOTION.durBase + 10 * 16)
+    timer.current = setTimeout(() => setActive(false), MOTION.durationSm + 10 * 16)
   }, [ready])
   useEffect(() => {
     if (!active) return

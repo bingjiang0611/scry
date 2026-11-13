@@ -11,7 +11,7 @@ import { RemotePairing } from './RemotePairing'
 import { SettingsModal } from './Modals'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { LocationPicker, LOCAL_MACHINE } from './LocationPicker'
-import { WorkdirPicker } from './Pickers'
+import { WorkdirPicker } from './WorkdirPicker'
 import { RemoteChat, remoteDraftKey, remotePermissionOption, remoteRunControlCatalog } from './RemoteChat'
 import { createRightSurfaceState } from '../right-surface'
 import { RightSurfacePanel } from './RightSurfacePanel'
@@ -184,6 +184,23 @@ describe('remote conversation guards', () => {
     const html = remoteChat('mac2')
     expect(html).toContain('mac2 未连接。草稿会保留，连接后不会自动发送。')
     expect(html).toContain('>连接</button>')
+  })
+
+  it('shows managed Worktree controls only for a connected capable host and a new session', async () => {
+    list.mockResolvedValue([host])
+    catalog.mockResolvedValue({
+      projects: [{ path: '/remote/app', label: 'Remote app' }], providers: [], providerEvidence: 'host_snapshot',
+      sessions: [], managedWorktrees: 1
+    })
+    await refreshDesktopConnections()
+    await refreshRemoteCatalog(host.id)
+    const capable = remoteChat('mac2', 'draft')
+    expect(capable).toContain('aria-label="工作区与分支"')
+    expect(capable).toContain('当前工作区')
+
+    catalog.mockResolvedValue({ projects: [{ path: '/remote/app', label: 'Remote app' }], providers: [], providerEvidence: 'host_snapshot', sessions: [] })
+    await refreshRemoteCatalog(host.id)
+    expect(remoteChat('mac2', 'draft')).not.toContain('aria-label="工作区与分支"')
   })
 
   it('does not advertise a local Shell for an unavailable remote terminal', () => {

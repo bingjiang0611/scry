@@ -233,41 +233,52 @@ export async function persistModelEventContent(
   return output
 }
 
+export type ToolContentFieldSide = 'input' | 'output'
+
+async function persistEventField(
+  event: TraceEvent,
+  field: ToolContentFieldSide,
+  policy: ToolContentPolicy,
+  source: string,
+  persist: (content: string, encoding: ToolContentRef['encoding'], field: ToolContentFieldSide) => Promise<ToolContentRef>
+): Promise<ToolContent> {
+  const existing = field === 'output' ? event.outputContent : event.inputContent
+  const raw = field === 'output' ? event.output ?? event.text : event.input
+  if (existing?.contentRef) return sanitizeCapturedContent(existing, policy.toolContentFieldBytes)
+  // Aliases on an already captured event are previews, not a new raw source.
+  const full = existing
+    ? sanitizeCapturedContent(existing, null)
+    : captureToolContent(raw, { source, maxBytes: null, ...sourceState(event, field === 'input') })
+  if (full.content === undefined || full.storage !== 'complete') {
+    return sanitizeCapturedContent(full, policy.toolContentFieldBytes)
+  }
+  // Every body needs a durable copy: even a field below its own limit can be clipped later when the
+  // shared turn budget is exhausted by earlier calls.
+  const contentRef = await persist(full.content, full.encoding === 'json' ? 'json' : 'utf8', field)
+  return {
+    ...(full.savedBytes > (policy.toolContentFieldBytes ?? 8 * 1024)
+      ? limitToolContent(full, policy.toolContentFieldBytes ?? 8 * 1024, 'field_budget')
+      : full),
+    contentRef
+  }
+}
+
 /** Persist complete raw bodies before applying the bounded inline projection. */
 export async function persistToolEventContent(
   events: TraceEvent[],
   policy: ToolContentPolicy,
   source: string,
-  persist: (content: string, encoding: ToolContentRef['encoding']) => Promise<ToolContentRef>
+  persist: (content: string, encoding: ToolContentRef['encoding'], field: ToolContentFieldSide) => Promise<ToolContentRef>
 ): Promise<TraceEvent[]> {
   if (!isFullToolContentPolicy(policy)) return events
   return Promise.all(events.map(async (event) => {
     if (!['tool', 'skill', 'agent'].includes(event.kind)) return event
     const result = event.stage === 'tool_result'
-    const existing = result ? event.outputContent : event.inputContent
-    const raw = result ? event.output ?? event.text : event.input
-    let content: ToolContent
-    if (existing?.contentRef) {
-      content = sanitizeCapturedContent(existing, policy.toolContentFieldBytes)
-    } else {
-      // Aliases on an already captured event are previews, not a new raw source.
-      const full = existing
-        ? sanitizeCapturedContent(existing, null)
-        : captureToolContent(raw, { source, maxBytes: null, ...sourceState(event, !result) })
-      if (full.content !== undefined && full.storage === 'complete') {
-        // Every body needs a durable copy: even a field below its own limit can be clipped later
-        // when the shared turn budget is exhausted by earlier calls.
-        const contentRef = await persist(full.content, full.encoding === 'json' ? 'json' : 'utf8')
-        content = {
-          ...(full.savedBytes > (policy.toolContentFieldBytes ?? 8 * 1024)
-            ? limitToolContent(full, policy.toolContentFieldBytes ?? 8 * 1024, 'field_budget')
-            : full),
-          contentRef
-        }
-      } else {
-        content = sanitizeCapturedContent(full, policy.toolContentFieldBytes)
-      }
-    }
-    return protectedToolEvent(event, content, result)
+    const primary = await persistEventField(event, result ? 'output' : 'input', policy, source, persist)
+    const projected = protectedToolEvent(event, primary, result)
+    // 入参与输出按字段区分，不按事件类型：tool_result 也可能带工具入参正文，入参一侧同样要有可读字节，
+    // 否则采集策略裁剪掉输出后，这一轮的工具入参就没有任何副本可读。
+    if (!result || (event.input === undefined && event.inputContent === undefined)) return projected
+    return { ...projected, inputContent: await persistEventField(event, 'input', policy, source, persist) }
   }))
 }

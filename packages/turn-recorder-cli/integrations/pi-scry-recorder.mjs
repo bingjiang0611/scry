@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { request } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -9,6 +9,54 @@ const MAX_JSON_BYTES = 64 * 1024
 const MAX_ASSISTANT_BYTES = 256 * 1024
 // A tool event stays below the daemon's 8 MiB request limit, including metadata.
 const MAX_TOOL_BYTES = 4 * 1024 * 1024
+
+let sigintHandler
+let sigintFlush
+let sigintFlushing = false
+
+function armSigint(flush) {
+  sigintFlush = flush
+  if (sigintHandler) return
+  sigintHandler = () => {
+    if (sigintFlushing) {
+      const handler = sigintHandler
+      sigintHandler = undefined
+      sigintFlush = undefined
+      if (handler) process.removeListener('SIGINT', handler)
+      process.kill(process.pid, 'SIGINT')
+      return
+    }
+    const action = sigintFlush
+    const handler = sigintHandler
+    sigintFlush = undefined
+    if (!action) {
+      sigintHandler = undefined
+      if (handler) process.removeListener('SIGINT', handler)
+      process.kill(process.pid, 'SIGINT')
+      return
+    }
+    // Pi loads signal-exit. Keep this listener installed for the whole first signal
+    // emission; removing it synchronously would make signal-exit the sole listener,
+    // and it would re-raise SIGINT before the asynchronous terminal delivery finishes.
+    sigintFlushing = true
+    void action().finally(() => {
+      if (sigintHandler === handler) sigintHandler = undefined
+      if (handler) process.removeListener('SIGINT', handler)
+      sigintFlushing = false
+      process.kill(process.pid, 'SIGINT')
+    })
+  }
+  process.prependListener('SIGINT', sigintHandler)
+}
+
+function disarmSigint(flush) {
+  if (sigintFlush !== flush) return
+  sigintFlush = undefined
+  if (sigintFlushing) return
+  const handler = sigintHandler
+  sigintHandler = undefined
+  if (handler) process.removeListener('SIGINT', handler)
+}
 
 function debug(message) {
   if (process.env.SCRY_RECORDER_DEBUG === '1') process.stderr.write(`[scry-pi] ${message}\n`)
@@ -103,18 +151,45 @@ function addUsage(total, message) {
   return true
 }
 
-function executable() {
-  const configured = process.env.SCRY_CLI_PATH
-  if (configured !== undefined) {
-    if (!isAbsolute(configured) || !existsSync(configured)) {
-      debug('configured SCRY_CLI_PATH is unavailable; refusing PATH fallback')
-      return undefined
-    }
-    try { return realpathSync(configured) } catch {
-      debug('configured SCRY_CLI_PATH cannot be resolved; refusing PATH fallback')
-      return undefined
-    }
+function resolveExecutable(candidate, source) {
+  if (!isAbsolute(candidate) || !existsSync(candidate)) {
+    debug(source + ' is unavailable; refusing PATH fallback')
+    return undefined
   }
+  try { return realpathSync(candidate) } catch {
+    debug(source + ' cannot be resolved; refusing PATH fallback')
+    return undefined
+  }
+}
+
+// A pin that exists but cannot be used must never fall through to a guessed installation: the
+// guess is how a workspace silently records with an older CLI. Only an absent pin path means
+// "no pin"; an empty file, an unreadable one or a dangling symlink is a broken pin. lstat asks
+// whether the path itself exists, so a link to a deleted file still counts as a pin.
+function pinnedCliPath(workspace) {
+  const path = join(workspace, '.scry', 'cli-path')
+  try {
+    lstatSync(path)
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { present: false }
+    debug('workspace .scry/cli-path cannot be inspected; refusing PATH fallback')
+    return { present: true, value: '' }
+  }
+  try {
+    return { present: true, value: String(readFileSync(path, 'utf8')).split('\n')[0].trim() }
+  } catch {
+    debug('workspace .scry/cli-path cannot be read; refusing PATH fallback')
+    return { present: true, value: '' }
+  }
+}
+
+// 工作区把要用的 CLI 绝对路径写在 .scry/cli-path（`scry init`/`repair` 写入，provider hook 也读它）。
+// 固定猜 ~/.local/bin/scry 会在多份安装并存时静默用错版本，所以固定路径必须先于猜测。
+function executable(workspace) {
+  const configured = process.env.SCRY_CLI_PATH
+  if (configured !== undefined) return resolveExecutable(configured, 'configured SCRY_CLI_PATH')
+  const pin = pinnedCliPath(workspace)
+  if (pin.present) return resolveExecutable(pin.value, 'workspace .scry/cli-path')
   const candidates = [
     join(homedir(), '.local', 'bin', 'scry'),
     ...String(process.env.PATH || '').split(':').filter(Boolean).map((directory) => join(directory, 'scry')),
@@ -173,7 +248,7 @@ function sendSocket(workspace, event, payload) {
 }
 
 function sendDirect(workspace, event, payload) {
-  const scry = executable()
+  const scry = executable(workspace)
   if (!scry) return Promise.resolve(false)
   return new Promise((resolve) => {
     let settled = false
@@ -219,6 +294,33 @@ export default function scryPiRecorder(pi) {
     queue = queue.then(() => deliver(workspace, event, payload)).catch((error) => debug(String(error)))
     return queue
   }
+  const settleActive = async (status) => {
+    const turn = active
+    if (!turn || turn.settled) return
+    turn.settled = true
+    disarmSigint(flushOnSigint)
+    const assistant = boundedText(turn.assistant.join('\n'))
+    await enqueue(turn.workspace, 'Stop', {
+      session_id: turn.sessionId,
+      promptId: turn.providerTurnId,
+      assistant_response: assistant.value,
+      ...limitation({ assistant_response: assistant, error: turn.error }),
+      ...(turn.usageObserved ? { usage: turn.usage } : {}),
+      ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
+      model_segments: turn.modelSegments,
+      ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
+        ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
+        : {}),
+      ...(turn.error ? { error: turn.error.value } : {}),
+      status,
+      timestamp: new Date().toISOString(),
+    })
+    if (active === turn) active = undefined
+  }
+  const flushOnSigint = async () => {
+    await settleActive('interrupted')
+    await queue
+  }
 
   pi.on('before_agent_start', async (event, ctx) => {
     responseStartedAt = undefined
@@ -236,6 +338,7 @@ export default function scryPiRecorder(pi) {
       startedAt: new Date().toISOString(),
       settled: false,
     }
+    armSigint(flushOnSigint)
     await enqueue(ctx.cwd, 'UserPromptSubmit', {
       session_id: sessionId,
       promptId: providerTurnId,
@@ -307,47 +410,13 @@ export default function scryPiRecorder(pi) {
   pi.on('agent_settled', async (event) => {
     const turn = active
     if (!turn || turn.settled) return
-    turn.settled = true
-    const assistant = boundedText(turn.assistant.join('\n'))
-    await enqueue(turn.workspace, 'Stop', {
-      session_id: turn.sessionId,
-      promptId: turn.providerTurnId,
-      assistant_response: assistant.value,
-      ...limitation({ assistant_response: assistant, error: turn.error }),
-      ...(turn.usageObserved ? { usage: turn.usage } : {}),
-      ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
-      model_segments: turn.modelSegments,
-      ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
-        ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
-        : {}),
-      ...(turn.error ? { error: turn.error.value } : {}),
-      status: event.aborted ? 'cancelled' : turn.terminalStatus ?? 'completed',
-      timestamp: new Date().toISOString(),
-    })
-    if (active === turn) active = undefined
+    await settleActive(event.aborted ? 'cancelled' : turn.terminalStatus ?? 'completed')
   })
 
   pi.on('session_shutdown', async () => {
     const turn = active
-    if (turn && !turn.settled) {
-      turn.settled = true
-      const assistant = boundedText(turn.assistant.join('\n'))
-      await enqueue(turn.workspace, 'Stop', {
-        session_id: turn.sessionId,
-        promptId: turn.providerTurnId,
-        assistant_response: assistant.value,
-        ...limitation({ assistant_response: assistant, error: turn.error }),
-        ...(turn.usageObserved ? { usage: turn.usage } : {}),
-        ...(turn.usageIncomplete ? { usage_complete: false } : turn.usageObserved ? { usage_complete: true } : {}),
-        model_segments: turn.modelSegments,
-        ...(turn.modelSegments.some((segment) => typeof segment.model === 'string')
-          ? { model_ids: [...new Set(turn.modelSegments.flatMap((segment) => typeof segment.model === 'string' ? [segment.model] : []))], model_ids_complete: turn.modelSegments.every((segment) => typeof segment.model === 'string' && segment.model.length > 0) }
-          : {}),
-        ...(turn.error ? { error: turn.error.value } : {}),
-        status: turn.terminalStatus ?? 'interrupted',
-        timestamp: new Date().toISOString(),
-      })
-    }
+    await settleActive(turn?.terminalStatus ?? 'interrupted')
+    disarmSigint(flushOnSigint)
     await queue
   })
 }

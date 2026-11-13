@@ -120,6 +120,36 @@ final class TunnelCodecTests: XCTestCase {
     }
   }
 
+  // The relay answers a room no host serves by closing with 4001 host_offline.
+  // It never speaks inner TLS, so NIOSSL sees that close as a stream truncated
+  // without close_notify. Reporting "uncleanShutdown" instead loses the one
+  // statement of why the tunnel ended and makes the device retry the room.
+  func testHostOfflineCloseSurvivesInnerTLSUncleanShutdown() throws {
+    let codec = TunnelCodec()
+    let channel = EmbeddedChannel()
+    try channel.pipeline.syncOperations.addHandler(codec)
+    defer { _ = try? channel.finish(acceptAlreadyClosed: true) }
+    var payload = channel.allocator.buffer(capacity: 16)
+    payload.writeInteger(UInt16(4001))
+    payload.writeString("host_offline")
+    channel.pipeline.fireChannelRead(WebSocketFrame(fin: true, opcode: .connectionClose, data: payload))
+    channel.embeddedEventLoop.run()
+    let recovered = codec.retainingCloseCause(for: NIOSSLError.uncleanShutdown)
+    guard let closed = recovered as? RelayTransportError, case let .closed(code, reason) = closed else {
+      return XCTFail("Inner TLS truncation hid the relay close: \(recovered)")
+    }
+    XCTAssertEqual(code, 4001)
+    XCTAssertEqual(reason, "host_offline")
+    XCTAssertTrue(RelayTransportError.isHostOffline(recovered))
+    // A truncation with no relay close, and a real TLS failure, still surface.
+    let noCauseCodec = TunnelCodec()
+    guard case NIOSSLError.uncleanShutdown = noCauseCodec.retainingCloseCause(for: NIOSSLError.uncleanShutdown) else {
+      return XCTFail("A truncation without a relay close cause was replaced")
+    }
+    let rejected = NIOSSLError.handshakeFailed(.sslError([]))
+    XCTAssertEqual(codec.retainingCloseCause(for: rejected) as? NIOSSLError, rejected)
+  }
+
   // An older Mac sent a whole history page as one frame. The real NIO decoder
   // rejects it; the device must see a named error, not "invalidFrameLength".
   func testOversizedFrameBecomesFrameTooLarge() throws {

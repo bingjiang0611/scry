@@ -18,6 +18,11 @@ export interface RecorderHookInput {
   /** Persist an uncertain transport delivery for lifecycle-deduplicated recovery, without applying it. */
   queueOnly?: boolean
   /**
+   * Session capture context, present only for `--capture-mode session` delivery. A workspace in
+   * `capture.sessions: opt-in` mode records nothing without it.
+   */
+  capture?: import('./session-capture-contract.js').SessionCaptureContext
+  /**
    * Skip commit-hook delivery so a long-lived caller can run it after answering the Provider.
    * Recording is what the hook must wait for; waking an external uploader is not, and its budget
    * is paid on every event. Only a caller that outlives the response may set this — a one-shot CLI
@@ -43,6 +48,23 @@ export interface StoredLifecycleEvent {
   transcriptPath?: string
 }
 
+export interface PiTranscriptAnchor {
+  beforeEntryId: string | null
+  afterEntryId?: string
+}
+
+export function piTranscriptAnchorOf(payload: Record<string, unknown>): PiTranscriptAnchor | undefined {
+  const raw = payload.pi_transcript_anchor
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const anchor = raw as Record<string, unknown>
+  if (!Object.prototype.hasOwnProperty.call(anchor, 'before_entry_id')) return undefined
+  const before = anchor.before_entry_id
+  if (before !== null && (typeof before !== 'string' || !before.trim())) return undefined
+  const after = anchor.after_entry_id
+  if (after !== undefined && (typeof after !== 'string' || !after.trim())) return undefined
+  return { beforeEntryId: before === null ? null : before, ...(typeof after === 'string' ? { afterEntryId: after } : {}) }
+}
+
 export interface TranscriptRead {
   stable: boolean
   source?: {
@@ -55,6 +77,12 @@ export interface TranscriptRead {
   }
   observed: boolean
   identityMatched?: boolean
+  /**
+   * Background tasks this window launched and has not seen report. A Stop while this is non-empty is
+   * not the end of the turn: the transcript will gain the wake's rows, and publishing now would split
+   * one burst of Agent work into two records.
+   */
+  pendingBackgroundTasks?: string[]
   providerTurnId?: string
   complete?: boolean
   terminalStatus?: AgentTurnRecord['status']
@@ -289,6 +317,13 @@ export const STOP_HOOK_ACTIVE_PROVIDERS = new Set<ProviderId>(['claude', 'codex'
 export const SESSION_END_EVENTS = new Set(['SessionEnd', 'session.end', 'session_end', 'session.exited', 'process.exit'])
 export const TERMINAL_CLOCK_SKEW_MS = 60_000
 export const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
+
+/**
+ * Providers that keep writing into one logical turn after its Stop when a background task reports.
+ * The wake arrives as another prompt event, so a recorder that treats it as a new turn both
+ * truncates the original turn and creates one whose identity the transcript never has.
+ */
+export const BACKGROUND_WAKE_PROVIDERS = new Set<ProviderId>(['qoder'])
 export const STALE_TERMINAL_WINDOW_MS = 30_000
 export const DEFERRED_TERMINAL_GRACE_MS = 180_000
 export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
@@ -301,6 +336,8 @@ export interface QueuedHook {
   payload: Record<string, unknown>
   managed?: boolean
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
+  /** 会话捕获上下文随条目持久化：重放出来的唤醒仍属于同一个 capture，不是陌生记录。 */
+  capture?: import('./session-capture-contract.js').SessionCaptureContext
   arrivedAt: string
 }
 

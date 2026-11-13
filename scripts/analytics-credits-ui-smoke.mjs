@@ -30,26 +30,35 @@ async function exercise() {
   check(document.querySelector('.usage-table-wrap').textContent.includes('claude-opus-5'), 'Managed custom-provider Claude usage missing')
   const customRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'cc-switch')
   check(customRow?.querySelector('.usage-provider-main > strong').textContent === '<$0.01', 'Missing official Claude API estimate')
-  check(!document.querySelector('.usage-table-wrap').textContent.includes('—'), 'Unknown detail placeholder is visible')
+  // 没有价格证据的模型仍列出：金额为“—”，不隐藏在明细之外。
+  const unpricedRow = [...document.querySelectorAll('.usage-table-wrap tbody tr')].find((row) => row.textContent.includes('unpriced-model'))
+  check(unpricedRow && unpricedRow.children[1].textContent === '—', 'Unpriced model row lost its unknown-cost placeholder')
   check(document.querySelector('.usage-table-wrap [title*="官方 API 标准价换算"]'), 'Estimate provenance is missing')
-  check(!document.querySelector('.usage-table-wrap').textContent.includes('unpriced-model'), 'Unknown model cost row is visible')
   check(qoderRow.querySelector('strong').title.includes('15.41 Credits') && qoderRow.querySelector('strong').title.includes('已知下界'), 'Missing partial credit evidence')
   check(!document.querySelector('.usage-overview').textContent.includes('Credits'), 'Removed Credits line is visible')
   check(!document.querySelector('.usage-footnote'), 'Removed explanation entry is visible')
-  check(document.querySelectorAll('.usage-metrics dt').length === 5 && !document.querySelector('.usage-metrics small'), 'Metric hierarchy differs from approved design')
-  check(![...document.querySelectorAll('.usage-provider-main b')].some(node => node.textContent === 'unknown'), 'Unknown provider row is visible')
+  // 数值下方允许且只允许一行“已知下界”提示，其余说明仍留在 title 里。
+  const metricNotes = [...document.querySelectorAll('.usage-metrics small')]
+  check(document.querySelectorAll('.usage-metrics dt').length === 5
+    && metricNotes.every((node) => node.classList.contains('usage-metric-note') && node.textContent.includes('已知下界')), 'Metric hierarchy differs from approved design')
+  // 成本未知的 Provider 行保留，金额为“—”，不能写成 0 或凭空消失。
+  const providerAmounts = [...document.querySelectorAll('.usage-provider-main > strong')].map((node) => node.textContent)
+  check(providerAmounts.every((text) => text === '—' || text.startsWith('$') || text.startsWith('<')), 'Provider amount left its evidence form')
   const groupButton = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
   groupButton('明细维度', '日期').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('日期'))
   check(document.querySelector('.usage-table-wrap').textContent.includes('$1.41'), 'Day breakdown lost API/Qoder equivalents')
-  check(!document.querySelector('.usage-table-wrap').textContent.includes('—'), 'Unknown day placeholder is visible')
+  // 日期明细里未知成本写“—”，不编造 0；已知成本仍保留金额。
+  const dayCosts = [...document.querySelectorAll('.usage-table-wrap tbody tr')].map((row) => row.children[1].textContent)
+  check(dayCosts.every((text) => text === '—' || text.startsWith('$') || text.startsWith('<')), 'Day breakdown fabricated a cost value')
   groupButton('明细维度', '模型').click()
   await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('模型'))
   check(document.querySelector('.usage-table-wrap').textContent.includes('$0.15'), 'Model breakdown lost Qoder USD equivalent')
-  groupButton('趋势指标', 'TOKEN').click()
+  groupButton('趋势指标', 'Token').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('Token'))
-  const customPath = document.querySelector('.usage-chart-line.is-cc-switch')
-  check(customPath && getComputedStyle(customPath).stroke !== 'none', 'Custom provider token series invisible')
+  // 单日观测不再伪造连线，只留数据点；两种标记都算可见。
+  const customSeries = document.querySelector('.usage-chart-line.is-cc-switch, .usage-chart-point.is-cc-switch')
+  check(customSeries && getComputedStyle(customSeries).stroke !== 'none', 'Custom provider token series invisible')
   groupButton('趋势指标', '成本').click()
   await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('成本'))
   check(document.querySelector('.usage-chart .is-qoder'), 'Qoder USD equivalent missing from cost chart')
@@ -71,11 +80,12 @@ try {
   await bundle({ entryPoints: [join(root, 'src/main/db.ts'), join(root, 'src/main/transcript-archive.ts'), join(root, 'src/core/turn-recorder/aggregate.ts'), join(root, 'src/shared/credit-usage.ts')], outdir: temp, entryNames: '[name]', outExtension: { '.js': '.mjs' }, bundle: true, platform: 'node', format: 'esm', packages: 'external' })
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    worker: { format: 'es' },
     resolve: { alias: { '@shared': join(root, 'src/shared') } }, define: { 'process.env.NODE_ENV': '"production"' },
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
       lib: { entry: join(root, 'scripts/fixtures/analytics-credits-smoke.tsx'), formats: ['iife'], name: 'CreditsFixture', fileName: () => 'fixture.js', cssFileName: 'fixture' } }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data:"><link rel="stylesheet" href="fixture.css"><div id="root"></div><script src="fixture.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')
     const { writeFileSync } = require('node:fs')
@@ -88,7 +98,7 @@ try {
     process.env.QODER_CONFIG_DIR = join(root, 'qoder')
     app.whenReady().then(async () => {
       app.dock?.hide()
-      const { configureStorage, initDb, recordTurn, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
+      const { configureStorage, initDb, recordTurn, usageAnalyticsQuery, usageAnalyticsWithCreditsQuery } = await import('./db.mjs')
       const { upsertTraceArchiveTurn } = await import('./transcript-archive.mjs')
       const { aggregateTurnEvidence } = await import('./aggregate.mjs')
       const { creditUsageEvidence } = await import('./credit-usage.mjs')
@@ -158,6 +168,20 @@ try {
         !analytics.byModel.some(row => row.provider === 'cc-switch' && row.model === 'claude-opus-5')) throw new Error('Pi Qoder/Claude projection missing')
       const again = await usageAnalyticsWithCreditsQuery(7)
       if (JSON.stringify(again.totals) !== JSON.stringify(analytics.totals)) throw new Error('Pi refresh doubled usage')
+      // Persist Pi Credits, then remove their native shadow: both the first SQLite
+      // snapshot and subsequent refresh must retain the exact amount, once only.
+      const piRecorded = { ...piTurns[0], items: [...piTurns[0].items, {
+        id: 'pi-credits', runId: 'pi-qoder', ts: new Date().toISOString(), kind: 'harness', stage: 'credit_usage',
+        creditUsage: creditUsageEvidence([{ id: 'pi-request', runId: 'pi-qoder', credits: 2.909718812000001 }], 'pi_qoder_credit_observation')
+      }] }
+      if (!recordTurn(piRecorded)) throw new Error('Pi credits ledger write failed')
+      require('node:fs').unlinkSync(join(piDirectory, '2026-09-09_' + piSession + '.jsonl'))
+      for (const snapshot of [usageAnalyticsQuery(7), await usageAnalyticsWithCreditsQuery(7)]) {
+        const amount = snapshot.totals.qoderCredits?.credits
+        const cost = snapshot.byProvider.find(row => row.provider === 'qoder')?.costUsd
+        if (!Number.isFinite(amount) || Math.abs(amount - 15.409718812000001) > 1e-10 ||
+          !Number.isFinite(cost) || Math.abs(cost - 0.15409718812000001) > 1e-10) throw new Error('Ledger-first Pi Credits missing or doubled')
+      }
       // Add a real measured-zero day only after the original deduplication/count contracts.
       const zeroDate = new Date()
       zeroDate.setDate(zeroDate.getDate() - 2)

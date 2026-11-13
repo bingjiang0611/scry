@@ -5,9 +5,9 @@ max_score: 40
 na_heuristics:
 p0_count: 0
 p1_count: 3
-target_identity: "file:/Users/baobingjiang/IdeaProjects/vibecoding/scry/apps/ios/ScryRemote/HomeView.swift"
+target_identity: "file:/Users/<user>/IdeaProjects/vibecoding/scry/apps/ios/ScryRemote/HomeView.swift"
 target_fingerprint: "sha256:e4f2ed26f2918e7fc2c6486f7ade82209e824fdca7f51bd17a61bd6151e55fb9"
-target_path: /Users/baobingjiang/IdeaProjects/vibecoding/scry/apps/ios/ScryRemote/HomeView.swift
+target_path: /Users/<user>/IdeaProjects/vibecoding/scry/apps/ios/ScryRemote/HomeView.swift
 timestamp: 2026-10-21T08-07-22Z
 slug: apps-ios-scryremote-homeview-swift
 closed: true

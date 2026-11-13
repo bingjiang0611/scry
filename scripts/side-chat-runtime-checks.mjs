@@ -1,4 +1,5 @@
 import { CHILD_COMPOSER, CHILD_PANEL, MAIN_COMPOSER, json, sideChatDriver } from './side-chat-driving.mjs'
+import { expectHiddenChildLiftsParent } from './side-chat-sidebar-checks.mjs'
 
 /**
  * Side-chat runtime independence in the isolated production App.
@@ -134,15 +135,16 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
     `hiding must leave no child subscription behind: ${json(hiddenCounts)}`)
   const hiddenRun = await activeChildRun()
   check(hiddenRun != null, `a hidden child must keep its run: ${json({ hidden, hiddenRun })}`)
-  const parentLabel = hidden.sidebarCounts.find(label => label.includes('侧聊'))
-  check(parentLabel != null && (parentLabel.includes('运行中') || parentLabel.includes('需处理')),
-    `a hidden running child must still be visible in the sidebar: ${json(hidden)}`)
+  await expectHiddenChildLiftsParent({ evaluate, check, clickAt, wait, childId, hidden })
   await capture('runtime-child-hidden')
   const showCounts = counts()
   await click('.panel-pill:not(.summary-pill)')
   await wait(`document.querySelector('.app.right-panel-hidden') == null`)
   await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface') != null`)
   await wait(`document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null`, 20000)
+  // The surface resubscribes on mount, so the transcript replays after the run status appears;
+  // a same-tick read raced that replay on CI.
+  await wait(`document.querySelector('${CHILD_PANEL} .chat-body')?.textContent.includes('holding hidden') ?? false`, 10000)
   const reopened = await evaluate(`(() => ({
     childId: document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId ?? null,
     running: document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null,
@@ -155,7 +157,6 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   check((reopenedCounts['runTraces:subscribe'] ?? 0) >= 1,
     `reopening must resubscribe the visible child's run: ${json(reopenedCounts)}`)
   check(await activeChildRun() === hiddenRun, 'reopening showed another run than the one that kept going')
-  check(reopened.text, `the reopened child must show its own streamed text: ${json({ reopened })}`)
   await stopChild()
   await settleTurn('side chat hold hidden')
 

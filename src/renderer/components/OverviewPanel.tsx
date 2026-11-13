@@ -5,7 +5,7 @@ import type { TraceEvent, DbStats, WorkspaceDiffResult } from '@shared/trace'
 import type { RuntimeProvider } from '@shared/runtime'
 import { fmtTok } from '../format'
 import type { Turn } from '../format'
-import { OVERVIEW_CACHE_COPY, OVERVIEW_COST_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
+import { OVERVIEW_CACHE_COPY, OVERVIEW_COST_COPY, OVERVIEW_CREDIT_COPY, OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { Icon } from './primitives/Icon'
 import { OverviewSessionPanel } from './OverviewSessionPanel'
 import { OverviewTurnCalls } from './OverviewTurnCalls'
@@ -155,7 +155,7 @@ function OverviewPanelBody({
       <div className="ov-topbar">
         <div className="overview-panel-title">
           <strong>总览</strong>
-          <em><i aria-hidden="true" />本机真实数据</em>
+          {turns.length > 0 && <em>{OVERVIEW_SESSION_COPY.callCount(calls.totalCalls)}</em>}
         </div>
       </div>
       <div className="ov-scroll overview-scroll-content">
@@ -186,13 +186,15 @@ function OverviewPanelBody({
 
       {turns.length > 0 && (
         <section className={`overview-verdict ${vstate}`} aria-label="当前会话判词与尺度">
-          <header className="overview-verdict-line">
-            <div>
-              <span className={`sdot ${vstate}`} />
-              <strong>{judge}</strong>
-            </div>
-            <em>{calls.totalCalls} calls</em>
-          </header>
+          {/* 完成态不再重复总结「轮次已结束」：报错与危险已在本轮清单和会话数据里各自成证。 */}
+          {judge !== null && (
+            <header className="overview-verdict-line">
+              <div>
+                <span className={`sdot ${vstate}`} />
+                <strong>{judge}</strong>
+              </div>
+            </header>
+          )}
           <div className="overview-metric-grid">
             <div className="overview-metric accent lead">
               <span>{billing.tokenFormulaLabel}</span>
@@ -210,12 +212,12 @@ function OverviewPanelBody({
             <div
               className={`overview-metric ${isQoder ? (qoderCreditKnown ? 'accent' : 'unsupported') : cost.value == null ? 'unsupported' : ''}`}
               title={isQoder
-                ? qoderCreditKnown ? `仅统计已观测到的主会话请求 Credit${qoderCreditPartial ? '，存在未覆盖请求或轮次' : ''}` : '当前会话没有可用的 Qoder Credit 证据'
+                ? qoderCreditKnown ? OVERVIEW_CREDIT_COPY.coverage(qoderCreditPartial) : OVERVIEW_CREDIT_COPY.unavailable
                 : cost.value == null ? OVERVIEW_COST_COPY.unavailable : OVERVIEW_COST_COPY.coverage(cost.known, results.length)}
             >
-              <span>{isQoder ? 'Credit' : OVERVIEW_COST_COPY.label}</span>
+              <span>{isQoder ? OVERVIEW_CREDIT_COPY.label : OVERVIEW_COST_COPY.label}</span>
               <strong>{isQoder
-                ? qoderCreditKnown ? `${qoderCreditPartial ? '≥' : ''}${formatOverviewCredits(qoderCredits)}` : '—'
+                ? qoderCreditKnown ? formatOverviewCredits(qoderCredits) : '—'
                 : cost.value == null ? '—' : formatOverviewCost(cost.value)}</strong>
             </div>
           </div>
@@ -227,7 +229,7 @@ function OverviewPanelBody({
       )}
 
       {turns.length > 0 && (
-        <div className="overview-data-tabs" role="tablist" aria-label="纵览数据维度">
+        <div className="overview-data-tabs" role="tablist" aria-label={OVERVIEW_SESSION_COPY.dataDimensions}>
           <button
             type="button"
             id="overview-turns-tab"

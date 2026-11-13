@@ -11,7 +11,7 @@
       },
       "p95Ms": 250,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "providers.catalog": {
       "lane": "disk",
@@ -23,7 +23,7 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "navigation.catalog": {
       "lane": "disk",
@@ -35,7 +35,7 @@
       },
       "p95Ms": 150,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "history.page": {
       "lane": "domain",
@@ -47,7 +47,7 @@
       },
       "p95Ms": 20,
       "warmups": 3,
-      "samples": 15
+      "samples": 20
     },
     "compose.drafts": {
       "lane": "domain",
@@ -60,7 +60,7 @@
       },
       "p95Ms": 20,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "persistence.archive": {
       "lane": "disk",
@@ -73,7 +73,7 @@
       },
       "p95Ms": 250,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "evidence.projection": {
       "lane": "domain",
@@ -86,7 +86,7 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "analytics.stats": {
       "lane": "domain",
@@ -99,7 +99,7 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "workspace.files": {
       "lane": "disk",
@@ -112,7 +112,7 @@
       },
       "p95Ms": 250,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "source-control.diff": {
       "lane": "process",
@@ -124,7 +124,7 @@
       },
       "p95Ms": 1000,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "terminal.delivery": {
       "lane": "domain",
@@ -137,7 +137,7 @@
       },
       "p95Ms": 20,
       "warmups": 3,
-      "samples": 15
+      "samples": 20
     },
     "send.codex-fixture": {
       "lane": "process",
@@ -150,7 +150,7 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "controls.stop-lifecycle": {
       "lane": "process",
@@ -163,7 +163,7 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "remote.loopback": {
       "lane": "process",
@@ -176,7 +176,7 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "resources-shell.process": {
       "lane": "process",
@@ -189,14 +189,14 @@
       },
       "p95Ms": 100,
       "warmups": 1,
-      "samples": 7
+      "samples": 20
     },
     "trace.delivery": {
       "lane": "domain",
       "workload": "trace-events=1000;unicode=true",
       "iterations": 20,
       "warmups": 3,
-      "samples": 15,
+      "samples": 20,
       "counters": {
         "bytes": 175000,
         "messages": 2,
@@ -209,7 +209,7 @@
       "workload": "trace-events=1000;unicode=true",
       "iterations": 20,
       "warmups": 3,
-      "samples": 15,
+      "samples": 20,
       "counters": {
         "bytes": 23000,
         "turns": 1

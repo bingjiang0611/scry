@@ -62,6 +62,11 @@ export async function runSidebarActivity({ driver, options }) {
     await click('[data-activity-group=completed] [data-remote-session=old-native]')
     await wait(remoteShown, 'completed Activity opens remote session')
     await wait('!document.querySelector("[data-remote-session=old-native] .sb-unread")', 'viewed focused remote result clears unread')
+    const viewedSyncCalls = (await fixture()).viewedSessionCalls.length
+    await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
+    await wait(`window.desktopRemoteFixture.viewedSessionCalls.length > ${viewedSyncCalls} && window.desktopRemoteFixture.viewedSessionCalls.at(-1).context === null`, 'disconnect clears the viewed session projection')
+    await read('window.desktopRemoteFixture.connected = true; window.refreshFixtureConnections()')
+    await wait('window.desktopRemoteFixture.viewedSessionCalls.at(-1).context?.externalSessionId === "old-native"', 'reconnect resynchronizes the focused remote session')
     await read('window.refreshFixtureCatalog()')
     check(!await read('document.querySelector("[data-remote-session=old-native] .sb-unread")'), 'Repeated catalog marked an already-read result')
     await click('.sb-view-tabs [role=tab]', '项目')

@@ -1,7 +1,7 @@
 import { app, ipcMain, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { mainEventId } from './bootstrap/main-event-id'
 import { startRun } from './bootstrap/run-execution'
 import { startWorkspaceRun } from './bootstrap/workspace-start'
 import { createForkOperations } from './bootstrap/run-fork'
@@ -45,6 +45,8 @@ import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
 import { catalogChannelHandlers, registerChannelHandlers } from './bootstrap/startup-channels'
 import { registerConversationHandlers } from './bootstrap/conversation'
+import type { SideChatCascade } from './bootstrap/conversation-delete'
+import { registerConversationAttention } from './bootstrap/conversation-attention'
 import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
 import { createPiProfileRuntime } from './bootstrap/pi-profiles'
@@ -61,7 +63,6 @@ const { rendererEntryUrl, useDevelopmentRenderer, isOwnedTestApp, primaryInstanc
 let runSeq = 0
 let isShuttingDown = false
 let startupManagedRecovery: Promise<void> = Promise.resolve()
-const mainEventId = (prefix: string, runId: string): string => `${prefix}-${runId}-${randomUUID()}`
 
 const {
   sessionByContext, sessionRevisionByContext, sessionAliasesByContext,
@@ -105,7 +106,7 @@ const {
   getProviderRegistry: () => providerRegistry,
   homeDir, resolveKnownProjectDirectory
 })
-const { piProfileStore, detectInstalledAgents, storedPiProfilesNotDetected, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
+const { piProfileStore, detectInstalledAgents, storedPiProfiles, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
 const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({
   homeDir,
   userDataDir: app.getPath('userData'),
@@ -118,16 +119,11 @@ const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProvider
 })
 
 function setCurrentCwd(dir: string | undefined): void {
-  // Selection is not process ownership. Existing shells retain their spawn cwd;
-  // only explicit close or app shutdown terminates them. New starts still validate currentCwd.
   currentCwd = dir
 }
 
-// 注：原来扫 ~/.claude/projects 列举 transcript 的逻辑（readHeadPreview/readCwd/collectSessions）
-// 已移除——app 只列自己起过的会话（见 app-sessions），不采集 terminal 裸跑的 claude。
 
 const rendererAutoReloadCooldownMs = 60_000
-// 崩溃重载会丢掉整棵 UI 树；把原因留给重载后的 renderer 读一次，避免界面假装“继续”。
 const rendererRestart = createRendererRestartLog()
 
 const createWindow = (): void => createBootstrapWindow({
@@ -141,6 +137,7 @@ const createWindow = (): void => createBootstrapWindow({
   traceOutput,
   runTraces,
   dockBadge,
+  resetSessionAttention: () => resetConversationAttention(),
   isShuttingDown: () => isShuttingDown,
   rendererAutoReloadCooldownMs,
   rendererRestart
@@ -159,13 +156,12 @@ function handleTrusted<TArgs extends unknown[], TResult>(
 
 registerAppAgentHandlers({
   handleTrusted, getWindow: () => win, smokeProviderEnabled, smokeDetectedAgents,
-  storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry,
+  storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry,
   dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory,
   invalidateSessionHistoryLoad, rememberProject, setCurrentCwd,
   resolveKnownProjectDirectory, getCurrentCwd: () => currentCwd
 })
 
-// one-shot：重载后的新 renderer 读一次即消费，正常启动不会继续报警。
 handleTrusted('app:rendererRestart', () => rendererRestart.take())
 
 async function openLocalPath(path: string): Promise<void> {
@@ -232,26 +228,33 @@ registerProviderHandlers({
 
 registerChannelHandlers(handleTrusted, catalogChannelHandlers({ appSessionStore, listProjectCatalog, recentStore }))
 
-const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined }
+const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined,
+  sideChatCascade: undefined as SideChatCascade | undefined }
 const sessionDeletion = registerSessionDeletionHandlers({
   handleTrusted, getRuns: () => runs, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions,
   getWindow: () => win, rendererCanReceive, appUserDataDir: app.getPath('userData'), isOwnedTestApp, requestRunStop,
   assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, getCurrentCwd: () => currentCwd,
-  prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation)
+  prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation),
+  sideChatCascade: { count: scope => conversationDeletion.sideChatCascade!.count(scope), run: scope => conversationDeletion.sideChatCascade!.run(scope) }
 })
 const { deleteOneSession, sessionRefFromRequest, changeLegacySessionMetadata } = sessionDeletion
 
-const { prepareConversationDeletion } = registerConversationHandlers({
+const resetConversationAttention = registerConversationAttention({
+  handleTrusted, conversationStore, resolveKnownProjectDirectory, getWindow: () => win,
+  clearLegacyFocus: () => { runs.focus(null) }, invalidateSessionHistoryLoad, dockBadge
+})
+const { prepareConversationDeletion, sideChatCascade } = registerConversationHandlers({
   handleTrusted, resolveKnownProjectDirectory, providerContextKey, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   appSessionStore, conversationStore, getRuns: () => runs, providerRegistry, deletingSessions, adoptingSessionKeys,
   conversationService, invalidateSessionHistoryLoad, getWindow: () => win,
   deleteOneSession: (request, options) => deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof deleteOneSession>[1]),
   resolveSessionRunIds, deleteConversationHistory, appUserDataDir: app.getPath('userData'),
-  providerSessionKey, assertLegacyConversationWriteAllowed, rememberProject
+  providerSessionKey, assertLegacyConversationWriteAllowed, rememberProject, dockBadge
 })
 
 conversationDeletion.prepare = prepareConversationDeletion
+conversationDeletion.sideChatCascade = sideChatCascade
 
 registerProjectHandlers({ handleTrusted, projectStore, recentStore })
 
@@ -308,7 +311,6 @@ registerAgentRuntimeHandlers({
 })
 registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow: () => win })
 
-// Shared by the Mac stop button and a paired device stopping a Mac run.
 function requestRunStop(runId: string): boolean {
   return pipeline.requestRunStop(runId)
 }
@@ -317,13 +319,14 @@ function requestRunStop(runId: string): boolean {
 // the official public relay; development remains opt-in and SCRY_REMOTE_HOST=0
 // is an explicit kill switch. The relay only sees opaque inner-mTLS bytes.
 let remoteHostService: RemoteHostService | null = null
+const remoteAttention = createRemoteAttentionTracker((keys) => dockBadge.setRemote(keys))
 const remoteConnections = createRemoteConnections({
   providerRegistry, listPiProfiles, resolvePiProfile, resolveRemoteProjectDirectory,
-  withProviderOperation, remoteProjectRoots, hasRemoteHost: () => remoteHostService !== null
+  withProviderOperation, remoteProjectRoots, hasRemoteHost: () => remoteHostService !== null,
+  remoteAttention
 })
 const { requireDesktopRemoteClient, remoteProviderDiscovery, refreshRemoteProviderSnapshot } = remoteConnections
-registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient,
-  createRemoteAttentionTracker((keys) => dockBadge.setRemote(keys)))
+registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient)
 let remoteProviderRefresh: ReturnType<typeof setInterval> | undefined
 
 function invalidateRemoteProviderMetadata(providerId: ProviderId): void {

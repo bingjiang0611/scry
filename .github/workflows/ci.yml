@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -8,33 +9,35 @@ on:
 permissions:
   contents: read
 
+# PR pushes and main pushes each keep only their newest run; manual dispatch is never
+# coalesced. Main runs validate fully because a cancelled run's commits are not re-diffed.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/validation-changes.yml
+
   node:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Prepare Electron executable
-        run: |
-          node -e "require('node:fs').accessSync(require('electron'))"
-          electron_bin="$(node -e "process.stdout.write(require('electron'))")"
-          echo "Electron executable: ${electron_bin}"
-          sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            sudo chown root:root "${sandbox}"
-            sudo chmod 4755 "${sandbox}"
-          fi
+      # This job compiles but never launches Electron or loads native modules.
+      # A clean --ignore-scripts install covers every command below; do not
+      # download an unused Electron executable or prepare its runtime sandbox.
+      - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
       - name: Harness binding checks
@@ -45,10 +48,36 @@ jobs:
         run: npm run build
       - name: Build recorder CLI
         run: npm run build:cli
+      - name: Package unpublished recorder with source provenance
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/recorder-artifact
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          npm pack ./packages/turn-recorder-cli --ignore-scripts --json --pack-destination "$ARTIFACT_DIR" > "$ARTIFACT_DIR/pack.json"
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const directory = process.env.ARTIFACT_DIR
+          const [{ filename }] = JSON.parse(readFileSync(join(directory, 'pack.json'), 'utf8'))
+          const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+          const sha256 = createHash('sha256').update(readFileSync(join(directory, filename))).digest('hex')
+          writeFileSync(join(directory, 'provenance.json'), JSON.stringify({ commit, filename, sha256 }, null, 2) + '\n')
+          NODE
+      - name: Retain recorder for exact-commit validation without publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: recorder-cli-${{ github.sha }}
+          path: ${{ runner.temp }}/recorder-artifact/
+          if-no-files-found: error
+          retention-days: 7
 
   # 全量 Vitest 按文件分成 4 片并行。每片仍只用一个 worker，
   # 50k-trace 等 CPU 密集契约不会互相争抢，超时保持不变；不过滤任何测试。
   unit:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -59,10 +88,14 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: |
@@ -71,6 +104,12 @@ jobs:
           sandbox="$(dirname "${electron_bin}")/chrome-sandbox"
           sudo chown root:root "${sandbox}"
           sudo chmod 4755 "${sandbox}"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Unit, contract tests and coverage shard
         run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' npm run test:coverage -- --maxWorkers=1 --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob --outputFile.blob=.vitest-reports/blob-${{ matrix.shard }}.json
       - name: Keep shard results for the merged coverage report
@@ -85,14 +124,16 @@ jobs:
 
   # 任一分片失败时仍合并已完成分片并上传覆盖率，便于排查；Check 仍因 unit 失败而失败。
   unit-coverage:
-    needs: unit
-    if: ${{ !cancelled() }}
+    needs: [changes, unit]
+    if: ${{ !cancelled() && needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -114,6 +155,8 @@ jobs:
           if-no-files-found: ignore
 
   cli-compat:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -124,36 +167,52 @@ jobs:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
       - name: CLI tests and clean tarball smoke
-        run: npm run check:cli-release
+        # Full desktop typechecking runs in node; CLI compilation and all runtime
+        # tests/tarball checks still execute on every supported Node version.
+        run: npm run check:cli-runtime
 
-  # 不再等待 node/cli-compat：最终 Check 仍要求全部 job 成功，只是并行跑。
-  # renderer UI smoke 按原串行顺序连续切成 2 片（部分 fixture 对前序脚本敏感，不跨片重排），打包只在第 1 片执行一次。
-  # 只拆 2 片：GitHub Free 同时最多 5 个 macOS job，需与 Performance native、
-  # Remote transport/ios 同时运行而不排队。
+  # Preserve the serial smoke order in three contiguous slices. Packaging runs
+  # with the shortest slice. Normal PRs use four macOS slots including native
+  # performance; remote/iOS changes may queue one of the six jobs at the five-slot cap.
+  # Diffs that cannot reach the App (tests, Agent docs, iOS) skip only this macOS job.
   packaged-electron:
+    needs: changes
+    if: ${{ needs.changes.outputs.desktop == 'true' }}
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     env:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
       - name: Prepare Electron native dependencies
         run: ./node_modules/.bin/electron-builder install-app-deps
       - name: Isolated renderer DOM smoke tests
@@ -166,16 +225,52 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sidebar-paint-diagnostics-${{ matrix.shard }}
-          path: ${{ runner.temp }}/scry-sidebar-*.png
+          path: |
+            ${{ runner.temp }}/scry-sidebar-*.png
+            ${{ runner.temp }}/scry-workspace-session-ui-*/failure.json
           if-no-files-found: ignore
+
       - name: Package and smoke the macOS app
-        if: ${{ matrix.shard == 1 }}
+        if: ${{ matrix.shard == 2 }}
         run: npm run pack:artifact
+      - name: Archive the verified macOS app for manual installation
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
+        run: |
+          APP_PATH="$(node --input-type=module -e "import { defaultPackagedAppPath } from './scripts/packaged-app-layout.mjs'; console.log(defaultPackagedAppPath())")"
+          mkdir -p release-artifacts
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" release-artifacts/Scry.app.zip
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          import { defaultPackagedAppPath, packagedAppLayout } from './scripts/packaged-app-layout.mjs'
+          const file = 'Scry.app.zip'
+          const { resources } = packagedAppLayout(defaultPackagedAppPath())
+          const { version } = JSON.parse(readFileSync(join(resources, 'scry-cli/package.json'), 'utf8'))
+          const sha256 = createHash('sha256').update(readFileSync(join('release-artifacts', file))).digest('hex')
+          const provenance = {
+            sourceCommit: process.env.GITHUB_SHA,
+            arch: process.arch,
+            recorderVersion: version,
+            file,
+            sha256
+          }
+          writeFileSync('release-artifacts/provenance.json', JSON.stringify(provenance, null, 2) + '\n')
+          NODE
+      - name: Upload the verified macOS app
+        if: ${{ github.event_name == 'workflow_dispatch' && matrix.shard == 2 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app-${{ github.sha }}
+          path: release-artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   check:
     name: Check
     if: ${{ always() }}
-    needs: [node, unit, unit-coverage, cli-compat, packaged-electron, packaged-linux]
+    needs: [changes, node, unit, unit-coverage, cli-compat, packaged-electron, packaged-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -184,7 +279,16 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$RESULTS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null
+          # Every job must succeed, except jobs proven unaffected, which must be skipped.
+          echo "$RESULTS" | jq -e --argjson desktop '["packaged-electron"]' '
+            length == 7 and .changes.result == "success" and
+            (.changes.outputs as $out
+              | ($out.required == "true" and ($out.desktop == "true" or $out.desktop == "false"))
+                or ($out.required == "false" and $out.desktop == "false")) and
+            (.changes.outputs as $out | del(.changes) | to_entries | all(.[];
+              .key as $job | .value.result == (
+                if $out.required == "false" or ($out.desktop == "false" and any($desktop[]; . == $job))
+                then "skipped" else "success" end)))' > /dev/null
 
   # Linux 打包门禁：验证产物布局、原生模块、私有 CLI、locale 裁剪与资源 allowlist，
   # 再在 Xvfb 下用真实 Electron（setuid chrome-sandbox，不关 sandbox）跑 daemon 模式 smoke：
@@ -192,30 +296,60 @@ jobs:
   # pack:artifact 里的整套 smoke:electron 仍按 macOS 布局取可执行文件，不在这里运行；
   # Xvfb 不是目标桌面，界面、Wayland 与真实密钥环行为在目标 Omarchy 机器上验收。
   packaged-linux:
+    needs: changes
+    if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       QODER_SKIP_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - uses: ./.github/actions/cache-electron
+        id: electron-cache
       - run: npm ci
       - name: Prepare Electron executable
         run: node -e "require('node:fs').accessSync(require('electron'))"
-      - name: Prepare Electron native dependencies
-        run: ./node_modules/.bin/electron-builder install-app-deps
+      # Save the validated download before unrelated tests/builds can fail.
+      - uses: actions/cache/save@v4
+        if: ${{ steps.electron-cache.outputs.hit != 'true' }}
+        with:
+          path: ${{ runner.temp }}/electron-downloads
+          key: ${{ steps.electron-cache.outputs.key }}
+      # electron-builder pulls fpm/7zip from GitHub releases; a cached toolset
+      # keeps the packaging gate independent of that CDN's availability.
+      - name: Resolve packaging toolset cache key
+        id: builder-toolsets
+        run: |
+          version="$(node -p "require('./node_modules/electron-builder/package.json').version")"
+          echo "key=electron-builder-toolsets-v1-${RUNNER_OS}-${version}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-cache
+          key: ${{ steps.builder-toolsets.outputs.key }}
+      # run-electron-builder performs the authoritative forced ABI rebuild and
+      # real native-load probe; no Electron tests precede it in this job.
       - name: Build desktop app and private CLI
         run: |
           npm run build
           npm run build:cli
       - name: Install archive tools
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+        run: |
+          # The default Ubuntu archive hosts failed DNS on both runner images.
+          # Prefer the HTTPS kernel.org mirror, retaining native fallbacks and signature checks.
+          test -f /etc/apt/apt-mirrors.txt
+          printf 'https://mirrors.edge.kernel.org/ubuntu/\tpriority:0\n' | sudo tee -a /etc/apt/apt-mirrors.txt
+          sudo apt-get update && sudo apt-get install -y libarchive-tools
       # 发布构建同时产出 dist/linux-unpacked 和 dist/*.pacman；
       # pacman 的 pkgdesc 曾经静默变空，所以打包产物必须过 check:pacman-package。
       - name: Package Linux app directory and pacman package
+        env:
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
         run: SCRY_RELEASE_BUILD=1 node scripts/run-electron-builder.mjs
       - name: Check packaged Linux app
         run: npm run check:packaged-app

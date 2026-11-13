@@ -27,7 +27,7 @@
   color: var(--dim2);
   font: 650 13px/1 var(--font-ui);
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .capability-kind-tabs button.active {
@@ -84,7 +84,7 @@
   color: var(--dim2);
   font: 650 12.5px/1 var(--font-ui);
   cursor: pointer;
-  transition: color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
 .capability-source-tabs button.active {
@@ -118,7 +118,7 @@
   gap: 5px;
   padding: 8px 18px;
   border-bottom: 1px solid var(--border3);
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .capability-skill > strong {
@@ -141,7 +141,7 @@
 
 .capability-mcp-row {
   border-bottom: 1px solid var(--border3);
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .capability-mcp-row__summary {
@@ -258,7 +258,7 @@
   display: grid;
   grid-template-rows: 0fr;
   background: var(--panel2);
-  transition: grid-template-rows var(--dur-base) var(--ease-struct);
+  transition: grid-template-rows var(--duration-md) var(--ease-in-out);
 }
 
 .capability-tools.open { grid-template-rows: 1fr; }

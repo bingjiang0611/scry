@@ -244,7 +244,7 @@ export interface RecordContentItem {
   ref: ToolContentRef
 }
 
-export function recordContentItems(record: AgentTurnRecord): RecordContentItem[] {
+export function recordContentItems(record: Omit<AgentTurnRecord, 'sequence'>): RecordContentItem[] {
   const items: RecordContentItem[] = []
   for (const section of ['tools', 'skills', 'mcps'] as const) {
     for (const [index, call] of (record[section].value ?? []).entries()) {

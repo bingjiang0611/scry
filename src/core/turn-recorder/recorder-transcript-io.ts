@@ -12,6 +12,25 @@ export function transcriptIdentity(info: { dev: number; ino: number; size: numbe
   return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs }
 }
 
+// Process-local read counters: an increment per read call, no allocation on the hot path.
+// Used to tell "parsed the whole transcript" apart from "parsed this turn's appended bytes".
+let transcriptBytesRead = 0
+let transcriptAnchorBytesScanned = 0
+
+export function transcriptReadStats(): { bytesRead: number; anchorBytesScanned: number } {
+  return { bytesRead: transcriptBytesRead, anchorBytesScanned: transcriptAnchorBytesScanned }
+}
+
+export function resetTranscriptReadStats(): void {
+  transcriptBytesRead = 0
+  transcriptAnchorBytesScanned = 0
+}
+
+/** Anchor discovery reads backwards from the end of the file; count it separately from parsing. */
+export function recordTranscriptAnchorBytes(bytes: number): void {
+  transcriptAnchorBytesScanned += bytes
+}
+
 function sameTranscriptIdentity(left: TranscriptSnapshotIdentity, right: TranscriptSnapshotIdentity): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
@@ -50,6 +69,7 @@ export async function readTranscriptWindow(
       bytesRead += result.bytesRead
     }
     after = transcriptIdentity(await handle.stat())
+    transcriptBytesRead += bytesRead
   } finally {
     await handle.close()
   }

@@ -3,17 +3,14 @@
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
 import { sidebarActivity } from '../sidebar-activity'
-import { SIDEBAR_ACTIVITY_COPY as activityCopy, SIDEBAR_PROJECT_COPY } from '../constants/copy'
-import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
-import { SideChatOrphanGroup } from './SideChatOrphanGroup'
+import { SIDEBAR_ACTIVITY_COPY as activityCopy, SIDEBAR_PROJECT_COPY as projectCopy, SIDEBAR_SESSION_COPY as sessionCopy } from '../constants/copy'
 import { SidebarActivity } from './SidebarActivity'
-import { conversationSourceKey, nativeSourceKey, sideChatCountLabel, type SideChatCatalog } from '../side-chat-index'
 import { SessionRow } from './SidebarSessionRow'
 import { SidebarProjects } from './SidebarProjects'
 import { ProjectDialog } from './SidebarProjectDialog'
 import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
-import { sessionAttentionKey } from '@shared/session-attention'
+import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 import { Icon } from './primitives/Icon'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
@@ -45,7 +42,6 @@ export const Sidebar = memo(function Sidebar({
   draftStore,
   runningRunIds = new Set<string>(),
   waitingQuestionRunIds = new Set<string>(),
-  sideChatCatalog,
   unreadSessionKeys = new Set<string>(),
   backgroundWorkByRun = {},
   version = '0.1.0',
@@ -89,7 +85,6 @@ export const Sidebar = memo(function Sidebar({
   draftStore?: ComposerDraftStore
   runningRunIds?: ReadonlySet<string>
   /** One-pass child totals/running/attention per parent, already computed by the shell. */
-  sideChatCatalog?: SideChatCatalog
   waitingQuestionRunIds?: ReadonlySet<string>
   unreadSessionKeys?: ReadonlySet<string>
   backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
@@ -183,8 +178,6 @@ export const Sidebar = memo(function Sidebar({
     unread={unreadSessionKeys.has(sessionAttentionKey({ providerId: session.providerId,
       agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))}
     backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
-    sideChatCount={sideChatCountLabel(sideChatCatalog?.counts.get(nativeSourceKey({ providerId: session.providerId,
-      agentProfileId: session.agentProfileId, cwd, nativeSessionId: session.externalSessionId ?? session.sessionId })))}
     onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
     onMenu={onRenameSession ? openSessionMenu : undefined} />
   const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" data-motion-key={view === 'projects' ? `conversation:${conversation.id}` : undefined} key={conversation.id}>
@@ -194,11 +187,10 @@ export const Sidebar = memo(function Sidebar({
         {draftStore && <SessionDraftIndicator store={draftStore} draftKey={composerDraftKey({ providerId: 'conversation', cwd: conversation.cwd, sessionId: conversation.id })} />}
         <span className="sb-sesstext" title={conversation.cwd}>{conversation.title}</span>
       </span>
-      <span className="sb-session-meta">{conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? conversation.deletion.status === 'complete' ? '副本待核对' : '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}{(() => {
-        const label = sideChatCountLabel(sideChatCatalog?.counts.get(conversationSourceKey(conversation.id)))
-        // A compact counter, never a nested button inside the row button.
-        return label ? <span className="sb-side-chat-count" data-side-chat-count={label}> · {label}</span> : null
-      })()}</span>
+      <span className="sb-session-meta">
+        {unreadSessionKeys.has(conversationAttentionKey(conversation.id)) && <span className="sb-unread" role="status" aria-label={sessionCopy.unread} title={sessionCopy.unread} />}
+        {conversation.activeRunId ? waitingQuestionRunIds.has(conversation.activeRunId) ? '需回答' : '运行中' : conversation.deletion ? conversation.deletion.status === 'complete' ? '副本待核对' : '删除未完成' : conversation.blockedReason ? '需核对' : `${conversation.turnCount} 轮`}
+      </span>
     </button>
   </div>
   return (
@@ -212,7 +204,7 @@ export const Sidebar = memo(function Sidebar({
       </button>
       <div className="sb-search">
         <Icon name="search" />
-        <input placeholder="搜索会话 / 项目…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder={projectCopy.searchPlaceholder} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (
@@ -278,7 +270,7 @@ export const Sidebar = memo(function Sidebar({
       </div>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealthError ? (
-          <div className="sb-empty" role="status" data-catalog-read-error>{SIDEBAR_PROJECT_COPY.catalogReadFailed(catalogHealthError)}</div>
+          <div className="sb-empty" role="status" data-catalog-read-error>{projectCopy.catalogReadFailed(catalogHealthError)}</div>
         ) : catalogHealth && catalogHealth.status !== 'ready' && (
           <div className="sb-empty" role="status" title={catalogHealth.reason}>
             {catalogHealth.status === 'degraded'
@@ -288,12 +280,7 @@ export const Sidebar = memo(function Sidebar({
         )}
         {view === 'activity' ? <>
           <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
-            ? entry.sideChatParent
-              ? <div className="sb-activity-child" data-side-chat-activity-child>
-                <span className="sb-activity-child-label">{SIDE_CHAT_COPY.activityChild(entry.sideChatParent)}</span>
-                {renderConversation(entry.conversation)}
-              </div>
-              : renderConversation(entry.conversation)
+            ? renderConversation(entry.conversation)
             : entry.kind === 'remote' ? <SidebarRemoteProjects groups={[{ ...entry.project, sessions: [entry.session] }]}
               draftStore={draftStore} layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
@@ -309,7 +296,6 @@ export const Sidebar = memo(function Sidebar({
               draftStore={draftStore} active={activeRemote} collapsed={collapsed} onToggle={toggle}
               onPickSession={onPickRemoteSession!} onNewProjectChat={onNewRemoteProjectChat!}
               onArchiveSession={onArchiveRemoteSession} onArchivedSession={onArchivedRemoteSession} />} />
-          {sideChatCatalog && <SideChatOrphanGroup groups={sideChatCatalog.orphans} onPick={onPickConversation} />}
         </>}
       </div></SessionHoverProvider>
 

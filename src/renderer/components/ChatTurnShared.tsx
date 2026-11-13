@@ -5,7 +5,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 
 
-import { disclosureIsLong, useDisclosurePresence } from './Disclosure'
+import { disclosureIsLong } from './Disclosure'
+import { useOpenPresence } from '../hooks/usePresence'
 
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
@@ -54,7 +55,7 @@ export function coalesceAdjacentThinking(items: readonly TraceEvent[]): TraceEve
 
 export function ThinkingBlock({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(true)
-  const presence = useDisclosurePresence(open)
+  const presence = useOpenPresence(open)
   const content = useRef<HTMLDivElement | null>(null)
   const [long, setLong] = useState(() => text.split('\n').length > 40)
   const measure = (): void => { if (content.current) setLong(disclosureIsLong(content.current)) }

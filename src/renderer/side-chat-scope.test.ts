@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationSummary } from '@shared/conversation-api'
-import { sideChatScope } from './side-chat-scope'
+import { sideChatScope, terminalTurnCount } from './side-chat-scope'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 
 const controls = { permissionMode: 'auto_accept_edits' as const, model: { id: 'model-a', providerId: 'claude' }, effort: 'high' }
@@ -20,7 +20,7 @@ const childConversation = (): ConversationSummary => conversation({
 function chatScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {}) {
   return sideChatScope({
     draftKey: 'draft-key', view: 'chat', providerId: 'claude', runControls: controls, cwd: '/repo',
-    nativeSessionId: 'native-1', completedTurns: 8, apiAvailable: true, ...overrides
+    nativeSessionId: 'native-1', terminalTurns: 8, apiAvailable: true, ...overrides
   })
 }
 
@@ -28,7 +28,7 @@ function chatScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {})
 function conversationScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {}) {
   return sideChatScope({
     draftKey: 'draft-key', view: 'conversation', providerId: 'claude', runControls: controls, cwd: '/repo',
-    nativeSessionId: 'native-1', completedTurns: 8, apiAvailable: true, ...overrides
+    nativeSessionId: 'native-1', terminalTurns: 8, apiAvailable: true, ...overrides
   })
 }
 
@@ -41,9 +41,20 @@ describe('side-chat source scope', () => {
   })
 
   it('pins the parent provider, profile, model, effort and permission as the first target', () => {
-    const scope = conversationScope({ conversation: conversation(), agentProfileId: 'pi:0123456789abcdef', providerId: 'pi' })
+    const scope = conversationScope({ conversation: conversation(), agentProfileId: 'pi:0123456789abcdef',
+      targetAgentProfileId: 'pi:0123456789abcdef', providerId: 'pi' })
     expect(scope.target).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef',
       model: { id: 'model-a', providerId: 'claude' }, effort: 'high', permissionMode: 'auto_accept_edits' })
+  })
+
+  // 回归：历史 Pi id（Pi · Rotom）只能作为原生来源身份；新子会话的首次发送目标必须是已登记 Profile。
+  it('keeps a historical Pi id as the native source but never as the first target', () => {
+    const scope = chatScope({ agentProfileId: 'pi:rotom', targetAgentProfileId: 'pi:0123456789abcdef', providerId: 'pi' })
+    expect(scope.source).toEqual({ kind: 'native-session', providerId: 'pi',
+      agentProfileId: 'pi:rotom', cwd: '/repo', nativeSessionId: 'native-1' })
+    expect(scope.target).toMatchObject({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
+    // 没有已登记 Profile 时不伪造目标身份，也不会把历史 id 当成 Agent Profile。
+    expect(chatScope({ agentProfileId: 'pi:rotom', providerId: 'pi' }).target).not.toHaveProperty('agentProfileId')
   })
 
   it('keeps the exact native session tuple instead of a bare session id', () => {
@@ -86,7 +97,28 @@ describe('side-chat source scope', () => {
   })
 
   it('never claims a snapshot from zero turns', () => {
-    expect(conversationScope({ conversation: conversation(), completedTurns: 0 }).hasCompletedTurn).toBe(false)
-    expect(conversationScope({ conversation: conversation(), completedTurns: 3 }).hasCompletedTurn).toBe(true)
+    expect(conversationScope({ conversation: conversation(), terminalTurns: 0 }).hasTerminalTurn).toBe(false)
+    expect(conversationScope({ conversation: conversation(), terminalTurns: 3 }).hasTerminalTurn).toBe(true)
+  })
+
+  it('counts only actual terminal turn evidence, not a live placeholder', () => {
+    expect(terminalTurnCount([])).toBe(0)
+    // A running turn, a pending-start placeholder and a finalizing turn are all unproven.
+    expect(terminalTurnCount([{ done: false }, { done: false }])).toBe(0)
+    expect(terminalTurnCount([{ done: true }])).toBe(1)
+    // `error` is terminal even when the settled flag never arrived.
+    expect(terminalTurnCount([{ done: false, error: 'spawn failed' }])).toBe(1)
+    expect(terminalTurnCount([{ done: true }, { done: false }, { done: false, error: 'x' }])).toBe(2)
+  })
+
+  // Regression: the shell counted every displayed turn, so a parent whose only turn was
+  // still running offered a side chat of a prefix main would refuse to freeze.
+  it('keeps a child disabled while the only displayed turn is still running', () => {
+    const running = conversationScope({ conversation: conversation(), terminalTurns: terminalTurnCount([{ done: false }]) })
+    expect(running.hasTerminalTurn).toBe(false)
+    expect(conversationScope({ conversation: conversation(),
+      terminalTurns: terminalTurnCount([{ done: true }]) }).hasTerminalTurn).toBe(true)
+    expect(conversationScope({ conversation: conversation(),
+      terminalTurns: terminalTurnCount([{ done: false, error: 'Provider 启动失败' }]) }).hasTerminalTurn).toBe(true)
   })
 })

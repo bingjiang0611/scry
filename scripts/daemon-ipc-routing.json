@@ -699,6 +699,11 @@
       "op": "workspaceSelection",
       "method": "validateBranch",
       "why": "校验新分支名"
+    },
+    {
+      "channel": "conversation:setViewed",
+      "route": "main",
+      "why": "badge 由 main 渲染；只读统一对话以校验其项目，不写对话"
     }
   ]
 }

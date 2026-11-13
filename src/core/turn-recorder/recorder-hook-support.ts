@@ -1,17 +1,36 @@
-import { open as openFile } from 'node:fs/promises'
+import { open as openFile, rm, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { captureToolContent, isFullToolContentPolicy } from './tool-content.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
-import { listRecords, updateHealth, stableHash } from './store.js'
+import { findRecordById, listRecords, updateHealth, safeKey, stableHash } from './store.js'
 import { recorderOpenPath as openPath, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, stringAt, type RecorderHookInput, transcriptPathOf, observedNow } from './recorder-contracts.js'
+import { storeLifecycleEvent } from './recorder-turn-state.js'
+import { refreshSealWindow } from './recorder-segment.js'
+import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, providerTurnIdOf, stringAt, type RecorderHookInput, type RecorderHookResult, transcriptPathOf, observedNow } from './recorder-contracts.js'
 
-export function isClaudeTaskNotification(payload: Record<string, unknown>): boolean {
+/** A `<task-notification>` prompt is a continuation, not a user question, for every Provider. */
+export function isTaskNotificationPrompt(payload: Record<string, unknown>): boolean {
   const origin = nestedRecord(payload, 'origin')
   return stringAt(origin ?? {}, 'kind') === 'task-notification' ||
     (promptOf(payload)?.trimStart().startsWith('<task-notification>') ?? false)
+}
+
+export async function recordTaskNotificationWake(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  root: string,
+  open: OpenTurnState | null,
+  input: RecorderHookInput,
+  providerTurnId: string | undefined
+): Promise<RecorderHookResult> {
+  if (!open) return { status: 'ignored', reason: 'task notification has no real user turn' }
+  if (open.managedByScry) return { status: 'recorded', reason: 'managed task continuation kept in canonical Scry turn' }
+  await rememberContinuationProviderTurn(root, open, providerTurnId)
+  await storeLifecycleEvent(enablement, open, input.event, input.payload)
+  // The wake proves the segment is still alive, so a held Stop waits for quiet again.
+  await refreshSealWindow(root, open)
+  return { status: 'recorded', reason: 'task notification continued the open turn' }
 }
 
 export function continuationProviderTurnIds(open: OpenTurnState): string[] {
@@ -35,6 +54,58 @@ export function isContinuationProviderTurn(open: OpenTurnState, providerTurnId: 
 
 export function isSynthetic(payload: Record<string, unknown>): boolean {
   return payload.isMeta === true || payload.synthetic === true || stringAt(payload, 'source') === 'synthetic'
+}
+
+const CODEX_TITLE_INSTRUCTION = 'Generate a concise, single-line task title of at most 36 characters'
+const CODEX_TITLE_PROMPT_SEPARATOR = '\n\nUser prompt:\n'
+
+/**
+ * Codex asks the model for a short UI title in a throwaway session before the real turn.
+ * That request carries the fixed title instruction plus the captured user prompt, so the
+ * lifecycle hooks cannot reuse an origin marker. Require the instruction opening, the exact
+ * blank-line separator and the instruction's closing sentence together: a real prompt that
+ * merely shares the opening words, or mentions "User prompt:" inline, is never ignored.
+ */
+export function isCodexInternalPrompt(payload: Record<string, unknown>): boolean {
+  const prompt = stringAt(payload, 'prompt', 'user_prompt', 'userPrompt')
+  if (!prompt) return false
+  const normalized = prompt.replace(/^\s+/, '')
+  if (!normalized.startsWith(CODEX_TITLE_INSTRUCTION)) return false
+  const separator = normalized.indexOf(CODEX_TITLE_PROMPT_SEPARATOR)
+  if (separator < 0) return false
+  return normalized.slice(0, separator).trimEnd().endsWith('Do not answer the request.')
+}
+
+/**
+ * The title session has no evidence of its own, but its paired terminal still arrives. Remember
+ * the ignored identity so the terminal is ignored too instead of becoming an orphan event that
+ * raises `missingStartTerminals` and `lastError` in health.
+ */
+export async function markCodexInternalTurn(
+  dataRoot: string,
+  provider: ProviderId,
+  sessionId: string,
+  turnId: string
+): Promise<void> {
+  await writeJsonAtomic(internalTurnPath(dataRoot, provider, sessionId, turnId), {
+    schemaVersion: 1, sessionId, turnId, at: observedNow()
+  })
+}
+
+export async function consumeCodexInternalTurn(
+  dataRoot: string,
+  provider: ProviderId,
+  sessionId: string,
+  turnId: string
+): Promise<boolean> {
+  const path = internalTurnPath(dataRoot, provider, sessionId, turnId)
+  if (!await readJson(path)) return false
+  await rm(path, { force: true })
+  return true
+}
+
+function internalTurnPath(dataRoot: string, provider: ProviderId, sessionId: string, turnId: string): string {
+  return join(dataRoot, 'runtime', provider, 'internal-turns', `${safeKey(sessionId)}-${safeKey(turnId)}.json`)
 }
 
 /**
@@ -107,6 +178,39 @@ export async function isCommittedProviderTurn(
     record.sessionId === sessionId &&
     record.providerTurnId === providerTurnId
   )
+}
+
+/**
+ * Qoder can deliver a Stop several seconds after its completed record and omit every native
+ * identity. Text equality is not turn identity. The only no-open fast path is an unchanged,
+ * authoritative transcript snapshot for the last record; otherwise the event stays an orphan.
+ * Any open turn remains ambiguous and is handled by stale-terminal protection instead.
+ */
+export async function isLateQoderTerminalDuplicate(
+  dataRoot: string,
+  root: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  open: OpenTurnState | null
+): Promise<boolean> {
+  if (open || payload.stop_hook_active === true || providerTurnIdOf(payload, 'qoder')) return false
+  const assistant = stringAt(payload, 'last_assistant_message', 'lastAssistantMessage')
+  const transcriptPath = transcriptPathOf(payload)
+  if (!assistant || !transcriptPath) return false
+  const state = await readJson<SessionState>(statePath(root))
+  if (!state?.lastCommittedRecordId) return false
+  const record = await findRecordById(dataRoot, state.lastCommittedRecordId)
+  const source = record?.transcript?.status === 'available' ? record.transcript.value : undefined
+  if (!record || record.provider.id !== 'qoder' || record.sessionId !== sessionId || record.status !== 'completed' ||
+    record.assistant.status !== 'available' || record.assistant.value?.text !== assistant ||
+    !source || source.sourcePath !== transcriptPath) return false
+  try {
+    const current = await stat(transcriptPath)
+    return current.dev === source.identity.dev && current.ino === source.identity.ino &&
+      current.size === source.identity.size && current.mtimeMs === source.identity.mtimeMs && current.ctimeMs === source.identity.ctimeMs
+  } catch {
+    return false
+  }
 }
 
 export async function storeOrphanEvent(

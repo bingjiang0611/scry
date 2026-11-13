@@ -26,3 +26,6 @@ artifacts/
 docs/cli-team-rollout.md
 .agents/skills/validate-scry-rate-workflow
 .vitest-reports/
+
+# Side-chat local verification screenshots are PR attachments, not repository content.
+docs/handoff/side-chat/local-verify/evidence/

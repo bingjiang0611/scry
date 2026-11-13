@@ -110,6 +110,13 @@ scry upgrade --check    # 只检查
 scry upgrade            # 前台升级到 registry latest（不受 major 边界限制）
 ```
 
+### 混合版本：事件接口的版本握手
+
+hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-version`。daemon 在**应用事件前**
+校验：版本不一致返回 409；旧 daemon 不认识该路径返回 404 —— 两者都表示事件没有被应用。hook（包括
+生成的 shell 快路径）拿到 404/409 后走既有 `startRecorderDaemon` 路径替换 owner，再重投一次；超时
+或 5xx 属未知投递，只排队重放，不重发。`/v1/hook` 仍被新 daemon 接受，留给旧 hook。
+
 真正容易踩的坑不是"没自动升",而是**同一台机器有多份安装**:hook 通过 `SCRY_CLI_PATH` 或 `.scry/cli-path` 固定用某一份,而你在 shell 里 `scry upgrade` 升的是 `PATH` 里的另一份。`doctor` 会直接指出来:
 
 ```json

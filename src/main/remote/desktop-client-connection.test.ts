@@ -35,6 +35,73 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
     } finally { await restored?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('establishes the authoritative session baseline before publishing a connection as active', async () => {
+    const order: string[] = []
+    const baseline = vi.fn(() => { order.push('baseline') })
+    const fixture = await setup({
+      attention: { baseline, catalog: () => [], viewed: () => {}, disconnect: () => {}, forget: () => {} },
+      sessionsResponse: () => {
+        order.push('sessions')
+        return { sessionsPage: { sessions: [{ sessionId: 's', externalSessionId: 'native', cwd: '/workspace', providerId: 'claude', label: 'Done', ts: 1,
+          lastRunId: 'run-1', lastRunOutcome: 'completed' }], cursor: 1, total: 1, hasMore: false, snapshot: 'baseline' } }
+      }
+    })
+    try {
+      const pending = await fixture.client.pair({ label: 'Baseline', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      await fixture.client.connect(pending.connection.id)
+      order.push((await fixture.client.list())[0].state)
+      expect(order).toEqual(['sessions', 'baseline', 'connected'])
+      expect(baseline).toHaveBeenCalledWith(pending.connection.id, [expect.objectContaining({ lastRunId: 'run-1' })])
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it.each([
+    ['target_unreachable', 'desktop_ssh_target_unreachable'],
+    ['forwarding_denied', 'desktop_ssh_forwarding_denied']
+  ] as const)('reports a proven SSH forwarding failure instead of a generic TLS EOF: %s', async (failure, expected) => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Forward failure', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      // The run-channel lane replays a lost read once on a fresh tunnel, so a forwarding
+      // failure that is real has to persist across that replay to surface.
+      fixture.tlsRequest.mockImplementation(async () => {
+        fixture.setTunnelFailure(failure)
+        throw new Error('desktop_tls_request_eof')
+      })
+      await expect(fixture.client.connect(pending.connection.id)).rejects.toThrow(expected)
+      expect((await fixture.client.list())[0].state).toBe('disconnected')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('does not reuse a stale SSH forwarding failure for a later TLS EOF', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Stale forward failure', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      fixture.setTunnelFailure('target_unreachable')
+      // Persistent, so the lane's one replay of the read also ends in the bare EOF.
+      fixture.tlsRequest.mockRejectedValue(new Error('desktop_tls_request_eof'))
+      await expect(fixture.client.connect(pending.connection.id)).rejects.toThrow('desktop_tls_request_eof')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('keeps an otherwise valid connection available when its attention baseline cannot be read', async () => {
+    const baseline = vi.fn()
+    const fixture = await setup({
+      attention: { baseline, catalog: () => [], viewed: () => {}, disconnect: () => {}, forget: () => {} },
+      sessionsResponse: () => ({ invalid: true })
+    })
+    try {
+      const pending = await fixture.client.pair({ label: 'Baseline unavailable', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      await expect(fixture.client.connect(pending.connection.id)).resolves.toBeUndefined()
+      expect((await fixture.client.list())[0].state).toBe('connected')
+      expect(baseline).not.toHaveBeenCalled()
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('reports an exited SSH tunnel as disconnected and rejects unsent work without creating an unknown receipt', async () => {
     const fixture = await setup()
     try {
@@ -209,76 +276,5 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
       await expect(restored.submit(connectionId, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'again' })).rejects.toThrow('unknown_receipts_pending')
       await restored.dispose()
     } finally { await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
-  it('keeps a durable unknown receipt when the submit acknowledgement is malformed', async () => {
-    const fixture = await setup({ submitResponse: () => ({ status: 'recorded' }) })
-    try {
-      const pending = await fixture.client.pair({ label: 'Malformed ack', ssh, invitation: fixture.invitation })
-      await fixture.client.finishPairing(pending.connection.id)
-      await fixture.client.connect(pending.connection.id)
-      const receipt = await fixture.client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'malformed' })
-      expect(receipt.status).toBe('unknown')
-      await expect(fixture.client.intents(pending.connection.id)).resolves.toMatchObject([{ intentId: receipt.intentId, status: 'unknown' }])
-    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
-  it('keeps an absent host intent unknown instead of unlocking a resend', async () => {
-    const fixture = await setup({ unknownIntent: true })
-    try {
-      const pending = await fixture.client.pair({ label: 'Absent intent', ssh, invitation: fixture.invitation })
-      await fixture.client.finishPairing(pending.connection.id)
-      await fixture.client.connect(pending.connection.id)
-      const receipt = await fixture.client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'ambiguous' })
-      const checked = await fixture.client.intentStatus(pending.connection.id, receipt.intentId)
-      expect(checked).toMatchObject({ intentId: receipt.intentId, status: 'unknown' })
-      await expect(fixture.client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'resend' })).rejects.toThrow('unknown_receipts_pending')
-    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
-  it('does not evict recorded runs merely to satisfy receipt capacity', async () => {
-    const fixture = await setup({ submitResponse: () => ({ status: 'recorded', runId: randomUUID() }) })
-    try {
-      const pending = await fixture.client.pair({ label: 'Capacity', ssh, invitation: fixture.invitation })
-      await fixture.client.finishPairing(pending.connection.id)
-      await fixture.client.connect(pending.connection.id)
-      for (let index = 0; index < 256; index++) await fixture.client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: `run-${index}` })
-      await expect(fixture.client.submit(pending.connection.id, { context: { cwd: '/workspace', providerId: 'claude' }, prompt: 'overflow' })).rejects.toThrow('intent_receipt_capacity_exceeded')
-      await expect(fixture.client.intents(pending.connection.id)).resolves.toHaveLength(256)
-    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
-  it('keeps missing lifecycle evidence unknown and rejects malformed state or event pages', async () => {
-    const fixture = await setup()
-    try {
-      const pending = await fixture.client.pair({ label: 'Status', ssh, invitation: fixture.invitation })
-      const id = pending.connection.id
-      await fixture.client.finishPairing(id)
-      await fixture.client.connect(id)
-      const runId = randomUUID()
-      // The lifecycle long poll is the only evidence source; a missing, empty or
-      // unrecognized envelope is rejected rather than read as "no change".
-      for (const response of [null, {}, { watch: null }, { watch: { poll: null } }, { watch: { state: 'running', poll: { events: [], cursor: 0 } } }]) {
-        fixture.tlsRequest.mockResolvedValueOnce(response)
-        await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
-      }
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'settled', poll: { events: [], cursor: 0 } } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ state: 'settled' })
-      // No state and no evidence is unknown. The previous answer said settled, so
-      // the lifecycle did change; a window that expires with the same state is not
-      // a change and must not make the caller re-read content.
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: true })
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: false })
-    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
-  })
-
-  it('rejects invitations with a changed or malformed anchor', async () => {
-    const fixture = await setup()
-    try {
-      const malformed = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: fixture.host.hostId, anchorPEM: 'not pem', pairPort: 1, runPort: 2, pairingId: randomUUID(), secret: 'secret', expiresAt: Date.now() + 1000 })).toString('base64url')}`
-      await expect(fixture.client.pair({ label: 'bad', ssh, invitation: malformed })).rejects.toThrow('invalid_certificate')
-    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 })

@@ -1,0 +1,312 @@
+{
+  "schema": 1,
+  "baselineRevision": "315e3639",
+  "candidateSource": "315e3639 + production diff from 56620f73 working tree (recorder-turn-state.ts only)",
+  "baselineModuleSha256": "bc70c9f0e74bcaa2c3cebcb84c43a604ccd62d7b88b40872b6d8ef3abae6543c",
+  "candidateModuleSha256": "3424a19fa990ec8f819f24c23757d90652805708ab1947dfef1bd8036e15ed22",
+  "workload": "unchanged recorder-engine-bench.mjs S5, 3 rounds per fresh process, ABBA",
+  "hostTiming": {
+    "label": "c-s5-linux-paired",
+    "command": [
+      "colima",
+      "ssh",
+      "--",
+      "sh",
+      "/tmp/scry-c-s5.sh"
+    ],
+    "exit": 0,
+    "signal": null,
+    "wallMs": 134000,
+    "cores": 10,
+    "loadBefore": 20.63,
+    "loadAfter": 11.16,
+    "highLoad": true
+  },
+  "limitation": "Guest shares busy macOS host. Host highLoad=true; timings cannot establish an L2 speedup. RSS remains a sampled single-scenario measure.",
+  "runs": [
+    {
+      "label": "before-1",
+      "generatedAt": "2026-11-06T06:31:20.073Z",
+      "environment": {
+        "platform": "linux",
+        "release": "6.8.0-117-generic",
+        "arch": "arm64",
+        "node": "v24.22.2",
+        "git": "git version 2.43.0",
+        "cpu": "unknown",
+        "cpuCount": 6,
+        "totalMemBytes": 8307920896,
+        "loadavg": [
+          0.03,
+          0.01,
+          0
+        ],
+        "probe": {
+          "gitWrapper": true,
+          "indexBytes": false
+        }
+      },
+      "notes": [],
+      "timing": {
+        "label": "c-s5-before-1",
+        "command": [
+          "node",
+          "scripts/recorder-engine-bench.mjs",
+          "--only=S5",
+          "--detail=/tmp/scry-c-s5-before-1-detail.json",
+          "--out=/tmp/scry-c-s5-before-1.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 36796,
+        "cores": 6,
+        "loadBefore": 0.03,
+        "loadAfter": 0.46,
+        "highLoad": false
+      },
+      "endStages": [
+        {
+          "ms": 13441.46,
+          "rssBeforeBytes": 189276160,
+          "rssAfterBytes": 465805312,
+          "peakRssBytes": 501424128,
+          "rssGrowthBytes": 312147968,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 10320.14,
+          "rssBeforeBytes": 201797632,
+          "rssAfterBytes": 488329216,
+          "peakRssBytes": 526610432,
+          "rssGrowthBytes": 324812800,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 11168.19,
+          "rssBeforeBytes": 210194432,
+          "rssAfterBytes": 489742336,
+          "peakRssBytes": 523878400,
+          "rssGrowthBytes": 313683968,
+          "gitProcesses": 7
+        }
+      ],
+      "rawSha256": "c23e40f4187f76010fc4773061fa7dad4599719482f04c9e78c220759af46bcd"
+    },
+    {
+      "label": "after-1",
+      "generatedAt": "2026-11-06T06:31:52.363Z",
+      "environment": {
+        "platform": "linux",
+        "release": "6.8.0-117-generic",
+        "arch": "arm64",
+        "node": "v24.22.2",
+        "git": "git version 2.43.0",
+        "cpu": "unknown",
+        "cpuCount": 6,
+        "totalMemBytes": 8307920896,
+        "loadavg": [
+          0.46,
+          0.12,
+          0.04
+        ],
+        "probe": {
+          "gitWrapper": true,
+          "indexBytes": false
+        }
+      },
+      "notes": [],
+      "timing": {
+        "label": "c-s5-after-1",
+        "command": [
+          "node",
+          "scripts/recorder-engine-bench.mjs",
+          "--only=S5",
+          "--detail=/tmp/scry-c-s5-after-1-detail.json",
+          "--out=/tmp/scry-c-s5-after-1.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 32237,
+        "cores": 6,
+        "loadBefore": 0.46,
+        "loadAfter": 0.7,
+        "highLoad": false
+      },
+      "endStages": [
+        {
+          "ms": 9756.42,
+          "rssBeforeBytes": 189173760,
+          "rssAfterBytes": 378630144,
+          "peakRssBytes": 501145600,
+          "rssGrowthBytes": 311971840,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 10289.43,
+          "rssBeforeBytes": 204636160,
+          "rssAfterBytes": 384147456,
+          "peakRssBytes": 523800576,
+          "rssGrowthBytes": 319164416,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 10270.48,
+          "rssBeforeBytes": 211456000,
+          "rssAfterBytes": 385863680,
+          "peakRssBytes": 525586432,
+          "rssGrowthBytes": 314130432,
+          "gitProcesses": 7
+        }
+      ],
+      "rawSha256": "865927e979717b6f04066fa65058ca66e8fb60301aefd6f0d917ef567a3ec334"
+    },
+    {
+      "label": "after-2",
+      "generatedAt": "2026-11-06T06:32:23.003Z",
+      "environment": {
+        "platform": "linux",
+        "release": "6.8.0-117-generic",
+        "arch": "arm64",
+        "node": "v24.22.2",
+        "git": "git version 2.43.0",
+        "cpu": "unknown",
+        "cpuCount": 6,
+        "totalMemBytes": 8307920896,
+        "loadavg": [
+          0.7,
+          0.22,
+          0.08
+        ],
+        "probe": {
+          "gitWrapper": true,
+          "indexBytes": false
+        }
+      },
+      "notes": [],
+      "timing": {
+        "label": "c-s5-after-2",
+        "command": [
+          "node",
+          "scripts/recorder-engine-bench.mjs",
+          "--only=S5",
+          "--detail=/tmp/scry-c-s5-after-2-detail.json",
+          "--out=/tmp/scry-c-s5-after-2.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 30581,
+        "cores": 6,
+        "loadBefore": 0.7,
+        "loadAfter": 0.82,
+        "highLoad": false
+      },
+      "endStages": [
+        {
+          "ms": 9671.19,
+          "rssBeforeBytes": 189820928,
+          "rssAfterBytes": 406765568,
+          "peakRssBytes": 501436416,
+          "rssGrowthBytes": 311615488,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 9539.67,
+          "rssBeforeBytes": 233009152,
+          "rssAfterBytes": 442380288,
+          "peakRssBytes": 546246656,
+          "rssGrowthBytes": 313237504,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 9806.18,
+          "rssBeforeBytes": 269692928,
+          "rssAfterBytes": 449769472,
+          "peakRssBytes": 583143424,
+          "rssGrowthBytes": 313450496,
+          "gitProcesses": 7
+        }
+      ],
+      "rawSha256": "fe50779e6aec35b888efef8f74ae1466b956fd7c27158612a705924ab5701856"
+    },
+    {
+      "label": "before-2",
+      "generatedAt": "2026-11-06T06:32:56.301Z",
+      "environment": {
+        "platform": "linux",
+        "release": "6.8.0-117-generic",
+        "arch": "arm64",
+        "node": "v24.22.2",
+        "git": "git version 2.43.0",
+        "cpu": "unknown",
+        "cpuCount": 6,
+        "totalMemBytes": 8307920896,
+        "loadavg": [
+          0.82,
+          0.3,
+          0.11
+        ],
+        "probe": {
+          "gitWrapper": true,
+          "indexBytes": false
+        }
+      },
+      "notes": [],
+      "timing": {
+        "label": "c-s5-before-2",
+        "command": [
+          "node",
+          "scripts/recorder-engine-bench.mjs",
+          "--only=S5",
+          "--detail=/tmp/scry-c-s5-before-2-detail.json",
+          "--out=/tmp/scry-c-s5-before-2.json"
+        ],
+        "exit": 0,
+        "signal": null,
+        "wallMs": 33245,
+        "cores": 6,
+        "loadBefore": 0.82,
+        "loadAfter": 0.97,
+        "highLoad": false
+      },
+      "endStages": [
+        {
+          "ms": 10271.35,
+          "rssBeforeBytes": 122335232,
+          "rssAfterBytes": 467746816,
+          "peakRssBytes": 501227520,
+          "rssGrowthBytes": 378892288,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 10645.18,
+          "rssBeforeBytes": 205824000,
+          "rssAfterBytes": 314683392,
+          "peakRssBytes": 521809920,
+          "rssGrowthBytes": 315985920,
+          "gitProcesses": 7
+        },
+        {
+          "ms": 10445.13,
+          "rssBeforeBytes": 161591296,
+          "rssAfterBytes": 396066816,
+          "peakRssBytes": 529596416,
+          "rssGrowthBytes": 368005120,
+          "gitProcesses": 7
+        }
+      ],
+      "rawSha256": "c4d6b5097822637c73a1c8cc6d7c7932af3d2d4b55dc5351ab7dcc6bee2a63ab"
+    }
+  ],
+  "aggregate": {
+    "before": {
+      "endMsMedian": 10545.154999999999,
+      "peakRssBytesMax": 529596416,
+      "rssGrowthBytesMax": 378892288
+    },
+    "after": {
+      "endMsMedian": 9781.3,
+      "peakRssBytesMax": 583143424,
+      "rssGrowthBytesMax": 319164416
+    }
+  }
+}

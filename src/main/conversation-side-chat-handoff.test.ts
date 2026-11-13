@@ -83,7 +83,7 @@ describe('side-chat first send and frozen context', () => {
       conversationId: child.id, providerId: 'codex', expectedRevision: 0, expectedContinuationKey: 'identity:codex:default',
       commandId: 'child-cmd-2', prompt: 'second child question', selectedItems: [], confirmFresh: false, permissionMode: 'default'
     })
-    expect(duplicate.disposition).toBe('duplicate')
+    expect(duplicate).toMatchObject({ status: 'accepted', disposition: 'duplicate' })
     expect(current.runs.filter(run => run.prompt === 'second child question')).toHaveLength(1)
   })
 

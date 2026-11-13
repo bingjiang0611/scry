@@ -15,6 +15,8 @@ export interface AppRunStartOptions {
   workspaceAdmission?: { cwd: string; admit: (register: () => void) => Promise<void> }
   /** Sidebar project root for a run prepared in a separate worktree. */
   projectCwd?: string
+  /** Host-only registration signal used by managed remote workspace launch. */
+  onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void
   origin?: 'local' | 'remote'
   /**
    * Scope of the verified grant that submitted this run. Only meaningful for
@@ -89,13 +91,15 @@ export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunS
   // broken shell; the next send may recover without restarting Scry.
   const shellEnvReady = warmShellEnv({ retryFailed: true })
   const cwd = request.cwd
-    ? (appSemantics
-      ? options.workspaceAdmission
-        ? canonicalExistingDirectory(request.cwd)
-        : deps.resolveKnownProjectDirectory(request.cwd)
-      : deps.resolveRemoteProjectDirectory(request.cwd))
+    ? (options.workspaceAdmission
+      ? canonicalExistingDirectory(request.cwd)
+      : appSemantics
+        ? deps.resolveKnownProjectDirectory(request.cwd)
+        : deps.resolveRemoteProjectDirectory(request.cwd))
     : deps.currentCwd
-  if (options.workspaceAdmission && (!appSemantics || cwd !== options.workspaceAdmission.cwd))
+  // A reserved workspace (a new worktree) is admitted for App and remote submitters
+  // alike; the start must land exactly where it was reserved.
+  if (options.workspaceAdmission && cwd !== options.workspaceAdmission.cwd)
     throw new Error('工作区预留与真实启动目录不一致')
   if (appSemantics && !options.workspaceAdmission && request.cwd && deps.currentCwd && cwd !== canonicalExistingDirectory(deps.currentCwd)) {
     throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {

@@ -61,6 +61,14 @@ export function displayDiffPath(path: string, repoRoot?: string): string {
   return basename(path)
 }
 
+// Tree identity must retain directories even when historical evidence has no
+// repo root. A basename is a label, not a unique file identifier.
+export function diffTreePath(path: string, repoRoot?: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const root = repoRoot?.replace(/\\/g, '/').replace(/\/$/, '')
+  return root && normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : normalized.replace(/^\/+/, '')
+}
+
 function lastSnapshotAtStage(items: readonly TraceEvent[], stage: string): TurnDiffSnapshot | undefined {
   for (let index = items.length - 1; index >= 0; index--) {
     const event = items[index]

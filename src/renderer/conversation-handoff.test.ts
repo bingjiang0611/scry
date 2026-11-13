@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { adoptConversationWithReadback, conversationTarget, legacyAdoptionSourceTarget, prepareConversationSend } from './conversation-handoff'
+import { adoptConversationWithReadback, conversationTarget, legacyAdoptionSourceTarget, prepareConversationSend,
+  registeredPiProfileIdOf, selectedAgentProfileId } from './conversation-handoff'
+import { CONVERSATION_COPY } from './constants/conversation-copy'
 import type { ConversationAdoptionPreview, ConversationPreview } from '@shared/conversation-api'
 
 const preview: ConversationPreview = {
@@ -44,6 +46,60 @@ describe('same-composer Agent handoff', () => {
     expect(legacyAdoptionSourceTarget('pi:0123456789abcdef')).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
     expect(() => legacyAdoptionSourceTarget('qoder')).toThrow('迁移来源仅支持 Claude/Codex/Pi')
     expect(() => legacyAdoptionSourceTarget('opencode')).toThrow('迁移来源仅支持 Claude/Codex/Pi')
+  })
+
+  // 回归：旧捕获的来源身份就是当时记录的历史启动器 id，宿主按这个身份匹配记录。
+  it('refuses to migrate a historical Pi launcher identity as an adoption source', () => {
+    for (const agentId of ['pi:rotom', 'pi:default']) {
+      expect(() => legacyAdoptionSourceTarget(agentId)).toThrow(CONVERSATION_COPY.legacyPiSourceNotMigratable(agentId))
+    }
+    // 来源文案不承诺「加 Profile 就能迁移」，它说的是这段记录不能作为迁移来源。
+    expect(CONVERSATION_COPY.legacyPiSourceNotMigratable('Pi · Rotom')).toContain('不能作为迁移来源')
+    expect(CONVERSATION_COPY.legacyPiSourceNotMigratable('Pi · Rotom')).toContain('新增 Profile 也不会改写已有记录')
+    // 已登记的 Pi Profile 来源仍然按它记录的 id 迁移，不借用发现结果。
+    expect(legacyAdoptionSourceTarget('pi:0123456789abcdef'))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
+  })
+
+  // 分支比较用的是运行 binding 记录的 Profile 身份，而不是选择器显示的历史 id。
+  it('maps the selected agent to the profile identity a run binding records', () => {
+    const agent = { id: 'pi:rotom', agentProfileId: 'pi:0123456789abcdef' }
+    expect(selectedAgentProfileId('pi:rotom', [agent])).toBe('pi:0123456789abcdef')
+    expect(selectedAgentProfileId('pi:0123456789abcdef', [])).toBe('pi:0123456789abcdef')
+    expect(selectedAgentProfileId('claude', [])).toBe('claude')
+    expect(selectedAgentProfileId('codex', [{ id: 'codex', agentProfileId: 'ignored' }])).toBe('codex')
+    expect(selectedAgentProfileId('pi:rotom', [{ id: 'pi:rotom' }])).toBeUndefined()
+  })
+
+  // 回归（截图）：侧聊/对话的 Composer 标签是 Pi · Rotom，但发送必须带已登记 Profile。
+  it('sends the registered profile of a selected legacy Pi agent', () => {
+    const agent = { id: 'pi:rotom', agentProfileId: 'pi:0123456789abcdef' }
+    expect(registeredPiProfileIdOf('pi:rotom', [agent])).toBe('pi:0123456789abcdef')
+    expect(conversationTarget('pi:rotom', { permissionMode: 'full_access' }, [agent]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', permissionMode: 'full_access' })
+    // 已登记的稳定 id 仍然用它自己，不依赖发现结果。
+    expect(conversationTarget('pi:0123456789abcdef')).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
+    // 另一个 Pi 启动器不是这个 Agent 的身份。
+    expect(registeredPiProfileIdOf('pi:rotom', [
+      { id: 'pi:rotom' }, { id: 'pi:fedcba9876543210', agentProfileId: 'pi:fedcba9876543210' }])).toBeUndefined()
+  })
+
+  it('blocks a legacy Pi agent without an exact registered profile before any IPC', async () => {
+    const api = { preview: vi.fn() }
+    // ConversationView 的发送准备顺序：先解析目标，再读预览。目标解析失败就不会有 IPC。
+    const prepare = (agents: { id: string; agentProfileId?: string }[]) => () => prepareConversationSend(api, 'conversation',
+      conversationTarget('pi:rotom', undefined, agents), 'hello', 'one-command')
+    expect(() => prepare([{ id: 'pi:rotom' }])()).toThrow(CONVERSATION_COPY.piProfileNotRegistered('pi:rotom'))
+    expect(() => prepare([{ id: 'pi:claude-only', agentProfileId: 'pi:fedcba9876543210' }])())
+      .toThrow(CONVERSATION_COPY.piProfileNotRegistered('pi:rotom'))
+    expect(api.preview).not.toHaveBeenCalled()
+    // 负对照：旧实现把原始 `pi:rotom` 当成 Agent Profile 发出去，宿主才报错。
+    expect(() => conversationTarget('pi:rotom')).toThrow(CONVERSATION_COPY.piProfileNotRegistered('pi:rotom'))
+    // The menus' own label is what the user sees; a raw id only appears when nothing named it.
+    expect(() => conversationTarget('pi:rotom', undefined, [{ id: 'pi:rotom', name: 'Pi · Rotom' }]))
+      .toThrow(CONVERSATION_COPY.piProfileNotRegistered('Pi · Rotom'))
+    expect(conversationTarget('pi:rotom', undefined, [{ id: 'pi:rotom', agentProfileId: 'pi:0123456789abcdef' }]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
   })
 
   it('plans every missing item automatically, without dispatching or dropping controls', async () => {

@@ -183,6 +183,7 @@ export function GithubPullRequestPanelBody({
               {selectedPrFile && (
                 <Patch
                   diff={selectedPrFile}
+                  path={prFile}
                   onLine={
                     !staleDraft && pr.filesComplete && !loadingPr
                       ? (side, line) => {

@@ -1,6 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import { createRemoteRunState } from './run-remote-state'
 import type { ActiveRun } from '../../shared/trace'
+import { DockBadgeState } from '../dock-badge'
+
+describe('run terminal attention', () => {
+  it('tracks managed attention by conversation, clears only the opened conversation, and respects visibility', () => {
+    const badge = new DockBadgeState(() => {})
+    const runtime = (conversationId: string) => createRemoteRunState({
+      isRemoteRun: false,
+      runId: `run-${conversationId}`,
+      providerId: 'claude',
+      runtimeProvider: 'claude_sdk',
+      runState: { runId: `run-${conversationId}`, conversationId, userText: 'task', items: [], done: false },
+      getObservedSessionId: () => 'native-session',
+      isWindowFocused: () => true,
+      dockBadge: badge,
+      scopedSessionKey: (id) => `native:${id}`,
+      // Unified views subscribe to their run without adopting the legacy focus.
+      runs: { isViewed: () => false }
+    })
+    const first = runtime('first')
+    const second = runtime('second')
+    first.markTerminalAttention('native-session', true)
+    second.markTerminalAttention('another-native-session', true)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['conversation\0first', 'conversation\0second'])
+
+    badge.view('conversation\0first', true)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['conversation\0second'])
+    first.markTerminalAttention('new-native-session-after-provider-switch', true)
+    expect(badge.count).toBe(1)
+
+    badge.view(null, true)
+    first.markTerminalAttention('new-native-session-after-provider-switch', true)
+    expect(badge.count).toBe(2)
+  })
+})
 
 // M2: a run the daemon owns is a ledger run, so its recording failure travels as the
 // remote completion (`recording: 'failed'`) plus the run's own error text. That is what
@@ -14,7 +48,7 @@ function state(isRemoteRun: boolean) {
   const owned = createRemoteRunState({
     isRemoteRun, runId: state.runId, providerId: 'claude', runtimeProvider: 'claude_sdk',
     runState: state, getObservedSessionId: () => 'session-1', isWindowFocused: () => false,
-    dockBadge: { markAttention: () => undefined },
+    dockBadge: { markAttention: () => undefined, isViewed: () => false },
     scopedSessionKey: (sessionId) => `claude\0session\0${sessionId}`,
     runs: { isViewed: () => false }
   })

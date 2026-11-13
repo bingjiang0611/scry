@@ -1,4 +1,7 @@
 import type { AgentDataUpdated } from '../../shared/runtime'
+import type { ProviderContext } from '../../shared/provider'
+import type { createAppSessionStore } from '../app-store'
+import type { ContextAdmission } from '../context-admission'
 import type { SideChatSource } from '../../shared/conversation'
 import type { ConversationStore } from '../conversation-store'
 import type { ConversationService } from '../conversation-service'
@@ -15,9 +18,23 @@ export function registerSideChatChannels(
     conversationStore: () => ConversationStore
     conversationService: () => ConversationService
     publishDataUpdated: (event: AgentDataUpdated) => void
+    appSessionStore: () => Pick<ReturnType<typeof createAppSessionStore>, 'load'>
+    contextAdmission: Pick<ContextAdmission, 'run'>
+    providerContextKey: (providerId: ProviderContext['providerId'], cwd: string, agentProfileId?: string) => string
+    providerSessionKey: (providerId: ProviderContext['providerId'], cwd: string, sessionId: string, agentProfileId?: string) => string
+    deletingSessions: ReadonlySet<string>
   }
 ): void {
-  const { resolveKnownProjectDirectory, getStartupManagedRecovery, conversationStore, conversationService, publishDataUpdated } = deps
+  const { resolveKnownProjectDirectory, getStartupManagedRecovery, conversationStore, conversationService, publishDataUpdated,
+    appSessionStore, contextAdmission, providerContextKey, providerSessionKey, deletingSessions } = deps
+  function nativeSourceDeleting(source: Extract<SideChatSource, { kind: 'native-session' }>): boolean {
+    // A delete reserves the alias it was asked for; the source may name either alias.
+    const row = appSessionStore().load().find(session => session.providerId === source.providerId &&
+      session.agentProfileId === source.agentProfileId && session.cwd === source.cwd &&
+      (session.externalSessionId === source.nativeSessionId || session.sessionId === source.nativeSessionId))
+    return [source.nativeSessionId, row?.externalSessionId, row?.sessionId, row?.runId]
+      .some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id, source.agentProfileId)))
+  }
   /**
    * Read-only source authorization. A managed (conversation) source must belong to
    * an authorized known project; a native source additionally has to match one
@@ -45,11 +62,24 @@ export function registerSideChatChannels(
   handle('conversation:createSideChat', async (_event, request: unknown) => {
     // Shape first, then source authorization: an untyped request never reads the ledger.
     const parsed = parseSideChatCreate(request)
-    const authorized = await authorizeSideChatSource(parsed.source)
-    await getStartupManagedRecovery()
-    const created = await conversationService().createSideChat({ ...parsed, source: authorized })
-    publishDataUpdated({ kind: 'conversation_changed', conversationId: created.id })
-    return created
+    // In flight from before the first wait: a read-back during authorization or startup
+    // recovery must not answer not-found for a create that is about to publish.
+    return conversationService().trackSideChatCreate(parsed.commandId, async () => {
+      const authorized = await authorizeSideChatSource(parsed.source)
+      await getStartupManagedRecovery()
+      const publish = () => conversationService().createSideChat({ ...parsed, source: authorized })
+      // A Provider session's delete reserves itself and counts its side chats under this
+      // admission. Publishing under it too means a child is either counted by that delete
+      // or refused here, never left behind with no source panel to open it from.
+      const created = authorized.kind === 'native-session'
+        ? await contextAdmission.run(providerContextKey(authorized.providerId, authorized.cwd, authorized.agentProfileId), async () => {
+          if (nativeSourceDeleting(authorized)) throw new Error('侧聊来源会话正在删除，不能创建侧边会话')
+          return publish()
+        })
+        : await publish()
+      publishDataUpdated({ kind: 'conversation_changed', conversationId: created.id })
+      return created
+    })
   })
   handle('conversation:listSideChats', async (_event, request: unknown) => {
     const parsed = parseSideChatListRequest(request)

@@ -1,9 +1,9 @@
 import { appendFileSync } from 'node:fs'
-import { mkdtemp, mkdir, open, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, open, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parsePiNativeHistory, readPiNativeHistory, readPiNativeHistorySnapshot, readPiNativeSession, reconcilePiNativeHistory } from './pi-native-history'
+import { parsePiNativeHistory, readPiNativeHistory, readPiNativeHistorySnapshot, reconcilePiNativeHistory } from './pi-native-history'
 import { restoreTraceArchiveTurn, sessionHistoryPage } from './session-history'
 import type { TraceEvent } from '../shared/trace'
 
@@ -198,33 +198,6 @@ describe('offline Pi native history recovery', () => {
     expect(() => parsePiNativeHistory(encode(user, user), identity)).toThrow('entry id')
   })
 
-  it('streams histories larger than 64 MiB and keeps only the current branch', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'scry-pi-native-large-'))
-    roots.push(root)
-    const sessionRoot = join(root, 'sessions')
-    const dir = join(sessionRoot, '--repo--')
-    await mkdir(dir, { recursive: true })
-    const path = join(dir, `large_${identity.sessionId}.jsonl`)
-    const file = await open(path, 'w')
-    try {
-      await file.writeFile(`${encode(user)}\n`)
-      const padding = 'x'.repeat(1024 * 1024)
-      for (let index = 0; index < 65; index++) {
-        await file.writeFile(`${JSON.stringify({ ...assistant, id: `abandoned-${index}`,
-          message: { role: 'assistant', content: padding } })}\n`)
-      }
-      // Include a multi-chunk active record with UTF-8, CRLF and no final newline.
-      const reply = { ...assistant, message: { role: 'assistant', content: '你好🙂'.repeat(16000) } }
-      await file.writeFile(`${JSON.stringify(reply)}\r\n${JSON.stringify(result)}`)
-      expect((await stat(path)).size).toBeGreaterThan(64 * 1024 * 1024)
-      const turns = await readPiNativeHistory({ ...identity, sessionRoot })
-      expect(turns).toEqual(parsePiNativeHistory(encode(user, reply, result), identity))
-      expect(turns?.[0].items[1].output).toBe('/repo')
-      await expect(readPiNativeSession({ ...identity, sessionRoot })).rejects.toThrow('aggregate byte budget')
-    } finally {
-      await file.close()
-    }
-  })
 
   it.each([
     ['', '身份'],

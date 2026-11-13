@@ -21,6 +21,7 @@ function fixture() {
   const conversations = {
     previewSideChat: vi.fn(async () => ({ throughOrdinal: 1 })),
     createSideChat: vi.fn(async () => ({ id: conversationId })),
+    trackSideChatCreate: vi.fn((_commandId: string | undefined, run: () => Promise<unknown>) => run()),
     listSideChats: vi.fn(async () => ({ total: 0, items: [] })),
     findSideChatCommand: vi.fn(async (_source: unknown, commandId: string) => ({ commandId, status: 'not-found' })),
     readSideChatSnapshot: vi.fn(async () => ({ conversationId, items: [], byteLimit: 262144 }))
@@ -53,7 +54,8 @@ function fixture() {
     deleteOneSession: unexpected,
     resolveSessionRunIds: unexpected,
     deleteConversationHistory: unexpected,
-    appUserDataDir: '/unused-by-this-test'
+    appUserDataDir: '/unused-by-this-test',
+    dockBadge: { adopt: () => {} }
   })
   const invoke = (channel: string, ...args: unknown[]): unknown => handlers.get(channel)!(event, ...args)
   return { invoke, conversations, conversationStore, event, webContents, mainFrame, handlers }
@@ -140,9 +142,9 @@ describe('side-chat IPC trust and source authorization', () => {
 
   it('canonicalizes the native source and forwards only typed options', async () => {
     const current = fixture()
-    await current.invoke('conversation:previewSideChat', native, { completedThroughOrdinal: 2,
+    await current.invoke('conversation:previewSideChat', native, { terminalThroughOrdinal: 2,
       initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } })
-    expect(current.conversations.previewSideChat).toHaveBeenCalledWith(native, { completedThroughOrdinal: 2,
+    expect(current.conversations.previewSideChat).toHaveBeenCalledWith(native, { terminalThroughOrdinal: 2,
       initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } })
     await expect(current.invoke('conversation:previewSideChat', {
       ...native, path: '/tmp/transcript.jsonl'

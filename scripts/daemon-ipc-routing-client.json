@@ -146,6 +146,21 @@
       "channel": "desktopRemote:workbench",
       "route": "main",
       "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:setViewedSession",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:validateWorkspaceBranch",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:workspaceChoices",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
     }
   ]
 }

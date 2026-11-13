@@ -7,11 +7,13 @@ import { CONVERSATION_COPY } from '../constants/conversation-copy'
 import { chatBottomStickinessAfterScroll, observeChatBottomLayout, scrollChatToBottomIfNeeded } from '../chat-scroll'
 import type { SideChatViewPosition } from '../side-chat-view-state'
 import { applyViewRestore, type PendingViewRestore } from '../conversation-view-restore'
-import { conversationTarget, prepareConversationSend } from '../conversation-handoff'
+import { conversationTarget, prepareConversationSend, selectedAgentProfileId } from '../conversation-handoff'
 import type { Turn } from '../format'
 import { resendContent, useConversationSubmission } from '../hooks/useConversationSubmission'
+import { pendingRecovery } from '../composer-pending'
 import { runStructuralTransition } from '../structural-motion'
 import { useRunTraceStream } from '../hooks/useRunTraceStream'
+import { missingConversationTurns, projectConversationTurns } from '../conversation-turn-projection'
 
 
 import '../conversation.css'
@@ -200,15 +202,6 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
   }, [page, live, before, latestRequest, historyRef, chatProps.focusedTurnRunId, navigation?.active,
     initialViewPosition, conversation.id])
 
-  // live 只覆盖「本轮仍在运行」的那一格；一旦分页不再报告 activeRunId，归档后的正式轮次接管，
-  // 不会把有界的 live 投影当成已完成轮次的正文。
-  const turns = useMemo<Turn[]>(() => (page?.turns ?? []).flatMap(turn => {
-    const liveTurn = activeRunId === turn.runId ? live : undefined
-    const history = liveTurn?.runId === turn.runId ? liveTurn : turn.history
-    return history ? [{ ...history, runId: turn.runId, ordinal: turn.ordinal, done: history.done === true,
-      providerId: turn.providerId, cwd: conversation.cwd }] : []
-  }), [page, live, activeRunId, conversation.cwd])
-  useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId), atNewest: before === undefined }) }, [conversation.id, turns, activeRunId, before, onProjection])
 
   const showLatest = (): void => {
     navigation?.cancel()
@@ -236,7 +229,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     api: window.scry.conversations, draftStore, draftKey, mounted,
     expectedRevision: () => page?.summary.revision,
     prepare: (prompt, attachments, commandId) => prepareConversationSend(window.scry.conversations, conversation.id,
-      conversationTarget(chatProps.selectedAgentId, chatProps.runControls), prompt, commandId, attachments),
+      conversationTarget(chatProps.selectedAgentId, chatProps.runControls, chatProps.agents), prompt, commandId, attachments),
     onError: setError, onNotice: setNotice,
     onSubmitted: () => {
       showLatest()
@@ -245,6 +238,12 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     }
   })
   const { pending, pendingHealth, working: submitting, checkPending, settlePending } = submission
+  // live 只覆盖「本轮仍在运行」的那一格；一旦分页不再报告 activeRunId，归档后的正式轮次接管，
+  // 不会把有界的 live 投影当成已完成轮次的正文。
+  const turns = useMemo<Turn[]>(() => projectConversationTurns({ pageTurns: page?.turns ?? [], activeRunId, live,
+    cwd: conversation.cwd, ...(pending ? { pending: { commandId: pending.commandId, prompt: pending.prompt } } : {}) }),
+  [page, live, activeRunId, conversation.cwd, pending])
+  useEffect(() => { onProjection({ conversationId: conversation.id, turns, busy: Boolean(activeRunId), atNewest: before === undefined }) }, [conversation.id, turns, activeRunId, before, onProjection])
   // Mount, restart and every authoritative page settle the exact command id read-only.
   // A page that predates the submission cannot answer it, and a page read while the
   // start reply is still in flight must not report a false "missing record".
@@ -260,7 +259,9 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     try { await submission.submit() } finally { busyRef.current = false }
   }
   const resend = async (): Promise<void> => {
-    if (busyRef.current || !pending || pendingHealth?.kind !== 'not_sent' || blockedReason) return
+    // A host-confirmed refusal is durable evidence even before (or without) a page read.
+    if (busyRef.current || !pending || blockedReason) return
+    if (pendingRecovery(pending, pendingHealth)?.state !== 'not_sent') return
     busyRef.current = true
     try { await submission.submit(resendContent(pending)) } finally { busyRef.current = false }
   }
@@ -275,7 +276,10 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       const selected = page.turns.find(item => item.runId === turn?.runId)
       const binding = page.bindings.find(item => item.id === selected?.bindingId)
       if (!binding || !turn || !forkableRunIds.has(turn.runId)) throw new Error('该轮没有可执行的原生归属；共享历史请回到源对话操作')
-      const sameAgent = chatProps.selectedAgentId === (binding.agentProfileId ?? binding.providerId)
+      // The binding records the Agent Profile identity of its run, which is the registered
+      // Pi profile rather than the historical discovery id the picker shows.
+      const sameAgent = selectedAgentProfileId(chatProps.selectedAgentId, chatProps.agents) ===
+        (binding.agentProfileId ?? binding.providerId)
       if (binding.providerId === 'pi' && (!sameAgent || chatProps.runControls.permissionMode !== 'full_access')) {
         throw new Error('请先选择该轮的 Pi Profile 并明确启用本机完全访问，再创建原生分支；不会发送消息')
       }
@@ -296,7 +300,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
       if (mounted.current) setError(`分支结果尚未确认：${message(error)}。不会自动重建；核对 / 继续使用同一条请求，宿主若尚未收到则可能首次执行。`)
     } finally { busyRef.current = false; if (mounted.current) setWorking(false) }
   }
-  const missing = page?.turns.filter(turn => !turn.history && live?.runId !== turn.runId) ?? []
+  const missing = missingConversationTurns(page?.turns ?? [], activeRunId, live)
   const inherited = page?.bindings.some(binding => binding.retiredReason && binding.continuationKey.startsWith('unverified-legacy:'))
   const firstHandoff = inherited && page?.turns.every(turn => turn.delivery.status === 'imported')
   const limitation = CONVERSATION_COPY.handoffScope

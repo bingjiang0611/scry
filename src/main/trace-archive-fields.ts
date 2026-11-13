@@ -11,6 +11,30 @@ import type { ArchiveBodyFacts, ArchiveTurnExpectation } from './trace-archive-p
 export const BODY_KEYS = new Set(['source', 'encoding', 'sourceCompleteness', 'redaction', 'storage'])
 export const REF_KEYS = new Set(['storage', 'sha256', 'bytes', 'encoding'])
 
+/** Event scalars that decide whether the event is visible at all. */
+export const EVENT_KEYS = new Set([
+  'id', 'kind', 'stage', 'runId', 'messageId', 'agentId', 'parentToolUseId', 'ts', 'providerId', 'runtimeProvider',
+  // A `result` event's own verdict and its structured termination are the only
+  // success/failure evidence a legacy turn has.
+  'isError', 'terminationReason', 'providerStopReason'
+])
+
+/**
+ * A `result` event's verdict fields that carry text.
+ *
+ * Both may only prove a non-successful turn, so a value that is not a scalar must fail
+ * closed: skipping an object or array here would let `isError: false` decide alone.
+ */
+export const RESULT_VERDICT_KEYS: ReadonlySet<string> = new Set(['terminationReason', 'providerStopReason'])
+
+/** A `result` event's own verdict field; a non-string value is a corrupt record, not text. */
+export function resultScalar(eventMeta: Map<string, unknown>, key: string): string | undefined {
+  const value = eventMeta.get(key)
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') throw new Error(`trace archive event ${key} is invalid`)
+  return value.trim() === '' ? undefined : value
+}
+
 /** Only visible assistant text is projected; reasoning, tools and subagents are not. */
 export function keepText(meta: Map<string, unknown>): boolean {
   return meta.get('kind') === 'model' && (meta.get('stage') === 'text' || meta.get('stage') === 'text_delta') &&

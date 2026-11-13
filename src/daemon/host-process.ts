@@ -20,6 +20,7 @@ import { createRemoteHistoryHandlers } from '../main/bootstrap/remote-history'
 import { resolveRemoteRelay } from '../main/bootstrap/remote-relay'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { createHostRuntime } from '../host-runtime/host-runtime'
+import { remoteLanConfig } from '../main/remote/remote-lan-config'
 import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
@@ -328,6 +329,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     userDataDir: options.userDataDir,
     relay,
     gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
+    ...remoteLanConfig(process.env),
     shellEnvironment: warmShellEnv,
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
     // Omit every source. HostController returns explicit unavailable envelopes with

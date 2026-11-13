@@ -115,7 +115,10 @@ describe('ordinary conversation send: bounded history, real reader and native im
     const conversation = await seed('source', 'x'.repeat(20_000))
     const start = vi.fn()
     const api = service(start, false)
-    await expect(api.send(await input(api, conversation))).rejects.toThrow('历史检索工具')
+    // A refusal proven before dispatch is a typed not_sent answer, not an unknown outcome.
+    await expect(api.send(await input(api, conversation))).resolves.toMatchObject({
+      status: 'not_sent', reason: expect.stringContaining('历史检索工具')
+    })
     expect(start).not.toHaveBeenCalled()
     expect(await store.read(conversation.id)).toEqual(conversation)
   })
@@ -126,10 +129,11 @@ describe('ordinary conversation send: bounded history, real reader and native im
     const start = vi.fn(async (managed: ManagedConversationStart) => { connection = managed.historyReader; throw new Error('native reader not ready') })
     const api = service(start)
     const request = await input(api, conversation)
-    await expect(api.send(request)).rejects.toThrow('native reader not ready')
+    await expect(api.send(request)).resolves.toEqual({ status: 'not_sent', reason: 'native reader not ready' })
     expect((await store.read(conversation.id))!.turns.at(-1)).toMatchObject({ delivery: { status: 'not_sent' } })
     await expect(fetch(connection!.url)).rejects.toThrow()
-    await expect(api.send(request)).resolves.toMatchObject({ disposition: 'duplicate' })
+    // The retry reports the durable not_sent delivery instead of claiming it was accepted.
+    await expect(api.send(request)).resolves.toEqual({ status: 'not_sent', reason: 'native reader not ready' })
     expect(start).toHaveBeenCalledTimes(1)
   })
 
@@ -213,7 +217,7 @@ describe('ordinary conversation send: bounded history, real reader and native im
     })
     const request = { ...await input(api, conversation, [image]), prompt: 'x'.repeat(128_000 - 32_000 - 8192 - cost - 2) }
     expect(handoffBudget({ userText: request.prompt, attachments: [image] })).toBe(cost)
-    await expect(api.send(request)).rejects.toThrow('最终输入')
+    await expect(api.send(request)).resolves.toMatchObject({ status: 'not_sent', reason: expect.stringContaining('最终输入') })
     expect(nativeCalls).toBe(0)
     expect((await store.read(conversation.id))!.turns.at(-1)).toMatchObject({ delivery: { status: 'not_sent' } })
   })

@@ -67,6 +67,7 @@ export interface RemoteRunBindingDependencies<M extends ConversationRunMarker = 
     requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
     onTraceEvent(event: TraceEvent): void
     onSession?(externalSessionId: string): void
+    onRegistered?(info: { cwd: string }): void
     permissionModeOverride?: AgentStartRequest['permissionMode']
     // The verified submitter's scope, forwarded so the pipeline can take the App's
     // path for a local grant instead of inferring it from `origin`.
@@ -221,13 +222,15 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
           // workspace. Sending an empty string would make the App treat it as a path.
           ...(routing.cwd ? { cwd: routing.cwd } : {}),
           ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}),
-          ...(resume ? { expectedExternalSessionId: resume } : {}),
+          // A worktree start is always a fresh session in the prepared workspace.
+          ...(resume ? { expectedExternalSessionId: resume } : routing.workspace ? { expectedExternalSessionId: null } : {}),
           ...(routing.expectedExternalSessionId ? { expectedExternalSessionId: routing.expectedExternalSessionId } : {}),
           ...(routing.forkLastTurn ? { forkLastTurn: routing.forkLastTurn } : {}),
           ...(routing.restartLastTurn ? { restartLastTurn: routing.restartLastTurn } : {}),
           attachments,
           ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
-          ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {})
+          ...(routing.effort ? { effort: routing.effort } : {}), ...(routing.permissionMode ? { permissionMode: routing.permissionMode } : {}),
+          ...(routing.workspace ? { workspace: routing.workspace } : {})
         },
         ...(!launch && providerPrompt !== prompt ? { providerPrompt } : {}),
         ...(launch ? { managedConversation: launch.managedConversation } : {}),
@@ -245,6 +248,11 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
         },
         onTraceEvent,
         onSession: (externalSessionId) => progress(marker({ event: 'session', externalSessionId })),
+        // A worktree start runs outside the submitted project: the device follows the run's
+        // own cwd, re-announced once the prepared workspace is registered.
+        onRegistered: ({ cwd }) => {
+          if (cwd !== routing.cwd) progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd }))
+        },
         permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride,
         ...(grantScope ? { grantScope } : {})
       })

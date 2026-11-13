@@ -31,11 +31,12 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
       }}
     />
   )
-  it('verdict 卡：聚合 token + 无报错无危险 → 极简展示 Provider 轮次终态', () => {
+  it('verdict 卡：聚合 token + 无报错无危险 → 不再写“轮次已结束”，只留指标', () => {
     expect(html).toContain('<strong>3.0k</strong>') // 跨轮累计本会话 token（含 cache）
     expect(html).not.toContain('$0.1234')
     expect(html).toContain('overview-verdict ok') // 无 error/danger → ok
-    expect(html).toContain('轮次已结束')
+    expect(html).not.toContain('轮次已结束') // 完成态不再重复总结，调用次数移到面板头部
+    expect(html).not.toContain('overview-verdict-line')
     expect(html).toContain('输入+输出+缓存')
     expect(html).not.toContain('reasoning 单列')
     expect(html).not.toContain('overview-metric-foot')
@@ -121,7 +122,7 @@ it('历史会话合并 archive 与 transcript usage 时仍按用户 turn 展示�
       <OverviewPanel turns={[mergedTurn]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(mergedHtml).toContain('轮次已结束')
+    expect(mergedHtml).not.toContain('轮次已结束')
     expect(mergedHtml).not.toContain('轮已捕获')
     expect(mergedHtml).toContain('<strong>35</strong>')
     expect(mergedHtml).not.toContain('<strong>47</strong>')
@@ -218,7 +219,7 @@ it('TOP TOOLS 段：tool+mcp 合并排名 + mini-bar', () => {
   })
 it('每轮调用段：按 turn 聚合工具并可跳回该轮用户消息', () => {
     expect(html).toContain('每轮调用')
-    expect(html).toContain('1 turns')
+    expect(html).toContain('1 轮')
     expect(html).toContain('aria-label="跳到第 1 轮，对话中共 3 次工具/Skill/MCP/子 Agent 调用"')
     expect(html).toContain('创建并读回文件')
     expect(html).toContain('turn-call-group turn-call-toggle timing')
@@ -254,7 +255,7 @@ it('纵览按轮次与会话拆成二级 tab，并把会话汇总放入会话数
     const turnsPanel = tabHtml.slice(tabHtml.indexOf('id="overview-turns-panel"'), tabHtml.indexOf('id="overview-session-panel"'))
     const sessionPanel = tabHtml.slice(tabHtml.indexOf('id="overview-session-panel"'))
 
-    expect(tabHtml).toContain('aria-label="纵览数据维度"')
+    expect(tabHtml).toContain('aria-label="总览数据维度"')
     expect(tabHtml).toMatch(/id="overview-turns-tab"[^>]*aria-selected="true"/)
     expect(tabHtml).toMatch(/id="overview-session-tab"[^>]*aria-selected="false"/)
     expect(turnsPanel).toContain('每轮调用')

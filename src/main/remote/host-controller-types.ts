@@ -5,6 +5,7 @@ import type { DeleteSessionResult, McpSnapshot } from '../../shared/provider'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
 import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace'
 import type { AgentForkLastTurn, AgentRestartLastTurn } from '../../shared/runtime-types'
+import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
 import { type PairingDependencies } from './pairing'
 import { type LedgerStore } from './session-ledger'
 import { type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview, type RemoteHistoryVersion, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery } from './remote-gateway'
@@ -36,6 +37,8 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   modelProviderId?: string
   effort?: string
   permissionMode?: AgentPermissionMode
+  // A fresh session in a managed worktree (device submits only; see parseRouting).
+  workspace?: WorkspaceStartSelection
   // Inline payloads are retained for older peers; current desktop peers send
   // persistent, hash-bound host attachment references. Images are forwarded as
   // native Provider attachments; UTF-8 text/code files become explicit context

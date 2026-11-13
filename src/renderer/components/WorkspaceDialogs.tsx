@@ -6,6 +6,7 @@ import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
+import { MOTION } from '../motion'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
 
 // Readable IPC errors (daemon mode names its absences); the checks below still match
@@ -35,7 +36,7 @@ export function WorkspaceContextMenu({
   onRefresh: () => void
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null)
-  const presence = usePresence({ onClose, exitMs: 100 })
+  const presence = usePresence({ onClose, exitMs: MOTION.durationExitSm })
   const close = (): void => presence.requestClose('pointer')
   useEffect(() => {
     if (presence.state === 'exit') return

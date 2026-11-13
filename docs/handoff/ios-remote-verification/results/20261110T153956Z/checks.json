@@ -1,0 +1,96 @@
+{
+  "stages": [
+    {
+      "name": "install-mac",
+      "status": "fail",
+      "exitCode": 143,
+      "seconds": 1070,
+      "log": "logs/install-mac.tail.txt"
+    },
+    {
+      "name": "relay-probe-mac",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 11,
+      "log": "logs/relay-probe-mac.tail.txt"
+    },
+    {
+      "name": "build-ios",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 18,
+      "log": "logs/build-ios.tail.txt"
+    },
+    {
+      "name": "install-ios",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 18,
+      "log": "logs/install-ios.tail.txt"
+    },
+    {
+      "name": "netbench-wifi-relay",
+      "status": "fail",
+      "exitCode": 1,
+      "seconds": 97,
+      "log": "netbench-wifi-relay.jsonl"
+    },
+    {
+      "name": "netbench-wifi-auto",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 61,
+      "log": "netbench-wifi-auto.jsonl"
+    },
+    {
+      "name": "netbench-wifi-relay2",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 47,
+      "log": "netbench-wifi-relay2.jsonl"
+    },
+    {
+      "name": "typecheck-node",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 12,
+      "log": "logs/typecheck-node.tail.txt"
+    },
+    {
+      "name": "node-unit",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 49,
+      "log": "logs/node-unit.tail.txt"
+    },
+    {
+      "name": "g0-node-tests",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 5,
+      "log": "logs/g0-node-tests.tail.txt"
+    },
+    {
+      "name": "cf-relay-smokes",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 33,
+      "log": "logs/cf-relay-smokes.tail.txt"
+    },
+    {
+      "name": "swift-test",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 28,
+      "log": "logs/swift-test.tail.txt"
+    },
+    {
+      "name": "ios-checks",
+      "status": "known-baseline",
+      "exitCode": 247,
+      "seconds": 49,
+      "log": "logs/ios-checks.tail.txt",
+      "baselineEvidence": "logs/ios-checks.tail.txt"
+    }
+  ]
+}

@@ -4,10 +4,10 @@ import type { ConversationSummary } from '@shared/conversation-api'
 import { SIDE_CHAT_DEFAULT_TITLE } from '@shared/conversation'
 import type { DetectedAgent } from './env'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
+import { CONVERSATION_COPY } from './constants/conversation-copy'
 import { providerContextOf, requestedAgentId, useSideChatInstance } from './hooks/useSideChatInstance'
 import { readSideChatPreferences, writeSideChatPreference } from './side-chat-preferences'
 import { SideChatHeader, SideChatSurface } from './components/SideChatSurface'
-import { SideChatSnapshotViewer } from './components/SideChatSnapshotViewer'
 
 const memoryStorage = () => {
   const rows = new Map<string, string>()
@@ -78,16 +78,47 @@ describe('side chat runtime seeding', () => {
   })
 
   it('keeps the requested Provider when it is missing instead of picking another', () => {
-    // Persisted target names a Pi profile that no longer exists; Claude is installed.
-    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: 'pi:deleted' } } })
+    // Persisted target names a registered Pi profile that no longer exists; Claude is installed.
+    const deleted = 'pi:0123456789abcdef'
+    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: deleted } } })
     expect(requestedAgentId({ conversation: child, agents: [agent('claude')] }))
-      .toEqual({ agentId: 'pi:deleted', availability: 'unavailable' })
+      .toEqual({ agentId: deleted, availability: 'unavailable' })
     const rendered = probe(child, [agent('claude')])
-    expect(rendered.selectedAgentId).toBe('pi:deleted')
-    expect(rendered.blocked).toBe(SIDE_CHAT_COPY.providerUnavailable('pi:deleted'))
-    expect(rendered.sendBlocked).toBe(SIDE_CHAT_COPY.providerUnavailable('pi:deleted'))
+    expect(rendered.selectedAgentId).toBe(deleted)
+    expect(rendered.blocked).toBe(SIDE_CHAT_COPY.providerUnavailable(deleted))
+    expect(rendered.sendBlocked).toBe(SIDE_CHAT_COPY.providerUnavailable(deleted))
     expect(rendered.addPi).toBe('undefined')
     expect(rendered.removePi).toBe('undefined')
+  })
+
+  // 回归：截图里的 Pi · Rotom 是历史发现 id，不是已登记的 Agent Profile。发送前就要说清楚，
+  // 而不是等到提交时才由宿主报错；换个已登记 Profile 就能继续用这个侧聊。
+  it('blocks sending a historical Pi profile until one exact registered profile exists', () => {
+    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: 'pi:rotom' } } })
+    const rotom = { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: '/bin/rotom' }
+    const blocked = probe(child, [agent('claude'), rotom])
+    expect(blocked.selectedAgentId).toBe('pi:rotom')
+    expect(blocked.blocked).toBe(CONVERSATION_COPY.piProfileNotRegistered('Pi · Rotom'))
+    expect(blocked.sendBlocked).toBe(CONVERSATION_COPY.piProfileNotRegistered('Pi · Rotom'))
+    // 不是「Provider 不可用」：这个 Provider 装着，只是这个身份不能发送。
+    expect(blocked.blocked).not.toBe(SIDE_CHAT_COPY.providerUnavailable('pi:rotom'))
+
+    const unblocked = probe(child, [{ ...rotom, agentProfileId: 'pi:0123456789abcdef' }])
+    expect(unblocked.selectedAgentId).toBe('pi:rotom')
+    expect(unblocked.blocked).toBeNull()
+    expect(unblocked.sendBlocked).toBeNull()
+    // 已登记的稳定 id 选中时同样可以发送。
+    const registered = summary({ sideChat: { ...summary().sideChat!,
+      initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } } })
+    expect(probe(registered, [{ ...rotom, agentProfileId: 'pi:0123456789abcdef' },
+      { ...rotom, id: 'pi:0123456789abcdef', name: 'Pi · rotom' }]).sendBlocked).toBeNull()
+  })
+
+  it('does not claim a missing Pi profile while detection is still reading', () => {
+    const child = summary({ sideChat: { ...summary().sideChat!, initialTarget: { providerId: 'pi', agentProfileId: 'pi:rotom' } } })
+    const reading = probe(child, [])
+    expect(reading.blocked).toBe(SIDE_CHAT_COPY.providerReading)
+    expect(reading.sendBlocked).toBe(SIDE_CHAT_COPY.providerReading)
   })
 
   it('blocks an unavailable Qoder instead of falling back to an installed Claude', () => {
@@ -113,10 +144,21 @@ describe('side chat runtime seeding', () => {
   })
 
   it('rejects an unknown agent id instead of guessing Claude', () => {
-    expect(providerContextOf('pi:work', '/repo')).toEqual({ providerId: 'pi', agentProfileId: 'pi:work', cwd: '/repo' })
-    expect(providerContextOf('codex', '/repo')).toEqual({ providerId: 'codex', cwd: '/repo' })
-    expect(providerContextOf('', '/repo')).toBeUndefined()
-    expect(providerContextOf('not-a-provider', '/repo')).toBeUndefined()
+    expect(providerContextOf('pi:work', '/repo', [agent('pi:work')]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:work', cwd: '/repo' })
+    expect(providerContextOf('codex', '/repo', [agent('codex')])).toEqual({ providerId: 'codex', cwd: '/repo' })
+    expect(providerContextOf('', '/repo', [])).toBeUndefined()
+    expect(providerContextOf('not-a-provider', '/repo', [])).toBeUndefined()
+  })
+
+  // 回归：截图里的 Pi · Rotom 是历史发现 id，不是已登记的 Agent Profile。
+  it('reads Pi controls under the registered profile reported for that exact agent', () => {
+    const detected = { ...agent('pi:rotom'), agentProfileId: 'pi:0123456789abcdef' }
+    expect(providerContextOf('pi:rotom', '/repo', [agent('claude'), detected]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', cwd: '/repo' })
+    // 另一个启动器的 Profile 不会被借用；历史 id 仍指同一个检测到的启动器，main 能解析它。
+    expect(providerContextOf('pi:rotom', '/repo', [agent('pi:rotom'), { ...agent('pi:other'), agentProfileId: 'pi:fedcba9876543210' }]))
+      .toEqual({ providerId: 'pi', agentProfileId: 'pi:rotom', cwd: '/repo' })
   })
 })
 
@@ -140,54 +182,31 @@ describe('side chat instance control surface', () => {
 })
 
 describe('side chat surface copy and provenance', () => {
-  it('shows the default title, the captured source title and the frozen boundary', () => {
-    const html = renderToStaticMarkup(<SideChatHeader title={SIDE_CHAT_DEFAULT_TITLE} summary={summary().sideChat} cwd="/repo"
-      snapshotOpen={false} onToggleSnapshot={() => undefined} onClose={() => undefined} />)
-    expect(html).toContain(SIDE_CHAT_DEFAULT_TITLE)
+  it('names the captured source and the frozen boundary without repeating the child title', () => {
+    const html = renderToStaticMarkup(<SideChatHeader summary={summary().sideChat} cwd="/repo" />)
+    expect(html).toContain(SIDE_CHAT_COPY.sourceLabel)
     expect(html).toContain('主会话标题')
     expect(html).toContain(SIDE_CHAT_COPY.snapshotLine(7))
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotDetail)
-    // The workspace moved to the composer's readonly label: keeping it in this row truncated
-    // the captured parent title to a couple of characters in a narrow pane.
-    expect(html).toContain('data-side-chat-workspace="/repo"')
-    expect(html).not.toContain(SIDE_CHAT_COPY.workspaceReadonly('repo'))
-  })
-
-  it('gives the captured parent the row instead of a shrunken workspace', () => {
-    const html = renderToStaticMarkup(<SideChatHeader title={SIDE_CHAT_DEFAULT_TITLE} summary={summary().sideChat} cwd="/repo"
-      snapshotOpen onToggleSnapshot={() => undefined} onClose={() => undefined} />)
-    expect(html).toContain('data-side-chat-parent-title="true">主会话标题')
-    expect(html).toContain('aria-expanded="true"')
-  })
-
-  it('renders the main view without a second title or a tab close action', () => {
-    // The main pane already prints the conversation title and leaves by navigation, so the
-    // header keeps only what the body cannot say: the captured source and the snapshot action.
-    const html = renderToStaticMarkup(<SideChatHeader title="我自己起的名字" summary={summary().sideChat} cwd="/repo"
-      variant="main" snapshotOpen={false} onToggleSnapshot={() => undefined} />)
-    expect(html).not.toContain('我自己起的名字')
-    expect(html).not.toContain(SIDE_CHAT_COPY.surfaceClose)
-    expect(html).toContain('主会话标题')
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotDetail)
-  })
-
-  it('never reuses the source title as the child title', () => {
-    const html = renderToStaticMarkup(<SideChatHeader title="我自己起的名字" summary={summary().sideChat} cwd="/repo"
-      snapshotOpen={false} onToggleSnapshot={() => undefined} onClose={() => undefined} />)
-    expect(html).toContain('我自己起的名字')
+    // The tab strip prints the child's own title; a second one only squeezed this row.
     expect(html).not.toContain(`>${SIDE_CHAT_DEFAULT_TITLE}<`)
+    // The workspace stays a tooltip on the composer's readonly label, not a second row here.
+    expect(html).toContain('data-side-chat-workspace="/repo"')
+    expect(html).not.toContain(SIDE_CHAT_COPY.sharedWorkspace)
   })
-})
 
-describe('snapshot viewer frame', () => {
-  it('labels the frozen source with capture time and message count before any page arrives', () => {
-    const html = renderToStaticMarkup(<SideChatSnapshotViewer conversationId="child-1" summary={summary().sideChat!}
-      onClose={() => undefined} />)
-    expect(html).toContain('主会话标题')
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotMessageCount(12))
-    expect(html).toContain(SIDE_CHAT_COPY.snapshotLine(7))
-    expect(html).toContain('data-side-chat-snapshot="child-1"')
-    expect(html).not.toContain('data-snapshot-state="complete"')
+  it('offers no action of its own', () => {
+    // Owner decision 2026-11-09: this surface carries no snapshot reader, no duplicate
+    // tab-close button and no refresh/management toolbar; closing stays in the tab strip.
+    const html = renderToStaticMarkup(<SideChatHeader summary={summary().sideChat} cwd="/repo" />)
+    expect(html).not.toContain('<button')
+    expect(html).not.toContain('查看来源快照')
+    expect(html).not.toContain('关闭侧聊')
+  })
+
+  it('falls back to the surface subtitle before a frozen summary is readable', () => {
+    const html = renderToStaticMarkup(<SideChatHeader summary={undefined} cwd="/repo" />)
+    expect(html).toContain(SIDE_CHAT_COPY.surfaceSubtitle)
+    expect(html).not.toContain('data-side-chat-parent-title')
   })
 })
 

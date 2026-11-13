@@ -97,10 +97,13 @@ export class RunStopLifecycle {
     }
     const entry: StopLifecycleEntry = { state, cancel: null }
     this.entries.set(target.runId, entry)
-    this.invoke(target.runId, 'interrupt', target.interrupt)
-    this.options.publish(state)
+    // 取消调用失败是独立事实：用户的停止意图仍然保留（继续按窗口升级），但 Scry 不能
+    // 声称取消已经发出，也不能因此把这一轮读成已终止。
+    let requested = state
+    if (this.invoke(target.runId, 'interrupt', target.interrupt)) this.options.publish(state)
+    else requested = this.advance(entry, 'interrupt_request_failed', false)
     entry.cancel = this.schedule(() => this.escalate(target), window.gracefulMs)
-    return state
+    return requested
   }
 
   /** Provider runtime 已 settle：终止有证据了，取消所有未触发的升级。 */

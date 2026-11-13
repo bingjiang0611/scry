@@ -10,6 +10,7 @@ import type { DesktopRemoteClient } from '../main/remote/desktop-client'
 import type { DesktopRemoteForkSessionRequest } from '../shared/desktop-remote'
 import type { UserQuestionBroker } from '../main/user-question'
 import type { RemoteRunCompletion } from '../main/remote/remote-run-binding'
+import type { RemoteWorkspaceRunStart } from '../main/bootstrap/workspace-start'
 import type { SessionDeletionRequest } from '../main/bootstrap/session-deletion'
 import type { HostControllerFactoryDependencies } from '../main/remote/host-controller-factory'
 import type { RemoteHostServiceDependencies } from '../main/remote/remote-host-service-deps'
@@ -32,6 +33,8 @@ export interface RemoteStartOptions {
   // The verified submitter's scope. Absent means it could not be proven, and the
   // pipeline keeps the device semantics rather than guessing "local".
   grantScope?: 'local' | 'remote'
+  // Host-only registration signal for a managed remote workspace (worktree) launch.
+  onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void
 }
 export type RemoteRuns = { activeStates: () => ActiveRun[]; get: (runId: string) => { state: ActiveRun } | undefined }
 export type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
@@ -44,7 +47,7 @@ export type RemoteHostRuntime = {
   refreshRemoteProviderSnapshot: () => Promise<void>
   configuredRemotePermissionMode: () => AgentPermissionMode | undefined
   remoteStartReceipts: RemoteReceipts
-  startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string }>
+  startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string } | RemoteWorkspaceRunStart>
   sourceControl: SourceControlService
   providerOperationGate: ProviderOperationGate
   providerRegistry: ProviderRegistry
@@ -86,6 +89,8 @@ export interface HostRuntimeInputs {
   userDataDir: string
   relay: RemoteRelayResolution
   gatewayLabel: string
+  // Direct LAN/overlay route for paired phones (remote-lan-config.ts); absent disables it.
+  lan?: { port?: number }
   // Lazily resolved login-shell environment for Provider processes.
   shellEnvironment: () => Promise<Record<string, string | undefined>>
   openPath?: (path: string) => Promise<void>

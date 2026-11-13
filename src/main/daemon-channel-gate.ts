@@ -43,6 +43,8 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:clipboardImage', 'agent:focusRun', 'agent:revealProject', 'agent:setCwd',
   'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions', 'agent:viewSessions',
   'app:copyText', 'app:performanceDiagnosticsEnabled', 'app:rendererRestart',
+  // The managed conversation on screen: dock-badge view state, which main renders.
+  'conversation:setViewed',
   'app:reportRendererPerformance', 'app:setTheme',
   // «后台服务» actions: dialogs, signals to the verified daemon.lock holder, app.quit (B4-S).
   'remote:backgroundService:quit', 'remote:backgroundService:reconnect', 'remote:backgroundService:restart',

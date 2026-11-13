@@ -2,13 +2,18 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ActiveRun } from '../../shared/trace'
+import type { ScRead } from '../../shared/source-control'
+import type { WorkspaceChoices, WorkspaceChoicesRequest } from '../../shared/workspace-selection'
 import { upsertTraceArchiveTurn } from '../transcript-archive'
 import { createDesktopHostReader } from './desktop-host-reader'
 import { bindRemoteHistoryContext } from './history-context'
 
 // Shared by the evidence suites that read through the same injected reader.
 // Callers own cleanup through the returned root list.
-export function desktopReaderFixture() {
+export function desktopReaderFixture(options: {
+  workspaceChoices?: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
+  validateWorkspaceBranch?: (request: { cwd: string; repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'scry-desktop-reader-'))
   const cwd = join(root, 'workspace')
   mkdirSync(cwd)
@@ -20,7 +25,8 @@ export function desktopReaderFixture() {
     authorizeWorkspace: (path) => { if (!allowed || path !== cwd) throw new Error('workspace_not_authorized'); return cwd },
     authorizeSession: (value) => { bindRemoteHistoryContext({ ...value, externalSessionId: value.externalSessionId!, historyScope: 'session' },
       [{ sessionId: context.externalSessionId, cwd, providerId: 'codex' }], path => path) },
-    getRun: () => run
+    getRun: () => run,
+    ...options
   })
   const context = { cwd, providerId: 'codex', externalSessionId: 'native-session' }
   return { read, context, userDataDir, root, setRun: (value: ActiveRun) => { run = value }, revoke: () => { allowed = false },

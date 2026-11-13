@@ -10,6 +10,7 @@ import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import { SideChatTabBody } from '../components/SideChatTabBody'
 import { useSideChatWorkspace } from './useSideChatWorkspace'
 import { sideChatScope } from '../side-chat-scope'
+import { registeredPiProfileIdOf } from '../conversation-handoff'
 
 /**
  * Composition of the side-chat workspace of the active parent session.
@@ -20,7 +21,7 @@ import { sideChatScope } from '../side-chat-scope'
  */
 export function useSideChatPanel({
   draftKey, view, conversation, cwd, activeSessionId, selectedProviderSessionId, providerId, agentProfileId,
-  runControls, completedTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
+  runControls, terminalTurns, draftStore, chatProps, pickConversation, loadProjects, openIds, dispatch,
   dispatchForScope, restorePane, runningRunIds, waitingQuestionRunIds, questionKindsByRun
 }: {
   draftKey: string
@@ -32,7 +33,7 @@ export function useSideChatPanel({
   providerId: ProviderId
   agentProfileId?: string
   runControls: ConversationHostChatProps['runControls']
-  completedTurns: number
+  terminalTurns: number
   draftStore: ComposerDraftStore
   chatProps: Pick<ConversationHostChatProps, 'agents' | 'onOpenFile'>
   pickConversation: (conversation: ConversationSummary) => void
@@ -46,15 +47,22 @@ export function useSideChatPanel({
   waitingQuestionRunIds: ReadonlySet<string>
   questionKindsByRun: ReadonlyMap<string, import('@shared/runtime').AgentQuestionKind>
 }) {
+  // A new child's first send names the parent's registered Pi profile. The parent's own
+  // recorded id stays the source identity; without a registered profile the target carries
+  // none, so main never receives a historical id as an Agent Profile.
+  const targetAgentProfileId = providerId === 'pi'
+    ? registeredPiProfileIdOf(agentProfileId ?? '', chatProps.agents)
+    : agentProfileId
   const scope = sideChatScope({
     draftKey, view,
     ...(conversation ? { conversation } : {}),
     providerId,
     ...(agentProfileId ? { agentProfileId } : {}),
+    ...(targetAgentProfileId ? { targetAgentProfileId } : {}),
     runControls,
     cwd,
     nativeSessionId: selectedProviderSessionId ?? activeSessionId,
-    completedTurns,
+    terminalTurns,
     // Static render and tests have no preload bridge; treat that as "api unavailable"
     // rather than reaching for a `window` that does not exist.
     apiAvailable: typeof window !== 'undefined' && Boolean(window.scry?.conversations)
@@ -77,7 +85,7 @@ export function useSideChatPanel({
     ...(scope.source ? { source: scope.source } : {}),
     ...(scope.target ? { target: scope.target } : {}),
     openIds,
-    hasCompletedTurn: scope.hasCompletedTurn,
+    hasTerminalTurn: scope.hasTerminalTurn,
     ...(scope.unavailableReason ? { unavailableReason: scope.unavailableReason } : {}),
     statusOf,
     // The child is opened in the scope it was created for. Switching parents while a
@@ -98,7 +106,6 @@ export function useSideChatPanel({
     {...(chatProps.onOpenFile ? { onOpenFile: chatProps.onOpenFile as (target: WorkspaceFileTarget) => void } : {})}
     onOpenConversation={pickConversation}
     onChanged={() => { workspace.refresh(); void loadProjects() }}
-    onClose={() => dispatch({ type: 'close-side-chat', conversationId })}
   />
   return {
     tabs: workspace.tabs,

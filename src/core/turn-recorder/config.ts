@@ -1,5 +1,6 @@
-import { lstat, opendir, readFile, readdir } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { lstat, opendir, readFile, readdir, realpath } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { gitCommand, TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 
 export interface RecorderConfig {
   schemaVersion: 1
@@ -19,6 +20,13 @@ export interface RecorderConfig {
     orphanGraceHours: number
   }
   capture: {
+    /**
+     * `opt-in` records nothing from ordinary Provider hooks; only an explicitly opened session
+     * (`recorder hook --capture-mode session` with a claimed capture) is recorded. Absent means the
+     * legacy behavior (record every hook this workspace receives). Older readers ignore the key,
+     * which is why the session guard, not this field, is what keeps un-opened sessions silent.
+     */
+    sessions?: 'opt-in'
     prompt: boolean
     assistant: boolean
     toolOutput: 'none' | 'summary' | 'full'
@@ -38,7 +46,7 @@ export interface RecorderCommitHookConfig {
 
 export type RecorderEnablement =
   | { enabled: true; workspaceRoot: string; dataRoot: string; config: RecorderConfig }
-  | { enabled: false; reason: 'sentinel' | 'environment' | 'missing_config' | 'config_disabled' | 'invalid_config'; detail?: string }
+  | { enabled: false; reason: 'sentinel' | 'environment' | 'missing_config' | 'config_disabled' | 'invalid_config' | 'capture_opt_in'; detail?: string }
 
 export type RecorderLocation =
   | { valid: true; workspaceRoot: string; dataRoot: string; config: RecorderConfig }
@@ -91,6 +99,9 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     ...(retentionDays != null ? { retentionDays } : {}),
     orphanGraceHours: boundedStorageInteger(storageRaw.orphanGraceHours, 'storage.orphanGraceHours', 1, 8_760) ?? 24
   } : undefined
+  if (captureRaw.sessions !== undefined && captureRaw.sessions !== 'opt-in') {
+    throw new Error('capture.sessions must be opt-in when present')
+  }
   const patchExcludeBasenames = [...new Set(stringArray(captureRaw.patchExcludeBasenames).map((item) => item.trim()))]
   if (patchExcludeBasenames.some((item) => item.includes('/') || item.includes('\\'))) {
     throw new Error('capture.patchExcludeBasenames entries must be basenames')
@@ -103,7 +114,10 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     ...(commitHook ? { commitHook } : {}),
     repositories: { mode, maxDepth, exclude: stringArray(repositories.exclude) },
     ...(storage ? { storage } : {}),
-    capture: resolveCapture(captureRaw, patchExcludeBasenames)
+    capture: {
+      ...resolveCapture(captureRaw, patchExcludeBasenames),
+      ...(captureRaw.sessions === 'opt-in' ? { sessions: 'opt-in' as const } : {})
+    }
   }
 }
 
@@ -198,9 +212,15 @@ export async function resolveRecorderLocation(workspace: string): Promise<Record
   }
 }
 
+/**
+ * `ordinaryHook` marks a Provider hook that carries no session-capture context. An opt-in workspace
+ * records only sessions that claimed themselves, so such an event is not recorded — it is not a
+ * configuration error either, and diagnostics still see the workspace as enabled.
+ */
 export async function resolveRecorderEnablement(
   workspace: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  ordinaryHook = false
 ): Promise<RecorderEnablement> {
   const workspaceRoot = resolve(workspace)
   if (await exists(join(workspaceRoot, '.scry-disabled'))) return { enabled: false, reason: 'sentinel' }
@@ -208,6 +228,7 @@ export async function resolveRecorderEnablement(
   const location = await resolveRecorderLocation(workspaceRoot)
   if (!location.valid) return { enabled: false, reason: location.reason, detail: location.detail }
   if (!location.config.enabled) return { enabled: false, reason: 'config_disabled' }
+  if (ordinaryHook && location.config.capture.sessions === 'opt-in') return { enabled: false, reason: 'capture_opt_in' }
   return { enabled: true, workspaceRoot: location.workspaceRoot, dataRoot: location.dataRoot, config: location.config }
 }
 
@@ -215,12 +236,83 @@ async function isGitRepository(path: string): Promise<boolean> {
   return exists(join(path, '.git'))
 }
 
+/**
+ * Excluded directory names under the capture scope; start-hook and finalize worktree discovery share one rule.
+ *
+ * Scope is the only rule shared here. `repositories.mode` governs which repositories the start hook
+ * baselines; finalize additionally covers worktrees created during the turn, so `workspace-only`
+ * turns can still report one new-worktree snapshot even though start capture never listed it.
+ */
+export function captureExcludedNames(config: RecorderConfig): Set<string> {
+  return new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
+}
+
+/** A path is in capture scope only when it is canonically inside the workspace and outside excluded directories. */
+export function withinCaptureScope(canonical: string, workspaceRoot: string, excluded: Set<string>): boolean {
+  const fromRoot = relative(workspaceRoot, canonical)
+  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return false
+  return !fromRoot.split(/[\\/]/).some((segment) => excluded.has(segment))
+}
+
+async function linkedWorktreeRepositories(
+  repository: string,
+  workspaceRoot: string,
+  excluded: Set<string>,
+  deadline: number
+): Promise<{ repositories: string[]; truncated: boolean }> {
+  worktreeDiscoveryCommands++
+  let output: string
+  try {
+    output = await gitCommand(['--no-optional-locks', 'worktree', 'list', '--porcelain', '-z'], {
+      cwd: repository, deadline: Math.min(deadline, Date.now() + 1_000)
+    })
+  } catch {
+    return { repositories: [], truncated: true }
+  }
+  const found: string[] = []
+  let truncated = false
+  for (const line of output.split('\0')) {
+    if (!line.startsWith('worktree ')) continue
+    const candidate = line.slice('worktree '.length)
+    if (!candidate) continue
+    if (found.length >= WORKTREE_DISCOVERY_MAX_RESULTS) {
+      truncated = true
+      break
+    }
+    let canonical: string
+    try { canonical = await realpath(candidate) } catch { continue }
+    if (!withinCaptureScope(canonical, workspaceRoot, excluded)) continue
+    if (await isGitRepository(canonical)) found.push(canonical)
+  }
+  return { repositories: found, truncated }
+}
+
 export interface RepositoryDiscovery {
   repositories: string[]
   maxDepth: number
   /** Directories not entered because of the configured depth, not a count of missing repos. */
   depthLimitedDirectories: number
+  worktreeDiscovery?: {
+    probedRepositories: number
+    skippedRepositories: number
+    discoveredWorktrees: number
+    incomplete: true
+  }
   nextDepth?: { repositories: string[]; incomplete: boolean }
+}
+
+// Covers the measured 20-repository workspace without unbounded process fan-out.
+export const WORKTREE_DISCOVERY_MAX_REPOSITORIES = 32
+export const WORKTREE_DISCOVERY_MAX_RESULTS = 128
+export const WORKTREE_DISCOVERY_MAX_CONCURRENCY = 4
+let worktreeDiscoveryCommands = 0
+
+export function resetRepositoryDiscoveryStats(): void {
+  worktreeDiscoveryCommands = 0
+}
+
+export function repositoryDiscoveryStats(): { worktreeCommands: number } {
+  return { worktreeCommands: worktreeDiscoveryCommands }
 }
 
 export async function discoverRepositories(
@@ -234,7 +326,7 @@ export async function discoverRepositories(
   if (config.repositories.mode !== 'discover-nested-git') {
     return { repositories: [...repositories], maxDepth, depthLimitedDirectories: 0 }
   }
-  const excluded = new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
+  const excluded = captureExcludedNames(config)
   let depthLimitedDirectories = 0
   const frontier: string[] = []
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -261,7 +353,47 @@ export async function discoverRepositories(
     }))
   }
   await walk(root, 1)
-  const result: RepositoryDiscovery = { repositories: [...repositories].sort(), maxDepth, depthLimitedDirectories }
+  // A linked worktree is a real repository even when its `.git` file sits below the
+  // configured traversal depth. Ask Git only for worktrees owned by repositories we
+  // already discovered; canonical containment and excludes keep this bounded expansion
+  // inside the authorized workspace. Batches cap child Git concurrency on the start path.
+  const workspaceRoot = await realpath(root).catch(() => resolve(root))
+  // Keep the first requested spelling for an already discovered repository. Git reports
+  // canonical worktree paths, while a workspace can be entered through a portable alias
+  // such as /var -> /private/var; those paths must share one repository identity without
+  // rewriting the user's requested roots.
+  const repositoryByIdentity = new Map<string, string>()
+  for (const repository of repositories) {
+    const identity = await realpath(repository).catch(() => resolve(repository))
+    if (!repositoryByIdentity.has(identity)) repositoryByIdentity.set(identity, repository)
+  }
+  const candidates = [...repositoryByIdentity.values()].sort()
+  const probed = candidates.slice(0, WORKTREE_DISCOVERY_MAX_REPOSITORIES)
+  const deadline = Date.now() + TURN_DIFF_BEGIN_DEADLINE_MS
+  const skippedRepositories = Math.max(0, candidates.length - probed.length)
+  const linked: Array<{ repositories: string[]; truncated: boolean }> = []
+  for (let offset = 0; offset < probed.length; offset += WORKTREE_DISCOVERY_MAX_CONCURRENCY) {
+    linked.push(...await Promise.all(probed.slice(offset, offset + WORKTREE_DISCOVERY_MAX_CONCURRENCY).map(repository =>
+      linkedWorktreeRepositories(repository, workspaceRoot, excluded, deadline)
+    )))
+  }
+  let discoveredWorktrees = 0
+  for (const result of linked) for (const candidate of result.repositories) {
+    const identity = await realpath(candidate).catch(() => resolve(candidate))
+    if (repositoryByIdentity.has(identity)) continue
+    repositoryByIdentity.set(identity, candidate)
+    discoveredWorktrees++
+  }
+  const worktreeTruncated = skippedRepositories > 0 || linked.some(result => result.truncated)
+  const result: RepositoryDiscovery = {
+    repositories: [...repositoryByIdentity.values()].sort(), maxDepth, depthLimitedDirectories,
+    ...(worktreeTruncated ? { worktreeDiscovery: {
+      probedRepositories: probed.length,
+      skippedRepositories,
+      discoveredWorktrees,
+      incomplete: true
+    } } : {})
+  }
   if (probeNextDepth) {
     const nextDepth = { repositories: [] as string[], incomplete: frontier.length < depthLimitedDirectories }
     let examinedEntries = 0

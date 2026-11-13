@@ -9,7 +9,7 @@
   border: 1px solid var(--border3);
   border-radius: var(--r-md);
   cursor: pointer;
-  transition: border-color var(--dur-micro) linear, background var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background var(--duration-hover) var(--ease-out);
 }
 .tool-card::before {
   content: '';

@@ -81,5 +81,5 @@
 - 已安装，并完成独立 packaged smoke 与重启后的真实实例短验收。
 - 未 push；用户实例已按明确授权重启并加载新 build。
 - 没有真实 Provider 验收，也没有达到 L3 所需的多会话日常样本。
-- 打包与验收日志保存在 `/Users/baobingjiang/.local/state/scry-history-install-20261026.IubVGb`。
+- 打包与验收日志保存在 `/Users/<user>/.local/state/scry-history-install-20261026.IubVGb`。
 - 结构化证据：[20261026-history-open-install-evidence.json](20261026-history-open-install-evidence.json)。

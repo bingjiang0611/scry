@@ -26,7 +26,7 @@ export function refreshDesktopConnections(): Promise<void> {
       snapshot = { connections, loaded: true, refreshing: false, error: null }
     } catch (error) {
       if (request !== revision) return
-      snapshot = { ...snapshot, refreshing: false, error: error instanceof Error ? error.message : String(error) }
+      snapshot = { ...snapshot, refreshing: false, error: copy.errorText(error) }
     }
     publish()
   })().finally(() => { inFlight = undefined })

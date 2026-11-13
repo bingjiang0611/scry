@@ -24,6 +24,7 @@ export async function buildResult({ finalState }) {
     failedAnswerNotSuccess: true,
     nativeSessionAdoption: true,
     providerControlReset: true, remoteModelAndPermissionRemembered: true, remoteProviderRemembered: true,
+    remoteManagedWorktree: { capabilityGated: true, hostValidated: true, selectionOnly: true },
     fullAccessSelection: true,
     contextSwitchIsolation: true,
     remoteBackgroundCannotStopLocal: true,

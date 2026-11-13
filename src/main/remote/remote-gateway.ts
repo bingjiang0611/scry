@@ -137,7 +137,7 @@ export class RemoteGateway {
   #output?: RemoteOutputReader
   #workspace?: RemoteGatewayDependencies['workspace']
   #fileDownloads?: RemoteFileDownloads
-  #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number }>()
+  #historySnapshots = new Map<string, { bytes: Buffer; expiresAt: number; deflated?: Promise<Buffer> }>()
   #historyBuilds = new Map<string, Promise<{ bytes: Buffer; snapshot: string }>>()
   // A catalog page is a frozen view. Keep the materialized source only for the
   // short lifetime of a page walk; authorization is still checked on every

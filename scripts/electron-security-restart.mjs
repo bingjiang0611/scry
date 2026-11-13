@@ -19,6 +19,9 @@ export async function exerciseRestart(smokeContext) {
   cdp = connectCdp(restarted.page.webSocketDebuggerUrl)
   await cdp.send('Runtime.enable')
   const historyRestart = await evaluate(`(async () => {
+    // Session workbenches retain hidden terminal tabs. A global tab query can
+    // activate that stale workbench instead of hydrating the selected one.
+    const current = selector => document.querySelector('[data-session-surface-current="true"]')?.querySelector(selector)
     const waitFor = async (predicate) => {
       const deadline = Date.now() + 8_000
       while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 30))
@@ -32,16 +35,17 @@ export async function exerciseRestart(smokeContext) {
     const entry = cold.items.find((item) => item.id === id)
     const toggle = document.querySelector('button[title="右侧工作区"]')
     if (toggle.getAttribute('aria-pressed') !== 'true') toggle.click()
-    await waitFor(() => !!document.querySelector('button[aria-label="添加 Surface"]'))
-    let terminalTab = [...document.querySelectorAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))
+    await waitFor(() => !!current('button[aria-label="添加 Surface"]'))
+    const panel = current('.right-surface-panel')
+    const terminalTab = [...panel.querySelectorAll('.surface-tab-activate')].find((node) => node.textContent.includes('终端'))
     if (!terminalTab) {
-      document.querySelector('button[aria-label="添加 Surface"]').click()
+      current('button[aria-label="添加 Surface"]').click()
       await waitFor(() => [...document.querySelectorAll('[role="menuitem"]')].some((node) => node.textContent.trim().startsWith('终端')))
       ;[...document.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent.trim().startsWith('终端')).click()
     } else terminalTab.click()
-    await waitFor(() => !!document.querySelector('.terminal-state.running'))
+    await waitFor(() => !!current('.terminal-state.running'))
     const before = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
-    document.querySelector('button[aria-label="终端录制历史"]').click()
+    current('button[aria-label="终端录制历史"]').click()
     await waitFor(() => !!document.querySelector('[data-recording-id="' + id + '"] button'))
     const row = document.querySelector('[data-recording-id="' + id + '"]')
     const modal = row.closest('[role="dialog"]')
@@ -50,8 +54,8 @@ export async function exerciseRestart(smokeContext) {
     const modalVisible = rect.width > 200 && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
       && [[rect.left + 24, rect.top + 24], [rect.right - 24, rect.bottom - 24]].every(([x, y]) => modal.contains(document.elementFromPoint(x, y)))
     row.querySelector('button').click()
-    await waitFor(() => document.querySelector('.terminal-pane:not([hidden]) .xterm-rows')?.textContent.includes('__SCRY_TERMINAL_WORKSPACE_OK__'))
-    const readonly = document.querySelector('button[aria-label="重新启动终端"]').disabled
+    await waitFor(() => current('.terminal-pane:not([hidden]) .xterm-rows')?.textContent.includes('__SCRY_TERMINAL_WORKSPACE_OK__'))
+    const readonly = current('button[aria-label="重新启动终端"]').disabled
     const after = (await window.scry.terminalRecordingList()).items.map((item) => item.id)
     const oldWriteRejected = await window.scry.terminalWrite(id, 1, 'no-old-shell') === false
     await window.scry.setCwd(null)

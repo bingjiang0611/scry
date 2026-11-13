@@ -88,7 +88,7 @@ describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进�
   })
 
   it('会话总调用拆分为工具、MCP、Skill、子 Agent，四项之和等于总数', () => {
-    expect(html).toContain('4 calls')
+    expect(html).toContain('4 次调用')
     expect(html).not.toContain('<span>调用</span><strong>4</strong>')
     expect(html).not.toContain('工具 1 · MCP 1 · Skill 1 · 子Agent 1')
     expect(html).toContain('TOP TOOLS<span class="more">工具 1 · MCP 1</span>')

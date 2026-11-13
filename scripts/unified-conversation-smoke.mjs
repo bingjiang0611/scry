@@ -91,6 +91,9 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
     await wait(() => evaluate(`Boolean(document.querySelector(${json(entry)}))`), 'seeded draft in sidebar')
     await click(entry)
     await wait(() => evaluate(`document.querySelector('.conversation-chat')?.dataset.conversationId === ${json(created.id)}`), 'draft opens in normal chat')
+    const attentionLog = join(fixture.userData, 'conversation-attention.jsonl')
+    await wait(() => existsSync(attentionLog) && readFileSync(attentionLog, 'utf8').trim().split('\n')
+      .some(line => JSON.parse(line).id === created.id), 'visible draft dispatches production attention IPC')
     return created.id
   }
   const id = await openDraft()
@@ -130,6 +133,12 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
   const first = await settled(evaluate, id, 1)
   assert.equal(first.turns[0].providerId, 'claude')
   assert.equal(first.summary.lastRunOutcome, 'completed', 'logical completion comes from the real settled receipt')
+  if (!await evaluate('document.hasFocus()')) {
+    await wait(async () => (await evaluate('window.scry.unreadSessions()')).unreadSessionKeys.includes(`conversation\0${id}`),
+      'background completion owns a stable logical-conversation reminder')
+    await wait(() => evaluate(`Boolean(document.querySelector(${json(originalEntry)})?.querySelector('.sb-unread'))`),
+      'unread logical conversation remains discoverable in the sidebar')
+  }
   await click('.sb-view-tabs [role="tab"][id$="-activity"]')
   await wait(() => evaluate(`document.querySelector('.sb-activity [data-conversation-id="${id}"]')?.closest('[data-activity-group]')?.dataset.activityGroup === 'completed'`), 'real logical result appears in completed')
   await click('.sb-view-tabs [role="tab"][id$="-projects"]')
@@ -152,11 +161,27 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
 
   const atLatest = `(() => { const el=document.querySelector('.conversation-chat .chat'); return el && el.scrollHeight-el.clientHeight-el.scrollTop < 2 })()`
   await wait(() => evaluate(`document.querySelectorAll('.conversation-chat .turn').length === 2 && ${atLatest}`), 'new output follows the transcript bottom')
-  // The bottom-follow policy includes 32px of slack. The original viewport only
-  // overflowed by 13px, so its top was still inside that zone, not older output.
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 700, deviceScaleFactor: 1, mobile: false })
+  // The bottom-follow policy allows 32px of slack, so this check only means something when the
+  // transcript really scrolls: two turns do not overflow every viewport, so shrink until they do.
+  const geometry = () => evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return {
+    atLatest: ${atLatest}, scrollHeight: el?.scrollHeight ?? null,
+    clientHeight: el?.clientHeight ?? null, scrollTop: el?.scrollTop ?? null,
+    viewportWidth: innerWidth, viewportHeight: innerHeight, deviceScaleFactor: devicePixelRatio,
+    turns: document.querySelectorAll('.conversation-chat .turn').length
+  } })()`)
+  const overflowing = (state) => state.scrollHeight - state.clientHeight > 32
+  let initialScrollState
   try {
-    await wait(() => evaluate(`${atLatest} && (() => { const el=document.querySelector('.conversation-chat .chat'); return el.scrollHeight-el.clientHeight > 32 })()`), 'scrollable transcript follows the bottom')
+    // Shrink only while the transcript cannot scroll. A viewport that already scrolls is the
+    // one this check is about, so a lost bottom-follow there must fail instead of shrinking on.
+    for (const height of [700, 640, 560]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1, mobile: false })
+      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+      initialScrollState = await geometry()
+      if (overflowing(initialScrollState)) break
+    }
+    assert.ok(overflowing(initialScrollState), `the transcript must overflow to test bottom following: ${JSON.stringify(initialScrollState)}`)
+    assert.ok(initialScrollState.atLatest, `scrollable transcript follows the bottom: ${JSON.stringify(initialScrollState)}`)
     const wheelPoint = await evaluate(`(() => {const rect=document.querySelector('.conversation-chat .chat').getBoundingClientRect();return {x:rect.left+10,y:rect.top+30}})()`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelPoint, deltaX: 0, deltaY: -10000 })
     await wait(() => evaluate(`document.querySelector('.conversation-chat .chat').scrollTop === 0 && !${atLatest}`), 'user scroll leaves bottom following')
@@ -166,6 +191,10 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
       const position = await evaluate(`(() => { const el=document.querySelector('.conversation-chat .chat'); return { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight } })()`)
       assert.equal(position.top, 0, `layout changes must preserve the user reading older output: ${JSON.stringify(position)}`)
     }
+  } catch (error) {
+    // Keep the first failure and distinguish no overflow from lost bottom-follow.
+    console.error('[scry] initial transcript scroll geometry', initialScrollState)
+    throw error
   } finally { await cdp.send('Emulation.clearDeviceMetricsOverride') }
 
   const aPreview = await preview(evaluate, id, 'claude')

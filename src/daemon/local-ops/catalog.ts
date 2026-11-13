@@ -14,7 +14,7 @@ export const catalogLocalOps: DaemonLocalOpGroup = ({ catalog, workspace, provid
   ...providerDetectionChannelHandlers({
     smokeProviderEnabled: providers.smokeProviderEnabled,
     smokeDetectedAgents: providers.smokeDetectedAgents,
-    storedPiProfilesNotDetected: pi.storedPiProfilesNotDetected,
+    storedPiProfiles: pi.storedPiProfiles,
     providerCompatibility: providers.providerCompatibility,
     detectInstalledAgents: pi.detectInstalledAgents,
     providerRegistry: providers.providerRegistry

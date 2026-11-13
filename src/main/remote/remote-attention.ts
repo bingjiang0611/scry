@@ -11,44 +11,68 @@ export interface RemoteAttentionSink {
   (keys: readonly string[]): void
 }
 
-export function createRemoteAttentionTracker(publish: RemoteAttentionSink) {
+export interface RemoteAttentionTracker {
+  baseline(connectionId: string, sessions: readonly RemoteSessionRef[]): void
+  catalog(connectionId: string, catalog: Pick<DesktopRemoteCatalog, 'sessions'>): readonly string[]
+  viewed(connectionId: string, context: DesktopRemoteContext | null): void
+  disconnect(connectionId: string): void
+  forget(connectionId: string): void
+}
+
+export function createRemoteAttentionTracker(publish: RemoteAttentionSink): RemoteAttentionTracker {
   const previous = new Map<string, readonly RemoteSessionRef[]>()
   const sessions = new Map<string, readonly RemoteSessionRef[]>()
   const unread = new Map<string, ReadonlySet<string>>()
   const viewed = new Map<string, string | null>()
 
   const flush = (): void => {
-    publish([...unread.values()].flatMap((keys) => [...keys]))
+    publish([...unread].flatMap(([connectionId, keys]) => sessions.has(connectionId) ? [...keys] : []))
   }
 
-  const recompute = (connectionId: string): void => {
+  const recompute = (connectionId: string): ReadonlySet<string> => {
     const next = reconcileRemoteSessionAttention(
       connectionId, previous.get(connectionId), sessions.get(connectionId) ?? [],
       unread.get(connectionId) ?? new Set(), viewed.get(connectionId) ?? null
     )
     unread.set(connectionId, next)
+    return next
   }
 
   return {
-    // The host catalog is the only authority for a remote run's terminal outcome.
-    catalog(connectionId: string, catalog: Pick<DesktopRemoteCatalog, 'sessions'>): void {
-      const next = Array.isArray(catalog.sessions) ? catalog.sessions : []
-      // First discovery is a baseline, so historical results are not announced.
-      if (!previous.has(connectionId)) previous.set(connectionId, next)
+    // Connection establishment must observe this baseline before publishing the
+    // host as connected. On reconnect the retained previous catalog detects
+    // terminal results that arrived while the tunnel was down.
+    baseline(connectionId, next): void {
       sessions.set(connectionId, next)
-      recompute(connectionId)
+      if (previous.has(connectionId)) recompute(connectionId)
+      else unread.set(connectionId, new Set())
       previous.set(connectionId, next)
       flush()
     },
-    // Opening a remote session clears its own key; the renderer already shows the run.
-    viewed(connectionId: string, context: DesktopRemoteContext): void {
-      if (!context.externalSessionId) return
-      viewed.set(connectionId, remoteSessionAttentionKey(connectionId, context))
-      sessions.set(connectionId, sessions.get(connectionId) ?? [])
-      recompute(connectionId)
+    // The host catalog is the only authority for a remote run's terminal outcome.
+    catalog(connectionId, catalog): readonly string[] {
+      const next = Array.isArray(catalog.sessions) ? catalog.sessions : []
+      if (!previous.has(connectionId)) previous.set(connectionId, next)
+      sessions.set(connectionId, next)
+      const result = recompute(connectionId)
+      previous.set(connectionId, next)
+      flush()
+      return [...result]
+    },
+    // Only a focused remote session suppresses its own key. Clearing focus lets a
+    // later completion on that same session become unread again.
+    viewed(connectionId, context): void {
+      viewed.set(connectionId, context?.externalSessionId ? remoteSessionAttentionKey(connectionId, context) : null)
+      if (sessions.has(connectionId)) recompute(connectionId)
       flush()
     },
-    disconnect(connectionId: string): void {
+    // Disconnect clears visible attention but keeps the last observed catalog as
+    // the reconnect baseline. Forgetting the host removes that retained identity.
+    disconnect(connectionId): void {
+      sessions.delete(connectionId); viewed.delete(connectionId)
+      flush()
+    },
+    forget(connectionId): void {
       previous.delete(connectionId); sessions.delete(connectionId)
       unread.delete(connectionId); viewed.delete(connectionId)
       flush()

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createRemoteRunBinding } from './remote-run-binding'
+import { createRemoteRunBinding, type RemoteRunBindingDependencies } from './remote-run-binding'
+import { fakeRun } from './remote-run-binding-fixtures'
 import type { TraceEvent } from '../../shared/trace'
 
 // The canonical seam: a submitted run is handed to the App's own run lifecycle. These
@@ -23,6 +24,30 @@ describe('remote run binding (canonical App seam: submit -> startAppRun)', () =>
       runId: 'canonical-1', ledgerRunId: 'ledger-canonical', request: expect.objectContaining({ prompt: 'go', cwd: '/w' })
     }))
     expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'canonical output' })
+  })
+
+  it('passes only the workspace selection to the canonical host lifecycle and rejects it on the legacy executor', async () => {
+    const workspace = { operationId: '11111111-1111-4111-8111-111111111111', intent: {
+      kind: 'current' as const, repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64)
+    } }
+    const startAppRun = vi.fn(async (input: Parameters<NonNullable<RemoteRunBindingDependencies['startAppRun']>>[0]) => {
+      input.onRegistered?.({ cwd: '/managed/topic' })
+      return { status: 'completed' as const, recording: 'committed' as const }
+    })
+    const progress = vi.fn()
+    await createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-worktree' })({
+      runId: 'ledger-worktree', routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },
+      progress, output: vi.fn()
+    })
+    expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
+      cwd: '/source', workspace, expectedExternalSessionId: null
+    }) }))
+    expect(progress).toHaveBeenCalledWith(expect.stringContaining('"cwd":"/managed/topic"'))
+    const { run } = fakeRun(async () => ({ status: 'completed' }))
+    await expect(createRemoteRunBinding({ run })({
+      runId: 'legacy-worktree', routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },
+      progress: vi.fn(), output: vi.fn()
+    })).rejects.toThrow('remote_workspace_requires_canonical_runtime')
   })
 
   it('tells the App this run arrived through the ledger', async () => {

@@ -1,0 +1,107 @@
+// 归档列表的 Provider 筛选：单选菜单，保留品牌图标与当前项对勾。
+import { useId, useRef } from 'react'
+
+import { PROVIDER_LABELS, type ProviderId } from '@shared/provider'
+
+import { PROVIDER_FILTER_COPY } from '../constants/copy'
+
+import { Icon } from './primitives/Icon'
+import { ProviderGlyph } from './ProviderGlyph'
+import { MenuCheck } from './menu-parts'
+import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
+import { moveMenuFocus } from './WorkdirPicker'
+
+/** Provider id 不是给人读的；未知来源单独说明，不冒充成某个 Provider。 */
+export function providerFilterLabel(provider: string): string {
+  if (provider === 'all') return PROVIDER_FILTER_COPY.all
+  if (provider === 'legacy_unknown') return PROVIDER_FILTER_COPY.unknown
+  return PROVIDER_LABELS[provider as ProviderId] ?? provider
+}
+
+export function ProviderFilterMenu({
+  providers,
+  value,
+  onChange,
+  open: controlledOpen,
+  onOpenChange
+}: {
+  providers: string[]
+  value: string
+  onChange: (provider: string) => void
+} & PickerOpenProps) {
+  const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
+  const menuId = useId()
+  const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // 关闭前把焦点退回触发器：选中一项后菜单就卸载了，否则焦点会掉到 body。
+  // 外部点击时焦点不在根节点内，这里不动焦点，避免抢走用户刚点的地方。
+  const close = (): void => {
+    if (rootRef.current?.contains(document.activeElement)) triggerRef.current?.focus()
+    setOpen(false)
+  }
+  useMenuDismiss({ open, close, rootRef, triggerRef, menuRef })
+  const pick = (provider: string): void => {
+    onChange(provider)
+    close()
+  }
+  return (
+    <div className="arch-filter arch-provider-filter" ref={rootRef}>
+      <Icon name="filter" />
+      <button
+        type="button"
+        ref={triggerRef}
+        className="arch-provider-trigger"
+        aria-label={PROVIDER_FILTER_COPY.label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        title={PROVIDER_FILTER_COPY.label}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {providerFilterLabel(value)}
+        <Icon name="chevronDown" />
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          ref={menuRef}
+          className="menu arch-provider-menu"
+          role="menu"
+          aria-label={PROVIDER_FILTER_COPY.label}
+          onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
+        >
+          <button
+            type="button"
+            role="menuitemradio"
+            className="mitem"
+            aria-checked={value === 'all'}
+            onClick={() => pick('all')}
+          >
+            <MenuCheck selected={value === 'all'} />
+            <Icon name="grid" />
+            <span>{providerFilterLabel('all')}</span>
+          </button>
+          <div className="mdiv" role="separator" />
+          {providers.map((provider) => (
+            <button
+              key={provider}
+              type="button"
+              role="menuitemradio"
+              className="mitem"
+              data-provider-option={provider}
+              aria-checked={value === provider}
+              onClick={() => pick(provider)}
+            >
+              <MenuCheck selected={value === provider} />
+              {provider === 'legacy_unknown'
+                ? <Icon name="box" />
+                : <ProviderGlyph provider={provider as ProviderId} />}
+              <span>{providerFilterLabel(provider)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

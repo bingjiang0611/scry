@@ -31,6 +31,9 @@ export interface RelayTransport {
   start(onSession: (stream: Duplex) => void, onError?: (error: Error) => void): Promise<void>
   // Optional because private/test transports may not expose pool state.
   diagnostics?(): RelayDiagnostics
+  // Drop legs that cannot be trusted any more (the Mac woke from sleep or
+  // changed network) and dial replacements. Optional for private transports.
+  refresh?(options?: { includeActive?: boolean }): void
   close(): Promise<void>
 }
 
@@ -64,6 +67,10 @@ export class RelayClient {
 
   diagnostics(): RelayDiagnostics | undefined {
     return this.#transport.diagnostics?.()
+  }
+
+  refresh(options?: { includeActive?: boolean }): void {
+    if (this.#started) this.#transport.refresh?.(options)
   }
 
   async close(): Promise<void> {
@@ -167,6 +174,17 @@ export class ReverseTunnelTransport implements RelayTransport {
       this.#active.delete(leg)
       this.#fillPool()
     })
+  }
+
+  // Waiting and opening legs carry no device, so replacing them is free. Active
+  // legs carry phone lanes; after sleep or a network change their sockets are
+  // usually dead already, and closing them lets the phone reconnect at once
+  // instead of waiting for a response deadline.
+  refresh(options?: { includeActive?: boolean }): void {
+    if (this.#closed) return
+    const stale = [...this.#waiting, ...this.#opening, ...(options?.includeActive ? this.#active : [])]
+    for (const leg of stale) leg.destroy()
+    this.#fillPool()
   }
 
   async close(): Promise<void> {

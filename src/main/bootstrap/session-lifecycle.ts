@@ -16,6 +16,8 @@ import { attachmentSessionRunIds, deleteRunAttachments } from '../attachment-sto
 import { managedSessionRunIds, deleteManagedTurnArtifacts } from '../managed-turn-commit'
 import { traceProgressSessionRunIds, deleteTraceTurnProgressArtifacts } from '../trace-turn-progress'
 import { deleteOwnedSessionData } from '../session-deletion'
+import type { SideChatCascade } from './conversation-delete'
+import { createSessionSideChats } from './session-side-chats'
 
 // Session delete, rename, pin, archive and archived purge, free of Electron so main and
 // the daemon run one implementation. Asking the user is the caller's: main passes its
@@ -45,6 +47,8 @@ export interface SessionLifecycleDependencies {
   appUserDataDir: string
   requestRunStop: (runId: string) => boolean
   prepareConversationDeletion: (conversation: Conversation) => Promise<ConversationDeletionPreview>
+  /** A Provider session's side chats, deleted with it (they live only in its panel). */
+  sideChatCascade: SideChatCascade
   publishDataUpdated: (event: AgentDataUpdated) => void
   /** Asks the user; false or absent answer means no. Absent when the caller already asked. */
   confirm?: (prompt: { message: string; detail: string; button: string }) => Promise<boolean>
@@ -70,12 +74,23 @@ export const SESSION_DELETION_PROMPT = {
   detail: ARCHIVED_DELETION_DETAIL
 }
 
+/** The single-session prompt, naming the side chats the deletion takes along. */
+export function sessionDeletionPrompt(sideChatCount = 0) {
+  return sideChatCount > 0
+    ? { ...SESSION_DELETION_PROMPT, detail: `${SESSION_DELETION_PROMPT.detail}\n这个会话的 ${sideChatCount} 个侧边会话会一并删除。` }
+    : SESSION_DELETION_PROMPT
+}
+
 export function archivedDeletionPrompt(count: number) {
-  return { message: `永久删除全部 ${count} 个已存档会话？`, button: `删除全部 ${count} 个`, detail: ARCHIVED_DELETION_DETAIL }
+  return {
+    message: `永久删除全部 ${count} 个已存档会话？`, button: `删除全部 ${count} 个`,
+    detail: '将删除 Scry 的 catalog、archive、附件、SQLite 和 usage 记录，以及这些会话各自的侧边会话。工作区 .scry/ canonical evidence 与 Provider 原生 transcript/history 会保留。'
+  }
 }
 
 export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
-  const { getRuns, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery, providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions, appUserDataDir, requestRunStop, prepareConversationDeletion, assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, publishDataUpdated } = deps
+  const { getRuns, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery, providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions, appUserDataDir, requestRunStop, prepareConversationDeletion, assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, publishDataUpdated, sideChatCascade } = deps
+  const sessionSideChats = createSessionSideChats({ appSessionStore, sideChatCascade, notifyFailure: deps.notifyFailure })
 
   // 删除一个历史会话。工作区 .scry/ 是独立 canonical evidence，明确保留。
   // confirm / notifyFailure 由调用方决定：单条删除各弹一次系统弹窗，批量删除只在批次首尾各弹一次。
@@ -94,6 +109,9 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
     const admissionKey = providerContextKey(providerId, cwd, agentProfileId)
     const deletionKey = providerSessionKey(providerId, cwd, externalSessionId, agentProfileId)
     let otherOwnedRunIds = new Set<string>()
+    // A Provider session takes its side chats with it. A conversation's own targets come
+    // through here too, and that delete owns its children.
+    let sideChats: Awaited<ReturnType<typeof sessionSideChats.plan>> | undefined
     const assertDeletionAllowed = async (): Promise<void> => {
       if (!options.conversationId) return assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd, nativeSessionId: externalSessionId }, {})
       const owner = await conversationStore().read(options.conversationId)
@@ -118,13 +136,26 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
     })
     if (!reserved) return { ok: false, reason: 'active_session', ...empty() }
     try {
+      if (!options.conversationId) {
+        try {
+          sideChats = await sessionSideChats.plan({ providerId, agentProfileId, cwd, externalSessionId })
+        } catch (error) { return sessionSideChats.kept(sessionSideChats.failureOf(error), options.notifyFailure, empty()) }
+      }
       if (options.confirm && deps.confirm) {
-        const confirmed = await deps.confirm(SESSION_DELETION_PROMPT)
+        const confirmed = await deps.confirm(sessionDeletionPrompt(sideChats?.count))
         if (!confirmed) {
           return { ok: false, cancelled: true, reason: 'user_cancelled', ...empty() }
         }
       }
-      return contextAdmission.run(admissionKey, async () => {
+      if (sideChats?.count) {
+        // Side chats are deleted before the session's own destructive phase, so the
+        // caller's authorization is re-checked here exactly as it is there.
+        options.authorize?.()
+        const failed = await sessionSideChats.remove(sideChats.scope)
+        if (failed.length > 0) return sessionSideChats.kept(failed, options.notifyFailure, empty())
+      }
+      // Awaited: the finally below drops the reservation, which must outlive this phase.
+      return await contextAdmission.run(admissionKey, async () => {
         // Matching starts are fenced by deletionKey. The context admission is reacquired
         // only for the destructive phase so broad managed recovery in another session
         // cannot resurrect this session while unrelated work is deleted.

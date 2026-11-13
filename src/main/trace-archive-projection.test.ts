@@ -141,6 +141,24 @@ describe('readArchiveTurnProjection', () => {
     await expect(read(file, { providerId: 'codex' })).rejects.toThrow('Provider')
   })
 
+  it('fails closed on a composite verdict field but still skips unknown nested payloads', async () => {
+    // An object or array in a selected verdict field is a corrupt record: skipping it would
+    // leave `isError: false` to decide the turn's verdict alone.
+    for (const composite of [{ reason: 'output_token_limit' }, ['output_token_limit']]) {
+      await expect(read(archive([event({ stage: 'result', isError: false, terminationReason: composite })],
+        { status: undefined }))).rejects.toThrow('trace archive event terminationReason is invalid')
+      await expect(read(archive([event({ stage: 'result', isError: false, providerStopReason: composite })],
+        { status: undefined }))).rejects.toThrow('trace archive event providerStopReason is invalid')
+    }
+    // Only those selected fields fail: an unknown nested payload that imitates them is still
+    // skipped, so an unrelated Provider payload cannot make an archive unreadable.
+    const turn = await read(archive([
+      event({ stage: 'result', isError: false, runtimeMetadata: { terminationReason: 'output_token_limit' } }),
+      event({ id: 'e2', text: 'answer' })
+    ], { status: undefined }))
+    expect(turn.status).toBe('completed')
+  })
+
   it('refuses an event that claims another Provider or run', async () => {
     await expect(read(archive([event({ providerId: 'codex' })]))).rejects.toThrow('Provider')
     await expect(read(archive([event({ runId: 'other-run' })]))).rejects.toThrow('another run')

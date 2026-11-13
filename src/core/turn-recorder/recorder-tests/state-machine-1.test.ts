@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process'
 import { readFile, writeFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { it, expect } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
 import { safeKey, readHealth, listRecords } from '../store'
 import { workspace, payload, completeTurn } from './fixture.test'
+
+const pexecFile = promisify(execFile)
 
 export function registerSuite1(): void {
 
@@ -115,6 +119,106 @@ export function registerSuite1(): void {
     // A later prompt opens a new turn instead of reviving the closed one.
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('ended', { prompt: 'again', timestamp: new Date().toISOString() }) })
     expect((await listRecords(join(root, '.scry')))).toHaveLength(1)
+  })
+
+  it.each(['missing', 'previous-turn'])('Qoder SessionEnd closes a pre-model cancellation with %s transcript', async (source) => {
+    const root = await workspace()
+    const sessionId = 'qoder-cancelled-before-model'
+    const configPath = join(root, 'scry.config.json')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.capture.toolOutput = 'full'
+    config.capture.diff = true
+    await writeFile(configPath, JSON.stringify(config))
+    await pexecFile('git', ['init', '-q', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'add', '.'], { cwd: root })
+    await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '-m', 'baseline'], { cwd: root })
+    const base = { provider: 'qoder' as const, workspace: root }
+    const native = { session_id: sessionId, cwd: root, transcript_path: join(root, 'qoder.jsonl') }
+    if (source === 'previous-turn') {
+      await writeFile(native.transcript_path, [
+        { type: 'user', promptId: 'old', message: { role: 'user', content: 'previous prompt' } },
+        { type: 'assistant', promptId: 'old', message: { content: [{ type: 'text', text: 'foreign answer' }], usage: { input_tokens: 999 } } }
+      ].map(row => JSON.stringify(row)).join('\n'))
+    }
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: {
+      ...native, hook_event_name: 'UserPromptSubmit', prompt: 'cancel before the model starts'
+    } })
+    const openPath = join(root, '.scry/runtime/qoder', safeKey(sessionId), 'open.json')
+    expect(JSON.parse(await readFile(openPath, 'utf8')).staleTerminalProtection).toBe(true)
+    await recoverRecorder(root)
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
+    const terminal = { ...base, event: 'SessionEnd', payload: {
+      ...native, hook_event_name: 'SessionEnd', reason: 'other'
+    } }
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
+    const closing = JSON.parse(await readFile(openPath, 'utf8'))
+    expect(closing.status).toBe('closing')
+    expect(closing.deferredTerminalAt).toBeUndefined()
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
+    await recoverRecorder(root)
+    await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'duplicate' })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      sessionId, status: 'interrupted',
+      termination: { quality: 'estimated', value: {
+        reason: 'session_end', completedAtSource: 'recorder_observed_terminal'
+      } },
+      assistant: { status: 'unavailable' },
+      transcript: { status: 'unavailable' },
+      usage: { status: 'unavailable' },
+      diff: { status: 'unavailable' }
+    })
+    expect(records[0].diff.omissionReason).toContain('Git baseline may include work after the unmatched turn boundary')
+    expect(JSON.stringify(records)).not.toContain('foreign answer')
+  })
+
+  it('Qoder SessionEnd confirms an already deferred interrupted Stop without waiting for stale-terminal grace', async () => {
+    const root = await workspace()
+    const sessionId = 'qoder-headless-completed'
+    const base = { provider: 'qoder' as const, workspace: root }
+    const native = {
+      session_id: sessionId,
+      cwd: root,
+      transcript_path: join(root, 'non-persisted-qoder.jsonl')
+    }
+    await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: {
+      ...native, hook_event_name: 'UserPromptSubmit', prompt: 'answer once'
+    } })
+    await expect(handleRecorderHook({ ...base, event: 'Stop', payload: {
+      ...native, hook_event_name: 'Stop', assistant_response: 'cancelled', status: 'interrupted'
+    } })).resolves.toMatchObject({ status: 'pending' })
+    const openPath = join(root, '.scry/runtime/qoder', safeKey(sessionId), 'open.json')
+    const deferred = JSON.parse(await readFile(openPath, 'utf8'))
+    expect(deferred).toMatchObject({ status: 'closing', endReason: 'provider_terminal' })
+    expect(deferred.deferredTerminalEventId).toBeTruthy()
+
+    const sessionEnd = { ...base, event: 'SessionEnd', payload: {
+      ...native, hook_event_name: 'SessionEnd', reason: 'other'
+    } }
+    await expect(handleRecorderHook(sessionEnd)).resolves.toMatchObject({ status: 'pending' })
+    const confirmed = JSON.parse(await readFile(openPath, 'utf8'))
+    expect(confirmed).toMatchObject({
+      status: 'closing',
+      endReason: 'provider_terminal',
+      terminalFallbackStatus: 'interrupted',
+      terminalIdentityConfirmedBySessionEnd: true
+    })
+    expect(confirmed.deferredTerminalAt).toBeUndefined()
+    expect(confirmed.deferredTerminalEventId).toBeUndefined()
+    const terminalAt = confirmed.terminalAt
+    await expect(handleRecorderHook(sessionEnd)).resolves.toMatchObject({ status: 'pending' })
+    expect(JSON.parse(await readFile(openPath, 'utf8')).terminalAt).toBe(terminalAt)
+
+    await recoverRecorder(root)
+    await expect(handleRecorderHook(sessionEnd)).resolves.toMatchObject({ status: 'duplicate' })
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      sessionId,
+      status: 'interrupted',
+      termination: { value: { reason: 'provider_terminal' } }
+    })
   })
 
   it('a terminal timestamp from a skewed Provider clock is not trusted as the end time', async () => {

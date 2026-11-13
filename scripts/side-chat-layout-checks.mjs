@@ -1,6 +1,6 @@
-import { CHILD_COMPOSER, CHILD_PANEL, SIDE_CHAT_SURFACE, json, sideChatDriver } from './side-chat-driving.mjs'
+import { CHILD_PANEL, SIDE_CHAT_SURFACE, json, sideChatDriver } from './side-chat-driving.mjs'
+import { exerciseSideChatInput } from './side-chat-input-checks.mjs'
 import { createWindowResize } from './side-chat-window-control.mjs'
-import { exerciseSideChatUntrustedText } from './side-chat-untrusted-text-checks.mjs'
 
 /**
  * Side-chat layout, keyboard and composition acceptance in the isolated production App.
@@ -11,33 +11,23 @@ import { exerciseSideChatUntrustedText } from './side-chat-untrusted-text-checks
  * instead of only at one size.
  */
 export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, childId, windowControlPath, rendererFailures = [] }) {
-  const {
-    driver, capture, click, clearDraft, keyStroke, idle, wait, conversation, inputs
-  } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, rendererFailures, label: 'Side-chat layout' })
+  const controls = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, rendererFailures, label: 'Side-chat layout' })
+  const { capture, click, keyStroke, idle, wait } = controls
   // A real window resize, not an emulated viewport: see side-chat-window-control.mjs.
   const { resize, applied: windowSizes } = createWindowResize({ wait, idle, check, windowControlPath, json })
   /**
-   * Show the workbench itself. `showChild` returns early when the child surface is still
-   * mounted from a hidden panel, so the narrow sections reveal the panel explicitly.
+   * Show the workbench itself without switching the selected child; narrow sections
+   * use this separately from selecting and waiting for the tested child.
    */
   const revealPanel = async () => {
-    if (await evaluate(`document.querySelector('.app.right-panel-hidden') == null`)) return
-    await click('.panel-pill:not(.summary-pill)')
-    await wait(`document.querySelector('.app.right-panel-hidden') == null`)
+    await controls.showPanel()
     await idle()
-    await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`)
   }
   const showChild = async () => {
-    const current = await evaluate(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId ?? null`)
-    if (current === childId) return
-    if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {
-      await click('.panel-pill:not(.summary-pill)')
-    }
-    if (await evaluate(`document.querySelector('#right-surface-pane [data-session-surface-current="true"]') == null`)) return
-    const tab = `[data-side-chat-tab-id="${childId}"] [role="tab"]`
-    if (await evaluate(`document.querySelector('${tab}') != null`)) await click(tab)
-    await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`, 20000)
-    await idle()
+    // Reload mounts the sidebar before restoring the parent and its workbench.
+    await wait(`document.querySelector('${SIDE_CHAT_SURFACE} [data-side-chat-tab-id="${childId}"]') != null`, 30000)
+    await controls.showPanel()
+    await controls.openChildById(childId)
   }
 
   // Measurements the panel and the chip must keep at every supported width.
@@ -240,27 +230,7 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   check(tabKeys.every(entry => entry.selected === 1), `the tab strip lost its single selection while using the keyboard: ${json(tabKeys)}`)
   check(tabKeys.every(entry => entry.focus != null), `a tab key left the focus on nothing: ${json(tabKeys)}`)
 
-  // 6. Real IME composition must not send, and committing it must not lose the text.
-  await click(CHILD_COMPOSER)
-  const beforeComposition = inputs().length
-  const turnsBefore = (await conversation(childId)).turns.length
-  await cdp.send('Input.imeSetComposition', { text: '侧边会话', selectionStart: 4, selectionEnd: 4 })
-  await new Promise(resolve => setTimeout(resolve, 200))
-  await keyStroke({ key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
-  await new Promise(resolve => setTimeout(resolve, 400))
-  const composing = await evaluate(`(() => ({ value: document.querySelector('${CHILD_COMPOSER}')?.value ?? null,
-    composing: document.querySelector('${CHILD_COMPOSER}')?.matches(':focus') ?? false }))()`)
-  check(composing.value === '侧边会话', `an IME composition was not kept in the composer: ${json(composing)}`)
-  const imeDispatched = inputs().length !== beforeComposition
-  check(!imeDispatched, 'Enter during IME composition dispatched a Provider run')
-  check((await conversation(childId)).turns.length === turnsBefore, 'Enter during IME composition created a turn')
-  await cdp.send('Input.insertText', { text: '侧边会话' })
-  await wait(`document.querySelector('${CHILD_COMPOSER}')?.value === '侧边会话'`)
-  await clearDraft(CHILD_COMPOSER)
-  await capture('layout-ime')
-
-  // 7. Snapshot and Provider text is untrusted: it renders as text, never as markup.
-  const injected = await exerciseSideChatUntrustedText({ cdp, evaluate, check, childId, driver, click, wait, capture, conversation })
+  const input = await exerciseSideChatInput({ cdp, evaluate, check, childId, controls, showChild })
 
   await resize(1400, 900)
   await showChild()
@@ -269,7 +239,6 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
     narrowWindow: { ...narrowSide, column: narrowColumn, backToConversation },
     surfaces: tools, chatBodyHeight, windowSizes,
     narrowPanel, schemes: Object.fromEntries(Object.entries(schemes).map(([scheme, value]) => [scheme, { ratio: value.ratio, background: value.background }])),
-    tabKeys, ime: { value: composing.value, dispatchedDuringComposition: imeDispatched },
-    untrustedText: injected
+    tabKeys, ...input
   }
 }

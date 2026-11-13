@@ -44,7 +44,7 @@ struct SidebarDrawer: View {
                            onDismiss: { actions.dismissToast() })
       }
     }
-    .animation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false), value: refreshToastVisible)
+    .animation(Motion.animation(refreshToastVisible ? .enter : .exit, reduceMotion: reduceMotion), value: refreshToastVisible)
     .task(id: refreshToastID) {
       guard refreshToastVisible else { return }
       do { try await Task.sleep(for: .milliseconds(2_600)) } catch { return }

@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { catalogue } from './performance-path-catalogue.mjs'
 
 // The IPC routing matrix answers one question per privileged channel: when the daemon
 // owns the run pipeline, does this call stay in main, travel over an existing protocol
@@ -122,8 +123,10 @@ export function workbenchMethods() {
   return surfaces
 }
 
+// The catalogue resolves `include` entries (performance-paths/*.json), so a path that
+// moved into an included file is still a known user path.
 export function performancePaths() {
-  return new Set(JSON.parse(readFileSync(PATHS, 'utf8')).paths.map((path) => path.id))
+  return new Set(catalogue.paths.map((path) => path.id))
 }
 
 /**

@@ -1,33 +1,7 @@
-import { constants } from 'node:fs'
-import { open } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { creditUsageEvidence, isCreditUsageEvidence, type CreditUsageEvidence } from '../shared/credit-usage'
 import type { LoadedSessionTurn } from '../shared/session-history'
 import type { TraceEvent } from '../shared/trace'
-import { piCreditRequests } from './pi-credit-usage'
-import { readPiNativeSession } from './pi-native-history'
-
-// Larger sessions stay unavailable; add indexed/byte-offset metering before raising this read budget.
-const MAX_BYTES = 64 * 1024 * 1024
-
-// Only the adapter supplies this path, from its persisted session receipt. History
-// uses the catalog-authorized default root instead; no renderer path is accepted.
-async function readLiveSession(path: string): Promise<string> {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-  try {
-    const info = await file.stat()
-    if (!info.isFile() || info.size > MAX_BYTES) throw new Error('Pi credit session is not a regular file within 64 MiB')
-    const buffer = Buffer.alloc(info.size)
-    let offset = 0
-    while (offset < buffer.length) {
-      const { bytesRead } = await file.read(buffer, offset, buffer.length - offset, offset)
-      if (!bytesRead) throw new Error('Pi credit session was truncated during read')
-      offset += bytesRead
-    }
-    return buffer.toString('utf8')
-  } finally { await file.close() }
-}
+import { readPiCreditRequests } from './pi-credit-reader'
 
 export async function readPiCreditUsage(args: {
   cwd: string
@@ -39,12 +13,7 @@ export async function readPiCreditUsage(args: {
   const evidence = new Map<string, CreditUsageEvidence>()
   if (!args.turns.length) return evidence
   try {
-    const content = args.sessionFile ? await readLiveSession(args.sessionFile) : await readPiNativeSession({
-      cwd: args.cwd, sessionId: args.sessionId,
-      sessionRoot: args.sessionRoot ?? join(homedir(), '.pi', 'agent', 'sessions'), maxBytes: MAX_BYTES
-    })
-    if (content == null) throw new Error('Pi credit session is unavailable in the default session root')
-    const parsed = piCreditRequests(content, args, args.turns)
+    const parsed = await readPiCreditRequests(args)
     for (const turn of args.turns) {
       const value = creditUsageEvidence(parsed.requests.filter((request) => request.runId === turn.runId), 'pi_qoder_credit_observation')
       if (parsed.incomplete) value.omissionReason += ' Native JSONL tail is incomplete; only complete entries are covered.'

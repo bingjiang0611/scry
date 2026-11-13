@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import * as agentDiscovery from './claude-locate'
 import { createPiProfileRuntime } from './bootstrap/pi-profiles'
-import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, resolvePiLauncherExecutable, undetectedPiProfiles } from './pi-agent-profiles'
+import { canonicalizePiAgentPaths, createPiAgentProfileStore, piProfileForExecutable, registeredPiProfileId, resolvePiLauncherExecutable, undetectedPiProfiles } from './pi-agent-profiles'
 
 describe('Pi Agent Profile store', () => {
   it('uses the canonical executable path as stable identity and persists profiles', () => {
@@ -132,5 +132,18 @@ describe('Pi profile discovery identity', () => {
     const saved = { id: 'pi:564f7a994e4e34da', label: 'Pi · Rotom', executable: '/bin/rotom' }
     expect(undetectedPiProfiles([saved], [{ id: 'pi:rotom' }])).toEqual([saved])
     expect(undetectedPiProfiles([saved], [{ id: saved.id }])).toEqual([])
+  })
+
+  // 回归：Pi · Rotom 的历史 id 不是已登记的 Agent Profile；只有同一 canonical 启动器才映射。
+  it('resolves the registered profile of a legacy Pi id by exact canonical launcher', () => {
+    const saved = { id: 'pi:0123456789abcdef', label: 'Pi · rotom', executable: '/bin/rotom' }
+    expect(registeredPiProfileId({ id: 'pi:rotom', path: '/bin/rotom' }, [saved])).toBe(saved.id)
+    expect(registeredPiProfileId({ id: 'pi:rotom', path: '/bin/other' }, [saved])).toBeUndefined()
+    expect(registeredPiProfileId({ id: 'pi:rotom', path: '/bin/rotom' }, [])).toBeUndefined()
+    // 已经登记的 id 就是它自己的 Profile，即使存储条目已不可读。
+    expect(registeredPiProfileId({ id: saved.id, path: '/bin/gone' }, [])).toBe(saved.id)
+    // 同一启动器上的两个 Profile 有歧义，不选其中一个。
+    expect(registeredPiProfileId({ id: 'pi:rotom', path: '/bin/rotom' },
+      [saved, { id: 'pi:fedcba9876543210', label: 'Pi · copy', executable: '/bin/rotom' }])).toBeUndefined()
   })
 })

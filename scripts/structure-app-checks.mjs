@@ -87,7 +87,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
       const trigger = `.sb-navitem[title="${title}"]`
       await click(trigger)
       await wait(`document.querySelector('${selector}') != null`)
-      check(await evaluate(`document.querySelector('${selector}').getAnimations().some(a => a.effect.getTiming().duration === 260)`), 'Modal entrance timing differs in the production App')
+      check(await evaluate(`document.querySelector('${selector}').getAnimations().some(a => a.effect.getTiming().duration === 250)`), 'Modal entrance timing differs in the production App')
       await settleEntrance(selector)
       await capture(`${theme}-${name}`)
       closeTimes.push({ theme, modal: name, ...await closeModal(selector, trigger) })
@@ -121,7 +121,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await idle()
     await click('#right-surface-pane [data-session-surface-current="true"] [aria-label="添加 Surface"]')
     await wait(`document.querySelector('.surface-menu[data-state="enter"]') != null`)
-    check(await evaluate(`document.querySelector('.surface-menu').getAnimations().some(a => a.effect.getTiming().duration === 160)`), 'Surface menu entrance is not 160ms')
+    check(await evaluate(`document.querySelector('.surface-menu').getAnimations().some(a => a.effect.getTiming().duration === 200)`), 'Surface menu entrance is not 200ms')
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`document.querySelector('.surface-menu').getAnimations().every(a => a.playState === 'finished')`)
     await capture(`${theme}-surface-menu`)
@@ -138,7 +138,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
       return label.length > 0 && historyLabel.length > 0 && label !== historyLabel
     })()`), 'Side-chat entry is missing from the add menu')
     await key('Escape')
-    check(await evaluate(`document.querySelector('.surface-menu')?.dataset.state === 'exit' && document.querySelector('.surface-menu').getAnimations().some(a => a.effect.getTiming().duration === 100)`), 'Surface menu exit is not 100ms')
+    check(await evaluate(`document.querySelector('.surface-menu')?.dataset.state === 'exit' && document.querySelector('.surface-menu').getAnimations().some(a => a.effect.getTiming().duration === 150)`), 'Surface menu exit is not 150ms')
     await wait(`document.querySelector('.surface-menu') == null`)
     // Chooser: with no tab open the side-chat card is the first item of the same grid.
     const currentSurface = '#right-surface-pane [data-session-surface-current="true"]'
@@ -161,7 +161,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     const hoverPoint = await pointFor('button.sb-sess')
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...hoverPoint })
     await wait(`document.querySelector('.session-hover-card') != null`)
-    check(await evaluate(`document.querySelector('.session-hover-card').getAnimations().some(a => a.effect.getTiming().duration === 160)`), 'Hover card entrance is not 160ms')
+    check(await evaluate(`document.querySelector('.session-hover-card').getAnimations().some(a => a.effect.getTiming().duration === 200)`), 'Hover card entrance is not 200ms')
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`document.querySelector('.session-hover-card').getAnimations().every(a => a.playState === 'finished')`)
     await capture(`${theme}-hover-card`)
@@ -169,7 +169,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await wait(`document.querySelector('.session-hover-card') == null`)
     await capture(`${theme}-chat`)
     await click('.sb-nav .sb-navitem:first-child')
-    await wait(`${page}?.effect.getTiming().duration === 240`)
+    await wait(`${page}?.effect.getTiming().duration === 400`)
     await idle()
     await capture(`${theme}-analytics`)
     await click('.sb-nav .sb-navitem:last-child')
@@ -180,7 +180,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await wait(`document.querySelector('.runtime-composer textarea')?.value === 'structure unsent draft'`)
     await idle()
     await click('.sb-new')
-    await wait(`${page}?.effect.getTiming().duration === 180`)
+    await wait(`${page}?.effect.getTiming().duration === 400`)
     await wait(`document.querySelector('.tool-group-row') == null`)
     await idle()
     await click('button.sb-sess')
@@ -191,15 +191,15 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   try {
     await click('.panel-pill:not(.summary-pill)')
     await wait(`${panes}.length > 0`)
-    check(await evaluate(`${panes}.every(a => a.effect.getTiming().duration === 120 && a.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none'))`), 'Reduced F pane retained spatial animation')
+    check(await evaluate(`${panes}.every(a => a.effect.getTiming().duration === 150 && a.effect.getKeyframes().every(frame => !frame.transform || frame.transform === 'none'))`), 'Reduced F pane retained spatial animation')
     await idle()
     await click('.panel-pill:not(.summary-pill)')
     await idle()
   } finally { await cdp.send('Emulation.setEmulatedMedia', { features: [] }) }
   const sideChat = await exerciseSideChatApp({ cdp, evaluate, capture, check, click, idle, pointFor, wait,
     ipcCountsPath: options.ipcCountsPath, lostReplyPath: options.lostReplyPath })
-  return { test: 'structure production App', themes: ['light', 'dark'], page240: true, newConversation180: true,
+  return { test: 'structure production App', themes: ['light', 'dark'], page400: true, newConversation400: true,
     metaPrompts: true, paneFallbackF: true, transcriptWidthCommittedOnce: true, interruptedPane: true, maximizeRestore: true,
-    sidebarKeyboardFoldRestore: true, reducedPane120OpacityOnly: true, themeImmediate: true, nativeCaptureCalls: 0, modalCloseTimes: closeTimes,
-    nativeSend: true, unsentDraftRetained: true, sideChat, overlays: { settingsSkillsMcpLlm: true, surfaceMenu160And100: true, hoverCard160: true, focusRestoredBeforeUnmount: true }, captures }
+    sidebarKeyboardFoldRestore: true, reducedPane150OpacityOnly: true, themeImmediate: true, nativeCaptureCalls: 0, modalCloseTimes: closeTimes,
+    nativeSend: true, unsentDraftRetained: true, sideChat, overlays: { settingsSkillsMcpLlm: true, surfaceMenu200And150: true, hoverCard200: true, focusRestoredBeforeUnmount: true }, captures }
 }

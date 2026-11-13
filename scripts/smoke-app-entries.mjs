@@ -28,12 +28,16 @@ export function writeFileOpenEntry(entryPath, receiptPath) {
 /** Lose one fork reply after the native effect and the durable commit. */
 export function writeConversationFaultEntry(entryPath, markerPath) {
   writeFileSync(entryPath, `
-    import { ipcMain } from 'electron'
-    import { existsSync, writeFileSync } from 'node:fs'
+    import { app, ipcMain } from 'electron'
+    import { existsSync, promises as fs, writeFileSync } from 'node:fs'
+    import { join } from 'node:path'
     const marker = ${JSON.stringify(markerPath)}
     const handle = ipcMain.handle.bind(ipcMain)
     ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
       const result = await listener(...args)
+      if (channel === 'conversation:setViewed') {
+        await fs.appendFile(join(app.getPath('userData'), 'conversation-attention.jsonl'), JSON.stringify({ id: args[1] }) + '\\n')
+      }
       if (channel === 'conversation:fork' && result.fork?.status === 'accepted' && !existsSync(marker)) {
         writeFileSync(marker, 'native fork committed')
         throw new Error('fixture: native fork reply lost after commit')

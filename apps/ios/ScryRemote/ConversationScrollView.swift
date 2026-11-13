@@ -68,7 +68,7 @@ struct ConversationScrollView<Content: View>: View {
             Button {
               browsingOlder = false
               following = true
-              withAnimation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false)) { proxy.scrollTo("bottom", anchor: .bottom) }
+              withAnimation(reduceMotion ? nil : Motion.animation(.scroll, reduceMotion: false)) { proxy.scrollTo("bottom", anchor: .bottom) }
             } label: {
               Label(ConnectionCopy.returnToLatest, systemImage: "arrow.down")
                 .font(Typography.meta.weight(.semibold)).padding(.horizontal, 14).frame(minHeight: 44)

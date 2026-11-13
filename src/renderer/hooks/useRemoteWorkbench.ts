@@ -19,7 +19,13 @@ export function useRemoteWorkbench({ view, surfacePane }: {
   const [remoteQueueStore] = useState(() => new RemotePromptQueueStore())
   // Native session id adopted after the first run; keeps sidebar and workbench ownership aligned.
   const [remoteAdoptedSession, setRemoteAdoptedSession] = useState<string | undefined>()
-  useViewedRemoteSession(view === 'remote' ? remoteTarget?.connectionId : undefined, view === 'remote' ? remoteTarget?.session : undefined)
+  const desktopConnections = useDesktopConnections()
+  const viewedConnection = remoteTarget ? desktopConnections.connections.find(connection => connection.id === remoteTarget.connectionId) : undefined
+  useViewedRemoteSession(
+    view === 'remote' ? remoteTarget?.connectionId : undefined,
+    view === 'remote' ? remoteTarget?.session : undefined,
+    viewedConnection?.state === 'connected'
+  )
   const remoteSurfaceKey = remoteTarget
     ? remoteDraftKey(remoteTarget.connectionId, remoteTarget.cwd, remoteAdoptedSession)
     : 'remote:none'
@@ -36,7 +42,6 @@ export function useRemoteWorkbench({ view, surfacePane }: {
     if (action.type === 'activate') commit()
     else animatePaneChange(commit)
   }
-  const desktopConnections = useDesktopConnections()
   useConnectedCatalogLoader(desktopConnections.connections, desktopConnections.error, desktopConnections.refreshing)
   useEffect(() => {
     if (desktopConnections.refreshing) return

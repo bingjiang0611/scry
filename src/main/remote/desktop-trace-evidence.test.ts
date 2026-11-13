@@ -84,6 +84,20 @@ describe('desktop live trace evidence', () => {
     await expect(f.read({ ...chunked, chunk: { id: next.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } })).rejects.toThrow('workspace_not_authorized')
   })
 
+  it('keeps chunk cursors for traces above the previous 64 MiB cache ceiling', async () => {
+    const f = fixture()
+    const text = 'x'.repeat(64 * 1024 * 1024)
+    const runId = 'run-over-old-cache-limit'
+    f.setRun({ runId, cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId,
+      userText: 'task', done: false, items: [{ id: 'event', runId, ts: '2026-10-14T00:00:00Z', kind: 'model', stage: 'text_delta', text }] })
+    const query = { kind: 'trace' as const, context: f.context, runId, images: true as const, byteChunks: true as const }
+    const first = await f.read(query)
+    if (first.kind !== 'history_chunk') throw new Error('expected chunked trace')
+    expect(first.totalBytes).toBeGreaterThan(64 * 1024 * 1024)
+    await expect(f.read({ ...query, chunk: { id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES } }))
+      .resolves.toMatchObject({ kind: 'history_chunk', id: first.id, offset: DESKTOP_HISTORY_CHUNK_BYTES, totalBytes: first.totalBytes })
+  })
+
   it('keeps a long turn of bounded tool bodies inside one evidence response', async () => {
     const f = fixture()
     const body = 'x'.repeat(8 * 1024)

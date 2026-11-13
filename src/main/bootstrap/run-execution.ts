@@ -1,23 +1,20 @@
 import type { AgentStartRequest } from '../../shared/runtime'
-import type { TraceEvent } from '../../shared/trace'
 import type { ProviderRunHandle } from '../providers/types'
 import { admitRun } from '../context-admission'
-import { RunDiffPreviewer } from '../session-diff'
-import { appendCoalescedTrace, upsertTraceById } from '../live-trace'
+import { appendCoalescedTrace } from '../live-trace'
 import { RunSteering } from '../run-steering'
 import { prepareRunAttachments, deleteRunAttachments } from '../attachment-store'
 import type { RemoteRunCompletion } from '../remote/remote-run-binding'
 import { prepareRunFrontdoor, type AppRunStartOptions } from './run-frontdoor'
 import { prepareRunAdmission } from './run-admission'
 import { createLiveRunState } from './run-live-state'
-import { createRunDiffLifecycle } from './run-diff'
+import { createRunDiffLifecycle, createRunDiffPreviewer } from './run-diff'
 import { createSessionPublisher } from './run-session'
 import { startRunProviderAndRegister, startProviderAfterBaseline } from './run-startup'
 import { createRemoteRunState } from './run-remote-state'
-import { createManagedConversationSettlement } from './run-settlement'
+import { attachRunSettlement, createManagedConversationSettlement, type RunSettlementDeps } from './run-settlement'
 import { handleRunCompletion } from './run-completion'
 import { handleRunFailure } from './run-failure'
-import { archiveTraceTurn } from './archive'
 import { storageUserDataDir } from '../storage-paths'
 import type { RunHost } from './run-host'
 
@@ -74,28 +71,10 @@ export async function startRun(
         ingestion, emit, persistLlmPerformance, turnDiffCapture, patchExcludeBasenames,
         sessionBaselineReady, sessionBaselineOrigin, sessionBaselineCapture, releaseSessionBaseline } = liveRunState
       if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_preparing', { mainDone: false, mainSettled: false })
-      const diffPreviewer = new RunDiffPreviewer({
-        runId,
-        turnCapture: cwd ? turnDiffCapture : null,
-        sessionCapture: sessionBaselineCapture,
-        ...(sessionBaselineOrigin ? { sessionBaselineOrigin } : {}),
-        hints: () => ({ ...turnChangeJournal?.snapshot(), patchExcludeBasenames }),
-        emit: ({ stage, id, snapshot }) => {
-          const event: TraceEvent = {
-            id,
-            ts: new Date().toISOString(),
-            runId,
-            kind: 'harness',
-            stage,
-            providerId,
-            runtimeProvider,
-            turnDiff: snapshot
-          }
-          upsertTraceById(runState.items, event)
-          // 运行中预览也是这一轮的证据：仍在看的 scoped 视图必须在收口前收到它。
-          publishTrace(event)
-        },
-        onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)
+      const diffPreviewer = createRunDiffPreviewer({
+        runId, providerId, runtimeProvider, cwd, turnCapture: turnDiffCapture,
+        sessionCapture: sessionBaselineCapture, sessionBaselineOrigin, turnChangeJournal,
+        patchExcludeBasenames, runState, publishTrace
       })
       notifyDiffChangeRef.current = () => void diffPreviewer.notifyChange()
       const diffLifecycle = createRunDiffLifecycle({ appSemantics, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
@@ -255,87 +234,54 @@ export async function startRun(
         firstTextPerf,
         runs
       })
-      runtimePromise
-        .then(
-          (result) => handleRunCompletion(result, completionContext()),
-          (error: unknown) => handleRunFailure(error, {
-            ...completionContext(), handle, interrupted: runtimeStartup.getInterrupted(), publishTrace, mainEventId
-          })
-        )
-        .catch(async (error) => {
-          console.error('[scry] run completion handler failed:', error)
-          await finalizeTurnDiff()
-          if (runTerminalState.terminalArchiveArgs && !runTerminalState.terminalArchiveCommitted) {
-            try {
-              await archiveTraceTurn(runTerminalState.terminalArchiveArgs)
-              runTerminalState.terminalArchiveCommitted = true
-              if (runTerminalState.terminalArchiveArgs.sessionId) {
-                recordingBlockedSessions.delete(scopedSessionKey(runTerminalState.terminalArchiveArgs.sessionId))
-              }
-            } catch (archiveError) {
-              if (runTerminalState.terminalArchiveArgs.sessionId) recordingBlockedSessions.set(
-                scopedSessionKey(runTerminalState.terminalArchiveArgs.sessionId),
-                recordingRecoveryHint
-              )
-              console.error('[scry] fallback terminal archive failed:', archiveError)
-            }
-          }
-          if (!runState.done) runState.done = true
-          flushTraceSend()
-          renderer.send('agent:error', {
-            runId,
-            message: `Scry 处理 Provider 终态失败：${String((error as Error).message)}`,
-            category: 'recording',
-            hint: '保留 userData 与 workspace/.scry 后重启 Scry 检查归档'
-          })
-          if (isRemoteRun) runTerminalState.remoteRecordingFailed = true
-          markTerminalAttention(
-            runTerminalState.terminalArchiveArgs?.sessionId ?? liveRunState.observedSessionId ?? resume ?? runId,
-            !runtimeStartup.getInterrupted()
-          )
-          finishRemote(runtimeStartup.getInterrupted() ? 'interrupted' : 'failed', String((error as Error).message ?? error))
-        })
-        .catch((error) => {
-          if (isRemoteRun && !runTerminalState.remoteCompletion) {
-            runTerminalState.remoteRecordingFailed = true
-            finishRemote(runtimeStartup.getInterrupted() ? 'interrupted' : 'failed', String((error as Error).message ?? error))
-          }
-        })
-        .finally(async () => {
-          try {
-            if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_settlement', { mainDone: runState.done })
-            await settleManagedConversation(runTerminalState.terminalStatus ?? (runtimeStartup.getInterrupted() ? 'interrupted' : 'failed'))
-            options.stopSignal?.removeEventListener('abort', requestRemoteStop)
-            runState.providerSettled = true
-            firstTracePerf.finish(undefined, runtimeStartup.getInterrupted() ? 'cancelled' : 'unavailable')
-            firstTextPerf.finish(undefined, runtimeStartup.getInterrupted() ? 'cancelled' : 'unavailable')
-            runStopLifecycle.settle(runId)
-            userQuestionBroker.cancelRun(runId)
-            // 收口：先终态 flush + terminal，再离开登记，这样终态 diff 与 resync 仍可读。
-            runtimeStartup.control.setDiffPreviewDemand = undefined
-            runTraces.settle(runId)
-            runs.remove(runId)
-            forgetBoundedRun(runId)
-            releaseSessionBaseline?.()
-            resolveSettled?.()
-            if (providerId === 'pi') host.piRunDiagnostics.record(runId, 'main_settled', { mainDone: runState.done, mainSettled: true })
-            void eventLog?.close()
-          } finally {
-            if (isRemoteRun) {
-              if (!runTerminalState.remoteCompletion) {
-                runTerminalState.remoteRecordingFailed = true
-                finishRemote('failed', 'remote_run_terminal_outcome_unknown')
-              }
-              remoteRunIds.delete(runId)
-              remoteRunLedgerIds.delete(runId)
-              if (runTerminalState.remoteCompletion) runTerminalState.resolveRemoteCompletion?.(runTerminalState.remoteCompletion)
-            }
-          }
-        })
+      // Provider settle, completion handling and local finalization are one ordered chain:
+      // settlement is recorded first, finalization owns the registry entry last.
+      const settlement: RunSettlementDeps = {
+        onProviderSettled: () => {
+          runState.providerSettled = true
+          runState.localFinalizing = true
+          runStopLifecycle.settle(runId)
+        },
+        finalizeTurnDiff,
+        runState,
+        runId,
+        providerId,
+        isRemoteRun,
+        remote: remoteState,
+        settleManagedConversation,
+        interrupted: runtimeStartup.getInterrupted,
+        flushTraceSend,
+        renderer,
+        recordingBlockedSessions,
+        scopedSessionKey,
+        recordingRecoveryHint,
+        getObservedSessionId: () => liveRunState.observedSessionId,
+        resume,
+        piRunDiagnostics: host.piRunDiagnostics,
+        lifecycle: {
+          runStopLifecycle, userQuestionBroker, runTraces, runs, forgetBoundedRun,
+          releaseSessionBaseline, resolveSettled,
+          clearDiffPreviewDemand: () => { runtimeStartup.control.setDiffPreviewDemand = undefined },
+          closeEventLog: () => void eventLog?.close()
+        },
+        firstTracePerf, firstTextPerf,
+        stopSignal: options.stopSignal,
+        requestRemoteStop,
+        remoteRunIds, remoteRunLedgerIds
+      }
+      attachRunSettlement(
+        runtimePromise,
+        (result) => handleRunCompletion(result, completionContext()),
+        (error) => handleRunFailure(error, {
+          ...completionContext(), handle, interrupted: runtimeStartup.getInterrupted(), publishTrace, mainEventId
+        }),
+        settlement
+      )
       startPerf.finish({ attachments: attachments.length })
       return { runId, ...(runState.externalSessionId ? { externalSessionId: runState.externalSessionId } : {}) }
     })
     options.onStarted?.(started.runId)
+    options.onRegistered?.(started)
     return isRemoteRun ? await remoteResult! : started
   } catch (error) {
     startPerf.finish(undefined, 'error')

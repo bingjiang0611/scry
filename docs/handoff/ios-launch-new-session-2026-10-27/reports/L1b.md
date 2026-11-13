@@ -85,7 +85,7 @@
 | `Checks/home-sections.py` | PASS，25 项 |
 | `Checks/markdown-blocks.py` | PASS，17 项 |
 | `-only-testing:ScryRemoteUITests/HomeUITests`（模拟器） | 未跑起来：`DTServiceHubClient failed to bless service hub`，与 L1 同一环境阻塞（宿主机 Developer Mode 未开启），900 s 后中断 |
-| 同上（真机） | 未跑起来：设备已达「免费开发者描述文件应用数量上限」（已占 `com.baobingjiang.ictrl.uitests.xctrunner`、`com.baobingjiang.etch.mobile`、`com.scry.remote.local`），安装测试 Runner 报 `MIInstallerErrorDomain Code=13` |
+| 同上（真机） | 未跑起来：设备已达「免费开发者描述文件应用数量上限」（已占 `com.example.ictrl.uitests.xctrunner`、`com.example.etch.mobile`、`com.scry.remote.local`），安装测试 Runner 报 `MIInstallerErrorDomain Code=13` |
 
 `catalog-refresh.py`、`-selfTest` 的 3 项失败是 L1 已记录的既有问题，本次未动。
 

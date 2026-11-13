@@ -5,6 +5,8 @@ import { executionTargetError, type ExecutionTargetRouter } from './execution-ta
 import { historyProfileSelection } from './remote-gateway'
 import { dispatchHistoryRequest, parseLiveRunsHistory } from './inner-mtls-history-dispatch'
 import { protocolMismatch } from './remote-protocol'
+import type { LanAdvertisement } from './remote-lan-listener'
+import { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS } from './inner-mtls-protocol'
 
 // The device-facing request vocabulary: which controller capability an
 // authenticated request reaches, and how its envelope is bounded before it does.
@@ -53,6 +55,10 @@ export interface RemoteRequestEnvelope {
   sha256?: string
   index?: number
   totalCount?: number
+  // sessionsPage: the catalog snapshot the phone already holds (first page only).
+  known?: string
+  // historyPage: 'deflate' pages the compressed form of the same snapshot bytes.
+  encoding?: string
 }
 
 export async function dispatchRemoteRequest(
@@ -60,7 +66,8 @@ export async function dispatchRemoteRequest(
   fingerprint: string,
   parsed: unknown,
   executionTargets?: ExecutionTargetRouter,
-  localEndpoint?: LocalEndpointHandlers
+  localEndpoint?: LocalEndpointHandlers,
+  lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
 ): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
@@ -69,6 +76,20 @@ export async function dispatchRemoteRequest(
   const mismatch = protocolMismatch(request)
   if (mismatch) return mismatch
   try {
+    if (request.op === 'ping') {
+      // Transport keepalive/probe for the gateway tunnel itself; never forwarded
+      // to an execution target. Still re-authorizes the verified peer, so a
+      // revoked device cannot keep a tunnel warm.
+      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) ||
+          (request.keepAlive !== undefined && typeof request.keepAlive !== 'boolean')) return { error: 'invalid_request' }
+      controller.authorizeDevicePeer(fingerprint)
+      const lan = lanAdvertisement()
+      return { pong: {
+        serverTime: Date.now(), idleTimeoutMs: INNER_IDLE_TIMEOUT_MS,
+        capabilities: [...HOST_TRANSPORT_CAPABILITIES, ...(lan ? ['lan'] : [])],
+        ...(lan ? { lan } : {})
+      } }
+    }
     if (request.op === 'executionTargets') {
       // Discovery runs on the persistent control lane, so it carries the same
       // authenticated phone metadata as other run requests. Strip those
@@ -256,8 +277,10 @@ export async function dispatchRemoteRequest(
       if ((request.includeArchived !== undefined && typeof request.includeArchived !== 'boolean') ||
           (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
           (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
-          (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
+          (request.snapshot !== undefined && typeof request.snapshot !== 'string') ||
+          (request.known !== undefined && typeof request.known !== 'string')) return { error: 'invalid_request' }
       return { sessionsPage: controller.listSessionsPage(fingerprint, {
+        ...(typeof request.known === 'string' ? { known: request.known } : {}),
         ...(request.includeArchived === true ? { includeArchived: true } : {}),
         ...(typeof request.cursor === 'number' ? { cursor: request.cursor } : {}),
         ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),

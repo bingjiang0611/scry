@@ -5,9 +5,11 @@ import { detectRendererPlatform, type RendererPlatform } from '../platform'
  * The wrapper Electron adds to a rejected IPC handler (`error.toString()`): the channel
  * name and the error's class are not user copy. `AgentRuntimeError` is how an in-process
  * start refusal arrives; the daemon's refusal is a plain `Error` with the same message,
- * so both modes read the same once the class is gone.
+ * so both modes read the same once the class is gone. A stringified rejection can carry
+ * one more leading `Error: `; the host's own reason (e.g. which side chat holds a delete)
+ * is what remains.
  */
-const IPC_WRAPPER = /^Error invoking remote method '[^']+':\s*(?:(?:AgentRuntime)?Error:\s*)?/
+const IPC_WRAPPER = /^(?:Error:\s*)?Error invoking remote method '[^']+':\s*(?:(?:AgentRuntime)?Error:\s*)?/
 /** The daemon-mode gate's named absence (main/daemon-channel-gate.ts). */
 const DAEMON_UNAVAILABLE = /^daemon_capability_unavailable:(.+)$/
 /** The background service could not be started or reached (daemon-supervisor, transport). */

@@ -19,6 +19,7 @@ struct WorkspaceShell: View {
   @Environment(ExecutionTargetCoordinator.self) private var targets
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var drawerOpen: Bool
+  @State private var drawerUsesReleaseCurve = false
   // A new-session request while the page is already shown must focus again; the
   // ticket changes so the composer cannot mistake a repeat request for no-op.
   @State private var focusTicket = 1
@@ -96,7 +97,7 @@ struct WorkspaceShell: View {
         guard !drawerOpen, value.startLocation.x <= 24 else { return }
         let horizontal = value.translation.width
         let vertical = abs(value.translation.height)
-        if horizontal > 72 && horizontal > vertical * 1.35 { setDrawer(true) }
+        if horizontal > 72 && horizontal > vertical * 1.35 { setDrawer(true, released: true) }
       }
     )
   }
@@ -174,6 +175,11 @@ struct WorkspaceShell: View {
 
   // MARK: - Drawer
 
+  private var drawerEffect: Motion.Effect {
+    if drawerUsesReleaseCurve { return .drawerRelease }
+    return drawerOpen ? .drawerOpen : .drawerClose
+  }
+
   private var dimmer: some View {
     Color.black.opacity(drawerOpen ? 0.28 : 0)
       .ignoresSafeArea()
@@ -184,7 +190,7 @@ struct WorkspaceShell: View {
       .accessibilityAddTraits(.isButton)
       .accessibilityLabel(ConnectionCopy.closeSidebar)
       .accessibilityHidden(!drawerOpen)
-      .animation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false), value: drawerOpen)
+      .animation(Motion.animation(drawerEffect, reduceMotion: reduceMotion), value: drawerOpen)
   }
 
   private func drawer(width: CGFloat) -> some View {
@@ -200,21 +206,22 @@ struct WorkspaceShell: View {
           .overlay(alignment: .trailing) { Rectangle().fill(Palette.border).frame(width: 0.5) }
       }
       .shadow(color: .black.opacity(0.10), radius: 30, x: 8)
-      .offset(x: drawerOpen ? 0 : -width)
+      .offset(x: reduceMotion || drawerOpen ? 0 : -width)
+      .animation(reduceMotion ? nil : Motion.animation(drawerEffect, reduceMotion: false), value: drawerOpen)
       .opacity(drawerOpen ? 1 : 0)
+      .animation(Motion.animation(drawerEffect, reduceMotion: reduceMotion), value: drawerOpen)
       .allowsHitTesting(drawerOpen)
       .accessibilityHidden(!drawerOpen)
       // Swipe left on the panel closes it, with the same thresholds and the same
-      // reduced-motion contract (no animation, so it appears/disappears at once).
+      // reduced-motion contract: position stays fixed so the opacity fade remains visible.
       .simultaneousGesture(
         DragGesture(minimumDistance: 18).onEnded { value in
           guard drawerOpen else { return }
           let horizontal = -value.translation.width
           let vertical = abs(value.translation.height)
-          if horizontal > 72 && horizontal > vertical * 1.35 { setDrawer(false) }
+          if horizontal > 72 && horizontal > vertical * 1.35 { setDrawer(false, released: true) }
         }
       )
-      .animation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false), value: drawerOpen)
   }
 
   private var targetPicker: some View {
@@ -237,11 +244,12 @@ struct WorkspaceShell: View {
 
   // MARK: - Actions
 
-  private func setDrawer(_ open: Bool) {
+  private func setDrawer(_ open: Bool, released: Bool = false) {
     guard drawerOpen != open else { return }
     // The drawer owns the keyboard: opening it must not type into a field the
     // user can no longer see.
     if open { Self.resignKeyboard() }
+    drawerUsesReleaseCurve = released
     drawerOpen = open
   }
 

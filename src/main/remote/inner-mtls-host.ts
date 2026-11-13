@@ -5,9 +5,16 @@ import type { HostController } from './host-controller'
 import type { PairingAuthority } from './pairing'
 import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import type { ExecutionTargetRouter } from './execution-targets'
-import { dispatchRemoteRequest } from './inner-mtls-dispatch'
+import type { LanAdvertisement } from './remote-lan-listener'
 import type { LocalEndpointHandlers } from './host-local-ops'
+import { DEFAULT_MAX_FRAME } from './inner-mtls-protocol'
+import { serveInnerConnection, type RequestTiming } from './inner-mtls-connection'
+import { dispatchRemoteRequest } from './inner-mtls-dispatch'
+import { protocolMismatch } from './remote-protocol'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
+
+// Protocol constants live in inner-mtls-protocol.ts; re-exported for callers.
+export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT, WATCH_STREAM_MAX_MS, WATCH_STREAM_WAIT_MS } from './inner-mtls-protocol'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
 // paired device reaches (through the outer WSS byte relay, which never sees
@@ -16,13 +23,14 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 // (socket.getPeerCertificate().raw), never from anything in the request body -
 // the same invariant proven by experiments/remote-g0/g1-smoke, now in src/main.
 //
-// Line-delimited JSON, one outstanding request at a time. A request without
-// `keepAlive: true` is a one-shot exchange and the connection ends after its
-// reply. A device may opt a connection into reuse: every following request must
-// also opt in, and every reply then starts with `{"keepAlive":true,` so a client
-// can tell a reusable lane from an older one-shot host without guessing. Reuse
-// changes no authorization: each request re-derives nothing from the body and is
-// re-authorized by HostController against the verified peer fingerprint.
+// Line-delimited JSON. A request without `keepAlive: true` is a one-shot exchange
+// and the connection ends after its reply. A device may opt a connection into
+// reuse: every following request must also opt in, and every reply then starts
+// with `{"keepAlive":true,` so a client can tell a reusable lane from an older
+// one-shot host without guessing. A kept-alive request carrying a numeric `id`
+// switches the lane to multiplexed requests (inner-mtls-connection.ts). Reuse
+// changes no authorization: each request is re-authorized by HostController
+// against the verified peer fingerprint, and by transport scope here.
 
 export interface InnerMtlsHostOptions {
   controller: HostController
@@ -36,9 +44,9 @@ export interface InnerMtlsHostOptions {
   // Optional Mac1 -> Mac2 target route. Local mobile operations never use it.
   executionTargets?: ExecutionTargetRouter
   // How peers reach this endpoint. 'network' (default) covers TCP listeners, the
-  // relay tunnel and SSH; 'local' is the daemon's 0600 unix socket. A grant issued
-  // over the local socket is refused here when this is 'network', so it cannot be
-  // replayed from another machine even if its certificate leaks.
+  // relay tunnel, the LAN route and SSH; 'local' is the daemon's 0600 unix socket.
+  // A grant issued over the local socket is refused here when this is 'network', so
+  // it cannot be replayed from another machine even if its certificate leaks.
   transport?: 'local' | 'network'
   // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
   // check the daemon's version and build (shared/build-identity.ts) before it uses a grant.
@@ -49,14 +57,12 @@ export interface InnerMtlsHostOptions {
   localEndpoint?: LocalEndpointHandlers
 }
 
-// Remote prompts may carry a small, explicitly bounded image/text attachment.
-// The relay still sees only inner-TLS ciphertext; 1.25 MiB is enough for the
-// mobile attachment budget while preventing unbounded buffering.
-const DEFAULT_MAX_FRAME = 1_310_720
-
 function digest(bytes: Uint8Array): string {
   return createHash('sha256').update(Buffer.from(bytes)).digest('hex')
 }
+
+// Ops a multiplexed lane answers itself (pushed streams), before request dispatch.
+const LANE_OPS = new Set(['watchStream', 'cancel'])
 
 export class InnerMtlsHost {
   #server: Server
@@ -67,6 +73,7 @@ export class InnerMtlsHost {
   // Open sockets by verified peer fingerprint, so revoking a device closes the
   // tunnels it holds open instead of waiting for their idle timeout.
   #peers = new Map<string, Set<TLSSocket>>()
+  #lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
@@ -80,12 +87,21 @@ export class InnerMtlsHost {
       rejectUnauthorized: true,
       minVersion: 'TLSv1.3',
       maxVersion: 'TLSv1.3',
-      secureOptions: constants.SSL_OP_NO_TICKET
+      secureOptions: constants.SSL_OP_NO_TICKET,
+      // Relay legs start TLS only once device bytes arrive and direct LAN
+      // peers are unauthenticated until the handshake ends: bound it.
+      handshakeTimeout: 10_000
     }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets, options.localEndpoint))
     this.#server.on('tlsClientError', (err) => {
       // Rejected handshakes are not host errors. Optional diagnostics only.
       if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] tlsClientError: ${(err as Error)?.message}`)
     })
+  }
+
+  // Direct-route addresses reported to an authorized phone's ping. Set once the
+  // LAN listener is up; absent, phones keep using the relay.
+  setLanAdvertisement(source: () => LanAdvertisement | undefined): void {
+    this.#lanAdvertisement = source
   }
 
   // Serve inner-mTLS over an already-established byte stream (e.g. one leg of the
@@ -118,97 +134,36 @@ export class InnerMtlsHost {
       peerSockets.delete(socket)
       if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) this.#peers.delete(fingerprint)
     })
-    let buffer = Buffer.alloc(0)
-    let busy = false
-    let kept = false
-    // Diagnostics only: name why the host tore a channel down, because the device
-    // sees every host-side destroy as the same relay `peer_closed`.
-    const abort = (reason: string): void => {
-      if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] destroy reason=${reason} buffered=${buffer.length}`)
-      socket.destroy()
-    }
-    // This is an idle timeout, not a computation deadline. A history/archive
-    // read may legitimately take longer than 30 seconds; the client can cancel
-    // the TLS channel when its request is superseded. Disable the idle timer
-    // while dispatching and arm it again only after a response is written.
-    // One listener for the connection's lifetime; re-arming only resets the timer.
-    // Passing a callback per arm would stack a listener per keep-alive request.
-    socket.on('timeout', () => abort('idle_timeout'))
-    const armIdleTimeout = (): void => { socket.setTimeout(30_000) }
-    armIdleTimeout()
-    socket.on('data', (bytes: Buffer) => {
-      if (busy) { abort('data_while_busy'); return }
-      if (Date.now() >= certificateExpiresAt) { abort('certificate_expired'); return }
-      if (buffer.length + bytes.length > this.#maxFrame) { abort(`frame_too_large:${buffer.length + bytes.length}`); return }
-      buffer = Buffer.concat([buffer, bytes])
-      const end = buffer.indexOf(10)
-      if (end < 0) return
-      // One outstanding request, never pipelined commands; every request still
-      // checks the device grant inside HostController.
-      if (end !== buffer.length - 1) { abort('pipelined_request'); return }
-      const frame = buffer.subarray(0, end)
-      buffer = Buffer.alloc(0)
-      // Parse the frame once: keep-alive framing and dispatch share the object.
-      let parsed: unknown
-      try { parsed = JSON.parse(frame.toString('utf8')) } catch { parsed = undefined }
-      const keepAlive = !!(parsed && typeof parsed === 'object' && (parsed as { keepAlive?: unknown }).keepAlive === true)
-      if (kept && !keepAlive) { socket.end(JSON.stringify({ error: 'keep_alive_required' }) + '\n'); return }
-      kept ||= keepAlive
-      // The scope rule lives at the transport, not in the request: a grant enrolled
-      // over the local socket is only good on the local socket. Checked per request so
-      // revoking takes effect on the next frame, before any controller work happens.
-      // Fail closed: a controller that cannot answer the transport question cannot
-      // prove the grant belongs on this transport.
-      const authority: PairingAuthority | undefined = controller.authority
-      if (typeof authority?.authorizesCertificate !== 'function' || !authority.authorizesCertificate(fingerprint, this.#transport)) {
-        // Same envelope shape as a controller rejection so clients need no new branch.
-        const denial = { error: 'device_not_authorized' }
-        if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...denial })}\n`); armIdleTimeout() }
-        else socket.end(`${JSON.stringify(denial)}\n`)
-        return
-      }
-      // Version handshake: answered here because it describes this endpoint's
-      // process, and it must be reachable before the App owns a run or a catalog.
-      if (this.#info && parsed && typeof parsed === 'object' && (parsed as { op?: unknown }).op === 'daemonInfo') {
-        const { version, build } = this.#info
-        const info = { op: 'daemonInfo', version, ...(build ? { build } : {}), protocol: REMOTE_PROTOCOL_VERSION }
-        if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...info })}\n`); armIdleTimeout() }
-        else socket.end(`${JSON.stringify(info)}\n`)
-        return
-      }
-      busy = true
-      socket.setTimeout(0)
-      const timing = remoteRequestTrace('remote.host.request')
-      timing?.mark('frame_received')
-      void dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint)
-        .then((res) => {
-          busy = false
-          timing?.mark('dispatch_settled', remoteOperationCounters(parsed))
-          const outcome = (res as { error?: unknown }).error === undefined ? 'completed' : 'error'
-          if (keepAlive) {
-            // keepAlive must be the first key: clients check this exact prefix.
-            const reply = JSON.stringify({ keepAlive: true, ...(res as object) }) + '\n'
-            socket.write(reply)
-            timing?.mark('response_written')
-            armIdleTimeout()
-          } else {
-            socket.end(JSON.stringify(res) + '\n')
-            timing?.mark('response_written')
-          }
-          timing?.finish(remoteOperationCounters(parsed), outcome)
-        })
-        .catch((error) => {
-          timing?.finish(undefined, 'error')
-          abort(`dispatch_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`)
-        })
+    serveInnerConnection(socket, {
+      controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,
+      preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
+      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement()),
+      timing: (parsed) => requestTiming(parsed)
     })
-    socket.on('error', (error) => {
-      // Peer reset; nothing to report to the device.
-      if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] socket error: ${error.message}`)
-    })
-    if (process.env.SCRY_INNER_MTLS_DEBUG) {
-      socket.once('close', (hadError) => console.log(`[inner-mtls] close hadError=${hadError} busy=${busy} buffered=${buffer.length}`))
+  }
+
+  // Checked for every frame before any controller work. The scope rule lives at the
+  // transport, not in the request: a grant enrolled over the local socket is only
+  // good on the local socket, and revoking takes effect on the next frame. Fail
+  // closed: a controller that cannot answer the transport question cannot prove the
+  // grant belongs on this transport. Same envelope shape as a controller rejection.
+  #preflight(controller: HostController, fingerprint: string, parsed: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    const authority: PairingAuthority | undefined = controller.authority
+    if (typeof authority?.authorizesCertificate !== 'function' || !authority.authorizesCertificate(fingerprint, this.#transport)) {
+      return { error: 'device_not_authorized' }
     }
+    // Version handshake: answered here because it describes this endpoint's process,
+    // and it must be reachable before the App owns a run or a catalog.
+    if (this.#info && parsed?.op === 'daemonInfo') {
+      const { version, build } = this.#info
+      return { op: 'daemonInfo', version, ...(build ? { build } : {}), protocol: REMOTE_PROTOCOL_VERSION }
+    }
+    // Pushed-stream ops never reach request dispatch, so its version gate runs here.
+    if (parsed && typeof parsed.op === 'string' && LANE_OPS.has(parsed.op)) {
+      const mismatch = protocolMismatch(parsed)
+      if (mismatch) return { ...mismatch }
+    }
+    return undefined
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<{ port: number; host: string }> {
@@ -230,5 +185,25 @@ export class InnerMtlsHost {
   async close(): Promise<void> {
     for (const socket of this.#connections) socket.destroy()
     await new Promise<void>((resolve) => this.#server.close(() => resolve()))
+  }
+}
+
+// Segmented timing for one dispatched request: frame received, dispatch settled,
+// response written. Absent when performance recording is off.
+function requestTiming(parsed: Record<string, unknown> | undefined): RequestTiming | undefined {
+  const timing = remoteRequestTrace('remote.host.request')
+  if (!timing) return undefined
+  timing.mark('frame_received')
+  let outcome: 'completed' | 'error' = 'completed'
+  return {
+    settled: (response) => {
+      timing.mark('dispatch_settled', remoteOperationCounters(parsed))
+      outcome = (response as { error?: unknown } | undefined)?.error === undefined ? 'completed' : 'error'
+    },
+    written: () => {
+      timing.mark('response_written')
+      timing.finish(remoteOperationCounters(parsed), outcome)
+    },
+    failed: () => timing.finish(undefined, 'error')
   }
 }

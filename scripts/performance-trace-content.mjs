@@ -49,7 +49,8 @@ try {
         for (const existing of [false, true]) {
           observation = { bytes, copies, existing, payloadHashes: 0, hashMs: 0 }
           const beforeCpu = process.cpuUsage(), started = performance.now()
-          const [persisted] = await persistTraceToolEvents(userData, '/fixture/project', [event], recorder)
+          const [persisted] = await persistTraceToolEvents(userData, '/fixture/project', [event],
+            recorder === undefined ? undefined : { root: recorder, toolOutput: 'full' })
           const elapsedMs = performance.now() - started, cpu = process.cpuUsage(beforeCpu)
           const sample = { ...observation, elapsedMs, cpuMs: (cpu.user + cpu.system) / 1000 }
           observation = undefined

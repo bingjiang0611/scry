@@ -7,15 +7,6 @@
   flex-direction: column;
 }
 
-.overview-panel-title em i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  corner-shape: round;
-  background: var(--ok);
-  box-shadow: 0 0 0 4px var(--ok-soft);
-}
-
 .overview-panel-title {
   min-height: 45px;
   display: flex;
@@ -44,12 +35,6 @@
   color: var(--fg);
   font-style: normal;
   white-space: nowrap;
-}
-
-.overview-panel-title em i {
-  width: 5px;
-  height: 5px;
-  box-shadow: 0 0 0 3px var(--ok-soft);
 }
 
 .overview-verdict {
@@ -151,7 +136,7 @@
 
 button.overview-metric-action {
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 button.overview-metric-action:hover { background: var(--surface-hover); }
@@ -246,7 +231,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   white-space: nowrap;
   cursor: pointer;
   opacity: 0.55;
-  transition: opacity var(--dur-micro) linear;
+  transition: opacity var(--duration-hover) var(--ease-out);
 }
 
 .segment-ribbon button.b-base { background: var(--dim3); color: var(--fg); }
@@ -319,7 +304,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   color: var(--fg);
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 .segment-ledger > button:hover { background: var(--surface-hover); }
 .segment-ledger > button.is-selected { background: var(--selected-soft); box-shadow: inset 2px 0 0 var(--selected); }
@@ -460,7 +445,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   border: 1px solid var(--border);
   border-radius: 0;
   background: var(--panel);
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 .graph-call-cluster > button.gline:hover,
 .graph-child-run > button.gline:hover { border-color: var(--border2); background: var(--surface-hover); }

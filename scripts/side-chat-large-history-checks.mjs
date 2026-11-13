@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { json, readJsonLines, sideChatDriver } from './side-chat-driving.mjs'
-import { exerciseLargeHistoryDialog } from './side-chat-large-history-ui.mjs'
 
 const MiB = 1024 * 1024
 /** Paged viewer reads must finish inside this budget, or the check fails as incomplete. */
@@ -51,7 +50,7 @@ const sealedBodiesScript = (childId) => `(async () => {
  * more than 2000 turns, more than 4000 messages, a >16 MiB archive and a >4 MiB visible
  * message. The shipped preview freezes it, creation publishes a v4 child, the first send
  * really dispatches, the Provider pages the earliest/middle/latest omitted bodies over
- * the loopback MCP endpoint, and the child still reads them after the parent is deleted.
+ * the loopback MCP endpoint, and deleting the parent then deletes the child with it.
  */
 export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, readsPath, seedPath, userDataDir }) {
   const driver = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath,
@@ -154,36 +153,35 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     check(entry.pages > 0, `a read body never completed: ${json({ id: entry.id, pages: entry.pages })}`)
   }
 
-  // Deleting the parent must not take the child's own frozen bodies with it.
-  await evaluate(`(async () => {
+  // A side chat has no entry outside its parent's panel, so deleting the parent deletes it:
+  // the previewed scope names it, and its frozen bodies are gone afterwards.
+  // A side chat that is still running refuses its parent's delete, so the child's own first
+  // send has to be settled first. This waits for that state; it does not retry the delete.
+  const settleDeadline = Date.now() + 120_000
+  while ((await driver.conversation(childId)).summary.activeRunId !== undefined) {
+    check(Date.now() < settleDeadline, 'the child run never settled, so its parent cannot be deleted')
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  const cascade = await evaluate(`(async () => {
     const id = ${json(seed.conversationId)}
     const page = await window.scry.conversations.read(id)
     await window.scry.conversations.update(id, page.summary.revision, { kind: 'archive', archived: true })
     const plan = await window.scry.conversations.previewDeletion(id)
-    await window.scry.conversations.delete(id, plan.fingerprint)
+    const result = await window.scry.conversations.delete(id, plan.fingerprint)
+    return { sideChats: (plan.sideChats ?? []).map(child => child.conversationId), ok: result.ok, failed: result.failed }
   })()`)
-  const afterDelete = await evaluate(sealedBodiesScript(childId))
-  check(afterDelete.complete === true, `the child stopped reading after its parent was deleted: ${json(afterDelete)}`)
-  check(afterDelete.digestAvailable === true, 'the renderer cannot digest a body after the parent was deleted')
-  check(afterDelete.pages.length === sealed.pages.length,
-    `the child lost rows after its parent was deleted: ${json({ before: sealed.pages.length, after: afterDelete.pages.length })}`)
-  const afterById = new Map(afterDelete.pages.map(row => [row.id, row]))
-  for (const [index, entry] of read.reads.entries()) {
-    const before = sealedById.get(entry.id)
-    const after = afterById.get(entry.id)
-    check(after !== undefined, `a frozen body disappeared after its parent was deleted: ${json({ id: entry.id })}`)
-    check(after.hash === before.hash,
-      `a frozen body changed after its parent was deleted: ${json({ id: entry.id, before: before.hash, after: after.hash })}`)
-    check(sourceHashes.has(after.hash),
-      `the surviving body no longer matches the source: ${json({ id: entry.id, after: after.hash })}`)
-  }
-  // The bodies are reachable over IPC above; this proves a user can open the dialog on the
-  // same child, read it and page it with real pointer input.
-  const dialog = await exerciseLargeHistoryDialog({ driver, evaluate, check, seed, childId, ipcCountsPath })
-  return { parentId: seed.conversationId, childId, dialog, parentTurns: seed.turnCount, messageCount: seed.messageCount,
-    archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, viewerRows: sealed.pages.length,
-    viewerElapsedMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
-    readsAfterDelete: afterDelete.pages.length, coverage: preview.coverage }
+  check(cascade.ok === true && cascade.sideChats.includes(childId),
+    `the parent delete must name and delete its side chat: ${json(cascade)}`)
+  const afterDelete = await evaluate(`(async () => ({
+    status: await window.scry.conversations.read(${json(childId)}).then(page => page.summary.deletion?.status ?? null, () => 'unreadable'),
+    body: await window.scry.conversations.readSideChatSnapshot(${json(childId)}).then(() => 'readable', () => 'refused')
+  }))()`)
+  check(afterDelete.status === 'complete' && afterDelete.body === 'refused',
+    `the side chat outlived its deleted parent: ${json(afterDelete)}`)
+  return { parentId: seed.conversationId, childId, parentTurns: seed.turnCount, messageCount: seed.messageCount,
+    archiveBytes: seed.archiveBytes, hugeMessageBytes: seed.hugeMessageBytes, bodyRows: sealed.pages.length,
+    bodyReadMs: sealed.elapsedMs, planItems: planShape.missingItems, providerReads: read.reads.length,
+    childAfterDelete: afterDelete, coverage: preview.coverage }
 }
 
 /**

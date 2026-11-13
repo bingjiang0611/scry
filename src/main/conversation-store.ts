@@ -82,6 +82,13 @@ export class ConversationStore implements ConversationLedger {
   private readonly directory: string
   /** Rebuildable projection of the canonical ledgers, never a second persisted authority. */
   private ownership: Map<string, Conversation> | undefined
+  /**
+   * One cold scan at a time, tagged with the invalidation it started under. `list` reads
+   * outside the admission, so without this a slow scan that began before a publication
+   * could finish after it and replace the cache with a map that lacks the new ledger.
+   */
+  private ownershipScan: { generation: number; promise: Promise<Map<string, Conversation>> } | undefined
+  private ownershipGeneration = 0
   private recoveryFailure: Error | undefined
 
   constructor(readonly userData: string) {
@@ -127,6 +134,18 @@ export class ConversationStore implements ConversationLedger {
 
   async loadOwnership(): Promise<Map<string, Conversation>> {
     if (this.ownership) return this.ownership
+    const generation = this.ownershipGeneration
+    if (this.ownershipScan?.generation === generation) return this.ownershipScan.promise
+    const promise = this.scanOwnership().then((conversations) => {
+      // A scan that began before an invalidation may predate the publication behind it.
+      if (generation === this.ownershipGeneration && !this.ownership) this.ownership = conversations
+      return conversations
+    }).finally(() => { if (this.ownershipScan?.promise === promise) this.ownershipScan = undefined })
+    this.ownershipScan = { generation, promise }
+    return promise
+  }
+
+  private async scanOwnership(): Promise<Map<string, Conversation>> {
     let entries: Dirent[]
     try {
       entries = await readdir(this.directory, { withFileTypes: true })
@@ -142,7 +161,6 @@ export class ConversationStore implements ConversationLedger {
       conversations.set(id, await this.required(id))
     }
     checkNativeOwners(conversations.values())
-    this.ownership = conversations
     return conversations
   }
 
@@ -160,6 +178,7 @@ export class ConversationStore implements ConversationLedger {
       // Atomic publication may have succeeded before its acknowledgement was lost.
       // The next check must read the ledgers, not trust the pre-write projection.
       this.ownership = undefined
+      this.ownershipGeneration += 1
       throw error
     }
   }
@@ -301,8 +320,8 @@ export class ConversationStore implements ConversationLedger {
     return finishFork(this, id, result)
   }
 
-  beginDeletion(id: string, revision: number, fingerprint: string, reclaim = false) {
-    return beginDeletion(this, id, revision, fingerprint, reclaim)
+  beginDeletion(id: string, revision: number, fingerprint: string, reclaim = false, cascade = false) {
+    return beginDeletion(this, id, revision, fingerprint, reclaim, cascade)
   }
 
   finishDeletion(id: string, fingerprint: string, result: ConversationDeletionResult, retainedCopies = false) {

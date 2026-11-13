@@ -1,39 +1,37 @@
-import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
+import { validQueuedCapture } from './recorder-hook-queue.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, rememberContinuationProviderTurn, storeOrphanEvent, continuationProviderTurnIds } from './recorder-hook-support.js'
-import { snapshotSessionNetDiff } from './git.js'
-import { terminalSnapshot } from './git-capture.js'
+import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
+import { holdSeal, refreshSealWindow } from './recorder-segment.js'
+import { resumeAfterStorage } from './git.js'
+import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
   sessionId: string
 ): Promise<RecorderHookResult> {
-  const taskNotification = input.provider === 'claude' &&
-    START_EVENTS.has(input.event) &&
-    isClaudeTaskNotification(input.payload)
+  const taskNotification = START_EVENTS.has(input.event) && isTaskNotificationPrompt(input.payload)
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
   let open = await readJson<OpenTurnState>(openPath(root))
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
-  if (taskNotification) {
-    if (!open) return { status: 'ignored' as const, reason: 'task notification has no real user turn' }
-    if (open.managedByScry) {
-      return { status: 'recorded' as const, reason: 'managed task continuation kept in canonical Scry turn' }
-    }
-    await rememberContinuationProviderTurn(root, open, incomingProviderTurnId)
-    await storeLifecycleEvent(enablement, open, input.event, input.payload)
-    return { status: 'recorded' as const, reason: 'task notification continued the current Claude turn' }
+  if (input.provider === 'qoder' && input.event === 'Stop' &&
+    await isLateQoderTerminalDuplicate(enablement.dataRoot, root, sessionId, input.payload, open)) {
+    return { status: 'duplicate' as const, reason: 'late Qoder terminal matches the last completed assistant' }
   }
+  if (taskNotification && open) return recordTaskNotificationWake(enablement, root, open, input, incomingProviderTurnId)
+  // With the previous segment already sealed, this wake is new Agent work: it becomes a segment of
+  // its own, linked to the turn that asked, not a phantom turn with a prompt nobody sent.
+  if (taskNotification) return openContinuationSegment({ enablement, input, sessionId })
   if (START_EVENTS.has(input.event) && subagentScopedPayload(input.payload)) {
     // A sub-agent prompt is not a new user turn: superseding the open parent turn here would end
     // it early and orphan every later parent event.
@@ -44,7 +42,11 @@ export async function applyHookLocked(
   if (START_EVENTS.has(input.event)) {
     const providerTurnId = incomingProviderTurnId
     const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
-    let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) && !providerTurnId
+    // Qoder can emit an old ID-less Stop after a new native prompt id exists. Keep the
+    // stale-terminal fence armed for that provider even when this start has an id; the
+    // identified Stop path still bypasses the fence and can prove the new turn directly.
+    let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) &&
+      (!providerTurnId || input.provider === 'qoder')
     const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
     const incomingManagedPromptHash = stringAt(input.payload, 'scry_managed_prompt_hash')
     const hasManagedIdentity = !!(
@@ -108,7 +110,7 @@ export async function applyHookLocked(
       input.payload,
       input.managed === true,
       protectNextStart,
-      input.uploadEnvironment
+      input.uploadEnvironment, input.capture
     )
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
     return { status: 'started' as const }
@@ -137,6 +139,10 @@ export async function applyHookLocked(
       }
     }
     if (input.managed && !terminal) return { status: 'ignored' as const, reason: 'managed turn has no open identity' }
+    if (input.provider === 'codex' && terminal && incomingProviderTurnId &&
+      await consumeCodexInternalTurn(enablement.dataRoot, input.provider, sessionId, incomingProviderTurnId)) {
+      return { status: 'ignored' as const, reason: 'codex internal title turn' }
+    }
     return storeOrphanEvent(enablement, root, input, terminal)
   }
   if (open.managedByScry) {
@@ -167,20 +173,41 @@ export async function applyHookLocked(
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
   if (open.deferredTerminalEventId) {
-    if (endEvent) return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+    const identifiedForOpen = !!incomingProviderTurnId && incomingProviderTurnId === open.providerTurnId
+    if (endEvent && !sessionEndEvent && !identifiedForOpen) {
+      // Another Stop in this segment restarts the silence window: a burst that keeps stopping and
+      // waking stays one segment.
+      await refreshSealWindow(root, open)
+      return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
+    }
+    if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
+      await storeLifecycleEvent(enablement, open, input.event, input.payload)
+      open.terminalIdentityConfirmedBySessionEnd = true
+      delete open.deferredTerminalAt
+      delete open.deferredTerminalEventId
+      await writeJsonAtomic(openPath(root), open)
+      return { status: 'pending' as const, reason: 'session end confirmed the deferred terminal; aggregation deferred to recovery' }
+    }
     await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
     open.status = 'open'
     delete open.closingAt
+    delete open.terminalAt
+    delete open.terminalAtSource
+    delete open.terminalFallbackStatus
+    delete open.endReason
     delete open.deferredTerminalAt
     delete open.deferredTerminalEventId
     delete open.terminalDiffs
+    // The chain is dropped with the hold: this turn keeps its own baseline.
+    for (const { capture } of open.captures) resumeAfterStorage(capture)
+    delete open.frozenDiffs
+    delete open.terminalIdentityConfirmedBySessionEnd
     delete open.staleTerminalProtection
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
-  // Stale-terminal protection weighs one Provider terminal against a possibly newer one. A session
-  // or process end has no such competitor: deferring or discarding it would leave the turn open
-  // for the next prompt to close, which is the inflation this path exists to prevent.
+  // Stale-terminal protection weighs one terminal against a possibly newer one. A session end has
+  // no such competitor: deferring it would leave the turn open for the next prompt to close.
   if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
     return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
   }
@@ -188,36 +215,26 @@ export async function applyHookLocked(
     const terminalAt = explicitTerminalAt ?? timestampOf(input.payload)
     const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
     if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS) {
-      const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
-      open.status = 'closing'
-      open.closingAt = terminalAt
-      open.terminalAt = terminalAt
-      open.terminalAtSource = 'recorder_observed_terminal'
-      open.endReason ??= 'provider_terminal'
-      // Freeze at the Provider boundary without consuming the baseline: a newer
-      // prompt can still cancel this deferred terminal. Keep runtime promise queues
-      // on the temporary view, not in the JSON-persisted capture.
-      open.terminalDiffs = await Promise.all(open.captures.map(async ({ repository, capture }) => {
-        const started = Date.now()
-        try {
-          const snapshot = await snapshotSessionNetDiff({ ...capture, opChain: undefined, finishPromise: undefined }, undefined, {
-            patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-            completePatches: true
-          })
-          return { repository, snapshot }
-        } catch {
-          // A failed boundary capture cannot be replaced by a later worktree view.
-          return { repository, snapshot: terminalSnapshot(capture, 'unavailable', 'git_error', [], terminalAt, Date.now() - started, 'failed') }
-        }
-      }))
-      open.deferredTerminalAt = new Date().toISOString()
-      open.deferredTerminalEventId = eventId
-      await writeJsonAtomic(openPath(root), open)
-      return { status: 'pending' as const, reason: 'unidentified early terminal deferred for stale-event protection' }
+      return holdSeal(enablement, root, open, input, 'stale_terminal', terminalAt)
     }
   }
+  // A Provider that continues this turn after its Stop must not publish while its own background
+  // work is unreported: the wake's rows belong to this same burst.
+  if (endEvent && !sessionEndEvent) {
+    const held = await holdStopForBackgroundWork({
+      enablement, input, sessionId, open, terminalAt: explicitTerminalAt ?? timestampOf(input.payload)
+    })
+    if (held) return held
+  }
+  if (sessionEndEvent && open.terminalIdentityConfirmedBySessionEnd) {
+    return { status: 'pending' as const, reason: 'session end already confirmed the deferred terminal' }
+  }
   await storeLifecycleEvent(enablement, open, input.event, input.payload)
-  if (!endEvent) return { status: 'recorded' as const }
+  if (!endEvent) {
+    // Activity inside a held segment: the silence window measures quiet, not the first Stop.
+    await refreshSealWindow(root, open)
+    return { status: 'recorded' as const }
+  }
   const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
   open.status = 'closing'
   open.closingAt = timestampOf(input.payload)
@@ -228,7 +245,12 @@ export async function applyHookLocked(
   // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
   // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
   // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
-  if (sessionEndEvent) open.terminalFallbackStatus ??= 'interrupted'
+  if (sessionEndEvent) {
+    open.terminalFallbackStatus ??= 'interrupted'
+    // The session end is what lets this turn close on the evidence it has; a separate field keeps an
+    // earlier terminal's verdict intact.
+    open.sessionEndedAt ??= timestampOf(input.payload)
+  }
   await writeJsonAtomic(openPath(root), open)
   if (sessionEndEvent) {
     return { status: 'pending' as const, reason: 'session end persisted; turn aggregation deferred to recovery' }
@@ -247,35 +269,6 @@ export function isLockTimeout(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ELOCKTIMEOUT'
 }
 
-function hookInbox(dataRoot: string, provider: ProviderId, sessionId: string): string {
-  return join(sessionRoot(dataRoot, provider, sessionId), 'inbox')
-}
-
-export async function queueHook(
-  enablement: Extract<RecorderEnablement, { enabled: true }>,
-  input: RecorderHookInput,
-  sessionId: string,
-  arrivedAt: string
-): Promise<void> {
-  const entry: QueuedHook = {
-    schemaVersion: 1,
-    provider: input.provider,
-    sessionId,
-    event: input.event,
-    payload: input.payload,
-    uploadEnvironment: input.uploadEnvironment,
-    ...(input.managed ? { managed: true } : {}),
-    arrivedAt
-  }
-  // Names sort by arrival; the UUID only separates hooks that arrive in the same millisecond.
-  const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${randomUUID()}.json`
-  await writeJsonAtomic(join(hookInbox(enablement.dataRoot, input.provider, sessionId), name), entry)
-  await appendRotatingLog(
-    join(enablement.dataRoot, 'logs', 'recorder.log'),
-    `${new Date().toISOString()} WARN ${input.queueOnly ? 'daemon delivery uncertain' : 'session lock busy'}; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
-  ).catch(() => undefined)
-}
-
 /**
  * Apply queued hooks in arrival order. Caller must hold the session lock. Delivery is
  * at-least-once: a crash between apply and unlink replays the hook, which the lifecycle
@@ -285,9 +278,16 @@ export async function replayQueuedHooks(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
   sessionKey: string,
-  includeFailed = false
+  includeFailed = false,
+  expectedSessionId?: string
 ): Promise<number> {
   const root = join(enablement.dataRoot, 'runtime', provider, sessionKey)
+  if (expectedSessionId !== undefined) {
+    const open = await readJson<OpenTurnState>(openPath(root))
+    if (open && (open.provider !== provider || open.sessionId !== expectedSessionId)) {
+      throw new Error(`scoped recorder recovery open identity differs from requested ${provider}/${expectedSessionId}`)
+    }
+  }
   const warn = (name: string, error: unknown) => appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
     `${new Date().toISOString()} WARN inbox ${provider}/${sessionKey}/${name}: ${error instanceof Error ? error.message : String(error)}`
@@ -310,9 +310,14 @@ export async function replayQueuedHooks(
       if (queued === null) continue // ENOENT only: another completed cleanup, not a lost event.
       if (queued.schemaVersion !== 1 || queued.provider !== provider ||
         typeof queued.sessionId !== 'string' || safeKey(queued.sessionId) !== sessionKey ||
+        (expectedSessionId !== undefined && queued.sessionId !== expectedSessionId) ||
         typeof queued.event !== 'string' || !queued.payload || typeof queued.payload !== 'object' ||
         Array.isArray(queued.payload) || typeof queued.arrivedAt !== 'string' ||
-        !Number.isFinite(Date.parse(queued.arrivedAt))) {
+        !Number.isFinite(Date.parse(queued.arrivedAt)) ||
+        !validQueuedCapture(queued, provider)) {
+        if (expectedSessionId !== undefined && (queued.provider !== provider || queued.sessionId !== expectedSessionId)) {
+          throw new Error(`scoped recorder inbox identity differs from requested session: ${entry.name}`)
+        }
         throw new Error(`invalid queued recorder hook: ${entry.name}`)
       }
       await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
@@ -321,9 +326,13 @@ export async function replayQueuedHooks(
         workspace: enablement.workspaceRoot,
         payload: queued.payload,
         managed: queued.managed,
-        uploadEnvironment: queued.uploadEnvironment
+        uploadEnvironment: queued.uploadEnvironment,
+        ...(queued.capture ? { capture: queued.capture } : {})
       }, queued.sessionId))
     } catch (error) {
+      if (expectedSessionId !== undefined && error instanceof Error && error.message.startsWith('scoped recorder inbox identity')) {
+        throw error
+      }
       try {
         await quarantineInboxEntry(entry, attempts + 1, error)
         if (attempts + 1 === INBOX_MAX_ATTEMPTS) {

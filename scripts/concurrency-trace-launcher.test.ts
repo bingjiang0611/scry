@@ -75,23 +75,22 @@ describe('concurrency trace launcher contract', () => {
     expect(result.stdout).not.toContain('SCRY_CONCURRENCY_TRACE_BENCH')
   })
 
-  it('rejects unknown flags, extra positionals and illegal values with exit code 2', () => {
-    const cases: Array<{ args: string[], pattern: RegExp }> = [
-      { args: ['--concurrency', '4'], pattern: /unknown option/i },
-      { args: ['extra'], pattern: /positional/i },
-      { args: ['--limit', '8'], pattern: /--limit must be one of 4, 16/ },
-      { args: ['--readers', '2'], pattern: /--readers must be one of 0, 1, 4/ },
-      { args: ['--items', '50000'], pattern: /--items must be one of 1000, 10000/ },
-      // A missing value has to be reported as such; the usage text alone must not satisfy this.
-      { args: ['--limit'], pattern: /argument missing/i }
-    ]
-    for (const { args, pattern } of cases) {
-      const result = runLauncher(...args)
-      expect({ args, status: result.status }).toEqual({ args, status: 2 })
-      expect(result.stdout).toBe('')
-      expect(result.stderr).toMatch(pattern)
-      expect(result.stderr).toContain('Usage: node scripts/concurrency-trace-bench.mjs')
-    }
+  // Each CLI invocation is an independent contract, with its own unchanged
+  // deadline; unrelated process startup costs must not accumulate in one case.
+  it.each([
+    { args: ['--concurrency', '4'], pattern: /unknown option/i },
+    { args: ['extra'], pattern: /positional/i },
+    { args: ['--limit', '8'], pattern: /--limit must be one of 4, 16/ },
+    { args: ['--readers', '2'], pattern: /--readers must be one of 0, 1, 4/ },
+    { args: ['--items', '50000'], pattern: /--items must be one of 1000, 10000/ },
+    // A missing value has to be reported as such; the usage text alone must not satisfy this.
+    { args: ['--limit'], pattern: /argument missing/i }
+  ])('rejects $args with exit code 2 and the specific diagnostic', ({ args, pattern }) => {
+    const result = runLauncher(...args)
+    expect({ args, status: result.status }).toEqual({ args, status: 2 })
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toMatch(pattern)
+    expect(result.stderr).toContain('Usage: node scripts/concurrency-trace-bench.mjs')
   })
 
   it('touches no filesystem entry and starts no process for --help or an invalid flag', () => {

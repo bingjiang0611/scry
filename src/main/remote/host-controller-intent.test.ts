@@ -60,6 +60,25 @@ describe('HostController intent execution (routing, workspaces, providers, proje
     expect(runProvider).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts only structurally valid managed-worktree selections in the durable intent detail', async () => {
+    const seen: RemoteIntentRouting[] = []
+    const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
+    const { controller } = await grantedController(runProvider)
+    const workspace = { operationId: '11111111-1111-4111-8111-111111111111', intent: {
+      kind: 'current' as const, repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64)
+    } }
+    const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go', workspace }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(seen[0]?.workspace).toEqual(workspace)
+    const rejected = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({
+      prompt: 'go', workspace: { ...workspace, operationId: '../escape' } as unknown as RemoteIntentRouting['workspace']
+    }) })
+    await controller.idle()
+    expect(controller.runState(CERT, { runId: rejected.runId })).toBe('failed')
+    expect(runProvider).toHaveBeenCalledTimes(1)
+  })
+
   it('accepts bounded encrypted image/text attachments and rejects malformed payloads before Provider execution', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })

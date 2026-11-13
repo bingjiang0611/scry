@@ -34,6 +34,8 @@ export {
   isDiffSnapshotStage,
   isDiffPreviewStage,
   type TurnDiffBaselineOrigin,
+  type WorktreeBaselineReason,
+  WORKTREE_BASELINE_REASONS,
   type TurnDiffPatchStatus,
   type TurnDiffPatchReason,
   type TurnDiffFallbackReason,
@@ -76,6 +78,13 @@ export interface McpCallRef {
 // 与 renderer 的 Turn 结构一致（结构化类型，可互赋）。
 export interface ActiveRun {
   runId: string
+  /** Stable owner for managed-conversation attention, independent of Provider bindings. */
+  conversationId?: string
+  /**
+   * Attention owner when it is not this conversation: a side chat has no sidebar row of its
+   * own, so its unread result and questions belong to the row of the session it came from.
+   */
+  attentionKey?: string
   providerId?: ProviderId
   agentProfileId?: string
   cwd?: string
@@ -87,7 +96,15 @@ export interface ActiveRun {
   /** Latest bounded legacy observation; global summaries must not rescan the trace. */
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   done: boolean
+  /** Provider transport settled. Independent of the local finalization below. */
   providerSettled?: boolean
+  /**
+   * Local finalization (turn diff, archive, managed settlement) is still open after the
+   * Provider settled. Such a run still owns its conversation and its recording fences, so
+   * admission and deletion keep waiting for it, while stop control must not call into an
+   * ended Provider.
+   */
+  localFinalizing?: boolean
   /** 已请求停止时的真实停止进度；缺失表示没有人请求过停止，不表示已终止。 */
   stopState?: AgentStopState
   sessionId?: string

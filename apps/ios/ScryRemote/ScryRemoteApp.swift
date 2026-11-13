@@ -15,6 +15,7 @@ struct ScryRemoteApp: App {
     RemoteSelfTest.runDirectoryAttachmentProbeIfRequested()
     RemoteSelfTest.runSessionReadProbeIfRequested()
     RemoteSelfTest.runHistoryContractProbeIfRequested()
+    RemoteSelfTest.runNetBenchIfRequested()
     RemoteRunStore.runOpenFlowProbeIfRequested()
     #endif
   }
@@ -22,7 +23,9 @@ struct ScryRemoteApp: App {
     WindowGroup {
       Group {
         #if DEBUG
-        if let mode = SheetPreview.requestedMode {
+        if RemoteSelfTest.netBenchRequested {
+          Text("netBench running").font(.footnote).foregroundStyle(.secondary)
+        } else if let mode = SheetPreview.requestedMode {
           SheetPreview(mode: mode)
         } else {
           RootView()
@@ -127,7 +130,7 @@ struct RootView: View {
     // Route replacement can remove a focused TextField while the system is
     // resizing for its keyboard. An implicit animation of the entire root
     // loops SwiftUI layout on iOS 26.5; keep page replacement unanimated.
-    .animation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false), value: model.canShowWorkspace)
+    .animation(reduceMotion ? nil : Motion.animation(.page, reduceMotion: false), value: model.canShowWorkspace)
     // The run channel is the honest source of reachability: reflect a real
     // successful/failed host exchange into the paired link status so the UI never
     // shows "offline" while sending actually works.
@@ -144,8 +147,13 @@ struct RootView: View {
       switch phase {
       case .background:
         targets.backgrounded()
-        Task { await RemoteSessionRegistry.shared.resetAll() }
-      case .active: if model.canShowWorkspace { targets.foregrounded() }
+        Task {
+          await RemoteSessionRegistry.shared.setForeground(false)
+          await RemoteSessionRegistry.shared.resetAll()
+        }
+      case .active:
+        Task { await RemoteSessionRegistry.shared.setForeground(true) }
+        if model.canShowWorkspace { targets.foregrounded() }
       default: break
       }
     }
@@ -154,6 +162,9 @@ struct RootView: View {
       if paired { resumeRecoveredRun(); targets.foregrounded() } else { targets.backgrounded() }
     }
     .onAppear {
+      // onChange(of: scenePhase) does not fire for the launch phase.
+      let launchedActive = scenePhase == .active
+      Task { await RemoteSessionRegistry.shared.setForeground(launchedActive) }
       #if DEBUG
       model.applyUIPreviewArguments(runStore: run)
       run.applyUIPreviewArguments()

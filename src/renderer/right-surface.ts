@@ -12,7 +12,7 @@ export interface RightSurfaceDefinition {
 export const RIGHT_SURFACE_DEFINITIONS: readonly RightSurfaceDefinition[] = [
   {
     kind: 'overview',
-    label: '纵览',
+    label: '总览',
     description: '查看当前会话的结论、调用与证据。',
     icon: 'overview'
   },

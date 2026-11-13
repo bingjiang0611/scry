@@ -34,6 +34,50 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
     } finally { await restored?.dispose(); await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('keeps a submit unknown when a concurrent SSH channel failure cannot be attributed to that request', async () => {
+    const fixture = await setup()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let readStarted!: () => void
+    const reading = new Promise<void>((resolve) => { readStarted = resolve })
+    let submitStarted!: () => void
+    const submitting = new Promise<void>((resolve) => { submitStarted = resolve })
+    try {
+      const paired = await fixture.client.pair({ label: 'remote', ssh, invitation: fixture.invitation })
+      const id = paired.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      fixture.tlsRequest.mockImplementation(async (options) => {
+        const request = options.request as { op?: string }
+        // The run-status read is the lifecycle long poll on its own lane.
+        if (request.op === 'watch') {
+          readStarted()
+          await gate
+          fixture.setTunnelFailure('target_unreachable')
+          throw new Error('desktop_tls_request_eof')
+        }
+        if (request.op === 'submit') {
+          submitStarted()
+          await gate
+          await Promise.resolve()
+          throw new Error('desktop_tls_request_eof')
+        }
+        throw new Error('unexpected_request')
+      })
+      const read = fixture.client.runStatus(id, randomUUID()).then(() => undefined, (error: unknown) => error)
+      await reading
+      const submit = fixture.client.submit(id, { context: { cwd: '/project-a', providerId: 'pi' }, prompt: 'possibly sent' })
+      await submitting
+      release()
+      await expect(read).resolves.toMatchObject({ message: 'desktop_tls_request_eof' })
+      await expect(submit).resolves.toMatchObject({ status: 'unknown', failure: 'desktop_tls_request_eof' })
+      await expect(fixture.client.intents(id)).resolves.toMatchObject([{ status: 'unknown', failure: 'desktop_tls_request_eof' }])
+    } finally {
+      release?.()
+      await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     { response: () => ({ error: 'unknown_op' }), error: 'desktop_remote_unknown_op' },
     { response: () => { throw new Error('reply_lost') }, error: 'reply_lost' },
@@ -88,6 +132,25 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       release?.(); writeSpy?.mockRestore()
       await fixture.client.dispose(); await fs.rm(fixture.directory, { recursive: true, force: true })
     }
+  })
+
+  it('rejects relayed managed-worktree submissions when the target host did not negotiate support', async () => {
+    const fixture = await setup({ submitResponse: () => ({ runId: randomUUID(), status: 'recorded' }) })
+    try {
+      const pending = await fixture.client.pair({ label: 'Legacy target', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(pending.connection.id)
+      await fixture.client.connect(pending.connection.id)
+      const target = (await fixture.client.executionTargets())[0]!
+      const phoneIntentId = randomUUID()
+      const detail = JSON.stringify({ cwd: '/workspace', providerId: 'pi', prompt: 'must not run', workspace: {
+        operationId: randomUUID(), intent: { kind: 'current', repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64) }
+      } })
+      await expect(fixture.client.mobileSubmit({ target, phonePeerFingerprint: 'a'.repeat(64), phoneIntentId,
+        payloadHash: 'b'.repeat(64), request: { op: 'submit', intentId: phoneIntentId, detail } }))
+        .rejects.toThrow('workspace_selection_unavailable')
+      await expect(fixture.client.intents(pending.connection.id)).resolves.toEqual([])
+      expect(fixture.tlsRequest.mock.calls.some(([value]) => (value.request as { op?: string }).op === 'submit')).toBe(false)
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
   it('keeps one downstream key for equal target retries and target intent status, rejecting payload changes', async () => {

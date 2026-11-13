@@ -7,6 +7,21 @@ import { join } from 'node:path'
 // Production App/main/preload/renderer, isolated HOME/userData and real local Git.
 // No Provider start, gh credential lookup, or GitHub request is made here.
 export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remote, home }) {
+  // Observe real worker transport before opening a diff. Packaged acceptance
+  // must prove ASAR assets work, not just the synchronous/plaintext fallback.
+  await evaluate(`(() => {
+    const NativeWorker = window.Worker;
+    window.__sourceControlWorkers = [];
+    window.Worker = class extends NativeWorker {
+      constructor(url, options) {
+        super(url, options);
+        const worker = { url: String(url), messages: [] };
+        window.__sourceControlWorkers.push(worker);
+        this.addEventListener('message', event => worker.messages.push(event.data.type === 'success' ? 'success:' + event.data.requestType : 'error'));
+        this.addEventListener('error', () => worker.messages.push('error'));
+      }
+    };
+  })()`)
   const git = (...args) => execFileSync('/usr/bin/git', args, {
     cwd: workspace, encoding: 'utf8',
     env: { PATH: '/usr/bin:/bin', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }
@@ -117,7 +132,8 @@ export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remot
 
   await click(visible('button.sc-file-name[title="pre-staged.txt"]'))
   await wait(visible('.sc-diff-switch'))
-  await wait(visible('.sc-diff-scroll .sc-code-line'))
+  await wait(`Array.from(document.querySelectorAll('.sc-diff-scroll diffs-container')).some(host =>
+    Array.from(host.shadowRoot?.querySelectorAll('[data-line]') ?? []).some(line => line.getBoundingClientRect().height > 0))`)
   for (const label of ['提交改动…', '详情', '刷新']) {
     assert.equal(await evaluate(`(() => {
       const element = ${button(label)};
@@ -208,7 +224,19 @@ export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remot
   await click(button('操作记录'))
   await wait(`document.querySelectorAll('.sc-operation').length === 3`)
   assert.equal(await evaluate(`Array.from(document.querySelectorAll('.sc-operation')).some(element => element.textContent.includes('结果未知') || element.textContent.includes('失败'))`), false)
+  // The Git workflow above uses .txt files, which intentionally take Pierre's
+  // plaintext path. Exercise a highlighted language before judging the worker.
+  writeFileSync(join(workspace, 'worker.ts'), 'export const offline = true\n')
+  await click(visible('.sc-tabs button'))
+  await click(button('刷新'))
+  await wait(visible('button.sc-file-name[title="worker.ts"]'))
+  await click(visible('button.sc-file-name[title="worker.ts"]'))
+  await wait(`window.__sourceControlWorkers.some(worker => worker.messages.includes('success:diff') || worker.messages.includes('error'))`)
+  const workers = await evaluate('window.__sourceControlWorkers')
+  assert(workers.some(worker => worker.messages.includes('success:initialize') && worker.messages.includes('success:diff')), 'Native diff worker never answered: ' + JSON.stringify(workers))
+  assert(workers.every(worker => worker.url.startsWith('file:') && !worker.messages.includes('error')), 'Diff worker failed or loaded remote code')
   return {
+    workerUrls: [...new Set(workers.map(worker => worker.url))], nativeDiffWorker: true,
     sourceControl: 'production App / real temporary Git',
     zeroIndexEntry: true, prospectiveSelection: true, explicitUnstage: true,
     partialIndexPreserved: true, fullIndexAndSelectedCommit: true, nativeFocusAndEscape: true,

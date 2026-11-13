@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { pierreTreeHasText } from './pierre-ui.mjs'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -18,7 +19,7 @@ const json = JSON.stringify
 /** Production App + preload + native Git, with the existing isolated, non-network Provider fixture. */
 export async function exerciseWorkspaceSessions(context) {
   const { cdp, evaluate, workspace, canonicalWorkspace, conversationInputs, userDataDir, temp, secondWorkspace } = context
-  const evidence = mkdtempSync(join(tmpdir(), 'scry-workspace-session-ui-'))
+  const evidence = mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'scry-workspace-session-ui-'))
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', ...args],
   { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim()
@@ -52,7 +53,9 @@ export async function exerciseWorkspaceSessions(context) {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
     await click(selector)
     await wait(() => evaluate(`document.querySelector('.workspace-context-strip button')?.disabled === false &&
-      document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft')
+      [${json(cwd)}, ${json(realpathSync(cwd))}].some(path =>
+        document.querySelector('[data-workspace-menu="workspace"]')?.title.endsWith(path)) &&
+      document.querySelector('textarea') && !document.querySelector('.workspace-picker')`), 'fresh native draft for selected workspace')
   }
   const openPicker = async () => {
     await click('[data-workspace-menu="refs"]')
@@ -178,23 +181,23 @@ export async function exerciseWorkspaceSessions(context) {
     await wait(() => evaluate(`[...document.querySelectorAll('button.pinned-summary-row')].some(node => node.textContent.includes('Changes'))`), 'workspace summary')
     await click('button.pinned-summary-row', 'Changes')
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'workspace' &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'workspace inspector snapshot')
-    assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
+      ${pierreTreeHasText('remote-second.txt')}`), 'workspace inspector snapshot')
+    assert.equal(await evaluate(pierreTreeHasText('remote-first.txt')), false)
     await selectDiffScope({ click, wait, evaluate }, 'branch')
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'branch' &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes includes committed and uncommitted files')
+      ${pierreTreeHasText('remote-first.txt')} &&
+      ${pierreTreeHasText('remote-second.txt')}`), 'branch Changes includes committed and uncommitted files')
     await selectDiffScope({ click, wait, evaluate }, 'latest')
-    await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'latest turn snapshot')
-    assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
+    await wait(() => evaluate(pierreTreeHasText('remote-second.txt')), 'latest turn snapshot')
+    assert.equal(await evaluate(pierreTreeHasText('remote-first.txt')), false)
     git(target, 'add', '--', 'remote-second.txt')
     git(target, 'commit', '-m', 'clean workspace keeps session evidence')
     await selectDiffScope({ click, wait, evaluate }, 'workspace')
     await wait(() => evaluate(`document.querySelector('.diff-review-empty')?.textContent.includes('工作区没有未提交净改动')`), 'captured zero never falls back to session')
     assert.equal(await evaluate(`document.querySelector('.diff-review-totals .add')?.textContent`), '+0')
     await selectDiffScope({ click, wait, evaluate }, 'branch')
-    await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt') &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'branch Changes persists after both files are committed')
+    await wait(() => evaluate(`${pierreTreeHasText('remote-first.txt')} &&
+      ${pierreTreeHasText('remote-second.txt')}`), 'branch Changes persists after both files are committed')
     await exerciseDiffWorkbench({ target, git, click, key, wait, evaluate, screenshot, cdp })
     if (await exerciseTurnMenu({ click, key, wait, evaluate, screenshot, target, firstRunId: created.run.runId, latestRunId: second.run.runId, cdp, userDataDir, inputs, evidence })) return
     await screenshot('inspector-wide')

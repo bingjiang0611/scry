@@ -33,10 +33,71 @@ export async function exerciseMotionTokens(contents) {
   contents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...toolGroup })
   contents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...toolGroup })
   await wait('document.querySelector(".tool-card") != null')
-  // This fixture measures hover, not Step04's newly mounted 240ms disclosure.
+  // This fixture measures hover, not the newly mounted 200ms disclosure.
   await read(`Promise.all(document.querySelector('#motion-tool').getAnimations({ subtree: true }).filter(animation => animation.effect.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))`)
-  check(await read("getComputedStyle(document.documentElement).getPropertyValue('--dur-slow').trim() === '300ms'"), 'the slow token is not 300ms')
-  check(await read("getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim() === 'cubic-bezier(0.23, 1, 0.32, 1)'"), 'the shared ease-out token is missing')
+  const ambientReduced = await read("matchMedia('(prefers-reduced-motion: reduce)').matches")
+  await contents.debugger.attach('1.3')
+  await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
+  })
+  await wait("!matchMedia('(prefers-reduced-motion: reduce)').matches")
+  const tokens = await read(`({
+    large: getComputedStyle(document.documentElement).getPropertyValue('--duration-lg').trim(),
+    entrance: getComputedStyle(document.documentElement).getPropertyValue('--ease-out').trim(),
+    reduced: matchMedia('(prefers-reduced-motion: reduce)').matches
+  })`)
+  check(tokens.large === '400ms', `the large token is not 400ms: ${JSON.stringify(tokens)}`)
+  check(tokens.entrance === 'cubic-bezier(0, 0, 0.58, 1)', `the shared entrance token is missing: ${JSON.stringify(tokens)}`)
+
+  // The native files disclosure must grow its content, moving the rows below it,
+  // instead of revealing them in one frame. Chromium exposes no transition events for
+  // `::details-content`, so the interpolated pseudo-element height is the evidence.
+  const filesDisclosure = await read(`(() => {
+    const details = document.querySelector('#motion-tool .files-summary:not(.diff)')
+    if (!details) return { missing: true }
+    const contract = getComputedStyle(details, '::details-content')
+    return { missing: false, open: details.open, property: contract.transitionProperty, duration: contract.transitionDuration }
+  })()`)
+  check(!filesDisclosure.missing, 'The motion fixture no longer renders a files disclosure')
+  check(!filesDisclosure.open, `Files disclosure should start collapsed: ${JSON.stringify(filesDisclosure)}`)
+  check(filesDisclosure.property.includes('height') && parseFloat(filesDisclosure.duration) === 0.15,
+    `Files disclosure lost its height transition: ${JSON.stringify(filesDisclosure)}`)
+  const filesRun = await read(`(async () => {
+    const details = document.querySelector('#motion-tool .files-summary:not(.diff)')
+    const summary = details.querySelector('summary')
+    // The host box is what the rows below actually move with, and it is a layout value
+    // that stays readable on every frame; the pseudo-element string can be auto.
+    const boxHeight = () => details.getBoundingClientRect().height
+    const frames = duration => new Promise(resolve => {
+      const started = performance.now()
+      const samples = []
+      const tick = () => {
+        samples.push({ at: Math.round(performance.now() - started), height: Number(boxHeight().toFixed(1)) })
+        if (performance.now() - started < duration) requestAnimationFrame(tick)
+        else resolve(samples)
+      }
+      requestAnimationFrame(tick)
+    })
+    const collapsed = { open: details.open, height: boxHeight() }
+    summary.click()
+    const opening = await frames(260)
+    const opened = { open: details.open, height: boxHeight(), rows: details.querySelector('.files-body')?.getBoundingClientRect().height ?? 0 }
+    summary.click()
+    const closing = await frames(260)
+    const closed = { open: details.open, height: boxHeight() }
+    return { collapsed, opening, opened, closing, closed }
+  })()`)
+  const midFlight = (samples, from, to) => samples.some(entry =>
+    entry.height > Math.min(from, to) + 1 && entry.height < Math.max(from, to) - 1)
+  check(!filesRun.collapsed.open && filesRun.opened.open && filesRun.opened.rows > 0,
+    `Files disclosure did not toggle: ${JSON.stringify({ collapsed: filesRun.collapsed, opened: filesRun.opened })}`)
+  check(filesRun.opened.height > filesRun.collapsed.height + 4,
+    `Open files disclosure does not take more room: ${JSON.stringify({ collapsed: filesRun.collapsed, opened: filesRun.opened })}`)
+  check(midFlight(filesRun.opening, filesRun.collapsed.height, filesRun.opened.height),
+    `Files disclosure popped open instead of growing: ${JSON.stringify(filesRun.opening)}`)
+  check(!filesRun.closed.open, `Files disclosure stayed open: ${JSON.stringify(filesRun.closed)}`)
+  check(midFlight(filesRun.closing, filesRun.closed.height, filesRun.opened.height),
+    `Files disclosure snapped closed: ${JSON.stringify(filesRun.closing)}`)
 
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
@@ -55,8 +116,6 @@ export async function exerciseMotionTokens(contents) {
     await checkNoTransform(selector, selector)
   }
 
-  const ambientReduced = await read("matchMedia('(prefers-reduced-motion: reduce)').matches")
-  await contents.debugger.attach('1.3')
   try {
     // Establish both media-query controls, regardless of the runner's preference.
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', {
@@ -87,8 +146,8 @@ export async function exerciseMotionTokens(contents) {
           id: animation.id, duration: animation.effect.getTiming().duration, frames: animation.effect.getKeyframes()
         }))
       })`)
-      check(!normal.reduced && normal.animations.some(animation => animation.duration === 300 && animation.frames.some(frame => frame.transform != null)),
-        `normal reorder did not produce the 300ms FLIP positive control: ${JSON.stringify({ ambientReduced, before, normal })}`)
+      check(!normal.reduced && normal.animations.some(animation => animation.duration === 250 && animation.frames.some(frame => frame.transform != null)),
+        `normal reorder did not produce the 250ms FLIP positive control: ${JSON.stringify({ ambientReduced, before, normal })}`)
     } finally {
       await read('window.__motionReorder.restore(); delete window.__motionReorder')
     }
@@ -140,7 +199,7 @@ export async function exerciseMotionTokens(contents) {
     }
     const micro = colorChanges.at(-1)
     check(micro.animations.length === 1 && micro.animations[0].property === 'background-color' &&
-      micro.animations[0].duration > 0 && micro.animations[0].duration <= 100 && micro.animations[0].easing === 'linear',
+      micro.animations[0].duration === 150 && micro.animations[0].easing === 'cubic-bezier(0, 0, 0.58, 1)',
     `the declared micro color transition changed: ${JSON.stringify(micro)}`)
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] }).catch(() => {})
@@ -155,9 +214,10 @@ export async function exerciseMotionTokens(contents) {
     hoverStates: ['tool-card', 'composer-send', 'sidebar-activity', 'analysis'],
     focusStates: true,
     reducedMotionReorder: true,
-    reducedMotionColorTransition: 'declared duration, at most 100ms linear',
+    reducedMotionColorTransition: 'declared 150ms ease-out',
     noUndeclaredColorTransitions: true,
-    reducedMotionTransformAnimation: false
+    reducedMotionTransformAnimation: false,
+    filesDisclosure: 'height transition on ::details-content'
   }
 }
 

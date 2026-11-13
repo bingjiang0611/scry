@@ -1,4 +1,13 @@
 // 远端主机与远端会话的界面文案；与 copy.ts 的其他领域文案分开，避免单个字典文件无限增长。
+const IPC_WRAPPER = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/
+const ERROR_CLASS_NAME = /^(?:[A-Za-z_$][\w$]*)?Error:\s+/
+const REMOTE_ERROR_COPY = {
+  targetUnavailable: 'SSH 已连接，但远端 Scry 服务不可达。请确认远端 Scry 正在运行，并检查远端系统的本机端口资源。',
+  forwardingDenied: 'SSH 服务器拒绝端口转发。请在远端 SSH 配置中允许 TCP 转发后重试。',
+  connectionClosed: '远端 Scry 在响应前关闭了连接。请确认远端 Scry 正在运行后重试。',
+  unknown: '远程操作失败，未返回原因。'
+} as const
+
 export const REMOTE_ACCESS_COPY = {
   discardWorkspaceChanges: '当前远程文件有未保存修改。放弃修改并继续吗？',
   title: '远程访问',
@@ -24,6 +33,14 @@ export const REMOTE_ACCESS_COPY = {
     unknown: '状态未知'
   },
   connectionReadError: (detail: string) => `无法确认连接状态：${detail}`,
+  errorText: (error: unknown): string => {
+    const raw = error instanceof Error ? error.message : String(error)
+    const reason = raw.replace(IPC_WRAPPER, '').replace(ERROR_CLASS_NAME, '').trim()
+    if (reason === 'desktop_ssh_target_unreachable') return REMOTE_ERROR_COPY.targetUnavailable
+    if (reason === 'desktop_ssh_forwarding_denied') return REMOTE_ERROR_COPY.forwardingDenied
+    if (reason === 'desktop_tls_request_eof' || /\bECONNRESET\b/.test(reason)) return REMOTE_ERROR_COPY.connectionClosed
+    return reason || REMOTE_ERROR_COPY.unknown
+  },
   connect: '连接',
   disconnect: '断开',
   finishPairing: '完成配对',

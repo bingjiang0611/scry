@@ -17,6 +17,13 @@ export interface CaptureItem {
   sourceOrdinal: number
   providerId: ProviderId
   contentHash: string
+  // Every remaining sealed field is repeated here because the fingerprint covers what the
+  // record will claim: a rewritten status, delivery or native identity is a different
+  // snapshot, even when the order and the text are byte-identical.
+  status: string
+  delivery: string
+  nativeSessionId?: string
+  providerTurnId?: string
   /** Exact UTF-8 bytes of the message text. */
   bytes: number
   /** Exact bytes this message adds to the first-send handoff, including both escapes. */
@@ -56,6 +63,9 @@ function inlineBase(meta: CaptureMessageMeta, contentHash: string): number {
 function item(meta: CaptureMessageMeta, contentHash: string, bytes: number, escapedBytes: number): CaptureItem {
   return {
     role: meta.role, sourceRunId: meta.sourceRunId, sourceOrdinal: meta.sourceOrdinal, providerId: meta.providerId,
+    status: meta.status, delivery: meta.delivery,
+    ...(meta.nativeSessionId === undefined ? {} : { nativeSessionId: meta.nativeSessionId }),
+    ...(meta.providerTurnId === undefined ? {} : { providerTurnId: meta.providerTurnId }),
     contentHash, bytes, inlineBytes: inlineBase(meta, contentHash) + escapedBytes
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { TurnDiffReview } from '../turn-diff'
 import type { DiffLayout } from '../diff-stack'
 import type { DiffCommitHistory } from '../hooks/useDiffCommitHistory'
@@ -7,7 +7,7 @@ import { TURN_DIFF_REVIEW_COPY as copy } from '../constants/copy'
 import { DIFF_COPY as detail } from '../constants/diff-copy'
 import { DiffFiles } from './DiffFiles'
 import { DiffNavigation } from './DiffNavigation'
-import { StackedDiff } from './StackedDiff'
+const StackedDiff = lazy(() => import('./StackedDiff').then(module => ({ default: module.StackedDiff })))
 import './diff-inspector.css'
 import './diff-stack.css'
 export { parseUnifiedDiff } from '../diff-lines'
@@ -71,8 +71,10 @@ export function TurnDiffReviewPanel({ review: source, onClose, embedded = false,
         {!review || !turnDiff ? <div className="diff-review-empty" role="status"><Icon name={history?.pending ? 'clock' : 'alert'} />
           <b>{history?.pending ? detail.commitPending : detail.commitUnavailable}</b>
         </div> : !available ? <div className="diff-review-empty"><Icon name="alert" /><b>{detail.evidence(turnDiff)}</b></div>
-          : selected ? <StackedDiff key={identity} files={files} path={selected.path} jump={jump} scope={scope} repoRoot={turnDiff.repoRoot}
-            layout={layout} setLayout={setLayout} />
+          : selected ? <Suspense fallback={<div className="diff-review-empty" role="status">{detail.loadingView}</div>}>
+            <StackedDiff key={identity} files={files} path={selected.path} jump={jump} scope={scope} repoRoot={turnDiff.repoRoot}
+              layout={layout} setLayout={setLayout} />
+          </Suspense>
             : <div className="diff-review-empty"><Icon name="check" /><b>{review.commit ? detail.commitEmpty : detail.empty(scope)}</b></div>}
       </section>
     </div>

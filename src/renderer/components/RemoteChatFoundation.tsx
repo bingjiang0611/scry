@@ -6,7 +6,7 @@ import { createRemoteWorkbench } from '../remote-workbench'
 import type { RightSurfaceAction } from '../right-surface'
 import type { DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent, DesktopRemoteRunStatus, DesktopRemoteLiveRun, RemoteProviderRef } from '@shared/desktop-remote'
 import type { Turn } from '../format'
-import { updateComposerDraft, type ComposerDraftAttachment } from '../composer-drafts'
+import { updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment } from '../composer-drafts'
 
 import { remoteQueueKey } from '../remote-prompt-queue'
 import type { SlashCmd } from '@shared/trace'
@@ -76,7 +76,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const [turns, setTurns] = useState<Turn[]>(() => preparedHistory?.status === 'ready' ? historyTurns(preparedHistory.history) : [])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(preparedHistory?.status === 'ready' ? preparedHistory.history : null)
-  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(preparedHistory?.status === 'loading')
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   // The shown run and the host revision it came from; updated synchronously so
@@ -107,6 +107,8 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const [pollError, setPollError] = useState<string | null>(null)
   const [pollFresh, setPollFresh] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(preparedHistory?.status === 'error' ? preparedHistory.error : null)
+  // 取更早一页的在途状态：自动续读会反复触发，重复请求拿的是同一游标。
+  const [historyOlderLoading, setHistoryOlderLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [resolvingIntentId, setResolvingIntentId] = useState<string | null>(null)
@@ -126,6 +128,29 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const traceDelta = catalog?.traceDelta === 1
   const previousContextKey = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const preparedHistoryContext = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
+  const appliedPreparedHistory = useRef(preparedHistory)
+  useEffect(() => {
+    if (!preparedHistory || appliedPreparedHistory.current === preparedHistory) return
+    appliedPreparedHistory.current = preparedHistory
+    preparedHistoryContext.current = contextKey
+    if (preparedHistory.status === 'loading') {
+      setHistoryLoading(true)
+      return
+    }
+    setHistoryLoading(false)
+    if (preparedHistory.status === 'error') {
+      setHistoryError(preparedHistory.error)
+      return
+    }
+    setHistoryError(null)
+    setTurns(historyTurns(preparedHistory.history))
+    setHistoryEvidence({
+      status: preparedHistory.history.status, reason: preparedHistory.history.reason,
+      hasOlder: preparedHistory.history.hasOlder, before: preparedHistory.history.before,
+      snapshot: preparedHistory.history.snapshot
+    })
+    presentedHistoryContext.current = context
+  }, [context, contextKey, preparedHistory])
   const contextGeneration = useRef(0)
   const pollSequence = useRef(0)
   const pollInFlight = useRef<Promise<void> | undefined>(undefined)
@@ -142,9 +167,9 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
       if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
     }
   }, [])
-  const updateDraft = useCallback((key: string, update: (current: { input: string; attachments: ComposerDraftAttachment[] }) => { input: string; attachments: ComposerDraftAttachment[] }): void => {
+  const updateDraft = useCallback((key: string, update: (current: ComposerDraft) => Pick<ComposerDraft, 'input' | 'attachments'>): void => {
     draftStore.update((drafts) => {
-      const result = updateComposerDraft(drafts, key, update)
+      const result = updateComposerDraft(drafts, key, current => ({ ...current, ...update(current) }))
       for (const evicted of result.evicted) releaseAttachments(evicted.attachments)
       return result.drafts
     })
@@ -257,7 +282,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   }, [api, catalogReady, catalog?.providerDiscovery, connected, controlsVisible, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, provider?.observedAt, provider?.metadataRevision, providerId, providerControlsRevision])
 
 
-  return { api, workbench, fileRequest, setFileRequest, workspaceDirty, setWorkspaceDirty, dispatchSurface, connections, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, setProviderSelection, sessionId, setSessionId, controls, setControls, selectedProvider, setSelectedProvider, selectedProviderContextKey, setSelectedProviderContextKey, providerControlsError, setProviderControlsError, providerControlsLoading, setProviderControlsLoading, providerControlsRevision, setProviderControlsRevision, controlsVisible, setControlsVisible, initializedControlsContext, turns, setTurns, selected, setSelected, historyEvidence, setHistoryEvidence, historyLoading, setHistoryLoading, historyRevision, setHistoryRevision, activeRun, setActiveRun, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, runStatus, setRunStatus, foreignRun, setForeignRun, foreignRunRef, intents, setIntents, status, setStatus, error, setError, pollError, setPollError, pollFresh, setPollFresh, historyError, setHistoryError, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, openingLatest, followLatest, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, catalogSession, sessionActive, traceDelta, previousContextKey, contextGeneration, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, setSlashCmds, slashReason, setSlashReason, slashLoading, setSlashLoading, slashRevision, setSlashRevision, slashSel, setSlashSel, slashHidden, setSlashHidden, submissionInFlight, slashOpen }
+  return { api, workbench, fileRequest, setFileRequest, workspaceDirty, setWorkspaceDirty, dispatchSurface, connections, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, setProviderSelection, sessionId, setSessionId, controls, setControls, selectedProvider, setSelectedProvider, selectedProviderContextKey, setSelectedProviderContextKey, providerControlsError, setProviderControlsError, providerControlsLoading, setProviderControlsLoading, providerControlsRevision, setProviderControlsRevision, controlsVisible, setControlsVisible, initializedControlsContext, turns, setTurns, selected, setSelected, historyEvidence, setHistoryEvidence, historyLoading, setHistoryLoading, historyRevision, setHistoryRevision, activeRun, setActiveRun, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, runStatus, setRunStatus, foreignRun, setForeignRun, foreignRunRef, intents, setIntents, status, setStatus, error, setError, pollError, setPollError, pollFresh, setPollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, openingLatest, followLatest, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, catalogSession, sessionActive, traceDelta, previousContextKey, contextGeneration, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, setSlashCmds, slashReason, setSlashReason, slashLoading, setSlashLoading, slashRevision, setSlashRevision, slashSel, setSlashSel, slashHidden, setSlashHidden, submissionInFlight, slashOpen }
 }
 
 export type FoundationState = ReturnType<typeof useRemoteChatFoundation>

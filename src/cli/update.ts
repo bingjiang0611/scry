@@ -151,7 +151,7 @@ export function shouldScheduleAutoUpdate(options: AutoUpdateOptions): boolean {
   const env = options.env ?? process.env
   if (!options.stderrIsTTY || options.noUpdateCheck) return false
   if (!options.command || ['upgrade', 'version', '__auto_update'].includes(options.command)) return false
-  if (options.command === 'recorder' && ['hook', 'serve'].includes(options.action ?? '')) return false
+  if (options.command === 'recorder' && ['hook', 'serve', 'capture'].includes(options.action ?? '')) return false
   return autoUpdateAllowedByEnv(env)
 }
 

@@ -11,6 +11,12 @@ export function remoteSessionAttentionKey(connectionId: string, session: RemoteS
   return JSON.stringify([connectionId, session.providerId, session.agentProfileId ?? '', session.cwd, session.externalSessionId])
 }
 
+function terminalFingerprint(session: RemoteSessionRef): string | null {
+  return session.lastRunOutcome === 'completed' || session.lastRunOutcome === 'failed'
+    ? `${session.lastRunId ?? ''}:${session.lastRunOutcome}`
+    : null
+}
+
 export function reconcileRemoteSessionAttention(
   connectionId: string,
   previous: readonly RemoteSessionRef[] | undefined,
@@ -24,10 +30,12 @@ export function reconcileRemoteSessionAttention(
     if (!session.externalSessionId || session.archivedAt) continue
     const key = remoteSessionAttentionKey(connectionId, session)
     if (key === viewedKey) continue
-    const terminal = !session.isActive && (session.lastRunOutcome === 'completed' || session.lastRunOutcome === 'failed')
-    // First discovery is a baseline, not thousands of unseen historical results.
-    // Keep it across disconnects so a new terminal run is detected on reconnect.
-    const newResult = previous !== undefined && terminal && session.lastRunId && prior.get(key)?.lastRunId !== session.lastRunId
+    const previousSession = prior.get(key)
+    const previousTerminal = previousSession ? terminalFingerprint(previousSession) : null
+    const currentTerminal = !session.isActive ? terminalFingerprint(session) : null
+    // First discovery is an explicit baseline. Later catalogs announce a new
+    // terminal fingerprint, including active -> completed with the same run id.
+    const newResult = previous !== undefined && currentTerminal !== null && currentTerminal !== previousTerminal
     if (unread.has(key) || newResult) next.add(key)
   }
   return next

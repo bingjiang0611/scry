@@ -444,3 +444,36 @@ export function parseNumstat(stdout: string, repoRoot: string): DiffFile[] {
   }
   return out
 }
+
+// Metadata record of `git diff --raw -z`: `:oldmode newmode oldsha newsha status`.
+// The status letter may carry a similarity suffix, but renames are disabled where this is used.
+const RAW_RECORD = /^:[0-7]{6} [0-7]{6} [0-9a-f]+ [0-9a-f]+ ([A-Z])[0-9]*$/
+
+/**
+ * One `git diff --raw --numstat -z` call yields both sections: every raw metadata record (each
+ * followed by the NUL-terminated path) comes first, then every `added\tdeleted\tpath` record.
+ * Parsing them together is what lets the turn diff replace two Git processes with one; the result
+ * is byte-for-byte the same file list the separate `--name-status` and `--numstat` calls produced.
+ */
+export function parseRawNumstat(stdout: string, repoRoot: string): DiffFile[] {
+  const records = stdout.split('\0')
+  const changes = new Map<string, DiffFileChange>()
+  let index = 0
+  for (; index < records.length; index++) {
+    const record = records[index]
+    if (!record) continue
+    const match = RAW_RECORD.exec(record)
+    if (!match) break
+    const rel = records[++index]
+    if (!rel) break
+    const status = match[1]
+    // T (type change) intentionally maps to no `change`, matching the previous name-status parse.
+    const change = status === 'A' ? 'added' : status === 'D' ? 'deleted' : status === 'M' ? 'modified' : undefined
+    if (change) changes.set(join(repoRoot, rel), change)
+  }
+  const out = parseNumstat(records.slice(index).join('\0'), repoRoot)
+  return out.map((file) => {
+    const change = changes.get(file.path)
+    return change ? { ...file, change } : file
+  })
+}

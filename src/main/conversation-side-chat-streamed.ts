@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { TextSpool, type SpoolBudget } from './text-spool'
 import type { StreamedMessage, StreamedTurn } from './conversation-side-chat-stream'
+import { NO_TERMINAL_TURN, type TurnTerminal } from './conversation-turn-terminal'
 
 /**
  * Turn assembly shared by the native transcript projections.
@@ -8,9 +9,9 @@ import type { StreamedMessage, StreamedTurn } from './conversation-side-chat-str
  * The boundaries a native reader can prove are the same for every Provider that writes a
  * JSONL transcript: a prompt opens a turn, the assistant's visible blocks follow it, and a
  * record's blank line separates records while blocks join with nothing. Only the Provider's
- * own terminal marker settles a turn, and only the captured prefix is authoritative: a
- * settled turn is frozen, an interior turn without terminal evidence refuses the snapshot,
- * and a trailing one is a tail Scry drops.
+ * own terminal marker makes a turn terminal, and only the captured prefix is authoritative:
+ * a terminal turn is frozen with the outcome its marker proves, an interior turn without
+ * terminal evidence refuses the snapshot, and a trailing one is a tail Scry drops.
  */
 
 /** One assistant record's visible blocks. */
@@ -105,30 +106,37 @@ export function captureSpools(budget: SpoolBudget): CaptureSpools {
 }
 
 export interface SettleOptions {
-  /** Whether a terminal marker proves the Provider finished the turn. */
-  settles: (stopReason: string | undefined) => boolean
+  /** What the Provider's own terminal marker proves about this turn. */
+  terminalOf: (stopReason: string | undefined) => TurnTerminal
 }
 
-/** Applies the prefix rule: a settled turn is frozen, an interior unsettled one refuses. */
+/**
+ * Applies the prefix rule: a terminal turn is frozen, an interior nonterminal one refuses.
+ *
+ * A native transcript carries one terminal per turn, so a turn is only yielded once its
+ * marker proves termination. The marker also proves the outcome, and a non-success outcome
+ * is preserved instead of being upgraded to a completed turn.
+ */
 export async function* settleTurn(
   turn: TurnBodies,
   options: SettleOptions,
   state: { sawUnsettled: boolean },
   release: (spools: Iterable<TextSpool>) => Promise<void>
 ): AsyncGenerator<StreamedTurn> {
-  if (!options.settles(turn.stopReason)) {
+  const evidence = options.terminalOf(turn.stopReason)
+  if (!evidence.terminal) {
     state.sawUnsettled = true
     await release(allSpools(turn))
     return
   }
   if (state.sawUnsettled) {
     await release(allSpools(turn))
-    throw new Error('原生会话前缀包含没有终止证据的轮次，不能创建侧聊')
+    throw new Error(NO_TERMINAL_TURN)
   }
   const messages: StreamedMessage[] = [await promptMessage(turn.prompt)]
   if (turn.assistant.length > 0) messages.push(await assistantMessage(turn.assistant))
   yield {
-    runId: turn.runId, status: 'unavailable', settled: true, messages,
+    runId: turn.runId, status: evidence.status, terminal: true, messages,
     ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
   }
 }

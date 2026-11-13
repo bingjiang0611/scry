@@ -29,6 +29,16 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
       if (!deps.links.prepareConversationDeletion) throw new Error('daemon_capability_unavailable:conversation-deletion')
       return deps.links.prepareConversationDeletion(conversation)
     },
+    sideChatCascade: {
+      count: (scope) => {
+        if (!deps.links.sideChatCascade) throw new Error('daemon_capability_unavailable:side-chat-cascade')
+        return deps.links.sideChatCascade.count(scope)
+      },
+      run: (scope) => {
+        if (!deps.links.sideChatCascade) throw new Error('daemon_capability_unavailable:side-chat-cascade')
+        return deps.links.sideChatCascade.run(scope)
+      }
+    },
     publishDataUpdated: (event) => events.append({ kind: 'data', event })
   })
   deps.links.deleteOneSession = (request, options) => lifecycle.deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof lifecycle.deleteOneSession>[1])

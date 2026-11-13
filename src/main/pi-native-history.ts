@@ -5,7 +5,7 @@
 // the whole file. Every read re-verifies the file stamp it indexed.
 
 import { createHash, type Hash } from 'node:crypto'
-import { lstat, open, readdir, readFile, realpath, type FileHandle } from 'node:fs/promises'
+import { lstat, open, readdir, realpath, type FileHandle } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import type { LoadedSessionTurn } from './session-history'
 import { historyCopy } from '../shared/constants/copy'
@@ -78,14 +78,6 @@ export async function readPiDisplayHistory(
   return { turns: readArchive ? reconcilePiNativeHistory(native, await readArchive()) : native }
 }
 
-// Metering still consumes a whole string and retains its independent byte budget.
-export async function readPiNativeSession(args: Parameters<typeof locatePiNativeSession>[0]): Promise<string | null> {
-  const source = await locatePiNativeSession(args)
-  if (!source) return null
-  if (source.size > 64 * 1024 * 1024) throw new Error('Pi metering aggregate byte budget reached')
-  return readFile(source.canonical, { encoding: 'utf8', signal: args.signal })
-}
-
 interface NativeFileStamp {
   dev: number
   ino: number
@@ -132,7 +124,7 @@ const maxNativeHistoryCaches = 4
 const maxNativeEntryBytes = 64 * 1024 * 1024
 const maxNativeEntries = 1_000_000
 
-async function* nativeLines(
+export async function* nativeLines(
   file: FileHandle,
   size: number,
   signal?: AbortSignal,
@@ -188,7 +180,7 @@ async function assertNativeSourceStable(file: FileHandle, canonical: string, exp
   return actual
 }
 
-async function hashNativeFile(file: FileHandle, size: number, prefixSize: number, signal?: AbortSignal): Promise<{ contentHash: string; prefixHash: string }> {
+export async function hashNativeFile(file: FileHandle, size: number, prefixSize: number, signal?: AbortSignal): Promise<{ contentHash: string; prefixHash: string }> {
   const content = createHash('sha256')
   const prefix = createHash('sha256')
   let position = 0
@@ -211,7 +203,7 @@ function cacheNativeHistory(cache: NativeHistoryCache): void {
   while (nativeHistoryCaches.size > maxNativeHistoryCaches) nativeHistoryCaches.delete(nativeHistoryCaches.keys().next().value!)
 }
 
-async function readNativeSnapshot(args: Parameters<typeof readPiNativeSession>[0]): Promise<PiNativeHistorySnapshot | null> {
+async function readNativeSnapshot(args: Parameters<typeof locatePiNativeSession>[0]): Promise<PiNativeHistorySnapshot | null> {
   args.signal?.throwIfAborted()
   const source = await locatePiNativeSession(args)
   if (!source) return null
@@ -337,11 +329,11 @@ async function readNativeByte(file: FileHandle, position: number): Promise<numbe
   return buffer[0]
 }
 
-export async function readPiNativeHistorySnapshot(args: Parameters<typeof readPiNativeSession>[0]): Promise<PiNativeHistorySnapshot | null> {
+export async function readPiNativeHistorySnapshot(args: Parameters<typeof locatePiNativeSession>[0]): Promise<PiNativeHistorySnapshot | null> {
   return readNativeSnapshot(args)
 }
 
-export async function readPiNativeHistory(args: Parameters<typeof readPiNativeSession>[0]): Promise<LoadedSessionTurn[] | null> {
+export async function readPiNativeHistory(args: Parameters<typeof locatePiNativeSession>[0]): Promise<LoadedSessionTurn[] | null> {
   const snapshot = await readNativeSnapshot(args)
   if (!snapshot) return null
   return snapshot.hydrate(snapshot.turns.map((turn) => turn.runId!), args.signal)

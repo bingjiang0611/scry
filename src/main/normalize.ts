@@ -17,6 +17,13 @@ import {
   transcriptUsageResult
 } from './normalize-core.js'
 import { normalizeHookAttachment, normalizeHookMessage } from './normalize-hooks.js'
+import {
+  mergeInjectedTranscriptIdentity,
+  transcriptIdentityContradictory,
+  transcriptIdentityEligible,
+  transcriptProviderTurnId,
+  transcriptRequestSetId
+} from './normalize-transcript-identity.js'
 
 // The hook/agent-task context shape is shared with agent-runner, so it stays
 // visible from here even though the primitives live in their own module.
@@ -258,27 +265,6 @@ export interface ParsedTurn {
   items: TraceEvent[]
 }
 
-function transcriptIdentityContradictory(line: Record<string, unknown>): boolean {
-  const pairs: Array<[string, string]> = [['prompt_id', 'promptId'], ['request_set_id', 'requestSetId']]
-  return pairs.some(([snake, camel]) => {
-    const snakeValue = typeof line[snake] === 'string' ? line[snake] as string : undefined
-    const camelValue = typeof line[camel] === 'string' ? line[camel] as string : undefined
-    return !!snakeValue && !!camelValue && snakeValue !== camelValue
-  })
-}
-
-function transcriptIdentityEligible(line: Record<string, unknown>): boolean {
-  return line.parent_tool_use_id == null && line.isMeta !== true && line.isSynthetic !== true &&
-    line.isSidechain !== true && line.isReplay !== true && !line.forkedFrom
-}
-
-function transcriptProviderTurnId(line: Record<string, unknown>): string | undefined {
-  for (const key of ['promptId', 'prompt_id', 'turnId', 'turn_id']) {
-    if (typeof line[key] === 'string' && line[key]) return line[key]
-  }
-  return undefined
-}
-
 function isClaudeTaskNotification(line: Record<string, unknown>, text: string): boolean {
   const origin = line.origin
   const originKind = origin && typeof origin === 'object' && !Array.isArray(origin)
@@ -385,15 +371,18 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
         if (text && !injectedSkill) lineCtx.lastSkillName = undefined
         const userEvents = normalizeSdkMessage(o, lineCtx)
         if (injectedSkill && cur) {
+          // Qoder writes the command wrapper before the meta skill line. The wrapper is
+          // the turn boundary, while the meta line is the first authoritative identity.
+          // Inherit only missing fields; conflicting identities remain ineligible for
+          // exact transcript selection rather than being silently rewritten.
+          mergeInjectedTranscriptIdentity(cur, o)
           cur.items.push(...userEvents)
         } else if (text) {
           suppressMetaAssistant = false
           cur = {
             userText: text,
             ...(transcriptProviderTurnId(o) ? { providerTurnId: transcriptProviderTurnId(o) } : {}),
-            ...((typeof o.request_set_id === 'string' && o.request_set_id)
-              ? { requestSetId: o.request_set_id }
-              : typeof o.requestSetId === 'string' && o.requestSetId ? { requestSetId: o.requestSetId } : {}),
+            ...(transcriptRequestSetId(o) ? { requestSetId: transcriptRequestSetId(o) } : {}),
             ...(transcriptIdentityEligible(o) ? {} : { identityEligible: false }),
             ...(transcriptIdentityContradictory(o) ? { identityContradictory: true } : {}),
             items: []

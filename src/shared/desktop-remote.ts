@@ -5,6 +5,8 @@ import type { DeleteSessionResult } from './provider'
 import type { ActiveRun, TraceEvent } from './trace'
 import type { LoadedSessionTurn } from './session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from './workspace'
+import type { ScRead } from './source-control'
+import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceStartSelection } from './workspace-selection'
 
 export interface RemoteProjectRef { path: string; label: string }
 export interface DesktopDirectoryPage {
@@ -141,6 +143,8 @@ export interface DesktopRemoteCatalog {
   // Selected controls are exact for the requested Provider/profile/cwd only when
   // this negotiated capability is present. Older hosts expose legacy snapshots.
   providerDiscovery?: 2
+  // The host owns repository validation and managed worktree preparation.
+  managedWorktrees?: 1
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
@@ -151,6 +155,9 @@ export interface DesktopRemoteCatalog {
   sessionDelete?: true
   // Absent on older hosts: the client keeps reading full trace snapshots.
   traceDelta?: 1
+  // Client-local attention projection from the connection baseline and host
+  // catalogs. These keys are not host evidence and are never sent to the host.
+  unreadSessionKeys?: string[]
 }
 export interface DesktopRemoteHistory {
   historyScope?: 'session'
@@ -166,7 +173,7 @@ export interface DesktopRemoteHistory {
 // Oversized history pages and live traces are transferred losslessly in bounded byte chunks.
 // The assembled page is capped separately from the 4 MiB wire response limit.
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
-export const DESKTOP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
+export const DESKTOP_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 
 // Version spoken on the run channel. Both ends refuse to talk across a mismatch
 // instead of degrading: a silent half-supported protocol is worse than a refusal.
@@ -174,11 +181,15 @@ export const REMOTE_PROTOCOL_VERSION = 2
 
 export type DesktopHostRead =
   | { kind: 'info' }
+  | { kind: 'workspaceChoices'; request: WorkspaceChoicesRequest }
+  | { kind: 'validateWorkspaceBranch'; request: { cwd: string; repositoryId: string; name: string } }
   | { kind: 'history'; context: DesktopRemoteContext; historyScope?: 'session'; before?: number; snapshot?: string; byteChunks?: true; images?: true; chunk?: { id: string; offset: number } }
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number } }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'workspaceChoices'; value: ScRead<WorkspaceChoices> }
+  | { kind: 'validateWorkspaceBranch'; value: ScRead<{ name: string }> }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
   // `revision` is present only when the query asked for `delta`; with it the
@@ -217,6 +228,7 @@ export interface DesktopRemoteSubmit {
   modelProviderId?: string
   effort?: string
   permissionMode?: AgentPermissionMode
+  workspace?: WorkspaceStartSelection
 }
 // Durable receipt: recorded is not executed, and unknown must never be retried
 // with a fresh intent id. The main process owns the id and pending receipt.
@@ -244,6 +256,7 @@ export interface DesktopRemoteRunStatus {
   state: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'unknown'
   scryRunId?: string
   externalSessionId?: string
+  cwd?: string
   detail?: string
   // The long poll saw new ledger evidence or a new lifecycle state. A device uses
   // this to skip redundant content reads; absent means "not reported", never "no
@@ -289,8 +302,11 @@ export interface DesktopRemoteAPI {
   disconnect(connectionId: string): Promise<void>
   forget(connectionId: string): Promise<void>
   catalog(connectionId: string): Promise<DesktopRemoteCatalog>
+  setViewedSession(connectionId: string, context: DesktopRemoteContext | null): Promise<void>
   providerControls(connectionId: string, context: DesktopRemoteContext): Promise<RemoteProviderRef>
   commands(connectionId: string, context: DesktopRemoteContext): Promise<RemoteCommandCatalog>
+  workspaceChoices(connectionId: string, request: WorkspaceChoicesRequest): Promise<ScRead<WorkspaceChoices>>
+  validateWorkspaceBranch(connectionId: string, request: { cwd: string; repositoryId: string; name: string }): Promise<ScRead<{ name: string }>>
   sessionAction(connectionId: string, context: DesktopRemoteContext, action: DesktopRemoteSessionAction): Promise<boolean>
   forkSession(connectionId: string, request: DesktopRemoteForkSessionRequest): Promise<{ externalSessionId: string }>
   deleteSession(connectionId: string, request: DesktopRemoteDeleteSessionRequest): Promise<DeleteSessionResult>

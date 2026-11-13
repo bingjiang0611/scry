@@ -6,7 +6,10 @@ import * as io from './io.js'
 import type { TraceEvent } from '../../shared/trace.js'
 import { isToolContent } from '../../shared/tool-content.js'
 import { aggregateTurnEvidence } from './aggregate.js'
-import { readRecorderContent, readRecorderContentPage, writeRecorderContent } from './content-store.js'
+import {
+  contentStoreStats, readRecorderContent, readRecorderContentPage, resetContentStoreStats,
+  writeRecorderContent, writeRecorderContentBatch
+} from './content-store.js'
 import { captureToolContent, persistToolEventContent, sanitizeToolEvents } from './tool-content.js'
 
 const roots: string[] = []
@@ -161,6 +164,29 @@ describe('recorder content store', () => {
     expect(write).toHaveBeenCalledTimes(1)
     expect(sync).toHaveBeenCalledWith(join(dataRoot, 'content', 'sha256', ref.sha256.slice(0, 2)))
     expect(await readRecorderContent(dataRoot, ref)).toBe('recover publication')
+  })
+
+  it('hashes, verifies and syncs each distinct payload of a batch once', async () => {
+    const dataRoot = await root()
+    const contents = Array.from({ length: 20 }, () => 'repeated patch body')
+    resetContentStoreStats()
+    const refs = await writeRecorderContentBatch(dataRoot, contents, 'utf8')
+    expect(refs.every((ref) => ref.sha256 === refs[0].sha256)).toBe(true)
+    expect(contentStoreStats()).toEqual({ hashes: 1, verifies: 0, directorySyncs: 0 })
+
+    resetContentStoreStats()
+    await writeRecorderContentBatch(dataRoot, contents, 'utf8')
+    // A stored payload is still read back and its directory synced, once for the whole batch.
+    expect(contentStoreStats()).toEqual({ hashes: 1, verifies: 1, directorySyncs: 1 })
+    expect(await readRecorderContent(dataRoot, refs[0])).toBe('repeated patch body')
+  })
+
+  it('still reports a corrupted stored batch payload', async () => {
+    const dataRoot = await root()
+    const ref = (await writeRecorderContentBatch(dataRoot, ['batch body'], 'utf8'))[0]
+    const path = join(dataRoot, 'content', 'sha256', ref.sha256.slice(0, 2), `${ref.sha256}.bin`)
+    await writeFile(path, 'batch bodY')
+    await expect(writeRecorderContentBatch(dataRoot, ['batch body'], 'utf8')).rejects.toThrow('collision or corruption')
   })
 
   it('converges concurrent publishers on the same verified content', async () => {

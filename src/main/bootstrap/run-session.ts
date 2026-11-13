@@ -57,7 +57,7 @@ export function createSessionPublisher(deps: {
     // The device reads the session binding from the live-run set; without the
     // signal a Mac run that binds late is only visible on the fallback tick.
     deps.runs.notifyChanged?.()
-    deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
+    if (!deps.managedConversation) deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
     if (deps.cwd) {
       try { updateRunAttachmentOwner(storageUserDataDir(), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {
         console.warn('[scry] attachment ownership update deferred:', deps.runId, error)
@@ -78,7 +78,7 @@ export function createSessionPublisher(deps: {
         console.warn('[scry] native session catalog update deferred:', deps.runId, error)
       }
     }
-    if (deps.runs.isViewed(deps.runId)) {
+    if (!deps.managedConversation && deps.runs.isViewed(deps.runId)) {
       deps.dockBadge.view(deps.scopedSessionKey(sessionId), deps.renderer.isFocused())
     }
     if (notifiedSessionId === sessionId) return

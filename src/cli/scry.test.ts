@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -23,10 +23,59 @@ describe('Scry CLI arguments', () => {
     expect(() => parseArgs(['doctor', '--workspace'])).toThrow('missing value')
   })
 
+  it('scoped recorder recovery fails closed on unpaired or unsupported scope', async () => {
+    await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder']))
+      .rejects.toThrow('--provider and --session-id must be provided together')
+    await expect(runScryCli(['recorder', 'recover', '--session-id', 'session-1']))
+      .rejects.toThrow('--provider and --session-id must be provided together')
+    await expect(runScryCli(['recorder', 'recover', '--provider', 'claude', '--session-id', 'session-1']))
+      .rejects.toThrow('only supported for qoder')
+    await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder', '--session-id', '']))
+      .rejects.toThrow('missing value for --session-id')
+  })
+
+  it.each(['missing_config', 'invalid_config', 'config_disabled', 'environment'] as const)('scoped recovery reports disabled reason %s', async (reason) => {
+    const root = await workspace()
+    const configPath = join(root, 'scry.config.json')
+    if (reason === 'missing_config') await rm(configPath)
+    else if (reason === 'invalid_config') await writeFile(configPath, '{invalid')
+    else if (reason === 'environment') vi.stubEnv('SCRY_RECORDER_ENABLED', '0')
+    else {
+      const config = JSON.parse(await readFile(configPath, 'utf8'))
+      await writeFile(configPath, JSON.stringify({ ...config, enabled: false }))
+    }
+    const stdout = captureStdout()
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--provider', 'qoder', '--session-id', 'retained-session']))
+      .resolves.toBe(2)
+    expect(JSON.parse(stdout.text())).toEqual({ action: 'recover', workspace: root, status: 'disabled', reason })
+  })
+
+  it.each([
+    ['pending-session', 3, 1],
+    ['absent-session', 0, 0]
+  ] as const)('scoped recovery reports pending or idempotent no-work for %s', async (sessionId, exitCode, pending) => {
+    const root = await workspace()
+    const transcript = join(root, 'qoder.jsonl')
+    await writeFile(transcript, '')
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root, env: {},
+      payload: { session_id: 'pending-session', transcript_path: transcript, request_set_id: 'pending-request', prompt: 'retained prompt', timestamp: '2026-10-24T12:00:00.000Z' }
+    })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root, env: {},
+      payload: { session_id: 'pending-session', transcript_path: transcript, parent_request_set_id: 'pending-request', timestamp: '2026-10-24T12:00:01.000Z' }
+    })
+    const stdout = captureStdout()
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--provider', 'qoder', '--session-id', sessionId]))
+      .resolves.toBe(exitCode)
+    expect(JSON.parse(stdout.text())).toEqual({ recovered: 0, pending, expired: 0 })
+  })
+
   it('help 使用 stdout 并成功退出', async () => {
     const stdout = captureStdout()
     await expect(runScryCli(['--help'])).resolves.toBe(0)
     expect(stdout.text()).toContain('Usage:')
+    expect(stdout.text()).toContain('recorder recover --provider qoder --session-id <id>')
   })
 
   it('--version 不会被空 positional 误判成 help', async () => {

@@ -168,7 +168,7 @@ struct RemoteQuestionSheet: View {
     .overlay(RoundedRectangle(cornerRadius: 12)
       .stroke(selected ? Palette.accent : Palette.border, lineWidth: selected ? 1.5 : 1))
     .contentShape(RoundedRectangle(cornerRadius: 12))
-    .animation(Motion.animation(.select, reduceMotion: reduceMotion), value: selected)
+    .animation(Motion.animation(.confirm, reduceMotion: reduceMotion), value: selected)
   }
 }
 

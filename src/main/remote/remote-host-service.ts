@@ -11,6 +11,7 @@ import { PairingTransport } from './pairing-transport'
 import type { LocalEndpointHandlers } from './host-local-ops'
 import { RelayClient, type RelayDiagnostics } from './relay-client'
 import type { RemoteHostServiceDependencies } from './remote-host-service-deps'
+import { RemoteLanListener, type LanAdvertisement } from './remote-lan-listener'
 import type { PairingAuthority } from './pairing'
 import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelayDiagnostics, RemoteStatus } from '../../shared/remote'
 
@@ -47,6 +48,9 @@ export class RemoteHostService {
   #desktopChanging: Promise<unknown> | null = null
   #desktopSettingsPath: string
   #serverCredentials: { certificatePEM: string; privateKeyPEM: string }
+  #lanConfig: { port?: number; host?: string } | null
+  #lan: RemoteLanListener | null = null
+  #lanError: string | undefined
   readonly anchorSHA256: string
   readonly caCertificatePEM: string
   readonly hostId: string
@@ -63,6 +67,7 @@ export class RemoteHostService {
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
     serverCredentials: { certificatePEM: string; privateKeyPEM: string }
     localEndpoint?: LocalEndpointHandlers
+    lan?: { port?: number; host?: string }
   }) {
     this.#binding = init.binding
     this.#serverCredentials = init.serverCredentials
@@ -75,6 +80,7 @@ export class RemoteHostService {
     this.hostId = init.hostId
     this.#relayAdvertisement = init.relayAdvertisement ?? null
     this.#localEndpoint = init.localEndpoint
+    this.#lanConfig = init.lan ?? null
   }
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
@@ -157,7 +163,8 @@ export class RemoteHostService {
       hostId: identity.hostId,
       relayAdvertisement: deps.relayAdvertisement ?? null,
       serverCredentials: { certificatePEM: server.certificatePEM, privateKeyPEM: server.privateKeyPEM },
-      ...(deps.localEndpoint ? { localEndpoint: deps.localEndpoint } : {})
+      ...(deps.localEndpoint ? { localEndpoint: deps.localEndpoint } : {}),
+      ...(deps.lan ? { lan: deps.lan } : {})
     })
   }
 
@@ -319,6 +326,17 @@ export class RemoteHostService {
     await Promise.all(peers.map((peer) => this.#binding.controller.releaseDesktopPeer(peer)))
   }
 
+  // The Mac woke or its network changed: outbound relay legs from before are
+  // presumed dead. Replace every leg, including ones carrying phone lanes, so
+  // the relay stops gluing phones to sockets that no longer reach this host.
+  // `includeActive` also drops legs carrying phone lanes: right after a wake
+  // they are presumed dead. Without it only idle legs are replaced, which
+  // never interrupts a phone that is using the Mac.
+  refreshRelay(options: { includeActive?: boolean } = { includeActive: true }): void {
+    if (this.#disposed) return
+    for (const client of this.#clients) client.refresh({ includeActive: options.includeActive === true })
+  }
+
   // Display-safe snapshot for the pairing screen.
   status(): RemoteStatus {
     const state = this.authority.inspectLocal()
@@ -372,6 +390,31 @@ export class RemoteHostService {
       if (this.#disposed) throw new Error('remote_host_service_disposed')
       await client.start()
     }
+    await this.#startLan()
+  }
+
+  // Optional direct route. A failure (port refused, firewall) never affects
+  // the relay or existing grants; it is kept for diagnostics only.
+  async #startLan(): Promise<void> {
+    if (!this.#lanConfig || this.#disposed) return
+    const listener = new RemoteLanListener((socket) => this.#host.serve(socket))
+    try {
+      await listener.listen(this.#lanConfig.port, this.#lanConfig.host)
+      if (this.#disposed) { await listener.close(); return }
+      this.#lan = listener
+      this.#lanError = undefined
+      this.#host.setLanAdvertisement(() => this.#lan?.advertisement())
+    } catch (error) {
+      await listener.close().catch(() => undefined)
+      this.#lanError = String(error instanceof Error ? error.message : error).slice(0, 200)
+    }
+  }
+
+  // Display/diagnostic view of the direct route: what an authorized phone is
+  // told, or why there is none.
+  lanStatus(): { advertisement?: LanAdvertisement; error?: string } {
+    const advertisement = this.#lan?.advertisement()
+    return { ...(advertisement ? { advertisement } : {}), ...(this.#lanError ? { error: this.#lanError } : {}) }
   }
 
   async dispose(): Promise<void> {
@@ -380,6 +423,9 @@ export class RemoteHostService {
   }
 
   async #dispose(): Promise<void> {
+    this.#host.setLanAdvertisement(() => undefined)
+    await this.#lan?.close().catch(() => undefined)
+    this.#lan = null
     try { await this.#desktopListeners?.close() } finally {
       this.#desktopListeners = null
       this.#desktopPorts = null

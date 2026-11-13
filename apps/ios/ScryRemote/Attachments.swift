@@ -115,7 +115,7 @@ struct AttachmentImagePreview: View {
             .onChanged { scale = min(5, max(1, baseScale * $0.magnification)) }
             .onEnded { _ in baseScale = scale })
           .onTapGesture(count: 2) {
-            withAnimation(reduceMotion ? nil : Motion.animation(.select, reduceMotion: false)) { scale = 1; baseScale = 1 }
+            withAnimation(reduceMotion ? nil : Motion.animation(.reset, reduceMotion: false)) { scale = 1; baseScale = 1 }
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .accessibilityLabel(item.name)

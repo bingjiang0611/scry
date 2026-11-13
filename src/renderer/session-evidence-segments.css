@@ -243,7 +243,6 @@
   .chat-body .transcript-turn.is-selected::before,
   .chat-body .transcript-turn.turn-jump-target::before { left: -8px; }
 
-  .overview-dossier .overview-panel-title em { display: none; }
   .overview-dossier .turn-call-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
   .evidence-segments { padding-inline: 18px; }

@@ -156,8 +156,17 @@ export function isOptionalString(value: unknown): boolean {
 export function isTurnRepositoryDiscovery(value: unknown): value is TurnRepositoryDiscovery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
+  const worktree = raw.worktreeDiscovery
+  const validWorktree = worktree === undefined || (
+    !!worktree && typeof worktree === 'object' && !Array.isArray(worktree) &&
+    Number.isSafeInteger((worktree as Record<string, unknown>).probedRepositories) && Number((worktree as Record<string, unknown>).probedRepositories) >= 0 &&
+    Number.isSafeInteger((worktree as Record<string, unknown>).skippedRepositories) && Number((worktree as Record<string, unknown>).skippedRepositories) >= 0 &&
+    Number.isSafeInteger((worktree as Record<string, unknown>).discoveredWorktrees) && Number((worktree as Record<string, unknown>).discoveredWorktrees) >= 0 &&
+    (worktree as Record<string, unknown>).incomplete === true
+  )
   return Number.isSafeInteger(raw.maxDepth) && Number(raw.maxDepth) >= 0 &&
     Number.isSafeInteger(raw.depthLimitedDirectories) && Number(raw.depthLimitedDirectories) >= 0 &&
+    validWorktree &&
     Array.isArray(raw.requestedRoots) && raw.requestedRoots.every(root => typeof root === 'string' && root.length > 0) &&
     new Set(raw.requestedRoots).size === raw.requestedRoots.length
 }

@@ -559,7 +559,7 @@
     "finalArtifactExit": 0,
     "sourceTreeUnchanged": true,
     "packaged": {
-      "appPath": "/Users/baobingjiang/.local/state/scry-main-performance-install.It2NU2/source/dist/mac-arm64/Scry.app",
+      "appPath": "/Users/<user>/.local/state/scry-main-performance-install.It2NU2/source/dist/mac-arm64/Scry.app",
       "bytes": 287347001,
       "maxBytes": 346030080,
       "sizeBreakdown": {
@@ -600,7 +600,7 @@
     "backupVersion": "0.2.225"
   },
   "logs": {
-    "local": "/Users/baobingjiang/.local/state/scry-main-performance-install.It2NU2",
+    "local": "/Users/<user>/.local/state/scry-main-performance-install.It2NU2",
     "remote": "/Users/test/scry-performance-climb-mac2.cO3N5W/logs/main-delivery-226",
     "files": [
       {

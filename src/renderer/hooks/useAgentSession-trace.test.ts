@@ -103,6 +103,16 @@ describe('stop lifecycle projection', () => {
     expect(noSafeKill.hint).toContain('共用')
     expect(noSafeKill.hint).toContain('先进队列')
     expect(noSafeKill.providerSettled).toBe(false)
+    const interruptFailed = runStopStatus(stopState('r1', 'interrupt_request_failed', 'x'))
+    // 取消调用失败必须可见：不能显示“停止中”，也不能显示“已终止”。
+    expect(interruptFailed.tone).toBe('unsettled')
+    expect(interruptFailed.label).toBe('停止请求未生效')
+    expect(interruptFailed.hint).toContain('取消调用失败')
+    // 升级不是无条件承诺：没有安全硬杀范围时只能如实报告未确认终止。
+    expect(interruptFailed.hint).toContain('只有存在安全的硬杀范围时')
+    expect(interruptFailed.hint).not.toContain('仍会按窗口升级强制终止')
+    expect(interruptFailed.hint).toContain('不会显示完成')
+    expect(interruptFailed.providerSettled).toBe(false)
     expect(runStopStatus(stopState('r1', 'settled', 'x')).providerSettled).toBe(true)
   })
 })
@@ -142,7 +152,8 @@ describe('paged session history projection', () => {
       completeness: 'partial'
     })
     expect(applied?.turns.map((turn) => turn.runId)).toEqual(['s1-38', 's1-39', 's1-40', 's1-41'])
-    expect(applied?.window).toEqual({ sessionId: 's1', offset: 38, totalTurns: 100, hasOlder: true, completeness: 'partial' })
+    // pagedOlder 记录“时间线确实往前翻过页”，首个窗口没有它，空转录也不会被当成翻到最早。
+    expect(applied?.window).toEqual({ sessionId: 's1', offset: 38, totalTurns: 100, hasOlder: true, completeness: 'partial', pagedOlder: true })
 
     const complete = prependOlderSessionTurns(prev, { ...window, offset: 2 }, 's1', {
       turns: parsed(0, 2),
@@ -153,6 +164,7 @@ describe('paged session history projection', () => {
     })
     expect(complete?.window.completeness).toBe('complete')
     expect(complete?.window.hasOlder).toBe(false)
+    expect(complete?.window.pagedOlder).toBe(true)
   })
 
   it('丢弃过期、错位或跨会话的更早页响应', () => {

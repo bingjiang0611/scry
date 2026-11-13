@@ -149,8 +149,8 @@ This device has reached the maximum number of installed apps using a free develo
 ### 身份、授权与数据边界
 
 - 首先 `git pull --ff-only` 到 `de8501ab5989114949f04a99decee8484d48d4c4`，读完上述审查意见。候选运行源码仍是已审查的 `82c5b33`；对照源码是 `bf92d049539a375aeafbc4044beedd61fef4244c`。测量工具及归一化数据独立提交 `e26941f2`，没有把测量代码塞入生产 target。
-- 始终使用 **iPhone 13 / iOS 26.5.2**，UDID `00008110-000808180E8B801E`，iCTRL 1.97.0；未使用模拟器，也未换成另一台手机。宿主 arm64 macOS 27.2、Xcode 26.6 (17F113)、Swift 6.3.3 / Swift 5 mode、Debug、`-jobs 4`。设备 UI 日志是 23 日，宿主日志是 22 日；统计使用 trace 内的单调时间，不混用两边的墙钟。
-- 隔离包仍被免费签名三 App 配额拒绝。之后用户明确授权 **“覆盖日常 scry”**，本轮才改用 `com.scry.remote.local` 原地安装；没有卸载 Scry、清空它的数据或重置配对。用户登录 Xcode 后 runner 可以签名，但安装仍超额；用户随后明确批准卸载 `com.baobingjiang.etch.mobile`，才得以执行 UI target。**Etch 已卸载，未自动重装，可能丢失其本地数据。**
+- 始终使用 **iPhone 13 / iOS 26.5.2**，UDID `<device-udid>`，iCTRL 1.97.0；未使用模拟器，也未换成另一台手机。宿主 arm64 macOS 27.2、Xcode 26.6 (17F113)、Swift 6.3.3 / Swift 5 mode、Debug、`-jobs 4`。设备 UI 日志是 23 日，宿主日志是 22 日；统计使用 trace 内的单调时间，不混用两边的墙钟。
+- 隔离包仍被免费签名三 App 配额拒绝。之后用户明确授权 **“覆盖日常 scry”**，本轮才改用 `com.scry.remote.local` 原地安装；没有卸载 Scry、清空它的数据或重置配对。用户登录 Xcode 后 runner 可以签名，但安装仍超额；用户随后明确批准卸载 `com.example.etch.mobile`，才得以执行 UI target。**Etch 已卸载，未自动重装，可能丢失其本地数据。**
 - `device-observation.py` 从不可变 Git revision 生成临时副本；给两边注入同一份 `device-observation.swift`。仅在生成副本隔离 defaults/history/state 目录、注入 body 计数与 trace、增加固定负载按钮和 Documents 结果文件。UI fixture 强制 preview；`-selfTest` 不强制 preview，保留原 admission 语义。没有改 transport、协议、恢复、outbox 或生产 Keychain 实现。
 - 构建时 Xcode 自动选择的 **8 个依赖 pin 在基线/候选完全相同**，已对比两份完整 pins 和两份 build log。该实验图保存为 [`20261022-ios-observation-device-f-packages.json`](../../../performance-experiments/20261022-ios-observation-device-f-packages.json)：ASN1 1.7.3、Collections 1.7.4、Atomics 1.3.1、Certificates 1.20.0、Crypto 4.5.2、NIO 2.90.1、NIOSSL 2.36.1、System 1.8.1。因此这是**同一实验依赖图下的源码对照**，不是声称复现原发布二进制。未提交 App 依赖升级；最终日常包另用仓库原锁文件构建，见末节。
 
@@ -231,7 +231,7 @@ cp docs/performance-experiments/20261022-ios-observation-device-f-packages.json 
 # 安装并确认对应 fixture 后，一次只录一轮，output 必须是新目录。
 node .agents/skills/scry-performance-climb/scripts/timing-run.mjs F-ios-A \
   -- python3 apps/ios/Checks/device-observation-record.py \
-  --device 00008110-000808180E8B801E --bundle com.scry.remote.local --output /tmp/f-l2-A \
+  --device <device-udid> --bundle com.scry.remote.local --output /tmp/f-l2-A \
   > /tmp/f-l2-A.log 2>&1
 cp /tmp/f-l2-A.log /tmp/f-l2-A/timing.log
 python3 apps/ios/Checks/device-observation-report.py /tmp/f-l2-A

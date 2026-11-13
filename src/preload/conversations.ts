@@ -15,6 +15,7 @@ export const conversationsApi = {
   update: (id: string, revision: number, change: Parameters<ConversationApi['update']>[2]): ReturnType<ConversationApi['update']> => ipcRenderer.invoke('conversation:update', id, revision, change),
   list: (cwd: string): ReturnType<ConversationApi['list']> => ipcRenderer.invoke('conversation:list', cwd),
   read: (id: string, beforeOrdinal?: number): ReturnType<ConversationApi['read']> => ipcRenderer.invoke('conversation:read', id, beforeOrdinal),
+  setViewed: (id: string | null): Promise<void> => ipcRenderer.invoke('conversation:setViewed', id),
   readItem: (id: string, ref: Parameters<ConversationApi['readItem']>[1]): ReturnType<ConversationApi['readItem']> => ipcRenderer.invoke('conversation:readItem', id, ref),
   preview: (id: string, request: Parameters<ConversationApi['preview']>[1]): ReturnType<ConversationApi['preview']> => ipcRenderer.invoke('conversation:preview', id, request),
   send: (request: Parameters<ConversationApi['send']>[0]): ReturnType<ConversationApi['send']> => ipcRenderer.invoke('conversation:send', request),

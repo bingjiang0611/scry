@@ -1,5 +1,7 @@
 # Remote refresh recovery
 
+Transport-level changes (relay heartbeat and `host_offline`, multiplexed and pushed lanes, direct LAN route, compression) and the on-device measurement procedure are in [remote-network-measurement.md](remote-network-measurement.md).
+
 This change concerns read-only discovery/catalog refreshes, not automatic task delivery.
 
 ## Failure evidence

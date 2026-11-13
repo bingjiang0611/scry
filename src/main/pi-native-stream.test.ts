@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { streamPiNativeTurns } from './pi-native-stream'
 import { parsePiNativeHistory } from './pi-native-parse'
 import type { StreamedTurn } from './conversation-side-chat-stream'
+import { providerTurnTerminal, type TurnTerminal } from './conversation-turn-terminal'
 
 /**
  * Read positions and a pass hook, so the two-pass contract can be observed exactly.
@@ -60,8 +61,8 @@ const sessionId = '01a1338c-3d8b-775b-8645-fd964faa29a3'
 const cwd = '/repo'
 const time = '2026-10-13T04:36:31Z'
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
-/** Pi settles a turn only with its own terminal marker. */
-const settles = (stopReason: string | undefined): boolean => stopReason === 'stop'
+/** Pi makes a turn terminal only with its own marker, which also proves the outcome. */
+const terminalOf = (stopReason: string | undefined): TurnTerminal => providerTurnTerminal('pi', stopReason)
 
 const header = { type: 'session', version: 3, id: sessionId, cwd }
 const user = (id: string, parentId: string | null, text: string) => ({
@@ -88,7 +89,7 @@ async function collect(path: string, identity: { sessionId?: string; cwd?: strin
 Promise<Array<StreamedTurn & { texts: string[]; largest: number }>> {
   const turns: Array<StreamedTurn & { texts: string[]; largest: number }> = []
   for await (const turn of streamPiNativeTurns({
-    path, sessionId: identity.sessionId ?? sessionId, cwd: identity.cwd ?? cwd, settles
+    path, sessionId: identity.sessionId ?? sessionId, cwd: identity.cwd ?? cwd, terminalOf
   })) {
     const texts: string[] = []
     let largest = 0
@@ -221,7 +222,7 @@ describe('Pi native session streaming', () => {
     let furthestAtFirstTurn = 0
     let seen = 0
     for await (const turn of streamPiNativeTurns({
-      path, sessionId, cwd, settles
+      path, sessionId, cwd, terminalOf
     }, budget)) {
       seen += 1
       // The body pass must not have read the rest of the file to deliver this turn.
@@ -275,5 +276,37 @@ describe('Pi native session streaming', () => {
       user('u2', 'a1', 'second'), assistant('a2', 'u2', 'answer')
     ])
     await expect(collect(interior)).rejects.toThrow('原生会话前缀包含没有终止证据的轮次')
+  })
+
+  // A raw Pi transcript records a non-success terminal between completed turns. Treating
+  // that marker as "no terminal evidence" refused a whole history whose turns all ended.
+  it('keeps a non-success terminal as a terminal failed turn instead of refusing the prefix', async () => {
+    const truncated = await sessionFile([
+      header,
+      user('u1', null, 'first'), assistant('a1', 'u1', 'answer one'),
+      user('u2', 'a1', 'second'), assistant('a2', 'u2', 'cut off here', 'length'),
+      user('u3', 'a2', 'third'), assistant('a3', 'u3', 'answer three')
+    ])
+    const turns = await collect(truncated)
+    expect(turns.map(turn => [turn.texts, turn.terminal, turn.status])).toEqual([
+      [['first', 'answer one'], true, 'completed'],
+      [['second', 'cut off here'], true, 'failed'],
+      [['third', 'answer three'], true, 'completed']
+    ])
+
+    // `aborted` is a model-side abort of the generation, not a proven user stop.
+    for (const stopReason of ['aborted', 'error']) {
+      const path = await sessionFile([
+        header, user('u1', null, 'question'), assistant('a1', 'u1', 'partial answer', stopReason)
+      ])
+      expect((await collect(path)).map(turn => [turn.terminal, turn.status])).toEqual([[true, 'failed']])
+    }
+
+    // Negative control: `toolUse` still proves nothing, so an interior one still refuses.
+    const streaming = await sessionFile([
+      header, user('u1', null, 'first'), assistant('a1', 'u1', 'calling a tool', 'toolUse'),
+      user('u2', 'a1', 'second'), assistant('a2', 'u2', 'answer')
+    ])
+    await expect(collect(streaming)).rejects.toThrow('原生会话前缀包含没有终止证据的轮次')
   })
 })

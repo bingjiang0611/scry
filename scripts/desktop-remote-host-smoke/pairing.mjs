@@ -44,9 +44,22 @@ export async function pairDevice({ evaluate, transport, temp, userDataDir, works
   const info = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { kind: 'info' } })
   assert.deepEqual(info.desktop, {
     kind: 'info', protocol: RUN_PROTOCOL_VERSION, hostId: invitation.hostId, execution: 'canonical',
-    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2, traceDelta: 1,
+    directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2, managedWorktrees: 1, traceDelta: 1,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
+  const workspaceChoices = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+    op: 'desktop', query: { kind: 'workspaceChoices', request: { cwd: canonicalWorkspace, kind: 'branches', query: '' } }
+  })
+  assert.equal(workspaceChoices.desktop.kind, 'workspaceChoices')
+  assert.equal(workspaceChoices.desktop.value.status, 'available')
+  assert.equal(workspaceChoices.desktop.value.data.root, canonicalWorkspace)
+  assert.ok(workspaceChoices.desktop.value.data.repositoryId)
+  const branchValidation = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+    op: 'desktop', query: { kind: 'validateWorkspaceBranch', request: {
+      cwd: canonicalWorkspace, repositoryId: workspaceChoices.desktop.value.data.repositoryId, name: 'remote-smoke'
+    } }
+  })
+  assert.deepEqual(branchValidation.desktop, { kind: 'validateWorkspaceBranch', value: { status: 'available', data: { name: 'remote-smoke' } } })
   // Explicit history scope is an authority claim, not permission to convert
   // an unknown session into a successfully verified empty transcript.
   for (const op of ['history', 'historyPage']) {

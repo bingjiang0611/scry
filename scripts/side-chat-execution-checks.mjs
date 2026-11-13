@@ -63,10 +63,12 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
         if (!line) return null
         return Math.round(line.getBoundingClientRect().height / parseFloat(getComputedStyle(line).lineHeight || '16'))
       })(),
-      titles: [...document.querySelectorAll('[data-side-chat-panel] .side-chat-surface-title, [data-side-chat-panel] .conversation-title')].map(node => node.textContent)
+      surfaceTitles: [...surface.querySelectorAll('.conversation-title, .side-chat-surface-header h2')].map(node => node.textContent)
     }
   })()`)
-  check(firstRender.titles.length === 1, `the child shows one title, not a repeated heading: ${json(firstRender.titles)}`)
+  // Owner decision 2026-11-09: the child surface prints no heading and no actions of its
+  // own. Its title is printed once by the tab strip that owns the child.
+  check(firstRender.surfaceTitles.length === 0, `the child surface must not repeat its title: ${json(firstRender.surfaceTitles)}`)
   check(firstRender.emptyState != null && firstRender.genericEmpty == null,
     `a new side chat must not claim to be an old archived session: ${json(firstRender)}`)
   // An empty draft disables the send button by design; what must not happen is a child
@@ -75,7 +77,7 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
     `a fresh child must not carry a send block: ${json(firstRender)}`)
   check(firstRender.composerBottomGap !== null && firstRender.composerBottomGap <= 24,
     `the child composer must sit at the column bottom: ${json(firstRender)}`)
-  check(firstRender.provenanceLines === 1, `the source line must stay one row: ${json(firstRender)}`)
+  check(firstRender.provenanceLines === 2, `the source and the frozen boundary keep one row each: ${json(firstRender)}`)
   check((firstRender.providerChip?.length ?? 0) >= 4, `the Provider chip must stay readable: ${json(firstRender)}`)
   await capture('side-chat-first-render')
 
@@ -227,12 +229,12 @@ export async function verifySideChatRestart({ cdp, evaluate, check, documentEpoc
   await wait(`document.querySelectorAll('.sb-sess').length > 0`)
   await idle()
   const rows = await evaluate(`[...document.querySelectorAll('.sb-sess')].map(row => ({ text: row.textContent, active: row.classList.contains('active') }))`)
-  check(rows.length >= 2, `the restart must still list the parent and its child: ${json(rows)}`)
+  check(rows.length >= 2, `the restart must still list its parents: ${json(rows)}`)
   // Reopening the source conversation is what a user does after a restart; the child tab
   // and its own record must come back without replaying a send.
   const parentIndex = rows.findIndex(row => row.text.includes('side chat parent turn'))
   check(parentIndex >= 0, `the restarted sidebar lost the parent conversation: ${json(rows)}`)
-  check(rows[parentIndex].text.includes('侧聊'), `the parent row must still count its side chat: ${json(rows[parentIndex])}`)
+  check(!rows.some(row => row.text.includes('侧聊')), `the sidebar must print nothing about side chats: ${json(rows)}`)
   await clickAt(`[...document.querySelectorAll('.sb-sess')][${parentIndex}]`)
   await wait(`[...document.querySelectorAll('.sb-sess')][${parentIndex}].classList.contains('active') === true`)
   await idle()

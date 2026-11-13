@@ -125,18 +125,31 @@ describe('staged file budget', () => {
 })
 
 describe('hook installation and real commits', () => {
-  it('installs idempotently and blocks a real commit until the staged file is split', () => {
+  it('installs idempotently without changing the installed hook', () => {
     expect(run(process.execPath, [installer]).status).toBe(0)
+    const installed = git('config', '--local', '--get', 'core.hooksPath')
+    const hook = readFileSync(join(installed, 'pre-commit'), 'utf8')
     expect(run(process.execPath, [installer]).status).toBe(0)
-    stage('large.ts', 'x'.repeat(20_001))
-    const blocked = run('git', ['commit', '-m', 'must fail'])
-    expect(blocked.status).not.toBe(0)
-    expect(blocked.stderr).toContain('Commit blocked')
-    expect(run('git', ['rev-parse', '--verify', 'HEAD']).status).not.toBe(0)
-    stage('large.ts', 'x'.repeat(10_000))
-    stage('extracted.ts', 'x'.repeat(10_001))
-    git('commit', '-m', 'split files')
-    expect(git('log', '-1', '--format=%s')).toBe('split files')
+    expect(git('config', '--local', '--get', 'core.hooksPath')).toBe(installed)
+    expect(readFileSync(join(installed, 'pre-commit'), 'utf8')).toBe(hook)
+  })
+
+  describe('installed hook enforcement', () => {
+    // Installation and commit enforcement have separate deadlines. Keep the
+    // real installer and both real Git outcomes; do not mock or skip the hook.
+    beforeEach(() => { expect(run(process.execPath, [installer]).status).toBe(0) })
+
+    it('blocks a real commit until the staged file is split', () => {
+      stage('large.ts', 'x'.repeat(20_001))
+      const blocked = run('git', ['commit', '-m', 'must fail'])
+      expect(blocked.status).not.toBe(0)
+      expect(blocked.stderr).toContain('Commit blocked')
+      expect(run('git', ['rev-parse', '--verify', 'HEAD']).status).not.toBe(0)
+      stage('large.ts', 'x'.repeat(10_000))
+      stage('extracted.ts', 'x'.repeat(10_001))
+      git('commit', '-m', 'split files')
+      expect(git('log', '-1', '--format=%s')).toBe('split files')
+    })
   })
 
   it('preserves and executes existing global hooks without modifying global configuration', () => {

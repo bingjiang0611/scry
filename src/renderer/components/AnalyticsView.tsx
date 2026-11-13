@@ -41,16 +41,28 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
   const totals = analytics.totals
   const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0 || row.qoderCredits)
   const costProviders = providers.filter((row) => row.costUsd != null).sort((a, b) => b.costUsd! - a.costUsd!)
+  // 面板列出所有有记录的 Provider；未知成本显示 “—”，而不是从列表里消失。
+  const providerRows = [...providers].sort((a, b) => (b.costUsd ?? -1) - (a.costUsd ?? -1) || (tokensOf(b) ?? 0) - (tokensOf(a) ?? 0))
   const qoderOnly = providers.length > 0 && providers.every((row) => row.provider === 'qoder')
   const chartProviders = providers.filter((row) => metricValue(row, chartMetric) != null)
-  const rows = breakdownMode === 'model' ? modelBreakdownRows(analytics) : analytics.byDay.filter((row) => row.costUsd != null).reverse()
+  const rows = breakdownMode === 'model'
+    ? modelBreakdownRows(analytics)
+    : analytics.byDay.filter((row) => row.costUsd != null || tokensOf(row) != null).reverse()
   const totalEvidence = copy.totalEvidence(displayCostEvidence(totals, undefined, creditsPending), totals.turns)
+  const metricNote = (raw: number | null, known: number, total: number): string | null =>
+    raw == null || total === 0 || known >= total ? null : copy.lowerBoundNote(known, total)
   const metrics = [
-    { label: copy.processedTokens, value: formatAggregateTokens(totals), evidence: tokenEvidence(totals) },
-    { label: copy.cacheRead, value: formatKnownTokens(totals.cacheReadTokens), evidence: copy.tokenCoverage(totals.cacheReadKnownRows, totals.usageRows) },
-    { label: copy.input, value: formatKnownTokens(totals.inputTokens), evidence: copy.tokenCoverage(totals.inputKnownRows, totals.usageRows) },
-    { label: copy.output, value: formatKnownTokens(totals.outputTokens), evidence: copy.outputEvidence(totals.outputKnownRows, totals.usageRows, formatKnownTokens(totals.reasoningTokens)) },
-    { label: copy.cacheWrite, value: formatKnownTokens(totals.cacheWriteTokens), evidence: copy.tokenCoverage(totals.cacheWriteKnownRows, totals.usageRows) }
+    {
+      label: copy.processedTokens,
+      value: formatAggregateTokens(totals),
+      evidence: tokenEvidence(totals),
+      // 输入或输出缺报时，已处理总量只能是下界，不必等到悬停才说。
+      note: totals.usageRows === 0 || tokenComplete(totals) ? null : copy.partialTokenNote
+    },
+    { label: copy.cacheRead, value: formatKnownTokens(totals.cacheReadTokens), evidence: copy.tokenCoverage(totals.cacheReadKnownRows, totals.usageRows), note: metricNote(totals.cacheReadTokens, totals.cacheReadKnownRows, totals.usageRows) },
+    { label: copy.input, value: formatKnownTokens(totals.inputTokens), evidence: copy.tokenCoverage(totals.inputKnownRows, totals.usageRows), note: metricNote(totals.inputTokens, totals.inputKnownRows, totals.usageRows) },
+    { label: copy.output, value: formatKnownTokens(totals.outputTokens), evidence: copy.outputEvidence(totals.outputKnownRows, totals.usageRows, formatKnownTokens(totals.reasoningTokens)), note: metricNote(totals.outputTokens, totals.outputKnownRows, totals.usageRows) },
+    { label: copy.cacheWrite, value: formatKnownTokens(totals.cacheWriteTokens), evidence: copy.tokenCoverage(totals.cacheWriteKnownRows, totals.usageRows), note: metricNote(totals.cacheWriteTokens, totals.cacheWriteKnownRows, totals.usageRows) }
   ]
 
   return (
@@ -133,7 +145,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
           <article className="usage-provider-panel" aria-label={copy.byProvider}>
             <div className="usage-section-head"><h2>{copy.byProvider}</h2></div>
             <div className="usage-provider-list">
-              {costProviders.length === 0 ? <div className="usage-empty-row">{copy.noCost}</div> : costProviders.map((row) => (
+              {providerRows.length === 0 ? <div className="usage-empty-row">{copy.noProviderRecord}</div> : providerRows.map((row) => (
                 <div className="usage-provider-row" key={row.provider}>
                   <div className="usage-provider-main">
                     <ProviderMark provider={row.provider} />
@@ -152,7 +164,8 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
           <dl className="usage-metrics">
             {metrics.map((metric) => (
               <div key={metric.label} title={metric.evidence}>
-                <dt>{metric.label}</dt><dd>{metric.value}</dd>
+                <dt>{metric.label}</dt>
+                <dd>{metric.value}{metric.note && <small className="usage-metric-note">{metric.note}</small>}</dd>
               </div>
             ))}
           </dl>

@@ -1,14 +1,12 @@
-import { basename } from 'node:path'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ProviderContext } from '../../shared/provider'
 import { installDaemonChannelResultHandler } from '../daemon-channel-gate'
-import { providerIdForAgentId } from '../../shared/runtime'
 import { canonicalizePiAgentPaths, type PiAgentProfile } from '../pi-agent-profiles'
 import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
 import { piRpcEnvironment } from '../providers/pi'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
-import { composeProviderDetectionResults } from '../provider-detection'
+import { composeProviderDetectionResults, fastProviderDetectionResults } from '../provider-detection'
 import type { createAppSessionStore, ProjectMeta } from '../app-store'
 
 // Channel handlers that both Electron main and the daemon register: main for the
@@ -47,37 +45,16 @@ export function catalogChannelHandlers(deps: {
 export function providerDetectionChannelHandlers(deps: {
   smokeProviderEnabled: boolean
   smokeDetectedAgents: DetectedAgent[]
-  storedPiProfilesNotDetected: (detected: Array<{ id: string }>) => PiAgentProfile[]
+  storedPiProfiles: () => PiAgentProfile[]
   providerCompatibility: ProviderCompatibilityStore
   detectInstalledAgents: () => Promise<DetectedAgent[]>
   providerRegistry: ProviderRegistry
 }) {
-  const { smokeProviderEnabled, smokeDetectedAgents, storedPiProfilesNotDetected, providerCompatibility, detectInstalledAgents, providerRegistry } = deps
+  const { smokeProviderEnabled, smokeDetectedAgents, storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry } = deps
   return {
     'agent:detectFast': async () => {
       if (smokeProviderEnabled) return smokeDetectedAgents
-      const detected = (await canonicalizePiAgentPaths(detectAgentsFast())).flatMap((agent) => {
-        const providerId = providerIdForAgentId(agent.id)
-        if (!providerId) return []
-        return [{
-          ...agent,
-          ...(providerId === 'pi'
-            ? { agentProfileId: agent.id, runtimeProvider: 'pi_rpc' as const, transport: 'JSONL RPC subprocess' }
-            : {})
-        }]
-      })
-      return [
-        ...detected,
-        ...storedPiProfilesNotDetected(detected).map((profile) => ({
-          id: profile.id,
-          name: profile.label,
-          bin: basename(profile.executable),
-          path: profile.executable,
-          agentProfileId: profile.id,
-          runtimeProvider: 'pi_rpc' as const,
-          transport: 'JSONL RPC subprocess'
-        }))
-      ]
+      return fastProviderDetectionResults(await canonicalizePiAgentPaths(detectAgentsFast()), storedPiProfiles())
     },
     'agent:detect': async () => {
       // Use the newest policy for this description; hydrate/refresh swallow their own
@@ -92,7 +69,7 @@ export function providerDetectionChannelHandlers(deps: {
       return composeProviderDetectionResults({
         detected,
         descriptors,
-        storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfilesNotDetected(detected),
+        storedPiProfiles: smokeProviderEnabled ? [] : storedPiProfiles(),
         probeStoredPiProfile: async (profile) => probeCliVersion(profile.executable, ['--version'], {
           env: await piRpcEnvironment(profile),
           timeout: PI_VERSION_PROBE_TIMEOUT_MS

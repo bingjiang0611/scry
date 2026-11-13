@@ -38,7 +38,12 @@ export async function exercisePiCommands(contents) {
   await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:564f7a994e4e34da' && !document.querySelector('#model-effort .climenu')`)
   await click(agentTrigger)
   await wait(`document.querySelectorAll('#model-effort .agent-option-pick').length === 2`)
-  if (!await contents.executeJavaScript(`document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.textContent.includes('当前') && !document.querySelector(${JSON.stringify(piChoice('pi:rotom'))})`)) throw new Error('Historical Profile identity was silently switched')
+  // 选中态由菜单的单选语义表达；同时确认历史 Profile 仍被单独列出，没有被并进 Rotom 那一行。
+  const profileIdentity = await contents.executeJavaScript(`(() => ({
+    checked: document.querySelector(${JSON.stringify(piChoice('pi:564f7a994e4e34da'))})?.getAttribute('aria-checked') === 'true',
+    rotomListed: document.querySelector(${JSON.stringify(piChoice('pi:rotom'))}) != null
+  }))()`)
+  if (!profileIdentity.checked || profileIdentity.rotomListed) throw new Error('Historical Profile identity was silently switched: ' + JSON.stringify(profileIdentity))
   await click(piChoice('pi:1234567890abcdef'))
   await wait(`document.querySelector('${agentTrigger}').dataset.agentId === 'pi:1234567890abcdef' && !document.querySelector('#model-effort .climenu')`)
   await click(agentTrigger)
@@ -144,7 +149,9 @@ export async function exercisePiCommands(contents) {
   await wait(`document.querySelector('#pi-command textarea')?.value === 'Existing objective'`)
   for (const cancelInput of [false, true]) {
     await click('#pi-command-restart')
-    await wait(`document.querySelectorAll('#pi-command .question-option').length === 2`)
+    // Confirm also has two options. Wait for the reset menu, not the preceding
+    // question that can still be mounted while the native click is in flight.
+    await wait(`document.querySelectorAll('#pi-command .question-option').length === 2 && document.querySelector('#pi-command .question-other') != null && JSON.parse(document.querySelector('#pi-command-answers').textContent).length === 0`)
     await click('#pi-command .question-other')
     await wait(`document.querySelector('#pi-command .question-other-input') != null`)
     if (!await contents.executeJavaScript(`document.activeElement === document.querySelector('#pi-command .question-other-input')`)) throw new Error('Native custom-answer input did not receive focus')

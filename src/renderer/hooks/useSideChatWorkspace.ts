@@ -4,7 +4,7 @@ import type { SideChatInitialTarget, SideChatSource } from '@shared/conversation
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { SideChatEntry, SideChatTabView } from '../components/RightSurfacePanel'
 import {
-  canRecordCreateCommand, clearCreateCommand, commandFromPreview, createRequestOf, createdOutcome, findCreatedSideChat,
+  clearCreateCommand, commandFromPreview, settleFullLedger, createRequestOf, createdOutcome, findCreatedSideChat,
   lookupSideChatSummaries, lossOutcome, readCreateCommands, restoreTabOutcome, writeCreateCommand,
   type SideChatCreateCommand, type SideChatRestoreAnswer
 } from '../side-chat-create'
@@ -87,7 +87,7 @@ function sameSummary(left: ConversationSummary, right: ConversationSummary): boo
  * for, but it can never write a notice, dialog page or focus request into another parent.
  */
 export function useSideChatWorkspace({
-  api, scopeKey, source, target, openIds, hasCompletedTurn, unavailableReason, onOpen, onDrop, onClose, statusOf
+  api, scopeKey, source, target, openIds, hasTerminalTurn, unavailableReason, onOpen, onDrop, onClose, statusOf
 }: {
   api?: SideChatApi
   scopeKey: string
@@ -95,7 +95,7 @@ export function useSideChatWorkspace({
   /** Runtime intent of the parent controls at click time; revalidated by main on send. */
   target?: SideChatInitialTarget
   openIds: readonly string[]
-  hasCompletedTurn: boolean
+  hasTerminalTurn: boolean
   unavailableReason?: string
   /** Opens the child in the scope it was created for; never in whatever is visible now. */
   onOpen: (conversationId: string, scopeKey: string) => void
@@ -113,8 +113,8 @@ export function useSideChatWorkspace({
   const openKey = openIds.join(',')
   // One ref holds the inputs whose identity legitimately changes every render. Effects
   // and the create path read it, so they never depend on a fresh object or callback.
-  const latest = useRef({ api, source, target, openIds, hasCompletedTurn, onOpen, onDrop, onClose, statusOf, scopeKey })
-  latest.current = { api, source, target, openIds, hasCompletedTurn, onOpen, onDrop, onClose, statusOf, scopeKey }
+  const latest = useRef({ api, source, target, openIds, hasTerminalTurn, onOpen, onDrop, onClose, statusOf, scopeKey })
+  latest.current = { api, source, target, openIds, hasTerminalTurn, onOpen, onDrop, onClose, statusOf, scopeKey }
   const busy = useRef(false)
   const inFlight = useRef<string>()
 
@@ -193,7 +193,7 @@ export function useSideChatWorkspace({
 
   const runCreate = useCallback(async (boundary?: number): Promise<void> => {
     const current = latest.current
-    if (!current.api || !current.source || busy.current || !current.hasCompletedTurn) return
+    if (!current.api || !current.source || busy.current || !current.hasTerminalTurn) return
     busy.current = true
     setCreating(true)
     setNotice(SIDE_CHAT_COPY.creating)
@@ -207,7 +207,7 @@ export function useSideChatWorkspace({
     try {
       preview = await pinned.api.previewSideChat(pinned.source, {
         ...(pinned.target ? { initialTarget: pinned.target } : {}),
-        ...(boundary === undefined ? {} : { completedThroughOrdinal: boundary })
+        ...(boundary === undefined ? {} : { terminalThroughOrdinal: boundary })
       })
     } catch (error) {
       if (mine()) setNotice(SIDE_CHAT_COPY.createRefused(message(error)))
@@ -225,14 +225,8 @@ export function useSideChatWorkspace({
       preview, scopeKey: pinned.scopeKey, commandId,
       ...(pinned.target ?? preview.target ? { initialTarget: pinned.target ?? preview.target } : {})
     })
-    if (!canRecordCreateCommand()) {
-      // An unresolved command would be lost if the ledger evicted it. Refuse before
-      // dispatch instead of creating a child nobody can prove afterwards.
-      setNotice(SIDE_CHAT_COPY.createRefused(SIDE_CHAT_COPY.createLedgerFull))
-      setCreating(false)
-      busy.current = false
-      return
-    }
+    // A full ledger is read back first, so only a command nobody can resolve is ever dropped.
+    await settleFullLedger(pinned.api).catch(() => 0)
     if (!writeCreateCommand(command)) {
       setNotice(SIDE_CHAT_COPY.createRefused(SIDE_CHAT_COPY.createDurableUnavailable))
       setCreating(false)
@@ -257,9 +251,11 @@ export function useSideChatWorkspace({
       setNotice(preview.firstSendBlockedReason
         ? `${outcome.notice} ${SIDE_CHAT_COPY.previewBlocked(preview.firstSendBlockedReason)}`
         : outcome.notice)
-    } catch {
-      // The reply was lost or the host refused after the ledger entry existed. Read the
-      // same command id back; a not-found answer stays unknown and never re-dispatches.
+    } catch (error) {
+      // The host refused, or its reply was lost after the ledger entry existed. Read the
+      // same command id back: a found child is opened, a conclusive not-found is the
+      // host's refusal and is shown with its real reason, and only an unreadable lookup
+      // stays unknown.
       const resolution = await findCreatedSideChat(pinned.api, command)
       const loss = lossOutcome(command, resolution, latest.current.scopeKey, CREATE_NOTICE)
       if (loss.keepCommand) {
@@ -272,6 +268,15 @@ export function useSideChatWorkspace({
         return
       }
       clearCreateCommand(command.commandId)
+      if (loss.refused) {
+        // Nothing was created. The next click is an ordinary create with a fresh preview,
+        // not a check of this settled command.
+        if (mine()) {
+          setUnknownCommand(undefined)
+          setNotice(SIDE_CHAT_COPY.createRefused(message(error)))
+        }
+        return
+      }
       if (loss.outcome?.kind === 'open') {
         setCreatedId(loss.outcome.conversation.id)
         latest.current.onOpen(loss.outcome.conversation.id, command.scopeKey)
@@ -298,6 +303,15 @@ export function useSideChatWorkspace({
     const resolution = await findCreatedSideChat(current.api, command)
     busy.current = false
     setCreating(false)
+    if (resolution.kind === 'not-created') {
+      // The earlier command published nothing, so it no longer stands between the user
+      // and a side chat: settle it and carry this same click through as a new create.
+      clearCreateCommand(command.commandId)
+      if (!mine()) return
+      setUnknownCommand(undefined)
+      await runCreate()
+      return
+    }
     if (resolution.kind === 'created') {
       clearCreateCommand(command.commandId)
       // The child belongs to the command's own scope, which may no longer be visible.
@@ -308,8 +322,8 @@ export function useSideChatWorkspace({
       setNotice(SIDE_CHAT_COPY.createRecovered)
       return
     }
-    if (mine()) setNotice(SIDE_CHAT_COPY.createNotFoundUnknown)
-  }, [fenceHolds, mergeRecords, unknownCommand])
+    if (mine()) setNotice(SIDE_CHAT_COPY.createUnknown)
+  }, [fenceHolds, mergeRecords, runCreate, unknownCommand])
 
   const history = useSideChatHistory({
     ...(api ? { api } : {}), ...(source ? { source } : {}), scopeKey, fenceHolds,
@@ -322,7 +336,7 @@ export function useSideChatWorkspace({
 
   const entry = useMemo<SideChatEntry>(() => {
     const reason = unavailableReason ?? (!source ? SIDE_CHAT_COPY.entryUnavailableNoSource
-      : !hasCompletedTurn ? SIDE_CHAT_COPY.entryUnavailableNoTurn : undefined)
+      : !hasTerminalTurn ? SIDE_CHAT_COPY.entryUnavailableNoTurn : undefined)
     return {
       label: SIDE_CHAT_COPY.surfaceLabel,
       description: SIDE_CHAT_COPY.entryDescription,
@@ -333,7 +347,7 @@ export function useSideChatWorkspace({
       ...(notice ? { notice } : {}),
       ...(creating ? { creating: true } : {})
     }
-  }, [checkUnknown, creating, hasCompletedTurn, history, notice, runCreate, source, unknownCommand, unavailableReason])
+  }, [checkUnknown, creating, hasTerminalTurn, history, notice, runCreate, source, unknownCommand, unavailableReason])
 
   const tabs = useMemo<SideChatTabView[]>(() => openIds.map((id) => {
     const record = records.get(id)

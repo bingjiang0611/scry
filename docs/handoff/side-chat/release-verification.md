@@ -11,7 +11,7 @@
   - `72ec35cc` fix(renderer)：虚拟化历史锚定与精确视图恢复各自保留。
 - 版本：根 `package.json` `0.2.230`；私有 CLI `packages/turn-recorder-cli` `0.2.52`（本轮不动）。
 - 已安装产物（本轮之前、未重装）：`/Applications/Scry.app`，App `0.2.230`，`app.asar` SHA-256 `05c088c95e172cf7dd99aa7afb22ef84ba2a53e10499e17e6612d9a864ad0dbc`。
-- Node `22.22.1`（`/Users/baobingjiang/.nvm/versions/node/v22.22.1/bin`），npm `12.2.0`；darwin-arm64。
+- Node `22.22.1`（`/Users/<user>/.nvm/versions/node/v22.22.1/bin`），npm `12.2.0`；darwin-arm64。
 - 全部日志：`$TMPDIR/scry-release-gates-0jw8gcKN/`（下文用 `<logs>/`）。
 
 ## 门禁结果

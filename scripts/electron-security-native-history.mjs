@@ -108,9 +108,20 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.equal(reopened.turns.length, 3)
     assert.equal(reopened.turns.at(-1).runId, 'scry-continuation')
     const creditOf = turn => turn.items.filter(item => item.stage === 'credit_usage').at(-1)?.creditUsage
-    // Keep the existing >64 MiB workload intact: metering is explicitly unavailable beyond its budget.
+    // Keep the >64 MiB workload intact: missing records are not inferred as zero.
     assert.equal(creditOf(reopened.turns.at(-1)).status, 'unavailable')
-    assert.match(creditOf(reopened.turns.at(-1)).omissionReason, /byte budget/)
+    assert.equal(creditOf(reopened.turns.at(-1)).value.amount, undefined)
+    // A real receipt beyond the former file-size cap must now survive the IPC projection.
+    appendFileSync(nativePath, '\n' + JSON.stringify({ type: 'custom', id: 'large-credit-observation',
+      parentId, customType: 'qoder-credit-observation-v1',
+      data: { version: 1, sessionId: nativeSessionId, modelId: 'dfmodel', requestId: 'large-request-1',
+        status: 'reported', outcome: 'complete', billable: true, credits: 7.5 } }) + '\n')
+    const metered = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 3 })`)
+    assert.equal(metered.totalTurns, 41)
+    assert.equal(metered.turns.at(-1).runId, 'scry-continuation')
+    assert.equal(creditOf(metered.turns.at(-1)).value.amount, 7.5)
+    assert.deepEqual(creditOf(metered.turns.at(-1)).source, ['pi_qoder_credit_observation'])
+    assert.equal(metered.turns.at(-1).items.filter(item => item.stage === 'credit_usage').length, 1)
     assert.ok(!reopened.turns.some(turn => turn.errorHint?.includes('Pi 原生历史未能核对')))
     const oldest = await evaluate(`window.scry.loadSessionOlder(${JSON.stringify(context)}, { before: 1, limit: 1 })`)
     assert.equal(oldest.turns.length, 1)

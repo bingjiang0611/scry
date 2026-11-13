@@ -4,7 +4,7 @@ import type { DockBadgeState } from '../main/dock-badge'
 import { CommandReceipts } from '../main/command-receipts'
 import { LlmNetworkConfigurationCache } from '../main/llm-network-configuration'
 import { startRun } from '../main/bootstrap/run-execution'
-import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
+import { startWorkspaceRun, type RemoteWorkspaceRunStart } from '../main/bootstrap/workspace-start'
 import type { AppRunStartOptions } from '../main/bootstrap/run-frontdoor'
 import type { AgentStartRequest, AgentStartResult } from '../shared/runtime'
 import type { RemoteRunCompletion } from '../main/remote/remote-run-binding'
@@ -84,14 +84,14 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
 
 
   function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & { origin?: 'local' }): Promise<AgentStartResult>
-  function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion>
-  async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion> {
+  function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion | RemoteWorkspaceRunStart>
+  async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion | RemoteWorkspaceRunStart> {
     // DAEMON_OWNS_RUNS: with the daemon switch on, a run started in this process would
     // be invisible to the daemon's ledger and the App's own view. Refusing by name is
     // the only honest answer; the caller's channel routes to the daemon instead.
     if (inputs.execution === 'daemon') throw new Error('daemon_mode_owns_runs')
     if (payload?.workspace !== undefined) return workspaceStart(payload, options, {
-      sourceControl, providerRegistry, resolveKnownProjectDirectory,
+      sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,
       getCurrentCwd: inputs.getCurrentCwd, getStartupManagedRecovery: inputs.getStartupManagedRecovery,
       start: startAppRun
     })

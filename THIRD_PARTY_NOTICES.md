@@ -24,6 +24,10 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## Pierre file tree and diff renderer
+
+Scry bundles `@pierre/diffs` 1.6.4 and `@pierre/trees` 1.0.0-beta.6 from [Pierre](https://github.com/pierrecomputer/pierre), under Apache-2.0. The complete license, upstream notices (including the trees headless-tree attribution), and bundled dependency licenses are preserved in [third-party/pierre](third-party/pierre/README.md) and included in the App archive.
+
 ## Other dependencies
 
 Other npm dependencies retain the license metadata and notices shipped by their respective authors. A source checkout does not include `node_modules`. Any future binary distribution must preserve all notices required by the exact dependency versions bundled in that release.

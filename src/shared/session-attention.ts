@@ -10,6 +10,10 @@ export interface SessionAttentionSnapshot {
   unreadSessionKeys: string[]
 }
 
+export function conversationAttentionKey(id: string): string {
+  return `conversation\0${id}`
+}
+
 export function sessionAttentionKey(ref: SessionAttentionRef): string {
   return `${ref.providerId}\0${ref.agentProfileId ?? ''}\0${ref.cwd}\0${ref.sessionId}`
 }

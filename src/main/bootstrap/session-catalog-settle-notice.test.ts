@@ -89,7 +89,9 @@ describe('a settled conversation turn notifies the window', () => {
     }
     const service = current.catalog.conversationService()
     const created = await service.create(current.cwd)
-    const { runId } = await service.send(send(created.id, created.revision, 'command-accepted'))
+    const sent = await service.send(send(created.id, created.revision, 'command-accepted'))
+    if (sent.status !== 'accepted') throw new Error(`send was not accepted: ${sent.reason}`)
+    const { runId } = sent
     // Without this notice the window keeps whatever page it read mid-run: a pending turn
     // that is still "delivering", or one with no run at all that it never re-reads.
     const notices = current.seen.filter((notice) => notice.conversationId === created.id)
@@ -104,7 +106,8 @@ describe('a settled conversation turn notifies the window', () => {
     current.launch.current = async () => { throw new Error('provider refused to start') }
     const service = current.catalog.conversationService()
     const created = await service.create(current.cwd)
-    await expect(service.send(send(created.id, created.revision, 'command-refused'))).rejects.toThrow('provider refused to start')
+    // A host-proven refusal before dispatch is a typed answer, not a thrown unknown.
+    await expect(service.send(send(created.id, created.revision, 'command-refused'))).resolves.toEqual({ status: 'not_sent', reason: 'provider refused to start' })
     const notices = current.seen.filter((notice) => notice.conversationId === created.id)
     expect(notices).toHaveLength(1)
     const page = await notices[0].page

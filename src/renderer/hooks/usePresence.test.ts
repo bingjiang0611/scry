@@ -8,7 +8,8 @@ vi.mock('react', () => ({
   useRef: (current: unknown) => ({ current }),
   useState: (initial: string) => [initial, (next: string) => { harness.state = next }],
   useCallback: (callback: unknown) => callback,
-  useEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) }
+  useEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) },
+  useLayoutEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) }
 }))
 vi.mock('react-dom', () => ({ flushSync: (callback: () => void) => { harness.flushes++; callback() } }))
 
@@ -154,11 +155,11 @@ describe('overlay presence lifecycle', () => {
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()
   })
-  it('uses 120ms + 40 under reduced motion', () => {
+  it('uses 150ms + 40 under reduced motion', () => {
     media.matches = true
     const p = mount()
     p.requestClose('escape')
-    vi.advanceTimersByTime(159)
+    vi.advanceTimersByTime(189)
     expect(p.onClose).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(p.onClose).toHaveBeenCalledOnce()

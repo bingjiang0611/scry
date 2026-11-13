@@ -215,6 +215,23 @@ describe('atomic workspace first-send preparation with real Git', { timeout: 15_
     expect(providerCalls).toHaveLength(0)
   })
 
+  it('keeps following a registered run when only the final registration journal save is unconfirmed', async () => {
+    const input = request(await selection('current'))
+    const actual = service.store.save.bind(service.store)
+    const spy = vi.spyOn(service.store, 'save').mockImplementation(async (record) => {
+      if (record.intent.workspace?.phase === 'registered') throw new Error('registration journal reply lost')
+      return actual(record)
+    })
+    const result = await service.startWorkspace(input, start)
+    expect(result.runId).toBeTruthy()
+    expect(providerCalls).toHaveLength(1)
+    spy.mockRestore()
+    expect((await service.store.get(input.workspace.operationId))?.intent.workspace?.phase).toBe('start_requested')
+    const inspected = await service.inspectWorkspaceStart({ ...input.workspace.intent, operationId: input.workspace.operationId })
+    expect(inspected.status === 'available' && inspected.data?.phase).toBe('registered')
+    expect(providerCalls).toHaveLength(1)
+  })
+
   it('does not replay an unknown Git dispatch or a start-requested journal without authoritative run evidence after restart', async () => {
     const input = request(await selection('newWorktree'))
     const actual = service.git.run.bind(service.git)

@@ -21,6 +21,8 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     rememberProject: workspace.rememberProject,
     deletingSessions: session.deletingSessions,
     adoptingSessionKeys: session.adoptingSessionKeys,
+    // An adopted native session's attention moves to the conversation's row.
+    dockBadge: session.dockBadge,
     // The history cache invalidated is this daemon's own; the App hears of the change
     // through the event feed.
     invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
@@ -35,6 +37,7 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     appUserDataDir: deps.userDataDir
   })
   deps.links.prepareConversationDeletion = table.prepareConversationDeletion
+  deps.links.sideChatCascade = table.sideChatCascade
   const ops = withoutEvent(table.handlers)
   ops['conversation:send'] = conversationSend.answer(ops['conversation:send'] as (request: unknown) => Promise<unknown>)
   return ops

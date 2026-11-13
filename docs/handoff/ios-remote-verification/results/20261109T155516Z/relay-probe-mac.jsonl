@@ -1,0 +1,12 @@
+RELAYPROBE {"event":"environment","relay":"wss://scry-relay-pages.pages.dev","samples":10,"node":"v24.18.0"}
+RELAYPROBE {"event":"sample","sample":1,"colo":"ORD","ms":{"dns":7.6,"tcp":11,"tls":386.2,"upgrade":839.8,"close":839.9,"total":840.2},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":2,"colo":"ORD","ms":{"dns":1.6,"tcp":3.8,"tls":361.1,"upgrade":823.8,"close":823.9,"total":824},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":3,"colo":"PIT","ms":{"dns":2,"tcp":5,"tls":371.7,"upgrade":903.2,"close":903.3,"total":903.3},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":4,"colo":"PIT","ms":{"dns":1.7,"tcp":3.9,"tls":354.2,"upgrade":853.6,"close":853.7,"total":853.8},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":5,"colo":"ORD","ms":{"dns":2.1,"tcp":6.2,"tls":358.8,"upgrade":818.4,"close":818.5,"total":818.6},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":6,"colo":"ORD","ms":{"dns":1.8,"tcp":5,"tls":372.2,"upgrade":847.1,"close":848.6,"total":848.7},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":7,"colo":"PIT","ms":{"dns":1.7,"tcp":4.1,"tls":359.5,"upgrade":940.7,"close":940.8,"total":940.8},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":8,"colo":"PIT","ms":{"dns":2.1,"tcp":5.4,"tls":381,"upgrade":826.2,"close":826.3,"total":826.3},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":9,"colo":"PIT","ms":{"dns":1.4,"tcp":3.4,"tls":340.9,"upgrade":867.6,"close":867.6,"total":867.7},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"sample","sample":10,"colo":"PIT","ms":{"dns":2.3,"tcp":5.7,"tls":339,"upgrade":1004.6,"close":1066.7,"total":1066.8},"close":{"code":1013,"reason":"no_host_leg"},"relayGeneration":"pre-heartbeat"}
+RELAYPROBE {"event":"summary","ok":10,"failed":0,"colos":["ORD","PIT"],"relayGenerations":["pre-heartbeat"],"medianMs":{"dns":2,"tcp":5,"tls":361.1,"upgrade":853.6,"upgradeExcludingWait":null,"close":853.7,"total":853.8}}

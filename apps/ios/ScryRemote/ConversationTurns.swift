@@ -59,6 +59,7 @@ struct ConversationChunk: View {
   let text: String
   var result: String?
   @State private var expanded = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   @ViewBuilder var body: some View {
     switch kind {
@@ -82,6 +83,7 @@ struct ConversationChunk: View {
         HStack(spacing: 8) {
           Image(systemName: Symbol.chevron).font(Typography.meta)
             .rotationEffect(.degrees(expanded ? 90 : 0))
+            .animation(reduceMotion ? nil : Motion.animation(.chevron, reduceMotion: false), value: expanded)
           Text(detailLabel).font(kind == "tool" ? Typography.mono : Typography.meta)
             .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -116,11 +118,13 @@ struct ConversationToolGroup: View {
   let entries: [ConversationEntry]
   let truncated: Bool
   @State private var expanded = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       Button { expanded.toggle() } label: {
         HStack(spacing: 8) {
           Image(systemName: Symbol.chevron).rotationEffect(.degrees(expanded ? 90 : 0))
+            .animation(reduceMotion ? nil : Motion.animation(.chevron, reduceMotion: false), value: expanded)
           Text(ConversationCopy.tools(entries.count, truncated: truncated))
           Spacer(minLength: 0)
         }.font(Typography.meta).foregroundStyle(Palette.dim2)

@@ -7,7 +7,7 @@ import { RemoteHostService as RemoteHostServiceImpl } from '../main/remote/remot
 import { createDesktopHostReader } from '../main/remote/desktop-host-reader'
 import { createDesktopWorkbench } from '../main/remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from '../main/remote/desktop-directory-picker'
-import { createRemoteRunBinding } from '../main/remote/remote-run-binding'
+import { createRemoteRunBinding, type RemoteRunCompletion } from '../main/remote/remote-run-binding'
 import { abandonRefusedLaunch } from '../main/remote/managed-launches'
 import type { ManagedConversationStart } from '../main/conversation-service-deps'
 import { canonicalRemoteProjectRoots } from '../main/remote/remote-directory-browser'
@@ -32,6 +32,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
   const remotePermissionMode = runtime.configuredRemotePermissionMode()
   return await RemoteHostServiceImpl.create({
     stateDirectory,
+    ...(inputs.lan ? { lan: inputs.lan } : {}),
     desktopWorkbench: createDesktopWorkbench({
       directory: join(inputs.userDataDir, 'desktop-terminal-recordings'),
       authorizeWorkspace: runtime.resolveRemoteProjectDirectory,
@@ -45,6 +46,13 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       getRun: (runId) => {
         const state = runtime.runs.get(runId)?.state
         return state ? runtime.boundedLiveRun(state) : null
+      },
+      workspaceChoices: (request) => runtime.sourceControl.workspaceChoices(request),
+      validateWorkspaceBranch: async ({ cwd, repositoryId, name }) => {
+        const choices = await runtime.sourceControl.workspaceChoices({ cwd, kind: 'branches' })
+        if (choices.status !== 'available') return choices
+        if (choices.data.repositoryId !== repositoryId) return { status: 'failed', reason: '仓库身份已变化，请重新选择' }
+        return runtime.sourceControl.validateWorkspaceBranch({ repositoryId, name })
       }
     }),
     desktopDirectories: {
@@ -62,24 +70,31 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     startRun: createRemoteRunBinding<ManagedConversationStart>({
       permissionModeOverride: remotePermissionMode,
       ...(inputs.managedLaunches ? { managedLaunch: (runId) => inputs.managedLaunches!.take(runId) } : {}),
-      startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, () => runtime.startAppRun({
-        ...input.request,
-        backend: 'local',
-        runtimeProvider: undefined
-      }, {
-        origin: 'remote',
-        runId: input.runId,
-        stopSignal: input.stopSignal,
-        requestUserInput: input.requestUserInput,
-        ledgerRunId: input.ledgerRunId,
-        permissionModeOverride: input.permissionModeOverride,
-        providerPrompt: input.providerPrompt,
-        onTraceEvent: input.onTraceEvent,
-        onSession: input.onSession,
-        grantScope: input.grantScope,
-        ...(input.managedConversation ? { managedConversation: input.managedConversation } : {}),
-        ...(input.onStarted ? { onStarted: input.onStarted } : {})
-      }) as Promise<import('../main/remote/remote-run-binding').RemoteRunCompletion>).then((receipt) => receipt.result)
+      startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, async () => {
+        const started = await runtime.startAppRun({
+          ...input.request,
+          // A worktree start reserves its workspace under the ledger run's identity.
+          commandId: input.ledgerRunId,
+          backend: 'local',
+          runtimeProvider: undefined
+        }, {
+          origin: 'remote',
+          runId: input.runId,
+          stopSignal: input.stopSignal,
+          requestUserInput: input.requestUserInput,
+          ledgerRunId: input.ledgerRunId,
+          permissionModeOverride: input.permissionModeOverride,
+          providerPrompt: input.providerPrompt,
+          onTraceEvent: input.onTraceEvent,
+          onSession: input.onSession,
+          grantScope: input.grantScope,
+          ...(input.managedConversation ? { managedConversation: input.managedConversation } : {}),
+          ...(input.onStarted ? { onStarted: input.onStarted } : {}),
+          onRegistered: (result) => input.onRegistered?.({ cwd: result.cwd ?? input.request.cwd! })
+        })
+        // A worktree start answers once registered; its terminal receipt follows.
+        return 'remoteCompletion' in started ? started.remoteCompletion : started as RemoteRunCompletion
+      }).then((receipt) => receipt.result)
     }),
     hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),
     listProjects: () => runtime.remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),
@@ -152,10 +167,16 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       const roots = canonicalRemoteProjectRoots(runtime.knownProjectDirectories())
       const activeRuns = runtime.runs.activeStates()
       const out: RemoteSessionRef[] = []
+      // Sync realpath once per distinct cwd in this call (never stale).
+      const resolved = new Map<string, string | null>()
       for (const s of runtime.appSessionStore().load()) {
         if (!s.cwd) continue
-        let canonical: string
-        try { canonical = runtime.resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { continue }
+        let canonical = resolved.get(s.cwd)
+        if (canonical === undefined) {
+          try { canonical = runtime.resolveCanonicalRemoteProjectDirectory(s.cwd, roots) } catch { canonical = null }
+          resolved.set(s.cwd, canonical)
+        }
+        if (canonical === null) continue
         const activeRun = activeRuns.find((run) =>
           run.providerId === s.providerId && run.cwd === canonical &&
           (run.runId === s.runId || Boolean(s.externalSessionId && run.externalSessionId === s.externalSessionId)))

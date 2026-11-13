@@ -3,7 +3,7 @@ import { unavailableProviderDescriptor, type ProviderDescriptor, type ProviderHe
 import type { ProviderCompatibilityAdvisory } from '../shared/provider-compatibility'
 import { providerIdForAgentId } from '../shared/runtime'
 import type { DetectedAgent } from './claude-locate'
-import type { PiAgentProfile } from './pi-agent-profiles'
+import { registeredPiProfileId, undetectedPiProfiles, type PiAgentProfile } from './pi-agent-profiles'
 
 export type ProviderDetectionResult = DetectedAgent & {
   agentProfileId?: string
@@ -73,6 +73,10 @@ export function createCachedAsyncLoader<T>(
 interface ComposeProviderDetectionOptions {
   detected: DetectedAgent[]
   descriptors: ProviderDescriptor[]
+  /**
+   * Every stored Pi profile with its canonical executable. It supplies the registered
+   * profile of a detected launcher and the entries discovery did not detect itself.
+   */
   storedPiProfiles: PiAgentProfile[]
   probeStoredPiProfile: (profile: PiAgentProfile) => Promise<VersionProbeResult>
   /**
@@ -81,6 +85,34 @@ interface ComposeProviderDetectionOptions {
    * 时沿用 descriptor 的结论，不编造。
    */
   compatibility?: (providerId: ProviderId, version: string | undefined) => ProviderCompatibilityAdvisory
+}
+
+/**
+ * Cold-start discovery result: no version probes, but the same Provider and profile
+ * identity rules as the full composition, so the first screen already names a profile a
+ * conversation send can use.
+ */
+export function fastProviderDetectionResults(
+  detected: DetectedAgent[],
+  storedPiProfiles: PiAgentProfile[]
+): ProviderDetectionResult[] {
+  const agents = detected.flatMap((agent): ProviderDetectionResult[] => {
+    const providerId = providerIdForAgentId(agent.id)
+    if (!providerId) return []
+    if (providerId !== 'pi') return [agent]
+    const agentProfileId = registeredPiProfileId(agent, storedPiProfiles)
+    return [{ ...agent, ...(agentProfileId ? { agentProfileId } : {}),
+      runtimeProvider: 'pi_rpc' as const, transport: 'JSONL RPC subprocess' }]
+  })
+  return [...agents, ...undetectedPiProfiles(storedPiProfiles, agents).map((profile) => ({
+    id: profile.id,
+    name: profile.label,
+    bin: basename(profile.executable),
+    path: profile.executable,
+    agentProfileId: profile.id,
+    runtimeProvider: 'pi_rpc' as const,
+    transport: 'JSONL RPC subprocess'
+  }))]
 }
 
 export async function composeProviderDetectionResults({
@@ -131,6 +163,7 @@ export async function composeProviderDetectionResults({
         })()
       }]
     }
+    const agentProfileId = providerId === 'pi' ? registeredPiProfileId(agent, storedPiProfiles) : undefined
     return [{
       id: agent.id,
       name: providerId === 'pi' ? agent.name : descriptor.label,
@@ -152,7 +185,7 @@ export async function composeProviderDetectionResults({
         const advisory = advisoryFor(providerId, agent.version ?? descriptor.version, descriptor)
         return advisory ? { compatibility: advisory } : {}
       })(),
-      ...(providerId === 'pi' ? { agentProfileId: agent.id } : {})
+      ...(agentProfileId ? { agentProfileId } : {})
     }]
   })
   const found = new Set(agents.map((agent) => agent.id))

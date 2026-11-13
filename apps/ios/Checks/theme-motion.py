@@ -49,20 +49,32 @@ import AppKit
     precondition(Palette.provider("opencode") == Palette.providerOpenCode)
     precondition(Palette.provider("pi") == Palette.providerPi)
     precondition(Palette.provider("unknown") == Palette.dim2)
-    precondition(Motion.micro == 0.10 && Motion.fast == 0.16 && Motion.base == 0.22 && Motion.slow == 0.30)
+    precondition(Motion.hover == 0.12 && Motion.small == 0.20 && Motion.medium == 0.25 && Motion.large == 0.40)
+    precondition(Motion.exitSmall == 0.15 && Motion.exitMedium == 0.20 && Motion.overshoot == 0.30)
     let expected: [(Motion.Effect, Animation)] = [
-      (.press, .linear(duration: 0.10)),
-      (.select, .timingCurve(0.23, 1, 0.32, 1, duration: 0.16)),
-      (.tab, .timingCurve(0.32, 0.72, 0, 1, duration: 0.22)),
-      (.disclosureOpen, .timingCurve(0.32, 0.72, 0, 1, duration: 0.24)),
-      (.disclosureClose, .timingCurve(0.4, 0, 1, 1, duration: 0.16)),
-      (.rowIn, .timingCurve(0.23, 1, 0.32, 1, duration: 0.22)),
-      (.streamIn, .timingCurve(0.23, 1, 0.32, 1, duration: 0.18)),
-      (.sheet, .timingCurve(0.32, 0.72, 0, 1, duration: 0.30))
+      (.press, .timingCurve(0, 0, 0.58, 1, duration: 0.12)),
+      (.select, .timingCurve(0.22, 1, 0.36, 1, duration: 0.20)),
+      (.confirm, .timingCurve(0.34, 1.56, 0.64, 1, duration: 0.30)),
+      (.enter, .timingCurve(0, 0, 0.58, 1, duration: 0.20)),
+      (.exit, .timingCurve(0.42, 0, 1, 1, duration: 0.15)),
+      (.tab, .timingCurve(0.42, 0, 0.58, 1, duration: 0.20)),
+      (.reorder, .timingCurve(0.42, 0, 0.58, 1, duration: 0.25)),
+      (.disclosureOpen, .timingCurve(0, 0, 0.58, 1, duration: 0.20)),
+      (.disclosureClose, .timingCurve(0.42, 0, 1, 1, duration: 0.15)),
+      (.chevron, .timingCurve(0.22, 1, 0.36, 1, duration: 0.20)),
+      (.rowIn, .timingCurve(0, 0, 0.58, 1, duration: 0.20)),
+      (.streamIn, .timingCurve(0, 0, 0.58, 1, duration: 0.20)),
+      (.drawerOpen, .timingCurve(0, 0, 0.58, 1, duration: 0.25)),
+      (.drawerClose, .timingCurve(0.42, 0, 1, 1, duration: 0.20)),
+      (.drawerRelease, .spring(duration: 0.38, bounce: 0.12)),
+      (.reset, .timingCurve(0.42, 0, 0.58, 1, duration: 0.25)),
+      (.scroll, .timingCurve(0.42, 0, 0.58, 1, duration: 0.25)),
+      (.page, .timingCurve(0, 0, 0.58, 1, duration: 0.40)),
+      (.sheet, .timingCurve(0, 0, 0.58, 1, duration: 0.40))
     ]
     for (effect, animation) in expected {
       precondition(Motion.animation(effect, reduceMotion: false) == animation)
-      precondition(Motion.animation(effect, reduceMotion: true) == .linear(duration: 0.12))
+      precondition(Motion.animation(effect, reduceMotion: true) == .timingCurve(0, 0, 0.58, 1, duration: 0.15))
     }
     precondition(Motion.rowDelay(index: -1) == 0 && Motion.rowDelay(index: 0) == 0)
     precondition(Motion.rowDelay(index: 1) == 0.016)
@@ -75,10 +87,17 @@ import AppKit
     precondition(Typography.mono == .system(.footnote, design: .monospaced))
     precondition(Typography.codeBlock == .system(.caption, design: .monospaced))
     precondition(Typography.sheetTitle == .headline)
-    print("PASS 56 color resolutions, provider mapping, 8 motion presets/reduced motion, row delay bounds, 9 font roles")
+    print("PASS 56 color resolutions, provider mapping, 19 motion presets/reduced motion, row delay bounds, 9 font roles")
   }
 }
 '''
+workspace = (root / 'apps/ios/ScryRemote/WorkspaceShell.swift').read_text()
+assert '.offset(x: reduceMotion || drawerOpen ? 0 : -width)' in workspace
+assert 'if drawerUsesReleaseCurve { return .drawerRelease }' in workspace
+assert workspace.count('Motion.animation(drawerEffect') == 3
+assert 'drawerUsesReleaseCurve = released\n    drawerOpen = open' in workspace
+print('PASS reduced drawer keeps position for opacity; one effect selects button/release curves')
+
 with tempfile.TemporaryDirectory(prefix='scry-theme-motion-') as temporary:
     source = Path(temporary) / 'Check.swift'
     executable = Path(temporary) / 'check'

@@ -109,7 +109,7 @@
   content: "›";
   color: var(--accent);
   transform: rotate(0deg);
-  transition: transform var(--dur-base) var(--ease-struct);
+  transition: transform var(--duration-sm) var(--ease-out-strong);
 }
 .billing-details[open] > summary::before {
   transform: rotate(90deg);

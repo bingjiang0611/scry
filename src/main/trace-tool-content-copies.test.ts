@@ -111,7 +111,7 @@ describe('one-event dual-authority publication', () => {
     const onPersisted = vi.fn()
     const onError = vi.fn()
     const queue = new LiveTraceIngestion({ provider: 'pi', publish: event => { published.push(event) },
-      persist: async event => (await persistTraceToolEvents(userData, '/fixture', [event], recorder))[0], onPersisted, onError })
+      persist: async event => (await persistTraceToolEvents(userData, '/fixture', [event], { root: recorder, toolOutput: 'full' }))[0], onPersisted, onError })
     queue.enqueue(tool, sanitizeToolEvents([tool], TRACE_TOOL_CONTENT_POLICY, 'live_renderer')[0])
     await queue.idle()
     expect(onError).toHaveBeenCalledOnce()
@@ -138,7 +138,7 @@ describe('one-event dual-authority publication', () => {
     const onPersisted = vi.fn()
     const onError = vi.fn()
     const queue = new LiveTraceIngestion({ provider: 'pi', publish: event => { published.push(event) },
-      persist: async event => (await persistTraceToolEvents(userData, '/fixture', [event], recorder))[0], onPersisted, onError })
+      persist: async event => (await persistTraceToolEvents(userData, '/fixture', [event], { root: recorder, toolOutput: 'full' }))[0], onPersisted, onError })
     try {
       queue.enqueue(tool, sanitizeToolEvents([tool], TRACE_TOOL_CONTENT_POLICY, 'live_renderer')[0])
       await Promise.race([reached, queue.idle().then(() => { throw new Error('persisted before the second cleanup barrier') })])

@@ -22,7 +22,8 @@ export function finishGitTurnDiff(
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
   options: GitTurnDiffFinishOptions = {}
 ): Promise<TurnDiffSnapshot> {
-  capture.finishPromise ??= serializeCaptureOp(capture, () => computeGitTurnDiff(capture, deadlineMs, options, true))
+  capture.finishPromise ??= serializeCaptureOp(capture, () =>
+    computeGitTurnDiff(capture, deadlineMs, options, true, undefined, options.onAfter))
   return capture.finishPromise
 }
 
@@ -129,7 +130,8 @@ export function snapshotSessionNetDiff(
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
   options: GitTurnDiffFinishOptions = {}
 ): Promise<TurnDiffSnapshot> {
-  return serializeCaptureOp(baseline, () => computeGitTurnDiff(baseline, deadlineMs, options, false))
+  return serializeCaptureOp(baseline, () =>
+    computeGitTurnDiff(baseline, deadlineMs, options, false, undefined, options.onAfter))
 }
 
 /**

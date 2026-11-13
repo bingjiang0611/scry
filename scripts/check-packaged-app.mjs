@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { join, resolve, posix, sep } from 'node:path'
+import { join, resolve, relative, posix, sep } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 import { reachableMainSources } from './packaged-main-graph.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
@@ -54,7 +54,29 @@ for (const packageFile of packageFiles) {
     runtimeDependencies += 1
   }
 }
+const pierreNotices = [
+  '/third-party/pierre/README.md',
+  '/third-party/pierre/diff-license.txt',
+  '/third-party/pierre/hast-util-to-html-license.txt',
+  '/third-party/pierre/html-void-elements-license.txt',
+  '/third-party/pierre/lru_map-license.txt',
+  '/third-party/pierre/oniguruma-parser-license.txt',
+  '/third-party/pierre/oniguruma-to-es-license.txt',
+  '/third-party/pierre/pierre-apache-2.0-license.txt',
+  '/third-party/pierre/pierre-highlights-notice.txt',
+  '/third-party/pierre/pierre-theme-notice.txt',
+  '/third-party/pierre/pierre-trees-notice.txt',
+  '/third-party/pierre/preact-license.txt',
+  '/third-party/pierre/preact-render-to-string-license.txt',
+  '/third-party/pierre/regex-recursion-license.txt',
+  '/third-party/pierre/regex-utilities-license.txt',
+  '/third-party/pierre/shikijs-core-license.txt',
+  '/third-party/pierre/shikijs-vscode-textmate-license.txt'
+]
 const exactRuntimeFiles = new Set([
+  '/third-party',
+  '/third-party/pierre',
+  ...pierreNotices,
   '/package.json',
   '/LICENSE',
   '/THIRD_PARTY_NOTICES.md',
@@ -72,7 +94,7 @@ const unexpected = entries.filter((entry) =>
 if (unexpected.length > 0) {
   throw new Error(`packaged app 包含 allowlist 外文件：${unexpected.slice(0, 10).join(', ')}`)
 }
-for (const required of ['/package.json', '/LICENSE', '/THIRD_PARTY_NOTICES.md']) {
+for (const required of ['/package.json', '/LICENSE', '/THIRD_PARTY_NOTICES.md', ...pierreNotices]) {
   if (!entries.includes(required)) throw new Error(`packaged app 缺少发布文件：${required}`)
 }
 for (const forbiddenRoot of ['/.claude', '/.local', '/src', '/docs', '/scripts', '/out/cli', '/audit-report-scry-2026-07-31.md']) {
@@ -105,6 +127,15 @@ if (bundledCliInAsar || bundledCliUnpacked) throw new Error('packaged app 仍包
 const sdkIndexInAsar = entries.includes(`/${qoderIndexRelative.replaceAll('\\', '/')}`)
 const sdkIndexUnpacked = existsSync(join(unpacked, qoderIndexRelative))
 if (!sdkIndexInAsar && !sdkIndexUnpacked) throw new Error('排除 Qoder CLI 时误删了 Qoder SDK JavaScript adapter')
+
+const sqliteBinding = join(unpacked, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node')
+if (!existsSync(sqliteBinding)) throw new Error(`packaged app 缺少 better-sqlite3 native binding：${sqliteBinding}`)
+for (const directory of ['obj', 'obj.target']) {
+  const intermediate = `node_modules/better-sqlite3/build/Release/${directory}`
+  if (entries.some(entry => entry.startsWith(`/${intermediate}/`))) {
+    throw new Error(`packaged app 包含 SQLite 编译中间产物：${intermediate}`)
+  }
+}
 
 // node-pty 在 macOS 用随包分发的 prebuilds + spawn-helper（posix_spawn）；
 // Linux 走 node-gyp 的 build/Release forkpty binding，没有 spawn-helper。
@@ -150,14 +181,22 @@ if (actualCliVersion !== expectedCliVersion) {
 }
 
 const bytes = directoryBytes(appPath)
-if (bytes > maxBytes) {
-  throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes`)
-}
 const sizeBreakdown = {
   ...(process.platform === 'darwin' ? { frameworks: directoryBytes(join(appPath, 'Contents', 'Frameworks')) } : {}),
   asar: directoryBytes(asarPath),
   unpacked: directoryBytes(unpacked),
   privateCli: directoryBytes(join(resources, 'scry-cli'))
+}
+if (bytes > maxBytes) {
+  const largestFiles = readdirSync(appPath, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => {
+      const path = join(entry.parentPath, entry.name)
+      return { path: relative(appPath, path), bytes: lstatSync(path).size }
+    })
+    .sort((left, right) => right.bytes - left.bytes)
+    .slice(0, 10)
+  throw new Error(`packaged app 超过体积预算：${bytes} > ${maxBytes} bytes; ${JSON.stringify({ sizeBreakdown, largestFiles })}`)
 }
 console.log(JSON.stringify({
   appPath,

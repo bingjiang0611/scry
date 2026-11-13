@@ -9,7 +9,7 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
     await click('#list-resolve')
     const stagger = await captured()
     check(stagger.length === 12, `${theme}: expected all 12 real analytics rows, got ${stagger.length}`)
-    check(stagger.every(row => row.duration === 220), `${theme}: row duration not 220ms`)
+    check(stagger.every(row => row.duration === 200), `${theme}: row duration not 200ms`)
     check(stagger.slice(0, 10).every((row, index) => Math.abs(row.delay - index * 16) < 1e-6), `${theme}: first ten stagger delays ${JSON.stringify(stagger.map(row=>row.delay))}`)
     check(stagger[10].delay === 0 && stagger[11].delay === 0, `${theme}: row 11/12 must have no stagger delay`)
     await wait("!document.querySelector('.usage-breakdown .motion-stagger')")
@@ -21,6 +21,40 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
       await click(`#list-${modal}`)
       await wait("document.querySelector('.modal-overlay .motion-stagger')")
       await settle()
+      if (modal === 'mcp') {
+        // The tool drawer lives in its own table row: opening it must animate the row's
+        // height (moving the servers below) and closing must retire it inert, not vanish.
+        const drawer = await read(`(async () => {
+          const disclosure = () => document.querySelector('.modal-overlay .mcp-tools-row .motion-disclosure')
+          const serverRowTop = () => [...document.querySelectorAll('.modal-overlay .mcp-fleet tbody tr')]
+            .find(row => row.textContent.startsWith('server-1'))?.getBoundingClientRect().top ?? null
+          const button = document.querySelector('.modal-overlay .mcp-tools-toggle')
+          const secondRowTop = serverRowTop
+          const contractOf = node => {
+            const style = getComputedStyle(node)
+            return { name: style.animationName, duration: style.animationDuration, state: node.dataset.state, inert: node.inert }
+          }
+          const closed = { present: disclosure() != null, secondRowTop: secondRowTop() }
+          button.click()
+          await new Promise(resolve => setTimeout(resolve, 20))
+          const entering = contractOf(disclosure())
+          await new Promise(resolve => setTimeout(resolve, 320))
+          const opened = { height: disclosure().getBoundingClientRect().height, secondRowTop: secondRowTop(), expanded: button.getAttribute('aria-expanded') }
+          button.click()
+          await new Promise(resolve => setTimeout(resolve, 20))
+          const exiting = contractOf(disclosure())
+          await new Promise(resolve => setTimeout(resolve, 320))
+          return { closed, entering, opened, exiting, gone: disclosure() == null }
+        })()`)
+        check(!drawer.closed.present, `${theme}: MCP tool drawer mounted before opening`)
+        check(drawer.entering.name === 'disclosure-in' && drawer.entering.duration === '0.2s' && drawer.entering.state === 'enter',
+          `${theme}: MCP tool drawer did not animate its row height: ${JSON.stringify(drawer.entering)}`)
+        check(drawer.opened.expanded === 'true' && drawer.opened.height > 0, `${theme}: MCP tool drawer did not open: ${JSON.stringify(drawer.opened)}`)
+        check(drawer.opened.secondRowTop - drawer.closed.secondRowTop >= drawer.opened.height - 1,
+          `${theme}: MCP tool drawer did not move the servers below it: ${JSON.stringify(drawer)}`)
+        check(drawer.exiting.name === 'disclosure-out' && drawer.exiting.state === 'exit' && drawer.exiting.inert === true && drawer.gone,
+          `${theme}: MCP tool drawer exit was not retired: ${JSON.stringify(drawer)}`)
+      }
       await screenshot(`${theme}-${modal}`)
       contents.sendInputEvent({ type: 'keyDown', keyCode: 'ESC' }); contents.sendInputEvent({ type: 'keyUp', keyCode: 'ESC' })
       await wait("!document.querySelector('.modal-overlay')")
@@ -33,8 +67,8 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
     await arm("node.hasAttribute('data-motion-key') && node.closest('#list-sidebar')")
     await click('#list-append')
     const flip = await captured()
-    check(flip.some(animation => animation.duration === 300 && animation.frames.some(frame => 'transform' in frame)), `${theme}: existing sessions did not move for 300ms`)
-    check(flip.some(animation => animation.duration === 220 && animation.frames[0].opacity === '0'), `${theme}: newly added session did not enter for 220ms`)
+    check(flip.some(animation => animation.duration === 250 && animation.frames.some(frame => 'transform' in frame)), `${theme}: existing sessions did not move for 250ms`)
+    check(flip.some(animation => animation.duration === 200 && animation.frames[0].opacity === '0'), `${theme}: newly added session did not enter for 200ms`)
     await settle()
     await click('#list-sidebar .sb-proj-head')
     await wait("document.querySelector('#list-sidebar .sb-proj-head').getAttribute('aria-expanded')==='false'")
@@ -60,7 +94,7 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
   await arm("node.closest('.sb-pinned') && ['scry-list-arrival','scry-list-reorder'].includes(a.id)")
   await read('window.listFixture.pinCount(3)')
   const pinnedMotion = await captured()
-  check(pinnedMotion.some(animation=>animation.duration===220) && pinnedMotion.filter(animation=>animation.duration===300).length===2, 'pinned list omitted arrival or survivor FLIP')
+  check(pinnedMotion.some(animation=>animation.duration===200) && pinnedMotion.filter(animation=>animation.duration===250).length===2, 'pinned list omitted arrival or survivor FLIP')
   await click('#list-small')
   await settle()
   // Count the real layout getters and tab-root observations across unrelated renders.
@@ -92,11 +126,11 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
   const switchTab = async (root, selector) => {
     selector = `[id=${JSON.stringify(await read(`document.querySelector(${JSON.stringify(selector)}).id`))}]`
     const colors = await read(`(() => {const root=document.querySelector(${JSON.stringify(root)}); return {active:getComputedStyle(root.querySelector('[role=tab][aria-selected=true]')).color,target:getComputedStyle(document.querySelector(${JSON.stringify(selector)})).color}})()`)
-    await arm(`a.effect.getTiming().duration===220 && !!node.closest(${JSON.stringify(root)}) && a.effect.getKeyframes().some(frame=>'transform' in frame)`)
+    await arm(`a.effect.getTiming().duration===200 && !!node.closest(${JSON.stringify(root)}) && a.effect.getKeyframes().some(frame=>'transform' in frame)`)
     await click(selector)
     await wait(`document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-selected')==='true'`)
     const animations = await captured()
-    check(animations.length === 1 && animations[0].duration === 220, `${root}: indicator was not one 220ms animation: ${JSON.stringify(animations)}`)
+    check(animations.length === 1 && animations[0].duration === 200, `${root}: indicator was not one 200ms animation: ${JSON.stringify(animations)}`)
     check(await read(`getComputedStyle(document.querySelector(${JSON.stringify(selector)})).color===${JSON.stringify(colors.active)}`), `${root}: selected text color was delayed`)
     check(await read(`!document.querySelector(${JSON.stringify(selector)}).getAnimations().some(a=>a.effect.getKeyframes().some(frame=>'color' in frame))`), `${root}: text color interpolated`)
     await settle()
@@ -117,16 +151,16 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
   await click('#list-queue'); await wait("document.querySelectorAll('.queue-item').length===1")
   await click('#list-queue'); await wait("document.querySelectorAll('.queue-item').length===2")
   await settle()
-  await arm("node.closest('.queue-list') && a.effect.getTiming().duration===300")
+  await arm("node.closest('.queue-list') && a.effect.getTiming().duration===250")
   await click('.queue-remove')
-  check((await captured()).every(animation=>animation.duration===300), 'queue survivors did not close the gap')
+  check((await captured()).every(animation=>animation.duration===250), 'queue survivors did not close the gap')
   await wait("document.querySelectorAll('.queue-item').length===1")
   await click('#list-task'); await wait("document.querySelectorAll('.background-work-task').length===1")
   await click('#list-task'); await wait("document.querySelectorAll('.background-work-task').length===2")
   await settle()
-  await arm("node.closest('.background-work-panel') && a.effect.getTiming().duration===300")
+  await arm("node.closest('.background-work-panel') && a.effect.getTiming().duration===250")
   await read('window.listFixture.removeFirstTask()')
-  check((await captured()).every(animation=>animation.duration===300), 'background task survivors did not close the gap')
+  check((await captured()).every(animation=>animation.duration===250), 'background task survivors did not close the gap')
   await wait("document.querySelectorAll('.background-work-task').length===1")
-  return { themes: reports, oversized45RetainedWithoutFlip: true, pinnedArrival220AndSurvivors300: true, unrelatedRendersNoTabReadsOrObserverRebuild: true, selection220AndImmediateColor: true, dynamicTabsAndResizeJump: true, queueAndTaskSurvivors300: true }
+  return { themes: reports, oversized45RetainedWithoutFlip: true, pinnedArrival200AndSurvivors250: true, unrelatedRendersNoTabReadsOrObserverRebuild: true, selection200AndImmediateColor: true, dynamicTabsAndResizeJump: true, queueAndTaskSurvivors250: true }
 }

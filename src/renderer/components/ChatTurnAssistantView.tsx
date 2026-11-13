@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
+import { piRuntimeCopy } from '@shared/constants/copy'
 import { type BackgroundWork } from '@shared/background-work'
-import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
+import { classifyRunTermination, type AgentQuestionRequest, type AgentQuestionResponse } from '@shared/runtime'
 import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import type { TurnStreamProjection } from '../turn-stream-projection'
 import type { FileRow, HookSummary, Turn } from '../format'
@@ -57,6 +58,12 @@ export function AssistantTurnView({
   remote: boolean
   backgroundWork?: BackgroundWork
 }) {
+  // Old archives retain their original generic retry hint; correct the display without
+  // rewriting evidence or suggesting that the account binding itself has changed.
+  const errorHint = turn.error?.includes('account_changed_start_new_session')
+    && classifyRunTermination({ message: turn.error }) !== 'input_context_overflow'
+    ? piRuntimeCopy.qoderAccountChangedHint(turn.errorHint)
+    : turn.errorHint
   return (
     <div className="turn-assistant">
       <div className="who">
@@ -150,7 +157,7 @@ export function AssistantTurnView({
           <div className="errmain">
             <Icon name="alert" /> <span>{turn.error}</span>
           </div>
-          {turn.errorHint && <div className="errhint">→ {turn.errorHint}</div>}
+          {errorHint && <div className="errhint">→ {errorHint}</div>}
         </div>
       )}
       {/* History/attachment evidence can be partial without a Provider failure. */}

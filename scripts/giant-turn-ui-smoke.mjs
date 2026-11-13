@@ -13,6 +13,7 @@ try {
   await Promise.all(['userData', 'sessionData'].map(name => mkdir(join(temp, name))))
   await build({
     configFile: false,
+    worker: { format: 'es' },
     root: temp,
     envDir: temp,
     logLevel: 'error',
@@ -33,7 +34,7 @@ try {
       }
     }
   })
-  await writeFile(join(temp, 'giant-turn.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="giant-turn.css"><div id="root"></div><script src="giant-turn.js"></script>')
+  await writeFile(join(temp, 'giant-turn.html'), '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:"><link rel="stylesheet" href="giant-turn.css"><div id="root"></div><script src="giant-turn.js"></script>')
   await writeFile(join(temp, 'main.cjs'), `
 const { app, BrowserWindow } = require('electron')
 require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)

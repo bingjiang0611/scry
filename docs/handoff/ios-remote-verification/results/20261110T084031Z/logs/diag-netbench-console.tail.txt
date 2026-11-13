@@ -1,0 +1,18 @@
+# Manual console runs of the same build and relay while the stage loop was stuck.
+# Each is 'xcrun devicectl device process launch --console ... -netBench -netBenchLabel=<label>'.
+
+## diag (08:58Z, no --terminate-existing, 1 round)
+NETBENCH {"event":"cold-open","label":"diag","ms":3456.1999999999998,"round":1}
+NETBENCH {"error":"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。","event":"offline-probe","hostOffline":true,"label":"diag","ms":2047}
+NETBENCH {"event":"done","failures":0,"label":"diag"}
+
+## diag2 (09:17Z, no --terminate-existing, 2 rounds)
+NETBENCH {"event":"cold-open","label":"diag2","ms":5447.8999999999996,"round":1}
+NETBENCH {"event":"cold-open","label":"diag2","ms":2151.3000000000002,"round":2}
+NETBENCH {"error":"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。","event":"offline-probe","hostOffline":true,"label":"diag2","ms":2053.5999999999999}
+NETBENCH {"event":"done","failures":0,"label":"diag2"}
+
+## diag3 (09:20Z, --terminate-existing, 1 round)
+NETBENCH {"event":"cold-open","label":"diag3","ms":2660.6999999999998,"round":1}
+NETBENCH {"error":"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。","event":"offline-probe","hostOffline":true,"label":"diag3","ms":1325.3}
+NETBENCH {"event":"done","failures":0,"label":"diag3"}

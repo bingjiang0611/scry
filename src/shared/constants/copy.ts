@@ -34,6 +34,19 @@ function detail(result: WorkspaceDiffState): string {
 
 const count = (value: number): string => `${value} 个工作区文件的 Git 净改动`
 
+const qoderAccountChanged = 'Qoder 登录身份与会话绑定不一致。请新建会话后发送；在当前会话重试不会解除绑定。'
+const piRetryFailure = '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
+
+export const piRuntimeCopy = {
+  qoderAccountChanged,
+  retryFailure: piRetryFailure,
+  transportFailure: '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试',
+  qoderAccountChangedHint: (detail?: string): string => {
+    if (!detail || detail === piRetryFailure) return qoderAccountChanged
+    return detail.includes(qoderAccountChanged) ? detail : `${qoderAccountChanged} ${detail}`
+  }
+}
+
 export const historyCopy = {
   nativeArchiveFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生历史未能核对：${detail}`,
   nativeBodyFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生正文未能核对：${detail}`,

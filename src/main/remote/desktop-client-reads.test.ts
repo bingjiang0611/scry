@@ -6,6 +6,43 @@ import { REMOTE_PROTOCOL_VERSION, DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_M
 import { setup, ssh, encrypt, decrypt } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient history, trace and session reads', () => {
+  it('reads managed worktree choices through the authenticated host reader without accepting a client path result', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Worktrees', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const request = { cwd: '/workspace', kind: 'branches' as const, query: 'topic' }
+      const value = { status: 'unavailable' as const, reason: 'repository unavailable' }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value } })
+      await expect(fixture.client.workspaceChoices(id, request)).resolves.toEqual(value)
+      expect(fixture.tlsRequest).toHaveBeenLastCalledWith(expect.objectContaining({ request: {
+        protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'workspaceChoices', request }
+      } }))
+      const available = { status: 'available' as const, data: {
+        repositoryId: 'a'.repeat(64), root: '/workspace', revision: 'b'.repeat(64), branch: 'main', head: 'c'.repeat(40),
+        dirty: false, writeBlocker: null, commonDirBusy: false, observedAt: 1,
+        defaultBase: { kind: 'local' as const, name: 'refs/heads/main', head: 'c'.repeat(40) },
+        page: { kind: 'branches' as const, items: [{ kind: 'local' as const, name: 'refs/heads/main', head: 'c'.repeat(40), worktreeIds: [] }] },
+        nextCursor: null, limited: false
+      } }
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value: available } })
+      await expect(fixture.client.workspaceChoices(id, request)).resolves.toEqual(available)
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'validateWorkspaceBranch', value: { status: 'available', data: { name: 'topic' } } } })
+      await expect(fixture.client.validateWorkspaceBranch(id, { cwd: '/workspace', repositoryId: 'a'.repeat(64), name: 'topic' }))
+        .resolves.toEqual({ status: 'available', data: { name: 'topic' } })
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value: { status: 'available', data: {
+        repositoryId: 'a'.repeat(64), root: '', revision: 'b'.repeat(64), branch: null, head: null,
+        dirty: false, writeBlocker: null, commonDirBusy: false, observedAt: 1,
+        page: { kind: 'branches', items: [] }, nextCursor: null, limited: false
+      } } } })
+      await expect(fixture.client.workspaceChoices(id, request)).rejects.toThrow('invalid_workspace_choices_response')
+      fixture.tlsRequest.mockResolvedValueOnce({ desktop: { kind: 'workspaceChoices', value: { status: 'invented' } } })
+      await expect(fixture.client.workspaceChoices(id, request)).rejects.toThrow('invalid_workspace_choices_response')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('reassembles bounded history chunks and rejects malformed or non-progressing pages', async () => {
     const fixture = await setup()
     try {

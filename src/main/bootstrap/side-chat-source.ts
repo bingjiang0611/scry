@@ -5,7 +5,7 @@ import type { SideChatNativeSource, SideChatSourceDeps } from '../conversation-s
 import type { StreamedTurn } from '../conversation-side-chat-stream'
 import { streamNativeTranscriptTurns } from '../conversation-side-chat-native-stream'
 import { streamPiNativeTurns } from '../pi-native-stream'
-import { stopReasonProvesCompletion } from '../conversation-side-chat-raw'
+import { providerTurnTerminal } from '../conversation-turn-terminal'
 import { locatePiNativeSession } from '../pi-native-history'
 import { archivedTranscriptPath, transcriptPath } from '../transcript-archive'
 
@@ -78,7 +78,7 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
       if (!located) return null
       return streamPiNativeTurns({
         path: located.canonical, sessionId: source.nativeSessionId, cwd: source.cwd,
-        settles: stopReason => stopReasonProvesCompletion('pi', { stopReason })
+        terminalOf: stopReason => providerTurnTerminal('pi', stopReason)
       })
     }
     if (source.providerId !== 'claude') return null
@@ -93,7 +93,7 @@ export function createSideChatSourceDeps(runtime: SideChatSourceRuntime): SideCh
     if (!chosen) return null
     return streamNativeTranscriptTurns({
       path: chosen, runId: source.nativeSessionId, sessionId: source.nativeSessionId, cwd: source.cwd,
-      settles: stopReason => stopReasonProvesCompletion('claude', { stopReason })
+      terminalOf: stopReason => providerTurnTerminal('claude', stopReason)
     })
   }
   // Every native reader this bootstrap wires streams its own records, so there is no

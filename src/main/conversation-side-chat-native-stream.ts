@@ -4,6 +4,7 @@ import { TextSpool, type SpoolBudget } from './text-spool'
 import { projectTranscript, type JsonlEvent, type ScalarSlot } from './claude-jsonl-projector'
 import { hashFilePrefix } from './jsonl-record-scanner'
 import type { StreamedTurn } from './conversation-side-chat-stream'
+import type { TurnTerminal } from './conversation-turn-terminal'
 import { allSpools, captureSpools, settleAndRelease, type AssistantPart } from './conversation-side-chat-streamed'
 import type { CaptureItem, CaptureSink } from './conversation-side-chat-capture'
 import { TitleTap, consume, type RequestedBoundary } from './conversation-side-chat-sink'
@@ -20,7 +21,7 @@ import type { ProviderId } from '../shared/provider'
  * `message.content` is a `text` block opens a turn; `isMeta` and `isCompactSummary`
  * records never become a human prompt; a task notification is a continuation; an injected
  * skill directive continues the current turn; and only the Provider's own terminal marker
- * settles a turn. Visible text never settles anything.
+ * makes a turn terminal. Visible text never proves termination.
  *
  * Only the captured prefix is authoritative. The bytes this read parsed are hashed as they
  * pass, then the same range is read once more and compared: a same-size rewrite changes no
@@ -59,12 +60,12 @@ export interface NativeTranscriptStreamOptions {
   /** Identity the transcript must claim itself: its own records name session and cwd. */
   sessionId: string
   cwd?: string
-  /** Whether a terminal marker proves the Provider finished the turn. */
-  settles: (stopReason: string | undefined) => boolean
+  /** What the Provider's own terminal marker proves about this turn. */
+  terminalOf: (stopReason: string | undefined) => TurnTerminal
 }
 
 /**
- * Projects one native transcript into settled turns, in order.
+ * Projects one native transcript into terminal turns, in order.
  *
  * The generator owns every spool it creates: it frees them once a message body has been
  * consumed and on error, so an aborted capture leaves no temporary file behind.
@@ -93,7 +94,7 @@ export async function* streamNativeTranscriptTurns(
     // generator without events, so the completed prefix is still frozen.
     for await (const event of projectTranscript(handle, before.size, evidence)) {
       await record.accept(event)
-      // A turn that just closed is settled before the next record is read.
+      // A turn that just closed is projected before the next record is read.
       while (ready.length > 0) yield* settleAndRelease(ready.shift()!, options, state, release)
     }
     // The last turn ends at EOF, not at a following prompt record.
@@ -301,7 +302,7 @@ class RecordProjection {
  *
  * A spooled body means a long transcript costs the sealed manifest, not memory, and an
  * unfinished trailing record or a later append cannot change the frozen prefix. The
- * reader has already refused a prefix with an unsettled turn before a settled one, so
+ * reader has already refused a prefix with a nonterminal turn before a terminal one, so
  * only the requested boundary and the title remain to be decided here.
  */
 export async function captureStreamedNativePrefix(args: {

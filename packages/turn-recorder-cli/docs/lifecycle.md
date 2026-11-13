@@ -2,6 +2,12 @@
 
 [返回 CLI README](../README.md)
 
+## 未发布：OpenCode / Pi 终态收敛
+
+- OpenCode 插件把原生 `messageID` 作为同轮 `turn_id` 贯穿 start、tool 与 idle 终态。已知轮次不再因为缺少身份而进入 180 秒陈旧终态宽限期；无法取得原生消息身份时仍保留原有保守路径，不猜测。非交互进程收到 `SIGINT` 且只有一个活动轮次时，插件同步提交该轮 `interrupted` Stop 后再重新发送信号；存在多个活动轮次时不猜测目标，保留 open 状态供后续真实终态或恢复处理。
+- Pi 扩展在进程收到 `SIGINT` 时，先按队列顺序持久化当前轮次的 `interrupted` Stop，再移除自己的监听并重新发送同一信号。这样保留原生信号退出语义，同时避免非交互 `pi -p` 直接退出后遗留永不收口的 `open.json`。
+- 两项修复只影响新轮次，不重写历史记录。OpenCode 工作区需要 repair/re-init 更新生成插件；Pi 需要更新并重新加载用户级扩展。
+
 ## 0.2.52 sequence 水位、投递空洞与丢失结果恢复
 
 - sequence 分配改为持久化已发号水位：提交锁内先 durable 写入再写 record，删除最新 record 或删光 records 后不再复用号。`doctor` 新增 `records.sequence`，水位高于现存最大号时报 warn。
@@ -99,11 +105,12 @@
 - 超出轮次窗口的时间戳（早于 `startedAt`、或超出本地时钟 60s 以上）不被信任，会退到下一个可信来源。
 ## 会话结束（SessionEnd）
 
-收到 `SessionEnd`、`session.end`、`session_end`、`session.exited`、`process.exit` 时，当前 open turn 立即定界为 `interrupted`（`reason: session_end`），**不会**因为会话结束而被当成完成。
+收到 `SessionEnd`、`session.end`、`session_end`、`session.exited`、`process.exit` 时，当前 open turn 立即定界。通常记录为 `interrupted`（`reason: session_end`），**不会**仅因为会话结束而被当成完成。Qoder 已经持久化的本轮取消 Stop 由 SessionEnd 确认时，保留该 Stop 的 `interrupted` 结论和 `provider_terminal` 边界。
 
 - Hook 只做两件事：写入生命周期事件、把终止时间与结论固定到 `open.json`，然后返回 `pending`。transcript 解析与 Git diff 由 daemon/`scry recorder recover` 在后台完成（daemon 在每次请求后重置为 1s 轮询）。结束时间已先固定，所以推迟聚合不会拉长时长；Hook 被杀也只是留下一个 closing turn，仍可恢复。
 - 重复 SessionEnd 幂等：未完成时反复返回 `pending` 而不改写边界，已提交后返回 `duplicate`。普通采集、managed 与 journal recovery 共用同一套语义。
-- `scry init` **只为 Claude 注册** `SessionEnd`，timeout **3 秒**（`Stop` 仍为 15 秒）：依据是 Claude SDK 的 `HOOK_EVENTS` 包含 `SessionEnd`。**Codex、Qoder 没有经过核实的会话结束 Hook，OpenCode 根本没有这类事件**，因此不注册，也不假装 parity；这些 Provider 仍靠上面的结束时间解析。已安装的工作区跑 `scry init` 或 `scry integrations repair` 才会补上。
+- `scry init` 为 **Claude 和 Qoder** 注册 `SessionEnd`，timeout **3 秒**（`Stop` 仍为 15 秒）。Claude SDK 的 `HOOK_EVENTS` 包含该事件；Qoder CLI **1.1.81** 已实测项目 hook 在原生 `/quit` 时执行，未发起模型轮次的会话也会触发。Qoder 更早版本未验证，不承诺支持。**Codex 没有经过核实的会话结束 Hook，OpenCode 没有这类事件**，因此不注册，也不假装 parity。升级 CLI 后，已有独立 CLI 工作区需运行 `scry init` 或 `scry integrations repair --yes` 更新接入；由 uploader 管理的工作区通过其初始化流程更新，避免覆盖上传桥接。
+- Qoder 的 Esc 只取消请求，不等于退出会话。若取消发生在 UserPromptSubmit hook 中，可能没有匹配的 transcript；后续实际退出时的 SessionEnd 可为已打开的轮次提供结束边界。已明确标记 `interrupted` 的 deferred Stop 可由 SessionEnd 确认，并保留原 Stop 的边界；身份不明的 `completed` Stop 不能靠 SessionEnd 变成当前轮的完成证据，会先撤销再按普通 SessionEnd 处理。此时只保存可归属的 hook 证据，缺失的正文、用量保持 unavailable；transcript 身份不匹配时 Git baseline 也不继续结算，`diff` 标记 unavailable，避免归入退出后的修改。已有匹配的 transcript 仍走原有聚合路径。普通 Stop 仍等待身份匹配。没有任何终态证据时仍保持 open，不伪造完成或中断记录。
 - 外部已有自己的 SessionEnd Hook（例如其他平台封装）时，也可以不让 Scry 注册，直接转发：`scry recorder hook --provider claude --event SessionEnd --workspace "$PWD" --stdin --quiet`。
 
 > ⚠️ **Connection reset 不会触发 SessionEnd。** 连接断开但会话仍在时，靠的是上一节“不再借用下一次输入时间”；SessionEnd 只能让真正结束的会话更早收口。

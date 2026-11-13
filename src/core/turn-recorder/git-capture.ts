@@ -8,7 +8,8 @@ import {
   mkdtemp,
   mkdir,
   rm,
-  realpath
+  realpath,
+  stat
 } from 'node:fs/promises'
 import {
   join,
@@ -47,10 +48,19 @@ export interface GitTurnDiffCapture {
   branch?: string
   baselineClean?: boolean
   indexPath?: string
+  /**
+   * 启动时观测到的真实 index 身份。finish 的候选发现只在 index 未被改写时沿用它：
+   * 那时 index 仍等于 beforeTree，可以省掉一次 read-tree --reset，且 stat cache 仍然有效。
+   */
+  indexState?: { mtimeMs: number; ctimeMs: number; size: number; ino: number }
+  /** 启动快照自带、内容等于 beforeTree 且 stat cache 有效的隔离 index（仅 worktree 脏时存在）。 */
+  beforeIndex?: string
   tempDir?: string
   objectDir?: string
   alternateObjectDirs?: string
   filterOverrides?: string[]
+  /** 保留 object store 供下一段当基线；随 open 状态持久化，跨进程生效。 */
+  preservedStorage?: boolean
   pathspec?: string[]
   excludedPaths?: string[]
   /** clone 之间共享的只读 baseline object store；引用归零后才删除 owner 根目录。 */
@@ -63,6 +73,21 @@ export interface GitTurnDiffCapture {
   opChain?: Promise<void>
 }
 
+/**
+ * 显式基线：diff 的 before-tree 是 `commit` 当时的树，不是本次 begin 时刻的工作树。
+ * 只用于可证明的基线（本轮新建 worktree 的创建提交），调用方必须先证明来源。
+ */
+export interface GitTurnDiffBaseline {
+  commit: string
+  /** 基线观测时间（ISO），写入 snapshot.beforeAt。 */
+  at: string
+  /**
+   * 基线所在的只读 object store（会话内上一段冻结的结束状态）。
+   * 基线树里的 blob 可能只存在于那里，不是本仓库的已提交对象。
+   */
+  objectDirs?: string[]
+}
+
 export interface GitTurnDiffFinishOptions {
   structuredPaths?: string[]
   forceFull?: boolean
@@ -71,6 +96,11 @@ export interface GitTurnDiffFinishOptions {
   completePatches?: boolean
   /** Bounded, read-only workspace inspector; not the recorder retention policy. */
   workspaceSnapshot?: boolean
+  /**
+   * 终态 after-tree 的出口。分段记录用它冻结「本段结束时的状态」，作为下一段的基线；
+   * 共享 after 的重算不触发，因为那时树属于另一个 capture。
+   */
+  onAfter?: (after: GitAfterTree) => void
 }
 
 /**
@@ -170,6 +200,20 @@ export function terminalSnapshot(
 
 const retainedCaptureStorage = new WeakMap<GitTurnDiffCapture, () => Promise<TurnDiffSnapshot['cleanup']>>()
 
+/**
+ * 保留本 capture 的 object store 到本段之后：下一段以本段结束时的树为基线，需要这里的 blob。
+ * 逐段链式保留，释放由下一段封箱负责。标记必须随 open 状态持久化：hold 与封箱是不同进程，
+ * 进程内的 set 在恢复时认不出重新读出来的 capture。
+ */
+export function preserveAfterStorage(capture: GitTurnDiffCapture): void {
+  capture.preservedStorage = true
+}
+
+/** The segment chain was dropped (a real prompt resumed the turn): clean up normally again. */
+export function resumeAfterStorage(capture: GitTurnDiffCapture): void {
+  capture.preservedStorage = false
+}
+
 /** A terminal peer owns one reference to the complete source store, including clone-only objects. */
 export function retainAfterStorage(capture: GitTurnDiffCapture): () => Promise<TurnDiffSnapshot['cleanup']> {
   const owner: GitTurnDiffCapture = { ...capture, finishPromise: undefined, opChain: undefined }
@@ -183,6 +227,13 @@ export function retainAfterStorage(capture: GitTurnDiffCapture): () => Promise<T
 }
 
 export async function cleanupCapture(capture: GitTurnDiffCapture): Promise<TurnDiffSnapshot['cleanup']> {
+  if (capture.preservedStorage) {
+    // The next segment still needs this store. The shared session baseline keeps its reference so
+    // blobs that predate it stay resolvable for that segment's diff.
+    capture.tempDir = undefined
+    capture.sharedStorage = undefined
+    return 'ok'
+  }
   const release = retainedCaptureStorage.get(capture)
   if (release) {
     retainedCaptureStorage.delete(capture)
@@ -216,7 +267,8 @@ export async function beginGitTurnDiff(
   deadlineMs = TURN_DIFF_BEGIN_DEADLINE_MS,
   captureRoot?: string,
   excludedPaths: string[] = [],
-  workspaceSnapshot = false
+  workspaceSnapshot = false,
+  baseline?: GitTurnDiffBaseline
 ): Promise<GitTurnDiffCapture> {
   const started = Date.now()
   const beforeAt = new Date(started).toISOString()
@@ -231,7 +283,10 @@ export async function beginGitTurnDiff(
     // 一轮并行 Git 进程，不再串行执行 HEAD 与 status 两轮探测。
     const [layoutResult, statusResult] = await Promise.allSettled([
       gitCommand(
-        ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir', '--git-path', 'index'],
+        [
+          'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-common-dir',
+          '--git-path', 'index', '--git-path', 'info/sparse-checkout'
+        ],
         { cwd: canonicalCwd, env: readEnv, deadline }
       ),
       gitCommand(snapshotGitArgs([], ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.']), {
@@ -246,9 +301,9 @@ export async function beginGitTurnDiff(
       if (layoutResult.reason instanceof GitDeadlineError) throw layoutResult.reason
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
-    const [inside, repoRoot, commonDirRaw, indexPathRaw] = layoutResult.value
+    const [inside, repoRoot, commonDirRaw, indexPathRaw, sparsePathRaw] = layoutResult.value
       .split('\n').map((line) => line.trim())
-    if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw) {
+    if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw || !sparsePathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
     if (statusResult.status === 'rejected') throw statusResult.reason
@@ -295,9 +350,59 @@ export async function beginGitTurnDiff(
     tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
     const objectDir = join(tempDir, 'objects')
     await mkdir(objectDir)
-    const alternateObjectDirs = [join(commonDir, 'objects'), process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES]
-      .filter((value): value is string => !!value)
-      .join(delimiter)
+    // A segment baseline can hand over the whole chain's stores, which overlap on the repository's own.
+    const alternateObjectDirs = [...new Set([
+      join(commonDir, 'objects'),
+      ...(baseline?.objectDirs ?? []),
+      ...(process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES ? process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES.split(delimiter) : [])
+    ].filter((value): value is string => !!value))].join(delimiter)
+    // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
+    // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
+    // linked worktree 的规则文件在自己的 git 目录（`<common>/worktrees/<id>/info/...`），
+    // 所以路径必须由 `--git-path` 解析，不能拼 commonDir。
+    const sparsePath = isAbsolute(sparsePathRaw) ? sparsePathRaw : resolve(canonicalCwd, sparsePathRaw)
+    if (baseline) {
+      // 显式基线的仓库不需要工作树快照：基线树就是创建提交的树。仍要先建立本 capture 自己的
+      // object store，after 快照只能写进这里，不能污染真实仓库。
+      // A frozen segment baseline is a tree object that only exists in that segment's store: it is
+      // not in the repository, so it can only be resolved through the alternates it came from.
+      const baselineTree = (await gitCommand(
+        ['rev-parse', '--verify', '--end-of-options', `${baseline.commit}^{tree}`],
+        {
+          cwd: repoRoot,
+          env: baseline.objectDirs?.length ? { ...readEnv, GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateObjectDirs } : readEnv,
+          deadline
+        }
+      )).trim()
+      return {
+        beforeAt: baseline.at,
+        captureMs: Date.now() - started,
+        status: 'ready',
+        repoRoot,
+        scope,
+        requestedRoot,
+        beforeTree: baselineTree,
+        head: baseline.commit,
+        branch,
+        baselineClean: false,
+        indexPath,
+        tempDir,
+        objectDir,
+        alternateObjectDirs,
+        pathspec,
+        excludedPaths: canonicalExcludedPaths
+      }
+    }
+    const [indexState, sparseCheckout] = await Promise.all([
+      stat(indexPath).then(
+        (value) => ({ mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, size: value.size, ino: value.ino }),
+        () => undefined
+      ),
+      // 只有 ENOENT 能证明“这个工作树没有 sparse 规则文件”。其他错误（EACCES、ENOTDIR、悬空路径）
+      // 说明判断失败，此时按 sparse 处理：宁可白跑一次 read-tree --reset，也不能把 skip-worktree
+      // 条目当成删除写进证据。
+      stat(sparsePath).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')
+    ])
     if (baselineClean) {
       return {
         beforeAt,
@@ -311,6 +416,7 @@ export async function beginGitTurnDiff(
         branch,
         baselineClean,
         indexPath,
+        ...(indexState && !sparseCheckout ? { indexState } : {}),
         tempDir,
         objectDir,
         alternateObjectDirs,
@@ -348,6 +454,7 @@ export async function beginGitTurnDiff(
       branch,
       baselineClean,
       indexPath,
+      ...(sparseCheckout ? {} : { beforeIndex }),
       tempDir,
       objectDir,
       alternateObjectDirs,

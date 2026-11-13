@@ -140,7 +140,7 @@
 }
 
 .gline {
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .gline:hover {
@@ -259,7 +259,7 @@
   color: var(--dim);
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .theme-option.active {

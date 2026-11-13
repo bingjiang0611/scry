@@ -72,7 +72,9 @@ describe('exact diff scope and evidence presentation', () => {
 
   it('renders retained patch bodies without claiming that history never stores patches', () => {
     const markup = render(changed)
-    expect(markup).toContain('retained evidence')
+    // Retained captured text is mounted and expanded in test:pierre:ui.
+    expect(markup).toContain('1 file')
+    expect(markup).toContain('正在加载差异视图…')
     expect(markup).not.toContain('历史归档不保存')
   })
 })

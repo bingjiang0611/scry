@@ -131,7 +131,7 @@
   color: var(--dim2);
   font: 11.5px/1 var(--font-ui);
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 
@@ -172,7 +172,7 @@
   color: var(--dim);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--dur-micro) linear, background-color var(--dur-micro) linear;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .welcome-provider:disabled { cursor: default; }
@@ -296,7 +296,7 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .welcome-profile-row:has(.welcome-profile-remove) .welcome-profile-pick { padding-right: 38px; }
@@ -330,7 +330,7 @@
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: background-color var(--dur-micro) linear, color var(--dur-micro) linear, opacity var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out), opacity var(--duration-hover) var(--ease-out);
 }
 
 .welcome-profile-row:hover .welcome-profile-remove,

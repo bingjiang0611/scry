@@ -1,0 +1,63 @@
+ources/CCryptoBoringSSLShims/include -Xcc -I/tmp/scry-remote-device-build/SourcePackages/checkouts/swift-crypto/Sources/CCryptoBoringSSL/include -Xcc -I/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/include -Xcc -I/tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/DerivedSources-normal/arm64 -Xcc -I/tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/DerivedSources/arm64 -Xcc -I/tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote-Swift.h -working-directory /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.swiftmodule/arm64-apple-ios.abi.json /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote.abi.json (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote.abi.json /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.swiftmodule/arm64-apple-ios.abi.json
+
+Copy /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.swiftmodule/Project/arm64-apple-ios.swiftsourceinfo /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote.swiftsourceinfo (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote.swiftsourceinfo /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.swiftmodule/Project/arm64-apple-ios.swiftsourceinfo
+
+CopySwiftLibs /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    builtin-swiftStdLibTool --copy --verbose --sign <redacted> --scan-executable /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/ScryRemote.debug.dylib --scan-folder /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/Frameworks --scan-folder /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/PlugIns --scan-folder /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/SystemExtensions --scan-folder /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/Extensions --platform iphoneos --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.6.109.0.u6Qm9T/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ExtractAppIntentsMetadata (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.6.109.0.u6Qm9T/Metal.xctoolchain --module-name ScryRemote --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk --xcode-version 17F113 --platform-family iOS --deployment-target 17.0 --bundle-identifier com.scry.remote.local --output /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app --target-triple arm64-apple-ios17.0 --binary-file /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/ScryRemote --dependency-file /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote_dependency_info.dat --stringsdata-file /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote.SwiftFileList --metadata-file-list /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/ScryRemote.DependencyMetadataFileList --static-metadata-file-list /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/ScryRemote.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/Objects-normal/arm64/ScryRemote.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-11-09 10:03:34.052 appintentsmetadataprocessor[13597:29334587] Starting appintentsmetadataprocessor export
+2026-11-09 10:03:34.054 appintentsmetadataprocessor[13597:29334587] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+AppIntentsSSUTraining (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsnltrainingprocessor --infoplist-path /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/Info.plist --temp-dir-path /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/ssu --bundle-id com.scry.remote.local --product-path /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app --extracted-metadata-path /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/Metadata.appintents --metadata-file-list /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/ScryRemote.DependencyMetadataFileList --source-file /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/Info.plist --archive-ssu-assets
+2026-11-09 10:03:34.086 appintentsnltrainingprocessor[13598:29334588] Parsing options for appintentsnltrainingprocessor
+2026-11-09 10:03:34.086 appintentsnltrainingprocessor[13598:29334588] Starting AppIntents SSU YAML Generation
+2026-11-09 10:03:34.089 appintentsnltrainingprocessor[13598:29334588] No AppShortcuts found - Skipping.
+
+CodeSign /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/ScryRemote.debug.dylib (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    
+    Signing Identity:     "Apple Development: <signing-identity> (<team>)"
+    Provisioning Profile: "iOS Team Provisioning Profile: com.scry.remote.local"
+                          (<id:0944978c>)
+    
+    /usr/bin/codesign --force --sign <redacted> --timestamp\=none --generate-entitlement-der /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/ScryRemote.debug.dylib
+/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/ScryRemote.debug.dylib: replacing existing signature
+
+CodeSign /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/__preview.dylib (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    
+    Signing Identity:     "Apple Development: <signing-identity> (<team>)"
+    Provisioning Profile: "iOS Team Provisioning Profile: com.scry.remote.local"
+                          (<id:0944978c>)
+    
+    /usr/bin/codesign --force --sign <redacted> --timestamp\=none --generate-entitlement-der /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/__preview.dylib
+/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app/__preview.dylib: replacing existing signature
+
+CodeSign /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    
+    Signing Identity:     "Apple Development: <signing-identity> (<team>)"
+    Provisioning Profile: "iOS Team Provisioning Profile: com.scry.remote.local"
+                          (<id:0944978c>)
+    
+    /usr/bin/codesign --force --sign <redacted> --entitlements /tmp/scry-remote-device-build/Build/Intermediates.noindex/ScryRemote.build/Debug-iphoneos/ScryRemote.build/ScryRemote.app.xcent --timestamp\=none --generate-entitlement-der /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app
+/tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app: replacing existing signature
+
+Validate /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app (in target 'ScryRemote' from project 'ScryRemote')
+    cd /Users/<user>/Library/Application\ Support/scry/worktrees/c8d961bd28eaec9180aa5c2b9c570457fc2d4880a629824d2fd20f708baa5414/<id:f47cbf70>/apps/ios
+    builtin-validationUtility /tmp/scry-remote-device-build/Build/Products/Debug-iphoneos/ScryRemote.app -shallow-bundle -infoplist-subpath Info.plist
+
+** BUILD SUCCEEDED **
+

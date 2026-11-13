@@ -11,6 +11,8 @@ import type { RemoteRunBindingDependencies, RemoteRunInput, RemoteRunTrace } fro
 const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 
 export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, scryRunId: string, { runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal }: RemoteRunInput): Promise<void> {
+  // A managed worktree is prepared only by the canonical App runtime; this seam cannot.
+  if (routing.workspace) throw new Error('remote_workspace_requires_canonical_runtime')
   const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
   // A run with no prompt is not a Provider run; fail closed and truthfully
   // rather than launch an empty turn.

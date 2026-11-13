@@ -1,5 +1,3 @@
-import { HOOK_ENV_KEYS } from '../core/turn-recorder/commit-environment.js'
-import { PROTOCOL_VERSION } from '../core/turn-recorder/daemon.js'
 import { object } from './workspace-files.js'
 
 
@@ -8,14 +6,14 @@ export const PROVIDERS = ['claude', 'codex', 'qoder', 'opencode'] as const
 export const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const
 /**
  * Session-end hooks per Provider, registered only where the Provider really has the event. Claude
- * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Codex and Qoder expose no verified session-end
- * hook, and OpenCode has no session-end event at all, so they stay unregistered rather than pretend
- * parity. Without it those Providers rely on turn-end resolution instead of an earlier close.
+ * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Qoder CLI 1.1.81 was verified to invoke a
+ * project SessionEnd command on native /quit, including before any model turn. Codex has no
+ * verified session-end hook and OpenCode has no such event, so they stay unregistered.
  */
 export const PROVIDER_SESSION_END_EVENTS: Record<Exclude<InitProvider, 'opencode'>, readonly string[]> = {
   claude: ['SessionEnd'],
   codex: [],
-  qoder: []
+  qoder: ['SessionEnd']
 }
 /** Session end must only persist and enqueue, so it gets a much tighter budget than a turn end. */
 export const SESSION_END_HOOK_TIMEOUT_SECONDS = 3
@@ -27,7 +25,8 @@ export function providerEvents(provider: Exclude<InitProvider, 'opencode'>): rea
 export function isSessionEndEvent(provider: Exclude<InitProvider, 'opencode'>, event: string): boolean {
   return PROVIDER_SESSION_END_EVENTS[provider].includes(event)
 }
-export const HANDLER_ID = 'turn-recorder-v1'
+import { HANDLER_ID } from './provider-hook-source.js'
+export { HANDLER_ID, HOOK_UNDELIVERED_STATUS, providerHookSource } from './provider-hook-source.js'
 export const CONFIG_PATHS: Record<Exclude<InitProvider, 'opencode'>, string> = {
   claude: '.claude/settings.local.json',
   codex: '.codex/hooks.json',
@@ -37,90 +36,6 @@ export const PROJECT_DIR_ENV: Record<Exclude<InitProvider, 'opencode'>, string> 
   claude: 'CLAUDE_PROJECT_DIR',
   codex: 'CODEX_PROJECT_DIR',
   qoder: 'QODER_PROJECT_DIR'
-}
-
-export function providerHookSource(): string {
-  const environment = HOOK_ENV_KEYS.map(key =>
-    `  if [ "\${${key}+x}" = x ]; then printf '%s\\0%s\\0' '${key}' "$${key}"; fi`
-  ).join('\n')
-  return `#!/bin/sh
-set -u
-unset SCRY_RECORDER_DAEMON_TRIED
-workspace="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 0
-# Failure-only diagnostics: the successful fast path starts no extra process.
-skip() {
-  # Invalid storage must not turn an observational error into a write outside this workspace.
-  [ ! -L "$workspace/.scry" ] && [ ! -L "$workspace/.scry/logs" ] && [ ! -L "$workspace/.scry/logs/hook-skip.log" ] || exit 0
-  (umask 077; mkdir -p "$workspace/.scry/logs" &&
-    printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$provider" "$event" "$1" "\${2:-0}" >> "$workspace/.scry/logs/hook-skip.log") 2>/dev/null || :
-  exit 0
-}
-provider="\${1:-unknown}"
-event="\${2:-unknown}"
-IFS= read -r scry_bin < "$workspace/.scry/cli-path" || skip cli_path_missing
-IFS= read -r node_bin_dir < "$workspace/.scry/node-bin-dir" || skip node_bin_dir_missing
-PATH="$node_bin_dir:$PATH"
-export PATH SCRY_HANDLER_ID=${HANDLER_ID}
-if [ "\${SCRY_RECORDER_MANAGED:-0}" = "1" ]; then
-  [ -x "\${SCRY_CLI_PATH:-}" ] || skip managed_cli_invalid
-  case "$provider:$event" in
-    claude:PreToolUse|claude:PostToolUse|claude:PostToolUseFailure)
-      if [ -n "\${SCRY_MANAGED_RUN_ID:-}" ] && [ -n "\${SCRY_MANAGED_PROMPT_HASH:-}" ]; then
-        # Managed tool evidence comes from the App's canonical trace, not these hooks.
-        # Keep lifecycle delivery for identity, health, queued replay and notifications;
-        # activity counts only events actually delivered, never synthetic tool heartbeats.
-        # Drain large payloads before exiting so the Provider does not see a broken pipe.
-        cat >/dev/null || skip payload_read_failed
-        exit 0
-      fi ;;
-  esac
-  scry_bin="$SCRY_CLI_PATH"
-  "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet --managed
-  result=$?
-  [ "$result" = "0" ] || skip managed_cli_failed "$result"
-  exit 0
-fi
-# Read the payload once so the fallback can resend it: stdin cannot be replayed.
-payload="$(cat)" || skip payload_read_failed
-post_body() {
-${environment}
-  printf '\\0%s' "$payload"
-}
-# Posting straight to a running daemon skips a Node start per event, which dominates hook cost.
-# Anything other than HTTP 200 falls through to the CLI, so an old or wedged daemon cannot drop events.
-socket="\${SCRY_RECORDER_SOCKET:-$workspace/.scry/recorder-v1.sock}"
-if [ -n "\${SCRY_RECORDER_SOCKET:-}" ]; then
-  case "$socket" in /*) ;; *) socket="$workspace/$socket" ;; esac
-elif [ -r "$workspace/.scry/recorder-socket-path" ]; then
-  IFS= read -r recorded_socket < "$workspace/.scry/recorder-socket-path" || recorded_socket=""
-  [ -S "$recorded_socket" ] && [ -O "$recorded_socket" ] && socket="$recorded_socket"
-fi
-if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && command -v curl >/dev/null 2>&1; then
-  case "$2" in
-    UserPromptSubmit|Stop) deadline=4 ;;
-    *) deadline=1 ;;
-  esac
-  code="$(post_body | curl -s -o /dev/null -w '%{http_code}' --max-time "$deadline" \
-    --unix-socket "$socket" -X POST \
-    -H 'x-scry-protocol: ${PROTOCOL_VERSION}' -H "x-scry-provider: $1" -H "x-scry-event: $2" \
-    -H 'content-type: application/octet-stream' --data-binary @- http://localhost/v1/hook 2>/dev/null)"
-  rc=$?
-  [ "$rc" = "0" ] && [ "$code" = "200" ] && exit 0
-  case "$rc:$code" in
-    7:*|0:4??)
-      # Connection failed or the daemon rejected before apply: let the CLI retry normally.
-      unset SCRY_RECORDER_DAEMON_TRIED ;;
-    *)
-      # Timeout, broken response or server failure may follow delivery; preserve for replay.
-      export SCRY_RECORDER_DAEMON_TRIED=1 ;;
-  esac
-fi
-[ -x "$scry_bin" ] || skip cli_not_executable
-printf '%s' "$payload" | "$scry_bin" recorder hook --provider "$provider" --event "$event" --workspace "$workspace" --stdin --quiet
-result=$?
-[ "$result" = "0" ] || skip cli_failed "$result"
-exit 0
-`
 }
 
 export function hookCommand(provider: Exclude<InitProvider, 'opencode'>, event: string): string {
@@ -187,15 +102,25 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hook = resolve(root, '.scry/provider-hook.sh')
 const turns = new Map()
+// Provider 终态错误只在本进程内暂存到下一个 session.idle；没有错误就不带这个字段。
+const turnErrors = new Map()
 // session.idle can repeat without new work. Retain only this instance's last 128 idle sessions;
 // after eviction/reload the first unpaired idle is unknown and must still reach the recorder.
 const idleSessions = new Set()
+let sigintHandler
 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 const first = (...values) => values.find((value) => value !== undefined && value !== null && value !== '')
 const text = (parts) => Array.isArray(parts)
   ? parts.filter((part) => part?.type === 'text' && !part.ignored).map((part) => part.text).filter(Boolean).join('\\n')
   : ''
+// session.error 的错误对象形状不稳定：优先取可读消息，退回到错误名。
+const errorDetail = (error) => {
+  const value = object(error)
+  const data = object(value.data)
+  const detail = first(value.message, data.message, value.name, data.name)
+  return detail === undefined ? undefined : String(detail)
+}
 
 function utf8Prefix(value, limit) {
   const source = Buffer.from(String(value ?? ''))
@@ -222,6 +147,12 @@ function sessionId(input) {
   const properties = object(event.properties)
   const info = object(first(input?.info, properties.info))
   return String(first(input?.sessionID, input?.sessionId, properties.sessionID, properties.sessionId, info.sessionID, info.sessionId, info.id, ''))
+}
+
+function messageId(input, output = {}) {
+  const inputMessage = object(input?.message)
+  const outputMessage = object(output?.message)
+  return first(input?.messageID, input?.messageId, output?.messageID, output?.messageId, inputMessage.id, outputMessage.id)
 }
 
 function tool(input, output = {}) {
@@ -271,14 +202,17 @@ function deliver(event, payload) {
     timeout: event === 'Stop' ? 15000 : 10000
   })
   if (result.error) process.stderr.write('[scry-recorder] ' + event + ': ' + result.error.message + '\\n')
+  // 未送达不是异常：本插件保留这一轮和暂存错误，下一次 session.idle 重试。
+  else if (result.status !== 0) process.stderr.write('[scry-recorder] ' + event + ': not delivered (exit ' + result.status + ')\\n')
   return result
 }
 
-function payload(event, input, output = {}) {
+function payload(event, input, output = {}, turnId) {
   const call = tool(input, output)
   return {
     session_id: sessionId(input),
     hook_event_name: event,
+    ...(turnId ? { turn_id: turnId } : {}),
     prompt: first(input?.prompt, text(input?.parts), text(output?.parts)),
     tool_name: call.name,
     tool_use_id: first(input?.callID, input?.callId, input?.tool_use_id),
@@ -288,18 +222,68 @@ function payload(event, input, output = {}) {
   }
 }
 
+function stopPayload(input, state, status) {
+  const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
+  const observedUsage = usage(state)
+  // 终态错误必须随 Stop 上报，否则失败的一轮会被记成 completed 且 errors 为空。
+  const failure = turnErrors.get(sessionId(input))
+  return {
+    ...payload('Stop', input, {}, state?.turnId),
+    assistant_response: assistant.value,
+    ...(failure ? { error: failure } : {}),
+    ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
+    ...(observedUsage ? {
+      // Older recorders must see unavailable, never an exact partial sum.
+      ...(observedUsage.complete ? { usage: observedUsage.totals } : { usage_partial: observedUsage.totals }),
+      usage_complete: observedUsage.complete
+    } : {}),
+    ...(status ? { status, timestamp: new Date().toISOString() } : {})
+  }
+}
+
+function armSigint() {
+  if (sigintHandler) return
+  sigintHandler = () => {
+    const handler = sigintHandler
+    if (turns.size === 1) {
+      const [id, state] = turns.entries().next().value
+      const delivered = deliver('Stop', stopPayload({ sessionID: id }, state, 'interrupted'))
+      if (!delivered.error && delivered.status === 0) turnErrors.delete(id)
+    }
+    turns.clear()
+    sigintHandler = undefined
+    if (handler) process.removeListener('SIGINT', handler)
+    process.kill(process.pid, 'SIGINT')
+  }
+  process.prependListener('SIGINT', sigintHandler)
+}
+
+function disarmSigint() {
+  if (turns.size > 0) return
+  const handler = sigintHandler
+  sigintHandler = undefined
+  if (handler) process.removeListener('SIGINT', handler)
+}
+
 export const ScryRecorder = async () => ({
   'chat.message': async (input, output) => {
     const id = sessionId(input)
     const prompt = first(input?.prompt, text(input?.parts), text(output?.parts), '')
+    const turnId = messageId(input, output)
     idleSessions.delete(id)
-    turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map() })
-    deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output), prompt })
+    turnErrors.delete(id)
+    turns.set(id, { assistant: new Map(), assistantMessages: new Set(), usage: new Map(), turnId })
+    armSigint()
+    deliver('UserPromptSubmit', { ...payload('UserPromptSubmit', input, output, turnId), prompt })
   },
-  'tool.execute.before': async (input, output) => deliver('PreToolUse', payload('PreToolUse', input, output)),
+  'tool.execute.before': async (input, output) => {
+    const state = turns.get(sessionId(input))
+    deliver('PreToolUse', payload('PreToolUse', input, output, state?.turnId))
+  },
   'tool.execute.after': async (input, output) => {
     const event = output?.error ? 'PostToolUseFailure' : 'PostToolUse'
-    deliver(event, payload(event, input, output))
+    const state = turns.get(sessionId(input))
+    deliver(event, payload(event, input, output, state?.turnId))
   },
   event: async (input) => {
     const envelope = object(input?.event)
@@ -321,23 +305,19 @@ export const ScryRecorder = async () => ({
         state.assistant.set(String(first(part.id, state.assistant.size)), part.text)
       }
     }
+    if (envelope.type === 'session.error') {
+      const detail = errorDetail(properties.error)
+      if (id && detail) turnErrors.set(id, detail)
+    }
     if (envelope.type === 'session.idle') {
       if (idleSessions.has(id)) return
-      const assistant = utf8Prefix(state ? [...state.assistant.values()].join('\\n') : '', 262144)
-      const observedUsage = usage(state)
-      const delivered = deliver('Stop', {
-        ...payload('Stop', input),
-        assistant_response: assistant.value,
-        ...(assistant.capture ? { scry_capture: { schemaVersion: 1, fields: { assistant_response: assistant.capture } } } : {}),
-        ...(observedUsage ? {
-          // Older recorders must see unavailable, never an exact partial sum.
-          ...(observedUsage.complete ? { usage: observedUsage.totals } : { usage_partial: observedUsage.totals }),
-          usage_complete: observedUsage.complete
-        } : {})
-      })
-      turns.delete(id)
-      // Failed dispatch is not evidence of a delivered terminal. Do not suppress a later retry.
+      const delivered = deliver('Stop', stopPayload(input, state))
+      // Failed dispatch is not evidence of a delivered terminal. Keep the turn and its staged
+      // error so the retry carries the same evidence instead of dropping it.
       if (!delivered.error && delivered.status === 0) {
+        turns.delete(id)
+        turnErrors.delete(id)
+        disarmSigint()
         idleSessions.add(id)
         if (idleSessions.size > 128) idleSessions.delete(idleSessions.values().next().value)
       }

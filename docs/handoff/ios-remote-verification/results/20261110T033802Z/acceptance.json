@@ -1,0 +1,89 @@
+{
+  "verdict": "fail",
+  "rules": [
+    {
+      "id": "R1-checks",
+      "required": true,
+      "status": "pass",
+      "detail": "all ran stages passed; known-baseline: ios-checks (logs/control-base-ios-checks.tail.txt)"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R2-netbench-clean:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "failures=0"
+    },
+    {
+      "id": "R3-transport:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R3-transport:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "multiplexed, all capabilities"
+    },
+    {
+      "id": "R4-relay-only",
+      "required": true,
+      "status": "pass",
+      "detail": "routes=relay"
+    },
+    {
+      "id": "R5-direct",
+      "required": true,
+      "status": "blocked",
+      "detail": "the Mac advertised no LAN/overlay address: it is not on a local network the phone can share (check the LAN listener with lsof before accepting this)"
+    },
+    {
+      "id": "R5b-no-blocking-unproven-route:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "failed direct attempts on the open path=0"
+    },
+    {
+      "id": "R5b-no-blocking-unproven-route:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "failed direct attempts on the open path=0"
+    },
+    {
+      "id": "R6-catalog:wifi-auto",
+      "required": true,
+      "status": "pass",
+      "detail": "confirmed 3/3; full=1061.3ms (31 sessions) refresh median=1289.5ms of 3"
+    },
+    {
+      "id": "R6-catalog:wifi-relay",
+      "required": true,
+      "status": "pass",
+      "detail": "confirmed 3/3; full=929.1ms (31 sessions) refresh median=810.3ms of 3"
+    },
+    {
+      "id": "R7-offline-fast",
+      "required": true,
+      "status": "fail",
+      "detail": "samples=2 allHostOffline=true slowestMs=3478 sample={\"error\":\"Mac 当前不在线（中继未看到它的连接）：可能已休眠、断网或 Scry 未运行。唤醒 Mac 后会自动重连。\",\"event\":\"offline-probe\",\"hostOffline\":true,\"label\":\"wifi-auto\",\"ms\":3478}"
+    },
+    {
+      "id": "I1-direct-vs-relay",
+      "required": false,
+      "status": "info",
+      "detail": "warm median relay=1210.2ms direct=1022.7ms; cold median relay=2369.7ms auto=2459.3ms"
+    },
+    {
+      "id": "I3-relay-path:mac",
+      "required": false,
+      "status": "info",
+      "detail": "colos=ORD,PIT generations=heartbeat-aware median={\"dns\":3,\"tcp\":7.2,\"tls\":528.3,\"upgrade\":1561.9,\"upgradeExcludingWait\":961.9,\"close\":1562,\"total\":1562.1}"
+    }
+  ]
+}

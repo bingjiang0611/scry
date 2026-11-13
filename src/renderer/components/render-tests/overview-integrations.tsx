@@ -183,7 +183,7 @@ it('每轮调用段保留零调用轮次，不让标题与会话总轮数冲突'
     )
 
     expect(rowsHtml).toContain('每轮调用')
-    expect(rowsHtml).toContain('2 turns')
+    expect(rowsHtml).toContain('2 轮')
     expect(rowsHtml).toContain('T02')
     expect(rowsHtml).toContain('只返回文本，不调用工具')
     expect(rowsHtml).toContain('aria-label="MCP 0，无明细"')

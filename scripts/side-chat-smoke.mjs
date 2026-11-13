@@ -9,9 +9,7 @@ import { exerciseSideChatRuntime } from './side-chat-runtime-checks.mjs'
 import { exerciseSideChatHistory } from './side-chat-history-checks.mjs'
 import { exerciseSideChatLayout } from './side-chat-layout-checks.mjs'
 import { exerciseSideChatScroll } from './side-chat-scroll-checks.mjs'
-import { exerciseSideChatOrphan } from './side-chat-orphan-checks.mjs'
-import { exerciseSideChatOrphanReader } from './side-chat-orphan-reader-checks.mjs'
-import { exerciseSideChatOrphanPaging } from './side-chat-orphan-paging-checks.mjs'
+import { exerciseSideChatSourceDeleted } from './side-chat-source-deleted-checks.mjs'
 import { exerciseSideChatRestore } from './side-chat-restore-checks.mjs'
 import { prepareSideChatDrafts, verifySideChatDrafts } from './side-chat-draft-restart-checks.mjs'
 import { verifySideChatWorkbenchAfterRestart } from './side-chat-workbench-checks.mjs'
@@ -88,22 +86,13 @@ async function exerciseSideChatMode({ cdp, evaluate, check, lifecycle, options, 
   const history = await exerciseSideChatHistory({ cdp, evaluate, check, rendererFailures, childId: first.childId, ...options })
   step('scroll')
   const scroll = await exerciseSideChatScroll({ cdp, evaluate, check, rendererFailures, childId: first.childId, ...options })
-  step('orphan')
-  const orphan = await exerciseSideChatOrphan({ cdp, evaluate, check, rendererFailures, childId: first.childId, ...options })
-  step('orphan reader')
-  // Still on the deleted source's child: its frozen body and its own controls are read from
-  // the child record alone, so this stays a separate pass from the delete it depends on.
-  const orphanReader = await exerciseSideChatOrphanReader({ cdp, evaluate, check, rendererFailures,
-    orphanChild: orphan.childId, hostAgent: orphan.hostAgent, draft: orphan.draft,
-    expectedMessages: orphan.seededMessages, ...options })
-  step('orphan paging')
-  // The bounds of the orphan list: one page of groups and one page of rows per group, both
-  // reached by real next/previous clicks. The extra grouped sources are real records.
-  const orphanPaging = await exerciseSideChatOrphanPaging({ cdp, evaluate, check, rendererFailures,
-    workspace: options.workspace, existingGroups: 1, knownKeys: [`conversation:${orphan.parentId}`], ...options })
-  // The orphan pass leaves the window on the deleted source's child; the restart below must
+  step('source deleted')
+  // A side chat is never a sidebar row: after its source is really deleted its record
+  // survives, and neither sidebar tab lists it.
+  const sourceDeleted = await exerciseSideChatSourceDeleted({ cdp, evaluate, check, rendererFailures, ...options })
+  // The delete pass leaves the window on the deleted source; the restart below must
   // resume from the original parent with its own child tab open, as a user would. The
-  // parent is found by the row that owns the side-chat count, never by a title alone.
+  // parent is the one sidebar row of that source.
   step('restore')
   const restore = await exerciseSideChatRestore({ cdp, evaluate, check, rendererFailures,
     childId: first.childId, ...options })
@@ -163,8 +152,8 @@ async function exerciseSideChatMode({ cdp, evaluate, check, lifecycle, options, 
     ...readdirSync(resolve('out/renderer/assets')).filter(name => /\.(js|css)$/.test(name)).map(name => `out/renderer/assets/${name}`)]
   const artifactHashes = Object.fromEntries(artifactPaths.map((path) =>
     [path, createHash('sha256').update(readFileSync(resolve(path))).digest('hex')]))
-  const result = { test: 'side-chat execution', ...first, runtime, history, scroll, orphan, orphanReader,
-    orphanPaging, restore, layout, largeRefusal, drafts: draftsRestored, workbench, adoption, restart: second, artifactHashes }
+  const result = { test: 'side-chat execution', ...first, runtime, history, scroll, sourceDeleted,
+    restore, layout, largeRefusal, drafts: draftsRestored, workbench, adoption, restart: second, artifactHashes }
   // The smoke temp tree is removed on exit; the capture directory persists, so the evidence
   // lives next to the screenshots this run really produced.
   const verificationPath = join(first.captures, 'verification.json')

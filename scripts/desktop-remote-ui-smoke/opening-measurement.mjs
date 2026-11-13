@@ -29,14 +29,47 @@ export async function runOpeningMeasurement({ driver, options }) {
       await read('window.openingPreviousChat = document.querySelector(".chat"); window.openingPreviousSelection = document.querySelector("[data-remote-session][aria-current=true]"); window.desktopRemoteFixture.holdHistory = true')
       await click('[data-remote-session="other-native"]')
       await wait('typeof window.releaseHistory === "function"', 'history request held in flight')
-      check(await read('document.querySelector(".chat") === window.openingPreviousChat && document.querySelector("[data-remote-session][aria-current=true]") === window.openingPreviousSelection && document.querySelector(".chat").textContent.includes("Remote history paragraph 79")'), 'Selection or content changed before the target history was ready')
+      await wait('document.querySelector(".chat") !== window.openingPreviousChat && document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true"', 'pending target session publishes immediately')
+      check(await read('document.querySelectorAll(".transcript-turn").length === 0 && !document.querySelector(".chat").textContent.includes("Remote history paragraph 79")'), 'Pending target displayed the previous session transcript')
       const pendingReads = (await fixture()).historyCalls.length
       await click('[data-remote-session="other-native"]')
       check((await fixture()).historyCalls.length === pendingReads, 'Repeated selection restarted its pending history read')
+      await read(`window.pendingRemoteChat = document.querySelector('.chat')`)
+      await click('.sb-navitem', 'Meta Prompts')
+      await wait('document.querySelector(".mp-button") != null', 'meta prompt opens while remote history is pending')
       await read('window.desktopRemoteFixture.holdHistory = false; window.releaseHistory(); delete window.releaseHistory')
-      await wait('document.querySelector(".chat") !== window.openingPreviousChat && document.querySelector(".chat").textContent.includes("Remote history paragraph 79") && document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true"', 'delayed history and selection publish together')
+      await wait('document.querySelector(".chat") === window.pendingRemoteChat && document.querySelector(".chat").textContent.includes("Remote history paragraph 79")', 'auxiliary page preserves and fills the mounted remote history')
+      await click('.mp-back', '返回会话')
+      await wait('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true"', 'meta prompt returns to selected remote session')
+      await wait('document.querySelector(".chat").textContent.includes("Remote history paragraph 79")', 'delayed history fills the selected session')
       await wait(bottom, 'delayed history opens at bottom')
       await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && !document.querySelector(".composer-notice")', 'controls settled before the resize control')
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      // Let the mounted component issue its own bottom pin, then shrink the
+      // viewport synchronously before the browser delivers that scroll event.
+      await read(`(() => {
+        const history = document.querySelector('.chat')
+        const scrollTo = history.scrollTo
+        const height = history.clientHeight
+        window.openingQueuedPin = false
+        history.scrollTo = function (...args) {
+          scrollTo.apply(this, args)
+          delete this.scrollTo
+          this.style.maxHeight = (height - 48) + 'px'
+          this.getBoundingClientRect()
+          window.openingQueuedPin = true
+        }
+        const extra = document.createElement('div')
+        extra.dataset.openingQueuedPin = 'true'
+        extra.style.height = '900px'
+        history.append(extra)
+      })()`)
+      await wait('window.openingQueuedPin', 'remote component pins before the queued-event viewport shrink')
+      await wait(bottom, 'queued automatic pin preserves remote bottom following')
+      await read('document.querySelector("[data-opening-queued-pin]").style.height = "1200px"')
+      await wait(bottom, 'later content still follows after the queued pin')
+      await read('document.querySelector("[data-opening-queued-pin]").remove(); document.querySelector(".chat").style.maxHeight = ""')
+      await wait(bottom, 'queued-pin control restores the original viewport')
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
       // A Provider notice disappearing grows the viewport. Force that native
       // clamp before content grows, while the browser's scroll event is queued.
@@ -81,10 +114,11 @@ export async function runOpeningMeasurement({ driver, options }) {
       await click('[data-remote-session="other-native"]')
       await wait('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true"', 'newer selection wins')
       await read('window.releaseOldOpening()')
-      check(await read('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true" && document.querySelector(".chat").textContent.includes("Remote history paragraph 79")'), 'Late history replaced a newer selection')
-      await read(`window.scry.desktopRemote.history = async () => { throw new Error('fixture opening read failed') }; true`)
+      await wait('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true" && document.querySelector(".chat").textContent.includes("Remote history paragraph 79")', 'late history does not replace the newer selection')
+      await read(`window.scry.desktopRemote.history = async () => { throw new Error("Error invoking remote method 'desktopRemote:history': Error: desktop_tls_request_eof") }; true`)
       await click('[data-remote-session="old-native"]')
-      await wait('document.querySelector(".composer-notice.is-error")?.textContent.includes("fixture opening read failed")', 'prepared history error remains visible')
+      await wait('document.querySelector(".composer-notice.is-error")?.textContent.includes("远端 Scry 在响应前关闭了连接")', 'prepared history error is actionable')
+      check(await read('!document.querySelector(".composer-notice.is-error")?.textContent.includes("Error invoking remote method")'), 'Prepared history exposed the IPC wrapper')
       check(await read('document.querySelector("[data-remote-session=old-native]")?.getAttribute("aria-current") === "true" && document.querySelectorAll(".transcript-turn").length === 0'), 'Failed target displayed previous session content')
       await read('window.scry.desktopRemote.history = window.openingHistory; true')
       await click('[data-remote-session="old-native"]')

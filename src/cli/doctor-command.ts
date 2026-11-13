@@ -1,7 +1,7 @@
 import { type ParsedArgs, workspaceOf, print } from './command-args.js'
 import { recorderEnablement, refreshRecorderPendingHealth, OPEN_TURN_EXPIRY_MS } from '../core/turn-recorder/recorder.js'
 import { readHookSkips, readUserHookSkips } from '../core/turn-recorder/hook-diagnostics.js'
-import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion, commitNotificationStatus } from '../core/turn-recorder/store.js'
+import { RECORDER_VERSION, readHealth, verifyStore, lastRecordVersion, recentRecordVersions, commitNotificationStatus } from '../core/turn-recorder/store.js'
 import { readSequenceWatermark } from '../core/turn-recorder/sequence-watermark.js'
 import { UnresolvedDeliveryPrefixError } from '../core/turn-recorder/commit-delivery-ledger.js'
 import { recorderStaleOpenTurns } from '../core/turn-recorder/runtime-state.js'
@@ -65,11 +65,12 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     return missing ? 3 : 2
   }
   await refreshRecorderPendingHealth(enablement.dataRoot)
-  const [health, store, staleOpenTurns, recordingVersion, hookScript, discovery, activation] = await Promise.all([
+  const [health, store, staleOpenTurns, recordingVersion, recentVersions, hookScript, discovery, activation] = await Promise.all([
     readHealth(enablement.dataRoot),
     verifyStore(enablement.dataRoot),
     recorderStaleOpenTurns(enablement.dataRoot, OPEN_TURN_EXPIRY_MS),
     lastRecordVersion(enablement.dataRoot),
+    recentRecordVersions(enablement.dataRoot),
     providerHookScriptState(enablement.workspaceRoot),
     discoverRepositories(enablement.workspaceRoot, enablement.config, true),
     resolveCommitHookActivation(enablement.workspaceRoot, enablement.config)
@@ -193,16 +194,19 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     {
       // Warn only: right after an upgrade this is expected until the next turn is recorded, so it
       // must not flip the exit code. It exists to catch the case where the hook keeps using an
-      // older install that a shell-level `scry upgrade` never touched.
+      // older install that a shell-level `scry upgrade` never touched. The newest record alone
+      // hides a split install, so the detail counts every version in the recent batch.
       id: 'recorder.version',
-      status: recordingVersion && recordingVersion !== RECORDER_VERSION ? 'warn' : 'pass',
+      status: recordingVersion && recordingVersion !== RECORDER_VERSION ? 'warn' : recentVersions.length > 0 && recentVersions.some((entry) => entry.version !== RECORDER_VERSION) ? 'warn' : 'pass',
       detail: recordingVersion == null
         ? 'no record yet'
-        : recordingVersion === RECORDER_VERSION
-          ? `records written by ${recordingVersion}`
-          : `newest record written by ${recordingVersion}, this CLI is ${RECORDER_VERSION}`,
-      ...(recordingVersion && recordingVersion !== RECORDER_VERSION
-        ? { remediation: 'hook 与你升级的可能不是同一份安装：检查 SCRY_CLI_PATH 与 .scry/cli-path 指向的 CLI' }
+        : recentVersions.length === 0
+          ? `newest record written by ${recordingVersion}, this CLI is ${RECORDER_VERSION}`
+          : `recent ${recentVersions.reduce((sum, entry) => sum + entry.records, 0)} record(s) by version: ` +
+            recentVersions.map((entry) => `${entry.version}×${entry.records}`).join(', ') +
+            `; newest record written by ${recordingVersion}, this CLI is ${RECORDER_VERSION}`,
+      ...(recordingVersion && (recordingVersion !== RECORDER_VERSION || recentVersions.some((entry) => entry.version !== RECORDER_VERSION))
+        ? { remediation: 'hook 与你升级的可能不是同一份安装：检查 SCRY_CLI_PATH 与 .scry/cli-path 指向的 CLI；App 内置的 recorder 守护进程需重启后才切换版本' }
         : {})
     },
     {
@@ -230,7 +234,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     capture: enablement.config.capture,
     hookScript,
     commitNotifications: delivery,
-    recorderVersions: { thisCli: RECORDER_VERSION, lastRecord: recordingVersion },
+    recorderVersions: { thisCli: RECORDER_VERSION, lastRecord: recordingVersion, recent: recentVersions },
     health,
     store,
     staleOpenTurns: staleOpenTurns.map((turn) => ({

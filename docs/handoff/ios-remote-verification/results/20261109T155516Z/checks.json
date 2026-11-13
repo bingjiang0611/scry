@@ -1,0 +1,116 @@
+{
+  "stages": [
+    {
+      "name": "npm-ci",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 16,
+      "log": "logs/npm-ci.tail.txt"
+    },
+    {
+      "name": "g0-npm-ci",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 7,
+      "log": "logs/g0-npm-ci.tail.txt"
+    },
+    {
+      "name": "typecheck-node",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 12,
+      "log": "logs/typecheck-node.tail.txt"
+    },
+    {
+      "name": "node-unit",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 38,
+      "log": "logs/node-unit.tail.txt"
+    },
+    {
+      "name": "g0-node-tests",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 17,
+      "log": "logs/g0-node-tests.tail.txt"
+    },
+    {
+      "name": "cf-relay-smokes",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 37,
+      "log": "logs/cf-relay-smokes.tail.txt"
+    },
+    {
+      "name": "swift-test",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 31,
+      "log": "logs/swift-test.tail.txt"
+    },
+    {
+      "name": "ios-checks",
+      "status": "fail",
+      "exitCode": 1,
+      "seconds": 41,
+      "log": "logs/ios-checks.tail.txt"
+    },
+    {
+      "name": "install-mac",
+      "status": "fail",
+      "exitCode": 1,
+      "seconds": 1080,
+      "log": "logs/install-mac.tail.txt"
+    },
+    {
+      "name": "build-ios",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 22,
+      "log": "logs/build-ios.tail.txt"
+    },
+    {
+      "name": "install-ios",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 18,
+      "log": "logs/install-ios.tail.txt"
+    },
+    {
+      "name": "relay-probe-mac",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 10,
+      "log": "logs/relay-probe-mac.tail.txt"
+    },
+    {
+      "name": "netbench-wifi-relay",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 24,
+      "log": "netbench-wifi-relay.jsonl"
+    },
+    {
+      "name": "netbench-wifi-auto",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 29,
+      "log": "netbench-wifi-auto.jsonl"
+    },
+    {
+      "name": "netbench-diag-order",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 14,
+      "log": "netbench-diag-order.jsonl"
+    },
+    {
+      "name": "relay-probe-mac-after-deploy",
+      "status": "pass",
+      "exitCode": 0,
+      "seconds": 16,
+      "log": "logs/relay-probe-mac-after-deploy.tail.txt"
+    }
+  ]
+}

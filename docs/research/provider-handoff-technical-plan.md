@@ -144,7 +144,7 @@
 - 中间版本 `npm test`：3164 通过、3 跳过，shell 通过。最终补强后再次全量：3166 通过、1 失败、3 跳过，因 unit 失败未执行该次 shell，不能报告最终全量通过。跳过的是既有 `billing-admin-real`、`p0-integration`、`p1-integration` 真实探针。
 - 最终失败来自并行新增的 `src/renderer/remote-workbench.test.ts` 的 Git 操作用例，超过原 5 秒；该调用链不引用本轮 conversation 模块。单项诊断运行 3.64 秒通过，其余 6 项未运行；并发超时根因仍未确认，没有加 timeout、改断言或用单项通过覆盖全量失败。最终全量日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7a526709fb1f4c87.log`。
 
-本阶段初次交付的上述检查仅覆盖存储合同/模拟调用和共享工作区编译；后续生产 IPC 验证见 4.7。真实 Provider 与完整打包发布仍未验收。中间全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/b4/b4b8f46f0f9dd9cf24a8c3430ee17d3d080f6ab39b210a0fffe70cc6b10edbce.txt`。
+本阶段初次交付的上述检查仅覆盖存储合同/模拟调用和共享工作区编译；后续生产 IPC 验证见 4.7。真实 Provider 与完整打包发布仍未验收。中间全量日志：`/Users/<user>/.pi/agent/sessions/--Users-<user>-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/b4/b4b8f46f0f9dd9cf24a8c3430ee17d3d080f6ab39b210a0fffe70cc6b10edbce.txt`。
 
 ### 4.7 隔离生产 IPC 验证
 
@@ -159,7 +159,7 @@
 - `npm run typecheck`、`npm run build`、上述 IPC smoke 与独立 `npm run test:shell` 通过。
 - **冻结源码的默认全量仍未通过**：3157 通过、3 失败、3 跳过。失败均为原有 `source-control/service.test.ts` 的 5 秒超时（选定文件提交、push endpoint、PR account/HEAD/base 复核）；因此不能把先前超时仅归因于 remote WIP。该文件独立诊断 27/27 通过，耗时从全量期间约 96.5 秒降至 37.3 秒。结果符合资源争用特征，但具体瓶颈未定位；没有修改 timeout、断言、并发配置或把独立通过当作默认全量通过。
 
-最终类型/build/IPC 与全量日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/82/82fcecb14604aa51aa0796851c324d92681efe9a545c4e95e5dcc2c3775c4744.txt`。这验证的是归属保护，不是完整 A→B→A，也不是实账号 Provider、已安装 App 或打包发布验收。
+最终类型/build/IPC 与全量日志：`/Users/<user>/.pi/agent/sessions/--Users-<user>-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/82/82fcecb14604aa51aa0796851c324d92681efe9a545c4e95e5dcc2c3775c4744.txt`。这验证的是归属保护，不是完整 A→B→A，也不是实账号 Provider、已安装 App 或打包发布验收。
 
 ### 4.8 超时诊断与真实执行补验
 
@@ -267,7 +267,7 @@
 
 首轮完整 UI gate 的 `session-cache` 曾返回泛化的 `Script failed to execute`。没有扩大时限、删除断言或增加自动重试；仅补充 renderer 异常透传。随后 cache-only 和完整 gate 通过，**不能据此宣称首轮异常根因已修复**。若复现，由本任务维护者使用新增 stack 和首轮日志继续定位。
 
-- unit 首轮日志：`/Users/baobingjiang/.pi/agent/sessions/--Users-baobingjiang-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`
+- unit 首轮日志：`/Users/<user>/.pi/agent/sessions/--Users-<user>-IdeaProjects-vibecoding-scry--/sol-pi/01a13b2e-413e-714c-92ef-a38e81c32f5c/evidence-preserving-reducer/objects/43/43d9a67af99a6eddde4be967238cba1531c31c993c517721e5a5870b26449580.txt`
 - 最终完整 UI、CLI、artifact 日志：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/pi-bash-7de9e98b4acfcb81.log`
 - UI 证据：`/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-c4Bzai/verification.json`，包含当前 main/preload/renderer JS/CSS hashes；同目录保存深浅色、1280px 与 860px 桌面视口的 8 张截图。人工检查了宽浅色/窄深色预览、窄浅色/宽深色时间线：主操作可见、文字可读、无横向裁切；不据此宣称完整无障碍验收。
 
@@ -607,7 +607,7 @@ Pi 成功证据位于 `/tmp/scry-pi-fixed-YA0P17/`。两组真实测试使用同
 
 ## 19. 仅准备安装包与隔离安装验证（2026-10-17）
 
-用户选择只准备安装包：不覆盖日常安装、不关闭或重启日常 Scry、不推送、不发布、不授予系统权限。本轮没有新增真实模型调用。产物保存在 `/Users/baobingjiang/Downloads/scry-provider-packages-sKt4O9/`，构建与原始日志在 `/tmp/scry-provider-package-build-TUILX1/`。
+用户选择只准备安装包：不覆盖日常安装、不关闭或重启日常 Scry、不推送、不发布、不授予系统权限。本轮没有新增真实模型调用。产物保存在 `/Users/<user>/Downloads/scry-provider-packages-sKt4O9/`，构建与原始日志在 `/tmp/scry-provider-package-build-TUILX1/`。
 
 ### 首次检查的冻结版本与产物状态（确认弹窗前）
 

@@ -20,4 +20,5 @@
 | `conversation:readItem` | new-op | `conversation:readItem` | history | — | 对话账本在 daemon 的 SQLite 里 |
 | `conversation:readSideChatSnapshot` | new-op | `conversation:readSideChatSnapshot` | history | — | 对话账本在 daemon 的 SQLite 里 |
 | `conversation:send` | new-op | `conversation:send` | send | — | 对话账本在 daemon 的 SQLite 里 |
+| `conversation:setViewed` | main | `—` | — | — | badge 由 main 渲染；只读统一对话以校验其项目，不写对话 |
 | `conversation:update` | new-op | `conversation:update` | navigation | — | 对话账本在 daemon 的 SQLite 里 |

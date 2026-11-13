@@ -4,6 +4,7 @@ import type { DesktopRemoteHistory, RemoteSessionRef } from '@shared/desktop-rem
 export type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
 
 export type PreparedRemoteHistory =
+  | { status: 'loading' }
   | { status: 'ready'; history: DesktopRemoteHistory }
   | { status: 'error'; error: string }
 

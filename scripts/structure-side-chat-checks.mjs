@@ -182,7 +182,9 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     'A recovered create command stayed in the durable ledger')
   await capture('side-chat-recovered')
 
-  // A full ledger refuses the next creation before it dispatches anything.
+  // A ledger full of other parents' commands no longer blocks this parent: the full ledger
+  // is read back first, rows the host can prove (here: never created) are settled, the
+  // create goes through once, and nothing unresolved is left behind.
   const otherScopeRow = (index) => ({
     commandId: `structure-ledger-row-${index}`, scopeKey: 'other-scope',
     source: { kind: 'conversation', conversationId: 'structure-ledger-parent' },
@@ -194,37 +196,39 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     Array.from({ length: 8 }, (_, index) => otherScopeRow(index))))})`)
   const beforeFull = counts()
   await click(`${currentSurface} [data-surface-chooser] [data-side-chat-entry]`)
-  await waitNotice('先核对它们')
-  const refused = since(beforeFull)
-  check((refused['conversation:createSideChat'] ?? 0) === 0, `A full ledger still dispatched a create: ${JSON.stringify(refused)}`)
-  check((refused['conversation:listSideChats'] ?? 0) === 0, 'A full ledger read children before refusing')
+  await wait(`document.querySelectorAll('${currentSurface} [data-side-chat-tab-id]').length === 1`)
+  const full = since(beforeFull)
+  check(full['conversation:createSideChat'] === 1, `A full ledger did not let exactly one create through: ${JSON.stringify(full)}`)
+  check((full['conversation:findSideChatCommand'] ?? 0) >= 8, `A full ledger was not read back before making room: ${JSON.stringify(full)}`)
+  check(await evaluate(`JSON.parse(localStorage.getItem('scry.side-chat-create-commands.v1') ?? '[]').length === 0`),
+    'Settled ledger rows or the created command stayed in the durable ledger')
   await capture('side-chat-ledger-full')
 
-  // A reply lost before the host created anything stays unknown, and the next attempt is
-  // a read-only check that never dispatches a second create.
+  // A create the host refuses publishes nothing. The parent is told the host's own reason,
+  // no command is left behind, and the very next click is an ordinary create instead of an
+  // endless read-only check of the refused command.
   await evaluate(`localStorage.removeItem('scry.side-chat-create-commands.v1')`)
   await openChooser()
   writeFileSync(lostReplyPath, 'before-commit')
-  const beforeUnknown = counts()
+  const beforeRefused = counts()
   await click(`${currentSurface} [data-surface-chooser] [data-side-chat-entry]`)
-  await waitNotice('创建结果尚未确认')
-  const unknown = since(beforeUnknown)
-  check(unknown['conversation:createSideChat'] === 1, `An unconfirmed create replied more than once: ${JSON.stringify(unknown)}`)
-  check(await evaluate(`JSON.parse(localStorage.getItem('scry.side-chat-create-commands.v1') ?? '[]').length === 1`),
-    'An unconfirmed create discarded the durable command')
+  await waitNotice('没有创建侧边会话', beforeRefused)
+  const refused = since(beforeRefused)
+  check(refused['conversation:createSideChat'] === 1, `A refused create was dispatched more than once: ${JSON.stringify(refused)}`)
+  check((refused['conversation:findSideChatCommand'] ?? 0) >= 1, `A refused create was not read back: ${JSON.stringify(refused)}`)
+  check(await evaluate(`JSON.parse(localStorage.getItem('scry.side-chat-create-commands.v1') ?? '[]').length === 0`),
+    'A conclusively refused create left its command in the durable ledger')
   check(await evaluate(`document.querySelectorAll('${currentSurface} [data-side-chat-tab-id]').length === 0`),
-    'An unconfirmed create opened a tab')
-  await capture('side-chat-unconfirmed')
-  const beforeCheck = counts()
+    'A refused create opened a tab')
+  await capture('side-chat-create-refused')
+  const beforeRetry = counts()
   await click(`${currentSurface} [data-surface-chooser] [data-side-chat-entry]`)
-  await waitNotice('这不代表没有创建')
-  const checked = since(beforeCheck)
-  check((checked['conversation:findSideChatCommand'] ?? 0) >= 1, `The unconfirmed command was not read back: ${JSON.stringify(checked)}`)
-  check((checked['conversation:createSideChat'] ?? 0) === 0, `The unconfirmed command was dispatched again: ${JSON.stringify(checked)}`)
-  await evaluate(`localStorage.removeItem('scry.side-chat-create-commands.v1')`)
+  await wait(`document.querySelectorAll('${currentSurface} [data-side-chat-tab-id]').length === 1`)
+  const retried = since(beforeRetry)
+  check(retried['conversation:createSideChat'] === 1, `The click after a refusal did not create exactly once: ${JSON.stringify(retried)}`)
   rmSync(lostReplyPath, { force: true })
 
   return { oneClickOneChild: true, childDraftKept: true, mainDraftKept: true, historyReopen: true,
     tabSwitchKeepsFocus: true, idleIpcBounded: true, doubleClickOneChild: true, parentsIsolated: true,
-    closeKeptParentPane: true, lostReplyRecovered: true, unconfirmedRecoveryChecked: true, ledgerFullRefused: true, createdDelta, idleDelta }
+    closeKeptParentPane: true, lostReplyRecovered: true, refusedCreateRetried: true, ledgerFullBounded: true, createdDelta, idleDelta }
 }

@@ -1,20 +1,25 @@
 import { join } from 'node:path'
-import type { TraceEvent } from '../../shared/trace.js'
+import type { TraceEvent, TurnDiffSnapshot } from '../../shared/trace.js'
 import { available, disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
 import { aggregateTurnEvidence } from './aggregate.js'
+import { isCodexAppContextInput } from './recorder-codex-user-input.js'
 import { isFullToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
-import { limitTurnDiffPatchBytes, cancelGitTurnDiff, finishGitTurnDiff } from './git.js'
-import { writeJsonAtomic } from './io.js'
+import { cancelGitTurnDiff } from './git.js'
+import { appendRotatingLog, writeJsonAtomic } from './io.js'
 import { RECORDER_VERSION, commitRecord, clearRuntimeTurn, stableHash } from './store.js'
-import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
+import { releaseStaleAttention, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { terminalStatus, type RecorderHookResult, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
-import { degradeEvidenceSections, persistRecorderEventContent, persistTurnDiffContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
-import { turnChangeHints } from './change-journal.js'
+import { degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
+import { unmatchedIdentityReason } from './recorder-transcript-background.js'
+import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
+import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
+import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { rm } from 'node:fs/promises'
+import { applyCaptureBaselineCaveat, captureRecordMetadata } from './record-capture-metadata.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -33,17 +38,22 @@ export async function finalizeOpenTurn(
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
   const runId = `${open.provider}:${open.sessionId}:${open.generation}`
+  // A continuation is the same native turn as its predecessor, so it reads that turn's rows and
+  // slices off what was already published; the wake's own request id never appears natively.
+  const continuation = open.continuation
   let transcript = open.transcriptPath
     ? await stableTranscript(
         open.transcriptPath,
         runId,
         open.provider,
-        open.promptHash,
-        open.providerTurnId,
+        continuation ? undefined : open.promptHash,
+        continuation?.providerTurnId ?? open.providerTurnId,
         open.transcriptStartOffset,
-        open.requestSetId,
+        continuation ? undefined : open.requestSetId,
         open.sessionId,
-        enablement.workspaceRoot
+        enablement.workspaceRoot,
+        open.piTranscriptAnchor,
+        open.captureTranscriptEndOffset
       )
     : {
         stable: true,
@@ -62,22 +72,23 @@ export async function finalizeOpenTurn(
       }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
+  const unmatchedReason = unmatchedIdentityReason(open, options.forcedReason)
+  let retainedWindow = false
   if (transcript.identityMatched === false) {
-    // Waiting for identity to appear is right while a turn may still converge, but an expired turn
-    // never will: Providers rotate transcripts away, and holding the turn open forever loses it and
-    // keeps the daemon alive. Close it on lifecycle evidence alone rather than borrowing content
-    // that was never confirmed to be this turn's.
-    if (!options.forcedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+    // A prompt cancelled before model execution may never reach the native transcript, and a session
+    // end can close that turn on lifecycle evidence alone. Ordinary turn ends keep waiting for
+    // identity. Once giving up is decided, keep the rows this turn wrote: publishing hooks only
+    // would throw away a body the transcript still held.
+    if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
-    transcript = {
-      stable: true,
-      observed: false,
-      complete: false,
-      events: [],
-      observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
-    }
+    const window = await forcedIdentityWindow(open, runId, enablement.workspaceRoot)
+    retainedWindow = window.retained
+    transcript = window.transcript
   }
-  const effectiveProviderTurnId = open.providerTurnId ?? transcript.providerTurnId
+  const view = segmentTranscriptView(open, transcript)
+  transcript = view.transcript
+  const ownsTranscriptRows = view.ownsRows
+  const effectiveProviderTurnId = continuation ? undefined : open.providerTurnId ?? transcript.providerTurnId
   const contentPolicy = open.toolContentPolicy ?? enablement.config.capture
   const storedEvents = await readStoredEvents(join(turnRoot(root, open.generation), 'events'))
   const transcriptEvents = await persistRecorderEventContent(
@@ -90,7 +101,7 @@ export async function finalizeOpenTurn(
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
-  if (options.forcedReason || open.terminalDiffs) {
+  if (options.forcedReason || open.terminalDiffs || identityUnmatched) {
     await Promise.all(open.captures.map(async ({ repository, capture }) => {
       try {
         await cancelGitTurnDiff(capture)
@@ -100,23 +111,23 @@ export async function finalizeOpenTurn(
       }
     }))
   }
-  const diffs = options.forcedReason
-    ? []
-    : limitTurnDiffPatchBytes(await persistTurnDiffContent(
-        enablement.dataRoot,
-        open.terminalDiffs
-          ? open.terminalDiffs.map(({ repository, snapshot }) => ({ ...snapshot, requestedRoot: repository }))
-          : await Promise.all(open.captures.map(async ({ repository, capture }) => ({
-              ...await finishGitTurnDiff(capture, undefined, {
-                ...turnChangeHints(repository, mergedEvents),
-                patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-                completePatches: true
-              }),
-              // A failed Git baseline may not resolve repoRoot. Preserve the known request
-              // directory separately, without inventing a successful Git-root observation.
-              requestedRoot: repository
-            })))
-      ))
+  // 回合中途 `git worktree add` 新建的工作树在回合开始时没有基线。它的基线只能来自 git 自己的
+  // 创建记录（reflog 第一条）；拿不到就不计。发现放在收尾，hook 热路径不新增调用。
+  // deferred-terminal 轮的基线已冻结在 Provider 边界（terminalDiffs），不再叠加工作树 view。
+  const worktreeDiffs: Promise<TurnDiffSnapshot[]> = !enablement.config.capture.diff || options.forcedReason ||
+    identityUnmatched || open.terminalDiffs
+    ? Promise.resolve([])
+    : newWorktreeTurnDiffs(enablement, open, mergedEvents)
+  const frozen = segmentFreeze({
+    enabled: enablement.config.capture.diff,
+    open,
+    gaveUp: !!options.forcedReason || identityUnmatched
+  })
+  const collected = options.forcedReason || identityUnmatched
+    ? { diffs: [] as TurnDiffSnapshot[], frozen: undefined }
+    : await collectTurnDiffs({ enablement, open, mergedEvents, worktreeDiffs, frozen })
+  const diffs = collected.diffs
+  const sealedFrozen = collected.frozen
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
     id: `diff-${open.generation}-${index}`,
     ts: turnDiff.afterAt,
@@ -148,10 +159,14 @@ export async function finalizeOpenTurn(
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )
   const hasHookEvidence = events.some((event) => event.kind === 'hook')
+  let userText = open.provider === 'qoder' || open.provider === 'claude'
+    ? open.prompt ?? transcript.userText
+    : transcript.userText ?? open.prompt
+  // A context-only Codex turn has no transcript prompt. Do not restore an app
+  // envelope from the lifecycle hook; undefined uses the existing unavailable state.
+  if (open.provider === 'codex' && userText && isCodexAppContextInput(userText)) userText = undefined
   const evidence = aggregateTurnEvidence({
-    userText: open.provider === 'qoder' || open.provider === 'claude'
-      ? open.prompt ?? transcript.userText
-      : transcript.userText ?? open.prompt,
+    userText,
     events,
     source: transcript.observed ? 'provider_transcript+lifecycle_hooks' : 'lifecycle_hooks',
     toolContentPolicy: open.toolContentPolicy ?? enablement.config.capture,
@@ -175,27 +190,20 @@ export async function finalizeOpenTurn(
       'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
     )
   }
+  applyContinuationEvidence(evidence, open, ownsTranscriptRows, enablement.config.capture.diff)
   // A force-closed turn stopped converging, so nothing it holds can be called complete even when
   // the transcript window itself parsed cleanly.
-  if (options.forcedReason) {
-    const reason = identityUnmatched
-      ? `${options.forcedReason}; the transcript no longer contains this turn, so only lifecycle-hook evidence remains`
-      : options.forcedReason
-    degradeEvidenceSections(evidence, reason)
-    evidence.diff = unavailable(
-      `${options.forcedReason}; the turn diff baseline spans that window and cannot be attributed to this turn`
-    )
-    if (identityUnmatched) {
-      evidence.assistant = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
-      evidence.modelSegments = unavailable(`${options.forcedReason}; the transcript no longer contains this turn`)
-    }
-  }
+  applyForcedEvidence(
+    evidence, options.forcedReason, identityUnmatched, unmatchedReason, retainedWindow,
+    enablement.config.capture.diff && open.captures.some(({ capture }) => capture.status === 'ready')
+  )
   if (open.repositoryDiscovery) {
     evidence.diff.discovery = {
       ...open.repositoryDiscovery,
       requestedRoots: open.captures.map(capture => capture.repository)
     }
   }
+  applyCaptureBaselineCaveat(evidence, open.capture)
   if ((diffs.length > 0 || evidence.diff.discovery) && !evidence.diff.source.includes('repository_discovery')) {
     evidence.diff.source.push('repository_discovery')
   }
@@ -261,7 +269,7 @@ export async function finalizeOpenTurn(
     event.runtimeMetadata?.roleParentId, event.runtimeMetadata?.reviewedSessionId
   ]), event.runtimeMetadata]))
   const turnRoleMetadata = turnRoles.size === 1 ? [...turnRoles.values()][0] : undefined
-  const observedTurnRole = turnRoleMetadata && turnRoleMetadata.invalid !== true &&
+  const observedTurnRole = continuationRole(open) ?? (turnRoleMetadata && turnRoleMetadata.invalid !== true &&
     typeof turnRoleMetadata.role === 'string' && typeof turnRoleMetadata.roleSource === 'string'
     ? {
         role: String(turnRoleMetadata.role),
@@ -271,7 +279,7 @@ export async function finalizeOpenTurn(
           ? { reviewedSessionId: String(turnRoleMetadata.reviewedSessionId) }
           : {})
       }
-    : undefined
+    : undefined)
   const draft: Omit<AgentTurnRecord, 'sequence'> = {
     schemaVersion: 1,
     recordKind: 'agent_turn',
@@ -289,6 +297,7 @@ export async function finalizeOpenTurn(
     linkedTaskId: boundTask ? String(boundTask.taskId) : null,
     ...(boundTask ? { linkedTaskGeneration: String(boundTask.taskGeneration) } : {}),
     taskLinkStatus: boundTask ? 'bound' : taskEvents.length ? 'conflict' : 'unbound',
+    ...captureRecordMetadata(open.capture),
     // Absence of a host-supplied role is reported as `unobserved`, never as a
     // main-agent turn: text prefixes are not an identity boundary.
     turnRoleStatus: observedTurnRole ? 'observed' : turnRoleEvents.length ? 'conflict' : 'unobserved',
@@ -312,12 +321,36 @@ export async function finalizeOpenTurn(
   const committedProviderTurnIds = effectiveProviderTurnId
     ? [...new Set([...(session.committedProviderTurnIds ?? []), effectiveProviderTurnId])].slice(-200)
     : session.committedProviderTurnIds
+  // An unmeasured boundary stays unset: the next segment says it may repeat content, not guess.
+  // A turn with no transcript at all has no boundary to measure — treating its empty event list as
+  // "published 0" would make the next segment republish everything this one already did.
+  const measured = transcript.observed && transcript.identityMatched !== false && !options.forcedReason
+  const sealedBoundary = measured
+    ? (continuation?.publishedEvents ?? 0) + transcriptSourceEvents(transcript.events).length
+    : undefined
+  // A real user prompt starts a new chain, which releases the previous one; managed turns have no
+  // repositories, so they must not touch the chain.
+  const chainStores = open.managedByScry
+    ? session.chainStores
+    : await releaseSegmentChain(root, session, sealedFrozen, !!open.continuation)
   await writeJsonAtomic(statePath(root), {
     ...session,
     lastCommittedRecordId: committed.record.recordId,
-    ...(committedProviderTurnIds ? { committedProviderTurnIds } : {})
+    ...(committedProviderTurnIds ? { committedProviderTurnIds } : {}),
+    lastSegment: {
+      ...sealedSegment(open, committed.record.recordId, completedAt, view.providerTurnId ?? transcript.providerTurnId, sealedBoundary),
+      ...(sealedFrozen?.length ? { frozenDiffs: sealedFrozen } : {})
+    },
+    ...(chainStores ? { chainStores } : {})
   }, { sync: false })
   await rm(openPath(root), { force: true })
+  // A hook queued while this turn was finalizing still needs a recovery pass, so the index entry is
+  // only dropped when nothing is left to replay. Caller holds the session lock.
   await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
+  // The record is durable. A disposable-index cleanup failure must not change its acknowledgement.
+  await releaseStaleAttention(enablement.dataRoot, open.provider, root).catch(error => appendRotatingLog(
+    join(enablement.dataRoot, 'logs', 'recorder.log'),
+    `${new Date().toISOString()} WARN attention cleanup: ${error instanceof Error ? error.message : String(error)}`
+  ).catch(() => undefined))
   return { status: committed.status, record: committed.record }
 }

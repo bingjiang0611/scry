@@ -147,8 +147,12 @@ describe('logical deletion scope and durable fence', () => {
     expect(await service.list(cwd)).toEqual([])
     expect((await service.read(conversation.id)).turns).toEqual([])
     await expect(service.readItem(conversation.id, conversation.turns[0].items[0])).rejects.toThrow('正文不可用')
-    await expect(service.send({ conversationId: conversation.id, expectedRevision: 0, providerId: 'codex', expectedContinuationKey: 'identity',
-      commandId: 'deleted-command', prompt: 'never execute', selectedItems: [], confirmFresh: false })).rejects.toThrow('不能发送')
+    // A tombstone refuses before dispatch, so the answer is a typed not_sent result.
+    await expect(service.send({ conversationId: conversation.id, expectedRevision: 0, providerId: 'codex',
+      expectedContinuationKey: 'identity', commandId: 'deleted-command', prompt: 'never execute',
+      selectedItems: [], confirmFresh: false })).resolves.toEqual({
+      status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送'
+    })
     expect(loadItemText).not.toHaveBeenCalled()
     expect(resolveContinuationKey).not.toHaveBeenCalled()
   })

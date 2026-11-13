@@ -9,6 +9,7 @@ import { usageAnalyticsWithCreditsQuery } from '../db'
 import { readLlmPerformanceHistory } from '../llm-performance-history'
 import { summarizeRunningLlmSessions } from '../../shared/llm-performance'
 import { resolveRemoteRelay } from './remote-relay'
+import { remoteLanConfig, watchRemoteRelayPower } from './remote-host-network'
 import { pairingChannelHandlers } from './pairing-channels'
 import { registerChannelHandlers } from './startup-channels'
 import { createRemoteHistoryHandlers } from './remote-history'
@@ -38,6 +39,8 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
       stateDirectory,
       userDataDir: app.getPath('userData'),
       relay,
+      // Direct LAN/overlay route for paired phones (SCRY_REMOTE_LAN / SCRY_REMOTE_LAN_PORT).
+      ...remoteLanConfig(process.env),
       gatewayLabel: 'Mac1',
       shellEnvironment: warmShellEnv,
       openPath: runtime.openLocalPath,
@@ -82,6 +85,7 @@ export async function startRemoteHostIfEnabled(runtime: RemoteHostRuntime): Prom
     })
     runtime.remoteHostService = service
     await service.start()
+    watchRemoteRelayPower(runtime)
     console.warn(`[scry] remote host subsystem started (${relay.createTransport ? 'relay transport configured' : 'dormant: no relay transport configured'})`)
   } catch (error) {
     console.warn('[scry] remote host subsystem failed to start:', error)

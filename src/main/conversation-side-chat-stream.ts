@@ -28,8 +28,18 @@ export interface StreamedMessage {
 export interface StreamedTurn {
   runId: string
   providerTurnId?: string
+  /**
+   * Exact captured outcome of this turn. A Scry archive keeps the recorder's own status
+   * (or the archive's structured evidence for a legacy turn); a raw Provider transcript
+   * keeps what its terminal marker proves, so a non-success outcome is never hidden.
+   */
   status: string
-  settled: boolean
+  /**
+   * Evidence the turn ended, not evidence it succeeded: a recorder terminal for a Scry
+   * archive, the Provider's own terminal marker for a native transcript. This is what may
+   * end a frozen prefix; `status` says how it ended.
+   */
+  terminal: boolean
   messages: StreamedMessage[]
 }
 
@@ -313,7 +323,8 @@ async function assembleTurn(userData: string, cwd: string, registry: SpoolRegist
 
 /**
  * Streams one turn at a time. A turn is yielded only once its header proves identity and
- * completion evidence, so a caller never freezes a turn whose provenance is still open.
+ * its termination evidence, so a caller never freezes a turn whose provenance is still
+ * open. `terminal` is that evidence; `status` is the recorded outcome.
  */
 export async function* streamTurns(
   userData: string,
@@ -335,14 +346,25 @@ export async function* streamTurns(
   try {
     for await (const entry of entries) {
       if (entry.type === 'turn') {
-        // The bodies are sealed from these inputs, so the sink's read never comes back here.
-        const messages = await assembleTurn(userData, cwd, registry, parts)
-        const status = entry.status ?? 'completed'
+        // A legacy turn whose archive proves no outcome keeps `unavailable`: an absent
+        // status is not permission to call it completed.
+        const status = entry.status
+        // `done` is the recorder's terminal, written when the Provider result was
+        // recorded; a failed or interrupted run has it too. Termination and outcome stay
+        // separate facts: every terminal turn may end a frozen prefix, `status` says how.
+        const terminal = entry.done === true
+        // A turn the recorder never terminated is never capturable, so its visible
+        // bodies are not sealed at all. The caller can only drop it, and sealing would
+        // hold one output copy and its spill file per unfinished segment until the pass
+        // ends. Input spools are still filled and released in the `finally` below.
+        // The bodies of a terminal turn are sealed from these inputs, so the sink's read
+        // never comes back here.
+        const messages = terminal ? await assembleTurn(userData, cwd, registry, parts) : []
         try {
           yield {
             runId: entry.runId,
             ...(entry.providerTurnId === undefined ? {} : { providerTurnId: entry.providerTurnId }),
-            status, settled: entry.done && status === 'completed', messages
+            status, terminal, messages
           }
         } finally {
           // Runs once the sink has consumed this turn, and also when the caller abandons or

@@ -70,7 +70,7 @@ export function createSessionCatalog({
     // One store read per project answers both the rows and the alias filter. Child
     // summaries already travel inside this answer; no per-child read is issued here.
     return Promise.all(projects.map(async (project) => {
-      const { conversations, ownedNativeAliases } = await conversationService().listCatalog(project.cwd)
+      const { conversations, ownedNativeAliases, ownedRunIds } = await conversationService().listCatalog(project.cwd)
       return {
         ...project,
         // Only the local sidebar projection hides aliases. Raw app/provider
@@ -78,7 +78,8 @@ export function createSessionCatalog({
         sessions: project.sessions.filter((session) => {
           const nativeId = session.externalSessionId ?? session.sessionId
           const alias = `${session.providerId}\0${session.agentProfileId ?? ''}\0${session.cwd ?? project.cwd}\0${nativeId}`
-          return !ownedNativeAliases.has(alias)
+          return !ownedNativeAliases.has(alias) &&
+            !(session.runId && ownedRunIds.has(`${session.providerId}\0${session.cwd ?? project.cwd}\0${session.runId}`))
         }),
         conversations
       }

@@ -18,6 +18,7 @@ import type { Conversation } from '../../shared/conversation'
 import type { ConversationDeletionPreview } from '../../shared/conversation-api'
 import type { SourceControlService } from '../../main/source-control/service'
 import type { createProviderDiscovery } from '../../main/remote/provider-discovery'
+import type { SideChatCascade } from '../../main/bootstrap/conversation-delete'
 
 // What the daemon's local-op groups are built from: the same runtime objects Electron
 // main builds its handlers from, owned here by the daemon.
@@ -56,6 +57,8 @@ export interface DaemonLocalEndpointDeps {
 export interface DaemonSessionLinks {
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   prepareConversationDeletion?: (conversation: Conversation) => Promise<ConversationDeletionPreview>
+  // Session deletion takes the session's side chats along (conversation-delete.ts).
+  sideChatCascade?: SideChatCascade
 }
 
 export type DaemonLocalGroupDeps = DaemonLocalEndpointDeps & { links: DaemonSessionLinks }

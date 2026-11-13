@@ -4,12 +4,29 @@ import { detectRendererPlatform, shortcutModifierLabel } from '../platform'
 // 处理事件时两个修饰键都接受，所以文案只需跟随平台，不改变行为。
 const shortcutModifier = shortcutModifierLabel(detectRendererPlatform())
 
+export const WORKDIR_PICKER_COPY = {
+  removeRecentTitle: '从最近文件夹中移除',
+  removeRecentLabel: (dir: string) => `从最近文件夹中移除 ${dir}`
+} as const
+
+export const AGENT_PICKER_COPY = {
+  menuLabel: '选择 Agent',
+  empty: '未检测到 agent CLI：先安装并登录一个 Provider CLI，再重新扫描 PATH。'
+} as const
+
 export const PI_PICKER_COPY = {
   nativePi: '原生 Pi',
   detail: (detected: boolean, version?: string) =>
     `${detected ? '系统检测' : '自定义 Profile'} · ${version ?? '版本未知'}`,
   removeTitle: '从 Scry 移除；不会删除启动器文件',
   removeLabel: (name: string) => `移除 Pi Profile：${name}`
+} as const
+
+export const COMPOSER_BLOCKED_COPY = {
+  scanning: '正在检测本机 Provider，暂不能发送',
+  // App 不能替用户装 CLI；这里只给出可执行的下一步，不假装能自动修好。
+  missingCli: (label: string) => `未检测到 ${label}：先在终端安装并登录该 CLI，再重新检测。草稿与附件已保留。`,
+  missingProfile: (profileId: string) => `未检测到 Pi Profile「${profileId}」：在 Agent 菜单重新扫描，或选择其他 Agent。草稿与附件已保留。`
 } as const
 
 export const TURN_FLOW_COPY = {
@@ -63,10 +80,10 @@ export const ANALYTICS_COPY = {
   unavailable: '用量分析暂不可用',
   databaseUnavailable: 'SQLite 尚未初始化，Scry 其他功能不受影响。',
   retry: '重试',
-  noCost: '当前范围没有已知成本',
+  noProviderRecord: '当前范围没有可展示的 Provider 记录',
   noDetails: '当前范围没有可展示的明细',
   cost: '成本',
-  tokenToggle: 'TOKEN',
+  tokenToggle: 'Token',
   dailyCost: '每日成本',
   dailyTokens: '每日 Token',
   costTrend: '每日成本趋势',
@@ -82,10 +99,13 @@ export const ANALYTICS_COPY = {
     if (value > 0 && value < 0.01) return '<0.01 Credits'
     return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} Credits`
   },
-  chartInstructions: '聚焦图表后，可使用左右方向键逐日查看证据，Home / End 跳到首尾，Esc 收起详情。无记录日沿基线连接以保持走势连续，但不代表实际值为零。',
+  chartInstructions: '聚焦图表后，可使用左右方向键逐日查看证据，Home / End 跳到首尾，Esc 收起详情。没有记录或没有该指标证据的日期不连线，也不按零值绘制。',
   providerEvidence: (cost: string, tokens: string, tokenEvidence: string) => `${cost}；${tokens} Token；${tokenEvidence}`,
   totalEvidence: (evidence: string, turns: number) => `${evidence}；${turns.toLocaleString()} 轮；不代表实际账单。部分覆盖只表示已知下界。`,
   tokenCoverage: (known: number, total: number) => `${known}/${total} 条明细已上报`,
+  // 摘要数值只在部分明细上报时才带这行，避免把已知下界读成总量。
+  lowerBoundNote: (known: number, total: number) => `已知下界 · ${known}/${total} 条明细已上报`,
+  partialTokenNote: '已知下界：部分明细未上报',
   outputEvidence: (known: number, total: number, reasoning: string) => `${known}/${total} 条明细已上报；推理 ${reasoning}`
 } as const
 
@@ -146,6 +166,9 @@ export const BACKGROUND_WORK_COPY = {
 
 export const OVERVIEW_SESSION_COPY = {
   heading: '会话',
+  dataDimensions: '总览数据维度',
+  callCount: (count: number) => `${count} 次调用`,
+  turnCount: (count: number) => `${count} 轮`,
   context: '上下文占用',
   contextUnavailable: '暂无上下文数据',
   id: 'ID',
@@ -185,6 +208,12 @@ export const OVERVIEW_COST_COPY = {
   label: '成本',
   unavailable: '当前 Provider 未上报成本',
   coverage: (known: number, total: number) => `${known}/${total} 轮上报了成本`
+} as const
+
+export const OVERVIEW_CREDIT_COPY = {
+  label: 'Credit',
+  unavailable: '当前会话没有可用的 Qoder Credit 证据',
+  coverage: (partial: boolean) => `仅统计已观测到的主会话请求 Credit${partial ? '，存在未覆盖请求或轮次' : ''}`
 } as const
 
 export const OVERVIEW_TOOL_ERROR_COPY = {
@@ -230,10 +259,27 @@ export const SLASH_COMMAND_COPY = {
   noMatches: '无匹配命令'
 } as const
 
+// 时间线分页提示。更早轮次仍在归档里——加载只是收起，不是丢弃，文案必须说清楚。
+export const HISTORY_WINDOW_COPY = {
+  rangeLabel: '历史轮次范围',
+  rangeLocal: (loaded: number, total: number) => `已加载 ${loaded} / ${total} 轮·更早轮次仍在本机归档中，未丢弃`,
+  rangeRemote: (loaded: number, host: string) => `已加载最近 ${loaded} 轮·更早轮次仍在 ${host} 的归档中，未丢弃`,
+  loadOlder: '加载更早轮次',
+  loadingShort: '加载中…',
+  exhausted: (total: number) => `已到最早一轮 · 共 ${total} 轮`
+} as const
+
 export const ARCHIVED_SESSIONS_COPY = {
   localTitle: '本机已存档会话',
   deleteAllLocal: '删除全部本机会话',
   localEmpty: '没有本机已存档会话'
+} as const
+
+// 归档列表的 Provider 筛选：Provider id 不给人读，未知来源也不能冒充某个 Provider。
+export const PROVIDER_FILTER_COPY = {
+  label: '按 Provider 筛选',
+  all: '全部 Provider',
+  unknown: 'Provider 未知'
 } as const
 
 export const QUESTIONNAIRE_COPY = {
@@ -274,7 +320,9 @@ export const QUEUE_COPY = {
   remove: '移除排队消息',
   removeLabel: (index: number) => `移除队列第 ${index} 条消息`,
   removeTitlePending: 'Steer 正在提交，不能移除',
-  removeTitleUnknown: '结果未知的 Steer 不能移除',
+  removeTitleUnknown: 'Steer 结果未知，确认本轮结束前不能移出等待队列',
+  dismissUnknown: '仅移出等待队列，保留未知回执；不会撤回或重发此消息',
+  dismissUnknownLabel: (index: number) => `移出等待队列第 ${index} 条消息（保留未知回执）`,
   edit: '编辑这条消息',
   editLabel: (index: number) => `编辑队列第 ${index} 条消息`,
   editTitle: '把这条消息放回输入框修改；发送后移到队尾',
@@ -322,4 +370,13 @@ export const LOADING_COPY = {
   skillsVisible: (shown: number, total: number) => `显示 ${shown} / ${total}`,
   mcpNoConfigEvidence: '没有配置证据不等于运行正常，也不等于连接失败。',
   mcpSummary: (configured: number, connected: number, runtime: number, tests: number) => `${configured} 配置 · ${runtime > 0 ? connected + ' 已连接 / ' + runtime + ' 运行态' : '运行态未返回'} · ${tests} 测试证据`
+} as const
+
+/** 停止控制调用的事实文案：调用失败不冒充“已请求”，更不冒充“已终止”。 */
+export const RUN_STOP_COPY = {
+  interruptRequestFailed: {
+    label: '停止请求未生效',
+    hint: (providerId: string): string =>
+      `${providerId} 的取消调用失败，Scry 无法确认取消已经发出。这一轮可能仍在运行，用量与文件足迹尚未收敛；停止意图会继续按窗口升级，只有存在安全的硬杀范围时才会发出强制终止，否则如实显示未确认终止，收到 Provider 终态前不会显示完成`
+  }
 } as const

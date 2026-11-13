@@ -9,7 +9,7 @@ import { recordFiles, parseRecordFile } from './store-index.js'
 import { readArchiveState } from './store-archive.js'
 import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitNotificationFailure, recordName, readCommitHookAck, pendingCommitFiles, publishDeadLetter, readDeadLetter, readDeadLetters } from './commit-delivery-state.js'
 
-import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, requeueLostOutcome, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
+import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, loadScopedDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, requeueLostOutcome, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
 
 export interface RecordCommittedNotification {
   schemaVersion: 2
@@ -94,10 +94,17 @@ export async function commitNotificationStatus(dataRoot: string, env: NodeJS.Pro
 export const HOOK_DRAIN_MAX_RECORDS = 8
 export const HOOK_DRAIN_BUDGET_MS = 1_500
 
+export interface CommitNotificationScope {
+  provider: AgentTurnRecord['provider']['id']
+  sessionId: string
+}
+
 export interface DrainOptions {
   maxRecords?: number
   budgetMs?: number
   now?: () => number
+  /** Limit delivery to one provider/session without advancing the shared ACK cursor. */
+  scope?: CommitNotificationScope
 }
 
 export interface DrainResult {
@@ -119,7 +126,9 @@ export async function drainCommitNotifications(
     const hook = await configuredCommitHook(env)
     if (!hook) return { delivered: 0, pending: 0, truncated: false }
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
-      const state = await loadDeliveryState(dataRoot, fingerprint)
+      const state = options.scope
+        ? await loadScopedDeliveryState(dataRoot, fingerprint)
+        : await loadDeliveryState(dataRoot, fingerprint)
       let savedAck = state.ackedThrough
       let savedProgress = state.processedThrough
       const persistProgress = async () => {
@@ -129,7 +138,7 @@ export async function drainCommitNotifications(
         savedProgress = state.processedThrough
       }
       const archiveFloor = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
-      await advanceAck(dataRoot, state, archiveFloor)
+      if (!options.scope) await advanceAck(dataRoot, state, archiveFloor)
       const initialProgress = state.processedThrough ?? state.ackedThrough
       const fresh = (await recordFiles(dataRoot)).filter(file => file.sequence > initialProgress)
       const now = options.now ?? Date.now
@@ -143,6 +152,10 @@ export async function drainCommitNotifications(
 
       const processFile = async (candidate: { sequence: number; recordId: string }, freshFile: boolean): Promise<void> => {
         const file = { sequence: candidate.sequence, recordId: candidate.recordId }
+        if (options.scope) {
+          const notification = await commitNotification(dataRoot, recordName(file))
+          if (notification.provider !== options.scope.provider || notification.sessionId !== options.scope.sessionId) return
+        }
         let outcome = await readOutcome(dataRoot, fingerprint, file.sequence)
         if (outcome && outcome.recordId !== file.recordId) throw new Error('delivery outcome does not match record identity')
         if (outcome?.status === 'retry' && outcome.failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES) {
@@ -161,7 +174,7 @@ export async function drainCommitNotifications(
             outcome = { ...file, status: 'delivered' }
             // A normal contiguous success needs only its durable ACK. Across a gap,
             // retain a positive receipt so missing metadata can never masquerade as success.
-            if (!freshFile || state.ackedThrough < (state.processedThrough ?? 0) || file.sequence >= firstUnresolved) {
+            if (options.scope || !freshFile || state.ackedThrough < (state.processedThrough ?? 0) || file.sequence >= firstUnresolved) {
               await saveOutcome(dataRoot, fingerprint, outcome)
             }
           } else {
@@ -182,7 +195,7 @@ export async function drainCommitNotifications(
         }
         if (outcome?.status !== 'delivered') firstUnresolved = Math.min(firstUnresolved, file.sequence)
         highestVisited = Math.max(highestVisited, file.sequence)
-        if (freshFile) {
+        if (freshFile && !options.scope) {
           if (outcome?.status === 'delivered' && state.ackedThrough === state.processedThrough && file.sequence < firstUnresolved) {
             state.ackedThrough = file.sequence
           }
@@ -212,26 +225,28 @@ export async function drainCommitNotifications(
         }
         await processFile(file, true)
       }
-      if (!truncated) state.processedThrough = Math.max(state.processedThrough ?? 0, highestVisited)
-      try {
-        await advanceAck(dataRoot, state, archiveFloor)
-      } catch (error) {
-        // Keep the ACK prefix that positive receipts already prove before reporting the sequence
-        // that stayed unresolved; discarding it would re-walk proven work on every later drain.
+      if (!options.scope) {
+        if (!truncated) state.processedThrough = Math.max(state.processedThrough ?? 0, highestVisited)
+        try {
+          await advanceAck(dataRoot, state, archiveFloor)
+        } catch (error) {
+          // Keep the ACK prefix that positive receipts already prove before reporting the sequence
+          // that stayed unresolved; discarding it would re-walk proven work on every later drain.
+          await persistProgress()
+          throw error
+        }
         await persistProgress()
-        throw error
       }
-      await persistProgress()
       return { delivered, pending: await pendingCount(), truncated }
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
+    // Scoped recovery must surface corrupt checkpoints, records, and receipts instead of treating
+    // unknown identity as a non-target. The legacy unscoped path retains its soft backlog result.
+    if (options.scope && !(error instanceof UnresolvedDeliveryPrefixError)) throw error
     let pending: number | null = null
     try { pending = await pendingCount() } catch {
-      // The status query failed too. Re-throwing from this catch is what used to poison every later
-      // drain, so a prefix the recorder cannot yet prove returns with an unknown backlog instead.
-      // Corrupt checkpoints or receipts are not that case: they stay a loud failure.
       if (!(error instanceof UnresolvedDeliveryPrefixError)) throw error
       pending = null
     }

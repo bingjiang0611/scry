@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { discoverRepositories, parseRecorderConfig, resolveRecorderEnablement, resolveRecorderLocation, type RecorderConfig } from './config'
+import { discoverRepositories, parseRecorderConfig, repositoryDiscoveryStats, resetRepositoryDiscoveryStats, resolveRecorderEnablement, resolveRecorderLocation, WORKTREE_DISCOVERY_MAX_REPOSITORIES, type RecorderConfig } from './config'
 
 const config: RecorderConfig = {
   schemaVersion: 1,
@@ -14,6 +14,23 @@ const config: RecorderConfig = {
 }
 
 describe('discoverRepositories', () => {
+  it('bounds linked-worktree probes and discloses skipped repository owners', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scry-worktree-budget-'))
+    try {
+      for (let index = 0; index < WORKTREE_DISCOVERY_MAX_REPOSITORIES + 4; index++) {
+        const path = join(root, `repo-${index}`)
+        await mkdir(join(path, '.git'), { recursive: true })
+        await writeFile(join(path, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+      }
+      resetRepositoryDiscoveryStats()
+      const discovery = await discoverRepositories(root, config)
+      expect(repositoryDiscoveryStats().worktreeCommands).toBe(WORKTREE_DISCOVERY_MAX_REPOSITORIES)
+      expect(discovery.worktreeDiscovery).toMatchObject({ probedRepositories: WORKTREE_DISCOVERY_MAX_REPOSITORIES, skippedRepositories: 4, incomplete: true })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('发现完整 nested Git 集合并套用 exclude，不依赖易漏仓 allowlist', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-nested-git-'))
     try {
@@ -21,7 +38,8 @@ describe('discoverRepositories', () => {
         await mkdir(join(path, '.git'), { recursive: true })
         await writeFile(join(path, '.git', 'HEAD'), 'ref: refs/heads/main\n')
       }
-      await expect(discoverRepositories(root, config)).resolves.toEqual({ maxDepth: 2, depthLimitedDirectories: 0, repositories: [
+      await expect(discoverRepositories(root, config)).resolves.toEqual({ maxDepth: 2, depthLimitedDirectories: 0,
+        worktreeDiscovery: { probedRepositories: 4, skippedRepositories: 0, discoveredWorktrees: 0, incomplete: true }, repositories: [
         root,
         join(root, 'group', 'service-detail'),
         join(root, 'plugin-commerce-app'),

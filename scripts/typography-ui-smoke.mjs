@@ -69,7 +69,7 @@ async function exercise() {
   truncated.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
   check(!truncated.title, 'Uncut text keeps a truncation tooltip')
   check(mixedStyle.textAlign === 'justify', 'Chinese body text is not justified')
-  check(mixedStyle.maxWidth !== 'none', 'Chinese measure is not capped to whole characters')
+  check(mixedStyle.maxWidth === 'none', 'Chinese body text is capped before its container edge')
   check(mixedStyle.textAutospace === 'normal', 'Chinese and Latin autospace is not enabled')
   check(mixedStyle.textSpacingTrim === 'trim-start', 'Chinese opening punctuation trim is not enabled')
   check(codeStyle.textAutospace === 'no-autospace', 'Chinese language rules leak into code autospace')
@@ -112,6 +112,7 @@ try {
   await symlink(join(root, 'node_modules'), join(temp, 'node_modules'), 'dir')
   await build({
     configFile: false,
+    worker: { format: 'es' },
     root: temp,
     envDir: temp,
     logLevel: 'error',
@@ -132,7 +133,7 @@ try {
       }
     }
   })
-  await writeFile(join(temp, 'index.html'), '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>')
+  await writeFile(join(temp, 'index.html'), '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>')
   if (screenshotPath) await mkdir(dirname(screenshotPath), { recursive: true })
   await writeFile(join(temp, 'main.cjs'), `
     const { app, BrowserWindow } = require('electron')

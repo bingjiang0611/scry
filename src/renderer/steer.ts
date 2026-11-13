@@ -3,6 +3,8 @@ import type { TraceEvent } from '@shared/trace'
 
 export type RendererSteerStatus = AgentSteerEvidence['status']
 
+export type RendererSteerEvidence = AgentSteerEvidence & { eventId: string; runEnded?: boolean }
+
 export interface QueuedSteerState {
   status: RendererSteerStatus
   message?: string
@@ -21,8 +23,8 @@ export function latestSteerCapability(items: readonly TraceEvent[]): AgentSteerC
   return undefined
 }
 
-export function latestSteerEvidence(items: readonly TraceEvent[]): Map<string, AgentSteerEvidence & { eventId: string }> {
-  const latest = new Map<string, AgentSteerEvidence & { eventId: string }>()
+export function latestSteerEvidence(items: readonly TraceEvent[]): Map<string, RendererSteerEvidence> {
+  const latest = new Map<string, RendererSteerEvidence>()
   for (const event of items) {
     if (!event.steer) continue
     latest.set(event.steer.messageId, { ...event.steer, eventId: event.id })
@@ -30,10 +32,12 @@ export function latestSteerEvidence(items: readonly TraceEvent[]): Map<string, A
   return latest
 }
 
-export function latestSteerEvidenceForTurns(turns: readonly { items: readonly TraceEvent[] }[]): Map<string, AgentSteerEvidence & { eventId: string }> {
-  const latest = new Map<string, AgentSteerEvidence & { eventId: string }>()
+export function latestSteerEvidenceForTurns(turns: readonly { items: readonly TraceEvent[]; done?: boolean }[]): Map<string, RendererSteerEvidence> {
+  const latest = new Map<string, RendererSteerEvidence>()
   for (const turn of turns) {
-    for (const [messageId, evidence] of latestSteerEvidence(turn.items)) latest.set(messageId, evidence)
+    for (const [messageId, evidence] of latestSteerEvidence(turn.items)) {
+      latest.set(messageId, { ...evidence, runEnded: turn.done === true })
+    }
   }
   return latest
 }
@@ -60,8 +64,15 @@ export function isSteerDrainBlocked(state: QueuedSteerState | undefined): boolea
   return state?.status === 'pending' || state?.status === 'unknown' || state?.status === 'accepted'
 }
 
-export function isSteerRemovalBlocked(state: QueuedSteerState | undefined): boolean {
-  return isSteerDrainBlocked(state)
+export function canDismissUnknownSteer(state: QueuedSteerState | undefined, evidence: RendererSteerEvidence | undefined): boolean {
+  // Only the owning run's terminal unknown receipt permits local dismissal. An idle
+  // composer or an old rejected attempt is not proof that this dispatch has ended.
+  return state?.status === 'unknown' && evidence?.status === 'unknown' && evidence.runEnded === true
+}
+
+export function isSteerRemovalBlocked(state: QueuedSteerState | undefined, evidence?: RendererSteerEvidence): boolean {
+  // Dismissal changes only the waiting queue, never the receipt or dispatch eligibility.
+  return isSteerDrainBlocked(state) && !canDismissUnknownSteer(state, evidence)
 }
 
 export function retainProtectedSteerPrompts<T extends { messageId: string; steer?: QueuedSteerState }>(

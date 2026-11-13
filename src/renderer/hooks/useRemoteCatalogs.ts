@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import type { DesktopRemoteCatalog, DesktopRemoteConnection, RemoteSessionRef } from '@shared/desktop-remote'
-import { reconcileRemoteSessionAttention, remoteSessionAttentionKey } from '@shared/remote-session-attention'
+import type { DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, RemoteSessionRef } from '@shared/desktop-remote'
+import { remoteSessionAttentionKey } from '@shared/remote-session-attention'
 import { useVisibilityPolling } from './useVisibilityPolling'
 
 // One host catalog per saved connection, shared by the sidebar, location picker,
@@ -33,10 +33,20 @@ export function viewRemoteSession(key: string | null, focused: boolean): void {
   }
 }
 
-export function useViewedRemoteSession(connectionId?: string, session?: RemoteSessionRef): void {
+export function useViewedRemoteSession(connectionId?: string, session?: RemoteSessionRef, connected = true): void {
   const key = connectionId && session?.externalSessionId ? remoteSessionAttentionKey(connectionId, session) : null
   useEffect(() => {
-    const update = (): void => viewRemoteSession(key, document.hasFocus())
+    const context: DesktopRemoteContext | null = session?.externalSessionId ? {
+      cwd: session.cwd, providerId: session.providerId, externalSessionId: session.externalSessionId,
+      ...(session.agentProfileId ? { agentProfileId: session.agentProfileId } : {})
+    } : null
+    let lastFocused = false
+    const update = (): void => {
+      const focused = connected && document.hasFocus()
+      lastFocused = focused
+      viewRemoteSession(key, focused)
+      if (connectionId) void window.scry.desktopRemote.setViewedSession(connectionId, focused ? context : null).catch(() => {})
+    }
     update()
     window.addEventListener('focus', update)
     window.addEventListener('blur', update)
@@ -44,8 +54,15 @@ export function useViewedRemoteSession(connectionId?: string, session?: RemoteSe
       window.removeEventListener('focus', update)
       window.removeEventListener('blur', update)
       viewRemoteSession(null, false)
+      if (connectionId && lastFocused) void window.scry.desktopRemote.setViewedSession(connectionId, null).catch(() => {})
     }
-  }, [key])
+  }, [connected, connectionId, key, session?.agentProfileId, session?.cwd, session?.externalSessionId, session?.providerId])
+}
+
+export function remoteCatalogUnread(catalog: DesktopRemoteCatalog, viewedKey: string | null): ReadonlySet<string> {
+  const unread = new Set<string>(catalog.unreadSessionKeys ?? [])
+  if (viewedKey) unread.delete(viewedKey)
+  return unread
 }
 
 function publish(connectionId: string, entry: RemoteCatalogEntry): void {
@@ -69,8 +86,7 @@ export function refreshRemoteCatalog(connectionId: string): Promise<void> {
     try {
       const catalog = await window.scry.desktopRemote.catalog(connectionId)
       if (revisions.get(connectionId) !== revision) return
-      const unreadSessionKeys = reconcileRemoteSessionAttention(connectionId, previous?.catalog?.sessions,
-        catalog.sessions, snapshot.get(connectionId)?.unreadSessionKeys ?? new Set(), viewedSessionKey)
+      const unreadSessionKeys = remoteCatalogUnread(catalog, viewedSessionKey)
       publish(connectionId, { catalog, loading: false, stale: false, unreadSessionKeys })
     } catch (error) {
       if (revisions.get(connectionId) !== revision) return

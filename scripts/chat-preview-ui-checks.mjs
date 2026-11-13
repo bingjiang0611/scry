@@ -128,6 +128,58 @@ export async function exerciseChatPreviewDom() {
   const projectPicker = () => document.querySelector('#composer-project .composer-context')
   check(projectPicker() != null, 'New draft lost project selection')
   const input = document.querySelector('#composer-project textarea')
+  const composerShell = () => document.querySelector('#composer-project .composer-shell')
+  input.focus()
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  check(input.getBoundingClientRect().height === 64, 'Composer default height regressed')
+  // 焦点态必须真的比未聚焦多一层可见描边，且仍是单层安静描边（没有 4px 以上的光晕）。
+  // 两种主题分别验证：浅色主题多一条同权重规则，只断言未聚焦形状会漏掉它。
+  const themeBeforeFocusCheck = document.documentElement.dataset.theme
+  for (const theme of ['dark', 'light']) {
+    document.documentElement.dataset.theme = theme
+    input.blur()
+    const unfocusedShadow = getComputedStyle(composerShell()).boxShadow
+    input.focus()
+    const composerFocusShadow = getComputedStyle(composerShell()).boxShadow
+    check(composerFocusShadow !== unfocusedShadow, `Composer focus must add a visible outline in ${theme}`)
+    check(composerFocusShadow.includes('1px') && !/\b([4-9]|[1-9]\d)px\b/.test(composerFocusShadow), `Composer focus must use one quiet outline layer in ${theme}`)
+  }
+  if (themeBeforeFocusCheck) document.documentElement.dataset.theme = themeBeforeFocusCheck
+  for (const trigger of document.querySelectorAll('#composer-project .permission-mode-trigger, #composer-project .model-effort-trigger, #composer-project .composer-action-controls .clibtn')) {
+    check(trigger.getBoundingClientRect().height === 32, 'Composer controls must share the compact 32px rhythm')
+  }
+  // Agent 菜单与工作目录菜单共用同一套键盘语义：焦点进选项、方向键移动、Esc 关闭并退回触发器。
+  // 这些行为只能在实际 DOM 里验证，静态标记看不出焦点去哪了。
+  const agentPicker = document.querySelector('#agent-picker-fixture')
+  const agentTrigger = agentPicker.querySelector('.clibtn')
+  const agentMenu = () => agentPicker.querySelector('.climenu')
+  agentTrigger.focus()
+  agentTrigger.click()
+  await waitFor(() => agentMenu()?.getAttribute('role') === 'menu' && agentMenu().contains(document.activeElement))
+  check(agentMenu().getAttribute('aria-label') === '选择 Agent', 'Agent menu lost its accessible name')
+  const firstItem = document.activeElement
+  check(firstItem.getAttribute('role') === 'menuitemradio', 'Focused Agent option is not a menu radio item')
+  firstItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  await waitFor(() => document.activeElement !== firstItem && agentMenu().contains(document.activeElement))
+  check(document.activeElement.getAttribute('role') === 'menuitemradio', 'ArrowDown left the Agent menu items')
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  await waitFor(() => !agentMenu())
+  check(document.activeElement === agentTrigger, 'Agent menu did not restore focus to its trigger')
+  check(agentTrigger.getAttribute('aria-expanded') === 'false', 'Agent trigger still reports expanded after Escape')
+  agentTrigger.click()
+  await waitFor(() => agentMenu()?.contains(document.activeElement))
+  const checkedItems = [...agentMenu().querySelectorAll('[role="menuitemradio"]')].filter((item) => item.getAttribute('aria-checked') === 'true')
+  check(checkedItems.length === 1, 'Agent menu must expose exactly one checked option')
+  document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  await waitFor(() => !agentMenu())
+  // 选中一项后菜单会关闭，焦点不能落在被卸载的按钮上（会掉到 body）。
+  agentTrigger.click()
+  await waitFor(() => agentMenu()?.contains(document.activeElement))
+  const pickedItem = agentMenu().querySelector('[role="menuitemradio"]:not(:disabled)')
+  pickedItem.click()
+  await waitFor(() => !agentMenu())
+  check(document.activeElement === agentTrigger, 'Selecting an Agent option lost focus instead of returning it to the trigger')
+  input.blur()
   const draft = input.value
   const enter = (options = {}) => {
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options })

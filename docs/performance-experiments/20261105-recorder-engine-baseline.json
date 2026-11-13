@@ -1,0 +1,712 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-11-05T15:23:31.302Z",
+  "environment": {
+    "platform": "darwin",
+    "release": "27.2.0",
+    "arch": "arm64",
+    "node": "v24.18.0",
+    "git": "git version 2.50.1 (Apple Git-155)",
+    "cpu": "Apple M2 Pro",
+    "cpuCount": 10,
+    "totalMemBytes": 34359738368,
+    "loadavg": [
+      8.39306640625,
+      10.41796875,
+      14.57763671875
+    ],
+    "probe": {
+      "gitWrapper": true,
+      "indexBytes": true
+    }
+  },
+  "rounds": 3,
+  "notes": [],
+  "scenarios": [
+    {
+      "id": "S1",
+      "title": "small repo, clean baseline, one file changed",
+      "wallMs": 6532,
+      "gitPerScenario": {
+        "total": 39,
+        "byCommand": {
+          "rev-parse": 3,
+          "status": 9,
+          "check-ignore": 3,
+          "config": 3,
+          "update-index": 3,
+          "read-tree": 3,
+          "add": 3,
+          "write-tree": 3,
+          "diff": 9
+        },
+        "indexBytes": 72747
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 340.13,
+          "rounds": 3,
+          "git": {
+            "total": 4,
+            "byCommand": {
+              "rev-parse": 1,
+              "status": 2,
+              "check-ignore": 1
+            },
+            "indexBytes": 0,
+            "cumulative": 4
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 4423680
+        },
+        {
+          "name": "end",
+          "msP50": 955.72,
+          "rounds": 3,
+          "git": {
+            "total": 9,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1,
+              "read-tree": 1,
+              "add": 1,
+              "write-tree": 1,
+              "diff": 3
+            },
+            "indexBytes": 24249,
+            "cumulative": 13
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 1032192
+        },
+        {
+          "name": "record-visible",
+          "msP50": 0.156041,
+          "rounds": 3,
+          "git": null,
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "large repo (20k tracked), clean baseline, one file changed",
+      "wallMs": 32893,
+      "gitPerScenario": {
+        "total": 39,
+        "byCommand": {
+          "status": 9,
+          "rev-parse": 3,
+          "check-ignore": 3,
+          "config": 3,
+          "update-index": 3,
+          "read-tree": 3,
+          "add": 3,
+          "write-tree": 3,
+          "diff": 9
+        },
+        "indexBytes": 14400771
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 841.01,
+          "rounds": 3,
+          "git": {
+            "total": 4,
+            "byCommand": {
+              "status": 2,
+              "rev-parse": 1,
+              "check-ignore": 1
+            },
+            "indexBytes": 0,
+            "cumulative": 43
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 4145152
+        },
+        {
+          "name": "end",
+          "msP50": 2462.38,
+          "rounds": 3,
+          "git": {
+            "total": 9,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1,
+              "read-tree": 1,
+              "add": 1,
+              "write-tree": 1,
+              "diff": 3
+            },
+            "indexBytes": 4800257,
+            "cumulative": 52
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 10272768
+        },
+        {
+          "name": "record-visible",
+          "msP50": 0.383,
+          "rounds": 3,
+          "git": null,
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "large repo, dirty baseline (50 modified before the turn)",
+      "wallMs": 11381,
+      "gitPerScenario": {
+        "total": 54,
+        "byCommand": {
+          "rev-parse": 3,
+          "status": 9,
+          "check-ignore": 3,
+          "config": 6,
+          "read-tree": 6,
+          "update-index": 6,
+          "add": 6,
+          "write-tree": 6,
+          "diff": 9
+        },
+        "indexBytes": 33601845
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 1360.85,
+          "rounds": 3,
+          "git": {
+            "total": 9,
+            "byCommand": {
+              "rev-parse": 1,
+              "status": 2,
+              "check-ignore": 1,
+              "config": 1,
+              "read-tree": 1,
+              "update-index": 1,
+              "add": 1,
+              "write-tree": 1
+            },
+            "indexBytes": 6400358,
+            "cumulative": 87
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 344064
+        },
+        {
+          "name": "end",
+          "msP50": 1958.33,
+          "rounds": 3,
+          "git": {
+            "total": 9,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1,
+              "read-tree": 1,
+              "add": 1,
+              "write-tree": 1,
+              "diff": 3
+            },
+            "indexBytes": 4800257,
+            "cumulative": 96
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 1146880
+        },
+        {
+          "name": "record-visible",
+          "msP50": 0.211209,
+          "rounds": 3,
+          "git": null,
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "large repo, 300 small files changed in the turn",
+      "wallMs": 17099,
+      "gitPerScenario": {
+        "total": 45,
+        "byCommand": {
+          "rev-parse": 3,
+          "status": 9,
+          "check-ignore": 3,
+          "config": 3,
+          "update-index": 3,
+          "read-tree": 3,
+          "add": 3,
+          "write-tree": 3,
+          "diff": 15
+        },
+        "indexBytes": 14400771
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 345.26,
+          "rounds": 3,
+          "git": {
+            "total": 4,
+            "byCommand": {
+              "rev-parse": 1,
+              "status": 2,
+              "check-ignore": 1
+            },
+            "indexBytes": 0,
+            "cumulative": 136
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 98304
+        },
+        {
+          "name": "end",
+          "msP50": 5122.8,
+          "rounds": 3,
+          "git": {
+            "total": 11,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1,
+              "read-tree": 1,
+              "add": 1,
+              "write-tree": 1,
+              "diff": 5
+            },
+            "indexBytes": 4800257,
+            "cumulative": 147
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 21823488
+        },
+        {
+          "name": "record-visible",
+          "msP50": 0.171333,
+          "rounds": 3,
+          "git": null,
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "one 50 MB text file changed (peak RSS)",
+      "wallMs": 53288,
+      "gitPerScenario": {
+        "total": 39,
+        "byCommand": {
+          "status": 9,
+          "rev-parse": 3,
+          "check-ignore": 3,
+          "config": 3,
+          "update-index": 3,
+          "read-tree": 3,
+          "add": 3,
+          "write-tree": 3,
+          "diff": 9
+        },
+        "indexBytes": 37443
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 536.43,
+          "rounds": 3,
+          "git": {
+            "total": 4,
+            "byCommand": {
+              "status": 2,
+              "rev-parse": 1,
+              "check-ignore": 1
+            },
+            "indexBytes": 0,
+            "cumulative": 181
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 884736
+        },
+        {
+          "name": "end",
+          "msP50": 17334.34,
+          "rounds": 3,
+          "git": {
+            "total": 9,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1,
+              "read-tree": 1,
+              "add": 1,
+              "write-tree": 1,
+              "diff": 3
+            },
+            "indexBytes": 12481,
+            "cumulative": 190
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 1824833536
+        },
+        {
+          "name": "record-visible",
+          "msP50": 0.153083,
+          "rounds": 3,
+          "git": null,
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "18 nested repositories, 3 changed",
+      "wallMs": 10141,
+      "gitPerScenario": {
+        "total": 324,
+        "byCommand": {
+          "rev-parse": 54,
+          "status": 108,
+          "config": 54,
+          "update-index": 54,
+          "read-tree": 9,
+          "add": 9,
+          "write-tree": 9,
+          "diff": 27
+        },
+        "indexBytes": 115920
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 404.42,
+          "rounds": 3,
+          "git": {
+            "total": 36,
+            "byCommand": {
+              "rev-parse": 18,
+              "status": 18
+            },
+            "indexBytes": 0,
+            "cumulative": 252
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 3244032
+        },
+        {
+          "name": "end",
+          "msP50": 1486.34,
+          "rounds": 3,
+          "git": {
+            "total": 72,
+            "byCommand": {
+              "config": 18,
+              "update-index": 18,
+              "status": 18,
+              "read-tree": 3,
+              "add": 3,
+              "write-tree": 3,
+              "diff": 9
+            },
+            "indexBytes": 38640,
+            "cumulative": 324
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 1556480
+        },
+        {
+          "name": "record-visible",
+          "msP50": 0.118,
+          "rounds": 3,
+          "git": null,
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        }
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "30 tool calls (60 events), no file changes",
+      "wallMs": 5226,
+      "gitPerScenario": {
+        "total": 21,
+        "byCommand": {
+          "status": 9,
+          "rev-parse": 3,
+          "check-ignore": 3,
+          "config": 3,
+          "update-index": 3
+        },
+        "indexBytes": 24291
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 257.64,
+          "rounds": 3,
+          "git": {
+            "total": 4,
+            "byCommand": {
+              "status": 2,
+              "rev-parse": 1,
+              "check-ignore": 1
+            },
+            "indexBytes": 0,
+            "cumulative": 544
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 32768
+        },
+        {
+          "name": "tool",
+          "msP50": 1042.18,
+          "rounds": 3,
+          "git": {
+            "total": 0,
+            "byCommand": {},
+            "indexBytes": 0,
+            "cumulative": 544
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 770048
+        },
+        {
+          "name": "end",
+          "msP50": 393.27,
+          "rounds": 3,
+          "git": {
+            "total": 3,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1
+            },
+            "indexBytes": 8097,
+            "cumulative": 547
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 262144
+        }
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "long transcript (50 MB) turn end",
+      "wallMs": 6824,
+      "gitPerScenario": {
+        "total": 45,
+        "byCommand": {
+          "rev-parse": 3,
+          "status": 9,
+          "check-ignore": 3,
+          "config": 6,
+          "read-tree": 6,
+          "update-index": 6,
+          "add": 6,
+          "write-tree": 6
+        },
+        "indexBytes": 36531
+      },
+      "stages": [
+        {
+          "name": "start",
+          "msP50": 917.25,
+          "rounds": 3,
+          "git": {
+            "total": 9,
+            "byCommand": {
+              "rev-parse": 1,
+              "status": 2,
+              "check-ignore": 1,
+              "config": 1,
+              "read-tree": 1,
+              "update-index": 1,
+              "add": 1,
+              "write-tree": 1
+            },
+            "indexBytes": 6848,
+            "cumulative": 570
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 32768
+        },
+        {
+          "name": "end",
+          "msP50": 1105.32,
+          "rounds": 3,
+          "git": {
+            "total": 6,
+            "byCommand": {
+              "config": 1,
+              "update-index": 1,
+              "status": 1,
+              "read-tree": 1,
+              "add": 1,
+              "write-tree": 1
+            },
+            "indexBytes": 5329,
+            "cumulative": 576
+          },
+          "parseBytes": 52429031,
+          "anchorBytes": 52429031,
+          "rssGrowthBytes": 47284224
+        }
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "commit one record with 0 / 1000 / 10000 existing records",
+      "wallMs": 393561,
+      "gitPerScenario": null,
+      "stages": [
+        {
+          "name": "commit",
+          "history": 0,
+          "msP50": 22.48,
+          "rounds": 1,
+          "git": {
+            "total": 0,
+            "byCommand": {},
+            "indexBytes": 0
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        },
+        {
+          "name": "commit",
+          "history": 1000,
+          "msP50": 28.45,
+          "rounds": 1,
+          "git": {
+            "total": 0,
+            "byCommand": {},
+            "indexBytes": 0
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 0
+        },
+        {
+          "name": "commit",
+          "history": 10000,
+          "msP50": 41.05,
+          "rounds": 1,
+          "git": {
+            "total": 0,
+            "byCommand": {},
+            "indexBytes": 0
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 16384
+        }
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "4 concurrent sessions x 5 turns on one workspace",
+      "wallMs": 16591,
+      "gitPerScenario": {
+        "total": 420,
+        "byCommand": {
+          "rev-parse": 60,
+          "status": 180,
+          "check-ignore": 60,
+          "config": 60,
+          "update-index": 60
+        },
+        "indexBytes": 485820
+      },
+      "stages": [
+        {
+          "name": "concurrent",
+          "msP50": 5473.17,
+          "rounds": 3,
+          "git": {
+            "total": 140,
+            "byCommand": {
+              "rev-parse": 20,
+              "status": 60,
+              "check-ignore": 20,
+              "config": 20,
+              "update-index": 20
+            },
+            "indexBytes": 161940,
+            "cumulative": 746
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 89997312,
+          "records": 20
+        }
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "recovery with 1000 completed session directories",
+      "wallMs": 6828,
+      "gitPerScenario": {
+        "total": 12,
+        "byCommand": {
+          "status": 6,
+          "rev-parse": 3,
+          "check-ignore": 3
+        },
+        "indexBytes": 0
+      },
+      "stages": [
+        {
+          "name": "recovery",
+          "msP50": 230.86,
+          "rounds": 3,
+          "git": {
+            "total": 4,
+            "byCommand": {
+              "status": 2,
+              "rev-parse": 1,
+              "check-ignore": 1
+            },
+            "indexBytes": 0,
+            "cumulative": 1030
+          },
+          "parseBytes": 0,
+          "anchorBytes": 0,
+          "rssGrowthBytes": 2244608
+        }
+      ]
+    }
+  ]
+}

@@ -3,9 +3,12 @@ import type { TraceEvent } from '@shared/trace'
 import { enqueuePrompt, editedPromptToTail, migrateSessionPromptQueue, nextDrainableQueuedPrompt, type QueuedPrompt } from './App'
 import {
   activeSteerIdentityMatches,
+  canDismissUnknownSteer,
   isSteerDrainBlocked,
+  isSteerRemovalBlocked,
   latestSteerCapability,
   latestSteerEvidence,
+  latestSteerEvidenceForTurns,
   removeQueuedPromptByMessageId,
   retainProtectedSteerPrompts,
   steerStateForMessage,
@@ -93,6 +96,40 @@ describe('renderer Steer queue contract', () => {
     expect(accepted).toMatchObject({ status: 'accepted' })
     expect(isSteerDrainBlocked(accepted)).toBe(true)
     expect(steerStateForMessage(unknown, { messageId: 'm', prompt: 'x', attachments: [], status: 'rejected' })).toEqual(unknown)
+  })
+
+  it('allows explicit dismissal only after the owning unknown run ends, without changing its receipt or replay eligibility', () => {
+    const unknown = prompt('m', { status: 'unknown' })
+    const item = event('unknown', { steer: { messageId: 'm', prompt: 'x', attachments: [], status: 'unknown' } })
+    const unfinished = { items: [item], done: false }
+    for (const turns of [[unfinished], [unfinished, { items: [], done: true }]]) {
+      const evidence = latestSteerEvidenceForTurns(turns).get('m')
+      expect(canDismissUnknownSteer(unknown.steer, evidence)).toBe(false)
+      expect(isSteerRemovalBlocked(unknown.steer, evidence)).toBe(true)
+    }
+    const evidence = latestSteerEvidenceForTurns([{ ...unfinished, done: true }])
+    expect(canDismissUnknownSteer(unknown.steer, evidence.get('m'))).toBe(true)
+    expect(isSteerRemovalBlocked(unknown.steer, evidence.get('m'))).toBe(false)
+    expect(isSteerDrainBlocked(unknown.steer)).toBe(true)
+    // Stop and session cleanup must not silently dismiss uncertainty.
+    expect(retainProtectedSteerPrompts([unknown], evidence, new Set())).toEqual([unknown])
+    expect(removeQueuedPromptByMessageId([unknown, prompt('next')], 'm')).toEqual([prompt('next')])
+    expect(evidence.get('m')?.status).toBe('unknown')
+    expect(item.steer?.status).toBe('unknown')
+    expect(unknown.steer?.status).toBe('unknown')
+  })
+
+  it('does not infer terminal receipt evidence from missing data or an old rejected attempt', () => {
+    const unknown = { status: 'unknown' as const }
+    const item = event('unknown', { steer: { messageId: 'm', prompt: 'x', attachments: [], status: 'unknown' } })
+    expect(isSteerRemovalBlocked(unknown)).toBe(true)
+    expect(isSteerRemovalBlocked(unknown, latestSteerEvidence([item]).get('m'))).toBe(true)
+    const receipt = latestSteerEvidenceForTurns([{ items: [item], done: true }]).get('m')!
+    expect(isSteerRemovalBlocked(unknown, { ...receipt, status: 'rejected' })).toBe(true)
+    expect(isSteerRemovalBlocked({ status: 'pending' }, receipt)).toBe(true)
+    expect(isSteerRemovalBlocked({ status: 'accepted' }, receipt)).toBe(true)
+    const accepted = steerStateForMessage(unknown, { ...receipt, status: 'accepted' })
+    expect(isSteerRemovalBlocked(accepted, receipt)).toBe(true)
   })
 
   it('blocks a new retry before its pending trace arrives and an ACK before queue-removal commits', () => {

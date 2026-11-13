@@ -9,6 +9,10 @@ import type { LocalEndpointHandlers } from './host-local-ops'
 // What Electron main supplies to RemoteHostService. Kept apart from the service
 // lifecycle so the contract can be read on its own.
 export interface RemoteHostServiceDependencies {
+  // Direct route for paired phones on the same network. Bootstrap passes it by
+  // default (maintainer decision on bingjiang0611/scry#52; SCRY_REMOTE_LAN=0
+  // turns it off); absent here means no listener, e.g. in tests.
+  lan?: { port?: number; host?: string }
   readDesktop?: HostControllerFactoryDependencies['readDesktop']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']

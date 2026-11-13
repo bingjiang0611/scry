@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld(${JSON.stringify(PRELOAD_BRIDGE_KEY)}, {
 `
 
 export const INDEX_HTML = '<!doctype html><meta charset="utf-8">' +
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:">' +
+  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'self\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src data:">' +
   '<link rel="stylesheet" href="renderer.css"><div id="root" style="height:100vh"></div><script src="renderer.js"></script>'
 
 /**
@@ -151,6 +151,7 @@ export async function buildLiveFixture({ outDir, root = defaultRoot, mainEntry }
   const { build } = await import('vite')
   await build({
     configFile: false, root: outDir, envDir: outDir, logLevel: 'error', esbuild: { jsx: 'automatic' },
+    worker: { format: 'es' },
     plugins: [liveInstrumentationPlugin(root)],
     // Production React with the profiling renderer, so <Profiler> reports commit durations.
     resolve: { alias: [{ find: '@shared', replacement: join(root, 'src/shared') }, { find: /^react-dom$/, replacement: 'react-dom/profiling' }] },

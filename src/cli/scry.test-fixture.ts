@@ -6,6 +6,11 @@ import { afterEach, beforeEach, vi } from 'vitest'
 
 
 export const roots: string[] = []
+const cleanups: (() => Promise<void>)[] = []
+
+export function beforeWorkspaceCleanup(cleanup: () => Promise<void>): void {
+  cleanups.push(cleanup)
+}
 
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), 'scry-cli-test-home-'))
@@ -15,6 +20,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) await cleanup()
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllEnvs()

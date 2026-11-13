@@ -9,15 +9,58 @@ function fixture(endTime) {
   let left = 0
   const animation = { pending: true, playState: 'running', effect: { getComputedTiming: () => ({ endTime }) } }
   const element = { getBoundingClientRect: () => ({ x: left, y: 0, left, top: 0, width: 40, height: 40 }),
-    contains: () => true, getAnimations: () => [animation], parentElement: null,
+    contains: () => true, getAnimations: () => [animation], parentElement: null, getRootNode: () => document,
     tagName: 'BUTTON', id: 'target', getAttribute: () => 'location-button', closest: () => null }
-  vi.stubGlobal('document', { querySelector: () => element, elementFromPoint: () => element, getAnimations: () => [animation], hasFocus: () => true, activeElement: element })
+  vi.stubGlobal('document', { querySelector: () => element, querySelectorAll: query => document.querySelector(query) ? [document.querySelector(query)] : [],
+    elementFromPoint: () => element, getAnimations: () => [animation], hasFocus: () => true, activeElement: element })
   vi.stubGlobal('requestAnimationFrame', callback => { frames.push(callback); return frames.length })
   vi.stubGlobal('cancelAnimationFrame', () => {})
   return { animation, element, move: value => { left = value }, frame: async () => { frames.shift()(); await Promise.resolve() } }
 }
 
 describe('native pointer readiness', () => {
+  it('uses actual shadow-root hit tests and composed event receipts', async () => {
+    const f = fixture(150)
+    f.element.getAnimations = () => []
+    f.element.contains = node => node === f.element
+    const host = { getAnimations: () => [], getRootNode: () => document, parentElement: null }
+    const shadow = { host, querySelectorAll: () => [f.element], elementFromPoint: () => f.element }
+    host.shadowRoot = shadow
+    f.element.getRootNode = () => shadow
+    document.querySelectorAll = query => query === '*' ? [host] : []
+    document.elementFromPoint = () => host
+    let receipt
+    document.addEventListener = (_, listener) => { receipt = listener }
+    vi.stubGlobal('window', {})
+    const pending = nativeUiPointer('.location-button', { timeoutMs: 7000, scroll: false, captureReceipt: true })
+    await f.frame(); await f.frame()
+    await expect(pending).resolves.toEqual({ x: 20, y: 20 })
+    receipt({ isTrusted: true, target: host, composedPath: () => [f.element, shadow, host, document] })
+    expect(window.__nativeUiPointerReceipt).toMatchObject({ trusted: true, targetMatched: true })
+  })
+  it('scopes a shadow selector to its containing remote pane', async () => {
+    const f = fixture(150)
+    f.element.getAnimations = () => []
+    f.element.contains = node => node === f.element
+    const host = { getAnimations: () => [], getRootNode: () => document, parentElement: null }
+    const shadow = { host, querySelectorAll: query => ['*', '.row'].includes(query) ? [f.element] : [], elementFromPoint: () => f.element }
+    host.shadowRoot = shadow
+    f.element.getRootNode = () => shadow
+    document.querySelectorAll = query => ['*', '#remote file-tree-container'].includes(query) ? [host] : []
+    document.elementFromPoint = () => host
+    const pending = nativeUiPointer('#remote file-tree-container >>> .row', { timeoutMs: 7000, scroll: false, captureReceipt: false })
+    await f.frame(); await f.frame()
+    await expect(pending).resolves.toEqual({ x: 20, y: 20 })
+  })
+  it('matches width-truncated tree labels by their full row path', async () => {
+    const f = fixture(150)
+    f.element.getAnimations = () => []
+    f.element.textContent = 'workbench-co…'
+    f.element.getAttribute = attribute => attribute === 'data-item-path' ? 'src/workbench-context.ts' : null
+    const pending = nativeUiPointer('[data-item-path]', { text: 'workbench-context.ts', timeoutMs: 7000, scroll: false, captureReceipt: false })
+    await f.frame(); await f.frame()
+    await expect(pending).resolves.toEqual({ x: 20, y: 20 })
+  })
   it('does not dispatch at temporarily stable geometry before a finite transition moves the control', async () => {
     const f = fixture(150)
     let result

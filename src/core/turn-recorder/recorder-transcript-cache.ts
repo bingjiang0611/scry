@@ -3,9 +3,10 @@ import { open as openFile, stat } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { parseTranscriptSnapshot } from './recorder-transcript-parse.js'
-import { nestedRecord, stringAt, type TranscriptRead } from './recorder-contracts.js'
+import { piTranscriptOffsets } from './recorder-pi-transcript.js'
+import { nestedRecord, stringAt, type PiTranscriptAnchor, type TranscriptRead } from './recorder-contracts.js'
 import { textContent } from './recorder-codex-calls.js'
-import type { TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { recordTranscriptAnchorBytes, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 
 interface TranscriptSnapshotCacheEntry {
   key: string
@@ -39,12 +40,15 @@ function transcriptSnapshotCacheKey(args: {
   requestSetId?: string
   sessionId?: string
   cwd?: string
+  piTranscriptAnchor?: PiTranscriptAnchor
+  endOffset?: number
   identity: TranscriptSnapshotIdentity
 }): string {
   return JSON.stringify([
     args.path, args.startOffset ?? 0, args.stable, args.runId, args.provider,
     args.promptHash ?? '', args.providerTurnId ?? '', args.requestSetId ?? '', args.sessionId ?? '', args.cwd ?? '', args.identity.dev, args.identity.ino,
-    args.identity.size, args.identity.mtimeMs, args.identity.ctimeMs
+    args.identity.size, args.identity.mtimeMs, args.identity.ctimeMs,
+    args.piTranscriptAnchor?.beforeEntryId ?? '', args.piTranscriptAnchor?.afterEntryId ?? '', args.endOffset ?? args.identity.size
   ])
 }
 
@@ -115,16 +119,167 @@ function transcriptLineAnchor(
   return matchesHash || !promptHash && !providerTurnId ? 'turn' : undefined
 }
 
-async function transcriptAnchorOffset(
+interface AnchorScan {
+  /** Byte offset the window starts at (the newline before the anchor line, or 0). */
+  offset: number
+  /** End of the last newline-terminated line; an unfinished tail must be rescanned. */
+  scannedTo: number
+}
+
+interface AnchorCacheEntry extends AnchorScan {
+  size: number
+  dev: number
+  ino: number
+}
+
+const ANCHOR_CACHE_LIMIT = 32
+const anchorCache = new Map<string, AnchorCacheEntry>()
+
+export function resetTranscriptAnchorCache(): void {
+  anchorCache.clear()
+}
+
+function rememberAnchor(key: string, entry: AnchorCacheEntry): void {
+  anchorCache.delete(key)
+  anchorCache.set(key, entry)
+  while (anchorCache.size > ANCHOR_CACHE_LIMIT) {
+    const oldest = anchorCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    anchorCache.delete(oldest)
+  }
+}
+
+/**
+ * The newest matching anchor in [from, endOffset), read forward only. Returns -1 when that region
+ * holds none. A cached anchor is a candidate, never the answer: the same prompt can be sent twice,
+ * and the full backwards scan always returns the latest match.
+ */
+async function latestAnchorFrom(
+  path: string,
+  from: number,
+  endOffset: number,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): Promise<AnchorScan> {
+  if (from >= endOffset) return { offset: -1, scannedTo: from }
+  const handle = await openFile(path, 'r')
+  const chunkBytes = 1024 * 1024
+  let cursor = from
+  let pending = Buffer.alloc(0)
+  let pendingStart = from
+  let latest = -1
+  try {
+    while (cursor < endOffset) {
+      const length = Math.min(chunkBytes, endOffset - cursor)
+      const chunk = Buffer.allocUnsafe(length)
+      const { bytesRead } = await handle.read(chunk, 0, length, cursor)
+      if (bytesRead !== length) break
+      recordTranscriptAnchorBytes(bytesRead)
+      const combined = pending.length ? Buffer.concat([pending, chunk]) : chunk
+      let lineStart = 0
+      for (;;) {
+        const newline = combined.indexOf(0x0a, lineStart)
+        if (newline < 0) break
+        if (newline > lineStart && transcriptLineAnchor(
+          combined.subarray(lineStart, newline).toString('utf8'), provider, promptHash, providerTurnId
+        )) {
+          latest = Math.max(latest, Math.max(0, pendingStart + lineStart - 1))
+        }
+        lineStart = newline + 1
+      }
+      pending = Buffer.from(combined.subarray(lineStart))
+      pendingStart += lineStart
+      cursor += bytesRead
+    }
+  } finally {
+    await handle.close()
+  }
+  // A complete JSON value at EOF is an anchor too, but its line must be rescanned if appended.
+  if (cursor === endOffset && pending.length && transcriptLineAnchor(pending.toString('utf8'), provider, promptHash, providerTurnId)) {
+    latest = Math.max(latest, Math.max(0, pendingStart - 1))
+  }
+  return { offset: latest, scannedTo: pendingStart }
+}
+
+/** Read the single JSONL line a cached offset points at (the offset may be its preceding newline). */
+async function lineAtAnchor(path: string, offset: number): Promise<string | undefined> {
+  const handle = await openFile(path, 'r')
+  const buffer = Buffer.allocUnsafe(8192)
+  try {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
+    recordTranscriptAnchorBytes(bytesRead)
+    const view = buffer.subarray(0, bytesRead)
+    const start = view[0] === 0x0a ? 1 : 0
+    const end = view.indexOf(0x0a, start)
+    if (end < 0) return undefined
+    return view.subarray(start, end).toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Reuse a previously located anchor for the same prompt identity.
+ *
+ * Correctness comes from re-proving every part of the claim: the path is the same file, the line at
+ * the cached offset still passes the anchor test, and only bytes appended since the last scan are
+ * searched for a newer match. Anything unprovable falls back to the full backwards scan.
+ */
+async function anchorOffsetFor(
   path: string,
   endOffset: number,
   provider: ProviderId,
   promptHash?: string,
   providerTurnId?: string
 ): Promise<number> {
-  if (endOffset <= 0 || !promptHash && !providerTurnId) return 0
+  // Codex anchors are found through a forward state machine over each scanned chunk, so a single
+  // line cannot re-prove one; its scan also stops at the turn boundary, which is the same work.
+  if (provider === 'codex' || !promptHash && !providerTurnId) {
+    return (await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)).offset
+  }
+  const key = JSON.stringify([path, provider, promptHash ?? '', providerTurnId ?? ''])
+  const cached = anchorCache.get(key)
+  if (cached) {
+    let reusable = false
+    try {
+      const info = await stat(path)
+      // Append-only growth is proven by dev/ino identity and a size that still covers what was
+      // already scanned; a replaced or truncated file cannot reuse this offset.
+      if (info.dev === cached.dev && info.ino === cached.ino && info.size >= cached.size) {
+        const line = await lineAtAnchor(path, cached.offset)
+        reusable = line !== undefined && !!transcriptLineAnchor(line, provider, promptHash, providerTurnId)
+      }
+    } catch {
+      // An unreadable path falls through to the authoritative scan.
+    }
+    if (reusable) {
+      const newer = await latestAnchorFrom(path, cached.scannedTo, endOffset, provider, promptHash, providerTurnId)
+      const offset = newer.offset >= 0 ? newer.offset : cached.offset
+      rememberAnchor(key, { offset, scannedTo: newer.scannedTo, size: endOffset, dev: cached.dev, ino: cached.ino })
+      return offset
+    }
+    anchorCache.delete(key)
+  }
+  const scan = await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
+  try {
+    const info = await stat(path)
+    rememberAnchor(key, { ...scan, size: endOffset, dev: info.dev, ino: info.ino })
+  } catch {}
+  return scan.offset
+}
+
+async function transcriptAnchorOffset(
+  path: string,
+  endOffset: number,
+  provider: ProviderId,
+  promptHash?: string,
+  providerTurnId?: string
+): Promise<AnchorScan> {
+  if (endOffset <= 0 || !promptHash && !providerTurnId) return { offset: 0, scannedTo: 0 }
   const handle = await openFile(path, 'r')
   const chunkBytes = 1024 * 1024
+  let scannedTo = 0
   let cursor = endOffset
   let suffix = Buffer.alloc(0)
   let matchedUserOffset: number | undefined
@@ -134,7 +289,12 @@ async function transcriptAnchorOffset(
       const start = Math.max(0, cursor - chunkBytes)
       const chunk = Buffer.allocUnsafe(cursor - start)
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
-      if (bytesRead !== chunk.length) return 0
+      recordTranscriptAnchorBytes(bytesRead)
+      if (bytesRead !== chunk.length) return { offset: 0, scannedTo: 0 }
+      if (scannedTo === 0) {
+        const newline = chunk.lastIndexOf(0x0a)
+        if (newline >= 0) scannedTo = start + newline + 1
+      }
       const combined = Buffer.concat([chunk, suffix])
       let lineEnd = combined.length
       for (let index = combined.length - 1; index >= 0; index--) {
@@ -145,12 +305,12 @@ async function transcriptAnchorOffset(
           const anchor = transcriptLineAnchor(combined.subarray(lineStart, lineEnd).toString('utf8'), provider, promptHash, providerTurnId)
           const windowOffset = Math.max(0, absoluteOffset - 1)
           if (provider !== 'codex') {
-            if (anchor === 'turn') return windowOffset
+            if (anchor === 'turn') return { offset: windowOffset, scannedTo }
           } else {
             const anyAnchor = transcriptLineAnchor(
               combined.subarray(lineStart, lineEnd).toString('utf8'), provider, undefined, undefined
             )
-            if (matchedTurnOffset != null && anyAnchor === 'turn') return windowOffset
+            if (matchedTurnOffset != null && anyAnchor === 'turn') return { offset: windowOffset, scannedTo }
             if (anchor === 'turn' || matchedUserOffset != null && anyAnchor === 'turn') {
               matchedTurnOffset = windowOffset
             } else if (anchor === 'user' && matchedUserOffset == null) {
@@ -163,21 +323,23 @@ async function transcriptAnchorOffset(
       suffix = combined.subarray(0, lineEnd)
       // NUL cannot occur in a valid JSONL record. Sparse/uninitialized prefixes are
       // therefore a hard format boundary, not evidence that must be loaded to byte 0.
-      if (matchedTurnOffset != null && suffix.includes(0)) return matchedTurnOffset
+      if (matchedTurnOffset != null && suffix.includes(0)) return { offset: matchedTurnOffset, scannedTo }
       cursor = start
     }
     if (suffix.length) {
       const firstLine = suffix.toString('utf8')
       const anchor = transcriptLineAnchor(firstLine, provider, promptHash, providerTurnId)
-      if (anchor === 'turn') return 0
-      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return 0
+      if (anchor === 'turn') return { offset: 0, scannedTo }
+      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return { offset: 0, scannedTo }
       if (anchor === 'user' && matchedUserOffset == null) matchedUserOffset = 0
     }
-    return matchedTurnOffset ?? matchedUserOffset ?? 0
+    return { offset: matchedTurnOffset ?? matchedUserOffset ?? 0, scannedTo }
   } finally {
     await handle.close()
   }
 }
+
+/** Scan Pi JSONL only for native IDs; the subsequent snapshot is bounded to this turn's entry range. */
 
 async function cachedTranscriptSnapshot(args: {
   path: string
@@ -190,6 +352,8 @@ async function cachedTranscriptSnapshot(args: {
   requestSetId?: string
   sessionId?: string
   cwd?: string
+  piTranscriptAnchor?: PiTranscriptAnchor
+  endOffset?: number
   identity: TranscriptSnapshotIdentity
 }): Promise<TranscriptRead> {
   const key = transcriptSnapshotCacheKey(args)
@@ -201,7 +365,7 @@ async function cachedTranscriptSnapshot(args: {
     return cached.read
   }
   transcriptSnapshotCacheMisses++
-  const read = await parseTranscriptSnapshot({ ...args, endOffset: args.identity.size })
+  const read = await parseTranscriptSnapshot({ ...args, endOffset: args.endOffset ?? args.identity.size })
   // A read that raced truncation/rotation must be retried; caching it under the stable identity
   // would otherwise keep a recoverable turn pending for the lifetime of this process.
   // Agent sidecars have identities independent of the root log. Do not cache a
@@ -216,6 +380,17 @@ async function cachedTranscriptSnapshot(args: {
   return read
 }
 
+function missingTranscript(providerTurnId?: string, promptHash?: string): TranscriptRead {
+  return {
+    stable: true,
+    observed: false,
+    ...(providerTurnId || promptHash ? { identityMatched: false } : {}),
+    complete: true,
+    events: [],
+    observable: { tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false }
+  }
+}
+
 export async function stableTranscript(
   path: string,
   runId: string,
@@ -225,52 +400,78 @@ export async function stableTranscript(
   startOffset?: number,
   requestSetId?: string,
   sessionId?: string,
-  cwd?: string
+  cwd?: string,
+  piTranscriptAnchor?: PiTranscriptAnchor,
+  /**
+   * Frozen end of the readable window. A captured session records this at stop time so the next
+   * prompt, written after stop, can never be parsed back into the turn that just ended.
+   */
+  endOffsetLimit?: number
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
+  if (provider === 'pi' && !piTranscriptAnchor) {
+    return { stable: true, observed: false, complete: false, events: [], observable: {
+      tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false
+    } }
+  }
   // Recompute an exact JSONL turn anchor. Older persisted offsets were heuristic
   // byte rewinds and may begin inside a large prompt, so they are never evidence.
   startOffset = 0
   let previous = -1
   let latestIdentity: TranscriptSnapshotIdentity | undefined
+  if (endOffsetLimit != null && !(provider === 'pi' && piTranscriptAnchor)) {
+    let frozenIdentity: TranscriptSnapshotIdentity
+    try {
+      frozenIdentity = transcriptIdentity(await stat(path))
+    } catch {
+      return missingTranscript(providerTurnId, promptHash)
+    }
+    const boundary = Math.min(frozenIdentity.size, Math.max(0, endOffsetLimit))
+    return cachedTranscriptSnapshot({
+      path,
+      startOffset: await anchorOffsetFor(path, boundary, provider, promptHash, providerTurnId),
+      stable: true,
+      runId,
+      provider,
+      promptHash,
+      providerTurnId,
+      requestSetId,
+      sessionId,
+      cwd,
+      endOffset: boundary,
+      identity: frozenIdentity
+    })
+  }
   for (let attempt = 0; attempt < 3; attempt++) {
     let identity: TranscriptSnapshotIdentity
     try {
-      const info = await stat(path)
-      identity = {
-        dev: info.dev,
-        ino: info.ino,
-        size: info.size,
-        mtimeMs: info.mtimeMs,
-        ctimeMs: info.ctimeMs
-      }
+      identity = transcriptIdentity(await stat(path))
     } catch {
-      return {
-        stable: true,
-        observed: false,
-        ...(providerTurnId || promptHash ? { identityMatched: false } : {}),
-        complete: true,
-        events: [],
-        observable: {
-          tools: false,
-          skills: false,
-          mcps: false,
-          hooks: false,
-          usage: false,
-          files: false,
-          errors: false
-        }
-      }
+      return missingTranscript(providerTurnId, promptHash)
     }
     latestIdentity = identity
     if (identity.size === previous) {
-      startOffset = await transcriptAnchorOffset(path, identity.size, provider, promptHash, providerTurnId)
-      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, identity })
+      let endOffset = identity.size
+      if (provider === 'pi' && piTranscriptAnchor) {
+        const offsets = await piTranscriptOffsets(path, identity.size, piTranscriptAnchor)
+        startOffset = offsets.startOffset
+        endOffset = offsets.endOffset
+      } else {
+        startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId)
+      }
+      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, piTranscriptAnchor, endOffset, identity })
     }
     previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  if (latestIdentity) startOffset = await transcriptAnchorOffset(path, latestIdentity.size, provider, promptHash, providerTurnId)
+  let endOffset = latestIdentity?.size
+  if (latestIdentity && provider === 'pi' && piTranscriptAnchor) {
+    const offsets = await piTranscriptOffsets(path, latestIdentity.size, piTranscriptAnchor)
+    startOffset = offsets.startOffset
+    endOffset = offsets.endOffset
+  } else if (latestIdentity) {
+    startOffset = await anchorOffsetFor(path, latestIdentity.size, provider, promptHash, providerTurnId)
+  }
   return latestIdentity
     ? cachedTranscriptSnapshot({
         path,
@@ -283,6 +484,8 @@ export async function stableTranscript(
         requestSetId,
         sessionId,
         cwd,
+        piTranscriptAnchor,
+        endOffset,
         identity: latestIdentity
       })
     : parseTranscriptSnapshot({

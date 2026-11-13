@@ -6,6 +6,7 @@ import type { ComposerDraftStore } from './composer-drafts'
 import type { DraftAttachment, QueuedPrompt, SessionEvidenceGap } from './app-model'
 import type { useWorkspaceState } from './hooks/useWorkspaceState'
 import type { Turn } from './format'
+import type { RendererSteerEvidence } from './steer'
 import type { SlashCmd } from '@shared/trace'
 import { LOCAL_MACHINE } from './components/LocationPicker'
 import { SessionChatView } from './components/ChatView'
@@ -36,7 +37,7 @@ export interface AppChatPropsContext {
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
   steerCapability: import('@shared/runtime').AgentSteerCapability | null
-  steerEvidenceByMessageId: ReadonlyMap<string, import('@shared/runtime').AgentSteerEvidence & { eventId: string }>
+  steerEvidenceByMessageId: ReadonlyMap<string, RendererSteerEvidence>
   editingQueuedPromptId: string | null
   movedQueuedPromptId: string | null
   slashOpen: boolean

@@ -201,10 +201,12 @@ export function useOverviewPanelModel({
   const dangerHi = dangers.filter((e) => e.danger!.level === 'danger').length
   const toolErrorRows = useMemo(() => overviewToolErrors(all), [all])
   const toolErrors = toolErrorRows.length
-  const turnError = turns.some((t) => !!t.error)
+  const failedTurns = turns.filter((t) => !!t.error).length
+  const turnError = failedTurns > 0
   const hasError = toolErrors > 0 || turnError
   let vstate: 'ok' | 'warn' | 'bad' = 'ok'
-  let judge = '轮次已结束'
+  // 只在还活着的状态（运行中、高危、可疑）占一行；已完成且无风险时不写“轮次已结束”。
+  let judge: string | null = null
   if (busy) {
     vstate = 'warn'
     const activeTurn = turns.find(turn => !turn.done && !turn.error)
@@ -214,10 +216,11 @@ export function useOverviewPanelModel({
     judge = `${dangerHi} 处高危操作`
   } else if (hasError) {
     vstate = 'warn'
-    judge = toolErrors > 0 ? `轮次已结束 · ${toolErrors} 处工具报错` : '轮次已结束 · 有报错'
+    // 失败轮次在「每轮调用」里没有对应 chip，必须在这里保留可见证据；只有工具报错时不重复成一句话。
+    if (turnError) judge = `${failedTurns} 轮失败`
   } else if (dangers.length > 0) {
     vstate = 'warn'
-    judge = `轮次已结束 · ${dangers.length} 处可疑操作`
+    judge = `${dangers.length} 处可疑操作`
   }
   const diffFiles = gitDiff?.files ?? []
   const diffAdd = diffFiles.reduce((s, d) => s + d.added, 0)

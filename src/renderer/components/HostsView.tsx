@@ -15,7 +15,7 @@ import './hosts-view.css'
 // Connect-time refusals include the version gate: say which end to upgrade
 // instead of showing a raw protocol code.
 function errorText(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = copy.errorText(error)
   if (message.includes('desktop_protocol_host_older')) return REMOTE_SESSION_COPY.protocolHostOlder('远端主机')
   if (message.includes('desktop_protocol_client_older')) return REMOTE_SESSION_COPY.protocolClientOlder
   if (message.includes('desktop_protocol_mismatch') || message.includes('desktop_protocol_missing')) return REMOTE_SESSION_COPY.protocolMismatch

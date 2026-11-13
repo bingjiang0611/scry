@@ -1,9 +1,25 @@
 import { useRef, useState } from 'react'
 import { SessionChatView } from '../../src/renderer/components/ChatView'
+import { CliPicker } from '../../src/renderer/components/CliPicker'
 import { createComposerDraftStore } from '../../src/renderer/composer-drafts'
 import { updateSessionComposerDraft } from '../../src/renderer/App'
 
 const noop = () => {}
+
+// 合成 Provider，只用于验证菜单的键盘与焦点行为；不探测本机 CLI。
+const pickerAgents = [
+  { id: 'claude', name: 'Claude Code', bin: 'claude', path: '/usr/local/bin/claude', version: '2.0.0' },
+  { id: 'codex', name: 'Codex', bin: 'codex', path: '/usr/local/bin/codex', version: '0.9.0' }
+]
+
+export function AgentPickerFixture() {
+  const [selected, setSelected] = useState('claude')
+  const [open, setOpen] = useState(false)
+  return <section id="agent-picker-fixture" data-selected={selected} data-open={open}>
+    <CliPicker agents={pickerAgents} selectedId={selected} onSelect={setSelected} onRescan={noop}
+      open={open} onOpenChange={setOpen} />
+  </section>
+}
 
 export function ComposerProjectFixture() {
   const [started, setStarted] = useState(false)

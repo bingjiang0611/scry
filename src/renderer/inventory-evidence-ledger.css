@@ -228,7 +228,7 @@
   background: transparent;
   color: var(--dim2);
   font: 620 12.5px/1 var(--font-ui);
-  transition: color var(--dur-micro) linear;
+  transition: color var(--duration-hover) var(--ease-out);
 }
 
 .skill-scope-tabs button::after {
@@ -328,7 +328,7 @@
   background: var(--panel2);
   color: var(--accent);
   font: 600 12px/1 var(--font-ui);
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear, color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .inventory-toolbar__count {
@@ -433,7 +433,7 @@
   border-radius: var(--r-pill);
   corner-shape: round;
   background: var(--panel3);
-  transition: background-color var(--dur-micro) linear, border-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
 .inventory-switch__track > span {
@@ -445,7 +445,7 @@
   border-radius: 50%;
   corner-shape: round;
   background: var(--dim);
-  transition: background-color var(--dur-micro) linear, transform var(--dur-fast) var(--ease-struct);
+  transition: background-color var(--duration-hover) var(--ease-out), transform var(--duration-overshoot) var(--ease-overshoot);
 }
 
 .inventory-switch input:checked + .inventory-switch__track {
@@ -481,7 +481,7 @@
   gap: 18px;
   padding: 11px 22px;
   border-bottom: 1px solid var(--border3);
-  transition: background-color var(--dur-micro) linear;
+  transition: background-color var(--duration-hover) var(--ease-out);
 }
 
 .skill-ledger__main {

@@ -21,7 +21,7 @@ export function runStructuralTransition(kind: StructuralKind, commit: () => void
   const animation = page.animate(reduced || kind === 'session'
     ? [{ opacity: 0 }, { opacity: 1 }]
     : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }],
-  { duration: reduced ? 120 : kind === 'page' ? 240 : 180, easing: reduced ? 'linear' : MOTION.easeOut })
+  { duration: reduced ? MOTION.durationReduced : MOTION.durationLg, easing: MOTION.easeOut })
   animation.id = 'scry-structure'
   const unsubscribe = subscribeReducedMotion(value => { if (value) cancel() })
   const finish = (): void => {

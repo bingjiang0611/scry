@@ -5,9 +5,9 @@ max_score: 36
 na_heuristics: 9
 p0_count: 0
 p1_count: 2
-target_identity: "file:/Users/baobingjiang/IdeaProjects/vibecoding/scry/src/renderer/components/LlmPerformancePanel.tsx"
+target_identity: "file:/Users/<user>/IdeaProjects/vibecoding/scry/src/renderer/components/LlmPerformancePanel.tsx"
 target_fingerprint: "sha256:67eb8f6cf9ac20343ffb3ae51945a27c3846ec65e3c8791876870c3a7f852420"
-target_path: /Users/baobingjiang/IdeaProjects/vibecoding/scry/src/renderer/components/LlmPerformancePanel.tsx
+target_path: /Users/<user>/IdeaProjects/vibecoding/scry/src/renderer/components/LlmPerformancePanel.tsx
 timestamp: 2026-10-21T07-25-41Z
 slug: src-renderer-components-llmperformancepanel-tsx
 ---

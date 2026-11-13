@@ -6,6 +6,7 @@ import { ConversationAdoptionDialog } from './ConversationAdoptionDialog'
 import type { SessionMeta } from '../env'
 import { ModalFrame, requestModalClose } from './Modals'
 import { usePresence } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
@@ -26,7 +27,7 @@ export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
 }) {
   const [editing, setEditing] = useState<'rename' | 'adopt'>()
   const provider = target.session.providerId
-  const presence = usePresence({ onClose, exitMs: 100, onExitStart: () => target.trigger.focus() })
+  const presence = usePresence({ onClose, exitMs: MOTION.durationExitSm, onExitStart: () => target.trigger.focus() })
   const canAdopt = Boolean(onAdopted && !target.session.agentProfileId && (provider === 'claude' || provider === 'codex'))
   const menuRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {

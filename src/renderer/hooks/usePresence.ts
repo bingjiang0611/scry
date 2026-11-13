@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefCallback } from 'react'
 import { flushSync } from 'react-dom'
-import { prefersReducedMotion } from '../motion'
+import { MOTION, prefersReducedMotion } from '../motion'
+
+// Layout effects are the safe measurement point in the browser; the node-only
+// unit harness renders without a DOM.
+export const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export type PresenceState = 'enter' | 'exit'
 export type PresenceCloseReason = 'button' | 'escape' | 'backdrop' | 'pointer' | 'replace' | 'confirm'
@@ -79,7 +83,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     if (node) { node.dataset.state = 'exit'; node.inert = true }
     setState('exit')
     onExitStartRef.current?.()
-    const fallbackMs = (prefersReducedMotion() ? 120 : exitMs) + 40
+    const fallbackMs = (prefersReducedMotion() ? MOTION.durationReduced : exitMs) + 40
     // An exit that never reports animationend still has to be removed. The ceiling is measured
     // from the close request, so following a late animation start can never postpone removal
     // past it; that keeps slow or frame-starved renderers bounded instead of hanging.
@@ -133,4 +137,22 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     return () => { closed.current = true; clearExit() }
   }, [clearExit])
   return { state, ref, requestClose, finishNow: finish, reset }
+}
+
+/**
+ * Presence driven by an `open` flag: callers keep setting `open` exactly as before
+ * and only swap `open &&` for `present &&` when rendering, so the exit animation
+ * still gets its DOM. Parent-driven closes are covered because the effect watches
+ * the flag, not the event that changed it.
+ */
+export function useOpenPresence(open: boolean) {
+  const [present, setPresent] = useState(open)
+  const latestOpen = useRef(open)
+  latestOpen.current = open
+  const presence = usePresence({ exitMs: MOTION.durationExitSm, onClose: () => { if (!latestOpen.current) setPresent(false) } })
+  useBrowserLayoutEffect(() => {
+    if (open) { presence.reset(); setPresent(true) }
+    else if (present) presence.requestClose('replace')
+  }, [open])
+  return { ...presence, present }
 }

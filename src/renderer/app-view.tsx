@@ -7,6 +7,7 @@ import type { ExecutionLocation } from './components/LocationPicker'
 import type { RightSurfaceAction } from './right-surface'
 import { appendMetaPrompt } from './meta-prompts'
 import { composerDraftKey } from './composer-drafts'
+import { focusComposerUnlessFocusMoved } from './composer-focus'
 import { usePinnedSummaryVisibility } from './components/PinnedSummary'
 import { LocationPicker } from './components/LocationPicker'
 import { remoteDraftKey } from './components/RemoteChat'
@@ -125,7 +126,7 @@ export function useAppView(context: AppViewContext) {
   const changeView = (next: AppView): boolean => {
     if (view === 'remote' && next !== 'remote' && remoteWorkspaceDirty && !window.confirm(REMOTE_ACCESS_COPY.discardWorkspaceChanges)) return false
     setRemoteWorkspaceDirty(false)
-    if (next !== view) sessionNavigationSeqRef.current += 1
+    if (next !== view && next !== 'meta-prompts' && view !== 'meta-prompts') sessionNavigationSeqRef.current += 1
     cancelPaneMotion()
     runStructuralTransition('page', () => setView(next))
     if (next === 'analytics') integrations.loadAnalytics()
@@ -158,7 +159,9 @@ export function useAppView(context: AppViewContext) {
     void (async () => {
       try {
         const sourceTarget = legacyAdoptionSourceTarget(integrations.selectedId)
-        const destination = conversationTarget(agentId)
+        // The destination is the new send target, so it names the registered Pi profile of
+        // the agent the user just picked; the source keeps the identity it was recorded as.
+        const destination = conversationTarget(agentId, undefined, integrations.agents)
         const source = {
           providerId: sourceTarget.providerId,
           ...(sourceTarget.agentProfileId ? { agentProfileId: sourceTarget.agentProfileId } : {}),
@@ -271,7 +274,7 @@ export function useAppView(context: AppViewContext) {
   }
   const returnFromMetaPrompts = (): void => {
     changeView(metaPromptTarget.current.view)
-    window.setTimeout(() => taRef.current?.focus(), 0)
+    focusComposerUnlessFocusMoved(taRef, document.activeElement)
   }
   const insertMetaPrompt = (body: string): void => {
     const target = metaPromptTarget.current

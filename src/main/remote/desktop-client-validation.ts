@@ -54,11 +54,13 @@ export interface StoredConnection {
   autoConnect?: boolean
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
-export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1 }
+export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1; managedWorktrees?: 1 }
 export interface RunStatusCursor {
   cursor: number
   scryRunId?: string
   externalSessionId?: string
+  // The run's own cwd (a worktree start runs outside the submitted project).
+  cwd?: string
   // Last lifecycle state handed back to the caller, for change detection.
   state?: string
 }

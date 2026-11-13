@@ -3,6 +3,7 @@ import type { ProviderId } from '@shared/provider'
 import type { AgentRunControls } from '@shared/runtime'
 import type { ConversationSummary } from '@shared/conversation-api'
 import type { AppView } from './app-types'
+import type { Turn } from './format-types'
 import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 
 export interface SideChatScope {
@@ -11,9 +12,20 @@ export interface SideChatScope {
   source?: SideChatSource
   /** Runtime intent copied from the parent controls; main revalidates it on send. */
   target?: SideChatInitialTarget
-  hasCompletedTurn: boolean
+  hasTerminalTurn: boolean
   /** Set when no child can be created at all, with the real reason. */
   unavailableReason?: string
+}
+
+/**
+ * How many displayed turns are terminal evidence a snapshot could freeze.
+ *
+ * `done` is a settled turn and `error` is terminal even when the settled flag never
+ * arrived. A `pendingStart` placeholder, a running turn and a finalizing turn are none of
+ * those, so a parent holding only a running turn offers no side chat at all.
+ */
+export function terminalTurnCount(turns: readonly Pick<Turn, 'done' | 'error'>[]): number {
+  return turns.filter(turn => turn.done || Boolean(turn.error)).length
 }
 
 /**
@@ -29,40 +41,46 @@ export interface SideChatScope {
  * Provider session into "another side chat's source", which hid its children.
  */
 export function sideChatScope({
-  draftKey, view, conversation, providerId, agentProfileId, runControls, cwd, nativeSessionId,
-  completedTurns, apiAvailable
+  draftKey, view, conversation, providerId, agentProfileId, targetAgentProfileId, runControls, cwd, nativeSessionId,
+  terminalTurns, apiAvailable
 }: {
   draftKey: string
   view: AppView
   conversation?: ConversationSummary
   providerId: ProviderId
+  /** The parent's own recorded identity; a native source must address this exact session. */
   agentProfileId?: string
+  /**
+   * The Agent Profile identity the child's first send will name. It matches
+   * `agentProfileId` except for a historical Pi id, which is not a registered profile.
+   */
+  targetAgentProfileId?: string
   runControls: AgentRunControls
   cwd: string | null
   nativeSessionId: string | null
-  completedTurns: number
+  terminalTurns: number
   apiAvailable: boolean
 }): SideChatScope {
   const target: SideChatInitialTarget = {
     providerId,
-    ...(agentProfileId ? { agentProfileId } : {}),
+    ...(targetAgentProfileId ? { agentProfileId: targetAgentProfileId } : {}),
     ...(runControls.model ? { model: { ...runControls.model } } : {}),
     ...(runControls.effort ? { effort: runControls.effort } : {}),
     permissionMode: runControls.permissionMode
   }
   if (!apiAvailable) {
-    return { scopeKey: draftKey, target, hasCompletedTurn: false, unavailableReason: SIDE_CHAT_COPY.entryUnavailableApi }
+    return { scopeKey: draftKey, target, hasTerminalTurn: false, unavailableReason: SIDE_CHAT_COPY.entryUnavailableApi }
   }
   const parent = view === 'conversation' ? conversation : undefined
   // A side chat has its own frozen source; nesting one inside another is refused here
   // and by the host, which keeps provenance a single hop.
   if (parent?.sideChat) {
-    return { scopeKey: draftKey, target, hasCompletedTurn: completedTurns > 0,
+    return { scopeKey: draftKey, target, hasTerminalTurn: terminalTurns > 0,
       unavailableReason: SIDE_CHAT_COPY.entryUnavailableNested }
   }
   if (parent) {
     return { scopeKey: draftKey, source: { kind: 'conversation', conversationId: parent.id },
-      target, hasCompletedTurn: completedTurns > 0 }
+      target, hasTerminalTurn: terminalTurns > 0 }
   }
   if (view !== 'conversation' && cwd && nativeSessionId) {
     return {
@@ -70,9 +88,9 @@ export function sideChatScope({
       source: { kind: 'native-session', providerId, ...(agentProfileId ? { agentProfileId } : {}),
         cwd, nativeSessionId },
       target,
-      hasCompletedTurn: completedTurns > 0
+      hasTerminalTurn: terminalTurns > 0
     }
   }
-  return { scopeKey: draftKey, target, hasCompletedTurn: completedTurns > 0,
+  return { scopeKey: draftKey, target, hasTerminalTurn: terminalTurns > 0,
     unavailableReason: SIDE_CHAT_COPY.entryUnavailableNoSource }
 }

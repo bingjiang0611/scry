@@ -73,6 +73,11 @@ export interface ComposerPendingSubmission {
    * authoritative page decides the outcome; a crash before the ack is still unknown.
    */
   phase: 'unknown' | 'dispatched'
+  /**
+   * A host-confirmed refusal that proves nothing was dispatched. It is the only durable
+   * evidence that may unlock an explicit resend; a missing page record is not.
+   */
+  notSent?: { reason: string }
   submittedAt: number
 }
 
@@ -93,6 +98,7 @@ interface StoredPending {
   expectedRevision: number
   expectedContinuationKey: string
   phase: ComposerPendingSubmission['phase']
+  notSent?: ComposerPendingSubmission['notSent']
   submittedAt: number
 }
 
@@ -112,6 +118,12 @@ const STORAGE_KEY = 'scry.composer-drafts.v1'
  */
 export const MAX_DRAFTS = 32
 export const MAX_PENDING_DRAFTS = 8
+
+/**
+ * Host reasons are free text and can quote a long Provider message. The receipt keeps the
+ * beginning so a restart still explains the refusal without growing the draft record.
+ */
+export const NOT_SENT_REASON_LIMIT = 2000
 
 // Input subscribers update independently of App. Sending/migration always reads the same
 // synchronous snapshot; there is no debounced copy that can lose the last keystroke.
@@ -232,6 +244,10 @@ function validPending(value: unknown): value is StoredPending {
     Number.isSafeInteger(pending.expectedRevision) && Number(pending.expectedRevision) >= 0 &&
     typeof pending.expectedContinuationKey === 'string' && pending.expectedContinuationKey.length > 0 &&
     (pending.phase === 'dispatched' || pending.phase === 'unknown') &&
+    (pending.notSent === undefined ||
+      (typeof pending.notSent === 'object' && pending.notSent !== null &&
+        typeof (pending.notSent as { reason?: unknown }).reason === 'string' &&
+        (pending.notSent as { reason: string }).reason.length <= NOT_SENT_REASON_LIMIT)) &&
     Number.isSafeInteger(pending.submittedAt) && Number(pending.submittedAt) > 0
 }
 
@@ -246,6 +262,7 @@ function pendingSubmission(value: StoredPending): ComposerPendingSubmission {
     expectedRevision: value.expectedRevision,
     expectedContinuationKey: value.expectedContinuationKey,
     phase: value.phase,
+    ...(value.notSent ? { notSent: { ...value.notSent } } : {}),
     submittedAt: value.submittedAt
   }
 }
@@ -261,6 +278,7 @@ function storedPending(pending: ComposerPendingSubmission): StoredPending {
     expectedRevision: pending.expectedRevision,
     expectedContinuationKey: pending.expectedContinuationKey,
     phase: pending.phase,
+    ...(pending.notSent ? { notSent: { reason: pending.notSent.reason.slice(0, NOT_SENT_REASON_LIMIT) } } : {}),
     submittedAt: pending.submittedAt
   }
 }

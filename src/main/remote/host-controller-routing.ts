@@ -4,6 +4,8 @@ import { RemoteRunDenied } from './remote-run-policy'
 import { decodedBase64ByteLength, isAgentPermissionMode, isSupportedImageMimeType } from '../../shared/runtime'
 import { normalizeAgentStartRequest } from '../../shared/runtime-provider'
 import type { AgentStartRequest } from '../../shared/runtime'
+import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
+import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-input'
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES } from './desktop-attachments'
 import type { RemoteIntentAttachment, RemoteIntentRouting } from './host-controller-types'
 
@@ -117,10 +119,13 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     throw new RemoteRunDenied('invalid_target')
   }
   if (routing.attachmentPeer !== undefined && (typeof routing.attachmentPeer !== 'string' || !SHA256.test(routing.attachmentPeer))) throw new RemoteRunDenied('invalid_target')
-  // A workspace PREPARATION is a different App flow (it needs a command id and an
-  // explicit new session), so it is refused by name rather than dropped: running the
-  // plain turn instead would answer a request the user did not make.
-  if (routing.workspace !== undefined) throw new RemoteRunDenied('unsupported_local_request:workspace')
+  // A device may start a fresh session in a managed worktree: the selection is parsed
+  // here and prepared by the host under the ledger run's identity. An App submission
+  // (cwdOptional) has no such flow yet, so it is refused by name rather than dropped:
+  // running the plain turn instead would answer a request the user did not make.
+  if (routing.workspace !== undefined && options.cwdOptional) throw new RemoteRunDenied('unsupported_local_request:workspace')
+  let workspace: WorkspaceStartSelection | undefined
+  try { if (routing.workspace !== undefined) workspace = parseWorkspaceStartSelection(routing.workspace) } catch { throw new RemoteRunDenied('invalid_target') }
   // Turn boundaries (edit-last-message fork / restart) do travel, but only from the
   // App, and through the App's own schema: the shared normalizer is the single place
   // that decides whether a boundary is trustworthy.
@@ -148,6 +153,7 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     ...(typeof routing.modelProviderId === 'string' ? { modelProviderId: routing.modelProviderId } : {}),
     ...(typeof routing.effort === 'string' ? { effort: routing.effort } : {}),
     ...(isAgentPermissionMode(routing.permissionMode) ? { permissionMode: routing.permissionMode } : {}),
+    ...(workspace ? { workspace } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(typeof routing.resume === 'string' && routing.resume.length > 0 && routing.resume.length <= 128 ? { resume: routing.resume } : {}),
     ...(typeof routing.attachmentPeer === 'string' ? { attachmentPeer: routing.attachmentPeer } : {}),

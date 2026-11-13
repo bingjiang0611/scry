@@ -343,7 +343,7 @@ button.turn-call-group:focus-visible {
   height: 12px;
   margin-top: 1px;
   color: var(--dim3);
-  transition: transform var(--dur-base) var(--ease-struct);
+  transition: transform var(--duration-sm) var(--ease-out-strong);
 }
 .turn-tool-error[open] .turn-tool-error-chevron {
   transform: rotate(180deg);

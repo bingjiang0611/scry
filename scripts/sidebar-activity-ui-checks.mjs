@@ -33,6 +33,9 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   const layoutAnimations = `document.querySelector('.sb-activity').getAnimations({ subtree: true }).filter(animation => animation.effect.target.hasAttribute('data-motion-key'))`
   await wait('window.activityFixture && document.querySelector("[role=tab]")')
   check(await read(`document.querySelector('[role="tab"][aria-selected="true"]').textContent === '项目'`), 'Original project view is not the default')
+  check(await read(`document.querySelector('.sb-search input').placeholder === '搜索会话或项目'`), 'Search placeholder was not refined')
+  check(await read(`document.querySelector('.sb-sess').getBoundingClientRect().height === 36 && document.querySelector('.sb-proj-head').getBoundingClientRect().height === 32`), 'Project and session rows do not use the refined rhythm')
+  if (screenshotPrefix) require('node:fs').writeFileSync(`${screenshotPrefix}-projects.png`, (await contents.capturePage({ x: 0, y: 0, width: 280, height: 650 })).toPNG())
   const projectTypography = await read(`(() => {
     const style = getComputedStyle(document.querySelector('.sb-sess .sb-sesstext'));
     return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
@@ -42,6 +45,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
   await wait(`document.activeElement?.id === 'activity-sidebar-view-activity' && ${group} === 'working'`)
+  check(projectTypography.size === '13px' && projectTypography.weight === '400', 'Project titles do not use the refined type scale')
   const activityTypography = await read(`(() => {
     const style = getComputedStyle(document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'));
     return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
@@ -65,6 +69,12 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
   await read('window.activityFixture.setLongTitle(true)')
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('/design-loop ios')`)
   check(await read(`(() => { const title = document.querySelector(${JSON.stringify(row)}).querySelector('.sb-sesstext'); return title.scrollWidth > title.clientWidth && getComputedStyle(title).textOverflow === 'ellipsis'; })()`), 'Long running title does not truncate')
+  await read(`(() => {
+    const marker = document.createElement('i');
+    marker.id = 'sidebar-paint-fence';
+    marker.style.cssText = 'position:fixed;left:0;top:0;width:4px;height:4px;z-index:2147483647;pointer-events:none;forced-color-adjust:none';
+    document.body.append(marker);
+  })()`)
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme = '${theme}'`)
     await wait(`document.querySelector('.sidebar').getAnimations({ subtree: true }).every(animation => animation.effect.getComputedTiming().endTime === Infinity)`)
@@ -81,9 +91,33 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
         return { x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height) };
       })()`)
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-      const image = await contents.capturePage(rect)
-      sweepImages.push(image.toBitmap())
-      sweepFrames.push({ time, image })
+      // A queued paint can precede the requested animation update. A unique
+      // marker commits after that update; only its acknowledged frame is a
+      // sample. The pixel assertion still runs exactly once, without retries.
+      const color = [time === 1100 ? 17 : 19, theme === 'dark' ? 29 : 31, 43]
+      let onPaint
+      const painted = new Promise((resolve, reject) => {
+        onPaint = (_event, _dirty, frame) => {
+          try {
+            const pixel = frame.crop({ x: 1, y: 1, width: 1, height: 1 }).toBitmap()
+            if (pixel[0] !== color[2] || pixel[1] !== color[1] || pixel[2] !== color[0] || pixel[3] !== 255) return
+            const image = frame.crop(rect)
+            resolve({ image, bitmap: Buffer.from(image.toBitmap()) })
+          } catch (error) {
+            reject(error)
+          }
+        }
+        contents.on('paint', onPaint)
+      })
+      try {
+        await read(`document.querySelector('#sidebar-paint-fence').style.backgroundColor = 'rgb(${color.join(',')})'`)
+        contents.invalidate()
+        const { image, bitmap } = await painted
+        sweepImages.push(bitmap)
+        sweepFrames.push({ time, image })
+      } finally {
+        contents.off('paint', onPaint)
+      }
     }
     // A different PNG alone accepted an imperceptible shimmer. Require a visible
     // channel change on multiple glyph pixels, not just a single changed byte.
@@ -109,7 +143,7 @@ export async function exerciseSidebarActivity(contents, screenshotPrefix) {
     })()`) : undefined
     check(visiblePixels >= 20, `Long ${theme} working title sweep is too faint: ${visiblePixels} pixels changed by >=40/255; maxDelta=${maxDelta}; sizes=${JSON.stringify(sweepFrames.map(frame => frame.image.getSize()))}; ${JSON.stringify(diagnostic)}`)
   }
-  await read(`${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
+  await read(`document.querySelector('#sidebar-paint-fence').remove(); ${titleAnimations}.find(animation => animation.animationName === 'sb-activity-sweep').play(); window.activityFixture.setLongTitle(false); document.documentElement.dataset.theme = 'dark'`)
   await wait(`document.querySelector(${JSON.stringify(row)}).textContent.includes('Retry failed webhook delivery')`)
   check(await read(`document.querySelectorAll('.sb-activity-heading').length === 2 && !document.querySelector('.sb-activity-project') && !document.querySelector('.sb-activity-heading span')`), 'Empty groups, project subtitles or counts leaked into the flat list')
   return exerciseSidebarActivityContinuation({ contents, screenshotPrefix, read, wait, point, click, check, row, group, layoutAnimations, titleAnimations, projectTypography })

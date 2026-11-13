@@ -165,7 +165,7 @@ describe('daemon host process', () => {
         }]
       })
       expect(sent.error).toBeUndefined()
-      expect(sent.result).toMatchObject({ disposition: 'created', ledger: { runId: expect.any(String) } })
+      expect(sent.result).toMatchObject({ status: 'accepted', disposition: 'created', ledger: { runId: expect.any(String) } })
       const conversationEvents: Array<{ kind: string; detail?: string }> = []
       let conversationState = 'dispatched'
       let conversationCursor = 0
@@ -215,10 +215,9 @@ describe('daemon host process', () => {
         op: 'appEvents', cursor: 0, waitMs: 0
       })
       const unread = fresh.events.items.find((item: { kind: string }) => item.kind === 'attention')?.snapshot.unreadSessionKeys as string[]
-      // The conversation turn's native session; the directory part may be canonicalized.
-      expect(unread).toHaveLength(1)
-      expect(unread[0]!.startsWith('codex\u0000\u0000')).toBe(true)
-      expect(unread[0]!.endsWith(`\u0000${turn.delivery.nativeSessionId}`)).toBe(true)
+      // A conversation turn's attention is the conversation's row, whichever native
+      // session carried it (the Provider binding may change between turns).
+      expect(unread).toEqual([`conversation\u0000${created.id}`])
       for (const sessionKey of unread) {
         const viewed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'attentionViewed', sessionKey

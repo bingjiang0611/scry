@@ -63,6 +63,8 @@ export interface ConversationTerminal {
 
 export interface ManagedConversationStart {
   conversationId: string
+  /** Attention owner when it is not this conversation (a side chat's source row). */
+  attentionKey?: string
   runId: string
   target: ConversationTarget
   resumeSessionId: string | null

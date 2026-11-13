@@ -14,6 +14,19 @@ import type { NativeHandoffTarget } from './conversation-history'
 import type { HandoffBudgetInput } from './conversation-handoff-budget'
 import { conversationIntentHash, hashPattern, items, requireValue, subset, target, type ConversationLedger } from './conversation-store'
 
+/**
+ * Thrown when a failure happens at or after this attempt published its durable dispatch
+ * intent. The atomic write may have succeeded before its acknowledgement was lost, so
+ * neither "no turn exists" nor "the turn is exactly what we sent" can be proven: callers
+ * must report an unknown outcome and must not retry or claim the input was not sent.
+ */
+export class ConversationTurnBeginUncertainError extends Error {
+  constructor(readonly reason: string, cause?: unknown) {
+    super(reason, { cause })
+    this.name = 'ConversationTurnBeginUncertainError'
+  }
+}
+
 export interface BeginConversationTurn {
   expectedRevision: number
   commandId: string
@@ -22,7 +35,14 @@ export interface BeginConversationTurn {
   /** Hash of the frozen actual input, attachments and selected run settings. */
   payloadHash: string
   items: ConversationItemRef[]
+  /** What this dispatch actually delivers; the budget may trim the requested selection. */
   selectedItems: ConversationItemRef[]
+  /**
+   * The caller's requested selection, when trimming means `selectedItems` alone no longer
+   * describes the request. The intent hash binds what the caller asked for, so a retry can
+   * prove it names the same selection instead of only the part that survived the budget.
+   */
+  requestedItems?: ConversationItemRef[]
   /**
    * First user text of this dispatch. A side chat whose title is still unset takes
    * a truncated copy of it in this same transaction; an explicit rename or any
@@ -90,12 +110,14 @@ export async function beginConversationTurn(
     items(request.items)
     requireValue(request.items.every((item) => item.runId === request.runId), '轮次包含其他 run 的内容')
     items(request.selectedItems)
+    if (request.requestedItems) items(request.requestedItems)
+    const intentSelection = request.requestedItems ?? request.selectedItems
     const intentHash = conversationIntentHash({
       commandId: request.commandId,
       target: request.target,
       payloadHash: request.payloadHash,
       items: request.items,
-      selectedItems: request.selectedItems
+      selectedItems: intentSelection
     })
     const conversation = await ledger.required(id)
     requireValue(!conversation.deletion, '统一对话正在删除或已删除，不能执行')
@@ -166,15 +188,22 @@ export async function beginConversationTurn(
       ...(omitted.ranges.length ? { omittedRanges: omitted.ranges } : {}),
       delivery: { status: 'pending' }
     }
+    // From here on this attempt owns a durable dispatch intent: the atomic publish may
+    // succeed before its acknowledgement is lost, so every failure is reported as unknown.
     conversation.turns.push(turn)
-    if (conversation.sideChat && conversation.title === undefined && request.firstQuestion?.trim()) {
-      conversation.title = captureTitle(request.firstQuestion, SIDE_CHAT_DEFAULT_TITLE)
+    try {
+      if (conversation.sideChat && conversation.title === undefined && request.firstQuestion?.trim()) {
+        conversation.title = captureTitle(request.firstQuestion, SIDE_CHAT_DEFAULT_TITLE)
+      }
+      conversation.revision++
+      const checked = ledger.checked(conversation)
+      await loadConversationHistory(ledger.userData, checked, turn)
+      await ledger.persist(checked)
+      return { disposition: 'created', conversation: checked, turn: structuredClone(turn) }
+    } catch (error) {
+      throw new ConversationTurnBeginUncertainError(
+        `统一对话投递意图可能已经写入：${String((error as Error)?.message ?? error)}`, error)
     }
-    conversation.revision++
-    const checked = ledger.checked(conversation)
-    await loadConversationHistory(ledger.userData, checked, turn)
-    await ledger.persist(checked)
-    return { disposition: 'created', conversation: checked, turn: structuredClone(turn) }
   })
 }
 

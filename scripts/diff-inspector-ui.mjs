@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { pierreDiffEval, pierreTreeHasText } from './pierre-ui.mjs'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -79,17 +80,17 @@ export async function exerciseTurnMenu({ click, key, wait, evaluate, screenshot,
     await key('End', 'End', 35)
     await key('Enter', 'Enter', 13)
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffRunId === ${JSON.stringify(firstRunId)} &&
-      document.querySelector('.diff-virtual-files')?.textContent.includes('remote-first.txt')`), 'oldest turn selected with native keyboard')
-    assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-second.txt')`), false)
-    const patch = await evaluate(`document.querySelector('.diff-virtual-code').textContent`)
+      ${pierreTreeHasText('remote-first.txt')}`), 'oldest turn selected with native keyboard')
+    assert.equal(await evaluate(pierreTreeHasText('remote-second.txt')), false)
+    const patch = await evaluate(pierreDiffEval('roots.map(root => root.textContent).join("\\n")'))
     assert.ok(patch.includes(original.trim()))
     assert.equal(patch.includes(later.trim()), false, 'history never reads current file content as its old patch')
     assert.equal(await evaluate(`document.querySelector('.diff-scope-trigger').textContent.trim()`), '第 1 轮')
     await screenshot('diff-first-turn')
   } finally { writeFileSync(file, original) }
   await selectDiffScope(actions, 'latest')
-  await wait(() => evaluate(`document.querySelector('.diff-virtual-files')?.textContent.includes('remote-second.txt')`), 'latest turn restored')
-  assert.equal(await evaluate(`document.querySelector('.diff-virtual-files').textContent.includes('remote-first.txt')`), false)
+  await wait(() => evaluate(pierreTreeHasText('remote-second.txt')), 'latest turn restored')
+  assert.equal(await evaluate(pierreTreeHasText('remote-first.txt')), false)
   assert.equal(await evaluate(`document.querySelector('.diff-scope-trigger').textContent.trim()`), 'Latest turn')
   assert.equal(inputs().length, invocations, 'history reload and scope selection never start a Provider')
   if (historyOnly) console.log(JSON.stringify({ test: 'reference-only historical diff after reload', immutableHistory: true, providerInvocations: invocations, evidence }))

@@ -4,6 +4,7 @@ import {
 } from '../right-surface'
 import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
+import { MOTION } from '../motion'
 import { RightSurfaceTabStrip, rightSurfacePanelId } from './RightSurfaceTabStrip'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
@@ -80,7 +81,7 @@ export function RightSurfacePanel({
   const restoreMenuFocusRef = useRef(false)
   const menuPresence = usePresence({
     onClose: () => setMenuOpen(false),
-    exitMs: 100,
+    exitMs: MOTION.durationExitSm,
     onExitStart: () => {
       if (restoreMenuFocusRef.current) addButtonRef.current?.focus()
       restoreMenuFocusRef.current = false

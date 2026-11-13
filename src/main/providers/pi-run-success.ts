@@ -2,6 +2,7 @@ import type { ProviderRunRequest, ProviderRunResult } from './types'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import type { TraceEvent } from '../../shared/trace'
 import { classifyRunTermination } from '../../shared/runtime'
+import { piRuntimeCopy } from '../../shared/constants/copy'
 import { AgentRuntimeError } from '../run-outcome'
 import { cancelManagedRecorderTurn } from '../../core/turn-recorder/managed'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
@@ -318,6 +319,7 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
       const transportFailure = Boolean(
         ctx.usage.lastTransportError || ctx.usage.lastError?.toLowerCase().includes('fetch failed')
       )
+      const transportHint = ctx.launchShellEnvError ?? piRuntimeCopy.transportFailure
       throw new AgentRuntimeError(failureText ?? 'Pi Provider 未正常完成本轮', {
         provider: 'pi_rpc',
         stage: 'runtime',
@@ -326,9 +328,11 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
           ? '先检查最后一项工具结果与 Rotom 日志，确认执行状态；不要在结果未知时重复执行'
           : terminationReason === 'input_context_overflow'
             ? '点击失败卡片的“从失败处恢复”，在新分支中移除或压缩大图后重试；也可以新建会话'
-            : transportFailure
-              ? ctx.launchShellEnvError ?? '检查上游服务和代理连接（WebSocket 与 SSE）；若修改了 shell 代理配置，请重启 Scry 后重试'
-              : '继续当前会话重试；若再次中止，请检查上游 Provider 状态与 Rotom 日志'
+            : ctx.usage.lastError?.includes('account_changed_start_new_session')
+              ? piRuntimeCopy.qoderAccountChangedHint(transportFailure ? transportHint : undefined)
+              : transportFailure
+                ? transportHint
+                : piRuntimeCopy.retryFailure
       })
     }
     return {

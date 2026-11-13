@@ -14,7 +14,7 @@
 - 用户已授权正常退出旧 App 并启动新版。前台退出两次都中断了作为 Scry 子进程的当前 Pi，且均未安装；最后交由独立 launchd 一次性任务正常退出 PID23211，再调用原样的 `scripts/install-macos.mjs`。安装器返回成功（自带目标 CLI/版本校验），目标 asar/可执行文件 SHA 与冻结产物一致，目标深度签名通过。**安装时间 2026-10-17T12:39:42.021Z**，目标 `/Applications/Scry.app`，旧版备份 `/Applications/.Scry.app.backup`。
 - **实际生效证据**：新 PID **35636** 的真实 userData 由已打开的 `scry.db` 路径确认；真实 packaged 日志匹配版本/build，首条 **2026-10-17T12:39:42.982Z**。安装后快照经现有 gzip-aware `readRecords` 解析 82713 条、issues为空，其中新 build 659 条、1个会话；这些只是身份与运行记录，**不是659个完成场景，也不是L3改善结论**。一次性诊断器最初将 gzip 当 JSON 解析失败，改用现有 helper 后通过；这不是产品失败，未改日志或分析合同。
 - 核对证据：`/tmp/scry-install-performance.ROQOkg/handoff-receipt.json`、`runtime-verification.json`、`install-identity.json`、`install.log`。保留初次失败/最终检查日志与诊断构建；安装任务正常完成、exit0、仅运行1次，已 `bootout` 自有服务 `gui/502/com.scry.install.performance.ROQOkg`，未留下活跃安装任务。未推送或正式发布；此为本机 Apple Development 签名安装，不冒充 Developer ID 公证发布。
-- 本地日志快照：`/Users/baobingjiang/scry-performance-archive/20261017-{before,after}-0.2.197-ROQOkg`。安装前保留旧证据；当前热点必须显式选择新 build，旧 build 只作历史对照。日常 baseline 的场景/环境/source匹配与 L3 仍未验证；需要同场景两侧各 ≥30 样本、≥2 会话和数据健康证据后再比较。
+- 本地日志快照：`/Users/<user>/scry-performance-archive/20261017-{before,after}-0.2.197-ROQOkg`。安装前保留旧证据；当前热点必须显式选择新 build，旧 build 只作历史对照。日常 baseline 的场景/环境/source匹配与 L3 仍未验证；需要同场景两侧各 ≥30 样本、≥2 会话和数据健康证据后再比较。
 
 **前次集成交付快照（0.2.196 验证包，仅作历史记录）**：
 

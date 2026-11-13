@@ -543,6 +543,15 @@
   letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
 }
+/* 部分明细缺报时，把“已知下界”写成可见的一行，而不是只留在 title 里。 */
+.usage-metrics .usage-metric-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--dim2);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+}
 .usage-breakdown {
   margin-top: 38px;
   padding-top: 26px;

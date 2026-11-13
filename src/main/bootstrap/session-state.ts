@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import type { ProviderId } from '../../shared/provider'
 import type { ActiveRun } from '../../shared/trace'
-import { sessionAttentionKey, type SessionAttentionSnapshot } from '../../shared/session-attention'
+import { conversationAttentionKey, sessionAttentionKey, type SessionAttentionSnapshot } from '../../shared/session-attention'
 import { DockBadgeState } from '../dock-badge'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { ContextAdmission } from '../context-admission'
@@ -78,6 +78,8 @@ export function createSessionState({
     }
   })
   const activeRunSessionKey = (run: ActiveRun): string | null => {
+    if (run.attentionKey) return run.attentionKey
+    if (run.conversationId) return conversationAttentionKey(run.conversationId)
     if (!run.providerId) return null
     return providerSessionKey(
       run.providerId,

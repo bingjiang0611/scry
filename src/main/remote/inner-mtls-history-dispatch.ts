@@ -49,8 +49,11 @@ export async function dispatchHistoryRequest(controller: HostController, fingerp
     if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string' ||
         (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
         (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
-        (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
+        (request.snapshot !== undefined && typeof request.snapshot !== 'string') ||
+        (request.encoding !== undefined && request.encoding !== 'deflate')) return { error: 'invalid_request' }
     return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyPage: await controller.readHistoryPage(fingerprint, {
+      // 'deflate' pages the DEFLATE form of the same snapshot bytes (raw hash unchanged).
+      ...(request.encoding === 'deflate' ? { encoding: 'deflate' as const } : {}),
       ...scoped, ...profile,
       providerId: request.providerId,
       cwd: typeof request.cwd === 'string' ? request.cwd : '',

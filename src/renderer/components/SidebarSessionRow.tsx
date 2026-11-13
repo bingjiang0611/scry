@@ -23,7 +23,6 @@ export const SessionRow = memo(function SessionRow({
   waitingForAnswer,
   unread,
   backgroundWork,
-  sideChatCount,
   draftStore,
   onPick,
   onTogglePin,
@@ -42,8 +41,6 @@ export const SessionRow = memo(function SessionRow({
   waitingForAnswer: boolean
   unread: boolean
   backgroundWork?: BackgroundWork
-  /** Compact child counter of this session; a running child is real background work. */
-  sideChatCount?: string
   draftStore?: ComposerDraftStore
   onPick: (cwd: string, sessionId: string, providerId: SessionProviderId, externalSessionId?: string, runId?: string, agentProfileId?: string, previewText?: string, previewRunId?: string) => void
   onTogglePin: (cwd: string, session: SessionMeta) => void
@@ -100,7 +97,6 @@ export const SessionRow = memo(function SessionRow({
               <Icon name="message" /> {copy.answer}
             </span>
           )}
-          {sideChatCount && <span className="sb-side-chat-count" data-side-chat-count={sideChatCount}>{sideChatCount}</span>}
           {showProjectName && projectName && <span className="sb-sess-proj">{projectName}</span>}
         </span>
         {running && !waitingForAnswer && <span className="sb-running" role="status" data-background-waiting={status?.waiting || undefined} aria-label={status?.label ?? copy.running} title={status?.label ?? copy.running} />}

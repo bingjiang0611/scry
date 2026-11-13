@@ -367,6 +367,8 @@ export interface SessionHistoryWindow {
   hasOlder: boolean
   sourceComplete?: boolean
   completeness: 'complete' | 'partial'
+  /** 这一会话确实向上翻过页；用于区分“本来就只有这么多”和“已经翻到最早一轮”。 */
+  pagedOlder?: boolean
 }
 
 export interface OlderSessionPage {
@@ -418,7 +420,8 @@ export function prependOlderSessionTurns(
       totalTurns: page.totalTurns,
       hasOlder: page.hasOlder,
       sourceComplete: page.sourceComplete,
-      completeness: page.hasOlder || page.sourceComplete === false ? 'partial' : 'complete'
+      completeness: page.hasOlder || page.sourceComplete === false ? 'partial' : 'complete',
+      pagedOlder: true
     }
   }
 }

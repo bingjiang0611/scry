@@ -113,12 +113,24 @@ enum ProviderSymbol {
 struct RunningRing: View {
   var size: CGFloat = 14
   var color: Color = Palette.dim
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
-    TimelineView(.animation) { context in
-      Circle().trim(from: 0, to: 0.75).stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-        .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
+    Group {
+      if reduceMotion {
+        ring(angle: 0)
+      } else {
+        TimelineView(.animation) { context in
+          ring(angle: context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360)
+        }
+      }
     }
     .frame(width: size, height: size).accessibilityLabel(ConnectionCopy.running)
+  }
+
+  private func ring(angle: Double) -> some View {
+    Circle().trim(from: 0, to: 0.75).stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+      .rotationEffect(.degrees(angle))
   }
 }
 

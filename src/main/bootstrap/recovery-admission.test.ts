@@ -37,7 +37,8 @@ function fixture(getStartupManagedRecovery: () => Promise<void>) {
     deleteOneSession: unexpected,
     resolveSessionRunIds: unexpected,
     deleteConversationHistory: unexpected,
-    appUserDataDir: '/unused-by-this-test'
+    appUserDataDir: '/unused-by-this-test',
+    dockBadge: { adopt: () => {} }
   })
   return {
     conversationService, dispatched,
