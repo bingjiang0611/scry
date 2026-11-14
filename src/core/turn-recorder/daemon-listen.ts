@@ -9,6 +9,7 @@ import { appendRotatingLog, readJson, writeJsonAtomic, writeTextAtomic } from '.
 import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
+import { pruneStaleSegmentChains } from './segment-prune.js'
 import { pruneStaleTemps } from './temp-prune.js'
 import {
   PROTOCOL_VERSION, HOOK_EVENT_PATH, RECORDER_VERSION_HEADER, daemonRequest, writeJson, header, readJsonBody, recorderSocketPath
@@ -311,6 +312,7 @@ export async function listenRecorderDaemon(args: {
   // 等很久。与提交路径的按天清理互不依赖，失败也只是这次不清理。等待它完成，避免进程在别处收尾时
   // 还有一次目录遍历在写标记文件。
   await pruneStaleTemps(enablement.dataRoot).catch(() => undefined)
+  await pruneStaleSegmentChains(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)
   return { socketPath, closed, close }

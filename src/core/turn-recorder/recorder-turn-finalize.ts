@@ -20,6 +20,7 @@ import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { rm } from 'node:fs/promises'
 import { applyCaptureBaselineCaveat, captureRecordMetadata } from './record-capture-metadata.js'
+import { segmentCaptureRepositories } from './session-capture-repositories.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -322,14 +323,13 @@ export async function finalizeOpenTurn(
     ? [...new Set([...(session.committedProviderTurnIds ?? []), effectiveProviderTurnId])].slice(-200)
     : session.committedProviderTurnIds
   // An unmeasured boundary stays unset: the next segment says it may repeat content, not guess.
-  // A turn with no transcript at all has no boundary to measure — treating its empty event list as
-  // "published 0" would make the next segment republish everything this one already did.
+  // An empty event list is not "published 0" — that would republish everything this one already did.
   const measured = transcript.observed && transcript.identityMatched !== false && !options.forcedReason
   const sealedBoundary = measured
     ? (continuation?.publishedEvents ?? 0) + transcriptSourceEvents(transcript.events).length
     : undefined
-  // A real user prompt starts a new chain, which releases the previous one; managed turns have no
-  // repositories, so they must not touch the chain.
+  // A real user prompt starts a new chain, which releases the previous one.
+  const stores = segmentCaptureRepositories(session, open)
   const chainStores = open.managedByScry
     ? session.chainStores
     : await releaseSegmentChain(root, session, sealedFrozen, !!open.continuation)
@@ -341,11 +341,12 @@ export async function finalizeOpenTurn(
       ...sealedSegment(open, committed.record.recordId, completedAt, view.providerTurnId ?? transcript.providerTurnId, sealedBoundary),
       ...(sealedFrozen?.length ? { frozenDiffs: sealedFrozen } : {})
     },
-    ...(chainStores ? { chainStores } : {})
+    ...(chainStores ? { chainStores } : {}),
+    ...(stores ? { captureRepositories: stores } : {})
   }, { sync: false })
   await rm(openPath(root), { force: true })
-  // A hook queued while this turn was finalizing still needs a recovery pass, so the index entry is
-  // only dropped when nothing is left to replay. Caller holds the session lock.
+  // A hook queued during finalize still needs a recovery pass: drop the index entry only when
+  // nothing is left to replay. Caller holds the session lock.
   await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
   // The record is durable. A disposable-index cleanup failure must not change its acknowledgement.
   await releaseStaleAttention(enablement.dataRoot, open.provider, root).catch(error => appendRotatingLog(
