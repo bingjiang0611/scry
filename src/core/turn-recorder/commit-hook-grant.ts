@@ -25,6 +25,19 @@ export interface CommitHookBundle {
   fingerprint: string
 }
 
+/**
+ * A host (Scry App, CodeLens) injects its callback through the environment of the process it
+ * starts. Later hook deliveries reach the daemon/receiver without that environment, so the same
+ * fact is persisted and re-proved on read: same absolute path, same executable, same content.
+ */
+export interface HostCommitHookRecord {
+  schemaVersion: 1
+  workspace: string
+  entry: string
+  fingerprint: string
+  recordedAt: string
+}
+
 export interface CommitHookGrant {
   schemaVersion: 1
   workspace: string
@@ -47,6 +60,66 @@ export function commitHookGrantPath(workspaceRoot: string, env: NodeJS.ProcessEn
     : join(env.HOME?.trim() || homedir(), '.scry', 'grants')
   const digest = createHash('sha256').update(resolve(workspaceRoot)).digest('hex').slice(0, 32)
   return join(base, `${digest}.json`)
+}
+
+/** Beside the grant, so an operator cleanup of grants also drops the host activation. */
+export function hostCommitHookPath(workspaceRoot: string, env: NodeJS.ProcessEnv = process.env): string {
+  return `${commitHookGrantPath(workspaceRoot, env).replace(/\.json$/, '')}.host.json`
+}
+
+async function hostEntryFingerprint(entry: string): Promise<string | null> {
+  try {
+    if (!isAbsolute(entry)) return null
+    const info = await stat(entry)
+    if (!info.isFile() || (info.mode & 0o111) === 0) return null
+    const content = await readFile(entry)
+    return createHash('sha256').update(content).digest('hex')
+  } catch {
+    return null
+  }
+}
+
+/** Record the host-injected callback so processes the host did not start can still deliver. */
+async function rememberHostCommitHook(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv,
+  entry: string
+): Promise<void> {
+  const fingerprint = await hostEntryFingerprint(entry)
+  if (!fingerprint) return
+  const path = hostCommitHookPath(workspaceRoot, env)
+  const current = await readJson<HostCommitHookRecord>(path).catch(() => null)
+  if (
+    current?.schemaVersion === 1 && current.workspace === resolve(workspaceRoot) &&
+    current.entry === entry && current.fingerprint === fingerprint
+  ) return
+  await mkdir(join(path, '..'), { recursive: true, mode: 0o700 })
+  await writeJsonAtomic(path, {
+    schemaVersion: 1,
+    workspace: resolve(workspaceRoot),
+    entry,
+    fingerprint,
+    recordedAt: new Date().toISOString()
+  } satisfies HostCommitHookRecord)
+  await chmod(path, 0o600).catch(() => undefined)
+}
+
+/**
+ * The host callback this workspace already proved, if its file still matches byte for byte.
+ * A changed or missing file drops the record: this is not a way to keep executing an old hook.
+ */
+async function persistedHostCommitHook(
+  workspaceRoot: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | undefined> {
+  const path = hostCommitHookPath(workspaceRoot, env)
+  const record = await readJson<HostCommitHookRecord>(path).catch(() => null)
+  if (!record || record.schemaVersion !== 1) return undefined
+  if (record.workspace !== resolve(workspaceRoot) || typeof record.entry !== 'string' || !record.entry) return undefined
+  const fingerprint = await hostEntryFingerprint(record.entry)
+  if (fingerprint && fingerprint === record.fingerprint) return record.entry
+  await rm(path, { force: true })
+  return undefined
 }
 
 async function bundleFile(workspaceRoot: string, relPath: string): Promise<CommitHookBundleFile> {
@@ -142,10 +215,32 @@ export async function resolveCommitHookActivation(
   config: RecorderConfig,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<CommitHookActivation> {
-  // A managed host (Scry App) performs its own fingerprint gate and injects the entry
-  // directly; never override or second-guess it from the workspace config.
-  if (env.SCRY_RECORDER_COMMIT_HOOK?.trim()) return { status: 'host-provided' }
-  if (!config.commitHook) return { status: 'not-configured' }
+  // A managed host (Scry App, CodeLens) performs its own fingerprint gate and injects the entry
+  // directly; never override or second-guess it from the workspace config. The same activation is
+  // recorded here because the host only controls the process it starts: the daemon and the hook
+  // receiver deliver every later commit, and without this record they would find no callback.
+  const hosted = env.SCRY_RECORDER_COMMIT_HOOK?.trim()
+  if (hosted) {
+    await rememberHostCommitHook(workspaceRoot, env, hosted)
+    return { status: 'host-provided' }
+  }
+  // A declared hook in the workspace config is the reproducible, reviewable declaration and always
+  // wins: a host callback recorded here must not silently replace it or change its identity.
+  if (!config.commitHook) {
+    const persisted = await persistedHostCommitHook(workspaceRoot, env)
+    if (persisted) {
+      const fingerprint = await hostEntryFingerprint(persisted)
+      if (fingerprint) {
+        return {
+          status: 'trusted',
+          entryPath: persisted,
+          fingerprint: env.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT?.trim() || fingerprint,
+          grantPath: commitHookGrantPath(workspaceRoot, env)
+        }
+      }
+    }
+    return { status: 'not-configured' }
+  }
   const grantPath = commitHookGrantPath(workspaceRoot, env)
   let bundle: CommitHookBundle
   try {

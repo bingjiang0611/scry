@@ -111,6 +111,7 @@ function liveTurnDiffs(
     ...await finishGitTurnDiff(capture, undefined, {
       ...turnChangeHints(repository, mergedEvents),
       patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
+      diffExclude: enablement.config.capture.diffExclude,
       completePatches: true,
       ...(frozen ? { onAfter: frozen.option(repository) } : {})
     }),

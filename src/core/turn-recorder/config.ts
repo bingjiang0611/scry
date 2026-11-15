@@ -35,6 +35,8 @@ export interface RecorderConfig {
     diff: boolean
     hooks: boolean
     patchExcludeBasenames?: string[]
+    /** 接入方声明的仓库相对路径：这些路径不计入本轮 diff。 */
+    diffExclude?: string[]
   }
 }
 
@@ -106,6 +108,10 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
   if (patchExcludeBasenames.some((item) => item.includes('/') || item.includes('\\'))) {
     throw new Error('capture.patchExcludeBasenames entries must be basenames')
   }
+  const diffExclude = [...new Set(stringArray(captureRaw.diffExclude).map((item) => item.trim().replace(/^\.\//, '').replace(/\/+$/, '')))]
+  if (diffExclude.some((item) => !item || isAbsolute(item) || item.split(/[\\/]/).includes('..'))) {
+    throw new Error('capture.diffExclude entries must be workspace-relative paths without ..')
+  }
   return {
     schemaVersion: 1,
     enabled: root.enabled !== false,
@@ -115,7 +121,7 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
     repositories: { mode, maxDepth, exclude: stringArray(repositories.exclude) },
     ...(storage ? { storage } : {}),
     capture: {
-      ...resolveCapture(captureRaw, patchExcludeBasenames),
+      ...resolveCapture(captureRaw, patchExcludeBasenames, diffExclude),
       ...(captureRaw.sessions === 'opt-in' ? { sessions: 'opt-in' as const } : {})
     }
   }
@@ -128,7 +134,8 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
  */
 function resolveCapture(
   raw: Record<string, unknown>,
-  patchExcludeBasenames: string[]
+  patchExcludeBasenames: string[],
+  diffExclude: string[]
 ): RecorderConfig['capture'] {
   // Existing workspaces used full-redacted; it now selects full raw capture, not redaction.
   const toolOutput = raw.toolOutput === undefined || raw.toolOutput === 'full-redacted' ? 'full' : raw.toolOutput
@@ -145,7 +152,8 @@ function resolveCapture(
     } : {}),
     diff: raw.diff !== false,
     hooks: raw.hooks !== false,
-    patchExcludeBasenames
+    patchExcludeBasenames,
+    diffExclude
   }
 }
 

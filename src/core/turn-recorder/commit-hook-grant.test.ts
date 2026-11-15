@@ -2,10 +2,12 @@ import { chmod, mkdir, mkdtemp, stat, symlink, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { readJson } from './io.js'
 import { resolveRecorderLocation, type RecorderConfig } from './config.js'
 import {
   commitHookEnv,
   commitHookGrantPath,
+  hostCommitHookPath,
   inspectCommitHookBundle,
   readCommitHookGrant,
   resolveCommitHookActivation,
@@ -153,5 +155,36 @@ describe('commit hook grant', () => {
     expect((await resolveCommitHookActivation(workspace, parsed, env)).status).toBe('trusted')
     expect((await readCommitHookGrant(workspace, env))?.source).toBe('auto')
     expect((await revokeCommitHookGrant(workspace, env)).removed).toBe(true)
+  })
+
+  it('a host-injected callback stays activated for processes the host never started', async () => {
+    const { workspace, env } = await fixture()
+    const hostHook = join(workspace, 'tools', 'host-notify.sh')
+    await writeFile(hostHook, '#!/bin/sh\ncat >/dev/null\nexit 0\n')
+    await chmod(hostHook, 0o755)
+
+    // The capture start process carries the host environment.
+    const hosted = await resolveCommitHookActivation(workspace, await config(workspace), {
+      ...env, SCRY_RECORDER_COMMIT_HOOK: hostHook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'host-fingerprint'
+    })
+    expect(hosted.status).toBe('host-provided')
+
+    // The daemon and the hook receiver do not: the recorded activation is what delivers.
+    const later = await resolveCommitHookActivation(workspace, await config(workspace), env)
+    expect(later.status).toBe('trusted')
+    expect(commitHookEnv(later, env).SCRY_RECORDER_COMMIT_HOOK).toBe(hostHook)
+    expect(await readJson<{ entry?: string }>(hostCommitHookPath(workspace, env))).toMatchObject({ entry: hostHook })
+  })
+
+  it('forgets a host callback whose file changed or disappeared', async () => {
+    const { workspace, env } = await fixture()
+    const hostHook = join(workspace, 'tools', 'host-notify.sh')
+    await writeFile(hostHook, '#!/bin/sh\nexit 0\n')
+    await chmod(hostHook, 0o755)
+    await resolveCommitHookActivation(workspace, await config(workspace), { ...env, SCRY_RECORDER_COMMIT_HOOK: hostHook })
+
+    await writeFile(hostHook, '#!/bin/sh\n# replaced by someone else\nexit 0\n')
+    expect((await resolveCommitHookActivation(workspace, await config(workspace), env)).status).toBe('not-configured')
+    expect(await readJson<unknown>(hostCommitHookPath(workspace, env))).toBeNull()
   })
 })

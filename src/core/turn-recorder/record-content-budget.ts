@@ -1,7 +1,7 @@
 import { type ToolContent, type ToolContentRef } from '../../shared/tool-content.js'
 import type { AgentTurnRecord, Evidence, TurnCall, TurnDiffSnapshotRecord, TurnModelSegment, TurnTranscriptSource } from '../../shared/turn-record.js'
 import { degradedSection } from './managed-capture.js'
-import { recordContentItems } from './store-index.js'
+import { recordContentItems, RECORD_CONTENT_PRIORITY, type RecordContentPriority } from './store-index.js'
 import { limitToolContent } from './tool-content.js'
 
 /**
@@ -62,6 +62,17 @@ export function recordContentRefs(record: RecordDraft): ToolContentRef[] {
     if (!previous) refs.set(ref.sha256, ref)
   }
   return [...refs.values()]
+}
+
+/** Highest priority any path of this body carries; one body referenced twice keeps its best class. */
+function refPriorities(record: RecordDraft): Map<string, RecordContentPriority> {
+  const priorities = new Map<string, RecordContentPriority>()
+  const rank = (priority: RecordContentPriority) => RECORD_CONTENT_PRIORITY.indexOf(priority)
+  for (const { ref, priority } of recordContentItems(record)) {
+    const previous = priorities.get(ref.sha256)
+    if (!previous || rank(priority) < rank(previous)) priorities.set(ref.sha256, priority)
+  }
+  return priorities
 }
 
 /** Size the receiver will check: record JSON plus every referenced body in its transport encoding. */
@@ -241,18 +252,31 @@ function shrinkInlineDiffBodies(record: RecordDraft, overBy: number): RecordDraf
  */
 export function applyRecordContentBudget(record: RecordDraft): RecordDraft {
   const refs = recordContentRefs(record)
+  const priorities = refPriorities(record)
   const kept = new Map<string, ToolContentRef>()
   const dropped = new Set<string>()
-  for (const ref of refs) {
-    if (ref.bytes > RECORDER_CONTENT_MAX_BYTES || kept.size >= RECORDER_CONTENT_MAX_REFS) dropped.add(ref.sha256)
-    else kept.set(ref.sha256, ref)
+  // Fill in priority order, so the 513th body is always the least valuable one still available.
+  for (const priority of RECORD_CONTENT_PRIORITY) {
+    for (const ref of refs) {
+      if (priorities.get(ref.sha256) !== priority || kept.has(ref.sha256) || dropped.has(ref.sha256)) continue
+      if (ref.bytes > RECORDER_CONTENT_MAX_BYTES || kept.size >= RECORDER_CONTENT_MAX_REFS) dropped.add(ref.sha256)
+      else kept.set(ref.sha256, ref)
+    }
   }
   const recordJson = JSON.stringify(record)
   let size = envelopeBytes(recordJson, [...kept.values()])
   while (size > RECORDER_TRANSPORT_MAX_BYTES && kept.size > 0) {
-    // Base64 dominates the envelope, so the largest body buys the most room per lost reference.
-    const victim = [...kept.values()].reduce((largest, ref) =>
-      ref.bytes > largest.bytes || (ref.bytes === largest.bytes && ref.sha256 < largest.sha256) ? ref : largest)
+    // Evict from the lowest priority class that still holds bodies; base64 dominates the envelope,
+    // so the largest body of that class buys the most room per lost reference.
+    let victim: ToolContentRef | undefined
+    for (let index = RECORD_CONTENT_PRIORITY.length - 1; index >= 0 && !victim; index--) {
+      const priority = RECORD_CONTENT_PRIORITY[index]
+      for (const ref of kept.values()) {
+        if (priorities.get(ref.sha256) !== priority) continue
+        if (!victim || ref.bytes > victim.bytes || (ref.bytes === victim.bytes && ref.sha256 < victim.sha256)) victim = ref
+      }
+    }
+    if (!victim) break
     kept.delete(victim.sha256)
     dropped.add(victim.sha256)
     size = kept.size === 0

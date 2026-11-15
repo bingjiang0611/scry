@@ -8,11 +8,59 @@ import { creditUsageEvidence } from '../../shared/credit-usage.js'
 import { qoderCreditRequests } from '../../shared/qoder-credit-requests.js'
 import { pendingBackgroundTasks } from './recorder-transcript-background.js'
 import { parseCodexRollout } from './recorder-codex-rollout.js'
+import type { CodexUsageBaseline } from './recorder-codex-usage.js'
 import { qoderSidecarEvents } from './recorder-qoder-sidecars.js'
 import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn, BACKGROUND_WAKE_PROVIDERS } from './recorder-contracts.js'
 import { readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 import { parsePiTranscript } from './recorder-pi-transcript.js'
 
+
+/** Bounded tail of the bytes before a turn window: enough for the last cumulative usage frame. */
+const CODEX_USAGE_BASELINE_BYTES = 256 * 1024
+
+/**
+ * The cumulative usage the session had reached before this turn began. Codex reports per-turn usage
+ * as a delta between cumulative frames, so a window that correctly starts at this turn's
+ * `task_started` still needs the last frame written before it. The read is bounded and read-only;
+ * when no frame is found the caller keeps the zero baseline and the delta degrades the same way it
+ * already does for a session whose first window starts at byte 0.
+ */
+async function codexUsageBaseline(
+  path: string,
+  startOffset: number,
+  identity: TranscriptSnapshotIdentity
+): Promise<CodexUsageBaseline | undefined> {
+  const from = Math.max(0, startOffset - CODEX_USAGE_BASELINE_BYTES)
+  let tail: Awaited<ReturnType<typeof readTranscriptWindow>>
+  try {
+    tail = await readTranscriptWindow(path, startOffset, from, identity)
+  } catch {
+    return undefined
+  }
+  if (!tail.consistent) return undefined
+  const lines = tail.content.split('\n')
+  for (let index = lines.length - 1; index >= 0; index--) {
+    let row: Record<string, unknown>
+    try {
+      row = JSON.parse(lines[index]) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const payload = row.type === 'event_msg' ? row.payload as Record<string, unknown> | undefined : undefined
+    const info = payload?.type === 'token_count' ? payload.info as Record<string, unknown> | undefined : undefined
+    const total = info?.total_token_usage as Record<string, unknown> | undefined
+    if (!total) continue
+    const number = (key: string): number => typeof total[key] === 'number' && Number.isFinite(total[key]) ? total[key] as number : 0
+    return {
+      tokensIn: number('input_tokens'),
+      tokensOut: number('output_tokens'),
+      cacheReadTokens: number('cached_input_tokens'),
+      cacheCreationTokens: number('cache_write_input_tokens'),
+      reasoningTokens: number('reasoning_output_tokens')
+    }
+  }
+  return undefined
+}
 
 async function codexChildRollout(parentPath: string, sessionId: string): Promise<string | undefined> {
   const dayDir = dirname(await realpath(parentPath))
@@ -193,7 +241,10 @@ export async function parseTranscriptSnapshot(args: {
         if (newline >= 0) sessionIdentity = parseCodexRollout(header.content.slice(0, newline + 1), args.runId).identity
       }
     }
-    const parsed = parseCodexRollout(snapshot.content, args.runId, sessionIdentity)
+    const usageBaseline = snapshot.startOffset > 0 && snapshot.identity
+      ? await codexUsageBaseline(args.path, snapshot.startOffset, snapshot.identity)
+      : undefined
+    const parsed = parseCodexRollout(snapshot.content, args.runId, sessionIdentity, usageBaseline)
     const direct = args.providerTurnId ? parsed.turns.find((turn) => turn.providerTurnId === args.providerTurnId) : undefined
     const matching = args.promptHash
       ? [...parsed.turns].reverse().find((turn) => {

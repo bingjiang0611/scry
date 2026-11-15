@@ -96,6 +96,34 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
   return output
 }
 
+/**
+ * Name what policy omitted, from the record's own manifest: the untracked files that exceeded the
+ * manifest limit keep their path and line counts, so the count and their directories stay provable
+ * without reading any body. Bodies are the only thing this reason has to explain.
+ */
+function policyOmissionReason(files: Array<{ path: string; change?: string }>): string {
+  const untracked = files.filter((file) => file.change === 'added')
+  const other = files.length - untracked.length
+  const directories = new Map<string, number>()
+  for (const file of untracked) {
+    const segments = file.path.split('/').filter(Boolean)
+    const top = segments.length > 1 ? segments[segments.length - 2] : '.'
+    directories.set(top, (directories.get(top) ?? 0) + 1)
+  }
+  const distribution = [...directories]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 5)
+    .map(([dir, count]) => `${dir} (${count})`)
+    .join(', ')
+  return [
+    untracked.length > 0
+      ? `${untracked.length} new untracked file(s) exceeded the manifest limit and keep only their path and line counts` +
+        (distribution ? `; directories: ${distribution}` : '')
+      : '',
+    other > 0 ? `${other} file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude` : ''
+  ].filter(Boolean).join('; ')
+}
+
 export function aggregateTurnEvidence(args: {
   userText?: string
   events: TraceEvent[]
@@ -179,6 +207,13 @@ export function aggregateTurnEvidence(args: {
         ? [file.patchReason ?? 'unknown']
         : []
   )))
+  // A policy omission has two causes the record can still name: the integrator's own exclusion list,
+  // and a turn whose new untracked files exceeded the manifest limit. Both keep the file list.
+  const policyOmitted = diffs.flatMap((diff) => diff.files.filter((file) =>
+    file.patchStatus === 'unavailable' && file.patchReason === 'policy'))
+  const policyReason = policyOmitted.length === 0
+    ? undefined
+    : policyOmissionReason(policyOmitted)
   // 新建 worktree 拿不到可信基线时，记清楚是哪一种原因，不把「无法归因」退化成一句泛化文案。
   const worktreeBaselineReasons = new Set(diffs.flatMap((diff) => diff.baselineReason ? [diff.baselineReason] : []))
   const dangers = starts.flatMap((event) =>
@@ -331,7 +366,8 @@ export function aggregateTurnEvidence(args: {
                   ? worktreeBaselineReasons.size > 0
                     ? `one or more repository snapshots were unavailable: new worktree baselines were untrustworthy (${[...worktreeBaselineReasons].join(', ')})`
                     : 'one or more repository snapshots were unavailable'
-                  : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}`,
+                  : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}` +
+                    (policyReason ? `; ${policyReason}` : ''),
                 'exact'
               )
             : {

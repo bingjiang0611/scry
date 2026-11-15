@@ -242,30 +242,60 @@ export async function existingPath(path: string): Promise<boolean> {
 export interface RecordContentItem {
   path: string
   ref: ToolContentRef
+  /** Eviction class of this body; see `RECORD_CONTENT_PRIORITY`. */
+  priority: RecordContentPriority
 }
+
+/**
+ * Eviction order for one record's bodies, highest-value evidence first. The transport budget keeps
+ * this order, so the raw session archive and the tool bodies a turn is judged on survive before
+ * previews of files. `diff-added` is a file nothing tracked before this turn: it goes last.
+ */
+export const RECORD_CONTENT_PRIORITY = [
+  'transcript',
+  'tool',
+  'model',
+  'assistant',
+  'diff-tracked',
+  'diff-added'
+] as const
+
+export type RecordContentPriority = typeof RECORD_CONTENT_PRIORITY[number]
 
 export function recordContentItems(record: Omit<AgentTurnRecord, 'sequence'>): RecordContentItem[] {
   const items: RecordContentItem[] = []
+  if (record.transcript?.value?.contentRef) {
+    items.push({ path: 'transcript', ref: record.transcript.value.contentRef, priority: 'transcript' })
+  }
   for (const section of ['tools', 'skills', 'mcps'] as const) {
     for (const [index, call] of (record[section].value ?? []).entries()) {
-      if (call.inputContent?.contentRef) items.push({ path: `${section}.${index}.input`, ref: call.inputContent.contentRef })
-      if (call.outputContent?.contentRef) items.push({ path: `${section}.${index}.output`, ref: call.outputContent.contentRef })
+      if (call.inputContent?.contentRef) items.push({ path: `${section}.${index}.input`, ref: call.inputContent.contentRef, priority: 'tool' })
+      if (call.outputContent?.contentRef) items.push({ path: `${section}.${index}.output`, ref: call.outputContent.contentRef, priority: 'tool' })
     }
   }
   for (const [segmentIndex, segment] of (record.modelSegments?.value ?? []).entries()) {
     for (const [refIndex, ref] of (segment.contentRefs ?? []).entries()) {
-      items.push({ path: `modelSegments.${segmentIndex}.${refIndex}`, ref })
+      items.push({ path: `modelSegments.${segmentIndex}.${refIndex}`, ref, priority: 'model' })
     }
   }
   for (const [refIndex, ref] of (record.assistant.value?.contentRefs ?? []).entries()) {
-    items.push({ path: `assistant.${refIndex}`, ref })
+    items.push({ path: `assistant.${refIndex}`, ref, priority: 'assistant' })
   }
-  for (const [snapshotIndex, snapshot] of (record.diff.value ?? []).entries()) {
-    for (const [fileIndex, file] of snapshot.files.entries()) {
-      if (file.patchContent?.contentRef) items.push({ path: `diff.${snapshotIndex}.${fileIndex}.patch`, ref: file.patchContent.contentRef })
+  // Existing files the turn changed, then the new files it added: a turn that creates hundreds of
+  // files must not push its own edits out of the budget.
+  for (const added of [false, true]) {
+    for (const [snapshotIndex, snapshot] of (record.diff.value ?? []).entries()) {
+      for (const [fileIndex, file] of snapshot.files.entries()) {
+        if (!file.patchContent?.contentRef) continue
+        if ((file.change === 'added') !== added) continue
+        items.push({
+          path: `diff.${snapshotIndex}.${fileIndex}.patch`,
+          ref: file.patchContent.contentRef,
+          priority: added ? 'diff-added' : 'diff-tracked'
+        })
+      }
     }
   }
-  if (record.transcript?.value?.contentRef) items.push({ path: 'transcript', ref: record.transcript.value.contentRef })
   return items
 }
 

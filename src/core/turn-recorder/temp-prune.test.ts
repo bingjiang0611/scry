@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseRecorderConfig } from './config.js'
 import { handleRecorderHook } from './recorder.js'
-import { STALE_TEMP_AGE_MS, pruneStaleTemps } from './temp-prune.js'
+import { RETAINED_CAPTURE_AGE_MS, STALE_TEMP_AGE_MS, pruneStaleTemps } from './temp-prune.js'
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -45,7 +45,7 @@ describe('recorder stale temp files', () => {
     // 标记文件让目录遍历最多每天一次：同级调用直接跳过，不做任何扫描。
     await writeFile(join(records, `00000000000000002330-${'c'.repeat(32)}.json.4245.6f21.tmp`), '')
     const again = await pruneStaleTemps(dataRoot, { now: now + day / 2 })
-    expect(again).toEqual({ removed: 0, bytes: 0, scanned: false })
+    expect(again).toEqual({ removed: 0, bytes: 0, scanned: false, retained: 0 })
     expect(await readdir(records)).toHaveLength(2)
 
     const nextDay = await pruneStaleTemps(dataRoot, { now: now + STALE_TEMP_AGE_MS, olderThanMs: 0 })
@@ -120,5 +120,51 @@ describe('recorder stale temp files', () => {
     const names = await readdir(records)
     expect(names.some((name) => name.endsWith('.tmp'))).toBe(false)
     expect(names).toHaveLength(1)
+  })
+
+  it('expires a retained segment store whose session no longer names it', async () => {
+    const dataRoot = await tempRoot('scry-retained-capture-')
+    const session = join(dataRoot, 'runtime', 'codex', 'session-1')
+    const store = join(session, 'segment-captures', '1', 'scry-turn-diff-abc', 'objects')
+    await mkdir(store, { recursive: true })
+    await writeFile(join(dataRoot, 'runtime', 'codex', 'session-1', 'session.json'), JSON.stringify({
+      schemaVersion: 1, lastGeneration: 1, lastTurnIndex: 0
+    }))
+    const now = Date.now()
+    const old = new Date(now - 3 * RETAINED_CAPTURE_AGE_MS)
+    await utimes(join(session, 'segment-captures', '1'), old, old)
+
+    const result = await pruneStaleTemps(dataRoot, { now, olderThanMs: 0 })
+    expect(result.retained).toBe(1)
+    expect(await readdir(join(session, 'segment-captures'))).toEqual([])
+  })
+
+  it('keeps a store the session still holds as its chain baseline, however old', async () => {
+    const dataRoot = await tempRoot('scry-retained-chain-')
+    const session = join(dataRoot, 'runtime', 'qoder', 'session-2')
+    const generation = join(session, 'segment-captures', '1')
+    const store = join(generation, 'scry-turn-diff-def', 'objects')
+    await mkdir(store, { recursive: true })
+    await writeFile(join(session, 'session.json'), JSON.stringify({
+      schemaVersion: 1, lastGeneration: 2, lastTurnIndex: 1, chainStores: [generation]
+    }))
+    const now = Date.now()
+    const old = new Date(now - 30 * day)
+    await utimes(store, old, old)
+    await utimes(generation, old, old)
+
+    const result = await pruneStaleTemps(dataRoot, { now, olderThanMs: 0 })
+    expect(result.retained).toBe(0)
+    expect(await readdir(join(session, 'segment-captures'))).toEqual(['1'])
+  })
+
+  it('leaves a store younger than the retention window alone', async () => {
+    const dataRoot = await tempRoot('scry-retained-fresh-')
+    const session = join(dataRoot, 'runtime', 'codex', 'session-3')
+    const generation = join(session, 'segment-captures', '4')
+    await mkdir(join(generation, 'scry-turn-diff-ghi', 'objects'), { recursive: true })
+    const result = await pruneStaleTemps(dataRoot, { now: Date.now(), olderThanMs: 0 })
+    expect(result.retained).toBe(0)
+    expect(await readdir(join(session, 'segment-captures'))).toEqual(['4'])
   })
 })
