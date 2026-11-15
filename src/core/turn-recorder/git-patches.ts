@@ -191,13 +191,16 @@ function patchBatchFiles(
 ): { result: DiffFile[]; pending: Array<{ index: number; file: DiffFile; pathspec: string; pathBytes: Buffer }> } {
   const result = files.map((file) => {
     if (file.binary) return { ...file, patchStatus: 'binary' as const }
+    // A caller that already decided this body is not captured (config exclusion, untracked
+    // manifest limit) keeps that decision; capturing it here would silently undo the policy.
+    if (file.patchStatus === 'unavailable') return file
     if (excludedBasenames.has(basename(file.path))) {
       return { ...file, patchStatus: 'unavailable' as const, patchReason: 'policy' as const }
     }
     return file
   })
   const pending = files.flatMap((file, index) => {
-    if (file.binary || excludedBasenames.has(basename(file.path))) return []
+    if (file.binary || file.patchStatus === 'unavailable' || excludedBasenames.has(basename(file.path))) return []
     const relPath = relative(capture.repoRoot!, file.path).split(sep).join('/')
     return [{ index, file, pathspec: exactGlobPathspec(relPath), pathBytes: Buffer.from(relPath) }]
   })

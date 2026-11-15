@@ -8,6 +8,7 @@ import { handleRecorderHook } from './recorder'
 import { listRecords } from './store'
 import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state'
 import { readJson } from './io'
+import { readRecorderContent } from './content-store'
 
 const roots: string[] = []
 
@@ -141,6 +142,11 @@ it('an opt-in workspace records nothing from ordinary hooks, and the guard claim
   })
   expect(records[0].user.value?.text).toBe(CURRENT_TURN.prompt)
   expect(records[0].startedAt).toBe(CURRENT_TURN.startedAt)
+  expect(records[0].transcript.status).toBe('available')
+  const raw = await readRecorderContent(join(root, '.scry'), records[0].transcript.value!.contentRef)
+  const currentLines = rolloutLines(root, [CURRENT_TURN]).slice(1).map((line) => JSON.stringify(line)).join('\n') + '\n'
+  expect(raw).toBe(currentLines)
+  expect(raw).not.toContain(OLDER_TURN.prompt)
 })
 
 it('repeated claims are idempotent per captureId and never open a second generation', async () => {

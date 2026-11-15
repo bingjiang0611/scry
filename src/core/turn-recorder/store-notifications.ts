@@ -112,6 +112,11 @@ export interface DrainResult {
   /** `null` when the delivery state itself is unreadable: the backlog is unknown, not zero. */
   pending: number | null
   truncated: boolean
+  /**
+   * False when this workspace has no activated commit callback, so nothing could be delivered.
+   * A caller must not read the zeroes above as "there was nothing to deliver".
+   */
+  hookConfigured?: boolean
 }
 
 export async function drainCommitNotifications(
@@ -124,7 +129,14 @@ export async function drainCommitNotifications(
   let delivered = 0
   try {
     const hook = await configuredCommitHook(env)
-    if (!hook) return { delivered: 0, pending: 0, truncated: false }
+    if (!hook) {
+      // No callback is a configuration fact, not an empty backlog. Report it instead of returning
+      // zeroes that read like a successful delivery, and leave the records queued on disk.
+      // `recorder.log` is machine-readable diagnostics, so this fact travels in the result and in
+      // `scry status`/`doctor`, not as a free-text line.
+      const pending = await pendingCount().catch(() => null)
+      return { delivered: 0, pending, truncated: false, hookConfigured: false }
+    }
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
       const state = options.scope
         ? await loadScopedDeliveryState(dataRoot, fingerprint)

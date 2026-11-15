@@ -37,6 +37,7 @@ import {
   captureTurnPatches,
   parseRawNumstat
 } from './git-patches.js'
+import { applyTurnDiffFilePolicy } from './git-turn-diff-policy.js'
 
 import { WORKSPACE_FILE_LIMIT, WORKSPACE_PATCH_BYTES, WorkspaceReadUnavailable } from './git-workspace-limits.js'
 
@@ -119,6 +120,31 @@ async function unchangedIndexPath(capture: GitTurnDiffCapture): Promise<string |
   const same = now.mtimeMs === indexState.mtimeMs && now.ctimeMs === indexState.ctimeMs &&
     now.size === indexState.size && now.ino === indexState.ino
   return same ? indexPath : undefined
+}
+
+async function untrackedPaths(
+  capture: GitTurnDiffCapture,
+  filterOverrides: string[],
+  pathspec: string[],
+  env: NodeJS.ProcessEnv,
+  deadline: number
+): Promise<Set<string>> {
+  // Untracked means "not in the repository's own index". The capture's index is a temporary
+  // snapshot that already staged these files, so this query must use the real one.
+  const realEnv = { ...env }
+  if (capture.indexPath) realEnv.GIT_INDEX_FILE = capture.indexPath
+  else delete realEnv.GIT_INDEX_FILE
+  try {
+    const out = await gitCommand(
+      snapshotGitArgs(filterOverrides, ['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspec]),
+      { cwd: capture.repoRoot!, env: realEnv, deadline }
+    )
+    return new Set(out.split('\0').filter(Boolean).map((path) => resolve(capture.repoRoot!, path)))
+  } catch {
+    // An unqueryable index keeps the previous behaviour (every added file keeps its patch); the
+    // diff stays truthful because nothing was omitted.
+    return new Set()
+  }
 }
 
 export async function computeGitTurnDiff(
@@ -353,6 +379,19 @@ export async function computeGitTurnDiff(
     if (options.workspaceSnapshot && files.length > WORKSPACE_FILE_LIMIT) {
       throw new WorkspaceReadUnavailable('workspace_limit')
     }
+    // Untracked status is only queried when this turn added files: a turn that only edits tracked
+    // files pays nothing, and the query is one bounded read-only Git call.
+    const untracked = files.some((file) => file.change === 'added') && !options.workspaceSnapshot
+      ? await untrackedPaths(capture, filterOverrides, fullPathspec, env, deadline)
+      : undefined
+    const policy = applyTurnDiffFilePolicy({
+      files,
+      repoRoot: capture.repoRoot,
+      diffExclude: options.diffExclude ?? [],
+      untracked,
+      untrackedLimit: options.untrackedPatchLimit
+    })
+    files = policy.files
     files = await captureTurnPatches(
       capture,
       env,

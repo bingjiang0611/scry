@@ -310,7 +310,7 @@ async function transcriptAnchorOffset(
             const anyAnchor = transcriptLineAnchor(
               combined.subarray(lineStart, lineEnd).toString('utf8'), provider, undefined, undefined
             )
-            if (matchedTurnOffset != null && anyAnchor === 'turn') return { offset: windowOffset, scannedTo }
+            if (matchedTurnOffset != null && anyAnchor === 'turn') return { offset: matchedTurnOffset, scannedTo }
             if (anchor === 'turn' || matchedUserOffset != null && anyAnchor === 'turn') {
               matchedTurnOffset = windowOffset
             } else if (anchor === 'user' && matchedUserOffset == null) {
@@ -330,7 +330,7 @@ async function transcriptAnchorOffset(
       const firstLine = suffix.toString('utf8')
       const anchor = transcriptLineAnchor(firstLine, provider, promptHash, providerTurnId)
       if (anchor === 'turn') return { offset: 0, scannedTo }
-      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return { offset: 0, scannedTo }
+      if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return { offset: matchedTurnOffset, scannedTo }
       if (anchor === 'user' && matchedUserOffset == null) matchedUserOffset = 0
     }
     return { offset: matchedTurnOffset ?? matchedUserOffset ?? 0, scannedTo }

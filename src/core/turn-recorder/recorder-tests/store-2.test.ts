@@ -85,6 +85,18 @@ export function registerSuite14(): void {
     await expect(access(join(dataRoot, 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
   })
 
+  it('reports a missing callback as a queue that is not being delivered, never as an empty backlog', async () => {
+    const root = await workspace()
+    await completeTurn(root, 'no-callback')
+    const dataRoot = join(root, '.scry')
+    const env = { PATH: '/usr/bin:/bin' }
+    // Friday 现场：记录落地、notifyBacklog=3，但 uploader initialized=false、enqueuedThrough=0。
+    await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({
+      delivered: 0, pending: 1, truncated: false, hookConfigured: false
+    })
+    await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: null, notifyBacklog: 1 })
+  })
+
   it('retains pending notifications on a live lock deadline and delivers them once on explicit recovery', async () => {
     const root = await workspace()
     await completeTurn(root, 'lock-contention')

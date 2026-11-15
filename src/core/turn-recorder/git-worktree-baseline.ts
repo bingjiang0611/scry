@@ -245,6 +245,7 @@ export interface NewWorktreeBaselineOptions {
   excludedPaths: string[]
   events: TraceEvent[]
   patchExcludeBasenames?: string[]
+  diffExclude?: string[]
   /** begin 阶段的 5 秒上限（保留给测试缩短）。 */
   deadlineMs?: number
   /** finish 阶段上限；缺省时沿用现有 finish 预算。 */
@@ -301,6 +302,7 @@ export async function finishNewWorktreeBaseline(
     const snapshot = await finishGitTurnDiff(capture, options.finishDeadlineMs, {
       ...turnChangeHints(plan.root, options.events),
       patchExcludeBasenames: options.patchExcludeBasenames,
+      diffExclude: options.diffExclude,
       completePatches: true
     })
     if (snapshot.status !== 'captured') {

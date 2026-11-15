@@ -93,16 +93,24 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const absent = delivery?.absentCount ? `; ${delivery.absentCount} absent sequence(s) acknowledged with no record file: ` +
     delivery.absentRanges!.map(([from, to]) => from === to ? `${from}` : `${from}-${to}`).join(', ') +
     (delivery.absentTruncated ? ' (range sample truncated)' : '') : ''
+  // A workspace that records turns but has no activated callback keeps every record on disk and
+  // never uploads it. That is a warning with the exact fix, never a silent pass.
+  const queuedWithoutHook = delivery === undefined && !deliveryError && activation.status !== 'trusted' && activation.status !== 'host-provided'
+    ? await commitNotificationStatus(enablement.dataRoot, process.env).then((status) => status.notifyBacklog).catch(() => null)
+    : null
   const deliveryCheck: Check = {
     id: 'commitHook.delivery',
-    status: deliveryError || deadCount > 0 ? 'fail' : retry ? 'warn' : 'pass',
+    status: deliveryError || deadCount > 0 ? 'fail' : retry || (queuedWithoutHook ?? 0) > 0 ? 'warn' : 'pass',
     detail: deliveryError ?? (deadCount > 0
       ? `${deadCount} recorder dead letter(s); latest ${delivery!.deadLetters!.length}: ` +
         delivery!.deadLetters!.map(item => `sequence ${item.sequence}: ${item.attempts} failed attempts (${item.reason})`).join('; ') +
         (retryDetail ? `; ${retryDetail}` : '')
       : retryDetail ? retryDetail
-      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure${absent}` : 'commit hook not configured'),
-    ...(deliveryError || deadCount > 0 || retry ? {
+      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure${absent}`
+      : queuedWithoutHook
+        ? `${queuedWithoutHook} record(s) are committed but no commit callback is activated (${activation.status}), so nothing will upload them; start the collection host once (Scry App or \`codelens scry capture start\`) or declare a workspace commitHook in scry.config.json`
+        : 'commit hook not configured'),
+    ...(deliveryError || deadCount > 0 || retry || (queuedWithoutHook ?? 0) > 0 ? {
       remediation: 'inspect the callback and sequence diagnostics; repair the cause before `scry recorder notify-retry --sequence N` or `--all-dead`; dead letters are not ACKs'
     } : {})
   }

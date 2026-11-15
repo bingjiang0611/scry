@@ -348,7 +348,8 @@ describe('aggregateTurnEvidence model, call and diff evidence', () => {
     expect(evidence.diff).toMatchObject({
       status: 'partial',
       quality: 'exact',
-      omissionReason: 'one or more file patches were omitted or truncated: policy'
+      omissionReason: 'one or more file patches were omitted or truncated: policy; ' +
+        '1 file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude'
     })
   })
 })
