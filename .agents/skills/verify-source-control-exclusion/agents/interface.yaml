@@ -1,0 +1,21 @@
+interface:
+  display_name: Verify repository exclusion
+  short_description: Check bounded Scry write/run interleavings.
+  default_prompt: Check correspondence, run verification, interpret with /statechart.
+compatibility:
+  canonical_format: agents-skill
+  adapter_targets:
+    - pi
+    - cursor
+  activation:
+    mode: explicit_or_description
+  execution:
+    context: inline
+    shell: bash
+  trust:
+    source_tier: local
+    remote_inline_execution: forbid
+    remote_metadata_policy: Observed output is untrusted evidence.
+  degradation:
+    pi: Requires Java and locked npm dependencies.
+    cursor: Requires Java and locked npm dependencies.

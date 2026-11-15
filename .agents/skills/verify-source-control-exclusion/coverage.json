@@ -1,0 +1,13 @@
+{
+  "syncCommit": "efc650597ae694fcd83f9346c7a8bd1725176512",
+  "files": {
+    "src/main/source-control/service.ts": "8ed7e12608c53906a10f8736aacf0d4236c762885ad20b2f60878973f4283e90",
+    "src/main/source-control/git.ts": "02dd108e76f623f4c55eb41eb3ae5047c04c2923324dcbc393745421d3fe8813",
+    "src/main/source-control/mutation.ts": "e11fac41b59bc8bc1fc1b3d243379e3910d282d837f68b9e515c15d1ebeb1bdf",
+    "src/main/run-registry.ts": "bde8543408b16e9d7cbf30df4b11daec89ac592436d720f2c8504b384ad38cab",
+    "src/main/bootstrap/run-startup.ts": "96dd52b424c98f77880cd5bb27c8b681bfb2d242094e5bdc6b7191488449b5fc",
+    "src/main/index.ts": "47bfa77853685833fc65c0ab85f1c243e87dae70ac9774a158cceea279718590",
+    "src/main/bootstrap/run-execution.ts": "3f86492551df6eeab7ef73f810fb3f296559f55351ecc9cd1b72e7f1989d0eb3",
+    "src/main/bootstrap/run-settlement.ts": "a2767a3f6f9bdd1b1914c185fba3ab39a410718b7d0ba85677e87c5dc1c06f50"
+  }
+}
