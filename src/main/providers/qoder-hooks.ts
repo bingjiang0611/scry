@@ -180,15 +180,28 @@ export function hookFingerprint(event: TraceEvent): string {
   return [event.stage, event.hookEvent, command, event.toolUseId, event.hookOutcome].join('|')
 }
 
+/**
+ * Log-reconstructed hook events the SDK did not already report. A log event the SDK did report
+ * is dropped, and the rest of that log hook run is filed under the SDK run's hookId: otherwise
+ * a run whose SDK frames stop at `started` (a failing SessionStart hook, round six F0) keeps its
+ * log failure under the log's own id, and the record counts one run as two.
+ */
 export function qoderHookFallbackOnly(sdkHooks: TraceEvent[], fallback: TraceEvent[]): TraceEvent[] {
-  const sdkCounts = new Map<string, number>()
-  for (const event of sdkHooks) sdkCounts.set(hookFingerprint(event), (sdkCounts.get(hookFingerprint(event)) ?? 0) + 1)
-  return fallback.filter((event) => {
+  const sdkByKey = new Map<string, TraceEvent[]>()
+  for (const event of sdkHooks) {
     const key = hookFingerprint(event)
-    const remaining = sdkCounts.get(key) ?? 0
-    if (remaining === 0) return true
-    sdkCounts.set(key, remaining - 1)
+    sdkByKey.set(key, [...(sdkByKey.get(key) ?? []), event])
+  }
+  const aliases = new Map<string, string>()
+  const kept = fallback.filter((event) => {
+    const match = sdkByKey.get(hookFingerprint(event))?.shift()
+    if (!match) return true
+    if (event.hookId && match.hookId && !aliases.has(event.hookId)) aliases.set(event.hookId, match.hookId)
     return false
+  })
+  return kept.map((event) => {
+    const alias = event.hookId ? aliases.get(event.hookId) : undefined
+    return alias ? { ...event, hookId: alias } : event
   })
 }
 

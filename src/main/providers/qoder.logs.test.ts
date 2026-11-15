@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { aggregateHooks } from '../../core/turn-recorder/aggregate-hooks'
 import type { TraceEvent } from '../../shared/trace'
 import { bindQoderTestHelpers, resetQoderTestState } from './qoder.test-support'
 
@@ -245,5 +246,18 @@ describe('Qoder provider adapter · native log evidence', () => {
 
     expect(qoderHookFallbackOnly([sdk('same-hook')], [fallback('a', 'same-hook'), fallback('b', 'same-hook')]))
       .toEqual([expect.objectContaining({ id: 'b' })])
+  })
+
+  it('files a log-only failure under the SDK run it belongs to, so one failing hook is one run', () => {
+    const base = { runId: 'run-1', ts: '2026-11-12T00:00:00.000Z', kind: 'hook' as const, hookEvent: 'SessionStart' }
+    // The SDK reported only the start of a failing hook; the log has both halves.
+    const sdk: TraceEvent = { ...base, id: 'sdk-start', stage: 'hook_started', hookId: 'sdk-hook', hookName: 'check', hookOutcome: 'started', runtimeMetadata: { source: 'qoder_sdk' } }
+    const logStart: TraceEvent = { ...base, id: 'log-start', stage: 'hook_started', hookId: 'log-hook', hookCommand: 'check', hookOutcome: 'started', runtimeMetadata: { source: 'qoder_cli_log' } }
+    const logFailure: TraceEvent = { ...base, id: 'log-failure', stage: 'hook_response', hookId: 'log-hook', hookCommand: 'check', hookOutcome: 'error', isError: true, runtimeMetadata: { source: 'qoder_cli_log' } }
+    const other: TraceEvent = { ...logFailure, id: 'other-failure', hookId: 'other-log-hook', hookCommand: 'other' }
+    const kept = qoderHookFallbackOnly([sdk], [logStart, logFailure, other])
+    expect(kept.map((event) => [event.id, event.hookId])).toEqual([['log-failure', 'sdk-hook'], ['other-failure', 'other-log-hook']])
+    const runs = aggregateHooks([sdk, ...kept], new Map()).filter((hook) => hook.event === 'SessionStart')
+    expect(runs.map((hook) => [hook.command ?? hook.name, hook.runs, hook.status])).toEqual([['check', 1, 'failed'], ['other', 1, 'failed']])
   })
 })
