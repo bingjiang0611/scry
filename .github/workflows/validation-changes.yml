@@ -57,7 +57,7 @@ jobs:
           desktop_free=(
             "${documentation[@]}"
             ':(top,glob,exclude)**/*.test.ts' ':(top,glob,exclude)**/*.test.tsx'
-            ':(top,exclude)CLAUDE.md' ':(top,exclude)CONTRIBUTING.md' ':(top,exclude)DESIGN.md' ':(top,exclude)PRODUCT.md'
+            ':(top,exclude)AGENTS.md' ':(top,exclude)CONTRIBUTING.md' ':(top,exclude)DESIGN.md' ':(top,exclude)PRODUCT.md' ':(top,exclude)CLAUDE.md'
             ':(top,glob,exclude).agents/**/*.md' ':(top,glob,exclude).claude/**/*.md'
             ':(top,exclude).github/pull_request_template.md' ':(top,glob,exclude).github/ISSUE_TEMPLATE/**'
             ':(top,exclude).github/VOUCHED.td' ':(top,exclude).github/TRIAGE_EXEMPTIONS.td'
