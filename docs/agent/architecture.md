@@ -6,19 +6,35 @@
 
 Scry 是一个 local-first 的 AI coding agent 观测与治理桌面 App。它在应用内驱动本机 Provider CLI/SDK，把会话、工具调用、文件足迹、用量、诊断和干预呈现为可检查证据。
 
-- **Provider**：Claude、Codex、Qoder、OpenCode 或 Pi 的产品适配层。
+领域定义统一见根目录 [GLOSSARY.md](../../GLOSSARY.md)。以下保留实现层词汇，不以代码中历史沿用的 `session` 名称推断领域身份。
+
+- **Provider**：所接入的 Agent 执行系统，不等于模型或 Provider adapter。
 - **runtime provider**：实际 transport：`claude_sdk`、`codex_cli`、`qoder_cli`、`opencode_server`、`pi_rpc`。
 - **Provider adapter**：实现 run，并可选实现 fork、Skill、MCP、command、trust、run-control 等 facet 的边界对象。
 - **CapabilityEnvelope**：显式表达 ready、degraded、unavailable 的能力结果。
-- **run / turn / session**：一次活动执行、一次顶层用户轮次、可恢复的 Provider 对话身份；三者不可混用。
+- **Conversation / binding / native session**：Scry 会话、执行目标关联、Provider 原生会话分别建模；见 `src/shared/conversation.ts`。App 归档引用也不由原生会话身份推导。
+- **run / turn / record**：活动执行、Agent 工作轮次、持久证据记录不可混用；见 `src/main/run-registry.ts` 与 `src/shared/turn-record-contracts.ts`。轮次角色须由宿主结构化声明，不能把所有记录当作主 Agent 的人工回合。
 - **trace event**：归一化后的模型、工具、Hook、usage、错误或 lifecycle 观测事件。
 - **logical call**：聚合 lifecycle 事件后的单次工具/Skill/MCP/agent 调用。
-- **turn record**：带 evidence status/quality/provenance 的版本化顶层轮次事实。
+- **turn record**：带 evidence status/quality/provenance 的版本化轮次记录；后台唤醒可产生关联原轮次的续段记录，记录数不是人工回合数。
 - **managed recorder**：由 App 管理、在证据收敛后提交 canonical turn record 的路径。
 - **trace archive**：Scry App 为历史 UI 保存的轮次/事件档案，不等于 `.scry` record。
 - **SQLite ledger**：面向分析、用量、账单和聚合的本机数据库；可以降级，不是 Provider transcript。
-- **commit hook bundle**：经指纹批准后冻结到 userData、用于 commit notification 的 workspace hook 副本。
+- **commit hook bundle**：经自动授权与指纹校验后冻结到 userData、用于轮次记录提交通知的 workspace hook 副本；不是 Git hook，也不是用户手动批准。
 - **permission mode**：default、auto-review（仅支持的 Provider）或 full access；不是统一 sandbox 等级。
+
+### 边界场景核对
+
+| 场景 | 领域结论 | 合同与实现入口 |
+| --- | --- | --- |
+| 切换 Provider 后仍在同一 Scry 对话中交流 | Scry 会话持续存在，不代表沿用同一个原生会话；可见历史不等于已投递上下文 | `src/shared/conversation.ts` |
+| 从可见历史创建侧边会话，随后来源继续收到消息 | 新会话保留创建时点的消息副本，不是来源的实时镜像或原生分叉 | `src/shared/conversation.ts` |
+| 主 Agent 停顿后被后台结果唤醒，或宿主发起审批轮次 | 续段记录与角色须分别解释，不能累加为人工回合 | `src/core/turn-recorder/recorder-hook-segment.ts`、`src/core/turn-recorder/turn-role.test.ts` |
+| 仅有部分请求的精确 Credits | 精确性不代表覆盖完整；可同时为 `exact` 与 `partial`，不能补零或混入美元 | `src/shared/credit-usage.ts` |
+| 已选择 full access，但仓库配置发生变化 | 仍需执行信任与指纹重验；自动授权不等于手动批准 | `src/main/mcp-execution-trust.ts`、`src/main/commit-hook-trust.ts` |
+| Provider 已结束，但本地归档仍在收尾 | Provider 结束不等于 Scry 本地收尾完成 | `src/main/run-registry.ts` |
+
+这些是文档与代码合同核对，不代表当前版本的端到端运行验收。
 
 ## 架构与数据流
 
