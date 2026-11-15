@@ -268,9 +268,9 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     <section className={`workspace-panel${selected ? ' file-open' : ''}`} aria-label={copy.filesLabel}>
       <header className="workspace-head">
         {selected ? (
-          <button type="button" className="iconbtn" onClick={() => confirmLeave() && setSelected(null)} title={copy.backToFiles}>
+          <IconButton size={selected ? 'sm' : 'md'} label={copy.backToFiles} onClick={() => confirmLeave() && setSelected(null)}>
             <Icon name="chevronRight" className="workspace-back" />
-          </button>
+          </IconButton>
         ) : (
           <Icon name="folder" />
         )}
@@ -282,17 +282,17 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         </div>
         {!selected && (
           <>
-            {!readOnlySource && <button type="button" className="iconbtn" onClick={() => startCreate('file')} title={copy.createFile}>
+            {!readOnlySource && <IconButton size={selected ? 'sm' : 'md'} label={copy.createFile} onClick={() => startCreate('file')}>
               <Icon name="plus" />
-            </button>}
-            <button type="button" className="iconbtn" onClick={refresh} title={copy.refreshFiles}>
+            </IconButton>}
+            <IconButton size={selected ? 'sm' : 'md'} label={copy.refreshFiles} onClick={refresh}>
               <Icon name="refresh" />
-            </button>
+            </IconButton>
           </>
         )}
-        <button type="button" className="iconbtn" onClick={requestClose} title={copy.closeFiles}>
+        <IconButton size={selected ? 'sm' : 'md'} label={copy.closeFiles} onClick={requestClose}>
           <Icon name="x" />
-        </button>
+        </IconButton>
       </header>
 
       {error && (
@@ -390,10 +390,10 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
               {copy.trashDescription(deleteTarget.name)}
             </p>
             <div className="workspace-dialog-actions">
-              <button type="button" className="btn" disabled={mutating} onClick={() => setDeleteTarget(null)}>{copy.cancelFileOperation}</button>
-              <button type="button" className="btn danger" disabled={mutating} onClick={() => void trash()}>
+              <Button disabled={mutating} onClick={() => setDeleteTarget(null)}>{copy.cancelFileOperation}</Button>
+              <Button variant="danger" disabled={mutating} onClick={() => void trash()}>
                 {mutating ? copy.processingFile : copy.moveToTrash}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -404,4 +404,6 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
 
 
 import { WorkspaceContextMenu, WorkspaceDialog, FileEditor } from './WorkspaceDialogs'
+import { Button } from './primitives/Button'
+import { IconButton } from './primitives/IconButton'
 export { WorkspaceContextMenu, WorkspaceDialog, FileEditor }

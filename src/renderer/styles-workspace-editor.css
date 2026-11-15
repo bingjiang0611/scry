@@ -23,12 +23,6 @@
   border-bottom: 0;
 }
 
-.workspace-panel.file-open .workspace-head > .iconbtn {
-  width: 28px;
-  height: 28px;
-  flex-basis: 28px;
-}
-
 .workspace-title {
   min-width: 0;
   flex: 1;
@@ -52,20 +46,6 @@
 .workspace-title span {
   color: var(--dim3);
   font: var(--text-2xs)/1.45 var(--font-mono);
-}
-
-.iconbtn {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  color: var(--dim);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  cursor: pointer;
 }
 
 .workspace-back {
@@ -247,22 +227,6 @@
   text-align: right;
 }
 
-.workspace-editorbar .btn {
-  min-height: 28px;
-  padding: 4px 9px;
-  border: 0;
-  font-size: var(--text-compact-size);
-  white-space: nowrap;
-}
-
-.workspace-editorbar .btn:not(.primary) {
-  background: var(--panel2);
-}
-
-.workspace-editorbar .btn:not(.primary):hover {
-  background: var(--panel3);
-}
-
 .workspace-editorbody {
   flex: 1;
   min-width: 0;
@@ -376,20 +340,7 @@
   margin-top: 14px;
 }
 
-.btn.danger {
-  color: #fff;
-  background: var(--bad);
-  border-color: var(--bad);
-}
-
-.btn:disabled,
-.iconbtn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 @media (hover: hover) and (pointer: fine) {
-  .iconbtn:hover,
   .workspace-node:hover:not(.active) {
     color: var(--fg);
     background: var(--panel3);

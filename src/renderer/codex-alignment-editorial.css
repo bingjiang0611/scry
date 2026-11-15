@@ -49,8 +49,7 @@
 .sb-sess,
 .sb-settings,
 .tb-action,
-.surface-tab,
-.icon-button {
+.surface-tab {
   transition: color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
 }
 
@@ -411,28 +410,6 @@
 
 .runtime-composer .send:not(:disabled):hover {
   box-shadow: none;
-}
-
-/* Right surface actions share the same quiet hover language as conversation chrome. */
-.right-surface-panel .surface-actions .icon-button {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-sm);
-}
-
-.right-surface-panel .surface-actions .icon-button:hover {
-  background: var(--surface-hover);
-  color: var(--fg);
-}
-
-.right-surface-panel .surface-actions .icon-button.on {
-  background: var(--surface-subtle);
-  color: var(--fg);
-}
-
-.right-surface-panel .surface-actions .icon-button .ico {
-  width: 16px;
-  height: 16px;
 }
 
 /* Overview: a flat evidence dossier with one clear reading hierarchy. */

@@ -1,0 +1,131 @@
+/* The single definition of text and icon buttons (components/primitives/Button.tsx,
+   IconButton.tsx). Context rules elsewhere may position a button but must not
+   restyle its size, color or radius; pick a variant or size instead. Focus uses
+   the global focus-visible ring from codex-alignment-shell.css. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--fg);
+  font: var(--weight-medium) var(--text-sm)/1.25 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--panel3);
+  border-color: var(--accent-line);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--fill-fg);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, white);
+  border-color: color-mix(in srgb, var(--accent) 88%, white);
+}
+
+/* Irreversible confirmations only. */
+.btn.danger {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--fill-fg);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 88%, white);
+  border-color: color-mix(in srgb, var(--bad) 88%, white);
+}
+
+.btn.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--dim);
+}
+
+.btn.quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+  color: var(--fg);
+}
+
+.btn.sm {
+  gap: var(--space-1);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--r-sm);
+  font-size: var(--text-xs);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn .ico {
+  flex: none;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
+}
+
+.icon-button .ico {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-button.sm {
+  width: 28px;
+  height: 28px;
+}
+
+.icon-button.sm .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.icon-button.on {
+  background: var(--surface-strong);
+  color: var(--fg);
+}
+
+.icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-button {
+    transition: none;
+  }
+}

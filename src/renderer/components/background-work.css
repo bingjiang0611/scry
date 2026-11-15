@@ -115,14 +115,6 @@
 .background-work-evidence dd { margin: 0; color: var(--dim); overflow-wrap: anywhere; }
 .background-work-evidence code,
 .background-work-evidence time { font-family: var(--font-mono); font-size: inherit; }
-.background-work-actions > .background-work-stop {
-  flex: none;
-  min-height: 28px;
-  padding: 3px 8px;
-  font-size: var(--text-compact-size);
-  line-height: 20px;
-  white-space: nowrap;
-}
 .background-work-result,
 .background-work-warning,
 .background-work-empty { margin: 8px 0 0; color: var(--dim2); font-size: var(--text-supporting-size); line-height: 1.6; }

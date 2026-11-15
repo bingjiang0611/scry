@@ -12,6 +12,7 @@ import { SessionChatView } from './ChatView'
 import { ConversationDeleteDialog } from './ConversationDeleteDialog'
 import { PendingSubmissionDialog } from './PendingSubmissionDialog'
 import { SessionRenameDialog } from './SessionRename'
+import { Button } from './primitives/Button'
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
@@ -53,12 +54,12 @@ export function ConversationViewBody({
         cramped copy of that chrome inside the child. */}
     {!embedded && <div className="conversation-toolbar">
       <strong className="conversation-title" title={conversation.cwd}>{page?.summary.title ?? conversation.title}</strong>
-      <button ref={refreshButton} className="btn" onClick={() => { setError(undefined); setReload(value => value + 1) }}>刷新状态</button>
+      <Button size="sm" ref={refreshButton} onClick={() => { setError(undefined); setReload(value => value + 1) }}>刷新状态</Button>
       <details className="conversation-options"><summary>对话选项</summary><div className="unified-management">
-        <button className="btn" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => setRenaming(true)}>重命名</button>
-        <button className="btn" aria-label={page?.summary.pinnedAt ? '取消置顶统一对话' : '置顶统一对话'} disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'pin', pinned: !page?.summary.pinnedAt }).catch(error => setError(message(error))) }}>{page?.summary.pinnedAt ? '取消置顶' : '置顶'}</button>
-        <button className="btn" aria-label={page?.summary.archivedAt ? '恢复统一对话' : '存档统一对话'} disabled={!page || managing || working || Boolean((page?.summary.blockedReason && page.summary.fork?.status !== 'not_sent') || page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'archive', archived: !page?.summary.archivedAt }).catch(error => setError(message(error))) }}>{page?.summary.archivedAt ? '恢复' : '存档'}</button>
-        {page?.summary.archivedAt && (page.summary.deletion?.status !== 'complete' || page.summary.deletion.retainedCopies) && <button className="btn" aria-label="删除统一对话" disabled={managing || working || Boolean(activeRunId)} onClick={() => setDeleting(true)}>{page.summary.deletion?.status === 'complete' ? '核对保留副本…' : page.summary.deletion ? '继续清理…' : '删除副本…'}</button>}
+        <Button size="sm" aria-label="重命名统一对话" disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => setRenaming(true)}>重命名</Button>
+        <Button size="sm" aria-label={page?.summary.pinnedAt ? '取消置顶统一对话' : '置顶统一对话'} disabled={!page || managing || working || Boolean(page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'pin', pinned: !page?.summary.pinnedAt }).catch(error => setError(message(error))) }}>{page?.summary.pinnedAt ? '取消置顶' : '置顶'}</Button>
+        <Button size="sm" aria-label={page?.summary.archivedAt ? '恢复统一对话' : '存档统一对话'} disabled={!page || managing || working || Boolean((page?.summary.blockedReason && page.summary.fork?.status !== 'not_sent') || page?.summary.deletion)} onClick={() => { void updateMetadata({ kind: 'archive', archived: !page?.summary.archivedAt }).catch(error => setError(message(error))) }}>{page?.summary.archivedAt ? '恢复' : '存档'}</Button>
+        {page?.summary.archivedAt && (page.summary.deletion?.status !== 'complete' || page.summary.deletion.retainedCopies) && <Button size="sm" aria-label="删除统一对话" disabled={managing || working || Boolean(activeRunId)} onClick={() => setDeleting(true)}>{page.summary.deletion?.status === 'complete' ? '核对保留副本…' : page.summary.deletion ? '继续清理…' : '删除副本…'}</Button>}
         <p>{limitation}</p>
         {forkUnsupported
           ? <p>{CONVERSATION_COPY.forkUnsupported}</p>
@@ -67,13 +68,13 @@ export function ConversationViewBody({
       </div></details>
     </div>}
     {(page?.nextBeforeOrdinal !== undefined || before !== undefined) && <nav className="unified-pagination" aria-label="历史分页">
-      <button className="btn" disabled={page?.nextBeforeOrdinal === undefined} onClick={() => setBefore(page?.nextBeforeOrdinal)}>更早记录</button>
-      <span>每页最多 40 轮</span><button className="btn" disabled={before === undefined} onClick={showLatest}>最近记录</button>
+      <Button disabled={page?.nextBeforeOrdinal === undefined} onClick={() => setBefore(page?.nextBeforeOrdinal)}>更早记录</Button>
+      <span>每页最多 40 轮</span><Button disabled={before === undefined} onClick={showLatest}>最近记录</Button>
     </nav>}
     {missing.map(turn => <p className="conversation-history-notice" role="status" key={turn.runId}>第 {turn.ordinal} 轮：{turn.unavailableReason ?? '正在等待运行记录'}{turn.delivery.status === 'unknown' || turn.delivery.status === 'not_sent' ? `；${turn.delivery.reason}` : ''}</p>)}
     {page?.summary.deletion && <div className="conversation-history-notice" role="status">
       {page.summary.deletion.status === 'complete' ? page.summary.deletion.retainedCopies ? '逻辑对话已删除；上次保留的共享副本可重新核对' : '对话副本已删除' : '删除未完成'}，正文不可用。草稿仍保留。
-      {input && <button className="btn" onClick={() => { void window.scry.copyText(input).then(() => setNotice('已复制保留的草稿。')).catch(error => setError(message(error))) }}>复制保留的草稿</button>}
+      {input && <Button onClick={() => { void window.scry.copyText(input).then(() => setNotice('已复制保留的草稿。')).catch(error => setError(message(error))) }}>复制保留的草稿</Button>}
       {page.summary.deletion.result && <details><summary>删除回执与保留范围</summary>
         <ul>{page.summary.deletion.result.retained.map(item => <li key={item}>{item}</li>)}</ul>
         {page.summary.deletion.result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
@@ -81,11 +82,11 @@ export function ConversationViewBody({
     </div>}
     {page?.summary.fork?.status === 'accepted' && !page.summary.deletion && <div className="conversation-history-notice" role="status">
       创建分支不会发送消息或回退文件。分支点之前的历史为共享只读副本。
-      <button className="btn" disabled={working} onClick={() => {
+      <Button disabled={working} onClick={() => {
         void window.scry.conversations.read(page.summary.fork!.sourceConversationId).then(source => {
           if (mounted.current) onOpenConversation(source.summary)
         }).catch(error => { if (mounted.current) setError(message(error)) })
-      }}>打开源对话</button>
+      }}>打开源对话</Button>
     </div>}
     <SessionChatView {...chatProps}
       draftStore={draftStore} draftKey={draftKey} turns={turns} cwd={conversation.cwd} workspaceRoots={[conversation.cwd]}
@@ -113,13 +114,13 @@ export function ConversationViewBody({
         if (activeRunId) void window.scry.stop(activeRunId).then(requested => setNotice(requested ? '已请求停止，等待本轮结束。' : '运行已结束或无法停止，请刷新状态。')).catch(error => setError(message(error)))
       }}
     />
-    {forkAttempt && <div className="conversation-recovery" role="status"><button className="btn" disabled={working} onClick={() => { void fork(undefined, forkAttempt) }}>核对 / 继续原分支</button></div>}
+    {forkAttempt && <div className="conversation-recovery" role="status"><Button disabled={working} onClick={() => { void fork(undefined, forkAttempt) }}>核对 / 继续原分支</Button></div>}
     {recovery && <div className="conversation-recovery" role="status" data-pending-state={recovery.state}>
       <p>{recovery.explanation}</p>
-      <button type="button" className="btn" data-pending-inspect={recovery.state}
-        onClick={() => setInspectingPending(true)}>{SIDE_CHAT_COPY.pendingInspect}</button>
-      <button className="btn" disabled={working} onClick={onCheckPending}>{SIDE_CHAT_COPY.pendingCheck}</button>
-      {recovery.state === 'not_sent' && <button className="btn" disabled={working} onClick={onResendPending}>{SIDE_CHAT_COPY.pendingResend}</button>}
+      <Button data-pending-inspect={recovery.state}
+        onClick={() => setInspectingPending(true)}>{SIDE_CHAT_COPY.pendingInspect}</Button>
+      <Button disabled={working} onClick={onCheckPending}>{SIDE_CHAT_COPY.pendingCheck}</Button>
+      {recovery.state === 'not_sent' && <Button disabled={working} onClick={onResendPending}>{SIDE_CHAT_COPY.pendingResend}</Button>}
     </div>}
     {pending && recovery && inspectingPending && <PendingSubmissionDialog pending={pending} state={recovery.state}
       onClose={() => setInspectingPending(false)} />}

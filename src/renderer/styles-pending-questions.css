@@ -185,11 +185,6 @@
   margin-left: auto;
 }
 
-.question-cancel,
-.question-submit {
-  min-height: 36px;
-}
-
 .question-shortcut {
   margin-left: 6px;
   color: inherit;

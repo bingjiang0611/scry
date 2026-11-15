@@ -16,6 +16,7 @@ import { ThinkingBlock } from './ChatTurnShared'
 import { TurnFooter, TerminationNotice, ToolTerminationNotice } from './ChatTurnFooter'
 import { resultTokenTotal, fmtTok } from '../format'
 import type { TurnHookPhase } from './ChatTurnHookData'
+import { Button } from './primitives/Button'
 
 export function AssistantTurnView({
   turn, runtime, finalizing, backgroundStatus, result, toolN, errs, linkWorkspaces, linkFilePaths, turnFlowBody,
@@ -184,9 +185,7 @@ export function AssistantTurnView({
           {turn.done && <TurnFooter items={turn.items} files={structured} />}
           {canFork && (
             <div className="turn-branch-row">
-              <button
-                type="button"
-                className="turn-branch-btn"
+              <Button variant="quiet" size="sm" className="turn-branch-btn"
                 title={forkTitle}
                 aria-label={forkTitle}
                 disabled={forking}
@@ -194,7 +193,7 @@ export function AssistantTurnView({
               >
                 <Icon name="branch" />
                 <span>{forking ? '正在创建分支…' : forkLabel}</span>
-              </button>
+              </Button>
               {forkError && <span className="turn-branch-error" role="alert">{forkError}</span>}
             </div>
           )}

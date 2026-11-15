@@ -9,6 +9,7 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { ModalFrame, requestModalClose } from './Modals'
 import './desktop-remote.css'
+import { Button } from './primitives/Button'
 
 export function desktopRemoteStateKey(connectionId: string, context: DesktopRemoteContext): string {
   return [connectionId, context.providerId, context.agentProfileId ?? '', context.cwd, context.externalSessionId ?? 'new'].join('\u0000')
@@ -147,14 +148,14 @@ export function RemoteHostPanel(): JSX.Element {
     </div>
     {error && <p className="desktop-remote__error" role="alert">{error}</p>}
     {enabled !== null && <div className="remote-access-actions">
-      <button type="button" className="hosts-button" onClick={() => void run(async () => setInvite(await window.scry.remoteDesktopHostInvite()))} disabled={busy}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</button>
-      {enabled && <button type="button" className="hosts-button is-quiet" onClick={() => void run(async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) })} disabled={busy}>{copy.disableDesktopAccess}</button>}
+      <Button onClick={() => void run(async () => setInvite(await window.scry.remoteDesktopHostInvite()))} disabled={busy}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</Button>
+      {enabled && <Button variant="quiet" onClick={() => void run(async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) })} disabled={busy}>{copy.disableDesktopAccess}</Button>}
     </div>}
     {enabled && invite && <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setInvite(null)}>
       <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><ModalCloseButton aria-label={copy.closeInvite} onClick={() => requestModalClose()} /></div>
       <div className="modal-body"><p className="hosts-muted">{copy.sshInviteEffect}</p><div className="desktop-remote__invite"><code>{invite}</code></div>
         {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-        <div className="hosts-address-actions"><button type="button" className="hosts-button" onClick={() => requestModalClose()}>{copy.close}</button><button type="button" className="hosts-button is-primary" onClick={() => { void window.scry.copyText(invite).catch(reason => setError(errorText(reason))) }}><Icon name="copy" />{copy.copyInvite}</button></div>
+        <div className="hosts-address-actions"><Button onClick={() => requestModalClose()}>{copy.close}</Button><Button variant="primary" onClick={() => { void window.scry.copyText(invite).catch(reason => setError(errorText(reason))) }}><Icon name="copy" />{copy.copyInvite}</Button></div>
       </div>
     </ModalFrame>}
   </article>

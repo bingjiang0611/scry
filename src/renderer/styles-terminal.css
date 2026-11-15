@@ -182,3 +182,25 @@
   font: var(--text-compact-size)/1 var(--font-mono);
   white-space: nowrap;
 }
+
+/* Recording history follows the shared modal layout: title left, close right,
+   footnote left of the pager buttons. */
+.terminal-history-modal .modal-head h2 {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.terminal-history-modal .modal-x {
+  margin-left: auto;
+}
+
+.terminal-history-modal .modal-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.terminal-history-modal .modal-foot > span {
+  margin-right: auto;
+}

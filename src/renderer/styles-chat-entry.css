@@ -225,11 +225,6 @@
   display: flex;
   gap: 10px;
 }
-.wc-browse .btn {
-  flex: 0 0 auto;
-  justify-content: center;
-  padding: 9px 13px;
-}
 .wc-suggest h3 {
   font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
   color: var(--dim);

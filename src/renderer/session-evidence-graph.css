@@ -189,4 +189,3 @@
 .evidence-graph .gp-section .kv { font-size: 11.5px; line-height: 1.45; }
 .evidence-graph .gp-section pre { max-height: 180px; font-size: var(--text-xs); line-height: 1.55; }
 .evidence-graph .gp-actions { gap: 5px; }
-.evidence-graph .gp-actions .btn { min-height: 32px; padding-inline: 10px; font-size: var(--text-xs); }

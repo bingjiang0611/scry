@@ -18,6 +18,8 @@
   --draft-fg: #c7b795;
   --accent: #5b9cff;
   --accent-fg: #ffffff;
+  /* Text on filled accent/bad controls: white is 2.75:1 on these dark-theme fills, ink is 6.6:1. */
+  --fill-fg: #151515;
   --accent-soft: rgb(91 156 255 / 12%);
   --accent-line: rgb(91 156 255 / 48%);
   --selected: #5b9cff;
@@ -61,6 +63,7 @@
   --resizer-line: #e8e8e4;
   --accent: #3f7ee8;
   --accent-fg: #ffffff;
+  --fill-fg: #ffffff;
   --accent-soft: rgb(63 126 232 / 9%);
   --accent-line: rgb(63 126 232 / 42%);
   --selected: #3f7ee8;

@@ -85,7 +85,6 @@
 
 .surface-tab-activate,
 .surface-tab-close,
-.right-surface-panel .icon-button,
 .surface-menu .menu-item,
 .surface-card {
   border: 0;
@@ -144,22 +143,6 @@
 
 .surface-add-wrap {
   position: relative;
-}
-
-.right-surface-panel .icon-button {
-  width: 29px;
-  height: 29px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--dim2);
-}
-
-.right-surface-panel .icon-button.on {
-  color: var(--fg);
-  background: var(--surface-strong);
 }
 
 .surface-menu {
@@ -237,7 +220,7 @@
   flex: 1;
 }
 
-.surface-content .workspace-head > .iconbtn:last-child,
+.surface-content .workspace-head > .icon-button:last-child,
 .surface-content .diff-review-close {
   display: none;
 }

@@ -10,6 +10,7 @@ import { MOTION } from '../motion'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
+import { Button } from './primitives/Button'
 
 export interface SessionMenuTarget {
   cwd: string
@@ -120,8 +121,8 @@ export function SessionRenameDialog({ title, onSave, onClose }: {
           {error && <p id={`${id}-error`} role="alert" className="session-rename-error">{error}</p>}
         </div>
         <div className="project-dialog-actions">
-          <button type="button" className="btn" disabled={saving} onClick={() => requestModalClose()}>取消</button>
-          <button type="submit" className="btn primary" disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</button>
+          <Button disabled={saving} onClick={() => requestModalClose()}>取消</Button>
+          <Button variant="primary" type="submit" disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</Button>
         </div>
       </form>
     </ModalFrame>

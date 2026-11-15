@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
 import { ModalFrame, requestModalClose } from './Modals'
+import { Button } from './primitives/Button'
 
 /** The IPC wrapper main adds to a rejected handler; the channel name is not user copy. */
 const IPC_WRAPPER = /^(?:Error:\s*)?Error invoking remote method '[^']+':\s*(?:Error:\s*)?/
@@ -70,8 +71,8 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       {result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
     </section>}
     <div className="unified-actions">
-      <button ref={cancel} className="btn" disabled={working} onClick={() => requestModalClose()}>{result ? '关闭' : '取消'}</button>
-      {!result && <button className="btn danger" disabled={working || !preview || Boolean(error)} onClick={() => { void confirm() }}>{working ? '正在清理…' : preview?.reclaim ? '确认回收已无引用的副本' : '确认删除 Scry 副本'}</button>}
+      <Button ref={cancel} disabled={working} onClick={() => requestModalClose()}>{result ? '关闭' : '取消'}</Button>
+      {!result && <Button variant="danger" disabled={working || !preview || Boolean(error)} onClick={() => { void confirm() }}>{working ? '正在清理…' : preview?.reclaim ? '确认回收已无引用的副本' : '确认删除 Scry 副本'}</Button>}
     </div>
   </ModalFrame>
 }

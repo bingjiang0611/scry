@@ -9,6 +9,7 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { ModalFrame, requestModalClose } from './Modals'
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
+import { Button } from './primitives/Button'
 
 // Draw the scannable scry1: device code as a QR onto a canvas (CSP-safe: no
 // data: URL, no innerHTML). The QR encodes only what the code already contains.
@@ -108,7 +109,7 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
             {vm?.kind === 'enabled' && !vm.relayReady && <p className="remote-access-card-note">{copy.relayDormantEffect}</p>}
             {vm?.kind === 'enabled' && (
               <div className="remote-access-actions">
-                <button type="button" className="hosts-button" onClick={beginPairing} disabled={busy}>{copy.generatePairingCode}</button>
+                <Button onClick={beginPairing} disabled={busy}>{copy.generatePairingCode}</Button>
               </div>
             )}
             {code && (

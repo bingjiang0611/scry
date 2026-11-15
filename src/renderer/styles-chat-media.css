@@ -761,28 +761,6 @@
   min-height: 30px;
   margin-top: 7px;
 }
-.turn-branch-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 28px;
-  padding: 4px 9px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--dim2);
-  font: 11.5px/1 var(--font-ui);
-  cursor: pointer;
-}
-.turn-branch-btn .ico { width: 14px; height: 14px; }
-.turn-branch-btn:hover:not(:disabled),
-.turn-branch-btn:focus-visible {
-  border-color: var(--border2);
-  background: var(--panel2);
-  color: var(--fg);
-}
-.turn-branch-btn:focus-visible { outline: 2px solid var(--selected-line); outline-offset: 1px; }
-.turn-branch-btn:disabled { cursor: wait; opacity: 0.65; }
 .turn-branch-error {
   max-width: 58ch;
   color: var(--bad);

@@ -18,6 +18,7 @@
   --resizer-line: #444444;
   --accent: #6aa8ff;
   --accent-fg: #f4f7fb;
+  --fill-fg: var(--bg);
   --accent-soft: rgba(106, 168, 255, 0.12);
   --accent-line: rgba(106, 168, 255, 0.4);
   --selected: #50e3c2;
@@ -123,6 +124,7 @@
   --resizer-line: #d2d7dd;
   --accent: #3f72b7;
   --accent-fg: #ffffff;
+  --fill-fg: #ffffff;
   --accent-soft: rgba(63, 114, 183, 0.1);
   --accent-line: rgba(63, 114, 183, 0.45);
   --selected: #137b66;

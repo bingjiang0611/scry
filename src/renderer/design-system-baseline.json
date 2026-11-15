@@ -6,10 +6,10 @@
     "color": "a non-token declaration uses a raw color literal instead of a theme variable"
   },
   "totals": {
-    "fontSize": 272,
-    "fontWeight": 119,
-    "spacing": 1329,
-    "color": 145
+    "fontSize": 269,
+    "fontWeight": 117,
+    "spacing": 1311,
+    "color": 144
   },
   "files": {
     "analytics-evidence.css": {
@@ -57,7 +57,7 @@
     "components/background-work.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 13,
+      "spacing": 12,
       "color": 1
     },
     "components/desktop-remote.css": {
@@ -86,8 +86,8 @@
     },
     "components/hosts-view.css": {
       "fontSize": 2,
-      "fontWeight": 3,
-      "spacing": 31,
+      "fontWeight": 2,
+      "spacing": 28,
       "color": 0
     },
     "components/llm-performance.css": {
@@ -98,8 +98,8 @@
     },
     "components/meta-prompts.css": {
       "fontSize": 4,
-      "fontWeight": 6,
-      "spacing": 35,
+      "fontWeight": 5,
+      "spacing": 31,
       "color": 0
     },
     "components/model-picker.css": {
@@ -177,7 +177,7 @@
     "session-evidence-graph.css": {
       "fontSize": 5,
       "fontWeight": 0,
-      "spacing": 38,
+      "spacing": 37,
       "color": 0
     },
     "session-evidence-layout.css": {
@@ -237,13 +237,13 @@
     "styles-chat-entry.css": {
       "fontSize": 8,
       "fontWeight": 3,
-      "spacing": 23,
+      "spacing": 21,
       "color": 0
     },
     "styles-chat-media.css": {
-      "fontSize": 18,
+      "fontSize": 17,
       "fontWeight": 2,
-      "spacing": 58,
+      "spacing": 56,
       "color": 12
     },
     "styles-composer-queue.css": {
@@ -283,9 +283,9 @@
       "color": 0
     },
     "styles-execution-graph.css": {
-      "fontSize": 10,
+      "fontSize": 9,
       "fontWeight": 1,
-      "spacing": 29,
+      "spacing": 27,
       "color": 1
     },
     "styles-markdown.css": {
@@ -361,9 +361,9 @@
       "color": 1
     },
     "styles-sidebar.css": {
-      "fontSize": 7,
+      "fontSize": 6,
       "fontWeight": 1,
-      "spacing": 12,
+      "spacing": 10,
       "color": 1
     },
     "styles-surface-tabs.css": {
@@ -429,8 +429,8 @@
     "styles-workspace-editor.css": {
       "fontSize": 3,
       "fontWeight": 0,
-      "spacing": 21,
-      "color": 4
+      "spacing": 20,
+      "color": 3
     }
   }
 }

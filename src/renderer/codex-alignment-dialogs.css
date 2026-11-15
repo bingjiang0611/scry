@@ -58,8 +58,7 @@
   background: var(--surface-strong);
 }
 
-.surface-tab-activate,
-.right-surface-panel .icon-button {
+.surface-tab-activate {
   height: 30px;
 }
 

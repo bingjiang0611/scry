@@ -5,6 +5,7 @@ import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { PendingRecoveryState } from '../composer-pending'
 import { ImageLightbox, attachmentSrc } from './ChatTurnUser'
 import { ModalFrame } from './ModalFrame'
+import { Button } from './primitives/Button'
 
 /**
  * Read-only view of one submitted-but-unresolved send.
@@ -38,8 +39,8 @@ export function PendingSubmissionDialog({ pending, state, onClose }: {
             <h3 id={titleId}>{SIDE_CHAT_COPY.pendingInspectTitle}</h3>
             <p>{state === 'not_sent' ? SIDE_CHAT_COPY.pendingStates.notSent : SIDE_CHAT_COPY.pendingStates.unresolved}</p>
           </div>
-          <button ref={closeRef} type="button" className="btn" onClick={onClose}
-            aria-label={SIDE_CHAT_COPY.pendingInspectClose}>{SIDE_CHAT_COPY.pendingInspectClose}</button>
+          <Button ref={closeRef} onClick={onClose}
+            aria-label={SIDE_CHAT_COPY.pendingInspectClose}>{SIDE_CHAT_COPY.pendingInspectClose}</Button>
         </header>
         <div className="pending-submission-body">
           <p className="pending-submission-label">{SIDE_CHAT_COPY.pendingInspectTextLabel}</p>

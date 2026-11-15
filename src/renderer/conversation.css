@@ -5,7 +5,6 @@
 .unified-conversation > .composer { flex: none; }
 .conversation-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 24px; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
 .conversation-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-toolbar .btn { padding: 4px 8px; font-size: var(--text-sm); }
 .conversation-options { position: relative; }
 .conversation-options > summary { cursor: pointer; padding: 6px; color: var(--dim); }
 .conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 8px 24px #0003; }

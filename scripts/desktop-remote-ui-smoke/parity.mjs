@@ -15,7 +15,7 @@ export async function runParity({ driver }) {
     await read('window.desktopRemoteFixture.runStatusFailure = true')
     await wait('document.querySelector(".composer-notice")?.textContent.includes("output_capture_queue_full")', 'failed status read preserves queue')
     check((await fixture()).submitInputs.length === 1, 'Failed status read drained queue')
-    await click('.sb-navitem', 'Meta Prompts'); await click('.mp-button', '放入当前会话')
+    await click('.sb-navitem', 'Meta Prompts'); await click('.meta-prompts-view .btn', '放入当前会话')
     await wait(`${composerValue} === 'host scoped prompt'`, 'running remote meta prompt retains current session')
     check(await read('document.querySelector(".prompt-queue")?.textContent.includes("queued remote turn")'), 'Meta prompts lost remote queue')
     await click('.sb-navitem', '分析')

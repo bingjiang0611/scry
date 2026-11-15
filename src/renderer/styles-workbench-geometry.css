@@ -383,12 +383,6 @@
   border-top: 1px solid var(--border3);
 }
 
-.project-remove-confirm {
-  border-color: var(--bad) !important;
-  background: var(--bad-soft) !important;
-  color: var(--bad) !important;
-}
-
 .sb-sess-list {
   margin: 0;
   padding: 0;

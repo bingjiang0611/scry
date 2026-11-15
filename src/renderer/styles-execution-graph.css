@@ -357,10 +357,6 @@ button.toptool {
   flex-wrap: wrap;
   gap: 6px;
 }
-.gp-actions .btn {
-  font-size: 11.5px;
-  padding: 5px 10px;
-}
 /* full verdict 卡（graph 顶部，非 compact，4 pillar 一排） */
 .verdict-card.full {
   /* 都用 minmax(0, …)：1fr 的下限是 min-content，pillar 里的

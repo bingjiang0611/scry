@@ -4,6 +4,7 @@ import type { ProviderId } from '@shared/provider'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import { QUESTIONNAIRE_COPY } from '../constants/copy'
+import { Button } from './primitives/Button'
 
 const providerLabels = {
   claude: 'Claude',
@@ -339,13 +340,13 @@ export function AskUserQuestionInline({
           {error ? <span className="question-error">{error}</span> : statusCopy}
         </div>
         <div className="question-actions">
-          <button type="button" className="btn question-cancel" disabled={submitting} onClick={cancel}>
+          <Button className="question-cancel" disabled={submitting} onClick={cancel}>
             {QUESTIONNAIRE_COPY.cancel}
-          </button>
-          <button type="submit" className="btn primary question-submit" disabled={!answers || submitting}>
+          </Button>
+          <Button variant="primary" className="question-submit" type="submit" disabled={!answers || submitting}>
             {submitting ? QUESTIONNAIRE_COPY.submitting : groupedPiQuestionnaire ? QUESTIONNAIRE_COPY.submitAll : QUESTIONNAIRE_COPY.submit}
             <span className="question-shortcut" aria-hidden="true">{QUESTIONNAIRE_COPY.submitShortcut}</span>
-          </button>
+          </Button>
         </div>
       </footer>
     </form>

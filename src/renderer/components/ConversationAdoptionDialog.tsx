@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConversationAdoptionPreview, ConversationLegacySource, ConversationSummary } from '@shared/conversation-api'
 import { ModalFrame, requestModalClose } from './Modals'
+import { Button } from './primitives/Button'
 
 export function ConversationAdoptionDialog({ source, onAdopted, onClose }: {
   source: ConversationLegacySource
@@ -41,8 +42,8 @@ export function ConversationAdoptionDialog({ source, onAdopted, onClose }: {
     {preview ? <p>{preview.title} · {preview.turnCount} 轮 · {preview.source.providerId}</p> : !error && <p role="status">正在核对完整归档…</p>}
     {error && <p role="alert">{error}</p>}
     <div className="unified-actions">
-      <button className="btn" disabled={working} onClick={() => requestModalClose()}>取消</button>
-      <button className="btn primary" disabled={working || !preview} onClick={() => { void confirm() }}>{working ? '正在迁入…' : '确认迁入，不发送'}</button>
+      <Button disabled={working} onClick={() => requestModalClose()}>取消</Button>
+      <Button variant="primary" disabled={working || !preview} onClick={() => { void confirm() }}>{working ? '正在迁入…' : '确认迁入，不发送'}</Button>
     </div>
   </ModalFrame>
 }
