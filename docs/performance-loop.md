@@ -4,6 +4,16 @@
 
 ## 路径地图和覆盖边界
 
+### 性能任务的证据与授权合同
+
+- **指标诚实**：测不到写 `unavailable` + 原因，不记 0。毫秒结论注明机器负载。
+- **只降不升**：不手改 `scripts/performance-ratchet.json` 来放宽；门限或基线升高、删除指标需写 `raise` 记录并经维护者同意（CI 性能检查不阻塞合并，不再要求 `performance-raise-approved` 标签）。收紧用 `npm run performance:propose`。candidate 升为门禁需要稳定、敏感、相关三项证据，并经维护者确认。
+- **性能任务才强制测**：做性能优化、宣称变快或用户要求时，运行 `npm run performance:measure`（可加 `--scenario`），每个 `worse` 说明是必要工作还是回归，回归先修。普通改动碰到热路径时可选测，不作为提交或合并前置条件。
+- **不骗计数**：测量代码（collector、`scripts/performance-*.mjs`、workload）与优化代码分开提交；不缩小 workload、不换调用方式、不把工作挪到不计数的地方来让数字变小。
+- **如实宣称**：说“更快”要写明级别——L1 计数下降、L2 受控或真实 App 毫秒下降、L3 发布后日常记录（同场景 ≥30 样本、≥2 会话）——并说明减少的工作去了哪里。不用 L1 冒充 L2/L3。
+- **测速纪律**：毫秒测量串行，经 `.agents/skills/scry-performance-climb/scripts/timing-run.mjs` 加锁；计数可并行。不为性能测试加 sleep、重试或扩大超时来变绿。
+- **日常记录**：`userData/performance` 只读、先快照再分析、不上传、不粘贴会话内容。改记录格式、保留策略或采集内容需维护者同意。
+
 权威清单入口是 [`scripts/performance-paths.json`](../scripts/performance-paths.json)，其中 `include` 按领域展开片段；文件与 Git diff 映射位于 [`workbench.json`](../scripts/performance-paths/workbench.json)。可运行 `npm run performance:inventory` 检查引用和注册入口。新增未归类的 main IPC channel / named trace 会使检查失败。namespace 下新增方法自动归属该组，但仍需人工更新相应的具体场景、数据规模和验收。
 
 | 路径 ID | 用户操作 | 并行责任组 |

@@ -1,8 +1,10 @@
 # scry · architecture
 
-按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [CLAUDE.md](../../CLAUDE.md)。
+按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [AGENTS.md](../../.agents/AGENTS.md)。
 
 ## 术语
+
+Scry 是一个 local-first 的 AI coding agent 观测与治理桌面 App。它在应用内驱动本机 Provider CLI/SDK，把会话、工具调用、文件足迹、用量、诊断和干预呈现为可检查证据。
 
 - **Provider**：Claude、Codex、Qoder、OpenCode 或 Pi 的产品适配层。
 - **runtime provider**：实际 transport：`claude_sdk`、`codex_cli`、`qoder_cli`、`opencode_server`、`pi_rpc`。

@@ -89,6 +89,7 @@ export async function beginOpenTurn(
         source: capture.source,
         task: capture.task,
         openedAt: capture.openedAt,
+        ...(capture.diffExclude?.length ? { diffExclude: capture.diffExclude } : {}),
         ...(claim?.baselineAt ? { baselineAt: claim.baselineAt } : {})
       }
     } : {}),
@@ -169,7 +170,8 @@ export async function beginCaptureTurn(
           captureId: context.captureId,
           source: context.source,
           task: context.task,
-          openedAt: context.openedAt
+          openedAt: context.openedAt,
+          ...(context.diffExclude?.length ? { diffExclude: context.diffExclude } : {})
         }
       }, { sync: false })
     }

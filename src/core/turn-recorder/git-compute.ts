@@ -38,6 +38,7 @@ import {
   parseRawNumstat
 } from './git-patches.js'
 import { applyTurnDiffFilePolicy } from './git-turn-diff-policy.js'
+import type { TurnDiffExcludeEvidence } from '../../shared/turn-diff.js'
 
 import { WORKSPACE_FILE_LIMIT, WORKSPACE_PATCH_BYTES, WorkspaceReadUnavailable } from './git-workspace-limits.js'
 
@@ -173,6 +174,7 @@ export async function computeGitTurnDiff(
   let reason: TurnDiffReason | undefined
   let files: DiffFile[] = []
   let collection: TurnDiffCollection | undefined
+  let exclusion: TurnDiffExcludeEvidence | undefined
   try {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -392,6 +394,8 @@ export async function computeGitTurnDiff(
       untrackedLimit: options.untrackedPatchLimit
     })
     files = policy.files
+    // 只记命中的声明路径和文件数：被排除的文件不进 files，正文既不读取也不收录。
+    exclusion = policy.excluded.files > 0 ? policy.excluded : undefined
     files = await captureTurnPatches(
       capture,
       env,
@@ -415,5 +419,6 @@ export async function computeGitTurnDiff(
   }
   const finishMs = Date.now() - started
   const cleanup = consume ? await cleanupCapture(capture) : 'ok'
-  return terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection)
+  const snapshot = terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection)
+  return exclusion ? { ...snapshot, diffExclude: exclusion } : snapshot
 }
