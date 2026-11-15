@@ -4,6 +4,7 @@ import type { ProviderId } from '../../shared/provider.js'
 import { readJson, writeJsonAtomic, writeTextAtomic } from './io.js'
 import { RECORDER_VERSION } from './store.js'
 import { handleRecorderHook, recorderEnablement } from './recorder.js'
+import { resolveCommitHookActivation } from './commit-hook-grant.js'
 import type { RecorderEnablement } from './config.js'
 import { recorderSocketPath, PROTOCOL_VERSION, HOOK_EVENT_PATH } from './daemon-transport.js'
 import { recorderOpenPath, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState } from './runtime-state.js'
@@ -72,6 +73,12 @@ export async function startSessionCapture(args: {
   await ensureWorkspaceConfig(workspaceRoot, dataRoot)
   const enablement = await recorderEnablement(workspaceRoot, args.env)
   if (!enablement.enabled) throw new CaptureRequestError('recorder_unavailable', `recorder is not enabled: ${enablement.reason}`)
+  // The host tells us its commit callback exactly once, in this process. Record it now: the turns this
+  // capture produces are committed later by the daemon and the hook receiver, which never inherit the
+  // host's environment and would otherwise find no callback at all.
+  if ((args.env ?? process.env).SCRY_RECORDER_COMMIT_HOOK?.trim()) {
+    await resolveCommitHookActivation(workspaceRoot, enablement.config, args.env ?? process.env)
+  }
   const transcriptPath = transcriptPathOf(args.payload) ?? args.context.transcriptPath
   try {
     const info = await stat(transcriptPath)
