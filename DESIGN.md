@@ -140,11 +140,12 @@ components:
 | --- | --- | --- |
 | `src/renderer/radius-system.test.ts` | 所有 `border-radius` 必须是 `var(--r-*)`、`50%` 或 `0`；圆形必须声明 `corner-shape: round` | 绝对，无存量例外 |
 | `src/renderer/motion.test.ts` | 缓动曲线只在 `motion.css` 定义 | 绝对 |
-| `src/renderer/design-system.test.ts` + `src/renderer/design-system-baseline.json` | 字号、字重、间距网格、裸颜色字面值、未排除 primitive 的容器级 `button` 规则 | 棘轮：每个文件每项计数只能下降，下降后必须同步写回基线 |
-| `design-system.test.ts` 的 cleaned areas | 已清理完的区域（目前：侧栏 `.sb-*`、`.sidebar*`；对话与工具证据，即首个类名属于 `turn`、`chat`、`hook`、`tool`、`md`、`question`、`thinking` 等族的规则）的全部规则 | 绝对：该区域债务必须为 0 |
+| `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
 | `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
 
-`npm run design:audit` 列出存量债务，`-- --verbose` 给出逐行明细，`-- --write` 在全部计数未上升时把基线写低。基线只降不升：新代码不能写入新债务，也没有放宽的入口。确需新增尺度值时，先在本文与 `styles-theme-shell.css` 中扩展 scale，并在 PR 中说明为何现有档位不够。
+`npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
+
+删除样式时注意两类陷阱：`:is()`／`:where()` 里只删无效成员，不删整条选择器；文件或规则的章节注释若仍描述剩余规则，要保留。
 
 ## Colors
 
@@ -161,7 +162,11 @@ frontmatter 中的颜色是 desktop-dark、desktop-light、ios 三域的规范�
 | 状态 | `--ok`、`--warn`、`--bad` 及 `-soft` | 成功、需要注意、失败；状态成立必须有真实证据 |
 | 证据类型 | `--read`、`--write`、`--edit`、`--mcp`、`--skill`、`--agent` | 工具调用的读写类别；不与状态色混用 |
 | Provider | `--provider-*` | 只用于识别来源，不表达授权、成功或完整性 |
-| 阴影 | `--shadow-card`、`--shadow-pop` | 卡片与浮层；局部阴影也应引用或扩展这两个 token |
+| 阴影 | `--shadow-card`、`--shadow-pop`、`--shadow-xs`、`--shadow-menu`、`--shadow-float`、`--shadow-thumb`、`--shadow-composer(-focus)`、`--shadow-side-panel` | 卡片、弹窗、细微抬升、菜单与浮动提示、浮动控件、滑块、输入框、窄屏浮动右栏；新的阴影先找最近的一档 |
+| 填充控件文字 | `--fill-fg` | 见上文 |
+| 固定色板 | `--terminal-*`、`--theme-preview-*`、`--qr-surface`、`--bg-deep` | 不随主题变化的颜色：终端始终是深色、主题预览要同时展示两套配色、二维码必须是白底、分析页深色画布 |
+
+状态与证据类型的半透明底色和边框一律由语义变量派生：`color-mix(in srgb, var(--ok) 24%, transparent)`。写死的 `rgba()` 会让浅色主题沿用深色主题调好的色值。
 
 iOS：canvas／surface／message 承载画布、导航背景和消息背景；ink／muted 表达文字层级，blue 是强调色，green／amber／negative 用于相应语义。当前 Palette 是固定色值，没有独立浅色调色板。明暗、色盲和对比度合规未由本文整体证明，具体界面需单独验收。
 
@@ -183,6 +188,7 @@ iOS：canvas／surface／message 承载画布、导航背景和消息背景；in
 
 - 组件只用上表 token。半像素字号（10.5、11.5、12.5、13.5）不进入 scale：相邻档位只差 1px，再加半档只会制造无法区分的层级。
 - 允许的例外只有三类：`inherit`／`0`；Markdown 内部的相对 `em` 比例；欢迎页等展示标题的 `clamp()` 流式字号。
+- 大号数字（总览主指标、用量总额等）上限是 `--text-2xl`，不另设展示字号。
 - 等宽字体与界面字体共用同一字号 scale。`--font-mono` 声明 JetBrains Mono 及系统回退，不代表字体已随包分发。
 
 ### 字重
@@ -358,7 +364,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 - 不要写半像素字号、550／620 这类中间字重、5／7／9／10／14px 这类网格外间距。
 - 不要在组件里写 `#hex`、`rgb()`、`oklch()` 等裸颜色；需要新颜色时先在主题层定义语义变量。
 - 不要为一个新功能另起一套按钮、通知或标签页样式；扩展收敛目标而不是复制。
-- 不要写 `.panel button { … }` 这种覆盖容器内所有按钮的规则；确需重置原生按钮时加 `:not(.btn, .icon-button, [role='tab'], .segmented > button)`，否则它会悄悄改掉 primitive。
+- 不要写 `.panel button { … }` 这种覆盖容器内所有按钮的规则；确需重置原生按钮时写成 `.panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button))`。必须用 `:where()`：直接写 `:not(.btn, …)` 会把规则的优先级抬高到参数里最高的那一项，反过来压过组件自己的样式。
 - 不要把 Provider 品牌色、选中态或连接点当作成功、授权或完整性证明。
 - 不要把基础 `styles-theme-shell.css` 的颜色旧值或 `designs/` 原型直接当作当前产品规范；颜色以最终覆写层为准。
 - 不要把 iOS 的 glass helper 描述成已实现的系统材质或背景模糊。
@@ -371,11 +377,12 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
 2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
 3. **通知与标签页（已完成）**：`Notice`、`Tabs`、`Segmented` 与 `styles-notices.css`、`styles-tabs.css`；容器级 `button` 规则改为排除 primitive，并纳入债务棘轮。
-4. **按区域偿还字号与间距**：侧栏（已完成）→ 对话与工具证据（已完成）→ composer → 纵览 → 设置与清单 → 分析视图。每个区域按同一方法处理，完成后加入 cleaned areas，债务锁定为 0：
+4. **按区域偿还字号与间距（已完成）**：侧栏 → 对话与工具证据 → 输入框 → 总览 → 设置与清单 → 分析视图 → 其余工作区界面，全部清零后守卫改为绝对规则。每个区域用的方法：
    - **先删死代码**：同一选择器、同一属性被后加载的顶层规则无条件重新声明的，先加载的那条一定不生效，直接删除；删除后用真实组件的计算样式比对确认零变化。
    - **再按固定规则取整**：间距取最近的 4 的倍数，恰在中间（6、10、14、18、22、30）时取 8 的倍数；字号 ≥12 的半像素向下取（12.5→12、13.5→13），<12 的向上取（9、9.5→10，10.5→11，11.5→12）；中间字重按角色取 500 或 600。
    - **守住契约**：区域内 smoke 断言的行高、宽度与对齐值不变；用计算样式比对列出每一处真实变化并逐条确认。
    - **阅读字号不随取整变化**：会改变正文阅读字号的取整先停下，确认是否需要语义 token（对话正文因此新增 `--text-reading`）。
    - **颜色由语义变量派生**：状态与证据类型的半透明底色、边框写成 `color-mix(in srgb, var(--ok) 24%, transparent)`，不写死 `rgba()`，否则浅色主题会沿用深色主题调好的色值。
-5. **颜色与层级**：局部阴影、品牌与图表颜色收敛为语义变量；z-index 收敛为分层 token。
-6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure。
+5. **颜色与层级**：颜色与阴影已收敛为语义变量和固定色板（已完成）；z-index 尚未收敛为分层 token（现有约 20 个散落值）。
+6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure（尚未开始）。
+7. **其余组件**：菜单（14 套）尚未收敛；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。
