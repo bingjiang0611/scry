@@ -376,6 +376,14 @@ export const LOADING_COPY = {
 
 /** 停止控制调用的事实文案：调用失败不冒充“已请求”，更不冒充“已终止”。 */
 export const RUN_STOP_COPY = {
+  requesting: {
+    label: '正在请求停止…',
+    hint: '停止请求已发出，等待 Provider 确认；确认前这一轮仍可能在运行'
+  },
+  requestFailed: {
+    label: '停止请求没有发出',
+    hint: (reason: string): string => `${reason}。这一轮仍在运行，可以再次点击停止`
+  },
   interruptRequestFailed: {
     label: '停止请求未生效',
     hint: (providerId: string): string =>

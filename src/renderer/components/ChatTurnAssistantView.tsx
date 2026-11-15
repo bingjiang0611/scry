@@ -163,8 +163,13 @@ export function AssistantTurnView({
       {/* History/attachment evidence can be partial without a Provider failure. */}
       {!turn.error && turn.errorHint && <div className="errhint" role="note">{turn.errorHint}</div>}
       {backgroundWork && <BackgroundWorkPanel key={turn.runId} runId={turn.runId} work={remote ? { ...backgroundWork, taskStop: 'unavailable' } : backgroundWork} />}
-      {!terminal && (
-        <div className="skeleton" aria-label="运行中">
+      {/* A placeholder for the answer only until its first output. After that the
+          header's 运行中, the composer's elapsed time and the streaming caret already
+          say it is working; a second indicator under the text would repeat them and,
+          when it left at the end, pull the turn up. The header carries the status for
+          screen readers, so these shapes are hidden from them. */}
+      {!terminal && !hasVisibleOutput(projection) && (
+        <div className="skeleton" aria-hidden="true">
           <div className="sk-line" style={{ width: '70%' }} />
           <div className="sk-line" style={{ width: '92%' }} />
           <div className="sk-line" style={{ width: '48%' }} />
@@ -202,4 +207,12 @@ export function AssistantTurnView({
       )}
     </div>
   )
+}
+
+const VISIBLE_KINDS: ReadonlySet<TraceEvent['kind']> = new Set(['tool', 'skill', 'agent', 'model', 'hook'])
+
+/** Whether the turn has shown anything of the answer yet: text, thinking or a call. */
+export function hasVisibleOutput(projection: TurnStreamProjection): boolean {
+  return projection.liveText.length > 0 || projection.liveThinking.length > 0
+    || projection.structuralItems.some((event) => VISIBLE_KINDS.has(event.kind))
 }

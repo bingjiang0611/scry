@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import { useAgentStart } from './useAgentStart'
+import type { StopRequest } from '../run-stop-status'
 import { applyTraceBatch } from '../format'
 import type { ParsedTurn, TraceBatchReceipt } from '../env'
 import type { Turn } from '../format'
@@ -46,6 +47,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [pendingQuestions, setPendingQuestions] = useState<AgentQuestionRequest[]>([])
   const [stopStates, setStopStates] = useState<StopStateMap>({})
+  const [stopRequest, setStopRequest] = useState<StopRequest>()
   const [traceHealth, setTraceHealth] = useState<TraceLiveHealth>(TRACE_LIVE_HEALTHY)
   const [historyWindow, setHistoryWindow] = useState<SessionHistoryWindow | null>(null)
   const [traceCommitVersion, setTraceCommitVersion] = useState(0)
@@ -251,7 +253,15 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
 
   const stopRun = useCallback(async (): Promise<void> => {
     if (!currentRunId) return
-    await window.scry.stop(currentRunId)
+    const runId = currentRunId
+    // Feedback from the press, not from main's first stop phase.
+    setStopRequest({ runId, status: 'sending' })
+    try {
+      await window.scry.stop(runId)
+    } catch (error) {
+      const reason = error instanceof Error && error.message ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : '停止请求失败'
+      setStopRequest((current) => current?.runId === runId ? { runId, status: 'failed', reason } : current)
+    }
   }, [currentRunId])
 
   const answerQuestion = useCallback(async (response: AgentQuestionResponse): Promise<void> => {
@@ -440,6 +450,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     setSelected,
     pendingQuestions,
     stopStates,
+    stopRequest,
     traceHealth,
     currentRunId,
     running,

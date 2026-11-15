@@ -3,7 +3,7 @@ import type { RefObject } from 'react'
 import type { ChatViewProps } from './types'
 import { WorkdirPicker } from '../WorkdirPicker'
 import { Icon } from '../primitives/Icon'
-import { QUEUE_COPY } from '../../constants/copy'
+import { QUEUE_COPY, RUN_STOP_COPY } from '../../constants/copy'
 import { CONVERSATION_COPY } from '../../constants/conversation-copy'
 import { RunElapsed } from './RunElapsed'
 import { imageFilesFromClipboardData, composerEnterConfirmsIme, navigateComposerHistory } from './composer-utils'
@@ -168,7 +168,8 @@ export function ComposerInput({
                 </span>
               )}
               {!Number.isNaN(runStartedAt) && <RunElapsed startedAt={runStartedAt} />}
-              <button type="button" className="stop run-status-stop" onClick={onStop} disabled={stopStatus.providerSettled}>
+              <button type="button" className="stop run-status-stop" onClick={onStop} disabled={stopStatus.providerSettled}
+                aria-busy={stopStatus.label === RUN_STOP_COPY.requesting.label}>
                 <Icon name="square" /> 停止本轮
               </button>
             </span>

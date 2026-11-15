@@ -134,6 +134,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     slashSel,
     pendingQuestions: session.pendingQuestions,
     stopStates: session.stopStates,
+    stopRequest: session.stopRequest,
     historyWindow: session.historyWindow,
     historyOlderLoading,
     onLoadOlderTurns: () => { void loadOlderTurns() },
