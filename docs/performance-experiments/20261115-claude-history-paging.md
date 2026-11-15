@@ -47,10 +47,45 @@ L2（Node 受控、生产函数、非 App 毫秒）：临时 vitest 基准（未
 - 单测：相关 34 文件 247 项通过；`npm run typecheck` 通过；全量 unit 6001 通过 / 5 失败 / 6 跳过，5 个失败在基线 `a464aff` 上同样失败（root 下 Chromium sandbox、不可读目录用例、进程回收），与本改动无关。
 - 合入：未合入；构建：未构建 App；安装/生效：未安装。日常比较：无。
 
+## 独立复核与第二轮（同日）
+
+另一模型独立复核第一轮后发现问题，均已在 `bb38e13`、`101fa58` 处理：
+
+| 问题 | 处理 |
+|---|---|
+| 同一 runId 落在两个分段文件（一个按 providerTurnId 命名）时，分页多出一轮 | 索引含重复 runId 即不可代替归档，回退全量；有负对照 |
+| 更早页失败被 renderer `.catch(() => null)` 吞掉，按钮点了没反应 | 失败经 composer 错误显示；过期/取消请求在 main 返回 null |
+| 更早页默认 40 轮、无取消 | transcript 分页的更早页默认 20 轮；新会话加载或失效时取消 |
+| 缓存保留窗口外原始 transcript 正文，内存无上限 | 缓存只保留已合并窗口；更早页重新读取 transcript，并校验 prompt 与计划一致，否则要求重新打开 |
+| 每次窗口仍做两遍全量合并（O(会话)） | 按 user text 生成合并计划（`sessionMergePlan`），只合并窗口内位置（`mergeSessionTurnAt`） |
+
+第一轮记录中“剩余主要是复用校验”的判断不完整：基准从已解析轮次开始，没有计入 transcript 文件读取/解析；还有两遍全量合并。
+
+维护者决定（2026-11-15）：
+
+- 同意历史加载路径使用进程内“已校验内容”记忆：本进程已发布或已校验并 fsync 的 blob，再次持久化时只核对文件存在且大小一致，不再读回比较和 fsync；被删除的 blob 会重写，读取仍校验摘要；实时 recorder 写入不变。
+- 会话历史横幅无论耗时一律去掉；待定状态仍由 aria-busy、`data-history-source="preview"` 与锁定的 composer 表达。
+- 悬停/按下预取暂不做，待真实 App 测量后再定。
+
+第二轮 L2（同一 Node 受控基准，10 轮首页，7 次交替，`highLoad=false`，页内容与旧路径相等）：
+
+| 会话轮数 | 旧全量 | 新：进程内首次打开 | 新：再次打开 |
+|---:|---:|---:|---:|
+| 100 | 3655 ms | 263 ms | 128 ms |
+| 200 | 7632 ms | 308 ms | 159 ms |
+
+- 减少的工作去了哪里：窗口外正文不读、不持久化、不合并（不做了）；同进程已证明的 blob 不再读回和 fsync（不做了，以存在/大小检查代替）。
+- 不含：transcript 文件读取/解析。复核实测同形状 25 MB JSONL 超过 transcript 缓存 32 MB 序列化上限，每次打开冷读约 220 ms；这部分仍随会话长度增长，未改。
+- 验证：新增 3 项测试（变更 prompt、重复 runId、记忆的 ref/校验次数/fsync 次数与 blob 重写），各有负对照失败；全量 unit 6004 通过，5 个既有 root 环境失败与基线相同；`typecheck`、recorder/CLI 类型检查、App 构建通过。
+- UI：`scripts/loading-ui-checks.mjs`、`scripts/session-cache-ui-checks.mjs` 改为断言任何时长都不出现历史横幅。**未运行**：容器以 root 运行，Electron 不加 `--no-sandbox` 无法启动；真实 App 重放与截图未做。
+- 合入：未合入；构建：仅本地开发构建通过，未打包；安装：未安装；L3：未验证。
+
 ## 剩余成本与下一步
 
-10 轮首页仍约 0.5 s（本负载），主要是页内每个工具正文的复用校验：读回已存内容比较 + fsync。transcript 缓存每次克隆内联正文，所以每次打开都会重复这一步。recorder content store 刻意“不缓存目录证明”，若要在加载路径跳过同进程已验证内容，需要维护者决定持久性/缓存策略，未在本次实施。
-
-其他候选（未实验）：侧边栏 hover/pointerdown 预取 `loadSession`（需要 main 侧页缓存与失效设计）；设置 `setCwd`+`activeRuns` 与 `loadSession` 并行（仅省一次 IPC 往返，收益小）。
+- transcript 文件本身：超大 transcript 不进缓存，每次冷解析。可选提高上限（内存换时间，需维护者决定）或增量解析。
+- macOS APFS 上 fsync 成本未测；进程内首次打开仍对页内 blob 做完整校验。
+- 无索引也无 sidecar 的老 Claude 会话仍走全量路径且不会补建索引；占比未知。
+- 悬停/按下预取：需要拆出无副作用的只读通道和 main 侧页缓存（IPC 与缓存策略），待真实 App 测量后决定。
+- 复核提出、未深查的既有疑点：Claude 历史路径不调用 `hydrateNewestSessionSnapshots`，外置 session diff 是否正确回填未确认。
 
 - 锁定：未改 ratchet/台账。

@@ -2,7 +2,7 @@
 
 ## Claude 历史按窗口分页（2026-11-15，L1 / Node 受控 L2，App 未验证）
 
-Claude 有 transcript，原来每次打开读取全部归档轮次并重新持久化全部工具正文，耗时随会话长度增长。`ffe1ec7` 用完整索引定位合并位置，只读/持久化返回窗口的正文；与全量合并逐页等价，有负对照和回退。`45426df` 首页对齐为 10 轮。Node 受控（highLoad=false）100 轮：3582→1542 ms（40 轮页），10 轮页 529 ms；200 轮 7065→1704 ms。真实 App L2/L3 未验证（容器 root 下 Electron 需要 --no-sandbox，未采用）。剩余主成本是页内正文复用校验的 fsync，需维护者决定。见[实验记录](performance-experiments/20261115-claude-history-paging.md)。
+Claude 原来每次打开读取全部归档轮次、重新持久化并合并全部正文，耗时随会话长度增长。现按 user text 合并计划定位，只读、持久化、合并窗口内位置；首页 10 轮、更早页 20 轮且可取消；同进程已证明的 blob 不再读回和 fsync（维护者批准）；会话历史横幅已按维护者决定移除。Node 受控（highLoad=false）100 轮：3655→263 ms（进程内首次）/128 ms（再次）；200 轮：7632→308/159 ms。不含超大 transcript 冷解析（约 220 ms/25 MB）。真实 App 与 L3 未验证。见[实验记录](performance-experiments/20261115-claude-history-paging.md)。
 
 ## 零预算正文（2026-11-01，L1）
 
