@@ -168,7 +168,7 @@ button.turn-id.turn-call-open:focus-visible {
   .a-hero {
     grid-template-columns: 1fr;
     align-items: start;
-    gap: 22px;
+    gap: 24px;
   }
 
   .a-hero-reading {

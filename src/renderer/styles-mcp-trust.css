@@ -35,8 +35,8 @@
   min-width: 0;
   border: 1px solid var(--border2);
   border-radius: var(--r-xs);
-  padding: 2px 7px;
-  font: 10.5px/1.4 var(--font-mono);
+  padding: 2px 8px;
+  font: var(--text-xs)/1.4 var(--font-mono);
   color: var(--dim);
   background: var(--surface-muted);
   white-space: nowrap;
@@ -44,17 +44,17 @@
 .trust-label.ok,
 .trust-text.ok {
   color: var(--ok);
-  border-color: rgba(79, 209, 161, 0.26);
+  border-color: color-mix(in srgb, var(--ok) 26%, transparent);
 }
 .trust-label.warn,
 .trust-text.warn {
   color: var(--warn);
-  border-color: rgba(246, 197, 96, 0.28);
+  border-color: color-mix(in srgb, var(--warn) 28%, transparent);
 }
 .trust-label.bad,
 .trust-text.bad {
   color: var(--bad);
-  border-color: rgba(255, 100, 113, 0.3);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
 }
 .trust-label.muted,
 .trust-text.muted {

@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-// Design-system debt audit for renderer CSS.
+// Design-system audit for renderer CSS.
 //
-// Counts declarations that bypass the token scales defined in
-// src/renderer/styles-theme-shell.css. The committed baseline may only shrink:
-// `--check` fails when any file/metric grows, `--write` refuses to raise a value.
-// Radius is enforced separately (and absolutely) by radius-system.test.ts.
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+// Lists declarations that bypass the token scales defined in
+// src/renderer/styles-theme-shell.css, raw colors outside theme variables, and
+// container button rules that would restyle the primitives. The renderer is held
+// at zero findings by design-system.test.ts; this CLI prints them (`--verbose`
+// for every line) and exits non-zero when there are any.
+// Radius is enforced separately by radius-system.test.ts.
+import { readFileSync, readdirSync } from 'node:fs'
 import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const rendererRoot = join(repoRoot, 'src/renderer')
-export const baselinePath = join(rendererRoot, 'design-system-baseline.json')
 
 export const METRICS = /** @type {const} */ (['fontSize', 'fontWeight', 'spacing', 'color', 'buttonReset'])
 
@@ -127,103 +128,25 @@ export function auditRenderer(root = rendererRoot) {
   return files
 }
 
-/**
- * Audits only the rules with at least one selector matching `scope` (e.g. the sidebar), across
- * every renderer stylesheet. Areas that have been fully cleaned are held at zero
- * with this, which is stricter than the per-file ratchet.
- */
-export function auditRendererScope(scope, root = rendererRoot) {
-  /** @type {Record<string, Record<string, Array<{ line: number, text: string }>>>} */
-  const files = {}
-  for (const path of cssFiles(root)) {
-    // Blank every rule outside the scope while keeping line numbers stable.
-    const source = stripComments(readFileSync(path, 'utf8'))
-      .replace(/([^{}]+)\{([^{}]*)\}/g, (rule, prelude) =>
-        splitSelectors(prelude).some((selector) => scope.test(selector)) ? rule : rule.replace(/[^\n]/g, ' '))
-    const found = auditCss(source, { primitiveSheet: PRIMITIVE_SHEETS.has(basename(path)) })
-    if (METRICS.some((metric) => found[metric].length > 0)) files[relative(root, path)] = found
-  }
-  return files
-}
-
-export function countsOf(audit) {
-  /** @type {Record<string, Record<string, number>>} */
-  const counts = {}
-  for (const [file, found] of Object.entries(audit)) {
-    counts[file] = Object.fromEntries(METRICS.map((metric) => [metric, found[metric].length]))
-  }
-  return counts
-}
-
-export function totalsOf(counts) {
-  const totals = Object.fromEntries(METRICS.map((metric) => [metric, 0]))
-  for (const fileCounts of Object.values(counts)) {
-    for (const metric of METRICS) totals[metric] += fileCounts[metric] ?? 0
-  }
-  return totals
-}
-
-export function readBaseline(path = baselinePath) {
-  return JSON.parse(readFileSync(path, 'utf8'))
-}
-
-/**
- * Lists every file/metric whose current count exceeds the baseline. A metric
- * the baseline has never recorded is being introduced: its first `--write`
- * records today's debt, and from then on it can only shrink like the others.
- */
-export function regressions(counts, baseline) {
-  const out = []
-  const recorded = METRICS.filter((metric) => baseline.rules?.[metric] !== undefined)
-  for (const [file, fileCounts] of Object.entries(counts)) {
-    for (const metric of recorded) {
-      const allowed = baseline.files[file]?.[metric] ?? 0
-      if (fileCounts[metric] > allowed) out.push({ file, metric, allowed, actual: fileCounts[metric] })
-    }
-  }
-  return out
-}
-
 function main(argv) {
   const audit = auditRenderer()
-  const counts = countsOf(audit)
-  const totals = totalsOf(counts)
   const verbose = argv.includes('--verbose')
-  const write = (path) => writeFileSync(path, `${JSON.stringify({ rules: METRIC_RULES, totals, files: counts }, null, 2)}\n`)
-  if (argv.includes('--init')) {
-    // Bootstrap only: an existing baseline can never be re-recorded upward.
-    if (existsSync(baselinePath)) throw new Error('baseline exists; use --write, which only lowers it')
-    write(baselinePath)
-    console.log(`baseline initialised: ${JSON.stringify(totals)}`)
-    return
-  }
-  const baseline = readBaseline()
-  const grown = regressions(counts, baseline)
-
-  if (argv.includes('--write')) {
-    if (grown.length > 0) {
-      for (const item of grown) console.error(`refusing to raise ${item.file} ${item.metric}: ${item.allowed} -> ${item.actual}`)
-      console.error('The baseline only shrinks. Fix the new debt instead of recording it.')
-      process.exitCode = 1
-      return
-    }
-    write(baselinePath)
-    console.log(`baseline written: ${JSON.stringify(totals)}`)
-    return
-  }
-
+  let total = 0
   for (const [file, found] of Object.entries(audit)) {
     const summary = METRICS.filter((metric) => found[metric].length > 0).map((metric) => `${metric} ${found[metric].length}`)
     console.log(`${file}: ${summary.join(', ')}`)
-    if (verbose) {
-      for (const metric of METRICS) for (const item of found[metric]) console.log(`  ${metric} L${item.line} ${item.text}`)
+    for (const metric of METRICS) {
+      total += found[metric].length
+      if (verbose) for (const item of found[metric]) console.log(`  ${metric} L${item.line} ${item.text}`)
     }
   }
-  console.log(`\ntotal: ${JSON.stringify(totals)}  baseline: ${JSON.stringify(baseline.totals)}`)
-  if (grown.length > 0) {
-    for (const item of grown) console.error(`design debt grew: ${item.file} ${item.metric} ${item.allowed} -> ${item.actual}`)
-    process.exitCode = 1
+  if (total === 0) {
+    console.log('design audit: no findings')
+    return
   }
+  console.error(`\ndesign audit: ${total} findings`)
+  for (const [metric, rule] of Object.entries(METRIC_RULES)) console.error(`  ${metric}: ${rule}`)
+  process.exitCode = 1
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main(process.argv.slice(2))

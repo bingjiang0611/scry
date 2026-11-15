@@ -40,7 +40,7 @@
 .surface-topbar {
   height: var(--window-titlebar-h, var(--topbar-h));
   min-height: var(--window-titlebar-h, var(--topbar-h));
-  padding-inline: 9px;
+  padding-inline: 8px;
   border-bottom-color: var(--border3);
 }
 
@@ -63,7 +63,7 @@
 
 .surface-tab-activate .label {
   font-size: var(--text-sm);
-  font-weight: 580;
+  font-weight: var(--weight-medium);
 }
 
 .surface-body,

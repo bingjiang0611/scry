@@ -6,14 +6,14 @@
 
 .app.pinned-summary-persistent :is(.main-area, .main-content) > .chat-body {
   width: 100%;
-  padding-right: 326px;
+  padding-right: 328px;
   background: transparent;
 }
 
 .app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer {
   width: 100%;
   max-width: none;
-  padding-right: calc(326px + var(--evidence-gutter));
+  padding-right: calc(328px + var(--evidence-gutter));
 }
 
 .app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer > .composer-shell {
@@ -233,11 +233,11 @@ button.pinned-summary-detail-row:hover {
 
 @container main-pane (max-width: 760px) {
   .app.pinned-summary-persistent :is(.main-area, .main-content) > .chat-body {
-    padding-right: 310px;
+    padding-right: 312px;
   }
 
   .app.pinned-summary-persistent :is(.main-area, .main-content) > .runtime-composer {
-    padding-right: calc(310px + var(--evidence-gutter));
+    padding-right: calc(312px + var(--evidence-gutter));
   }
 
   .pinned-summary-layer {

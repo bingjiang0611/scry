@@ -1,9 +1,9 @@
 .diff-scope-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 8px 8px;
   border: 0;
   border-radius: var(--r-sm);
   background: var(--panel3);
@@ -21,13 +21,13 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  padding: 6px;
+  padding: 8px;
   overflow: auto;
   border: 1px solid var(--border2);
   border-radius: var(--r-md);
   background: var(--panel);
   color: var(--fg);
-  box-shadow: 0 12px 36px #0003;
+  box-shadow: var(--shadow-menu);
   font-size: var(--text-md);
 }
 .diff-turn-menu { z-index: 1201; }
@@ -40,7 +40,7 @@
   box-sizing: border-box;
   width: 100%;
   min-height: 36px;
-  padding: 8px 9px;
+  padding: 8px 8px;
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
@@ -58,10 +58,10 @@
 .diff-turn-choice[aria-checked="true"] { background: var(--panel3); }
 .diff-scope-menu .ico,
 .diff-turn-menu .ico { width: 14px; height: 14px; color: var(--muted); }
-.diff-turn-menu > .diff-turn-back { justify-content: flex-start; gap: 6px; }
+.diff-turn-menu > .diff-turn-back { justify-content: flex-start; gap: 8px; }
 .diff-turn-back .ico { transform: rotate(180deg); }
 .diff-turn-list { overflow: auto; max-height: 288px; min-height: 0; }
-.diff-turn-choice { display: grid; align-content: center; justify-content: stretch; gap: 3px; }
+.diff-turn-choice { display: grid; align-content: center; justify-content: stretch; gap: 4px; }
 .diff-turn-choice small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: var(--text-xs); }
 .diff-turn-menu > .diff-load-turns { margin-top: 4px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--text-sm); }
 .diff-turn-menu > .diff-load-turns:disabled { cursor: default; opacity: .6; }

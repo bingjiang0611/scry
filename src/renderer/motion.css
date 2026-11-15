@@ -50,7 +50,7 @@
 
 @keyframes loading-status-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes loading-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-.loading-status { display: grid; gap: 6px; color: var(--dim); font-size: var(--text-sm); animation: loading-status-in var(--duration-sm) var(--ease-out) backwards; }
+.loading-status { display: grid; gap: 8px; color: var(--dim); font-size: var(--text-sm); animation: loading-status-in var(--duration-sm) var(--ease-out) backwards; }
 .loading-status-copy { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 .loading-status-bar { display: block; width: 100%; height: 2px; overflow: hidden; background: var(--border3); }
 .loading-status-bar::after { content: ''; display: block; width: 35%; height: 100%; background: var(--dim2); animation: loading-progress 1.1s linear infinite; }

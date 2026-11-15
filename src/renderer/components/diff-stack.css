@@ -7,7 +7,7 @@
 .diff-review-panel .diff-review-summary {
   min-height: 40px;
   flex-wrap: wrap;
-  gap: 5px 12px;
+  gap: 4px 12px;
   padding: 8px 12px;
 }
 .diff-review-panel .diff-review-prompt { flex-basis: 40%; font-size: var(--text-sm); }
@@ -40,7 +40,7 @@
   flex: none;
   min-height: 34px;
   padding: 0 8px;
-  gap: 6px;
+  gap: 8px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -48,7 +48,7 @@
 .diff-code-toolbar button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)), .diff-all-changes, .diff-load-commits, .diff-history-status button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   border: 0;
   border-radius: var(--r-xs);
-  padding: 5px 7px;
+  padding: 4px 8px;
   background: transparent;
   color: var(--dim);
   font: var(--text-xs) var(--font-ui);
@@ -63,11 +63,11 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   box-sizing: border-box;
   width: 100%;
   height: 44px;
-  padding: 4px 10px;
+  padding: 4px 8px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -80,7 +80,7 @@
 .diff-commit-subject, .diff-commit-meta { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .diff-commit-subject { font: var(--text-sm) var(--font-ui); }
 .diff-commit-meta { color: var(--dim); font: var(--text-xs) var(--font-mono); }
-.diff-history-status { padding: 10px; color: var(--dim); font-size: var(--text-xs); }
+.diff-history-status { padding: 8px; color: var(--dim); font-size: var(--text-xs); }
 .diff-history-status button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { display: block; color: var(--accent); }
 .diff-review-panel .diff-stacked-patch { flex: 1; min-width: 0; min-height: 0; padding: 0; overflow: auto; background: var(--bg); container-type: inline-size; }
 .diff-stack-path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

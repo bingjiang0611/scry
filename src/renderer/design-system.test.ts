@@ -2,9 +2,9 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error -- plain ESM script shared with the CLI audit; no type declarations.
-import { auditCss, auditRenderer, auditRendererScope, countsOf, readBaseline, regressions, totalsOf } from '../../scripts/design-system-audit.mjs'
+import { METRIC_RULES, auditCss, auditRenderer } from '../../scripts/design-system-audit.mjs'
 
-type Counts = Record<string, Record<string, number>>
+type Findings = Record<string, Record<string, Array<{ line: number, text: string }>>>
 
 const rendererDirectory = __dirname
 const themeShell = readFileSync(join(rendererDirectory, 'styles-theme-shell.css'), 'utf8')
@@ -58,37 +58,12 @@ describe('design debt audit', () => {
     expect(found.buttonReset.map((item: { text: string }) => item.text)).toEqual(['.d button:hover', '.g button:not(.btn):hover'])
   })
 
-  it('only lets renderer design debt shrink', () => {
-    const counts: Counts = countsOf(auditRenderer())
-    expect(regressions(counts, readBaseline()), 'Use var(--text-*), var(--weight-*), a 4px-grid spacing value, theme color variables, and exclude primitives from container button rules. See DESIGN.md.').toEqual([])
-  })
-
-  it('records paid-down debt so it cannot silently return', () => {
-    const counts: Counts = countsOf(auditRenderer())
-    const baseline = readBaseline()
-    expect(totalsOf(counts), 'Debt went down: run `npm run design:audit -- --write` to lower the baseline.').toEqual(baseline.totals)
-  })
-})
-
-describe('cleaned areas', () => {
-  // Areas whose debt has been paid off in full are held at zero, not just ratcheted.
-  const CLEAN = {
-    sidebar: /(^|[\s,>+~(])\.(sb-|sidebar\b|sidebar-)/,
-    // Conversation and tool evidence: selectors whose first class belongs to these families.
-    conversation: /^[^.,]*\.(?:turn|chat|hooks?|tool|md|mdiv|transcript|question|thinking|user-md|user-attachments?|subagent|callrow|callserver|model-text)(?:-[\w-]*)?(?![\w-])/,
-    // Composer, its pickers and queue, and the welcome screen around it.
-    composer: /^[^.,]*\.(?:composer|runtime-composer|runtime|queue|slash|model-effort|wdbtn|clibtn|climenu|clipick|location|welcome|wc|draft-attachments?|permission-mode|pending-submission|send|stop|steer|agicon|image-lightbox|bubble|who)(?:-[\w-]*)?(?![\w-])/,
-    // Overview panel, evidence graph, segments, verdict, pinned summary and run status.
-    overview: /^[^.,]*\.(?:overview|ov|evidence|seg|segment|segments|graph|gp|verdict|pinned|ctx|billing|panel|stat|top-tools|toptool|tt|kv|background|agents?|psrc|run-status|recorder)(?:-[\w-]*)?(?![\w-])/,
-    // Settings, Skills/MCP/capability inventories, modals, archives, remote hosts and meta prompts.
-    settings: /^[^.,]*\.(?:mcp|inventory|capability|capabilities|skill|skills|settings|modal|theme|arch|hosts|remote|desktop|mp|project|recent|err|session|conversation|unified|history|intervention|badge|kbd|si|sg|gline|gdrow|gtree|pad2)(?:-[\w-]*|__[\w-]*)?(?![\w-])/,
-    // Usage analytics and LLM performance views.
-    analytics: /^[^.,]*\.(?:usage|llm-perf|analytics)(?:-[\w-]*)?(?![\w-])/
-  }
-
-  it.each(Object.entries(CLEAN))('%s rules use only scale tokens, the 4px grid and theme colors', (_, scope) => {
-    const debt = Object.entries(auditRendererScope(scope)).flatMap(([file, found]) =>
-      Object.entries(found as Record<string, Array<{ line: number, text: string }>>).flatMap(([metric, items]) => items.map((item) => `${file}:${item.line} ${metric} ${item.text}`)))
-    expect(debt).toEqual([])
+  it('finds no design debt in any renderer stylesheet', () => {
+    // Every stylesheet uses the type and weight tokens, the 4px grid, theme colors, and
+    // container button rules that leave the primitives alone. There is no baseline:
+    // any finding is a regression. `npm run design:audit -- --verbose` prints the same list.
+    const debt = Object.entries(auditRenderer() as Findings).flatMap(([file, found]) =>
+      Object.entries(found).flatMap(([metric, items]) => items.map((item) => `${file}:${item.line} ${metric}: ${item.text}`)))
+    expect(debt, Object.values(METRIC_RULES).join('\n')).toEqual([])
   })
 })

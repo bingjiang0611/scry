@@ -132,7 +132,7 @@
 
 @container main-pane (max-width: 560px) {
   .topbar {
-    gap: 6px;
+    gap: 8px;
     padding-inline: 8px;
   }
 
@@ -145,7 +145,7 @@
   }
 
   .tb-action {
-    padding-inline: 6px;
+    padding-inline: 8px;
   }
 
   .tb-action.panel-pill {

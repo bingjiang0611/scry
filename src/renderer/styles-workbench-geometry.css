@@ -388,9 +388,9 @@
 
 .tb-action,
 .tb-agent-status{
-  gap: 6px;
+  gap: 8px;
   padding: 0 8px;
-  font: var(--weight-semibold) 10.5px/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-xs)/1 var(--font-mono);
 }
 
 .agent-pill {
@@ -400,12 +400,12 @@
 
 @container main-pane (max-width: 560px) {
   .topbar {
-    padding-right: 6px;
-    padding-left: 6px;
+    padding-right: 8px;
+    padding-left: 8px;
   }
 
   .tb-action {
-    padding: 0 6px;
+    padding: 0 8px;
     font-size: var(--text-2xs);
   }
 }

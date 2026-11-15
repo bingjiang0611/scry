@@ -96,10 +96,10 @@
   border-radius: var(--r-md);
 }
 .skeleton {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
 }
 .sk-line {
   position: relative;
@@ -127,13 +127,13 @@
   color: var(--bad);
   background: color-mix(in srgb, var(--bad) 18%, var(--bg));
   border-radius: var(--r-sm);
-  padding: 7px 11px;
+  padding: 8px 12px;
   margin-top: 8px;
 }
 .errmain {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
+  gap: 8px;
 }
 .errhint {
   margin-top: 4px;

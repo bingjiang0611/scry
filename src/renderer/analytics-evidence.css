@@ -39,7 +39,7 @@
 
 :root:not([data-theme='light']) .main-area:has(.usage-page),
 :root:not([data-theme='light']) .main-area:has(.usage-page) > .aux-view-topbar {
-  background: #0d0d0c;
+  background: var(--bg-deep);
 }
 
 .usage-shell {

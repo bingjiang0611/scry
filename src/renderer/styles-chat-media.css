@@ -259,10 +259,10 @@
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 40px;
-  padding: 9px 12px;
-  font: 10.5px/1 var(--font-mono);
+  padding: 8px 12px;
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -273,7 +273,7 @@
 }
 .files-summary .fh-count {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 .files-summary .fh-file-count {
   color: var(--fg);
@@ -656,8 +656,8 @@
 .file-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 8px;
+  gap: 8px;
+  padding: 4px 8px;
   border-radius: var(--r-xs);
   font: var(--text-sm) var(--font-mono);
 }
@@ -685,7 +685,7 @@
 }
 .file-row .line-diff {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
   flex: none;
   font-variant-numeric: tabular-nums;
 }
@@ -696,7 +696,7 @@
   letter-spacing: 0.08em;
 }
 .files-empty {
-  padding: 7px 8px 3px;
+  padding: 8px 8px 4px;
   color: var(--dim2);
   font: var(--text-xs)/1.4 var(--font-mono);
 }

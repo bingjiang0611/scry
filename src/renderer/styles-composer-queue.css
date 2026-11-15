@@ -153,7 +153,7 @@
 .prompt-queue {
   margin-bottom: 8px;
   max-height: 214px;
-  padding: 7px 9px 4px;
+  padding: 8px 8px 4px;
   overflow: auto;
   border: 1px solid var(--border3);
   border-radius: var(--r-md);
@@ -590,7 +590,7 @@
   border: 1px solid var(--border2);
   border-radius: var(--r-sm);
   color: var(--fg);
-  padding: 11px 13px;
+  padding: 12px 12px;
   outline: none;
   font: inherit;
 }

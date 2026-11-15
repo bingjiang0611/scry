@@ -407,7 +407,7 @@
   user-select: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .subhead .chev {
   margin-left: auto;
@@ -425,7 +425,7 @@
 }
 .tag {
   font-size: var(--text-2xs);
-  padding: 0 5px;
+  padding: 0 4px;
   border-radius: var(--r-xs);
   border: 1px solid var(--mcp);
   color: var(--mcp);

@@ -6,8 +6,8 @@
   max-width: 100%;
   border: 1px solid var(--border2);
   border-radius: var(--r-xs);
-  padding: 2px 7px;
-  font: 10.5px/1.45 var(--font-mono);
+  padding: 2px 8px;
+  font: var(--text-xs)/1.45 var(--font-mono);
   color: var(--dim);
   background: var(--surface-hover);
   overflow: hidden;

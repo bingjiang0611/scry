@@ -16,7 +16,7 @@
 .files-summary .fh-review {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   color: var(--accent);
   letter-spacing: 0;
   text-transform: none;
@@ -62,7 +62,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 14px 0 16px;
+  padding: 0 16px 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -72,7 +72,7 @@
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .diff-review-title > svg {
@@ -85,7 +85,7 @@
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
 }
 
 .diff-review-title b {
@@ -97,7 +97,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--dim2);
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -159,9 +159,9 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   color: var(--dim2);
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -194,7 +194,7 @@
 .diff-file-nav-count {
   flex: none;
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -204,7 +204,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   padding: 32px;
   color: var(--dim2);
   text-align: center;
@@ -223,7 +223,7 @@
 
 .diff-review-empty span {
   max-width: 42ch;
-  font: 11.5px/1.55 var(--font-ui);
+  font: var(--text-sm)/1.55 var(--font-ui);
 }
 
 .diff-file-nav {
@@ -270,7 +270,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px 7px 12px;
+  padding: 8px 8px 8px 12px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -283,7 +283,7 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  font: 10.5px/1.35 var(--font-mono);
+  font: var(--text-xs)/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -325,6 +325,6 @@
   }
 
   .diff-file-nav-title {
-    padding-bottom: 6px;
+    padding-bottom: 8px;
   }
 }

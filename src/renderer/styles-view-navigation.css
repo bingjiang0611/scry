@@ -64,5 +64,5 @@
 .tb-action b,
 .tb-agent-status b{
   color: var(--fg);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }

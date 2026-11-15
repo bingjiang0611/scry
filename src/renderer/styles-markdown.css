@@ -21,13 +21,13 @@
   min-height: 28px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   margin: 8px 0 0 auto;
   padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   color: var(--dim2);
-  font: var(--weight-medium) 11.5px/1 var(--font-ui);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-ui);
   cursor: pointer;
 }
 
@@ -43,7 +43,7 @@
 
 /* skill 注入注记：中性折叠，区别于用户蓝气泡（它不是用户输入） */
 .skillinject {
-  margin: 6px 0 14px;
+  margin: 8px 0 16px;
   border: 1px dashed var(--border2);
 }
 .si-head {
@@ -315,9 +315,9 @@
 .filerow {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-height: 40px;
-  padding: 5px 14px;
+  padding: 4px 16px;
 }
 .fbadge {
   width: 18px;
@@ -350,6 +350,6 @@
 }
 .fname {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--fg);
 }

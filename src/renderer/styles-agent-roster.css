@@ -246,8 +246,8 @@
   .terminal-action:hover:not(:disabled),
   .terminal-tab-close:hover,
   .terminal-restart:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.08);
+    color: var(--terminal-fg-bright);
+    background: var(--terminal-surface-hover);
   }
 }
 
@@ -273,7 +273,7 @@
     left: auto;
     z-index: 30;
     width: min(var(--overview-panel-w), calc(100vw - var(--sidebar-w) - var(--pane-resizer-w)));
-    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.44);
+    box-shadow: var(--shadow-side-panel);
   }
 }
 

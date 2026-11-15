@@ -44,8 +44,8 @@
 .surface-topbar {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 7px;
+  gap: 4px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border3);
 }
 
@@ -90,7 +90,7 @@
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0 4px 0 8px;
   background: transparent;
 }
@@ -111,7 +111,7 @@
   display: grid;
   flex: none;
   place-items: center;
-  margin-right: 3px;
+  margin-right: 4px;
   padding: 0;
   border-radius: var(--r-xs);
   background: transparent;
@@ -142,7 +142,7 @@
   width: 214px;
   display: grid;
   gap: 2px;
-  padding: 5px;
+  padding: 4px;
   border: 1px solid var(--border2);
   box-shadow: var(--shadow-pop);
   transform-origin: top right;
@@ -165,7 +165,7 @@
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 0 9px;
+  padding: 0 8px;
   border-radius: var(--r-md);
   background: transparent;
   color: var(--dim);
@@ -234,12 +234,12 @@
   margin: 0;
   color: var(--fg);
   font-size: var(--text-lg);
-  font-weight: 620;
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
 }
 
 .empty-heading p {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: var(--dim2);
   font-size: var(--text-sm);
 }
@@ -255,7 +255,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 15px;
+  padding: 16px;
   border: 1px solid var(--border);
   color: var(--fg);
   text-align: left;
@@ -263,7 +263,7 @@
 }
 
 .surface-card .card-icon {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
   color: var(--dim);
 }
 
@@ -274,19 +274,19 @@
 
 .surface-card strong {
   font-size: var(--text-md);
-  font-weight: 620;
+  font-weight: var(--weight-semibold);
 }
 
 .surface-card p {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: var(--dim2);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   line-height: 1.55;
 }
 
 .surface-unavailable {
   align-content: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--dim2);
   text-align: center;
 }
@@ -297,5 +297,5 @@
 }
 
 .surface-unavailable span {
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }

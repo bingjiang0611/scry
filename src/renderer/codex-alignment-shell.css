@@ -60,6 +60,29 @@
   --theme-preview-light-line: #e4e4df;
   --theme-preview-light-ink: #e7e7e3;
   --qr-surface: #ffffff;
+  /* Dark-theme analytics canvas, a step below --bg. */
+  --bg-deep: #0d0d0c;
+  --shadow-side-panel: -18px 0 48px rgb(0 0 0 / 44%);
+  /* The terminal is always dark, whatever the app theme, so its palette is fixed. */
+  --terminal-bg: #090b0e;
+  --terminal-fg: #eceef2;
+  --terminal-fg-strong: #f2f4f7;
+  --terminal-fg-bright: #ffffff;
+  --terminal-dim: #8f98a7;
+  --terminal-muted: #7c8592;
+  --terminal-scrollbar: #4f5865;
+  --terminal-line: rgb(255 255 255 / 7%);
+  --terminal-line-strong: rgb(255 255 255 / 12%);
+  --terminal-line-control: rgb(255 255 255 / 14%);
+  --terminal-surface: rgb(255 255 255 / 7%);
+  --terminal-surface-active: rgb(255 255 255 / 7.5%);
+  --terminal-surface-hover: rgb(255 255 255 / 8%);
+  --terminal-button: #15191f;
+  --terminal-button-fg: #d9dde5;
+  --terminal-state-idle: #68707d;
+  --terminal-state-running: #7ed9a0;
+  --terminal-state-error: #ef767a;
+  --terminal-state-starting: #d9b86c;
 }
 
 :root[data-theme='light'] {
@@ -358,8 +381,8 @@ select:focus-visible,
 /* Conversation chrome ------------------------------------------------------- */
 
 .topbar {
-  gap: 10px;
-  padding: 0 14px;
+  gap: 8px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border3);
 }
 
@@ -379,7 +402,7 @@ select:focus-visible,
 .tb-thread b {
   max-width: min(28vw, 240px);
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -393,7 +416,7 @@ select:focus-visible,
 }
 
 .tb-statusbar {
-  gap: 6px;
+  gap: 8px;
 }
 
 .tb-agent-status,
@@ -411,14 +434,14 @@ select:focus-visible,
   padding-inline: 8px;
   color: var(--dim);
   font-size: var(--text-sm);
-  font-weight: 520;
+  font-weight: var(--weight-medium);
 }
 
 .tb-agent-status .agent-version {
   color: var(--dim2);
   font-family: var(--font-mono);
   font-size: var(--text-compact-size);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 
 .tb-agent-status .dot {
