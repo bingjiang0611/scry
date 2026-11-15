@@ -7,18 +7,18 @@
     "buttonReset": "a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button))"
   },
   "totals": {
-    "fontSize": 31,
-    "fontWeight": 20,
-    "spacing": 247,
-    "color": 53,
+    "fontSize": 26,
+    "fontWeight": 9,
+    "spacing": 202,
+    "color": 50,
     "buttonReset": 0
   },
   "files": {
     "analytics-evidence.css": {
-      "fontSize": 5,
-      "fontWeight": 11,
-      "spacing": 45,
-      "color": 2,
+      "fontSize": 0,
+      "fontWeight": 0,
+      "spacing": 0,
+      "color": 1,
       "buttonReset": 0
     },
     "codex-alignment-dialogs.css": {
@@ -61,13 +61,6 @@
       "fontWeight": 0,
       "spacing": 7,
       "color": 0,
-      "buttonReset": 0
-    },
-    "components/llm-performance.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 0,
-      "color": 2,
       "buttonReset": 0
     },
     "components/pierre-views.css": {

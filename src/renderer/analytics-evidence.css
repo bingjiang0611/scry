@@ -75,11 +75,11 @@
 .usage-header,
 .usage-section-head {
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
 }
 
 .usage-title-group {
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
 }
 .usage-title-group > div {
@@ -88,8 +88,8 @@
 }
 .usage-header h1 {
   margin: 0;
-  font-size: 26px;
-  font-weight: 620;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
   line-height: 1.2;
   letter-spacing: -0.035em;
 }
@@ -101,7 +101,7 @@
   font-variant-numeric: tabular-nums;
 }
 .usage-actions {
-  gap: 14px;
+  gap: 16px;
 }
 .usage-back,
 .usage-refresh {
@@ -144,7 +144,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8%;
-  padding: 33px 0 26px;
+  padding: 32px 0 24px;
   border-bottom: 1px solid var(--usage-border);
 }
 .usage-cost-card,
@@ -161,9 +161,9 @@
 }
 .usage-cost-card > strong {
   display: block;
-  margin: 9px 0;
+  margin: 8px 0;
   font-size: clamp(54px, 7.1cqw, 90px);
-  font-weight: 560;
+  font-weight: var(--weight-medium);
   line-height: 1.19;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
@@ -172,20 +172,20 @@
 .usage-cost-currency {
   font-size: 0.61em;
   vertical-align: 0.17em;
-  margin-right: 5px;
+  margin-right: 4px;
   color: var(--dim2);
-  font-weight: 450;
+  font-weight: var(--weight-regular);
 }
 .usage-cost-decimal,
 .usage-cost-fraction {
   font-size: 0.7em;
   color: var(--dim2);
-  font-weight: 450;
+  font-weight: var(--weight-regular);
   letter-spacing: -0.025em;
 }
 .usage-composition {
   align-self: center;
-  padding-top: 10px;
+  padding-top: 8px;
 }
 .usage-composition h2 {
   margin: 0;
@@ -194,9 +194,9 @@
 }
 .usage-composition-bar {
   display: flex;
-  gap: 3px;
+  gap: 4px;
   height: 12px;
-  margin: 17px 0 15px;
+  margin: 16px 0 16px;
   background: var(--usage-control);
 }
 .usage-composition-bar > span {
@@ -214,14 +214,14 @@
 .usage-composition-key > div > span {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--dim2);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 .usage-composition-key strong {
   display: block;
-  margin: 4px 0 0 22px;
+  margin: 4px 0 0 24px;
   font-size: var(--text-xl);
   font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
@@ -230,8 +230,8 @@
 .usage-analysis {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 35px;
-  padding: 28px 0 26px;
+  gap: 36px;
+  padding: 28px 0 24px;
   border-bottom: 1px solid var(--usage-border);
 }
 .usage-section-head {
@@ -241,32 +241,32 @@
 .usage-tokens h2 {
   margin: 0;
   font-size: var(--text-lg);
-  font-weight: 570;
+  font-weight: var(--weight-medium);
 }
 .usage-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 18px;
-  margin: 18px 0;
+  gap: 8px 16px;
+  margin: 16px 0;
   color: var(--dim2);
   font-size: var(--text-xs);
 }
 .usage-legend > span {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 .usage-provider-panel {
   display: flex;
   flex-direction: column;
-  padding-left: 27px;
+  padding-left: 28px;
   border-left: 1px solid var(--usage-border);
 }
 .usage-provider-list {
   display: grid;
   grid-auto-rows: minmax(74px, 1fr);
   flex: 1;
-  margin-top: 9px;
+  margin-top: 8px;
 }
 .usage-provider-row {
   display: flex;
@@ -280,13 +280,13 @@
 .usage-provider-main {
   width: 100%;
   min-width: 0;
-  gap: 9px;
+  gap: 8px;
 }
 .usage-provider-main b {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: var(--text-base);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 .usage-provider-share {
   margin-left: auto;
@@ -298,8 +298,8 @@
   flex: none;
   min-width: 94px;
   text-align: right;
-  font-size: 17px;
-  font-weight: 530;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
   letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
 }
@@ -441,11 +441,11 @@
   width: min(300px, calc(100% - 16px));
   display: grid;
   gap: 12px;
-  padding: 15px 16px;
+  padding: 16px 16px;
   border: 1px solid var(--usage-border);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--usage-bg) 95%, var(--fg));
-  box-shadow: 0 12px 30px #0003;
+  box-shadow: var(--shadow-menu);
   pointer-events: none;
   font-size: var(--text-sm);
 }
@@ -466,7 +466,7 @@
   font-style: normal;
 }
 .usage-chart-tooltip strong {
-  font-weight: 520;
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
 }
 .usage-visually-hidden {
@@ -482,16 +482,16 @@
 }
 
 .usage-tokens {
-  padding-top: 21px;
+  padding-top: 20px;
 }
 .usage-metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  margin: 22px 0 0;
+  margin: 24px 0 0;
 }
 .usage-metrics > div {
   min-width: 0;
-  padding: 0 22px;
+  padding: 0 24px;
   border-left: 1px solid var(--usage-border);
 }
 .usage-metrics > div:first-child {
@@ -506,9 +506,9 @@
   font-size: var(--text-sm);
 }
 .usage-metrics dd {
-  margin: 9px 0 7px;
-  font-size: 31px;
-  font-weight: 510;
+  margin: 8px 0 8px;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-medium);
   line-height: 1.25;
   letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
@@ -516,15 +516,15 @@
 /* 部分明细缺报时，把“已知下界”写成可见的一行，而不是只留在 title 里。 */
 .usage-metrics .usage-metric-note {
   display: block;
-  margin-top: 6px;
+  margin-top: 8px;
   color: var(--dim2);
   font-size: var(--text-sm);
-  font-weight: 450;
+  font-weight: var(--weight-regular);
   letter-spacing: 0;
 }
 .usage-breakdown {
-  margin-top: 38px;
-  padding-top: 26px;
+  margin-top: 40px;
+  padding-top: 24px;
   border-top: 1px solid var(--usage-border);
 }
 .usage-table-wrap {
@@ -549,7 +549,7 @@
 }
 .usage-table-wrap th,
 .usage-table-wrap td {
-  padding: 18px 14px;
+  padding: 16px 16px;
   border-bottom: 1px solid var(--usage-border-soft);
   text-align: right;
 }
@@ -564,13 +564,13 @@
 }
 .usage-table-wrap thead th {
   padding-top: 12px;
-  padding-bottom: 14px;
+  padding-bottom: 16px;
   color: var(--dim2);
   font-size: var(--text-sm);
-  font-weight: 450;
+  font-weight: var(--weight-regular);
 }
 .usage-table-wrap tbody th {
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: var(--weight-medium);
 }
 .usage-table-wrap td {
@@ -588,7 +588,7 @@
 }
 .usage-model-cell {
   min-width: 0;
-  gap: 11px;
+  gap: 12px;
 }
 .usage-model-cell > svg {
   width: 15px;
@@ -606,7 +606,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 16px;
   padding: 32px;
   color: var(--dim2);
 }
@@ -618,7 +618,7 @@
   color: var(--fg);
 }
 .usage-state.is-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
-  padding: 8px 14px;
+  padding: 8px 16px;
   border: 1px solid var(--usage-border);
   border-radius: var(--r-sm);
   background: var(--usage-control);
@@ -645,20 +645,20 @@
 @container usage-page (max-width: 1150px) {
   .usage-analysis {
     grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 23px;
+    gap: 24px;
   }
   .usage-provider-panel {
-    padding-left: 22px;
+    padding-left: 24px;
   }
   .usage-provider-main {
-    gap: 7px;
+    gap: 8px;
   }
   .usage-provider-main > strong {
     min-width: 84px;
     font-size: var(--text-lg);
   }
   .usage-metrics > div {
-    padding-inline: 14px;
+    padding-inline: 16px;
   }
 }
 @container usage-page (max-width: 920px) {
@@ -678,7 +678,7 @@
     border-bottom: 1px solid var(--usage-border-soft);
   }
   .usage-title-group > div {
-    gap: 14px;
+    gap: 16px;
   }
   .usage-overview {
     gap: 5%;
@@ -689,15 +689,15 @@
     align-items: flex-start;
   }
   .usage-title-group {
-    gap: 10px;
+    gap: 8px;
   }
   .usage-title-group > div {
     flex-direction: column;
     align-items: flex-start;
-    gap: 7px;
+    gap: 8px;
   }
   .usage-actions {
-    gap: 5px;
+    gap: 4px;
   }
 
   .usage-overview {
@@ -722,7 +722,7 @@
     border-left: 0;
   }
   .usage-metrics dd {
-    font-size: 28px;
+    font-size: var(--text-2xl);
   }
 }
 @keyframes usage-spin {
