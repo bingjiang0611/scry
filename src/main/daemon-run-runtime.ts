@@ -1,12 +1,11 @@
-import { boundMarker } from './daemon-run-evidence'
-import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BUDGET_MS, lateRefusalNotice, noteAdmission } from './daemon-run-admission'
+import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BUDGET_MS, lateRefusalNotice } from './daemon-run-admission'
 import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
-import { view, type RunCursor } from './daemon-run-cursor'
+import { noteWatchEvents, view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
@@ -280,28 +279,7 @@ export class DaemonRunRuntime {
         changed = true
       }
       if (watch.state !== cursor.lifecycle) changed = true
-      for (const entry of watch.events) {
-        noteAdmission(cursor, entry)
-        if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
-        const bound = boundMarker(entry.detail)
-        if (!bound) continue
-        // The watch is per context, so it also replays how other runs in this workspace
-        // were bound. A marker decides the binding of the run it names, or the window
-        // ends up showing, answering and stopping a run it never started.
-        if (bound.ledgerRunId !== undefined && bound.ledgerRunId !== cursor.runId) continue
-        if (cursor.scryRunId === undefined) {
-          cursor.scryRunId = bound.scryRunId
-          cursor.stamp?.mark('bound')
-        }
-        // A run this window adopted has no context of its own; the daemon states it
-        // once, and only then can the trace be addressed.
-        if (cursor.context === undefined && bound.cwd !== undefined && bound.providerId !== undefined) {
-          cursor.context = {
-            cwd: bound.cwd, providerId: bound.providerId,
-            ...(bound.agentProfileId ? { agentProfileId: bound.agentProfileId } : {})
-          }
-        }
-      }
+      noteWatchEvents(cursor, watch.events)
       if (cursor.context === undefined) { cursor.lifecycle = watch.state; return { changed, lifecycle: cursor.lifecycle } }
       // The trace is addressed by the canonical id its events carry. The ledger id the
       // watch polls uses is a different id and finds no run there.

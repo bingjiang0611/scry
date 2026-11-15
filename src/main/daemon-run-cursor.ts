@@ -1,7 +1,8 @@
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor } from '../shared/desktop-remote'
 import type { PerformanceTrace } from './performance-timing'
-import { refusedView } from './daemon-run-admission'
+import { noteAdmission, refusedView } from './daemon-run-admission'
+import { boundMarker } from './daemon-run-evidence'
 
 // One window's cursor for one daemon run: what it has been told, what it has already
 // delivered, and what the window currently shows. Kept apart from the polling so the
@@ -49,8 +50,37 @@ export interface RunCursor {
   handedOut?: boolean
 }
 
-// `bound` is the daemon's own marker, not a client guess; anything else in the
-// progress detail stays opaque.
+/**
+ * What one watch page of ledger entries tells this cursor: admission, and the bind that
+ * names the run's canonical id (and, for a run this window adopted, its context).
+ * `bound` is the daemon's own marker, not a client guess; anything else in the
+ * progress detail stays opaque.
+ */
+export function noteWatchEvents(cursor: RunCursor, events: ReadonlyArray<{ runId: string; kind: string; detail?: string }>): void {
+  for (const entry of events) {
+    noteAdmission(cursor, entry)
+    if (entry.kind !== 'run_progress' || entry.detail === undefined) continue
+    const bound = boundMarker(entry.detail)
+    if (!bound) continue
+    // The watch is per context, so it also replays how other runs in this workspace
+    // were bound. A marker decides the binding of the run it names, or the window
+    // ends up showing, answering and stopping a run it never started.
+    if (bound.ledgerRunId !== undefined && bound.ledgerRunId !== cursor.runId) continue
+    if (cursor.scryRunId === undefined) {
+      cursor.scryRunId = bound.scryRunId
+      cursor.stamp?.mark('bound')
+    }
+    // A run this window adopted has no context of its own; the daemon states it
+    // once, and only then can the trace be addressed.
+    if (cursor.context === undefined && bound.cwd !== undefined && bound.providerId !== undefined) {
+      cursor.context = {
+        cwd: bound.cwd, providerId: bound.providerId,
+        ...(bound.agentProfileId ? { agentProfileId: bound.agentProfileId } : {})
+      }
+    }
+  }
+}
+
 // The trace only reports `done` when a snapshot happens to be the read that carries
 // it; after the first snapshot every read is a delta, so a run that stops would look
 // alive forever. The ledger's terminal state is the authority on whether a daemon run
