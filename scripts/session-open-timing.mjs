@@ -1,6 +1,8 @@
 // Serialized into the benchmark renderer. Readiness must be a synchronous DOM
 // check; cached content alone is not enough to declare the composer usable.
-export function measureNativeSessionOpen(button, isReady, isSelected = isReady) {
+// `deadlineMs` only bounds the measurement: a baseline that reads the whole archive can take
+// minutes on a loaded host, and a deadline must never be mistaken for the measured duration.
+export function measureNativeSessionOpen(button, isReady, isSelected = isReady, deadlineMs = 15000) {
   return new Promise((resolve, reject) => {
     let frame
     const cleanup = () => {
@@ -44,8 +46,8 @@ export function measureNativeSessionOpen(button, isReady, isSelected = isReady) 
     }
     const deadline = setTimeout(() => {
       cleanup()
-      reject(new Error('Native session readiness timed out'))
-    }, 15000)
+      reject(new Error(`Native session readiness timed out after ${deadlineMs}ms`))
+    }, deadlineMs)
     button.addEventListener('click', onClick, { once: true, capture: true })
   })
 }
