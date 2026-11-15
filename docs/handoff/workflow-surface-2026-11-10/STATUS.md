@@ -1,6 +1,6 @@
-# 第八轮进行中（H1 通过，H2 未通过）
+# 第八轮进行中（H1 通过，H2/H3 未通过）
 
-[H1](reports/H1.md) 在本机 Qoder CLI 1.1.89 的独立 test 实例里，启动窗口 114/367/712 ms 三次停止均显示中断、native 0、本 run 守护进程从未开始，下一轮完成；不点停止的负对照正常完成。每例保存主进程标准输出，脱敏结构见 [H1 证据](evidence/r8/h1-startup.json)。[H2](reports/H2.md) 两个后台 Agent 的通知均到达，`query closing` 晚于最后通知后的 result，未再出现 `Operation aborted`；但 managed recorder 仍报 Provider turn id 与 open lifecycle identity 不同，记录未提交，等待 UI 截图未取得。[脱敏时间线](evidence/r8/h2-timeline.json)。H3–H5 继续，兼容清单仍为 `unsupported`。
+[H1](reports/H1.md) 在本机 Qoder CLI 1.1.89 的独立 test 实例里，启动窗口 114/367/712 ms 三次停止均显示中断、native 0、本 run 守护进程从未开始，下一轮完成；不点停止的负对照正常完成。每例保存主进程标准输出，脱敏结构见 [H1 证据](evidence/r8/h1-startup.json)。[H2](reports/H2.md) 两个后台 Agent 的通知均到达，`query closing` 晚于最后通知后的 result，未再出现 `Operation aborted`；但 managed recorder 仍报 Provider turn id 与 open lifecycle identity 不同，记录未提交，等待 UI 截图未取得。[脱敏时间线](evidence/r8/h2-timeline.json)。[H3](reports/H3.md) 在已完成轮次上点击分支后，报错原因是「没有找到该会话的归档」；只交原因，不修改产品。H4–H5 继续，兼容清单仍为 `unsupported`。
 
 **审查方核验第七轮（2026-11-15）。** G1、G3 通过，第六轮的三处修复在真机上成立；G0 证实了 hook 拆分的推断。G2、G4 的证据定位出四个问题，均已修复：
 
