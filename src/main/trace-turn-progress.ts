@@ -107,10 +107,20 @@ export function shouldUseManagedTerminalPersistence(
   managedPolicy: boolean,
   turn: Pick<TraceArchiveTurn, 'status' | 'items' | 'providerTurnId' | 'forkTurnId'>
 ): boolean {
-  const commandOnly = !turn.providerTurnId && !turn.forkTurnId &&
+  return managedPolicy && !isProviderlessTerminalTurn(turn) && !isProviderCommandOnlyTurn(turn)
+}
+
+/**
+ * A provider command answered without any model turn. In a new conversation a Qoder control
+ * command has no session at all, so there is no archive key and no Provider session id to
+ * wait for: it is neither canonical evidence nor a pending recovery.
+ */
+export function isProviderCommandOnlyTurn(
+  turn: Pick<TraceArchiveTurn, 'items' | 'providerTurnId' | 'forkTurnId'>
+): boolean {
+  return !turn.providerTurnId && !turn.forkTurnId &&
     turn.items.some(isProviderCommandResult) &&
     !turn.items.some((item) => item.kind === 'model' || item.kind === 'agent' || item.kind === 'tool')
-  return managedPolicy && !isProviderlessTerminalTurn(turn) && !commandOnly
 }
 
 function validUnresolvedProgress(value: UnresolvedTraceTurnProgress | null): value is UnresolvedTraceTurnProgress {

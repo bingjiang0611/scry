@@ -117,7 +117,9 @@ describe('Qoder provider adapter · managed runs, plugins and commands', () => {
 
     expect(reloadPlugins).toHaveBeenCalledOnce()
     expect(sdk.query.mock.calls[0][0].prompt).not.toBe('/plugins reload')
-    expect(result).toMatchObject({ externalSessionId: 'qoder-session', status: 'completed' })
+    // The daemon reported an id, but a prompt-less command never writes its transcript.
+    expect(result).toMatchObject({ status: 'completed' })
+    expect(result.externalSessionId).toBeUndefined()
     // A control answer is not model output: nothing may claim a model turn happened.
     expect(events.filter((event) => event.kind === 'model')).toEqual([])
     expect(events).toContainEqual(expect.objectContaining({
@@ -132,22 +134,29 @@ describe('Qoder provider adapter · managed runs, plugins and commands', () => {
     }))
   })
 
-  it('names the session of a /plugins reload that never receives a message', async () => {
+  it.each([
+    { label: 'a new conversation', resume: undefined },
+    { label: 'a resumed session', resume: 'existing-session' }
+  ])('reports no session a /plugins reload never wrote, in $label', async ({ resume }) => {
     sdk.query.mockReturnValue({
-      async *[Symbol.asyncIterator]() {},
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'system', subtype: 'init', session_id: 'daemon-named-session', mcp_servers: [] }
+      },
       reloadPlugins: vi.fn().mockResolvedValue({ commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 }),
       close: vi.fn().mockResolvedValue(undefined),
       interrupt: vi.fn().mockResolvedValue(undefined)
     })
     const seen: string[] = []
     const result = await createQoderAdapter().run({
-      runId: 'run-plugin-reload-silent', prompt: '/plugins reload', cwd: '/repo', attachments: [], emit: () => {},
+      runId: 'run-plugin-reload-session', prompt: '/plugins reload', cwd: '/repo', attachments: [], emit: () => {},
+      ...(resume ? { resume } : {}),
       onExternalSessionId: (id) => seen.push(id)
     }).promise
-    const requested = sdk.query.mock.calls[0][0].options.sessionId
-    expect(requested).toMatch(/^[0-9a-f-]{36}$/)
-    expect(result).toMatchObject({ externalSessionId: requested, status: 'completed' })
-    expect(seen).toEqual([requested])
+    expect(sdk.query.mock.calls[0][0].options.sessionId).toBeUndefined()
+    expect(result.status).toBe('completed')
+    // A resumed reload keeps the session it ran in; a new one stays session-less.
+    expect(result.externalSessionId).toBe(resume)
+    expect(seen).toEqual([])
   })
 
   it('把 Qoder 日志中的后台 shell 失败回写为本轮失败', async () => {

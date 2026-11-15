@@ -12,7 +12,7 @@ import type { AgentInputAttachment, RuntimeProvider } from '../../shared/runtime
 import type { ProviderId } from '../../shared/provider'
 import { aggregateTurnEvidence } from '../../core/turn-recorder/aggregate'
 import { isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, type ManagedTurnTiming } from '../../core/turn-recorder/managed'
-import { persistTraceTurnProgress, persistUnresolvedTraceTurnProgress, isProviderlessTerminalTurn, shouldUseManagedTerminalPersistence } from '../trace-turn-progress'
+import { persistTraceTurnProgress, persistUnresolvedTraceTurnProgress, isProviderlessTerminalTurn, isProviderCommandOnlyTurn, shouldUseManagedTerminalPersistence } from '../trace-turn-progress'
 import { canonicalOrObservedTurnTiming, commitManagedTraceTurn, persistManagedTraceProgress } from '../managed-turn-commit'
 import { deleteTraceTurnProgress } from '../trace-turn-progress'
 
@@ -150,7 +150,7 @@ export async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promi
     // Provider 在产出任何内容前就失败时没有原生 session 可恢复；不能把这类失败（参数/权限
     // 校验、CLI 缺失、pinned recorder CLI 版本不符）持久化成永久 pending，否则用户修正环境后
     // 仍无法开始下一轮。
-    if (isProviderlessTerminalTurn(turn)) return
+    if (isProviderlessTerminalTurn(turn) || isProviderCommandOnlyTurn(turn)) return
     if (managedPolicy) {
       await persistUnresolvedTraceTurnProgress({
         userDataDir: app.getPath('userData'),
@@ -206,7 +206,7 @@ export async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void
     throw new Error('managed recorder launch policy has no valid workspace/provider identity')
   }
   if (!args.sessionId) {
-    if (isProviderlessTerminalTurn(args)) return
+    if (isProviderlessTerminalTurn(args) || isProviderCommandOnlyTurn(args)) return
     if (managedPolicy) {
       throw new Error('managed recorder requires an authoritative Provider session id')
     }

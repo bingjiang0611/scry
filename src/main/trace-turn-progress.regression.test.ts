@@ -6,7 +6,8 @@ import type { TraceEvent } from '../shared/trace'
 import {
   persistUnresolvedTraceTurnProgress,
   recoverTraceTurnProgress,
-  shouldUseManagedTerminalPersistence
+  shouldUseManagedTerminalPersistence,
+  isProviderCommandOnlyTurn
 } from './trace-turn-progress'
 
 const roots: string[] = []
@@ -75,6 +76,10 @@ describe('providerless terminal recovery regression matrix', () => {
       [command, { ...harness, kind: 'model' as const, stage: 'text', text: 'reply' }]
     ]) expect(shouldUseManagedTerminalPersistence(true, { ...turn, items })).toBe(true)
     expect(shouldUseManagedTerminalPersistence(true, { ...turn, providerTurnId: 'native-turn' })).toBe(true)
+    // Without a session id the archive skips exactly these turns instead of leaving a pending file.
+    expect(isProviderCommandOnlyTurn(turn)).toBe(true)
+    expect(isProviderCommandOnlyTurn({ ...turn, items: [command, { ...harness, kind: 'tool' as const, stage: 'tool_use' }] })).toBe(false)
+    expect(isProviderCommandOnlyTurn({ ...turn, items: [{ ...command, providerCommand: undefined }] })).toBe(false)
   })
 
   it.each(['failed', 'cancelled', 'interrupted'] as const)('clears %s only in the matching scope, then remains idempotent', async (status) => {
