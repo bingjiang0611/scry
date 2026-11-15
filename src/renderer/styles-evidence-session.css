@@ -1,5 +1,5 @@
 /* Session transcript and fixed composer */
-.chat { padding-block: 18px 16px; }
+.chat { padding-block: 16px 16px; }
 
 /* 选中的历史会话读不到证据：这是一个明确的“证据不可用”状态，不是新会话空态。 */
 .chat-session-evidence-gap {
@@ -7,25 +7,25 @@
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 24px;
   text-align: center;
 }
 
 .chat-session-evidence-gap b {
   color: var(--fg);
-  font: 620 var(--text-base)/1.4 var(--font-ui);
+  font: var(--weight-semibold) var(--text-base)/1.4 var(--font-ui);
 }
 
 .chat-session-evidence-gap span {
   max-width: 520px;
   color: var(--dim2);
-  font: 12.5px/1.6 var(--font-ui);
+  font: var(--text-sm)/1.6 var(--font-ui);
 }
 
 .turn {
   max-width: 880px;
-  margin-bottom: 30px;
+  margin-bottom: 32px;
   padding-inline: 24px;
 }
 
@@ -35,7 +35,7 @@
 }
 
 .turn-assistant {
-  padding-left: 14px;
+  padding-left: 16px;
   border-left: 1px solid var(--border);
 }
 

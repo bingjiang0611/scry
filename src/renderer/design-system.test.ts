@@ -9,10 +9,10 @@ type Counts = Record<string, Record<string, number>>
 const rendererDirectory = __dirname
 const themeShell = readFileSync(join(rendererDirectory, 'styles-theme-shell.css'), 'utf8')
 
-const TYPE_SCALE = { '2xs': 10, xs: 11, sm: 12, md: 13, base: 14, lg: 16, xl: 20, '2xl': 24 }
+const TYPE_SCALE = { '2xs': 10, xs: 11, sm: 12, md: 13, base: 14, reading: 15, lg: 16, xl: 20, '2xl': 24 }
 const WEIGHTS = { regular: 400, medium: 500, semibold: 600, bold: 700 }
 const SPACE = { '0_5': 2, 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 8: 32, 10: 40, 12: 48 }
-const TOKEN_DEFINITION = /--(?:text-(?:2xs|xs|sm|md|base|lg|xl|2xl)|weight-[a-z]+|space-[0-9_]+)\s*:/
+const TOKEN_DEFINITION = /--(?:text-(?:2xs|xs|sm|md|base|reading|lg|xl|2xl)|weight-[a-z]+|space-[0-9_]+)\s*:/
 
 function cssFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -71,7 +71,11 @@ describe('design debt audit', () => {
 
 describe('cleaned areas', () => {
   // Areas whose debt has been paid off in full are held at zero, not just ratcheted.
-  const CLEAN = { sidebar: /(^|[\s,>+~(])\.(sb-|sidebar\b|sidebar-)/ }
+  const CLEAN = {
+    sidebar: /(^|[\s,>+~(])\.(sb-|sidebar\b|sidebar-)/,
+    // Conversation and tool evidence: selectors whose first class belongs to these families.
+    conversation: /^[^.,]*\.(?:turn|chat|hooks?|tool|md|mdiv|transcript|question|thinking|user-md|user-attachments?|subagent|callrow|callserver|model-text)(?:-[\w-]*)?(?![\w-])/
+  }
 
   it.each(Object.entries(CLEAN))('%s rules use only scale tokens, the 4px grid and theme colors', (_, scope) => {
     const debt = Object.entries(auditRendererScope(scope)).flatMap(([file, found]) =>

@@ -58,7 +58,7 @@
      anchoring can otherwise restore an arbitrary old turn after the new
      transcript grows, making a freshly opened session land in the middle. */
   overflow-anchor: none;
-  padding: 22px 0 10px;
+  padding: 24px 0 8px;
 }
 .chat::-webkit-scrollbar {
   display: none;
@@ -271,7 +271,7 @@
 }
 
 .turn {
-  margin: 0 auto 26px;
+  margin: 0 auto 24px;
   border-radius: var(--r-lg);
   scroll-margin-top: 16px;
   transition: background-color var(--duration-hover) var(--ease-out);

@@ -67,6 +67,8 @@
   --text-sm: 12px;
   --text-md: 13px;
   --text-base: 14px;
+  /* Transcript reading text only (assistant answers, user messages); UI chrome stays on --text-base. */
+  --text-reading: 15px;
   --text-lg: 16px;
   --text-xl: 20px;
   --text-2xl: 24px;

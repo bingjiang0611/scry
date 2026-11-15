@@ -263,7 +263,7 @@ button.mitem:disabled {
 .mdiv {
   height: 1px;
   background: var(--border);
-  margin: 6px 4px;
+  margin: 8px 4px;
 }
 .dim {
   color: var(--dim);

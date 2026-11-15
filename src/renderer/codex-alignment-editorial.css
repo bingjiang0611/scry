@@ -189,16 +189,16 @@
 /* A turn already contains both the user prompt and assistant response. Keep the
    boundary visible without stacking two oversized padding bands between turns. */
 .chat-body .transcript-turn {
-  padding-bottom: 18px;
+  padding-bottom: 16px;
 }
 
 .chat-body .transcript-turn + .transcript-turn {
-  padding-top: 22px;
+  padding-top: 24px;
 }
 
 .chat-body .turn-assistant {
-  margin-top: 14px;
-  padding: 16px 18px;
+  margin-top: 16px;
+  padding: 16px 16px;
   border: 0;
   border-radius: var(--r-lg);
   background: var(--surface-faint);
@@ -225,7 +225,7 @@
 
 .chat-body .model-text {
   max-width: 704px;
-  font-size: 15px;
+  font-size: var(--text-reading);
   line-height: 1.72;
 }
 
@@ -249,12 +249,12 @@
 }
 
 .chat-body .tool-card {
-  margin-top: 10px;
-  padding: 11px 12px;
+  margin-top: 8px;
+  padding: 12px 12px;
   border-color: var(--border3);
   border-radius: var(--r-md);
   background: var(--surface-subtle);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
+  box-shadow: inset 0 1px 0 var(--surface-faint);
   transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
@@ -266,18 +266,18 @@
 
 .chat-body .tool-row .name {
   font-size: var(--text-sm);
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
 }
 
 .chat-body .tool-row .op {
-  font-size: 9px;
-  font-weight: 720;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
   letter-spacing: 0.075em;
 }
 
 .chat-body .turn-hooks-summary,
 .chat-body .files-summary {
-  margin-top: 14px;
+  margin-top: 16px;
   overflow: hidden;
   border: 0;
   border-radius: var(--r-md);
@@ -288,7 +288,7 @@
 .chat-body .turn-hooks-summary > summary,
 .chat-body .files-summary > summary {
   min-height: 44px;
-  padding: 10px 14px;
+  padding: 8px 16px;
   color: var(--dim);
   letter-spacing: 0.02em;
   text-transform: none;
@@ -314,14 +314,14 @@
   display: flex;
   align-items: flex-end;
   gap: 12px;
-  margin-top: 10px;
+  margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border3);
 }
 
 .chat-body .turn-footer {
   flex: 1 1 auto;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   min-height: 28px;
   margin: 0;
@@ -329,7 +329,7 @@
   border: 0;
   background: transparent;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   letter-spacing: 0.015em;
 }
 
@@ -340,8 +340,8 @@
 }
 
 .chat-body .turn-footer .lbl {
-  font-size: 9px;
-  font-weight: 650;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }

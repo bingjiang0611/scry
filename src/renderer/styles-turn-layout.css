@@ -1,8 +1,8 @@
 /* 方案 C：整轮一条左轨；思考/正文/工具组都挂在轨上，工具组是退到栏沟里的脚注。 */
 .turn-flow {
   position: relative;
-  margin: 6px 0 2px;
-  padding-left: 25px;
+  margin: 8px 0 2px;
+  padding-left: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -18,7 +18,7 @@
 }
 .turn-flow-reveal {
   align-self: flex-start;
-  padding: 3px 8px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--dim2);
@@ -38,7 +38,7 @@
 .tool-group-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   padding: 0;
   min-height: 22px;
@@ -67,7 +67,7 @@
 .tool-group-row .tg-label {
   flex: 0 1 auto;
   min-width: 0;
-  font: 11.5px/1 var(--font-mono);
+  font: var(--text-sm)/1 var(--font-mono);
   color: var(--dim3);
   white-space: nowrap;
   overflow: hidden;
@@ -90,7 +90,7 @@
 .tool-group-row .chev { color: var(--dim3); flex: none; }
 .tool-group-body {
   margin-top: 8px;
-  padding: 2px 10px;
+  padding: 2px 8px;
   background: var(--panel);
   border: 1px solid var(--border3);
   border-radius: var(--r-md);

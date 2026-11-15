@@ -8,13 +8,11 @@
 }
 
 .chat-body .chat-transcript {
-  padding: 24px var(--evidence-gutter) 42px;
+  padding: 24px var(--evidence-gutter) 40px;
 }
 
 .chat-body .welcome-field {
   width: min(var(--evidence-content), 100%);
-  gap: 24px;
-  padding-block: 34px;
   text-align: center;
 }
 
@@ -92,11 +90,10 @@
 
 .chat-body .transcript-turn {
   width: min(var(--evidence-content), 100%);
-  padding: 5px 0 34px;
+  padding: 4px 0 32px;
 }
 
 .chat-body .transcript-turn + .transcript-turn {
-  padding-top: 40px;
   border-top: 0;
 }
 
@@ -116,25 +113,19 @@
 .chat-body .bubble-user {
   width: fit-content;
   max-width: 100%;
-  padding: 10px 14px;
+  padding: 8px 16px;
   border: 0;
   border-radius: var(--r-lg);
   background: var(--panel2);
   box-shadow: var(--shadow-card);
-  font-size: 14.5px;
+  font-size: var(--text-reading);
   line-height: 1.6;
 }
 
-.chat-body .turn-assistant {
-  margin-top: 20px;
-}
 
 .chat-body .who {
-  min-height: 26px;
-  padding-bottom: 8px;
   color: var(--dim2);
-  font-size: 11.5px;
-  font-weight: 540;
+  font-weight: var(--weight-medium);
 }
 
 .chat-body .who .av {
@@ -151,16 +142,9 @@
 }
 
 .chat-body .model-text {
-  max-width: 100%;
   color: var(--fg);
-  font-size: 14.5px;
-  line-height: 1.72;
 }
 
-.chat-body .turn-flow {
-  gap: 15px;
-  padding-left: 22px;
-}
 
 .chat-body .turn-flow::before {
   left: 2px;
@@ -177,7 +161,7 @@
 .chat-body .tool-group-row .tg-dur {
   color: var(--dim2);
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .chat-body .tool-group-row .tg-pill {
@@ -187,16 +171,12 @@
 }
 
 .chat-body .tool-group-body {
-  padding-inline: 10px;
+  padding-inline: 8px;
   border: 1px solid var(--border3);
   border-radius: var(--r-sm);
   background: var(--panel2);
 }
 
-.chat-body .tool-card {
-  border-color: var(--border3);
-  background: transparent;
-}
 
 .chat-body .tool-row .name,
 .chat-body .tool-row .arg {
@@ -204,7 +184,6 @@
 }
 
 .chat-body .turn-footer {
-  margin-top: 12px;
   border-top-color: var(--border3);
 }
 
@@ -398,7 +377,6 @@
   background: var(--surface-strong);
   color: var(--fg);
 }
-
 
 .runtime-composer .composer-action-controls .climenu {
   right: 0;

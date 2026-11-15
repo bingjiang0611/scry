@@ -106,8 +106,6 @@
   white-space: nowrap;
 }
 
-
-
 .mcp-test,
 .modal-x,
 .modal-refresh,
@@ -249,14 +247,9 @@
 }
 
 .turn {
-  max-width: 960px;
-  padding: 0 26px;
+  padding: 0 24px;
 }
 
-.turn.turn-jump-target {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-}
 
 .bubble-user {
   background: var(--panel2);
@@ -306,7 +299,6 @@
 .skillinject,
 .turn-footer {
   background: transparent;
-  border-color: var(--border3);
   border-left: 0;
   border-right: 0;
   border-radius: 0;
@@ -327,7 +319,6 @@
 }
 
 .tool-card.selected {
-  background: var(--accent-soft);
   border-color: var(--border3);
 }
 
@@ -336,7 +327,7 @@
 }
 
 .tool-row .op.r {
-  background: rgba(86, 168, 245, 0.12);
+  background: color-mix(in srgb, var(--read) 12%, transparent);
 }
 
 .tool-row .op.w {
@@ -344,7 +335,7 @@
 }
 
 .tool-row .op.e {
-  background: rgba(199, 125, 187, 0.12);
+  background: color-mix(in srgb, var(--edit) 12%, transparent);
 }
 
 .hook-status.ok,

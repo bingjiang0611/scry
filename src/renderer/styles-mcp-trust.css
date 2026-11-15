@@ -107,7 +107,3 @@
   color: var(--dim);
   font: var(--text-xs)/1.4 var(--font-mono);
 }
-.turn-id {
-  color: var(--accent);
-  border-color: var(--accent-line);
-}

@@ -79,8 +79,8 @@
   align-items: center;
   border: 1px solid var(--border2);
   border-radius: var(--r-xs);
-  padding: 1px 6px;
-  font: 10.5px/1.45 var(--font-mono);
+  padding: 1px 8px;
+  font: var(--text-xs)/1.45 var(--font-mono);
   color: var(--dim);
   background: var(--surface-muted);
   white-space: nowrap;

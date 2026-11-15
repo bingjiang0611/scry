@@ -399,6 +399,6 @@
 
   .question-result-list > div {
     grid-template-columns: 1fr;
-    gap: 5px;
+    gap: 4px;
   }
 }

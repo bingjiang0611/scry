@@ -214,7 +214,7 @@
 }
 
 @container (max-width: 720px) {
-  .chat-body .chat-transcript { padding-inline: 18px; }
+  .chat-body .chat-transcript { padding-inline: 16px; }
   .runtime-composer { padding-inline: 18px; }
 
   .evidence-graph {

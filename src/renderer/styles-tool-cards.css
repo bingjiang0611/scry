@@ -1,13 +1,11 @@
 /* ============ 蓝本 tool-card（PR#2 P1 chat 重排） ============ */
 .tool-card {
   display: block;
-  margin: 6px 0;
+  margin: 8px 0;
   position: relative;
   overflow: hidden;
-  padding: 9px 12px 9px 14px;
-  background: var(--panel);
+  padding: 8px 12px 8px 16px;
   border: 1px solid var(--border3);
-  border-radius: var(--r-md);
   cursor: pointer;
   transition: border-color var(--duration-hover) var(--ease-out), background var(--duration-hover) var(--ease-out);
 }
@@ -20,18 +18,18 @@
   width: 2px;
   background: var(--kind, var(--border2));
 }
-.tool-card.sub { margin-left: 18px; }
+.tool-card.sub { margin-left: 16px; }
 .tool-card.k-tool { --kind: var(--dim3); }
 .tool-card.k-skill { --kind: var(--skill); }
 .tool-card.k-mcp { --kind: var(--mcp); }
 .tool-card.k-agent { --kind: var(--agent); }
 .tool-card.k-hook { --kind: var(--warn); }
 .tool-card.k-err { --kind: var(--bad); }
-.tool-row { display: flex; align-items: center; gap: 9px; }
+.tool-row { display: flex; align-items: center; gap: 8px; }
 .tool-row .st { width: 14px; height: 14px; display: grid; place-items: center; flex: none; }
 .tool-row .st.ok { color: var(--ok); }
 .tool-row .st.err { color: var(--bad); }
-.tool-row .name { font: var(--weight-semibold) 12.5px/1 var(--font-mono); color: var(--fg); letter-spacing: -0.005em; }
+.tool-row .name { font: var(--weight-semibold) var(--text-sm)/1 var(--font-mono); color: var(--fg); letter-spacing: -0.005em; }
 .tool-card.k-mcp .tool-row .name {
   min-width: 0;
   max-width: min(42%, 320px);
@@ -117,7 +115,7 @@
 .tool-row .meta .warn { color: var(--warn); display: inline-flex; align-items: center; }
 .tool-row .chev { color: var(--dim2); flex: none; }
 .tool-row .op {
-  width: 16px; height: 14px; font: var(--weight-bold) 9px/14px var(--font-mono); letter-spacing: 0.04em;
+  width: 16px; height: 14px; font: var(--weight-bold) var(--text-2xs)/14px var(--font-mono); letter-spacing: 0.04em;
   border-radius: var(--r-xs); text-align: center; flex: none;
 }
 .tool-row .op.r { color: var(--read); }
@@ -126,23 +124,23 @@
 /* 蓝本：工具卡内联展开详情（选中/点开时显 old/new string 或 input + output） */
 .tool-detail {
   margin-top: 8px;
-  padding: 10px;
+  padding: 8px;
   background: var(--bg);
   border-radius: var(--r-sm);
   border: 1px solid var(--border3);
 }
 .tool-detail .lbl {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .tool-detail .lbl + pre {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .tool-detail pre {
-  font: 11.5px/1.5 var(--font-mono);
+  font: var(--text-sm)/1.5 var(--font-mono);
   color: var(--fg);
   max-height: 280px;
   overflow: auto;

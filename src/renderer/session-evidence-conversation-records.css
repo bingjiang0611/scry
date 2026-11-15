@@ -64,8 +64,8 @@
    问答按行对齐、答案落在与等待同一条右轨。这块的基础规则在 ab5601b 从 styles.css 删除后
    一直没有补回，此前渲染的是浏览器默认的 <dl>/<dd>/<summary>。 */
 .question-result {
-  margin-top: 6px;
-  padding-top: 9px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--border3);
   cursor: default;
 }
@@ -77,9 +77,9 @@
 .question-result-head > span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--ok);
-  font: 650 var(--text-2xs)/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.08em;
 }
 .question-result-head > span .ico {
@@ -92,7 +92,7 @@
 }
 .question-result-head small {
   color: var(--dim2);
-  font: var(--weight-regular) 10.5px/1 var(--font-mono);
+  font: var(--weight-regular) var(--text-xs)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .question-result-head .question-result-wait {
@@ -100,7 +100,7 @@
 }
 .question-result-list {
   display: grid;
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   border-top: 1px solid var(--border3);
 }
 .question-result-list > div {
@@ -117,7 +117,7 @@
   min-width: 0;
   margin: 0;
   color: var(--dim);
-  font: var(--weight-regular) 12.5px/1.55 var(--font-ui);
+  font: var(--weight-regular) var(--text-sm)/1.55 var(--font-ui);
   overflow-wrap: anywhere;
 }
 .question-result-list dd {
@@ -136,26 +136,26 @@
 }
 .question-result-fallback {
   margin-top: 8px;
-  padding: 8px 9px;
+  padding: 8px 8px;
   border: 1px solid var(--border3);
   border-radius: var(--r-sm);
   background: var(--surface-inset);
   color: var(--dim);
-  font: 11.5px/1.6 var(--font-mono);
+  font: var(--text-sm)/1.6 var(--font-mono);
   overflow-wrap: anywhere;
 }
 .question-raw {
-  margin-top: 10px;
+  margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border3);
 }
 .question-raw > summary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   list-style: none;
   color: var(--dim2);
-  font: var(--weight-regular) 10.5px/1.4 var(--font-mono);
+  font: var(--weight-regular) var(--text-xs)/1.4 var(--font-mono);
   letter-spacing: 0.08em;
   cursor: pointer;
   transition: color var(--duration-hover) var(--ease-out);
@@ -179,22 +179,22 @@
   transform: rotate(90deg);
 }
 .question-raw .lbl {
-  margin: 8px 0 6px;
+  margin: 8px 0 8px;
   color: var(--dim);
-  font: var(--weight-regular) 10.5px/1 var(--font-mono);
+  font: var(--weight-regular) var(--text-xs)/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .question-raw pre {
   margin: 0;
-  padding: 8px 9px;
+  padding: 8px 8px;
   max-height: 280px;
   overflow: auto;
   border: 1px solid var(--border3);
   border-radius: var(--r-sm);
   background: var(--surface-inset);
   color: var(--fg);
-  font: 11.5px/1.5 var(--font-mono);
+  font: var(--text-sm)/1.5 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }

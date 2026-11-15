@@ -127,7 +127,7 @@ export function auditRenderer(root = rendererRoot) {
 }
 
 /**
- * Audits only the rules whose selector matches `scope` (e.g. the sidebar), across
+ * Audits only the rules with at least one selector matching `scope` (e.g. the sidebar), across
  * every renderer stylesheet. Areas that have been fully cleaned are held at zero
  * with this, which is stricter than the per-file ratchet.
  */
@@ -137,7 +137,8 @@ export function auditRendererScope(scope, root = rendererRoot) {
   for (const path of cssFiles(root)) {
     // Blank every rule outside the scope while keeping line numbers stable.
     const source = stripComments(readFileSync(path, 'utf8'))
-      .replace(/([^{}]+)\{([^{}]*)\}/g, (rule, selector) => scope.test(selector) ? rule : rule.replace(/[^\n]/g, ' '))
+      .replace(/([^{}]+)\{([^{}]*)\}/g, (rule, prelude) =>
+        splitSelectors(prelude).some((selector) => scope.test(selector)) ? rule : rule.replace(/[^\n]/g, ' '))
     const found = auditCss(source, { primitiveSheet: PRIMITIVE_SHEETS.has(basename(path)) })
     if (METRICS.some((metric) => found[metric].length > 0)) files[relative(root, path)] = found
   }
