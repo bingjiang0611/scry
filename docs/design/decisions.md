@@ -108,3 +108,28 @@
 守卫：`Button.test.tsx` 断言 primitive 的输出、`.btn`／`.icon-button` 只在 `styles-buttons.css` 定义、退役类名不再出现、TSX 不再手写 `className="btn…"`；手写一个 `className="btn primary"` 的负对照会使该测试失败。设计债务基线随之下降（字号 272→269、字重 119→117、间距 1329→1311、颜色 145→144）。
 
 验证：在 Playwright Chromium 中用构建后的真实 CSS 静态渲染 10 个真实组件（项目重命名与移除、会话重命名、工作区新建文件、终端录制历史、Meta Prompts、远程主机、对话删除与迁入、文件面板）和 primitive 画廊，深浅主题各拍前后对照。Electron 内的交互、键盘焦点与 UI smoke 未在本地运行（容器以 root 运行，Electron 拒绝在不加 `--no-sandbox` 时启动）；smoke 脚本中引用旧类名的选择器已同步更新，需由 CI 的 UI smoke 验证。已知限制：浅色主题主按钮白字在 `#3f7ee8` 上为 3.92:1，低于 4.5:1，属强调色本身的取值，本轮未改。
+
+## 通知与标签页收敛：Notice、Tabs、Segmented（2026-11-15）
+
+范围是渲染进程里所有行内通知、视图内标签页和分段控件。可关闭、可拖动的工作区标签条（`.surface-tabs`、`.terminal-tabs`）和设置页左侧导航（`.settings-tab`）语义不同，保留独立实现；浮动 toast（`.mp-notice`）与按钮旁的状态字暂不处理。
+
+收敛前的状态：
+
+- 通知 11 套。同样表达“警告”，有琥珀描边框（还写死了 `#b48739`）、琥珀底圆角卡、等宽字体横幅、只有红字、只有灰字五种形态；`side-chat-surface-notice` 引用了不存在的 `--muted`、`--line` 变量，`surface-layout-notice` 完全没有样式；错误提示的关闭按钮是裸 `×`。
+- 标签页 7 套。有填充胶囊、蓝下划线、白下划线、整宽居中加粗四种形态。`.overview-data-tabs` 被 4 个文件逐层覆写；`.sc-tabs` 用 `aria-pressed` 按钮冒充标签页；`overview-data-tabs`、`capability-kind-tabs`、`capability-source-tabs` 写了 `role="tab"` 却没有方向键与 roving tabindex。
+- 能力弹窗里语义与外观相反：切换整块面板的 Skills／MCP 长得像分段控件，过滤同一列表的“全部／项目／用户”反而长得像标签页。
+
+| 决定 | 理由 | 落地 |
+| --- | --- | --- |
+| 通知只有三种语气 | 用户需要从外观判断“知道一下／需要注意／失败了”，而不是记住每个面板的配色 | `Notice` tone info／warn／bad，图标、颜色与文字同时表达；`layout="strip"` 用于贴面板边缘的提示 |
+| `role` 由调用方给 | status／alert 决定读屏是否打断用户，只有调用方知道 | primitive 不隐式加 role，迁移时逐处保留原值 |
+| 标签页与分段控件按语义区分 | 标签页换掉整块面板；分段控件过滤或换算同一份内容 | 能力类型改为 `Tabs`，来源过滤改为 `Segmented`（`role="group"` + `aria-pressed`） |
+| 标签页统一键盘行为 | 4 套标签页无法用方向键切换 | `Tabs` 提供自动激活、方向键／Home／End、roving tabindex |
+| 选中色不做过渡 | 侧栏 smoke 要求选中色与 `aria-selected` 同一帧切换 | `.tabs` 不声明 color transition；动效指示条沿用 `useTabIndicator` |
+| 容器级按钮重置必须排除 primitive | `.usage-page button { font: inherit }`、`.desktop-remote__host button` 等规则的优先级不低于 primitive 且加载更晚，会悄悄改掉 Segmented 和上一轮迁移的 Button | 这类规则追加 `:not(.btn, .icon-button, [role='tab'], .segmented > button)`；设计债务审计新增第 5 项指标 `buttonReset`，存量 87 处只降不升 |
+
+保留的合同：标签按钮的 id、`aria-controls`、`title`、顺序与侧栏动效指示条不变；通知与标签页的原类名保留为定位与测试钩子，smoke 选择器无需改动。删除了 102 个旧选择器（含 `.vtab(s)`、`.panel-tabs` 死样式）。
+
+守卫：`Feedback.test.tsx` 断言 Notice 的语气与 role 合同、Tabs 的 roving tabindex 与键盘目标、Segmented 的 group／pressed 语义、三者只在各自样式表定义、TSX 不再手写 `role="tablist"`（两个可关闭标签条除外）。设计债务基线：字号 269→262、字重 117→114、间距 1311→1268、颜色 144→138，`buttonReset` 首次记录为 87。
+
+验证：用构建后的真实 CSS，在 Playwright Chromium 中把迁移前后的标记放进各自的真实祖先容器（`sc-panel`、`sidebar`、`overview-dossier`、`skills-modal`、`capabilities-modal`、`diff-navigation`、`usage-page` 等）渲染，深浅主题各拍前后对照。渲染测试中 3 条写死旧标记的断言按新合同更新（来源过滤改为 group／pressed，计数改为 `.tab-count`）。Electron 内交互与 UI smoke 未在本地运行（容器以 root 运行，Electron 拒绝不带 `--no-sandbox` 启动）。已知限制：Skills 弹窗标签页左侧留白从 22px 变为 24px，与下方工具栏的 22px 相差 2px，待工具栏对齐网格时一并修正。

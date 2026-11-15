@@ -139,7 +139,8 @@ components:
 | --- | --- | --- |
 | `src/renderer/radius-system.test.ts` | 所有 `border-radius` 必须是 `var(--r-*)`、`50%` 或 `0`；圆形必须声明 `corner-shape: round` | 绝对，无存量例外 |
 | `src/renderer/motion.test.ts` | 缓动曲线只在 `motion.css` 定义 | 绝对 |
-| `src/renderer/design-system.test.ts` + `src/renderer/design-system-baseline.json` | 字号、字重、间距网格、裸颜色字面值 | 棘轮：每个文件每项计数只能下降，下降后必须同步写回基线 |
+| `src/renderer/design-system.test.ts` + `src/renderer/design-system-baseline.json` | 字号、字重、间距网格、裸颜色字面值、未排除 primitive 的容器级 `button` 规则 | 棘轮：每个文件每项计数只能下降，下降后必须同步写回基线 |
+| `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
 
 `npm run design:audit` 列出存量债务，`-- --verbose` 给出逐行明细，`-- --write` 在全部计数未上升时把基线写低。基线只降不升：新代码不能写入新债务，也没有放宽的入口。确需新增尺度值时，先在本文与 `styles-theme-shell.css` 中扩展 scale，并在 PR 中说明为何现有档位不够。
 
@@ -260,12 +261,13 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 工具栏里只有图标的动作 | `<IconButton label=…>`（`label` 必填，同时作为 tooltip） | 无标签的图标；为图标按钮另写一套 hover |
 | 打开一个选择菜单（Provider、模型、工作目录） | 选择器触发器（`.wdbtn`、`.clibtn`、`.location-button`），显示当前值 | `<Button>`：它表达“执行”，不表达“当前选择是什么” |
 | 关闭弹窗 | `ModalCloseButton` | 手写 `<button>×</button>` |
-| 在同一视图内切换平级内容 | 标签页（`role="tablist"`，选中态用 `--selected` 下划线） | 用按钮组模拟标签页；用标签页做导航跳转 |
-| 在 2–4 个互斥选项中选一个且立即生效 | 分段控件 | 下拉菜单（选项少时增加一次点击） |
+| 在同一视图内切换平级内容（换掉整块面板） | `<Tabs>`：`--selected` 下划线，方向键／Home／End 切换 | 用按钮组或 `aria-pressed` 模拟标签页；用标签页做页面导航 |
+| 在 2–4 个互斥选项中过滤或换算同一份内容，立即生效 | `<Segmented>`：`role="group"` + `aria-pressed` | 用标签页做过滤；下拉菜单（选项少时多一次点击） |
 | 从较多选项中选择，或选项需要说明 | 菜单／选择器（`.menu` 结构，键盘可达） | 平铺一排按钮 |
 | 描述对象的状态或属性 | 徽章 `.badge`（非交互，文字 + 颜色） | 可点击的徽章；只靠颜色的徽章 |
 | 实时连接或运行状态 | 状态点 + 文字标签 | 只有颜色的圆点 |
-| 需要用户注意、但不阻断操作的结果 | 行内通知（Notice），放在相关内容旁 | 全局弹窗；常驻页面顶部的横幅 |
+| 需要用户注意、但不阻断操作的结果 | `<Notice tone>`：info／warn／bad；`layout="strip"` 贴面板边缘，默认 box 放在相关内容旁；最多一个小按钮 | 全局弹窗；只有颜色、没有图标与文字的提示；自己写底色与边框 |
+| 一次性操作反馈（已复制、已保存） | 短暂的 toast 或按钮旁的状态字 | 常驻的 Notice |
 | 必须用户决定才能继续 | 弹窗 `ModalFrame` | 把可选细节塞进弹窗 |
 | 低频的解释、定义、来源说明 | tooltip 或可展开的 `Disclosure` | 常驻的说明段落 |
 | 大块可选细节（原始输入输出、日志） | `Disclosure` 折叠 | 默认展开 |
@@ -279,9 +281,11 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | --- | --- | --- |
 | 文字按钮 | ~~`.btn` 双重定义、`.hosts-button`、`.mp-button`、`.turn-branch-btn`、`.project-remove-confirm`~~ | **已完成（2026-11-15）**：`Button` + `styles-buttons.css` |
 | 图标按钮 | ~~`.iconbtn`、`.icon-button` 局部覆写、`.mp-icon-button`、无样式的 `.icon-btn`~~ | **已完成（2026-11-15）**：`IconButton` |
-| 行内通知 | `.sc-notice`、`.sc-inline-notice`、`.mp-notice`、`.composer-notice`、`.conversation-history-notice`、`.diff-review-notice`、`.overview-session-notice`、`.side-chat-surface-notice`、`.surface-chooser-notice`、`.termination-notice`、`.hosts-alert`、`.llm-perf-alert`、`.mcp-auth-banner` | `Notice` primitive（tone: info / warn / bad；可选一个动作） |
-| 标签页 | `.surface-tabs`、`.terminal-tabs`、`.sc-tabs`、`.sb-view-tabs`、`.overview-data-tabs`、`.skill-scope-tabs`、`.capability-kind-tabs`、`.capability-source-tabs`、`.diff-navigation-tabs`、`.panel-tabs`、`.vtabs`、`.settings-tab` | `Tabs` primitive（视图内切换）；工作区 surface 标签页因可关闭、可拖动保留独立实现 |
-| 分段控件 | `.usage-segmented`、`.seg-chip` | `Segmented` primitive |
+| 行内通知 | ~~`.sc-notice`、`.sc-inline-notice`、`.composer-notice`、`.conversation-history-notice`、`.diff-review-notice`、`.side-chat-surface-notice`、`.surface-layout-notice`、`.termination-notice`、`.hosts-alert`、`.llm-perf-alert`、`.mcp-auth-banner`~~ | **已完成（2026-11-15）**：`Notice`；类名保留为定位与测试钩子 |
+| 标签页 | ~~`.sc-tabs`、`.sb-view-tabs`、`.overview-data-tabs`、`.skill-scope-tabs`、`.capability-kind-tabs`、`.diff-navigation-tabs`；无引用的 `.panel-tabs`、`.vtabs`~~ | **已完成（2026-11-15）**：`Tabs` |
+| 分段控件 | ~~`.usage-segmented`、`.capability-source-tabs`~~ | **已完成（2026-11-15）**：`Segmented`。`.seg-chip` 是指标徽章，不属于分段控件 |
+| 不并入 | `.surface-tabs`、`.terminal-tabs`（可关闭、可拖动）；`.settings-tab`（设置页左侧导航，`aria-current`） | 保留独立实现，但选中色、下划线与字号对齐 `Tabs` |
+| 待定 | `.mp-notice`（浮动 toast）；`.overview-session-notice`、`.surface-chooser-notice`（按钮旁的状态字） | 等 toast 模式确定后统一 |
 | 菜单 | `.menu`、`.wdmenu`、`.climenu`、`.ctxmenu`、`.slash-menu`、`.surface-menu`、`.sb-project-menu`、`.sb-session-menu`、`.diff-scope-menu`、`.diff-turn-menu`、`.arch-provider-menu` | 共享 `.menu` 结构与菜单项样式；定位与触发逻辑仍由调用方负责 |
 
 ### 已有 primitive
@@ -290,6 +294,9 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | --- | --- |
 | `src/renderer/components/primitives/Button.tsx` | variant：primary / secondary（默认）/ quiet / danger；size：md（32px，弹窗与面板）/ sm（28px，工具栏与行内）。默认 `type="button"`，表单主操作显式传 `type="submit"`；`className` 只用于测试钩子与定位，不改尺寸、颜色和圆角 |
 | `src/renderer/components/primitives/IconButton.tsx` | `label` 必填，同时生成 `aria-label` 与 `title`；size：md（32px，图标 16px）/ sm（28px，图标 14px）；`active` 只控制视觉，`aria-pressed`／`aria-expanded` 仍由调用方给出 |
+| `src/renderer/components/primitives/Notice.tsx` | tone：info（默认）／warn／bad；layout：box／strip；size：md／sm；`action` 放一两个 sm 按钮。图标随 tone 自动给出；`role`（status／alert）由调用方决定，primitive 不隐式添加。正文里的 `<b>` 是标题样式 |
+| `src/renderer/components/primitives/Tabs.tsx` | `items` 的 `id`／`controls`／`title`／`count` 保持原 DOM 合同；自动激活，只有选中项在 Tab 顺序中；`tabRef`／`listRef`／`children` 支持动效指示条。颜色在 `aria-selected` 同一帧切换，不做颜色过渡 |
+| `src/renderer/components/primitives/Segmented.tsx` | `role="group"` + `aria-pressed`；`value` 可为字符串或数字 |
 | `src/renderer/components/primitives/ModalCloseButton.tsx` | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。不承担焦点陷阱或确认关闭逻辑 |
 | `src/renderer/components/ModalFrame.tsx` | 弹窗栈、焦点进入与恢复、Esc／遮罩关闭路由、进出场动效 |
 | `src/renderer/components/Disclosure.tsx` | 折叠内容的挂载、`inert` 与进出场动效；长内容自动切换为长动效 |
@@ -348,6 +355,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 - 不要写半像素字号、550／620 这类中间字重、5／7／9／10／14px 这类网格外间距。
 - 不要在组件里写 `#hex`、`rgb()`、`oklch()` 等裸颜色；需要新颜色时先在主题层定义语义变量。
 - 不要为一个新功能另起一套按钮、通知或标签页样式；扩展收敛目标而不是复制。
+- 不要写 `.panel button { … }` 这种覆盖容器内所有按钮的规则；确需重置原生按钮时加 `:not(.btn, .icon-button, [role='tab'], .segmented > button)`，否则它会悄悄改掉 primitive。
 - 不要把 Provider 品牌色、选中态或连接点当作成功、授权或完整性证明。
 - 不要把基础 `styles-theme-shell.css` 的颜色旧值或 `designs/` 原型直接当作当前产品规范；颜色以最终覆写层为准。
 - 不要把 iOS 的 glass helper 描述成已实现的系统材质或背景模糊。
@@ -359,7 +367,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
 2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
-3. **通知与标签页**：引入 `Notice`、`Tabs`、`Segmented`，按收敛清单迁移。
+3. **通知与标签页（已完成）**：`Notice`、`Tabs`、`Segmented` 与 `styles-notices.css`、`styles-tabs.css`；容器级 `button` 规则改为排除 primitive，并纳入债务棘轮。
 4. **按区域偿还字号与间距**：侧栏 → 对话与工具证据 → composer → 纵览 → 设置与清单 → 分析视图。半像素字号收敛到相邻档位，网格外间距按嵌套规则重排。
 5. **颜色与层级**：局部阴影、品牌与图表颜色收敛为语义变量；z-index 收敛为分层 token。
 6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure。
