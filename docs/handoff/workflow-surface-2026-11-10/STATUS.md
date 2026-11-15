@@ -1,4 +1,16 @@
-# 第六轮待核验（F1 未通过，F2/F3 部分通过，清单未放开）
+# 第七轮进行中（第六轮已核验，三处已修，待真机复测）
+
+**审查方核验第六轮（2026-11-15）。** 执行方的证据足够定位三处问题，均已修复：
+
+- 旧 E4 `invalid canonical record`：审批标题超过记录合同的 120 字符上限（`cc75676b`）。
+- reload 之后下一轮找不到 transcript：审查方第四轮引入，已改为新对话里的 reload 不报告会话 ID（`fda34e0e`）。
+- SessionStart 运行次数虚增：CLI 日志与 SDK 各报半次，没有合并（`0f95dddf`，原因是推断的，G0 核对）。
+
+F2 启动窗口需要改的是验收标准，不是代码。F3 分支和后台 Agent 根轮次 `Operation aborted` 证据不足，本轮补采。F4 的 4 个超时在空载容器里 2.6 秒通过，与负载解释一致（Linux，不代替 macOS）。清单仍是 `unsupported`，判断正确。做法见 [R7.md](R7.md)，启动提示见 [PROMPT-R7.md](PROMPT-R7.md)。
+
+## 第六轮报告（已核验）
+
+### 第六轮待核验（F1 未通过，F2/F3 部分通过，清单未放开）
 
 F0–F4 均已执行并逐包提交推送，等待审查方核验；**不是兼容性验收通过**。F0 旧 E4 恢复报 `$.interventions invalid intervention evidence`，hook-1 补采了 hookId 配对计数；F1 reload 本身通过但下一轮源 transcript 缺失；F2 Hook 与输出中途各三次续发成功，启动期五次点击无可验证终态；F3 普通工具与审批/重启通过，但分支未证实独立身份、两个后台 Agent 的根轮次 aborted；F4 不改 `unsupported`，干净门禁 typecheck/renderer UI/pack 通过，unit 4 条 5 秒超时退出 1。详见 [F0](reports/F0.md)、[F1](reports/F1.md)、[F2](reports/F2.md)、[F3](reports/F3.md)、[F4](reports/F4.md)。
 
