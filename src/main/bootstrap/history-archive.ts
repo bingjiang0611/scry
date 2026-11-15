@@ -3,7 +3,6 @@ import type { TraceArchive } from '../transcript-archive'
 import type { TraceArchivePage } from '../transcript-archive'
 import type { SessionHistoryPageRequest } from '../session-history'
 import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchivePageAsync } from '../transcript-archive'
-import { createTranscriptArchivePaging, type TranscriptArchivePaging } from '../transcript-archive-paging'
 import { sessionArchiveIsPageable, readSessionHistoryAfterCompletedRuns } from '../session-history'
 
 /**
@@ -17,10 +16,11 @@ export interface SessionArchiveRead {
   archivePage: TraceArchivePage | null
   archived: TraceArchive | null
   /**
-   * Transcript-backed loads with a complete archive index: positions come from the index and
-   * bodies are read per history window. `archived` is then null until a caller falls back.
+   * Transcript-backed loads with a complete archive index: index-only turns that position the
+   * transcript merge, with bodies read per history window. `archived` is then null until a caller
+   * falls back to the complete read.
    */
-  transcriptPaging?: TranscriptArchivePaging
+  archiveIndex?: TraceArchive
 }
 
 /**
@@ -45,7 +45,7 @@ export async function readSessionArchive(input: {
     : {}
   const paged = sessionArchiveIsPageable(input.providerId, input.transcriptPath)
   try {
-    const [archivePage, archived, transcriptPaging] = await readSessionHistoryAfterCompletedRuns(input.runs, input.signal, async () => {
+    const [archivePage, archived, archiveIndex] = await readSessionHistoryAfterCompletedRuns(input.runs, input.signal, async () => {
       const limit = input.request?.limit ?? DEFAULT_LOAD_SESSION_TURNS
       const page = paged ? await readTraceArchivePageAsync(args, { ...profile, limit }, input.signal) : null
       // A transcript merge positions turns by the whole archive, but only by its index: read every
@@ -53,11 +53,11 @@ export async function readSessionArchive(input: {
       const metadata = !paged && input.transcriptPath
         ? await readTraceArchiveMetadataAsync(args, input.signal, { requireComplete: true })
         : null
-      if (metadata) return [null, null, createTranscriptArchivePaging(metadata)] as const
+      if (metadata) return [null, null, metadata] as const
       const archive = page?.archive ?? (paged ? null : await readTraceArchiveAsync(args, input.signal))
       return [page, archive, undefined] as const
     })
-    return { archivePage, archived, ...(transcriptPaging ? { transcriptPaging } : {}) }
+    return { archivePage, archived, ...(archiveIndex ? { archiveIndex } : {}) }
   } catch (error) {
     input.signal.throwIfAborted()
     throw error

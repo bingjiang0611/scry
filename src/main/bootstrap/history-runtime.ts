@@ -44,11 +44,19 @@ export function createHistoryRuntime() {
   // 已加载会话的单条历史缓存：翻页复用归一化事件，但附件只在页越过 IPC 前读取。
   // 这把图片 I/O/base64 与常驻内存限制在可见页；事件源仍完整解析，后续由源级索引继续收窄。
   let sessionHistoryCache: SessionHistoryCache | null = null
+  // An older page reads and fsyncs its window; a new session or invalidation must not wait behind it.
+  let olderHistoryAbortController: AbortController | null = null
+
+  function abortOlderHistory(reason: string): void {
+    olderHistoryAbortController?.abort(new Error(reason))
+    olderHistoryAbortController = null
+  }
 
   function invalidateSessionHistoryLoad(reason: string): void {
     loadSessionRevision += 1
     loadSessionAbortController?.abort(new Error(reason))
     loadSessionAbortController = null
+    abortOlderHistory(reason)
     sessionHistoryCache = null
   }
 
@@ -70,13 +78,21 @@ export function createHistoryRuntime() {
       ...deps, ...shared,
       getLoadSessionAbortController: () => loadSessionAbortController,
       setLoadSessionAbortController: (controller) => { loadSessionAbortController = controller },
-      nextLoadSessionRevision: () => ++loadSessionRevision
+      nextLoadSessionRevision: () => {
+        abortOlderHistory('session history request superseded')
+        return ++loadSessionRevision
+      }
     })
     registerOlderHistoryHandler({
       ...shared,
       handleTrusted: deps.handleTrusted,
       resolveKnownProjectDirectory: deps.resolveKnownProjectDirectory,
-      providerRegistry: deps.providerRegistry
+      providerRegistry: deps.providerRegistry,
+      beginOlderHistoryRequest: () => {
+        abortOlderHistory('older history request superseded')
+        olderHistoryAbortController = new AbortController()
+        return olderHistoryAbortController.signal
+      }
     })
     registerTurnTerminalEvidenceHandler({
       handleTrusted: deps.handleTrusted,

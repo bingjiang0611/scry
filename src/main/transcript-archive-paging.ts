@@ -1,63 +1,96 @@
+import { createHash } from 'node:crypto'
 import type { ParsedTurn } from './normalize'
 import type { TraceEvent } from '../shared/trace'
 import type { ProviderId } from '../shared/provider'
 import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
-import { mergeSessionTurns, sessionHistoryPage, type LoadedSessionTurn, type SessionHistoryContext, type SessionHistoryPageRequest } from './session-history'
+import {
+  mergeSessionTurnAt,
+  sessionHistoryWindow,
+  sessionMergeKey,
+  sessionMergePlan,
+  type LoadedSessionTurn,
+  type SessionHistoryContext,
+  type SessionHistoryPageRequest,
+  type SessionMergePosition
+} from './session-history'
 
 /**
- * Transcript-backed history (Claude) merges the whole transcript with the whole archive by
- * canonical user text, so a turn's position depends on every turn. Positions only need the
- * archive index (runId, userText, order), not turn bodies; bodies are read for the turns a page
- * shows. A page built this way equals the same slice of the complete merge: matching never looks
- * at bodies, each turn's items merge independently, and per-event content persistence is per event.
+ * Transcript-backed history (Claude) merges the transcript with the archive by canonical user
+ * text, so a turn's position depends on every turn. Positions need only user texts (the archive
+ * index has them); bodies are read, persisted and merged for the positions a page shows. Without
+ * attachment hydration each merged position depends only on its own inputs, so a page equals the
+ * same slice of the complete merge.
+ *
+ * The state keeps merged (content-bounded) turns of hydrated windows and archive bodies read for
+ * them; it never keeps raw transcript bodies. Older windows re-read the transcript and must find
+ * the same prompts, or the caller reloads instead of mixing two transcript versions.
  */
 export interface TranscriptArchivePaging {
   readonly identity: Pick<TraceArchive, 'cwd' | 'sessionId' | 'providerId'>
   /** Complete index metadata in canonical archive order. Never mutated. */
   readonly metadata: readonly TraceArchiveTurn[]
-  /** Archive turns whose canonical bodies were read and persisted, keyed by runId. */
+  readonly plan: readonly SessionMergePosition[]
+  /** Digest of the transcript prompts the plan was built from. */
+  readonly transcriptKey: string
+  /** Archive bodies read (and content-persisted) for hydrated windows, keyed by runId. */
   readonly hydrated: Map<string, TraceArchiveTurn>
-  /** Transcript indices whose tool content was persisted. */
-  readonly persistedTranscript: Set<number>
+  /** Exact merged turns by position. */
+  readonly merged: Map<number, LoadedSessionTurn>
 }
 
 export interface TranscriptArchiveWindow {
+  /** Every position; only positions of hydrated windows carry merged content. */
   turns: LoadedSessionTurn[]
+  /** Archive bodies read so far, for attachment hydration of the returned page. */
   archive: TraceArchive
   turnFilesRead: number
 }
 
-export function createTranscriptArchivePaging(metadata: TraceArchive): TranscriptArchivePaging {
+const UNHYDRATED: TraceEvent[] = []
+
+export function transcriptPromptKey(transcriptTurns: readonly Pick<ParsedTurn, 'userText'>[]): string {
+  const hash = createHash('sha256').update(String(transcriptTurns.length))
+  for (const turn of transcriptTurns) hash.update('\0').update(sessionMergeKey(turn.userText))
+  return hash.digest('hex')
+}
+
+export function createTranscriptArchivePaging(metadata: TraceArchive, transcriptTurns: readonly ParsedTurn[]): TranscriptArchivePaging {
   return {
     identity: { cwd: metadata.cwd, sessionId: metadata.sessionId, providerId: metadata.providerId },
     metadata: metadata.turns,
+    plan: sessionMergePlan(transcriptTurns.map((turn) => turn.userText), metadata.turns.map((turn) => turn.userText)),
+    transcriptKey: transcriptPromptKey(transcriptTurns),
     hydrated: new Map(),
-    persistedTranscript: new Set()
+    merged: new Map()
   }
 }
 
-/** Index turns with every hydrated body substituted in place; order and membership are the index's. */
-export function transcriptPagingArchive(paging: TranscriptArchivePaging): TraceArchive {
+function pagingArchive(paging: TranscriptArchivePaging): TraceArchive {
   return {
     version: 3,
     cwd: paging.identity.cwd,
     sessionId: paging.identity.sessionId,
     providerId: paging.identity.providerId as ProviderId,
-    turns: paging.metadata.map((turn) => paging.hydrated.get(turn.runId) ?? turn)
+    turns: paging.metadata.flatMap((turn) => paging.hydrated.get(turn.runId) ?? [])
   }
 }
 
+function pagingTurns(paging: TranscriptArchivePaging): LoadedSessionTurn[] {
+  return paging.plan.map((position, index) => paging.merged.get(index) ?? {
+    ...(position.archive != null ? { runId: paging.metadata[position.archive].runId } : {}),
+    userText: '',
+    items: UNHYDRATED
+  })
+}
+
 /**
- * Hydrates the archive bodies and transcript tool content behind one history window and returns
- * the complete merged list, exact inside the window. Positions outside it may still carry index-only
- * items; callers must only expose turns from a window this function hydrated.
- *
- * Returns null when the canonical bodies no longer match the index (a file disappeared or changed):
- * the caller must fall back to its complete read rather than show a guessed page.
+ * Makes the window `request` selects exact and returns all positions. Returns null when the sources
+ * no longer match the plan (transcript prompts changed, an archive file disappeared or changed):
+ * the caller must fall back to its complete read or ask for a reload, never show a guessed page.
  */
 export async function hydrateTranscriptArchiveWindow(input: {
   paging: TranscriptArchivePaging
-  transcriptTurns: ParsedTurn[]
+  transcriptTurns: readonly ParsedTurn[]
   request?: SessionHistoryPageRequest
   context: SessionHistoryContext
   readTurns: (runIds: readonly string[]) => Promise<TraceArchiveTurn[]>
@@ -65,24 +98,19 @@ export async function hydrateTranscriptArchiveWindow(input: {
   signal?: AbortSignal
 }): Promise<TranscriptArchiveWindow | null> {
   const { paging, transcriptTurns, context } = input
-  const merge = (): LoadedSessionTurn[] =>
-    mergeSessionTurns(transcriptTurns, transcriptPagingArchive(paging), context, { hydrateAttachments: false })
-  const positioned = merge()
-  const window = sessionHistoryPage(positioned, input.request)
-  const end = window.offset + window.turns.length
-  const missing = window.turns
-    .map((turn) => turn.runId)
-    .filter((runId): runId is string => typeof runId === 'string' && !paging.hydrated.has(runId))
-  const transcriptIndices: number[] = []
-  for (let index = window.offset; index < Math.min(end, transcriptTurns.length); index++) {
-    if (!paging.persistedTranscript.has(index)) transcriptIndices.push(index)
-  }
-  if (missing.length === 0 && transcriptIndices.length === 0) {
-    return { turns: positioned, archive: transcriptPagingArchive(paging), turnFilesRead: 0 }
-  }
+  if (transcriptPromptKey(transcriptTurns) !== paging.transcriptKey) return null
+  const { offset, end } = sessionHistoryWindow(paging.plan.length, input.request)
+  const pending: number[] = []
+  for (let index = offset; index < end; index++) if (!paging.merged.has(index)) pending.push(index)
+  if (pending.length === 0) return { turns: pagingTurns(paging), archive: pagingArchive(paging), turnFilesRead: 0 }
+  const missing = pending
+    .map((index) => paging.plan[index].archive)
+    .filter((archive): archive is number => archive != null)
+    .map((archive) => paging.metadata[archive])
+    .filter((turn) => !paging.hydrated.has(turn.runId))
   let read: TraceArchiveTurn[] = []
   try {
-    read = missing.length ? await input.readTurns(missing) : []
+    read = missing.length ? await input.readTurns(missing.map((turn) => turn.runId)) : []
   } catch (error) {
     input.signal?.throwIfAborted()
     // The selective reader refuses an index entry whose canonical file changed or is corrupt.
@@ -91,24 +119,20 @@ export async function hydrateTranscriptArchiveWindow(input: {
   }
   input.signal?.throwIfAborted()
   const readByRunId = new Map(read.map((turn) => [turn.runId, turn]))
-  const expected = new Map(paging.metadata.map((turn) => [turn.runId, turn]))
-  for (const runId of missing) {
-    const body = readByRunId.get(runId)
-    // userText decides positions. A body that disagrees with its index entry means the page we
-    // positioned is not the page the complete merge would produce.
-    if (!body || body.userText !== expected.get(runId)?.userText) return null
-  }
-  for (const runId of missing) {
-    const body = readByRunId.get(runId)!
-    body.items = await input.persistItems(body.items)
+  // userText decides positions: a body that disagrees with its index entry was not planned.
+  if (missing.some((turn) => readByRunId.get(turn.runId)?.userText !== turn.userText)) return null
+  for (const turn of missing) {
+    const body = readByRunId.get(turn.runId)!
+    paging.hydrated.set(turn.runId, { ...body, items: await input.persistItems(body.items) })
     input.signal?.throwIfAborted()
-    paging.hydrated.set(runId, body)
   }
-  for (const index of transcriptIndices) {
-    const turn = transcriptTurns[index]
-    turn.items = await input.persistItems(turn.items)
+  for (const index of pending) {
+    const position = paging.plan[index]
+    const source = position.transcript != null ? transcriptTurns[position.transcript] : undefined
+    const transcript = source ? { ...source, items: await input.persistItems(source.items) } : undefined
     input.signal?.throwIfAborted()
-    paging.persistedTranscript.add(index)
+    const archived = position.archive != null ? paging.hydrated.get(paging.metadata[position.archive].runId) : undefined
+    paging.merged.set(index, mergeSessionTurnAt(transcript, archived, context))
   }
-  return { turns: merge(), archive: transcriptPagingArchive(paging), turnFilesRead: read.length }
+  return { turns: pagingTurns(paging), archive: pagingArchive(paging), turnFilesRead: read.length }
 }

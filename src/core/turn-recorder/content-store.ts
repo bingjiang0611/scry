@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { isToolContentRef, type ToolContentRef } from '../../shared/tool-content.js'
 import { syncDirectory, writeFileAtomicExclusive, writeFileAtomicExclusiveBatch, writeFileAtomicExclusiveCopies } from './io.js'
 
-function contentPath(dataRoot: string, sha256: string): string {
+export function contentPath(dataRoot: string, sha256: string): string {
   return join(dataRoot, 'content', 'sha256', sha256.slice(0, 2), `${sha256}.bin`)
 }
 

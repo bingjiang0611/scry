@@ -1439,7 +1439,13 @@ export async function readTraceArchiveMetadataAsync(args: {
   if (!index || index.version !== 2) return null
   // Callers that stand metadata in for the complete archive (positions, not just tool ids) need
   // every canonical turn described; a degraded index or a missing sidecar forces their full read.
-  if (options.requireComplete && (index.sourceComplete === false || index.entries.some((entry) => !entry.metadata))) return null
+  // The complete reader also collapses canonical files that share a runId (one may be keyed by
+  // providerTurnId, an older one by runId); an index cannot say which body wins, so it may not stand in.
+  if (options.requireComplete && (
+    index.sourceComplete === false ||
+    index.entries.some((entry) => !entry.metadata) ||
+    new Set(index.entries.map((entry) => entry.runId)).size !== index.entries.length
+  )) return null
   signal?.throwIfAborted()
   return {
     version: 3,

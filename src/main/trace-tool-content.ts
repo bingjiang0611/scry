@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto'
+import { lstat } from 'node:fs/promises'
 import type { TraceEvent } from '../shared/trace'
-import { isToolContentRef, type RecorderContentPageRequest } from '../shared/tool-content'
+import { isToolContentRef, type RecorderContentPageRequest, type ToolContentRef } from '../shared/tool-content'
 import { persistToolEventContent } from '../core/turn-recorder/tool-content'
 import { appTraceContentRoot } from '../core/turn-recorder/app-trace-content'
-import { readRecorderContentPage, writeRecorderContentCopies } from '../core/turn-recorder/content-store'
+import { contentPath, readRecorderContentPage, writeRecorderContentCopies } from '../core/turn-recorder/content-store'
 
 export { appTraceContentRoot }
 
@@ -45,6 +47,55 @@ export async function persistTraceToolEvents(
       async (content, encoding, field) => writeRecorderContentCopies(roots(field), content, encoding)))
   }
   return bounded
+}
+
+/**
+ * Blobs this process already published or verified-and-synced through the history path, by root
+ * and digest. Opening history re-persists the same transcript bodies every time (the transcript
+ * cache hands out fresh copies); repeating the full readback compare and fsync of a blob this
+ * process already proved durable adds no durability. A hit still requires the file to exist at the
+ * expected size, so a removed or truncated blob is rewritten. Reads verify the digest regardless,
+ * so a corrupted blob surfaces as an integrity error, never as other content. Bounded; process-local.
+ * Live recorder ingestion does not use it and keeps verifying every write.
+ */
+const verifiedHistoryContent = new Map<string, true>()
+const VERIFIED_HISTORY_CONTENT_LIMIT = 20_000
+
+async function persistHistoryContent(root: string, content: string, encoding: ToolContentRef['encoding']): Promise<ToolContentRef> {
+  const sha256 = createHash('sha256').update(content).digest('hex')
+  const bytes = Buffer.byteLength(content, 'utf8')
+  const key = `${root}\0${sha256}`
+  if (verifiedHistoryContent.delete(key)) {
+    try {
+      const stat = await lstat(contentPath(root, sha256))
+      if (stat.isFile() && stat.size === bytes) {
+        verifiedHistoryContent.set(key, true)
+        return { storage: 'recorder-content-v1', sha256, bytes, encoding }
+      }
+    } catch { /* missing: publish again below */ }
+  }
+  const ref = await writeRecorderContentCopies([root], content, encoding)
+  verifiedHistoryContent.set(key, true)
+  if (verifiedHistoryContent.size > VERIFIED_HISTORY_CONTENT_LIMIT) {
+    verifiedHistoryContent.delete(verifiedHistoryContent.keys().next().value!)
+  }
+  return ref
+}
+
+/** History-load persistence: same policy, source and refs as `persistTraceToolEvents` without a recorder. */
+export async function persistHistoryToolEvents(userDataDir: string, cwd: string, events: TraceEvent[]): Promise<TraceEvent[]> {
+  const appRoot = appTraceContentRoot(userDataDir, cwd)
+  const bounded: TraceEvent[] = []
+  for (const event of events) {
+    bounded.push(...await persistToolEventContent([event], TRACE_TOOL_CONTENT_POLICY, APP_TRACE_CONTENT_SOURCE,
+      (content, encoding) => persistHistoryContent(appRoot, content, encoding)))
+  }
+  return bounded
+}
+
+/** Test seam: forget verification state. */
+export function resetVerifiedHistoryContent(): void {
+  verifiedHistoryContent.clear()
 }
 
 export async function readAppTraceContentPage(userDataDir: string, cwd: string, value: unknown) {

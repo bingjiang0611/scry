@@ -4,8 +4,11 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ParsedTurn } from './normalize'
 import type { TraceEvent } from '../shared/trace'
+import { existsSync, unlinkSync } from 'node:fs'
 import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchiveTurnsAsync, upsertTraceArchiveTurnAsync, type TraceArchiveTurn } from './transcript-archive'
-import { persistTraceToolEvents } from './trace-tool-content'
+import { appTraceContentRoot, persistHistoryToolEvents, persistTraceToolEvents, resetVerifiedHistoryContent } from './trace-tool-content'
+import { contentPath, contentStoreStats } from '../core/turn-recorder/content-store'
+import { isToolContentRef } from '../shared/tool-content'
 import { mergeSessionTurns, sessionHistoryPage, type SessionHistoryPageRequest } from './session-history'
 import { createTranscriptArchivePaging, hydrateTranscriptArchiveWindow } from './transcript-archive-paging'
 
@@ -72,13 +75,13 @@ describe('transcript archive paging', () => {
 
     const metadata = await readTraceArchiveMetadataAsync(args, undefined, { requireComplete: true })
     expect(metadata?.turns.length).toBeGreaterThan(20)
-    const paging = createTranscriptArchivePaging(metadata!)
-    const pagedTranscript = clone(transcript)
+    const paging = createTranscriptArchivePaging(metadata!, transcript)
     const reads: string[][] = []
     for (const [index, request] of requests.entries()) {
       const window = await hydrateTranscriptArchiveWindow({
         paging,
-        transcriptTurns: pagedTranscript,
+        // Older windows re-read the transcript: a fresh copy, never the first window's objects.
+        transcriptTurns: clone(transcript),
         request,
         context: { userDataDir: args.userDataDir },
         readTurns: async (runIds) => { reads.push([...runIds]); return readTraceArchiveTurnsAsync(args, runIds) },
@@ -100,7 +103,7 @@ describe('transcript archive paging', () => {
 
   it('re-serves an already hydrated window without reading or persisting again', async () => {
     const { args, transcript } = await fixture()
-    const paging = createTranscriptArchivePaging((await readTraceArchiveMetadataAsync(args, undefined, { requireComplete: true }))!)
+    const paging = createTranscriptArchivePaging((await readTraceArchiveMetadataAsync(args, undefined, { requireComplete: true }))!, transcript)
     let reads = 0
     let persists = 0
     const run = () => hydrateTranscriptArchiveWindow({
@@ -127,23 +130,69 @@ describe('transcript archive paging', () => {
     const persistItems = async (items: TraceEvent[]) => items
     const context = { userDataDir: args.userDataDir }
     const renamed = await hydrateTranscriptArchiveWindow({
-      paging: createTranscriptArchivePaging(metadata), transcriptTurns: clone(transcript), context, persistItems,
+      paging: createTranscriptArchivePaging(metadata, transcript), transcriptTurns: clone(transcript), context, persistItems,
       readTurns: async (runIds) => (await readTraceArchiveTurnsAsync(args, runIds)).map((turn): TraceArchiveTurn => ({ ...turn, userText: `${turn.userText} (edited)` }))
     })
     expect(renamed).toBeNull()
     const missing = await hydrateTranscriptArchiveWindow({
-      paging: createTranscriptArchivePaging(metadata), transcriptTurns: clone(transcript), context, persistItems,
+      paging: createTranscriptArchivePaging(metadata, transcript), transcriptTurns: clone(transcript), context, persistItems,
       readTurns: async (runIds) => (await readTraceArchiveTurnsAsync(args, runIds)).slice(1)
     })
     expect(missing).toBeNull()
     const corrupt = await hydrateTranscriptArchiveWindow({
-      paging: createTranscriptArchivePaging(metadata), transcriptTurns: clone(transcript), context, persistItems,
+      paging: createTranscriptArchivePaging(metadata, transcript), transcriptTurns: clone(transcript), context, persistItems,
       readTurns: async () => { throw new Error('trace archive index entry changed or is corrupt') }
     })
     expect(corrupt).toBeNull()
     await expect(hydrateTranscriptArchiveWindow({
-      paging: createTranscriptArchivePaging(metadata), transcriptTurns: clone(transcript), context, persistItems,
+      paging: createTranscriptArchivePaging(metadata, transcript), transcriptTurns: clone(transcript), context, persistItems,
       readTurns: async () => { throw new Error('disk exploded') }
     })).rejects.toThrow('disk exploded')
+  })
+
+  it('refuses an older window when the transcript prompts no longer match the plan', async () => {
+    const { args, transcript } = await fixture()
+    const paging = createTranscriptArchivePaging((await readTraceArchiveMetadataAsync(args, undefined, { requireComplete: true }))!, transcript)
+    const base = {
+      paging, context: { userDataDir: args.userDataDir },
+      readTurns: (runIds: readonly string[]) => readTraceArchiveTurnsAsync(args, runIds),
+      persistItems: async (items: TraceEvent[]) => items
+    }
+    expect(await hydrateTranscriptArchiveWindow({ ...base, transcriptTurns: clone(transcript), request: { limit: 10 } })).not.toBeNull()
+    const appended = [...clone(transcript), { providerTurnId: 'late', userText: 'a new prompt', items: [] } as ParsedTurn]
+    expect(await hydrateTranscriptArchiveWindow({ ...base, transcriptTurns: appended, request: { before: 20, limit: 10 } })).toBeNull()
+  })
+
+  it('does not stand an index in for an archive whose files share a runId', async () => {
+    const { args } = await fixture()
+    // The same run archived before and after it learned its provider turn id: two canonical files.
+    await upsertTraceArchiveTurnAsync({ ...args, turn: { runId: 'run-dup', userText: 'dup', items: [], done: true, ts: BASE + 99_000 } })
+    await upsertTraceArchiveTurnAsync({ ...args, turn: { runId: 'run-dup', providerTurnId: 'provider-dup', userText: 'dup', items: [], done: true, ts: BASE + 99_000 } })
+    const complete = await readTraceArchiveAsync(args)
+    expect(complete!.turns.filter((turn) => turn.runId === 'run-dup')).toHaveLength(1)
+    const index = await readTraceArchiveMetadataAsync(args)
+    expect(index!.turns.filter((turn) => turn.runId === 'run-dup')).toHaveLength(2)
+    expect(await readTraceArchiveMetadataAsync(args, undefined, { requireComplete: true })).toBeNull()
+  })
+})
+
+describe('history tool content persistence', () => {
+  it('returns the recorder refs, skips re-verifying blobs it proved, and rewrites a removed blob', async () => {
+    const { args, transcript } = await fixture()
+    resetVerifiedHistoryContent()
+    const items = transcript[0].items
+    const recorder = await persistTraceToolEvents(args.userDataDir, args.cwd, clone(items))
+    const first = await persistHistoryToolEvents(args.userDataDir, args.cwd, clone(items))
+    expect(first).toEqual(recorder)
+    const before = contentStoreStats()
+    const second = await persistHistoryToolEvents(args.userDataDir, args.cwd, clone(items))
+    const after = contentStoreStats()
+    expect(second).toEqual(recorder)
+    expect([after.verifies - before.verifies, after.directorySyncs - before.directorySyncs]).toEqual([0, 0])
+    const ref = second.flatMap((event) => [event.outputContent, event.inputContent]).map((content) => content?.contentRef).find(isToolContentRef)!
+    const blob = contentPath(appTraceContentRoot(args.userDataDir, args.cwd), ref.sha256)
+    unlinkSync(blob)
+    expect(await persistHistoryToolEvents(args.userDataDir, args.cwd, clone(items))).toEqual(recorder)
+    expect(existsSync(blob)).toBe(true)
   })
 })

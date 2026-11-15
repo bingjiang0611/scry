@@ -35,9 +35,10 @@ export function sessionArchiveIsPageable(providerId: SessionProviderId, transcri
 }
 
 /**
- * 默认交付最近 40 轮；更早证据仍可按页取回。
- * Archive-only paths (including Pi) read only requested turn files. Claude transcript
- * and Qoder reconciliation still require full-source parsing before this projection.
+ * 未指定 limit 时的页大小上限；首次打开由调用方另选更小的默认（DEFAULT_LOAD_SESSION_TURNS）。
+ * Archive-only paths (including Pi) read only requested turn files. Claude transcript history
+ * positions turns from the archive index and reads bodies per window, but still parses the whole
+ * transcript; Qoder reconciliation still requires full-source parsing before this projection.
  */
 export const DEFAULT_SESSION_HISTORY_PAGE_SIZE = 40
 export const MAX_SESSION_HISTORY_PAGE_SIZE = 200
@@ -89,11 +90,7 @@ export function sessionHistoryPage(
   request: SessionHistoryPageRequest = {}
 ): SessionHistoryPage {
   const totalTurns = turns.length
-  const limit = boundedPageSize(request.limit)
-  const end = request.before == null
-    ? totalTurns
-    : Math.max(0, Math.min(Math.floor(request.before), totalTurns))
-  const offset = Math.max(0, end - limit)
+  const { offset, end } = sessionHistoryWindow(totalTurns, request)
   return {
     turns: turns.slice(offset, end),
     offset,
@@ -463,13 +460,35 @@ export function mergeSessionTurns(
     usedBytes: 0,
     maxBytes: context?.attachmentBudgetBytes ?? MAX_ARCHIVE_ATTACHMENT_HYDRATE_BYTES
   }
-  const restoredArchive = (archive?.turns ?? [])
-    .map((turn) => restoreTraceArchiveTurn(turn, context, budget, { hydrateAttachments }))
-    .map((turn) => ({
-      ...turn,
-      items: normalizeHistoricalEvents(keepLastTurnDiff(turn.items))
-    }))
-  const merged: LoadedSessionTurn[] = transcriptTurns.map((turn) => ({
+  // Archive turns restore before transcript turns: attachment hydration spends one shared budget.
+  const restoredArchive = (archive?.turns ?? []).map((turn) => loadArchiveTurn(turn, context, budget, hydrateAttachments))
+  const loadedTranscript = transcriptTurns.map((turn) => loadTranscriptTurn(turn, context, budget, hydrateAttachments))
+  return sessionMergePlan(
+    transcriptTurns.map((turn) => turn.userText),
+    (archive?.turns ?? []).map((turn) => turn.userText)
+  ).map(({ transcript, archive: archiveIndex }) =>
+    transcript != null && archiveIndex != null
+      ? mergeTurnWithArchive(loadedTranscript[transcript], restoredArchive[archiveIndex])
+      : transcript != null ? loadedTranscript[transcript] : restoredArchive[archiveIndex!])
+}
+
+function loadArchiveTurn(
+  turn: TraceArchiveTurn,
+  context: SessionHistoryContext | undefined,
+  budget: AttachmentHydrationBudget,
+  hydrateAttachments: boolean
+): LoadedSessionTurn {
+  const restored = restoreTraceArchiveTurn(turn, context, budget, { hydrateAttachments })
+  return { ...restored, items: normalizeHistoricalEvents(keepLastTurnDiff(restored.items)) }
+}
+
+function loadTranscriptTurn(
+  turn: TranscriptTurn,
+  context: SessionHistoryContext | undefined,
+  budget: AttachmentHydrationBudget,
+  hydrateAttachments: boolean
+): LoadedSessionTurn {
+  const loaded: LoadedSessionTurn = {
     providerTurnId: turn.providerTurnId,
     forkTurnId: turn.providerTurnId,
     userText: cleanAttachmentPrompt(turn.userText),
@@ -477,33 +496,75 @@ export function mergeSessionTurns(
       ? { attachments: recoverAttachmentsFromPrompt(turn.userText, '', context, budget).attachments }
       : {}),
     items: normalizeHistoricalEvents(turn.items)
-  }))
-  for (const turn of merged) {
-    if (turn.attachments?.length === 0) delete turn.attachments
   }
-  if (restoredArchive.length === 0) return merged
-  if (merged.length === 0) return restoredArchive
+  if (loaded.attachments?.length === 0) delete loaded.attachments
+  return loaded
+}
 
+/** One position of the merged history: a transcript turn, an archive turn, or both merged. */
+export interface SessionMergePosition {
+  transcript?: number
+  archive?: number
+}
+
+/**
+ * Positions of `mergeSessionTurns`, derived from user text alone: transcript turns keep their order,
+ * each archive turn (newest first) claims the latest unclaimed transcript turn with the same
+ * canonical prompt, and unmatched archive turns follow in archive order. Bodies never move a turn.
+ */
+export function sessionMergePlan(transcriptUserTexts: readonly string[], archiveUserTexts: readonly string[]): SessionMergePosition[] {
+  const plan: SessionMergePosition[] = transcriptUserTexts.map((_text, transcript) => ({ transcript }))
+  if (archiveUserTexts.length === 0) return plan
   const transcriptIndices = new Map<string, number[]>()
-  for (let index = 0; index < merged.length; index++) {
-    const key = canonicalUserText(merged[index].userText)
+  for (const [index, text] of transcriptUserTexts.entries()) {
+    const key = sessionMergeKey(text)
     const indices = transcriptIndices.get(key)
     if (indices) indices.push(index)
     else transcriptIndices.set(key, [index])
   }
-  const usedArchive = new Set<number>()
-  for (let archiveIndex = restoredArchive.length - 1; archiveIndex >= 0; archiveIndex--) {
-    const archivedTurn = restoredArchive[archiveIndex]
-    const turnIndex = transcriptIndices.get(canonicalUserText(archivedTurn.userText))?.pop()
+  const unmatched: SessionMergePosition[] = []
+  const matched = new Set<number>()
+  for (let archiveIndex = archiveUserTexts.length - 1; archiveIndex >= 0; archiveIndex--) {
+    const turnIndex = transcriptIndices.get(sessionMergeKey(archiveUserTexts[archiveIndex]))?.pop()
     if (turnIndex == null) continue
-    merged[turnIndex] = mergeTurnWithArchive(merged[turnIndex], archivedTurn)
-    usedArchive.add(archiveIndex)
+    plan[turnIndex] = { transcript: turnIndex, archive: archiveIndex }
+    matched.add(archiveIndex)
   }
+  for (let archiveIndex = 0; archiveIndex < archiveUserTexts.length; archiveIndex++) {
+    if (!matched.has(archiveIndex)) unmatched.push({ archive: archiveIndex })
+  }
+  return plan.concat(unmatched)
+}
 
-  for (let index = 0; index < restoredArchive.length; index++) {
-    if (!usedArchive.has(index)) merged.push(restoredArchive[index])
-  }
-  return merged
+/** The prompt identity merge positions are matched on. */
+export function sessionMergeKey(userText: string): string {
+  return canonicalUserText(cleanAttachmentPrompt(userText))
+}
+
+/**
+ * Exactly the turn `mergeSessionTurns(..., { hydrateAttachments: false })` produces at a position whose
+ * inputs are `transcriptTurn` and/or `archiveTurn`. Without attachment hydration a position depends
+ * on nothing but its own inputs.
+ */
+export function mergeSessionTurnAt(
+  transcriptTurn: TranscriptTurn | undefined,
+  archiveTurn: TraceArchiveTurn | undefined,
+  context?: SessionHistoryContext
+): LoadedSessionTurn {
+  const budget: AttachmentHydrationBudget = { usedBytes: 0, maxBytes: 0 }
+  const archived = archiveTurn ? loadArchiveTurn(archiveTurn, context, budget, false) : undefined
+  const transcript = transcriptTurn ? loadTranscriptTurn(transcriptTurn, context, budget, false) : undefined
+  if (transcript && archived) return mergeTurnWithArchive(transcript, archived)
+  const turn = transcript ?? archived
+  if (!turn) throw new Error('merge position has no source turn')
+  return turn
+}
+
+/** First and last (exclusive) merged positions of the history page `request` selects. */
+export function sessionHistoryWindow(totalTurns: number, request: SessionHistoryPageRequest = {}): { offset: number; end: number } {
+  const limit = boundedPageSize(request.limit)
+  const end = request.before == null ? totalTurns : Math.max(0, Math.min(Math.floor(request.before), totalTurns))
+  return { offset: Math.max(0, end - limit), end }
 }
 
 /** Hydrate only the page that will cross IPC instead of every turn kept in the main cache. */

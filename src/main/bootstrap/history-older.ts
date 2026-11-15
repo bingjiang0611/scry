@@ -5,7 +5,8 @@ import type { TraceArchive } from '../transcript-archive'
 import type { LoadedSessionTurn, SessionHistoryPage, SessionHistoryPageRequest } from '../session-history'
 import { readTraceArchivePageAsync, readTraceArchiveTurnsAsync } from '../transcript-archive'
 import { mergeSessionTurns, hydrateSessionHistoryPage, sessionHistoryPage } from '../session-history'
-import { persistTraceToolEvents } from '../trace-tool-content'
+import { persistHistoryToolEvents } from '../trace-tool-content'
+import { readCachedTranscript } from '../transcript-parser'
 import type { ProviderRegistry } from '../providers/registry'
 import { PerformanceTrace } from '../performance-timing'
 import { historyCopy } from '../../shared/constants/copy'
@@ -27,6 +28,8 @@ export type SessionHistoryCache = {
   nativeHydrator?: (runIds: readonly string[]) => Promise<LoadedSessionTurn[]>
   /** Transcript-backed history whose archive bodies are read per window; `turns` is exact only inside hydrated windows. */
   transcriptPaging?: TranscriptArchivePaging
+  /** Where older paged windows re-read transcript prompts and bodies; null when the load had no transcript. */
+  transcriptSource?: { path: string; runId: string; contextKey: string } | null
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 }
 
@@ -40,15 +43,24 @@ export interface OlderHistoryDependencies {
   pageWithHookCommands: (page: SessionHistoryPage, hookConfig: ReturnType<typeof loadClaudeHookConfig> | null) => SessionHistoryPage
   markIncompleteArchivePage: (page: SessionHistoryPage, issue: string | undefined) => SessionHistoryPage
   sessionHistoryCacheKey: (payload: ProviderContext, cwd: string) => string
+  /** Supersedes any older-page request still running and returns this request's signal. */
+  beginOlderHistoryRequest: () => AbortSignal
 }
 
+/**
+ * Older windows of transcript-paged history read, persist and merge their own turns, so they are
+ * smaller than the cached 40-turn slice. Archive-only and complete paths keep their page size.
+ */
+export const TRANSCRIPT_OLDER_PAGE_TURNS = 20
+
 export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): void {
-  const { handleTrusted, getSessionHistoryCache, setSessionHistoryCache, getLoadSessionRevision, resolveKnownProjectDirectory, providerRegistry, pageWithHookCommands, markIncompleteArchivePage, sessionHistoryCacheKey } = deps
+  const { handleTrusted, getSessionHistoryCache, setSessionHistoryCache, getLoadSessionRevision, resolveKnownProjectDirectory, providerRegistry, pageWithHookCommands, markIncompleteArchivePage, sessionHistoryCacheKey, beginOlderHistoryRequest } = deps
   // 更早轮次的纯读取：不重做任何会话切换副作用（cwd / baseline / dock badge / resume）。
   // revision 或 session 身份不匹配时返回 null：renderer 将它当作过期请求丢弃，而不是拼上错会话的轮次。
   handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, request: SessionHistoryPageRequest) => {
     if (!payload.externalSessionId) return null
     const perf = new PerformanceTrace('session_history.load_older', { provider: payload.providerId })
+    const signal = beginOlderHistoryRequest()
     try {
       const cache = getSessionHistoryCache()
       if (!cache || cache.revision !== getLoadSessionRevision()) return null
@@ -64,7 +76,7 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
         if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         if (sourcePage.archive) {
           for (const turn of sourcePage.archive.turns) {
-            turn.items = await persistTraceToolEvents(cache.context.userDataDir, cwd, turn.items)
+            turn.items = await persistHistoryToolEvents(cache.context.userDataDir, cwd, turn.items)
           }
           if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         }
@@ -92,11 +104,17 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
         return result
 
       }
+      let pageTranscriptTurns = cache.transcriptTurns
       if (cache.transcriptPaging) {
+        request = { ...request, limit: request.limit ?? TRANSCRIPT_OLDER_PAGE_TURNS }
         const sessionId = payload.externalSessionId
+        // The cache keeps no raw transcript bodies; the window checks the prompts still match its plan.
+        const source = cache.transcriptSource
+        const transcriptTurns = source ? (await readCachedTranscript({ ...source, signal })).turns : []
+        if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         const window = await hydrateTranscriptArchiveWindow({
           paging: cache.transcriptPaging,
-          transcriptTurns: cache.transcriptTurns,
+          transcriptTurns,
           request,
           context: cache.context,
           readTurns: (runIds) => readTraceArchiveTurnsAsync({
@@ -104,17 +122,19 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
             sessionId,
             providerId: payload.providerId,
             userDataDir: cache.context.userDataDir
-          }, runIds),
-          persistItems: (items) => persistTraceToolEvents(cache.context.userDataDir, cwd, items)
+          }, runIds, signal),
+          persistItems: (items) => persistHistoryToolEvents(cache.context.userDataDir, cwd, items),
+          signal
         })
         if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         if (!window) {
           setSessionHistoryCache(null)
           throw new Error(historyCopy.archivePageReload)
         }
-        // Same cache object: positions are unchanged, only this window's bodies became exact.
+        // Same cache object: positions are unchanged, only this window's turns became exact.
         cache.turns = window.turns
         cache.archive = window.archive
+        pageTranscriptTurns = transcriptTurns
         perf.mark('archive_window', { archiveTurnFilesRead: window.turnFilesRead })
       }
       let cachedPage = sessionHistoryPage(cache.turns, request)
@@ -165,7 +185,7 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
       }
       const page = hydrateSessionHistoryPage(
         cachedPage,
-        cache.transcriptTurns,
+        pageTranscriptTurns,
         pageArchive,
         cache.context
       )
@@ -174,6 +194,11 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
       return result
     } catch (error) {
+      // Superseded by a newer page or another session: the renderer drops a null page as stale.
+      if (signal.aborted) {
+        perf.finish(undefined, 'cancelled')
+        return null
+      }
       perf.finish(undefined, 'error')
       throw error
     } finally {
