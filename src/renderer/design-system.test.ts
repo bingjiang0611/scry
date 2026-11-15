@@ -1,0 +1,68 @@
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+// @ts-expect-error -- plain ESM script shared with the CLI audit; no type declarations.
+import { auditCss, auditRenderer, countsOf, readBaseline, regressions, totalsOf } from '../../scripts/design-system-audit.mjs'
+
+type Counts = Record<string, Record<string, number>>
+
+const rendererDirectory = __dirname
+const themeShell = readFileSync(join(rendererDirectory, 'styles-theme-shell.css'), 'utf8')
+
+const TYPE_SCALE = { '2xs': 10, xs: 11, sm: 12, md: 13, base: 14, lg: 16, xl: 20, '2xl': 24 }
+const WEIGHTS = { regular: 400, medium: 500, semibold: 600, bold: 700 }
+const SPACE = { '0_5': 2, 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 8: 32, 10: 40, 12: 48 }
+const TOKEN_DEFINITION = /--(?:text-(?:2xs|xs|sm|md|base|lg|xl|2xl)|weight-[a-z]+|space-[0-9_]+)\s*:/
+
+function cssFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return cssFiles(path)
+    return entry.isFile() && entry.name.endsWith('.css') ? [path] : []
+  })
+}
+
+describe('design tokens', () => {
+  it('defines one type, weight and 4px spacing scale in the theme shell', () => {
+    for (const [name, px] of Object.entries(TYPE_SCALE)) expect(themeShell).toContain(`--text-${name}: ${px}px;`)
+    for (const [name, weight] of Object.entries(WEIGHTS)) expect(themeShell).toContain(`--weight-${name}: ${weight};`)
+    for (const [name, px] of Object.entries(SPACE)) {
+      expect(themeShell).toContain(`--space-${name}: ${px}px;`)
+      expect(px === 2 || px % 4 === 0).toBe(true)
+    }
+    expect(themeShell).toContain('--text-supporting-size: var(--text-sm);')
+    expect(themeShell).toContain('--text-compact-size: var(--text-xs);')
+  })
+
+  it('keeps scale definitions in a single place so a theme or skin cannot fork them', () => {
+    const forks = cssFiles(rendererDirectory)
+      .filter((path) => !path.endsWith('styles-theme-shell.css'))
+      .filter((path) => TOKEN_DEFINITION.test(readFileSync(path, 'utf8')))
+    expect(forks).toEqual([])
+  })
+})
+
+describe('design debt audit', () => {
+  it('flags off-scale type, off-grid spacing and raw colors but not tokens', () => {
+    const found = auditCss(`
+      .a:hover { padding: 6px var(--space-2); font: var(--weight-semibold) 11.5px/1 var(--font-mono); color: #fff; --x: #000 }
+      @media (max-width: 640px) { .b { margin: -3px 0 2px; gap: 1px 8px; font-weight: 550; font-size: clamp(24px, 3cqi, 32px) } }
+      .c { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--fg); padding: 4px 12px }
+    `)
+    expect(found.fontSize.map((item: { text: string }) => item.text)).toEqual(['font: var(--weight-semibold) 11.5px/1 var(--font-mono)'])
+    expect(found.fontWeight.map((item: { text: string }) => item.text)).toEqual(['font-weight: 550'])
+    expect(found.spacing.map((item: { text: string }) => item.text)).toEqual(['padding: 6px var(--space-2)', 'margin: -3px 0 2px'])
+    expect(found.color.map((item: { text: string }) => item.text)).toEqual(['color: #fff'])
+  })
+
+  it('only lets renderer design debt shrink', () => {
+    const counts: Counts = countsOf(auditRenderer())
+    expect(regressions(counts, readBaseline()), 'Use var(--text-*), var(--weight-*), a 4px-grid spacing value and theme color variables. See DESIGN.md.').toEqual([])
+  })
+
+  it('records paid-down debt so it cannot silently return', () => {
+    const counts: Counts = countsOf(auditRenderer())
+    const baseline = readBaseline()
+    expect(totalsOf(counts), 'Debt went down: run `npm run design:audit -- --write` to lower the baseline.').toEqual(baseline.totals)
+  })
+})
