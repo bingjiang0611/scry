@@ -42,6 +42,9 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   const [busy, setBusy] = useState(false)
   const [runningAction, setRunningAction] = useState<ScMutation['action'] | null>(null)
   const busyRef = useRef(false)
+  // The running push/fetch a person may cancel.
+  const runningOperation = useRef<{ repositoryId: string; operationId: string } | null>(null)
+  const [cancelState, setCancelState] = useState<'idle' | 'requested' | 'unavailable'>('idle')
   const alive = useRef(true)
   const epoch = useRef(0)
   const currentCwd = useRef(cwd)
@@ -157,6 +160,8 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     setRunningAction(request.action)
     setError('')
     const operationId = crypto.randomUUID()
+    if (request.action === 'push' || request.action === 'fetch') runningOperation.current = { repositoryId: request.repositoryId, operationId }
+    setCancelState('idle')
     let succeeded = false
     try {
       if (request.action === 'commit') await messageQueue.current
@@ -164,6 +169,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
       succeeded = result.status === 'succeeded'
       // The action has answered: its button is done. Writes stay locked (busy) until
       // the repository is read again, so nothing is sent against an old revision.
+      runningOperation.current = null
       if (alive.current) setRunningAction(null)
       if (alive.current && currentCwd.current === cwd) {
         setOperations((previous) => [result, ...previous.filter((op) => op.id !== result.id)])
@@ -193,6 +199,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     } finally {
       try { if (currentCwd.current === cwd) await refresh() } catch (caught) { report(caught) }
       busyRef.current = false
+      runningOperation.current = null
       if (alive.current) {
         setBusy(false)
         setRunningAction(null)
@@ -238,6 +245,16 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   const disabled = locked || !active || !!repo?.writeBlocker || unknown
   const slowAction = useDelayedFlag(runningAction !== null, LONG_WAIT_MS, 0)
   const showRefreshing = useDelayedFlag(refreshing)
+  const cancelRunning = (): void => {
+    const target = runningOperation.current
+    if (!target || cancelState === 'requested') return
+    setCancelState('requested')
+    // Cancel only asks main to stop this operation's own git child; the operation's
+    // own record says what happened (failed before sending, unknown after).
+    void api.cancel(target).then((accepted) => {
+      if (alive.current && !accepted && runningOperation.current === target) setCancelState('unavailable')
+    }, () => { if (alive.current && runningOperation.current === target) setCancelState('unavailable') })
+  }
   const manualRefresh = (): void => {
     if (refreshing || busy) return
     setRefreshing(true)
@@ -323,7 +340,10 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <footer className="sc-action-dock">
           <div className="sc-next-summary"><span>0{primary.step} / 03</span><div><strong>{primary.step === 1 ? scope.length ? `本次提交 ${scope.length} 个文件` : '先确认这次要提交哪些文件' : primary.step === 2 ? unknown ? '先核查未知操作，不重复发送' : '下一步：推送已存在的本地提交' : '下一步：查看或创建当前分支 PR'}</strong>
             <small>{primary.step === 1 ? '未选的工作区文件不会自动加入提交。' : primary.step === 2 ? '推送不包含未提交的工作区改动。' : '本次推送已确认；GitHub 状态需另行读取。'}</small></div></div>
-          <div className="sc-dock-buttons"><button disabled={locked} onClick={() => setActionsOpen(true)}>其他操作</button>
+          <div className="sc-dock-buttons">{(runningAction === 'push' || runningAction === 'fetch')
+            ? <button aria-busy={cancelState === 'requested'} aria-disabled={cancelState !== 'idle'} onClick={cancelRunning}>
+              {cancelState === 'requested' ? '正在取消…' : cancelState === 'unavailable' ? '无法取消' : '取消'}</button>
+            : <button disabled={locked} onClick={() => setActionsOpen(true)}>其他操作</button>}
             <button className="sc-primary" disabled={locked || !active || (primary.action === 'commit' && !repo.files.length)} onClick={primaryClick}>
               {runningAction ? `正在${actionNames[runningAction]}…` : primary.label}
             </button></div>

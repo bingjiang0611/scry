@@ -208,6 +208,7 @@ export function sourceControlHandlers(service: SourceControlService, authorize?:
     operations: (request: unknown) => service.operations(ref(object(request))),
     reconcile: (request: unknown) => service.reconcile(operation(object(request))),
     acknowledge: (request: unknown) => service.acknowledge(operation(object(request))),
+    cancel: (request: unknown) => service.cancel(operation(object(request))),
     pullRequests: (request: unknown) => {
       const input = object(request)
       return service.pullRequests({ ...ref(input), repository: repository(input.repository) })

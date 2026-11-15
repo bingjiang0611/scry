@@ -364,6 +364,7 @@ export const LOADING_COPY = {
   readingConfig: '读取配置中…',
   piSnapshot: '正在刷新 Pi MCP 快照…',
   detectingMcp: '正在检测全部 MCP…',
+  detectingMcpSlow: '仍在检测，比平时久；可以关闭此窗口，检测会继续，重新打开时显示结果',
   refreshing: '刷新中…',
   tools: '正在读取工具明细…',
   remoteProjects: (host: string) => `正在读取 ${host} 的项目…`,

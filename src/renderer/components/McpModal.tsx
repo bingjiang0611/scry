@@ -85,6 +85,9 @@ export function McpModal({
   const readStarted = useReadStarted(configRefreshing)
   const mcpUnavailable = capability === null && !loading && readStarted
   const showMcpLoading = useDelayedFlag(loading)
+  // Checking every MCP starts servers and can take tens of seconds; say so after 10s.
+  // The check belongs to the app, not this window, so closing it does not stop it.
+  const slowRuntimeCheck = useDelayedFlag(refreshing && readsRuntime && !readsPiSnapshot, 10_000, 0)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
   const mcpMotion = useFirstReadyList(mcps.length > 0)
@@ -103,7 +106,7 @@ export function McpModal({
           </div>
         </div>
         <div className="inventory-modal__head-actions">
-          {showMcpLoading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? LOADING_COPY.readingConfig : readsPiSnapshot ? LOADING_COPY.piSnapshot : LOADING_COPY.detectingMcp, role: 'status' }} quiet />}
+          {showMcpLoading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? LOADING_COPY.readingConfig : readsPiSnapshot ? LOADING_COPY.piSnapshot : slowRuntimeCheck ? LOADING_COPY.detectingMcpSlow : LOADING_COPY.detectingMcp, role: 'status' }} quiet />}
           <button
             className={'modal-refresh' + (readsRuntime ? ' mcp-refresh-all' : '')}
             onClick={onRefresh}

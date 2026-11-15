@@ -61,6 +61,7 @@ export const defaultSourceControlApi: SourceControlApi = {
   operations: request => window.scry.sourceControl.operations(request),
   reconcile: request => window.scry.sourceControl.reconcile(request),
   acknowledge: request => window.scry.sourceControl.acknowledge(request),
+  cancel: request => window.scry.sourceControl.cancel(request),
   pullRequests: request => window.scry.sourceControl.pullRequests(request),
   pullRequest: request => window.scry.sourceControl.pullRequest(request),
   saveCommitDraft: draft => window.scry.sourceControl.saveCommitDraft(draft),

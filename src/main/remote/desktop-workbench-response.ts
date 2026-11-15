@@ -55,6 +55,7 @@ export function validateDesktopWorkbenchResponse(query: DesktopWorkbenchRequest,
       }
       case 'operations': valid = Array.isArray(value) && value.every(operation); break
       case 'mutate': case 'reconcile': case 'acknowledge': valid = operation(value); break
+      case 'cancel': valid = typeof value === 'boolean'; break
       case 'loadCommitDraft': case 'loadDraft': valid = value === null || object(value) && string(value.repositoryId); break
       case 'saveCommitDraft': case 'saveDraft': valid = value === null; break
     }

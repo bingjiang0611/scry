@@ -196,7 +196,7 @@ describe('preload IPC boundary', () => {
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {
-    const methods = ['read', 'diff', 'mutate', 'operations', 'reconcile', 'acknowledge', 'pullRequests', 'pullRequest', 'saveDraft', 'loadDraft', 'saveCommitDraft', 'loadCommitDraft']
+    const methods = ['read', 'diff', 'mutate', 'operations', 'reconcile', 'acknowledge', 'cancel', 'pullRequests', 'pullRequest', 'saveDraft', 'loadDraft', 'saveCommitDraft', 'loadCommitDraft']
     expect(Object.keys(api.sourceControl).sort()).toEqual([...methods].sort())
     const namespace = api.sourceControl as unknown as Record<string, (request: unknown) => Promise<unknown>>
     for (const method of methods) {
