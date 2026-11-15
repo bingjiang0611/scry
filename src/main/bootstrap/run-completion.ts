@@ -217,7 +217,8 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       agentProfileId,
       providerTurnId: r.providerTurnId,
       forkTurnId: r.forkTurnId ?? r.providerTurnId,
-      stopped: r.stopped
+      stopped: r.stopped,
+      status: completionStatus
     })
     markTerminalAttention(storageSessionId, completionNeedsAttention)
     terminalPerf.mark('renderer_terminal')
@@ -260,7 +261,8 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
       agentProfileId,
       providerTurnId: r.providerTurnId,
       forkTurnId: r.forkTurnId ?? r.providerTurnId,
-      stopped: r.stopped
+      stopped: r.stopped,
+      status: completionStatus
     })
     markTerminalAttention(storageSessionId, completionNeedsAttention)
     terminalPerf.mark('renderer_terminal')

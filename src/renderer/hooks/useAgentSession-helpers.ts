@@ -3,22 +3,8 @@ import type { AgentInputAttachment, AgentQuestionRequest, AgentStartRequest, Age
 import type { ParsedTurn, TraceBacklogState } from '../env'
 import type { Turn } from '../format'
 
-export interface TurnDoneEvent {
-  runId: string
-  sessionId?: string
-  providerTurnId?: string
-  forkTurnId?: string
-}
-
-export interface TurnErrorEvent {
-  runId: string
-  message: string
-  hint?: string
-}
-
-export type RunLifecycleDelta =
-  | { kind: 'done'; event: TurnDoneEvent }
-  | { kind: 'error'; event: TurnErrorEvent }
+import { replayRunLifecycleDeltas, type RunLifecycleDelta, type TurnDoneEvent, type TurnErrorEvent } from './turn-lifecycle'
+export { markTurnDone, markTurnError, replayRunLifecycleDeltas, type RunLifecycleDelta, type TurnDoneEvent, type TurnErrorEvent } from './turn-lifecycle'
 
 export interface AgentSessionCallbacks {
   onTurnDone?: (event: TurnDoneEvent) => void
@@ -80,28 +66,6 @@ export function mergeRecoveredRun(prev: Turn[], run: Turn): Turn[] {
     forkTurnId: local.forkTurnId ?? turn.forkTurnId
   } : turn)
 }
-
-export const markTurnDone = (prev: Turn[], runId: string, providerTurnId?: string, forkTurnId?: string): Turn[] =>
-  prev.map((turn) => (turn.runId === runId ? {
-    ...turn,
-    done: true,
-    ...(providerTurnId ? { providerTurnId } : {}),
-    ...((forkTurnId ?? providerTurnId) ? { forkTurnId: forkTurnId ?? providerTurnId } : {})
-  } : turn))
-
-export const markTurnError = (prev: Turn[], event: TurnErrorEvent): Turn[] =>
-  prev.map((turn) =>
-    turn.runId === event.runId ? { ...turn, done: true, error: event.message, errorHint: event.hint } : turn
-  )
-
-export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta[]): Turn[] =>
-  deltas.reduce(
-    (turns, delta) =>
-      delta.kind === 'done'
-        ? markTurnDone(turns, delta.event.runId, delta.event.providerTurnId, delta.event.forkTurnId)
-        : markTurnError(turns, delta.event),
-    prev
-  )
 
 /** 总览的用量/成本只认终态 result；它缺失时补进归档里的终态证据，按 id 去重，不覆盖 live 证据。 */
 export const terminalEvidenceOf = (items: readonly TraceEvent[]): TraceEvent[] =>

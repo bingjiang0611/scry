@@ -54,7 +54,7 @@ export const eventApi = {
     ipcRenderer.on('terminal:exit', listener)
     return () => ipcRenderer.removeListener('terminal:exit', listener)
   },
-  onTurnDone: (cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; stopped?: boolean }) => void): (() => void) => {
+  onTurnDone: (cb: (e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; stopped?: boolean; status?: 'completed' | 'failed' | 'cancelled' | 'interrupted' }) => void): (() => void) => {
     const l = (_: unknown, e: { runId: string; sessionId?: string; externalSessionId?: string; providerId?: string; agentProfileId?: string; stopped?: boolean }): void => cb(e)
     ipcRenderer.on('agent:turnDone', l)
     return () => ipcRenderer.removeListener('agent:turnDone', l)

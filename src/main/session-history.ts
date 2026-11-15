@@ -1,3 +1,4 @@
+import { INTERRUPTED_TURN_NOTICE } from '../shared/turn-outcome-copy'
 import { isSupportedImageMimeType, type AgentInputAttachment, type AgentImageMimeType } from '../shared/runtime'
 import type { ParsedTurn as TranscriptTurn } from './normalize'
 import type { SessionProviderId } from '../shared/provider'
@@ -193,7 +194,7 @@ export function restoreTraceArchiveTurn(
   // done only means the run settled. An interrupted archive can have no model
   // result or error (for example, a stop during startup), so retain its outcome.
   const errorHint = turn.status === 'interrupted'
-    ? ['本轮已中断，不代表任务完成。', turn.errorHint].filter(Boolean).join('\n')
+    ? [INTERRUPTED_TURN_NOTICE, turn.errorHint].filter(Boolean).join('\n')
     : turn.errorHint
   return {
     runId: turn.runId,
