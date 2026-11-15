@@ -25,6 +25,17 @@ describe('CapabilitiesModal 精简能力页', () => {
     onClose: () => {}
   }
 
+  it('MCP 检测只为能真正停止的 Provider 提供取消，其余不显示取消按钮', () => {
+    const during = (providerId: 'claude' | 'qoder' | 'codex' | 'opencode' | 'pi') => renderToStaticMarkup(
+      <CapabilitiesModal {...sharedProps} view="mcp" mcpRefreshing mcpProviderId={providerId} onCancelMcp={async () => true} />
+    )
+    expect(during('claude')).toContain('取消检测')
+    expect(during('qoder')).toContain('取消检测')
+    for (const providerId of ['codex', 'opencode', 'pi'] as const) expect(during(providerId)).not.toContain('取消检测')
+    const idle = renderToStaticMarkup(<CapabilitiesModal {...sharedProps} view="mcp" mcpProviderId="claude" onCancelMcp={async () => true} />)
+    expect(idle).not.toContain('取消检测')
+  })
+
   it('Skills 默认显示全部来源，只保留名称和描述', () => {
     const html = renderToStaticMarkup(
       <CapabilitiesModal

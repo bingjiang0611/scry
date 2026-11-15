@@ -1,3 +1,4 @@
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { useId, useRef, useState } from 'react'
 import type { McpStatus } from '../format'
 import type { McpMeta } from '../env'
@@ -8,7 +9,6 @@ import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
-import { DelayedLoadingStatus } from './LoadingStatus'
 
 
 import './archived-sessions.css'
@@ -145,7 +145,7 @@ export function McpModal({
 
       <div className="modal-body inventory-modal__body inventory-modal__body--mcp" aria-busy={loading}>
         {mcps.length === 0 && mcpUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.mcpUnavailable}</div>
-          : mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loading} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
+          : mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedSkeletonRows loading={loading} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
           <div className="inventory-empty" role="status">
             <strong>{LOADING_COPY.mcpEmpty}</strong>
             <p>{LOADING_COPY.mcpNoConfigEvidence}</p>

@@ -190,7 +190,9 @@ export interface McpFacet {
   snapshot(
     context: ProviderContext,
     refresh?: boolean,
-    execution?: AuthorizedMcpExecution
+    execution?: AuthorizedMcpExecution,
+    /** Honoured only where MCP_LIVE_CHECK_CANCEL says the check is cancellable. */
+    signal?: AbortSignal
   ): Promise<CapabilityEnvelope<McpSnapshot>>
   test?(
     context: ProviderContext,

@@ -86,6 +86,7 @@ export const SIDE_CHAT_COPY = {
   tabStatusPermission: '需权限',
   tabUnavailable: '这个侧边会话暂时读不到记录；页签保持打开。',
   tabLoading: '正在读取侧边会话…',
+  historyLoading: '正在读取侧边会话历史…',
   tabDeleted: '这个侧边会话已被删除，页签已关闭。',
   // 快照与工作区
   snapshotBoundary: (ordinal: number): string => `主会话快照 · 截至第 ${ordinal} 轮`,

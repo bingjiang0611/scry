@@ -33,7 +33,7 @@ struct ArchivedSessionsView: View {
           }
           switch run.archivedCatalog {
           case .idle, .loading:
-            ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 44)
+            PlaceholderRows(label: ConnectionCopy.readingSessions, count: 5, rowHeight: 48).padding(.top, 8)
           case .failed:
             EmptyState(title: ConnectionCopy.archivedEmpty, detail: ConnectionCopy.archivedPolicy, symbol: Symbol.archive)
               .padding(.top, 24)

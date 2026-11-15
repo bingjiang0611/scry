@@ -109,7 +109,7 @@ struct ProjectPickerSheet: View {
               Text(pendingDirectory.path).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(3)
             }.padding(.vertical, 12)
           }
-          ProgressView(ConnectionCopy.readingFolders).frame(maxWidth: .infinity).padding(.top, 40)
+          PlaceholderRows(label: ConnectionCopy.readingFolders, count: 5, rowHeight: 58, detail: true, horizontalPadding: 0)
         }
       case let .loaded(listing):
         VStack(alignment: .leading, spacing: 0) {
@@ -199,7 +199,7 @@ struct ProviderPickerSheet: View {
                    onRefresh: { run.loadProviders(force: true) }) {
       switch run.providers {
       case .idle, .loading:
-        ProgressView(ConnectionCopy.readingProviders).frame(maxWidth: .infinity).padding(.top, 40)
+        PlaceholderRows(label: ConnectionCopy.readingProviders, count: 4, rowHeight: 56, icon: false, detail: true, horizontalPadding: 0)
       case let .loaded(list):
         VStack(spacing: 0) {
           ForEach(list, id: \.selectionId) { ref in

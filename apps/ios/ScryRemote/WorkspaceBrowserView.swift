@@ -64,7 +64,9 @@ private struct WorkspaceDirectoryView: View {
           Button("下一页") { if let next = page.nextCursor { cursors.append(next) } }
             .disabled(page.nextCursor == nil)
         }.frame(minHeight: 44)
-      } else if error == nil { ProgressView("正在读取目录…").frame(maxHeight: .infinity) }
+      } else if error == nil {
+        PlaceholderRows(label: "正在读取目录…", count: 8, rowHeight: 44).frame(maxHeight: .infinity, alignment: .top)
+      }
       if let error { Notice(text: error, warning: true) }
       Button("重新读取目录") { cursors = [nil]; revision += 1 }.frame(minHeight: 44)
     }
@@ -133,7 +135,9 @@ private struct WorkspaceContentView: View {
         if diff?.truncated == true {
           Notice(text: "仅显示前 64 KiB；Diff 未完整展示，请在 Mac 查看其余内容。", warning: true)
         }
-      } else if error == nil { ProgressView("正在读取…").frame(maxHeight: .infinity) }
+      } else if error == nil {
+        PlaceholderRows(label: "正在读取…", count: 12, rowHeight: 20, icon: false, horizontalPadding: 0).frame(maxHeight: .infinity, alignment: .top)
+      }
       if let error { Notice(text: error, warning: true) }
       Button("从头重新读取") { offset = 0; snapshot = nil; revision += 1 }.frame(minHeight: 44)
     }

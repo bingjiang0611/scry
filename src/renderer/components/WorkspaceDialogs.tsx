@@ -4,6 +4,7 @@ import { WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type Workspace
 import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { usePresence } from '../hooks/usePresence'
 import { MOTION } from '../motion'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
@@ -271,7 +272,8 @@ export function FileEditor({
   }, [api, cwd, entry.path, loading, onError, page, readOnly, readPage])
 
   const markdown = /\.(md|mdx)$/i.test(entry.name)
-  if (loading && !snapshot && !page) return <div className="workspace-empty">读取文件…</div>
+  // Text lines in the editor's place: the file's layout is known to be lines of text.
+  if (loading && !snapshot && !page) return <div className="workspace-editor" aria-busy="true"><DelayedSkeletonRows loading rows={10} rowHeight={22} label="读取文件…" /></div>
   if (externallyOpened) return <div className="workspace-empty">已使用系统默认应用打开 {entry.name}</div>
   if (!snapshot && !page) return <div className="workspace-empty">文件无法打开</div>
   if (page && (!readPage || page.hasMore || page.offset > 0)) {
