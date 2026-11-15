@@ -1,3 +1,4 @@
+import { useCopyFeedback } from '../hooks/useCopyFeedback'
 // 右栏纵览：会话 verdict 卡 + context 占用 + 每轮调用 + 文件与 diff 证据。
 import { memo, useId, useState, type CSSProperties, type MouseEvent } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
@@ -32,7 +33,8 @@ function formatOverviewCredits(value: number): string {
 
 function OverviewSessionSummary({ sessionId, compactions }: { sessionId: string | null; compactions: number }) {
   const [expanded, setExpanded] = useState(false)
-  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const idCopy = useCopyFeedback()
+  const copyStatus = idCopy.status.state
   const [scopeDismissed, setScopeDismissed] = useState(false)
   const scopeId = useId()
   const fullId = useId()
@@ -65,7 +67,7 @@ function OverviewSessionSummary({ sessionId, compactions }: { sessionId: string 
           </button>
         ) : <span className="overview-session-missing">{copy.missingId}</span>}
         <button type="button" className="overview-session-copy" disabled={!sessionId} aria-label={copy.copy} title={copy.copy} onClick={() => {
-          if (sessionId) void window.scry.copyText(sessionId).then(() => setCopyStatus('copied')).catch(() => setCopyStatus('failed'))
+          if (sessionId) idCopy.copy(sessionId)
         }}><Icon name={copyStatus === 'copied' ? 'check' : 'copy'} /></button>
       </div>
       <div id={fullId} className="overview-session-full-id" hidden={!expanded}><code>{sessionId}</code></div>

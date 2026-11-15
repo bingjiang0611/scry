@@ -1,3 +1,4 @@
+import { useCopyFeedback } from '../hooks/useCopyFeedback'
 // Remote building blocks shared by the hosts page and remote conversations.
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import type { TraceEvent } from '@shared/trace'
@@ -130,6 +131,8 @@ export function RemoteHostPanel(): JSX.Element {
   const [invite, setInvite] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The copied invite is not visible anywhere, so the copy itself is confirmed.
+  const inviteCopy = useCopyFeedback()
   const refresh = useCallback(async () => {
     try {
       const status = await window.scry.remoteDesktopHostStatus()
@@ -154,7 +157,11 @@ export function RemoteHostPanel(): JSX.Element {
       <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><ModalCloseButton aria-label={copy.closeInvite} onClick={() => requestModalClose()} /></div>
       <div className="modal-body"><p className="hosts-muted">{copy.sshInviteEffect}</p><div className="desktop-remote__invite"><code>{invite}</code></div>
         {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-        <div className="hosts-address-actions"><button type="button" className="hosts-button" onClick={() => requestModalClose()}>{copy.close}</button><button type="button" className="hosts-button is-primary" onClick={() => { void window.scry.copyText(invite).catch(reason => setError(errorText(reason))) }}><Icon name="copy" />{copy.copyInvite}</button></div>
+        <div className="hosts-address-actions"><button type="button" className="hosts-button" onClick={() => requestModalClose()}>{copy.close}</button><button type="button" className="hosts-button is-primary" onClick={() => inviteCopy.copy(invite)}><Icon name={inviteCopy.status.state === 'copied' ? 'check' : 'copy'} />{copy.copyInvite}</button></div>
+        <p className={inviteCopy.status.state === 'failed' ? 'desktop-remote__error' : 'hosts-muted desktop-remote__copy-status'}
+          role={inviteCopy.status.state === 'failed' ? 'alert' : 'status'}>
+          {inviteCopy.status.state === 'copied' ? copy.inviteCopied : inviteCopy.status.state === 'failed' ? copy.inviteCopyFailed(inviteCopy.status.reason) : ''}
+        </p>
       </div>
     </ModalFrame>}
   </article>
