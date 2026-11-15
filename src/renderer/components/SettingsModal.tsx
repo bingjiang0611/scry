@@ -19,6 +19,11 @@ import { ArchivedChatsPanel } from './ArchivedChatsPanel'
 
 export type SettingsTab = 'appearance' | 'archived' | 'remote'
 
+type ArchivedIndexState =
+  | { status: 'loading' }
+  | { status: 'unavailable' }
+  | { status: 'available'; projects: ProjectMeta[] }
+
 export function SettingsModal({
   theme,
   onThemeChange,
@@ -37,20 +42,21 @@ export function SettingsModal({
   const titleId = useId()
   const initialTabRef = useRef<HTMLButtonElement>(null)
   const [tab, setTab] = useState<SettingsTab>(initialTab)
-  // null = 还没读到索引；不能当成 0 个已存档会话。
-  const [archived, setArchived] = useState<ProjectMeta[] | null>(null)
+  // loading = 还没读到索引；unavailable = 读取失败。两者都不能当成 0 个已存档会话，
+  // 也不能互相冒充：加载中显示成「索引不可用」等于报告一个没发生的失败。
+  const [archived, setArchived] = useState<ArchivedIndexState>({ status: 'loading' })
   const refreshArchived = useCallback(async (): Promise<void> => {
     try {
-      setArchived(await window.scry.listArchivedSessions())
+      setArchived({ status: 'available', projects: await window.scry.listArchivedSessions() })
     } catch {
-      setArchived(null)
+      setArchived({ status: 'unavailable' })
     }
   }, [])
   useEffect(() => {
     void refreshArchived()
   }, [refreshArchived])
   const remoteArchived = useRemoteProjectGroups('', true)
-  const archivedCount = archived == null ? undefined : archived.reduce((sum, project) => sum + project.sessions.length, 0)
+  const archivedCount = archived.status !== 'available' ? undefined : archived.projects.reduce((sum, project) => sum + project.sessions.length, 0)
     + remoteArchived.reduce((sum, group) => sum + group.sessions.length, 0)
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
@@ -133,7 +139,8 @@ export function SettingsModal({
           ) : tab === 'archived' ? (
             <div className="arch-sections">
               <ArchivedChatsPanel
-                projects={archived}
+                projects={archived.status === 'available' ? archived.projects : null}
+                loading={archived.status === 'loading'}
                 onRefresh={refreshArchived}
                 onSessionsChanged={onSessionsChanged}
               />

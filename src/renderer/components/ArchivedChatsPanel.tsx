@@ -3,7 +3,9 @@ import { useState } from 'react'
 import type { ProjectMeta, SessionMeta } from '../env'
 
 import type { DeleteArchivedSessionsResult } from '@shared/provider'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { Icon } from './primitives/Icon'
+import { SkeletonRows } from './primitives/Skeleton'
 import { ProviderFilterMenu } from './ProviderFilterMenu'
 
 
@@ -38,10 +40,13 @@ const DELETE_FAILURE_LABEL: Record<NonNullable<DeleteArchivedSessionsResult['fai
 
 export function ArchivedChatsPanel({
   projects,
+  loading = false,
   onRefresh,
   onSessionsChanged
 }: {
+  /** null with loading=false means the index read failed. */
   projects: ProjectMeta[] | null
+  loading?: boolean
   onRefresh: () => Promise<void>
   onSessionsChanged: () => void
 }) {
@@ -50,6 +55,27 @@ export function ArchivedChatsPanel({
   const [projectFilter, setProjectFilter] = useState<string>('all')
   const [failures, setFailures] = useState<DeleteArchivedSessionsResult['failures']>([])
   const [busy, setBusy] = useState(false)
+  const showSkeleton = useDelayedFlag(loading)
+
+  if (!projects && loading) {
+    // The title does not depend on the index, so it shows at once; the rows
+    // wait behind the shared delay so a fast read never flashes a skeleton.
+    return (
+      <>
+        <div className="arch-head">
+          <div className="settings-copy">
+            <b>{archivedCopy.localTitle}</b>
+          </div>
+          <button type="button" className="arch-danger" disabled>
+            <Icon name="trash" /> {archivedCopy.deleteAllLocal}
+          </button>
+        </div>
+        <div className="arch-list" aria-busy="true">
+          {showSkeleton && <SkeletonRows rows={4} meta rowHeight={60} label={archivedCopy.loading} />}
+        </div>
+      </>
+    )
+  }
 
   if (!projects) {
     return (
