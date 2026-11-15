@@ -1,4 +1,6 @@
 import { useCopyFeedback } from '../hooks/useCopyFeedback'
+import { useAsyncAction } from '../hooks/useAsyncAction'
+import { BusyLabel } from './primitives/BusyLabel'
 // Remote building blocks shared by the hosts page and remote conversations.
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import type { TraceEvent } from '@shared/trace'
@@ -69,20 +71,18 @@ export function ClientPairForm({ onPaired }: { onPaired: (id: string) => Promise
   const [port, setPort] = useState('22')
   const [invitation, setInvitation] = useState('')
   const [pairing, setPairing] = useState<DesktopPairingResult | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const pair = async (): Promise<void> => {
-    setBusy(true); setError(null)
-    try {
-      const result = await bridge().pair({ label: label.trim() || hostname.trim(), ssh: { username: username.trim(), hostname: hostname.trim(), port: Number(port) }, invitation: invitation.trim() })
-      setPairing(result); await onPaired(result.connection.id)
-    } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
-  }
-  const finish = async (): Promise<void> => {
+  // An SSH handshake takes seconds: the pressed button shows it after the shared
+  // delay, a second press is ignored, and a failure stays here with a retry.
+  const action = useAsyncAction<'pair' | 'finish'>(errorText)
+  const busy = action.pending !== null
+  const pair = (): void => action.run('pair', async () => {
+    const result = await bridge().pair({ label: label.trim() || hostname.trim(), ssh: { username: username.trim(), hostname: hostname.trim(), port: Number(port) }, invitation: invitation.trim() })
+    setPairing(result); await onPaired(result.connection.id)
+  })
+  const finish = (): void => {
     if (!pairing) return
-    setBusy(true); setError(null)
-    try { setPairing(await bridge().finishPairing(pairing.connection.id)); await onPaired(pairing.connection.id) }
-    catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
+    const id = pairing.connection.id
+    action.run('finish', async () => { setPairing(await bridge().finishPairing(id)); await onPaired(id) })
   }
   return (
     <section className="desktop-remote__card">
@@ -93,12 +93,15 @@ export function ClientPairForm({ onPaired }: { onPaired: (id: string) => Promise
         <label>{copy.sshPort}<input value={port} onChange={(event) => setPort(event.target.value)} inputMode="numeric" required /></label>
       </div>
       <label>{copy.invitationString}<textarea value={invitation} onChange={(event) => setInvitation(event.target.value)} rows={4} spellCheck={false} required /></label>
-      {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-      {!pairing ? <button type="button" onClick={() => void pair()} disabled={busy || !username.trim() || !hostname.trim() || !invitation.trim()}>{copy.pair}</button> : (
+      {action.error && <p className="desktop-remote__error" role="alert">{action.error.text}
+        <button type="button" className="hosts-button" onClick={action.retry}>{copy.retry}</button></p>}
+      {!pairing ? <button type="button" onClick={() => { if (!busy) pair() }} aria-busy={action.pending === 'pair'} aria-disabled={busy}
+        disabled={!busy && (!username.trim() || !hostname.trim() || !invitation.trim())}><BusyLabel busy={action.showBusy && action.pending === 'pair'}>{copy.pair}</BusyLabel></button> : (
         <div className="desktop-remote__pairing-result">
           <p><b>{copy.deviceFingerprint}</b></p><code>{pairing.publicKeySHA256}</code>
           <p>{pairing.state === 'pending' ? copy.awaitingHostApproval : copy.devicePaired}</p>
-          {pairing.state === 'pending' && <button type="button" onClick={() => void finish()} disabled={busy}>{copy.finishPairing}</button>}
+          {pairing.state === 'pending' && <button type="button" onClick={() => { if (!busy) finish() }} aria-busy={action.pending === 'finish'} aria-disabled={busy}>
+            <BusyLabel busy={action.showBusy && action.pending === 'finish'}>{copy.finishPairing}</BusyLabel></button>}
         </div>
       )}
     </section>
@@ -130,7 +133,8 @@ export function RemoteHostPanel(): JSX.Element {
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [invite, setInvite] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const hostAction = useAsyncAction<'invite' | 'disable'>(errorText)
+  const busy = hostAction.pending !== null
   // The copied invite is not visible anywhere, so the copy itself is confirmed.
   const inviteCopy = useCopyFeedback()
   const refresh = useCallback(async () => {
@@ -141,7 +145,7 @@ export function RemoteHostPanel(): JSX.Element {
     } catch (reason) { setEnabled(null); setError(errorText(reason)) }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
-  const run = async (action: () => Promise<void>): Promise<void> => { setBusy(true); setError(null); try { await action(); await refresh() } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) } }
+  const run = (key: 'invite' | 'disable', work: () => Promise<void>): void => hostAction.run(key, async () => { await work(); await refresh() })
   return <article className="remote-access-card desktop-remote__host">
     <div className="remote-access-card-head">
       <span className="remote-access-icon"><Icon name="server" /></span>
@@ -149,9 +153,15 @@ export function RemoteHostPanel(): JSX.Element {
       <span className={`remote-access-status ${enabled ? 'is-ready' : ''}`}>{enabled === null ? error ? copy.status.unknown : copy.loadingDesktopStatus : enabled ? copy.enabled : copy.disabled}</span>
     </div>
     {error && <p className="desktop-remote__error" role="alert">{error}</p>}
+    {hostAction.error && <p className="desktop-remote__error" role="alert">{hostAction.error.text}
+      <button type="button" className="hosts-button" onClick={hostAction.retry}>{copy.retry}</button></p>}
     {enabled !== null && <div className="remote-access-actions">
-      <button type="button" className="hosts-button" onClick={() => void run(async () => setInvite(await window.scry.remoteDesktopHostInvite()))} disabled={busy}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</button>
-      {enabled && <button type="button" className="hosts-button is-quiet" onClick={() => void run(async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) })} disabled={busy}>{copy.disableDesktopAccess}</button>}
+      <button type="button" className="hosts-button" onClick={() => { if (!busy) run('invite', async () => setInvite(await window.scry.remoteDesktopHostInvite())) }}
+        aria-busy={hostAction.pending === 'invite'} aria-disabled={busy} disabled={busy && hostAction.pending !== 'invite'}>
+        <BusyLabel busy={hostAction.showBusy && hostAction.pending === 'invite'}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</BusyLabel></button>
+      {enabled && <button type="button" className="hosts-button is-quiet" onClick={() => { if (!busy) run('disable', async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) }) }}
+        aria-busy={hostAction.pending === 'disable'} aria-disabled={busy} disabled={busy && hostAction.pending !== 'disable'}>
+        <BusyLabel busy={hostAction.showBusy && hostAction.pending === 'disable'}>{copy.disableDesktopAccess}</BusyLabel></button>}
     </div>}
     {enabled && invite && <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setInvite(null)}>
       <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><ModalCloseButton aria-label={copy.closeInvite} onClick={() => requestModalClose()} /></div>
