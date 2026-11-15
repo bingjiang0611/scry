@@ -1,4 +1,7 @@
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
+import { patchProjectSession, sessionRowKey, type SessionSaveState } from './session-save-state'
+import { actionErrorText } from './hooks/useAsyncAction'
+import { SESSION_SAVE_COPY } from './constants/copy'
 import { runStructuralTransition } from './structural-motion'
 import { browserStorage } from './browser-storage'
 import { LOADING_COPY } from './constants/copy'
@@ -21,13 +24,16 @@ import {
 } from './app-model'
 import { focusComposerUnlessFocusMoved } from './composer-focus'
 
+// A confirmed save shows briefly, then the row goes back to its time.
+const SAVED_STATUS_MS = 1200
+
 export function createSessionActions({
   workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
   resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
   draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
   confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
   setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
-  queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs
+  queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
 }: {
   workspace: ReturnType<typeof useWorkspaceState>
   session: ReturnType<typeof useAgentSession>
@@ -56,6 +62,7 @@ export function createSessionActions({
   queueKeyRef: MutableRefObject<string>
   setArchiveUndo: Dispatch<SetStateAction<{ ref: SessionRef; preview: string } | null>>
   archiveUndo: { ref: SessionRef; preview: string } | null
+  setSessionSaves: Dispatch<SetStateAction<ReadonlyMap<string, SessionSaveState>>>
   refreshProviderCatalogs: () => Promise<void>
 }) {
   const { cwd, setCwd, loadProjects, refreshRecent } = workspace
@@ -360,16 +367,54 @@ export function createSessionActions({
     externalSessionId: session.externalSessionId ?? session.sessionId
   })
 
-  // 置顶与存档都会让会话换分组，所以重新拉一次列表而不是就地改：顺序变化是预期结果。
+  // Pin, archive and title only change the app's own session index: they almost
+  // always succeed and are quietly reversible, so the row changes at once and the
+  // write follows. A failed write puts the row back and says so on the row.
+  const markSave = (key: string, state: SessionSaveState | null): void => {
+    setSessionSaves((current) => {
+      const next = new Map(current)
+      if (state) next.set(key, state)
+      else next.delete(key)
+      return next
+    })
+    if (state?.status === 'saved') {
+      setTimeout(() => setSessionSaves((current) => {
+        if (current.get(key) !== state) return current
+        const next = new Map(current)
+        next.delete(key)
+        return next
+      }), SAVED_STATUS_MS)
+    }
+  }
+
+  // 置顶会让会话换分组：先就地移动，写入成功后再拉一次列表校准顺序。
   const togglePinSession = async (cwd: string, session: SessionMeta): Promise<void> => {
-    await window.scry.setSessionPinned(sessionRefOf(cwd, session), !session.pinnedAt)
+    const key = sessionRowKey(cwd, session)
+    const pinned = !session.pinnedAt
+    workspace.setProjects((current) => patchProjectSession(current, cwd, session, { pinnedAt: pinned ? Date.now() : undefined }))
+    markSave(key, { status: 'saving', action: 'pin' })
+    try {
+      if (!(await window.scry.setSessionPinned(sessionRefOf(cwd, session), pinned))) throw new Error(SESSION_SAVE_COPY.gone)
+      markSave(key, { status: 'saved', action: 'pin' })
+    } catch (error) {
+      workspace.setProjects((current) => patchProjectSession(current, cwd, session, { pinnedAt: session.pinnedAt }))
+      markSave(key, { status: 'failed', action: 'pin', reason: actionErrorText(error, SESSION_SAVE_COPY.pinFailed) })
+    }
     workspace.loadProjects()
   }
 
+  // The rename dialog stays open until the write answers, so what was typed is kept
+  // on failure; the row shows the new title meanwhile and goes back if it fails.
   const renameSession = async (cwd: string, session: SessionMeta, title: string): Promise<void> => {
     if (!window.scry.renameSession) throw new Error('请重启 Scry 以启用会话重命名')
-    const changed = await window.scry.renameSession(sessionRefOf(cwd, session), title)
-    if (!changed) throw new Error('会话已不存在或身份已变化，请刷新列表后重试')
+    workspace.setProjects((current) => patchProjectSession(current, cwd, session, { preview: title }))
+    try {
+      const changed = await window.scry.renameSession(sessionRefOf(cwd, session), title)
+      if (!changed) throw new Error('会话已不存在或身份已变化，请刷新列表后重试')
+    } catch (error) {
+      workspace.setProjects((current) => patchProjectSession(current, cwd, session, { preview: session.preview }))
+      throw error
+    }
     workspace.loadProjects()
   }
 
@@ -382,11 +427,29 @@ export function createSessionActions({
       providerId: integrations.selectedProviderId,
       agentProfileId: integrations.providerContext.agentProfileId
     })
-    if (ref.providerId !== 'legacy_unknown') clearSessionPromptQueue(archivingActiveSession ? queueKeyRef.current : sessionComposerDraftKey({
-      providerId: ref.providerId, agentProfileId: ref.agentProfileId, cwd, sessionId: meta.sessionId
-    }))
+    // Captured now: the active selection may change while the archive is written.
+    const activeQueueKey = queueKeyRef.current
+    const key = sessionRowKey(cwd, meta)
+    // The row leaves the list at once; it comes back from the catalog if the write fails.
+    workspace.setProjects((current) => patchProjectSession(current, cwd, meta, null))
+    markSave(key, { status: 'saving', action: 'archive' })
     await applySessionArchiveEffects({
-      archive: () => window.scry.setSessionArchived(ref, true),
+      archive: async () => {
+        try {
+          if (!(await window.scry.setSessionArchived(ref, true))) throw new Error(SESSION_SAVE_COPY.gone)
+        } catch (error) {
+          markSave(key, { status: 'failed', action: 'archive', reason: actionErrorText(error, SESSION_SAVE_COPY.archiveFailed) })
+          workspace.loadProjects()
+          return false
+        }
+        markSave(key, null)
+        // Queued prompts are dropped only once the archive is durable, so a failed
+        // archive leaves the session exactly as it was.
+        if (ref.providerId !== 'legacy_unknown') clearSessionPromptQueue(archivingActiveSession ? activeQueueKey : sessionComposerDraftKey({
+          providerId: ref.providerId, agentProfileId: ref.agentProfileId, cwd, sessionId: meta.sessionId
+        }))
+        return true
+      },
       archivingActiveSession,
       rememberUndo: () => setArchiveUndo({ ref, preview: meta.preview }),
       resetConversation: async () => {

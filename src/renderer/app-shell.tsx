@@ -42,7 +42,7 @@ export function AppShell(props: AppShellProps) {
     panelRuntimeProvider, showSessionOverview, panelVisible, currentSurface, rightSurface, rightSurfaces,
     handleRightSurfaceAction, openTurnInChat, diffInspector, openWorkspaceDiff, workspaceRefreshKey,
     workspaceOpenRequests, setScopeDirty, addWorkspaceReference, showLlmPerformance, setShowLlmPerformance,
-    showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo,
+    showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo, sessionSaves,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, backgroundWorkByRun,
     catalogHealth, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
@@ -93,7 +93,7 @@ export function AppShell(props: AppShellProps) {
         activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
         activeProviderId={integrations.selectedProviderId} activeAgentProfileId={integrations.providerContext.agentProfileId}
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
-        backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo}
+        backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo} sessionSaves={sessionSaves}
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
         value={sidebarPane.width} collapsed={sidebarPane.collapsed} active={sidebarPane.resizing} onPointerDown={sidebarPane.startResize} onKeyDown={sidebarPane.onKeyDown} />

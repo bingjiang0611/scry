@@ -377,6 +377,17 @@ export const LOADING_COPY = {
 } as const
 
 /** 停止控制调用的事实文案：调用失败不冒充“已请求”，更不冒充“已终止”。 */
+// 侧栏乐观改动的保存状态：固定在行的时间位置，失败时在行内说明并可重试。
+export const SESSION_SAVE_COPY = {
+  saving: '保存中',
+  saved: '已保存',
+  retry: '重试',
+  gone: '会话已不存在或身份已变化',
+  pinFailed: '置顶没有保存',
+  archiveFailed: '存档没有保存',
+  failed: (action: 'pin' | 'archive', reason: string): string => `${action === 'pin' ? '置顶' : '存档'}没有保存：${reason}`
+} as const
+
 export const RUN_STOP_COPY = {
   requesting: {
     label: '正在请求停止…',
