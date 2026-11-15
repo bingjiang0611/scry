@@ -35,12 +35,6 @@
 
 .diff-inspector-actions button:disabled { opacity: .45; cursor: default; }
 
-.diff-refresh-state {
-  padding: 6px 14px;
-  color: var(--dim);
-  font-size: 11px;
-}
-
 .diff-inspector-body {
   flex: 1;
   min-height: 0;

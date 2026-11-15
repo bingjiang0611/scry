@@ -1,7 +1,7 @@
 import type { ScExpected, ScMutation, ScOperation, ScRepository } from '../../shared/source-control'
 import type { ScGit, GitIdentity } from './git'
 import { ScGithubError, type ScGithub, type GithubSession } from './github'
-import { ScCommandError, scMessage } from './process'
+import { CANCELLED_BEFORE_START, ScCommandError, scMessage } from './process'
 import type { ScStore, StoredOperation } from './store'
 
 /** Called only while SourceControlService holds the repository's commonDir gate. */
@@ -9,15 +9,21 @@ export async function executeMutation(
   request: ScMutation,
   identity: GitIdentity,
   record: StoredOperation,
-  { git, github, store, expected, githubScope }: {
+  deps: {
     git: ScGit
     github: ScGithub
     store: ScStore
     expected: (identity: GitIdentity, request: ScExpected) => Promise<ScRepository>
     githubScope: (identity: GitIdentity, repository: string, session: GithubSession) => Promise<void>
+    /** A person's cancel; honoured for push and fetch, the long network steps. */
+    signal?: AbortSignal
   },
   authorize?: () => void
 ): Promise<ScOperation> {
+  const { signal } = deps
+  // Before dispatch a cancel means nothing was written; after it, the outcome is unknown.
+  const notCancelled = (): void => { if (signal?.aborted) throw new ScCommandError(CANCELLED_BEFORE_START, null, true) }
+  const { git, github, store, expected, githubScope } = deps
   let dispatched = false
   let completionNote = ''
   try {
@@ -140,24 +146,27 @@ export async function executeMutation(
         if (request.action === 'push') {
           if (!snapshot.branch || !snapshot.head)
             throw new Error('detached/unborn HEAD 不能推送；请先创建分支和提交')
-          const remoteHead = await git.remoteHead(identity, target, snapshot.branch)
+          const remoteHead = await git.remoteHead(identity, target, snapshot.branch, signal)
           if (remoteHead)
-            await git.run(identity.root, ['merge-base', '--is-ancestor', remoteHead, snapshot.head])
+            await git.run(identity.root, ['merge-base', '--is-ancestor', remoteHead, snapshot.head], true, 15_000, signal)
           record.intent = { target, branch: snapshot.branch, head: snapshot.head }
           await store.save(record)
           await expected(identity, request)
+          notCancelled()
           authorize?.()
           dispatched = true
-          await git.push(identity, target, snapshot.branch, snapshot.head)
+          await git.push(identity, target, snapshot.branch, snapshot.head, signal)
+          // Verifying arrival is not cancellable: a push that ran is checked, not abandoned.
           if ((await git.remoteHead(identity, target, snapshot.branch)) !== snapshot.head)
             throw new Error('推送已执行但远端无法确认到达预期 SHA')
           record.operation.evidence = { sha: snapshot.head }
         } else {
           record.intent = { target }
           await store.save(record)
+          notCancelled()
           authorize?.()
           dispatched = true
-          await git.fetch(identity, target, request.remote)
+          await git.fetch(identity, target, request.remote, signal)
         }
       } else {
         if (!snapshot.branch || snapshot.branch !== request.headBranch || !snapshot.head)

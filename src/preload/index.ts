@@ -143,6 +143,7 @@ const sourceControl: SourceControlApi = {
   operations: request => ipcRenderer.invoke('sourceControl:operations', request),
   reconcile: request => ipcRenderer.invoke('sourceControl:reconcile', request),
   acknowledge: request => ipcRenderer.invoke('sourceControl:acknowledge', request),
+  cancel: request => ipcRenderer.invoke('sourceControl:cancel', request),
   pullRequests: request => ipcRenderer.invoke('sourceControl:pullRequests', request),
   pullRequest: request => ipcRenderer.invoke('sourceControl:pullRequest', request),
   saveCommitDraft: request => ipcRenderer.invoke('sourceControl:saveCommitDraft', request),

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import type { SessionSaveState } from './session-save-state'
 import { AppShell } from './app-shell'
 import type { RemoteTarget } from './app-types'
 import type { RemoteProviderRef } from '@shared/desktop-remote'
@@ -69,6 +70,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const [turnDiffSelection, setTurnDiffSelection] = useDiffReviewSelection(currentSurface.id)
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
+  const [sessionSaves, setSessionSaves] = useState<ReadonlyMap<string, SessionSaveState>>(() => new Map())
   useConversationWorkspace(view, logicalConversation, cwd, setConversationError, setComposerError)
   const {
     remoteTarget, setRemoteTarget, remoteQueueStore, remoteAdoptedSession, setRemoteAdoptedSession,
@@ -178,7 +180,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
     confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
     setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
-    queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs
+    queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
   })
   restoreStoredSelectionRef.current = restoreLastSelection
   const appView = useAppView({
@@ -273,6 +275,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     workspaceRefreshKey,
     setArchiveUndo,
     archiveUndo,
+    sessionSaves,
     settingsTab,
     setSettingsTab,
     theme,

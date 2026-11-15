@@ -1,13 +1,17 @@
 import { useEffect, useRef } from 'react'
 import type { ConversationSummary } from '@shared/conversation-api'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import type { ComposerDraftStore } from '../composer-drafts'
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { ConversationHostChatProps } from '../conversation-chat-props'
 import type { WorkspaceFileTarget } from '../workspace-links'
+import { LoadingStatus } from './LoadingStatus'
 import { SideChatSurface } from './SideChatSurface'
 
 export interface SideChatTabBodyProps {
   summary?: ConversationSummary
+  /** The summary has not been answered yet; distinct from an unreadable record. */
+  loading?: boolean
   draftStore: ComposerDraftStore
   agents: ConversationHostChatProps['agents']
   onOpenFile?: (target: WorkspaceFileTarget) => void
@@ -26,11 +30,17 @@ export interface SideChatTabBodyProps {
  * record is unreadable right now; it is not shown as an empty conversation, and nothing
  * here reads a transcript to fill the gap.
  */
-export function SideChatTabBody({ summary, onMounted, ...rest }: SideChatTabBodyProps) {
+export function SideChatTabBody({ summary, loading = false, onMounted, ...rest }: SideChatTabBodyProps) {
   // The mount marker is consumed exactly once, so a later rerender cannot re-focus.
   const mountedCallback = useRef(onMounted)
   mountedCallback.current = onMounted
   useEffect(() => { mountedCallback.current?.() }, [])
+  const showLoading = useDelayedFlag(!summary && loading)
+  if (!summary && loading) {
+    return <div className="side-chat-unavailable" aria-busy="true" data-side-chat-loading>
+      {showLoading && <LoadingStatus title={SIDE_CHAT_COPY.tabLoading} />}
+    </div>
+  }
   if (!summary) {
     return <div className="side-chat-unavailable" role="status" data-side-chat-unavailable>
       {SIDE_CHAT_COPY.tabUnavailable}

@@ -291,3 +291,6 @@
   .sc-diff-pane { display: flex; }
   .sc-back-files { display: none; }
 }
+
+.sc-notice.sc-cached { color: var(--dim); }
+.sc-error-link { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }

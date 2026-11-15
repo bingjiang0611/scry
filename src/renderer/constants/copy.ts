@@ -49,6 +49,8 @@ export const TURN_DIFF_REVIEW_COPY = {
 } as const
 
 export const ANALYTICS_COPY = {
+  // 切换范围时旧数据仍在屏幕上，必须说清它属于哪个范围。
+  staleRange: (next: number, shownFrom: string, shownTo: string): string => `正在读取最近 ${next} 天… 下方仍是 ${shownFrom} – ${shownTo} 的数据`,
   title: '用量',
   totalLabel: '原始 Token 成本',
   composition: '成本构成',
@@ -272,7 +274,9 @@ export const HISTORY_WINDOW_COPY = {
 export const ARCHIVED_SESSIONS_COPY = {
   localTitle: '本机已存档会话',
   deleteAllLocal: '删除全部本机会话',
-  localEmpty: '没有本机已存档会话'
+  localEmpty: '没有本机已存档会话',
+  loading: '正在读取已存档会话…',
+  deleting: '正在永久删除已存档会话'
 } as const
 
 // 归档列表的 Provider 筛选：Provider id 不给人读，未知来源也不能冒充某个 Provider。
@@ -342,6 +346,10 @@ export const LOADING_COPY = {
   sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
   sessionHistory: '正在读取会话历史…',
   sessionHistoryDetail: '会话已切换；内容将在本机证据读取完成后显示。',
+  // 缓存或目录预览已经在屏幕上时，不能再说「内容将在读取完成后显示」。
+  sessionHistoryVerifying: '正在核对会话历史…',
+  sessionHistoryVerifyingDetail: '当前显示的是上次读取的内容；核对完成前暂不能发送或分支。',
+  sendWaitsForHistory: '会话历史读取完成后才能发送，避免发到错误的会话',
   skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   skills: '正在读取 Skill…',
@@ -357,6 +365,7 @@ export const LOADING_COPY = {
   readingConfig: '读取配置中…',
   piSnapshot: '正在刷新 Pi MCP 快照…',
   detectingMcp: '正在检测全部 MCP…',
+  detectingMcpSlow: '仍在检测，比平时久；可以关闭此窗口，检测会继续，重新打开时显示结果',
   refreshing: '刷新中…',
   tools: '正在读取工具明细…',
   remoteProjects: (host: string) => `正在读取 ${host} 的项目…`,
@@ -370,7 +379,26 @@ export const LOADING_COPY = {
 } as const
 
 /** 停止控制调用的事实文案：调用失败不冒充“已请求”，更不冒充“已终止”。 */
+// 侧栏乐观改动的保存状态：固定在行的时间位置，失败时在行内说明并可重试。
+export const SESSION_SAVE_COPY = {
+  saving: '保存中',
+  saved: '已保存',
+  retry: '重试',
+  gone: '会话已不存在或身份已变化',
+  pinFailed: '置顶没有保存',
+  archiveFailed: '存档没有保存',
+  failed: (action: 'pin' | 'archive', reason: string): string => `${action === 'pin' ? '置顶' : '存档'}没有保存：${reason}`
+} as const
+
 export const RUN_STOP_COPY = {
+  requesting: {
+    label: '正在请求停止…',
+    hint: '停止请求已发出，等待 Provider 确认；确认前这一轮仍可能在运行'
+  },
+  requestFailed: {
+    label: '停止请求没有发出',
+    hint: (reason: string): string => `${reason}。这一轮仍在运行，可以再次点击停止`
+  },
   interruptRequestFailed: {
     label: '停止请求未生效',
     hint: (providerId: string): string =>

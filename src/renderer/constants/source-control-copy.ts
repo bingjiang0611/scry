@@ -20,6 +20,7 @@ export const sourceControlFileCopy = {
 
 export const sourceControlOperationCopy = {
   title: '操作证据 · 不自动重放',
+  slow: (action: string): string => `仍在${action}，比平时久；可以先浏览其他页面，结果会记在操作记录里。`,
   empty: '本仓库没有本机操作记录。',
   label: (op: ScOperation) => `${sourceControlActionNames[op.action]} · ${sourceControlStatusNames[op.status]}${op.acknowledged ? ' · 已人工核查' : ''}`,
   viewPr: '查看 PR',

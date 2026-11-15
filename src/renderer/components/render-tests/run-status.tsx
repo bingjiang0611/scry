@@ -28,6 +28,27 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('停止')
   })
 
+  it('回答出现前占位，出现后不再在正文下方重复显示运行中占位', () => {
+    expect(renderWelcome({ turns: [runningTurn], busy: true })).toContain('class="skeleton" aria-hidden="true"')
+    const streaming: Turn = {
+      ...runningTurn,
+      items: [...runningTurn.items, { id: 'ev-text', ts: '', runId: runningTurn.runId, kind: 'model', stage: 'text', text: '先读取登录模块。' }]
+    }
+    const html = renderWelcome({ turns: [streaming], busy: true })
+    expect(html).not.toContain('class="skeleton"')
+    expect(html).toContain('运行中')
+  })
+
+  it('点击停止后立即显示正在请求停止，失败时如实说明并允许再点', () => {
+    const sending = renderWelcome({ turns: [runningTurn], busy: true, stopRequest: { runId: runningTurn.runId, status: 'sending' } })
+    expect(sending).toContain('正在请求停止…')
+    expect(sending).toContain('data-stop-tone="stopping"')
+    const failed = renderWelcome({ turns: [runningTurn], busy: true, stopRequest: { runId: runningTurn.runId, status: 'failed', reason: 'IPC 不可用' } })
+    expect(failed).toContain('停止请求没有发出')
+    expect(failed).toContain('IPC 不可用')
+    expect(failed).not.toMatch(/class="stop run-status-stop" disabled=""/)
+  })
+
   it('待回答时状态条说明本轮在等你的选择，而不是继续运行', () => {
     const pendingQuestions: shared.AgentQuestionRequest[] = [
       { runId: runningTurn.runId, questionId: 'q-1', questions: [{ question: '推送本轮调查分支？', header: '调查交付', multiSelect: false, options: [{ label: '推送供审查', description: 'A' }] }] },

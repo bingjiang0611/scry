@@ -3,6 +3,7 @@ import type { ChatViewProps } from './types'
 import { CliPicker } from '../CliPicker'
 import { ModelEffortPicker, RunControlSelect } from '../Pickers'
 import { Icon } from '../primitives/Icon'
+import { LOADING_COPY } from '../../constants/copy'
 import type { ModelPickerOption } from '../model-picker-options'
 import type { RunControlSelectOption } from '../picker-state'
 
@@ -136,7 +137,7 @@ export function ComposerControls({
               aria-busy={submitting}
               aria-label={sendActionLabel}
               aria-describedby={composerStatus ? 'composer-status' : undefined}
-              title={composerStatus ?? sendActionLabel}
+              title={composerStatus ?? (sessionLoading ? LOADING_COPY.sendWaitsForHistory : sendActionLabel)}
             >
               <Icon name="arrowUp" />
               <span className="send-label">{submitting ? '启动中' : queueing ? '加入队列' : '发送'}</span>

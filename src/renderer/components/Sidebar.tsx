@@ -1,4 +1,5 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
+import type { SessionSaveState } from '../session-save-state'
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
@@ -56,6 +57,7 @@ export const Sidebar = memo(function Sidebar({
   onRemoveProject,
   onRevealProject,
   archiveUndo = null,
+  sessionSaves,
   onUndoArchive,
   onAnalytics,
   analyticsActive = false,
@@ -98,6 +100,8 @@ export const Sidebar = memo(function Sidebar({
   onRemoveProject?: (project: ProjectMeta) => void | Promise<void>
   onRevealProject?: (project: ProjectMeta) => void
   archiveUndo?: { preview: string } | null
+  /** Save status of optimistic row changes, keyed like the rows themselves. */
+  sessionSaves?: ReadonlyMap<string, SessionSaveState>
   onUndoArchive?: () => void
   onAnalytics?: () => void
   analyticsActive?: boolean
@@ -174,6 +178,7 @@ export const Sidebar = memo(function Sidebar({
       agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))}
     backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
     onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
+    saveState={sessionSaves?.get(sessionKey(cwd, session))}
     onMenu={onRenameSession ? openSessionMenu : undefined} />
   const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" data-motion-key={view === 'projects' ? `conversation:${conversation.id}` : undefined} key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>

@@ -8,6 +8,8 @@ import { GithubPullRequestPanel } from './GithubPullRequestPanel'
 import { defaultSourceControlApi, type SourceControlApi } from '../workbench-api'
 import { SourceControlCommitDialog } from './SourceControlCommitDialog'
 import '../source-control.css'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { BusyLabel } from './primitives/BusyLabel'
 
 import { SourceControlOperations } from './SourceControlOperations'
 import { SourceControlFileRow } from './SourceControlFileRow'
@@ -15,21 +17,51 @@ import { SourceControlTransportDialog } from './SourceControlTransportDialog'
 import { SourceControlRepositoryDialog } from './SourceControlRepositoryDialog'
 import { sourceControlActionNames as actionNames, sourceControlStatusNames as statusNames, sourceControlOperationCopy, sourceControlFileCopy } from '../constants/source-control-copy'
 
+// The last read of each repository, so returning to this tab shows what was known
+// instead of a cold load. Keyed by the API (this machine or one remote host) and cwd,
+// so the same path on another machine is never shown as this one. Bounded per API, and
+// always shown as an earlier read: writes stay locked until a fresh read lands.
+const LAST_READ_LIMIT = 8
+type LastRead = { state: ScRead<ScRepository>; operations: ScOperation[]; at: number }
+const lastReadsByApi = new WeakMap<SourceControlApi, Map<string, LastRead>>()
+function lastRead(api: SourceControlApi, cwd: string): LastRead | undefined {
+  return lastReadsByApi.get(api)?.get(cwd)
+}
+function rememberRead(api: SourceControlApi, cwd: string, state: ScRead<ScRepository>, operations: ScOperation[]): void {
+  const reads = lastReadsByApi.get(api) ?? new Map<string, LastRead>()
+  lastReadsByApi.set(api, reads)
+  reads.delete(cwd)
+  reads.set(cwd, { state, operations, at: Date.now() })
+  while (reads.size > LAST_READ_LIMIT) reads.delete(reads.keys().next().value as string)
+}
+// After this long a running Git action says it is taking longer than usual.
+const LONG_WAIT_MS = 10_000
+const readTime = (at: number): string => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+
 export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: string; active: boolean; api?: SourceControlApi }) {
   const api = useMemo(() => injectedApi ?? defaultSourceControlApi, [injectedApi])
-  const [state, setState] = useState<ScRead<ScRepository> | null>(null)
+  const [state, setState] = useState<ScRead<ScRepository> | null>(() => lastRead(api, cwd)?.state ?? null)
+  // Set while the panel shows an earlier read of this cwd; cleared by the first fresh read.
+  const [cachedAt, setCachedAt] = useState<number | null>(() => lastRead(api, cwd)?.at ?? null)
+  const [freshReadFailed, setFreshReadFailed] = useState(false)
+  const staleRef = useRef(cachedAt !== null)
+  staleRef.current = cachedAt !== null
+  const [refreshing, setRefreshing] = useState(false)
   const [tab, setTab] = useState<'changes' | 'pr' | 'operations'>('changes')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [runningAction, setRunningAction] = useState<ScMutation['action'] | null>(null)
   const busyRef = useRef(false)
+  // The running push/fetch a person may cancel.
+  const runningOperation = useRef<{ repositoryId: string; operationId: string } | null>(null)
+  const [cancelState, setCancelState] = useState<'idle' | 'requested' | 'unavailable'>('idle')
   const alive = useRef(true)
   const epoch = useRef(0)
   const currentCwd = useRef(cwd)
   currentCwd.current = cwd
   const diffEpoch = useRef(0)
   const backToFiles = useRef<HTMLButtonElement>(null)
-  const [operations, setOperations] = useState<ScOperation[]>([])
+  const [operations, setOperations] = useState<ScOperation[]>(() => lastRead(api, cwd)?.operations ?? [])
   const [selection, setSelection] = useState<{ path: string; staged: boolean } | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [diff, setDiff] = useState<ScRead<ScDiff> | null>(null)
@@ -70,6 +102,8 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     if (!alive.current || ticket !== epoch.current) return
     diffEpoch.current++
     setState(next)
+    setCachedAt(null)
+    setFreshReadFailed(false)
     setSelected([])
     setDiff(null)
     setSelection(null)
@@ -84,17 +118,27 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         setMessage(commitDraft?.message ?? '')
         setMessageHead(commitDraft?.head ?? next.data.head)
       }
-      setOperations((previous) => [
-        ...latest,
-        ...previous.filter((op) => op.repositoryId === next.data.id && op.status === 'unknown' && !latest.some((item) => item.id === op.id))
-      ])
+      setOperations((previous) => {
+        const merged = [
+          ...latest,
+          ...previous.filter((op) => op.repositoryId === next.data.id && op.status === 'unknown' && !latest.some((item) => item.id === op.id))
+        ]
+        rememberRead(api, cwd, next, merged)
+        return merged
+      })
       setRemote((value) => next.data.remotes.some((item) => item.name === value)
         ? value : next.data.remotes.length === 1 ? next.data.remotes[0].name : '')
     }
   }, [api, cwd])
+  const firstCwd = useRef(cwd)
   useEffect(() => {
-    setState(null)
-    setOperations([])
+    // The initial cwd was already seeded from the last read; a later cwd is another repository.
+    if (firstCwd.current === cwd) return
+    firstCwd.current = cwd
+    const cached = lastRead(api, cwd)
+    setState(cached?.state ?? null)
+    setCachedAt(cached?.at ?? null)
+    setOperations(cached?.operations ?? [])
     setMessage('')
     setDelivery(null)
     setCommitTitle('')
@@ -105,7 +149,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     setTab('changes')
   }, [cwd])
   useEffect(() => {
-    if (active) void refresh().catch(report)
+    if (active) void refresh().catch((caught: unknown) => { setFreshReadFailed(true); report(caught) })
     else {
       epoch.current++
       diffEpoch.current++
@@ -121,17 +165,24 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   }, [selection?.path])
 
   async function execute(request: ScMutation): Promise<boolean> {
-    if (busyRef.current || !active) return false
+    // Opening a dialog is fine on an earlier read; sending a write is not.
+    if (busyRef.current || !active || staleRef.current) return false
     busyRef.current = true
     setBusy(true)
     setRunningAction(request.action)
     setError('')
     const operationId = crypto.randomUUID()
+    if (request.action === 'push' || request.action === 'fetch') runningOperation.current = { repositoryId: request.repositoryId, operationId }
+    setCancelState('idle')
     let succeeded = false
     try {
       if (request.action === 'commit') await messageQueue.current
       const result = await api.mutate({ ...request, operationId })
       succeeded = result.status === 'succeeded'
+      // The action has answered: its button is done. Writes stay locked (busy) until
+      // the repository is read again, so nothing is sent against an old revision.
+      runningOperation.current = null
+      if (alive.current) setRunningAction(null)
       if (alive.current && currentCwd.current === cwd) {
         setOperations((previous) => [result, ...previous.filter((op) => op.id !== result.id)])
         if (result.status === 'succeeded') {
@@ -144,7 +195,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
               next: request.action === 'commit' ? 'push' : 'pr' })
           }
         } else {
-          setTab('operations')
+          // A definite failure stays where it happened; the record is one click away.
           setError(result.message)
         }
       }
@@ -160,6 +211,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     } finally {
       try { if (currentCwd.current === cwd) await refresh() } catch (caught) { report(caught) }
       busyRef.current = false
+      runningOperation.current = null
       if (alive.current) {
         setBusy(false)
         setRunningAction(null)
@@ -200,7 +252,27 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   }
   const expected = repo ? { repositoryId: repo.id, expectedRevision: repo.revision } : null
   const unknown = operations.some((op) => op.status === 'unknown' && !op.acknowledged)
-  const disabled = busy || !active || !!repo?.writeBlocker || unknown
+  // An earlier read is shown, never written against.
+  const locked = busy || cachedAt !== null
+  const disabled = locked || !active || !!repo?.writeBlocker || unknown
+  const slowAction = useDelayedFlag(runningAction !== null, LONG_WAIT_MS, 0)
+  const showRefreshing = useDelayedFlag(refreshing)
+  const cancelRunning = (): void => {
+    const target = runningOperation.current
+    if (!target || cancelState === 'requested') return
+    setCancelState('requested')
+    // Cancel only asks main to stop this operation's own git child; the operation's
+    // own record says what happened (failed before sending, unknown after).
+    void api.cancel(target).then((accepted) => {
+      if (alive.current && !accepted && runningOperation.current === target) setCancelState('unavailable')
+    }, () => { if (alive.current && runningOperation.current === target) setCancelState('unavailable') })
+  }
+  const manualRefresh = (): void => {
+    if (refreshing || busy) return
+    setRefreshing(true)
+    void refresh().catch((caught: unknown) => { if (cachedAt !== null) setFreshReadFailed(true); report(caught) })
+      .finally(() => { if (alive.current) setRefreshing(false) })
+  }
   const primary = repo ? nextGitAction(repo, delivery, unknown) : null
   const scope = repo ? commitFiles(repo, selected) : []
   const selectedFile = repo?.files.find((file) => file.path === selection?.path)
@@ -220,9 +292,14 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           {repo && <small>{repo.upstream ? `上游 ${repo.upstream}` : '尚未设置上游'} · {pushed ? '本次推送已确认' : `↑${repo.ahead ?? '未知'} ↓${repo.behind ?? '未知'}`}</small>}
         </div>
         <div className="sc-header-actions"><button disabled={busy} onClick={() => setDetailsOpen(true)}>详情</button>
-          <button disabled={busy} title="刷新后需要重新选择工作区提交范围" onClick={() => void refresh().catch(report)}>刷新</button></div>
+          <button disabled={busy} aria-busy={refreshing} aria-disabled={refreshing} title="刷新后需要重新选择工作区提交范围" onClick={manualRefresh}><BusyLabel busy={showRefreshing}>刷新</BusyLabel></button></div>
       </header>
-      {error && <div role="alert" className="sc-notice sc-error">{error}<button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
+      {error && <div role="alert" className="sc-notice sc-error">{error}
+        {repo && tab !== 'operations' && <button className="sc-error-link" onClick={() => setTab('operations')}>查看操作记录</button>}
+        <button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
+      {cachedAt !== null && repo && <p className="sc-notice sc-cached" role="status">{freshReadFailed
+        ? `显示的是 ${readTime(cachedAt)} 读取的状态；重新读取失败，不能写入，可点刷新重试。`
+        : `显示的是 ${readTime(cachedAt)} 读取的状态，正在刷新；刷新完成前不能写入。`}</p>}
       {!state && <p role="status" className="sc-empty">正在读取仓库…</p>}
       {state && state.status !== 'available' && <div className="sc-empty"><h3>无法读取仓库</h3><p>{state.reason}</p><p>读取失败不代表没有变更。</p></div>}
       {repo && primary && expected && <>
@@ -241,7 +318,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
               {!repo.files.length && <p className="sc-empty">没有未提交的改动。</p>}
               {repo.files.map(file => <SourceControlFileRow key={file.path} file={file} buttonId={`${dialogId}-${file.path}`}
                 selected={selection?.path === file.path} included={isStaged(file) || selected.includes(file.path)}
-                busy={busy} unstageDisabled={disabled || !!repo.actionBlockers.unstage}
+                busy={locked} unstageDisabled={disabled || !!repo.actionBlockers.unstage}
                 onToggle={() => toggleFile(file.path)} onInspect={() => void inspectFile(file.path, isStaged(file))}
                 onUnstage={() => confirm({ ...expected, action: 'unstage', paths: [file.path] }, sourceControlFileCopy.unstageDetail(file.path))} />)}
               <p className="sc-scope-note">勾选只确定提交范围。确认提交时才暂存所选文件；已有暂存内容始终纳入，未选工作区改动保留。</p>
@@ -266,9 +343,9 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           </div>
         </div>
         <div className="sc-scroll" hidden={tab !== 'pr'}>
-          <GithubPullRequestPanel key={`${repo.id}:${repo.branch}`} repo={repo} active={active && tab === 'pr'} busy={busy} suggestedTitle={delivery?.head === repo.head ? commitTitle : ''} ask={confirm} report={report} api={api} />
+          <GithubPullRequestPanel key={`${repo.id}:${repo.branch}`} repo={repo} active={active && tab === 'pr'} busy={locked} suggestedTitle={delivery?.head === repo.head ? commitTitle : ''} ask={confirm} report={report} api={api} />
         </div>
-        {tab === 'operations' && <SourceControlOperations operations={operations} busy={busy}
+        {tab === 'operations' && <SourceControlOperations operations={operations} busy={locked}
           onReconcile={operationId => void api.reconcile({ repositoryId: repo.id, operationId }).then(() => refresh()).catch(report)}
           onAcknowledge={operationId => setConfirmation({
             title: sourceControlOperationCopy.acknowledgeTitle,
@@ -278,14 +355,21 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <footer className="sc-action-dock">
           <div className="sc-next-summary"><span>0{primary.step} / 03</span><div><strong>{primary.step === 1 ? scope.length ? `本次提交 ${scope.length} 个文件` : '先确认这次要提交哪些文件' : primary.step === 2 ? unknown ? '先核查未知操作，不重复发送' : '下一步：推送已存在的本地提交' : '下一步：查看或创建当前分支 PR'}</strong>
             <small>{primary.step === 1 ? '未选的工作区文件不会自动加入提交。' : primary.step === 2 ? '推送不包含未提交的工作区改动。' : '本次推送已确认；GitHub 状态需另行读取。'}</small></div></div>
-          <div className="sc-dock-buttons"><button disabled={busy} onClick={() => setActionsOpen(true)}>其他操作</button>
+          <div className="sc-dock-buttons">{(runningAction === 'push' || runningAction === 'fetch')
+            ? <button aria-busy={cancelState === 'requested'} aria-disabled={cancelState !== 'idle'} onClick={cancelRunning}>
+              {cancelState === 'requested' ? '正在取消…' : cancelState === 'unavailable' ? '无法取消' : '取消'}</button>
+            : <button disabled={busy} onClick={() => setActionsOpen(true)}>其他操作</button>}
             <button className="sc-primary" disabled={busy || !active || (primary.action === 'commit' && !repo.files.length)} onClick={primaryClick}>
-              {busy && runningAction ? `正在${actionNames[runningAction]}…` : primary.label}
+              {runningAction ? `正在${actionNames[runningAction]}…` : primary.label}
             </button></div>
-          <p className="sc-operation-status" role="status">{busy ? '正在执行已确认的操作，请等待结果。' : operations[0] ? `${actionNames[operations[0].action]} · ${statusNames[operations[0].status]} · ${operations[0].message}` : '尚未执行操作 · Git 状态与 Agent 文件证据独立'}</p>
+          <p className="sc-operation-status" role="status">{runningAction
+            ? slowAction ? sourceControlOperationCopy.slow(actionNames[runningAction]) : '正在执行已确认的操作，请等待结果。'
+            : busy ? '已收到结果，正在重新读取仓库状态…'
+              : operations[0] ? `${actionNames[operations[0].action]} · ${statusNames[operations[0].status]} · ${operations[0].message}` : '尚未执行操作 · Git 状态与 Agent 文件证据独立'}</p>
         </footer>
       </>}
       {repo && expected && commitOpen && <SourceControlCommitDialog repo={repo} selected={selected} message={message} messageHead={messageHead}
+        readBlocker={cachedAt !== null ? (freshReadFailed ? '仓库状态没能重新读取，暂不能提交；可关闭后点刷新重试。' : '正在重新读取仓库状态，完成后才能提交。') : null}
         onSelect={toggleFile} onMessage={updateMessage} onClose={() => setCommitOpen(false)} onCommit={() => {
           setCommitOpen(false)
           void execute({ ...expected, action: 'commit', paths: selected, message }).catch(report)
@@ -312,7 +396,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <h2 id={dialogId}>{confirmation.title}</h2><pre className="sc-confirm-detail">{confirmation.detail}</pre>
         {confirmation.blocker && <p className="sc-notice" role="alert">{confirmation.blocker}</p>}
         <div className="sc-actions"><button onClick={() => setConfirmation(null)}>取消</button>
-          <button className="sc-primary" disabled={!!confirmation.blocker || busy} onClick={() => {
+          <button className="sc-primary" disabled={!!confirmation.blocker || locked} onClick={() => {
             const action = confirmation.run
             setConfirmation(null)
             void action().catch(report)

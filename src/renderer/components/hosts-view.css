@@ -63,3 +63,4 @@
   .hosts-row-head { flex-wrap: wrap; }
   .hosts-row-details { padding-left: 14px; }
 }
+.hosts-error .hosts-button { margin-left: 8px; }

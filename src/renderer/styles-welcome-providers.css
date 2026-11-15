@@ -118,40 +118,7 @@
 
 .welcome-provider-head[data-tone='warn'] .welcome-ready-meter i[data-on='true'] { background: var(--warn); }
 
-.welcome-rescan {
-  flex: none;
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 9px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--dim2);
-  font: 11.5px/1 var(--font-ui);
-  cursor: pointer;
-  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
-}
 
-
-.welcome-rescan:hover:not(:disabled) {
-  border-color: var(--border2);
-  background: var(--panel3);
-  color: var(--fg);
-}
-
-.welcome-rescan:disabled { color: var(--dim3); cursor: default; }
-
-.welcome-rescan[data-busy='true'] .ico { animation: welcome-rescan-spin 900ms linear infinite; }
-
-@keyframes welcome-rescan-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .welcome-rescan[data-busy='true'] .ico { animation: none; }
-}
 
 /* Provider 卡片矩阵：2×2 取代满宽表格行，状态与名字待在一起。 */
 .welcome-provider-grid {

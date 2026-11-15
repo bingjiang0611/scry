@@ -3,7 +3,7 @@ import type { ScRepository } from '@shared/source-control'
 import { commitBlocker, commitFiles, isStaged } from '../source-control-workflow'
 import { ModalFrame, requestModalClose } from './Modals'
 
-export function SourceControlCommitDialog({ repo, selected, message, messageHead, onSelect, onMessage, onClose, onCommit }: {
+export function SourceControlCommitDialog({ repo, selected, message, messageHead, onSelect, onMessage, onClose, onCommit, readBlocker = null }: {
   repo: ScRepository
   selected: string[]
   message: string
@@ -12,11 +12,13 @@ export function SourceControlCommitDialog({ repo, selected, message, messageHead
   onMessage: (message: string) => void
   onClose: () => void
   onCommit: () => void
+  /** Set while the panel shows an earlier read: the message can be written, not committed yet. */
+  readBlocker?: string | null
 }) {
   const id = useId()
   const messageInput = useRef<HTMLTextAreaElement>(null)
   const files = commitFiles(repo, selected)
-  const blocker = commitBlocker(repo, selected)
+  const blocker = readBlocker ?? commitBlocker(repo, selected)
   return (
     <ModalFrame labelledBy={id} initialFocusRef={messageInput} className="sc-commit-dialog" onClose={onClose}>
       <h2 id={id}>确认本次提交</h2>

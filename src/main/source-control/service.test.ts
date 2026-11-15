@@ -373,6 +373,28 @@ describe('source control real temporary Git', { timeout: 15_000 }, () => {
     ).toBe('failed')
   })
 
+  it('cancels a push before it is sent: failed, nothing written, and only for this operation', async () => {
+    const remoteRepo = join(temp, 'cancel.git')
+    git('init', '--bare', remoteRepo)
+    authorized.add(remoteRepo)
+    git('remote', 'add', 'origin', remoteRepo)
+    const state = await snapshot()
+    const operationId = randomUUID()
+    expect(await service.cancel({ repositoryId: state.id, operationId: randomUUID() })).toBe(false)
+    const remoteHead = service.git.remoteHead.bind(service.git)
+    // The person presses Cancel while the pre-push remote check is running.
+    vi.spyOn(service.git, 'remoteHead').mockImplementationOnce(async (...args) => {
+      expect(await service.cancel({ repositoryId: state.id, operationId })).toBe(true)
+      return remoteHead(...args)
+    })
+    const op = await service.mutate({ action: 'push', repositoryId: state.id, expectedRevision: state.revision, remote: 'origin', operationId })
+    expect(op.status).toBe('failed')
+    expect(op.message).toContain('已取消')
+    expect(git('ls-remote', remoteRepo, 'refs/heads/feature')).toBe('')
+    // Finished operations have nothing left to cancel.
+    expect(await service.cancel({ repositoryId: state.id, operationId })).toBe(false)
+  })
+
   it('does not upgrade a nested workspace grant into parent repository access', async () => {
     const child = join(cwd, 'child')
     await mkdir(child)
@@ -420,4 +442,21 @@ describe('source control real temporary Git', { timeout: 15_000 }, () => {
     expect((await service.acknowledge({ repositoryId: state.id, operationId: id })).status).toBe('unknown')
   })
 
+})
+
+describe('ScProcess cancel', () => {
+  it('stops only the registered command group and reports the outcome as interrupted', async () => {
+    const runner = new ScProcess(() => ({ PATH: '/usr/bin:/bin', HOME: home, GIT_CONFIG_NOSYSTEM: '1' }))
+    const controller = new AbortController()
+    const started = Date.now()
+    // A git alias that runs a shell child: cancel must stop the whole group, not just git.
+    const running = runner.run('git', ['-c', 'alias.slow=!sleep 20', 'slow'], cwd, { timeout: 30_000, signal: controller.signal })
+    setTimeout(() => controller.abort(), 150)
+    await expect(running).rejects.toMatchObject({ interrupted: true, message: expect.stringContaining('已取消') })
+    expect(Date.now() - started).toBeLessThan(5_000)
+    const aborted = new AbortController()
+    aborted.abort()
+    await expect(runner.run('git', ['--version'], cwd, { signal: aborted.signal })).rejects.toMatchObject({ interrupted: true })
+    runner.dispose()
+  })
 })

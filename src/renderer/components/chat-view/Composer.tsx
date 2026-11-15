@@ -21,7 +21,7 @@ export function Composer({
   queueWhileBusy = true, draftAttachments, queuedPrompts, steerCapability = null, steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(), onSteerQueuedPrompt, editingQueuedId = null, movedQueuedId = null,
   onEditQueuedPrompt, onCancelQueuedPromptEdit, slashOpen: slashRequested, slashLoading, slashCmds, slashReason = null,
-  slashSel, pendingQuestions = [], stopStates = {}, traceHealth,
+  slashSel, pendingQuestions = [], stopStates = {}, stopRequest, traceHealth,
   onInput, onChooseFolder, onUnbindProject = () => {}, onPickRecent, onRemoveRecent, onRetrySlash, onPickSlash,
   onSlashSel, onHideSlash, onSend, onStop, onPasteImages, onPasteClipboardImage, onRemoveDraftAttachment,
   onRemoveQueuedPrompt, onSelectAgent, onAddPiAgent, onRemovePiAgent, onRunModel, onRunEffort, onPermissionMode,
@@ -101,7 +101,8 @@ export function Composer({
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
   const stopStatus = runStopStatus(
     inFlightTurn ? stopStates[inFlightTurn.runId] : undefined,
-    inFlightTurn != null && providerHasEnded(inFlightTurn.items)
+    inFlightTurn != null && providerHasEnded(inFlightTurn.items),
+    inFlightTurn && stopRequest?.runId === inFlightTurn.runId ? stopRequest : undefined
   )
   const busyTurn = busy ? inFlightTurn : undefined
   // Only the in-flight turn's own questions block it; another run's question is
