@@ -76,7 +76,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const handledOpenRequestId = useRef<number | null>(null)
 
   const loadDirectory = useCallback(
-    async (path = '', cursor?: string): Promise<void> => {
+    async (path = '', cursor?: string, refreshing = false): Promise<void> => {
       const sequence = (loadSequence.current.get(path) ?? 0) + 1
       loadSequence.current.set(path, sequence)
       setLoading((current) => new Set(current).add(path))
@@ -92,6 +92,13 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         setNextCursors((current) => ({ ...current, [path]: result.nextCursor }))
       } catch (loadError) {
         if (loadSequence.current.get(path) !== sequence) return
+        // An open folder that no longer reads during an in-place refresh is folded away,
+        // like a fresh tree would not show it; the root and explicit opens still report.
+        if (refreshing && path) {
+          setExpanded((current) => { const next = new Set(current); next.delete(path); return next })
+          setChildren((current) => { const { [path]: _gone, ...rest } = current; return rest })
+          return
+        }
         setError(errorMessage(loadError))
       } finally {
         if (loadSequence.current.get(path) === sequence) {
@@ -120,7 +127,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   expandedRef.current = expanded
   const refresh = useCallback((): void => {
     void loadDirectory()
-    for (const path of [...expandedRef.current].slice(0, MAX_REFRESHED_DIRECTORIES)) void loadDirectory(path)
+    for (const path of [...expandedRef.current].slice(0, MAX_REFRESHED_DIRECTORIES)) void loadDirectory(path, undefined, true)
   }, [loadDirectory])
 
   useEffect(() => {

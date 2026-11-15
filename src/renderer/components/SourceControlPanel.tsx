@@ -18,14 +18,21 @@ import { SourceControlRepositoryDialog } from './SourceControlRepositoryDialog'
 import { sourceControlActionNames as actionNames, sourceControlStatusNames as statusNames, sourceControlOperationCopy, sourceControlFileCopy } from '../constants/source-control-copy'
 
 // The last read of each repository, so returning to this tab shows what was known
-// instead of a cold load. Bounded, keyed by cwd, and always shown as an earlier read:
-// writes stay locked until a fresh read of the same cwd lands.
+// instead of a cold load. Keyed by the API (this machine or one remote host) and cwd,
+// so the same path on another machine is never shown as this one. Bounded per API, and
+// always shown as an earlier read: writes stay locked until a fresh read lands.
 const LAST_READ_LIMIT = 8
-const lastReads = new Map<string, { state: ScRead<ScRepository>; operations: ScOperation[]; at: number }>()
-function rememberRead(cwd: string, state: ScRead<ScRepository>, operations: ScOperation[]): void {
-  lastReads.delete(cwd)
-  lastReads.set(cwd, { state, operations, at: Date.now() })
-  while (lastReads.size > LAST_READ_LIMIT) lastReads.delete(lastReads.keys().next().value as string)
+type LastRead = { state: ScRead<ScRepository>; operations: ScOperation[]; at: number }
+const lastReadsByApi = new WeakMap<SourceControlApi, Map<string, LastRead>>()
+function lastRead(api: SourceControlApi, cwd: string): LastRead | undefined {
+  return lastReadsByApi.get(api)?.get(cwd)
+}
+function rememberRead(api: SourceControlApi, cwd: string, state: ScRead<ScRepository>, operations: ScOperation[]): void {
+  const reads = lastReadsByApi.get(api) ?? new Map<string, LastRead>()
+  lastReadsByApi.set(api, reads)
+  reads.delete(cwd)
+  reads.set(cwd, { state, operations, at: Date.now() })
+  while (reads.size > LAST_READ_LIMIT) reads.delete(reads.keys().next().value as string)
 }
 // After this long a running Git action says it is taking longer than usual.
 const LONG_WAIT_MS = 10_000
@@ -33,9 +40,10 @@ const readTime = (at: number): string => new Date(at).toLocaleTimeString('zh-CN'
 
 export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: string; active: boolean; api?: SourceControlApi }) {
   const api = useMemo(() => injectedApi ?? defaultSourceControlApi, [injectedApi])
-  const [state, setState] = useState<ScRead<ScRepository> | null>(() => lastReads.get(cwd)?.state ?? null)
+  const [state, setState] = useState<ScRead<ScRepository> | null>(() => lastRead(api, cwd)?.state ?? null)
   // Set while the panel shows an earlier read of this cwd; cleared by the first fresh read.
-  const [cachedAt, setCachedAt] = useState<number | null>(() => lastReads.get(cwd)?.at ?? null)
+  const [cachedAt, setCachedAt] = useState<number | null>(() => lastRead(api, cwd)?.at ?? null)
+  const [freshReadFailed, setFreshReadFailed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [tab, setTab] = useState<'changes' | 'pr' | 'operations'>('changes')
   const [error, setError] = useState('')
@@ -51,7 +59,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   currentCwd.current = cwd
   const diffEpoch = useRef(0)
   const backToFiles = useRef<HTMLButtonElement>(null)
-  const [operations, setOperations] = useState<ScOperation[]>(() => lastReads.get(cwd)?.operations ?? [])
+  const [operations, setOperations] = useState<ScOperation[]>(() => lastRead(api, cwd)?.operations ?? [])
   const [selection, setSelection] = useState<{ path: string; staged: boolean } | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [diff, setDiff] = useState<ScRead<ScDiff> | null>(null)
@@ -93,6 +101,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     diffEpoch.current++
     setState(next)
     setCachedAt(null)
+    setFreshReadFailed(false)
     setSelected([])
     setDiff(null)
     setSelection(null)
@@ -112,7 +121,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           ...latest,
           ...previous.filter((op) => op.repositoryId === next.data.id && op.status === 'unknown' && !latest.some((item) => item.id === op.id))
         ]
-        rememberRead(cwd, next, merged)
+        rememberRead(api, cwd, next, merged)
         return merged
       })
       setRemote((value) => next.data.remotes.some((item) => item.name === value)
@@ -124,7 +133,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     // The initial cwd was already seeded from the last read; a later cwd is another repository.
     if (firstCwd.current === cwd) return
     firstCwd.current = cwd
-    const cached = lastReads.get(cwd)
+    const cached = lastRead(api, cwd)
     setState(cached?.state ?? null)
     setCachedAt(cached?.at ?? null)
     setOperations(cached?.operations ?? [])
@@ -138,7 +147,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
     setTab('changes')
   }, [cwd])
   useEffect(() => {
-    if (active) void refresh().catch(report)
+    if (active) void refresh().catch((caught: unknown) => { setFreshReadFailed(true); report(caught) })
     else {
       epoch.current++
       diffEpoch.current++
@@ -258,7 +267,8 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   const manualRefresh = (): void => {
     if (refreshing || busy) return
     setRefreshing(true)
-    void refresh().catch(report).finally(() => { if (alive.current) setRefreshing(false) })
+    void refresh().catch((caught: unknown) => { if (cachedAt !== null) setFreshReadFailed(true); report(caught) })
+      .finally(() => { if (alive.current) setRefreshing(false) })
   }
   const primary = repo ? nextGitAction(repo, delivery, unknown) : null
   const scope = repo ? commitFiles(repo, selected) : []
@@ -284,7 +294,9 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
       {error && <div role="alert" className="sc-notice sc-error">{error}
         {repo && tab !== 'operations' && <button className="sc-error-link" onClick={() => setTab('operations')}>查看操作记录</button>}
         <button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {cachedAt !== null && repo && <p className="sc-notice sc-cached" role="status">显示的是 {readTime(cachedAt)} 读取的状态，正在刷新；刷新完成前不能写入。</p>}
+      {cachedAt !== null && repo && <p className="sc-notice sc-cached" role="status">{freshReadFailed
+        ? `显示的是 ${readTime(cachedAt)} 读取的状态；重新读取失败，不能写入，可点刷新重试。`
+        : `显示的是 ${readTime(cachedAt)} 读取的状态，正在刷新；刷新完成前不能写入。`}</p>}
       {!state && <p role="status" className="sc-empty">正在读取仓库…</p>}
       {state && state.status !== 'available' && <div className="sc-empty"><h3>无法读取仓库</h3><p>{state.reason}</p><p>读取失败不代表没有变更。</p></div>}
       {repo && primary && expected && <>
