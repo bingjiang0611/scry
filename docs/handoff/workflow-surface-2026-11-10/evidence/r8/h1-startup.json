@@ -1,0 +1,118 @@
+[
+  {
+    "case": "h1-early-2",
+    "cli": "1.1.89",
+    "stopClickMs": 114,
+    "stopClicked": true,
+    "interruptedVisible": true,
+    "nativeFrames": 0,
+    "nativeLast": null,
+    "runOwnedDaemonEvents": [],
+    "runOwnedDaemonNeverStarted": true,
+    "stopTurnRecords": [],
+    "followCompleted": true,
+    "followRecords": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true
+      }
+    ],
+    "controlCompleted": null,
+    "stdoutBytes": 1280,
+    "stdoutSha256": "21e30d53799b2b799edf2ecbb6336d13f251a825a4052a3ff01b160c767c1d50"
+  },
+  {
+    "case": "h1-middle",
+    "cli": "1.1.89",
+    "stopClickMs": 367,
+    "stopClicked": true,
+    "interruptedVisible": true,
+    "nativeFrames": 0,
+    "nativeLast": null,
+    "runOwnedDaemonEvents": [],
+    "runOwnedDaemonNeverStarted": true,
+    "stopTurnRecords": [],
+    "followCompleted": true,
+    "followRecords": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true
+      }
+    ],
+    "controlCompleted": null,
+    "stdoutBytes": 1280,
+    "stdoutSha256": "5e44260a63cd4f193838c660f11243087aeb0c7770d23f8055366c3bd69e3658"
+  },
+  {
+    "case": "h1-late-1",
+    "cli": "1.1.89",
+    "stopClickMs": 712,
+    "stopClicked": true,
+    "interruptedVisible": true,
+    "nativeFrames": 0,
+    "nativeLast": null,
+    "runOwnedDaemonEvents": [],
+    "runOwnedDaemonNeverStarted": true,
+    "stopTurnRecords": [],
+    "followCompleted": true,
+    "followRecords": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true
+      }
+    ],
+    "controlCompleted": null,
+    "stdoutBytes": 1600,
+    "stdoutSha256": "de159d3b48e749634839ddde6f1a71711227c0cf8984e8319efab0f0631ee0d5"
+  },
+  {
+    "case": "h1-control",
+    "cli": "1.1.89",
+    "stopClickMs": null,
+    "stopClicked": false,
+    "interruptedVisible": false,
+    "nativeFrames": 22,
+    "nativeLast": {
+      "type": "command_lifecycle",
+      "subtype": null
+    },
+    "runOwnedDaemonEvents": [
+      {
+        "event": "daemon started",
+        "relativeClickMs": 21065,
+        "durationMs": null,
+        "pidPresent": true
+      },
+      {
+        "event": "query closing",
+        "relativeClickMs": 50639,
+        "durationMs": null,
+        "pidPresent": false
+      },
+      {
+        "event": "daemon stopping",
+        "relativeClickMs": 50639,
+        "durationMs": null,
+        "pidPresent": true
+      },
+      {
+        "event": "daemon stopped",
+        "relativeClickMs": 53544,
+        "durationMs": 2905,
+        "pidPresent": true
+      }
+    ],
+    "runOwnedDaemonNeverStarted": false,
+    "stopTurnRecords": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true
+      }
+    ],
+    "followCompleted": null,
+    "followRecords": [],
+    "controlCompleted": true,
+    "stdoutBytes": 1280,
+    "stdoutSha256": "73984703a1d063e5b4683ef75fef88da0cb7dad628c414d65061000194d81a92"
+  }
+]
