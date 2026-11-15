@@ -20,7 +20,7 @@ import { persistTraceToolEvents } from '../trace-tool-content'
 import { sessionLoadMatchesRun } from '../session-diff'
 import { appSessionCanResume } from '../app-store'
 import { historyCopy } from '../../shared/constants/copy'
-import { readSessionArchive } from './history-archive'
+import { DEFAULT_LOAD_SESSION_TURNS, readSessionArchive } from './history-archive'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { rememberSessionProjectAfterLoad } from './history-project-recency'
 import { hydrateTranscriptArchiveWindow, type TranscriptArchiveWindow } from '../transcript-archive-paging'
@@ -115,6 +115,9 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         ? { agentProfileId: payload.agentProfileId }
         : {}
       const archivePaged = sessionArchiveIsPageable(payload.providerId, fp)
+      // Transcript-backed history now pages like archive-only history, so its first page uses the
+      // same small default; older turns load on demand through the unchanged history window.
+      const firstPageLimit = request?.limit ?? (fp ? DEFAULT_LOAD_SESSION_TURNS : undefined)
       const matchingRuns = getRuns().unsettledStates()
         .filter((run) => sessionLoadMatchesRun(run, {
           providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
@@ -177,7 +180,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         pagedWindow = await hydrateTranscriptArchiveWindow({
           paging: transcriptPaging,
           transcriptTurns: turns,
-          request: { limit: request?.limit },
+          request: { limit: firstPageLimit },
           context: { userDataDir },
           readTurns: (runIds) => readTraceArchiveTurnsAsync(archiveArgs, runIds, signal),
           persistItems: (items) => persistTraceToolEvents(userDataDir, cwd, items),
@@ -329,7 +332,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
           sourceComplete: archivePage.sourceComplete,
           completeness: archivePage.hasOlder || !archivePage.sourceComplete ? 'partial' : 'complete'
         }
-        : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
+        : sessionHistoryPage(merged, { before: undefined, limit: firstPageLimit })
       let selectedPage = unhydratedPage
       let selectedArchive: TraceArchive | null = pagedWindow?.archive ?? archived
       if (nativeSnapshot) {
