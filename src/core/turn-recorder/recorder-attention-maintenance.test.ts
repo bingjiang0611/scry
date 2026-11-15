@@ -91,7 +91,14 @@ it('clears current-generation quarantine evidence before deciding whether to kee
   await expect(readFile(join(turn, 'pending-open.json'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
-it('keeps recovering known inbox work when a periodic rebuild fails, without fabricating dropped events', async () => {
+// This case drives the production rebuild cadence: 64 real recovery passes against a real temporary
+// data root, about 210 fsyncs (strace). Its run time is the runner's fsync latency: under 1 s on a
+// local disk, past the 5 s Vitest default on a shared CI disk (cli-compat, run 43365276775). The
+// explicit budget covers that I/O. Every assertion is unchanged, and a lock wait that never resolves
+// still fails the test.
+const PERIODIC_REBUILD_TIMEOUT_MS = 30_000
+
+it('keeps recovering known inbox work when a periodic rebuild fails, without fabricating dropped events', { timeout: PERIODIC_REBUILD_TIMEOUT_MS }, async () => {
   const f = await fixture()
   await reconcileAttentionIndex(f.enabled.dataRoot)
   for (let pass = 1; pass < 64; pass++) await f.recorder.recoverRecorder(f.root, f.env)

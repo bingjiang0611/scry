@@ -80,6 +80,12 @@ const CASES: Array<{ k: number, scenario: string }> = [
 ]
 const samples = new Map<number, ProbeSample[]>(CASES.map(({ k }) => [k, []]))
 
+// These cases count work. They do not time it, so the per-test timeout only bounds a hang. One complete 50k
+// sample took 2.5-2.9 s locally and 3.1-3.7 s under the V8 coverage instrumentation that CI uses (4 cores).
+// That exceeds the 5 s Vitest default on the slower CI unit shard (unit (4), runs 43248550548 and
+// 43704860820). The workload, repeat count and every assertion are unchanged.
+const SAMPLE_TIMEOUT_MS = 30_000
+
 describe('concurrency trace single-run main projection work counters', () => {
   registerProbeControl()
 
@@ -144,7 +150,8 @@ describe('concurrency trace single-run main projection work counters', () => {
       const collected = samples.get(k)
       if (!collected) throw new Error(`no sample list for ${k}`)
       collected.push(sample)
-    }
+    },
+    SAMPLE_TIMEOUT_MS
   )
 
   it.each(CASES)('aggregates the $scenario samples as unregistered candidates', ({ k, scenario }) => {

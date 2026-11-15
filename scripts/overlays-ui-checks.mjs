@@ -125,7 +125,11 @@ export async function exerciseOverlays(contents) {
   await wait(`${css('.runtime-composer textarea')} != null`)
   if (await read(`document.querySelector('.app').classList.contains('right-panel-hidden') || !document.getElementById('right-surface-pane')`)) await click(css('.panel-pill:not(.summary-pill)'))
   const plus = '[data-session-surface-current="true"] .surface-add-wrap > button'
-  await wait(`${css(plus)} != null && !document.getAnimations().some(animation => animation.id === 'scry-pane')`)
+  // A hidden right pane stays mounted under display:none, so the button exists with a 0x0 box,
+  // and the native pill click above is handled asynchronously. Wait for the opened, laid-out
+  // pane, not merely the node, or the old hidden state satisfies this wait before the click
+  // lands (macOS CI run 43697289777: "Occluded overlay target" with a zero rect).
+  await wait(`!document.querySelector('.app').classList.contains('right-panel-hidden') && (() => { const node = ${css(plus)}; const box = node?.getBoundingClientRect(); return Boolean(box && box.width > 0 && box.height > 0) })() && !document.getAnimations().some(animation => animation.id === 'scry-pane')`)
   await click(css(plus))
   await wait(`${css('.surface-menu')}?.getAnimations().some(animation => animation.effect.getTiming().duration === 200)`)
   check(await read(`getComputedStyle(${css('.surface-menu')}).transformOrigin.includes('0px')`), 'Surface menu has no top-edge origin')
