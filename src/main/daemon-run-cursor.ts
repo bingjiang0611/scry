@@ -36,6 +36,9 @@ export interface RunCursor {
   resyncRequired: boolean
   pumping: boolean
   stopped: boolean
+  // The pump ended on a failed read (the daemon went away), not because the ledger says
+  // the run ended: what the window shows is only the last view read before the outage.
+  interrupted?: boolean
   // Where the wait before the first token actually goes. Only recorded when perf
   // logging is on; it answers "which hop?" instead of guessing.
   stamp?: PerformanceTrace
@@ -79,6 +82,19 @@ export function noteWatchEvents(cursor: RunCursor, events: ReadonlyArray<{ runId
       }
     }
   }
+}
+
+/**
+ * Whether a run whose pump ended on an outage should be read again, now that notices
+ * resume (the daemon is back, or answered a reset). Its view would otherwise keep the
+ * last state read before the outage for as long as the window is open, while the
+ * daemon's ledger has already ended the run (`host_restarted` after a crash).
+ */
+export function resume(cursor: RunCursor): boolean {
+  if (!cursor.interrupted || cursor.pumping) return false
+  cursor.interrupted = false
+  cursor.stopped = false
+  return true
 }
 
 // The trace only reports `done` when a snapshot happens to be the read that carries

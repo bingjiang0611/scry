@@ -5,7 +5,7 @@ import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
-import { noteWatchEvents, view, type RunCursor } from './daemon-run-cursor'
+import { noteWatchEvents, resume, view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
@@ -84,7 +84,11 @@ export class DaemonRunRuntime {
   // instead of holding a long poll on the one watch lane other runs need too.
   readonly #wakes = new RunWakes()
   wake(runId: string): void { this.#wakes.wake(runId) }
-  wakeAll(): void { this.#wakes.wakeAll() }
+  // Every run re-reads, including one whose pump ended on the outage that lost them.
+  wakeAll(): void {
+    this.#wakes.wakeAll()
+    for (const cursor of this.#runs.values()) if (!this.#disposed && resume(cursor)) void this.pump(cursor.runId)
+  }
   setWakesLive(live: boolean): void { this.#wakes.setLive(live) }
 
   /** The batching bridge, so `agent:traceAck` credits the same delivery state. */
@@ -320,8 +324,10 @@ export class DaemonRunRuntime {
       }
     } catch (error) {
       // A revoked grant or a dead daemon is not a run outcome. Keep the reason and
-      // stop pumping: continuing would burn the poll budget on a closed socket.
+      // stop pumping: continuing would burn the poll budget on a closed socket. The
+      // next wakeAll (notices resume) reads the run again, unless it was released.
       this.#deps.onWarn?.('daemon run pump stopped', error)
+      cursor.interrupted = !cursor.stopped
       cursor.stopped = true
     } finally {
       cursor.pumping = false
@@ -372,7 +378,7 @@ export class DaemonRunRuntime {
   /** Forget one run's cursor, e.g. after the view moved to another session. */
   release(runId: string): void {
     const cursor = this.#runs.get(runId)
-    if (cursor) cursor.stopped = true
+    if (cursor) { cursor.stopped = true; cursor.interrupted = false }
     this.#wakes.wake(runId)
   }
 
