@@ -5,8 +5,7 @@ import { Composer } from './chat-view/Composer'
 import type { ChatViewProps, SessionChatViewProps } from './chat-view/types'
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
-import { DelayedLoadingStatus } from './LoadingStatus'
-import { HISTORY_WINDOW_COPY, LOADING_COPY } from '../constants/copy'
+import { HISTORY_WINDOW_COPY } from '../constants/copy'
 import { useHistoryAutoload } from '../hooks/useHistoryAutoload'
 import { ChineseHeadingText } from '../typography'
 
@@ -115,9 +114,8 @@ export function ChatView(props: ChatViewProps) {
             {!sessionLoading && historyWindow?.pagedOlder && !historyWindow.hasOlder && turns.length > 0 && (
               <p className="history-window-start" role="note">{HISTORY_WINDOW_COPY.exhausted(historyWindow.totalTurns)}</p>
             )}
-            {(sessionLoading || sessionCacheVisible) && (
-              <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
-            )}
+            {/* Maintainer decision (2026-11-15): no session-history banner at any duration. Pending
+                authority stays explicit as aria-busy, data-history-source="preview" and the locked composer. */}
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
                 liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />

@@ -40,9 +40,8 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     window.__loadingObserver?.disconnect(); cancelAnimationFrame(window.__loadingFrame)
     window.__loadingReadObservation?.abort()
     const state = window.__loadingState = { since:performance.now(), seen:false, pending:false, badControls:false, identityStable:true, preview:true, authority:false, visible:true, shifted:false, replacement:false, draft:null, top:null, reserved:null }
-    // The timeline's own session-history status. ChatView renders it as standard flow content
-    // above .chat-transcript-content while sessionLoading || sessionCacheVisible, so it moves the
-    // turn down by exactly its own height while the read is pending.
+    // A session-history status inside the timeline. Maintainer decision 2026-11-15: ChatView renders
+    // none at any read duration; any such node is recorded in state.seen and fails the checks below.
     const loaderOf = transcript => transcript?.querySelector('.loading-status[data-status="loading"]:not(.chat-session-evidence-gap)') ?? null
     const scan = () => {
       const record = window.loadingFixture.records.filter(r=>r.kind==='session' && r.start>=state.since).at(-1)
@@ -50,9 +49,8 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       const loader = loaderOf(transcript)
       if(record && !record.end) {
         // Approved catalog-preview contract (57251373): the target owns the page from the first
-        // frame and the standard delayed status is intentionally shown during a slow read, so the
-        // guards are "target selected, its own preview visible, no old authority" plus a shift
-        // budget of exactly that status' flow height.
+        // frame; the guards are "target selected, its own preview visible, no old authority" and no
+        // layout shift. The history banner was removed (2026-11-15), so its reserved height stays 0.
         if (loader) state.seen = true
         state.pending = true
         state.identityStable &&= document.querySelector('.sb-sess[aria-current=true]')?.textContent.includes(${JSON.stringify(target)})
@@ -127,9 +125,10 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
   const fast = await measured('cache-b', 60)
   check(!fast.seen && fast.replacement, `60ms read flashed the session-history status or lost the 400ms replacement: ${JSON.stringify(fast)}`)
   const slow = await measured('cache-a', 1000)
-  check(slow.seen, `slow session read never showed the standard loading status: ${JSON.stringify(slow)}`)
+  check(!slow.seen, `slow session read showed the removed session-history banner: ${JSON.stringify(slow)}`)
   const failed = await measured('cache-b', 1000, true)
-  check(failed.seen, 'failed session read never showed the standard loading status')
+  // A failed read reports through the composer error (checked in measured), not a history banner.
+  check(!failed.seen, `failed session read showed the removed session-history banner: ${JSON.stringify(failed)}`)
   await screenshot('failure')
   let reduced
   try {
@@ -138,7 +137,7 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
     // Restore real content first; then measure a slow switch from a populated timeline.
     await read('window.loadingFixture.configure(60)'); await select('cache-b'); await ready('cache-b')
     reduced = await measured('cache-a', 1000)
-    check(reduced.seen && reduced.visible, `reduced motion hid the standard loading status or blanked the transcript: ${JSON.stringify(reduced)}`)
+    check(!reduced.seen && reduced.visible, `reduced motion showed the removed session-history banner or blanked the transcript: ${JSON.stringify(reduced)}`)
     await screenshot('reduced-ready')
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [

@@ -9,7 +9,7 @@ import type { WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { focusComposerUnlessFocusMoved } from './composer-focus'
 import type { DraftAttachment, QueuedPrompt, SessionPromptQueues } from './app-model'
 import { appendWorkspaceReference } from './app-model'
-import { QUEUE_COPY } from './constants/copy'
+import { HISTORY_WINDOW_COPY, QUEUE_COPY } from './constants/copy'
 import { activeSteerIdentityMatches, isSteerRemovalBlocked, latestSteerCapability, steerStateForMessage, updateQueuedPromptByMessageId, type RendererSteerEvidence } from './steer'
 import { workspaceReferenceToken } from './components/WorkspacePanel'
 
@@ -252,8 +252,9 @@ export function useAppQueueActions(context: AppQueueContext) {
     if (typeof window.scry.loadSessionOlder !== 'function' || !selectedProviderSessionId) return
     setHistoryOlderLoading(true)
     try {
-      const page = await window.scry
-        .loadSessionOlder(
+      let page: Awaited<ReturnType<typeof window.scry.loadSessionOlder>> = null
+      try {
+        page = await window.scry.loadSessionOlder(
           {
             providerId: integrations.selectedProviderId,
             agentProfileId: integrations.providerContext.agentProfileId,
@@ -262,7 +263,10 @@ export function useAppQueueActions(context: AppQueueContext) {
           },
           { before: historyWindow.offset }
         )
-        .catch(() => null)
+      } catch (error) {
+        // Stale or superseded requests resolve null in main; a rejection is a real failure of this page.
+        setComposerError(HISTORY_WINDOW_COPY.loadOlderFailed(error instanceof Error ? error.message : String(error)))
+      }
       session.prependOlderTurns(historyWindow.sessionId, page)
     } finally {
       setHistoryOlderLoading(false)

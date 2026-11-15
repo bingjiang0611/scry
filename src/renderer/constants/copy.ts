@@ -266,7 +266,8 @@ export const HISTORY_WINDOW_COPY = {
   rangeRemote: (loaded: number, host: string) => `已加载最近 ${loaded} 轮·更早轮次仍在 ${host} 的归档中，未丢弃`,
   loadOlder: '加载更早轮次',
   loadingShort: '加载中…',
-  exhausted: (total: number) => `已到最早一轮 · 共 ${total} 轮`
+  exhausted: (total: number) => `已到最早一轮 · 共 ${total} 轮`,
+  loadOlderFailed: (detail: string) => `无法加载更早轮次：${detail}`
 } as const
 
 export const ARCHIVED_SESSIONS_COPY = {
@@ -340,8 +341,6 @@ export const QUEUE_COPY = {
 
 export const LOADING_COPY = {
   sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
-  sessionHistory: '正在读取会话历史…',
-  sessionHistoryDetail: '会话已切换；内容将在本机证据读取完成后显示。',
   skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   skills: '正在读取 Skill…',

@@ -49,7 +49,7 @@ export async function exerciseSessionCache(contents) {
   const cached = async id => {
     const condition = `document.querySelector('.chat-transcript[aria-busy="false"][data-history-source="preview"]') != null &&
       document.querySelector('.chat-transcript')?.textContent.includes(${JSON.stringify(`Authoritative ${id}`)}) &&
-      document.querySelector('.loading-status[data-status="loading"]') != null`
+      document.querySelector('.chat-transcript .loading-status[data-status="loading"]') == null`
     await wait(condition)
     return read(condition)
   }
@@ -71,7 +71,7 @@ export async function exerciseSessionCache(contents) {
       document.querySelector('.transcript-turn')?.dataset.runId === ${JSON.stringify(`session-preview:${id}`)} &&
       document.querySelector('.chat-transcript').textContent.includes(${JSON.stringify(id)}) &&
       !document.querySelector('.chat-transcript').textContent.includes('Authoritative') &&
-      document.querySelector('.loading-status[data-status="loading"]') != null &&
+      document.querySelector('.chat-transcript .loading-status[data-status="loading"]') == null &&
       document.querySelector('button.send').disabled && !document.querySelector('button[title="从此轮创建分支会话"]')`
     await wait(condition)
     return read(condition)
@@ -150,7 +150,7 @@ export async function exerciseSessionCache(contents) {
   // Native input dispatch does not await React's commit. Observe the existing
   // uncached-loading state and require the visible cache to clear while the
   // authority request is still pending; keep the no-turns and stale-response checks.
-  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && document.querySelector('.loading-status[data-status="loading"]')`)
+  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && !document.querySelector('.chat-transcript .loading-status[data-status="loading"]')`)
   await wait(`document.querySelectorAll('.transcript-turn').length === 0`)
   check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
   await control('resolve-b'); await ready('cache-b')
