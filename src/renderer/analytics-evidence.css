@@ -755,3 +755,9 @@
     font-size: 28px;
   }
 }
+
+/* Previous range kept on screen while the new one loads: dimmed, never presented as current. */
+.usage-page[data-stale-range] > :not(.usage-header) {
+  opacity: 0.5;
+  transition: opacity var(--duration-sm) var(--ease-out);
+}

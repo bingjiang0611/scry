@@ -49,6 +49,8 @@ export const TURN_DIFF_REVIEW_COPY = {
 } as const
 
 export const ANALYTICS_COPY = {
+  // 切换范围时旧数据仍在屏幕上，必须说清它属于哪个范围。
+  staleRange: (next: number, shownFrom: string, shownTo: string): string => `正在读取最近 ${next} 天… 下方仍是 ${shownFrom} – ${shownTo} 的数据`,
   title: '用量',
   totalLabel: '原始 Token 成本',
   composition: '成本构成',

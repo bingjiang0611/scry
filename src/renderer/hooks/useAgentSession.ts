@@ -3,6 +3,7 @@ import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import { useAgentStart } from './useAgentStart'
 import type { StopRequest } from '../run-stop-status'
+import { actionErrorText } from './useAsyncAction'
 import { applyTraceBatch } from '../format'
 import type { ParsedTurn, TraceBatchReceipt } from '../env'
 import type { Turn } from '../format'
@@ -259,7 +260,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     try {
       await window.scry.stop(runId)
     } catch (error) {
-      const reason = error instanceof Error && error.message ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : '停止请求失败'
+      const reason = actionErrorText(error, '停止请求失败')
       setStopRequest((current) => current?.runId === runId ? { runId, status: 'failed', reason } : current)
     }
   }, [currentRunId])

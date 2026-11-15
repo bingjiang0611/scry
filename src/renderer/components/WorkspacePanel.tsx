@@ -6,6 +6,7 @@ import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } 
 export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 
 import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { WorkspaceFileTree } from './WorkspaceFileTree'
 import { workspaceCopy as copy } from '../constants/workspace-copy'
 
@@ -50,6 +51,10 @@ type ItemDialog =
   | { kind: 'create'; parentPath: string; entryKind: WorkspaceEntryKind; value: string }
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
+
+// Upper bound on open folders read again by one refresh; any beyond it keep their
+// previous listing until a later refresh reaches them.
+const MAX_REFRESHED_DIRECTORIES = 16
 
 export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi }: WorkspacePanelProps) {
   const api = useMemo<WorkspaceApi>(() => injectedApi ?? defaultWorkspaceApi, [injectedApi])
@@ -101,11 +106,21 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     [api, cwd, readOnlySource]
   )
 
-  const refresh = useCallback((): void => {
+  // Another workspace is another tree: start empty.
+  const reset = useCallback((): void => {
     setChildren({})
     setExpanded(new Set())
     setNextCursors({})
     void loadDirectory()
+  }, [loadDirectory])
+
+  // The same workspace read again keeps its tree and open folders on screen and
+  // reads each open level once; each level is replaced when its own answer lands.
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
+  const refresh = useCallback((): void => {
+    void loadDirectory()
+    for (const path of [...expandedRef.current].slice(0, MAX_REFRESHED_DIRECTORIES)) void loadDirectory(path)
   }, [loadDirectory])
 
   useEffect(() => {
@@ -113,8 +128,8 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     initializedCwd.current = cwd
     setSelected(null)
     setDirty(false)
-    refresh()
-  }, [active, cwd, refresh])
+    reset()
+  }, [active, cwd, reset])
 
   useEffect(() => {
     if (!active || refreshKey === handledRefreshKey.current || dirty) return
@@ -285,8 +300,9 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
             {!readOnlySource && <button type="button" className="iconbtn" onClick={() => startCreate('file')} title={copy.createFile}>
               <Icon name="plus" />
             </button>}
-            <button type="button" className="iconbtn" onClick={refresh} title={copy.refreshFiles}>
-              <Icon name="refresh" />
+            <button type="button" className="iconbtn" onClick={() => { if (!loading.has('')) refresh() }} title={copy.refreshFiles}
+              aria-busy={loading.has('')} aria-disabled={loading.has('')}>
+              <TurningIcon busy={loading.has('')} />
             </button>
           </>
         )}
