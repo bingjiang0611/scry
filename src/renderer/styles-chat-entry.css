@@ -75,44 +75,7 @@
   margin: 0 auto;
   width: 100%;
 }
-.wc-eyebrow {
-  display: block;
-  margin-bottom: 10px;
-  color: var(--dim2);
-  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
-}
-.wc-hero h2 {
-  margin: 0;
-  font: 620 30px/1.18 var(--font-ui);
-  letter-spacing: -0.02em;
-  max-width: 24ch;
-}
-.wc-hero p {
-  margin: 12px 0 0;
-  font-size: var(--text-base);
-  line-height: 1.6;
-  max-width: 56ch;
-}
-.wc-environment {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
-  align-items: start;
-  gap: 16px;
-  margin-top: 36px;
-  padding: 13px 0;
-  border-top: 1px solid var(--border3);
-  border-bottom: 1px solid var(--border3);
-}
-.wc-status-label {
-  padding-top: 2px;
-  color: var(--dim2);
-  font: var(--weight-semibold) 11.5px/1.4 var(--font-ui);
-}
-.wc-status {
-  display: flex;
-  gap: 8px 18px;
-  flex-wrap: wrap;
-}
+
 .stat-pill {
   display: inline-flex;
   align-items: center;
@@ -130,29 +93,7 @@
   color: var(--dim2);
   font: 10.5px/1.4 var(--font-mono);
 }
-.wc-actions {
-  margin-top: 34px;
-  padding: 0;
-  background: transparent;
-  border-radius: 0;
-}
-.wc-act-h {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.wc-act-h h3 {
-  margin: 0;
-  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
-  color: var(--dim);
-  letter-spacing: 0;
-  text-transform: none;
-}
-.wc-act-h > span {
-  color: var(--dim3);
-  font-size: var(--text-xs);
-}
+
 .recent-list {
   display: flex;
   flex-direction: column;
@@ -220,18 +161,7 @@
   min-width: 56px;
   text-align: right;
 }
-.wc-browse {
-  margin-top: 24px;
-  display: flex;
-  gap: 10px;
-}
-.wc-suggest h3 {
-  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
-  color: var(--dim);
-  letter-spacing: 0;
-  text-transform: none;
-  margin: 32px 0 10px;
-}
+
 .sg-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -261,13 +191,6 @@
 .sg-card .ico {
   flex: none;
   color: var(--dim3);
-}
-.wc-footnote {
-  margin-top: 34px;
-  padding-top: 0;
-  border-top: 0;
-  font: 11.5px/1.6 var(--font-ui);
-  color: var(--dim2);
 }
 
 .turn {

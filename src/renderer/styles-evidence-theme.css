@@ -8,11 +8,6 @@ textarea:focus-visible,
   outline-width: 2px;
 }
 
-.input:focus,
-.composer textarea:focus,
-.modal-search:focus {
-  border-color: var(--accent);
-}
 
 @media (hover: hover) and (pointer: fine) {
   .ctxitem:hover{
@@ -54,7 +49,6 @@ select:focus-visible,
   border-color: var(--selected-line);
 }
 
-
 /* Workbench chrome */
 .sb-brand::before {
   content: 'S';
@@ -76,13 +70,10 @@ select:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
-
-
 .sb-navitem.active,
 .sb-sess.active {
   box-shadow: inset 2px 0 0 var(--selected);
 }
-
 
 .sb-sess[data-provider='claude'] .sb-provider { color: var(--provider-claude); }
 .sb-sess[data-provider='codex'] .sb-provider { color: var(--provider-codex); }

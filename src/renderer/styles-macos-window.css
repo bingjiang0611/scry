@@ -43,13 +43,13 @@
   user-select: none;
 }
 
-:root[data-platform='macos'] .topbar button,
+:root[data-platform='macos'] .topbar button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
 :root[data-platform='macos'] .topbar input,
 :root[data-platform='macos'] .topbar select,
 :root[data-platform='macos'] .topbar textarea,
 :root[data-platform='macos'] .topbar a,
 :root[data-platform='macos'] .topbar [role='button'],
-:root[data-platform='macos'] .surface-topbar button,
+:root[data-platform='macos'] .surface-topbar button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
 :root[data-platform='macos'] .surface-topbar input,
 :root[data-platform='macos'] .surface-topbar select,
 :root[data-platform='macos'] .surface-topbar textarea,

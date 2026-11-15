@@ -68,7 +68,7 @@
   background: transparent;
 }
 
-.evidence-segments .segment-ribbon button {
+.evidence-segments .segment-ribbon button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   min-width: 64px;
   min-height: 68px;
   display: grid;
@@ -196,7 +196,7 @@
   .overview-dossier .turn-call-group:not(:disabled):hover,
   .evidence-graph .graph-session-wall button.gline:hover,
   .evidence-segments .segment-ledger > .segment-row:hover,
-  .evidence-segments .segment-ribbon button:hover { background-color: var(--surface-hover); }
+  .evidence-segments .segment-ribbon button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover { background-color: var(--surface-hover); }
 }
 
 @container (max-width: 900px) {
@@ -215,7 +215,7 @@
 
 @container (max-width: 720px) {
   .chat-body .chat-transcript { padding-inline: 16px; }
-  .runtime-composer { padding-inline: 18px; }
+  .runtime-composer { padding-inline: 16px; }
 
   .evidence-graph {
     grid-template-columns: minmax(0, 1fr);

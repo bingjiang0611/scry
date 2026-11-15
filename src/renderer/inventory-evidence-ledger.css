@@ -269,8 +269,8 @@
   box-shadow: none;
 }
 
-.inventory-search button,
-.inventory-empty button {
+.inventory-search button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
+.inventory-empty button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   flex: none;
   min-height: 28px;
   padding: 0 8px;

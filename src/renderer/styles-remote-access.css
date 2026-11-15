@@ -30,7 +30,7 @@
 .remote-pairing__pending li { padding: 12px; border: 1px solid var(--warn); border-radius: var(--r-lg); background: var(--warn-soft); }
 .remote-pairing__pending .remote-pairing__fp { flex-basis: 100%; }
 .remote-pairing__devices .remote-pairing__label { flex: 1; }
-.remote-pairing__pending button, .remote-pairing__devices button {
+.remote-pairing__pending button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)), .remote-pairing__devices button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   padding: 4px 10px; border-radius: var(--r-sm); border: 1px solid var(--border2);
   background: var(--panel3); color: var(--fg); cursor: pointer; font-size: var(--text-sm);
 }

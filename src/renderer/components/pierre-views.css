@@ -48,7 +48,7 @@
 }
 /* CodeView's sticky-header layer disables pointer events on empty space. */
 .pierre-file-header { pointer-events: auto; display: flex; align-items: center; width: 100%; height: 32px; overflow: hidden; background: var(--panel2); color: var(--fg); }
-.pierre-file-header > button {
+.pierre-file-header > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   display: flex;
   align-items: center;
   flex: 1;
@@ -65,7 +65,7 @@
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
-.pierre-file-header > button:hover { background: var(--panel3); }
+.pierre-file-header > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover { background: var(--panel3); }
 .pierre-file-header svg { flex: none; width: 13px; height: 13px; }
 .pierre-file-header .diff-add { color: var(--ok); }
 .pierre-file-header .diff-del { color: var(--bad); }
@@ -78,10 +78,10 @@
 .sc-patch.pierre-patch > p { flex: none; }
 .pierre-comment-target { display: flex; flex: none; flex-wrap: wrap; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
 .pierre-comment-target input { width: 90px; }
-.pierre-comment-target select, .pierre-comment-target input, .pierre-comment-target button {
+.pierre-comment-target select, .pierre-comment-target input, .pierre-comment-target button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   min-height: 28px; border: 1px solid var(--border); border-radius: var(--r-xs);
   padding: 4px 7px; background: var(--panel); color: var(--fg); font: var(--text-sm) var(--font-ui);
 }
-.pierre-comment-target button:disabled { opacity: .45; }
+.pierre-comment-target button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled { opacity: .45; }
 .pierre-comment-target :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.pierre-file-header button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pierre-file-header button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

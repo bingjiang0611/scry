@@ -37,7 +37,7 @@
   padding: 6px;
 }
 .location-col { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.location-projects { border-left: 1px solid var(--border3); padding-left: 6px; }
+.location-projects { border-left: 1px solid var(--border3); padding-left: 8px; }
 .location-project-list { max-height: 260px; }
 .location-machine { position: relative; }
 .location-machine.is-shown { background: var(--surface-strong); }
@@ -45,13 +45,13 @@
 .location-copy { min-width: 0; flex: 1; display: grid; gap: 2px; text-align: left; }
 .location-copy b,
 .location-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.location-copy b { font-weight: 560; }
+.location-copy b { font-weight: var(--weight-medium); }
 .location-copy code { color: var(--dim2); font-size: var(--text-xs); }
 .location-state { flex: none; color: var(--warn); font-size: var(--text-xs); }
-.location-empty { margin: 0; padding: 12px 10px; color: var(--dim); font-size: 12.5px; line-height: 1.5; white-space: normal; }
-.location-empty p { margin: 0 0 10px; }
+.location-empty { margin: 0; padding: 12px 8px; color: var(--dim); font-size: var(--text-sm); line-height: 1.5; white-space: normal; }
+.location-empty p { margin: 0 0 8px; }
 .location-action {
-  padding: 6px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--border2);
   border-radius: var(--r-sm);
   background: var(--panel2);
@@ -61,7 +61,7 @@
 }
 .location-action:hover:not(:disabled) { background: var(--surface-strong); }
 .location-action:disabled { opacity: .55; cursor: default; }
-.location-error { margin: 6px 10px; color: var(--bad); font-size: var(--text-sm); white-space: normal; overflow-wrap: anywhere; }
+.location-error { margin: 8px 8px; color: var(--bad); font-size: var(--text-sm); white-space: normal; overflow-wrap: anywhere; }
 
 /* Remote directory selection is a host-side grant, never a local folder dialog. */
 .remote-directory-modal { width: min(640px, 92vw); }

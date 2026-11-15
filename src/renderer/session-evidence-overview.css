@@ -216,7 +216,7 @@
   display: inline-flex;
 }
 
-.overview-session-scope > button,
+.overview-session-scope > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
 .overview-session-copy,
 .overview-session-id-toggle {
   display: inline-flex;

@@ -340,7 +340,7 @@
   .runtime-composer .composer-action-controls .clibtn {
     width: auto;
     max-width: min(168px, 42cqi);
-    padding-inline: 6px;
+    padding-inline: 8px;
   }
 
   .model-effort-picker {
@@ -349,7 +349,7 @@
 
   .model-effort-trigger {
     width: 100%;
-    padding-inline: 6px;
+    padding-inline: 8px;
   }
 
   .model-effort-model {
@@ -361,7 +361,7 @@
   }
 
   .permission-mode-trigger {
-    padding-inline: 7px;
+    padding-inline: 8px;
   }
 
   .permission-mode-popover {

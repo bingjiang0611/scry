@@ -46,7 +46,7 @@
   background: rgba(255, 255, 255, 0.075);
 }
 
-.terminal-tab > button:first-child {
+.terminal-tab > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):first-child {
   height: 27px;
   display: flex;
   align-items: center;

@@ -191,16 +191,6 @@
   padding: 64px 48px 48px;
 }
 
-.wc-hero h2 {
-  color: var(--fg);
-  font-size: 30px;
-  line-height: 1.18;
-}
-
-.wc-hero p {
-  color: var(--dim);
-}
-
 .stat-pill {
   background: transparent;
   border-color: transparent;
@@ -211,15 +201,9 @@
   border-color: rgba(84, 201, 138, 0.28);
 }
 
-.wc-actions,
 .sg-card,
 .recent {
   background: transparent;
-}
-
-.wc-actions {
-  border: 0;
-  box-shadow: none;
 }
 
 .recent-list {
@@ -250,14 +234,10 @@
   padding: 0 24px;
 }
 
-
 .bubble-user {
-  background: var(--panel2);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 9px 15px;
-  max-width: 70%;
+  padding: 8px 16px;
 }
 
 .user-md code,
@@ -284,8 +264,6 @@
 }
 
 .who .av {
-  background: transparent;
-  color: var(--accent);
   border: 1px solid var(--border);
 }
 
@@ -372,7 +350,6 @@
 
 .input:focus,
 .composer textarea:focus {
-  border-color: var(--accent-line);
   box-shadow: none;
 }
 

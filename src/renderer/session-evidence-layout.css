@@ -217,7 +217,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   scrollbar-width: thin;
 }
 
-.segment-ribbon button {
+.segment-ribbon button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   flex: 0 0 auto;
   min-width: 28px;
   overflow: hidden;
@@ -238,7 +238,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .segment-ribbon button.b-skill1 { background: var(--skill); }
 .segment-ribbon button.b-mcp { background: var(--mcp); }
 .segment-ribbon button.b-agent { background: var(--agent); color: var(--fg); }
-.segment-ribbon button:hover { opacity: 0.82; }
+.segment-ribbon button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover { opacity: 0.82; }
 .segment-ribbon button.is-selected { opacity: 1; box-shadow: inset 0 0 0 2px var(--selected); }
 
 .segments-summary-strip {
@@ -289,7 +289,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .segment-ledger > header small { color: var(--dim2); font: var(--text-2xs)/1 var(--font-mono); text-transform: uppercase; }
 .segment-ledger > header h3 { margin: 0; font-size: var(--text-sm); }
 
-.segment-ledger > button {
+.segment-ledger > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   width: 100%;
   min-height: 68px;
   display: grid;
@@ -306,7 +306,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   cursor: pointer;
   transition: background-color var(--duration-hover) var(--ease-out);
 }
-.segment-ledger > button:hover { background: var(--surface-hover); }
+.segment-ledger > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover { background: var(--surface-hover); }
 .segment-ledger > button.is-selected { background: var(--selected-soft); box-shadow: inset 2px 0 0 var(--selected); }
 .segment-ledger > button > i { align-self: stretch; width: 4px; opacity: .8; }
 .segment-ledger-copy,
@@ -479,6 +479,6 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
   .segment-ribbon,
   .segments-summary-strip,
   .segments-workspace { margin-inline: 18px; }
-  .segment-ribbon button { font-size: 0; }
+  .segment-ribbon button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { font-size: 0; }
   .segment-ribbon button::after { content: '·'; font-size: var(--text-2xs); }
 }

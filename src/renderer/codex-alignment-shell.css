@@ -42,6 +42,12 @@
   --shadow-card:
     0 1px 0 rgb(255 255 255 / 3%),
     0 10px 30px rgb(0 0 0 / 18%);
+  /* Local elevation steps. Values match what components used inline before they became tokens. */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 8%);
+  --shadow-thumb: 0 1px 4px rgb(0 0 0 / 20%);
+  --shadow-float: 0 12px 32px rgb(0 0 0 / 45%);
+  --shadow-composer: 0 10px 30px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 7%);
+  --shadow-composer-focus: 0 12px 34px rgb(0 0 0 / 13%), 0 0 0 1px var(--accent-soft);
 }
 
 :root[data-theme='light'] {
@@ -89,6 +95,7 @@
   --shadow-card:
     0 1px 2px rgb(35 35 32 / 6%),
     0 12px 30px rgb(35 35 32 / 7%);
+  --shadow-xs: 0 1px 2px rgb(35 35 32 / 6%);
 }
 
 body {

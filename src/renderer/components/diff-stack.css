@@ -45,7 +45,7 @@
   background: var(--panel);
 }
 .diff-layout-switch { display: flex; gap: 2px; }
-.diff-code-toolbar button, .diff-all-changes, .diff-load-commits, .diff-history-status button {
+.diff-code-toolbar button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)), .diff-all-changes, .diff-load-commits, .diff-history-status button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   border: 0;
   border-radius: var(--r-xs);
   padding: 5px 7px;
@@ -56,10 +56,10 @@
   cursor: pointer;
 }
 .diff-code-toolbar button[aria-pressed='true'] { color: var(--fg); background: var(--panel3); }
-.diff-code-toolbar button:disabled { opacity: .45; cursor: default; }
+.diff-code-toolbar button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled { opacity: .45; cursor: default; }
 .diff-all-changes { text-align: left; color: var(--accent); border-bottom: 1px solid var(--border); border-radius: 0; }
 .diff-virtual-commits { flex: 1; min-height: 0; overflow: auto; }
-.diff-virtual-commits button {
+.diff-virtual-commits button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -81,10 +81,10 @@
 .diff-commit-subject { font: var(--text-sm) var(--font-ui); }
 .diff-commit-meta { color: var(--dim); font: var(--text-xs) var(--font-mono); }
 .diff-history-status { padding: 10px; color: var(--dim); font-size: var(--text-xs); }
-.diff-history-status button { display: block; color: var(--accent); }
+.diff-history-status button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { display: block; color: var(--accent); }
 .diff-review-panel .diff-stacked-patch { flex: 1; min-width: 0; min-height: 0; padding: 0; overflow: auto; background: var(--bg); container-type: inline-size; }
 .diff-stack-path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.diff-navigation button:not(.btn, .icon-button, [role='tab'], .segmented > button):hover, .diff-code-toolbar button:hover:not(:disabled) { background: var(--panel3); }
+.diff-navigation button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover, .diff-code-toolbar button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover:not(:disabled) { background: var(--panel3); }
 .diff-navigation :focus-visible, .diff-stack :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (max-width: 1100px) {
   .diff-inspector .diff-review-layout { grid-template-columns: minmax(180px, 24%) minmax(0, 1fr); }

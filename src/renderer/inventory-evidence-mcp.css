@@ -295,8 +295,8 @@
     background: var(--surface-hover);
   }
 
-  .inventory-search button:hover,
-  .inventory-empty button:hover {
+  .inventory-search button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover,
+  .inventory-empty button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover {
     border-color: var(--border2);
     background: var(--panel3);
     color: var(--fg);

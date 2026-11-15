@@ -92,23 +92,23 @@
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
 }
 .who .mini .m {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  padding: 3px 6px;
+  padding: 4px 8px;
   border: 1px solid var(--border3);
   border-radius: var(--r-xs);
   white-space: nowrap;
 }
 .who .mini b {
   color: var(--fg);
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 .who .mini .cost b {

@@ -31,8 +31,8 @@
   font-size: var(--text-md);
 }
 .diff-turn-menu { z-index: 1201; }
-.diff-scope-menu > button,
-.diff-turn-menu > button,
+.diff-scope-menu > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
+.diff-turn-menu > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
 .diff-turn-choice {
   display: flex;
   align-items: center;
@@ -50,10 +50,10 @@
   cursor: pointer;
   flex-shrink: 0;
 }
-.diff-scope-menu > button:hover,
+.diff-scope-menu > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover,
 .diff-scope-menu > button[aria-checked="true"],
 .diff-scope-menu > button[aria-expanded="true"],
-.diff-turn-menu > button:hover,
+.diff-turn-menu > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover,
 .diff-turn-choice:hover,
 .diff-turn-choice[aria-checked="true"] { background: var(--panel3); }
 .diff-scope-menu .ico,
@@ -66,5 +66,5 @@
 .diff-turn-menu > .diff-load-turns { margin-top: 4px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--text-sm); }
 .diff-turn-menu > .diff-load-turns:disabled { cursor: default; opacity: .6; }
 .diff-scope-trigger:focus-visible,
-.diff-menu-layer button:focus-visible,
+.diff-menu-layer button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible,
 .diff-turn-list:focus-visible .keyboard-active { outline: 2px solid var(--selected); outline-offset: -2px; }

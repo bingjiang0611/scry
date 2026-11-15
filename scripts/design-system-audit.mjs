@@ -20,7 +20,7 @@ export const METRIC_RULES = {
   fontWeight: 'font-weight uses a number instead of var(--weight-*)',
   spacing: 'padding / margin / gap uses a px value off the 4px grid (1px hairline and 2px optical are allowed)',
   color: 'a non-token declaration uses a raw color literal instead of a theme variable',
-  buttonReset: 'a container-wide `… button` rule does not exclude the Button, IconButton, Tabs and Segmented primitives'
+  buttonReset: 'a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button))'
 }
 
 const SPACING_PROPERTY = /^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$|^(?:gap|row-gap|column-gap)$/
@@ -71,7 +71,8 @@ export function* selectors(source) {
 
 // `.panel button`, `.panel > button:hover`: a descendant rule whose subject is a bare button.
 const CONTAINER_BUTTON = /[\s>]button(?::[a-z-]+(?:\([^()]*\))?)*$/
-const EXCLUDES_PRIMITIVES = /:not\(\.btn\b/
+// `:not(:where(...))` keeps the rule's original specificity; a bare `:not(.btn, …)` would raise it.
+const EXCLUDES_PRIMITIVES = /:not\(:where\(\.btn\b/
 
 function withoutClamp(value) {
   return value.replace(/clamp\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '')

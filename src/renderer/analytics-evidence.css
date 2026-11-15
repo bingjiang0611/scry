@@ -49,13 +49,13 @@
   padding: 28px clamp(24px, 3.5cqw, 52px) 36px;
 }
 
-.usage-page button:not(.btn, .icon-button, [role='tab'], .segmented > button) {
+.usage-page button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   border: 0;
   font: inherit;
   cursor: pointer;
 }
 
-.usage-page button:not(.btn, .icon-button, [role='tab'], .segmented > button):focus-visible,
+.usage-page button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible,
 .usage-chart:focus-visible {
   outline: 2px solid var(--fg);
   outline-offset: 4px;
@@ -617,7 +617,7 @@
 .usage-state.is-error b {
   color: var(--fg);
 }
-.usage-state.is-error button {
+.usage-state.is-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   padding: 8px 14px;
   border: 1px solid var(--usage-border);
   border-radius: var(--r-sm);
@@ -637,7 +637,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .usage-page button:not(.btn, .icon-button, [role='tab'], .segmented > button):not(:disabled):hover {
+  .usage-page button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):not(:disabled):hover {
     background: var(--usage-control-active);
     color: var(--fg);
   }

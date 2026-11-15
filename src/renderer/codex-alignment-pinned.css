@@ -55,7 +55,7 @@
   display: none;
 }
 
-.pinned-summary-card button {
+.pinned-summary-card button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   color: inherit;
   font: inherit;
 }

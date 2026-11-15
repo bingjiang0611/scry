@@ -18,7 +18,6 @@
   scroll-padding-block: 42px;
 }
 
-
 .chat-body .transcript-turn {
   position: relative;
   max-width: none;
@@ -54,7 +53,6 @@
 }
 
 .chat-body .user-md { font-size: inherit; }
-
 
 .chat-body .who {
   min-width: 0;
@@ -104,7 +102,6 @@
   border-radius: 0;
   background: var(--panel);
 }
-
 
 .chat-body .files-summary > summary,
 .chat-body .turn-hooks-summary > summary {
@@ -207,29 +204,13 @@
 .chat-body .turn-footer .sep { display: none; }
 
 .runtime-composer {
-  width: min(var(--evidence-column), 100%);
   max-width: none;
-  padding: 8px var(--evidence-gutter) 10px;
 }
 
-.runtime-composer .evidence-composer-shell {
-  padding: 10px 12px 11px;
-  border-color: var(--border2);
-  border-radius: var(--r-lg);
-  background: var(--panel2);
-  box-shadow: 0 12px 30px -22px rgba(0, 0, 0, 0.45);
-}
 
-.runtime-composer .evidence-composer-shell:focus-within {
-  border-color: var(--selected-line);
-  box-shadow: 0 0 0 1px var(--selected-soft), 0 14px 32px -24px rgba(0, 0, 0, 0.48);
-}
-.runtime-composer .input,
-.runtime-composer textarea { min-height: 74px; padding: 8px 4px 12px; font-size: var(--text-base); line-height: 1.55; }
 .runtime-composer textarea:focus-visible { outline: none; }
-.runtime-composer .composer-bottom { margin-top: 0; }
 .runtime-composer .composer-controls { gap: 2px; }
-.runtime-composer .run-control-select { height: 36px; font-size: 11.5px; }
+.runtime-composer .run-control-select { height: 36px; }
 .runtime-composer .workdir-label {
   min-width: 0;
   overflow: hidden;
@@ -237,13 +218,13 @@
   white-space: nowrap;
 }
 .runtime-composer .wdbtn > .ico { flex: none; }
-.runtime-composer .run-control-select { padding-right: 23px; padding-left: 7px; }
+.runtime-composer .run-control-select { padding-right: 24px; padding-left: 8px; }
 .runtime-composer .run-control-select .rc-value { max-width: min(178px, 31cqi); }
 .runtime-composer .composer .send,
 .runtime-composer .send { width: 38px; height: 38px; min-height: 38px; border-radius: 50%; corner-shape: round; }
 .runtime-composer .send .ico { width: 15px; height: 15px; }
-.runtime-composer .stop { height: 36px; min-height: 36px; padding-inline: 10px; border-radius: var(--r-lg); font-size: var(--text-xs); }
+.runtime-composer .stop { height: 36px; min-height: 36px; padding-inline: 8px; border-radius: var(--r-lg); font-size: var(--text-xs); }
 /* 运行状态条跟随本皮肤的紧凑刻度：停止键收成小药丸，和右侧圆形发送键呼应 */
 .runtime-composer .run-status { padding: 0 2px 8px; }
-.runtime-composer .run-status-stop { height: 28px; min-height: 28px; padding-inline: 11px; border-radius: var(--r-md); font-size: var(--text-xs); }
+.runtime-composer .run-status-stop { height: 28px; min-height: 28px; padding-inline: 12px; border-radius: var(--r-md); font-size: var(--text-xs); }
 .runtime-composer .run-status-stop .ico { width: 11px; height: 11px; }

@@ -64,7 +64,7 @@
   font-size: 11.5px;
 }
 
-.workspace-error > button {
+.workspace-error > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   width: 40px;
   height: 40px;
   margin-left: auto;

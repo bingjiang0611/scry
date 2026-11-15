@@ -149,8 +149,8 @@
   margin: 0;
 }
 .recorder-content-page { margin-top: 8px; }
-.recorder-content-page > button,
-.recorder-content-page-actions button {
+.recorder-content-page > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
+.recorder-content-page-actions button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   border: 1px solid var(--border3);
   border-radius: var(--r-sm);
   background: var(--panel);
@@ -159,6 +159,6 @@
   padding: 5px 8px;
   cursor: pointer;
 }
-.recorder-content-page button:disabled { cursor: default; opacity: 0.5; }
+.recorder-content-page button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled { cursor: default; opacity: 0.5; }
 .recorder-content-page-actions { display: flex; gap: 6px; margin-top: 6px; }
 .recorder-content-page [role='alert'] { color: var(--danger); font-size: var(--text-xs); margin-top: 6px; }

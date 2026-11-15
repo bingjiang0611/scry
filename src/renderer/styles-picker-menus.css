@@ -7,12 +7,12 @@
 .clibtn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: var(--panel2);
   border: 1px solid var(--border2);
   border-radius: var(--r-sm);
   color: var(--fg);
-  padding: 6px 11px;
+  padding: 8px 12px;
   cursor: pointer;
   font: inherit;
 }
@@ -148,7 +148,7 @@
 
 .climenu .mitem,
 .arch-provider-menu .mitem {
-  gap: 10px;
+  gap: 8px;
 }
 .agent-option-name {
   min-width: 0;

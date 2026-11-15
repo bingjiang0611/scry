@@ -10,7 +10,7 @@
   font-size: var(--text-sm);
 }
 .workspace-context-strip { display: flex; justify-content: space-between; gap: 12px; }
-.workspace-context-strip button {
+.workspace-context-strip button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -25,14 +25,14 @@
   font: inherit;
   cursor: pointer;
 }
-.workspace-context-strip button:disabled { cursor: default; }
-.workspace-context-strip button:not(:disabled):hover,
+.workspace-context-strip button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled { cursor: default; }
+.workspace-context-strip button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):not(:disabled):hover,
 .workspace-context-strip button[aria-expanded="true"] { background: var(--surface-hover); color: var(--fg); }
 .workspace-context-strip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-context-strip .ico { flex-shrink: 0; width: 14px; height: 14px; }
 .workspace-composer-context p { margin: 4px 5px; line-height: 1.5; }
 .workspace-context-recovery { display: flex; gap: 8px; margin: 4px; }
-.workspace-context-recovery button { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: var(--r-xs); padding: 4px 7px; font: inherit; }
+.workspace-context-recovery button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: var(--r-xs); padding: 4px 7px; font: inherit; }
 .workspace-picker {
   position: fixed;
   z-index: 1100;
@@ -89,14 +89,14 @@
 .workspace-ref-search input::placeholder { color: var(--muted); }
 .workspace-picker-note { margin: 8px; color: var(--muted); line-height: 1.5; }
 .workspace-picker-error { margin: 8px; color: var(--danger); line-height: 1.5; }
-.workspace-picker-error button { display: block; margin-top: 6px; }
+.workspace-picker-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { display: block; margin-top: 6px; }
 .workspace-picker-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 6px 8px 2px; border-top: 1px solid var(--border); }
-.workspace-picker-footer button,
-.workspace-picker-error button { padding: 4px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.workspace-picker-footer button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
+.workspace-picker-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { padding: 4px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .workspace-choice-list:focus-visible .workspace-choice.keyboard-active { outline: 2px solid var(--selected); outline-offset: -2px; }
-.workspace-picker button:focus-visible,
-.workspace-context-strip button:focus-visible,
-.workspace-context-recovery button:focus-visible { outline: 2px solid var(--selected); outline-offset: -2px; }
+.workspace-picker button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible,
+.workspace-context-strip button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible,
+.workspace-context-recovery button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible { outline: 2px solid var(--selected); outline-offset: -2px; }
 @media (max-width: 700px) {
   .workspace-composer-context { margin-inline: 6px; }
   .workspace-context-strip { gap: 4px; }

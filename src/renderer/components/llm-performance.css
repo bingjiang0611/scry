@@ -13,8 +13,8 @@
 .llm-perf-head h2 { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-medium); line-height: 32px; letter-spacing: 0; }
 .llm-perf-head .modal-x { margin-left: 0; }
 .llm-perf-range { margin-left: auto; display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--r-md); background: var(--panel2); }
-.llm-perf-range button { border: 0; background: none; color: var(--dim); font: inherit; font-size: var(--text-base); line-height: 20px; padding: 8px 16px; border-radius: var(--r-sm); cursor: pointer; }
-.llm-perf-range button:hover { color: var(--fg); }
+.llm-perf-range button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { border: 0; background: none; color: var(--dim); font: inherit; font-size: var(--text-base); line-height: 20px; padding: 8px 16px; border-radius: var(--r-sm); cursor: pointer; }
+.llm-perf-range button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover { color: var(--fg); }
 .llm-perf-range button[aria-pressed='true'] { background: var(--panel3); color: var(--fg); }
 .llm-perf-body { min-height: 0; overflow: auto; padding: 24px 32px; }
 .llm-perf-body h3 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-medium); line-height: 24px; }
@@ -25,7 +25,7 @@
 .llm-perf-help > summary:hover, .llm-perf-help[open] > summary { color: var(--fg); }
 .llm-perf-help .ico { width: 14px; height: 14px; }
 .llm-perf-help > p { position: absolute; z-index: 4; top: 100%; right: 0; width: min(340px, calc(100vw - 80px)); margin: 8px 0 0; padding: 16px; border: 1px solid var(--border2); border-radius: var(--r-sm); background: var(--panel3); color: var(--fg); font-size: var(--text-base); line-height: 1.6; text-align: left; box-shadow: 0 8px 24px #0002; }
-.llm-perf-modal button:focus-visible, .llm-perf-modal summary:focus-visible, .llm-perf-chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.llm-perf-modal button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible, .llm-perf-modal summary:focus-visible, .llm-perf-chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .llm-perf-alert { margin: 0 0 var(--space-4); }
 .llm-perf-empty { padding: 28px 0; color: var(--dim); font-size: var(--text-base); }
 .llm-perf-truncated { margin: 12px 0 0; color: var(--dim); font-size: var(--text-sm); }
@@ -55,8 +55,8 @@
 .llm-perf-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 .llm-perf-detail-title { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .llm-perf-metric { display: flex; gap: 16px; flex-shrink: 0; }
-.llm-perf-metric button { padding: 0 0 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--dim); font: inherit; font-size: var(--text-md); line-height: 20px; cursor: pointer; }
-.llm-perf-metric button:hover { color: var(--fg); }
+.llm-perf-metric button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { padding: 0 0 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--dim); font: inherit; font-size: var(--text-md); line-height: 20px; cursor: pointer; }
+.llm-perf-metric button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover { color: var(--fg); }
 .llm-perf-metric button[aria-pressed='true'] { color: var(--fg); border-bottom-color: var(--accent); }
 .llm-perf-chart-meta { display: flex; align-items: center; justify-content: flex-end; margin-top: 20px; color: var(--dim); font-size: var(--text-sm); }
 .llm-perf-chart { position: relative; margin-top: 4px; }
@@ -71,7 +71,7 @@
   .modal.llm-perf-modal { width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
   .llm-perf-head { flex-wrap: wrap; padding: 20px; gap: 12px; }
   .llm-perf-head h2 { font-size: var(--text-xl); line-height: 28px; }
-  .llm-perf-range button { padding: 8px 12px; }
+  .llm-perf-range button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { padding: 8px 12px; }
   .llm-perf-body { padding: 20px; }
   .llm-perf-models { min-width: 640px; }
   .llm-perf-mhead, .llm-perf-mrow, .llm-perf-scale { grid-template-columns: 208px minmax(140px, 1fr) 76px 100px; gap: 16px; }

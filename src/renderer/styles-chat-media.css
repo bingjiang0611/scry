@@ -6,25 +6,20 @@
   margin-bottom: 16px;
 }
 .bubble-user {
-  max-width: 76%;
   min-width: 0;
-  padding: 10px 14px;
-  background: var(--user);
-  color: var(--fg);
-  border-radius: var(--r-md) var(--r-md) var(--r-xs) var(--r-md);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.55;
 }
 
 .bubble-user .slash {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font: var(--weight-semibold) var(--text-sm)/1 var(--font-mono);
   background: var(--surface-inset);
-  padding: 4px 7px;
+  padding: 4px 8px;
   border-radius: var(--r-xs);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .bubble-user .user-md {
   max-width: 100%;
@@ -106,7 +101,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 44px;
 }
 .image-lightbox-name {
@@ -172,16 +167,16 @@
   grid-template-columns: 34px 64px 34px;
   align-items: center;
   height: 34px;
-  margin-top: 14px;
+  margin-top: 16px;
   overflow: hidden;
   border: 1px solid var(--border2);
   border-radius: var(--r-pill);
   corner-shape: round;
   background: var(--panel2);
   color: var(--dim);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-float);
 }
-.image-lightbox-zoom button {
+.image-lightbox-zoom button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   display: inline-grid;
   place-items: center;
   width: 34px;
@@ -191,11 +186,11 @@
   color: inherit;
   cursor: pointer;
 }
-.image-lightbox-zoom button:hover:not(:disabled) {
+.image-lightbox-zoom button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--fg);
 }
-.image-lightbox-zoom button:disabled {
+.image-lightbox-zoom button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled {
   opacity: 0.35;
   cursor: default;
 }
@@ -224,9 +219,9 @@
   font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
 }
 .who .runid {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
-  margin-left: 6px;
+  margin-left: 8px;
   letter-spacing: 0.04em;
 }
 .who .running {
@@ -235,7 +230,7 @@
   font: var(--text-xs)/1 var(--font-mono);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .who .spin {
   width: 10px;
