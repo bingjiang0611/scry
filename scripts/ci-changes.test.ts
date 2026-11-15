@@ -88,7 +88,7 @@ describe('documentation-only validation skips', () => {
   })
 
   it.each([
-    'src/main.test.ts', 'src/renderer/view.test.tsx', 'scripts/ci-workflow.test.ts', 'CLAUDE.md', 'CONTRIBUTING.md',
+    'src/main.test.ts', 'src/renderer/view.test.tsx', 'scripts/ci-workflow.test.ts', 'AGENTS.md', 'CLAUDE.md', 'CONTRIBUTING.md',
     'DESIGN.md', 'PRODUCT.md', '.agents/skills/test/SKILL.md', '.claude/skills/test/SKILL.md',
     '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/bug_report.yml', '.github/VOUCHED.td',
     '.github/TRIAGE_EXEMPTIONS.td'
@@ -109,7 +109,7 @@ describe('documentation-only validation skips', () => {
 
   it.each([
     ['src/main.ts', FULL], ['package-lock.json', FULL], ['scripts/performance-baseline.test.ts', NO_DESKTOP],
-    ['CLAUDE.md', NO_DESKTOP], ['experiments/remote-g0/generated/wire.ts', FULL],
+    ['AGENTS.md', NO_DESKTOP], ['CLAUDE.md', NO_DESKTOP], ['experiments/remote-g0/generated/wire.ts', FULL],
     ['.github/workflows/performance.yml', FULL], ['apps/ios-other/main.ts', FULL]
   ])('retains Node measurement for iOS mixed with %s', (path, expected) => {
     const { write, commit, detect } = fixture()

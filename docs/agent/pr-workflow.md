@@ -4,7 +4,7 @@
 
 从 [t3code `960d576`](https://github.com/pingdotgg/t3code/tree/960d5761c13f68a2f10635bcd26489a5fa404ec1) 移植贡献指南、PR 模板、分诊 Skill、vouch/size 工作流和评审配置模式。其 MIT 版权与许可保留在 [.github/upstream/t3code-LICENSE](../../.github/upstream/t3code-LICENSE)。不采用上游模型黑名单、产品特定规则或依赖体系。
 
-权威关系：[CONTRIBUTING.md](../../CONTRIBUTING.md) 管贡献准入；[CLAUDE.md](../../CLAUDE.md) 管 Scry 工程与安全合同；[verification.md](verification.md) 管验证范围。Skill 只执行这些规则，不建立另一套产品政策。
+权威关系：[CONTRIBUTING.md](../../CONTRIBUTING.md) 管贡献准入；[AGENTS.md](../../AGENTS.md) 管 Scry 工程与安全合同；[verification.md](verification.md) 管验证范围。Skill 只执行这些规则，不建立另一套产品政策。
 
 ## 当前交付与待启用项
 
@@ -40,7 +40,7 @@
 
 每次改动任务完成验证后、提交和宣称完成前，由执行任务的 Agent 主动自查，无需单独请求或额外启动 Reviewer。已有任务提交的，在最终交付前检查本任务累计改动；自查后又有修改的，重验受影响部分。纯文档也自查，但仍按纯文档范围验证，不因此跑构建或全量测试。
 
-依据本次已确认的需求与授权、CONTRIBUTING.md、CLAUDE.md 和 verification.md，检查：
+依据本次已确认的需求与授权、CONTRIBUTING.md、AGENTS.md 和 verification.md，检查：
 
 1. **需求与批准**：是否解决用户要求的问题；敏感边界或有意行为变化是否已经明确获批。维护者在当前任务中的明确授权可作为本地证据，提 PR 时再按模板说明，不为自查强制创建 Issue 或 PR。
 2. **范围**：本任务各项改动是否服务于同一目标；是否夹带无关清理、用户 WIP 或无关提交。
@@ -103,7 +103,7 @@
 | 变化 | 主要修改位置 | 必须核对的关联项 |
 | --- | --- | --- |
 | 贡献准入、批准或豁免规则 | `CONTRIBUTING.md` | 分诊 Skill、案例和必要的模板提示；政策变化由维护者决定 |
-| 工程、安全或平台边界 | `CLAUDE.md`、`docs/agent/verification.md` | 领域检查清单和相关模板；评审器引用权威规则，不复制整套合同 |
+| 工程、安全或平台边界 | `AGENTS.md`、`docs/agent/verification.md` | 领域检查清单和相关模板；评审器引用权威规则，不复制整套合同 |
 | 提交信息经常缺失 | `.github/pull_request_template.md`、`.github/ISSUE_TEMPLATE/` | 只补必要信息；文案改动不顺带增加必填项或无关验收 |
 | CI 任务、命令或平台 | `.github/workflows/` | 本文的接线表、汇总逻辑和合同测试；新增任务不得被汇总漏掉，检查改名须核对 Ruleset 的 required context |
 | 分诊行为 | `.agents/skills/contribution-triage/`、`.claude/skills/contribution-triage/` | 两份 Skill 与案例同步；用案例验证语义，不只检查文本相同 |

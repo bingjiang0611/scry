@@ -1,6 +1,6 @@
 # scry · change-checklists
 
-按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [CLAUDE.md](../../CLAUDE.md)。
+按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [AGENTS.md](../../AGENTS.md)。
 
 ## 最容易伤到自己的做法
 
@@ -20,6 +20,9 @@
 
 ## macOS / Linux 跨平台改动
 
+- macOS/Linux 共用业务、UI、Provider 和 recorder，不建 Linux 专属业务分支。Linux 首批目标：Arch/Omarchy x86_64、Hyprland/Wayland、pacman 包。Ubuntu aarch64 容器与 headless wlroots 验证不等于目标机验收或 ARM64 支持承诺。
+- 功能、修复和依赖变更均检查跨平台影响。共享路径不得默认 `.app/Contents`、`/bin/zsh`、`⌘`、macOS 标题栏或 Keychain；复用现有平台入口，见[跨平台检查清单](change-checklists.md#macos--linux-跨平台改动)。平台独有能力须显式降级，不用空结果伪装支持。
+
 每次改动先判断是否涉及下面的边界；纯业务改动不机械增加平台分支。
 
 | 边界 | 优先复用 | 检查项 |
@@ -35,7 +38,39 @@
 
 ## 跨表面检查清单
 
+### 代码合同
+
+- 使用 strict TypeScript、discriminated union、typed envelope 和明确 domain state；避免 `any` 与字符串猜测。
+- 保持 semicolonless、single quote、两空格的既有风格，不做无关格式清洗。
+- 复杂度留在 adapter/trust/persistence 边界；renderer 保持展示导向，recorder core 保持纯净。
+- 优先扩展现有 contract、registry、store 和 projection，不建立第二套同义状态。
+- 注释解释证据来源、信任边界、失败模式和为何必须如此，不逐行翻译代码。
+- fail-open 只用于不应阻断用户 Agent 的观测附加路径；权限、信任、路径和发布完整性必须 fail closed。
+- 先做最小真实修复，再考虑抽象；不要保留复杂度只因为它已经存在。
+
+### 性能护栏
+
+用户每天在等：启动、打开会话、发送/停止、流式输出、轮次结束 diff、source-control 刷新、远程目录与终端。新代码默认按下面写；确实做不到时，在注释或提交说明里写明原因。
+
+#### 写代码时的护栏
+
+- **不阻塞用户路径**：新代码在 main 的 IPC handler、trace 投递和 renderer 交互路径中不用同步 I/O 或同步子进程（`*Sync`、`execSync`）。非必需工作（diff、用量、指纹、目录扫描）移出关键路径，但不能因此提前提交证据：结果到达前显示“刷新中/来源时间”，recorder 仍等证据收敛。
+- **不重复做**：一次刷新内不重复调用同一 git/文件/SQLite 查询；能一条命令拿到的不拆成多条；相同的并发请求合并为一个进行中的请求；大对象只 parse/stringify 一次。
+- **有上限**：列表、历史、日志、IPC payload、DOM 节点和内存缓存都分页或设上限。IPC 只传本次渲染需要的数据或增量，不传整份 transcript/归档。
+- **事件优先于轮询**：确需轮询时要退避、窗口不可见时暂停、同一时刻只有一个请求。
+- **缓存要诚实**：缓存键包含所有影响结果的输入（cwd、revision、provider/profile、mtime 等），能失效、有上限；可能过期的数据要标出来源时间，不能当作当前事实。
+- **renderer**：长列表虚拟化；流式更新按帧合并；不交替读写布局造成强制 layout；卸载时清理 listener、timer、observer 和订阅。
+- **可观测**：特权 IPC 用 `handleTrusted` 注册（自动记录 `ipc.<channel>` 耗时），并在 `scripts/performance-paths.json` 映射到用户路径或列入 `excludedChannels`；`scripts/performance-feedback.test.ts` 会拒绝未分类的 channel。多阶段操作用 `new PerformanceTrace('<name>')` 记录阶段。
+
 ### Provider 或 run-control 改动
+
+Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。不要为统一 UI 假装 capability parity。
+
+- adapter 不支持的能力返回明确的 degraded/unavailable envelope。
+- run controls、审批、session、fork、model、MCP、Hook、Skill、usage 和 resume 语义逐 Provider 决定。
+- Pi 没有 MCP 状态 API，就不要探测或推断。
+- OpenCode 不支持某种审批模式时，不要把另一个 Provider 的选项硬塞进去。
+- 切换 Provider、模型、权限模式或恢复 session 后，不能沿用不属于当前 runtime 的陈旧能力/审批状态。
 
 - Claude、Codex、Qoder、OpenCode、Pi 分别支持什么？不支持时 UI/Envelope 如何表示？
 - new/resume/fork/stop/permission/question/error 是否保持 provider-specific identity？
@@ -43,6 +78,12 @@
 - CLI/SDK wire fixture 是否覆盖重复、乱序、partial、cancelled 和 unknown 事件？
 
 ### Trace / usage / evidence 改动
+
+- 真实没有工具调用可以是 `available + []`；Provider 不提供工具证据必须是 `unavailable`，不能也显示为空数组。
+- 缺失 token、cost、duration、MCP、Hook、文件或风险证据时，不显示成 `0`、绿色或“无风险”。
+- 原始 transcript、Provider result、hook lifecycle、trace archive、SQLite 聚合和 `.scry` turn record 有不同权威性；合并时保留 provenance 并避免双计。
+- 一次逻辑调用的 started/progress/response 是生命周期，不是多次调用。
+- Provider 明确给出的 canonical usage 优先于 transcript shadow；reasoning token 不得在 total 中重复相加。
 
 - logical call 是否按稳定 ID 聚合，而不是按原始事件数计数？
 - canonical result 与 transcript shadow 是否去重？
@@ -70,6 +111,12 @@
 - Renderer 是否仍不能直接访问 Node、任意 fs 或 spawn？
 
 ### Recorder / CLI 改动
+
+`src/core/turn-recorder/` 与 `scry-turn-recorder` 必须保持无 Electron、无 SQLite、无 Provider SDK、无原生依赖。CLI 在 macOS/Linux Node 20/22/24 上独立运行，并只写工作区 `.scry/`。
+
+- `.scry/records` 是 recorder 的 canonical 一轮一文件事实源；runtime/state/health 是恢复或观测状态。
+- managed recorder 两阶段提交需要等待 Provider result、hook、diff 等证据收敛，不能悄悄降级为 rollout 近似。
+- Hook 通过明确的 private CLI 绝对路径运行；App 私有 CLI 与全局 npm CLI 是两个分发面。
 
 - Core 是否仍可在无 Electron/native module 环境构建？
 - Node 20/22/24、macOS/Linux 是否都在支持范围？

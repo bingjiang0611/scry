@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+旧版 Claude 兼容入口；共同入口为 [AGENTS.md](AGENTS.md)。原生加载验证通过前保留本文件，状态见 [指令加载](docs/agent/instruction-loading.md)。
+
 # Scry
 
 Scry 是一个 local-first 的 AI coding agent 观测与治理桌面 App。它在应用内驱动本机 Provider CLI/SDK，把会话、工具调用、文件足迹、用量、诊断和干预呈现为可检查证据。
@@ -12,7 +14,7 @@ Scry **不是安全沙箱**。它能做授权、指纹校验、观测和治理�
 
 ### 1. 证据不能说谎
 
-Scry 的核心价值是让用户知道“发生了什么”和“我们能证明什么”。`exact`、`estimated`、`inferred`、`partial`、`disabled`、`unavailable` 不是样式差异，而是产品语义。
+`exact`、`estimated`、`inferred`、`partial`、`disabled`、`unavailable` 不是样式差异，而是产品语义。
 
 - 真实没有工具调用可以是 `available + []`；Provider 不提供工具证据必须是 `unavailable`，不能也显示为空数组。
 - 缺失 token、cost、duration、MCP、Hook、文件或风险证据时，不显示成 `0`、绿色或“无风险”。

@@ -1,9 +1,11 @@
 ---
 name: scry-performance-climb
-description: 维护 Scry 的性能闭环。用于：从本机日常性能记录（performance journal）找真实慢点；问“哪里慢、卡、等太久、最大机会在哪、还能往哪优化”；做性能爬坡，降低某个工作量计数或毫秒指标；维护性能台账、基线、门禁、相关性证据和机会日志；升门禁、收紧或放宽上限、补 Linux 基线。不用于：修 CI 账单或 runner、发布、真实付费 Provider 探针、与性能无关的功能开发或 bug。
+description: 分析并优化 Scry 的真实慢点，维护指标、基线和性能证据；不用于 CI 账单、发布、付费 Provider 探针或无关功能。
 ---
 
 # Scry 性能爬坡与维护
+
+边界场景与触发措辞见 [使用场景](references/when-to-use.md)；仅在路由不明确时读取。
 
 三种模式：**A 分析** → **B 爬坡** → **C 维护**。用户只说“看看性能/哪里慢”时执行 A，再给出 B 的方案但不改代码；明确要求优化才进入 B 的实现。
 
@@ -48,7 +50,7 @@ description: 维护 Scry 的性能闭环。用于：从本机日常性能记录�
 
 ## A. 分析
 
-按 [journal-analysis.md](references/journal-analysis.md)：核对运行 build 与已有优化的交付状态 → 快照 → 选定当前 build，旧 build 另作历史对照 → `scripts/journal-hotspots.mjs` 排名 → 判断是否阻塞用户、归属（Scry/Provider）、已有覆盖、趋势。
+按 [journal-analysis.md](references/journal-analysis.md)：核对运行 build 与已有优化的交付状态 → 快照 → 选定当前 build，旧 build 另作历史对照 → `.agents/skills/scry-performance-climb/scripts/journal-hotspots.mjs` 排名 → 判断是否阻塞用户、归属（Scry/Provider）、已有覆盖、趋势。
 
 ## B. 爬坡
 
@@ -72,10 +74,7 @@ description: 维护 Scry 的性能闭环。用于：从本机日常性能记录�
 
 ## 交付前的测试要求
 
-- 改了生产代码：受影响测试 + `npm run typecheck`；提交前 `npm run test:unit` 全量。
-- 改了界面：再加 `npm run test:renderer:ui` 和真实 App 重放（项目 CLAUDE.md 要求），截图/真机不可用时写“未验证”。
-- 改了计数或台账：`npx vitest run scripts/performance-ratchet.test.ts` 和对应 collector；`performance-ratchet.mjs guard <旧台账> <新台账>` 必须通过。
-- **已知的原有失败**（不是你造成的，也不要“修”它们来变绿，只需报告是否仍然存在）：高负载下 `src/main/source-control/service.test.ts` 的 push endpoint / PR recheck 用例、`src/renderer/remote-workbench.test.ts` 的 source-control 用例会 5 秒超时；同一用例在 main `1c30b76` 上同样失败；负载约 200 时 `src/main/providers/pi.test.ts` 的 “menu-only command” 用例出现过一次断言失败，单独重跑改动前后均通过。若出现新的失败，按自己的问题处理。
+有改动待交付时，加载 [验证要求与已知失败](references/verification.md)。
 
 ## 需要交给用户的步骤
 
