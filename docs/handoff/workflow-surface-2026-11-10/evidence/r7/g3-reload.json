@@ -1,0 +1,82 @@
+[
+  {
+    "scenario": "new",
+    "cli": "1.1.88",
+    "before": {
+      "records": 0,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "afterReload": {
+      "records": 0,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "reloadCardVisible": true,
+    "afterFollow": {
+      "records": 1,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "followAnswerVisible": true,
+    "afterRestart": {
+      "records": 1,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "restartCardVisible": false,
+    "error": null
+  },
+  {
+    "scenario": "existing",
+    "cli": "1.1.88",
+    "before": {
+      "records": 1,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "afterReload": {
+      "records": 1,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "reloadCardVisible": true,
+    "afterFollow": {
+      "records": 2,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "followAnswerVisible": true,
+    "afterRestart": {
+      "records": 2,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "restartCardVisible": true,
+    "error": null
+  }
+]
