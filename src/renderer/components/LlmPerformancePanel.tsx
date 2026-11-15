@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from 'react'
 import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary } from '@shared/llm-performance'
 import { llmMetricSamples } from '@shared/llm-performance'
 import { ModalFrame, requestModalClose } from './Modals'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
@@ -98,7 +99,7 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
             <h3 id={`${titleId}-comparison`}>{copy.comparison}</h3>
           </div>
           {historyError ? <Notice tone="bad" className="llm-perf-alert" role="alert">{copy.historyError(historyError)}</Notice>
-            : !history ? <div className="llm-perf-empty">{copy.reading}</div>
+            : !history ? <div className="llm-perf-loading" aria-busy="true"><DelayedSkeletonRows loading rows={4} meta rowHeight={48} label={copy.reading} /></div>
               : !current ? <div className="llm-perf-empty">{speedSamples.length || firstTokenSamples.length ? copy.emptyRange : copy.empty}</div>
                 : <ModelComparison groups={groups} selected={current.model} colorOf={colorOf} onSelect={setSelected} />}
           {oldestKept != null && oldestKept > from && <p className="llm-perf-truncated">{copy.truncated(history!.rows.length)}</p>}

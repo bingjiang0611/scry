@@ -346,3 +346,6 @@
     min-height: 64px;
   }
 }
+
+/* Paging keeps the previous page on screen, dimmed, until the next page answers. */
+.side-chat-history-items[data-paging] { opacity: 0.5; transition: opacity var(--duration-sm) var(--ease-out); }

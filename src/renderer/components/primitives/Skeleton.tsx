@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react'
 
+import { useDelayedFlag } from '../../hooks/useDelayedFlag'
+
 import './skeleton.css'
 
 // Line lengths vary a little, and are always shorter than real text, so the
@@ -39,4 +41,10 @@ export function SkeletonRows({ rows, label, rowHeight, meta = false, avatar, cla
       ))}
     </div>
   )
+}
+
+/** Row shapes that appear only after the shared delay, so a fast read never flashes them. */
+export function DelayedSkeletonRows({ loading, ...props }: SkeletonRowsProps & { loading: boolean }) {
+  const visible = useDelayedFlag(loading)
+  return loading && visible ? <SkeletonRows {...props} /> : null
 }

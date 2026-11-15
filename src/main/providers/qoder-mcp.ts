@@ -2,6 +2,7 @@ import { query, type McpServerStatus } from '@qoder-ai/qoder-agent-sdk'
 import {
   capabilityReady,
   capabilityUnknown,
+  MCP_CHECK_CANCELLED,
   type CapabilityEnvelope,
   type McpAuthResult,
   type McpSnapshot,
@@ -56,7 +57,8 @@ export async function readQoderMcpSnapshot(
   homeDir: string,
   context: ProviderContext,
   refresh = false,
-  execution?: AuthorizedMcpExecution
+  execution?: AuthorizedMcpExecution,
+  signal?: AbortSignal
 ): Promise<CapabilityEnvelope<McpSnapshot>> {
   const configured = listProviderMcp('qoder', context.cwd, homeDir, shellEnv())
   const operations = { authenticate: qoderAuthenticationTargets(configured) }
@@ -74,14 +76,26 @@ export async function readQoderMcpSnapshot(
   if (!execution) {
     return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 Qoder MCP 执行快照')
   }
+  if (signal?.aborted) return capabilityUnknown<McpSnapshot>(context, 'read', MCP_CHECK_CANCELLED)
   const prompt = heldPrompt()
   const q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, execution) as never })
+  // A person's cancel stops waiting and finally closes the SDK query, which owns
+  // and stops its own Qoder child; the runtime state stays unknown.
+  let onAbort: (() => void) | undefined
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new Error(MCP_CHECK_CANCELLED))
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
   try {
-    await q.initializationResult()
-    return capabilityReady(context, 'read', qoderMcpSnapshot(await q.mcpServerStatus(), configured))
+    const status = await Promise.race([(async () => {
+      await q.initializationResult()
+      return q.mcpServerStatus()
+    })(), cancelled])
+    return capabilityReady(context, 'read', qoderMcpSnapshot(status, configured))
   } catch (error) {
     return capabilityUnknown<McpSnapshot>(context, 'read', sanitizeMcpAuthError(error))
   } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort)
     prompt.release()
     await Promise.resolve(q.close()).catch(() => {})
   }

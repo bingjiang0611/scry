@@ -4,6 +4,7 @@ import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { SideChatWorkspace } from '../hooks/useSideChatWorkspace'
 import { ModalFrame } from './ModalFrame'
 import { Button } from './primitives/Button'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 
 const capturedAt = (value: number): string => new Date(value).toLocaleString('zh-CN', {
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
@@ -32,7 +33,11 @@ export function SideChatHistoryDialog({ history, onClose }: {
       <Button ref={closeRef} onClick={onClose}>{SIDE_CHAT_COPY.historyClose}</Button>
     </header>
     {history.error && <p role="alert" className="side-chat-history-error">{history.error}</p>}
-    <ol className="side-chat-history-items" data-side-chat-history>
+    {/* First read: row shapes. Paging: the current page stays, dimmed, until the next
+        page answers (it is the previous page, so it is not shown as current). */}
+    <DelayedSkeletonRows loading={history.loading && history.items.length === 0} rows={5} meta rowHeight={52} label={SIDE_CHAT_COPY.historyLoading} />
+    <ol className="side-chat-history-items" data-side-chat-history aria-busy={history.loading}
+      data-paging={history.loading && history.items.length > 0 || undefined}>
       {history.items.map((item) => <li key={item.id}>
         <button type="button" className="side-chat-history-row" data-side-chat-history-id={item.id}
           onClick={() => history.select(item)}>
@@ -63,7 +68,7 @@ export function SideChatHistoryDialog({ history, onClose }: {
       {range
         ? <p data-side-chat-history-range>{SIDE_CHAT_COPY.historyPageRange(range.first, range.last, history.total ?? range.last)}</p>
         : null}
-      {history.loading ? <p role="status">…</p> : null}
+      {history.loading ? <p role="status" className="visually-hidden">{SIDE_CHAT_COPY.historyLoading}</p> : null}
     </footer>
   </ModalFrame>
 }

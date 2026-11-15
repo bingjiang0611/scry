@@ -1,3 +1,4 @@
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { useEffect, useId, useRef, useState } from 'react'
 
 import type { SkillMeta } from '../env'
@@ -7,7 +8,6 @@ import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
-import { DelayedLoadingStatus } from './LoadingStatus'
 
 
 import './archived-sessions.css'
@@ -142,7 +142,7 @@ export function SkillsModal({
         aria-busy={refreshing}
       >
         {skillsUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.skillsUnavailable}</div>
-          : initialSkillsLoading && <DelayedLoadingStatus loading={refreshing} title={LOADING_COPY.skills} />}
+          : initialSkillsLoading && <DelayedSkeletonRows loading={refreshing} rows={6} meta rowHeight={56} label={LOADING_COPY.skills} />}
         {filtered.length === 0 && !initialSkillsLoading && (
           <div className="inventory-empty" role="status">
             <strong>{scopeSkills.length === 0 ? LOADING_COPY.skillsEmpty(scopeLabel) : LOADING_COPY.skillsNoMatch(scopeLabel)}</strong>

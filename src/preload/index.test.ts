@@ -81,6 +81,7 @@ const invokeChannels = {
   catalogHealth: 'agent:catalogHealth',
   listSkills: 'agent:listSkills',
   mcpSnapshot: 'agent:mcpSnapshot',
+  cancelMcpSnapshot: 'agent:cancelMcpSnapshot',
   mcpGuardScan: 'agent:mcpGuardScan',
   testMcp: 'agent:testMcp',
   reauthenticateMcp: 'agent:reauthenticateMcp',

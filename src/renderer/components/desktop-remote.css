@@ -35,3 +35,4 @@
 @media (max-width: 800px) {
   .desktop-remote__form-grid { grid-template-columns: 1fr; }
 }
+.desktop-remote__copy-status { min-height: 1.45em; margin: 0; }

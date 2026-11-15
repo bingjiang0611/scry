@@ -116,7 +116,7 @@ struct SidebarDrawer: View {
                        onRowAction: handle,
                        onOpenTool: { onCollapse(); model.route = .toolPanel($0) })
           if run.hasConnection && targets.homeSessions.isEmpty && refreshing {
-            ProgressView(ConnectionCopy.readingSessions).frame(maxWidth: .infinity).padding(.top, 32)
+            PlaceholderRows(label: ConnectionCopy.readingSessions, count: 6, rowHeight: 48).padding(.top, 8)
           }
         }
       }

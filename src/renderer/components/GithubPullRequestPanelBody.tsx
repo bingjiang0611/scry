@@ -1,3 +1,4 @@
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import type { ScExpected, ScInlineComment, ScMutation, ScPr, ScPrList, ScRead, ScRepository, ScReviewDraft } from '@shared/source-control'
 import { ModalFrame, requestModalClose } from './Modals'
@@ -131,7 +132,7 @@ export function GithubPullRequestPanelBody({
             </details>
           </>
         )}
-        {loadingPr && <p role="status">正在读取 GitHub 证据…</p>}
+        <DelayedSkeletonRows loading={loadingPr} rows={3} meta rowHeight={52} label="正在读取 GitHub 证据…" />
         {pr && prExpected && (
           <>
             <section className="sc-section">

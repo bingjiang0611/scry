@@ -21,7 +21,8 @@ struct ToolPanelView: View {
     VStack(spacing: 0) {
       RemoteHeader(title: kind.title, backAction: { model.goBack() }) {
         if case .loading = run.toolPanel {
-          ProgressView().frame(width: 44, height: 44)
+          // The body's placeholder rows are this wait's one indicator; keep the slot.
+          Color.clear.frame(width: 44, height: 44)
         } else {
           PlainIcon(symbol: "arrow.clockwise", label: ConnectionCopy.toolRefresh) {
             Task { await load() }
@@ -33,7 +34,7 @@ struct ToolPanelView: View {
           provenance
           switch run.toolPanel {
           case .idle, .loading:
-            ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+            PlaceholderRows(label: ConnectionCopy.readingToolPanel, count: 5, rowHeight: 52, detail: true, horizontalPadding: 0)
           case let .failed(reason):
             Notice(text: "\(ConnectionCopy.panelLoadFailed)：\(reason)", warning: true)
           case let .loaded(payload):

@@ -123,6 +123,13 @@ export function useProviderCapabilities(
     })
   }, [loadMcpLive])
 
+  // Asks main to stop the running live check for this context. Main refuses for a
+  // Provider whose check cannot be stopped; the check's own answer then says what happened.
+  const cancelMcpLive = useCallback(async (): Promise<boolean> => {
+    if (typeof window.scry.cancelMcpSnapshot !== 'function') return false
+    return window.scry.cancelMcpSnapshot(providerContextRef.current)
+  }, [providerContextRef])
+
   const pullMcpLive = useCallback(async (): Promise<void> => {
     const context = providerContextRef.current
     const seq = ++mcpLiveRequestSeq.current
@@ -313,7 +320,7 @@ export function useProviderCapabilities(
     skillCapability: currentSkillCapability,
     skillsRefreshing, mcps, mcpStatus, mcpLive, mcpCapability,
     mcpConfigRefreshing, mcpRefreshing, mcpGuardReport, mcpGuardScanning,
-    refreshSkills, loadMcpLive, refreshMcp, pullMcpLive, testMcp, reauthenticateMcp,
+    refreshSkills, loadMcpLive, refreshMcp, pullMcpLive, cancelMcpLive, testMcp, reauthenticateMcp,
     setCurrentMcpGuardReport, scanMcpGuard, resetCapabilityContext
   }
 }
