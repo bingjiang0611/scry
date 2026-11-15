@@ -79,19 +79,19 @@
 .stat-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0;
   border: 0;
-  font: 11.5px/1.4 var(--font-ui);
+  font: var(--text-sm)/1.4 var(--font-ui);
   color: var(--dim);
 }
 .stat-pill b {
   color: var(--dim);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 .stat-pill .sub {
   color: var(--dim2);
-  font: 10.5px/1.4 var(--font-mono);
+  font: var(--text-xs)/1.4 var(--font-mono);
 }
 
 .recent-list {

@@ -8,13 +8,13 @@
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 13px 16px 8px;
+  padding: 12px 16px 8px;
   background: var(--panel);
 }
 .background-work-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 24px;
   min-width: 0;
 }
@@ -28,7 +28,7 @@
   display: flex;
   flex: 1;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 .background-work-name {
@@ -47,7 +47,7 @@
 .background-work-state {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: none;
   color: var(--accent);
   font-size: var(--text-compact-size);
@@ -72,14 +72,14 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  margin-left: 26px;
+  margin-left: 24px;
 }
 .background-work-details { flex: 1; min-width: 0; }
 .background-work-details > summary {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
   width: fit-content;
   min-height: 30px;
   margin-left: auto;
@@ -100,7 +100,7 @@
 .background-work-evidence {
   display: grid;
   gap: 8px;
-  margin: 6px 0 4px;
+  margin: 8px 0 4px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
   font-size: var(--text-compact-size);
@@ -118,15 +118,15 @@
 .background-work-result,
 .background-work-warning,
 .background-work-empty { margin: 8px 0 0; color: var(--dim2); font-size: var(--text-supporting-size); line-height: 1.6; }
-.background-work-result { margin-left: 26px; }
+.background-work-result { margin-left: 24px; }
 .background-work-warning { color: var(--warn); }
-.background-work-empty { display: flex; align-items: center; gap: 6px; }
-.run-status[data-background-waiting] .run-status-dot { animation: none; background: #b98b36; }
+.background-work-empty { display: flex; align-items: center; gap: 8px; }
+.run-status[data-background-waiting] .run-status-dot { animation: none; background: var(--warn); }
 .sb-running[data-background-waiting] { animation: none; border: 0; background: var(--dim2); border-radius: 50%; corner-shape: round; }
 @media (max-width: 600px) {
-  .background-work-head { flex-wrap: wrap; gap: 6px 10px; }
+  .background-work-head { flex-wrap: wrap; gap: 8px 8px; }
   .background-work-identity { flex-basis: calc(100% - 26px); }
-  .background-work-state { margin-left: 26px; }
+  .background-work-state { margin-left: 24px; }
   .background-work-age { margin-left: auto; }
   .background-work-evidence > div { grid-template-columns: 60px minmax(0, 1fr); gap: 8px; }
 }

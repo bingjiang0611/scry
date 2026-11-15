@@ -1,18 +1,14 @@
 .ov-topbar {
-  padding: 6px 10px 0;
-  background: var(--panel);
   border-bottom-color: var(--border);
   backdrop-filter: none;
 }
 
 .ctx-gauge {
-  background: transparent;
   border-bottom-color: var(--border3);
 }
 
 .metric-grid,
 .billing-grid {
-  background: var(--border3);
   border-color: var(--border);
 }
 
@@ -58,10 +54,6 @@
   background: transparent;
 }
 
-.seg-note {
-  background: var(--accent-soft);
-  border-bottom-color: var(--accent-line);
-}
 
 .seg-shell {
   width: min(100% - 60px, 1180px);
@@ -69,38 +61,27 @@
 
 .seg-bar {
   height: 30px;
-  border-radius: var(--r-md);
-  border-color: var(--border);
 }
 
 .seg-legend {
-  gap: 14px;
+  gap: 16px;
 }
 
-.seg-compare {
-  background: var(--border3);
-  border-color: var(--border);
-}
 
 .seg-card {
   grid-template-columns: 190px minmax(0, 1fr) 150px;
-  border-color: var(--border);
-  border-radius: var(--r-lg);
 }
 
 .seg-l,
 .seg-m,
 .seg-r {
-  padding: 14px 16px;
+  padding: 16px 16px;
 }
 
 .seg-l {
   background: var(--panel) !important;
 }
 
-.seg-r {
-  background: var(--panel2);
-}
 
 .seg-act {
   border-color: var(--border3) !important;

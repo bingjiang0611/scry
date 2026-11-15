@@ -7,10 +7,10 @@
     "buttonReset": "a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button))"
   },
   "totals": {
-    "fontSize": 148,
-    "fontWeight": 72,
-    "spacing": 848,
-    "color": 86,
+    "fontSize": 85,
+    "fontWeight": 54,
+    "spacing": 531,
+    "color": 69,
     "buttonReset": 0
   },
   "files": {
@@ -28,18 +28,11 @@
       "color": 0,
       "buttonReset": 0
     },
-    "codex-alignment-editorial.css": {
-      "fontSize": 2,
-      "fontWeight": 1,
-      "spacing": 17,
-      "color": 0,
-      "buttonReset": 0
-    },
     "codex-alignment-pinned.css": {
       "fontSize": 0,
-      "fontWeight": 1,
-      "spacing": 17,
-      "color": 2,
+      "fontWeight": 0,
+      "spacing": 4,
+      "color": 0,
       "buttonReset": 0
     },
     "codex-alignment-shell.css": {
@@ -54,13 +47,6 @@
       "fontWeight": 0,
       "spacing": 1,
       "color": 0,
-      "buttonReset": 0
-    },
-    "components/background-work.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 12,
-      "color": 1,
       "buttonReset": 0
     },
     "components/desktop-remote.css": {
@@ -169,37 +155,16 @@
       "buttonReset": 0
     },
     "session-evidence-conversation-records.css": {
-      "fontSize": 1,
+      "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 3,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "session-evidence-graph.css": {
-      "fontSize": 5,
-      "fontWeight": 0,
-      "spacing": 37,
+      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },
     "session-evidence-layout.css": {
-      "fontSize": 7,
-      "fontWeight": 2,
-      "spacing": 57,
-      "color": 1,
-      "buttonReset": 0
-    },
-    "session-evidence-overview.css": {
-      "fontSize": 6,
-      "fontWeight": 3,
-      "spacing": 24,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "session-evidence-segments.css": {
-      "fontSize": 6,
-      "fontWeight": 4,
-      "spacing": 46,
+      "fontSize": 0,
+      "fontWeight": 0,
+      "spacing": 1,
       "color": 0,
       "buttonReset": 0
     },
@@ -218,17 +183,17 @@
       "buttonReset": 0
     },
     "styles-agent-roster.css": {
-      "fontSize": 5,
+      "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 16,
+      "spacing": 0,
       "color": 3,
       "buttonReset": 0
     },
     "styles-billing-guard.css": {
-      "fontSize": 5,
+      "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 17,
-      "color": 4,
+      "spacing": 1,
+      "color": 0,
       "buttonReset": 0
     },
     "styles-call-evidence.css": {
@@ -239,16 +204,16 @@
       "buttonReset": 0
     },
     "styles-chat-entry.css": {
-      "fontSize": 5,
-      "fontWeight": 2,
-      "spacing": 10,
+      "fontSize": 3,
+      "fontWeight": 1,
+      "spacing": 9,
       "color": 0,
       "buttonReset": 0
     },
     "styles-chat-media.css": {
       "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 12,
+      "spacing": 8,
       "color": 0,
       "buttonReset": 0
     },
@@ -260,9 +225,9 @@
       "buttonReset": 0
     },
     "styles-composer-runtime.css": {
-      "fontSize": 2,
-      "fontWeight": 2,
-      "spacing": 3,
+      "fontSize": 0,
+      "fontWeight": 1,
+      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },
@@ -283,14 +248,14 @@
     "styles-evidence-session.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 6,
+      "spacing": 1,
       "color": 0,
       "buttonReset": 0
     },
     "styles-execution-graph.css": {
-      "fontSize": 9,
+      "fontSize": 3,
       "fontWeight": 0,
-      "spacing": 22,
+      "spacing": 8,
       "color": 1,
       "buttonReset": 0
     },
@@ -311,28 +276,21 @@
     "styles-overview-controls.css": {
       "fontSize": 3,
       "fontWeight": 0,
-      "spacing": 17,
+      "spacing": 13,
       "color": 14,
       "buttonReset": 0
     },
     "styles-overview-foundation.css": {
-      "fontSize": 3,
+      "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 8,
-      "color": 1,
-      "buttonReset": 0
-    },
-    "styles-panel-chrome.css": {
-      "fontSize": 2,
-      "fontWeight": 2,
       "spacing": 4,
-      "color": 0,
+      "color": 1,
       "buttonReset": 0
     },
     "styles-picker-menus.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 8,
+      "spacing": 7,
       "color": 1,
       "buttonReset": 0
     },
@@ -343,25 +301,11 @@
       "color": 1,
       "buttonReset": 0
     },
-    "styles-segment-summary.css": {
-      "fontSize": 2,
-      "fontWeight": 1,
-      "spacing": 5,
-      "color": 7,
-      "buttonReset": 0
-    },
-    "styles-segments.css": {
-      "fontSize": 9,
-      "fontWeight": 1,
-      "spacing": 20,
-      "color": 1,
-      "buttonReset": 0
-    },
     "styles-session-controls.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 2,
-      "color": 1,
+      "color": 0,
       "buttonReset": 0
     },
     "styles-settings-inventory.css": {
@@ -392,13 +336,6 @@
       "color": 22,
       "buttonReset": 0
     },
-    "styles-tool-cards.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 4,
-      "color": 0,
-      "buttonReset": 0
-    },
     "styles-tool-evidence.css": {
       "fontSize": 0,
       "fontWeight": 0,
@@ -414,9 +351,9 @@
       "buttonReset": 0
     },
     "styles-verdict-diff.css": {
-      "fontSize": 3,
-      "fontWeight": 1,
-      "spacing": 14,
+      "fontSize": 1,
+      "fontWeight": 0,
+      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },

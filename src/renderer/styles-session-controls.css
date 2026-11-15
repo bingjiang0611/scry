@@ -198,7 +198,7 @@
 }
 
 .stat-pill.ok {
-  border-color: rgba(84, 201, 138, 0.28);
+  border-color: color-mix(in srgb, var(--ok) 28%, transparent);
 }
 
 .sg-card,
@@ -366,5 +366,4 @@
 
 .panel {
   --panel: var(--overview-surface);
-  background: var(--overview-surface);
 }

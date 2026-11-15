@@ -10,9 +10,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 32px;
-  font: 11.5px/1.5 var(--font-mono);
-  color: var(--dim2);
+  padding: 8px 32px;
+  font: var(--text-sm)/1.5 var(--font-mono);
   border-bottom: 1px solid var(--border3);
 }
 .seg-empty {
@@ -22,7 +21,7 @@
   font-size: var(--text-md);
 }
 .seg-ribbon {
-  padding: 18px 0 14px;
+  padding: 16px 0 16px;
   background: var(--bg);
   border-bottom: 1px solid var(--border3);
 }
@@ -30,17 +29,16 @@
   margin: 0 auto;
 }
 .seg-ribbon h2 {
-  font: var(--weight-semibold) 17px/1 var(--font-ui);
-  letter-spacing: -0.01em;
+  font: var(--weight-semibold) var(--text-lg)/1 var(--font-ui);
   margin-bottom: 4px;
 }
 .seg-ribbon .sub {
-  font: 11.5px/1 var(--font-mono);
+  font: var(--text-sm)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.04em;
 }
 .seg-bar {
-  margin-top: 18px;
+  margin-top: 16px;
   display: flex;
   overflow: hidden;
   border: 1px solid var(--border3);
@@ -50,8 +48,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 10.5px/1 var(--font-mono);
-  color: rgba(0, 0, 0, 0.6);
+  font: var(--text-xs)/1 var(--font-mono);
+  color: color-mix(in srgb, var(--fill-fg) 60%, transparent);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -75,7 +73,7 @@
   color: var(--fg);
 }
 .seg-legend {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
   font: var(--text-xs)/1 var(--font-mono);
@@ -84,7 +82,7 @@
 .seg-legend .item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .seg-legend .sw {
   width: 10px;
@@ -99,12 +97,11 @@
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1px;
   border: 1px solid var(--border3);
-  border-radius: var(--r-md);
   overflow: hidden;
 }
 .seg-compare > div {
   background: var(--panel);
-  padding: 14px 16px;
+  padding: 16px 16px;
 }
 .seg-compare .lbl {
   font: var(--text-2xs)/1 var(--font-mono);
@@ -113,8 +110,8 @@
   text-transform: uppercase;
 }
 .seg-compare .val {
-  font: var(--weight-semibold) 19px/1.1 var(--font-mono);
-  margin-top: 6px;
+  font: var(--weight-semibold) var(--text-xl)/1.1 var(--font-mono);
+  margin-top: 8px;
   font-variant-numeric: tabular-nums;
 }
 .seg-compare .val.accent {
@@ -124,7 +121,7 @@
   color: var(--ok);
 }
 .seg-compare .sub {
-  font: 10.5px/1.4 var(--font-mono);
+  font: var(--text-xs)/1.4 var(--font-mono);
   color: var(--dim2);
   margin-top: 4px;
 }
@@ -132,27 +129,25 @@
   padding: 24px 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   margin: 0 auto;
 }
 .seg-card {
   display: grid;
-  background: var(--panel);
   border: 1px solid var(--border3);
   overflow: hidden;
 }
 .seg-l {
-  padding: 16px 18px;
   border-right: 1px solid var(--border3);
 }
 .seg-l .kind {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   margin-bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .seg-l .kind .sw {
   width: 10px;
@@ -162,23 +157,22 @@
 .seg-l h3 {
   font: var(--weight-semibold) var(--text-lg)/1.2 var(--font-mono);
   letter-spacing: -0.005em;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   word-break: break-word;
 }
 .seg-l .when {
   font: var(--text-xs)/1.4 var(--font-mono);
   color: var(--dim);
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .seg-l .when b {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 .seg-m {
-  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .seg-summary {
   font-size: var(--text-md);
@@ -191,13 +185,13 @@
 .seg-acts {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 .seg-act {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
+  gap: 4px;
+  padding: 4px 8px;
   background: var(--panel2);
   border: 1px solid var(--border3);
   border-radius: var(--r-xs);
@@ -218,7 +212,6 @@
   color: var(--edit);
 }
 .seg-r {
-  padding: 16px 18px;
   border-left: 1px solid var(--border3);
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -231,7 +224,7 @@
   text-transform: uppercase;
 }
 .seg-r .m-stat .val {
-  font: var(--weight-semibold) 17px/1.2 var(--font-mono);
+  font: var(--weight-semibold) var(--text-lg)/1.2 var(--font-mono);
   color: var(--fg);
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
@@ -246,7 +239,7 @@
   color: var(--warn);
 }
 .seg-r .m-stat .delta {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
   margin-top: 4px;
 }

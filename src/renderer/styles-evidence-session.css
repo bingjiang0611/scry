@@ -103,7 +103,7 @@
 }
 
 .ctx-gauge {
-  padding: 16px 14px;
+  padding: 16px 16px;
   background: var(--surface-faint);
 }
 
@@ -117,7 +117,7 @@
 
 .panel .verdict-pillar {
   min-height: 86px;
-  padding: 13px 14px;
+  padding: 12px 16px;
 }
 
 .metric-grid,
@@ -127,7 +127,7 @@
 }
 
 .panel-section {
-  padding: 14px 12px;
+  padding: 16px 12px;
   border-bottom-color: var(--border);
 }
 
@@ -174,7 +174,7 @@ button.turn-id.turn-call-open:focus-visible {
   color: var(--dim);
 }
 
-.seg-ribbon { padding-top: 30px; }
+.seg-ribbon { padding-top: 32px; }
 .seg-ribbon h2 { letter-spacing: -0.025em; }
 
 .seg-compare,

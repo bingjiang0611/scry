@@ -78,6 +78,8 @@ describe('cleaned areas', () => {
     conversation: /^[^.,]*\.(?:turn|chat|hooks?|tool|md|mdiv|transcript|question|thinking|user-md|user-attachments?|subagent|callrow|callserver|model-text)(?:-[\w-]*)?(?![\w-])/,
     // Composer, its pickers and queue, and the welcome screen around it.
     composer: /^[^.,]*\.(?:composer|runtime-composer|runtime|queue|slash|model-effort|wdbtn|clibtn|climenu|clipick|location|welcome|wc|draft-attachments?|permission-mode|pending-submission|send|stop|steer|agicon|image-lightbox|bubble|who)(?:-[\w-]*)?(?![\w-])/,
+    // Overview panel, evidence graph, segments, verdict, pinned summary and run status.
+    overview: /^[^.,]*\.(?:overview|ov|evidence|seg|segment|segments|graph|gp|verdict|pinned|ctx|billing|panel|stat|top-tools|toptool|tt|kv|background|agents?|psrc|run-status|recorder)(?:-[\w-]*)?(?![\w-])/
   }
 
   it.each(Object.entries(CLEAN))('%s rules use only scale tokens, the 4px grid and theme colors', (_, scope) => {

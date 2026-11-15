@@ -50,12 +50,12 @@
 /* 实时视图降级提示：只描述 live 镜像落后，明确不影响归档与 runState 的完整证据。 */
 .run-status-trace-degraded {
   flex: none;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
   border-radius: var(--r-xs);
   background: var(--warn-soft);
   color: var(--warn);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

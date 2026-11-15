@@ -6,9 +6,6 @@
   grid-template-columns: minmax(0, 1fr) var(--pane-resizer-w) var(--graph-detail-w);
   min-height: 0;
 }
-.graph-detail-resizer {
-  background: var(--bg);
-}
 .gtree {
   overflow: auto;
   padding: 20px 24px 40px;
@@ -272,27 +269,24 @@ button.toptool {
   min-height: 0;
 }
 .gp-empty {
-  padding: 40px 18px;
+  padding: 40px 16px;
   color: var(--dim2);
   font-size: var(--text-md);
 }
 .gp-h {
-  padding: 14px 18px 10px;
+  padding: 16px 16px 8px;
   border-bottom: 1px solid var(--border3);
 }
 .gp-h .breadcrumb {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   margin-bottom: 8px;
   flex-wrap: wrap;
-}
-.gp-h .breadcrumb b {
-  color: var(--accent);
 }
 .gp-h h2 {
   font: var(--weight-semibold) var(--text-lg)/1.2 var(--font-mono);
@@ -302,30 +296,30 @@ button.toptool {
 .gp-h .subhead {
   margin-top: 8px;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  font: 11.5px/1 var(--font-mono);
+  font: var(--text-sm)/1 var(--font-mono);
   color: var(--dim);
   flex-wrap: wrap;
 }
 .gp-section {
   border-bottom: 1px solid var(--border3);
-  padding: 14px 18px;
+  padding: 16px 16px;
 }
 .gp-section.last {
   border-bottom: 0;
 }
 .gp-section h4 {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .kv {
   display: grid;
   grid-template-columns: 110px 1fr;
-  row-gap: 6px;
+  row-gap: 8px;
   font: var(--text-sm)/1.5 var(--font-mono);
 }
 .kv dt {
@@ -337,12 +331,12 @@ button.toptool {
   margin: 0;
 }
 .gp-section pre {
-  font: 11.5px/1.5 var(--font-mono);
+  font: var(--text-sm)/1.5 var(--font-mono);
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--border3);
   border-radius: var(--r-sm);
-  padding: 10px;
+  padding: 8px;
   max-height: 220px;
   overflow: auto;
   white-space: pre-wrap;
@@ -351,21 +345,21 @@ button.toptool {
 .gp-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 /* full verdict 卡（graph 顶部，非 compact，4 pillar 一排） */
 .verdict-card.full {
   /* 都用 minmax(0, …)：1fr 的下限是 min-content，pillar 里的
      「审计·未拦截」这类文案会把整排顶出卡片，再被 overflow:hidden 切一半。 */
   grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
-  margin: 14px 0 18px;
+  margin: 16px 0 16px;
 }
 .verdict-card.full .verdict-left {
   border-right: 1px solid var(--border3);
   border-bottom: 0;
 }
 .verdict-card.full .verdict-left .judgement {
-  font-size: 22px;
+  font-size: var(--text-xl);
 }
 .verdict-card.full .verdict-right {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -378,7 +372,7 @@ button.toptool {
   border-right: 0;
 }
 .verdict-card.full .verdict-pillar .v {
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 
 /* 卡片可能被视图内部的分栏压窄（拓扑左树右详情），这跟主区宽度无关，

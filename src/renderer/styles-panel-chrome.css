@@ -16,7 +16,7 @@
   flex: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 9px;
+  gap: 8px;
   border-bottom: 1px solid var(--border3);
 }
 .ov-scroll {
@@ -29,7 +29,6 @@
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-  padding: 14px 16px;
   border-bottom: 1px solid var(--border3);
 }
 .ctx-gauge .ring {
@@ -42,7 +41,7 @@
   background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--panel3) 0);
   display: grid;
   place-items: center;
-  font: 650 var(--text-sm)/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-sm)/1 var(--font-mono);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
@@ -73,18 +72,18 @@
   min-width: 0;
 }
 .ctx-copy .lbl {
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.14em;
 }
 .ctx-copy .v {
-  margin-top: 6px;
-  font: 650 18px/1 var(--font-mono);
+  margin-top: 8px;
+  font: var(--weight-semibold) var(--text-lg)/1 var(--font-mono);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
 .ctx-copy .sub {
-  margin-top: 6px;
+  margin-top: 8px;
   font: var(--text-xs)/1.35 var(--font-mono);
   color: var(--dim2);
 }
