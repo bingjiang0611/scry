@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { applySessionCaptureHook, startSessionCapture, stopSessionCapture } from './session-capture'
 import { CaptureRequestError, type SessionCaptureContext } from './session-capture-contract'
 import { handleRecorderHook } from './recorder'
-import { listRecords } from './store'
+import { drainCommitNotifications, listRecords } from './store'
 import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state'
 import { readJson } from './io'
 import { readRecorderContent } from './content-store'
@@ -147,6 +147,36 @@ it('an opt-in workspace records nothing from ordinary hooks, and the guard claim
   const currentLines = rolloutLines(root, [CURRENT_TURN]).slice(1).map((line) => JSON.stringify(line)).join('\n') + '\n'
   expect(raw).toBe(currentLines)
   expect(raw).not.toContain(OLDER_TURN.prompt)
+})
+
+it('the capture-start process is the only one that sees the host callback, and it records it', async () => {
+  const root = await workspace()
+  const transcriptPath = await transcript(root, [OLDER_TURN, CURRENT_TURN])
+  const hook = join(root, 'notify.sh')
+  const received = join(root, 'received.json')
+  await writeFile(hook, `#!/bin/sh\ncat >> ${JSON.stringify(received)}\nprintf '\\n' >> ${JSON.stringify(received)}\n`)
+  await chmod(hook, 0o755)
+  // Friday 现场：capture start 成功、3 条记录落地，notifyBacklog=3、uploader enqueuedThrough=0。
+  await expect(startSessionCapture({
+    workspace: root,
+    provider: 'codex',
+    sessionId: 'sess-1',
+    dataDir: join(root, '.scry'),
+    context: context(transcriptPath),
+    payload: claimPayload(transcriptPath),
+    cli: {},
+    env: { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook, SCRY_GRANT_DIR: join(root, 'grants') }
+  })).resolves.toMatchObject({ status: 'started' })
+
+  // Every later delivery runs without that environment: the daemon and the receiver prove the
+  // recorded activation instead.
+  const env = { PATH: '/usr/bin:/bin', SCRY_GRANT_DIR: join(root, 'grants') }
+  await sessionHook(root, transcriptPath, 'Stop', stopEvent(transcriptPath))
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  await expect(drainCommitNotifications(join(root, '.scry'), {
+    ...env, SCRY_RECORDER_COMMIT_HOOK: hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: undefined
+  })).resolves.toMatchObject({ delivered: 1 })
 })
 
 it('repeated claims are idempotent per captureId and never open a second generation', async () => {
