@@ -1,3 +1,4 @@
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { useId, useRef, useState } from 'react'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
@@ -168,7 +169,7 @@ export function CapabilitiesModal({
               <strong>{LOADING_COPY.skillsUnavailable}</strong>
               <button type="button" className="capabilities-refresh" onClick={onRefreshSkills}>{LOADING_COPY.refresh}</button>
             </div>
-          ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedLoadingStatus loading={skillsRefreshing} title={LOADING_COPY.skills} /> : (
+          ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedSkeletonRows loading={skillsRefreshing} rows={6} meta rowHeight={56} label={LOADING_COPY.skills} /> : (
             <div className="capabilities-empty" role="status">
               <strong>{LOADING_COPY.skillsSourceEmpty}</strong>
             </div>
@@ -256,7 +257,7 @@ export function CapabilitiesModal({
               </article>
             )
           }) : mcpUnavailable ? <div className="capabilities-empty" role="status"><strong>{LOADING_COPY.mcpUnavailable}</strong></div>
-            : loadingMcpConfig || mcpCapability === null ? <DelayedLoadingStatus loading={loadingMcp} title={LOADING_COPY.mcp} /> : (
+            : loadingMcpConfig || mcpCapability === null ? <DelayedSkeletonRows loading={loadingMcp} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} /> : (
             <div className="capabilities-empty" role="status">
               <strong>{LOADING_COPY.mcpSourceEmpty}</strong>
             </div>
