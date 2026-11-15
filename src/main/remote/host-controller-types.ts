@@ -144,6 +144,9 @@ export interface HostControllerDependencies {
     routing: RemoteIntentRouting
     progress(detail?: string): void
     output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+    // The run's trace changed with neither output nor a ledger marker: a notice for the
+    // App event feed (onRunActivity), never content.
+    activity?(): void
     requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
     // Aborted only when the paired device explicitly asks to stop this run. The
     // binding forwards it to the Provider's own interrupt; the ledger lifecycle

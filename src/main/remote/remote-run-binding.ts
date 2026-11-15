@@ -136,6 +136,10 @@ export interface RemoteRunInput {
   // The assistant's REAL trace CONTENT sink (masked + bounded by the log). This
   // is what lets the device render the actual output, not just the lifecycle.
   output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
+  // The run's trace changed with no output and no ledger marker (a harness stage such
+  // as a native turn still pending). A notice only, never content: without it the App,
+  // which reads a run when told it changed, sees that item only on its fallback poll.
+  activity?(): void
   requestUserInput?(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
   // Device stop request. Forwarded to the Provider handle's own interrupt; the
   // run still settles from the Provider result (e.g. status `interrupted`).
@@ -159,7 +163,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
     return startLegacyRemoteRun(deps, nextScryRunId(), input)
   }
 
-  async function startCanonicalRemoteRun({ runId: ledgerRunId, routing, progress, output, requestUserInput, stopSignal, grantScope }: RemoteRunInput): Promise<void> {
+  async function startCanonicalRemoteRun({ runId: ledgerRunId, routing, progress, output, activity, requestUserInput, stopSignal, grantScope }: RemoteRunInput): Promise<void> {
     // A conversation run carries only a marker; its request and run id are the launch's.
     const launch = routing.conversation ? claimConversationLaunch(deps.managedLaunch, routing) : undefined
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
@@ -191,7 +195,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
         }
         progress(marker({ event: 'result', isError: Boolean(ev.isError), ...(typeof ev.tokensIn === 'number' ? { tokensIn: ev.tokensIn } : {}), ...(typeof ev.tokensOut === 'number' ? { tokensOut: ev.tokensOut } : {}), ...(typeof ev.costUsd === 'number' ? { costUsd: ev.costUsd } : {}) }))
       }
-      if (!chunk) return
+      if (!chunk) { activity?.(); return }
       let forwarded = chunk
       if (chunk.kind === 'output' && messageId) {
         const previous = outputByMessageId.get(messageId)

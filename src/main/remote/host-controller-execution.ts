@@ -98,6 +98,8 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
             executorInput.progress(detail)
           },
           output: executorInput.output,
+          // Content-free trace changes name the run for the App event feed (P3f E2).
+          activity: () => runActivity(deps, executorInput.runId, ledger),
           requestUserInput: (request, signal) => interactions.request(executorInput.runId, request, signal),
           stopSignal: stop.signal,
           // Policy that differs by scope reads the submitting grant's scope, never the

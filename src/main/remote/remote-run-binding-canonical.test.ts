@@ -115,4 +115,24 @@ describe('remote run binding (canonical App seam: submit -> startAppRun)', () =>
     expect(progress.mock.calls.map(call => JSON.parse(call[0] as string)).at(-1)).toEqual({ event: 'settled', status: 'failed' })
   })
 
+  it('names a trace change that carries no output, so the App reads it without waiting out its fallback', async () => {
+    // A stop-immediate fixture run emits only harness/init ("Awaiting native turn") and
+    // then waits: no output and no ledger marker follow it. The App reads a daemon run
+    // when told it changed, so without a notice this item reached the window only on
+    // the 15 s fallback poll - which is the native composer probe's own deadline.
+    const pending: TraceEvent = { id: 'p', ts: '2020', runId: 'x', kind: 'harness', stage: 'init', text: 'Awaiting native turn: go' }
+    const output = vi.fn()
+    const activity = vi.fn()
+    const startAppRun = vi.fn(async (input: Parameters<NonNullable<RemoteRunBindingDependencies['startAppRun']>>[0]) => {
+      input.onTraceEvent(pending)
+      expect(activity).toHaveBeenCalledTimes(1)
+      input.onTraceEvent(textEvent('visible'))
+      return { status: 'completed' as const, recording: 'committed' as const }
+    })
+    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-activity' })
+    await start({ runId: 'ledger-activity', routing: { cwd: '/w', providerId: 'codex', prompt: 'go' }, progress: vi.fn(), output, activity })
+    // Output already names the run through its own sink; the notice is only for the rest.
+    expect(activity).toHaveBeenCalledTimes(1)
+    expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'visible' })
+  })
 })

@@ -256,4 +256,21 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     const { seq } = controller.submitIntent(local, { intentId: 'local-activity', detail })
     expect(new Set(activity.mock.calls.map(([, intentSeq]) => intentSeq))).toEqual(new Set([seq]))
   })
+
+  it('names a run whose trace changed with neither output nor a ledger marker', async () => {
+    // A harness stage (a native turn still pending) is in the run's trace but not in its
+    // output log or ledger: the run start says so, and the App event feed hears of it.
+    const activity = vi.fn()
+    const { identity, controller, startRun } = await harness(undefined, activity)
+    let heard: unknown[][] | undefined
+    startRun.mockImplementationOnce(async (input) => {
+      const before = activity.mock.calls.length
+      ;(input as unknown as { activity(): void }).activity()
+      heard = activity.mock.calls.slice(before)
+    })
+    const local = await enrollLocal(identity, controller)
+    const { runId, seq } = controller.submitIntent(local, { intentId: 'local-trace-only', detail })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(heard).toEqual([[runId, seq]]))
+  })
 })
