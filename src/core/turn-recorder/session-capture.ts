@@ -23,6 +23,7 @@ import {
   captureStatePath,
   captureWireContext,
   readCaptureState,
+  unionDiffExclude,
   type CaptureAck,
   type SessionCaptureContext,
   type SessionCaptureState
@@ -82,6 +83,7 @@ export async function startSessionCapture(args: {
   const statePath = captureStatePath(enablement.dataRoot, args.provider, args.sessionId)
   const existing = await readCaptureState(enablement.dataRoot, args.provider, args.sessionId)
   if (existing && existing.captureId === args.context.captureId) {
+    await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, args.context.diffExclude)
     await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
     return { status: 'already_started', ack: captureAck('start', 'already_started', args.context), transport }
   }
@@ -99,6 +101,37 @@ export async function startSessionCapture(args: {
   }, { waitMs: 10_000 })
   await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
   return { status: 'started', ack: captureAck('start', 'started', args.context), transport }
+}
+
+/**
+ * A repeated start of this capture may only add exclusion paths: a later stage of the same workflow
+ * can never narrow what an earlier one asked for. The union is written to the session state, the
+ * published context and the open turn, which are the places the diff path reads it from.
+ */
+async function adoptDiffExclude(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  provider: ProviderId,
+  sessionId: string,
+  state: SessionCaptureState,
+  added: string[] | undefined
+): Promise<void> {
+  const merged = unionDiffExclude(state.diffExclude, added)
+  if (merged.length === (state.diffExclude?.length ?? 0)) return
+  await withRecorderSessionLock(enablement.dataRoot, provider, sessionId, async () => {
+    const current = await readCaptureState(enablement.dataRoot, provider, sessionId)
+    if (!current || current.captureId !== state.captureId) return
+    const next = unionDiffExclude(current.diffExclude, merged)
+    await writeJsonAtomic(captureStatePath(enablement.dataRoot, provider, sessionId),
+      { ...current, diffExclude: next } satisfies SessionCaptureState)
+    await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId),
+      captureWireContext({ ...captureStateContext(current), diffExclude: next }))
+    const root = recorderSessionRoot(enablement.dataRoot, provider, sessionId)
+    const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
+    if (open?.capture) {
+      await writeJsonAtomic(recorderOpenPath(root),
+        { ...open, capture: { ...open.capture, diffExclude: next } }, { sync: false })
+    }
+  }, { waitMs: 10_000 })
 }
 
 async function ensureReceiver(

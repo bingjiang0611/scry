@@ -20,6 +20,11 @@ export interface SessionCaptureContext {
   openedAt: string
   source: string
   task: string | null
+  /**
+   * Absolute paths this session keeps out of its turn diffs, as the integrator declared them.
+   * They belong to the claim, never to `scry.config.json`, and only the diff is affected.
+   */
+  diffExclude?: string[]
   stopRequestedAt?: string
 }
 
@@ -94,6 +99,7 @@ export function parseSessionCaptureContext(value: unknown, provider: ProviderId)
   if (stopRequestedAt !== undefined && (typeof stopRequestedAt !== 'string' || !Number.isFinite(Date.parse(stopRequestedAt)))) {
     throw new CaptureRequestError('invalid_request', 'capture.stopRequestedAt must be an ISO-8601 timestamp when present')
   }
+  const diffExclude = parseDiffExclude(raw.diffExclude)
   return {
     protocol: SESSION_CAPTURE_PROTOCOL,
     captureId,
@@ -104,8 +110,38 @@ export function parseSessionCaptureContext(value: unknown, provider: ProviderId)
     openedAt: new Date(openedAt).toISOString(),
     source,
     task: task as string | null,
+    ...(diffExclude.length ? { diffExclude } : {}),
     ...(typeof stopRequestedAt === 'string' ? { stopRequestedAt: new Date(stopRequestedAt).toISOString() } : {})
   }
+}
+
+/** At most this many declared paths per session: a workflow declares a handful, not a directory tree. */
+export const DIFF_EXCLUDE_PATH_LIMIT = 64
+
+/**
+ * Validate the declared exclusion paths. They are absolute because the integrator's working directory
+ * is not the recorder's: resolving again at diff time would guess a different base.
+ */
+export function parseDiffExclude(value: unknown): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > DIFF_EXCLUDE_PATH_LIMIT) {
+    throw new CaptureRequestError('invalid_request', 'capture.diffExclude must be an array of paths')
+  }
+  const paths: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || !item.startsWith('/') || item.length > 1024 || /[\r\n]/.test(item)) {
+      throw new CaptureRequestError('invalid_request', 'capture.diffExclude entries must be absolute paths')
+    }
+    if (!paths.includes(item)) paths.push(item)
+  }
+  return paths
+}
+
+/** The declared paths plus whatever another start of the same session adds; order is declaration order. */
+export function unionDiffExclude(current: string[] | undefined, added: string[] | undefined): string[] {
+  const merged = [...(current ?? [])]
+  for (const item of added ?? []) if (!merged.includes(item)) merged.push(item)
+  return merged
 }
 
 /** The `{capture, payload}` stdin document shared by start, stop and session hook delivery. */
@@ -151,6 +187,7 @@ export function captureWireContext(context: SessionCaptureContext): Record<strin
     openedAt: context.openedAt,
     source: context.source,
     task: context.task,
+    ...(context.diffExclude?.length ? { diffExclude: context.diffExclude } : {}),
     ...(context.stopRequestedAt ? { stopRequestedAt: context.stopRequestedAt } : {})
   }
 }

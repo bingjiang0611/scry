@@ -142,6 +142,8 @@ export interface RecorderOpenTurnState {
     source: string
     task: string | null
     openedAt: string
+    /** Absolute paths this session keeps out of its diffs; only the diff is affected. */
+    diffExclude?: string[]
     baselineAt?: string
   }
   /** Stop intent for a captured session; the turn still finishes from its own terminal events. */
