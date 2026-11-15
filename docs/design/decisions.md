@@ -192,3 +192,10 @@
 2. **整条删除了混合有效成员的 `:where()`**。清扫无引用类名时，`:where(h1, h2, h3, .card-title, …)` 与总览指标标签的 `:where(...)` 因含有无引用成员被整条删除，标题失去 `text-wrap: balance`、指标标签失去大写与字距。逐元素比对当时没有包含这些属性，因此没有报出。已只删除无效成员后恢复，比对属性随之扩展到 `letter-spacing`、`text-transform`、`text-wrap`、`font-variant-numeric`、`white-space`、`display`、`grid-template-columns` 等，复核结果为零差异；用同样的方法复核了更早两次类名清理，只有第三批那条 motion 规则（当时已恢复）。
 
 仍未处理：z-index 分层 token、UX 文案逐面板审查、菜单（14 套）收敛、浮动 toast 模式。Electron 内的真实交互与 UI smoke 未在本地运行（容器以 root 运行）。
+
+## PR CI 发现的两处行为回归（2026-11-15）
+
+macOS 打包后的 smoke 在 PR 上报出两处由本次收敛引入的行为变化，均已修正：
+
+1. **标题栏按钮失去 `no-drag`**。给容器级按钮规则统一加排除条件时，`styles-macos-window.css` 里让标题栏控件退出窗口拖拽区的规则也被加上了 `:not(:where(.btn, …))`。结果顶栏和侧面板顶栏里的 Button／IconButton 落在拖拽区内，点击会变成拖动窗口。这条规则只设置 `-webkit-app-region`，是行为而不是样式，已恢复为覆盖所有按钮。审计改为：只设置 `-webkit-app-region`、`pointer-events`、`user-select` 的容器规则不要求、也不应排除 primitive；`design-system.test.ts` 另加一条直接检查标题栏规则的测试，并用反向修改确认它会失败。静态渲染比对没有发现这个问题，因为它不带 `data-platform='macos'`，也不比对 `-webkit-app-region`。
+2. **减少动态效果时按钮颜色过渡被关掉**。`styles-buttons.css` 在 `prefers-reduced-motion` 下写了 `transition: none`，而全局约定是把过渡缩短到 `--duration-reduced`、保留颜色反馈（动效 token 检查要求 `.btn` 的背景色过渡仍为 150ms）。已删除这段覆盖。

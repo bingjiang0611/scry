@@ -364,7 +364,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 - 不要写半像素字号、550／620 这类中间字重、5／7／9／10／14px 这类网格外间距。
 - 不要在组件里写 `#hex`、`rgb()`、`oklch()` 等裸颜色；需要新颜色时先在主题层定义语义变量。
 - 不要为一个新功能另起一套按钮、通知或标签页样式；扩展收敛目标而不是复制。
-- 不要写 `.panel button { … }` 这种覆盖容器内所有按钮的规则；确需重置原生按钮时写成 `.panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button))`。必须用 `:where()`：直接写 `:not(.btn, …)` 会把规则的优先级抬高到参数里最高的那一项，反过来压过组件自己的样式。
+- 不要写 `.panel button { … }` 这种覆盖容器内所有按钮的规则；确需重置原生按钮时写成 `.panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button))`。必须用 `:where()`：直接写 `:not(.btn, …)` 会把规则的优先级抬高到参数里最高的那一项，反过来压过组件自己的样式。只改行为的规则（`-webkit-app-region`、`pointer-events`、`user-select`）例外：它们必须覆盖 primitive，例如 macOS 标题栏里的 `no-drag` 漏掉 Button／IconButton，按钮就会落进窗口拖拽区而点不动。
 - 不要把 Provider 品牌色、选中态或连接点当作成功、授权或完整性证明。
 - 不要把基础 `styles-theme-shell.css` 的颜色旧值或 `designs/` 原型直接当作当前产品规范；颜色以最终覆写层为准。
 - 不要把 iOS 的 glass helper 描述成已实现的系统材质或背景模糊。

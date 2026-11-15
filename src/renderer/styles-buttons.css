@@ -1,7 +1,9 @@
 /* The single definition of text and icon buttons (components/primitives/Button.tsx,
    IconButton.tsx). Context rules elsewhere may position a button but must not
    restyle its size, color or radius; pick a variant or size instead. Focus uses
-   the global focus-visible ring from codex-alignment-shell.css. */
+   the global focus-visible ring from codex-alignment-shell.css. Reduced motion is
+   handled globally by motion.css (transitions shorten to --duration-reduced), so
+   these color transitions are not switched off here. */
 
 .btn {
   display: inline-flex;
@@ -121,11 +123,4 @@
 .icon-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .btn,
-  .icon-button {
-    transition: none;
-  }
 }

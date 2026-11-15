@@ -49,13 +49,23 @@ describe('design debt audit', () => {
       @media (max-width: 640px) { .b { margin: -3px 0 2px; gap: 1px 8px; font-weight: 550; font-size: clamp(24px, 3cqi, 32px) } }
       .c { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--fg); padding: 4px 12px }
       .d button:hover, .e button:not(:where(.btn, .icon-button, [role='tab'])):hover, .g button:not(.btn):hover, .f .btn { cursor: pointer }
+      :root[data-platform='macos'] .topbar button, .h button { -webkit-app-region: no-drag; user-select: none }
     `)
     expect(found.fontSize.map((item: { text: string }) => item.text)).toEqual(['font: var(--weight-semibold) 11.5px/1 var(--font-mono)'])
     expect(found.fontWeight.map((item: { text: string }) => item.text)).toEqual(['font-weight: 550'])
     expect(found.spacing.map((item: { text: string }) => item.text)).toEqual(['padding: 6px var(--space-2)', 'margin: -3px 0 2px'])
     expect(found.color.map((item: { text: string }) => item.text)).toEqual(['color: #fff'])
     // A bare :not() raises specificity and overrides component rules, so only the :where() form counts.
+    // Behavior-only rules (window drag band, pointer events, selection) must keep reaching every button.
     expect(found.buttonReset.map((item: { text: string }) => item.text)).toEqual(['.d button:hover', '.g button:not(.btn):hover'])
+  })
+
+  it('keeps primitives inside the macOS titlebar drag opt-out', () => {
+    // Without no-drag a Button or IconButton in the 52px titlebar becomes part of the window drag band and stops receiving clicks.
+    const macWindow = readFileSync(join(rendererDirectory, 'styles-macos-window.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const noDrag = [...macWindow.matchAll(/([^{}]+)\{[^{}]*-webkit-app-region:\s*no-drag/g)]
+      .flatMap((match) => match[1].split(',').map((selector) => selector.trim()))
+    expect(noDrag).toEqual(expect.arrayContaining([":root[data-platform='macos'] .topbar button", ":root[data-platform='macos'] .surface-topbar button"]))
   })
 
   it('finds no design debt in any renderer stylesheet', () => {

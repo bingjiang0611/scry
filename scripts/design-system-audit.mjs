@@ -21,7 +21,7 @@ export const METRIC_RULES = {
   fontWeight: 'font-weight uses a number instead of var(--weight-*)',
   spacing: 'padding / margin / gap uses a px value off the 4px grid (1px hairline and 2px optical are allowed)',
   color: 'a non-token declaration uses a raw color literal instead of a theme variable',
-  buttonReset: 'a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button))'
+  buttonReset: 'a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button)); rules that only set -webkit-app-region, pointer-events or user-select must not exclude them'
 }
 
 const SPACING_PROPERTY = /^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$|^(?:gap|row-gap|column-gap)$/
@@ -59,14 +59,17 @@ function splitSelectors(text) {
   return out.map((selector) => selector.trim()).filter(Boolean)
 }
 
-/** Yields `{ selector, line }` for every style-rule selector (at-rule preludes excluded). */
+/** Yields `{ selector, line, properties }` for every style-rule selector (at-rule preludes excluded). */
 export function* selectors(source) {
   const text = stripComments(source)
   for (const match of text.matchAll(/([^{};]+)\{/g)) {
     const prelude = match[1].trim()
     if (!prelude || prelude.startsWith('@')) continue
     const line = text.slice(0, match.index + match[0].indexOf(prelude)).split('\n').length
-    for (const selector of splitSelectors(prelude)) yield { selector, line }
+    const bodyStart = match.index + match[0].length
+    const body = text.slice(bodyStart, text.indexOf('}', bodyStart))
+    const properties = [...body.matchAll(/(?:^|;)\s*(-{0,2}[a-zA-Z][-a-zA-Z0-9_]*)\s*:/g)].map((item) => item[1].toLowerCase())
+    for (const selector of splitSelectors(prelude)) yield { selector, line, properties }
   }
 }
 
@@ -74,6 +77,9 @@ export function* selectors(source) {
 const CONTAINER_BUTTON = /[\s>]button(?::[a-z-]+(?:\([^()]*\))?)*$/
 // `:not(:where(...))` keeps the rule's original specificity; a bare `:not(.btn, …)` would raise it.
 const EXCLUDES_PRIMITIVES = /:not\(:where\(\.btn\b/
+// Rules that only change behavior must reach every button, primitives included: a primitive
+// left out of a macOS `-webkit-app-region: no-drag` rule would sit inside the window drag band.
+const BEHAVIOR_PROPERTIES = new Set(['-webkit-app-region', 'pointer-events', 'user-select', '-webkit-user-select'])
 
 function withoutClamp(value) {
   return value.replace(/clamp\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '')
@@ -103,8 +109,10 @@ export function auditCss(source, { primitiveSheet = false } = {}) {
     }
     for (const _ of value.match(COLOR_LITERAL) ?? []) found.color.push({ line, text })
   }
-  for (const { selector, line } of primitiveSheet ? [] : selectors(source)) {
-    if (CONTAINER_BUTTON.test(selector) && !EXCLUDES_PRIMITIVES.test(selector)) found.buttonReset.push({ line, text: selector })
+  for (const { selector, line, properties } of primitiveSheet ? [] : selectors(source)) {
+    if (!CONTAINER_BUTTON.test(selector) || EXCLUDES_PRIMITIVES.test(selector)) continue
+    if (properties.length > 0 && properties.every((property) => BEHAVIOR_PROPERTIES.has(property))) continue
+    found.buttonReset.push({ line, text: selector })
   }
   return found
 }
