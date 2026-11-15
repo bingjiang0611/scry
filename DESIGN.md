@@ -50,6 +50,7 @@ typography:
     text-sm: 12px
     text-md: 13px
     text-base: 14px
+    text-reading: 15px
     text-lg: 16px
     text-xl: 20px
     text-2xl: 24px
@@ -140,7 +141,7 @@ components:
 | `src/renderer/radius-system.test.ts` | 所有 `border-radius` 必须是 `var(--r-*)`、`50%` 或 `0`；圆形必须声明 `corner-shape: round` | 绝对，无存量例外 |
 | `src/renderer/motion.test.ts` | 缓动曲线只在 `motion.css` 定义 | 绝对 |
 | `src/renderer/design-system.test.ts` + `src/renderer/design-system-baseline.json` | 字号、字重、间距网格、裸颜色字面值、未排除 primitive 的容器级 `button` 规则 | 棘轮：每个文件每项计数只能下降，下降后必须同步写回基线 |
-| `design-system.test.ts` 的 cleaned areas | 已清理完的区域（目前：侧栏 `.sb-*`、`.sidebar*`）的全部规则 | 绝对：该区域债务必须为 0 |
+| `design-system.test.ts` 的 cleaned areas | 已清理完的区域（目前：侧栏 `.sb-*`、`.sidebar*`；对话与工具证据，即首个类名属于 `turn`、`chat`、`hook`、`tool`、`md`、`question`、`thinking` 等族的规则）的全部规则 | 绝对：该区域债务必须为 0 |
 | `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
 
 `npm run design:audit` 列出存量债务，`-- --verbose` 给出逐行明细，`-- --write` 在全部计数未上升时把基线写低。基线只降不升：新代码不能写入新债务，也没有放宽的入口。确需新增尺度值时，先在本文与 `styles-theme-shell.css` 中扩展 scale，并在 PR 中说明为何现有档位不够。
@@ -174,7 +175,8 @@ iOS：canvas／surface／message 承载画布、导航背景和消息背景；in
 | `--text-xs` | 11px | 紧凑辅助文字、时间戳、表头（`--text-compact-size` 是其别名） |
 | `--text-sm` | 12px | 按钮、辅助说明、表单标签（`--text-supporting-size` 是其别名） |
 | `--text-md` | 13px | 次级正文、导航、列表行 |
-| `--text-base` | 14px | 对话正文与默认阅读文字 |
+| `--text-base` | 14px | 界面默认文字：面板正文、表单、列表说明 |
+| `--text-reading` | 15px | 只用于对话阅读正文：助手回答与用户消息（Markdown 标题按 em 随之缩放） |
 | `--text-lg` | 16px | 面板标题、弹窗标题 |
 | `--text-xl` | 20px | 区块标题 |
 | `--text-2xl` | 24px | 页面标题、主证据数值 |
@@ -369,9 +371,11 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
 2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
 3. **通知与标签页（已完成）**：`Notice`、`Tabs`、`Segmented` 与 `styles-notices.css`、`styles-tabs.css`；容器级 `button` 规则改为排除 primitive，并纳入债务棘轮。
-4. **按区域偿还字号与间距**：侧栏（已完成）→ 对话与工具证据 → composer → 纵览 → 设置与清单 → 分析视图。每个区域按同一方法处理，完成后加入 cleaned areas，债务锁定为 0：
+4. **按区域偿还字号与间距**：侧栏（已完成）→ 对话与工具证据（已完成）→ composer → 纵览 → 设置与清单 → 分析视图。每个区域按同一方法处理，完成后加入 cleaned areas，债务锁定为 0：
    - **先删死代码**：同一选择器、同一属性被后加载的顶层规则无条件重新声明的，先加载的那条一定不生效，直接删除；删除后用真实组件的计算样式比对确认零变化。
    - **再按固定规则取整**：间距取最近的 4 的倍数，恰在中间（6、10、14、18、22、30）时取 8 的倍数；字号 ≥12 的半像素向下取（12.5→12、13.5→13），<12 的向上取（9、9.5→10，10.5→11，11.5→12）；中间字重按角色取 500 或 600。
    - **守住契约**：区域内 smoke 断言的行高、宽度与对齐值不变；用计算样式比对列出每一处真实变化并逐条确认。
+   - **阅读字号不随取整变化**：会改变正文阅读字号的取整先停下，确认是否需要语义 token（对话正文因此新增 `--text-reading`）。
+   - **颜色由语义变量派生**：状态与证据类型的半透明底色、边框写成 `color-mix(in srgb, var(--ok) 24%, transparent)`，不写死 `rgba()`，否则浅色主题会沿用深色主题调好的色值。
 5. **颜色与层级**：局部阴影、品牌与图表颜色收敛为语义变量；z-index 收敛为分层 token。
 6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure。
