@@ -1,0 +1,35 @@
+{
+  "cli": "1.1.88",
+  "scenarios": [
+    {
+      "mode": "allow",
+      "approvalForms": 2,
+      "longHeaderLength": 120,
+      "headerEndsWithEllipsis": true,
+      "fullCommandVisibleInAllowOnce": true,
+      "recordStatus": "completed",
+      "providerTurnIdPresent": true,
+      "records": 1,
+      "pendingTrace": 0,
+      "pendingManagedProgress": 0,
+      "pendingManagedCommits": 0,
+      "gitCommitCountIncludingFixture": 2,
+      "eventFrames": { "native": 29, "canonical": 110 }
+    },
+    {
+      "mode": "deny",
+      "approvalForms": 2,
+      "longHeaderLength": 120,
+      "headerEndsWithEllipsis": true,
+      "fullCommandVisibleInAllowOnce": true,
+      "recordStatus": "completed",
+      "providerTurnIdPresent": true,
+      "records": 1,
+      "pendingTrace": 0,
+      "pendingManagedProgress": 0,
+      "pendingManagedCommits": 0,
+      "gitCommitCountIncludingFixture": 1,
+      "eventFrames": { "native": 32, "canonical": 99 }
+    }
+  ]
+}
