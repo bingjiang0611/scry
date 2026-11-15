@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ParsedTurn } from './normalize'
 import type { TraceEvent } from '../shared/trace'
 import { existsSync, unlinkSync } from 'node:fs'
-import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchiveTurnsAsync, upsertTraceArchiveTurnAsync, type TraceArchiveTurn } from './transcript-archive'
+import { readTraceArchiveAsync, readTraceArchiveMetadataAsync, readTraceArchivePageAsync, readTraceArchiveTurnsAsync, upsertTraceArchiveTurnAsync, type TraceArchiveTurn } from './transcript-archive'
+import { SESSION_DIFF_STAGE } from '../shared/turn-diff'
 import { appTraceContentRoot, persistHistoryToolEvents, persistTraceToolEvents, resetVerifiedHistoryContent } from './trace-tool-content'
 import { contentPath, contentStoreStats } from '../core/turn-recorder/content-store'
 import { isToolContentRef } from '../shared/tool-content'
@@ -194,5 +195,76 @@ describe('history tool content persistence', () => {
     unlinkSync(blob)
     expect(await persistHistoryToolEvents(args.userDataDir, args.cwd, clone(items))).toEqual(recorder)
     expect(existsSync(blob)).toBe(true)
+  })
+})
+
+/**
+ * 会话净 diff（`session_diff`）的 patch 正文写入内容库后，turn 文件只留引用；renderer 的
+ * `sessionDiffViewFromTurns` 直接读快照里的 patch，没有按引用取正文的通道，因此跨 IPC 的页必须
+ * 由 main 把最新一条会话快照的正文读回来（`hydrateNewestSessionSnapshots`）。
+ */
+const SESSION_PATCH = `${'+'.repeat(1)}session snapshot line\n`.repeat(40)
+
+function snapshotItems(runId: string): TraceEvent[] {
+  return [
+    { id: `${runId}-session`, ts: '2023-11-14T22:13:20.000Z', runId, kind: 'harness', stage: SESSION_DIFF_STAGE, turnDiff: {
+      version: 1, status: 'captured', repoRoot: '/ws', scope: 'working_tree',
+      beforeAt: '2023-11-14T22:13:19.000Z', afterAt: '2023-11-14T22:13:20.000Z', captureMs: 1, cleanup: 'ok',
+      files: [{ path: 'src/session.ts', added: 40, deleted: 0, patchStatus: 'captured', patch: SESSION_PATCH }]
+    } }
+  ] as TraceEvent[]
+}
+
+function newestSessionPatch(items: readonly TraceEvent[]): string | undefined {
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (items[index].stage === SESSION_DIFF_STAGE) return items[index].turnDiff?.files[0]?.patch
+  }
+  return undefined
+}
+
+describe('session snapshot patch bodies for history pages', () => {
+  it('pageable archives hand the newest session snapshot back with its patch', async () => {
+    const temp = mkdtempSync(join(tmpdir(), 'scry-session-snapshot-'))
+    temps.push(temp)
+    const userDataDir = join(temp, 'userData')
+    mkdirSync(userDataDir, { recursive: true })
+    mkdirSync(join(temp, 'ws'))
+    const cwd = realpathSync(join(temp, 'ws'))
+    const args = { cwd, sessionId: 'codex-session', userDataDir, providerId: 'codex' as const }
+    expect(await upsertTraceArchiveTurnAsync({ ...args, turn: { runId: 'run-0', userText: 'prompt 0', items: snapshotItems('run-0'), done: true, ts: 1 } })).toBe(true)
+    // The turn file keeps only the content reference; the page must read the body back.
+    const stored = await readTraceArchiveTurnsAsync(args, ['run-0'])
+    expect(stored[0].items[0].turnDiff?.files[0]?.patchContent?.contentRef).toBeDefined()
+    const page = await readTraceArchivePageAsync(args, { limit: 10 })
+    expect(page.archive?.turns.length).toBe(1)
+    expect(newestSessionPatch(page.archive?.turns[0].items ?? [])).toBe(SESSION_PATCH)
+  })
+
+  // Known pre-existing gap, not introduced by this branch: with a transcript path present
+  // `sessionArchiveIsPageable` is false, so Claude reads the complete archive and never calls
+  // hydrateNewestSessionSnapshots — on a464aff and on this branch alike. `it.fails` keeps the gap
+  // executable; fixing it needs a separate decision (see the handoff report, T5).
+  it.fails('Claude transcript history hands the newest session snapshot back with its patch', async () => {
+    const temp = mkdtempSync(join(tmpdir(), 'scry-session-snapshot-claude-'))
+    temps.push(temp)
+    const userDataDir = join(temp, 'userData')
+    mkdirSync(userDataDir, { recursive: true })
+    mkdirSync(join(temp, 'ws'))
+    const cwd = realpathSync(join(temp, 'ws'))
+    const args = { cwd, sessionId: 'claude-session', userDataDir, providerId: 'claude' as const }
+    expect(await upsertTraceArchiveTurnAsync({ ...args, turn: { runId: 'run-0', userText: 'prompt 0', items: snapshotItems('run-0'), done: true, ts: 1 } })).toBe(true)
+    const transcript = [{ providerTurnId: 'provider-0', userText: 'prompt 0', items: [] }] as ParsedTurn[]
+    const paging = createTranscriptArchivePaging((await readTraceArchiveMetadataAsync(args, undefined, { requireComplete: true }))!, transcript)
+    const window = await hydrateTranscriptArchiveWindow({
+      paging, transcriptTurns: transcript, request: { limit: 10 }, context: { userDataDir },
+      readTurns: (runIds) => readTraceArchiveTurnsAsync(args, runIds),
+      persistItems: (items) => persistHistoryToolEvents(userDataDir, cwd, items)
+    })
+    // Only the hydration assertion may fail here: the window exists, the snapshot crossed IPC, and
+    // its file carries the content reference. The missing piece is the patch body itself.
+    const items = window!.turns.flatMap((turn) => turn.items)
+    const snapshot = items.find((item) => item.stage === SESSION_DIFF_STAGE)
+    expect(snapshot?.turnDiff?.files[0]?.patchContent?.contentRef).toBeDefined()
+    expect(newestSessionPatch(items)).toBe(SESSION_PATCH)
   })
 })
