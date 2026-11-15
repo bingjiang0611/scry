@@ -28,6 +28,7 @@ import {
   capabilityReady,
   capabilityUnknown,
   capabilityUnavailable,
+  MCP_CHECK_CANCELLED,
   type McpAuthResult,
   type McpMeta,
   type McpSnapshot,
@@ -201,8 +202,10 @@ function claudeMcpSnapshot(configured: McpMeta[], statuses: McpServerStatus[]): 
 
 async function readClaudeMcpStatus(
   executable: string,
-  execution: AuthorizedMcpExecution
+  execution: AuthorizedMcpExecution,
+  signal?: AbortSignal
 ): Promise<McpServerStatus[]> {
+  if (signal?.aborted) throw new Error(MCP_CHECK_CANCELLED)
   const prompt = heldPrompt()
   const q = query({
     prompt: prompt.stream,
@@ -225,6 +228,9 @@ async function readClaudeMcpStatus(
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('Claude Code MCP 状态校验超时')), MCP_STATUS_TIMEOUT_MS)
         timer.unref()
+        // A person's cancel ends the check like the timeout does: finally closes the
+        // SDK query, which owns and stops its own Claude Code child.
+        signal?.addEventListener('abort', () => reject(new Error(MCP_CHECK_CANCELLED)), { once: true })
       })
     ])
   } finally {
@@ -481,7 +487,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       list: async (context) => capabilityReady(context, 'read', listSkills(context.cwd, homeDir))
     },
     mcp: {
-      snapshot: async (context, refresh = false, execution) => {
+      snapshot: async (context, refresh = false, execution, signal) => {
         const path = executable()
         if (!path) return capabilityUnavailable(context, 'unknown', 'Claude Code executable 未找到')
         const configured = listMcp(context.cwd, homeDir)
@@ -497,7 +503,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
         try {
           return capabilityReady(context, 'manage', claudeMcpSnapshot(
             configured,
-            await readClaudeMcpStatus(path, execution)
+            await readClaudeMcpStatus(path, execution, signal)
           ))
         } catch (error) {
           return capabilityUnavailable(context, 'unknown', sanitizeMcpAuthError(error))

@@ -1,5 +1,6 @@
 import { DelayedSkeletonRows } from './primitives/Skeleton'
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { MCP_LIVE_CHECK_CANCEL, type ProviderId } from '@shared/provider'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
@@ -66,6 +67,8 @@ export function CapabilitiesModal({
   onTestMcp,
   onReauthenticateMcp,
   onRefreshMcp,
+  onCancelMcp,
+  mcpProviderId,
   onClose
 }: {
   view: CapabilityView
@@ -83,6 +86,9 @@ export function CapabilitiesModal({
   onTestMcp: (targetId: string) => void
   onReauthenticateMcp?: (targetId: string) => void
   onRefreshMcp: () => void
+  /** Stops a running live check where the Provider allows it (MCP_LIVE_CHECK_CANCEL). */
+  onCancelMcp?: () => Promise<boolean>
+  mcpProviderId?: ProviderId
   onClose: () => void
 }) {
   const titleId = useId()
@@ -92,6 +98,9 @@ export function CapabilitiesModal({
   const activeCapability = view === 'skills' ? skillCapability : mcpCapability
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
+  const [cancelState, setCancelState] = useState<'idle' | 'requested' | 'unavailable'>('idle')
+  // Each check starts with a fresh cancel control.
+  useEffect(() => { if (!mcpRefreshing) setCancelState('idle') }, [mcpRefreshing])
   const skillsReadStarted = useReadStarted(skillsRefreshing)
   const mcpReadStarted = useReadStarted(mcpConfigRefreshing)
   const skillsUnavailable = skillCapability === null && !skillsRefreshing && skillsReadStarted
@@ -135,6 +144,23 @@ export function CapabilitiesModal({
           >
             <TurningIcon busy={mcpRefreshing} />
             <span>{showMcpLoading && mcpRefreshing ? LOADING_COPY.detecting : LOADING_COPY.refresh}</span>
+          </button>
+        )}
+        {/* Offered only for a Provider whose check runs in a process it owns; for the
+            others a cancel would only stop waiting while the check went on. */}
+        {view === 'mcp' && mcpRefreshing && onCancelMcp && mcpProviderId && MCP_LIVE_CHECK_CANCEL[mcpProviderId]?.cancellable && (
+          <button
+            className="capabilities-refresh capabilities-cancel"
+            type="button"
+            aria-busy={cancelState === 'requested'}
+            aria-disabled={cancelState !== 'idle'}
+            onClick={() => {
+              if (cancelState !== 'idle') return
+              setCancelState('requested')
+              void onCancelMcp().then((accepted) => { if (!accepted) setCancelState('unavailable') }, () => setCancelState('unavailable'))
+            }}
+          >
+            <span>{cancelState === 'requested' ? LOADING_COPY.cancellingMcp : cancelState === 'unavailable' ? LOADING_COPY.cancelMcpUnavailable : LOADING_COPY.cancelMcp}</span>
           </button>
         )}
         <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeCapabilities} />

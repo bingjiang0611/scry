@@ -449,6 +449,43 @@ describe('Qoder provider adapter', () => {
     }
   })
 
+  it('cancels a live Qoder MCP check: closes its own SDK query and reports unknown, not a runtime', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'scry-qoder-mcp-cancel-'))
+    await mkdir(join(home, '.qoder'), { recursive: true })
+    await writeFile(join(home, '.qoder', 'mcp.json'), JSON.stringify({ mcpServers: { tracker: { command: '/bin/echo' } } }))
+    try {
+      const adapter = createQoderAdapter(home)
+      const mcpServerStatus = vi.fn()
+      sdk.query.mockReturnValue({
+        // Initialisation never finishes on its own: only the cancel can end this check.
+        initializationResult: vi.fn(() => new Promise(() => {})),
+        mcpServerStatus,
+        close: sdk.close
+      })
+      const execution = {
+        cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
+        targets: [{ targetId: 'target', name: 'tracker', enabled: true, config: { command: '/bin/echo' } }]
+      }
+      const controller = new AbortController()
+      const closesBefore = sdk.close.mock.calls.length
+      const pending = adapter.mcp!.snapshot({ providerId: 'qoder', cwd: '/repo' }, true, execution, controller.signal)
+      controller.abort()
+      const result = await pending
+      expect(result).toMatchObject({ state: 'unknown', reason: expect.stringContaining('已取消') })
+      expect(result.data ?? null).toBeNull()
+      expect(mcpServerStatus).not.toHaveBeenCalled()
+      expect(sdk.close.mock.calls.length).toBe(closesBefore + 1)
+
+      // Already cancelled before it starts: no Qoder process is started at all.
+      const queriesBefore = sdk.query.mock.calls.length
+      await expect(adapter.mcp!.snapshot({ providerId: 'qoder', cwd: '/repo' }, true, execution, controller.signal))
+        .resolves.toMatchObject({ state: 'unknown' })
+      expect(sdk.query.mock.calls.length).toBe(queriesBefore)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('silently reauthenticates the exact authorized Qoder MCP target before any prompt', async () => {
     const mcpAuthenticate = vi.fn().mockResolvedValue({ requiresUserAction: false })
     const mcpServerStatus = vi.fn().mockResolvedValue([{ name: 'tracker', status: 'connected' }])

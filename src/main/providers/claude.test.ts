@@ -336,6 +336,29 @@ describe('Claude provider adapter', () => {
     expect(runner.captureInit).not.toHaveBeenCalled()
   })
 
+  it('cancels a live MCP check like its timeout: closes the SDK query and keeps the runtime unknown', async () => {
+    const close = vi.fn()
+    const mcpServerStatus = vi.fn()
+    sdk.query.mockReturnValue({ initializationResult: vi.fn(() => new Promise(() => {})), mcpServerStatus, close })
+    const controller = new AbortController()
+    const pending = createClaudeAdapter('/tmp/scry-home').mcp!.snapshot(
+      { providerId: 'claude', cwd: '/repo' },
+      true,
+      {
+        cwd: '/repo', fingerprint: 'sha256:snapshot', env: {},
+        targets: [{ targetId: 'target-scry-e2e', name: 'scry-e2e', enabled: true, config: { command: '/bin/mcp' } }]
+      },
+      controller.signal
+    )
+    controller.abort()
+    const result = await pending
+    expect(result.state).not.toBe('ready')
+    expect(result.reason).toContain('已取消')
+    expect(result.data?.runtime ?? null).toBeNull()
+    expect(mcpServerStatus).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledOnce()
+  })
+
   it('redacts credentials from native MCP refresh failures', async () => {
     sdk.query.mockReturnValue({
       initializationResult: vi.fn().mockRejectedValue(new Error('Authorization: Bearer refresh-secret')),

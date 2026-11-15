@@ -132,7 +132,7 @@ export function useIntegrations(
   const {
     skills, skillCapability, skillsRefreshing, mcps, mcpStatus, mcpLive, mcpCapability,
     mcpConfigRefreshing, mcpRefreshing, mcpGuardReport, mcpGuardScanning,
-    refreshSkills, loadMcpLive, refreshMcp, pullMcpLive, testMcp, reauthenticateMcp,
+    refreshSkills, loadMcpLive, refreshMcp, pullMcpLive, cancelMcpLive, testMcp, reauthenticateMcp,
     setCurrentMcpGuardReport, scanMcpGuard, resetCapabilityContext
   } = useProviderCapabilities(cwd, providerContext, providerContextRef)
 
@@ -419,6 +419,7 @@ export function useIntegrations(
     loadMcpLive,
     refreshMcp,
     pullMcpLive,
+    cancelMcpLive,
     testMcp,
     reauthenticateMcp,
     setCurrentMcpGuardReport,

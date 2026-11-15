@@ -195,6 +195,8 @@ export function AppShell(props: AppShellProps) {
         live={integrations.mcpLive}
         mcpConfigRefreshing={integrations.mcpConfigRefreshing}
         mcpRefreshing={integrations.mcpRefreshing}
+        onCancelMcp={integrations.cancelMcpLive}
+        mcpProviderId={integrations.selectedProviderId}
         mcpCapability={integrations.mcpCapability}
         onTestMcp={integrations.testMcp}
         onReauthenticateMcp={integrations.reauthenticateMcp}
