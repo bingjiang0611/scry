@@ -427,8 +427,12 @@ export function createSessionActions({
       providerId: integrations.selectedProviderId,
       agentProfileId: integrations.providerContext.agentProfileId
     })
-    // Captured now: the active selection may change while the archive is written.
-    const activeQueueKey = queueKeyRef.current
+    // Queued prompts are dropped before the write, not after it: while the archive is
+    // in flight the current run may finish and would otherwise drain the queue into a
+    // new turn of a session the person is archiving.
+    if (ref.providerId !== 'legacy_unknown') clearSessionPromptQueue(archivingActiveSession ? queueKeyRef.current : sessionComposerDraftKey({
+      providerId: ref.providerId, agentProfileId: ref.agentProfileId, cwd, sessionId: meta.sessionId
+    }))
     const key = sessionRowKey(cwd, meta)
     // The row leaves the list at once; it comes back from the catalog if the write fails.
     workspace.setProjects((current) => patchProjectSession(current, cwd, meta, null))
@@ -443,11 +447,6 @@ export function createSessionActions({
           return false
         }
         markSave(key, null)
-        // Queued prompts are dropped only once the archive is durable, so a failed
-        // archive leaves the session exactly as it was.
-        if (ref.providerId !== 'legacy_unknown') clearSessionPromptQueue(archivingActiveSession ? activeQueueKey : sessionComposerDraftKey({
-          providerId: ref.providerId, agentProfileId: ref.agentProfileId, cwd, sessionId: meta.sessionId
-        }))
         return true
       },
       archivingActiveSession,

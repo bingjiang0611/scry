@@ -44,6 +44,8 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   // Set while the panel shows an earlier read of this cwd; cleared by the first fresh read.
   const [cachedAt, setCachedAt] = useState<number | null>(() => lastRead(api, cwd)?.at ?? null)
   const [freshReadFailed, setFreshReadFailed] = useState(false)
+  const staleRef = useRef(cachedAt !== null)
+  staleRef.current = cachedAt !== null
   const [refreshing, setRefreshing] = useState(false)
   const [tab, setTab] = useState<'changes' | 'pr' | 'operations'>('changes')
   const [error, setError] = useState('')
@@ -163,7 +165,8 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   }, [selection?.path])
 
   async function execute(request: ScMutation): Promise<boolean> {
-    if (busyRef.current || !active) return false
+    // Opening a dialog is fine on an earlier read; sending a write is not.
+    if (busyRef.current || !active || staleRef.current) return false
     busyRef.current = true
     setBusy(true)
     setRunningAction(request.action)
@@ -355,8 +358,8 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
           <div className="sc-dock-buttons">{(runningAction === 'push' || runningAction === 'fetch')
             ? <button aria-busy={cancelState === 'requested'} aria-disabled={cancelState !== 'idle'} onClick={cancelRunning}>
               {cancelState === 'requested' ? '正在取消…' : cancelState === 'unavailable' ? '无法取消' : '取消'}</button>
-            : <button disabled={locked} onClick={() => setActionsOpen(true)}>其他操作</button>}
-            <button className="sc-primary" disabled={locked || !active || (primary.action === 'commit' && !repo.files.length)} onClick={primaryClick}>
+            : <button disabled={busy} onClick={() => setActionsOpen(true)}>其他操作</button>}
+            <button className="sc-primary" disabled={busy || !active || (primary.action === 'commit' && !repo.files.length)} onClick={primaryClick}>
               {runningAction ? `正在${actionNames[runningAction]}…` : primary.label}
             </button></div>
           <p className="sc-operation-status" role="status">{runningAction
@@ -366,6 +369,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         </footer>
       </>}
       {repo && expected && commitOpen && <SourceControlCommitDialog repo={repo} selected={selected} message={message} messageHead={messageHead}
+        readBlocker={cachedAt !== null ? (freshReadFailed ? '仓库状态没能重新读取，暂不能提交；可关闭后点刷新重试。' : '正在重新读取仓库状态，完成后才能提交。') : null}
         onSelect={toggleFile} onMessage={updateMessage} onClose={() => setCommitOpen(false)} onCommit={() => {
           setCommitOpen(false)
           void execute({ ...expected, action: 'commit', paths: selected, message }).catch(report)
