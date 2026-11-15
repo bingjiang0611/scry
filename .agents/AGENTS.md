@@ -62,9 +62,11 @@ Scry **不是安全沙箱**。它能做授权、指纹校验、观测和治理�
 
 不预读全部文档；需要定位时先检索并读取相关小节。
 
+涉及领域概念、接口命名或业务行为时，先读取根目录 [GLOSSARY.md](../GLOSSARY.md)，沿用规范名称。发现需求、代码与词汇表冲突时，先说明差异；需要产品取舍时征求确认，不把现有代码行为自动当作正确规则。概念确认后，在同一变更中更新词汇表及受影响文档；词汇表只保留术语、简短定义和易混概念，不写实现细节。
+
 | 场景 | 参考 |
 |---|---|
-| 术语、架构、代码定位或首次安装 | [架构与地图](../docs/agent/architecture.md) |
+| 架构、代码定位或首次安装 | [架构与地图](../docs/agent/architecture.md) |
 | 修改对应领域/边界 | [检查清单](../docs/agent/change-checklists.md)，只展开受影响领域 |
 | 普通代码、UI、跨边界或发布验证 | [验证与交付](../docs/agent/verification.md)，按下述范围选择小节 |
 | PR、分诊、评审与门禁 | [贡献指南](../CONTRIBUTING.md)；修改流程必须遵循[维护清单](../docs/agent/pr-workflow.md#workflow-maintenance)；分诊用 `contribution-triage` |
