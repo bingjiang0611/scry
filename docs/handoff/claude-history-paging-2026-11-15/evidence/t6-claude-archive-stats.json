@@ -1,0 +1,176 @@
+{
+  "summary": {
+    "generatedAt": "2026-11-15T12:42:26.996Z",
+    "catalog": {
+      "total": 1052,
+      "byProvider": {
+        "pi": 977,
+        "claude": 7,
+        "codex": 22,
+        "qoder": 44,
+        "opencode": 2
+      }
+    },
+    "claude": {
+      "catalogSessions": 7,
+      "catalogSessionsWithCwd": 5,
+      "transcripts": {
+        "resolvable": 0,
+        "bytesTotal": 0,
+        "distribution": {},
+        "over32MiB": 0
+      },
+      "segmented": {
+        "sessions": 6,
+        "boundToWorkspace": 4,
+        "unbound": 2,
+        "turnFiles": 2,
+        "turnBytes": 6317,
+        "withIndex": 0,
+        "indexVersions": [],
+        "indexSourceComplete": 0,
+        "turnCounts": [
+          {
+            "key": "1a2480dcb6768c80",
+            "bound": true,
+            "turnFiles": 0,
+            "indexEntries": null
+          },
+          {
+            "key": "abfd1eefafa92c67",
+            "bound": true,
+            "turnFiles": 0,
+            "indexEntries": null
+          },
+          {
+            "key": "b77e7a2088546de5",
+            "bound": true,
+            "turnFiles": 0,
+            "indexEntries": null
+          },
+          {
+            "key": "5104640bbb677147",
+            "bound": true,
+            "turnFiles": 0,
+            "indexEntries": null
+          },
+          {
+            "key": "13971081f676c0c3",
+            "bound": false,
+            "turnFiles": 1,
+            "indexEntries": null
+          },
+          {
+            "key": "28c3d1aee42add0b",
+            "bound": false,
+            "turnFiles": 1,
+            "indexEntries": null
+          }
+        ]
+      },
+      "monolithic": {
+        "files": 0,
+        "bytes": 0
+      }
+    }
+  },
+  "transcripts": [
+    {
+      "key": "dc92f9435401c4b5",
+      "resolvable": false,
+      "bytes": null
+    },
+    {
+      "key": "6841ccc3e11fd2b4",
+      "resolvable": false,
+      "bytes": null
+    },
+    {
+      "key": "ff2effffa5c0ee12",
+      "resolvable": false,
+      "bytes": null
+    },
+    {
+      "key": "3716558fe0ca8d24",
+      "resolvable": false,
+      "bytes": null
+    },
+    {
+      "key": "7a053cac322a5b85",
+      "resolvable": false,
+      "bytes": null
+    },
+    {
+      "key": "21de88397836f308",
+      "resolvable": false,
+      "bytes": null
+    },
+    {
+      "key": "48ff21705df8d864",
+      "resolvable": false,
+      "bytes": null
+    }
+  ],
+  "rows": [
+    {
+      "key": "1a2480dcb6768c80",
+      "bound": true,
+      "turnFiles": 0,
+      "turnBytes": 0,
+      "indexFile": false,
+      "indexVersion": null,
+      "indexEntries": null,
+      "indexSourceComplete": null
+    },
+    {
+      "key": "abfd1eefafa92c67",
+      "bound": true,
+      "turnFiles": 0,
+      "turnBytes": 0,
+      "indexFile": false,
+      "indexVersion": null,
+      "indexEntries": null,
+      "indexSourceComplete": null
+    },
+    {
+      "key": "b77e7a2088546de5",
+      "bound": true,
+      "turnFiles": 0,
+      "turnBytes": 0,
+      "indexFile": false,
+      "indexVersion": null,
+      "indexEntries": null,
+      "indexSourceComplete": null
+    },
+    {
+      "key": "5104640bbb677147",
+      "bound": true,
+      "turnFiles": 0,
+      "turnBytes": 0,
+      "indexFile": false,
+      "indexVersion": null,
+      "indexEntries": null,
+      "indexSourceComplete": null
+    },
+    {
+      "key": "13971081f676c0c3",
+      "bound": false,
+      "turnFiles": 1,
+      "turnBytes": 3155,
+      "indexFile": false,
+      "indexVersion": null,
+      "indexEntries": null,
+      "indexSourceComplete": null
+    },
+    {
+      "key": "28c3d1aee42add0b",
+      "bound": false,
+      "turnFiles": 1,
+      "turnBytes": 3162,
+      "indexFile": false,
+      "indexVersion": null,
+      "indexEntries": null,
+      "indexSourceComplete": null
+    }
+  ]
+}

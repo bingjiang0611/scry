@@ -1,0 +1,1 @@
+SCRY_TIMING_RUN={"label": "claude-open-paged-verify", "command": ["node", "scripts/claude-session-open-bench.mjs", "--root", "/tmp/scry-cp-verify", "--out", "/tmp/scry-evidence/open-paged-verify.json", "--path", "paged", "--warmups", "2", "--iterations", "12"], "exit": 0, "signal": null, "wallMs": 92063, "cores": 10, "loadBefore": 13.42, "loadAfter": 21.21, "highLoad": true}

@@ -1,0 +1,799 @@
+{
+ "kind": "claude-history-acceptance",
+ "expect": "paged",
+ "measuredAt": "2026-11-15T14:49:20.429Z",
+ "host": {
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpus": 10,
+  "node": "v24.18.0",
+  "load": 21.4912109375
+ },
+ "appRoot": "/private/tmp/scry-cp-verify",
+ "fixture": {
+  "sessions": [
+   {
+    "sessionId": "accept-medium",
+    "turns": 100,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "duplicateRunIdTurn": null,
+    "lastRunId": "accept-medium-run-99",
+    "transcriptBytes": 26142860
+   },
+   {
+    "sessionId": "accept-huge",
+    "turns": 150,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "duplicateRunIdTurn": null,
+    "lastRunId": "accept-huge-run-149",
+    "transcriptBytes": 39157960
+   },
+   {
+    "sessionId": "accept-dup",
+    "turns": 6,
+    "toolsPerTurn": 2,
+    "outputBytes": 512,
+    "duplicateRunIdTurn": 2,
+    "lastRunId": "accept-dup-run-5",
+    "transcriptBytes": 17508
+   }
+  ]
+ },
+ "results": [
+  {
+   "id": "T4-1",
+   "name": "banner absent and sending locked during a slow read",
+   "status": "pass",
+   "checks": [
+    {
+     "name": "loading timeline captured",
+     "ok": true,
+     "detail": "600 samples, 598 pending"
+    },
+    {
+     "name": "no history banner during a slow read",
+     "ok": true
+    },
+    {
+     "name": "the slow read actually reached the pending state",
+     "ok": true,
+     "detail": "598 pending samples; pending source=preview busy=false"
+    },
+    {
+     "name": "the composer accepts input while history loads",
+     "ok": true,
+     "detail": "method=native-keys, value after typing=\"ab\""
+    },
+    {
+     "name": "the send control is disabled while history is pending",
+     "ok": true,
+     "detail": "disabled=true"
+    },
+    {
+     "name": "sending is refused while history is pending",
+     "ok": true,
+     "detail": "start traces=0"
+    },
+    {
+     "name": "the refused send changed no turn and kept the draft",
+     "ok": true,
+     "detail": "turns 1->1"
+    },
+    {
+     "name": "the same controls unlock once the page is authoritative",
+     "ok": true,
+     "detail": "agentLocked=false"
+    }
+   ],
+   "screenshots": [
+    "paged-t4-01-locked-composer-huge-session.png"
+   ],
+   "pending": 598,
+   "samples": 600,
+   "bannerSeen": false,
+   "pendingAt": {
+    "source": "preview",
+    "busy": "false",
+    "turns": 1,
+    "draft": "",
+    "sendDisabled": true,
+    "sendStatus": null
+   },
+   "readyAt": {
+    "source": "authoritative",
+    "draft": "",
+    "sendDisabled": true,
+    "agentLocked": false
+   },
+   "afterSend": {
+    "source": "preview",
+    "turns": 1,
+    "draft": "",
+    "status": null
+   },
+   "sends": 0
+  },
+  {
+   "id": "T4-2",
+   "name": "first page holds ten turns and offers older turns",
+   "status": "pass",
+   "checks": [
+    {
+     "name": "an older-turns control is offered",
+     "ok": true
+    },
+    {
+     "name": "first page holds 10 turns",
+     "ok": true,
+     "detail": "turns=10"
+    }
+   ],
+   "screenshots": [
+    "paged-t4-02-first-page.png"
+   ],
+   "data": {
+    "openMs": 17567,
+    "turns": 10,
+    "hasOlderNote": true,
+    "noteText": "已加载 10 / 100 轮·更早轮次仍在本机归档中，未丢弃加载更早轮次",
+    "firstRunId": "accept-medium-run-90"
+   }
+  },
+  {
+   "id": "T4-3",
+   "name": "walking back to the first turn",
+   "status": "pass",
+   "checks": [
+    {
+     "name": "every turn was mounted and read",
+     "ok": true,
+     "detail": "100/100"
+    },
+    {
+     "name": "older pages were loaded",
+     "ok": true,
+     "detail": "5 pages: 20,20,20,20,10"
+    },
+    {
+     "name": "all fixture turns are reachable",
+     "ok": true,
+     "detail": "100/100"
+    },
+    {
+     "name": "transcript older pages hold 20 turns",
+     "ok": true,
+     "detail": "20,20,20,20,10"
+    },
+    {
+     "name": "the walk started from a 10-turn page",
+     "ok": true,
+     "detail": "turns=10"
+    },
+    {
+     "name": "the walk was not stopped by an unusable control",
+     "ok": true,
+     "detail": ""
+    }
+   ],
+   "screenshots": [
+    "paged-t4-03-all-turns-loaded.png"
+   ],
+   "dump": {
+    "mounted": 100,
+    "total": 100,
+    "turns": [
+     {
+      "runId": "accept-medium-run-0",
+      "fingerprint": "110:6a8bf9bb"
+     },
+     {
+      "runId": "accept-medium-run-1",
+      "fingerprint": "110:5137ccb2"
+     },
+     {
+      "runId": "accept-medium-run-2",
+      "fingerprint": "110:d82f1b99"
+     },
+     {
+      "runId": "accept-medium-run-3",
+      "fingerprint": "110:7016b1e8"
+     },
+     {
+      "runId": "accept-medium-run-4",
+      "fingerprint": "110:2753125f"
+     },
+     {
+      "runId": "accept-medium-run-5",
+      "fingerprint": "110:b9d7b9b6"
+     },
+     {
+      "runId": "accept-medium-run-6",
+      "fingerprint": "110:f367948d"
+     },
+     {
+      "runId": "accept-medium-run-7",
+      "fingerprint": "110:7ea6cdac"
+     },
+     {
+      "runId": "accept-medium-run-8",
+      "fingerprint": "110:33843c13"
+     },
+     {
+      "runId": "accept-medium-run-9",
+      "fingerprint": "110:a6a3bbea"
+     },
+     {
+      "runId": "accept-medium-run-10",
+      "fingerprint": "113:5224a9cc"
+     },
+     {
+      "runId": "accept-medium-run-11",
+      "fingerprint": "113:ae1ff293"
+     },
+     {
+      "runId": "accept-medium-run-12",
+      "fingerprint": "113:d804790a"
+     },
+     {
+      "runId": "accept-medium-run-13",
+      "fingerprint": "113:f21da639"
+     },
+     {
+      "runId": "accept-medium-run-14",
+      "fingerprint": "113:8b75bb68"
+     },
+     {
+      "runId": "accept-medium-run-15",
+      "fingerprint": "113:b33e762f"
+     },
+     {
+      "runId": "accept-medium-run-16",
+      "fingerprint": "113:22e04f66"
+     },
+     {
+      "runId": "accept-medium-run-17",
+      "fingerprint": "113:299bdf75"
+     },
+     {
+      "runId": "accept-medium-run-18",
+      "fingerprint": "113:15d93394"
+     },
+     {
+      "runId": "accept-medium-run-19",
+      "fingerprint": "113:adb3d12b"
+     },
+     {
+      "runId": "accept-medium-run-20",
+      "fingerprint": "113:6d2692ab"
+     },
+     {
+      "runId": "accept-medium-run-21",
+      "fingerprint": "113:ea6f6d24"
+     },
+     {
+      "runId": "accept-medium-run-22",
+      "fingerprint": "113:88128e4d"
+     },
+     {
+      "runId": "accept-medium-run-23",
+      "fingerprint": "113:f2f25c4e"
+     },
+     {
+      "runId": "accept-medium-run-24",
+      "fingerprint": "113:9e9a3dff"
+     },
+     {
+      "runId": "accept-medium-run-25",
+      "fingerprint": "113:88ccec80"
+     },
+     {
+      "runId": "accept-medium-run-26",
+      "fingerprint": "113:42806b51"
+     },
+     {
+      "runId": "accept-medium-run-27",
+      "fingerprint": "113:e29b77ba"
+     },
+     {
+      "runId": "accept-medium-run-28",
+      "fingerprint": "113:41881013"
+     },
+     {
+      "runId": "accept-medium-run-29",
+      "fingerprint": "113:05f715ec"
+     },
+     {
+      "runId": "accept-medium-run-30",
+      "fingerprint": "113:ca4c9b72"
+     },
+     {
+      "runId": "accept-medium-run-31",
+      "fingerprint": "113:a796dc95"
+     },
+     {
+      "runId": "accept-medium-run-32",
+      "fingerprint": "113:bcb795cc"
+     },
+     {
+      "runId": "accept-medium-run-33",
+      "fingerprint": "113:1bfd530f"
+     },
+     {
+      "runId": "accept-medium-run-34",
+      "fingerprint": "113:3c536766"
+     },
+     {
+      "runId": "accept-medium-run-35",
+      "fingerprint": "113:cfed9e79"
+     },
+     {
+      "runId": "accept-medium-run-36",
+      "fingerprint": "113:9d944e40"
+     },
+     {
+      "runId": "accept-medium-run-37",
+      "fingerprint": "113:e0737053"
+     },
+     {
+      "runId": "accept-medium-run-38",
+      "fingerprint": "113:15489d3a"
+     },
+     {
+      "runId": "accept-medium-run-39",
+      "fingerprint": "113:f9caaccd"
+     },
+     {
+      "runId": "accept-medium-run-40",
+      "fingerprint": "113:41101949"
+     },
+     {
+      "runId": "accept-medium-run-41",
+      "fingerprint": "113:3b5a8436"
+     },
+     {
+      "runId": "accept-medium-run-42",
+      "fingerprint": "113:5b72ccd7"
+     },
+     {
+      "runId": "accept-medium-run-43",
+      "fingerprint": "113:54713bac"
+     },
+     {
+      "runId": "accept-medium-run-44",
+      "fingerprint": "113:52df09bd"
+     },
+     {
+      "runId": "accept-medium-run-45",
+      "fingerprint": "113:44fec832"
+     },
+     {
+      "runId": "accept-medium-run-46",
+      "fingerprint": "113:a734170b"
+     },
+     {
+      "runId": "accept-medium-run-47",
+      "fingerprint": "113:64414788"
+     },
+     {
+      "runId": "accept-medium-run-48",
+      "fingerprint": "113:3f1014e1"
+     },
+     {
+      "runId": "accept-medium-run-49",
+      "fingerprint": "113:c6ed945e"
+     },
+     {
+      "runId": "accept-medium-run-50",
+      "fingerprint": "113:aeaf4580"
+     },
+     {
+      "runId": "accept-medium-run-51",
+      "fingerprint": "113:f0928367"
+     },
+     {
+      "runId": "accept-medium-run-52",
+      "fingerprint": "113:6af97ea6"
+     },
+     {
+      "runId": "accept-medium-run-53",
+      "fingerprint": "113:9f378c2d"
+     },
+     {
+      "runId": "accept-medium-run-54",
+      "fingerprint": "113:f74b25d4"
+     },
+     {
+      "runId": "accept-medium-run-55",
+      "fingerprint": "113:bee80a9b"
+     },
+     {
+      "runId": "accept-medium-run-56",
+      "fingerprint": "113:607bac4a"
+     },
+     {
+      "runId": "accept-medium-run-57",
+      "fingerprint": "113:23f46f81"
+     },
+     {
+      "runId": "accept-medium-run-58",
+      "fingerprint": "113:58821ea8"
+     },
+     {
+      "runId": "accept-medium-run-59",
+      "fingerprint": "113:645978bf"
+     },
+     {
+      "runId": "accept-medium-run-60",
+      "fingerprint": "113:0a944a87"
+     },
+     {
+      "runId": "accept-medium-run-61",
+      "fingerprint": "113:d080a818"
+     },
+     {
+      "runId": "accept-medium-run-62",
+      "fingerprint": "113:01bd20c1"
+     },
+     {
+      "runId": "accept-medium-run-63",
+      "fingerprint": "113:7f66d492"
+     },
+     {
+      "runId": "accept-medium-run-64",
+      "fingerprint": "113:ce850273"
+     },
+     {
+      "runId": "accept-medium-run-65",
+      "fingerprint": "113:2f3fd6ac"
+     },
+     {
+      "runId": "accept-medium-run-66",
+      "fingerprint": "113:fc38086d"
+     },
+     {
+      "runId": "accept-medium-run-67",
+      "fingerprint": "113:23ecc5b6"
+     },
+     {
+      "runId": "accept-medium-run-68",
+      "fingerprint": "113:c2cd787f"
+     },
+     {
+      "runId": "accept-medium-run-69",
+      "fingerprint": "113:f752a5a0"
+     },
+     {
+      "runId": "accept-medium-run-70",
+      "fingerprint": "113:30e87786"
+     },
+     {
+      "runId": "accept-medium-run-71",
+      "fingerprint": "113:e380a7d9"
+     },
+     {
+      "runId": "accept-medium-run-72",
+      "fingerprint": "113:68454a48"
+     },
+     {
+      "runId": "accept-medium-run-73",
+      "fingerprint": "113:2dd2bff3"
+     },
+     {
+      "runId": "accept-medium-run-74",
+      "fingerprint": "113:fe5b4242"
+     },
+     {
+      "runId": "accept-medium-run-75",
+      "fingerprint": "113:dcd10c65"
+     },
+     {
+      "runId": "accept-medium-run-76",
+      "fingerprint": "113:18193974"
+     },
+     {
+      "runId": "accept-medium-run-77",
+      "fingerprint": "113:4938653f"
+     },
+     {
+      "runId": "accept-medium-run-78",
+      "fingerprint": "113:1af7969e"
+     },
+     {
+      "runId": "accept-medium-run-79",
+      "fingerprint": "113:3b0ed761"
+     },
+     {
+      "runId": "accept-medium-run-80",
+      "fingerprint": "113:92167755"
+     },
+     {
+      "runId": "accept-medium-run-81",
+      "fingerprint": "113:99a8b8ca"
+     },
+     {
+      "runId": "accept-medium-run-82",
+      "fingerprint": "113:b18b8f1b"
+     },
+     {
+      "runId": "accept-medium-run-83",
+      "fingerprint": "113:61412c10"
+     },
+     {
+      "runId": "accept-medium-run-84",
+      "fingerprint": "113:799f98c1"
+     },
+     {
+      "runId": "accept-medium-run-85",
+      "fingerprint": "113:873a19ae"
+     },
+     {
+      "runId": "accept-medium-run-86",
+      "fingerprint": "113:e99a84a7"
+     },
+     {
+      "runId": "accept-medium-run-87",
+      "fingerprint": "113:86032eb4"
+     },
+     {
+      "runId": "accept-medium-run-88",
+      "fingerprint": "113:b596c71d"
+     },
+     {
+      "runId": "accept-medium-run-89",
+      "fingerprint": "113:86e64732"
+     },
+     {
+      "runId": "accept-medium-run-90",
+      "fingerprint": "113:68122764"
+     },
+     {
+      "runId": "accept-medium-run-91",
+      "fingerprint": "113:cb3958eb"
+     },
+     {
+      "runId": "accept-medium-run-92",
+      "fingerprint": "113:1cae7482"
+     },
+     {
+      "runId": "accept-medium-run-93",
+      "fingerprint": "113:eaabe9f1"
+     },
+     {
+      "runId": "accept-medium-run-94",
+      "fingerprint": "113:8de1fa10"
+     },
+     {
+      "runId": "accept-medium-run-95",
+      "fingerprint": "113:c0f3a7f7"
+     },
+     {
+      "runId": "accept-medium-run-96",
+      "fingerprint": "113:cc71c03e"
+     },
+     {
+      "runId": "accept-medium-run-97",
+      "fingerprint": "113:f33c29dd"
+     },
+     {
+      "runId": "accept-medium-run-98",
+      "fingerprint": "113:2a52e2bc"
+     },
+     {
+      "runId": "accept-medium-run-99",
+      "fingerprint": "113:ea8c93f3"
+     }
+    ]
+   },
+   "pages": [
+    {
+     "before": 10,
+     "after": 30,
+     "added": 20,
+     "wallMs": 35473,
+     "loadOlderMs": 35254.2,
+     "stages": {
+      "archive_window": 35253.4,
+      "cached_history": 0.1
+     }
+    },
+    {
+     "before": 30,
+     "after": 50,
+     "added": 20,
+     "wallMs": 34380,
+     "loadOlderMs": 33885.9,
+     "stages": {
+      "archive_window": 33885.5,
+      "cached_history": 0.1
+     }
+    },
+    {
+     "before": 50,
+     "after": 70,
+     "added": 20,
+     "wallMs": 35591,
+     "loadOlderMs": 35072.9,
+     "stages": {
+      "archive_window": 35072.4,
+      "cached_history": 0.1
+     }
+    },
+    {
+     "before": 70,
+     "after": 90,
+     "added": 20,
+     "wallMs": 40020,
+     "loadOlderMs": 39483.8,
+     "stages": {
+      "archive_window": 39483.2,
+      "cached_history": 0.2
+     }
+    },
+    {
+     "before": 90,
+     "after": 100,
+     "added": 10,
+     "wallMs": 18872,
+     "loadOlderMs": 18326,
+     "stages": {
+      "archive_window": 18325.7,
+      "cached_history": 0.1
+     }
+    }
+   ],
+   "firstPageTurns": 10,
+   "stopped": null
+  },
+  {
+   "id": "T4-4",
+   "name": "older-page request cancelled by a session switch",
+   "status": "pass",
+   "checks": [
+    {
+     "name": "the older page was in flight when the session switched",
+     "ok": true
+    },
+    {
+     "name": "no error surfaced for the cancelled page",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "name": "no turn from the previous session leaked in",
+     "ok": true,
+     "detail": "foreign=0"
+    },
+    {
+     "name": "the new session rendered its own page",
+     "ok": true,
+     "detail": "turns=6"
+    }
+   ],
+   "screenshots": [
+    "paged-t4-04-switch-cancelled.png"
+   ],
+   "data": {
+    "status": null,
+    "statusIsError": false,
+    "turns": 6,
+    "foreign": 0,
+    "inFlight": true
+   }
+  },
+  {
+   "id": "T4-6",
+   "name": "duplicate runId does not add a turn",
+   "status": "pass",
+   "checks": [
+    {
+     "name": "turn count equals the fixture",
+     "ok": true,
+     "detail": "6/6"
+    },
+    {
+     "name": "no turn is rendered twice",
+     "ok": true
+    }
+   ],
+   "screenshots": [
+    "paged-t4-06-duplicate-runid.png"
+   ],
+   "data": {
+    "turns": 6,
+    "unique": 6,
+    "runIds": [
+     "accept-dup-run-0",
+     "accept-dup-run-1",
+     "accept-dup-run-2",
+     "accept-dup-run-3",
+     "accept-dup-run-4",
+     "accept-dup-run-5"
+    ]
+   }
+  },
+  {
+   "id": "T4-5",
+   "name": "damaged older segment is reported, then the session reopens",
+   "status": "pass",
+   "checks": [
+    {
+     "name": "the failure is reported in the composer",
+     "ok": true,
+     "detail": "无法加载更早轮次：Error invoking remote method 'agent:loadSessionOlder': Error: 会话归档在翻页期间发生变化，请重新打开会话"
+    },
+    {
+     "name": "reopening the session still completes",
+     "ok": true
+    },
+    {
+     "name": "reopened session shows turns",
+     "ok": true,
+     "detail": "turns=10"
+    }
+   ],
+   "screenshots": [
+    "paged-t4-05-older-page-failure.png",
+    "paged-t4-05-reopened.png"
+   ],
+   "data": {
+    "victimRunId": "accept-medium-run-75",
+    "failure": {
+     "status": "无法加载更早轮次：Error invoking remote method 'agent:loadSessionOlder': Error: 会话归档在翻页期间发生变化，请重新打开会话",
+     "role": "alert"
+    },
+    "reopen": {
+     "outcome": "completed",
+     "stages": {
+      "catalog": 0.3,
+      "archive_read": 47,
+      "archive": 278.9,
+      "transcript": 551.2,
+      "native_history": 0,
+      "selection": 0.1,
+      "merge_turns": 75,
+      "merge": 0,
+      "page_hydration": 0.6
+     },
+     "counters": [
+      {
+       "matches": 1
+      },
+      {
+       "archiveTurns": 99,
+       "archiveTurnFilesRead": 99,
+       "archiveIndexTurns": 0
+      },
+      {
+       "archiveTurns": 99,
+       "archiveTotalTurns": 99,
+       "archiveTurnFilesRead": 99
+      },
+      {
+       "transcriptTurns": 100,
+       "transcriptBytes": 26142860,
+       "transcriptParsedBytes": 26142860,
+       "transcriptCacheHit": 0,
+       "transcriptIncremental": 0
+      },
+      {
+       "nativeTurns": 0
+      },
+      {
+       "mergedTurns": 100
+      },
+      {
+       "mergedTurns": 100
+      },
+      {
+       "returnedTurns": 10
+      }
+     ],
+     "turns": 10
+    },
+    "fellBackToComplete": true
+   }
+  }
+ ]
+}

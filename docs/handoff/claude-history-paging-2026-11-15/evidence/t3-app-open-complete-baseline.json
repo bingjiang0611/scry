@@ -1,0 +1,383 @@
+{
+ "kind": "claude-session-open",
+ "path": "complete",
+ "measuredAt": "2026-11-15T13:04:30.752Z",
+ "host": {
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpus": 10,
+  "node": "v24.18.0",
+  "loadBefore": 8.7548828125
+ },
+ "appRoot": "/tmp/scry-cp-base",
+ "buildSha256": "529d57da20a47583b7b08028686245f66717a39e272ec1561b7c76a41704c6ac",
+ "harnessSha256": "474f3a8bcf33d872894c73d9c50fc21c98cb5061fc255b54e19f56a3e2aef9ff",
+ "warmups": 1,
+ "iterations": 6,
+ "fixture": {
+  "generator": "scripts/claude-session-open-fixture.ts",
+  "generationMs": 2440,
+  "sessions": [
+   {
+    "sessionId": "bench-medium",
+    "turns": 100,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "lastRunId": "bench-medium-run-99",
+    "transcriptBytes": 26084060
+   },
+   {
+    "sessionId": "bench-huge",
+    "turns": 150,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "lastRunId": "bench-huge-run-149",
+    "transcriptBytes": 39069760
+   }
+  ]
+ },
+ "sessions": {
+  "bench-medium": {
+   "workload": {
+    "turns": 100,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "transcriptBytes": 26084060
+   },
+   "all": {
+    "n": 6,
+    "medianMs": 19979.899999976158,
+    "p95Ms": 35939.89999997616,
+    "minMs": 17289.399999976158,
+    "maxMs": 35939.89999997616
+   },
+   "coldTranscript": {
+    "n": 6,
+    "medianMs": 19979.899999976158,
+    "p95Ms": 35939.89999997616,
+    "minMs": 17289.399999976158,
+    "maxMs": 35939.89999997616
+   },
+   "warmTranscript": null,
+   "archiveWindowCounts": [
+    0
+   ],
+   "archiveTurnFilesRead": [
+    100
+   ],
+   "domTurns": [
+    40
+   ]
+  },
+  "bench-huge": {
+   "workload": {
+    "turns": 150,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "transcriptBytes": 39069760
+   },
+   "all": {
+    "n": 6,
+    "medianMs": 36948.94999998808,
+    "p95Ms": 94337.39999997616,
+    "minMs": 14532.399999976158,
+    "maxMs": 94337.39999997616
+   },
+   "coldTranscript": {
+    "n": 6,
+    "medianMs": 36948.94999998808,
+    "p95Ms": 94337.39999997616,
+    "minMs": 14532.399999976158,
+    "maxMs": 94337.39999997616
+   },
+   "warmTranscript": null,
+   "archiveWindowCounts": [
+    0
+   ],
+   "archiveTurnFilesRead": [
+    150
+   ],
+   "domTurns": [
+    40
+   ]
+  }
+ },
+ "samples": [
+  {
+   "sessionId": "bench-medium",
+   "round": 1,
+   "openMs": 18310.299999952316,
+   "selectionMs": 18310.299999952316,
+   "handlerDelayMs": 1.399999976158142,
+   "loadDurationMs": 18190.6,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 100,
+    "archiveTurnFilesRead": 100,
+    "archiveTotalTurns": 100,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 1,
+   "openMs": 50016.89999997616,
+   "selectionMs": 50016.89999997616,
+   "handlerDelayMs": 1.2999999523162842,
+   "loadDurationMs": 49893.6,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 150,
+    "archiveTurnFilesRead": 150,
+    "archiveTotalTurns": 150,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 2,
+   "openMs": 17289.399999976158,
+   "selectionMs": 17289.399999976158,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 17177.7,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 100,
+    "archiveTurnFilesRead": 100,
+    "archiveTotalTurns": 100,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 2,
+   "openMs": 94337.39999997616,
+   "selectionMs": 94337.39999997616,
+   "handlerDelayMs": 0.19999992847442627,
+   "loadDurationMs": 94230.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 150,
+    "archiveTurnFilesRead": 150,
+    "archiveTotalTurns": 150,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 3,
+   "openMs": 18690.299999952316,
+   "selectionMs": 18690.299999952316,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 18579.3,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 100,
+    "archiveTurnFilesRead": 100,
+    "archiveTotalTurns": 100,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 3,
+   "openMs": 72076.39999997616,
+   "selectionMs": 72076.39999997616,
+   "handlerDelayMs": 1.399999976158142,
+   "loadDurationMs": 71966.7,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 150,
+    "archiveTurnFilesRead": 150,
+    "archiveTotalTurns": 150,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 4,
+   "openMs": 23224.199999928474,
+   "selectionMs": 23224.199999928474,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 23102.7,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 100,
+    "archiveTurnFilesRead": 100,
+    "archiveTotalTurns": 100,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 4,
+   "openMs": 20723.299999952316,
+   "selectionMs": 20723.299999952316,
+   "handlerDelayMs": 1.899999976158142,
+   "loadDurationMs": 20607.7,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 150,
+    "archiveTurnFilesRead": 150,
+    "archiveTotalTurns": 150,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 5,
+   "openMs": 35939.89999997616,
+   "selectionMs": 35939.89999997616,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 35833.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 100,
+    "archiveTurnFilesRead": 100,
+    "archiveTotalTurns": 100,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 5,
+   "openMs": 23881,
+   "selectionMs": 23881,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 23766.7,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 150,
+    "archiveTurnFilesRead": 150,
+    "archiveTotalTurns": 150,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 6,
+   "openMs": 21269.5,
+   "selectionMs": 21269.5,
+   "handlerDelayMs": 1.5,
+   "loadDurationMs": 21169,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 100,
+    "archiveTurnFilesRead": 100,
+    "archiveTotalTurns": 100,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 6,
+   "openMs": 14532.399999976158,
+   "selectionMs": 14532.399999976158,
+   "handlerDelayMs": 0.3999999761581421,
+   "loadDurationMs": 14420.9,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 150,
+    "archiveTurnFilesRead": 150,
+    "archiveTotalTurns": 150,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 40
+   },
+   "domTurns": 40
+  }
+ ]
+}

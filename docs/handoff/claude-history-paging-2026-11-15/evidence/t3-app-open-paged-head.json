@@ -1,0 +1,707 @@
+{
+ "kind": "claude-session-open",
+ "path": "paged",
+ "measuredAt": "2026-11-15T13:32:38.750Z",
+ "host": {
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpus": 10,
+  "node": "v24.18.0",
+  "loadBefore": 21.21337890625
+ },
+ "appRoot": "/tmp/scry-cp-verify",
+ "buildSha256": "3f61aab1e63ad0174e14a80ff42dc6f5687b88141730a5bdfacd93d018f2711a",
+ "harnessSha256": "474f3a8bcf33d872894c73d9c50fc21c98cb5061fc255b54e19f56a3e2aef9ff",
+ "warmups": 2,
+ "iterations": 12,
+ "fixture": {
+  "generator": "scripts/claude-session-open-fixture.ts",
+  "generationMs": 3130,
+  "sessions": [
+   {
+    "sessionId": "bench-medium",
+    "turns": 100,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "lastRunId": "bench-medium-run-99",
+    "transcriptBytes": 26084060
+   },
+   {
+    "sessionId": "bench-huge",
+    "turns": 150,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "lastRunId": "bench-huge-run-149",
+    "transcriptBytes": 39069760
+   }
+  ]
+ },
+ "sessions": {
+  "bench-medium": {
+   "workload": {
+    "turns": 100,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "transcriptBytes": 26084060
+   },
+   "all": {
+    "n": 12,
+    "medianMs": 319.94999998807907,
+    "p95Ms": 413.8000000715256,
+    "minMs": 271.89999997615814,
+    "maxMs": 413.8000000715256
+   },
+   "coldTranscript": {
+    "n": 12,
+    "medianMs": 319.94999998807907,
+    "p95Ms": 413.8000000715256,
+    "minMs": 271.89999997615814,
+    "maxMs": 413.8000000715256
+   },
+   "warmTranscript": null,
+   "archiveWindowCounts": [
+    1
+   ],
+   "archiveTurnFilesRead": [
+    10
+   ],
+   "domTurns": [
+    10
+   ]
+  },
+  "bench-huge": {
+   "workload": {
+    "turns": 150,
+    "toolsPerTurn": 30,
+    "outputBytes": 8000,
+    "transcriptBytes": 39069760
+   },
+   "all": {
+    "n": 12,
+    "medianMs": 480.0999999642372,
+    "p95Ms": 646.2999999523163,
+    "minMs": 388.39999997615814,
+    "maxMs": 646.2999999523163
+   },
+   "coldTranscript": {
+    "n": 12,
+    "medianMs": 480.0999999642372,
+    "p95Ms": 646.2999999523163,
+    "minMs": 388.39999997615814,
+    "maxMs": 646.2999999523163
+   },
+   "warmTranscript": null,
+   "archiveWindowCounts": [
+    1
+   ],
+   "archiveTurnFilesRead": [
+    10
+   ],
+   "domTurns": [
+    10
+   ]
+  }
+ },
+ "samples": [
+  {
+   "sessionId": "bench-medium",
+   "round": 2,
+   "openMs": 298.40000009536743,
+   "selectionMs": 298.40000009536743,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 250.9,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 2,
+   "openMs": 531.6000000238419,
+   "selectionMs": 531.6000000238419,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 484.8,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 3,
+   "openMs": 350.10000002384186,
+   "selectionMs": 350.10000002384186,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 306.2,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 3,
+   "openMs": 419.10000002384186,
+   "selectionMs": 419.10000002384186,
+   "handlerDelayMs": 0.19999992847442627,
+   "loadDurationMs": 375,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 4,
+   "openMs": 271.89999997615814,
+   "selectionMs": 271.89999997615814,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 229.3,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 4,
+   "openMs": 449.2000000476837,
+   "selectionMs": 449.2000000476837,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 401,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 5,
+   "openMs": 283.7000000476837,
+   "selectionMs": 283.7000000476837,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 241.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 5,
+   "openMs": 424.2999999523163,
+   "selectionMs": 424.2999999523163,
+   "handlerDelayMs": 0.2999999523162842,
+   "loadDurationMs": 382.9,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 6,
+   "openMs": 318.39999997615814,
+   "selectionMs": 318.39999997615814,
+   "handlerDelayMs": 0.19999992847442627,
+   "loadDurationMs": 262.6,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 6,
+   "openMs": 497,
+   "selectionMs": 497,
+   "handlerDelayMs": 0.2999999523162842,
+   "loadDurationMs": 447.2,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 7,
+   "openMs": 387.39999997615814,
+   "selectionMs": 387.39999997615814,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 335.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 7,
+   "openMs": 646.2999999523163,
+   "selectionMs": 646.2999999523163,
+   "handlerDelayMs": 0.19999992847442627,
+   "loadDurationMs": 603.8,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 8,
+   "openMs": 321.5,
+   "selectionMs": 321.5,
+   "handlerDelayMs": 0.19999992847442627,
+   "loadDurationMs": 275.3,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 8,
+   "openMs": 388.39999997615814,
+   "selectionMs": 388.2999999523163,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 348.2,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 9,
+   "openMs": 305.7000000476837,
+   "selectionMs": 305.7000000476837,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 256.9,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 9,
+   "openMs": 430.2000000476837,
+   "selectionMs": 430.10000002384186,
+   "handlerDelayMs": 0.20000004768371582,
+   "loadDurationMs": 373.2,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 10,
+   "openMs": 413.8000000715256,
+   "selectionMs": 413.8000000715256,
+   "handlerDelayMs": 0.30000007152557373,
+   "loadDurationMs": 360.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 10,
+   "openMs": 496.39999997615814,
+   "selectionMs": 496.39999997615814,
+   "handlerDelayMs": 0.2999999523162842,
+   "loadDurationMs": 450.9,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 11,
+   "openMs": 311.7999999523163,
+   "selectionMs": 311.7999999523163,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 264.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 11,
+   "openMs": 479.7999999523163,
+   "selectionMs": 479.6999999284744,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 432.9,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 12,
+   "openMs": 339.7999999523163,
+   "selectionMs": 339.7999999523163,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 282.1,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 12,
+   "openMs": 480.39999997615814,
+   "selectionMs": 480.39999997615814,
+   "handlerDelayMs": 0.2999999523162842,
+   "loadDurationMs": 437.8,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-medium",
+   "round": 13,
+   "openMs": 395.10000002384186,
+   "selectionMs": 395,
+   "handlerDelayMs": 0.10000002384185791,
+   "loadDurationMs": 345.6,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 100,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 100,
+    "transcriptBytes": 26084060,
+    "transcriptParsedBytes": 26084060,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 100,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  },
+  {
+   "sessionId": "bench-huge",
+   "round": 13,
+   "openMs": 492,
+   "selectionMs": 492,
+   "handlerDelayMs": 0.2999999523162842,
+   "loadDurationMs": 450.3,
+   "counters": {
+    "matches": 1,
+    "archiveTurns": 0,
+    "archiveTurnFilesRead": 10,
+    "archiveIndexTurns": 150,
+    "archiveTotalTurns": 0,
+    "archiveWindow": 1,
+    "transcriptTurns": 150,
+    "transcriptBytes": 39069760,
+    "transcriptParsedBytes": 39069760,
+    "transcriptCacheHit": 0,
+    "transcriptIncremental": 0,
+    "nativeTurns": 0,
+    "mergedTurns": 150,
+    "returnedTurns": 10
+   },
+   "domTurns": 10
+  }
+ ]
+}

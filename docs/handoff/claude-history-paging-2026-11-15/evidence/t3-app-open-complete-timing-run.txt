@@ -1,0 +1,1 @@
+SCRY_TIMING_RUN={"label": "claude-open-complete-base", "command": ["node", "scripts/claude-session-open-bench.mjs", "--root", "/tmp/scry-cp-base", "--out", "/tmp/scry-evidence/open-complete-base.json", "--path", "complete", "--warmups", "1", "--iterations", "6"], "exit": 0, "signal": null, "wallMs": 1074475, "cores": 10, "loadBefore": 18.23, "loadAfter": 7.79, "highLoad": true}

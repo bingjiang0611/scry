@@ -1,0 +1,50 @@
+diff --git a/src/main/trace-diff-content.ts b/src/main/trace-diff-content.ts
+index 6260ba16..f1678e0a 100644
+--- a/src/main/trace-diff-content.ts
++++ b/src/main/trace-diff-content.ts
+@@ -134,7 +134,8 @@ async function hydrateSnapshot(root: string, snapshot: PatchBearingSnapshot | un
+ export async function hydrateNewestSessionSnapshots(
+   userDataDir: string,
+   cwd: string,
+-  turns: readonly TraceArchiveTurn[]
++  // Only the items matter: archive turns and the page turns crossing IPC both qualify.
++  turns: readonly { items: readonly TraceEvent[] }[]
+ ): Promise<void> {
+   const root = appTraceContentRoot(userDataDir, cwd)
+   const hydrated = new Set<string>()
+diff --git a/src/main/transcript-archive-paging.ts b/src/main/transcript-archive-paging.ts
+index 2b49b755..c4c24b39 100644
+--- a/src/main/transcript-archive-paging.ts
++++ b/src/main/transcript-archive-paging.ts
+@@ -3,6 +3,7 @@ import type { ParsedTurn } from './normalize'
+ import type { TraceEvent } from '../shared/trace'
+ import type { ProviderId } from '../shared/provider'
+ import type { TraceArchive, TraceArchiveTurn } from './transcript-archive'
++import { hydrateNewestSessionSnapshots } from './trace-diff-content'
+ import {
+   mergeSessionTurnAt,
+   sessionHistoryWindow,
+@@ -102,7 +103,15 @@ export async function hydrateTranscriptArchiveWindow(input: {
+   const { offset, end } = sessionHistoryWindow(paging.plan.length, input.request)
+   const pending: number[] = []
+   for (let index = offset; index < end; index++) if (!paging.merged.has(index)) pending.push(index)
+-  if (pending.length === 0) return { turns: pagingTurns(paging), archive: pagingArchive(paging), turnFilesRead: 0 }
++  // The page is what crosses IPC as the session-diff evidence. Archive bodies keep session/turn
++  // diff patches out of line, so the newest snapshot of this window is read back here — the same
++  // step `readTraceArchivePageAsync` does for archive-only pages.
++  const windowPage = async (turnFilesRead: number): Promise<TranscriptArchiveWindow> => {
++    const turns = pagingTurns(paging)
++    await hydrateNewestSessionSnapshots(context.userDataDir, paging.identity.cwd, turns.slice(offset, end))
++    return { turns, archive: pagingArchive(paging), turnFilesRead }
++  }
++  if (pending.length === 0) return windowPage(0)
+   const missing = pending
+     .map((index) => paging.plan[index].archive)
+     .filter((archive): archive is number => archive != null)
+@@ -134,5 +143,5 @@ export async function hydrateTranscriptArchiveWindow(input: {
+     const archived = position.archive != null ? paging.hydrated.get(paging.metadata[position.archive].runId) : undefined
+     paging.merged.set(index, mergeSessionTurnAt(transcript, archived, context))
+   }
+-  return { turns: pagingTurns(paging), archive: pagingArchive(paging), turnFilesRead: read.length }
++  return windowPage(read.length)
+ }
