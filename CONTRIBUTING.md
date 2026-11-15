@@ -60,7 +60,7 @@ Scry 是 local-first 的 AI coding agent 观测与治理工具，**不是安全�
 
 常规交付使用任务分支和 PR，不直接推送 main。一个 PR 只包含本次授权改动，不混入本地已有的未推送提交。标题使用简短的 conventional commit 格式，例如 `fix(recorder): preserve unavailable usage evidence`。
 
-Agent 默认只提交、不推送；推送和创建 PR 需要明确授权。维护者身份遵守 [CLAUDE.md](CLAUDE.md)；外部贡献者保留自己的公开身份。合并由维护者操作；不以分诊或机器人 Approval 自动合并。推荐 Squash；发布和安装仍各自遵守现有授权与验证流程。
+Agent 完成验证和自查后默认推送任务分支并创建 PR；合并须维护者明确要求。维护者身份遵守 [CLAUDE.md](CLAUDE.md)；外部贡献者保留自己的公开身份。合并由维护者操作；不以分诊或机器人 Approval 自动合并。推荐 Squash；发布和安装仍各自遵守现有授权与验证流程。
 
 ### 减少 CI 排队
 

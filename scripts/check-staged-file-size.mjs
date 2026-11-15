@@ -38,7 +38,7 @@ if (files.length > 0) {
     return bytes > maxBytes ? [{ ...file, bytes }] : []
   })
   if (oversized.length > 0) {
-    console.error('Commit blocked: staged files exceed 5,000 estimated tokens (20,000 bytes; tokens ≈ bytes / 4).')
+    console.error('Staged files exceed 5,000 estimated tokens (20,000 bytes; tokens ≈ bytes / 4).')
     for (const file of oversized) {
       console.error(`  ${JSON.stringify(file.path)}: ${file.bytes} bytes, ≈${Math.ceil(file.bytes / 4)} tokens`)
     }

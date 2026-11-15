@@ -100,7 +100,7 @@ npm run performance:report -- '<userData>/performance' '<baseline-build>' '<cand
 - 判定（`performance-ratchet.mjs check`）：每项单独判定，不能互相抵消。gating 项超过门限加误差、重复测量差异超过误差、缺失或 unavailable 都失败；低于门限报告 `tightenable`。
 - 基线（candidate）：每个 candidate 在 `baselines` 中按平台（如 `darwin-arm64`、`linux-x64`）记录最近接受的值。`check` 用同平台基线把它标为 `worse`/`unchanged`/`better`，报告顶部列出所有 `worse`，但**不让 CI 失败**；没有同平台基线时只显示数值，不跨平台下结论。CPU 指令数只在 Linux 可测，macOS 不记基线。2026-10-16 已用 `d26ddb1` 在 macOS 记录 25 项基线；负向对照：在 `sessionHistoryPage` 中多调用一次 `JSON.stringify`，`history.page/json.stringify.calls` 1→2 被标为 `worse`，其余 24 项 `unchanged`，`check` 仍通过。
 - 收紧（`propose`）：把 gating 门限降到新观测值；为当前平台补记缺失的 candidate 基线，或把基线降到更低的新值。不提升、不升级 candidate、不删除。基线升高或删除会掩盖 `worse`，`guard` 视同放宽，需要批准。CI 不用 PR 代码回写仓库；更新由人工审查或受信任任务提交。
-- 放宽（`guard`）：提高门限、扩大误差、降级或删除 gating 项，必须写 `raise: { from, to, reason }`，并由维护者给 PR 加 `performance-raise-approved` 标签后重新运行。改变 workload、单位或层就是新指标，必须使用新键。
+- 放宽（`guard`）：提高门限、扩大误差、降级或删除 gating 项，必须写 `raise: { from, to, reason }` 并经维护者同意。CI 仍据 `performance-raise-approved` 标签判断 guard 结果，但 2026-11-15 起 CI 不阻塞合并，该标签不是合并前置条件。改变 workload、单位或层就是新指标，必须使用新键。
 
 ## 并行优化任务合同
 

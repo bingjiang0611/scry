@@ -139,16 +139,17 @@ describe('hook installation and real commits', () => {
     // real installer and both real Git outcomes; do not mock or skip the hook.
     beforeEach(() => { expect(run(process.execPath, [installer]).status).toBe(0) })
 
-    it('blocks a real commit until the staged file is split', () => {
+    it('warns about an oversized staged file but lets the real commit through', () => {
       stage('large.ts', 'x'.repeat(20_001))
-      const blocked = run('git', ['commit', '-m', 'must fail'])
-      expect(blocked.status).not.toBe(0)
-      expect(blocked.stderr).toContain('Commit blocked')
-      expect(run('git', ['rev-parse', '--verify', 'HEAD']).status).not.toBe(0)
-      stage('large.ts', 'x'.repeat(10_000))
-      stage('extracted.ts', 'x'.repeat(10_001))
-      git('commit', '-m', 'split files')
-      expect(git('log', '-1', '--format=%s')).toBe('split files')
+      const warned = run('git', ['commit', '-m', 'advisory size'])
+      expect(warned.status, warned.stderr).toBe(0)
+      expect(warned.stderr).toContain('20001 bytes')
+      expect(warned.stderr).toContain('Warning only: the commit continues.')
+      expect(git('log', '-1', '--format=%s')).toBe('advisory size')
+      stage('small.ts', 'x'.repeat(10_000))
+      const quiet = run('git', ['commit', '-m', 'small file'])
+      expect(quiet.status).toBe(0)
+      expect(quiet.stderr).not.toContain('Warning only')
     })
   })
 
