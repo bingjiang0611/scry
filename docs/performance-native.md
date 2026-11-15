@@ -79,7 +79,7 @@ Native 比较器同时检查身份、环境、工作量、完整样本、真实�
 
 依赖安装沿用各自 lockfile 的版本和 integrity。lockfile 的 `resolved` 指向 npm 官方 registry，因此外部 runner 不依赖任何内网镜像，也不需要额外的 host 替换配置；不会升级版本或跳过完整性校验。固定 baseline checkout 同样复制这份配置。安装输出和失败时的 npm 调试日志也归档，不能因为测量尚未启动就丢掉失败证据。
 
-同仓 PR 的独立 job 更新评论；写 token 的 job 不检出或执行 PR 代码。fork PR 只提供只读 Actions summary/artifact。评论同时汇总 Node/native 两个 job 的实际状态及报告；测量失败或缺失时明确没有有效比较。让它成为必需合并检查还需要仓库 branch protection 配置；提交本地文件不会自动改变远端设置。
+macOS native job 在 PR 上只在改动冻结 harness（`nativeHarnessFiles`）或其工作流时运行；普通 App PR 合入 main 后以父提交为基线测量，每个 push 独立 run，也可对分支手动 dispatch 立即测量。PR 评论把未测量写成“合入后在 main 测量”，不计为通过。同仓 PR 的独立 job 更新评论；写 token 的 job 不检出或执行 PR 代码。fork PR 只提供只读 Actions summary/artifact。评论同时汇总 Node/native 两个 job 的实际状态及报告；测量失败或缺失时明确没有有效比较。让它成为必需合并检查还需要仓库 branch protection 配置；提交本地文件不会自动改变远端设置。
 
 本地比较也必须隔离两个源码目录、使用同一 harness/config/Node 和各自 lockfile；不能拿历史文档中的其他硬件或不同 fixture 数字当 baseline。可以用临时 detached worktree，但不要在同机并发跑耗时基准。
 

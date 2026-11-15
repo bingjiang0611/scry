@@ -2,6 +2,9 @@ name: Performance
 
 on:
   pull_request:
+  # Native timings for App changes are measured after merge, against the parent commit.
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       baseline:
@@ -123,8 +126,10 @@ jobs:
 
   native:
     needs: changes
-    # Diffs that cannot reach the App (tests, Agent docs, iOS) do not change native timings.
-    if: ${{ needs.changes.outputs.desktop == 'true' }}
+    # PRs measure native timings only when they change the frozen native harness or its workflow;
+    # main pushes measure every App change after merge, and dispatch measures on demand. This keeps
+    # ordinary PRs at three macOS jobs. native_performance implies desktop.
+    if: ${{ needs.changes.outputs.native_performance == 'true' }}
     # Same frozen driver, two real source builds, one runner, serial measurements.
     runs-on: macos-latest
     timeout-minutes: 30
@@ -137,7 +142,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha || inputs.baseline }}
+          # A main push compares against the commit before the push.
+          ref: ${{ github.event.pull_request.base.sha || inputs.baseline || github.event.before }}
           path: baseline
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -265,15 +271,18 @@ jobs:
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           # Every job must succeed, except jobs proven unaffected, which must be skipped.
-          echo "$RESULTS" | jq -e --argjson desktop '["native"]' '
+          # native_performance implies desktop; a main push runs native without the Node comparison.
+          echo "$RESULTS" | jq -e '
             length == 3 and .changes.result == "success" and
             (.changes.outputs as $out
-              | ($out.required == "true" and $out.node_performance == "true" and ($out.desktop == "true" or $out.desktop == "false"))
-                or (($out.required == "true" or $out.required == "false") and $out.desktop == "false" and $out.node_performance == "false")) and
+              | (($out.native_performance == "true" and $out.desktop == "true") or $out.native_performance == "false") and
+                (($out.required == "true" and $out.node_performance == "true" and ($out.desktop == "true" or $out.desktop == "false"))
+                  or ($out.required == "true" and $out.desktop == "true" and $out.node_performance == "false" and $out.native_performance == "true")
+                  or (($out.required == "true" or $out.required == "false") and $out.desktop == "false" and $out.node_performance == "false"))) and
             (.changes.outputs as $out | del(.changes) | to_entries | all(.[];
               .key as $job | .value.result == (
-                if $out.required == "false" or ($out.desktop == "false" and any($desktop[]; . == $job))
-                  or ($out.node_performance == "false" and $job == "compare")
+                if ($job == "native" and $out.native_performance == "false")
+                  or ($job == "compare" and $out.node_performance == "false")
                 then "skipped" else "success" end)))' > /dev/null
 
   comment:
@@ -295,14 +304,16 @@ jobs:
           NODE_RESULT: ${{ needs.compare.result }}
           NODE_REQUIRED: ${{ needs.changes.outputs.node_performance }}
           NATIVE_RESULT: ${{ needs.native.result }}
-          NATIVE_REQUIRED: ${{ needs.changes.outputs.desktop }}
+          NATIVE_REQUIRED: ${{ needs.changes.outputs.native_performance }}
+          DESKTOP: ${{ needs.changes.outputs.desktop }}
         with:
           script: |
             const fs = require('node:fs')
             const sections = [['Node', 'performance-results'], ['Native', 'performance-native-results']].map(([label, artifact]) => {
               const file = `reports/${artifact}/report.md`
               if (label === 'Node' && process.env.NODE_REQUIRED === 'false' && process.env.NODE_RESULT === 'skipped') return `## ${label}\nNot measured: only iOS or documentation inputs changed (validation changes reported node_performance=false).`
-              if (label === 'Native' && process.env.NATIVE_REQUIRED === 'false' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured: this diff cannot reach the packaged App (validation changes reported desktop=false).`
+              if (label === 'Native' && process.env.DESKTOP === 'false' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured: this diff cannot reach the packaged App (validation changes reported desktop=false).`
+              if (label === 'Native' && process.env.NATIVE_REQUIRED === 'false' && process.env.NATIVE_RESULT === 'skipped') return `## ${label}\nNot measured on this PR: the native harness is unchanged (validation changes reported native_performance=false). Native timings are measured after merge on main against the parent commit; dispatch the Performance workflow for this branch to measure it now. A skipped measurement is not a pass.`
               return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : `## ${label}\nNo valid comparison was produced. Missing measurements are not a pass.`
             })
             const body = (`<!-- scry-performance -->\nNode job: ${process.env.NODE_RESULT} · Native job: ${process.env.NATIVE_RESULT}\n\n` + sections.join('\n\n')).slice(0, 60000)
