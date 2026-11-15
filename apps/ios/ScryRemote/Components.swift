@@ -114,6 +114,50 @@ struct Notice: View {
   }
 }
 
+/// Placeholder rows at the real row size while a list is read for the first time,
+/// instead of one spinner in the middle of an empty page. The shapes come from
+/// `.redacted(reason: .placeholder)` over sample text shorter than real titles, so
+/// they follow system placeholder styling and Dynamic Type. They appear after the
+/// shared 300 ms delay (the space is reserved from the start, so nothing moves), and
+/// VoiceOver reads one label instead of the shapes.
+struct PlaceholderRows: View {
+  let label: String
+  var count = 6
+  var rowHeight: CGFloat = 48
+  var icon = true
+  var detail = false
+  var horizontalPadding: CGFloat = 16
+  @State private var visible = false
+
+  private static let titles = ["会话标题占位", "较长一些的会话标题占位", "短标题", "另一条会话标题", "标题占位文字", "中等长度标题"]
+  private static let details = ["路径占位", "较长的说明占位文字", "说明占位"]
+
+  var body: some View {
+    VStack(spacing: 0) {
+      ForEach(0..<count, id: \.self) { index in
+        HStack(spacing: 10) {
+          if icon { RoundedRectangle(cornerRadius: 4, style: .continuous).frame(width: 16, height: 16) }
+          VStack(alignment: .leading, spacing: 3) {
+            Text(Self.titles[index % Self.titles.count]).font(Typography.rowTitle)
+            if detail { Text(Self.details[index % Self.details.count]).font(Typography.meta) }
+          }
+          Spacer(minLength: 0)
+        }
+        .frame(minHeight: rowHeight).padding(.horizontal, horizontalPadding)
+      }
+    }
+    .foregroundStyle(Palette.dim2)
+    .redacted(reason: .placeholder)
+    .opacity(visible ? 1 : 0)
+    .task {
+      try? await Task.sleep(for: .milliseconds(300))
+      visible = true
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(label)
+  }
+}
+
 struct EmptyState: View {
   let title: String
   let detail: String
