@@ -243,16 +243,17 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     return true
   }, [])
 
-  const { send, adoptStartedRun } = useAgentStart({
+  const { send, adoptStartedRun, requestPendingStartStop } = useAgentStart({
     cachedDisplayRef, cachedHistoryRef, resyncGeneration, focusedRunIdRef,
     pendingStartLifecycleRef, pendingStartSequenceRef, focusLifecycleDeltasRef, focusQuestionDeltasRef,
     clearedRuns, prepareRunFocus, setRunning, setTurns, setPendingQuestions, setStopStates
   })
 
   const stopRun = useCallback(async (): Promise<void> => {
+    if (requestPendingStartStop()) return
     if (!currentRunId) return
     await window.scry.stop(currentRunId)
-  }, [currentRunId])
+  }, [currentRunId, requestPendingStartStop])
 
   const answerQuestion = useCallback(async (response: AgentQuestionResponse): Promise<void> => {
     if (typeof window.scry.answerQuestion !== 'function') throw new Error('当前 Scry preload 不支持回答 Claude 提问，请重启应用')

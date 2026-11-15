@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import type { ActiveRun } from '@shared/trace'
 import type { AgentQuestionRequest, AgentStartRequest, AgentStartResult } from '@shared/runtime'
 import type { Turn } from '../format'
@@ -9,6 +9,7 @@ import {
   mergeRecoveredRun, rendererTraceResyncBridge, resynchronizeLiveTrace, restoredRunRuntimeState,
   type OlderSessionPage, type RunLifecycleDelta, type PendingQuestionDelta, type StopStateMap
 } from './useAgentSession-helpers'
+import { PendingStartStop } from './pending-start-stop'
 
 type Ref<T> = MutableRefObject<T>
 type Setter<T> = Dispatch<SetStateAction<T>>
@@ -34,6 +35,9 @@ export function useAgentStart(deps: {
     pendingStartSequenceRef, focusLifecycleDeltasRef, focusQuestionDeltasRef, clearedRuns,
     prepareRunFocus, setRunning, setTurns, setPendingQuestions, setStopStates
   } = deps
+  const startStops = useRef(new PendingStartStop<RunLifecycleDelta[]>()).current
+  /** Stop for a send whose runId has not arrived; false when no start is pending. */
+  const requestPendingStartStop = useCallback((): boolean => startStops.request(), [startStops])
   const send = useCallback(async (
     text: string, options: Omit<AgentStartRequest, 'prompt'> = {}
   ): Promise<AgentStartResult | null> => {
@@ -45,6 +49,7 @@ export function useAgentStart(deps: {
     focusedRunIdRef.current = null
     const pendingLifecycle: RunLifecycleDelta[] = []
     pendingStartLifecycleRef.current = pendingLifecycle
+    startStops.begin(pendingLifecycle)
     setRunning(true)
     const pendingRunId = `pending-run-${Date.now().toString(36)}-${pendingStartSequenceRef.current++}`
     setTurns(previous => beginOptimisticTurn(previous, pendingRunId, request))
@@ -52,10 +57,14 @@ export function useAgentStart(deps: {
     try {
       result = await startWithWorkspaceReceipt(request)
     } catch (error) {
+      startStops.settle(pendingLifecycle)
       if (pendingStartLifecycleRef.current === pendingLifecycle) pendingStartLifecycleRef.current = null
       setTurns(previous => discardOptimisticTurn(previous, pendingRunId))
       if (generation === resyncGeneration.current) setRunning(false)
       throw error
+    }
+    if (startStops.settle(pendingLifecycle)) {
+      void window.scry.stop(result.runId).catch((error: unknown) => console.error('Scry 未能送达发送期间点击的停止', error))
     }
     if (pendingStartLifecycleRef.current === pendingLifecycle) pendingStartLifecycleRef.current = null
     // A long preparation may finish after another draft/history selection. Do not steal its focus.
@@ -70,7 +79,7 @@ export function useAgentStart(deps: {
     if (deltas.length) setRunning(false)
     return result
   }, [cachedDisplayRef, cachedHistoryRef, resyncGeneration, focusedRunIdRef, pendingStartLifecycleRef,
-    pendingStartSequenceRef, setRunning, setTurns])
+    pendingStartSequenceRef, setRunning, setTurns, startStops])
 
   const adoptStartedRun = useCallback(async (runId: string): Promise<
     { status: 'focused'; run: ActiveRun } | { status: 'unavailable' } | { status: 'superseded' }
@@ -99,5 +108,5 @@ export function useAgentStart(deps: {
   }, [prepareRunFocus, resyncGeneration, focusedRunIdRef, clearedRuns, focusLifecycleDeltasRef,
     focusQuestionDeltasRef, setTurns, setRunning, setPendingQuestions, setStopStates])
 
-  return { send, adoptStartedRun }
+  return { send, adoptStartedRun, requestPendingStartStop }
 }
