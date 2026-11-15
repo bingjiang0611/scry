@@ -7,6 +7,15 @@ import {
 
 const CUSTOM_ANSWER_TITLE = 'Type your answer:'
 
+// Current Pi repeats the options in its custom-input title; older walkers omit them.
+// Keep exact question + option identity, rather than accepting any matching suffix.
+export function piCustomInputTitles(title: string, optionLines: string[]): string[] {
+  return [
+    `${title}\n\n${CUSTOM_ANSWER_TITLE}`,
+    `${title}\n\n${optionLines.join('\n')}\n\n${CUSTOM_ANSWER_TITLE}`
+  ]
+}
+
 type Dialog = Record<string, unknown>
 type Reply = { type: 'extension_ui_response'; id: unknown; value?: string; cancelled?: true }
 
@@ -30,7 +39,7 @@ function legacyAnswerValue(question: AgentQuestionPrompt, answer: string): strin
 export class PiQuestionnaire {
   private index = 0
   private response: AgentQuestionResponse | undefined
-  private customInput: { title: string; value: string } | undefined
+  private customInput: { titles: string[]; value: string } | undefined
 
   private constructor(readonly request: AgentQuestionRequest) {}
 
@@ -49,13 +58,13 @@ export class PiQuestionnaire {
   }
 
   matches(event: Dialog): boolean {
-    if (this.customInput) return event.method === 'input' && event.title === this.customInput.title
+    if (this.customInput) return event.method === 'input' && this.customInput.titles.some((title) => event.title === title)
     const question = this.request.questions[this.index]
     if (!question) return false
     const title = `[${question.header}] ${question.question}`
     if (question.multiSelect) {
       const options = question.options.map((option, index) => `${index + 1}. ${option.label} — ${option.description}`).join('\n')
-      return event.method === 'input' && event.placeholder === '1,3' &&
+      return event.method === 'input' && (event.placeholder === '1,3' || event.placeholder === '1,3; custom answer') &&
         typeof event.title === 'string' && event.title.startsWith(`${title}\n\n${options}\n\n`)
     }
     const previews = question.options.flatMap((option, index) => option.preview
@@ -88,7 +97,11 @@ export class PiQuestionnaire {
     const selected = question.options.find((option) => option.answerValue === answer)
     const custom = this.response.nativeCustomAnswers?.includes(question.question) || !selected
     if (!question.multiSelect && custom) {
-      this.customInput = { title: `[${question.header}] ${question.question}\n\n${CUSTOM_ANSWER_TITLE}`, value: answer }
+      this.customInput = {
+        titles: piCustomInputTitles(`[${question.header}] ${question.question}`,
+          question.options.map((option, index) => `${index + 1}. ${option.label} — ${option.description}`)),
+        value: answer
+      }
       return { type: 'extension_ui_response', id: event.id, value: `${question.options.length + 1}. Type something.` }
     }
     const value = !question.multiSelect && selected ? `${answer}. ${selected.label} — ${selected.description}` : answer

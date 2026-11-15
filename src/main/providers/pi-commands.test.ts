@@ -81,7 +81,7 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each(['custom', 'custom-sentinel', 'custom-option', 'custom-preview', 'custom-legacy', 'option', 'cancel-select', 'unrelated-input', 'unrelated-context'])('round-trips the native questionnaire protocol: %s', async (scenario) => {
+  it.each(['custom', 'custom-sentinel', 'custom-option', 'custom-preview', 'custom-legacy', 'custom-old', 'option', 'cancel-select', 'unrelated-input', 'unrelated-context', 'unrelated-options'])('round-trips the native questionnaire protocol: %s', async (scenario) => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const questions: string[] = []
@@ -89,7 +89,9 @@ describe('Pi RPC Provider', () => {
       const promptSuffix = scenario === 'unrelated-input' ? '-unrelated'
         : scenario === 'unrelated-context' ? '-unrelated-context'
         : scenario === 'custom-preview' ? '-preview'
-        : scenario === 'custom-legacy' ? '-legacy' : ''
+        : scenario === 'custom-legacy' ? '-legacy'
+        : scenario === 'custom-old' ? '-old'
+        : scenario === 'unrelated-options' ? '-changed-options' : ''
       const customAnswer = scenario === 'custom-sentinel' ? '2. Type something.'
         : scenario === 'custom-option' ? '1. Continue' : '提交所有改动 保证工作区干净 然后构建并安装'
       const handle = adapter.run({
@@ -126,12 +128,12 @@ describe('Pi RPC Provider', () => {
     })
   }, 15_000)
 
-  it.each(['option', 'custom', 'labels', 'cancel', 'changed'])('reviews the whole native question group before replying: %s', async (scenario) => {
+  it.each(['option', 'custom', 'multi', 'labels', 'cancel', 'changed'])('reviews the whole native question group before replying: %s', async (scenario) => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const asked: string[] = []
       const handle = adapter.run({
-        runId: 'batch-run', prompt: `/fixture-menu batch${scenario === 'changed' ? '-changed' : ''}`, cwd,
+        runId: 'batch-run', prompt: `/fixture-menu batch${scenario === 'changed' || scenario === 'multi' ? `-${scenario}` : ''}`, cwd,
         agentProfileId: profile.id, attachments: [], permissionMode: 'full_access', emit: () => {},
         requestUserInput: async (request) => {
           asked.push(request.questionId)
@@ -147,7 +149,7 @@ describe('Pi RPC Provider', () => {
             runId: request.runId, questionId: request.questionId, behavior: 'answered',
             answers: scenario === 'labels'
               ? { 'What matters?': 'Speed', 'When to review?': 'Later' }
-              : { 'What matters?': '2', 'When to review?': scenario === 'custom' ? '1' : '2' },
+              : { 'What matters?': '2', 'When to review?': scenario === 'custom' ? '1' : scenario === 'multi' ? '1,2' : '2' },
             ...(scenario === 'labels' ? {} : { nativeCustomAnswers: scenario === 'custom' ? ['When to review?'] : [] })
           }
         }
@@ -160,7 +162,9 @@ describe('Pi RPC Provider', () => {
         else {
           expect(replies[0].value).toBe('2. Speed — Finish sooner')
           if (scenario === 'changed') expect(replies[1]).toMatchObject({ cancelled: true })
-          else expect(replies.map((reply) => reply.value)).toEqual(scenario === 'custom' ? ['2. Speed — Finish sooner', '3. Type something.', '1'] : ['2. Speed — Finish sooner', '2. Later — At the end'])
+          else expect(replies.map((reply) => reply.value)).toEqual(scenario === 'custom'
+            ? ['2. Speed — Finish sooner', '3. Type something.', '1']
+            : ['2. Speed — Finish sooner', scenario === 'multi' ? '1,2' : '2. Later — At the end'])
         }
       } finally {
         handle.forceKill()

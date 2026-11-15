@@ -183,9 +183,13 @@ export const piFixtureSourceTail = `
     } else if (command.type === 'extension_ui_response' && command.id.startsWith('batch-')) {
       require('node:fs').appendFileSync(process.cwd() + '/batch-responses', JSON.stringify(command) + '\\n')
       if (!command.cancelled && command.id === 'batch-first') {
-        send({ type: 'extension_ui_request', id: 'batch-second', method: 'select', title: promptMessage.endsWith('-changed') ? 'Unrelated secret' : '[Review] When to review?', options: ['1. Now — Before continuing', '2. Later — At the end', '3. Type something.'] })
+        if (promptMessage.endsWith('-multi')) {
+          send({ type: 'extension_ui_request', id: 'batch-second', method: 'input', title: '[Review] When to review?\\n\\n1. Now — Before continuing\\n2. Later — At the end\\n\\nEnter numbers or custom text', placeholder: '1,3; custom answer' })
+        } else {
+          send({ type: 'extension_ui_request', id: 'batch-second', method: 'select', title: promptMessage.endsWith('-changed') ? 'Unrelated secret' : '[Review] When to review?', options: ['1. Now — Before continuing', '2. Later — At the end', '3. Type something.'] })
+        }
       } else if (!command.cancelled && command.id === 'batch-second' && command.value === '3. Type something.') {
-        send({ type: 'extension_ui_request', id: 'batch-custom', method: 'input', title: '[Review] When to review?\\n\\nType your answer:', placeholder: '' })
+        send({ type: 'extension_ui_request', id: 'batch-custom', method: 'input', title: '[Review] When to review?\\n\\n1. Now — Before continuing\\n2. Later — At the end\\n\\nType your answer:', placeholder: '' })
       } else {
         send({ type: 'tool_execution_end', toolCallId: 'batch-tool', toolName: 'ask_user_question', result: { content: [{ type: 'text', text: command.cancelled ? 'Declined' : 'Answered' }] }, isError: false })
         send({ type: 'agent_end' })
@@ -199,7 +203,9 @@ export const piFixtureSourceTail = `
         const title = promptMessage.endsWith('question-unrelated') ? 'Unrelated secret'
           : promptMessage.endsWith('question-unrelated-context') ? '[另一问题] Unrelated secret\\n\\nType your answer:'
           : promptMessage.endsWith('question-legacy') ? 'Type your answer:'
-          : '[复现动作] Continue?\\n\\nType your answer:'
+          : promptMessage.endsWith('question-old') ? '[复现动作] Continue?\\n\\nType your answer:'
+          : promptMessage.endsWith('question-changed-options') ? '[复现动作] Continue?\\n\\n1. Changed option\\n\\nType your answer:'
+          : '[复现动作] Continue?\\n\\n1. Continue\\n\\nType your answer:'
         send({ type: 'extension_ui_request', id: 'question-input', method: 'input', title, placeholder: '' })
       } else if (command.id === 'question-select' && command.value !== '1. Continue') {
         send({ type: 'extension_error', extensionPath: 'command:fixture-menu', event: 'command', error: 'User declined to answer questions' })
