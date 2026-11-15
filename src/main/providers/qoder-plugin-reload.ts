@@ -36,6 +36,7 @@ export function runQoderPluginReload(
     }
     const promise: Promise<ProviderRunResult> = (async () => {
       lease = await startQoderDaemon({
+        owner: `reload:${request.runId}`,
         managedRecorder: request.managedRecorder === true,
         managedIdentity: request.managedRecorderIdentity
       })

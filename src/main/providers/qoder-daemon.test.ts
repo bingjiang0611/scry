@@ -116,6 +116,30 @@ describe('startQoderDaemon', () => {
   })
 })
 
+describe('daemon lifecycle log', () => {
+  it('names the owner, pid and stop duration, and carries no daemon output', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const listings: ProcessRow[][] = [[], [row(50, `node ${EXE} --sdk`)]]
+      const lease = await startQoderDaemon({ owner: 'run:run-9' }, {
+        start: vi.fn(async (options: { stderr?: (data: string) => void }) => {
+          options.stderr?.('secret prompt text\n')
+          return fakeDaemon()
+        }) as never,
+        children: async () => listings.shift() ?? []
+      })
+      await lease.stop()
+      const lines = info.mock.calls.map(([label, json]) => [label, JSON.parse(String(json))])
+      expect(lines.map(([label]) => label)).toEqual(['[scry] qoder daemon started', '[scry] qoder daemon stopping', '[scry] qoder daemon stopped'])
+      expect(lines.every(([, detail]) => detail.owner === 'run:run-9' && detail.pid === 50 && typeof detail.at === 'string')).toBe(true)
+      expect(typeof lines[2][1].ms).toBe('number')
+      expect(JSON.stringify(info.mock.calls)).not.toContain('secret')
+    } finally {
+      info.mockRestore()
+    }
+  })
+})
+
 describe('daemon ownership invariant', () => {
   it('only qoder-daemon.ts calls the SDK query/startDaemon, so nothing reaches the shared daemon', () => {
     const dir = __dirname

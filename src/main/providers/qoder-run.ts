@@ -23,7 +23,7 @@ import {
 } from './qoder-hooks'
 import { reconcileQoderRunLog } from './qoder-run-log'
 import { livePrompt, qoderExecutable, qoderSessionOptions, signalProcessTree } from './qoder-launch'
-import { qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
+import { qoderLifecycleLog, qoderQuery, startQoderDaemon, type QoderDaemonLease } from './qoder-daemon'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
@@ -171,6 +171,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     // Start this run's daemon before any input is attempted: a start failure leaves the
     // prompt unsent, exactly like a missing CLI.
     const starting = startQoderDaemon({
+      owner: `run:${request.runId}`,
       managedRecorder: request.managedRecorder === true,
       managedIdentity: request.managedRecorderIdentity
     })
@@ -292,6 +293,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       // publishing the final snapshot. Host interruption is not task evidence.
       backgroundMonitor.pause()
       releaseProviderPrompt()
+      qoderLifecycleLog('query closing', `run:${request.runId}`)
       try {
         await q.close()
       } catch (error) {

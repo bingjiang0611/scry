@@ -23,7 +23,11 @@ export function verifyForkArchiveBoundary(
   // Interrupted/cancelled/running turns remain unsafe because their native boundary may
   // still be incomplete or locally synthesized.
   if (!source || source.done !== true || (source.status !== 'completed' && source.status !== 'failed')) {
-    throw new Error('找不到可分支的已结束轮次')
+    // Say which check failed, without IDs or paths (round seven G4 could not tell them apart).
+    const reason = !archive ? '没有找到该会话的归档'
+      : !source ? `该会话归档的 ${archive.turns.length} 轮中没有这一轮`
+        : `这一轮${source.done === true ? '' : '尚未结束，'}状态为 ${source.status ?? '未知'}`
+    throw new Error(`找不到可分支的已结束轮次：${reason}`)
   }
   if (source.providerTurnId !== request.sourceProviderTurnId ||
     (source.forkTurnId ?? source.providerTurnId) !== request.sourceForkTurnId) {

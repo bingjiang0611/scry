@@ -79,7 +79,7 @@ export async function readQoderMcpSnapshot(
   let lease: QoderDaemonLease | undefined
   let q: ReturnType<typeof qoderQuery> | undefined
   try {
-    lease = await startQoderDaemon()
+    lease = await startQoderDaemon({ owner: 'mcp' })
     q = qoderQuery(lease, { prompt: prompt.stream, options: qoderSessionOptions(context.cwd, undefined, 'default', execution) })
     await q.initializationResult()
     return capabilityReady(context, 'read', qoderMcpSnapshot(await q.mcpServerStatus(), configured))
@@ -123,7 +123,7 @@ export async function reauthenticateQoderMcp(
   const prompt = heldPrompt()
   let lease: QoderDaemonLease
   try {
-    lease = await startQoderDaemon()
+    lease = await startQoderDaemon({ owner: 'mcp' })
   } catch (error) {
     loopback.close()
     return failed(error)

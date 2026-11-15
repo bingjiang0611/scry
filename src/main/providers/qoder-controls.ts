@@ -128,7 +128,7 @@ export function createQoderControls(): QoderControlPool {
     if (existing && !existing.retired) return existing
     if (disposed) throw new Error('Qoder adapter 已释放')
     const prompt = heldPrompt()
-    const opened = startQoderDaemon().then((lease) => ({
+    const opened = startQoderDaemon({ owner: 'controls' }).then((lease) => ({
       lease,
       query: qoderQuery(lease, { prompt: prompt.stream, options: { ...qoderSessionOptions(context.cwd), persistSession: false } })
     }))

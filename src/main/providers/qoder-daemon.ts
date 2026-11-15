@@ -35,6 +35,17 @@ export interface QoderDaemonLease {
 export interface QoderDaemonStartOptions {
   managedRecorder?: boolean
   managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
+  /** What this daemon serves, for the lifecycle log: `run:<runId>`, `controls`, `mcp`. */
+  owner?: string
+}
+
+/**
+ * One main-process log line per daemon/query lifecycle step, so a stop or abort can be put on
+ * a timeline and a daemon tied to the operation that started it (round seven G2/G4 could do
+ * neither). Owner, pid and timings only: no prompt, path or session content.
+ */
+export function qoderLifecycleLog(event: string, owner: string, detail: Record<string, unknown> = {}): void {
+  console.info(`[scry] qoder ${event}`, JSON.stringify({ at: new Date().toISOString(), owner, ...detail }))
 }
 
 /** Daemon-level env: identical to what the per-query process used to receive. */
@@ -118,13 +129,20 @@ export async function startQoderDaemon(
     throw new Error(`Qoder 守护进程启动失败：${(error as Error).message}${tail ? `\n${tail}` : ''}`)
   }
   const { daemon, child } = started
+  const owner = options.owner ?? 'unlabelled'
+  const pid = child?.pid ?? 'unknown'
+  qoderLifecycleLog('daemon started', owner, { pid })
   let stopping: Promise<void> | undefined
   return {
     daemon,
     ...(child ? { pid: child.pid, identity: { pid: child.pid, startedAt: child.startedAt, command: child.command } } : {}),
     stderrTail: () => stderr.trim(),
     onFailure: (listener) => daemon.onFailure(listener),
-    stop: () => stopping ??= daemon.stop().catch(() => {})
+    stop: () => stopping ??= (() => {
+      const begun = Date.now()
+      qoderLifecycleLog('daemon stopping', owner, { pid })
+      return daemon.stop().catch(() => {}).then(() => qoderLifecycleLog('daemon stopped', owner, { pid, ms: Date.now() - begun }))
+    })()
   }
 }
 
