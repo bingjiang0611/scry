@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { setImmediate } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
+import { nativeHarnessFiles } from './performance-native.mjs'
 
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown }
 const root = resolve(import.meta.dirname, '..')
@@ -53,10 +54,15 @@ function fixture() {
   return { git, write, commit, detect }
 }
 
-const SKIP = 'required=false\ndesktop=false\nnode_performance=false\n'
-const FULL = 'required=true\ndesktop=true\nnode_performance=true\n'
-const NO_DESKTOP = 'required=true\ndesktop=false\nnode_performance=true\n'
-const IOS_ONLY = 'required=true\ndesktop=false\nnode_performance=false\n'
+const SKIP = 'required=false\ndesktop=false\nnode_performance=false\nnative_performance=false\n'
+// Every gate, including the macOS native comparison: dispatch, new branches and native harness PRs.
+const ALL = 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=true\n'
+// An ordinary App PR: every CI gate and the Node comparison; native timings are measured after merge.
+const APP = 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=false\n'
+// A main push: every CI gate and the post-merge native comparison; the Node ABAB comparison is PR-only.
+const PUSH = 'required=true\ndesktop=true\nnode_performance=false\nnative_performance=true\n'
+const NO_DESKTOP = 'required=true\ndesktop=false\nnode_performance=true\nnative_performance=false\n'
+const IOS_ONLY = 'required=true\ndesktop=false\nnode_performance=false\nnative_performance=false\n'
 
 // Real Git pathspecs, including renames/deletions, not a second matcher.
 // Separate cases keep subprocess-heavy fixtures under the ordinary test deadline.
@@ -64,6 +70,8 @@ describe('documentation-only validation skips', () => {
   it('exports Node scope through the reusable workflow boundary', () => {
     expect(workflow.jobs.changes.outputs.node_performance).toBe('${{ steps.diff.outputs.node_performance }}')
     expect(workflow.on.workflow_call.outputs.node_performance.value).toBe('${{ jobs.changes.outputs.node_performance }}')
+    expect(workflow.jobs.changes.outputs.native_performance).toBe('${{ steps.diff.outputs.native_performance }}')
+    expect(workflow.on.workflow_call.outputs.native_performance.value).toBe('${{ jobs.changes.outputs.native_performance }}')
   })
 
   it.each([
@@ -78,13 +86,13 @@ describe('documentation-only validation skips', () => {
 
   it.each([
     'src/main.ts', 'package.json', 'docs/build.mjs', 'docs/fixture.json', '.github/workflows/ci.yml',
-    '.github/actions/cache-electron/action.yml', 'THIRD_PARTY_NOTICES.md', 'scripts/model-picker-ui-smoke.mjs',
+    'THIRD_PARTY_NOTICES.md', 'scripts/model-picker-ui-smoke.mjs',
     '.agents/skills/test/scripts/timing-run.mjs', '.claude/skills/test/run.mjs', 'src/core/recorder-tests/fixture.ts',
     'experiments/remote-g0/generated/wire.ts', 'fixtures/billing/response.json'
   ])('requires every gate for App, packaging or harness inputs mixed with docs: %s', path => {
     const { write, commit, detect } = fixture()
     write('README.md'); write(path); commit()
-    expect(detect()).toEqual({ status: 0, output: FULL })
+    expect(detect()).toEqual({ status: 0, output: APP })
   })
 
   it.each([
@@ -108,9 +116,9 @@ describe('documentation-only validation skips', () => {
   })
 
   it.each([
-    ['src/main.ts', FULL], ['package-lock.json', FULL], ['scripts/performance-baseline.test.ts', NO_DESKTOP],
-    ['AGENTS.md', NO_DESKTOP], ['.agents/AGENTS.md', NO_DESKTOP], ['CLAUDE.md', NO_DESKTOP], ['experiments/remote-g0/generated/wire.ts', FULL],
-    ['.github/workflows/performance.yml', FULL], ['apps/ios-other/main.ts', FULL]
+    ['src/main.ts', APP], ['package-lock.json', APP], ['scripts/performance-baseline.test.ts', NO_DESKTOP],
+    ['AGENTS.md', NO_DESKTOP], ['.agents/AGENTS.md', NO_DESKTOP], ['CLAUDE.md', NO_DESKTOP], ['experiments/remote-g0/generated/wire.ts', APP],
+    ['.github/workflows/performance.yml', ALL], ['apps/ios-other/main.ts', APP]
   ])('retains Node measurement for iOS mixed with %s', (path, expected) => {
     const { write, commit, detect } = fixture()
     write('apps/ios/ScryRemote/App.swift'); write(path); commit()
@@ -121,7 +129,7 @@ describe('documentation-only validation skips', () => {
     const { git, write, commit, detect } = fixture()
     write('apps/ios/README.md'); commit()
     git('mv', 'src/main.ts', 'apps/ios/moved.ts'); commit()
-    expect(detect()).toEqual({ status: 0, output: FULL })
+    expect(detect()).toEqual({ status: 0, output: APP })
   })
 
   it('handles iOS deletions without hiding a rename out of iOS', () => {
@@ -131,22 +139,22 @@ describe('documentation-only validation skips', () => {
     git('rm', 'apps/ios/deleted.swift'); commit()
     expect(detect(base)).toEqual({ status: 0, output: IOS_ONLY })
     git('mv', 'apps/ios/source.swift', 'src/moved.swift'); commit()
-    expect(detect(base)).toEqual({ status: 0, output: FULL })
+    expect(detect(base)).toEqual({ status: 0, output: APP })
   })
 
   it('keeps macOS App gates when an App input is mixed with desktop-free changes', () => {
     const { write, commit, detect } = fixture()
     write('src/main.test.ts'); write('CLAUDE.md'); write('src/main.ts'); commit()
-    expect(detect()).toEqual({ status: 0, output: FULL })
+    expect(detect()).toEqual({ status: 0, output: APP })
   })
 
   it('detects code renamed into documentation or a test file', () => {
     const { git, commit, detect } = fixture()
     git('mv', 'src/main.ts', 'docs/renamed.md'); commit()
-    expect(detect()).toEqual({ status: 0, output: FULL })
+    expect(detect()).toEqual({ status: 0, output: APP })
     const renamed = fixture()
     renamed.git('mv', 'src/main.ts', 'src/main.test.ts'); renamed.commit()
-    expect(renamed.detect()).toEqual({ status: 0, output: FULL })
+    expect(renamed.detect()).toEqual({ status: 0, output: APP })
   })
 
   it('skips documentation deletions', () => {
@@ -158,10 +166,46 @@ describe('documentation-only validation skips', () => {
   it('always validates dispatch, coalesced main pushes and new branches, and fails closed on an unreadable base', () => {
     const { detect } = fixture()
     expect(detect()).toEqual({ status: 0, output: SKIP })
-    expect(detect(undefined, 'workflow_dispatch')).toEqual({ status: 0, output: FULL })
-    expect(detect(undefined, 'push')).toEqual({ status: 0, output: FULL })
-    expect(detect('0'.repeat(40))).toEqual({ status: 0, output: FULL })
+    expect(detect(undefined, 'workflow_dispatch')).toEqual({ status: 0, output: ALL })
+    expect(detect(undefined, 'push')).toEqual({ status: 0, output: PUSH })
+    expect(detect('0'.repeat(40))).toEqual({ status: 0, output: ALL })
     expect(detect('f'.repeat(40)).status).not.toBe(0)
     expect(detect('f'.repeat(40)).output).toBe('')
+  })
+})
+
+// The PR native comparison follows the frozen harness list, not a hand-kept guess.
+describe('native comparison scope', () => {
+  it.each([
+    ...nativeHarnessFiles,
+    'scripts/performance-paths/new-domain.json', '.agents/skills/scry-performance-climb/scripts/new-helper.mjs',
+    '.github/workflows/performance.yml', '.github/workflows/validation-changes.yml', '.github/actions/cache-electron/action.yml'
+  ])('runs the native comparison on a PR that changes the native harness: %s', path => {
+    const { write, commit, detect } = fixture()
+    write('README.md'); write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: ALL })
+  })
+
+  it.each([
+    'src/main.ts', 'src/renderer/App.tsx', 'package-lock.json', 'scripts/performance-abab.mjs',
+    'scripts/model-picker-ui-smoke.mjs', '.github/workflows/ci.yml', 'src/main/providers/codex.ts'
+  ])('leaves ordinary App changes to the post-merge native comparison: %s', path => {
+    const { write, commit, detect } = fixture()
+    write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: APP })
+  })
+
+  it('never runs native for a harness test file that cannot reach the App', () => {
+    const { write, commit, detect } = fixture()
+    write('.agents/skills/scry-performance-climb/scripts/timing-run.test.ts'); commit()
+    expect(detect()).toEqual({ status: 0, output: NO_DESKTOP })
+  })
+
+  it('detects a harness file removed or renamed away by the PR', () => {
+    const { git, write, commit, detect } = fixture()
+    write('scripts/native-composer-probe.mjs'); commit()
+    const base = git('rev-parse', 'HEAD')
+    git('mv', 'scripts/native-composer-probe.mjs', 'scripts/renamed-probe.mjs'); commit()
+    expect(detect(base)).toEqual({ status: 0, output: ALL })
   })
 })
