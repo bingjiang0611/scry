@@ -23,6 +23,7 @@ import { historyCopy } from '../../shared/constants/copy'
 import { readSessionArchive } from './history-archive'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { rememberSessionProjectAfterLoad } from './history-project-recency'
+import { hydrateTranscriptArchiveWindow, type TranscriptArchiveWindow } from '../transcript-archive-paging'
 
 export interface LoadSessionDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -120,15 +121,18 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
           externalSessionId: payload.externalSessionId
         }))
         .map((run) => ({ done: run.done, settled: getRuns().get(run.runId)!.control.settled }))
-      const { archivePage, archived } = await readSessionArchive({
+      const archiveRead = await readSessionArchive({
         userDataDir, cwd, sessionId: payload.externalSessionId, providerId: payload.providerId,
         agentProfileId: payload.agentProfileId, request, transcriptPath: fp, runs: matchingRuns, signal
       })
+      const { archivePage } = archiveRead
+      let { archived, transcriptPaging } = archiveRead
       // Split the read from the per-turn content persistence: both used to land in one `archive`
       // checkpoint, so a slow load could not say whether the archive read or its writes cost the time.
       perf.mark('archive_read', {
         archiveTurns: archived?.turns.length ?? 0,
-        archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0
+        archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0,
+        archiveIndexTurns: transcriptPaging?.metadata.length ?? 0
       })
       if (archived) {
         for (const turn of archived.turns) {
@@ -145,6 +149,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       let transcriptBytes = 0
       let transcriptParsedBytes = 0
       let transcriptCache = 'unavailable'
+      let transcriptError: unknown
       if (fp) {
         try {
           if (isShuttingDown()) throw new Error('transcript parser disposed')
@@ -160,13 +165,46 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
           transcriptCache = parsed.cache
         } catch (error) {
           signal.throwIfAborted()
-          if (!archived) throw error
+          if (!archived && !transcriptPaging) throw error
+          transcriptError = error
         }
       }
-      for (const turn of turns) {
-        turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
+      // Transcript-backed paging positions every turn from the index, then reads and persists only
+      // the bodies of the returned window. A window that no longer matches its index falls back to
+      // the complete read, so the page is never assembled from guessed bodies.
+      let pagedWindow: TranscriptArchiveWindow | null = null
+      if (transcriptPaging) {
+        pagedWindow = await hydrateTranscriptArchiveWindow({
+          paging: transcriptPaging,
+          transcriptTurns: turns,
+          request: { limit: request?.limit },
+          context: { userDataDir },
+          readTurns: (runIds) => readTraceArchiveTurnsAsync(archiveArgs, runIds, signal),
+          persistItems: (items) => persistTraceToolEvents(userDataDir, cwd, items),
+          signal
+        })
+        if (!pagedWindow) {
+          archived = await readTraceArchiveAsync(archiveArgs, signal)
+          if (archived) {
+            for (const turn of archived.turns) {
+              turn.items = await persistTraceToolEvents(userDataDir, cwd, turn.items)
+              signal.throwIfAborted()
+            }
+          }
+        }
+        // Same contract as the complete path: a failed transcript is tolerated only beside an archive.
+        if (!pagedWindow && !archived && transcriptError !== undefined) throw transcriptError
+        perf.mark('archive_window', {
+          archiveWindow: pagedWindow ? 1 : 0,
+          archiveTurnFilesRead: pagedWindow?.turnFilesRead ?? archived?.turns.length ?? 0
+        })
+      }
+      for (let index = 0; index < turns.length && !pagedWindow; index++) {
+        if (transcriptPaging?.persistedTranscript.has(index)) continue
+        turns[index].items = await persistTraceToolEvents(userDataDir, cwd, turns[index].items)
         signal.throwIfAborted()
       }
+      if (!pagedWindow) transcriptPaging = undefined
       perf.mark('transcript', {
         transcriptTurns: turns.length, transcriptBytes, transcriptParsedBytes,
         transcriptCacheHit: transcriptCache === 'hit' ? 1 : 0,
@@ -240,7 +278,8 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       else sessionByContext.delete(key)
       perf.mark('selection')
       const historyContext = { userDataDir }
-      const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
+      const mergedHistory = nativeTurns ?? pagedWindow?.turns ??
+        mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
       perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
       const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
         { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
@@ -268,7 +307,8 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         key: sessionHistoryCacheKey(payload, cwd),
         turns: merged,
         transcriptTurns: turns,
-        archive: archived,
+        archive: pagedWindow?.archive ?? archived,
+        ...(transcriptPaging ? { transcriptPaging } : {}),
         context: historyContext,
         archiveSourceComplete: archivePage?.sourceComplete ?? true,
         archiveSourceIssue: archivePage?.sourceIssue,
@@ -291,7 +331,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         }
         : sessionHistoryPage(merged, { before: undefined, limit: request?.limit })
       let selectedPage = unhydratedPage
-      let selectedArchive: TraceArchive | null = archived
+      let selectedArchive: TraceArchive | null = pagedWindow?.archive ?? archived
       if (nativeSnapshot) {
         const selectedRunIds = unhydratedPage.turns.map((turn) => turn.runId!).filter((runId): runId is string => !!runId)
         const selectedArchiveTurns = await readSelectedArchivePageTurns(

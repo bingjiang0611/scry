@@ -51,6 +51,7 @@ export const historyCopy = {
   nativeArchiveFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生历史未能核对：${detail}`,
   nativeBodyFallback: (detail: string): string => `已显示 Scry 归档；Pi 原生正文未能核对：${detail}`,
   nativePageReload: 'Pi 原生历史在翻页期间发生变化，请重新打开会话',
+  archivePageReload: '会话归档在翻页期间发生变化，请重新打开会话',
   nativeSnapshotChanged: 'Pi 原生会话在读取期间发生变化，请重新打开会话',
   nativeEntryInvalid: 'Pi 原生会话 entry id 无效',
   nativeRecordLimit: 'Pi 原生会话记录数超过 1000000 条',

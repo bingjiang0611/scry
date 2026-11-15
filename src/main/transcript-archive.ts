@@ -1419,7 +1419,7 @@ export async function readTraceArchiveMetadataAsync(args: {
   sessionId: string
   userDataDir: string
   providerId: ProviderId
-}, signal?: AbortSignal): Promise<TraceArchive | null> {
+}, signal?: AbortSignal, options: { requireComplete?: boolean } = {}): Promise<TraceArchive | null> {
   const monolith = await inspectArchiveFileAsync(
     args.userDataDir,
     traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId),
@@ -1437,6 +1437,9 @@ export async function readTraceArchiveMetadataAsync(args: {
   const index = await upgradeTraceArchiveIndexAsync(args, indexed, signal)
   if (index?.version === 2 && storedVersion === 1 && (!validIndex || validIndex.version === 1)) await writeTraceArchiveIndex(args, index)
   if (!index || index.version !== 2) return null
+  // Callers that stand metadata in for the complete archive (positions, not just tool ids) need
+  // every canonical turn described; a degraded index or a missing sidecar forces their full read.
+  if (options.requireComplete && (index.sourceComplete === false || index.entries.some((entry) => !entry.metadata))) return null
   signal?.throwIfAborted()
   return {
     version: 3,

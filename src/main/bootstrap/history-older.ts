@@ -10,6 +10,7 @@ import type { ProviderRegistry } from '../providers/registry'
 import { PerformanceTrace } from '../performance-timing'
 import { historyCopy } from '../../shared/constants/copy'
 import { loadClaudeHookConfig } from '../hook-config'
+import { hydrateTranscriptArchiveWindow, type TranscriptArchivePaging } from '../transcript-archive-paging'
 
 export type SessionHistoryCache = {
   revision: number
@@ -24,6 +25,8 @@ export type SessionHistoryCache = {
   archiveSourceComplete?: boolean
   archiveSourceIssue?: string
   nativeHydrator?: (runIds: readonly string[]) => Promise<LoadedSessionTurn[]>
+  /** Transcript-backed history whose archive bodies are read per window; `turns` is exact only inside hydrated windows. */
+  transcriptPaging?: TranscriptArchivePaging
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 }
 
@@ -88,6 +91,31 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
         perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
         return result
 
+      }
+      if (cache.transcriptPaging) {
+        const sessionId = payload.externalSessionId
+        const window = await hydrateTranscriptArchiveWindow({
+          paging: cache.transcriptPaging,
+          transcriptTurns: cache.transcriptTurns,
+          request,
+          context: cache.context,
+          readTurns: (runIds) => readTraceArchiveTurnsAsync({
+            cwd,
+            sessionId,
+            providerId: payload.providerId,
+            userDataDir: cache.context.userDataDir
+          }, runIds),
+          persistItems: (items) => persistTraceToolEvents(cache.context.userDataDir, cwd, items)
+        })
+        if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
+        if (!window) {
+          setSessionHistoryCache(null)
+          throw new Error(historyCopy.archivePageReload)
+        }
+        // Same cache object: positions are unchanged, only this window's bodies became exact.
+        cache.turns = window.turns
+        cache.archive = window.archive
+        perf.mark('archive_window', { archiveTurnFilesRead: window.turnFilesRead })
       }
       let cachedPage = sessionHistoryPage(cache.turns, request)
       if (cache.archiveSourceComplete === false) {
