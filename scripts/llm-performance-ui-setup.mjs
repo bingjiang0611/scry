@@ -93,11 +93,17 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   if (!await read(`document.activeElement.matches('.llm-perf-chart svg') && ${modal}.querySelector('.llm-perf-tip') != null`)) throw new Error('Keyboard chart navigation lost focus')
   key('Escape')
   await wait(`${modal} != null && ${modal}.querySelector('.llm-perf-tip') == null`)
+  // A range switch remounts MetricChart (keyed by hours); its svg only renders after a follow-up
+  // width render, so the centered modal is ~208px shorter until then and the header sits lower.
+  // Wait for the remounted svg before measuring the next range button, or the click can land on
+  // the pre-settle coordinates and miss once the modal grows back.
+  const rangeSettled = `${modal}.querySelector('.llm-perf-chart svg') != null`
   await click('.llm-perf-range button:nth-child(1)')
-  await wait(`${modal}.querySelector('.llm-perf-range button').getAttribute('aria-pressed') === 'true' && ${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '61.0'`)
+  await wait(`${modal}.querySelector('.llm-perf-range button').getAttribute('aria-pressed') === 'true' && ${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '61.0' && ${rangeSettled}`)
   await click('.llm-perf-range button:nth-child(3)')
-  await wait(`${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '62.0'`)
+  await wait(`${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '62.0' && ${rangeSettled}`)
   await click('.llm-perf-range button:nth-child(2)')
+  await wait(`${modal}.querySelector('.llm-perf-range button:nth-child(2)').getAttribute('aria-pressed') === 'true' && ${rangeSettled}`)
   await click('#performance-stream')
   await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0') && node.textContent.includes('1.5') && node.textContent.includes('0 轮 · 1 暂计'))`)
   if (await read(`${modal}.querySelector('.llm-perf-running, .llm-perf-run') != null`)) throw new Error('Live evidence restored removed cards')

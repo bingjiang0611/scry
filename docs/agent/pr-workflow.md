@@ -81,6 +81,8 @@
 | 文档混有代码、配置或不可读 diff | 不按纯文档放行；前两者按实际影响范围验证，后者检测失败、汇总失败 |
 | 仅 apps/ios（可混文档） | `required=true`、`desktop=false`、`node_performance=false`；Node/native 性能测量跳过并标明未测量；其余 Ubuntu 与 Remote 验证保留，三个汇总门禁仍必需 |
 | iOS 混有 Node 源码、测试、依赖、工作流或 Agent 指导 | `node_performance=true`；Node 测量必须成功，失败、取消、缺失或跳过均拒绝 |
+| 普通 App 改动（未动 native harness） | `desktop=true`、`native_performance=false`；PR 上 native 跳过并在评论中标明合入后在 main 测量；native 成功、失败或取消都使汇总失败 |
+| 改动 native harness 或性能工作流 / main push / 手动 dispatch | `native_performance=true`；native 必须成功；main push 时 `node_performance=false`，compare 必须跳过 |
 | remote/iOS 未改动 | changes 输出 false，transport、ios 全部跳过，Remote Check 成功 |
 | remote/iOS/工作流有改动 | 两项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
 | remote diff 不可读取 | 检测失败，Remote Check 失败；不能按无影响处理 |

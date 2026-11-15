@@ -10,8 +10,11 @@ on:
         description: Whether the desktop App or its macOS gates may be affected (implies required)
         value: ${{ jobs.changes.outputs.desktop }}
       node_performance:
-        description: Whether Node performance inputs may be affected (implies required)
+        description: Whether the PR Node ABAB comparison runs (implies required; PR and dispatch only)
         value: ${{ jobs.changes.outputs.node_performance }}
+      native_performance:
+        description: Whether the macOS native comparison runs (implies desktop; harness PRs, dispatch and main pushes)
+        value: ${{ jobs.changes.outputs.native_performance }}
 
 permissions:
   contents: read
@@ -24,6 +27,7 @@ jobs:
       required: ${{ steps.diff.outputs.required }}
       desktop: ${{ steps.diff.outputs.desktop }}
       node_performance: ${{ steps.diff.outputs.node_performance }}
+      native_performance: ${{ steps.diff.outputs.native_performance }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,13 +41,28 @@ jobs:
         run: |
           # Dispatch always validates. A new branch has no readable before commit.
           # CI coalesces main pushes, so before..HEAD can omit a cancelled run's commits.
-          if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = push ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
-            printf 'required=true\ndesktop=true\nnode_performance=true\n' >> "$GITHUB_OUTPUT"
+          # Main pushes measure native timings after merge against the parent commit; the Node ABAB
+          # comparison is PR feedback and stays off main.
+          if [ "$EVENT_NAME" = push ]; then
+            printf 'required=true\ndesktop=true\nnode_performance=false\nnative_performance=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = workflow_dispatch ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            printf 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=true\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Exit 0 when matching paths changed, 1 when none did; an unreadable diff fails closed.
           changed() {
             git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- . "$@" || {
+              status=$?
+              if [ "$status" -ne 1 ]; then exit "$status"; fi
+              return 0
+            }
+            return 1
+          }
+          # Exit 0 when any listed path changed. No leading '.', so only the listed paths count.
+          touched() {
+            git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- "$@" || {
               status=$?
               if [ "$status" -ne 1 ]; then exit "$status"; fi
               return 0
@@ -63,14 +82,33 @@ jobs:
             ':(top,exclude).github/VOUCHED.td' ':(top,exclude).github/TRIAGE_EXEMPTIONS.td'
             ':(top,glob,exclude)apps/ios/**'
           )
+          # A PR runs the macOS native comparison only when it changes the frozen native harness or
+          # the workflow that runs it (scripts/performance-native.mjs nativeHarnessFiles; a contract
+          # test keeps the two lists equal). Other App changes are measured after merge on main, or on
+          # demand by dispatching Performance for the branch. This frees one of the five macOS slots per PR.
+          native_harness=(
+            ':(top)scripts/performance-native.mjs' ':(top)scripts/performance-native-run.mjs'
+            ':(top)scripts/session-open-bench.mjs' ':(top)scripts/session-open-fixture.mjs'
+            ':(top)scripts/session-open-history.mjs' ':(top)scripts/session-open-timing.mjs'
+            ':(top)scripts/native-composer-probe.mjs' ':(top)src/main/providers/smoke.ts'
+            ':(top)src/main/providers/smoke-history-reader.ts' ':(top)scripts/owned-app-processes.mjs'
+            ':(top)scripts/hidden-electron-windows.cjs' ':(top)scripts/performance-report.mjs'
+            ':(top)scripts/performance-journal.mjs' ':(top)scripts/performance-path-catalogue.mjs'
+            ':(top)scripts/performance-paths.json' ':(top,glob)scripts/performance-paths/**'
+            ':(top,glob).agents/skills/scry-performance-climb/scripts/**'
+            ':(top).github/workflows/performance.yml' ':(top).github/workflows/validation-changes.yml'
+            ':(top,glob).github/actions/cache-electron/**'
+          )
           if ! changed "${documentation[@]}"; then
-            printf 'required=false\ndesktop=false\nnode_performance=false\n' >> "$GITHUB_OUTPUT"
+            printf 'required=false\ndesktop=false\nnode_performance=false\nnative_performance=false\n' >> "$GITHUB_OUTPUT"
           # The Node harness does not consume iOS App inputs. Remote Check still
           # validates iOS; mixed non-documentation inputs retain Node measurements.
           elif ! changed "${documentation[@]}" ':(top,glob,exclude)apps/ios/**'; then
-            printf 'required=true\ndesktop=false\nnode_performance=false\n' >> "$GITHUB_OUTPUT"
+            printf 'required=true\ndesktop=false\nnode_performance=false\nnative_performance=false\n' >> "$GITHUB_OUTPUT"
           elif changed "${desktop_free[@]}"; then
-            printf 'required=true\ndesktop=true\nnode_performance=true\n' >> "$GITHUB_OUTPUT"
+            native=false
+            if touched "${native_harness[@]}"; then native=true; fi
+            printf 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=%s\n' "$native" >> "$GITHUB_OUTPUT"
           else
-            printf 'required=true\ndesktop=false\nnode_performance=true\n' >> "$GITHUB_OUTPUT"
+            printf 'required=true\ndesktop=false\nnode_performance=true\nnative_performance=false\n' >> "$GITHUB_OUTPUT"
           fi

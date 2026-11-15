@@ -3,7 +3,7 @@ import { flushPresenceExits, usePresence } from './usePresence'
 
 // Node has no DOM renderer. Exercise the real hook callbacks/cleanup with a tiny
 // hook harness; native Electron tests separately prove React, CSS and input wiring.
-const harness = vi.hoisted(() => ({ cleanups: [] as Array<() => void>, state: 'enter', flushes: 0 }))
+const harness = vi.hoisted(() => ({ cleanups: [] as Array<() => void>, state: 'enter', flushes: 0, syncDepth: 0 }))
 vi.mock('react', () => ({
   useRef: (current: unknown) => ({ current }),
   useState: (initial: string) => [initial, (next: string) => { harness.state = next }],
@@ -11,7 +11,12 @@ vi.mock('react', () => ({
   useEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) },
   useLayoutEffect: (effect: () => (() => void)) => { harness.cleanups.push(effect()) }
 }))
-vi.mock('react-dom', () => ({ flushSync: (callback: () => void) => { harness.flushes++; callback() } }))
+vi.mock('react-dom', () => ({
+  flushSync: (callback: () => void) => {
+    harness.flushes++; harness.syncDepth++
+    try { callback() } finally { harness.syncDepth-- }
+  }
+}))
 
 type StubAnimation = { playState: string; effect: { getComputedTiming: () => { endTime: number } } }
 class PresenceNode extends EventTarget {
@@ -31,7 +36,7 @@ function mount(onClose = vi.fn(), exitMs = 160, onExitStart = vi.fn()) {
 }
 beforeEach(() => {
   vi.useFakeTimers()
-  harness.cleanups = []; harness.state = 'enter'; harness.flushes = 0
+  harness.cleanups = []; harness.state = 'enter'; harness.flushes = 0; harness.syncDepth = 0
   documentEvents = new EventTarget()
   media = { matches: false }
   vi.stubGlobal('document', documentEvents)
@@ -44,6 +49,15 @@ afterEach(() => {
 })
 
 describe('overlay presence lifecycle', () => {
+  // A deferred close followed by a sync reopen keeps the same exiting instance mounted for good.
+  it.each(['animationend', 'fallback timer'] as const)('commits the parent close synchronously when the exit ends on its %s', path => {
+    const synchronous: boolean[] = []
+    const p = mount(vi.fn(() => { synchronous.push(harness.syncDepth > 0) }))
+    p.requestClose('button')
+    if (path === 'animationend') p.node.dispatchEvent(new Event('animationend'))
+    else vi.advanceTimersByTime(400)
+    expect(synchronous).toEqual([true])
+  })
   it('retires input at exit start and closes once on its own animationend', () => {
     const p = mount()
     p.requestClose('button')
