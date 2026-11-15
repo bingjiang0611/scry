@@ -1,5 +1,9 @@
 # 性能机会日志
 
+## Claude 历史按窗口分页（2026-11-15，L1 / Node 受控 L2，App 未验证）
+
+Claude 有 transcript，原来每次打开读取全部归档轮次并重新持久化全部工具正文，耗时随会话长度增长。`ffe1ec7` 用完整索引定位合并位置，只读/持久化返回窗口的正文；与全量合并逐页等价，有负对照和回退。`45426df` 首页对齐为 10 轮。Node 受控（highLoad=false）100 轮：3582→1542 ms（40 轮页），10 轮页 529 ms；200 轮 7065→1704 ms。真实 App L2/L3 未验证（容器 root 下 Electron 需要 --no-sandbox，未采用）。剩余主成本是页内正文复用校验的 fsync，需维护者决定。见[实验记录](performance-experiments/20261115-claude-history-paging.md)。
+
 ## 零预算正文（2026-11-01，L1）
 
 `limitToolContent` 不再编码即将完全省略的正文：每个零预算字段少一次 Buffer 编码，来源、引用和省略语义不变。实现 `412ad2c3`，完整 coverage 5262 项通过；不提高 50k 用例期限或减少工作量。带 profiler 的计时仅用于诊断，尚无 App L2/L3 结论。详见[实验与交付状态](performance-experiments/20261101-zero-budget-content.md)。

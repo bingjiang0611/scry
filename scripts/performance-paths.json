@@ -162,6 +162,7 @@
         "src/main/bootstrap/conversation-attention.ts",
         "src/main/conversation-turn-history.ts",
         "src/main/bootstrap/history-load.ts",
+        "src/main/transcript-archive-paging.ts",
         "src/main/bootstrap/history-project-recency.ts",
         "src/main/bootstrap/workspace-runtime.ts",
         "src/main/trace-diff-content.ts",
