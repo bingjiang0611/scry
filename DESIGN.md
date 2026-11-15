@@ -154,6 +154,7 @@ frontmatter 中的颜色是 desktop-dark、desktop-light、ios 三域的规范�
 | 边界 | `--border`、`--border2`、`--border3` | 常规、强调、发丝分隔 |
 | 文字 | `--fg`、`--dim`、`--dim2`、`--dim3` | 主文字到三级文字；三级文字仍需 4.5:1，不用更浅的灰冒充层级 |
 | 强调与选中 | `--accent`、`--accent-soft`、`--accent-line`、`--selected*` | 主操作、焦点、当前选中；二者色值目前相同，仍保留独立变量 |
+| 填充控件文字 | `--fill-fg` | 实心强调色／危险色控件上的文字：深色主题为深色字（白字在 `#5b9cff` 上仅 2.75:1），浅色主题为白字 |
 | 状态 | `--ok`、`--warn`、`--bad` 及 `-soft` | 成功、需要注意、失败；状态成立必须有真实证据 |
 | 证据类型 | `--read`、`--write`、`--edit`、`--mcp`、`--skill`、`--agent` | 工具调用的读写类别；不与状态色混用 |
 | Provider | `--provider-*` | 只用于识别来源，不表达授权、成功或完整性 |
@@ -255,8 +256,9 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 | 意图 | 用 | 不用 |
 | --- | --- | --- |
-| 触发一个动作（提交、保存、运行） | `.btn`；一组里最多一个 `.btn.primary`；不可逆操作用 `.btn.danger` | 链接样式的按钮；同一视图里两个主按钮 |
-| 工具栏里只有图标的动作 | 图标按钮（必须有 `aria-label` 与 tooltip） | 无标签的图标；为图标按钮另写一套 hover |
+| 触发一个动作（提交、保存、运行） | `<Button>`；一组里最多一个 `variant="primary"`；不可逆确认用 `variant="danger"`；返回、取消这类低强调动作可用 `variant="quiet"` | 链接样式的按钮；同一视图里两个主按钮；手写 `className="btn"` |
+| 工具栏里只有图标的动作 | `<IconButton label=…>`（`label` 必填，同时作为 tooltip） | 无标签的图标；为图标按钮另写一套 hover |
+| 打开一个选择菜单（Provider、模型、工作目录） | 选择器触发器（`.wdbtn`、`.clibtn`、`.location-button`），显示当前值 | `<Button>`：它表达“执行”，不表达“当前选择是什么” |
 | 关闭弹窗 | `ModalCloseButton` | 手写 `<button>×</button>` |
 | 在同一视图内切换平级内容 | 标签页（`role="tablist"`，选中态用 `--selected` 下划线） | 用按钮组模拟标签页；用标签页做导航跳转 |
 | 在 2–4 个互斥选项中选一个且立即生效 | 分段控件 | 下拉菜单（选项少时增加一次点击） |
@@ -275,8 +277,8 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 | 意图 | 现存实现 | 收敛目标 |
 | --- | --- | --- |
-| 文字按钮 | `.btn`（在 `styles-sidebar.css` 与 `styles-session-controls.css` 各定义一次）、`.hosts-button`、`.mp-button`、`.wdbtn`、`.clibtn`、`.turn-branch-btn`、`.location-button` | 单一 `.btn` 定义 + `Button` primitive（variant: primary / secondary / danger / quiet；size: sm / md） |
-| 图标按钮 | `.iconbtn`、`.icon-button`、`.mp-icon-button` | 单一 `IconButton` primitive，强制 `aria-label` |
+| 文字按钮 | ~~`.btn` 双重定义、`.hosts-button`、`.mp-button`、`.turn-branch-btn`、`.project-remove-confirm`~~ | **已完成（2026-11-15）**：`Button` + `styles-buttons.css` |
+| 图标按钮 | ~~`.iconbtn`、`.icon-button` 局部覆写、`.mp-icon-button`、无样式的 `.icon-btn`~~ | **已完成（2026-11-15）**：`IconButton` |
 | 行内通知 | `.sc-notice`、`.sc-inline-notice`、`.mp-notice`、`.composer-notice`、`.conversation-history-notice`、`.diff-review-notice`、`.overview-session-notice`、`.side-chat-surface-notice`、`.surface-chooser-notice`、`.termination-notice`、`.hosts-alert`、`.llm-perf-alert`、`.mcp-auth-banner` | `Notice` primitive（tone: info / warn / bad；可选一个动作） |
 | 标签页 | `.surface-tabs`、`.terminal-tabs`、`.sc-tabs`、`.sb-view-tabs`、`.overview-data-tabs`、`.skill-scope-tabs`、`.capability-kind-tabs`、`.capability-source-tabs`、`.diff-navigation-tabs`、`.panel-tabs`、`.vtabs`、`.settings-tab` | `Tabs` primitive（视图内切换）；工作区 surface 标签页因可关闭、可拖动保留独立实现 |
 | 分段控件 | `.usage-segmented`、`.seg-chip` | `Segmented` primitive |
@@ -286,21 +288,29 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 | 实现 | 合同 |
 | --- | --- |
+| `src/renderer/components/primitives/Button.tsx` | variant：primary / secondary（默认）/ quiet / danger；size：md（32px，弹窗与面板）/ sm（28px，工具栏与行内）。默认 `type="button"`，表单主操作显式传 `type="submit"`；`className` 只用于测试钩子与定位，不改尺寸、颜色和圆角 |
+| `src/renderer/components/primitives/IconButton.tsx` | `label` 必填，同时生成 `aria-label` 与 `title`；size：md（32px，图标 16px）/ sm（28px，图标 14px）；`active` 只控制视觉，`aria-pressed`／`aria-expanded` 仍由调用方给出 |
 | `src/renderer/components/primitives/ModalCloseButton.tsx` | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。不承担焦点陷阱或确认关闭逻辑 |
 | `src/renderer/components/ModalFrame.tsx` | 弹窗栈、焦点进入与恢复、Esc／遮罩关闭路由、进出场动效 |
 | `src/renderer/components/Disclosure.tsx` | 折叠内容的挂载、`inert` 与进出场动效；长内容自动切换为长动效 |
 | `apps/ios/ScryRemote/Components.swift` 的 `MoreMenu` | 原生 `Menu`、17pt medium 省略号、44 × 44pt 区域；菜单操作与可用条件由页面提供 |
 
 ```tsx
+<Button onClick={() => requestModalClose()}>{copy.cancel}</Button>
+<Button variant="primary" type="submit" disabled={!name.trim()}>{copy.save}</Button>
+<IconButton label={copy.refreshFiles} onClick={refresh}><Icon name="refresh" /></IconButton>
 <ModalCloseButton ref={closeRef} aria-label={MODAL_COPY.closeMcp} onClick={onClose} />
 ```
+
+按钮的样式只在 `src/renderer/styles-buttons.css` 定义；`Button.test.tsx` 拒绝在其他文件重新定义 `.btn`／`.icon-button`、拒绝已退役的类名，也拒绝在 TSX 里手写 `className="btn…"`。
 
 ### 代表组件的当前形态
 
 | 组件 | 来源与默认形态 | 状态与边界 |
 | --- | --- | --- |
-| 主按钮 | `.btn.primary`；强调色填充、最小高度 40px | hover 混入白色；禁用 opacity 0.45；保留 focus-visible 与按下反馈 |
-| 次按钮 | `.btn`；panel 底、`--border2` 边框 | hover 使用 panel3／accent-line；不自动变为主按钮 |
+| 主按钮 | `Button variant="primary"`；强调色填充、`--fill-fg` 文字、32px、`--r-md` | hover 混入白色；禁用 opacity 0.45；焦点环来自全局 focus-visible |
+| 次按钮 | `Button`；panel 底、`--border2` 边框 | hover 使用 panel3／accent-line；不自动变为主按钮 |
+| 危险按钮 | `Button variant="danger"`；`--bad` 填充 | 只用于不可逆确认；触发确认流程的入口用次按钮 |
 | 发送按钮 | runtime-composer 的 send；独立圆形按钮 | 不能用 `.btn.primary` 的矩形样式替代 |
 | 搜索输入 | `.sb-search`；36px 高、`--r-sm` | focus-within 的边界与外环来自后置皮肤；不是所有输入框的默认样式 |
 | 导航项 | `.sb-navitem`；36px 高、左对齐、`--r-sm` | active 使用 surface-hover 底；会话行另有自己的选中样式 |
@@ -329,7 +339,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 ### Do
 - 用 `var(--text-*)`、`var(--weight-*)`、`var(--space-*)` 或 4 的倍数、`var(--r-*)` 和主题颜色变量；先检查最终覆写层。
-- 先按语义目录选组件，再写样式；同一意图复用同一个实现。
+- 先按语义目录选组件，再写样式；同一意图复用同一个实现。按钮用 `<Button>`／`<IconButton>`。
 - 用文字、图标和状态共同说明证据；保留来源和缺失状态。
 - 复用现有文案模块；保留键盘焦点、禁用态与原生触控标签。
 - 新增模式前检查桌面双主题和 iOS 原生约束；具体界面再验收。
@@ -348,7 +358,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 存量债务按区域分批偿还，每批都会改变可见外观，因此单独提交、单独验证（隔离 Electron fixture 深浅主题截图 + 受影响的 UI smoke），并在 [设计决策记录](docs/design/decisions.md) 记一条。
 
 1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
-2. **核心控件**：`.btn` 合并为单一定义并对齐网格（当前 12.5px 字号、7px 间距、6px 内边距），引入 `Button`／`IconButton` primitive 并迁移平行实现。
+2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
 3. **通知与标签页**：引入 `Notice`、`Tabs`、`Segmented`，按收敛清单迁移。
 4. **按区域偿还字号与间距**：侧栏 → 对话与工具证据 → composer → 纵览 → 设置与清单 → 分析视图。半像素字号收敛到相邻档位，网格外间距按嵌套规则重排。
 5. **颜色与层级**：局部阴影、品牌与图表颜色收敛为语义变量；z-index 收敛为分层 token。

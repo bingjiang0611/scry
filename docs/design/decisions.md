@@ -87,3 +87,24 @@
 等价迁移：在 scale 上的字号与字重字面值（含 `font` 简写）由一次性脚本替换为 token。验证方式是反向替换——把 token 换回原字面值后与迁移前的 69 个 CSS 文件逐字节一致，主题文件只多出新增的 token 定义；因此计算样式不变。
 
 初始基线：网格外或 scale 外的字号声明 272、字重 119、间距值 1329、裸颜色字面值 145。这些是后续分批偿还的起点，见 DESIGN.md「迁移路线」。
+
+## 按钮收敛：Button 与 IconButton（2026-11-15）
+
+范围是渲染进程里所有“执行动作”的文字按钮与纯图标按钮。选择器触发器（`.wdbtn`、`.clibtn`、`.location-button`）表达当前选择而不是执行动作，不在本轮范围；弹窗关闭继续使用 `ModalCloseButton`。
+
+收敛前的状态：`.btn` 在两个文件中各定义一次，后定义的覆写了 hover 与主按钮文字色；另有 `.hosts-button`、`.mp-button`、`.turn-branch-btn` 三套文字按钮和 `.iconbtn`、`.mp-icon-button`、`.icon-button` 局部覆写、完全没有样式的 `.icon-btn` 四套图标按钮。尺寸从 28px 到 40px 不等，圆角有 `--r-sm` 与 `--r-md` 两种，Meta Prompts 的主按钮用反色（`--fg` 底）而非强调色，危险按钮有实心红、红字、`!important` 浅红三种形态。
+
+| 决定 | 理由 | 落地 |
+| --- | --- | --- |
+| 一个组件、四个 variant、两个尺寸 | 视觉差异来自重复实现，不来自真实的语义差异 | `Button`：primary／secondary／quiet／danger × md 32px／sm 28px；`IconButton`：md 32px／sm 28px |
+| 默认 32px，不再是 40px | 40px 按钮配 12px 文字在密集的工具界面里过重；与图标按钮、输入框的高度体系一致 | 弹窗按钮从 40px 降到 32px；对话工具栏、文件编辑栏、后台任务、分支按钮用 sm |
+| 填充按钮文字用 `--fill-fg` | 深色主题下白字在强调色上只有 2.75:1、在危险色上 2.94:1；深色字分别为 6.65:1、6.22:1 | 新增语义变量：深色主题 `#151515`，浅色主题白色 |
+| 危险操作统一为实心红 | 三种形态让用户无法从外观判断后果 | 删除会话、移除项目、移除主机、删除提示词、放弃编辑都用 `variant="danger"` |
+| 默认 `type="button"` | 三个对话框里的按钮未写 type，放进 form 会触发提交 | primitive 默认 button，表单主操作显式 `type="submit"` |
+| 图标按钮必须有名字 | 文件面板的 4 个图标按钮只有 `title`、没有 `aria-label` | `label` 为必填参数，同时生成 `aria-label` 与 `title` |
+
+附带修复：终端录制历史弹窗的关闭按钮此前是浏览器默认样式且紧贴标题，底部两个按钮之间没有间距；改用 `ModalCloseButton` 并补上与其他弹窗一致的头尾布局。删除了 TSX 中已无引用的 `.gp-actions .btn`、`.wc-browse .btn` 覆写。
+
+守卫：`Button.test.tsx` 断言 primitive 的输出、`.btn`／`.icon-button` 只在 `styles-buttons.css` 定义、退役类名不再出现、TSX 不再手写 `className="btn…"`；手写一个 `className="btn primary"` 的负对照会使该测试失败。设计债务基线随之下降（字号 272→269、字重 119→117、间距 1329→1311、颜色 145→144）。
+
+验证：在 Playwright Chromium 中用构建后的真实 CSS 静态渲染 10 个真实组件（项目重命名与移除、会话重命名、工作区新建文件、终端录制历史、Meta Prompts、远程主机、对话删除与迁入、文件面板）和 primitive 画廊，深浅主题各拍前后对照。Electron 内的交互、键盘焦点与 UI smoke 未在本地运行（容器以 root 运行，Electron 拒绝在不加 `--no-sandbox` 时启动）；smoke 脚本中引用旧类名的选择器已同步更新，需由 CI 的 UI smoke 验证。已知限制：浅色主题主按钮白字在 `#3f7ee8` 上为 3.92:1，低于 4.5:1，属强调色本身的取值，本轮未改。
