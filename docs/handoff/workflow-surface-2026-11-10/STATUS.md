@@ -1,4 +1,6 @@
-# 第七轮进行中（G0 已核对，G1–G5 待执行）
+# 第七轮受阻（G0 已核对，G1 未触达审批）
+
+[G1](reports/G1.md) 在 CLI 1.1.88 的独立 test 实例上两次均未触达长命令审批：一次发送前被禁用，一次发送后 recorder CLI 校验失败并有 5 秒版本探测超时；当时机器负载约 56–64，直接 `qodercli --version` 需 17.11 秒。没有 `.scry` 记录或审批表单，不能判断三处修复。未修改超时、产品代码或全局 CLI。G2–G5 尚未执行；机器空载后用新实例继续，G5 前提当前不成立。
 
 [G0](reports/G0.md) 只读旧备份：6 个不成对的 `SessionStart` hookId，恰为 3 个 SDK started 和 3 个 CLI 日志 error response，与审查方推断一致；新修复尚待真机复测。CLI 1.1.88，脱敏计数见 [证据](evidence/r7/g0-hook-source-counts.json)。
 
