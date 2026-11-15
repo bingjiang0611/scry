@@ -88,7 +88,7 @@ export async function runPiAgent(
   }
   const modelContextWindows = new Map<string, number>()
   const abortController = new AbortController()
-  let stagedCustomAnswer: { value: string; inputTitle: string } | undefined
+  let stagedCustomAnswer: { value: string; inputTitles: string[] } | undefined
   const questionnaires = new Map<string, PiQuestionnaire>()
   const toolNames = new Map<string, string>()
   const toolStarts = new Map<string, number>()

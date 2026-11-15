@@ -6,7 +6,7 @@ import { piEvent, piEventSequence } from './pi-rpc'
 import type { PiRpcProcess } from './pi-rpc'
 import type { PiRunState } from './pi-types'
 import { PiBackgroundWork } from './pi-background-work'
-import { PiQuestionnaire } from './pi-questionnaire'
+import { PiQuestionnaire, piCustomInputTitles } from './pi-questionnaire'
 import type { UsageAggregate } from './pi-usage'
 import { addAssistantUsage, piLlmCall } from './pi-usage'
 import { nativeCustomAnswerOption, questionFromExtension, extensionResponse } from './pi-events'
@@ -40,7 +40,7 @@ export interface PiEventHandlerContext {
   extensionCommandError: string | undefined
   historyReaderReady: boolean
   questionnaires: Map<string, PiQuestionnaire>
-  stagedCustomAnswer: { value: string; inputTitle: string } | undefined
+  stagedCustomAnswer: { value: string; inputTitles: string[] } | undefined
   abortController: AbortController
   toolNames: Map<string, string>
   toolStarts: Map<string, number>
@@ -300,9 +300,9 @@ export function attachPiEventHandlers(ctx: PiEventHandlerContext): () => void {
     if (question && ctx.stagedCustomAnswer !== undefined) {
       const answer = ctx.stagedCustomAnswer
       ctx.stagedCustomAnswer = undefined
-      // The questionnaire follows its sentinel with the same question + input label.
-      // Older versions sent only the label; do not accept another question's suffix.
-      if (event.method === 'input' && (event.title === answer.inputTitle || event.title === 'Type your answer:')) {
+      // Match known title formats with the approved question/options, never an arbitrary suffix.
+      // The oldest walker sent only the label.
+      if (event.method === 'input' && (answer.inputTitles.some((title) => event.title === title) || event.title === 'Type your answer:')) {
         ctx.rpc.notify(ctx.abortController.signal.aborted
           ? { type: 'extension_ui_response', id: event.id, cancelled: true }
           : { type: 'extension_ui_response', id: event.id, value: answer.value })
@@ -331,7 +331,10 @@ export function attachPiEventHandlers(ctx: PiEventHandlerContext): () => void {
             // RPC select titles append previews; the follow-up input omits them.
             // Use the raw title, not the bounded display copy in question.questions.
             const title = String(event.title ?? 'Pi Extension').split(/\n\n--- \d+\. [^\n]+ preview ---\n/, 1)[0]
-            ctx.stagedCustomAnswer = { value: answer, inputTitle: `${title}\n\nType your answer:` }
+            ctx.stagedCustomAnswer = {
+              value: answer,
+              inputTitles: piCustomInputTitles(title, prompt.options.map((option) => option.label))
+            }
             ctx.rpc.notify({ type: 'extension_ui_response', id: event.id, value: customOption })
             return
           }
