@@ -1,0 +1,114 @@
+{
+  "cli": "1.1.89",
+  "approval": {
+    "longFormCount": 1,
+    "longHeaderLength": 120,
+    "fullCommandVisibleInAllowOnce": true,
+    "recordStatuses": [
+      "completed"
+    ],
+    "gitCommitCountIncludingFixture": 2,
+    "pending": {
+      "trace-turn-progress": 0,
+      "managed-turn-progress": 0,
+      "managed-turn-commits": 0
+    },
+    "stdout": {
+      "bytes": 1280,
+      "sha256": "5ac34ac6f107fbbf705fa7fe5e27c0cdfb65ee1e45bb24d7ddeabbca629f5d48"
+    }
+  },
+  "reload": {
+    "afterCommand": {
+      "records": 0,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "cardVisible": true,
+    "afterFollow": {
+      "recordStatuses": [
+        "completed"
+      ],
+      "answerVisible": true,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      }
+    },
+    "stdout": {
+      "bytes": 1609,
+      "sha256": "f68c04a24933566f35eda42a993a62d8964c8f4bd0b8b25fcfd866ac35b5fd52"
+    },
+    "invalidHighLoadAttempt": {
+      "providerStartFailed": true,
+      "versionProbeTimedOut": true,
+      "stdout": {
+        "bytes": 870,
+        "sha256": "fe1d046a8e887c0d6b4f534cfead6179af1e5a8b6fa77b7ba11a2db03a7c540e"
+      }
+    }
+  },
+  "hookStop": {
+    "stopWindowReached": true,
+    "immediateUiInterrupted": false,
+    "initialRecordCount": 0,
+    "initialPending": {
+      "trace-turn-progress": 0,
+      "managed-turn-progress": 1,
+      "managed-turn-commits": 1
+    },
+    "initialUiForbidsNext": true,
+    "afterRestart": {
+      "interruptedVisible": true,
+      "recordStatuses": [
+        "interrupted"
+      ],
+      "providerTurnIdPresent": true,
+      "pending": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "sessionStartRuns": 8,
+      "sessionStartStatuses": {
+        "failed": 2,
+        "success": 6
+      },
+      "startedOnlyRuns": 0
+    },
+    "stdout": {
+      "bytes": 1280,
+      "sha256": "d55d42824749d47e0fe2ea61c8e4627b0442678ac313a0535264885b7e0ff3dd"
+    },
+    "recoveryStdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "outputStop": {
+    "stopWindowReached": true,
+    "uiInterrupted": true,
+    "recordStatuses": [
+      "interrupted"
+    ],
+    "providerTurnIdPresent": true,
+    "pending": {
+      "trace-turn-progress": 0,
+      "managed-turn-progress": 0,
+      "managed-turn-commits": 0
+    },
+    "followCompleted": true,
+    "afterFollowStatuses": [
+      "interrupted",
+      "completed"
+    ],
+    "stdout": {
+      "bytes": 1690,
+      "sha256": "80be86ffb3e1b427d9fb6510743b24655dcbb5801be918719aecd8e96e06ea33"
+    }
+  }
+}
