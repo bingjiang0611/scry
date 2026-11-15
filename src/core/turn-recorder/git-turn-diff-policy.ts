@@ -1,4 +1,5 @@
-import { relative, sep } from 'node:path'
+import { isAbsolute, relative, sep } from 'node:path'
+import type { TurnDiffExcludeEvidence } from '../../shared/turn-diff.js'
 import type { DiffFile } from '../../shared/trace.js'
 
 /**
@@ -12,27 +13,58 @@ import type { DiffFile } from '../../shared/trace.js'
 export const UNTRACKED_PATCH_FILE_LIMIT = 50
 
 export interface TurnDiffFilePolicyResult {
-  /** 过滤配置排除路径后的文件列表；未跟踪文件超限时仍保留全部条目，只是不带正文。 */
+  /** 过滤排除路径后的文件列表；未跟踪文件超限时仍保留全部条目，只是不带正文。 */
   files: DiffFile[]
+  /** 被排除路径过滤掉的文件：只记命中的声明路径和数量，正文既不读取也不收录。 */
+  excluded: TurnDiffExcludeEvidence
+}
+
+interface ExclusionPrefix {
+  /** 接入方写的原样路径，用于记录「排除了哪些路径」。 */
+  declared: string
+  /** 该路径在本仓库内的相对前缀；空字符串表示整个仓库。 */
+  prefix: string
 }
 
 function repoRelative(repoRoot: string, path: string): string {
   return relative(repoRoot, path).split(sep).join('/')
 }
 
-function excludedByConfig(relPath: string, prefixes: string[]): boolean {
-  return prefixes.some((prefix) => {
-    const normalized = prefix.replace(/^\.\//, '').replace(/\/+$/, '')
-    if (!normalized) return false
-    return relPath === normalized || relPath.startsWith(`${normalized}/`)
-  })
+/**
+ * 声明路径有两种来源：工作区配置里的相对路径，以及会话声明里的绝对路径。
+ *
+ * 绝对路径必须按**每个仓库自己的根**换算，否则一个仓库的路径会误伤另一个：排除 `run/` 时
+ * 它下面检出的独立仓库（`run/stage3/.../workspace/repo`）仍是自己的仓库，那条声明不在它的
+ * 根之下，因此一个文件都不排除。这也正是「排除运行目录不能丢掉其中的代码仓库」的实现点。
+ */
+function exclusionPrefixes(repoRoot: string, entries: string[]): ExclusionPrefix[] {
+  const prefixes: ExclusionPrefix[] = []
+  for (const declared of entries) {
+    if (!isAbsolute(declared)) {
+      const normalized = declared.replace(/^\.\//, '').replace(/\/+$/, '')
+      if (normalized) prefixes.push({ declared, prefix: normalized })
+      continue
+    }
+    const rel = relative(repoRoot, declared).split(sep).join('/')
+    // 祖先目录属于外层仓库；对当前仓库它不排除任何文件。
+    if (rel === '..' || rel.startsWith('../')) continue
+    prefixes.push({ declared, prefix: rel.replace(/\/+$/, '') })
+  }
+  return prefixes
+}
+
+function matchesExclusion(relPath: string, prefix: string): boolean {
+  // 空前缀只在声明的路径正好是仓库根时出现：整个仓库被排除。
+  if (!prefix) return true
+  return relPath === prefix || relPath.startsWith(`${prefix}/`)
 }
 
 /**
  * 按接入方声明和未跟踪文件体量决定这一轮 diff 记录什么。
  *
- * 两条规则都只改「正文是否收录」，不改文件清单：`files` 始终是完整的改动面，被省略正文的文件
- * 标 `patchStatus: unavailable` / `patchReason: policy`，聚合层因此把 diff 证据标成 partial。
+ * 排除的文件整条不进 `files`：它们既没有正文，也不占用清单。被省略正文的未跟踪文件保留清单
+ * 条目并标 `patchStatus: unavailable` / `patchReason: policy`，聚合层因此把 diff 证据标成 partial。
+ * 两种情况的文件数量都会写进记录，正文不会。
  */
 export function applyTurnDiffFilePolicy(args: {
   files: DiffFile[]
@@ -42,16 +74,34 @@ export function applyTurnDiffFilePolicy(args: {
   untracked: Set<string> | undefined
   untrackedLimit?: number
 }): TurnDiffFilePolicyResult {
-  const files = args.diffExclude.length === 0
-    ? [...args.files]
-    : args.files.filter((file) => !excludedByConfig(repoRelative(args.repoRoot, file.path), args.diffExclude))
-  if (!args.untracked?.size) return { files }
+  const prefixes = exclusionPrefixes(args.repoRoot, args.diffExclude)
+  const kept: DiffFile[] = []
+  const declared = new Set<string>()
+  let excludedFiles = 0
+  for (const file of args.files) {
+    if (prefixes.length === 0) {
+      kept.push(file)
+      continue
+    }
+    const rel = repoRelative(args.repoRoot, file.path)
+    const matched = prefixes.filter((entry) => matchesExclusion(rel, entry.prefix))
+    if (matched.length === 0) {
+      kept.push(file)
+      continue
+    }
+    excludedFiles += 1
+    for (const entry of matched) declared.add(entry.declared)
+  }
+  const files = kept
+  const excluded: TurnDiffExcludeEvidence = { paths: [...declared].sort(), files: excludedFiles }
+  if (!args.untracked?.size) return { files, excluded }
   const limit = args.untrackedLimit ?? UNTRACKED_PATCH_FILE_LIMIT
   const newUntracked = files.filter((file) =>
     file.change === 'added' && args.untracked!.has(file.path))
-  if (newUntracked.length <= limit) return { files }
+  if (newUntracked.length <= limit) return { files, excluded }
   const omitted = new Set(newUntracked.map((file) => file.path))
   return {
+    excluded,
     files: files.map((file) => omitted.has(file.path)
       ? { ...file, patchStatus: 'unavailable' as const, patchReason: 'policy' as const }
       : file)

@@ -19,7 +19,7 @@ import { applyContinuationEvidence, applyForcedEvidence, continuationRole, force
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { rm } from 'node:fs/promises'
-import { applyCaptureBaselineCaveat, captureRecordMetadata } from './record-capture-metadata.js'
+import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence, captureRecordMetadata } from './record-capture-metadata.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -204,6 +204,7 @@ export async function finalizeOpenTurn(
     }
   }
   applyCaptureBaselineCaveat(evidence, open.capture)
+  applyDiffExcludeEvidence(evidence)
   if ((diffs.length > 0 || evidence.diff.discovery) && !evidence.diff.source.includes('repository_discovery')) {
     evidence.diff.source.push('repository_discovery')
   }

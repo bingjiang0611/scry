@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.71
+npm install -g scry-turn-recorder@0.2.72
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
@@ -107,6 +107,22 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 关闭某项后对应证据段记为 `disabled` 并带 `omissionReason: ... disabled by config`,与 Provider 不支持的 `unavailable`、以及"真的没发生"的空数组是三个不同状态 —— 记录自己就能解释当时采了什么。
 
 > ⚠️ **关闭正文不等于脱敏。** 即使 `prompt`、`assistant` 关闭且 `toolOutput: "none"`,以下内容仍会落盘:**工具入参**(Bash 命令原文、Edit 的 old/new 字符串)、**文件路径**、**diff patch**(除非 `diff: false`)。当前没有单独关闭工具入参的开关。要求本地不留代码与命令的场景,应设 `diff: false` 并评估工具入参是否可接受,或者干脆不在该仓库启用。
+
+## 排除 diff 路径
+
+`scry.config.json` 的 `capture.diffExclude` 是工作区级排除，值是相对工作区的路径：
+
+```json
+{ "capture": { "diffExclude": ["generated", "vendor/bundle"] } }
+```
+
+接入方（例如 CodeLens）还可以为**当前会话**声明排除路径：`recorder capture start` 的 context 携带 `diffExclude`（绝对路径数组）。它只对被声明的那次会话采集生效，随 capture 保存，`capture stop` 后失效；同一 capture 多次 start 只会并集，不会缩小。它不写入项目文件，也不改 `scry.config.json`。
+
+排除按**每个仓库自己的根**换算，所以排除一个流程运行目录不会连带丢掉里面的代码仓库：那个仓库仍是自己的仓库，那条路径不在它的根之下，一个文件都不排除。声明的路径是当前仓库的祖先时同样无效。
+
+被排除的文件既没有清单条目，也不读取正文。record 的 `diff.value[].diffExclude` 只记命中的声明路径和文件数（`paths`、`files`），diff 证据因此标 `partial` 并在 `omissionReason` 写明；匹配不到任何文件时不出现该字段。工具调用、prompt 与原始 transcript 不受影响。
+
+需要 recorder 0.2.72 或更高版本；更早的版本接受 context 但会忽略这些路径。
 
 ## 详细参考
 

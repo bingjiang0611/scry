@@ -1,5 +1,6 @@
 import type { CreditUsageEvidence } from './credit-usage.js'
 import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger, WorkspaceOverlapEvidence, WorktreeBaselineReason } from './trace.js'
+import type { TurnDiffExcludeEvidence } from './turn-diff.js'
 import type { AgentSteerEvidence, AgentImageMimeType, AgentIntervention } from './runtime.js'
 import type { ProviderId } from './provider.js'
 
@@ -152,6 +153,11 @@ export interface TurnDiffSnapshotRecord {
   baselineCommit?: string
   baselineCreatedAt?: string
   baselineReason?: WorktreeBaselineReason
+  /**
+   * 接入方为这次会话声明的 diff 排除：实际命中的路径与因此没进 `files` 的文件数。
+   * 只记路径和数量，不记文件正文；缺失 = 这次 diff 没有因声明少任何文件。
+   */
+  diffExclude?: TurnDiffExcludeEvidence
 }
 
 export interface TurnDanger {

@@ -64,7 +64,7 @@ export async function holdSeal(
     try {
       const snapshot = await snapshotSessionNetDiff({ ...capture, opChain: undefined, finishPromise: undefined }, undefined, {
         patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-        diffExclude: enablement.config.capture.diffExclude,
+        diffExclude: [...(enablement.config.capture.diffExclude ?? []), ...(open.capture?.diffExclude ?? [])],
         completePatches: true,
         ...(frozen ? { onAfter: frozen.option(repository) } : {})
       })
