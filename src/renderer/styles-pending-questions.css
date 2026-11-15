@@ -4,7 +4,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0 7px;
+  padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
   border-radius: var(--r-pill);
   corner-shape: round;
@@ -21,7 +21,7 @@
 
 .sb-sess.waiting-answer .sb-sesstext {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 
 .sb-sess.waiting-answer .sb-session-meta {

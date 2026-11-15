@@ -7,14 +7,8 @@
   --window-titlebar-h: 52px;
 }
 
-:root[data-platform='macos'] .sidebar {
-  padding-top: 0;
-}
 
 :root[data-platform='macos'] .sb-brand {
-  height: var(--window-titlebar-h);
-  min-height: var(--window-titlebar-h);
-  padding: 0 8px 0 80px;
   border-bottom: 1px solid var(--border3);
   container-name: sidebar-brand;
   container-type: inline-size;

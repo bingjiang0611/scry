@@ -1,11 +1,8 @@
 /* PR#2：Sidebar chevron 展开/折叠 + 项目头可点 */
 
 /* 侧栏 视图 nav */
-.sb-nav { border-top: 1px solid var(--border3); }
-.sb-navitem {
-  width: 100%; display: flex; align-items: center; gap: 8px; border: 0;
-  background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer;
-  font-size: 12.5px;
+.sb-navitem { display: flex; align-items: center; gap: 8px;
+  background: transparent; font: inherit; text-align: left; cursor: pointer;
 }
 .sb-navitem:hover { color: var(--fg); }
 

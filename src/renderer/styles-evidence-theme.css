@@ -54,21 +54,13 @@ select:focus-visible,
   border-color: var(--selected-line);
 }
 
-/* Workbench chrome */
-.sb-brand {
-  gap: 9px;
-  padding-inline: 12px 14px;
-}
 
+/* Workbench chrome */
 .sb-brand::before {
   content: 'S';
-  width: 22px;
-  height: 22px;
-  display: grid;
   place-items: center;
   flex: none;
   border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
   color: var(--fg);
   background: var(--panel2);
   font: var(--weight-bold) var(--text-xs)/1 var(--font-mono);
@@ -76,36 +68,21 @@ select:focus-visible,
 
 .sb-brand .name {
   color: var(--fg);
-  font-size: 13.5px;
-  letter-spacing: -0.01em;
 }
 
 .sb-brand .ver {
   margin-left: auto;
-  font: 9.5px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-.sb-new {
-  border-color: var(--border);
-  background: transparent;
-}
 
-.sb-new:hover {
-  border-color: var(--border2);
-  background: var(--panel2);
-}
 
 .sb-navitem.active,
 .sb-sess.active {
-  background: var(--selected-soft);
   box-shadow: inset 2px 0 0 var(--selected);
 }
 
-.sb-navitem.active .ico,
-.sb-sess.active .sb-provider {
-  color: var(--selected);
-}
 
 .sb-sess[data-provider='claude'] .sb-provider { color: var(--provider-claude); }
 .sb-sess[data-provider='codex'] .sb-provider { color: var(--provider-codex); }

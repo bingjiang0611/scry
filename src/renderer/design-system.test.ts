@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error -- plain ESM script shared with the CLI audit; no type declarations.
-import { auditCss, auditRenderer, countsOf, readBaseline, regressions, totalsOf } from '../../scripts/design-system-audit.mjs'
+import { auditCss, auditRenderer, auditRendererScope, countsOf, readBaseline, regressions, totalsOf } from '../../scripts/design-system-audit.mjs'
 
 type Counts = Record<string, Record<string, number>>
 
@@ -66,5 +66,16 @@ describe('design debt audit', () => {
     const counts: Counts = countsOf(auditRenderer())
     const baseline = readBaseline()
     expect(totalsOf(counts), 'Debt went down: run `npm run design:audit -- --write` to lower the baseline.').toEqual(baseline.totals)
+  })
+})
+
+describe('cleaned areas', () => {
+  // Areas whose debt has been paid off in full are held at zero, not just ratcheted.
+  const CLEAN = { sidebar: /(^|[\s,>+~(])\.(sb-|sidebar\b|sidebar-)/ }
+
+  it.each(Object.entries(CLEAN))('%s rules use only scale tokens, the 4px grid and theme colors', (_, scope) => {
+    const debt = Object.entries(auditRendererScope(scope)).flatMap(([file, found]) =>
+      Object.entries(found as Record<string, Array<{ line: number, text: string }>>).flatMap(([metric, items]) => items.map((item) => `${file}:${item.line} ${metric} ${item.text}`)))
+    expect(debt).toEqual([])
   })
 })

@@ -146,4 +146,4 @@
 .sb-activity-item:hover > .sb-activity-status,
 .sb-activity-item:focus-within > .sb-activity-status { visibility: hidden; }
 .sb-activity .sb-act:not(:hover):not(.on) { color: var(--dim); }
-.sb-activity-limit { margin: 8px 10px; color: var(--dim2); font-size: var(--text-sm); }
+.sb-activity-limit { margin: 8px 8px; color: var(--dim2); font-size: var(--text-sm); }

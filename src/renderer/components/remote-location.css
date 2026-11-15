@@ -94,12 +94,12 @@
   min-width: 28px;
   max-width: 88px;
   margin-left: auto;
-  padding: 1px 6px;
+  padding: 1px 8px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border3));
   border-radius: var(--r-xs);
   color: var(--accent);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;

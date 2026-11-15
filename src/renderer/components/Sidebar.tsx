@@ -27,6 +27,7 @@ import { useTabIndicator } from '../hooks/useTabIndicator'
 import { browserStorage } from '../browser-storage'
 import { persistSidebarView, readStoredSidebarView, type SidebarView } from '../sidebar-view'
 import { Tabs } from './primitives/Tabs'
+import { Button } from './primitives/Button'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -340,9 +341,9 @@ export const Sidebar = memo(function Sidebar({
       {archiveUndo && onUndoArchive && (
         <div className="sb-undo" role="status">
           <span>已存档「{archiveUndo.preview || '(无预览)'}」</span>
-          <button type="button" onClick={onUndoArchive}>
+          <Button size="sm" onClick={onUndoArchive}>
             <Icon name="undo" /> 撤销
-          </button>
+          </Button>
         </div>
       )}
 

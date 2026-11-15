@@ -3,30 +3,18 @@
    Keep the resizable production shell, but use the prototype's
    compact rhythm instead of the legacy 40px navigation/card scale.
    ============================================================ */
-.sidebar {
-  padding: 14px 10px 10px;
-  border-right: 0;
-}
-
 .pane-resizer::before {
   left: 0;
   background: var(--border3);
 }
 
-.sidebar-resizer {
-  background: var(--main-surface);
-}
 
 .app.right-panel-overview > .panel-resizer {
   background: var(--overview-surface);
 }
 
 .sb-brand {
-  height: 32px;
-  min-height: 32px;
   flex: none;
-  gap: 8px;
-  padding: 0 8px 8px;
   border-bottom: 0;
 }
 
@@ -36,9 +24,6 @@
   border-radius: var(--r-xs);
 }
 
-.sb-brand .name {
-  font-size: var(--text-base);
-}
 
 .sb-brand .ver {
   font-size: var(--text-2xs);
@@ -46,52 +31,32 @@
 
 .sb-new {
   width: 100%;
-  height: 34px;
-  min-height: 34px;
   flex: none;
-  margin: 0;
-  padding: 0 9px;
-  font-size: var(--text-md);
 }
 
 .sb-search {
-  height: 32px;
-  min-height: 32px;
   flex: none;
-  margin: 8px 0 9px;
-  padding: 0 9px;
 }
 
 .sb-search input {
   min-height: 0;
   align-self: center;
-  font-size: 11.5px;
 }
 
 .sb-nav {
   display: grid;
   flex: none;
-  gap: 2px;
   padding: 0;
   border-top: 0;
 }
 
 .sb-navitem {
   width: 100%;
-  height: 31px;
-  min-height: 31px;
-  padding: 0 9px;
-  border-radius: var(--r-xs);
-  font-size: var(--text-md);
 }
 
 .sb-section {
   flex: none;
-  margin: 18px 8px 8px;
   padding: 0;
-  color: var(--dim3);
-  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
-  letter-spacing: 0.11em;
 }
 
 .sb-section .cnt {
@@ -108,21 +73,13 @@
   font-size: var(--text-sm);
 }
 
-.sb-proj {
-  margin-bottom: 10px;
-}
 
 .sb-proj-head {
-  height: 29px;
-  min-height: 29px;
   gap: 4px;
-  padding: 0 7px;
+  padding: 0 8px;
   font-size: var(--text-sm);
 }
 
-.sb-proj-head .pname {
-  font-size: var(--text-sm);
-}
 
 .sb-proj-head .pcnt {
   font-size: var(--text-2xs);
@@ -137,12 +94,9 @@
 }
 
 .sb-proj-row .sb-proj-head {
-  padding-right: 59px;
+  padding-right: 60px;
 }
 
-.sb-proj-row.active .sb-proj-head {
-  box-shadow: inset 2px 0 0 var(--accent);
-}
 
 .sb-project-pin {
   width: 11px;
@@ -153,7 +107,6 @@
 
 .sb-proj-acts {
   position: absolute;
-  top: 2px;
   right: 3px;
   display: flex;
   align-items: center;
@@ -204,9 +157,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 8px 0 27px;
+  padding: 0 8px 0 28px;
   color: var(--dim3);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .sb-project-menu {
@@ -294,8 +247,8 @@
 
 .sb-project-menu-head {
   display: grid;
-  gap: 3px;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 8px 8px;
 }
 
 .sb-project-menu-head b,
@@ -312,7 +265,7 @@
 
 .sb-project-menu-head code {
   color: var(--dim3);
-  font: 9.5px/1.25 var(--font-mono);
+  font: var(--text-2xs)/1.25 var(--font-mono);
 }
 
 .sb-project-remove {
@@ -389,38 +342,23 @@
 }
 
 .sb-sess {
-  height: 32px;
-  min-height: 32px;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "main meta";
-  gap: 7px;
+  gap: 8px;
   margin: 0;
-  padding: 0 8px 0 27px;
-  border-radius: var(--r-xs);
 }
 
-.sb-session-main {
-  gap: 7px;
-}
 
 .sb-provider {
   margin: 0;
   font-size: var(--text-2xs);
 }
 
-.sb-sesstext {
-  font-size: 12.5px;
-}
 
 .sb-session-meta {
   gap: 4px;
-  font-size: var(--text-2xs);
 }
 
-.sb-count,
-.sb-sesstime {
-  font-size: var(--text-2xs);
-}
 
 .sb-unread {
   width: 7px;
@@ -434,7 +372,7 @@
 
 .sb-sess.unread .sb-sesstext {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 
 .sb-running {
@@ -445,23 +383,16 @@
 }
 
 .sb-sess.running .sb-session-meta {
-  padding-right: 14px;
+  padding-right: 16px;
 }
 
 .sb-footer {
-  height: 38px;
   flex: none;
   margin-top: auto;
   padding: 0;
   border-top: 1px solid var(--border3);
 }
 
-.sb-settings {
-  height: 38px;
-  min-height: 38px;
-  padding-top: 7px;
-  border-radius: 0;
-}
 
 .topbar {
   height: var(--topbar-h);

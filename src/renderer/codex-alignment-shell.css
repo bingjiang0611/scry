@@ -196,7 +196,6 @@ select:focus-visible,
 
 .sb-search:focus-within {
   background: var(--panel);
-  box-shadow: 0 0 0 1px var(--border2);
 }
 
 .sb-search input {
@@ -224,15 +223,11 @@ select:focus-visible,
 }
 
 .sb-sess.active {
-  background: var(--selected-soft);
   color: var(--fg);
-  box-shadow: inset 2px 0 0 var(--selected);
 }
 
 .sb-proj-row.active .sb-proj-head {
   background: var(--surface-strong);
-  color: var(--fg);
-  box-shadow: none;
 }
 
 .sb-sess.active .sb-sesstext {
