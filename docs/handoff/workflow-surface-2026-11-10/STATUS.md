@@ -1,6 +1,6 @@
-# 第七轮进行中（G0/G1 通过，G2–G5 待执行）
+# 第七轮进行中（G0/G1 通过，G2 未通过）
 
-[G1](reports/G1.md) 在 CLI 1.1.88、两组新的独立 test 实例复测通过：长 Bash 审批标题截断至 120 字符且「允许一次」显示完整命令；允许后提交一条 `completed` 记录并产生 Git commit，拒绝后无 Git commit 但轮次记录正常。三个 pending 目录均无残留。早前高负载下无法启动的样本保留在同报告，不计入验收。脱敏计数见 [G1 证据](evidence/r7/g1-summary.json)。G2–G5 继续，清单尚未放开。
+[G1](reports/G1.md) 在 CLI 1.1.88、两组新的独立 test 实例复测通过：长 Bash 审批标题截断至 120 字符且「允许一次」显示完整命令；允许后提交一条 `completed` 记录并产生 Git commit，拒绝后无 Git commit 但轮次记录正常。三个 pending 目录均无残留。早前高负载下无法启动的样本保留在同报告，不计入验收。脱敏计数见 [G1 证据](evidence/r7/g1-summary.json)。[G2](reports/G2.md) 启动窗口三次点击均在 1 秒内，但没有一次同时满足 UI 中断、native 0、run 专属 daemon 15 秒退出和续发的标准；Hook/输出回归记录的 `SessionStart` 未出现拆分，输出回归后续发受版本探测阻碍。G3–G5 继续，G5 不得放开清单。
 
 [G0](reports/G0.md) 只读旧备份：6 个不成对的 `SessionStart` hookId，恰为 3 个 SDK started 和 3 个 CLI 日志 error response，与审查方推断一致；新修复尚待真机复测。CLI 1.1.88，脱敏计数见 [证据](evidence/r7/g0-hook-source-counts.json)。
 

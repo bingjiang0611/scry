@@ -1,0 +1,712 @@
+[
+  {
+    "case": "g2-startup-1",
+    "cli": "1.1.88",
+    "stopClickMs": 55,
+    "stopClicked": true,
+    "interruptedVisibleBeforeFollow": false,
+    "nativeFramesForStopRun": 22,
+    "canonicalStagesForStopRun": [
+      "runtime:input_receipt",
+      "hook_started",
+      "hook_progress",
+      "hook_response",
+      "runtime:llm_stream_end",
+      "result",
+      "credit_usage"
+    ],
+    "testInstanceProcessCounts": {
+      "beforeSend": 1,
+      "seenAfterClick": 1,
+      "newSeenAfterClick": 0,
+      "newAliveAfterObservationWindow": 0
+    },
+    "followSent": true,
+    "followSettled": true,
+    "records": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        },
+        "hooks": []
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        },
+        "hooks": []
+      }
+    ],
+    "errorClass": "none"
+  },
+  {
+    "case": "g2-startup-2",
+    "cli": "1.1.88",
+    "stopClickMs": 495,
+    "stopClicked": true,
+    "interruptedVisibleBeforeFollow": false,
+    "nativeFramesForStopRun": 0,
+    "canonicalStagesForStopRun": [],
+    "testInstanceProcessCounts": {
+      "beforeSend": 1,
+      "seenAfterClick": 3,
+      "newSeenAfterClick": 2,
+      "newAliveAfterObservationWindow": 2
+    },
+    "followSent": true,
+    "followSettled": true,
+    "records": [
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        },
+        "hooks": []
+      }
+    ],
+    "errorClass": "none"
+  },
+  {
+    "case": "g2-startup-3",
+    "cli": "1.1.88",
+    "stopClickMs": 744,
+    "stopClicked": true,
+    "interruptedVisibleBeforeFollow": false,
+    "nativeFramesForStopRun": 0,
+    "canonicalStagesForStopRun": [],
+    "testInstanceProcessCounts": {
+      "beforeSend": 1,
+      "seenAfterClick": 3,
+      "newSeenAfterClick": 2,
+      "newAliveAfterObservationWindow": 1
+    },
+    "followSent": false,
+    "followSettled": false,
+    "records": [],
+    "errorClass": "send-disabled"
+  },
+  {
+    "case": "g2-hook-1",
+    "cli": "1.1.88",
+    "stopClickMs": 30364,
+    "stopClicked": true,
+    "interruptedVisibleBeforeFollow": false,
+    "nativeFramesForStopRun": 14,
+    "canonicalStagesForStopRun": [
+      "runtime:input_receipt",
+      "hook_started",
+      "hook_progress",
+      "hook_response",
+      "credit_usage"
+    ],
+    "testInstanceProcessCounts": {
+      "beforeSend": 1,
+      "seenAfterClick": 1,
+      "newSeenAfterClick": 1,
+      "newAliveAfterObservationWindow": 0
+    },
+    "followSent": true,
+    "followSettled": true,
+    "records": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        },
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 4,
+            "status": "failed",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "failed",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 3,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          }
+        ]
+      },
+      {
+        "status": "completed",
+        "providerTurnIdPresent": true,
+        "termination": {
+          "status": "available",
+          "quality": "exact",
+          "source": [
+            "provider_result"
+          ]
+        },
+        "hooks": []
+      }
+    ],
+    "errorClass": "none"
+  },
+  {
+    "case": "g2-output-1",
+    "cli": "1.1.88",
+    "stopClickMs": 61908,
+    "stopClicked": true,
+    "interruptedVisibleBeforeFollow": false,
+    "nativeFramesForStopRun": 19,
+    "canonicalStagesForStopRun": [
+      "runtime:input_receipt",
+      "hook_started",
+      "hook_progress",
+      "hook_response",
+      "thinking",
+      "credit_usage"
+    ],
+    "testInstanceProcessCounts": {
+      "beforeSend": 1,
+      "seenAfterClick": 1,
+      "newSeenAfterClick": 1,
+      "newAliveAfterObservationWindow": 0
+    },
+    "followSent": false,
+    "followSettled": false,
+    "records": [
+      {
+        "status": "interrupted",
+        "providerTurnIdPresent": true,
+        "termination": {
+          "status": "partial",
+          "quality": "estimated",
+          "source": [
+            "scry_run_boundary"
+          ]
+        },
+        "hooks": [
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 3,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 3,
+            "status": "cancelled",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 3,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "failed",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionStart",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "UserPromptSubmit",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "UserPromptSubmit",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "UserPromptSubmit",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "UserPromptSubmit",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "UserPromptSubmit",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "QueryEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          },
+          {
+            "event": "SessionEnd",
+            "runs": 1,
+            "lifecycleEvents": 2,
+            "status": "success",
+            "has": {
+              "name": true,
+              "command": true,
+              "startedAt": true,
+              "completedAt": true
+            }
+          }
+        ]
+      }
+    ],
+    "errorClass": "send-disabled"
+  }
+]
