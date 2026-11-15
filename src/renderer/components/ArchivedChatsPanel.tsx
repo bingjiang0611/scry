@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import type { DeleteArchivedProgress } from '@shared/provider'
 
 import type { ProjectMeta, SessionMeta } from '../env'
 
 import type { DeleteArchivedSessionsResult } from '@shared/provider'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { Icon } from './primitives/Icon'
+import { CountProgress } from './primitives/CountProgress'
 import { SkeletonRows } from './primitives/Skeleton'
 import { ProviderFilterMenu } from './ProviderFilterMenu'
 
@@ -56,6 +58,9 @@ export function ArchivedChatsPanel({
   const [failures, setFailures] = useState<DeleteArchivedSessionsResult['failures']>([])
   const [busy, setBusy] = useState(false)
   const showSkeleton = useDelayedFlag(loading)
+  // Bulk delete is permanent and counted: never optimistic, shown as real progress.
+  const [progress, setProgress] = useState<DeleteArchivedProgress | null>(null)
+  const showProgress = useDelayedFlag(progress !== null && progress.done < progress.total)
 
   if (!projects && loading) {
     // The title does not depend on the index, so it shows at once; the rows
@@ -144,11 +149,16 @@ export function ArchivedChatsPanel({
 
   const deleteAll = async (): Promise<void> => {
     setBusy(true)
+    const unsubscribe = typeof window.scry.onDeleteArchivedProgress === 'function'
+      ? window.scry.onDeleteArchivedProgress(setProgress)
+      : () => {}
     try {
       const result = await window.scry.deleteArchivedSessions()
       setFailures(result.failures)
       await afterChange()
     } finally {
+      unsubscribe()
+      setProgress(null)
       setBusy(false)
     }
   }
@@ -159,14 +169,16 @@ export function ArchivedChatsPanel({
         <div className="settings-copy">
           <b>{archivedCopy.localTitle}</b>
         </div>
-        <button
-          type="button"
-          className="arch-danger"
-          disabled={total === 0 || busy}
-          onClick={() => void deleteAll()}
-        >
-          <Icon name="trash" /> {archivedCopy.deleteAllLocal}
-        </button>
+        {progress && showProgress
+          ? <CountProgress label={archivedCopy.deleting} done={progress.done} total={progress.total} failed={progress.failed} />
+          : <button
+            type="button"
+            className="arch-danger"
+            disabled={total === 0 || busy}
+            onClick={() => void deleteAll()}
+          >
+            <Icon name="trash" /> {archivedCopy.deleteAllLocal}
+          </button>}
       </div>
 
       {failures.length > 0 && (

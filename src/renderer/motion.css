@@ -72,6 +72,15 @@
 .busy-label[data-busy] .busy-label-text { opacity: 0; }
 .busy-label .busy-label-spinner { grid-area: 1 / 1; margin: 0; vertical-align: 0; }
 
+/* Counted progress (components/primitives/CountProgress.tsx): 4px accent bar on the
+   accent at 10%; the fill scales (transform-only) as real counts arrive. */
+.count-progress { display: grid; gap: 6px; min-width: 0; font-size: 12px; color: var(--dim); }
+.count-progress-copy { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.count-progress-copy b { color: var(--fg); font-weight: 600; }
+.count-progress-copy span { font-variant-numeric: tabular-nums; }
+.count-progress-track { height: 4px; overflow: hidden; border-radius: var(--r-pill); corner-shape: round; background: var(--accent-soft); }
+.count-progress-fill { display: block; height: 100%; background: var(--accent); transform-origin: left center; transition: transform var(--duration-md) var(--ease-out); }
+
 @keyframes loading-status-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes loading-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 .loading-status { display: grid; gap: 6px; color: var(--dim); font-size: 12px; animation: loading-status-in var(--duration-sm) var(--ease-out) backwards; }

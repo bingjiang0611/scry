@@ -153,6 +153,7 @@ const listenerChannels = {
   onUnreadSessions: 'agent:unreadSessions',
   onStopState: 'agent:stopState',
   onDataUpdated: 'agent:dataUpdated',
+  onDeleteArchivedProgress: 'agent:deleteArchivedProgress',
   onSession: 'agent:session',
   onFocusedRun: 'agent:focusedRun',
   onRemoteSessionRecorded: 'remote:sessionRecorded',

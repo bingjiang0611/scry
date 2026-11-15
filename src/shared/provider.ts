@@ -52,6 +52,13 @@ export interface DeleteSessionResult {
   failed: Array<{ store: string; error: string }>
 }
 
+/** Count of a running bulk delete; sent after each session is handled, never estimated. */
+export interface DeleteArchivedProgress {
+  done: number
+  total: number
+  failed: number
+}
+
 export interface DeleteArchivedSessionsResult {
   ok: boolean
   cancelled?: boolean

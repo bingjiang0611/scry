@@ -275,7 +275,8 @@ export const ARCHIVED_SESSIONS_COPY = {
   localTitle: '本机已存档会话',
   deleteAllLocal: '删除全部本机会话',
   localEmpty: '没有本机已存档会话',
-  loading: '正在读取已存档会话…'
+  loading: '正在读取已存档会话…',
+  deleting: '正在永久删除已存档会话'
 } as const
 
 // 归档列表的 Provider 筛选：Provider id 不给人读，未知来源也不能冒充某个 Provider。
