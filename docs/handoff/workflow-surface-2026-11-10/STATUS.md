@@ -1,4 +1,6 @@
-# 第七轮进行中（第六轮已核验，三处已修，待真机复测）
+# 第七轮进行中（G0 已核对，G1–G5 待执行）
+
+[G0](reports/G0.md) 只读旧备份：6 个不成对的 `SessionStart` hookId，恰为 3 个 SDK started 和 3 个 CLI 日志 error response，与审查方推断一致；新修复尚待真机复测。CLI 1.1.88，脱敏计数见 [证据](evidence/r7/g0-hook-source-counts.json)。
 
 **审查方核验第六轮（2026-11-15）。** 执行方的证据足够定位三处问题，均已修复：
 
