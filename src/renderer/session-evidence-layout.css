@@ -338,7 +338,7 @@ button.overview-metric-action.bad > strong { color: var(--bad); }
 .segment-inspector > footer { margin-top: 24px; color: var(--dim3); font: var(--text-2xs)/1.5 var(--font-mono); letter-spacing: .08em; }
 
 .gtree {
-  padding: 0 26px 40px;
+  padding: 0 24px 40px;
 }
 
 .graph-evidence-header {

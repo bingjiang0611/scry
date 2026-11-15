@@ -1,19 +1,16 @@
 /* MCP Trust：mcpguard 报告只读展示 */
-.mcp-trust-section {
-  background: var(--panel);
-}
 .mcp-trust-actions {
   display: grid;
-  gap: 7px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 .mcp-trust-error {
   margin: 8px 0;
-  padding: 7px 8px;
-  border: 1px solid rgba(255, 100, 113, 0.28);
+  padding: 8px 8px;
+  border: 1px solid color-mix(in srgb, var(--bad) 28%, transparent);
   border-radius: var(--r-xs);
   color: var(--bad);
-  background: rgba(255, 100, 113, 0.08);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
   font: var(--text-xs)/1.45 var(--font-mono);
 }
 .mcp-auth-banner {
@@ -26,11 +23,11 @@
 .mcp-severity-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 8px;
 }
 .mcp-labels.compact {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .trust-label {
   display: inline-flex;
@@ -68,7 +65,7 @@
   min-width: 0;
   margin-top: 8px;
   padding: 8px;
-  border: 1px solid rgba(143, 157, 184, 0.14);
+  border: 1px solid var(--border3);
 }
 .mcp-finding {
   display: grid;
@@ -97,13 +94,13 @@
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg);
-  font: var(--weight-semibold) 12.5px/1.25 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.25 var(--font-ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .mcp-target > .dim {
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--dim);
   font: var(--text-xs)/1.4 var(--font-mono);
 }

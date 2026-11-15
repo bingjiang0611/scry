@@ -109,8 +109,8 @@
 }
 
 .modal-head > b {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
 }
 
 .modal-x,
@@ -132,7 +132,7 @@
 
 .settings-rail {
   gap: 2px;
-  padding: 14px 10px;
+  padding: 16px 8px;
   border-right-color: var(--border3);
   background: var(--sidebar-surface);
 }
@@ -156,12 +156,12 @@
 
 .settings-body {
   gap: 24px;
-  padding: 28px 30px;
+  padding: 28px 32px;
 }
 
 .settings-copy b {
   font-size: var(--text-xl);
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.02em;
 }
 
@@ -176,7 +176,7 @@
 
 .theme-option {
   min-height: 88px;
-  padding: 14px;
+  padding: 16px;
   border-radius: var(--r-md);
   background: var(--panel);
 }
@@ -206,7 +206,7 @@
 .inventory-modal .inventory-modal__head,
 .inventory-modal--mcp .inventory-modal__head {
   min-height: 66px;
-  padding: 12px 18px;
+  padding: 12px 16px;
   background: var(--panel);
 }
 

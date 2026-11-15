@@ -224,7 +224,7 @@ button.turn-call-group:focus-visible {
 .intervention-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 .intervention-summary-grid > div {
   display: grid;
@@ -241,7 +241,7 @@ button.turn-call-group:focus-visible {
 }
 .intervention-summary-grid b {
   color: var(--fg);
-  font: 650 var(--text-md)/1.2 var(--font-mono);
+  font: var(--weight-semibold) var(--text-md)/1.2 var(--font-mono);
 }
 .turn-call-detail.skill {
   border-color: color-mix(in srgb, var(--warn) 22%, transparent);

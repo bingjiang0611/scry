@@ -7,10 +7,10 @@
     "buttonReset": "a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button))"
   },
   "totals": {
-    "fontSize": 85,
-    "fontWeight": 54,
-    "spacing": 531,
-    "color": 69,
+    "fontSize": 31,
+    "fontWeight": 20,
+    "spacing": 247,
+    "color": 53,
     "buttonReset": 0
   },
   "files": {
@@ -22,9 +22,9 @@
       "buttonReset": 0
     },
     "codex-alignment-dialogs.css": {
-      "fontSize": 1,
-      "fontWeight": 3,
-      "spacing": 6,
+      "fontSize": 0,
+      "fontWeight": 1,
+      "spacing": 1,
       "color": 0,
       "buttonReset": 0
     },
@@ -39,20 +39,6 @@
       "fontSize": 1,
       "fontWeight": 2,
       "spacing": 3,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "components/archived-sessions.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 1,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "components/desktop-remote.css": {
-      "fontSize": 1,
-      "fontWeight": 0,
-      "spacing": 15,
       "color": 0,
       "buttonReset": 0
     },
@@ -77,25 +63,11 @@
       "color": 0,
       "buttonReset": 0
     },
-    "components/hosts-view.css": {
-      "fontSize": 2,
-      "fontWeight": 2,
-      "spacing": 26,
-      "color": 0,
-      "buttonReset": 0
-    },
     "components/llm-performance.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 0,
       "color": 2,
-      "buttonReset": 0
-    },
-    "components/meta-prompts.css": {
-      "fontSize": 4,
-      "fontWeight": 5,
-      "spacing": 31,
-      "color": 0,
       "buttonReset": 0
     },
     "components/pierre-views.css": {
@@ -108,7 +80,7 @@
     "components/remote-location.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 5,
+      "spacing": 3,
       "color": 0,
       "buttonReset": 0
     },
@@ -119,49 +91,7 @@
       "color": 1,
       "buttonReset": 0
     },
-    "conversation.css": {
-      "fontSize": 1,
-      "fontWeight": 0,
-      "spacing": 3,
-      "color": 1,
-      "buttonReset": 0
-    },
-    "inventory-evidence-capabilities.css": {
-      "fontSize": 9,
-      "fontWeight": 4,
-      "spacing": 37,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "inventory-evidence-ledger.css": {
-      "fontSize": 7,
-      "fontWeight": 7,
-      "spacing": 34,
-      "color": 1,
-      "buttonReset": 0
-    },
-    "inventory-evidence-mcp.css": {
-      "fontSize": 6,
-      "fontWeight": 9,
-      "spacing": 37,
-      "color": 0,
-      "buttonReset": 0
-    },
     "motion.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 1,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "session-evidence-conversation-records.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 2,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "session-evidence-layout.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 1,
@@ -196,17 +126,10 @@
       "color": 0,
       "buttonReset": 0
     },
-    "styles-call-evidence.css": {
-      "fontSize": 0,
-      "fontWeight": 1,
-      "spacing": 1,
-      "color": 0,
-      "buttonReset": 0
-    },
     "styles-chat-entry.css": {
-      "fontSize": 3,
-      "fontWeight": 1,
-      "spacing": 9,
+      "fontSize": 0,
+      "fontWeight": 0,
+      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },
@@ -220,7 +143,7 @@
     "styles-composer-queue.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 9,
+      "spacing": 4,
       "color": 0,
       "buttonReset": 0
     },
@@ -232,9 +155,9 @@
       "buttonReset": 0
     },
     "styles-dialog-controls.css": {
-      "fontSize": 3,
+      "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 9,
+      "spacing": 0,
       "color": 1,
       "buttonReset": 0
     },
@@ -253,31 +176,31 @@
       "buttonReset": 0
     },
     "styles-execution-graph.css": {
-      "fontSize": 3,
+      "fontSize": 2,
       "fontWeight": 0,
-      "spacing": 8,
+      "spacing": 5,
       "color": 1,
       "buttonReset": 0
     },
     "styles-markdown.css": {
-      "fontSize": 3,
+      "fontSize": 2,
       "fontWeight": 0,
-      "spacing": 8,
+      "spacing": 6,
       "color": 0,
       "buttonReset": 0
     },
     "styles-mcp-trust.css": {
-      "fontSize": 2,
+      "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 7,
-      "color": 6,
+      "spacing": 1,
+      "color": 3,
       "buttonReset": 0
     },
     "styles-overview-controls.css": {
-      "fontSize": 3,
+      "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 13,
-      "color": 14,
+      "spacing": 0,
+      "color": 4,
       "buttonReset": 0
     },
     "styles-overview-foundation.css": {
@@ -294,13 +217,6 @@
       "color": 1,
       "buttonReset": 0
     },
-    "styles-remote-access.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 5,
-      "color": 1,
-      "buttonReset": 0
-    },
     "styles-session-controls.css": {
       "fontSize": 0,
       "fontWeight": 0,
@@ -309,16 +225,16 @@
       "buttonReset": 0
     },
     "styles-settings-inventory.css": {
-      "fontSize": 9,
-      "fontWeight": 3,
-      "spacing": 25,
+      "fontSize": 0,
+      "fontWeight": 0,
+      "spacing": 0,
       "color": 1,
       "buttonReset": 0
     },
     "styles-sidebar.css": {
-      "fontSize": 1,
+      "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 4,
+      "spacing": 2,
       "color": 1,
       "buttonReset": 0
     },
@@ -339,7 +255,7 @@
     "styles-tool-evidence.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 5,
+      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },
@@ -347,13 +263,6 @@
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 5,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "styles-verdict-diff.css": {
-      "fontSize": 1,
-      "fontWeight": 0,
-      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },
@@ -367,7 +276,7 @@
     "styles-workbench-geometry.css": {
       "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 14,
+      "spacing": 7,
       "color": 0,
       "buttonReset": 0
     },

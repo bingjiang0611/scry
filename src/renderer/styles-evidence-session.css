@@ -190,17 +190,6 @@ button.turn-id.turn-call-open:focus-visible {
 .seg-card .val.accent { color: var(--accent); }
 
 /* Skills and MCP remain operational ledgers, not a card wall. */
-.modal {
-  border-color: var(--border2);
-  border-radius: var(--r-lg);
-  background: var(--panel);
-}
-
-.modal-head {
-  min-height: 54px;
-  border-bottom-color: var(--border);
-}
-
 .modal-search {
   border-color: var(--border);
   background: var(--panel2);

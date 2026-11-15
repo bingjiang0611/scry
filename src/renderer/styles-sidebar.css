@@ -218,8 +218,8 @@ body.pane-resizing * {
   color: var(--bad);
 }
 .kbd {
-  font: 10.5px/1 var(--font-mono);
-  padding: 3px 6px;
+  font: var(--text-xs)/1 var(--font-mono);
+  padding: 4px 8px;
   border: 1px solid var(--border2);
   border-radius: var(--r-xs);
   color: var(--dim2);

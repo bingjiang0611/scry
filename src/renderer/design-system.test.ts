@@ -79,7 +79,9 @@ describe('cleaned areas', () => {
     // Composer, its pickers and queue, and the welcome screen around it.
     composer: /^[^.,]*\.(?:composer|runtime-composer|runtime|queue|slash|model-effort|wdbtn|clibtn|climenu|clipick|location|welcome|wc|draft-attachments?|permission-mode|pending-submission|send|stop|steer|agicon|image-lightbox|bubble|who)(?:-[\w-]*)?(?![\w-])/,
     // Overview panel, evidence graph, segments, verdict, pinned summary and run status.
-    overview: /^[^.,]*\.(?:overview|ov|evidence|seg|segment|segments|graph|gp|verdict|pinned|ctx|billing|panel|stat|top-tools|toptool|tt|kv|background|agents?|psrc|run-status|recorder)(?:-[\w-]*)?(?![\w-])/
+    overview: /^[^.,]*\.(?:overview|ov|evidence|seg|segment|segments|graph|gp|verdict|pinned|ctx|billing|panel|stat|top-tools|toptool|tt|kv|background|agents?|psrc|run-status|recorder)(?:-[\w-]*)?(?![\w-])/,
+    // Settings, Skills/MCP/capability inventories, modals, archives, remote hosts and meta prompts.
+    settings: /^[^.,]*\.(?:mcp|inventory|capability|capabilities|skill|skills|settings|modal|theme|arch|hosts|remote|desktop|mp|project|recent|err|session|conversation|unified|history|intervention|badge|kbd|si|sg|gline|gdrow|gtree|pad2)(?:-[\w-]*|__[\w-]*)?(?![\w-])/
   }
 
   it.each(Object.entries(CLEAN))('%s rules use only scale tokens, the 4px grid and theme colors', (_, scope) => {

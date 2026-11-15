@@ -8,9 +8,8 @@
 }
 .gtree {
   overflow: auto;
-  padding: 20px 24px 40px;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 .gempty {
   color: var(--dim2);
@@ -129,10 +128,9 @@
 .gline {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 40px;
-  padding: 5px 10px;
-  border-radius: var(--r-sm);
+  padding: 4px 8px;
   cursor: pointer;
 }
 button.gline,

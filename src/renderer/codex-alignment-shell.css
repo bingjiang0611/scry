@@ -48,6 +48,18 @@
   --shadow-float: 0 12px 32px rgb(0 0 0 / 45%);
   --shadow-composer: 0 10px 30px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 7%);
   --shadow-composer-focus: 0 12px 34px rgb(0 0 0 / 13%), 0 0 0 1px var(--accent-soft);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 20%);
+  /* Fixed, theme-independent swatches. Theme previews always show both palettes, and a
+     QR code must sit on white to scan, whatever theme is active. */
+  --theme-preview-dark-bg: #151515;
+  --theme-preview-dark-panel: #1c1c1c;
+  --theme-preview-dark-line: #333331;
+  --theme-preview-dark-ink: #343434;
+  --theme-preview-light-bg: #f7f7f5;
+  --theme-preview-light-panel: #ffffff;
+  --theme-preview-light-line: #e4e4df;
+  --theme-preview-light-ink: #e7e7e3;
+  --qr-surface: #ffffff;
 }
 
 :root[data-theme='light'] {

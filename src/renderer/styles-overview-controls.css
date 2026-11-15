@@ -54,7 +54,6 @@
   background: transparent;
 }
 
-
 .seg-shell {
   width: min(100% - 60px, 1180px);
 }
@@ -66,7 +65,6 @@
 .seg-legend {
   gap: 16px;
 }
-
 
 .seg-card {
   grid-template-columns: 190px minmax(0, 1fr) 150px;
@@ -81,7 +79,6 @@
 .seg-l {
   background: var(--panel) !important;
 }
-
 
 .seg-act {
   border-color: var(--border3) !important;
@@ -102,10 +99,6 @@
   background: var(--panel2);
 }
 
-.gline.selected {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-}
 
 .gtype.llm {
   border-color: rgba(86, 168, 245, 0.32);
@@ -129,45 +122,26 @@
   background: var(--panel);
 }
 
-.modal-overlay {
-  background: var(--modal-overlay);
-  backdrop-filter: blur(3px);
-}
 
 .modal {
   width: min(760px, 92vw);
   max-height: 82vh;
-  background: var(--panel);
-  border-color: var(--border2);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop);
 }
 
-.modal-head {
-  padding: 14px 18px;
-}
 
 .modal-search {
-  margin: 12px 18px 4px;
-  background: var(--panel2);
-  border-color: var(--border);
+  margin: 12px 16px 4px;
 }
 
-.modal-search:focus {
-  border-color: var(--accent-line);
-}
 
 .modal-body {
   padding: 4px 8px 12px;
 }
 
 .modal-foot {
-  padding: 10px 18px;
+  padding: 8px 16px;
 }
 
-.settings-modal {
-  width: min(480px, 92vw);
-}
 
 .settings-modal .modal-x {
   margin-left: auto;
@@ -175,13 +149,11 @@
 
 .settings-body {
   display: grid;
-  gap: 16px;
-  padding: 20px 18px 22px;
 }
 
 .settings-copy {
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 .settings-copy b {
@@ -190,27 +162,22 @@
 }
 
 .settings-copy span {
-  color: var(--dim2);
-  font: 11.5px/1.45 var(--font-ui);
+  font: var(--text-sm)/1.45 var(--font-ui);
 }
 
 .theme-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .theme-option {
   min-width: 0;
-  min-height: 72px;
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--panel2);
   color: var(--dim);
   text-align: left;
   cursor: pointer;
@@ -218,8 +185,6 @@
 }
 
 .theme-option.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
   color: var(--fg);
 }
 
@@ -247,55 +212,55 @@
 
 .theme-preview i {
   grid-row: 2;
-  margin: 5px;
+  margin: 4px;
   border-radius: var(--r-xs);
 }
 
 .theme-preview.dark {
-  border-color: #343942;
-  background: #0c0d0f;
+  border-color: var(--theme-preview-dark-line);
+  background: var(--theme-preview-dark-bg);
 }
 
 .theme-preview.dark::before,
 .theme-preview.dark span {
-  border-color: #343942;
-  background: #15171b;
+  border-color: var(--theme-preview-dark-line);
+  background: var(--theme-preview-dark-panel);
 }
 
 .theme-preview.dark i {
-  background: #22262c;
+  background: var(--theme-preview-dark-ink);
 }
 
 .theme-preview.light {
-  border-color: #c5ccd6;
-  background: #f3f5f7;
+  border-color: var(--theme-preview-light-line);
+  background: var(--theme-preview-light-bg);
 }
 
 .theme-preview.light::before,
 .theme-preview.light span {
-  border-color: #c5ccd6;
-  background: #ffffff;
+  border-color: var(--theme-preview-light-line);
+  background: var(--theme-preview-light-panel);
 }
 
 .theme-preview.light i {
-  background: #e4e8ed;
+  background: var(--theme-preview-light-ink);
 }
 
 .theme-option-copy {
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 .theme-option-copy b {
   color: var(--fg);
-  font: var(--weight-semibold) 12.5px/1 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1 var(--font-ui);
 }
 
 .theme-option-copy small {
   overflow: hidden;
   color: var(--dim2);
-  font: 10.5px/1 var(--font-ui);
+  font: var(--text-xs)/1 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

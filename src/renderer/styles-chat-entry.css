@@ -23,7 +23,7 @@
 }
 .badge {
   font-size: var(--text-sm);
-  padding: 3px 9px;
+  padding: 4px 8px;
   border-radius: var(--r-xs);
   border: 1px solid var(--border2);
   color: var(--dim);
@@ -105,10 +105,9 @@
 .recent {
   display: grid;
   grid-template-columns: 24px 1fr auto auto;
-  gap: 14px;
+  gap: 16px;
   align-items: center;
-  padding: 12px 6px;
-  background: transparent;
+  padding: 12px 8px;
   cursor: pointer;
   text-align: left;
   border: 0;
@@ -117,9 +116,6 @@
   font: inherit;
   width: 100%;
 }
-.recent:hover {
-  background: var(--panel2);
-}
 .recent .ico {
   color: var(--dim2);
 }
@@ -127,23 +123,23 @@
   color: var(--accent);
 }
 .recent .meta {
-  font-size: 13.5px;
+  font-size: var(--text-md);
   min-width: 0;
 }
 .recent .meta .name {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .recent .meta .last-tag {
   color: var(--dim2);
-  font: 10.5px/1 var(--font-ui);
+  font: var(--text-xs)/1 var(--font-ui);
   letter-spacing: 0;
 }
 .recent .meta .path {
-  font: 11.5px/1 var(--font-mono);
+  font: var(--text-sm)/1 var(--font-mono);
   color: var(--dim2);
   margin-top: 4px;
   letter-spacing: 0.02em;
@@ -170,8 +166,7 @@
 }
 .sg-card {
   min-width: 0;
-  padding: 11px 4px;
-  background: transparent;
+  padding: 12px 4px;
   border: 0;
   border-bottom: 1px solid var(--border3);
   border-radius: 0;
@@ -181,11 +176,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
 }
 .sg-card:hover {
-  background: var(--panel2);
   color: var(--fg);
 }
 .sg-card .ico {

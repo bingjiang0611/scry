@@ -5,7 +5,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--dim2);
   font-size: var(--text-sm);
   line-height: 18px;
@@ -39,7 +39,7 @@
 /* 已经回到第一轮：分隔线说明这条时间线没有更早内容了。 */
 .history-window-start {
   margin: 0 0 12px;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border3);
   color: var(--dim3);
   font-size: var(--text-sm);
