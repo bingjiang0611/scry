@@ -99,6 +99,7 @@ export function useSideChatPanel({
   })
   const renderTab = (conversationId: string): ReactNode => <SideChatTabBody
     summary={workspace.records.get(conversationId)}
+    loading={workspace.isPending(conversationId)}
     {...(workspace.createdId === conversationId ? { autoFocusComposer: true } : {})}
     onMounted={() => { if (workspace.createdId === conversationId) workspace.clearCreated() }}
     draftStore={draftStore}

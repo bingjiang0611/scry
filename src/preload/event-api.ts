@@ -5,6 +5,7 @@ import type { AgentDataUpdated, AgentQuestionRequest, AgentStopState } from '../
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { TraceBacklogState, TraceBatch, TraceBatchReceipt } from '../main/trace-output'
 import type { TerminalDataEvent, TerminalRecordingErrorEvent, TerminalExitEvent } from '../shared/terminal'
+import type { DeleteArchivedProgress } from '../shared/provider'
 
 export const eventApi = {
   onBackgroundWork: (cb: (event: { runId: string; work: BackgroundWork }) => void): (() => void) => {
@@ -68,6 +69,11 @@ export const eventApi = {
     const l = (_: unknown, state: AgentStopState): void => cb(state)
     ipcRenderer.on('agent:stopState', l)
     return () => ipcRenderer.removeListener('agent:stopState', l)
+  },
+  onDeleteArchivedProgress: (cb: (progress: DeleteArchivedProgress) => void): (() => void) => {
+    const l = (_: unknown, progress: DeleteArchivedProgress): void => cb(progress)
+    ipcRenderer.on('agent:deleteArchivedProgress', l)
+    return () => ipcRenderer.removeListener('agent:deleteArchivedProgress', l)
   },
   onDataUpdated: (cb: (e: AgentDataUpdated) => void): (() => void) => {
     const l = (_: unknown, e: AgentDataUpdated): void => cb(e)

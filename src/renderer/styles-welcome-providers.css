@@ -33,7 +33,3 @@
   min-width: 0;
   display: grid;
 }
-
-@keyframes welcome-rescan-spin {
-  to { transform: rotate(360deg); }
-}

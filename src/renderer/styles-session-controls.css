@@ -316,3 +316,26 @@
 .panel {
   --panel: var(--overview-surface);
 }
+
+/* Quiet save status of an optimistic row change, in the time's place. */
+.sb-sess-save { display: inline-flex; align-items: center; gap: 4px; color: var(--dim2); }
+.sb-sess-save[data-save='saved'] { animation: sb-save-fade 1200ms var(--ease-out) forwards; }
+.sb-sess-save .ico { width: 10px; height: 10px; color: var(--ok); }
+@keyframes sb-save-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.sb-sess-save-error {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 8px 8px 32px;
+  color: var(--bad);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.sb-sess-save-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}

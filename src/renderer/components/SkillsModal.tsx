@@ -3,10 +3,9 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { SkillMeta } from '../env'
 
 import type { CapabilityEnvelope } from '@shared/provider'
-import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
-import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { DelayedLoadingStatus } from './LoadingStatus'
 
@@ -17,7 +16,7 @@ import './archived-sessions.css'
 
 import { ModalFrame, requestModalClose } from './ModalFrame'
 
-import { EvidenceState, InventoryContext, filterSkillsForScope, scopeClass, scopeShortLabel, useReadStarted, type SkillScopeFilter } from './CapabilityEvidence'
+import { InventoryContext, filterSkillsForScope, scopeClass, scopeShortLabel, useReadStarted, type SkillScopeFilter } from './CapabilityEvidence'
 import { Tabs } from './primitives/Tabs'
 export { filterSkillsForScope } from './CapabilityEvidence'
 
@@ -52,7 +51,6 @@ export function SkillsModal({
   const initialSkillsLoading = (refreshing || capability === null) && skills.length === 0
   const readStarted = useReadStarted(refreshing)
   const skillsUnavailable = capability === null && !refreshing && readStarted
-  const showSkillsLoading = useDelayedFlag(refreshing)
   const listMotion = useFirstReadyList(filtered.length > 0)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
@@ -85,9 +83,9 @@ export function SkillsModal({
           <p>查看当前 Provider 在这个工作目录里实际发现了哪些 Skill。</p>
         </div>
         <div className="inventory-modal__head-actions">
-          {showSkillsLoading && <EvidenceState value={{ state: 'pending', label: LOADING_COPY.reading, role: 'status' }} quiet />}
-          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
-            <Icon name="refresh" />
+          {/* One indicator per wait: the refresh icon turns; no separate pill. */}
+          <button className="modal-refresh" onClick={() => { if (!refreshing) onRefresh() }} aria-disabled={refreshing} aria-busy={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
+            <TurningIcon busy={refreshing} />
           </button>
           <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSkills} />
         </div>

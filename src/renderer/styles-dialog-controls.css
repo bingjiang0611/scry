@@ -237,7 +237,7 @@
   border-top-color: var(--accent);
   border-radius: 50%;
   corner-shape: round;
-  animation: spin 0.7s linear infinite;
+  animation: spin 0.9s linear infinite;
 }
 .mcp-runtime {
   font-size: var(--text-2xs);

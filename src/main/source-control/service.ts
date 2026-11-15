@@ -28,6 +28,8 @@ export class SourceControlService {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly active = new Set<string>()
   private readonly pending = new Set<Promise<unknown>>()
+  // Running push/fetch operations a person may cancel, by operation id.
+  private readonly cancels = new Map<string, { repositoryId: string; controller: AbortController }>()
   private closed = false
   readonly git: ScGit
   readonly github: ScGithub
@@ -305,6 +307,31 @@ export class SourceControlService {
 
   async mutate(request: ScMutation & { operationId: string }, authorize?: () => void): Promise<ScOperation> {
     const identity = await this.identity(request)
+    const cancellable = request.action === 'push' || request.action === 'fetch'
+    const controller = cancellable && !this.cancels.has(request.operationId) ? new AbortController() : null
+    if (controller) this.cancels.set(request.operationId, { repositoryId: identity.id, controller })
+    try {
+      return await this.mutateExclusive(request, identity, controller?.signal, authorize)
+    } finally {
+      if (controller && this.cancels.get(request.operationId)?.controller === controller) this.cancels.delete(request.operationId)
+    }
+  }
+
+  /**
+   * Cancels a running push or fetch of this repository. It only aborts the operation's
+   * own registered git child (see ScProcess); the operation then records failed if
+   * nothing was sent yet, or unknown if the write had started. Returns false when
+   * there is nothing to cancel (already finished, another repository, or not cancellable).
+   */
+  async cancel(ref: ScRef & { operationId: string }): Promise<boolean> {
+    await this.identity(ref)
+    const entry = this.cancels.get(ref.operationId)
+    if (!entry || entry.repositoryId !== ref.repositoryId) return false
+    entry.controller.abort()
+    return true
+  }
+
+  private async mutateExclusive(request: ScMutation & { operationId: string }, identity: GitIdentity, signal: AbortSignal | undefined, authorize?: () => void): Promise<ScOperation> {
     return this.exclusive(identity, async () => {
       const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex')
       const prior = await this.store.get(request.operationId)
@@ -340,7 +367,8 @@ export class SourceControlService {
         github: this.github,
         store: this.store,
         expected: (target, expected) => this.expected(target, expected),
-        githubScope: (target, repository, session) => this.githubScope(target, repository, session)
+        githubScope: (target, repository, session) => this.githubScope(target, repository, session),
+        ...(signal ? { signal } : {})
       }, authorize)
     })
   }

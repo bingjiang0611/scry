@@ -5,7 +5,8 @@ import type { SessionMeta } from '../env'
 import { relTime } from '../format'
 import { backgroundWorkStatus } from '../background-work-status'
 import { composerDraftKey, type ComposerDraftStore } from '../composer-drafts'
-import { SIDEBAR_SESSION_COPY as copy } from '../constants/copy'
+import { SESSION_SAVE_COPY, SIDEBAR_SESSION_COPY as copy } from '../constants/copy'
+import type { SessionSaveState } from '../session-save-state'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
 import { SessionDraftIndicator } from './SessionDraftIndicator'
@@ -27,7 +28,8 @@ export const SessionRow = memo(function SessionRow({
   onPick,
   onTogglePin,
   onArchive,
-  onMenu
+  onMenu,
+  saveState
 }: {
   session: SessionMeta
   // Invalidate memo on parent refreshes; local hover/focus renders also refresh the age below.
@@ -46,6 +48,7 @@ export const SessionRow = memo(function SessionRow({
   onTogglePin: (cwd: string, session: SessionMeta) => void
   onArchive: (cwd: string, session: SessionMeta) => void
   onMenu?: (event: ReactMouseEvent<HTMLButtonElement>, cwd: string, session: SessionMeta) => void
+  saveState?: SessionSaveState
 }) {
   const pinned = Boolean(session.pinnedAt)
   const status = running ? backgroundWorkStatus(backgroundWork) : undefined
@@ -90,7 +93,12 @@ export const SessionRow = memo(function SessionRow({
           <span className="sb-sesstext">{session.preview || copy.noPreview}</span>
         </span>
         <span className="sb-session-meta">
-          {!waitingForAnswer && <span className="sb-sesstime">{relTime(session.mtime)}</span>}
+          {/* Saving / Saved take the time's fixed place; the change itself is never covered. */}
+          {!waitingForAnswer && (saveState?.status === 'saving' || saveState?.status === 'saved'
+            ? <span className="sb-sesstime sb-sess-save" data-save={saveState.status} role="status">
+              {saveState.status === 'saving' ? SESSION_SAVE_COPY.saving : <><Icon name="check" /> {SESSION_SAVE_COPY.saved}</>}
+            </span>
+            : <span className="sb-sesstime">{relTime(session.mtime)}</span>)}
           {unread && !waitingForAnswer && <span className="sb-unread" role="status" aria-label={copy.unread} title={copy.unread} />}
           {waitingForAnswer && (
             <span className="sb-question-pending" role="status" aria-label={copy.waiting} title={copy.waiting}>
@@ -102,6 +110,12 @@ export const SessionRow = memo(function SessionRow({
         {running && !waitingForAnswer && <span className="sb-running" role="status" data-background-waiting={status?.waiting || undefined} aria-label={status?.label ?? copy.running} title={status?.label ?? copy.running} />}
       </button>
       {hover.tooltip}
+      {saveState?.status === 'failed' && (
+        <div className="sb-sess-save-error" role="alert">
+          <span>{SESSION_SAVE_COPY.failed(saveState.action, saveState.reason)}</span>
+          <button type="button" onClick={() => (saveState.action === 'pin' ? onTogglePin : onArchive)(cwd, session)}>{SESSION_SAVE_COPY.retry}</button>
+        </div>
+      )}
       <span className="sb-sess-acts" onMouseEnter={hover.dismiss} onFocus={hover.dismiss}>
         {onMenu && <button type="button" className="sb-act" aria-haspopup="menu"
           title={copy.actions} aria-label={copy.sessionActions(session.preview)}

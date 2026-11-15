@@ -89,6 +89,7 @@ export interface AppShellProps {
   theme: import('./theme').AppTheme
   changeTheme: (theme: import('./theme').AppTheme) => void
   archiveUndo: { ref: SessionRef; preview: string } | null
+  sessionSaves: ReadonlyMap<string, import('./session-save-state').SessionSaveState>
   setArchiveUndo: (value: { ref: SessionRef; preview: string } | null) => void
   workspace: ReturnType<typeof useWorkspaceState>
   runningRunIds: ReadonlySet<string>

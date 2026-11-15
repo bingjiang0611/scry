@@ -8,6 +8,8 @@ import { forgetRemoteCatalog, refreshRemoteCatalog, useRemoteCatalogs } from '..
 import { bridge, ClientPairForm } from './DesktopRemote'
 import { HostStateDot, hostState } from './LocationPicker'
 import { ModalFrame, requestModalClose } from './Modals'
+import { useAsyncAction } from '../hooks/useAsyncAction'
+import { BusyLabel } from './primitives/BusyLabel'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
@@ -75,6 +77,8 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
   )
 }
 
+type HostAction = 'connect' | 'finishPairing' | 'disconnect' | 'forget'
+
 function HostRow({
   connection,
   readError,
@@ -92,15 +96,18 @@ function HostRow({
 }) {
   const state = hostState(connection, readError, refreshing)
   const entry = useRemoteCatalogs().get(connection.id)
-  const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const run = async (action: () => Promise<void>): Promise<void> => {
-    setBusy(true); setError(null)
-    try { await action(); await refreshDesktopConnections() }
-    catch (reason) { setError(errorText(reason)) }
-    finally { setBusy(false) }
-  }
+  // SSH round trips take seconds: the pressed button shows it (after the shared delay),
+  // a second press is ignored, and a failure stays on this row with a retry.
+  const action = useAsyncAction<HostAction>(errorText)
+  const busy = action.pending !== null
+  const run = (key: HostAction, work: () => Promise<void>): void =>
+    action.run(key, async () => { await work(); await refreshDesktopConnections() })
+  const pressed = (key: HostAction) => ({
+    'aria-busy': action.pending === key,
+    'aria-disabled': busy,
+    disabled: busy && action.pending !== key
+  })
   const api = bridge()
   const detailsId = useId()
   return (
@@ -116,23 +123,27 @@ function HostRow({
         <span className="hosts-state" data-state={state}><HostStateDot state={state} />{desktopConnectionLabel(connection, readError, refreshing)}</span>
         <span className="hosts-row-actions">
           {connection.state === 'disconnected' && (
-            <Button disabled={busy} onClick={() => void run(async () => {
+            <Button {...pressed('connect')} onClick={() => run('connect', async () => {
               await api.connect(connection.id)
               await refreshRemoteCatalog(connection.id)
-            })}>{copy.connect}</Button>
+            })}><BusyLabel busy={action.showBusy && action.pending === 'connect'}>{copy.connect}</BusyLabel></Button>
           )}
           {connection.state === 'pairing' && (
-            <Button disabled={busy} onClick={() => void run(async () => { await api.finishPairing(connection.id) })}>{copy.finishPairing}</Button>
+            <Button {...pressed('finishPairing')} onClick={() => run('finishPairing', async () => { await api.finishPairing(connection.id) })}><BusyLabel busy={action.showBusy && action.pending === 'finishPairing'}>{copy.finishPairing}</BusyLabel></Button>
           )}
           {connection.state === 'connected' && (
-            <Button disabled={busy} onClick={() => void run(() => api.disconnect(connection.id))}>{copy.disconnect}</Button>
+            <Button {...pressed('disconnect')} onClick={() => run('disconnect', () => api.disconnect(connection.id))}><BusyLabel busy={action.showBusy && action.pending === 'disconnect'}>{copy.disconnect}</BusyLabel></Button>
           )}
           <button type="button" className="hosts-row-expand" aria-label={copy.hostDetails(expanded, connection.label)} onClick={onToggle}>
             <Icon name={expanded ? 'chevronUp' : 'chevronDown'} />
           </button>
         </span>
       </div>
-      {error && <p className="hosts-error" role="alert">{error}</p>}
+      {action.error && (
+        <Notice tone="bad" className="hosts-error" role="alert" action={<Button size="sm" onClick={action.retry}>{copy.retry}</Button>}>
+          {action.error.text}
+        </Notice>
+      )}
       {expanded && (
         <div className="hosts-row-details" id={detailsId}>
           <div className="hosts-address-summary">
@@ -158,10 +169,10 @@ function HostRow({
             </ul>
           )}
           <div className="hosts-forget">
-            <Button variant="danger" disabled={busy} onClick={() => void run(async () => {
+            <Button variant="danger" {...pressed('forget')} onClick={() => run('forget', async () => {
               await api.forget(connection.id)
               forgetRemoteCatalog(connection.id)
-            })}>{copy.removeHost}</Button>
+            })}><BusyLabel busy={action.showBusy && action.pending === 'forget'}>{copy.removeHost}</BusyLabel></Button>
             <span className="hosts-muted">{copy.removeHostEffect}</span>
           </div>
         </div>

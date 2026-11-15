@@ -3,7 +3,7 @@ import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
-import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
@@ -130,7 +130,7 @@ export function CapabilitiesModal({
             disabled={loadingMcp || authenticationInProgress}
             aria-label="刷新 MCP 运行状态"
           >
-            {showMcpLoading && mcpRefreshing ? <span className="spinner" /> : <Icon name="refresh" />}
+            <TurningIcon busy={mcpRefreshing} />
             <span>{showMcpLoading && mcpRefreshing ? LOADING_COPY.detecting : LOADING_COPY.refresh}</span>
           </button>
         )}

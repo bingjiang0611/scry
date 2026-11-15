@@ -130,10 +130,6 @@
   opacity: 0.45;
   cursor: default;
 }
-.usage-refresh.is-loading svg {
-  animation: usage-spin 900ms linear infinite;
-}
-
 .usage-inline-error {
   margin-top: 20px;
   color: var(--warn);
@@ -725,13 +721,9 @@
     font-size: var(--text-2xl);
   }
 }
-@keyframes usage-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .usage-refresh.is-loading svg {
-    animation: none;
-  }
+
+/* Previous range kept on screen while the new one loads: dimmed, never presented as current. */
+.usage-page[data-stale-range] > :not(.usage-header) {
+  opacity: 0.5;
+  transition: opacity var(--duration-sm) var(--ease-out);
 }

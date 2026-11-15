@@ -16,7 +16,8 @@ describe('terminal history evidence', () => {
     const html = renderToStaticMarkup(createElement(TerminalHistory, { cwd: '/repo', canOpen: true, onOpen: () => {}, onClose: () => {} }))
     expect(html).toContain('role="dialog"')
     expect(html).toContain('aria-modal="true"')
-    expect(html).toContain('正在读取录制索引')
+    // The first 300ms show no separate loader; the list is marked busy, never empty.
+    expect(html).toContain('class="arch-list" aria-busy="true"')
     expect(html).toContain('原文可能含密钥')
     expect(html).not.toContain('本页没有可列出的录制')
     expect(html).toContain('不恢复 Shell')

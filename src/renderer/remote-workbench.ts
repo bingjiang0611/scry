@@ -26,6 +26,7 @@ export function createRemoteWorkbench(api: DesktopRemoteAPI, connectionId: strin
     operations: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'operations', args: [request] }),
     reconcile: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'reconcile', args: [request] }),
     acknowledge: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'acknowledge', args: [request] }),
+    cancel: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'cancel', args: [request] }),
     pullRequests: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'pullRequests', args: [request] }),
     pullRequest: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'pullRequest', args: [request] }),
     saveCommitDraft: request => api.workbench(connectionId, { surface: 'sourceControl', cwd, method: 'saveCommitDraft', args: [request] }),

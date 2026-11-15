@@ -4,6 +4,7 @@ import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { LoadingStatus } from './LoadingStatus'
 import type { UsageAnalytics, UsageAnalyticsBreakdownRow, UsageAnalyticsRangeDays } from '@shared/trace'
 import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ANALYTICS_COPY as copy } from '../constants/copy'
 import { formatAggregateTokens, formatCost, formatDay, formatKnownTokens, formatShare, metricValue, metricEvidence, modelBreakdownRows, tokensOf, ProviderMark, providerLabel, displayCostEvidence, tokenEvidence, tokenComplete, isApproximateCost, usdFormatter, ranges, UsageChart, type BreakdownMode, type ChartMetric } from './AnalyticsChart'
 import { Segmented } from './primitives/Segmented'
@@ -39,6 +40,9 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
     )
   }
 
+  // A range switch keeps the last answer on screen until the new one lands. It is
+  // the previous range's data, so it is dimmed and the period line says so.
+  const staleRange = analytics.rangeDays !== rangeDays
   const totals = analytics.totals
   const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0 || row.qoderCredits)
   const costProviders = providers.filter((row) => row.costUsd != null).sort((a, b) => b.costUsd! - a.costUsd!)
@@ -67,7 +71,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
   ]
 
   return (
-    <main className="usage-page">
+    <main className="usage-page" aria-busy={loading} data-stale-range={staleRange || undefined}>
       <div className="usage-shell">
         <header className="usage-header">
           <div className="usage-title-group">
@@ -78,7 +82,11 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
             )}
             <div>
               <h1>{copy.title}</h1>
-              <p title={copy.period(analytics.fromDay, analytics.toDay)}>{copy.periodDisplay(formatDay(analytics.fromDay), formatDay(analytics.toDay))}</p>
+              <p title={copy.period(analytics.fromDay, analytics.toDay)} role={staleRange ? 'status' : undefined}>
+                {staleRange
+                  ? copy.staleRange(rangeDays, formatDay(analytics.fromDay), formatDay(analytics.toDay))
+                  : copy.periodDisplay(formatDay(analytics.fromDay), formatDay(analytics.toDay))}
+              </p>
             </div>
           </div>
           <div className="usage-actions">
@@ -89,8 +97,8 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
               onChange={onRangeChange}
               options={ranges.map(days => ({ value: days, label: copy.range(days) }))}
             />
-            <button className={`usage-refresh ${showLoading ? 'is-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-label={copy.refresh} title={copy.refresh}>
-              <Icon name="refresh" />
+            <button className="usage-refresh" type="button" onClick={() => { if (!loading) onRefresh() }} aria-disabled={loading} aria-busy={loading} aria-label={copy.refresh} title={copy.refresh}>
+              <TurningIcon busy={loading && !staleRange} />
             </button>
           </div>
         </header>

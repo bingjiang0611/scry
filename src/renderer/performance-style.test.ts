@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { readCssManifest } from './css-test-reader'
@@ -36,6 +37,10 @@ describe('idle renderer paint budget', () => {
   it('keeps skeleton motion compositor-only', () => {
     expect(declaration(styles, '.sk-line::after')).toContain('animation: skeleton-shimmer')
     expect(declaration(styles, '@keyframes skeleton-shimmer')).toContain('transform: translateX')
+    const rows = readFileSync(join(__dirname, 'components/primitives/skeleton.css'), 'utf8')
+    expect(declaration(rows, '.sk-shape::after')).toContain('animation: sk-band')
+    expect(rows).not.toMatch(/background-position|background-attachment/)
+    expect(rows).toMatch(/@keyframes sk-band\s*\{\s*from\s*\{\s*transform: translateX/)
   })
 
   it('shows running sessions as neutral rotating rings', () => {

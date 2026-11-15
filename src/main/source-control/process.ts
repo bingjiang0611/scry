@@ -10,6 +10,9 @@ export function scMessage(error: unknown): string {
     .slice(0, 3000)
 }
 
+export const CANCELLED_BEFORE_START = '已取消；这一步没有执行'
+export const CANCELLED_WHILE_RUNNING = '已取消；命令在运行中被中止，执行结果需要核查'
+
 export class ScCommandError extends Error {
   constructor(
     message: string,
@@ -36,9 +39,12 @@ export class ScProcess {
       input?: string
       /** Host-owned temporary index for checkout attribute validation; never renderer input. */
       gitIndexFile?: string
+      /** A person's cancel. Stops only this registered child's own group, like a timeout. */
+      signal?: AbortSignal
     } = {}
   ): Promise<string> {
     if (this.closed) throw new Error('源代码管理已关闭')
+    if (options.signal?.aborted) throw new ScCommandError(CANCELLED_BEFORE_START, null, true)
     const inherited = this.environment()
     const env = sanitizeProviderEnv(
       Object.fromEntries(
@@ -104,6 +110,8 @@ export class ScProcess {
       }
       this.children.set(child, stop)
       const timer = setTimeout(() => stop('命令超时，执行结果需要核查'), options.timeout ?? 15_000)
+      const onAbort = (): void => stop(CANCELLED_WHILE_RUNNING)
+      options.signal?.addEventListener('abort', onAbort, { once: true })
       child.stdout.on('data', (chunk: Buffer) => {
         if (stdout.length + chunk.length > (options.maxBytes ?? 8 * 1024 * 1024))
           stop('命令输出超过上限，不能将部分数据视为完整结果')
@@ -117,6 +125,7 @@ export class ScProcess {
       })
       child.on('close', (code) => {
         clearTimeout(timer)
+        options.signal?.removeEventListener('abort', onAbort)
         this.children.delete(child)
         if (spawnError) reject(spawnError)
         else if (interruption || code !== 0)

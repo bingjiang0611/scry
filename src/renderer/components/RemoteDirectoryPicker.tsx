@@ -8,8 +8,9 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
-import { LoadingStatus } from './LoadingStatus'
 import { Button } from './primitives/Button'
+import { BusyLabel } from './primitives/BusyLabel'
+import { SkeletonRows } from './primitives/Skeleton'
 
 export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose }: {
   connection: DesktopRemoteConnection
@@ -89,15 +90,18 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
         </div>
         {!connected && <p role="alert" className="desktop-remote__error">{connection.label} 未连接或连接状态未知；不会改用本机选择或执行。</p>}
         {error && <p role="alert" className="desktop-remote__error">{error}</p>}
-        {showLoading && <LoadingStatus title={LOADING_COPY.reading} />}
+        {/* The list has a fixed height; another folder's rows are shapes in that box
+            (they belong to the folder being read), so nothing above or below moves. */}
         <div className="remote-directory-list" role="group" aria-label={`${connection.label} 的文件夹`}>
+          {!page && showLoading && <SkeletonRows rows={6} avatar={14} rowHeight={30} label={LOADING_COPY.reading} />}
           {page?.directories.map(directory => (
             <button type="button" key={`${directory.label}:${directory.path}`} className="mitem remote-directory-entry" title={directory.path} data-remote-directory={directory.path} disabled={busy || !connected} onClick={() => void browse(directory.path)}>
               <Icon name="folder" /><span>{directory.label}</span>
             </button>
           ))}
           {!loading && page?.total === 0 && <p className="hosts-muted">此目录没有子文件夹，可以直接选择此目录。</p>}
-          {page?.hasMore && <Button disabled={busy || !connected} onClick={() => void browse(page.current.path, page)}>加载更多文件夹</Button>}
+          {page?.hasMore && <Button disabled={!connected || (busy && !loading)} aria-busy={loading} aria-disabled={loading}
+            onClick={() => { if (!loading) void browse(page.current.path, page) }}><BusyLabel busy={showLoading}>加载更多文件夹</BusyLabel></Button>}
         </div>
         <div className="remote-directory-actions">
           <Button disabled={selecting} onClick={() => requestModalClose()}>取消</Button>

@@ -152,10 +152,10 @@ export async function exerciseDiffWorkbench({ target, git, click, wait, evaluate
   await click('[data-session-surface-current="true"] button[aria-label="添加 Surface"]')
   await click('.surface-menu .menu-item', 'Diff')
   await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'branch' && Boolean(document.querySelector('file-tree-container')?.shadowRoot)`), 'reopen through existing right-side entry')
-  await wait(() => evaluate(`!document.querySelector('.diff-refresh-state')`), 'settled reopened snapshot')
+  await wait(() => evaluate(`!document.querySelector('.diff-inspector [aria-busy="true"]')`), 'settled reopened snapshot')
   await screenshot('diff-workbench-sidebar')
   writeFileSync(path, contextFixture(true))
   await click('.diff-inspector-actions button[aria-label="刷新工作区差异"]')
-  await wait(() => evaluate(`!document.querySelector('.diff-refresh-state')`), 'restore clean working file')
+  await wait(() => evaluate(`!document.querySelector('.diff-inspector [aria-busy="true"]')`), 'restore clean working file')
   console.log(JSON.stringify({ test: 'real diff workbench', commit, geometry, immutableHistory: true, splitLineNumbers: pair.map(item => item.number), contextFromCapturedPatch: true, sidebarResize: true }))
 }
