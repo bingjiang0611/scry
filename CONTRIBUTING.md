@@ -1,6 +1,6 @@
 # Contributing to Scry
 
-Scry 是 local-first 的 AI coding agent 观测与治理工具，**不是安全沙箱**。贡献规则以本文为准；工程与安全合同见 [AGENTS.md](AGENTS.md)，验证范围见[验证与交付](docs/agent/verification.md)。
+Scry 是 local-first 的 AI coding agent 观测与治理工具，**不是安全沙箱**。贡献规则以本文为准；工程与安全合同见 [AGENTS.md](.agents/AGENTS.md)，验证范围见[验证与交付](docs/agent/verification.md)。
 
 ## 问题与方向批准
 
@@ -38,7 +38,7 @@ Scry 是 local-first 的 AI coding agent 观测与治理工具，**不是安全�
 - 放宽性能门限、删减指标、弱化测试或静态诊断。
 - Actions 权限、第三方服务权限、发布、签名和分发策略。
 
-这些决定应链接在 PR 中；禁止静默改变 [AGENTS.md](AGENTS.md) 的明确合同。新漏洞请勿在公开 Issue 中披露可利用细节，先通过 GitHub 私有漏洞报告功能（若已启用）或维护者提供的私有渠道联系；没有私有渠道时先请求建立渠道，不公开秘密。
+这些决定应链接在 PR 中；禁止静默改变 [AGENTS.md](.agents/AGENTS.md) 的明确合同。新漏洞请勿在公开 Issue 中披露可利用细节，先通过 GitHub 私有漏洞报告功能（若已启用）或维护者提供的私有渠道联系；没有私有渠道时先请求建立渠道，不公开秘密。
 
 ## 分诊与深入评审
 
@@ -60,7 +60,7 @@ Scry 是 local-first 的 AI coding agent 观测与治理工具，**不是安全�
 
 常规交付使用任务分支和 PR，不直接推送 main。一个 PR 只包含本次授权改动，不混入本地已有的未推送提交。标题使用简短的 conventional commit 格式，例如 `fix(recorder): preserve unavailable usage evidence`。
 
-Agent 完成验证和自查后默认推送任务分支并创建 PR；合并须维护者明确要求。维护者身份遵守 [AGENTS.md](AGENTS.md)；外部贡献者保留自己的公开身份。合并由维护者操作；不以分诊或机器人 Approval 自动合并。推荐 Squash；发布和安装仍各自遵守现有授权与验证流程。
+Agent 完成验证和自查后默认推送任务分支并创建 PR；合并须维护者明确要求。维护者身份遵守 [AGENTS.md](.agents/AGENTS.md)；外部贡献者保留自己的公开身份。合并由维护者操作；不以分诊或机器人 Approval 自动合并。推荐 Squash；发布和安装仍各自遵守现有授权与验证流程。
 
 ### 减少 CI 排队
 

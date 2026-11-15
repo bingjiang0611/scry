@@ -53,7 +53,7 @@ Scry 不只是聊天外壳，也不是安全沙箱。它把本机 Agent 的运�
 - 采集的对话与工具输出默认保留原文，可能含敏感信息。本机备份、导出和已授权远程设备可能接触这些内容；不得承诺自动脱敏或绝对隐私。
 - 远程目录与文件操作必须遵守对应端点的宿主授权边界。浏览不等于授权，桌面专用目录选择能力也不能用于放宽手机原有项目根范围。
 
-详细合同以 `AGENTS.md`、相应领域文档和生产实现为准。本文件不改写权限策略，也不将文档中的能力描述视为当前版本端到端验收结果。
+详细合同以 `.agents/AGENTS.md`、相应领域文档和生产实现为准。本文件不改写权限策略，也不将文档中的能力描述视为当前版本端到端验收结果。
 
 ## Brand Commitments
 
@@ -64,7 +64,7 @@ Scry 不只是聊天外壳，也不是安全沙箱。它把本机 Agent 的运�
 ## Evidence on Hand
 
 - `README.md`：产品定位、Provider 状态、本地数据与分发边界。
-- `AGENTS.md`：证据诚实、权限、trust、renderer 隔离及验收合同。
+- `.agents/AGENTS.md`：证据诚实、权限、trust、renderer 隔离及验收合同。
 - `docs/agent/architecture.md`：术语、架构和代码定位。
 - `src/renderer/`：桌面端现有实现；涉及文案优先复用 `src/renderer/constants/copy.ts` 与 `src/shared/constants/copy.ts`。
 - `apps/ios/README.md`、`apps/ios/ScryRemote/`：原生配套端的实现、合同与验证记录。ScryRemoteG0 是隔离验证应用，不是产品。

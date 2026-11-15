@@ -1,6 +1,6 @@
 # scry · verification
 
-按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [AGENTS.md](../../AGENTS.md)。
+按任务读取相关小节，不要求每次全文读取。代码块与行内路径均相对仓库根；命令执行前核对实际文件和 package scripts。当前根指南见 [AGENTS.md](../../.agents/AGENTS.md)。
 
 ## 测试维护纪律
 
