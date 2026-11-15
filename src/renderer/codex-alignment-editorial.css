@@ -24,7 +24,7 @@
   .overview-metric > small,
   .pinned-summary-section-title
 ) {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 680;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -220,7 +220,7 @@
   margin-bottom: 4px;
   padding-bottom: 4px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.015em;
 }
 
@@ -266,7 +266,7 @@
 }
 
 .chat-body .tool-row .name {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 650;
 }
 
@@ -444,12 +444,12 @@
 
 .overview-panel-title strong {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
 }
 
 .overview-panel-title p {
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .overview-dossier .ov-scroll {
@@ -484,8 +484,8 @@
 }
 
 .overview-verdict-line strong {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0;
 }
 
@@ -511,23 +511,23 @@
 }
 
 .overview-dossier .overview-metric > span {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
 
 .overview-metric > strong {
   margin-block: 4px 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
 
 .overview-dossier .overview-metric.lead > strong {
   color: var(--fg);
-  font-size: 24px;
-  font-weight: 600;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.02em;
 }
 
@@ -570,7 +570,7 @@
   margin-bottom: 4px;
   color: var(--dim2);
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -592,7 +592,7 @@
 }
 
 .overview-dossier .turn-call-heading strong {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 680;
   letter-spacing: -0.02em;
 }

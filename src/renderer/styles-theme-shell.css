@@ -59,8 +59,35 @@
   --diff-del-fg: #f2aaa7;
   --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --text-supporting-size: 12px;
-  --text-compact-size: 11px;
+  /* Type scale: the only font sizes components may use. Off-scale sizes are
+     tracked debt in design-system-baseline.json and may only shrink. */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-supporting-size: var(--text-sm);
+  --text-compact-size: var(--text-xs);
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  /* Spacing scale on a 4px grid. Nest by semantics: a container's inset is one
+     step larger than the gap between its children. 2px is reserved for
+     optical alignment; 1px only for hairlines. */
+  --space-0_5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
   /* Nested radius stack: 20 - 8 = 12, 12 - 4 = 8, 8 - 4 = 4. */
   --r-xs: 4px;
   --r-sm: 8px;
@@ -182,7 +209,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.5 var(--font-ui);
+  font: var(--text-md)/1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "ss01", "cv11";
   background-image: none;

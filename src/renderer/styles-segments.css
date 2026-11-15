@@ -19,7 +19,7 @@
   color: var(--dim2);
   padding: 60px 32px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .seg-ribbon {
   padding: 18px 0 14px;
@@ -30,7 +30,7 @@
   margin: 0 auto;
 }
 .seg-ribbon h2 {
-  font: 600 17px/1 var(--font-ui);
+  font: var(--weight-semibold) 17px/1 var(--font-ui);
   letter-spacing: -0.01em;
   margin-bottom: 4px;
 }
@@ -52,7 +52,7 @@
   justify-content: center;
   font: 10.5px/1 var(--font-mono);
   color: rgba(0, 0, 0, 0.6);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.04em;
   white-space: nowrap;
   overflow: hidden;
@@ -78,7 +78,7 @@
   margin-top: 10px;
   display: flex;
   flex-wrap: wrap;
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim);
 }
 .seg-legend .item {
@@ -107,13 +107,13 @@
   padding: 14px 16px;
 }
 .seg-compare .lbl {
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .seg-compare .val {
-  font: 600 19px/1.1 var(--font-mono);
+  font: var(--weight-semibold) 19px/1.1 var(--font-mono);
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
 }
@@ -160,13 +160,13 @@
   border-radius: var(--r-xs);
 }
 .seg-l h3 {
-  font: 600 16px/1.2 var(--font-mono);
+  font: var(--weight-semibold) var(--text-lg)/1.2 var(--font-mono);
   letter-spacing: -0.005em;
   margin-bottom: 6px;
   word-break: break-word;
 }
 .seg-l .when {
-  font: 11px/1.4 var(--font-mono);
+  font: var(--text-xs)/1.4 var(--font-mono);
   color: var(--dim);
   margin-top: 6px;
 }
@@ -181,7 +181,7 @@
   gap: 14px;
 }
 .seg-summary {
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--fg);
   line-height: 1.55;
 }
@@ -201,7 +201,7 @@
   background: var(--panel2);
   border: 1px solid var(--border3);
   border-radius: var(--r-xs);
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim);
 }
 .seg-act b {
@@ -209,7 +209,7 @@
 }
 .seg-act .op {
   color: var(--read);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 .seg-act .op.w {
   color: var(--write);
@@ -225,13 +225,13 @@
   gap: 12px;
 }
 .seg-r .m-stat .lbl {
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   color: var(--dim2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .seg-r .m-stat .val {
-  font: 600 17px/1.2 var(--font-mono);
+  font: var(--weight-semibold) 17px/1.2 var(--font-mono);
   color: var(--fg);
   margin-top: 4px;
   font-variant-numeric: tabular-nums;

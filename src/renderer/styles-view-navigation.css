@@ -15,7 +15,7 @@
 }
 .vtab {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1;
   color: var(--dim);
   display: flex;

@@ -66,7 +66,7 @@
   align-items: center;
   margin-bottom: 2px;
   color: var(--dim2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 550;
   letter-spacing: 0.06em;
 }
@@ -117,7 +117,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -128,7 +128,7 @@
   align-items: center;
   gap: 7px;
   color: var(--dim2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 
@@ -162,7 +162,7 @@
   corner-shape: round;
   background: var(--surface-hover);
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .pinned-summary-divider {

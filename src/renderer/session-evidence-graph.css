@@ -9,7 +9,7 @@
   min-width: 0;
   padding: 0 clamp(18px, 2.4cqi, 30px) 18px;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .evidence-graph .graph-evidence-header {
@@ -20,10 +20,10 @@
   padding: 24px 0 18px;
 }
 
-.evidence-graph .graph-evidence-header > div > span { font-size: 10px; letter-spacing: 0.14em; }
+.evidence-graph .graph-evidence-header > div > span { font-size: var(--text-2xs); letter-spacing: 0.14em; }
 .evidence-graph .graph-evidence-header h2 { margin: 9px 0 5px; font-size: clamp(24px, 2.8cqi, 32px); }
 .evidence-graph .graph-evidence-header p { font-size: 12.5px; line-height: 1.5; }
-.evidence-graph .graph-evidence-header > em { padding: 8px 10px; font-size: 10px; }
+.evidence-graph .graph-evidence-header > em { padding: 8px 10px; font-size: var(--text-2xs); }
 
 .evidence-graph .graph-summary-strip {
   grid-template-columns: 1.2fr repeat(4, minmax(78px, 0.7fr));
@@ -39,9 +39,9 @@
   background: transparent;
 }
 
-.evidence-graph .graph-summary-strip small { font-size: 10px; }
+.evidence-graph .graph-summary-strip small { font-size: var(--text-2xs); }
 .evidence-graph .graph-summary-strip b { font-size: 15px; }
-.evidence-graph .graph-summary-strip em { font-size: 10px; line-height: 1.35; }
+.evidence-graph .graph-summary-strip em { font-size: var(--text-2xs); line-height: 1.35; }
 
 .graph-session-wall {
   min-width: 0;
@@ -72,9 +72,9 @@
   border: 0;
 }
 
-.graph-session-wall .graph-lane-head .num { color: var(--dim2); font-size: 10px; }
-.graph-session-wall .graph-lane-head .preview { font-size: 12px; }
-.graph-session-wall .graph-lane-head .meta { gap: 8px; font-size: 10px; }
+.graph-session-wall .graph-lane-head .num { color: var(--dim2); font-size: var(--text-2xs); }
+.graph-session-wall .graph-lane-head .preview { font-size: var(--text-sm); }
+.graph-session-wall .graph-lane-head .meta { gap: 8px; font-size: var(--text-2xs); }
 
 .graph-session-wall .graph-lane-track {
   min-width: max-content;
@@ -100,7 +100,7 @@
 }
 
 .graph-session-wall .graph-llm-node b { font-size: 11.5px; }
-.graph-session-wall .graph-llm-node small { font-size: 10px; }
+.graph-session-wall .graph-llm-node small { font-size: var(--text-2xs); }
 .graph-session-wall .graph-call-run { align-items: center; gap: 12px; }
 .graph-session-wall .graph-call-cluster { width: auto; flex: none; display: flex; align-items: center; gap: 12px; }
 
@@ -130,11 +130,11 @@
 }
 
 .graph-session-wall button.gline { position: relative; }
-.graph-session-wall button.gline .gtype { grid-column: 1 / -1; align-self: start; padding: 0; border: 0; background: transparent; font-size: 10px; }
+.graph-session-wall button.gline .gtype { grid-column: 1 / -1; align-self: start; padding: 0; border: 0; background: transparent; font-size: var(--text-2xs); }
 .graph-session-wall button.gline .gtype .st { width: 5px; height: 5px; }
 .graph-session-wall button.gline .gname { grid-column: 1 / -1; align-self: center; font-size: 11.5px; line-height: 1.35; }
 .graph-session-wall button.gline .gargs { display: none; }
-.graph-session-wall button.gline .gmeta { grid-column: 1 / -1; align-self: end; gap: 5px; font-size: 10px; }
+.graph-session-wall button.gline .gmeta { grid-column: 1 / -1; align-self: end; gap: 5px; font-size: var(--text-2xs); }
 .graph-session-wall button.gline .latbar { min-width: 26px; height: 2px; }
 .graph-session-wall button.gline .danger { max-width: 38px; overflow: hidden; text-overflow: ellipsis; }
 
@@ -161,7 +161,7 @@
 .graph-evidence-foot {
   padding: 13px 0 0;
   color: var(--dim3);
-  font: 10px/1.5 var(--font-mono);
+  font: var(--text-2xs)/1.5 var(--font-mono);
   letter-spacing: 0.06em;
 }
 
@@ -176,17 +176,17 @@
   padding: 14px 0 14px 12px;
   border-left: 2px solid var(--selected);
   color: var(--dim2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.55;
 }
 
 .evidence-graph .gp-h { padding: 15px 17px 13px; border-bottom-color: var(--border); }
-.evidence-graph .gp-h .breadcrumb { margin-bottom: 9px; font-size: 10px; }
-.evidence-graph .gp-h h2 { font-size: 16px; line-height: 1.3; }
-.evidence-graph .gp-h .subhead { margin-top: 7px; font-size: 11px; line-height: 1.45; }
+.evidence-graph .gp-h .breadcrumb { margin-bottom: 9px; font-size: var(--text-2xs); }
+.evidence-graph .gp-h h2 { font-size: var(--text-lg); line-height: 1.3; }
+.evidence-graph .gp-h .subhead { margin-top: 7px; font-size: var(--text-xs); line-height: 1.45; }
 .evidence-graph .gp-section { padding: 13px 17px; border-bottom-color: var(--border3); }
-.evidence-graph .gp-section h4 { font-size: 10px; letter-spacing: 0.1em; }
+.evidence-graph .gp-section h4 { font-size: var(--text-2xs); letter-spacing: 0.1em; }
 .evidence-graph .gp-section .kv { font-size: 11.5px; line-height: 1.45; }
-.evidence-graph .gp-section pre { max-height: 180px; font-size: 11px; line-height: 1.55; }
+.evidence-graph .gp-section pre { max-height: 180px; font-size: var(--text-xs); line-height: 1.55; }
 .evidence-graph .gp-actions { gap: 5px; }
-.evidence-graph .gp-actions .btn { min-height: 32px; padding-inline: 10px; font-size: 11px; }
+.evidence-graph .gp-actions .btn { min-height: 32px; padding-inline: 10px; font-size: var(--text-xs); }

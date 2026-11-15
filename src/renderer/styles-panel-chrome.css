@@ -45,7 +45,7 @@
   background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--panel3) 0);
   display: grid;
   place-items: center;
-  font: 650 12px/1 var(--font-mono);
+  font: 650 var(--text-sm)/1 var(--font-mono);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
@@ -88,7 +88,7 @@
 }
 .ctx-copy .sub {
   margin-top: 6px;
-  font: 11px/1.35 var(--font-mono);
+  font: var(--text-xs)/1.35 var(--font-mono);
   color: var(--dim2);
 }
 .who .mini {

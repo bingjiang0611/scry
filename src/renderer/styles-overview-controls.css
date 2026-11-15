@@ -231,7 +231,7 @@
 
 .settings-copy b {
   color: var(--fg);
-  font: 600 13px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-md)/1.2 var(--font-ui);
 }
 
 .settings-copy span {
@@ -334,7 +334,7 @@
 
 .theme-option-copy b {
   color: var(--fg);
-  font: 600 12.5px/1 var(--font-ui);
+  font: var(--weight-semibold) 12.5px/1 var(--font-ui);
 }
 
 .theme-option-copy small {

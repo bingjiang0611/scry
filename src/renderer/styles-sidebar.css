@@ -61,14 +61,14 @@ body.pane-resizing * {
   display: flex;
   align-items: center;
   gap: 9px;
-  font: 600 13px/1 var(--font-ui);
+  font: var(--weight-semibold) var(--text-md)/1 var(--font-ui);
   letter-spacing: -0.005em;
 }
 .sb-brand .name {
   color: var(--fg);
 }
 .sb-brand .ver {
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   margin-left: auto;
 }
 .sb-new {
@@ -95,7 +95,7 @@ body.pane-resizing * {
   background: none;
   border: 0;
   outline: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--fg);
 }
 .sb-search .ico {
@@ -112,7 +112,7 @@ body.pane-resizing * {
 .sb-empty {
   color: var(--dim2);
   padding: 8px 16px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .sb-list {
   flex: 1;
@@ -137,7 +137,7 @@ body.pane-resizing * {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--dim);
   background: transparent;
   border: 0;
@@ -207,7 +207,7 @@ body.pane-resizing * {
 }
 .sb-count {
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .sb-sesstime {
   flex: none;
@@ -260,7 +260,7 @@ body.pane-resizing * {
   text-align: left;
   border-radius: var(--r-xs);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .ctxitem:hover {
   background: var(--panel2);
@@ -297,7 +297,7 @@ body.pane-resizing * {
   background: var(--accent);
   color: var(--bg);
   border-color: var(--accent);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .btn.primary:hover {
   background: var(--accent);

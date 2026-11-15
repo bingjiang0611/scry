@@ -189,7 +189,7 @@
 
 .tb-agent-status {
   color: var(--dim2);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 @container main-pane (max-width: 560px) {

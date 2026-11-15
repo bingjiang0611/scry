@@ -155,7 +155,7 @@ button.turn-call-group:focus-visible {
 .turn-call-count {
   min-width: 1.5ch;
   color: var(--fg);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
 }
 .turn-call-toggle-icon {
@@ -203,7 +203,7 @@ button.turn-call-group:focus-visible {
 .turn-intervention-head small,
 .turn-intervention-source {
   color: var(--dim3);
-  font: 10px/1.4 var(--font-mono);
+  font: var(--text-2xs)/1.4 var(--font-mono);
 }
 .turn-intervention-answer {
   align-items: baseline;
@@ -238,18 +238,18 @@ button.turn-call-group:focus-visible {
 }
 .intervention-summary-grid span {
   color: var(--dim3);
-  font: 10px/1.25 var(--font-mono);
+  font: var(--text-2xs)/1.25 var(--font-mono);
 }
 .intervention-summary-grid b {
   color: var(--fg);
-  font: 650 13px/1.2 var(--font-mono);
+  font: 650 var(--text-md)/1.2 var(--font-mono);
 }
 .turn-call-detail.skill {
   border-color: rgba(246, 187, 92, 0.22);
 }
 .turn-call-detail-title {
   color: var(--dim3);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -361,7 +361,7 @@ button.turn-call-group:focus-visible {
   justify-content: space-between;
   gap: 8px;
   color: var(--dim3);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -371,7 +371,7 @@ button.turn-call-group:focus-visible {
   border-radius: var(--r-xs);
   background: var(--surface-subtle);
   color: var(--dim2);
-  font: 10px/1.2 var(--font-mono);
+  font: var(--text-2xs)/1.2 var(--font-mono);
   letter-spacing: 0;
   text-transform: none;
   cursor: pointer;
@@ -388,7 +388,7 @@ button.turn-call-group:focus-visible {
 }
 .turn-tool-error-field > span {
   color: var(--dim3);
-  font: 10px/1.2 var(--font-mono);
+  font: var(--text-2xs)/1.2 var(--font-mono);
 }
 .turn-tool-error-field.is-error > span {
   color: var(--bad);
@@ -464,7 +464,7 @@ button.turn-call-group:focus-visible {
 .turn-file-empty {
   padding: 10px;
   color: var(--dim3);
-  font: 11px/1.4 var(--font-mono);
+  font: var(--text-xs)/1.4 var(--font-mono);
 }
 .turn-call-timing {
   min-width: 0;
@@ -518,7 +518,7 @@ button.turn-call-group:focus-visible {
 }
 .turn-timing-metric > b {
   color: var(--fg);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

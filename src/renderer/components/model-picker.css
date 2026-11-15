@@ -28,7 +28,7 @@
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .runtime-composer .model-effort-grouped .model-effort-search::placeholder {
@@ -78,8 +78,8 @@
   gap: 12px;
   padding: 5px 10px;
   color: var(--dim);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   overflow-wrap: anywhere;
 }
 
@@ -87,7 +87,7 @@
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .runtime-composer .model-effort-grouped .model-effort-list button span {
@@ -104,5 +104,5 @@
   padding: 8px 10px 2px;
   border-top: 1px solid var(--border2);
   color: var(--dim);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }

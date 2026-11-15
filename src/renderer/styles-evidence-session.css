@@ -14,7 +14,7 @@
 
 .chat-session-evidence-gap b {
   color: var(--fg);
-  font: 620 14px/1.4 var(--font-ui);
+  font: 620 var(--text-base)/1.4 var(--font-ui);
 }
 
 .chat-session-evidence-gap span {
@@ -144,7 +144,7 @@
 
 .panel-section h4 {
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .overview-data-tabs {
@@ -277,5 +277,5 @@ button.turn-id.turn-call-open:focus-visible {
 }
 
 @container main-pane (max-width: 520px) {
-  .welcome-heading h1 { font-size: 24px; }
+  .welcome-heading h1 { font-size: var(--text-2xl); }
 }

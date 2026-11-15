@@ -17,7 +17,7 @@ describe('conversation reading hierarchy', () => {
   it('keeps a long workspace identity compact and quiet', () => {
     const title = declaration(shell, '.tb-thread b')
     expect(title).toContain('max-width: min(28vw, 240px)')
-    expect(title).toContain('font-weight: 500')
+    expect(title).toContain('font-weight: var(--weight-medium)')
     expect(declaration(shell, '.tb-thread .execution-location:not(.is-remote)')).toContain('border-color: transparent')
   })
 

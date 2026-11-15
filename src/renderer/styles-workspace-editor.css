@@ -51,7 +51,7 @@
 
 .workspace-title span {
   color: var(--dim3);
-  font: 10px/1.45 var(--font-mono);
+  font: var(--text-2xs)/1.45 var(--font-mono);
 }
 
 .iconbtn {
@@ -172,7 +172,7 @@
 .workspace-node-note,
 .workspace-empty {
   color: var(--dim3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .workspace-node-note {
@@ -238,7 +238,7 @@
   flex: 1;
   overflow: hidden;
   color: var(--dim3);
-  font: 10px/1.35 var(--font-mono);
+  font: var(--text-2xs)/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -309,7 +309,7 @@
   background: var(--bg);
   border: 0;
   outline: 0;
-  font: 12px/1.65 var(--font-mono);
+  font: var(--text-sm)/1.65 var(--font-mono);
   tab-size: 2;
 }
 
@@ -351,7 +351,7 @@
 
 .workspace-dialog h3 {
   margin: 0 0 10px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .workspace-dialog p {

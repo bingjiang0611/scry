@@ -15,14 +15,14 @@
   display: none;
 }
 .brand {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.3px;
 }
 .spacer {
   flex: 1;
 }
 .badge {
-  font-size: 12px;
+  font-size: var(--text-sm);
   padding: 3px 9px;
   border-radius: var(--r-xs);
   border: 1px solid var(--border2);
@@ -79,7 +79,7 @@
   display: block;
   margin-bottom: 10px;
   color: var(--dim2);
-  font: 600 12px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
 }
 .wc-hero h2 {
   margin: 0;
@@ -89,7 +89,7 @@
 }
 .wc-hero p {
   margin: 12px 0 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.6;
   max-width: 56ch;
 }
@@ -106,7 +106,7 @@
 .wc-status-label {
   padding-top: 2px;
   color: var(--dim2);
-  font: 600 11.5px/1.4 var(--font-ui);
+  font: var(--weight-semibold) 11.5px/1.4 var(--font-ui);
 }
 .wc-status {
   display: flex;
@@ -144,14 +144,14 @@
 }
 .wc-act-h h3 {
   margin: 0;
-  font: 600 12px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
   color: var(--dim);
   letter-spacing: 0;
   text-transform: none;
 }
 .wc-act-h > span {
   color: var(--dim3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .recent-list {
   display: flex;
@@ -211,11 +211,11 @@
   text-overflow: ellipsis;
 }
 .recent .sess {
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim);
 }
 .recent .when {
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim2);
   min-width: 56px;
   text-align: right;
@@ -231,7 +231,7 @@
   padding: 9px 13px;
 }
 .wc-suggest h3 {
-  font: 600 12px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
   color: var(--dim);
   letter-spacing: 0;
   text-transform: none;
@@ -250,7 +250,7 @@
   border: 0;
   border-bottom: 1px solid var(--border3);
   border-radius: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--dim);
   cursor: pointer;
   display: flex;

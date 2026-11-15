@@ -22,9 +22,9 @@
   border-bottom: 0;
 }
 
-.overview-dossier .overview-panel-title strong { font-size: 14px; }
+.overview-dossier .overview-panel-title strong { font-size: var(--text-base); }
 /* 证据标签是注释，不是标题：让「总览」单独占住面板头部的重量。 */
-.overview-dossier .overview-panel-title em { color: var(--dim2); font-size: 10px; letter-spacing: 0; text-transform: none; }
+.overview-dossier .overview-panel-title em { color: var(--dim2); font-size: var(--text-2xs); letter-spacing: 0; text-transform: none; }
 
 .overview-dossier .panel-tabs {
   height: 33px;
@@ -38,7 +38,7 @@
   padding: 0 5px;
   border: 0;
   color: var(--dim3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .overview-dossier .panel-tabs button.active { color: var(--fg); }
@@ -78,7 +78,7 @@
   justify-content: space-between;
   gap: 12px;
   color: var(--dim2);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
 }
 .overview-dossier .ctx-head b {
   color: var(--fg);
@@ -103,18 +103,18 @@
 .overview-dossier .ctx-gauge.warm .ctx-track > span { background: var(--warn); }
 .overview-dossier .ctx-gauge.hot .ctx-track > span { background: var(--bad); }
 .overview-dossier .ctx-gauge.empty .ctx-track > span { width: 0; }
-.overview-dossier .ctx-copy .lbl { font-size: 10px; letter-spacing: 0; }
+.overview-dossier .ctx-copy .lbl { font-size: var(--text-2xs); letter-spacing: 0; }
 /* 显示用量是主证据，窗口总量是参照；显示文本仍是「已用 / 窗口」。 */
 .overview-dossier .ctx-copy .v {
   margin-top: 0;
   color: var(--dim2);
-  font: 500 13px/1.2 var(--font-mono);
+  font: var(--weight-medium) var(--text-md)/1.2 var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
 .overview-dossier .ctx-copy .v b { color: var(--fg); font-weight: 650; }
 .overview-dossier .ctx-copy .v span { color: var(--dim2); }
-.overview-dossier .ctx-gauge.empty .ctx-copy .v { font-size: 11px; }
+.overview-dossier .ctx-gauge.empty .ctx-copy .v { font-size: var(--text-xs); }
 .overview-dossier .ctx-copy .sub { margin-top: 5px; font-size: 10.5px; line-height: 1.5; }
 
 .overview-dossier .overview-verdict,
@@ -131,8 +131,8 @@
 }
 
 .overview-dossier .overview-verdict-line > div { grid-template-columns: auto max-content; gap: 8px; }
-.overview-dossier .overview-verdict-line strong { font-size: 13px; font-weight: 620; }
-.overview-dossier .overview-verdict-line em { font-size: 10px; }
+.overview-dossier .overview-verdict-line strong { font-size: var(--text-md); font-weight: 620; }
+.overview-dossier .overview-verdict-line em { font-size: var(--text-2xs); }
 /* 状态点沿用面板标题的软光环写法，颜色随判词状态，不另造强调色。 */
 .overview-dossier .overview-verdict-line .sdot { width: 7px; }
 .overview-dossier .overview-verdict.ok .overview-verdict-line .sdot { box-shadow: 0 0 0 2px var(--ok-soft); }
@@ -167,7 +167,7 @@
   border-bottom: 1px solid var(--border3);
 }
 
-.overview-dossier .overview-metric > span { margin-bottom: 4px; font-size: 10px; }
+.overview-dossier .overview-metric > span { margin-bottom: 4px; font-size: var(--text-2xs); }
 .overview-dossier .overview-metric > strong {
   font-size: clamp(14px, 4.2cqi, 17px);
   letter-spacing: -0.025em;
@@ -208,12 +208,12 @@
   margin: 0;
   border-bottom: 0;
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.overview-dossier .panel-section h4 .more { font-size: 10px; letter-spacing: 0; text-transform: none; }
+.overview-dossier .panel-section h4 .more { font-size: var(--text-2xs); letter-spacing: 0; text-transform: none; }
 .overview-dossier .panel-section .filerow { min-height: 36px; padding: 6px 0; border-bottom: 0; font-size: 11.5px; }
 
 .overview-session-head {
@@ -234,7 +234,7 @@
 .overview-session-count {
   margin-left: 4px;
   color: var(--fg);
-  font: 600 14px/1.3 var(--font-mono);
+  font: var(--weight-semibold) var(--text-base)/1.3 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -290,7 +290,7 @@
   width: 22px;
   flex: 0 0 auto;
   color: var(--dim3);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -351,7 +351,7 @@
   border-radius: var(--r-xs);
   background: var(--panel2);
   color: var(--dim2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .overview-dossier .turn-call-main { gap: 6px; }
@@ -373,19 +373,19 @@
   border-color: var(--border3);
   border-radius: 0;
   background: var(--overview-surface);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .overview-dossier .turn-call-group.agent { grid-template-columns: minmax(0, 1fr) max-content; }
 .overview-dossier .turn-call-kind { overflow: hidden; padding: 0; border-radius: 0; background: transparent; text-overflow: ellipsis; white-space: nowrap; }
-.overview-dossier .turn-call-count { font-size: 10px; }
+.overview-dossier .turn-call-count { font-size: var(--text-2xs); }
 .overview-dossier .turn-call-toggle-icon .ico { width: 11px; height: 11px; }
 
 .overview-dossier .turn-call-detail-slot { gap: 5px; }
 .overview-dossier .turn-call-detail,
 .overview-dossier .turn-intervention,
 .overview-dossier .turn-file-footprint,
-.overview-dossier .turn-tool-error { border-radius: 0; font-size: 11px; }
+.overview-dossier .turn-tool-error { border-radius: 0; font-size: var(--text-xs); }
 
 .overview-dossier .hook-instance-index,
 .overview-dossier .hook-instance-source,
@@ -395,7 +395,7 @@
 .overview-dossier .hook-issue .hook-run-status,
 .overview-dossier .hook-issue-meta,
 .overview-dossier .hook-config-scope,
-.overview-dossier .hook-config-matcher { font-size: 10px; }
+.overview-dossier .hook-config-matcher { font-size: var(--text-2xs); }
 .overview-dossier .hook-evidence pre { font-size: 10.5px; line-height: 1.5; }
 
-.overview-dossier .psrc { margin: 10px 0 0; color: var(--dim3); font-size: 10px; line-height: 1.5; }
+.overview-dossier .psrc { margin: 10px 0 0; color: var(--dim3); font-size: var(--text-2xs); line-height: 1.5; }

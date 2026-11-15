@@ -18,7 +18,7 @@
   align-items: center;
   gap: 8px;
   color: var(--dim2);
-  font: 700 9.5px/1 var(--font-mono);
+  font: var(--weight-bold) 9.5px/1 var(--font-mono);
   letter-spacing: 0.13em;
 }
 
@@ -53,7 +53,7 @@
   max-width: 560px;
   margin: 0;
   color: var(--dim);
-  font: 13px/1.75 var(--font-ui);
+  font: var(--text-md)/1.75 var(--font-ui);
   text-wrap: pretty;
 }
 
@@ -89,7 +89,7 @@
 
 .welcome-provider-head b {
   color: var(--fg);
-  font: 650 13px/1.25 var(--font-ui);
+  font: 650 var(--text-md)/1.25 var(--font-ui);
 }
 
 .welcome-provider-head small {
@@ -207,7 +207,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font: 650 13px/1.25 var(--font-ui);
+  font: 650 var(--text-md)/1.25 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -247,7 +247,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--dim3);
-  font: 11px/1.35 var(--font-mono);
+  font: var(--text-xs)/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -265,7 +265,7 @@
 
 .welcome-profile-count {
   color: var(--dim2);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.03em;
 }
 
@@ -360,7 +360,7 @@
   align-items: center;
   padding: 10px 8px;
   color: var(--dim2);
-  font: 13px/1.5 var(--font-ui);
+  font: var(--text-md)/1.5 var(--font-ui);
 }
 
 @media (hover: hover) and (pointer: fine) {

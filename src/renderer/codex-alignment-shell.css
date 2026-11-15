@@ -89,7 +89,7 @@
 }
 
 body {
-  font: 14px/1.55 var(--font-ui);
+  font: var(--text-base)/1.55 var(--font-ui);
   letter-spacing: -0.004em;
 }
 
@@ -146,8 +146,8 @@ select:focus-visible,
 }
 
 .sb-brand .name {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0;
 }
 
@@ -166,8 +166,8 @@ select:focus-visible,
   margin: 0;
   padding: 0 12px;
   background: transparent;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .sb-new:hover {
@@ -177,7 +177,7 @@ select:focus-visible,
 
 .sb-new .kbd {
   color: var(--dim2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .sb-search {
@@ -197,7 +197,7 @@ select:focus-visible,
 }
 
 .sb-search input {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .sb-nav {
@@ -209,8 +209,8 @@ select:focus-visible,
   min-height: 36px;
   padding: 0 12px;
   color: var(--dim);
-  font-size: 13px;
-  font-weight: 400;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
 }
 
 .sb-navitem:hover,
@@ -234,7 +234,7 @@ select:focus-visible,
 
 .sb-sess.active .sb-sesstext {
   color: var(--fg);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .sb-navitem.active .ico,
@@ -246,7 +246,7 @@ select:focus-visible,
 .sb-section {
   margin: 24px 8px 8px;
   color: var(--dim2);
-  font: 500 11px/16px var(--font-ui);
+  font: var(--weight-medium) var(--text-xs)/16px var(--font-ui);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -263,8 +263,8 @@ select:focus-visible,
 }
 
 .sb-proj-head .pname {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .sb-proj-row.active .sb-proj-head {
@@ -287,21 +287,21 @@ select:focus-visible,
 }
 
 .sb-sesstext {
-  font-size: 13px;
-  font-weight: 400;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
 }
 
 .sb-draft {
   flex: none;
   color: var(--draft-fg);
   font-size: var(--text-compact-size);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
 .sidebar .sb-sess .sb-provider {
   color: var(--dim2);
-  font: 500 var(--text-compact-size)/1 var(--font-ui);
+  font: var(--weight-medium) var(--text-compact-size)/1 var(--font-ui);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -364,7 +364,7 @@ select:focus-visible,
   max-width: min(28vw, 240px);
   overflow: hidden;
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -395,7 +395,7 @@ select:focus-visible,
   max-width: 240px;
   padding-inline: 8px;
   color: var(--dim);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 520;
 }
 

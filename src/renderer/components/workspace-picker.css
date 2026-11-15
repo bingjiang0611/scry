@@ -7,7 +7,7 @@
   border-radius: 0 0 var(--r-md) var(--r-md);
   color: var(--muted);
   background: var(--surface-faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .workspace-context-strip { display: flex; justify-content: space-between; gap: 12px; }
 .workspace-context-strip button {
@@ -46,9 +46,9 @@
   background: var(--panel);
   color: var(--fg);
   box-shadow: 0 12px 36px #0003;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
-.workspace-picker-label { padding: 5px 8px 8px; color: var(--muted); font-size: 12px; }
+.workspace-picker-label { padding: 5px 8px 8px; color: var(--muted); font-size: var(--text-sm); }
 .workspace-mode-choice,
 .workspace-choice {
   display: flex;
@@ -75,11 +75,11 @@
 .workspace-choice:disabled,
 .workspace-mode-choice:disabled { color: var(--muted); cursor: not-allowed; opacity: .6; }
 .workspace-choice-name { display: grid; min-width: 0; gap: 2px; }
-.workspace-choice strong { font-weight: 400; }
+.workspace-choice strong { font-weight: var(--weight-regular); }
 .workspace-choice strong,
 .workspace-choice small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-choice small { color: var(--muted); font-size: 12px; }
-.workspace-choice-note { color: var(--muted); font-size: 11px; margin-left: auto; flex-shrink: 0; }
+.workspace-choice small { color: var(--muted); font-size: var(--text-sm); }
+.workspace-choice-note { color: var(--muted); font-size: var(--text-xs); margin-left: auto; flex-shrink: 0; }
 .workspace-choice-list { overflow-y: auto; min-height: 0; flex-shrink: 1; }
 .workspace-ref-search { display: flex; align-items: center; gap: 8px; margin: 0 6px 6px; border-bottom: 1px solid var(--border); }
 .workspace-ref-search:focus-within { border-bottom-color: var(--selected); }

@@ -23,7 +23,7 @@
   border-radius: var(--r-sm);
   color: var(--dim2);
   background: var(--panel);
-  font: 11px/1.4 var(--font-mono);
+  font: var(--text-xs)/1.4 var(--font-mono);
   cursor: pointer;
 }
 .turn-flow-reveal:hover {
@@ -55,7 +55,7 @@
   padding: 0 4px;
   display: grid;
   place-items: center;
-  font: 600 10px/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono);
   color: var(--dim2);
   background: var(--panel2);
   border: 1px solid var(--border);
@@ -76,10 +76,10 @@
 }
 .tool-group-row:hover .tg-label { color: var(--dim); }
 .tool-group-row .tg-rule { flex: 1 1 24px; min-width: 16px; height: 1px; background: var(--border3); }
-.tool-group-row .tg-fail { flex: none; font: 600 10px/1 var(--font-mono); color: var(--bad); }
+.tool-group-row .tg-fail { flex: none; font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono); color: var(--bad); }
 .tool-group-row .tg-dur {
   flex: none;
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim3);
   font-variant-numeric: tabular-nums;
   opacity: 0;
@@ -138,7 +138,7 @@
 .errhint {
   margin-top: 4px;
   color: var(--bad);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .termination-notice {
@@ -151,7 +151,7 @@
   border-radius: var(--r-sm);
   background: var(--warn-soft);
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.45;
 }
 
@@ -169,5 +169,5 @@
 
 .termination-notice b {
   color: var(--fg);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }

@@ -12,7 +12,7 @@
   border-bottom: 1px solid transparent;
   background: transparent;
   color: var(--dim);
-  font: 500 12px/1 var(--font-ui);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-ui);
   cursor: pointer;
 }
 
@@ -32,7 +32,7 @@
   gap: 8px;
   margin: 24px 12px 8px;
   color: var(--fg);
-  font: 500 13px/20px var(--font-ui);
+  font: var(--weight-medium) var(--text-md)/20px var(--font-ui);
   letter-spacing: 0;
 }
 
@@ -162,4 +162,4 @@
 .sb-activity-item:hover > .sb-activity-status,
 .sb-activity-item:focus-within > .sb-activity-status { visibility: hidden; }
 .sb-activity .sb-act:not(:hover):not(.on) { color: var(--dim); }
-.sb-activity-limit { margin: 8px 10px; color: var(--dim2); font-size: 12px; }
+.sb-activity-limit { margin: 8px 10px; color: var(--dim2); font-size: var(--text-sm); }

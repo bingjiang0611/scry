@@ -73,7 +73,7 @@ select:focus-visible,
   border-radius: var(--r-sm);
   color: var(--fg);
   background: var(--panel2);
-  font: 700 11px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-xs)/1 var(--font-mono);
 }
 
 .sb-brand .name {

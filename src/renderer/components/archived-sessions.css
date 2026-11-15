@@ -22,7 +22,7 @@
   border: 0;
   background: none;
   color: var(--fg);
-  font: 12px/1 var(--font-ui);
+  font: var(--text-sm)/1 var(--font-ui);
   cursor: pointer;
 }
 

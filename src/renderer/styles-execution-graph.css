@@ -38,7 +38,7 @@
   background: var(--panel);
 }
 .turn-head .num {
-  font: 600 14px/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-base)/1 var(--font-mono);
   color: var(--accent);
   white-space: nowrap;
   display: inline-flex;
@@ -64,7 +64,7 @@
 }
 .turn-head .preview {
   color: var(--fg);
-  font: 13px/1.4 var(--font-ui);
+  font: var(--text-md)/1.4 var(--font-ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -74,7 +74,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  font: 11px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   color: var(--dim);
   white-space: nowrap;
   min-width: 0;
@@ -159,7 +159,7 @@ button.toptool {
   padding: 2px 7px;
   border: 1px solid var(--border2);
   border-radius: var(--r-xs);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
@@ -208,7 +208,7 @@ button.toptool {
   background: var(--bad);
 }
 .gname {
-  font: 600 12.5px/1 var(--font-mono);
+  font: var(--weight-semibold) 12.5px/1 var(--font-mono);
   color: var(--fg);
   letter-spacing: -0.005em;
   white-space: nowrap;
@@ -222,7 +222,7 @@ button.toptool {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .gmeta {
   display: flex;
@@ -278,7 +278,7 @@ button.toptool {
 .gp-empty {
   padding: 40px 18px;
   color: var(--dim2);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .gp-h {
   padding: 14px 18px 10px;
@@ -299,7 +299,7 @@ button.toptool {
   color: var(--accent);
 }
 .gp-h h2 {
-  font: 600 16px/1.2 var(--font-mono);
+  font: var(--weight-semibold) var(--text-lg)/1.2 var(--font-mono);
   letter-spacing: -0.005em;
   overflow-wrap: anywhere;
 }
@@ -330,7 +330,7 @@ button.toptool {
   display: grid;
   grid-template-columns: 110px 1fr;
   row-gap: 6px;
-  font: 12px/1.5 var(--font-mono);
+  font: var(--text-sm)/1.5 var(--font-mono);
 }
 .kv dt {
   color: var(--dim2);

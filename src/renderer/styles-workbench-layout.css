@@ -124,7 +124,7 @@ textarea:focus-visible,
 .sb-section {
   padding: 12px 11px 5px;
   color: var(--dim3);
-  font: 600 11px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-xs)/1.2 var(--font-ui);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -237,7 +237,7 @@ textarea:focus-visible,
   align-items: center;
   gap: 7px;
   color: var(--dim3);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 

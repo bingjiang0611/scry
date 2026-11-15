@@ -9,7 +9,7 @@
   background: var(--panel3);
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
 }
 .diff-scope-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -28,7 +28,7 @@
   background: var(--panel);
   color: var(--fg);
   box-shadow: 0 12px 36px #0003;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .diff-turn-menu { z-index: 1201; }
 .diff-scope-menu > button,
@@ -62,8 +62,8 @@
 .diff-turn-back .ico { transform: rotate(180deg); }
 .diff-turn-list { overflow: auto; max-height: 288px; min-height: 0; }
 .diff-turn-choice { display: grid; align-content: center; justify-content: stretch; gap: 3px; }
-.diff-turn-choice small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
-.diff-turn-menu > .diff-load-turns { margin-top: 4px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.diff-turn-choice small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: var(--text-xs); }
+.diff-turn-menu > .diff-load-turns { margin-top: 4px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--text-sm); }
 .diff-turn-menu > .diff-load-turns:disabled { cursor: default; opacity: .6; }
 .diff-scope-trigger:focus-visible,
 .diff-menu-layer button:focus-visible,

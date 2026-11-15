@@ -53,7 +53,7 @@
 .billing-grid span {
   display: block;
   color: var(--dim2);
-  font: 11px/1.2 var(--font-ui);
+  font: var(--text-xs)/1.2 var(--font-ui);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -61,7 +61,7 @@
   display: block;
   margin-top: 5px;
   color: var(--fg);
-  font: 600 13px/1.1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-md)/1.1 var(--font-mono);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -223,7 +223,7 @@
   border: 1px solid rgba(93, 210, 168, 0.24);
   background: rgba(34, 197, 141, 0.09);
   color: var(--ok);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .billing-sync:disabled {

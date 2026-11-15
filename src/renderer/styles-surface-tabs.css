@@ -263,7 +263,7 @@
 .empty-heading h2 {
   margin: 0;
   color: var(--fg);
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 620;
   letter-spacing: -0.01em;
 }
@@ -271,7 +271,7 @@
 .empty-heading p {
   margin: 5px 0 0;
   color: var(--dim2);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .surface-card-grid {
@@ -305,7 +305,7 @@
 }
 
 .surface-card strong {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 620;
 }
 
@@ -325,7 +325,7 @@
 
 .surface-unavailable b {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .surface-unavailable span {

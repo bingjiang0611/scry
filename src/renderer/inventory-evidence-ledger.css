@@ -45,7 +45,7 @@
 
 .inventory-modal__eyebrow {
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.15em;
   text-transform: uppercase;
 }
@@ -59,7 +59,7 @@
 
 .inventory-modal__title-line > b {
   color: var(--fg);
-  font: 700 18px/1 var(--font-ui);
+  font: var(--weight-bold) 18px/1 var(--font-ui);
   letter-spacing: -0.02em;
 }
 
@@ -76,7 +76,7 @@
   corner-shape: round;
   color: var(--dim2);
   background: var(--panel2);
-  font: 650 10px/1 var(--font-mono);
+  font: 650 var(--text-2xs)/1 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -107,7 +107,7 @@
   max-width: 720px;
   margin: 0;
   color: var(--dim);
-  font: 12px/1.4 var(--font-mono);
+  font: var(--text-sm)/1.4 var(--font-mono);
   text-wrap: pretty;
 }
 
@@ -162,7 +162,7 @@
 
 .inventory-context__item > span {
   color: var(--dim2);
-  font: 700 var(--text-compact-size)/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-compact-size)/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -171,7 +171,7 @@
 .inventory-context__item code {
   overflow: hidden;
   color: var(--dim);
-  font: 620 12px/1.35 var(--font-mono);
+  font: 620 var(--text-sm)/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -207,7 +207,7 @@
 
 .inventory-context__time {
   color: var(--dim2);
-  font: 600 10px/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -257,7 +257,7 @@
 .skill-scope-tabs button span {
   margin-left: 6px;
   color: var(--dim3);
-  font: 600 10px/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono);
 }
 
 .inventory-toolbar {
@@ -291,7 +291,7 @@
 
 .inventory-search > span {
   flex: none;
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.11em;
   text-transform: uppercase;
 }
@@ -308,7 +308,7 @@
   background: transparent;
   box-shadow: none;
   color: var(--fg);
-  font: 13px/1 var(--font-ui);
+  font: var(--text-md)/1 var(--font-ui);
 }
 
 .inventory-search .modal-search:focus,
@@ -327,14 +327,14 @@
   border-radius: var(--r-sm);
   background: var(--panel2);
   color: var(--accent);
-  font: 600 12px/1 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1 var(--font-ui);
   transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
 .inventory-toolbar__count {
   flex: none;
   color: var(--dim2);
-  font: 600 11.5px/1 var(--font-mono);
+  font: var(--weight-semibold) 11.5px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -403,7 +403,7 @@
 }
 
 .inventory-state--quiet {
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .inventory-switch {
@@ -499,7 +499,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font: 650 13px/1.25 var(--font-mono);
+  font: 650 var(--text-md)/1.25 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -524,7 +524,7 @@
 .skill-ledger__source > span {
   flex: none;
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -549,13 +549,13 @@
 
 .inventory-empty strong {
   color: var(--fg);
-  font: 650 13px/1.2 var(--font-ui);
+  font: 650 var(--text-md)/1.2 var(--font-ui);
 }
 
 .inventory-empty p {
   margin: 6px 0 13px;
   color: var(--dim);
-  font: 13px/1.5 var(--font-ui);
+  font: var(--text-md)/1.5 var(--font-ui);
 }
 
 .inventory-footnote {
@@ -569,7 +569,7 @@
 .inventory-footnote > span {
   flex: none;
   color: var(--dim2);
-  font: 700 var(--text-compact-size)/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-compact-size)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -593,7 +593,7 @@
 .inventory-state-legend > span:first-child {
   margin-right: 2px;
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }

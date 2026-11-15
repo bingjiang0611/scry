@@ -56,7 +56,7 @@
 }
 
 .run-status-hint {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--dim2);
   white-space: nowrap;
   overflow: hidden;
@@ -81,7 +81,7 @@
   min-height: 30px;
   padding: 0 12px;
   border-radius: var(--r-sm);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* 停止阶段是请求进度而不是终止证据：升级中用 warn，Provider 未确认终止用 bad，
@@ -144,7 +144,7 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.55;
   resize: none;
 }
@@ -238,7 +238,7 @@
   display: inline-flex;
   align-items: center;
   color: var(--dim);
-  font: 12px/1 var(--font-ui);
+  font: var(--text-sm)/1 var(--font-ui);
 }
 
 .permission-mode-trigger {
@@ -369,12 +369,12 @@
 
 .unbound-empty strong {
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 650;
 }
 
 .unbound-empty > span:last-child {
   max-width: 360px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
