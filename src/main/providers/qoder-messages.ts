@@ -48,8 +48,15 @@ export class QoderBackgroundTasks {
   private calls = new Map<string, { tool: 'Bash' | 'Agent'; description: string }>()
   private active = new Map<string, BackgroundTask>()
   private terminalCalls = new Set<string>()
+  // An Agent task ends on task_updated, but the CLI then delivers a task_notification that
+  // starts a follow-up model turn (1.1.80 fixture and 1.1.88, round seven G4). Releasing the
+  // prompt stream before that notice arrives aborted the follow-up ("Operation aborted").
+  private owed = new Map<string, string>()
+  private notified = new Set<string>()
 
   get pending(): boolean { return this.active.size > 0 }
+  /** A finished Agent task whose notification the CLI has not delivered yet. */
+  get notificationsOwed(): boolean { return this.owed.size > 0 }
   get tasks(): BackgroundTask[] { return [...this.active.values()].map((task) => ({ ...task })) }
   has(taskId: string): boolean { return this.active.has(taskId) }
   markStop(taskId: string, stopState: BackgroundTask['stopState']): void {
@@ -61,7 +68,9 @@ export class QoderBackgroundTasks {
   settleCall(toolUseId: string, tool: BackgroundTask['tool']): void {
     if (this.calls.get(toolUseId)?.tool !== tool) return
     for (const task of this.active.values()) {
-      if (task.tool === tool && task.toolUseId === toolUseId) this.active.delete(task.taskId)
+      if (task.tool !== tool || task.toolUseId !== toolUseId) continue
+      this.active.delete(task.taskId)
+      this.owe(task)
     }
     this.terminalCalls.add(toolUseId)
   }
@@ -106,9 +115,21 @@ export class QoderBackgroundTasks {
     const update = raw.type === 'system' && raw.subtype === 'task_updated' && typeof raw.task_id === 'string' &&
       this.active.get(raw.task_id)?.tool === 'Agent'
       ? { task_id: raw.task_id, status: record(raw.patch).status, tool_use_id: undefined } : undefined
-    const terminal = notification ?? update ?? (raw.type === 'system' && raw.subtype === 'task_notification' ? raw : undefined)
-    // Agent task_updated is already a terminal in Qoder's Agent projection.
-    // Bash must wait for the notification that triggers its follow-up model turn.
+    const delivered = notification ?? (raw.type === 'system' && raw.subtype === 'task_notification' ? raw : undefined)
+    if (delivered) {
+      // A notice may name the task, its tool call, or both; it settles every alias of that call.
+      for (const id of [delivered.task_id, delivered.tool_use_id]) if (typeof id === 'string') this.notified.add(id)
+      const call = typeof delivered.task_id === 'string'
+        ? this.owed.get(delivered.task_id) ?? this.active.get(delivered.task_id)?.toolUseId
+        : undefined
+      if (call) this.notified.add(call)
+      for (const [taskId, toolUseId] of this.owed) {
+        if (this.notified.has(taskId) || this.notified.has(toolUseId)) this.owed.delete(taskId)
+      }
+    }
+    const terminal = delivered ?? update
+    // Agent task_updated is the task's terminal; its notification is still owed (above).
+    // Bash ends only with the notification that triggers its follow-up model turn.
     if (!terminal || typeof terminal.task_id !== 'string') return
     const task = this.active.get(terminal.task_id)
     if (!task || (terminal.tool_use_id !== undefined && terminal.tool_use_id !== task.toolUseId)) return
@@ -116,6 +137,13 @@ export class QoderBackgroundTasks {
     if (!['completed', 'failed', 'stopped'].includes(String(terminalStatus))) return
     this.active.delete(terminal.task_id)
     this.terminalCalls.add(task.toolUseId)
+    this.owe(task)
+  }
+
+  private owe(task: BackgroundTask): void {
+    if (task.tool === 'Agent' && !this.notified.has(task.taskId) && !this.notified.has(task.toolUseId)) {
+      this.owed.set(task.taskId, task.toolUseId)
+    }
   }
 }
 

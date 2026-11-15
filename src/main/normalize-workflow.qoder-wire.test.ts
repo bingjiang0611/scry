@@ -77,3 +77,20 @@ describe('real Qoder background Agent wire', () => {
     expect(tasks.tasks).toEqual([])
   })
 })
+
+describe('real Qoder background Agent wire: owed notifications', () => {
+  // Round seven G4 (CLI 1.1.88): releasing the prompt stream on task_updated aborted the
+  // follow-up turn the notice starts. This real 1.1.80 run has the same order, so waiting
+  // for the notice cannot hang a run on either version.
+  it('owes a notice between each task_updated and its task_notification, and none at the end', () => {
+    const tasks = new QoderBackgroundTasks()
+    const owedAfter: Array<[string, boolean]> = []
+    for (const message of QODER_BACKGROUND_AGENT_MESSAGES) {
+      tasks.observe(message)
+      const subtype = (message as { subtype?: unknown }).subtype
+      if (subtype === 'task_updated' || subtype === 'task_notification') owedAfter.push([subtype, tasks.notificationsOwed])
+    }
+    expect(owedAfter).toEqual([['task_updated', true], ['task_notification', false], ['task_updated', true], ['task_notification', false]])
+    expect(tasks.pending).toBe(false)
+  })
+})

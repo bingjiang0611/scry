@@ -96,7 +96,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     backgroundMonitor.pause()
     try { return await action() } finally { backgroundMonitor.resume() }
   }
-  const hasPendingBackgroundWork = (): boolean => activeAgentCalls.size > 0 || backgroundTasks.pending
+  const hasPendingBackgroundWork = (): boolean => activeAgentCalls.size > 0 || backgroundTasks.pending || backgroundTasks.notificationsOwed
   const ctx: NormalizeCtx = {
     runId: request.runId,
     cwd: request.cwd,

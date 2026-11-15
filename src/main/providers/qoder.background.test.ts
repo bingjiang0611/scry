@@ -164,6 +164,12 @@ describe('Qoder provider adapter · background work', () => {
           : { type: 'system', subtype: 'task_updated', task_id: 'task-1', patch: { status: 'completed' } }
         yield { type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1' }
         yield { type: 'system', subtype: 'task_updated', task_id: 'task-1', patch: { status: 'completed' } }
+        if (wire !== 'text') {
+          // CLI 1.1.80 and 1.1.88 both deliver a notice after task_updated, which starts a
+          // follow-up turn; the stream is released on the result after that notice.
+          yield { type: 'result', subtype: 'success', result: 'launch turn done' }
+          yield { type: 'system', subtype: 'task_notification', task_id: 'task-1', status: 'completed' }
+        }
         yield { type: 'result', subtype: 'success', result: 'all done' }
         // Model a live CLI: receiving result is not enough to end the iterator.
         expect(await input.next()).toMatchObject({ done: true })
@@ -200,6 +206,13 @@ describe('Qoder provider adapter · background work', () => {
         yield wire === 'task_updated'
           ? { type: 'system', subtype: 'task_updated', task_id: 'task-alias', patch: { status } }
           : { type: 'system', subtype: 'task_notification', tool_use_id: 'agent', status }
+        if (wire === 'task_updated') {
+          // The task ended but its notice is still owed: the stream stays open (round seven G4).
+          yield { type: 'result', subtype: 'success' }
+          await new Promise<void>((resolve) => setImmediate(resolve))
+          expect(released).toBe(false)
+          yield { type: 'system', subtype: 'task_notification', task_id: 'task-alias', status }
+        }
         yield { type: 'result', subtype: 'success' }
         // Flush the async generator's EOF and its consumer's promise chain.
         await new Promise<void>((resolve) => setImmediate(resolve))
@@ -250,6 +263,14 @@ describe('Qoder provider adapter · background work', () => {
         yield { type: 'system', subtype: 'task_updated', task_id: 'task-two', patch: { status: 'completed' } }
         await Promise.resolve()
         expect(released).toBe(false)
+        yield { type: 'result', subtype: 'success', result: 'tasks ended, notices owed' }
+        await Promise.resolve()
+        expect(released).toBe(false)
+        yield { type: 'system', subtype: 'task_notification', task_id: 'task-one', status: 'completed' }
+        yield { type: 'result', subtype: 'success', result: 'one notice delivered' }
+        await Promise.resolve()
+        expect(released).toBe(false)
+        yield { type: 'system', subtype: 'task_notification', tool_use_id: 'two', status: 'completed' }
         yield { type: 'result', subtype: 'success', result: 'all done' }
         await done
       },
