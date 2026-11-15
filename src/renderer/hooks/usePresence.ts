@@ -73,6 +73,14 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     onCloseRef.current(closeReason.current)
   }, [clearExit])
   finishRef.current = finish
+  // Exits that end on a native timer or animationend commit the parent's close synchronously.
+  // Left to React, that close is a default-priority update. A trigger click landing before it
+  // renders queues a sync-priority reopen; the sync render skips the pending close and keeps
+  // the parent open, so the same exiting instance stays mounted, inert and closed for good,
+  // and the trigger stops working. The pointerdown guard above cannot help, because a
+  // finished exit has already left pendingExits. (macOS CI: the delete dialog stuck in exit,
+  // jobs 131767009947 and 131460326299.)
+  const finishCommitted = useCallback((): void => { flushSync(finish) }, [finish])
   const ref = useCallback<RefCallback<HTMLElement>>(node => { nodeRef.current = node }, [])
   const requestClose = useCallback((reason: PresenceCloseReason): void => {
     if (closed.current || closing.current) return
@@ -91,7 +99,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     const armFallback = (): void => {
       clearTimeout(timer.current)
       const remaining = Math.max(0, Math.min(fallbackMs, closeStart + fallbackMs + exitCeilingMs - Date.now()))
-      timer.current = setTimeout(finish, remaining)
+      timer.current = setTimeout(finishCommitted, remaining)
     }
     const exitAnimationRunning = (): boolean => node?.getAnimations().some(animation => {
       const endTime = animation.effect?.getComputedTiming().endTime
@@ -100,7 +108,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     const onAnimationEnd = (event: AnimationEvent): void => {
       // One node can carry several exit animations. Finishing on the shortest one deleted the
       // node 53ms after its animation start on CI while a longer animation still ran.
-      if (event.target === node && !exitAnimationRunning()) finish()
+      if (event.target === node && !exitAnimationRunning()) finishCommitted()
     }
     // A busy main thread can start the exit animation dozens of milliseconds after the state
     // change. Re-anchoring the fallback at the real animation start preserves the full exit
@@ -123,7 +131,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
       document.addEventListener('keydown', onNextInteraction, true)
     }
     pendingExits.add(finish)
-  }, [exitMs, finish])
+  }, [exitMs, finish, finishCommitted])
   const reset = useCallback((): void => {
     clearExit()
     closeReason.current = 'replace'
