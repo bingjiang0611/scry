@@ -84,6 +84,21 @@ export function exactSessionPermissionDescription(
   return description.length <= MAX_AGENT_PERMISSION_SESSION_DESCRIPTION_LENGTH ? description : undefined
 }
 
+// The answered question is persisted as intervention evidence, and a record whose
+// intervention breaks these bounds is rejected (turn-intervention-validation.ts). Provider
+// titles are free text: Qoder and Claude put a whole Bash command into `title`.
+const PERMISSION_HEADER_MAX = 120
+const PERMISSION_QUESTION_MAX = 2_000
+const PERMISSION_DESCRIPTION_MAX = 4_000
+
+function clipText(text: string, max: number): string {
+  if (text.length <= max) return text
+  let head = text.slice(0, max - 1)
+  // Never leave half of a surrogate pair behind.
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1)
+  return `${head}…`
+}
+
 export function agentPermissionQuestion(
   runId: string,
   questionId: string,
@@ -95,19 +110,24 @@ export function agentPermissionQuestion(
   sessionDescription = '允许这类操作直到当前原生会话结束',
   warning?: string
 ): AgentQuestionRequest {
+  const title = header.trim() || '权限请求'
+  // A clipped title must not hide what is being approved: the full title leads the
+  // allow-once description, which the approval form shows under that option.
+  const detail = description.trim() || 'Provider 未提供操作说明'
+  const allowDescription = title.length > PERMISSION_HEADER_MAX ? `${title}\n\n${detail}` : detail
   return {
     runId,
     questionId,
     questionKind: 'permission',
     source,
     questions: [{
-      header,
-      question,
+      header: clipText(title, PERMISSION_HEADER_MAX),
+      question: clipText(question, PERMISSION_QUESTION_MAX),
       multiSelect: false,
       ...(warning ? { warning } : {}),
       options: [
-        { label: '允许一次', description },
-        ...(allowSession ? [{ label: '本次会话允许', description: sessionDescription }] : []),
+        { label: '允许一次', description: clipText(allowDescription, PERMISSION_DESCRIPTION_MAX) },
+        ...(allowSession ? [{ label: '本次会话允许', description: clipText(sessionDescription, PERMISSION_DESCRIPTION_MAX) }] : []),
         { label: '拒绝', description: '拒绝本次操作并让 Agent 继续处理结果' }
       ]
     }]
