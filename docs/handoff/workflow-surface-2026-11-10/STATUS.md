@@ -1,8 +1,13 @@
-# 第七轮进行中（G0/G1/G3 通过，G2 未通过，G4 已采证）
+# 第七轮待核验
 
-[G1](reports/G1.md) 在 CLI 1.1.88、两组新的独立 test 实例复测通过：长 Bash 审批标题截断至 120 字符且「允许一次」显示完整命令；允许后提交一条 `completed` 记录并产生 Git commit，拒绝后无 Git commit 但轮次记录正常。三个 pending 目录均无残留。早前高负载下无法启动的样本保留在同报告，不计入验收。脱敏计数见 [G1 证据](evidence/r7/g1-summary.json)。[G2](reports/G2.md) 启动窗口三次点击均在 1 秒内，但没有一次同时满足 UI 中断、native 0、run 专属 daemon 15 秒退出和续发的标准；Hook/输出回归记录的 `SessionStart` 未出现拆分，输出回归后续发受版本探测阻碍。[G3](reports/G3.md) 新会话与已有会话 `/plugins reload` 均不新增记录或 pending journal，续发各新增一条普通轮次，重启后既有会话 reload 卡片可见。脱敏计数见 [G3 证据](evidence/r7/g3-reload.json)。[G4](reports/G4.md) 分支点击后 IPC 报找不到已结束轮次，后台双 Agent 在第 42 帧出现 `Operation aborted`，managed recorder 身份不一致并留 pending；仅采证未修。close/stop 精确时刻与 fork 入参未采得。脱敏时间线见 [G4 证据](evidence/r7/g4-fork-agents.json)。G5 继续；G2 未通过，兼容清单不得放开。
+本轮使用本机 CLI **1.1.88**，G0–G5 已逐包执行、报告并推送；**不是兼容性验收通过**。
 
-[G0](reports/G0.md) 只读旧备份：6 个不成对的 `SessionStart` hookId，恰为 3 个 SDK started 和 3 个 CLI 日志 error response，与审查方推断一致；新修复尚待真机复测。CLI 1.1.88，脱敏计数见 [证据](evidence/r7/g0-hook-source-counts.json)。
+- [G0](reports/G0.md)：旧备份有 3 个 SDK started 与 3 个 CLI error response 的未配对 `SessionStart`，与审查方推断一致；[脱敏计数](evidence/r7/g0-hook-source-counts.json)。
+- [G1](reports/G1.md)：长命令允许与拒绝均通过，完整命令在「允许一次」说明可见；记录完成、journal 无残留。[脱敏计数](evidence/r7/g1-summary.json)。
+- [G2](reports/G2.md)：三次 1 秒内停止没有一次满足完整启动窗口标准；Hook/输出回归记录的 `SessionStart` 未拆分，输出回归续发受版本探测阻碍。[逐例结构](evidence/r7/g2-attempts.json)。
+- [G3](reports/G3.md)：新会话与已有会话的 reload、续发和重启显示符合预期。[脱敏计数](evidence/r7/g3-reload.json)。
+- [G4](reports/G4.md)：分支失败、双后台 Agent 的根轮次 `Operation aborted` 且 recorder 留 pending；仅采证未修，close/stop 精确时刻与 fork 入参未采得。[脱敏时间线](evidence/r7/g4-fork-agents.json)。
+- [G5](reports/G5.md)：R7 前提不足，Qoder 清单保持 `unsupported`。干净依赖的 typecheck、renderer UI（原生重建后）、pack 通过；unit 初跑 4 条超时，空载单次定向重跑仍有 3 条超时。未安装或发布。
 
 **审查方核验第六轮（2026-11-15）。** 执行方的证据足够定位三处问题，均已修复：
 
