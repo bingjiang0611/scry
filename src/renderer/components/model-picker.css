@@ -8,7 +8,7 @@
   gap: 8px;
   min-height: 40px;
   padding: 0 8px 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   border-bottom: 1px solid var(--border2);
   color: var(--dim);
 }
@@ -28,7 +28,7 @@
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 .runtime-composer .model-effort-grouped .model-effort-search::placeholder {
@@ -76,18 +76,18 @@
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 5px 10px;
+  padding: 4px 8px;
   color: var(--dim);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   overflow-wrap: anywhere;
 }
 
-.runtime-composer .model-effort-grouped .model-effort-list button {
+.runtime-composer .model-effort-grouped .model-effort-list button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   width: 100%;
   min-height: 38px;
-  padding: 8px 10px;
-  font-size: 14px;
+  padding: 8px 8px;
+  font-size: var(--text-base);
 }
 
 .runtime-composer .model-effort-grouped .model-effort-list button span {
@@ -100,9 +100,9 @@
 }
 
 .runtime-composer .model-effort-grouped .model-effort-search-status {
-  margin-top: 6px;
-  padding: 8px 10px 2px;
+  margin-top: 8px;
+  padding: 8px 8px 2px;
   border-top: 1px solid var(--border2);
   color: var(--dim);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }

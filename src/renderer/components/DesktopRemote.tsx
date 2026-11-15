@@ -12,6 +12,7 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { ModalFrame, requestModalClose } from './Modals'
 import './desktop-remote.css'
+import { Button } from './primitives/Button'
 
 export function desktopRemoteStateKey(connectionId: string, context: DesktopRemoteContext): string {
   return [connectionId, context.providerId, context.agentProfileId ?? '', context.cwd, context.externalSessionId ?? 'new'].join('\u0000')
@@ -94,7 +95,7 @@ export function ClientPairForm({ onPaired }: { onPaired: (id: string) => Promise
       </div>
       <label>{copy.invitationString}<textarea value={invitation} onChange={(event) => setInvitation(event.target.value)} rows={4} spellCheck={false} required /></label>
       {action.error && <p className="desktop-remote__error" role="alert">{action.error.text}
-        <button type="button" className="hosts-button" onClick={action.retry}>{copy.retry}</button></p>}
+        <Button size="sm" onClick={action.retry}>{copy.retry}</Button></p>}
       {!pairing ? <button type="button" onClick={() => { if (!busy) pair() }} aria-busy={action.pending === 'pair'} aria-disabled={busy}
         disabled={!busy && (!username.trim() || !hostname.trim() || !invitation.trim())}><BusyLabel busy={action.showBusy && action.pending === 'pair'}>{copy.pair}</BusyLabel></button> : (
         <div className="desktop-remote__pairing-result">
@@ -154,20 +155,20 @@ export function RemoteHostPanel(): JSX.Element {
     </div>
     {error && <p className="desktop-remote__error" role="alert">{error}</p>}
     {hostAction.error && <p className="desktop-remote__error" role="alert">{hostAction.error.text}
-      <button type="button" className="hosts-button" onClick={hostAction.retry}>{copy.retry}</button></p>}
+      <Button size="sm" onClick={hostAction.retry}>{copy.retry}</Button></p>}
     {enabled !== null && <div className="remote-access-actions">
-      <button type="button" className="hosts-button" onClick={() => { if (!busy) run('invite', async () => setInvite(await window.scry.remoteDesktopHostInvite())) }}
+      <Button onClick={() => { if (!busy) run('invite', async () => setInvite(await window.scry.remoteDesktopHostInvite())) }}
         aria-busy={hostAction.pending === 'invite'} aria-disabled={busy} disabled={busy && hostAction.pending !== 'invite'}>
-        <BusyLabel busy={hostAction.showBusy && hostAction.pending === 'invite'}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</BusyLabel></button>
-      {enabled && <button type="button" className="hosts-button is-quiet" onClick={() => { if (!busy) run('disable', async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) }) }}
+        <BusyLabel busy={hostAction.showBusy && hostAction.pending === 'invite'}>{enabled ? copy.generateSshInvite : copy.enableAndGenerateSshInvite}</BusyLabel></Button>
+      {enabled && <Button variant="quiet" onClick={() => { if (!busy) run('disable', async () => { await window.scry.remoteDesktopHostDisable(); setInvite(null) }) }}
         aria-busy={hostAction.pending === 'disable'} aria-disabled={busy} disabled={busy && hostAction.pending !== 'disable'}>
-        <BusyLabel busy={hostAction.showBusy && hostAction.pending === 'disable'}>{copy.disableDesktopAccess}</BusyLabel></button>}
+        <BusyLabel busy={hostAction.showBusy && hostAction.pending === 'disable'}>{copy.disableDesktopAccess}</BusyLabel></Button>}
     </div>}
     {enabled && invite && <ModalFrame labelledBy={titleId} className="hosts-add-modal" onClose={() => setInvite(null)}>
       <div className="modal-head"><b id={titleId}>{copy.sshInvite}</b><ModalCloseButton aria-label={copy.closeInvite} onClick={() => requestModalClose()} /></div>
       <div className="modal-body"><p className="hosts-muted">{copy.sshInviteEffect}</p><div className="desktop-remote__invite"><code>{invite}</code></div>
         {error && <p className="desktop-remote__error" role="alert">{error}</p>}
-        <div className="hosts-address-actions"><button type="button" className="hosts-button" onClick={() => requestModalClose()}>{copy.close}</button><button type="button" className="hosts-button is-primary" onClick={() => inviteCopy.copy(invite)}><Icon name={inviteCopy.status.state === 'copied' ? 'check' : 'copy'} />{copy.copyInvite}</button></div>
+        <div className="hosts-address-actions"><Button onClick={() => requestModalClose()}>{copy.close}</Button><Button variant="primary" onClick={() => inviteCopy.copy(invite)}><Icon name={inviteCopy.status.state === 'copied' ? 'check' : 'copy'} />{copy.copyInvite}</Button></div>
         <p className={inviteCopy.status.state === 'failed' ? 'desktop-remote__error' : 'hosts-muted desktop-remote__copy-status'}
           role={inviteCopy.status.state === 'failed' ? 'alert' : 'status'}>
           {inviteCopy.status.state === 'copied' ? copy.inviteCopied : inviteCopy.status.state === 'failed' ? copy.inviteCopyFailed(inviteCopy.status.reason) : ''}

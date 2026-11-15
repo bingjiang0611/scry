@@ -17,7 +17,7 @@ describe('conversation reading hierarchy', () => {
   it('keeps a long workspace identity compact and quiet', () => {
     const title = declaration(shell, '.tb-thread b')
     expect(title).toContain('max-width: min(28vw, 240px)')
-    expect(title).toContain('font-weight: 500')
+    expect(title).toContain('font-weight: var(--weight-medium)')
     expect(declaration(shell, '.tb-thread .execution-location:not(.is-remote)')).toContain('border-color: transparent')
   })
 
@@ -30,8 +30,10 @@ describe('conversation reading hierarchy', () => {
 
 describe('compact control hover language', () => {
   it('uses the same recessed hover and radius for workspace and topbar actions', () => {
-    expect(declaration(workspace, '.workspace-context-strip button:not(:disabled):hover,\n.workspace-context-strip button[aria-expanded="true"]')).toContain('background: var(--surface-hover)')
-    expect(declaration(workspace, '.workspace-context-strip button')).toContain('border-radius: var(--r-sm)')
+    // Container button rules exclude the Button/IconButton/Tabs primitives without raising specificity.
+    const raw = 'button:not(:where(.btn, .icon-button, [role=\'tab\'], .segmented > button))'
+    expect(declaration(workspace, `.workspace-context-strip ${raw}:not(:disabled):hover,\n.workspace-context-strip button[aria-expanded="true"]`)).toContain('background: var(--surface-hover)')
+    expect(declaration(workspace, `.workspace-context-strip ${raw}`)).toContain('border-radius: var(--r-sm)')
     expect(declaration(shell, '.panel-pill:hover')).toContain('background: var(--surface-hover)')
     expect(declaration(shell, '.panel-pill .ico')).toContain('width: 16px')
   })
@@ -41,7 +43,8 @@ describe('quiet composer surface', () => {
   it('uses a compact input and single-layer focus indication', () => {
     expect(declaration(editorial, '.runtime-composer .input,\n.runtime-composer textarea')).toContain('height: 64px')
     // 浅色主题的静态阴影权重更高，必须排除焦点态，否则焦点描边永远不显示。
-    expect(declaration(editorial, ":root[data-theme='light'] .runtime-composer .composer-shell:not(:focus-within)")).toContain('0 1px 2px')
+    expect(declaration(editorial, ":root[data-theme='light'] .runtime-composer .composer-shell:not(:focus-within)")).toContain('var(--shadow-xs)')
+    expect(declaration(shell, ":root[data-theme='light']")).toContain('--shadow-xs: 0 1px 2px')
     const focus = declaration(editorial, '.runtime-composer .composer-shell:focus-within')
     expect(focus).toContain('0 0 0 1px var(--accent-soft)')
     expect(focus).not.toContain('5px')

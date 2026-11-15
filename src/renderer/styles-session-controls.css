@@ -36,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 1px;
-  padding-left: 30px;
+  padding-left: 32px;
   opacity: 0;
   /* 容器盖在会话按钮上方，它自己不处理点击：一旦整块可点，渐变遮罩与图标间隙
      就成了盲区，点上去既不进会话也不触发操作。只有真正的按钮才接指针事件。 */
@@ -90,12 +90,12 @@
   align-items: center;
   gap: 8px;
   margin: 4px 2px 0;
-  padding: 8px 10px;
+  padding: 8px 8px;
   border: 1px solid var(--border2);
   border-radius: var(--r-md);
   background: var(--panel2);
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .sb-undo span {
@@ -106,25 +106,6 @@
   white-space: nowrap;
 }
 
-.sb-undo button {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 8px;
-  border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
-  background: var(--panel3);
-  color: var(--fg);
-  font: 11.5px/1 var(--font-ui);
-  cursor: pointer;
-}
-
-.sb-undo button:hover {
-  border-color: var(--accent-line);
-}
-
-.btn,
 .mcp-test,
 .modal-x,
 .modal-refresh,
@@ -133,78 +114,26 @@
   transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
-.tb-action {
-  min-height: 40px;
-  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
-}
-
-.btn:hover,
 .mcp-test:hover {
   background: var(--panel3);
   border-color: var(--accent-line);
 }
 
-.btn.primary,
 .send {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
 }
 
-.btn.primary:hover,
 .send:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, white);
   border-color: color-mix(in srgb, var(--accent) 88%, white);
 }
 
-.topbar {
-  min-height: var(--topbar-h);
-  padding: 0 12px;
-  background: var(--panel);
-  border-bottom-color: var(--border);
-}
-
-.vtabs {
-  align-self: stretch;
-  gap: 16px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-}
-
-.vtab {
-  position: relative;
-  padding: 0 1px;
-  border-radius: 0;
-  border-bottom: 2px solid transparent;
-  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
-}
-
-.vtab.active {
-  background: transparent;
-  border-bottom-color: var(--accent);
-  box-shadow: none;
-}
-
-.tb-agent-status {
-  color: var(--dim2);
-  font-size: 11px;
-}
-
 @container main-pane (max-width: 560px) {
   .topbar {
-    gap: 6px;
-    padding-inline: 8px;
-  }
-
-  .vtabs {
     gap: 8px;
-  }
-
-  .vtab {
-    gap: 4px;
-    font-size: 11.5px;
+    padding-inline: 8px;
   }
 
   .tb-agent-status {
@@ -216,7 +145,7 @@
   }
 
   .tb-action {
-    padding-inline: 6px;
+    padding-inline: 8px;
   }
 
   .tb-action.panel-pill {
@@ -232,56 +161,16 @@
   color: var(--fg);
 }
 
-.tb-action.on .ico {
-  color: var(--accent);
-}
-
 .tb-action .dot,
 .tb-agent-status .dot {
   box-shadow: none;
 }
 
-.welcome-pane {
-  padding: 64px 48px 48px;
-}
-
-.wc-hero h2 {
-  color: var(--fg);
-  font-size: 30px;
-  line-height: 1.18;
-}
-
-.wc-hero p {
-  color: var(--dim);
-}
-
-.stat-pill {
-  background: transparent;
-  border-color: transparent;
-  border-radius: 0;
-}
-
-.stat-pill.ok {
-  border-color: rgba(84, 201, 138, 0.28);
-}
-
-.wc-actions,
-.sg-card,
 .recent {
   background: transparent;
 }
 
-.wc-actions {
-  border: 0;
-  box-shadow: none;
-}
-
-.recent-list {
-  background: transparent;
-}
-
-.recent:hover,
-.sg-card:hover {
+.recent:hover{
   background: var(--panel2);
 }
 
@@ -290,33 +179,14 @@
   box-shadow: none;
 }
 
-.sg-card {
-  border-color: var(--border3);
-  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
-}
-
-.sg-card:hover {
-  border-color: var(--border3);
-  transform: none;
-}
-
 .turn {
-  max-width: 960px;
-  padding: 0 26px;
-}
-
-.turn.turn-jump-target {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  padding: 0 24px;
 }
 
 .bubble-user {
-  background: var(--panel2);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 9px 15px;
-  max-width: 70%;
+  padding: 8px 16px;
 }
 
 .user-md code,
@@ -343,8 +213,6 @@
 }
 
 .who .av {
-  background: transparent;
-  color: var(--accent);
   border: 1px solid var(--border);
 }
 
@@ -358,7 +226,6 @@
 .skillinject,
 .turn-footer {
   background: transparent;
-  border-color: var(--border3);
   border-left: 0;
   border-right: 0;
   border-radius: 0;
@@ -379,7 +246,6 @@
 }
 
 .tool-card.selected {
-  background: var(--accent-soft);
   border-color: var(--border3);
 }
 
@@ -388,7 +254,7 @@
 }
 
 .tool-row .op.r {
-  background: rgba(86, 168, 245, 0.12);
+  background: color-mix(in srgb, var(--read) 12%, transparent);
 }
 
 .tool-row .op.w {
@@ -396,7 +262,7 @@
 }
 
 .tool-row .op.e {
-  background: rgba(199, 125, 187, 0.12);
+  background: color-mix(in srgb, var(--edit) 12%, transparent);
 }
 
 .hook-status.ok,
@@ -433,7 +299,6 @@
 
 .input:focus,
 .composer textarea:focus {
-  border-color: var(--accent-line);
   box-shadow: none;
 }
 
@@ -450,11 +315,10 @@
 
 .panel {
   --panel: var(--overview-surface);
-  background: var(--overview-surface);
 }
 
 /* Quiet save status of an optimistic row change, in the time's place. */
-.sb-sess-save { display: inline-flex; align-items: center; gap: 3px; color: var(--dim2); }
+.sb-sess-save { display: inline-flex; align-items: center; gap: 4px; color: var(--dim2); }
 .sb-sess-save[data-save='saved'] { animation: sb-save-fade 1200ms var(--ease-out) forwards; }
 .sb-sess-save .ico { width: 10px; height: 10px; color: var(--ok); }
 @keyframes sb-save-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
@@ -462,12 +326,12 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 2px 10px 6px 30px;
+  padding: 2px 8px 8px 32px;
   color: var(--bad);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
-.sb-sess-save-error button {
+.sb-sess-save-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   flex: none;
   border: 0;
   background: none;

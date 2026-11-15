@@ -1,0 +1,85 @@
+/* The single definition of in-view tabs (components/primitives/Tabs.tsx) and
+   segmented controls (Segmented.tsx). Context rules may set placement through a
+   hook class; size, color and the selection mark live here. Selection color
+   changes in the same frame as aria-selected, so tabs never transition color. */
+
+.tabs {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-4);
+  min-width: 0;
+  border-bottom: 1px solid var(--border3);
+}
+
+.tabs [role='tab'] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  height: 32px;
+  margin-bottom: -1px;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dim2);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tabs [role='tab']:hover {
+  color: var(--fg);
+}
+
+.tabs [role='tab'][aria-selected='true'] {
+  border-bottom-color: var(--selected);
+  color: var(--fg);
+}
+
+.tabs .tab-count {
+  color: var(--dim2);
+  font: var(--text-xs)/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A moving indicator (useTabIndicator) replaces the static underline once measured. */
+.tabs > .motion-tab-indicator {
+  bottom: -1px;
+  height: 2px;
+  background: var(--selected);
+}
+
+/* Concentric: 8px outer radius - 2px inset = inner radius rounded to --r-xs. */
+.segmented {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-0_5);
+  padding: var(--space-0_5);
+  border-radius: var(--r-sm);
+  background: var(--surface-muted);
+}
+
+.segmented button {
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--dim2);
+  font: var(--weight-medium) var(--text-xs)/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--fg);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border3);
+  color: var(--fg);
+}

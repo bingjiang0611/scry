@@ -18,7 +18,7 @@
 .skeleton-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: var(--sk-row-height);
   padding: 0 12px;
   box-sizing: border-box;
@@ -26,7 +26,7 @@
 .skeleton-row-copy {
   display: grid;
   flex: 1;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
 }
 .sk-shape {

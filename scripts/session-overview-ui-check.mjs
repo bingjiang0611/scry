@@ -93,15 +93,14 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
     if (!await contents.executeJavaScript(`!document.querySelector('#overview-session-panel').textContent.includes('本会话 Token 用量') && !document.querySelector('#overview-session-panel .pstats') && document.querySelector('#overview-file-footprint') != null && document.querySelector('#overview .overview-metric-grid') != null`)) {
       throw new Error('Overview retained the redundant token section or removed adjacent evidence')
     }
-    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab', modifiers: ['shift'] })
-    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] })
+    // The shared Tabs primitive uses a roving tabindex: only the selected tab is in the Tab order,
+    // and arrow keys move focus and selection together (DESIGN.md, Tabs).
+    if (!await contents.executeJavaScript(`document.activeElement.id === 'overview-session-tab' && document.querySelector('#overview-turns-tab').tabIndex === -1`)) throw new Error('Overview tabs lost the roving tab order')
+    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Left' })
+    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Left' })
     await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
     if (!await contents.executeJavaScript(`document.activeElement.id === 'overview-turns-tab'`)) throw new Error('Overview keyboard focus did not reach turns tab')
-    contents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
-    contents.sendInputEvent({ type: 'char', keyCode: '\r' })
-    contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
-    await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
-    if (!await contents.executeJavaScript(`document.activeElement.id === 'overview-turns-tab' && !document.querySelector('#overview-turns-panel').hidden`)) throw new Error('Overview keyboard tab return failed')
+    if (!await contents.executeJavaScript(`document.activeElement.id === 'overview-turns-tab' && document.querySelector('#overview-turns-tab').getAttribute('aria-selected') === 'true' && !document.querySelector('#overview-turns-panel').hidden && document.querySelector('#overview-session-tab').tabIndex === -1`)) throw new Error('Overview keyboard tab return failed')
     // Fixture controls change the session; the interactions above use native input.
     await contents.executeJavaScript(`document.querySelector('#context-start').click(); true`)
     await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')

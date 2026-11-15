@@ -6,6 +6,9 @@ import { Icon } from './primitives/Icon'
 import { usePresence } from '../hooks/usePresence'
 import { MOTION } from '../motion'
 import { RightSurfaceTabStrip, rightSurfacePanelId } from './RightSurfaceTabStrip'
+import { Button } from './primitives/Button'
+import { IconButton } from './primitives/IconButton'
+import { Notice } from './primitives/Notice'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
 
@@ -173,15 +176,12 @@ export function RightSurfacePanel({
             else onCloseSideChat?.(tab.conversationId)
           }}
         />
-        {layoutNotice && <p className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</p>}
+        {layoutNotice && <Notice tone="warn" layout="strip" className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</Notice>}
 
         <div className="surface-actions">
           <div className="surface-add-wrap">
-            <button
+            <IconButton label="添加 Surface" active={menuOpen}
               ref={addButtonRef}
-              className={`icon-button${menuOpen ? ' on' : ''}`}
-              type="button"
-              aria-label="添加 Surface"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-controls={menuOpen ? menuId : undefined}
@@ -201,7 +201,7 @@ export function RightSurfacePanel({
               }}
             >
               <Icon name="plus" />
-            </button>
+            </IconButton>
             {menuOpen && (
               <div
                 ref={(node) => { menuRef.current = node; menuPresence.ref(node) }}
@@ -264,25 +264,19 @@ export function RightSurfacePanel({
               </div>
             )}
           </div>
-          <button
-            className={`icon-button${maximized ? ' on' : ''}`}
-            type="button"
-            aria-label={maximized ? '恢复右侧工作区' : '最大化右侧工作区'}
+          <IconButton label={maximized ? '恢复右侧工作区' : '最大化右侧工作区'} active={maximized}
             aria-pressed={maximized}
             title={maximized ? '恢复面板' : '最大化面板'}
             onClick={onToggleMaximized}
           >
             <Icon name={maximized ? 'collapse' : 'expand'} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="隐藏右侧工作区"
+          </IconButton>
+          <IconButton label="隐藏右侧工作区"
             title="隐藏右侧工作区"
             onClick={onHide}
           >
             <Icon name="panel" />
-          </button>
+          </IconButton>
         </div>
       </div>
 
@@ -325,7 +319,7 @@ export function RightSurfacePanel({
               {sideChatEntry && (
                 <div className="surface-chooser-footer">
                   {sideChatEntry.notice && <p className="surface-chooser-notice" role="status" data-side-chat-creation-notice>{sideChatEntry.notice}</p>}
-                  <button type="button" className="btn" onClick={sideChatEntry.onOpenHistory}>{sideChatEntry.historyLabel}</button>
+                  <Button onClick={sideChatEntry.onOpenHistory}>{sideChatEntry.historyLabel}</Button>
                 </div>
               )}
             </div>

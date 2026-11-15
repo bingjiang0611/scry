@@ -7,6 +7,8 @@ import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { META_PROMPT_COPY, MODAL_COPY } from '../constants/copy'
 import './meta-prompts.css'
+import { Button } from './primitives/Button'
+import { IconButton } from './primitives/IconButton'
 
 type LibraryState = { status: 'ready'; prompts: MetaPrompt[] } | { status: 'error'; error: string }
 type Notice = { error: boolean; text: string }
@@ -88,15 +90,15 @@ export function MetaPromptsView({ onBack, onInsert }: {
       <header className="mp-header">
         <div><h1>Meta Prompts</h1></div>
         <div className="mp-actions">
-          <button type="button" className="mp-button mp-back" onClick={onBack}>返回会话</button>
-          <button type="button" className="mp-button" disabled={library.status !== 'ready'} onClick={() => { setNotice(null); setEditor({ prompt: null }) }}><Icon name="plus" /> 新建提示词</button>
+          <Button variant="quiet" onClick={onBack}>返回会话</Button>
+          <Button disabled={library.status !== 'ready'} onClick={() => { setNotice(null); setEditor({ prompt: null }) }}><Icon name="plus" /> 新建提示词</Button>
         </div>
       </header>
       {library.status === 'error' ? (
         <div className="mp-load-error" role="alert">
           <Icon name="alert" /><h2>提示词库无法读取</h2><p>{library.error}</p>
           <p>为避免覆盖原数据，当前不能新建或编辑提示词。</p>
-          <button type="button" className="mp-button" onClick={() => setLibrary(loadLibrary())}>重新读取</button>
+          <Button onClick={() => setLibrary(loadLibrary())}>重新读取</Button>
         </div>
       ) : (
         <div className="mp-layout">
@@ -109,7 +111,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
                   <button type="button" className="mp-row-select" aria-pressed={selected?.id === prompt.id} onClick={() => setSelectedId(prompt.id)}>
                     <strong>{prompt.title}</strong><span>{prompt.body.split('\n')[0]}</span>
                   </button>
-                  <button type="button" className="mp-icon-button" aria-label={`复制：${prompt.title}`} title="复制提示词" onClick={() => { void copy(prompt) }}><Icon name="copy" /></button>
+                  <IconButton label={`复制：${prompt.title}`} title="复制提示词" onClick={() => { void copy(prompt) }}><Icon name="copy" /></IconButton>
                 </div>
               ))}
               {visible.length === 0 && (
@@ -120,15 +122,15 @@ export function MetaPromptsView({ onBack, onInsert }: {
           <article className="mp-detail" aria-label="提示词详情">
             {selected ? <>
               <header className="mp-detail-header"><h2>{selected.title}</h2><div className="mp-actions">
-                <button type="button" className="mp-icon-button" aria-label="编辑提示词" title="编辑" onClick={() => { setNotice(null); setEditor({ prompt: selected }) }}><Icon name="edit" /></button>
-                <button type="button" className="mp-icon-button" aria-label="删除提示词" title="删除" onClick={() => { setNotice(null); setDeleting(selected) }}><Icon name="trash" /></button>
+                <IconButton label="编辑提示词" title="编辑" onClick={() => { setNotice(null); setEditor({ prompt: selected }) }}><Icon name="edit" /></IconButton>
+                <IconButton label="删除提示词" title="删除" onClick={() => { setNotice(null); setDeleting(selected) }}><Icon name="trash" /></IconButton>
               </div></header>
               <pre className="mp-body">{selected.body}</pre>
               <footer className="mp-detail-footer"><span>{Array.from(selected.body).length} 字 · 纯文本</span><div className="mp-actions">
-                <button type="button" className="mp-button" onClick={() => onInsert(selected.body)}>放入当前会话</button>
-                <button type="button" className="mp-button mp-primary" onClick={() => { void copy(selected) }}><Icon name="copy" /> 复制提示词</button>
+                <Button onClick={() => onInsert(selected.body)}>放入当前会话</Button>
+                <Button variant="primary" onClick={() => { void copy(selected) }}><Icon name="copy" /> 复制提示词</Button>
               </div></footer>
-            </> : <div className="mp-empty mp-detail-empty"><strong>{prompts.length === 0 ? '保存常用指令，下次直接使用' : '没有可预览的提示词'}</strong>{prompts.length === 0 && <button type="button" className="mp-button" onClick={() => setEditor({ prompt: null })}><Icon name="plus" /> 新建提示词</button>}</div>}
+            </> : <div className="mp-empty mp-detail-empty"><strong>{prompts.length === 0 ? '保存常用指令，下次直接使用' : '没有可预览的提示词'}</strong>{prompts.length === 0 && <Button onClick={() => setEditor({ prompt: null })}><Icon name="plus" /> 新建提示词</Button>}</div>}
           </article>
         </div>
       )}
@@ -137,7 +139,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
       {deleting && <ModalFrame labelledBy={deleteTitleId} className="mp-delete-modal" onClose={reason => { setDeleting(null); if (reason !== 'button') setNotice(null) }}>
         <div className="modal-head"><b id={deleteTitleId}>删除这条提示词？</b><ModalCloseButton aria-label={MODAL_COPY.cancelDelete} onClick={() => requestModalClose()} /></div>
         <div className="mp-delete-content"><p>「{deleting.title}」将从本机提示词库移除，无法撤销。</p>{notice?.error && <p className="mp-form-error" role="alert">{notice.text}</p>}</div>
-        <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>取消</button><button type="button" className="mp-button mp-danger" onClick={remove}>删除</button></footer>
+        <footer className="mp-modal-footer"><Button onClick={() => requestModalClose()}>取消</Button><Button variant="danger" onClick={remove}>删除</Button></footer>
       </ModalFrame>}
     </section>
   )
@@ -174,8 +176,8 @@ function PromptEditor({ prompt, error, onSave, onClose }: {
           {error && <p className="mp-form-error" role="alert">{error}</p>}
         </div>
         {discarding
-          ? <div className="mp-discard" role="alert"><strong>{META_PROMPT_COPY.discardTitle}</strong><p>{META_PROMPT_COPY.discardDescription}</p><div className="mp-actions"><button type="button" className="mp-button" onClick={() => setDiscarding(false)}>{META_PROMPT_COPY.continueEditing}</button><button type="button" className="mp-button mp-danger" onClick={() => requestModalClose('confirm')}>{META_PROMPT_COPY.discardChanges}</button></div></div>
-          : <footer className="mp-modal-footer"><button type="button" className="mp-button" onClick={() => requestModalClose()}>{META_PROMPT_COPY.cancel}</button><button type="submit" className="mp-button mp-primary" disabled={!title.trim() || !body.trim()}>{META_PROMPT_COPY.save}</button></footer>}
+          ? <div className="mp-discard" role="alert"><strong>{META_PROMPT_COPY.discardTitle}</strong><p>{META_PROMPT_COPY.discardDescription}</p><div className="mp-actions"><Button onClick={() => setDiscarding(false)}>{META_PROMPT_COPY.continueEditing}</Button><Button variant="danger" onClick={() => requestModalClose('confirm')}>{META_PROMPT_COPY.discardChanges}</Button></div></div>
+          : <footer className="mp-modal-footer"><Button onClick={() => requestModalClose()}>{META_PROMPT_COPY.cancel}</Button><Button variant="primary" type="submit" disabled={!title.trim() || !body.trim()}>{META_PROMPT_COPY.save}</Button></footer>}
       </form>
     </ModalFrame>
   )

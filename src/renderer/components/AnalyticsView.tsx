@@ -7,6 +7,7 @@ import { Icon } from './primitives/Icon'
 import { TurningIcon } from './primitives/TurningIcon'
 import { ANALYTICS_COPY as copy } from '../constants/copy'
 import { formatAggregateTokens, formatCost, formatDay, formatKnownTokens, formatShare, metricValue, metricEvidence, modelBreakdownRows, tokensOf, ProviderMark, providerLabel, displayCostEvidence, tokenEvidence, tokenComplete, isApproximateCost, usdFormatter, ranges, UsageChart, type BreakdownMode, type ChartMetric } from './AnalyticsChart'
+import { Segmented } from './primitives/Segmented'
 export interface AnalyticsViewProps {
   analytics: UsageAnalytics | null
   rangeDays: UsageAnalyticsRangeDays
@@ -89,11 +90,13 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
             </div>
           </div>
           <div className="usage-actions">
-            <div className="usage-segmented" role="group" aria-label={copy.rangeLabel}>
-              {ranges.map((days) => (
-                <button type="button" key={days} className={rangeDays === days ? 'active' : ''} aria-pressed={rangeDays === days} onClick={() => onRangeChange(days)}>{copy.range(days)}</button>
-              ))}
-            </div>
+            <Segmented
+              className="usage-segmented"
+              label={copy.rangeLabel}
+              value={rangeDays}
+              onChange={onRangeChange}
+              options={ranges.map(days => ({ value: days, label: copy.range(days) }))}
+            />
             <button className="usage-refresh" type="button" onClick={() => { if (!loading) onRefresh() }} aria-disabled={loading} aria-busy={loading} aria-label={copy.refresh} title={copy.refresh}>
               <TurningIcon busy={loading && !staleRange} />
             </button>
@@ -136,10 +139,13 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
           <article className="usage-chart-card">
             <div className="usage-section-head usage-chart-head">
               <h2>{chartMetric === 'cost' ? copy.dailyCost : copy.dailyTokens}</h2>
-              <div className="usage-segmented is-compact" role="group" aria-label={copy.metric}>
-                <button type="button" className={chartMetric === 'cost' ? 'active' : ''} aria-pressed={chartMetric === 'cost'} onClick={() => setChartMetric('cost')}>{copy.cost}</button>
-                <button type="button" className={chartMetric === 'tokens' ? 'active' : ''} aria-pressed={chartMetric === 'tokens'} onClick={() => setChartMetric('tokens')}>{copy.tokenToggle}</button>
-              </div>
+              <Segmented
+                className="usage-segmented is-compact"
+                label={copy.metric}
+                value={chartMetric}
+                onChange={setChartMetric}
+                options={[{ value: 'cost', label: copy.cost }, { value: 'tokens', label: copy.tokenToggle }]}
+              />
             </div>
             <div className="usage-legend" aria-label={copy.legend}>
               {chartProviders.map((row) => (
@@ -182,10 +188,13 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
         <section className="usage-breakdown">
           <div className="usage-section-head">
             <h2>{copy.details}</h2>
-            <div className="usage-segmented is-compact" role="group" aria-label={copy.detailDimension}>
-              <button type="button" className={breakdownMode === 'model' ? 'active' : ''} aria-pressed={breakdownMode === 'model'} onClick={() => setBreakdownMode('model')}>{copy.model}</button>
-              <button type="button" className={breakdownMode === 'day' ? 'active' : ''} aria-pressed={breakdownMode === 'day'} onClick={() => setBreakdownMode('day')}>{copy.day}</button>
-            </div>
+            <Segmented
+              className="usage-segmented is-compact"
+              label={copy.detailDimension}
+              value={breakdownMode}
+              onChange={setBreakdownMode}
+              options={[{ value: 'model', label: copy.model }, { value: 'day', label: copy.day }]}
+            />
           </div>
           <div className="usage-table-wrap">
             <table>

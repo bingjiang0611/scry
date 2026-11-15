@@ -25,7 +25,8 @@ export async function exerciseSessionCapabilityQuestionResult() {
   const answerCell = ledgerRow.querySelector('dd')
   const questionList = answeredBlock.querySelector('.question-result-list')
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-  check(getComputedStyle(questionList).display === 'grid' && getComputedStyle(questionList).marginTop === '6px', 'Answered question list does not use the ledger rhythm')
+  // 8px is --space-2: the design system snapped the former 6px gap onto the 4px grid (DESIGN.md).
+  check(getComputedStyle(questionList).display === 'grid' && getComputedStyle(questionList).marginTop === '8px', 'Answered question list does not use the ledger rhythm')
   check(getComputedStyle(questionList).borderTopWidth === '1px', 'Answered question list lost its hairline')
   check(getComputedStyle(answerCell).marginLeft === '0px', 'Answered answer kept the browser <dd> indent')
   check(getComputedStyle(ledgerRow).display === 'grid' && getComputedStyle(ledgerRow).gridTemplateColumns.split(' ').length === 2, 'Answered question rows are not a two-column ledger')

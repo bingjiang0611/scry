@@ -1,6 +1,9 @@
 /* Preserve this order: later domain sections override earlier rules. */
 @import './styles-theme-shell.css';
 @import './styles-typography.css';
+@import './styles-buttons.css';
+@import './styles-notices.css';
+@import './styles-tabs.css';
 @import './styles-sidebar.css';
 @import './styles-dialog-controls.css';
 @import './styles-chat-entry.css';
@@ -17,7 +20,6 @@
 @import './styles-verdict-diff.css';
 @import './styles-view-navigation.css';
 @import './styles-chat-media.css';
-@import './styles-segments.css';
 @import './styles-execution-graph.css';
 @import './styles-tool-cards.css';
 @import './styles-panel-chrome.css';

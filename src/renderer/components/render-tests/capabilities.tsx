@@ -48,8 +48,9 @@ describe('CapabilitiesModal 精简能力页', () => {
     )
 
     expect(html).toContain('role="tablist" aria-label="能力类型"')
-    expect(html).toContain('role="tablist" aria-label="Skill 来源"')
-    expect(html).toContain('aria-selected="true" class="active">全部</button>')
+    // Source filters re-scope one list, so they are a segmented group rather than tabs.
+    expect(html).toContain('role="group" aria-label="Skill 来源"')
+    expect(html).toContain('aria-pressed="true">全部</button>')
     expect(html).toContain('项目能力说明')
     expect(html).toContain('Provider 能力')
     expect(html).not.toContain('/repo/SKILL.md')

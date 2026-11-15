@@ -8,6 +8,7 @@ import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { usePresence } from '../hooks/usePresence'
 import { MOTION } from '../motion'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
+import { Button } from './primitives/Button'
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
 export function WorkspaceContextMenu({
@@ -105,10 +106,10 @@ export function WorkspaceDialog({
         <h3>{title}</h3>
         <input ref={inputRef} value={value} onChange={(event) => onChange(event.target.value)} aria-label={title} />
         <div className="workspace-dialog-actions">
-          <button type="button" className="btn" disabled={busy} onClick={onClose}>取消</button>
-          <button type="submit" className="btn primary" disabled={busy || !value.trim()}>
+          <Button disabled={busy} onClick={onClose}>取消</Button>
+          <Button variant="primary" type="submit" disabled={busy || !value.trim()}>
             {busy ? '处理中…' : '确认'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -282,14 +283,14 @@ export function FileEditor({
       <div className="workspace-editor">
         <div className="workspace-editorbar">
           <span>分页只读 · {start}–{page.nextOffset} / {page.totalBytes} bytes</span>
-          <button type="button" className="btn" disabled={loading || pageBack.length === 0} onClick={() => {
+          <Button size="sm" disabled={loading || pageBack.length === 0} onClick={() => {
             const offset = pageBack.at(-1)
             if (offset !== undefined) void movePage(offset, pageBack.slice(0, -1))
-          }}>上一页</button>
-          <button type="button" className="btn" disabled={loading || !page.hasMore} onClick={() =>
+          }}>上一页</Button>
+          <Button size="sm" disabled={loading || !page.hasMore} onClick={() =>
             void movePage(page.nextOffset, [...pageBack, page.offset])
-          }>下一页</button>
-          <button type="button" className="btn" disabled={loading} onClick={() => void load()}>{WORKSPACE_EDITOR_COPY.reload}</button>
+          }>下一页</Button>
+          <Button size="sm" disabled={loading} onClick={() => void load()}>{WORKSPACE_EDITOR_COPY.reload}</Button>
         </div>
         <div className="workspace-editorbody">
           <div className="workspace-source">
@@ -305,19 +306,15 @@ export function FileEditor({
       <div className="workspace-editorbar">
         <div className="workspace-editor-actions" role="group" aria-label={WORKSPACE_EDITOR_COPY.actions}>
           {markdown && (
-            <button
-              type="button"
-              className="btn"
+            <Button size="sm"
               aria-expanded={sourceExpanded}
               onClick={() => setSourceExpanded((expanded) => !expanded)}
             >
               <Icon name={sourceExpanded ? 'collapse' : 'expand'} />
               {sourceExpanded ? WORKSPACE_EDITOR_COPY.collapseSource : WORKSPACE_EDITOR_COPY.expandSource}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="btn workspace-reload"
+          <Button className="workspace-reload" size="sm"
             disabled={saving}
             onClick={() => {
               if (!dirty || window.confirm(WORKSPACE_EDITOR_COPY.confirmReload)) void load()
@@ -325,11 +322,11 @@ export function FileEditor({
           >
             <Icon name="refresh" />
             {WORKSPACE_EDITOR_COPY.reload}
-          </button>
+          </Button>
           {!readOnly && (!markdown || sourceExpanded || dirty) && (
-            <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
+            <Button variant="primary" size="sm" disabled={!dirty || saving} onClick={() => void save()}>
               {saving ? WORKSPACE_EDITOR_COPY.saving : WORKSPACE_EDITOR_COPY.save}
-            </button>
+            </Button>
           )}
         </div>
         <span>{WORKSPACE_EDITOR_COPY.status(

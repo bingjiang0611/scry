@@ -16,13 +16,13 @@
 .arch-provider-trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 24px;
   padding: 0;
   border: 0;
   background: none;
   color: var(--fg);
-  font: 12px/1 var(--font-ui);
+  font: var(--text-sm)/1 var(--font-ui);
   cursor: pointer;
 }
 
@@ -46,7 +46,7 @@
   gap: 8px;
   margin: 0;
   color: var(--bad);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
-.arch-row-error button { flex: none; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.arch-row-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { flex: none; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }

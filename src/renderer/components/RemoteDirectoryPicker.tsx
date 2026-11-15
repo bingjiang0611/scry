@@ -8,6 +8,7 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { Button } from './primitives/Button'
 import { BusyLabel } from './primitives/BusyLabel'
 import { SkeletonRows } from './primitives/Skeleton'
 
@@ -80,11 +81,11 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
         <p className="hosts-muted">这里浏览的是 {connection.label}，不是这台 Mac。浏览不会授权；明确选择后，目录将加入远端可运行项目，已配对设备也可访问。原有 Agent 权限与仓库信任检查保持不变。</p>
         <form className="remote-directory-path" onSubmit={navigate}>
           <label>远程路径<input ref={pathRef} name="remotePath" value={path} onChange={event => setPath(event.target.value)} placeholder="输入绝对路径或 ~/…，按回车浏览" maxLength={4096} required readOnly={busy} autoComplete="off" spellCheck={false} /></label>
-          <button type="submit" className="hosts-button" disabled={busy || !connected || !path}>前往</button>
+          <Button type="submit" disabled={busy || !connected || !path}>前往</Button>
         </form>
         <div className="remote-directory-navigation">
-          <button type="button" className="hosts-button" disabled={busy || !connected} onClick={() => void browse()}>主目录</button>
-          <button type="button" className="hosts-button" disabled={busy || !connected || !page?.parent} onClick={() => void browse(page!.parent!.path)}>上一级</button>
+          <Button disabled={busy || !connected} onClick={() => void browse()}>主目录</Button>
+          <Button disabled={busy || !connected || !page?.parent} onClick={() => void browse(page!.parent!.path)}>上一级</Button>
           <span className="hosts-muted">{page ? LOADING_COPY.directoryCount(page.directories.length, page.total) : loading ? '' : LOADING_COPY.directoryUnread}</span>
         </div>
         {!connected && <p role="alert" className="desktop-remote__error">{connection.label} 未连接或连接状态未知；不会改用本机选择或执行。</p>}
@@ -99,12 +100,12 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
             </button>
           ))}
           {!loading && page?.total === 0 && <p className="hosts-muted">此目录没有子文件夹，可以直接选择此目录。</p>}
-          {page?.hasMore && <button type="button" className="hosts-button" disabled={!connected || (busy && !loading)} aria-busy={loading} aria-disabled={loading}
-            onClick={() => { if (!loading) void browse(page.current.path, page) }}><BusyLabel busy={showLoading}>加载更多文件夹</BusyLabel></button>}
+          {page?.hasMore && <Button disabled={!connected || (busy && !loading)} aria-busy={loading} aria-disabled={loading}
+            onClick={() => { if (!loading) void browse(page.current.path, page) }}><BusyLabel busy={showLoading}>加载更多文件夹</BusyLabel></Button>}
         </div>
         <div className="remote-directory-actions">
-          <button type="button" className="hosts-button" disabled={selecting} onClick={() => requestModalClose()}>取消</button>
-          <button type="button" className="hosts-button is-primary" disabled={busy || !connected || !page || path !== page.current.path} onClick={() => void choose()}>{selecting ? '正在确认…' : '选择此目录'}</button>
+          <Button disabled={selecting} onClick={() => requestModalClose()}>取消</Button>
+          <Button variant="primary" disabled={busy || !connected || !page || path !== page.current.path} onClick={() => void choose()}>{selecting ? '正在确认…' : '选择此目录'}</Button>
         </div>
       </div>
     </ModalFrame>

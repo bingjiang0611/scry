@@ -8,23 +8,12 @@
 }
 
 .chat-body .chat-transcript {
-  padding: 24px var(--evidence-gutter) 42px;
+  padding: 24px var(--evidence-gutter) 40px;
 }
 
 .chat-body .welcome-field {
   width: min(var(--evidence-content), 100%);
-  gap: 24px;
-  padding-block: 34px;
   text-align: center;
-}
-
-.welcome-kicker {
-  justify-content: center;
-  color: var(--dim2);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 550;
-  letter-spacing: 0;
 }
 
 .welcome-heading {
@@ -35,68 +24,28 @@
 .welcome-heading h1 {
   max-width: 680px;
   font-size: clamp(27px, 3.2cqi, 34px);
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.04em;
 }
 
 .welcome-heading p {
   max-width: 580px;
   color: var(--dim2);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.65;
 }
 
 .welcome-provider-field {
-  gap: 12px;
-  padding: 16px;
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--panel);
-  box-shadow: var(--shadow-card);
   text-align: left;
-}
-
-.welcome-provider-head {
-  padding-bottom: 12px;
-  border-bottom-color: var(--border3);
-}
-
-.welcome-provider-head b {
-  font-size: 13.5px;
-}
-
-.welcome-provider-head small {
-  font-family: var(--font-ui);
-  font-size: 12px;
-}
-
-.welcome-provider {
-  padding: 12px 13px;
-  border-color: var(--border);
-  border-radius: var(--r-md);
-  background: var(--panel2);
-}
-
-.welcome-provider.is-selected,
-.welcome-profile-pick.is-selected {
-  border-color: var(--border2);
-  background: var(--panel3);
-  box-shadow: none;
-}
-
-.welcome-provider small,
-.welcome-provider code,
-.welcome-profile-count {
-  font-size: 11px;
 }
 
 .chat-body .transcript-turn {
   width: min(var(--evidence-content), 100%);
-  padding: 5px 0 34px;
+  padding: 4px 0 32px;
 }
 
 .chat-body .transcript-turn + .transcript-turn {
-  padding-top: 40px;
   border-top: 0;
 }
 
@@ -116,25 +65,18 @@
 .chat-body .bubble-user {
   width: fit-content;
   max-width: 100%;
-  padding: 10px 14px;
+  padding: 8px 16px;
   border: 0;
   border-radius: var(--r-lg);
   background: var(--panel2);
   box-shadow: var(--shadow-card);
-  font-size: 14.5px;
+  font-size: var(--text-reading);
   line-height: 1.6;
 }
 
-.chat-body .turn-assistant {
-  margin-top: 20px;
-}
-
 .chat-body .who {
-  min-height: 26px;
-  padding-bottom: 8px;
   color: var(--dim2);
-  font-size: 11.5px;
-  font-weight: 540;
+  font-weight: var(--weight-medium);
 }
 
 .chat-body .who .av {
@@ -151,15 +93,7 @@
 }
 
 .chat-body .model-text {
-  max-width: 100%;
   color: var(--fg);
-  font-size: 14.5px;
-  line-height: 1.72;
-}
-
-.chat-body .turn-flow {
-  gap: 15px;
-  padding-left: 22px;
 }
 
 .chat-body .turn-flow::before {
@@ -169,7 +103,7 @@
 
 .chat-body .thinking {
   color: var(--dim);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.65;
 }
 
@@ -177,7 +111,7 @@
 .chat-body .tool-group-row .tg-dur {
   color: var(--dim2);
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .chat-body .tool-group-row .tg-pill {
@@ -187,15 +121,10 @@
 }
 
 .chat-body .tool-group-body {
-  padding-inline: 10px;
+  padding-inline: 8px;
   border: 1px solid var(--border3);
   border-radius: var(--r-sm);
   background: var(--panel2);
-}
-
-.chat-body .tool-card {
-  border-color: var(--border3);
-  background: transparent;
 }
 
 .chat-body .tool-row .name,
@@ -204,7 +133,6 @@
 }
 
 .chat-body .turn-footer {
-  margin-top: 12px;
   border-top-color: var(--border3);
 }
 
@@ -212,23 +140,22 @@
 
 .runtime-composer {
   width: min(var(--evidence-column), 100%);
-  padding: 8px var(--evidence-gutter) 12px;
   container-name: composer-pane;
   container-type: inline-size;
 }
 
 .runtime-composer .evidence-composer-shell {
-  padding: 8px 12px 9px;
+  padding: 8px 12px 8px;
   overflow: visible;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--panel);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 7%);
+  box-shadow: var(--shadow-composer);
 }
 
 .runtime-composer .evidence-composer-shell:focus-within {
   border-color: var(--border2);
-  box-shadow: 0 12px 34px rgb(0 0 0 / 13%), 0 0 0 1px var(--accent-soft);
+  box-shadow: var(--shadow-composer-focus);
 }
 
 .composer-context {
@@ -236,9 +163,9 @@
   min-height: 48px;
   display: flex;
   align-items: center;
-  gap: 3px;
-  margin: -8px -12px 3px;
-  padding: 5px 14px;
+  gap: 4px;
+  margin: -8px -12px 4px;
+  padding: 4px 16px;
   border-bottom: 1px solid var(--border3);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
   background: transparent;
@@ -253,12 +180,12 @@
   width: auto;
   max-width: 100%;
   min-height: 38px;
-  padding: 0 14px;
+  padding: 0 16px;
   border: 0;
   border-radius: var(--r-md);
   background: var(--surface-muted);
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .composer-context .wdbtn:hover {
@@ -276,10 +203,8 @@
 
 .runtime-composer .input,
 .runtime-composer textarea {
-  min-height: 76px;
-  padding: 14px 8px 10px;
   color: var(--fg);
-  font-size: 15px;
+  font-size: var(--text-reading);
   line-height: 1.55;
 }
 
@@ -290,7 +215,6 @@
 .runtime-composer .composer-bottom {
   min-width: 0;
   align-items: center;
-  gap: 8px;
 }
 
 .runtime-composer .composer-controls {
@@ -300,16 +224,7 @@
 
 .runtime-composer .run-control-select {
   color: var(--dim);
-  font-size: 11.5px;
-}
-
-.runtime-composer .permission-mode-trigger {
-  height: 32px;
-  min-height: 32px;
-  padding-inline: 8px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
+  font-size: var(--text-sm);
 }
 
 .runtime-composer .permission-mode-trigger:hover,
@@ -350,7 +265,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 4px;
 }
 
 .runtime-composer .composer-action-controls .clipick,
@@ -362,15 +277,10 @@
 .runtime-composer .composer-action-controls .clibtn,
 .runtime-composer .model-effort-trigger {
   min-width: 0;
-  height: 34px;
-  min-height: 34px;
   padding: 0 8px;
-  border: 0;
   overflow: hidden;
-  border-radius: var(--r-sm);
-  background: transparent;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .runtime-composer .composer-action-controls .clibtn {
@@ -387,7 +297,7 @@
 .runtime-composer .composer-action-controls .clibtn:focus-visible,
 .runtime-composer .model-effort-trigger:focus-visible,
 .runtime-composer .model-effort-current:focus-visible,
-.runtime-composer .model-effort-list button:focus-visible {
+.runtime-composer .model-effort-list button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 1px;
 }
@@ -399,7 +309,6 @@
   color: var(--fg);
 }
 
-
 .runtime-composer .composer-action-controls .climenu {
   right: 0;
   left: auto;
@@ -408,7 +317,7 @@
 .runtime-composer .model-effort-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
 }
 
@@ -448,7 +357,7 @@
   left: 0;
   bottom: calc(100% + 9px);
   width: min(400px, calc(100vw - 32px));
-  padding: 7px;
+  padding: 8px;
   border: 1px solid var(--border2);
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--panel) 97%, transparent);
@@ -462,10 +371,10 @@
 }
 
 .runtime-composer .permission-mode-heading {
-  padding: 7px 10px 6px;
+  padding: 8px 8px 8px;
   color: var(--dim2);
-  font-size: 11px;
-  font-weight: 550;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   letter-spacing: 0.01em;
 }
 
@@ -475,8 +384,8 @@
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 20px;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 8px 8px;
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
@@ -515,14 +424,14 @@
 
 .runtime-composer .permission-mode-copy strong {
   color: inherit;
-  font-size: 14px;
-  font-weight: 520;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
   line-height: 1.2;
 }
 
 .runtime-composer .permission-mode-copy > span {
   color: var(--dim2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.35;
 }
 
@@ -602,23 +511,23 @@
 
 .runtime-composer .model-effort-field-label {
   color: var(--dim3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .runtime-composer .model-effort-current-effort {
   grid-column: 2 / 4;
   justify-self: end;
   color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
 }
 
 .runtime-composer .model-effort-current-model {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 12px;
-  font-weight: 450;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -635,7 +544,7 @@
   min-height: 24px;
   display: grid;
   align-items: center;
-  margin: 0 8px 3px;
+  margin: 0 8px 4px;
 }
 
 .runtime-composer .model-effort-slider input[type='range'] {
@@ -678,7 +587,7 @@
   border-radius: 50%;
   corner-shape: round;
   background: var(--panel);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+  box-shadow: var(--shadow-thumb);
 }
 
 .runtime-composer .model-effort-slider input[type='range']::-moz-range-track {
@@ -696,7 +605,7 @@
   border-radius: 50%;
   corner-shape: round;
   background: var(--panel);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+  box-shadow: var(--shadow-thumb);
 }
 
 .runtime-composer .model-effort-slider-dots {
@@ -732,24 +641,24 @@
   display: none;
 }
 
-.runtime-composer .model-effort-list button {
+.runtime-composer .model-effort-list button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   min-width: 0;
   min-height: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--dim);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 
-.runtime-composer .model-effort-list button:hover:not(:disabled),
-.runtime-composer .model-effort-list button:focus-visible {
+.runtime-composer .model-effort-list button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover:not(:disabled),
+.runtime-composer .model-effort-list button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible {
   background: var(--surface-strong);
   color: var(--fg);
 }
@@ -782,7 +691,6 @@
   corner-shape: round;
   background: var(--fg);
   color: var(--main-surface);
-  box-shadow: none;
 }
 
 .runtime-composer .send:hover:not(:disabled) {

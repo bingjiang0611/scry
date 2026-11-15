@@ -8,6 +8,7 @@ import { Icon } from './primitives/Icon'
 import { TerminalHistory } from './TerminalHistory'
 import { replayTerminalRecording } from '../terminal-recording-replay'
 import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
+import { Button } from './primitives/Button'
 
 type TerminalStatus = 'starting' | 'running' | 'exited' | 'error' | 'readonly'
 
@@ -600,7 +601,7 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
             <Icon name="terminal" lg />
             <strong>没有打开的终端</strong>
             <span>终端以 {machineLabel} 上的当前 macOS 用户权限运行；未绑定项目时从用户主目录启动。</span>
-            <button type="button" className="btn" onClick={addTab}>启动终端</button>
+            <Button onClick={addTab}>启动终端</Button>
           </div>
         ) : tabs.map((tab) => (
           <TerminalPane

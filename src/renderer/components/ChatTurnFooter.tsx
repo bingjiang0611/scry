@@ -8,7 +8,6 @@ import { type ReactNode } from 'react'
 
 
 
-import { Icon } from './primitives/Icon'
 import type { TraceEvent } from '@shared/trace'
 
 
@@ -18,6 +17,7 @@ import { isIncompleteRunTermination, runTerminationHint, runTerminationLabel, ty
 
 import { aggregateCalls, fmtTok, logicalCallEventsForTurn, resultOf } from '../format'
 import type { FileRow } from '../format'
+import { Notice } from './primitives/Notice'
 
 
 
@@ -68,25 +68,19 @@ export function TurnFooter({ items, files }: { items: TraceEvent[]; files: FileR
 export function TerminationNotice({ reason }: { reason: RunTerminationReason }) {
   if (!isIncompleteRunTermination(reason)) return null
   return (
-    <div className="termination-notice" role="status">
-      <Icon name="alert" />
-      <div>
-        <b>{runTerminationLabel(reason)}</b>
-        <span>{runTerminationHint(reason)}</span>
-      </div>
-    </div>
+    <Notice tone="warn" className="termination-notice" role="status">
+      <b>{runTerminationLabel(reason)}</b>
+      <span>{runTerminationHint(reason)}</span>
+    </Notice>
   )
 }
 
 export function ToolTerminationNotice({ evidence }: { evidence: NonNullable<TraceEvent['toolTermination']> }) {
   return (
-    <div className="termination-notice" role="status">
-      <Icon name="alert" />
-      <div>
-        <b>工具已结束本次执行 · {evidence.tool}</b>
-        <span>{evidence.message || '工具未提供结束说明'}</span>
-        <span>执行结束不代表目标已验证完成；请先查看工具结果，不要盲目重试。</span>
-      </div>
-    </div>
+    <Notice tone="warn" className="termination-notice" role="status">
+      <b>工具已结束本次执行 · {evidence.tool}</b>
+      <span>{evidence.message || '工具未提供结束说明'}</span>
+      <span>执行结束不代表目标已验证完成；请先查看工具结果，不要盲目重试。</span>
+    </Notice>
   )
 }

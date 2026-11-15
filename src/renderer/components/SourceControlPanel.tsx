@@ -16,6 +16,11 @@ import { SourceControlFileRow } from './SourceControlFileRow'
 import { SourceControlTransportDialog } from './SourceControlTransportDialog'
 import { SourceControlRepositoryDialog } from './SourceControlRepositoryDialog'
 import { sourceControlActionNames as actionNames, sourceControlStatusNames as statusNames, sourceControlOperationCopy, sourceControlFileCopy } from '../constants/source-control-copy'
+import { Notice } from './primitives/Notice'
+import { IconButton } from './primitives/IconButton'
+import { Button } from './primitives/Button'
+import { Icon } from './primitives/Icon'
+import { Tabs } from './primitives/Tabs'
 
 // The last read of each repository, so returning to this tab shows what was known
 // instead of a cold load. Keyed by the API (this machine or one remote host) and cwd,
@@ -294,22 +299,29 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         <div className="sc-header-actions"><button disabled={busy} onClick={() => setDetailsOpen(true)}>详情</button>
           <button disabled={busy} aria-busy={refreshing} aria-disabled={refreshing} title="刷新后需要重新选择工作区提交范围" onClick={manualRefresh}><BusyLabel busy={showRefreshing}>刷新</BusyLabel></button></div>
       </header>
-      {error && <div role="alert" className="sc-notice sc-error">{error}
-        {repo && tab !== 'operations' && <button className="sc-error-link" onClick={() => setTab('operations')}>查看操作记录</button>}
-        <button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-      {cachedAt !== null && repo && <p className="sc-notice sc-cached" role="status">{freshReadFailed
+      {error && <Notice tone="bad" role="alert" className="sc-notice sc-error" action={<>
+        {repo && tab !== 'operations' && <Button size="sm" variant="quiet" className="sc-error-link" onClick={() => setTab('operations')}>查看操作记录</Button>}
+        <IconButton size="sm" label="关闭错误提示" onClick={() => setError('')}><Icon name="x" /></IconButton>
+      </>}>{error}</Notice>}
+      {cachedAt !== null && repo && <Notice tone={freshReadFailed ? 'warn' : 'info'} className="sc-notice sc-cached" role="status">{freshReadFailed
         ? `显示的是 ${readTime(cachedAt)} 读取的状态；重新读取失败，不能写入，可点刷新重试。`
-        : `显示的是 ${readTime(cachedAt)} 读取的状态，正在刷新；刷新完成前不能写入。`}</p>}
+        : `显示的是 ${readTime(cachedAt)} 读取的状态，正在刷新；刷新完成前不能写入。`}</Notice>}
       {!state && <p role="status" className="sc-empty">正在读取仓库…</p>}
       {state && state.status !== 'available' && <div className="sc-empty"><h3>无法读取仓库</h3><p>{state.reason}</p><p>读取失败不代表没有变更。</p></div>}
       {repo && primary && expected && <>
-        <nav className="sc-tabs" aria-label="源代码管理页面">
-          {(['changes', 'pr', 'operations'] as const).map((value) => <button key={value} aria-pressed={tab === value} onClick={() => setTab(value)}>
-            {value === 'changes' ? `变更 ${repo.files.length}` : value === 'pr' ? 'Pull Request' : '操作记录'}
-          </button>)}
-        </nav>
-        {repo.writeBlocker && <p className="sc-notice sc-global-blocker" role="status">{repo.writeBlocker}</p>}
-        {!repo.writeBlocker && repo.actionBlockers.push && <div className="sc-inline-notice"><span>推送受限，本地提交按自身条件检查。</span><button onClick={() => setTransport('push')}>查看原因</button></div>}
+        <Tabs
+          className="sc-tabs"
+          label="源代码管理页面"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: 'changes', label: '变更', count: repo.files.length },
+            { value: 'pr', label: 'Pull Request' },
+            { value: 'operations', label: '操作记录' }
+          ]}
+        />
+        {repo.writeBlocker && <Notice tone="warn" className="sc-notice sc-global-blocker" role="status">{repo.writeBlocker}</Notice>}
+        {!repo.writeBlocker && repo.actionBlockers.push && <Notice layout="strip" className="sc-inline-notice" action={<Button size="sm" onClick={() => setTransport('push')}>查看原因</Button>}>推送受限，本地提交按自身条件检查。</Notice>}
         <div className="sc-workspace-shell" hidden={tab !== 'changes'}>
           <div className={`sc-workspace${selection ? ' has-selection' : ''}`}>
             <section className="sc-file-pane" aria-label="本次提交范围">
@@ -394,7 +406,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
         }} />}
       {confirmation && <ModalFrame labelledBy={dialogId} onClose={() => setConfirmation(null)}>
         <h2 id={dialogId}>{confirmation.title}</h2><pre className="sc-confirm-detail">{confirmation.detail}</pre>
-        {confirmation.blocker && <p className="sc-notice" role="alert">{confirmation.blocker}</p>}
+        {confirmation.blocker && <Notice tone="warn" className="sc-notice" role="alert">{confirmation.blocker}</Notice>}
         <div className="sc-actions"><button onClick={() => setConfirmation(null)}>取消</button>
           <button className="sc-primary" disabled={!!confirmation.blocker || locked} onClick={() => {
             const action = confirmation.run

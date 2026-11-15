@@ -1,13 +1,4 @@
 /* Turn Diff Review：点击“本轮改动”后，与对话并排审阅该轮实时 Git patch。 */
-.app.right-panel-review {
-  grid-template-columns:
-    var(--sidebar-w)
-    var(--pane-resizer-w)
-    minmax(420px, 1fr)
-    var(--pane-resizer-w)
-    minmax(0, min(var(--overview-panel-w), 55vw));
-}
-
 .right-panel-slot {
   container-type: inline-size;
 }
@@ -25,7 +16,7 @@
 .files-summary .fh-review {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   color: var(--accent);
   letter-spacing: 0;
   text-transform: none;
@@ -71,7 +62,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 14px 0 16px;
+  padding: 0 16px 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -81,7 +72,7 @@
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .diff-review-title > svg {
@@ -94,19 +85,19 @@
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
 }
 
 .diff-review-title b {
   color: var(--fg);
-  font: 600 13px/1 var(--font-ui);
+  font: var(--weight-semibold) var(--text-md)/1 var(--font-ui);
 }
 
 .diff-review-title span {
   min-width: 0;
   overflow: hidden;
   color: var(--dim2);
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -159,7 +150,7 @@
   flex: 1;
   overflow: hidden;
   color: var(--dim);
-  font: 12px/1.4 var(--font-ui);
+  font: var(--text-sm)/1.4 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -168,9 +159,9 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   color: var(--dim2);
-  font: 10.5px/1 var(--font-mono);
+  font: var(--text-xs)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -203,24 +194,8 @@
 .diff-file-nav-count {
   flex: none;
   display: inline-flex;
-  gap: 6px;
-  font-variant-numeric: tabular-nums;
-}
-
-.diff-review-notice {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(230, 178, 77, 0.24);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font: 11px/1.45 var(--font-ui);
-}
-
-.diff-review-notice svg {
-  width: 14px;
-  height: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .diff-review-empty {
@@ -229,7 +204,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   padding: 32px;
   color: var(--dim2);
   text-align: center;
@@ -243,12 +218,12 @@
 
 .diff-review-empty b {
   color: var(--fg);
-  font: 600 13px/1.3 var(--font-ui);
+  font: var(--weight-semibold) var(--text-md)/1.3 var(--font-ui);
 }
 
 .diff-review-empty span {
   max-width: 42ch;
-  font: 11.5px/1.55 var(--font-ui);
+  font: var(--text-sm)/1.55 var(--font-ui);
 }
 
 .diff-file-nav {
@@ -284,18 +259,18 @@
   padding: 12px 12px 8px;
   background: var(--panel);
   color: var(--dim3);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.diff-file-nav button {
+.diff-file-nav button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   width: 100%;
   min-height: 42px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px 7px 12px;
+  padding: 8px 8px 8px 12px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -308,7 +283,7 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  font: 10.5px/1.35 var(--font-mono);
+  font: var(--text-xs)/1.35 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -319,18 +294,18 @@
   color: var(--fg);
 }
 
-.diff-file-nav button:focus-visible {
+.diff-file-nav button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 .diff-file-nav-count {
   color: var(--dim3);
-  font: 10px/1.15 var(--font-mono);
+  font: var(--text-2xs)/1.15 var(--font-mono);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .diff-file-nav button:hover:not(.active) {
+  .diff-file-nav button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover:not(.active) {
     background: var(--panel2);
     color: var(--fg);
   }
@@ -350,25 +325,6 @@
   }
 
   .diff-file-nav-title {
-    padding-bottom: 6px;
-  }
-}
-
-@media (max-width: 1420px) {
-  .app.right-panel-review {
-    grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
-  }
-
-  .app.right-panel-review > .panel-resizer {
-    display: none;
-  }
-
-  .app.right-panel-review > .right-panel-slot {
-    position: fixed;
-    inset: 0 0 0 calc(var(--sidebar-w) + var(--pane-resizer-w));
-    z-index: 30;
-    display: flex;
-    width: auto;
-    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.5);
+    padding-bottom: 8px;
   }
 }

@@ -4,6 +4,7 @@ import { BACKGROUND_WORK_COPY as copy } from '../constants/copy'
 import { useFlipList } from '../hooks/useFlipList'
 import { Icon } from './primitives/Icon'
 import './background-work.css'
+import { Button } from './primitives/Button'
 
 export function backgroundTaskAge(observedAt: number, now: number): string | undefined {
   if (!Number.isFinite(observedAt) || observedAt > now) return undefined
@@ -69,10 +70,10 @@ export function BackgroundWorkPanel({ runId, work, stopTask = (taskId) => window
               <div><dt>{copy.receipt}</dt><dd><time>{new Date(task.observedAt).toLocaleTimeString()}</time></dd></div>
             </dl>
           </details>
-          {work.taskStop === 'available' && <button type="button" className="btn background-work-stop" disabled={!canStop}
+          {work.taskStop === 'available' && <Button size="sm" className="background-work-stop" disabled={!canStop}
             aria-label={copy.stopLabel(task.taskId)} onClick={() => { void stop(task.taskId) }}>
             <Icon name="square" />{stopping ? copy.stopping : copy.stop}
-          </button>}
+          </Button>}
         </div>
         {result?.message && <p className="background-work-result" role="status">{result.message}</p>}
       </article>

@@ -8,6 +8,7 @@ import { diffBodyItem, emptyDiffItem, parseDiffBody } from '../pierre-diff'
 import { foldCapturedContext } from '../pierre-context'
 import { displayDiffPath, type DiffScope } from '../turn-diff'
 import { diffTheme, PierreDiffRuntime, useDiffTheme } from './PierreDiffRuntime'
+import { Notice } from './primitives/Notice'
 import './pierre-views.css'
 
 function prepareBody(text: string | undefined, path: string) {
@@ -115,11 +116,11 @@ export function StackedDiff({ files, path, jump, scope, repoRoot, layout, setLay
                 return next
               })
             }}>{expanded.has(item.id) ? copy.collapseContext : copy.expandContext(entry.folded!.hidden)}</button>}
-            {entry.notices.map(reason => <div key={reason} className="diff-review-notice warn"
+            {entry.notices.map(reason => <Notice key={reason} tone="warn" size="sm" className="diff-review-notice"
               title={reason === 'missing' ? copy.patchMissingDetail : reason === 'binary' ? copy.binaryDetail : notices[reason]}>
               {reason === 'missing' && entry.file.patchStatus === 'unavailable' ? copy.patchUnavailable : notices[reason]}
-            </div>)}
-            {entry.body?.kind === 'raw' && <div className="diff-review-notice warn" title={entry.body.error}>{copy.rawPatch}</div>}
+            </Notice>)}
+            {entry.body?.kind === 'raw' && <Notice tone="warn" size="sm" className="diff-review-notice" title={entry.body.error}>{copy.rawPatch}</Notice>}
           </div>
         }} />
     </PierreDiffRuntime>

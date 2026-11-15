@@ -4,7 +4,8 @@ import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { useStaleWhileRefresh } from '../hooks/useStaleWhileRefresh'
 import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
 import { ModalFrame, requestModalClose } from './Modals'
-import { Icon } from './primitives/Icon'
+import { Button } from './primitives/Button'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { SkeletonRows } from './primitives/Skeleton'
 import { TurningIcon } from './primitives/TurningIcon'
 
@@ -34,10 +35,10 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedAp
   const error = list.error
   const showSkeleton = useDelayedFlag(list.status === 'loading')
   return (
-    <ModalFrame labelledBy={titleId} onClose={onClose}>
+    <ModalFrame labelledBy={titleId} className="terminal-history-modal" onClose={onClose}>
       <header className="modal-head">
         <h2 id={titleId}>终端录制历史</h2>
-        <button type="button" className="icon-btn" onClick={() => requestModalClose()} aria-label="关闭录制历史"><Icon name="x" /></button>
+        <ModalCloseButton onClick={() => requestModalClose()} aria-label="关闭录制历史" />
       </header>
       <div className="modal-body">
         <p title={cwd ?? '用户主目录'}>当前工作区：{cwd ?? '用户主目录'} · 原文可能含密钥</p>
@@ -64,10 +65,10 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedAp
       </div>
       <footer className="modal-foot">
         <span>按 ID 分页 · 回放时校验正文 · 不恢复 Shell</span>
-        <button type="button" className="btn" aria-busy={list.status === 'refreshing'} onClick={() => { if (after === undefined) list.refresh(); else setAfter(undefined) }}>
+        <Button aria-busy={list.status === 'refreshing'} onClick={() => { if (after === undefined) list.refresh(); else setAfter(undefined) }}>
           <TurningIcon busy={list.status === 'refreshing'} /> 首页 / 刷新
-        </button>
-        <button type="button" className="btn" disabled={busy || !page?.nextCursor} onClick={() => setAfter(page?.nextCursor ?? undefined)}>下一页</button>
+        </Button>
+        <Button disabled={busy || !page?.nextCursor} onClick={() => setAfter(page?.nextCursor ?? undefined)}>下一页</Button>
       </footer>
     </ModalFrame>
   )

@@ -1,32 +1,20 @@
 /* MCP Trust：mcpguard 报告只读展示 */
-.mcp-trust-section {
-  background: var(--panel);
-}
 .mcp-trust-actions {
   display: grid;
-  gap: 7px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 .mcp-trust-error {
   margin: 8px 0;
-  padding: 7px 8px;
-  border: 1px solid rgba(255, 100, 113, 0.28);
+  padding: 8px 8px;
+  border: 1px solid color-mix(in srgb, var(--bad) 28%, transparent);
   border-radius: var(--r-xs);
   color: var(--bad);
-  background: rgba(255, 100, 113, 0.08);
-  font: 11px/1.45 var(--font-mono);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  font: var(--text-xs)/1.45 var(--font-mono);
 }
 .mcp-auth-banner {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 5px 0 8px;
-  padding: 7px 8px;
-  border: 1px solid rgba(246, 197, 96, 0.26);
-  border-radius: var(--r-xs);
-  color: var(--warn);
-  background: rgba(246, 197, 96, 0.08);
-  font: 11.5px/1.35 var(--font-mono);
+  margin: var(--space-1) 0 var(--space-2);
 }
 .mcp-trust-grid {
   margin-top: 8px;
@@ -35,11 +23,11 @@
 .mcp-severity-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 8px;
 }
 .mcp-labels.compact {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .trust-label {
   display: inline-flex;
@@ -47,8 +35,8 @@
   min-width: 0;
   border: 1px solid var(--border2);
   border-radius: var(--r-xs);
-  padding: 2px 7px;
-  font: 10.5px/1.4 var(--font-mono);
+  padding: 2px 8px;
+  font: var(--text-xs)/1.4 var(--font-mono);
   color: var(--dim);
   background: var(--surface-muted);
   white-space: nowrap;
@@ -56,17 +44,17 @@
 .trust-label.ok,
 .trust-text.ok {
   color: var(--ok);
-  border-color: rgba(79, 209, 161, 0.26);
+  border-color: color-mix(in srgb, var(--ok) 26%, transparent);
 }
 .trust-label.warn,
 .trust-text.warn {
   color: var(--warn);
-  border-color: rgba(246, 197, 96, 0.28);
+  border-color: color-mix(in srgb, var(--warn) 28%, transparent);
 }
 .trust-label.bad,
 .trust-text.bad {
   color: var(--bad);
-  border-color: rgba(255, 100, 113, 0.3);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
 }
 .trust-label.muted,
 .trust-text.muted {
@@ -77,7 +65,7 @@
   min-width: 0;
   margin-top: 8px;
   padding: 8px;
-  border: 1px solid rgba(143, 157, 184, 0.14);
+  border: 1px solid var(--border3);
 }
 .mcp-finding {
   display: grid;
@@ -94,7 +82,7 @@
 .mcp-finding .dim {
   grid-column: 2;
   color: var(--dim2);
-  font: 11px/1.35 var(--font-mono);
+  font: var(--text-xs)/1.35 var(--font-mono);
 }
 .mcp-target-head {
   display: flex;
@@ -106,17 +94,13 @@
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg);
-  font: 600 12.5px/1.25 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.25 var(--font-ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .mcp-target > .dim {
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--dim);
-  font: 11px/1.4 var(--font-mono);
-}
-.turn-id {
-  color: var(--accent);
-  border-color: var(--accent-line);
+  font: var(--text-xs)/1.4 var(--font-mono);
 }

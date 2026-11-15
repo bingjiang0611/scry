@@ -3,6 +3,7 @@ import type { ConversationSummary } from '@shared/conversation-api'
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { SideChatWorkspace } from '../hooks/useSideChatWorkspace'
 import { ModalFrame } from './ModalFrame'
+import { Button } from './primitives/Button'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 
 const capturedAt = (value: number): string => new Date(value).toLocaleString('zh-CN', {
@@ -29,7 +30,7 @@ export function SideChatHistoryDialog({ history, onClose }: {
         <h3 id={titleId}>{SIDE_CHAT_COPY.historyTitle}</h3>
         {history.total !== undefined && <p data-side-chat-history-total>{SIDE_CHAT_COPY.historyTotal(history.total)}</p>}
       </div>
-      <button ref={closeRef} type="button" className="btn" onClick={onClose}>{SIDE_CHAT_COPY.historyClose}</button>
+      <Button ref={closeRef} onClick={onClose}>{SIDE_CHAT_COPY.historyClose}</Button>
     </header>
     {history.error && <p role="alert" className="side-chat-history-error">{history.error}</p>}
     {/* First read: row shapes. Paging: the current page stays, dimmed, until the next
@@ -54,14 +55,14 @@ export function SideChatHistoryDialog({ history, onClose }: {
     </ol>
     <footer className="side-chat-history-footer">
       {history.canLoadPrevious
-        ? <button type="button" className="btn" disabled={history.loading} onClick={history.loadPrevious}>
+        ? <Button disabled={history.loading} onClick={history.loadPrevious}>
           {SIDE_CHAT_COPY.historyLoadNewer}
-        </button>
+        </Button>
         : null}
       {history.canLoadMore
-        ? <button type="button" className="btn" disabled={history.loading} onClick={history.loadMore}>
+        ? <Button disabled={history.loading} onClick={history.loadMore}>
           {SIDE_CHAT_COPY.historyLoadOlder}
-        </button>
+        </Button>
         : null}
       {/* The dialog holds one page at a time; the row range says where this page is. */}
       {range

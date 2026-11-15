@@ -7,6 +7,7 @@ import type { WorkspaceFileTarget } from '../workspace-links'
 import { useSideChatInstance } from '../hooks/useSideChatInstance'
 import { ConversationView, type ConversationProjection } from './ConversationView'
 import { DiffInspector } from './DiffInspector'
+import { Notice } from './primitives/Notice'
 
 import '../side-chat.css'
 
@@ -91,7 +92,7 @@ export function SideChatSurface({ conversation, draftStore, agents, onOpenFile, 
     data-side-chat-id={conversation.id} data-side-chat-variant={variant}
     data-side-chat-send-blocked={instance.blockedReason ? 'true' : undefined}>
     <SideChatHeader summary={summary} cwd={conversation.cwd} />
-    {status && <p className="side-chat-surface-notice" role="status" data-side-chat-notice>{status}</p>}
+    {status && <Notice layout="strip" className="side-chat-surface-notice" role="status" data-side-chat-notice>{status}</Notice>}
     <ConversationView
       liveVisible={liveVisible} embedded={variant === 'frame'} conversation={conversation} draftStore={draftStore} chatProps={instance.chatProps}
       onChanged={onChanged}

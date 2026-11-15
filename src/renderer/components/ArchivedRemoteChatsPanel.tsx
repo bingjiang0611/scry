@@ -7,6 +7,7 @@ import type { RemoteProjectGroup } from './SidebarRemoteProjects'
 import { ModalFrame, requestModalClose } from './Modals'
 import { bridge } from './DesktopRemote'
 import { Icon } from './primitives/Icon'
+import { Button } from './primitives/Button'
 
 type ArchivedTarget = { group: RemoteProjectGroup; session: RemoteSessionRef }
 
@@ -94,8 +95,8 @@ export function ArchivedRemoteChatsPanel({ groups }: { groups: RemoteProjectGrou
       <div className="modal-head"><b id={deleteTitleId}>{copy.deleteTitle(deleting.group.connection.label)}</b></div>
       <div className="modal-body"><p>{copy.deleteWarning(deleting.session.label)}</p></div>
       <div className="modal-foot">
-        <button type="button" className="btn" disabled={pending} onClick={() => requestModalClose()}>{copy.cancel}</button>
-        <button type="button" className="btn danger" disabled={pending || !groups.some(group => group.key === deleting.group.key && group.canDelete)} onClick={() => { void change(deleting, true) }}>{pending ? copy.deleting : copy.delete}</button>
+        <Button disabled={pending} onClick={() => requestModalClose()}>{copy.cancel}</Button>
+        <Button variant="danger" disabled={pending || !groups.some(group => group.key === deleting.group.key && group.canDelete)} onClick={() => { void change(deleting, true) }}>{pending ? copy.deleting : copy.delete}</Button>
       </div>
     </ModalFrame>}
   </section>

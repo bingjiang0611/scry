@@ -6,24 +6,21 @@
   min-height: 0;
   height: 100%;
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .sc-header,
-.sc-tabs,
-.sc-actions,
-.sc-file {
+.sc-actions{
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .sc-header {
   justify-content: space-between;
-  padding: 14px;
+  padding: 16px;
   border-bottom: 1px solid var(--sc-border);
 }
 .sc-header small,
 .sc-identity small,
-.sc-file small,
 .sc-operation small,
 .sc-pr-list small {
   display: block;
@@ -35,11 +32,11 @@
   margin-top: 4px;
 }
 .sc-identity {
-  padding: 12px 14px;
+  padding: 12px 16px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 8px 12px;
 }
 .sc-identity small {
   width: 100%;
@@ -47,42 +44,38 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sc-tabs {
-  padding: 0 12px 10px;
-  border-bottom: 1px solid var(--sc-border);
-}
-.sc-panel button,
+
+.sc-panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
 .sc-panel input,
 .sc-panel select,
 .sc-panel textarea {
   font: inherit;
   color: inherit;
-  background: var(--panel, #fff);
+  background: var(--panel);
   border: 1px solid var(--sc-border);
   border-radius: var(--r-xs);
 }
-.sc-panel button {
-  padding: 6px 9px;
+.sc-panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
+  padding: 8px 8px;
   cursor: pointer;
 }
-.sc-panel button:disabled {
+.sc-panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }
-.sc-panel button:focus-visible,
+.sc-panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):focus-visible,
 .sc-panel input:focus-visible,
 .sc-panel select:focus-visible,
 .sc-panel textarea:focus-visible {
-  outline: 2px solid var(--accent, #356ae6);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.sc-tabs button[aria-pressed='true'],
 .sc-file-name[aria-pressed='true'] {
-  color: var(--accent, #356ae6);
+  color: var(--accent);
   border-color: currentColor;
 }
 .sc-panel .sc-primary {
-  background: var(--accent, #356ae6);
+  background: var(--accent);
   color: var(--accent-fg);
   border-color: transparent;
 }
@@ -90,7 +83,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0 14px 20px;
+  padding: 0 16px 20px;
   overscroll-behavior: contain;
 }
 .sc-form {
@@ -100,20 +93,20 @@
   min-width: 0;
 }
 .sc-section {
-  padding: 14px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--sc-border);
 }
 .sc-section h3 {
-  font-size: 12px;
-  margin: 0 0 10px;
+  font-size: var(--text-sm);
+  margin: 0 0 8px;
 }
 .sc-section h3 span {
   color: var(--dim2);
 }
 .sc-panel label {
   display: grid;
-  gap: 6px;
-  margin: 10px 0;
+  gap: 8px;
+  margin: 8px 0;
 }
 .sc-panel input,
 .sc-panel select,
@@ -135,9 +128,7 @@
 .sc-check input {
   width: auto;
 }
-.sc-file {
-  padding: 3px 0;
-}
+
 .sc-file-status {
   min-width: 16px;
   color: var(--dim2);
@@ -152,15 +143,10 @@
   border-color: transparent;
 }
 .sc-notice {
-  padding: 10px;
-  margin: 10px 0;
-  border: 1px solid #b48739;
-  border-radius: var(--r-xs);
-  line-height: 1.6;
-  overflow-wrap: anywhere;
+  margin: var(--space-2) 0;
 }
-.sc-notice button {
-  margin-left: 8px;
+.sc-notice .notice-body button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
+  margin-left: var(--space-2);
 }
 .sc-empty {
   padding: 24px 12px;
@@ -169,20 +155,20 @@
 }
 .sc-actions {
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .sc-wrap {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .sc-panel code {
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 .sc-patch {
   max-height: 420px;
   overflow: auto;
-  margin: 10px 0;
+  margin: 8px 0;
   border: 1px solid var(--sc-border);
   border-radius: var(--r-xs);
 }
@@ -190,22 +176,22 @@
 .sc-draft-comment,
 .sc-operation {
   border: 1px solid var(--sc-border);
-  padding: 10px;
-  margin: 10px 0;
+  padding: 8px;
+  margin: 8px 0;
   border-radius: var(--r-xs);
   overflow-wrap: anywhere;
 }
 .sc-pr-list {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
-.sc-pr-list button {
+.sc-pr-list button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) {
   text-align: left;
   overflow-wrap: anywhere;
 }
 .sc-section summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .sc-confirm-detail {
   max-height: 50vh;
@@ -217,73 +203,69 @@
 }
 
 /* The scrolling workspace is the query container, not the modal ancestor. */
-.sc-panel { font-size: 13px; }
+.sc-panel { font-size: var(--text-md); }
 .sc-panel [hidden] { display: none !important; }
-.sc-header { padding: 18px; gap: 12px; }
-.sc-header strong { font-size: 15px; }
-.sc-branch { font-size: 12px; }
-.sc-header small { font-size: 11px; font-variant-numeric: tabular-nums; }
-.sc-header-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.sc-header-actions button { padding: 4px 8px; font-size: 11px; }
-.sc-tabs { padding: 0 18px; gap: 20px; }
-.sc-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 0; color: var(--dim); font-size: 12px; }
-.sc-tabs button[aria-pressed='true'] { color: var(--fg); border-bottom-color: var(--accent); }
-.sc-panel button:hover:not(:disabled) { background: var(--surface-hover); }
+.sc-header { padding: 16px; gap: 12px; }
+.sc-header strong { font-size: var(--text-base); }
+.sc-branch { font-size: var(--text-sm); }
+.sc-header small { font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.sc-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.sc-header-actions button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { padding: 4px 8px; font-size: var(--text-xs); }
+
+.sc-panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):hover:not(:disabled) { background: var(--surface-hover); }
 .sc-panel button.sc-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
-.sc-inline-notice { display: flex; align-items: center; justify-content: space-between; padding: 8px 18px; gap: 10px; border-bottom: 1px solid var(--sc-border); font-size: 11px; color: var(--dim); }
-.sc-inline-notice button { padding: 2px 6px; font-size: 11px; }
-.sc-global-blocker, .sc-error { margin: 8px 14px; }
+.sc-global-blocker, .sc-error { margin: var(--space-2) var(--space-4); }
 .sc-workspace-shell { flex: 1; min-height: 0; container-type: inline-size; container-name: scWorkspace; }
 .sc-workspace { display: flex; height: 100%; min-height: 0; }
 .sc-file-pane { flex: 1; min-width: 0; overflow: auto; padding: 16px 0; }
-.sc-file-pane > header { display: flex; justify-content: space-between; gap: 8px; padding: 0 16px; font-size: 12px; }
+.sc-file-pane > header { display: flex; justify-content: space-between; gap: 8px; padding: 0 16px; font-size: var(--text-sm); }
 .sc-file-pane > header span { color: var(--dim2); font-variant-numeric: tabular-nums; }
-.sc-selection-help, .sc-scope-note { color: var(--dim2); font-size: 11px; padding: 0 16px; line-height: 1.8; }
+.sc-selection-help, .sc-scope-note { color: var(--dim2); font-size: var(--text-xs); padding: 0 16px; line-height: 1.8; }
 .sc-selection-help { margin: 8px 0 16px; }
 .sc-scope-note { margin: 20px 0 0; }
-.sc-file-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-left: 2px solid transparent; }
+.sc-file-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-left: 2px solid transparent; }
 .sc-file-row.selected { background: var(--accent-soft); border-left-color: var(--accent); }
 .sc-file-row > input, .sc-commit-file > input { width: 15px; height: 15px; flex: 0 0 15px; margin: 0; padding: 0; accent-color: var(--accent); }
-.sc-file-row .sc-file-name { padding: 0; overflow: hidden; font-size: 12px; }
-.sc-file-name strong { display: block; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
-.sc-file-name small { color: var(--dim2); font-size: 10px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.sc-file-row .sc-file-name { padding: 0; overflow: hidden; font-size: var(--text-sm); }
+.sc-file-name strong { display: block; font-weight: var(--weight-medium); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.sc-file-name small { color: var(--dim2); font-size: var(--text-2xs); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
 .sc-file-row .sc-file-name[aria-pressed='true'] { border-color: transparent; color: var(--fg); }
-.sc-file-row .sc-unstage { padding: 1px 6px; font-size: 12px; }
+.sc-file-row .sc-unstage { padding: 1px 8px; font-size: var(--text-sm); }
 .sc-diff-pane { display: none; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
 .sc-workspace.has-selection .sc-file-pane { display: none; }
 .sc-workspace.has-selection .sc-diff-pane { display: flex; }
 .sc-diff-pane > header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--sc-border); }
 .sc-diff-pane > header > div { min-width: 0; }
 .sc-diff-pane > header strong, .sc-diff-pane > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sc-diff-pane > header strong { font-size: 12px; }
-.sc-diff-pane > header small { color: var(--dim2); font-size: 10px; }
+.sc-diff-pane > header strong { font-size: var(--text-sm); }
+.sc-diff-pane > header small { color: var(--dim2); font-size: var(--text-2xs); }
 .sc-back-files { flex-shrink: 0; }
 .sc-diff-scroll { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .sc-diff-scroll > p { padding: 12px 16px; }
 .sc-diff-scroll .sc-patch { flex: 1; min-height: 0; max-height: none; margin: 0; border: 0; border-radius: 0; }
-.sc-diff-switch { display: flex; flex-wrap: wrap; padding: 8px; gap: 6px; font-size: 11px; }
+.sc-diff-switch { display: flex; flex-wrap: wrap; padding: 8px; gap: 8px; font-size: var(--text-xs); }
 .sc-diff-switch [aria-pressed='true'] { color: var(--accent); }
-.sc-action-dock { flex-shrink: 0; padding: 14px 18px 8px; border-top: 1px solid var(--sc-border); }
-.sc-next-summary { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
-.sc-next-summary > span { color: var(--dim2); font: 10px monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sc-next-summary strong { font-size: 12px; font-weight: 550; }
-.sc-next-summary small { display: block; color: var(--dim2); font-size: 11px; margin-top: 3px; }
+.sc-action-dock { flex-shrink: 0; padding: 16px 16px 8px; border-top: 1px solid var(--sc-border); }
+.sc-next-summary { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; }
+.sc-next-summary > span { color: var(--dim2); font: var(--text-2xs) monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sc-next-summary strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.sc-next-summary small { display: block; color: var(--dim2); font-size: var(--text-xs); margin-top: 4px; }
 .sc-dock-buttons { display: flex; justify-content: space-between; gap: 8px; }
 .sc-dock-buttons .sc-primary { min-width: 165px; }
-.sc-operation-status { margin: 12px 0 0; padding-top: 6px; border-top: 1px solid var(--sc-border); color: var(--dim2); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sc-panel .modal { width: min(550px, 92vw); max-height: 90dvh; overflow: auto; padding: 22px; gap: 10px; }
-.sc-panel .modal h2 { margin: 0; font-size: 20px; }
+.sc-operation-status { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--sc-border); color: var(--dim2); font-size: var(--text-2xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-panel .modal { width: min(550px, 92vw); max-height: 90dvh; overflow: auto; padding: 24px; gap: 8px; }
+.sc-panel .modal h2 { margin: 0; font-size: var(--text-xl); }
 .sc-panel .modal .sc-actions { justify-content: flex-end; }
-.sc-panel .modal label { font-size: 12px; }
-.sc-panel .modal .sc-muted { font-size: 12px; }
+.sc-panel .modal label { font-size: var(--text-sm); }
+.sc-panel .modal .sc-muted { font-size: var(--text-sm); }
 .sc-commit-files { flex-shrink: 0; max-height: 30dvh; overflow: auto; border: 1px solid var(--sc-border); border-radius: var(--r-sm); }
-.sc-panel label.sc-commit-file { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 0; border-bottom: 1px solid var(--sc-border); }
+.sc-panel label.sc-commit-file { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin: 0; border-bottom: 1px solid var(--sc-border); }
 .sc-commit-file:last-child { border-bottom: 0; }
 .sc-commit-file span { min-width: 0; }
-.sc-commit-file strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
-.sc-commit-file small { display: block; color: var(--dim2); font-size: 11px; }
+.sc-commit-file strong { display: block; font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.sc-commit-file small { display: block; color: var(--dim2); font-size: var(--text-xs); }
 .sc-other-actions { display: grid; gap: 8px; }
-.sc-other-actions button { text-align: left; padding: 10px 12px; }
+.sc-other-actions button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { text-align: left; padding: 8px 12px; }
 @container scWorkspace (min-width: 680px) {
   .sc-workspace { display: grid; grid-template-columns: 270px minmax(0, 1fr); }
   .sc-workspace.has-selection .sc-file-pane { display: block; }
