@@ -31,43 +31,7 @@
   align-items: center;
   border-bottom: 1px solid var(--border3);
 }
-.ctx-gauge .ring {
-  --p: 0;
-  position: relative;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  corner-shape: round;
-  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--panel3) 0);
-  display: grid;
-  place-items: center;
-  font: var(--weight-semibold) var(--text-sm)/1 var(--font-mono);
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.ctx-gauge .ring::before {
-  content: '';
-  position: absolute;
-  inset: 7px;
-  border-radius: 50%;
-  corner-shape: round;
-  background: var(--panel);
-  border: 1px solid var(--border3);
-}
-.ctx-gauge .ring span {
-  position: relative;
-  z-index: 1;
-}
-.ctx-gauge.warm .ring {
-  background: conic-gradient(var(--warn) calc(var(--p) * 1%), var(--panel3) 0);
-}
-.ctx-gauge.hot .ring {
-  background: conic-gradient(var(--bad) calc(var(--p) * 1%), var(--panel3) 0);
-}
-.ctx-gauge.empty .ring {
-  background: var(--panel3);
-  color: var(--dim2);
-}
+
 .ctx-copy {
   min-width: 0;
 }

@@ -7,10 +7,10 @@
     "buttonReset": "a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button))"
   },
   "totals": {
-    "fontSize": 26,
-    "fontWeight": 9,
-    "spacing": 202,
-    "color": 50,
+    "fontSize": 22,
+    "fontWeight": 8,
+    "spacing": 186,
+    "color": 39,
     "buttonReset": 0
   },
   "files": {
@@ -101,7 +101,7 @@
     "source-control.css": {
       "fontSize": 1,
       "fontWeight": 1,
-      "spacing": 31,
+      "spacing": 30,
       "color": 4,
       "buttonReset": 0
     },
@@ -116,13 +116,6 @@
       "fontSize": 1,
       "fontWeight": 0,
       "spacing": 1,
-      "color": 0,
-      "buttonReset": 0
-    },
-    "styles-chat-entry.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 2,
       "color": 0,
       "buttonReset": 0
     },
@@ -147,18 +140,11 @@
       "color": 0,
       "buttonReset": 0
     },
-    "styles-dialog-controls.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 0,
-      "color": 1,
-      "buttonReset": 0
-    },
     "styles-diff-review.css": {
       "fontSize": 4,
       "fontWeight": 0,
       "spacing": 11,
-      "color": 1,
+      "color": 0,
       "buttonReset": 0
     },
     "styles-evidence-session.css": {
@@ -166,13 +152,6 @@
       "fontWeight": 0,
       "spacing": 1,
       "color": 0,
-      "buttonReset": 0
-    },
-    "styles-execution-graph.css": {
-      "fontSize": 2,
-      "fontWeight": 0,
-      "spacing": 5,
-      "color": 1,
       "buttonReset": 0
     },
     "styles-markdown.css": {
@@ -189,17 +168,10 @@
       "color": 3,
       "buttonReset": 0
     },
-    "styles-overview-controls.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 0,
-      "color": 4,
-      "buttonReset": 0
-    },
     "styles-overview-foundation.css": {
       "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 4,
+      "spacing": 3,
       "color": 1,
       "buttonReset": 0
     },
@@ -207,7 +179,7 @@
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 7,
-      "color": 1,
+      "color": 0,
       "buttonReset": 0
     },
     "styles-session-controls.css": {
@@ -217,24 +189,17 @@
       "color": 0,
       "buttonReset": 0
     },
-    "styles-settings-inventory.css": {
-      "fontSize": 0,
-      "fontWeight": 0,
-      "spacing": 0,
-      "color": 1,
-      "buttonReset": 0
-    },
     "styles-sidebar.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 2,
-      "color": 1,
+      "color": 0,
       "buttonReset": 0
     },
     "styles-surface-tabs.css": {
-      "fontSize": 3,
-      "fontWeight": 3,
-      "spacing": 12,
+      "fontSize": 2,
+      "fontWeight": 2,
+      "spacing": 11,
       "color": 0,
       "buttonReset": 0
     },
@@ -260,24 +225,24 @@
       "buttonReset": 0
     },
     "styles-view-navigation.css": {
-      "fontSize": 1,
+      "fontSize": 0,
       "fontWeight": 1,
-      "spacing": 2,
+      "spacing": 0,
       "color": 0,
       "buttonReset": 0
     },
     "styles-workbench-geometry.css": {
       "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 7,
+      "spacing": 4,
       "color": 0,
       "buttonReset": 0
     },
     "styles-workspace-editor.css": {
       "fontSize": 3,
       "fontWeight": 0,
-      "spacing": 19,
-      "color": 3,
+      "spacing": 18,
+      "color": 2,
       "buttonReset": 0
     }
   }

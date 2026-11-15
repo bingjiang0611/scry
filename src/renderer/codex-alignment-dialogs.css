@@ -42,7 +42,6 @@
   min-height: var(--window-titlebar-h, var(--topbar-h));
   padding-inline: 9px;
   border-bottom-color: var(--border3);
-  background: transparent;
 }
 
 .surface-tabs {

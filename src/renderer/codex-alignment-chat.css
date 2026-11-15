@@ -16,15 +16,6 @@
   text-align: center;
 }
 
-.welcome-kicker {
-  justify-content: center;
-  color: var(--dim2);
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  letter-spacing: 0;
-}
-
 .welcome-heading {
   justify-items: center;
   gap: 12px;
@@ -47,27 +38,6 @@
 .welcome-provider-field {
   border: 1px solid var(--border);
   text-align: left;
-}
-
-.welcome-provider-head {
-  border-bottom-color: var(--border3);
-}
-
-.welcome-provider-head b {
-  font-size: var(--text-md);
-}
-
-.welcome-provider-head small {
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
-}
-
-
-
-.welcome-provider small,
-.welcome-provider code,
-.welcome-profile-count {
-  font-size: var(--text-xs);
 }
 
 .chat-body .transcript-turn {
@@ -256,7 +226,6 @@
   color: var(--dim);
   font-size: var(--text-sm);
 }
-
 
 .runtime-composer .permission-mode-trigger:hover,
 .runtime-composer .permission-mode-trigger:focus-visible,

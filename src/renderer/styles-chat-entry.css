@@ -3,8 +3,6 @@
   display: grid;
   grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   align-items: center;
-  gap: 7px 10px;
-  border-bottom: 1px solid var(--border);
   flex-wrap: nowrap;
   overflow: hidden;
   min-width: 0;
@@ -63,45 +61,7 @@
 .chat::-webkit-scrollbar {
   display: none;
 }
-/* welcome 空态屏（蓝本 welcome.html，全宽 no-right hero） */
-.welcome-pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.welcome-inner {
-  max-width: 920px;
-  margin: 0 auto;
-  width: 100%;
-}
 
-.stat-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  font: var(--text-sm)/1.4 var(--font-ui);
-  color: var(--dim);
-}
-.stat-pill b {
-  color: var(--dim);
-  font-weight: var(--weight-medium);
-}
-.stat-pill .sub {
-  color: var(--dim2);
-  font: var(--text-xs)/1.4 var(--font-mono);
-}
-
-.recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border-top: 1px solid var(--border3);
-  border-radius: 0;
-  overflow: hidden;
-}
 .recent {
   display: grid;
   grid-template-columns: 24px 1fr auto auto;
@@ -133,11 +93,7 @@
   align-items: center;
   gap: 8px;
 }
-.recent .meta .last-tag {
-  color: var(--dim2);
-  font: var(--text-xs)/1 var(--font-ui);
-  letter-spacing: 0;
-}
+
 .recent .meta .path {
   font: var(--text-sm)/1 var(--font-mono);
   color: var(--dim2);
@@ -156,35 +112,6 @@
   color: var(--dim2);
   min-width: 56px;
   text-align: right;
-}
-
-.sg-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 24px;
-  border-top: 1px solid var(--border3);
-}
-.sg-card {
-  min-width: 0;
-  padding: 12px 4px;
-  border: 0;
-  border-bottom: 1px solid var(--border3);
-  border-radius: 0;
-  font-size: var(--text-md);
-  color: var(--dim);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  text-align: left;
-}
-.sg-card:hover {
-  color: var(--fg);
-}
-.sg-card .ico {
-  flex: none;
-  color: var(--dim3);
 }
 
 .turn {

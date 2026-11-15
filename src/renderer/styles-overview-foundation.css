@@ -34,12 +34,6 @@
   flex-direction: column;
 }
 
-/* （.psec/.ptitle 已被蓝本 .panel-section/h4 取代——OverviewPanel 是唯一消费者，迁移后移除） */
-.pstats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 .psub {
   font-size: var(--text-xs);
   color: var(--dim);

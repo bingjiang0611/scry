@@ -350,21 +350,6 @@
   text-align: center;
 }
 
-.unbound-empty .unbound-icon {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
-  background: var(--panel2);
-}
-
-.unbound-empty .unbound-icon .ico {
-  width: 17px;
-  height: 17px;
-}
-
 .unbound-empty strong {
   color: var(--fg);
   font-size: var(--text-base);

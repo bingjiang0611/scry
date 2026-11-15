@@ -18,8 +18,6 @@
 }
 
 :where(
-  .welcome-kicker,
-  .overview-verdict-line .verdict-kicker,
   .overview-metric > span,
   .overview-metric > small,
   .pinned-summary-section-title
@@ -123,41 +121,6 @@
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--panel) 94%, transparent);
   box-shadow: var(--shadow-card);
-}
-
-.welcome-provider-head {
-  padding-bottom: 12px;
-}
-
-.welcome-provider-grid {
-  gap: 8px;
-}
-
-.welcome-provider {
-  min-height: 80px;
-  padding: 12px;
-  border-color: var(--border3);
-  border-radius: var(--r-md);
-  background: var(--surface-subtle);
-  box-shadow: inset 0 1px 0 var(--surface-faint);
-  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
-}
-
-.welcome-provider:hover {
-  border-color: var(--border2);
-  background: var(--surface-hover);
-  box-shadow: var(--shadow-card);
-}
-
-.welcome-provider.is-selected,
-.welcome-profile-pick.is-selected {
-  border-color: var(--selected-line);
-  background:
-    linear-gradient(145deg, var(--selected-soft), transparent 68%),
-    var(--surface-muted);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--selected-line) 42%, transparent),
-    var(--shadow-card);
 }
 
 .runtime-composer .composer-context {
@@ -430,23 +393,6 @@
 
 .overview-dossier .ov-scroll {
   padding: 4px 0 12px;
-}
-
-.overview-session-hero {
-  gap: 8px;
-}
-
-.overview-session-gauge {
-  padding: 2px 2px 8px;
-  border-bottom: 1px solid var(--border3);
-}
-
-.overview-session-verdict {
-  overflow: hidden;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
 }
 
 .overview-dossier .ctx-track {

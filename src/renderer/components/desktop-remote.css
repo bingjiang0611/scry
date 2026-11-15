@@ -2,11 +2,10 @@
 .desktop-remote__card button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)), .desktop-remote__card input, .desktop-remote__card textarea,
 .desktop-remote__host button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { font: inherit; cursor: pointer; }
 .desktop-remote__card button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled, .desktop-remote__host button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)):disabled { opacity: .5; cursor: default; }
-.desktop-remote__section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.desktop-remote__section-head button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { border: 0; background: transparent; color: var(--accent); padding: 4px 0; }
+
 .desktop-remote__card h2 { margin: 0 0 8px; font-size: var(--text-base); }
 .desktop-remote__card p, .desktop-remote__host p { margin: 8px 0; font-size: var(--text-sm); }
-.desktop-remote__muted { color: var(--dim); font-size: var(--text-sm); }
+
 .desktop-remote__error { color: var(--bad); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .desktop-remote__form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .desktop-remote__card label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; color: var(--dim); font-size: var(--text-sm); }

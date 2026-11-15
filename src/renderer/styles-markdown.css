@@ -45,8 +45,6 @@
 .skillinject {
   margin: 6px 0 14px;
   border: 1px dashed var(--border2);
-  border-radius: var(--r-sm);
-  background: var(--panel);
 }
 .si-head {
   display: flex;

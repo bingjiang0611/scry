@@ -1,10 +1,5 @@
-/* Billing Guardian：本地估算账单解释，不伪装官方账单 */
-.billing-source {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
+
+
 .source-pill {
   display: inline-flex;
   align-items: center;
@@ -18,11 +13,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.source-pill.estimate {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
 }
 .source-pill.off {
   color: var(--dim2);
@@ -63,13 +53,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.billing-coverage {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-.billing-coverage span,
+
 .turn-id {
   display: inline-flex;
   align-items: center;
@@ -84,9 +68,7 @@
 .billing-details {
   margin-top: 8px;
 }
-.billing-details.billing-priority {
-  padding-top: 2px;
-}
+
 .billing-details > summary {
   min-height: 40px;
   list-style: none;
@@ -153,59 +135,6 @@
   text-overflow: clip;
   white-space: normal;
   font-variant-numeric: tabular-nums;
-}
-.billing-token-table {
-  margin-top: 4px;
-  overflow-x: auto;
-  border: 1px solid var(--border3);
-  border-radius: var(--r-sm);
-  background: var(--surface-subtle);
-}
-.billing-token-row {
-  display: grid;
-  grid-template-columns: 54px minmax(92px, 1.2fr) minmax(72px, 0.9fr) minmax(72px, 0.9fr) minmax(78px, 1fr) 42px 54px;
-  align-items: center;
-  gap: 8px;
-  min-width: 540px;
-  padding: 8px 8px;
-  border-top: 1px solid var(--border3);
-  font: var(--text-sm)/1.35 var(--font-mono);
-  color: var(--dim);
-  font-variant-numeric: tabular-nums;
-}
-.billing-token-row:first-child {
-  border-top: 0;
-}
-.billing-token-row.head {
-  padding-top: 8px;
-  padding-bottom: 8px;
-  color: var(--dim2);
-  background: var(--surface-subtle);
-  font-size: var(--text-xs);
-}
-.billing-token-row.click {
-  min-height: 40px;
-  cursor: pointer;
-}
-.billing-token-row.click:hover {
-  background: var(--panel2);
-}
-.billing-token-row.click:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  background: var(--panel2);
-}
-.billing-token-row > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.billing-token-row > span:not(:first-child) {
-  text-align: right;
-}
-.billing-token-row .tok-total {
-  color: var(--fg);
 }
 
 .billing-sync {

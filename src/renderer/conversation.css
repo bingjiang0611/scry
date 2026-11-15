@@ -15,7 +15,7 @@
 .conversation-recovery { display: flex; gap: 8px; flex-wrap: wrap; }
 .conversation-history-notice details { max-height: 180px; overflow: auto; }
 .unified-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 24px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--dim); }
-.unified-scope { color: var(--dim); font-size: var(--text-sm); }
+
 .unified-preview [role='alert'] { color: var(--bad); overflow-wrap: anywhere; }
 .modal.unified-preview { width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding: 24px; box-sizing: border-box; overflow: auto; gap: 0; }
 .unified-preview h2 { margin: 0 0 12px; font-size: var(--text-lg); line-height: 1.4; }

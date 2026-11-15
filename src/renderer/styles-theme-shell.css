@@ -213,14 +213,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: var(--text-md)/1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "ss01", "cv11";
   background-image: none;
-}
-
-::selection {
-  background: var(--accent-soft);
 }
 
 * {
@@ -278,7 +273,6 @@ body {
 .main-area {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  container-type: inline-size;
   container-name: main-pane;
   min-width: 0;
   min-height: 0;

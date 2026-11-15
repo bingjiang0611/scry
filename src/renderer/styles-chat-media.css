@@ -254,8 +254,6 @@
 .files-summary {
   margin-top: 12px;
   border: 1px solid var(--border3);
-  border-radius: var(--r-md);
-  background: var(--panel);
 }
 .files-summary > summary {
   list-style: none;

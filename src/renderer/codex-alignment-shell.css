@@ -361,7 +361,6 @@ select:focus-visible,
   gap: 10px;
   padding: 0 14px;
   border-bottom: 1px solid var(--border3);
-  background: color-mix(in srgb, var(--main-surface) 96%, transparent);
 }
 
 .tb-thread {
@@ -398,7 +397,6 @@ select:focus-visible,
 }
 
 .tb-agent-status,
-.tb-context,
 .tb-action {
   height: 32px;
   min-height: 32px;

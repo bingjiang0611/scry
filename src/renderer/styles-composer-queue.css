@@ -587,16 +587,12 @@
   min-height: 64px;
   max-height: 200px;
   resize: vertical;
-  background: var(--panel2);
   border: 1px solid var(--border2);
   border-radius: var(--r-sm);
   color: var(--fg);
   padding: 11px 13px;
   outline: none;
   font: inherit;
-}
-.input:focus {
-  border-color: var(--accent);
 }
 .composer-bottom {
   display: flex;

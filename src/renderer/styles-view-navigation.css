@@ -13,22 +13,14 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
 }
 .tb-action,
-.tb-agent-status,
-.tb-context {
+.tb-agent-status{
   justify-self: end;
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: var(--r-sm);
-  font: 11.5px/1 var(--font-ui);
   color: var(--dim);
-  background: transparent;
 }
 .tb-action {
   cursor: pointer;
@@ -44,9 +36,7 @@
 .tb-action > span:not(.dot),
 .tb-action b,
 .tb-agent-status > span:not(.dot),
-.tb-agent-status b,
-.tb-context > span:not(.dot),
-.tb-context b {
+.tb-agent-status b{
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -54,9 +44,6 @@
 }
 .tb-action:hover {
   color: var(--fg);
-}
-.tb-action.on {
-  background: var(--panel2);
 }
 .tb-action .dot,
 .tb-agent-status .dot {
@@ -75,8 +62,7 @@
   background: var(--warn);
 }
 .tb-action b,
-.tb-agent-status b,
-.tb-context b {
+.tb-agent-status b{
   color: var(--fg);
   font-weight: 550;
 }

@@ -9,8 +9,7 @@
   font-size: var(--text-sm);
 }
 .sc-header,
-.sc-actions,
-.sc-file {
+.sc-actions{
   display: flex;
   align-items: center;
   gap: 8px;
@@ -22,7 +21,6 @@
 }
 .sc-header small,
 .sc-identity small,
-.sc-file small,
 .sc-operation small,
 .sc-pr-list small {
   display: block;
@@ -130,9 +128,7 @@
 .sc-check input {
   width: auto;
 }
-.sc-file {
-  padding: 3px 0;
-}
+
 .sc-file-status {
   min-width: 16px;
   color: var(--dim2);

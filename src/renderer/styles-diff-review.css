@@ -1,13 +1,4 @@
 /* Turn Diff Review：点击“本轮改动”后，与对话并排审阅该轮实时 Git patch。 */
-.app.right-panel-review {
-  grid-template-columns:
-    var(--sidebar-w)
-    var(--pane-resizer-w)
-    minmax(420px, 1fr)
-    var(--pane-resizer-w)
-    minmax(0, min(var(--overview-panel-w), 55vw));
-}
-
 .right-panel-slot {
   container-type: inline-size;
 }
@@ -207,8 +198,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-
-
 .diff-review-empty {
   min-height: 240px;
   display: flex;
@@ -337,24 +326,5 @@
 
   .diff-file-nav-title {
     padding-bottom: 6px;
-  }
-}
-
-@media (max-width: 1420px) {
-  .app.right-panel-review {
-    grid-template-columns: var(--sidebar-w) var(--pane-resizer-w) minmax(0, 1fr);
-  }
-
-  .app.right-panel-review > .panel-resizer {
-    display: none;
-  }
-
-  .app.right-panel-review > .right-panel-slot {
-    position: fixed;
-    inset: 0 0 0 calc(var(--sidebar-w) + var(--pane-resizer-w));
-    z-index: 30;
-    display: flex;
-    width: auto;
-    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.5);
   }
 }

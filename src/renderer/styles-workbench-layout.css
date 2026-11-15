@@ -18,46 +18,17 @@ textarea {
   font: inherit;
 }
 
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-[role='button']:focus-visible,
-[tabindex]:focus-visible {
-  outline: 1px solid var(--accent-line);
-  outline-offset: 2px;
-}
-
-
-.sidebar-resizer,
-.graph-detail-resizer {
+.sidebar-resizer{
   background: var(--main-surface);
 }
-
-.app.right-panel-overview > .panel-resizer,
-.app.right-panel-overview > .right-panel-slot {
-  background: var(--overview-surface);
-}
-
-.pane-resizer:hover::before,
-.pane-resizer.active::before,
-.pane-resizer:focus-visible::before {
-  background: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-soft);
-}
-
 
 .sb-brand .ver {
   color: var(--dim3);
 }
 
-
-
-
 .sb-search input::placeholder {
   color: var(--dim2);
 }
-
-
 
 .sb-search input:focus-visible {
   outline: none;
@@ -67,16 +38,9 @@ textarea:focus-visible,
   border-top-color: transparent;
 }
 
-
-
-
-
-
-
 .sb-settings .ico {
   color: var(--dim2);
 }
-
 
 .sb-proj-head:hover {
   background: var(--panel2);
@@ -106,12 +70,9 @@ textarea:focus-visible,
   align-items: center;
 }
 
-
-
 .sb-sess.active::before {
   display: none;
 }
-
 
 .sb-session-main {
   grid-area: main;

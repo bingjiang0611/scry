@@ -7,12 +7,10 @@
   border-bottom-color: var(--border3);
 }
 
-.metric-grid,
 .billing-grid {
   border-color: var(--border);
 }
 
-.billing-section,
 .mcp-trust-section {
   background: var(--panel);
 }
@@ -30,60 +28,6 @@
   background: var(--panel2);
 }
 
-.panel .verdict-card {
-  border: 0;
-  border-bottom: 1px solid var(--border3);
-  border-radius: 0;
-}
-
-.panel .verdict-card.ok {
-  border-color: var(--border3);
-}
-
-.panel .verdict-card.warn {
-  border-color: var(--border3);
-}
-
-.panel .verdict-card.bad {
-  border-color: var(--border3);
-}
-
-.panel .verdict-left,
-.panel .verdict-card.warn .verdict-left,
-.panel .verdict-card.bad .verdict-left {
-  background: transparent;
-}
-
-.seg-shell {
-  width: min(100% - 60px, 1180px);
-}
-
-.seg-bar {
-  height: 30px;
-}
-
-.seg-legend {
-  gap: 16px;
-}
-
-.seg-card {
-  grid-template-columns: 190px minmax(0, 1fr) 150px;
-}
-
-.seg-l,
-.seg-m,
-.seg-r {
-  padding: 16px 16px;
-}
-
-.seg-l {
-  background: var(--panel) !important;
-}
-
-.seg-act {
-  border-color: var(--border3) !important;
-}
-
 .turn-head,
 .turn-head.running {
   border-left: 0;
@@ -99,40 +43,14 @@
   background: var(--panel2);
 }
 
-
-.gtype.llm {
-  border-color: rgba(86, 168, 245, 0.32);
-  color: var(--read);
-  background: rgba(86, 168, 245, 0.08);
-}
-
-.gtype.skill {
-  border-color: rgba(230, 178, 77, 0.3);
-}
-
-.gtype.agent {
-  border-color: rgba(199, 125, 187, 0.32);
-}
-
-.gtype.mcp {
-  border-color: var(--accent-line);
-}
-
-.gpane {
-  background: var(--panel);
-}
-
-
 .modal {
   width: min(760px, 92vw);
   max-height: 82vh;
 }
 
-
 .modal-search {
   margin: 12px 16px 4px;
 }
-
 
 .modal-body {
   padding: 4px 8px 12px;
@@ -141,7 +59,6 @@
 .modal-foot {
   padding: 8px 16px;
 }
-
 
 .settings-modal .modal-x {
   margin-left: auto;

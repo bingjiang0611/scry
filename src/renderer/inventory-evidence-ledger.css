@@ -5,7 +5,6 @@
   overflow: hidden;
 }
 
-
 .inventory-modal--skills {
   width: min(860px, 94vw);
 }
@@ -19,7 +18,6 @@
   justify-content: space-between;
   gap: 20px;
 }
-
 
 .inventory-modal__title {
   min-width: 0;
@@ -349,52 +347,8 @@
   opacity: 0;
 }
 
-.inventory-switch__track {
-  position: relative;
-  width: 32px;
-  height: 18px;
-  display: block;
-  border: 1px solid var(--border2);
-  border-radius: var(--r-pill);
-  corner-shape: round;
-  background: var(--panel3);
-  transition: background-color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
-}
-
-.inventory-switch__track > span {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  corner-shape: round;
-  background: var(--dim);
-  transition: background-color var(--duration-hover) var(--ease-out), transform var(--duration-overshoot) var(--ease-overshoot);
-}
-
-.inventory-switch input:checked + .inventory-switch__track {
-  border-color: var(--selected-line);
-  background: var(--selected-soft);
-}
-
-.inventory-switch input:checked + .inventory-switch__track > span {
-  background: var(--selected);
-  transform: translateX(14px);
-}
-
-.inventory-switch input:focus-visible + .inventory-switch__track {
-  outline: 2px solid var(--selected);
-  outline-offset: 2px;
-}
-
 .inventory-switch:has(input:disabled) {
   cursor: not-allowed;
-}
-
-.inventory-switch input:disabled + .inventory-switch__track {
-  border-style: dashed;
-  opacity: 0.55;
 }
 
 .skill-ledger__row {

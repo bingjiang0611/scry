@@ -5,12 +5,6 @@
    ============================================================ */
 .pane-resizer::before {
   left: 0;
-  background: var(--border3);
-}
-
-
-.app.right-panel-overview > .panel-resizer {
-  background: var(--overview-surface);
 }
 
 .sb-brand {
@@ -23,7 +17,6 @@
   height: 22px;
   border-radius: var(--r-xs);
 }
-
 
 .sb-brand .ver {
   font-size: var(--text-2xs);
@@ -73,13 +66,11 @@
   font-size: var(--text-sm);
 }
 
-
 .sb-proj-head {
   gap: 4px;
   padding: 0 8px;
   font-size: var(--text-sm);
 }
-
 
 .sb-proj-head .pcnt {
   font-size: var(--text-2xs);
@@ -96,7 +87,6 @@
 .sb-proj-row .sb-proj-head {
   padding-right: 60px;
 }
-
 
 .sb-project-pin {
   width: 11px;
@@ -348,17 +338,14 @@
   margin: 0;
 }
 
-
 .sb-provider {
   margin: 0;
   font-size: var(--text-2xs);
 }
 
-
 .sb-session-meta {
   gap: 4px;
 }
-
 
 .sb-unread {
   width: 7px;
@@ -393,28 +380,16 @@
   border-top: 1px solid var(--border3);
 }
 
-
 .topbar {
   height: var(--topbar-h);
   min-height: var(--topbar-h);
-  gap: 10px;
-  padding: 0 10px 0 12px;
   border-bottom-color: var(--border3);
 }
 
-.tb-statusbar {
-  gap: 5px;
-}
-
 .tb-action,
-.tb-agent-status,
-.tb-context {
-  height: 27px;
-  min-height: 27px;
+.tb-agent-status{
   gap: 6px;
   padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: var(--r-xs);
   font: var(--weight-semibold) 10.5px/1 var(--font-mono);
 }
 

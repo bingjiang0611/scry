@@ -20,9 +20,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--pane-resizer-w) / 2 - 0.5px);
   width: 1px;
-  background: var(--resizer-line);
 }
 .pane-resizer:focus-visible {
   outline: none;
@@ -45,7 +43,6 @@
   min-height: 0;
   overflow: hidden;
   display: flex;
-  background: var(--panel);
 }
 body.pane-resizing {
   cursor: col-resize;
@@ -190,10 +187,7 @@ body.pane-resizing * {
 }
 .ctxmenu {
   position: fixed;
-  background: var(--panel2);
   border: 1px solid var(--border2);
-  border-radius: var(--r-sm);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
   padding: 4px;
   min-width: 130px;
 }
