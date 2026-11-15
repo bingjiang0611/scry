@@ -133,3 +133,22 @@
 守卫：`Feedback.test.tsx` 断言 Notice 的语气与 role 合同、Tabs 的 roving tabindex 与键盘目标、Segmented 的 group／pressed 语义、三者只在各自样式表定义、TSX 不再手写 `role="tablist"`（两个可关闭标签条除外）。设计债务基线：字号 269→262、字重 117→114、间距 1311→1268、颜色 144→138，`buttonReset` 首次记录为 87。
 
 验证：用构建后的真实 CSS，在 Playwright Chromium 中把迁移前后的标记放进各自的真实祖先容器（`sc-panel`、`sidebar`、`overview-dossier`、`skills-modal`、`capabilities-modal`、`diff-navigation`、`usage-page` 等）渲染，深浅主题各拍前后对照。渲染测试中 3 条写死旧标记的断言按新合同更新（来源过滤改为 group／pressed，计数改为 `.tab-count`）。Electron 内交互与 UI smoke 未在本地运行（容器以 root 运行，Electron 拒绝不带 `--no-sandbox` 启动）。已知限制：Skills 弹窗标签页左侧留白从 22px 变为 24px，与下方工具栏的 22px 相差 2px，待工具栏对齐网格时一并修正。
+
+## 侧栏：字号与间距清零（2026-11-15）
+
+范围是所有选择器以 `.sb-`、`.sidebar` 开头的规则，分布在 9 个样式表中。开始前侧栏范围内的债务为：字号 16、字重 3、间距 52、未排除 primitive 的按钮规则 2。
+
+关键发现：侧栏的大部分债务是死代码。同一个元素在 `styles-sidebar.css`、`styles-workbench-geometry.css`、`styles-workbench-layout.css` 和 `codex-alignment-shell.css` 里逐层重新定义（例如 `.sb-new` 的高度、内边距、字号各被写了三到四次），只有最后一层生效。因此本轮分两步：
+
+| 步骤 | 方法 | 结果 |
+| --- | --- | --- |
+| 删除可证明的死声明 | 同一选择器、同一属性（或覆盖它的简写），被后加载的顶层规则无条件重新声明，且重要性不低于前者。只依赖层叠规则，不依赖截图覆盖了哪些状态 | 删除 174 条声明；真实 Sidebar 组件 197 个元素的计算样式在深浅主题下均为 0 差异 |
+| 按固定规则取整其余值 | 见 DESIGN.md「迁移路线」第 4 步的取整规则 | 真实可见的变化只有：会话行图标间距 7→8、行内操作区左内边距 30→32、项目标题右内边距 59→60、“待回答”徽章内边距 7→8、空项目提示与撤销条字号 11.5→12、撤销条内边距统一为四边 8px |
+
+其他决定：未读与待回答会话标题从 550 改为 `--weight-medium`（550 与正文 400、当前会话 500 几乎不可分辨，待回答另有徽章）；撤销归档的手写按钮改为 `Button size="sm"`。删除规则时连带丢失的三处章节注释已恢复。
+
+契约：会话行 36px、项目标题 32px 的行高（`sidebar-activity-ui-checks.mjs`）在比对中未变化；`.sb-undo button`、`.sb-view-tabs [role=tab]` 等 smoke 选择器仍然有效。
+
+守卫：`design-system.test.ts` 新增 cleaned areas，侧栏范围的债务必须为 0。在侧栏追加一条 `padding: 7px` 的负对照会使该断言失败。全局基线随之下降：字号 262→246、字重 114→111、间距 1268→1216、按钮规则 87→85。
+
+验证：在 Playwright Chromium 中，用构建后的真实 CSS 渲染真实 `Sidebar` 组件（3 个项目，含运行中、待回答、置顶、长标题、空项目和撤销条），深浅主题各拍前后对照并逐元素比对计算样式。未覆盖：hover、动态（Activity）视图、远程主机分组、菜单展开等状态。死代码删除对这些状态同样成立（依据是层叠规则，与状态无关）；取整对它们的影响只在 CI 的 UI smoke 中验证。`SessionRename.test.tsx`（真实 Chromium 中的侧栏交互）因容器以 root 运行无法启动 Electron，本地未运行。
