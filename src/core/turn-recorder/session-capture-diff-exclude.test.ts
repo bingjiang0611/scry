@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { startSessionCapture, stopSessionCapture } from './session-capture'
+import { applySessionCaptureHook, startSessionCapture, stopSessionCapture } from './session-capture'
 import {
   CaptureRequestError,
   captureContextPath,
@@ -12,6 +12,7 @@ import {
 } from './session-capture-contract'
 import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state'
 import { readJson } from './io'
+import { listRecords } from './store'
 
 const roots: string[] = []
 
@@ -140,4 +141,94 @@ it('the transcript is never touched by an integration exclusion', async () => {
   const before = await readFile(transcriptPath, 'utf8')
   await start(root, transcriptPath, [root])
   expect(await readFile(transcriptPath, 'utf8')).toBe(before)
+})
+
+async function git(repo: string, args: string[]): Promise<void> {
+  const { execFile } = await import('node:child_process')
+  await new Promise<void>((resolve, reject) => {
+    execFile('git', args, {
+      cwd: repo,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'fixture', GIT_AUTHOR_EMAIL: 'fixture@example.com',
+        GIT_COMMITTER_NAME: 'fixture', GIT_COMMITTER_EMAIL: 'fixture@example.com',
+        GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null'
+      }
+    }, (error, _stdout, stderr) => error ? reject(new Error(`${error.message}: ${stderr}`)) : resolve())
+  })
+}
+
+async function repository(): Promise<string> {
+  // Git reports the resolved root, so the fixture compares against the same form.
+  const root = await realpath(await workspace())
+  await git(root, ['init', '-q', '-b', 'main'])
+  await writeFile(join(root, 'tracked.txt'), 'v1\n')
+  // The recorder's own data directory is not part of what the turn changed.
+  await writeFile(join(root, '.gitignore'), '.scry/\n')
+  await git(root, ['add', 'tracked.txt', '.gitignore'])
+  await git(root, ['commit', '-q', '-m', 'base'])
+  return root
+}
+
+it('a claimed session keeps its run directory out of the record diff and says what it cost', async () => {
+  const root = await repository()
+  const transcriptPath = await transcript(root)
+  const run = join(root, 'friday-88733196')
+  await start(root, transcriptPath, [run])
+
+  // The workflow writes its own stage material, and the turn also edits a tracked file.
+  await mkdir(run, { recursive: true })
+  for (const name of ['plan.md', 'notes.md', 'trace.json']) {
+    await writeFile(join(run, name), `${name} body\n`)
+  }
+  await writeFile(join(root, 'tracked.txt'), 'v2\n')
+
+  const applied = await applySessionCaptureHook({
+    workspace: root,
+    provider: 'codex',
+    event: 'Stop',
+    sessionId: 'sess-1',
+    dataDir: join(root, '.scry'),
+    context: context(transcriptPath),
+    payload: { session_id: 'sess-1', hook_event_name: 'Stop', transcript_path: transcriptPath, timestamp: '2026-07-19T12:00:05.000Z' }
+  })
+  expect(applied.status).toBe('accepted')
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  const diffs = records[0].diff.value ?? []
+  const workspace = diffs.find((diff) => diff.repoRoot === root)
+  // Excluded material keeps neither a清单 entry nor a body; the tracked edit is untouched.
+  expect(workspace?.files.map((file) => file.path)).toEqual([join(root, 'tracked.txt')])
+  expect(workspace?.files[0].change).toBe('modified')
+  // What the exclusion cost stays provable from the record: paths and counts, no bodies.
+  expect(workspace?.diffExclude).toEqual({ paths: [run], files: 3 })
+  expect(records[0].diff.omissionReason).toContain('3 file(s) were left out of this diff')
+  expect(JSON.stringify(records[0])).not.toContain('plan.md body')
+})
+
+it('the same turn without a declaration records the material files', async () => {
+  const root = await repository()
+  const transcriptPath = await transcript(root)
+  const run = join(root, 'friday-88733196')
+  await start(root, transcriptPath)
+  await mkdir(run, { recursive: true })
+  await writeFile(join(run, 'plan.md'), 'plan body\n')
+  await writeFile(join(root, 'tracked.txt'), 'v2\n')
+  await applySessionCaptureHook({
+    workspace: root,
+    provider: 'codex',
+    event: 'Stop',
+    sessionId: 'sess-1',
+    dataDir: join(root, '.scry'),
+    context: context(transcriptPath),
+    payload: { session_id: 'sess-1', hook_event_name: 'Stop', transcript_path: transcriptPath, timestamp: '2026-07-19T12:00:05.000Z' }
+  })
+  const records = await listRecords(join(root, '.scry'))
+  expect(records).toHaveLength(1)
+  const workspace = records[0].diff.value?.find((diff) => diff.repoRoot === root)
+  expect(workspace?.files.map((file) => file.path).sort())
+    .toEqual([join(root, 'friday-88733196/plan.md'), join(root, 'tracked.txt')])
+  expect(workspace?.diffExclude).toBeUndefined()
+  // The claim-based baseline caveat is expected; the exclusion note must not appear.
+  expect(records[0].diff.omissionReason ?? '').not.toContain('left out of this diff')
 })

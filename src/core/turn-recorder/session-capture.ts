@@ -1,4 +1,4 @@
-import { chmod, stat } from 'node:fs/promises'
+import { chmod, realpath, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { readJson, writeJsonAtomic, writeTextAtomic } from './io.js'
@@ -81,26 +81,27 @@ export async function startSessionCapture(args: {
   }
   const transport = captureTransport(enablement, workspaceRoot, args.provider, args.sessionId, args.env)
   const statePath = captureStatePath(enablement.dataRoot, args.provider, args.sessionId)
+  const context = await resolveDiffExclude(args.context)
   const existing = await readCaptureState(enablement.dataRoot, args.provider, args.sessionId)
   if (existing && existing.captureId === args.context.captureId) {
-    await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, args.context.diffExclude)
+    await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, context.diffExclude)
     await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
-    return { status: 'already_started', ack: captureAck('start', 'already_started', args.context), transport }
+    return { status: 'already_started', ack: captureAck('start', 'already_started', context), transport }
   }
   const state: SessionCaptureState = {
-    ...args.context,
+    ...context,
     schemaVersion: 1,
     workspaceRoot,
     dataRoot: enablement.dataRoot,
     transcriptPath: resolve(transcriptPath)
   }
   await withRecorderSessionLock(enablement.dataRoot, args.provider, args.sessionId, async () => {
-    await beginCaptureTurn(enablement, args.provider, args.sessionId, args.context, state.transcriptPath, args.payload)
+    await beginCaptureTurn(enablement, args.provider, args.sessionId, context, state.transcriptPath, args.payload)
     await writeJsonAtomic(statePath, state)
-    await writeJsonAtomic(captureContextPath(enablement.dataRoot, args.provider, args.sessionId), captureWireContext(args.context))
+    await writeJsonAtomic(captureContextPath(enablement.dataRoot, args.provider, args.sessionId), captureWireContext(context))
   }, { waitMs: 10_000 })
   await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
-  return { status: 'started', ack: captureAck('start', 'started', args.context), transport }
+  return { status: 'started', ack: captureAck('start', 'started', context), transport }
 }
 
 /**
@@ -132,6 +133,18 @@ async function adoptDiffExclude(
         { ...open, capture: { ...open.capture, diffExclude: next } }, { sync: false })
     }
   }, { waitMs: 10_000 })
+}
+
+/**
+ * A declared path comes from the integrator's own shell, so it can reach this workspace through a
+ * symlink (`/var` and `/private/var` are one directory). Resolve each path once, before it is stored:
+ * the diff comparison against the repository root Git reports is lexical. A path that does not exist
+ * yet keeps its declared form and simply excludes nothing until it does.
+ */
+async function resolveDiffExclude(context: SessionCaptureContext): Promise<SessionCaptureContext> {
+  if (!context.diffExclude?.length) return context
+  const paths = await Promise.all(context.diffExclude.map(async (path) => realpath(path).catch(() => path)))
+  return { ...context, diffExclude: [...new Set(paths)] }
 }
 
 async function ensureReceiver(

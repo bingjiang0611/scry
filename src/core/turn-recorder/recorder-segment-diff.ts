@@ -111,7 +111,9 @@ function liveTurnDiffs(
     ...await finishGitTurnDiff(capture, undefined, {
       ...turnChangeHints(repository, mergedEvents),
       patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
-      diffExclude: enablement.config.capture.diffExclude,
+      // Workspace config plus this capture's own claim: a workflow's material directory is
+      // excluded for the session that declared it, not for every session in the workspace.
+      diffExclude: [...(enablement.config.capture.diffExclude ?? []), ...(open.capture?.diffExclude ?? [])],
       completePatches: true,
       ...(frozen ? { onAfter: frozen.option(repository) } : {})
     }),

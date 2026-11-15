@@ -184,10 +184,13 @@ export interface TurnDiffSnapshot {
   diffExclude?: TurnDiffExcludeEvidence
 }
 
+/** 接入方声明排除的路径，以及因此没进 `files` 的文件数。只有路径和数量，没有正文。 */
 export interface TurnDiffExcludeEvidence {
   paths: string[]
   files: number
 }
+
+
 
 export function nonNegativeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null
