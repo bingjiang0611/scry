@@ -71,7 +71,8 @@
 .pierre-file-header .diff-del { color: var(--bad); }
 .pierre-file-header > button > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pierre-file-header > button[data-expand-context] { display: block; flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pierre-file-header .diff-review-notice { flex: 1; max-width: 40%; min-width: 0; margin: 0; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--text-xs)/18px var(--font-ui); }
+.pierre-file-header .diff-review-notice { flex: 1; max-width: 40%; }
+.pierre-file-header .diff-review-notice .notice-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-patch.pierre-patch { display: flex; flex-direction: column; flex: 1; height: min(420px, 60vh); min-height: 0; overflow: hidden; }
 .sc-diff-scroll > .pierre-patch { height: auto; }
 .sc-patch.pierre-patch > p { flex: none; }

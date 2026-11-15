@@ -9,7 +9,9 @@
 .conversation-options > summary { cursor: pointer; padding: 6px; color: var(--dim); }
 .conversation-options > .unified-management { position: absolute; right: 0; top: 100%; z-index: 20; width: min(300px, calc(100vw - 64px)); padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 8px 24px #0003; }
 .conversation-options p { margin: 4px 0; color: var(--dim); line-height: 1.5; }
-.conversation-history-notice, .conversation-recovery { margin: 0; padding: 8px 24px; font-size: var(--text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+.conversation-recovery { margin: 0; padding: 8px 24px; font-size: var(--text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+/* Strip notices align their text with the conversation toolbar column. */
+.conversation-history-notice { padding-inline: var(--space-6); }
 .conversation-recovery { display: flex; gap: 8px; flex-wrap: wrap; }
 .conversation-history-notice details { max-height: 180px; overflow: auto; }
 .unified-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 24px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--dim); }

@@ -6,20 +6,21 @@
 // `--check` fails when any file/metric grows, `--write` refuses to raise a value.
 // Radius is enforced separately (and absolutely) by radius-system.test.ts.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const rendererRoot = join(repoRoot, 'src/renderer')
 export const baselinePath = join(rendererRoot, 'design-system-baseline.json')
 
-export const METRICS = /** @type {const} */ (['fontSize', 'fontWeight', 'spacing', 'color'])
+export const METRICS = /** @type {const} */ (['fontSize', 'fontWeight', 'spacing', 'color', 'buttonReset'])
 
 export const METRIC_RULES = {
   fontSize: 'font-size / font shorthand uses a px literal instead of var(--text-*)',
   fontWeight: 'font-weight uses a number instead of var(--weight-*)',
   spacing: 'padding / margin / gap uses a px value off the 4px grid (1px hairline and 2px optical are allowed)',
-  color: 'a non-token declaration uses a raw color literal instead of a theme variable'
+  color: 'a non-token declaration uses a raw color literal instead of a theme variable',
+  buttonReset: 'a container-wide `… button` rule does not exclude the Button, IconButton, Tabs and Segmented primitives'
 }
 
 const SPACING_PROPERTY = /^(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?$|^(?:gap|row-gap|column-gap)$/
@@ -44,12 +45,43 @@ export function* declarations(source) {
   }
 }
 
+function splitSelectors(text) {
+  const out = []
+  let depth = 0
+  let current = ''
+  for (const ch of text) {
+    if (ch === '(' || ch === '[') depth++
+    else if (ch === ')' || ch === ']') depth--
+    if (ch === ',' && depth === 0) { out.push(current); current = '' } else current += ch
+  }
+  out.push(current)
+  return out.map((selector) => selector.trim()).filter(Boolean)
+}
+
+/** Yields `{ selector, line }` for every style-rule selector (at-rule preludes excluded). */
+export function* selectors(source) {
+  const text = stripComments(source)
+  for (const match of text.matchAll(/([^{};]+)\{/g)) {
+    const prelude = match[1].trim()
+    if (!prelude || prelude.startsWith('@')) continue
+    const line = text.slice(0, match.index + match[0].indexOf(prelude)).split('\n').length
+    for (const selector of splitSelectors(prelude)) yield { selector, line }
+  }
+}
+
+// `.panel button`, `.panel > button:hover`: a descendant rule whose subject is a bare button.
+const CONTAINER_BUTTON = /[\s>]button(?::[a-z-]+(?:\([^()]*\))?)*$/
+const EXCLUDES_PRIMITIVES = /:not\(\.btn\b/
+
 function withoutClamp(value) {
   return value.replace(/clamp\([^()]*(?:\([^()]*\)[^()]*)*\)/g, '')
 }
 
+// Sheets that define the primitives themselves are the one place a bare `button` subject is the point.
+const PRIMITIVE_SHEETS = new Set(['styles-buttons.css', 'styles-tabs.css', 'styles-notices.css'])
+
 /** Returns the violations of one stylesheet, grouped by metric. */
-export function auditCss(source) {
+export function auditCss(source, { primitiveSheet = false } = {}) {
   /** @type {Record<string, Array<{ line: number, text: string }>>} */
   const found = Object.fromEntries(METRICS.map((metric) => [metric, []]))
   for (const { property, value, line } of declarations(source)) {
@@ -69,6 +101,9 @@ export function auditCss(source) {
     }
     for (const _ of value.match(COLOR_LITERAL) ?? []) found.color.push({ line, text })
   }
+  for (const { selector, line } of primitiveSheet ? [] : selectors(source)) {
+    if (CONTAINER_BUTTON.test(selector) && !EXCLUDES_PRIMITIVES.test(selector)) found.buttonReset.push({ line, text: selector })
+  }
   return found
 }
 
@@ -85,7 +120,7 @@ export function auditRenderer(root = rendererRoot) {
   /** @type {Record<string, Record<string, Array<{ line: number, text: string }>>>} */
   const files = {}
   for (const path of cssFiles(root)) {
-    const found = auditCss(readFileSync(path, 'utf8'))
+    const found = auditCss(readFileSync(path, 'utf8'), { primitiveSheet: PRIMITIVE_SHEETS.has(basename(path)) })
     if (METRICS.some((metric) => found[metric].length > 0)) files[relative(root, path)] = found
   }
   return files
@@ -112,11 +147,16 @@ export function readBaseline(path = baselinePath) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
 
-/** Lists every file/metric whose current count exceeds the baseline. */
+/**
+ * Lists every file/metric whose current count exceeds the baseline. A metric
+ * the baseline has never recorded is being introduced: its first `--write`
+ * records today's debt, and from then on it can only shrink like the others.
+ */
 export function regressions(counts, baseline) {
   const out = []
+  const recorded = METRICS.filter((metric) => baseline.rules?.[metric] !== undefined)
   for (const [file, fileCounts] of Object.entries(counts)) {
-    for (const metric of METRICS) {
+    for (const metric of recorded) {
       const allowed = baseline.files[file]?.[metric] ?? 0
       if (fileCounts[metric] > allowed) out.push({ file, metric, allowed, actual: fileCounts[metric] })
     }

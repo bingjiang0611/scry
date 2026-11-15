@@ -7,6 +7,8 @@ import { QUEUE_COPY } from '../../constants/copy'
 import { CONVERSATION_COPY } from '../../constants/conversation-copy'
 import { RunElapsed } from './RunElapsed'
 import { imageFilesFromClipboardData, composerEnterConfirmsIme, navigateComposerHistory } from './composer-utils'
+import { Notice } from '../primitives/Notice'
+import { Button } from '../primitives/Button'
 
 type ComposerInputProps = Pick<ChatViewProps,
   'cwd'
@@ -140,15 +142,19 @@ export function ComposerInput({
           )}
         </div>}
         {composerNotice && (
-          <div className={`composer-notice is-${composerNotice.tone}`} role={composerNotice.tone === 'error' ? 'alert' : 'status'}>
-            <Icon name={composerNotice.tone === 'error' ? 'alert' : 'info'} />
-            <span title={composerNotice.text}>{composerNotice.text}</span>
-            {composerNotice.action && (
-              <button type="button" onClick={composerNotice.action.onClick} disabled={composerNotice.action.disabled}>
+          <Notice
+            tone={composerNotice.tone === 'error' ? 'bad' : composerNotice.tone === 'blocked' ? 'warn' : 'info'}
+            className={`composer-notice is-${composerNotice.tone}`}
+            role={composerNotice.tone === 'error' ? 'alert' : 'status'}
+            title={composerNotice.text}
+            action={composerNotice.action && (
+              <Button size="sm" onClick={composerNotice.action.onClick} disabled={composerNotice.action.disabled}>
                 {composerNotice.action.label}
-              </button>
+              </Button>
             )}
-          </div>
+          >
+            {composerNotice.text}
+          </Notice>
         )}
         {busy && (
           <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone} data-background-waiting={backgroundStatus?.waiting || undefined}>

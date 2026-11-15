@@ -1,45 +1,5 @@
-/* P1：视图 tab + Timeline 过滤 */
-/* 顶栏：会话视图与低权重工具组。 */
-.vtabs {
-  grid-column: 1;
-  grid-row: 1;
-  flex: 0 0 auto;
-  min-width: 0;
-  max-width: 100%;
-  display: flex;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.vtabs::-webkit-scrollbar {
-  display: none;
-}
-.vtab {
-  flex: 0 0 auto;
-  font-size: var(--text-sm);
-  line-height: 1;
-  color: var(--dim);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-.vtab .ico {
-  opacity: 0.7;
-}
-.vtab.active {
-  color: var(--fg);
-}
-.vtab.active .ico {
-  opacity: 1;
-  color: var(--accent);
-}
-.vtab:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+
+
 .tb-spacer {
   grid-column: 2;
   grid-row: 1;

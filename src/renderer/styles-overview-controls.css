@@ -5,32 +5,6 @@
   backdrop-filter: none;
 }
 
-
-.panel-tabs {
-  gap: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.panel-tabs button {
-  height: 40px;
-  border-radius: 0;
-  border-bottom: 2px solid transparent;
-}
-
-.panel-tabs button.active {
-  color: var(--fg);
-  background: transparent;
-  border-bottom-color: var(--accent);
-  box-shadow: none;
-}
-
-.panel-tabs button.active svg {
-  color: var(--accent);
-}
-
 .ctx-gauge {
   background: transparent;
   border-bottom-color: var(--border3);

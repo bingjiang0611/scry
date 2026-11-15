@@ -15,9 +15,7 @@ textarea:focus-visible,
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .ctxitem:hover,
-  .vtab:hover:not(.active),
-  .panel-tabs button:hover:not(.active) {
+  .ctxitem:hover{
     background: var(--panel3);
     color: var(--fg);
   }
@@ -122,15 +120,6 @@ select:focus-visible,
   box-shadow: 0 0 0 1px var(--selected-soft);
 }
 
-.vtab.active,
-.panel-tabs button.active {
-  border-bottom-color: var(--selected);
-}
-
-.vtab.active,
-.vtab.active .ico,
-.panel-tabs button.active,
-.panel-tabs button.active svg,
 .tb-action.on .ico {
   color: var(--selected);
 }

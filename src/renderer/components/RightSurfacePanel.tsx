@@ -8,6 +8,7 @@ import { MOTION } from '../motion'
 import { RightSurfaceTabStrip, rightSurfacePanelId } from './RightSurfaceTabStrip'
 import { Button } from './primitives/Button'
 import { IconButton } from './primitives/IconButton'
+import { Notice } from './primitives/Notice'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
 
@@ -175,7 +176,7 @@ export function RightSurfacePanel({
             else onCloseSideChat?.(tab.conversationId)
           }}
         />
-        {layoutNotice && <p className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</p>}
+        {layoutNotice && <Notice tone="warn" layout="strip" className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</Notice>}
 
         <div className="surface-actions">
           <div className="surface-add-wrap">

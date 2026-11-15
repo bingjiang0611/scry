@@ -102,17 +102,6 @@
   background: var(--overview-surface);
 }
 
-.panel-tabs {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.panel-tabs button {
-  min-width: 0;
-  height: 46px;
-  padding-inline: 4px;
-}
-
 .ctx-gauge {
   padding: 16px 14px;
   background: var(--surface-faint);
@@ -145,25 +134,6 @@
 .panel-section h4 {
   color: var(--dim);
   font-size: var(--text-xs);
-}
-
-.overview-data-tabs {
-  gap: 0;
-  padding: 0 12px;
-  background: var(--overview-surface);
-}
-
-.overview-data-tabs button {
-  height: 42px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-}
-
-.overview-data-tabs button.active {
-  border-bottom-color: var(--selected);
-  background: transparent;
-  color: var(--fg);
 }
 
 .turn-call-row:focus-visible,

@@ -211,55 +211,6 @@
   white-space: nowrap;
 }
 
-.skill-scope-tabs {
-  min-height: 42px;
-  display: flex;
-  flex: none;
-  gap: 2px;
-  padding: 0 22px;
-  border-bottom: 1px solid var(--border);
-}
-
-.skill-scope-tabs button {
-  position: relative;
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  background: transparent;
-  color: var(--dim2);
-  font: 620 12.5px/1 var(--font-ui);
-  transition: color var(--duration-hover) var(--ease-out);
-}
-
-.skill-scope-tabs button::after {
-  position: absolute;
-  right: 8px;
-  bottom: -1px;
-  left: 8px;
-  height: 2px;
-  background: transparent;
-  content: "";
-}
-
-.skill-scope-tabs button.active {
-  color: var(--fg);
-}
-
-.skill-scope-tabs button.active::after {
-  background: var(--selected);
-}
-
-.skill-scope-tabs button:focus-visible {
-  outline: 2px solid var(--selected);
-  outline-offset: -4px;
-}
-
-.skill-scope-tabs button span {
-  margin-left: 6px;
-  color: var(--dim3);
-  font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono);
-}
-
 .inventory-toolbar {
   min-width: 0;
   display: flex;

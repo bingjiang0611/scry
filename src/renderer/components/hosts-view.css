@@ -7,7 +7,7 @@
 .remote-access-inbound { margin: 0 26px; padding: 24px 0 32px; border-top: 1px solid var(--border); }
 .hosts-muted { margin: 0 0 10px; color: var(--dim); font-size: var(--text-sm); line-height: 1.5; }
 .hosts-error { margin: 0 14px 10px; color: var(--bad); font-size: var(--text-sm); overflow-wrap: anywhere; }
-.hosts-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 9px 12px; border-radius: var(--r-md); background: var(--warn-soft); color: var(--warn); font-size: var(--text-sm); }
+.hosts-alert { margin-bottom: var(--space-2); }
 .hosts-empty { padding: 28px; border: 1px dashed var(--border2); border-radius: var(--r-lg); color: var(--dim); font-size: var(--text-md); text-align: center; }
 .hosts-empty b { display: block; margin-bottom: 6px; color: var(--fg); }
 .hosts-empty p { margin: 0 0 12px; font-size: var(--text-sm); }

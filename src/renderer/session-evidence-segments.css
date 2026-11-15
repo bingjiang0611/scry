@@ -192,7 +192,7 @@
 .evidence-segments .segment-inspector > footer { margin-top: 16px; font-size: var(--text-2xs); line-height: 1.5; }
 
 @media (hover: hover) and (pointer: fine) {
-  .overview-dossier .panel-tabs button:hover { color: var(--fg); }
+
   .overview-dossier .turn-call-group:not(:disabled):hover,
   .evidence-graph .graph-session-wall button.gline:hover,
   .evidence-segments .segment-ledger > .segment-row:hover,

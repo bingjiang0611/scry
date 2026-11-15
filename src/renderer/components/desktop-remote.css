@@ -1,7 +1,7 @@
 /* Remote building blocks: pairing form and shared access cards. */
-.desktop-remote__card button, .desktop-remote__card input, .desktop-remote__card textarea,
-.desktop-remote__host button { font: inherit; cursor: pointer; }
-.desktop-remote__card button:disabled, .desktop-remote__host button:disabled { opacity: .5; cursor: default; }
+.desktop-remote__card button:not(.btn, .icon-button, [role='tab'], .segmented > button), .desktop-remote__card input, .desktop-remote__card textarea,
+.desktop-remote__host button:not(.btn, .icon-button, [role='tab'], .segmented > button) { font: inherit; cursor: pointer; }
+.desktop-remote__card button:not(.btn, .icon-button, [role='tab'], .segmented > button):disabled, .desktop-remote__host button:not(.btn, .icon-button, [role='tab'], .segmented > button):disabled { opacity: .5; cursor: default; }
 .desktop-remote__section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .desktop-remote__section-head button { border: 0; background: transparent; color: var(--accent); padding: 5px 0; }
 .desktop-remote__card h2 { margin: 0 0 8px; font-size: 15px; }

@@ -216,7 +216,6 @@
   font-size: 11.5px;
 }
 
-
 .mcp-fleet__actions .mcp-test + .mcp-test {
   margin-top: 6px;
 }
@@ -289,9 +288,6 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .skill-scope-tabs button:hover:not(.active) {
-    color: var(--dim);
-  }
 
   .skill-ledger__row:hover,
   .mcp-fleet__row:hover > th,
@@ -329,11 +325,6 @@
   }
 
   .inventory-toolbar {
-    padding-right: 18px;
-    padding-left: 18px;
-  }
-
-  .skill-scope-tabs {
     padding-right: 18px;
     padding-left: 18px;
   }

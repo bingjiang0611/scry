@@ -19,6 +19,8 @@ import './archived-sessions.css'
 
 import { ModalFrame, requestModalClose } from './ModalFrame'
 import { EvidenceState, type EvidenceValue, useReadStarted, evidenceForRuntime } from './CapabilityEvidence'
+import { Tabs } from './primitives/Tabs'
+import { Segmented } from './primitives/Segmented'
 type CapabilityView = 'skills' | 'mcp'
 type CapabilitySource = 'all' | 'project' | 'user'
 
@@ -32,20 +34,13 @@ function CapabilitySourceTabs({
   label: string
 }) {
   return (
-    <div className="capability-source-tabs" role="tablist" aria-label={label}>
-      {(['all', 'project', 'user'] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          role="tab"
-          aria-selected={source === value}
-          className={source === value ? 'active' : ''}
-          onClick={() => onChange(value)}
-        >
-          {value === 'all' ? '全部' : value === 'project' ? '项目' : '用户'}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      className="capability-source-tabs"
+      label={label}
+      value={source}
+      onChange={onChange}
+      options={[{ value: 'all', label: '全部' }, { value: 'project', label: '项目' }, { value: 'user', label: '用户' }]}
+    />
   )
 }
 
@@ -119,10 +114,13 @@ export function CapabilitiesModal({
     >
       <div className="capabilities-head">
         <h2 id={titleId} className="inventory-sr-only">Capabilities</h2>
-        <div className="capability-kind-tabs" role="tablist" aria-label="能力类型">
-          <button type="button" role="tab" aria-selected={view === 'skills'} className={view === 'skills' ? 'active' : ''} onClick={() => chooseView('skills')}>Skills</button>
-          <button type="button" role="tab" aria-selected={view === 'mcp'} className={view === 'mcp' ? 'active' : ''} onClick={() => chooseView('mcp')}>MCP</button>
-        </div>
+        <Tabs
+          className="capability-kind-tabs"
+          label="能力类型"
+          value={view}
+          onChange={chooseView}
+          items={[{ value: 'skills', label: 'Skills' }, { value: 'mcp', label: 'MCP' }]}
+        />
         <span className="capabilities-head__spacer" />
         {view === 'mcp' && (
           <button

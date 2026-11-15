@@ -207,21 +207,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.diff-review-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(230, 178, 77, 0.24);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font: var(--text-xs)/1.45 var(--font-ui);
-}
 
-.diff-review-notice svg {
-  width: 14px;
-  height: 14px;
-}
 
 .diff-review-empty {
   min-height: 240px;

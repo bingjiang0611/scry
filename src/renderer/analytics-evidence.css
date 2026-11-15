@@ -49,13 +49,13 @@
   padding: 28px clamp(24px, 3.5cqw, 52px) 36px;
 }
 
-.usage-page button {
+.usage-page button:not(.btn, .icon-button, [role='tab'], .segmented > button) {
   border: 0;
   font: inherit;
   cursor: pointer;
 }
 
-.usage-page button:focus-visible,
+.usage-page button:not(.btn, .icon-button, [role='tab'], .segmented > button):focus-visible,
 .usage-chart:focus-visible {
   outline: 2px solid var(--fg);
   outline-offset: 4px;
@@ -133,37 +133,7 @@
 .usage-refresh.is-loading svg {
   animation: usage-spin 900ms linear infinite;
 }
-.usage-segmented {
-  display: inline-flex;
-  flex: none;
-  padding: 3px;
-  border-radius: var(--r-sm);
-  background: var(--usage-control);
-}
-.usage-segmented button {
-  min-width: 63px;
-  padding: 5px 13px;
-  border-radius: var(--r-xs);
-  background: transparent;
-  color: var(--dim2);
-  font-size: var(--text-md);
-}
-.usage-segmented button.active {
-  background: var(--usage-control-active);
-  color: var(--fg);
-}
-.usage-segmented.is-compact {
-  padding: 2px;
-  border: 1px solid var(--usage-border);
-  border-radius: var(--r-sm);
-  background: transparent;
-}
-.usage-segmented.is-compact button {
-  min-width: 0;
-  padding: 4px 13px;
-  font-size: var(--text-xs);
-  border-radius: var(--r-xs);
-}
+
 .usage-inline-error {
   margin-top: 20px;
   color: var(--warn);
@@ -667,7 +637,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .usage-page button:not(:disabled):hover {
+  .usage-page button:not(.btn, .icon-button, [role='tab'], .segmented > button):not(:disabled):hover {
     background: var(--usage-control-active);
     color: var(--fg);
   }
@@ -729,10 +699,7 @@
   .usage-actions {
     gap: 5px;
   }
-  .usage-segmented button {
-    min-width: 0;
-    padding-inline: 10px;
-  }
+
   .usage-overview {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;

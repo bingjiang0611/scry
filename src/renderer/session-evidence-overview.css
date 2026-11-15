@@ -26,32 +26,6 @@
 /* 证据标签是注释，不是标题：让「总览」单独占住面板头部的重量。 */
 .overview-dossier .overview-panel-title em { color: var(--dim2); font-size: var(--text-2xs); letter-spacing: 0; text-transform: none; }
 
-.overview-dossier .panel-tabs {
-  height: 33px;
-  gap: 2px;
-  padding: 0 8px;
-}
-
-.overview-dossier .panel-tabs button {
-  position: relative;
-  height: 33px;
-  padding: 0 5px;
-  border: 0;
-  color: var(--dim3);
-  font-size: var(--text-sm);
-}
-
-.overview-dossier .panel-tabs button.active { color: var(--fg); }
-.overview-dossier .panel-tabs button.active::after {
-  position: absolute;
-  right: 8px;
-  bottom: 0;
-  left: 8px;
-  height: 2px;
-  background: var(--selected);
-  content: "";
-}
-
 .overview-dossier .overview-scroll-content {
   min-width: 0;
   min-height: 0;
@@ -198,7 +172,6 @@
   background: transparent;
 }
 
-
 .overview-dossier .panel-section h4 {
   min-height: 31px;
   display: flex;
@@ -305,30 +278,6 @@
 .overview-session-full-id code { color: var(--dim2); font: var(--text-compact-size)/1.7 var(--font-mono); }
 .overview-session-notice { padding-top: 6px; color: var(--dim2); font-size: var(--text-compact-size); }
 .overview-session-notice[role='alert'] { color: var(--bad); }
-
-.overview-dossier .overview-data-tabs {
-  height: 33px;
-  margin: 16px 12px 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.overview-dossier .overview-data-tabs button {
-  height: 33px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--dim);
-  font-size: 11.5px;
-}
-.overview-dossier .overview-data-tabs button.active {
-  border-bottom-color: var(--selected);
-  background: transparent;
-  box-shadow: none;
-  color: var(--fg);
-}
 
 .overview-dossier .turn-call-list { gap: 0; }
 .overview-dossier .turn-call-row {

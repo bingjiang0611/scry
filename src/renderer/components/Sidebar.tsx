@@ -26,6 +26,7 @@ import { SidebarProjectMenu } from './SidebarProjectMenu'
 import { useTabIndicator } from '../hooks/useTabIndicator'
 import { browserStorage } from '../browser-storage'
 import { persistSidebarView, readStoredSidebarView, type SidebarView } from '../sidebar-view'
+import { Tabs } from './primitives/Tabs'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -249,20 +250,23 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <div className="sb-view-tabs" ref={viewTabsRef} role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-        event.preventDefault()
-        const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
-        setView(next)
-        document.getElementById(`${tabId}-${next}`)?.focus()
-      }}>
-        {(['projects', 'activity'] as const).map((tab) => <button key={tab} ref={(node) => { viewTabRefs.current.set(tab, node) }} type="button" role="tab"
-          id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
-          tabIndex={view === tab ? 0 : -1} title={tab === 'activity' ? activityCopy.scope : undefined} onClick={() => setView(tab)}>
-          {activityCopy[tab]}
-        </button>)}
+      <Tabs
+        className="sb-view-tabs"
+        listRef={viewTabsRef}
+        label={activityCopy.navigation}
+        value={view}
+        onChange={setView}
+        tabRef={(tab, node) => { viewTabRefs.current.set(tab, node) }}
+        items={(['projects', 'activity'] as const).map(tab => ({
+          value: tab,
+          label: activityCopy[tab],
+          id: `${tabId}-${tab}`,
+          controls: `${tabId}-panel`,
+          title: tab === 'activity' ? activityCopy.scope : undefined
+        }))}
+      >
         <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
-      </div>
+      </Tabs>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealth && catalogHealth.status !== 'ready' && (
           <div className="sb-empty" role="status" title={catalogHealth.reason}>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type { SkillMeta } from '../env'
 
@@ -18,6 +18,7 @@ import './archived-sessions.css'
 import { ModalFrame, requestModalClose } from './ModalFrame'
 
 import { EvidenceState, InventoryContext, filterSkillsForScope, scopeClass, scopeShortLabel, useReadStarted, type SkillScopeFilter } from './CapabilityEvidence'
+import { Tabs } from './primitives/Tabs'
 export { filterSkillsForScope } from './CapabilityEvidence'
 
 export function SkillsModal({
@@ -72,22 +73,6 @@ export function SkillsModal({
     scopeChosenRef.current = true
     setScope(next)
   }
-  const onScopeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-    const current = visibleScopes.indexOf(scope)
-    const next = event.key === 'Home'
-      ? visibleScopes[0]
-      : event.key === 'End'
-        ? visibleScopes.at(-1)
-        : event.key === 'ArrowRight'
-          ? visibleScopes[(current + 1) % visibleScopes.length]
-          : event.key === 'ArrowLeft'
-            ? visibleScopes[(current - 1 + visibleScopes.length) % visibleScopes.length]
-            : undefined
-    if (!next) return
-    event.preventDefault()
-    chooseScope(next)
-    window.requestAnimationFrame(() => document.getElementById(`${titleId}-${next}-tab`)?.focus())
-  }
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} className="skills-modal inventory-modal inventory-modal--skills" onClose={onClose}>
       <div className="modal-head inventory-modal__head">
@@ -120,49 +105,19 @@ export function SkillsModal({
         </div>
       )}
 
-      <div className="skill-scope-tabs" role="tablist" aria-label="Skill 来源">
-        <button
-          type="button"
-          id={titleId + '-project-tab'}
-          role="tab"
-          tabIndex={scope === 'project' ? 0 : -1}
-          aria-selected={scope === 'project'}
-          aria-controls={titleId + '-skills-panel'}
-          className={scope === 'project' ? 'active' : ''}
-          onClick={() => chooseScope('project')}
-          onKeyDown={onScopeKeyDown}
-        >
-          {LOADING_COPY.skillScope.project} {!initialSkillsLoading && <span>{projectCount}</span>}
-        </button>
-        <button
-          type="button"
-          id={titleId + '-user-tab'}
-          role="tab"
-          tabIndex={scope === 'user' ? 0 : -1}
-          aria-selected={scope === 'user'}
-          aria-controls={titleId + '-skills-panel'}
-          className={scope === 'user' ? 'active' : ''}
-          onClick={() => chooseScope('user')}
-          onKeyDown={onScopeKeyDown}
-        >
-          {LOADING_COPY.skillScope.user} {!initialSkillsLoading && <span>{userCount}</span>}
-        </button>
-        {providerCount > 0 && (
-          <button
-            type="button"
-            id={titleId + '-provider-tab'}
-            role="tab"
-            tabIndex={scope === 'provider' ? 0 : -1}
-            aria-selected={scope === 'provider'}
-            aria-controls={titleId + '-skills-panel'}
-            className={scope === 'provider' ? 'active' : ''}
-            onClick={() => chooseScope('provider')}
-            onKeyDown={onScopeKeyDown}
-          >
-            {LOADING_COPY.skillScope.provider} <span>{providerCount}</span>
-          </button>
-        )}
-      </div>
+      <Tabs
+        className="skill-scope-tabs"
+        label="Skill 来源"
+        value={scope}
+        onChange={chooseScope}
+        items={visibleScopes.map(value => ({
+          value,
+          label: LOADING_COPY.skillScope[value],
+          count: value === 'provider' ? providerCount : initialSkillsLoading ? undefined : value === 'project' ? projectCount : userCount,
+          id: `${titleId}-${value}-tab`,
+          controls: `${titleId}-skills-panel`
+        }))}
+      />
 
       <div className="inventory-toolbar">
         <label className="inventory-search">

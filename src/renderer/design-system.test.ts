@@ -48,16 +48,18 @@ describe('design debt audit', () => {
       .a:hover { padding: 6px var(--space-2); font: var(--weight-semibold) 11.5px/1 var(--font-mono); color: #fff; --x: #000 }
       @media (max-width: 640px) { .b { margin: -3px 0 2px; gap: 1px 8px; font-weight: 550; font-size: clamp(24px, 3cqi, 32px) } }
       .c { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--fg); padding: 4px 12px }
+      .d button:hover, .e button:not(.btn, .icon-button, [role='tab']):hover, .f .btn { cursor: pointer }
     `)
     expect(found.fontSize.map((item: { text: string }) => item.text)).toEqual(['font: var(--weight-semibold) 11.5px/1 var(--font-mono)'])
     expect(found.fontWeight.map((item: { text: string }) => item.text)).toEqual(['font-weight: 550'])
     expect(found.spacing.map((item: { text: string }) => item.text)).toEqual(['padding: 6px var(--space-2)', 'margin: -3px 0 2px'])
     expect(found.color.map((item: { text: string }) => item.text)).toEqual(['color: #fff'])
+    expect(found.buttonReset.map((item: { text: string }) => item.text)).toEqual(['.d button:hover'])
   })
 
   it('only lets renderer design debt shrink', () => {
     const counts: Counts = countsOf(auditRenderer())
-    expect(regressions(counts, readBaseline()), 'Use var(--text-*), var(--weight-*), a 4px-grid spacing value and theme color variables. See DESIGN.md.').toEqual([])
+    expect(regressions(counts, readBaseline()), 'Use var(--text-*), var(--weight-*), a 4px-grid spacing value, theme color variables, and exclude primitives from container button rules. See DESIGN.md.').toEqual([])
   })
 
   it('records paid-down debt so it cannot silently return', () => {

@@ -13,6 +13,7 @@ import { ConversationDeleteDialog } from './ConversationDeleteDialog'
 import { PendingSubmissionDialog } from './PendingSubmissionDialog'
 import { SessionRenameDialog } from './SessionRename'
 import { Button } from './primitives/Button'
+import { Notice } from './primitives/Notice'
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
@@ -71,23 +72,23 @@ export function ConversationViewBody({
       <Button disabled={page?.nextBeforeOrdinal === undefined} onClick={() => setBefore(page?.nextBeforeOrdinal)}>更早记录</Button>
       <span>每页最多 40 轮</span><Button disabled={before === undefined} onClick={showLatest}>最近记录</Button>
     </nav>}
-    {missing.map(turn => <p className="conversation-history-notice" role="status" key={turn.runId}>第 {turn.ordinal} 轮：{turn.unavailableReason ?? '正在等待运行记录'}{turn.delivery.status === 'unknown' || turn.delivery.status === 'not_sent' ? `；${turn.delivery.reason}` : ''}</p>)}
-    {page?.summary.deletion && <div className="conversation-history-notice" role="status">
+    {missing.map(turn => <Notice layout="strip" className="conversation-history-notice" role="status" key={turn.runId}>第 {turn.ordinal} 轮：{turn.unavailableReason ?? '正在等待运行记录'}{turn.delivery.status === 'unknown' || turn.delivery.status === 'not_sent' ? `；${turn.delivery.reason}` : ''}</Notice>)}
+    {page?.summary.deletion && <Notice tone="warn" layout="strip" className="conversation-history-notice" role="status">
       {page.summary.deletion.status === 'complete' ? page.summary.deletion.retainedCopies ? '逻辑对话已删除；上次保留的共享副本可重新核对' : '对话副本已删除' : '删除未完成'}，正文不可用。草稿仍保留。
-      {input && <Button onClick={() => { void window.scry.copyText(input).then(() => setNotice('已复制保留的草稿。')).catch(error => setError(message(error))) }}>复制保留的草稿</Button>}
+      {input && <Button size="sm" onClick={() => { void window.scry.copyText(input).then(() => setNotice('已复制保留的草稿。')).catch(error => setError(message(error))) }}>复制保留的草稿</Button>}
       {page.summary.deletion.result && <details><summary>删除回执与保留范围</summary>
         <ul>{page.summary.deletion.result.retained.map(item => <li key={item}>{item}</li>)}</ul>
         {page.summary.deletion.result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
       </details>}
-    </div>}
-    {page?.summary.fork?.status === 'accepted' && !page.summary.deletion && <div className="conversation-history-notice" role="status">
+    </Notice>}
+    {page?.summary.fork?.status === 'accepted' && !page.summary.deletion && <Notice layout="strip" className="conversation-history-notice" role="status">
       创建分支不会发送消息或回退文件。分支点之前的历史为共享只读副本。
-      <Button disabled={working} onClick={() => {
+      <Button size="sm" disabled={working} onClick={() => {
         void window.scry.conversations.read(page.summary.fork!.sourceConversationId).then(source => {
           if (mounted.current) onOpenConversation(source.summary)
         }).catch(error => { if (mounted.current) setError(message(error)) })
       }}>打开源对话</Button>
-    </div>}
+    </Notice>}
     <SessionChatView {...chatProps}
       draftStore={draftStore} draftKey={draftKey} turns={turns} cwd={conversation.cwd} workspaceRoots={[conversation.cwd]}
       agentLocked={!page || working || Boolean(pending || forkAttempt || blockedReason || activeRunId)} hasSelectedSession

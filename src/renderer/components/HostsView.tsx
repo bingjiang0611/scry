@@ -12,6 +12,7 @@ import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
 import { Button } from './primitives/Button'
+import { Notice } from './primitives/Notice'
 
 function errorText(error: unknown): string {
   return copy.errorText(error)
@@ -33,10 +34,9 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
       <section className="remote-access-section" aria-label={copy.outboundTitle}>
         <h3>{copy.outboundTitle}</h3>
         {readError && (
-          <div className="hosts-alert" role="alert">
-            <span>{copy.connectionReadError(readError)}</span>
-            <Button onClick={() => void refreshDesktopConnections()}>{copy.retry}</Button>
-          </div>
+          <Notice tone="warn" className="hosts-alert" role="alert" action={<Button size="sm" onClick={() => void refreshDesktopConnections()}>{copy.retry}</Button>}>
+            {copy.connectionReadError(readError)}
+          </Notice>
         )}
         {!loaded && !readError && <p className="hosts-muted">{copy.loadingHosts}</p>}
         {loaded && !readError && connections.length === 0 && (

@@ -142,32 +142,11 @@
 }
 
 .termination-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px 11px;
-  border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
-  border-radius: var(--r-sm);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-size: var(--text-sm);
-  line-height: 1.45;
+  margin-top: var(--space-2);
 }
 
-.termination-notice svg {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  margin-top: 1px;
-}
 
-.termination-notice div {
+.termination-notice .notice-body {
   display: grid;
-  gap: 1px;
-}
-
-.termination-notice b {
-  color: var(--fg);
-  font-weight: var(--weight-semibold);
+  gap: var(--space-0_5);
 }

@@ -331,7 +331,6 @@
   margin-left: auto;
 }
 
-
 .project-dialog-body {
   display: grid;
   gap: 12px;
@@ -472,23 +471,6 @@
   border-bottom-color: var(--border3);
 }
 
-.vtabs {
-  gap: 1px;
-}
-
-.vtab {
-  min-width: 66px;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 10px;
-  font-size: var(--text-md);
-}
-
-.vtab.active::after {
-  right: 9px;
-  left: 9px;
-}
-
 .tb-statusbar {
   gap: 5px;
 }
@@ -514,12 +496,6 @@
   .topbar {
     padding-right: 6px;
     padding-left: 6px;
-  }
-
-  .vtab {
-    min-width: 56px;
-    padding: 0 7px;
-    font-size: var(--text-sm);
   }
 
   .tb-action {

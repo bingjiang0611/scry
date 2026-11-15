@@ -9,33 +9,6 @@
 
 .capabilities-head__spacer { flex: 1; }
 
-.capability-kind-tabs {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px;
-  border-radius: var(--r-sm);
-  background: var(--panel2);
-}
-
-.capability-kind-tabs button {
-  min-width: 68px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--r-xs);
-  background: transparent;
-  color: var(--dim2);
-  font: 650 var(--text-md)/1 var(--font-ui);
-  cursor: pointer;
-  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
-}
-
-.capability-kind-tabs button.active {
-  background: var(--panel);
-  color: var(--fg);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-}
-
 .capabilities-refresh {
   min-height: 34px;
   display: inline-flex;
@@ -67,29 +40,6 @@
   align-items: center;
   padding: 6px 18px;
   border-bottom: 1px solid var(--border);
-}
-
-.capability-source-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.capability-source-tabs button {
-  height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--dim2);
-  font: 650 12.5px/1 var(--font-ui);
-  cursor: pointer;
-  transition: color var(--duration-hover) var(--ease-out), border-color var(--duration-hover) var(--ease-out);
-}
-
-.capability-source-tabs button.active {
-  border-bottom-color: var(--accent);
-  color: var(--fg);
 }
 
 .capabilities-modal > .inventory-capability-note {
@@ -304,8 +254,7 @@
 .capabilities-empty > span { font-size: 12.5px; }
 
 @media (hover: hover) and (pointer: fine) {
-  .capability-kind-tabs button:hover:not(.active),
-  .capability-source-tabs button:hover:not(.active) { color: var(--fg); }
+
   .capabilities-refresh:hover:not(:disabled),
   .capabilities-close:hover { border-color: var(--border3); background: var(--panel2); }
   .capability-skill:hover,
@@ -327,8 +276,7 @@
 
 @media (max-width: 520px) {
   .capabilities-head { padding-left: 14px; }
-  .capability-kind-tabs { flex: 1; }
-  .capability-kind-tabs button { flex: 1; min-width: 0; }
+
   .capabilities-source-bar { padding-right: 14px; padding-left: 14px; }
   .capability-mcp-row__summary { grid-template-columns: minmax(0, 1fr); gap: 9px; padding-right: 14px; padding-left: 14px; }
   .capability-mcp-runtime { padding-left: 19px; }

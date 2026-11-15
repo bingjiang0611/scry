@@ -227,7 +227,6 @@
 }
 
 .inventory-context,
-.skill-scope-tabs,
 .inventory-toolbar,
 .inventory-state-legend {
   border-color: var(--border3);
@@ -243,13 +242,6 @@
 .inventory-search:focus-within {
   background: var(--panel);
   box-shadow: inset 0 0 0 1px var(--border2);
-}
-
-.skill-scope-tabs button.active::after {
-  right: 20%;
-  left: 20%;
-  border-radius: var(--r-xs);
-  background: var(--accent);
 }
 
 .skill-ledger__row,

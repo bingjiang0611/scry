@@ -3,434 +3,513 @@
     "fontSize": "font-size / font shorthand uses a px literal instead of var(--text-*)",
     "fontWeight": "font-weight uses a number instead of var(--weight-*)",
     "spacing": "padding / margin / gap uses a px value off the 4px grid (1px hairline and 2px optical are allowed)",
-    "color": "a non-token declaration uses a raw color literal instead of a theme variable"
+    "color": "a non-token declaration uses a raw color literal instead of a theme variable",
+    "buttonReset": "a container-wide `… button` rule does not exclude the Button, IconButton, Tabs and Segmented primitives"
   },
   "totals": {
-    "fontSize": 269,
-    "fontWeight": 117,
-    "spacing": 1311,
-    "color": 144
+    "fontSize": 262,
+    "fontWeight": 114,
+    "spacing": 1268,
+    "color": 138,
+    "buttonReset": 87
   },
   "files": {
     "analytics-evidence.css": {
       "fontSize": 5,
       "fontWeight": 11,
-      "spacing": 50,
-      "color": 2
+      "spacing": 45,
+      "color": 2,
+      "buttonReset": 1
     },
     "codex-alignment-chat.css": {
       "fontSize": 8,
       "fontWeight": 6,
       "spacing": 28,
-      "color": 5
+      "color": 5,
+      "buttonReset": 4
     },
     "codex-alignment-dialogs.css": {
       "fontSize": 1,
       "fontWeight": 3,
       "spacing": 9,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "codex-alignment-editorial.css": {
       "fontSize": 6,
       "fontWeight": 6,
       "spacing": 29,
-      "color": 4
+      "color": 4,
+      "buttonReset": 0
     },
     "codex-alignment-pinned.css": {
       "fontSize": 0,
       "fontWeight": 1,
       "spacing": 17,
-      "color": 2
+      "color": 2,
+      "buttonReset": 1
     },
     "codex-alignment-shell.css": {
       "fontSize": 1,
       "fontWeight": 2,
       "spacing": 3,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "components/archived-sessions.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 1,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "components/background-work.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 12,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "components/desktop-remote.css": {
       "fontSize": 1,
       "fontWeight": 0,
       "spacing": 15,
-      "color": 0
+      "color": 0,
+      "buttonReset": 4
     },
     "components/diff-inspector.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 3,
-      "color": 0
+      "color": 0,
+      "buttonReset": 3
     },
     "components/diff-scope-menu.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 7,
-      "color": 1
+      "color": 1,
+      "buttonReset": 5
     },
     "components/diff-stack.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 10,
-      "color": 0
+      "spacing": 7,
+      "color": 0,
+      "buttonReset": 6
     },
     "components/hosts-view.css": {
       "fontSize": 2,
       "fontWeight": 2,
-      "spacing": 28,
-      "color": 0
+      "spacing": 26,
+      "color": 0,
+      "buttonReset": 0
     },
     "components/llm-performance.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 0,
-      "color": 3
+      "color": 2,
+      "buttonReset": 6
     },
     "components/meta-prompts.css": {
       "fontSize": 4,
       "fontWeight": 5,
       "spacing": 31,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "components/model-picker.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 6,
-      "color": 0
+      "color": 0,
+      "buttonReset": 1
     },
     "components/pierre-views.css": {
       "fontSize": 0,
       "fontWeight": 0,
-      "spacing": 4,
-      "color": 0
+      "spacing": 3,
+      "color": 0,
+      "buttonReset": 5
     },
     "components/remote-location.css": {
       "fontSize": 2,
       "fontWeight": 1,
-      "spacing": 15,
-      "color": 0
+      "spacing": 12,
+      "color": 0,
+      "buttonReset": 0
     },
     "components/sidebar-activity.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 1,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "components/workspace-picker.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 14,
-      "color": 1
+      "color": 1,
+      "buttonReset": 10
     },
     "conversation.css": {
       "fontSize": 3,
       "fontWeight": 0,
       "spacing": 9,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "inventory-evidence-capabilities.css": {
-      "fontSize": 10,
-      "fontWeight": 6,
-      "spacing": 40,
-      "color": 1
+      "fontSize": 9,
+      "fontWeight": 4,
+      "spacing": 37,
+      "color": 0,
+      "buttonReset": 0
     },
     "inventory-evidence-ledger.css": {
-      "fontSize": 8,
-      "fontWeight": 8,
-      "spacing": 36,
-      "color": 1
+      "fontSize": 7,
+      "fontWeight": 7,
+      "spacing": 34,
+      "color": 1,
+      "buttonReset": 2
     },
     "inventory-evidence-mcp.css": {
       "fontSize": 6,
       "fontWeight": 9,
-      "spacing": 39,
-      "color": 0
+      "spacing": 37,
+      "color": 0,
+      "buttonReset": 2
     },
     "motion.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 2,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "session-evidence-chat.css": {
       "fontSize": 6,
       "fontWeight": 1,
       "spacing": 25,
-      "color": 2
+      "color": 2,
+      "buttonReset": 0
     },
     "session-evidence-conversation-records.css": {
       "fontSize": 7,
       "fontWeight": 1,
       "spacing": 12,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "session-evidence-graph.css": {
       "fontSize": 5,
       "fontWeight": 0,
       "spacing": 37,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "session-evidence-layout.css": {
       "fontSize": 7,
       "fontWeight": 2,
       "spacing": 57,
-      "color": 1
+      "color": 1,
+      "buttonReset": 5
     },
     "session-evidence-overview.css": {
-      "fontSize": 7,
+      "fontSize": 6,
       "fontWeight": 3,
-      "spacing": 25,
-      "color": 0
+      "spacing": 24,
+      "color": 0,
+      "buttonReset": 1
     },
     "session-evidence-segments.css": {
       "fontSize": 6,
       "fontWeight": 4,
       "spacing": 48,
-      "color": 0
+      "color": 0,
+      "buttonReset": 2
     },
     "side-chat.css": {
       "fontSize": 3,
       "fontWeight": 0,
-      "spacing": 11,
-      "color": 1
+      "spacing": 9,
+      "color": 1,
+      "buttonReset": 0
     },
     "source-control.css": {
       "fontSize": 1,
       "fontWeight": 1,
-      "spacing": 40,
-      "color": 5
+      "spacing": 31,
+      "color": 4,
+      "buttonReset": 4
     },
     "styles-agent-roster.css": {
       "fontSize": 5,
       "fontWeight": 0,
       "spacing": 16,
-      "color": 3
+      "color": 3,
+      "buttonReset": 0
     },
     "styles-approval-questions.css": {
       "fontSize": 2,
       "fontWeight": 2,
       "spacing": 11,
-      "color": 2
+      "color": 2,
+      "buttonReset": 0
     },
     "styles-billing-guard.css": {
       "fontSize": 6,
       "fontWeight": 0,
       "spacing": 18,
-      "color": 4
+      "color": 4,
+      "buttonReset": 0
     },
     "styles-call-evidence.css": {
       "fontSize": 10,
       "fontWeight": 3,
       "spacing": 31,
-      "color": 9
+      "color": 9,
+      "buttonReset": 3
     },
     "styles-chat-entry.css": {
       "fontSize": 8,
       "fontWeight": 3,
       "spacing": 21,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-chat-media.css": {
       "fontSize": 17,
       "fontWeight": 2,
       "spacing": 56,
-      "color": 12
+      "color": 12,
+      "buttonReset": 3
     },
     "styles-composer-queue.css": {
       "fontSize": 12,
       "fontWeight": 2,
       "spacing": 50,
-      "color": 4
+      "color": 4,
+      "buttonReset": 5
     },
     "styles-composer-runtime.css": {
       "fontSize": 4,
       "fontWeight": 2,
       "spacing": 24,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-dialog-controls.css": {
       "fontSize": 3,
       "fontWeight": 0,
       "spacing": 9,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "styles-diff-review.css": {
       "fontSize": 4,
       "fontWeight": 0,
       "spacing": 11,
-      "color": 2
+      "color": 1,
+      "buttonReset": 3
     },
     "styles-evidence-session.css": {
       "fontSize": 1,
       "fontWeight": 1,
       "spacing": 11,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-evidence-theme.css": {
       "fontSize": 2,
       "fontWeight": 0,
       "spacing": 2,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-execution-graph.css": {
       "fontSize": 9,
       "fontWeight": 1,
       "spacing": 27,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
+    },
+    "styles-macos-window.css": {
+      "fontSize": 0,
+      "fontWeight": 0,
+      "spacing": 0,
+      "color": 0,
+      "buttonReset": 2
     },
     "styles-markdown.css": {
       "fontSize": 5,
       "fontWeight": 5,
       "spacing": 12,
-      "color": 2
+      "color": 2,
+      "buttonReset": 0
     },
     "styles-mcp-trust.css": {
-      "fontSize": 3,
+      "fontSize": 2,
       "fontWeight": 0,
-      "spacing": 10,
-      "color": 8
+      "spacing": 7,
+      "color": 6,
+      "buttonReset": 0
     },
     "styles-overview-controls.css": {
       "fontSize": 3,
       "fontWeight": 0,
       "spacing": 17,
-      "color": 14
+      "color": 14,
+      "buttonReset": 0
     },
     "styles-overview-foundation.css": {
-      "fontSize": 5,
+      "fontSize": 3,
       "fontWeight": 0,
-      "spacing": 10,
-      "color": 1
+      "spacing": 8,
+      "color": 1,
+      "buttonReset": 0
     },
     "styles-panel-chrome.css": {
       "fontSize": 4,
       "fontWeight": 3,
       "spacing": 7,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-pending-questions.css": {
       "fontSize": 3,
       "fontWeight": 4,
       "spacing": 16,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-picker-menus.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 13,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "styles-remote-access.css": {
       "fontSize": 0,
       "fontWeight": 0,
       "spacing": 5,
-      "color": 1
+      "color": 1,
+      "buttonReset": 2
     },
     "styles-segment-summary.css": {
       "fontSize": 2,
       "fontWeight": 1,
       "spacing": 5,
-      "color": 7
+      "color": 7,
+      "buttonReset": 0
     },
     "styles-segments.css": {
       "fontSize": 9,
       "fontWeight": 1,
       "spacing": 20,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "styles-session-controls.css": {
-      "fontSize": 4,
+      "fontSize": 3,
       "fontWeight": 0,
       "spacing": 8,
-      "color": 3
+      "color": 3,
+      "buttonReset": 2
     },
     "styles-settings-inventory.css": {
       "fontSize": 10,
       "fontWeight": 3,
       "spacing": 26,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "styles-sidebar.css": {
       "fontSize": 6,
       "fontWeight": 1,
       "spacing": 10,
-      "color": 1
+      "color": 1,
+      "buttonReset": 0
     },
     "styles-surface-tabs.css": {
       "fontSize": 3,
       "fontWeight": 3,
       "spacing": 12,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-terminal.css": {
       "fontSize": 1,
       "fontWeight": 0,
       "spacing": 13,
-      "color": 22
+      "color": 22,
+      "buttonReset": 1
     },
     "styles-tool-cards.css": {
       "fontSize": 4,
       "fontWeight": 0,
       "spacing": 13,
-      "color": 0
+      "color": 0,
+      "buttonReset": 3
     },
     "styles-tool-evidence.css": {
       "fontSize": 5,
       "fontWeight": 1,
       "spacing": 40,
-      "color": 10
+      "color": 10,
+      "buttonReset": 0
     },
     "styles-turn-layout.css": {
       "fontSize": 1,
       "fontWeight": 0,
-      "spacing": 11,
-      "color": 0
+      "spacing": 10,
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-verdict-diff.css": {
       "fontSize": 3,
       "fontWeight": 1,
       "spacing": 14,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-view-navigation.css": {
       "fontSize": 1,
       "fontWeight": 1,
-      "spacing": 3,
-      "color": 0
+      "spacing": 2,
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-welcome-providers.css": {
       "fontSize": 6,
       "fontWeight": 4,
       "spacing": 20,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-workbench-geometry.css": {
       "fontSize": 5,
       "fontWeight": 1,
-      "spacing": 36,
-      "color": 0
+      "spacing": 33,
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-workbench-layout.css": {
       "fontSize": 1,
       "fontWeight": 0,
       "spacing": 19,
-      "color": 0
+      "color": 0,
+      "buttonReset": 0
     },
     "styles-workspace-editor.css": {
       "fontSize": 3,
       "fontWeight": 0,
       "spacing": 20,
-      "color": 3
+      "color": 3,
+      "buttonReset": 1
     }
   }
 }

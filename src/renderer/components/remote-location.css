@@ -81,33 +81,9 @@
 
 /* Location notice stays visible without a draft (offline host, missing Provider). */
 .composer-notice {
-  min-width: 0;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 4px 2px;
-  padding: 7px 9px;
-  border-radius: var(--r-sm);
-  font: var(--text-sm)/1.45 var(--font-ui);
+  margin: var(--space-1) var(--space-1) 0;
 }
-.composer-notice .ico { width: 14px; height: 14px; flex: none; }
-.composer-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.composer-notice.is-info { color: var(--dim); }
-.composer-notice.is-info span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-notice.is-blocked { background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--warn); }
-.composer-notice.is-error { background: var(--bad-soft); color: var(--bad); }
-.composer-notice button {
-  flex: none;
-  padding: 4px 10px;
-  border: 1px solid currentColor;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.composer-notice button:disabled { opacity: .55; cursor: default; }
+.composer-notice.is-info .notice-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Sidebar: remote project rows reuse local classes; only the host tag is new. */
 /* The project name keeps priority; the host tag shrinks first. */

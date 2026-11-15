@@ -26,7 +26,7 @@
 .llm-perf-help .ico { width: 14px; height: 14px; }
 .llm-perf-help > p { position: absolute; z-index: 4; top: 100%; right: 0; width: min(340px, calc(100vw - 80px)); margin: 8px 0 0; padding: 16px; border: 1px solid var(--border2); border-radius: var(--r-sm); background: var(--panel3); color: var(--fg); font-size: var(--text-base); line-height: 1.6; text-align: left; box-shadow: 0 8px 24px #0002; }
 .llm-perf-modal button:focus-visible, .llm-perf-modal summary:focus-visible, .llm-perf-chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-.llm-perf-alert { margin: 0 0 16px; color: var(--bad, #f36c67); font-size: var(--text-base); }
+.llm-perf-alert { margin: 0 0 var(--space-4); }
 .llm-perf-empty { padding: 28px 0; color: var(--dim); font-size: var(--text-base); }
 .llm-perf-truncated { margin: 12px 0 0; color: var(--dim); font-size: var(--text-sm); }
 .llm-perf-comparison-scroll { overflow-x: auto; padding: 4px; margin: -4px; }

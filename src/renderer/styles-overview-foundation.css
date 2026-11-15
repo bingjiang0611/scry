@@ -33,26 +33,6 @@
   display: flex;
   flex-direction: column;
 }
-.panel-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.panel-tabs button {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 0;
-  background: transparent;
-  color: var(--dim);
-  font: 11.5px/1 var(--font-ui);
-  cursor: pointer;
-}
-.panel-tabs button svg {
-  width: 14px;
-  height: 14px;
-}
 
 /* （.psec/.ptitle 已被蓝本 .panel-section/h4 取代——OverviewPanel 是唯一消费者，迁移后移除） */
 .pstats {
@@ -148,32 +128,6 @@
   text-transform: none;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-}
-
-.overview-data-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border3);
-  background: var(--panel);
-}
-
-.overview-data-tabs button {
-  min-width: 0;
-  height: 32px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--dim2);
-  font: var(--weight-medium) 11.5px/1 var(--font-ui);
-  cursor: pointer;
-}
-
-.overview-data-tabs button.active {
-  border-color: var(--border2);
-  background: var(--panel3);
-  color: var(--fg);
 }
 
 /* 行内状态点（蓝本）——补上现有代码已引用、但 CSS 一直缺失的 .sdot */

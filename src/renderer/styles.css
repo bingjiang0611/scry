@@ -2,6 +2,8 @@
 @import './styles-theme-shell.css';
 @import './styles-typography.css';
 @import './styles-buttons.css';
+@import './styles-notices.css';
+@import './styles-tabs.css';
 @import './styles-sidebar.css';
 @import './styles-dialog-controls.css';
 @import './styles-chat-entry.css';

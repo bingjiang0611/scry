@@ -72,11 +72,6 @@
 }
 
 .side-chat-surface-notice {
-  margin: 0;
-  padding: 6px 14px;
-  font-size: var(--text-xs);
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
   flex: none;
 }
 

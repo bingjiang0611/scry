@@ -19,16 +19,12 @@
   :root { --ease-spring: linear(0, .32, .78, 1.04, 1.09, 1.06, 1.02, 1, .99, .99, 1); }
 }
 
-/* Selected pills and labels settle after the click; ordinary hover stays on the hover token. */
+/* Selected pills and labels settle after the click; ordinary hover stays on the hover token.
+   In-view tabs (.tabs) switch color in the same frame instead and are not listed here. */
 :root :is(
   .surface-tab.active,
   .settings-tab.active,
-  .theme-option.active,
-  .vtab.active,
-  .overview-data-tabs button.active,
-  .capability-kind-tabs button.active,
-  .capability-source-tabs button.active,
-  .skill-scope-tabs button.active
+  .theme-option.active
 ) {
   transition-duration: var(--duration-sm);
   transition-timing-function: var(--ease-out-strong);
@@ -153,8 +149,8 @@
 }
 [data-indicator-ready='true'] > .motion-tab-indicator { visibility: visible; }
 .surface-tabs[data-indicator-ready='true'] .surface-tab.active,
-.sb-view-tabs[data-indicator-ready='true'] [aria-selected='true'] { border-bottom-color: transparent; }
-.surface-tabs [role='tab'], .sb-view-tabs [role='tab'] { transition: none; }
+.tabs[data-indicator-ready='true'] [aria-selected='true'] { border-bottom-color: transparent; }
+.surface-tabs [role='tab'] { transition: none; }
 
 @media (prefers-reduced-motion: reduce) {
   :root {

@@ -17,16 +17,7 @@
   font: var(--text-xs)/1.45 var(--font-mono);
 }
 .mcp-auth-banner {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 5px 0 8px;
-  padding: 7px 8px;
-  border: 1px solid rgba(246, 197, 96, 0.26);
-  border-radius: var(--r-xs);
-  color: var(--warn);
-  background: rgba(246, 197, 96, 0.08);
-  font: 11.5px/1.35 var(--font-mono);
+  margin: var(--space-1) 0 var(--space-2);
 }
 .mcp-trust-grid {
   margin-top: 8px;

@@ -5,6 +5,7 @@ import { diffBodyItem, parseDiffBody } from '../pierre-diff'
 import { STACK_PATCH_CHARACTER_LIMIT } from '../diff-stack'
 import { DIFF_COPY as copy } from '../constants/diff-copy'
 import { diffTheme, PierreDiffRuntime, useDiffTheme } from './PierreDiffRuntime'
+import { Notice } from './primitives/Notice'
 import './pierre-views.css'
 
 export function Patch({ diff, path = 'patch', onLine }: {
@@ -27,9 +28,9 @@ export function Patch({ diff, path = 'patch', onLine }: {
     return line >= start && line < start + count
   })
   return <div className="sc-patch pierre-patch" aria-label={copy.patch}>
-    {(diff.truncated || limited || diff.binary) && <p className="sc-notice">{diff.binary ? copy.scBinary : copy.scPartial}</p>}
+    {(diff.truncated || limited || diff.binary) && <Notice className="sc-notice">{diff.binary ? copy.scBinary : copy.scPartial}</Notice>}
     {!diff.patch && !diff.binary && !diff.truncated && <p className="sc-muted">{copy.scEmpty}</p>}
-    {body?.kind === 'raw' && <p className="sc-notice" title={body.error}>{copy.rawPatch}</p>}
+    {body?.kind === 'raw' && <Notice tone="warn" className="sc-notice" title={body.error}>{copy.rawPatch}</Notice>}
     {onLine && body?.kind === 'diff' && <form className="pierre-comment-target" onSubmit={event => {
       event.preventDefault()
       if (validLine) onLine(commentSide, line)
