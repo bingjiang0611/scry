@@ -7,6 +7,21 @@ function requestOf(frame: string): Record<string, unknown> {
   return request
 }
 
+// A reply the handler already encoded as one JSON object. The fake channel frames it
+// as the host does (`{"keepAlive":true,...}`) instead of decoding and re-encoding it,
+// so a measurement fixture pays one encode and one decode per reply, like production.
+export class EncodedLaneReply {
+  constructor(readonly json: string) {
+    if (!json.startsWith('{') || !json.endsWith('}')) throw new Error('encoded lane reply must be a JSON object')
+  }
+}
+
+function replyLine(value: unknown): string {
+  if (!(value instanceof EncodedLaneReply)) return JSON.stringify({ keepAlive: true, ...(value as object) })
+  const body = value.json.slice(1)
+  return body.trim() === '}' ? '{"keepAlive":true}' : `{"keepAlive":true,${body}`
+}
+
 // Routes lane frames to a one-shot style handler, so tests that fake the wire
 // still drive the production lane client (keep-alive replies, one outstanding
 // request, close on failure). A handler that throws models a lost reply: the
@@ -32,7 +47,7 @@ export function fakeLaneConnector(handler: (options: { path: string; request: un
         void handler({ path: endpoint.path ?? '', request: requestOf(frame) }).then(
           value => {
             if (closed) return
-            const line = JSON.stringify({ keepAlive: true, ...(value as object) })
+            const line = replyLine(value)
             if (deliver) { const done = deliver; deliver = undefined; done.resolve(line) } else lines.push(line)
           },
           error => close(error instanceof Error ? error : new Error('desktop_lane_closed'))

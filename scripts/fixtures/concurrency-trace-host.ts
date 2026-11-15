@@ -19,7 +19,7 @@ import { performance } from 'node:perf_hooks'
 import { createTraceRuntime } from '../../src/main/bootstrap/trace-runtime'
 import { DockBadgeState } from '../../src/main/dock-badge'
 import { DesktopRemoteClient } from '../../src/main/remote/desktop-client'
-import { fakeLaneConnector } from '../../src/main/remote/desktop-lane-fixtures'
+import { EncodedLaneReply, fakeLaneConnector } from '../../src/main/remote/desktop-lane-fixtures'
 import { createDesktopHostReader, parseDesktopHostRead } from '../../src/main/remote/desktop-host-reader'
 import { generateDesktopDeviceIdentity, type DesktopSshTunnel } from '../../src/main/remote/desktop-transport'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity'
@@ -166,7 +166,10 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
         version: 1, hostId: host.hostId, anchorPEM: host.caCertificatePEM,
         pairPort: 2201, runPort: 2202, pairingId, secret: `pairing-secret-${index}`, expiresAt: Date.now() + 60_000
       })).toString('base64url')}`
-      const tlsRequest = async (options: { request: unknown }): Promise<unknown> => {
+      // `reply` turns the host's single encoding into what the peer receives: the one-shot
+      // pairing path decodes it here, a lane hands the same bytes to the production lane
+      // client, which decodes them itself. Either way one encode and one decode per reply.
+      const answer = async (options: { request: unknown }, reply: (serialized: string) => unknown): Promise<unknown> => {
         counters.requests++
         const request = options.request as { operation?: string; requestId?: string; op?: string; query?: unknown }
         if (request.operation === 'pair.prove') {
@@ -206,15 +209,16 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
         counters.encodeMs += performance.now() - encodeStart
         counters.responseBytes += Buffer.byteLength(serialized)
         // One encode, one decode: the peer never holds the host's own objects.
-        return JSON.parse(serialized)
+        return reply(serialized)
       }
+      const tlsRequest = (options: { request: unknown }): Promise<unknown> => answer(options, (serialized) => JSON.parse(serialized))
       const client = new DesktopRemoteClient({ directory: join(directory, `peer-${index}`), encrypt, decrypt }, {
         // A real per-peer identity and grant, so certificates are not shared between peers.
         generateIdentity: async () => identity,
         openTunnel: async () => tunnel(),
         // Pairing is one-shot; run requests use the production lane client over a fake channel.
         tlsRequest,
-        openLane: fakeLaneConnector(tlsRequest)
+        openLane: fakeLaneConnector((options) => answer(options, (serialized) => new EncodedLaneReply(serialized)))
       })
       clients.push(client)
       const pending = await client.pair({ label: `peer-${index}`, ssh: { hostname: 'fixture.invalid', username: 'fixture', port: 22 }, invitation })
