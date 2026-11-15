@@ -21,7 +21,11 @@ export type SkeletonRowsProps = {
 }
 
 export function SkeletonRows({ rows, label, rowHeight, meta = false, avatar, className = '' }: SkeletonRowsProps) {
-  const style = rowHeight ? { '--sk-row-height': `${rowHeight}px` } as CSSProperties : undefined
+  const style = {
+    ...(rowHeight ? { '--sk-row-height': `${rowHeight}px` } : {}),
+    // The row gap is 10px; text after a picture shifts its band back by that much.
+    ...(avatar ? { '--sk-avatar-offset': `${avatar + 10}px` } : {})
+  } as CSSProperties
   return (
     <div className={`skeleton-rows ${className}`.trim()} role="status" aria-label={label} style={style}>
       {Array.from({ length: Math.max(0, rows) }, (_, index) => (

@@ -4,6 +4,7 @@ import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { LoadingStatus } from './LoadingStatus'
 import type { UsageAnalytics, UsageAnalyticsBreakdownRow, UsageAnalyticsRangeDays } from '@shared/trace'
 import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ANALYTICS_COPY as copy } from '../constants/copy'
 import { formatAggregateTokens, formatCost, formatDay, formatKnownTokens, formatShare, metricValue, metricEvidence, modelBreakdownRows, tokensOf, ProviderMark, providerLabel, displayCostEvidence, tokenEvidence, tokenComplete, isApproximateCost, usdFormatter, ranges, UsageChart, type BreakdownMode, type ChartMetric } from './AnalyticsChart'
 export interface AnalyticsViewProps {
@@ -86,8 +87,8 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
                 <button type="button" key={days} className={rangeDays === days ? 'active' : ''} aria-pressed={rangeDays === days} onClick={() => onRangeChange(days)}>{copy.range(days)}</button>
               ))}
             </div>
-            <button className={`usage-refresh ${showLoading ? 'is-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-label={copy.refresh} title={copy.refresh}>
-              <Icon name="refresh" />
+            <button className="usage-refresh" type="button" onClick={() => { if (!loading) onRefresh() }} aria-disabled={loading} aria-busy={loading} aria-label={copy.refresh} title={copy.refresh}>
+              <TurningIcon busy={loading} />
             </button>
           </div>
         </header>

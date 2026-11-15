@@ -115,7 +115,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(skillHtml).not.toContain('正在读取 Skill…')
     expect(skillHtml).not.toContain('未发现')
     expect(skillHtml).not.toContain('0 个结果')
-    expect(skillHtml).toContain('class="modal-refresh" disabled=""')
+    // Busy blocks a second press without leaving the keyboard order or greying out.
+    expect(skillHtml).toContain('class="modal-refresh" aria-disabled="true" aria-busy="true"')
 
     const mcpHtml = renderToStaticMarkup(
       <McpModal

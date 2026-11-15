@@ -3,7 +3,7 @@ import type { McpStatus } from '../format'
 import type { McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
-import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
@@ -115,7 +115,7 @@ export function McpModal({
                 : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
             aria-label={readsPiSnapshot ? '刷新 Pi MCP 快照' : readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
-            {showMcpLoading && refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
+            <TurningIcon busy={refreshing} />
             {readsRuntime && <span>{showMcpLoading && refreshing ? (readsPiSnapshot ? LOADING_COPY.refreshing : LOADING_COPY.detecting) : refreshLabel}</span>}
           </button>
           <ModalCloseButton ref={closeRef} onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeMcp} />

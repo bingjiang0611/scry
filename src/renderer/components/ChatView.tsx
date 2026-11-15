@@ -116,7 +116,9 @@ export function ChatView(props: ChatViewProps) {
               <p className="history-window-start" role="note">{HISTORY_WINDOW_COPY.exhausted(historyWindow.totalTurns)}</p>
             )}
             {(sessionLoading || sessionCacheVisible) && (
-              <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
+              sessionCacheVisible
+                ? <DelayedLoadingStatus loading className="is-quiet" title={LOADING_COPY.sessionHistoryVerifying} detail={LOADING_COPY.sessionHistoryVerifyingDetail} />
+                : <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
             )}
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}

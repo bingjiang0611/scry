@@ -1,11 +1,13 @@
 /* Placeholder shapes for content whose layout is already known.
-   One light band crosses every shape at once: the gradient is fixed to the
-   viewport, so all shapes share the same band position instead of each line
-   shimmering on its own. */
+   One light band crosses every shape together: each shape carries its own band,
+   but all bands share the same timing and travel from the same left edge, so
+   they line up into one band across the list. Motion is transform-only, so it
+   stays on the compositor (see performance-style.test.ts). */
 .skeleton-rows {
   --sk-base: var(--surface-strong);
   --sk-band: rgba(255, 255, 255, 0.06);
   --sk-row-height: 44px;
+  --sk-travel: 720px;
   display: grid;
   align-content: start;
 }
@@ -28,26 +30,35 @@
   min-width: 0;
 }
 .sk-shape {
+  position: relative;
   display: block;
-  background-color: var(--sk-base);
-  background-image: linear-gradient(90deg, transparent, var(--sk-band), transparent);
-  background-size: 320px 100%;
-  background-repeat: no-repeat;
-  background-attachment: fixed;
-  animation: sk-band 1.2s linear infinite;
+  overflow: hidden;
+  background: var(--sk-base);
 }
+.sk-shape::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 320px;
+  background: linear-gradient(90deg, transparent, var(--sk-band), transparent);
+  transform: translateX(calc(-320px - var(--sk-offset, 0px)));
+  animation: sk-band 1.2s linear infinite;
+  will-change: transform;
+}
+/* Text that starts after a picture offsets its band so it stays in line. */
+.skeleton-row .sk-circle ~ .skeleton-row-copy .sk-shape { --sk-offset: var(--sk-avatar-offset, 0px); }
 /* 12px lines stand in for 14px text; meta lines are a step smaller. */
 .sk-text { height: 12px; border-radius: var(--r-xs); }
 .sk-meta { height: 9px; }
 .sk-circle { flex: none; border-radius: 50%; corner-shape: round; }
 @keyframes sk-band {
-  from { background-position: -320px 0; }
-  to { background-position: 100vw 0; }
+  from { transform: translateX(calc(-320px - var(--sk-offset, 0px))); }
+  to { transform: translateX(calc(var(--sk-travel) - var(--sk-offset, 0px))); }
 }
 @media (prefers-reduced-motion: reduce) {
   /* The global reduced-motion rule caps every animation at one run, so a pulse
      cannot loop; keep the still shapes and drop the moving band. */
-  .sk-shape { animation: none !important; background-image: none; }
+  .sk-shape::after { content: none; animation: none !important; }
 }
 @media (forced-colors: active) {
   .sk-shape { background: CanvasText; opacity: 0.2; }

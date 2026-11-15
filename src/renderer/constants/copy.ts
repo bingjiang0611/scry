@@ -343,6 +343,10 @@ export const LOADING_COPY = {
   sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
   sessionHistory: '正在读取会话历史…',
   sessionHistoryDetail: '会话已切换；内容将在本机证据读取完成后显示。',
+  // 缓存或目录预览已经在屏幕上时，不能再说「内容将在读取完成后显示」。
+  sessionHistoryVerifying: '正在核对会话历史…',
+  sessionHistoryVerifyingDetail: '当前显示的是上次读取的内容；核对完成前暂不能发送或分支。',
+  sendWaitsForHistory: '会话历史读取完成后才能发送，避免发到错误的会话',
   skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   skills: '正在读取 Skill…',

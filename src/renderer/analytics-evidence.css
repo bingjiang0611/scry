@@ -130,9 +130,6 @@
   opacity: 0.45;
   cursor: default;
 }
-.usage-refresh.is-loading svg {
-  animation: usage-spin 900ms linear infinite;
-}
 .usage-segmented {
   display: inline-flex;
   flex: none;
@@ -756,15 +753,5 @@
   }
   .usage-metrics dd {
     font-size: 28px;
-  }
-}
-@keyframes usage-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .usage-refresh.is-loading svg {
-    animation: none;
   }
 }
