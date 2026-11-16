@@ -288,7 +288,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 描述对象的状态或属性 | 徽章 `.badge`（非交互，文字 + 颜色） | 可点击的徽章；只靠颜色的徽章 |
 | 实时连接或运行状态 | 状态点 + 文字标签 | 只有颜色的圆点 |
 | 需要用户注意、但不阻断操作的结果 | `<Notice tone>`：info／warn／bad；`layout="strip"` 贴面板边缘，默认 box 放在相关内容旁；最多一个小按钮 | 全局弹窗；只有颜色、没有图标与文字的提示；自己写底色与边框 |
-| 一次性操作反馈（已复制、已保存） | 短暂的 toast 或按钮旁的状态字 | 常驻的 Notice |
+| 一次性操作反馈（已复制、已保存） | 结果在界面上已经可见时只做读屏播报（`role="status"`）；否则在触发按钮旁给状态，复制统一用 `useCopyFeedback`（图标变成勾，成功 2 秒后恢复，失败保留到下次尝试） | 浮动 toast；常驻的 Notice；自动消失的错误 |
 | 必须用户决定才能继续 | 弹窗 `ModalFrame` | 把可选细节塞进弹窗 |
 | 低频的解释、定义、来源说明 | tooltip 或可展开的 `Disclosure` | 常驻的说明段落 |
 | 大块可选细节（原始输入输出、日志） | `Disclosure` 折叠 | 默认展开 |
@@ -306,7 +306,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 标签页 | ~~`.sc-tabs`、`.sb-view-tabs`、`.overview-data-tabs`、`.skill-scope-tabs`、`.capability-kind-tabs`、`.diff-navigation-tabs`；无引用的 `.panel-tabs`、`.vtabs`~~ | **已完成（2026-11-15）**：`Tabs` |
 | 分段控件 | ~~`.usage-segmented`、`.capability-source-tabs`~~ | **已完成（2026-11-15）**：`Segmented`。`.seg-chip` 是指标徽章，不属于分段控件 |
 | 不并入 | `.surface-tabs`、`.terminal-tabs`（可关闭、可拖动）；`.settings-tab`（设置页左侧导航，`aria-current`） | 保留独立实现，但选中色、下划线与字号对齐 `Tabs` |
-| 待定 | `.mp-notice`（浮动 toast）；`.overview-session-notice`、`.surface-chooser-notice`（按钮旁的状态字） | 等 toast 模式确定后统一 |
+| 就近反馈 | ~~`.mp-notice`（浮动 toast）~~；`.overview-session-notice`、`.surface-chooser-notice`、`.desktop-remote__copy-status`（按钮旁的状态字） | **已确定（2026-11-16）**：不做通用 toast，结果就近显示；复制反馈用 `useCopyFeedback` |
 | 菜单 | ~~`.climenu`、`.arch-provider-menu`、`.sb-session-menu`、`.sb-project-menu`、`.ctxmenu`、`.surface-menu` 各自的容器与条目样式~~ | **已完成（2026-11-16）**：`Menu` + `styles-menus.css`；定位、开关与动效仍由调用方负责 |
 | 不并入菜单 | `.diff-scope-menu`／`.diff-turn-menu`（虚拟列表子菜单，`aria-activedescendant`）、`.workspace-picker`（带搜索的列表）、`.wdmenu`／`.location-menu`（`role="dialog"` 的选择面板，行内有移除按钮）、`.slash-menu`、模型与权限弹出面板 | 弹出面板，不用 `role="menu"`；选择面板复用 `.menu-surface` 与 `.mitem` 的外观 |
 
