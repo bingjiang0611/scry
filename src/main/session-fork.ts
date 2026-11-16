@@ -39,3 +39,17 @@ export function verifyForkArchiveBoundary(
     prefix: archive!.turns.slice(0, sourceIndex + 1)
   }
 }
+
+/**
+ * Why no archive was found for a fork source (round eight H3): the same session archived under
+ * another workspace key, or this workspace holding other sessions, point at different bugs.
+ * Counts only; no IDs or paths.
+ */
+export function describeMissingForkArchive(
+  summaries: ReadonlyArray<{ cwd: string; sessionId: string }>,
+  key: { cwd: string; sessionId: string }
+): string {
+  const sameSessionElsewhere = summaries.filter((entry) => entry.sessionId === key.sessionId && entry.cwd !== key.cwd).length
+  const sameWorkspace = summaries.filter((entry) => entry.cwd === key.cwd).length
+  return `找不到可分支的已结束轮次：没有找到该会话的归档（该会话在其他工作目录下有 ${sameSessionElsewhere} 份归档；本工作目录下有 ${sameWorkspace} 个其他会话的归档）`
+}

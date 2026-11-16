@@ -6,12 +6,12 @@ import type { ConversationServiceDeps } from '../conversation-service'
 import type { NativeSessionScope } from '../conversation-store'
 import type { createAppSessionStore } from '../app-store'
 import { providerOperationKey, type ProviderOperationGate } from '../provider-operation-gate'
-import { verifyForkArchiveBoundary } from '../session-fork'
+import { describeMissingForkArchive, verifyForkArchiveBoundary } from '../session-fork'
 import type { ProviderId } from '../../shared/provider'
 import type { NormalizedAgentStartRequest, RuntimeProvider } from '../../shared/runtime'
 import { AgentRuntimeError } from '../run-outcome'
 import type { ProviderRegistry } from '../providers/registry'
-import { readTraceArchiveAsync } from '../transcript-archive'
+import { discoverTraceArchiveSessionsAsync, readTraceArchiveAsync } from '../transcript-archive'
 import { cloneForkArchiveTurns } from './archive'
 import { resolveCodexHookTrust, resolveOpenCodePluginTrust, authorizedMcpExecution, ensureMcpExecutionAuthorized } from './trust'
 import { canRestartInterruptedLocalOnlySession, type ContextAdmission } from '../context-admission'
@@ -217,6 +217,10 @@ export function createForkOperations({
           cwd: catalogCwd,
           sessionId: request.sourceSessionId
         })
+        if (!archive) {
+          const summaries = await discoverTraceArchiveSessionsAsync(app.getPath('userData'), [providerId])
+          throw new Error(describeMissingForkArchive(summaries, { cwd: catalogCwd, sessionId: request.sourceSessionId }))
+        }
         const { source, prefix } = verifyForkArchiveBoundary(archive, request)
         const codexHookTrust = providerId === 'codex' && cwd ? await resolveCodexHookTrust(cwd, providerRegistry) : []
         const openCodePluginTrust = providerId === 'opencode' && cwd

@@ -1,4 +1,5 @@
 import { observedInterruptionRecordId, reserveObservedInterruption } from './managed-interruption.js'
+import { lifecycleMismatchError } from './managed-identity-diagnostic.js'
 import { isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -225,11 +226,9 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
       if (candidates.length === 0) {
         return { status: 'pending' as const, reason: 'managed recorder open identity is not available yet' }
       }
-      throw new Error('managed recorder Provider turn id differs from the open lifecycle identity')
+      throw lifecycleMismatchError(input, candidates, 0)
     }
-    if (matches.length !== 1) {
-      throw new Error('managed recorder Provider turn id differs from the open lifecycle identity')
-    }
+    if (matches.length !== 1) throw lifecycleMismatchError(input, candidates, matches.length)
     const open = matches[0]
 
     const draft = recordDraft(enablement, open, protectedInput)
