@@ -227,7 +227,7 @@ export const Sidebar = memo(function Sidebar({
               aria-current={analyticsActive ? 'page' : undefined}
               onClick={onAnalytics}
             >
-              <Icon name="chart" /> 分析
+              <Icon name="overview" /> 分析
             </button>
           )}
           {onLlmPerformance && (

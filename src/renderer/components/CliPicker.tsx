@@ -2,7 +2,8 @@
 import { useEffect, useId, useRef } from 'react'
 import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
 import { providerIdForAgentId } from '@shared/runtime'
-import { AGENT_PICKER_COPY, PI_PICKER_COPY } from '../constants/copy'
+import { AGENT_PICKER_COPY } from '../constants/agent-picker-copy'
+import { PI_PICKER_COPY } from '../constants/copy'
 import { basename } from '../format'
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
@@ -101,7 +102,7 @@ export function CliPicker({
         data-agent-id={selectedId}
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
-        title={disabled ? '当前状态暂不能切换 Agent' : '选择下一条消息使用的 Agent'}
+        title={disabled ? AGENT_PICKER_COPY.switchUnavailable : AGENT_PICKER_COPY.selectNext}
         aria-expanded={open}
         aria-controls={menuId}
         aria-haspopup="menu"
@@ -109,7 +110,7 @@ export function CliPicker({
         <span className="agicon">
           {selectedProvider ? <ProviderGlyph provider={selectedProvider} /> : <Icon name="cube" />}
         </span>
-        <span>{sel?.name ?? 'Agent'}</span>
+        <span title={sel?.name ?? AGENT_PICKER_COPY.fallbackName}>{sel?.name ?? AGENT_PICKER_COPY.fallbackName}</span>
         <Icon name={disabled ? 'lock' : 'chevronDown'} className="chev" />
       </button>
       {open && !disabled && (
