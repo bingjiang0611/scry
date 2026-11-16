@@ -26,7 +26,7 @@
 - Pi 扩展在进程收到 `SIGINT` 时，先按队列顺序持久化当前轮次的 `interrupted` Stop，再移除自己的监听并重新发送同一信号。这样保留原生信号退出语义，同时避免非交互 `pi -p` 直接退出后遗留永不收口的 `open.json`。
 - 两项修复只影响新轮次，不重写历史记录。OpenCode 工作区需要 repair/re-init 更新生成插件；Pi 需要更新并重新加载用户级扩展。
 
-## 未发布：`recover --expire-open` 可用性与收尾门槛
+## 0.2.75 `recover --expire-open` 可用性与收尾门槛
 
 - **0.2.74 及更早的 CLI 没有注册这个开关。** `--expire-open` 会被参数解析当成未知选项，以 `unknown option: --expire-open` 退出 1；`scry doctor` 文案推荐它，CodeLens 每 15 分钟对开启了 scry 的工作区自动调用它，两条路径此前都拿不到任何收尾结果。0.2.75 起 `--expire-open` 是已注册的布尔开关，`scry recorder recover --expire-open` 正常执行并输出 `{recovered, pending, expired}`。
 - **它自带两道门槛，因为它会被定期自动调用，不能等同「操作者此刻断言进程已退出」：**
