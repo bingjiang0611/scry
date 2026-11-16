@@ -187,29 +187,6 @@ body.pane-resizing * {
 }
 .ctxmenu {
   position: fixed;
-  border: 1px solid var(--border2);
-  padding: 4px;
-  min-width: 130px;
-}
-.ctxitem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 40px;
-  padding: 8px 12px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  border-radius: var(--r-xs);
-  cursor: pointer;
-  font-size: var(--text-md);
-}
-.ctxitem:hover {
-  background: var(--panel2);
-}
-.ctxitem.del {
-  color: var(--bad);
 }
 .kbd {
   font: var(--text-xs)/1 var(--font-mono);

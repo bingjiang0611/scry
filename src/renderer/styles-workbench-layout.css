@@ -50,11 +50,7 @@ textarea {
   color: var(--fg);
 }
 
-.ctxmenu,
-.menu,
-.slash-menu,
-.clipick .menu,
-.wdpick .menu {
+.slash-menu {
   background: var(--panel2);
   border-color: var(--border2);
   box-shadow: var(--shadow-pop);

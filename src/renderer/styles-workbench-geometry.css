@@ -258,10 +258,6 @@
   font: var(--text-2xs)/1.25 var(--font-mono);
 }
 
-.sb-project-remove {
-  color: var(--bad) !important;
-}
-
 .project-dialog {
   width: min(420px, calc(100vw - 32px));
 }

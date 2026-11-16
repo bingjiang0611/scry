@@ -74,10 +74,6 @@
   background: transparent;
 }
 
-.surface-menu {
-  border-radius: var(--r-md);
-  background: var(--panel);
-}
 
 .surface-card {
   border-color: var(--border);
@@ -266,15 +262,6 @@
   border: 0;
   border-radius: var(--r-sm);
   background: var(--panel2);
-}
-
-.menu,
-.ctxmenu,
-.sb-project-menu {
-  border-color: var(--border);
-  border-radius: var(--r-md);
-  background: var(--panel);
-  box-shadow: var(--shadow-pop);
 }
 
 @container main-pane (max-width: 720px) {

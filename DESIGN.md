@@ -284,7 +284,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 关闭弹窗 | `ModalCloseButton` | 手写 `<button>×</button>` |
 | 在同一视图内切换平级内容（换掉整块面板） | `<Tabs>`：`--selected` 下划线，方向键／Home／End 切换 | 用按钮组或 `aria-pressed` 模拟标签页；用标签页做页面导航 |
 | 在 2–4 个互斥选项中过滤或换算同一份内容，立即生效 | `<Segmented>`：`role="group"` + `aria-pressed` | 用标签页做过滤；下拉菜单（选项少时多一次点击） |
-| 从较多选项中选择，或选项需要说明 | 菜单／选择器（`.menu` 结构，键盘可达） | 平铺一排按钮 |
+| 从较多选项中选择、或对当前对象执行一组命令 | `<Menu>` + `<MenuItem>`：单选项传 `checked`，危险操作传 `danger` 并放最后，分组用 `MenuSeparator`／`MenuLabel` | 平铺一排按钮；在菜单里放输入框或行内按钮（这类做成弹出面板） |
 | 描述对象的状态或属性 | 徽章 `.badge`（非交互，文字 + 颜色） | 可点击的徽章；只靠颜色的徽章 |
 | 实时连接或运行状态 | 状态点 + 文字标签 | 只有颜色的圆点 |
 | 需要用户注意、但不阻断操作的结果 | `<Notice tone>`：info／warn／bad；`layout="strip"` 贴面板边缘，默认 box 放在相关内容旁；最多一个小按钮 | 全局弹窗；只有颜色、没有图标与文字的提示；自己写底色与边框 |
@@ -307,7 +307,8 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 分段控件 | ~~`.usage-segmented`、`.capability-source-tabs`~~ | **已完成（2026-11-15）**：`Segmented`。`.seg-chip` 是指标徽章，不属于分段控件 |
 | 不并入 | `.surface-tabs`、`.terminal-tabs`（可关闭、可拖动）；`.settings-tab`（设置页左侧导航，`aria-current`） | 保留独立实现，但选中色、下划线与字号对齐 `Tabs` |
 | 待定 | `.mp-notice`（浮动 toast）；`.overview-session-notice`、`.surface-chooser-notice`（按钮旁的状态字） | 等 toast 模式确定后统一 |
-| 菜单 | `.menu`、`.wdmenu`、`.climenu`、`.ctxmenu`、`.slash-menu`、`.surface-menu`、`.sb-project-menu`、`.sb-session-menu`、`.diff-scope-menu`、`.diff-turn-menu`、`.arch-provider-menu` | 共享 `.menu` 结构与菜单项样式；定位与触发逻辑仍由调用方负责 |
+| 菜单 | ~~`.climenu`、`.arch-provider-menu`、`.sb-session-menu`、`.sb-project-menu`、`.ctxmenu`、`.surface-menu` 各自的容器与条目样式~~ | **已完成（2026-11-16）**：`Menu` + `styles-menus.css`；定位、开关与动效仍由调用方负责 |
+| 不并入菜单 | `.diff-scope-menu`／`.diff-turn-menu`（虚拟列表子菜单，`aria-activedescendant`）、`.workspace-picker`（带搜索的列表）、`.wdmenu`／`.location-menu`（`role="dialog"` 的选择面板，行内有移除按钮）、`.slash-menu`、模型与权限弹出面板 | 弹出面板，不用 `role="menu"`；选择面板复用 `.menu-surface` 与 `.mitem` 的外观 |
 
 ### 已有 primitive
 
@@ -318,6 +319,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | `src/renderer/components/primitives/Notice.tsx` | tone：info（默认）／warn／bad；layout：box／strip；size：md／sm；`action` 放一两个 sm 按钮。图标随 tone 自动给出；`role`（status／alert）由调用方决定，primitive 不隐式添加。正文里的 `<b>` 是标题样式 |
 | `src/renderer/components/primitives/Tabs.tsx` | `items` 的 `id`／`controls`／`title`／`count` 保持原 DOM 合同；自动激活，只有选中项在 Tab 顺序中；`tabRef`／`listRef`／`children` 支持动效指示条。颜色在 `aria-selected` 同一帧切换，不做颜色过渡 |
 | `src/renderer/components/primitives/Segmented.tsx` | `role="group"` + `aria-pressed`；`value` 可为字符串或数字 |
+| `src/renderer/components/primitives/Menu.tsx` | `Menu`（`role="menu"`、`aria-label` 必填，`className` 只放定位与测试钩子）、`MenuItem`（`checked` 给出对勾列与 `menuitemradio`，`danger`、`icon`、`trailing`）、`MenuSeparator`、`MenuLabel`。键盘：上下方向键循环、Home／End、按首字母跳转，只在启用的菜单项之间移动；打开时聚焦第一项、Esc 与 Tab 关闭由调用方处理。条目 32px，图标要么全有、要么全无 |
 | `src/renderer/components/primitives/ModalCloseButton.tsx` | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。不承担焦点陷阱或确认关闭逻辑 |
 | `src/renderer/components/ModalFrame.tsx` | 弹窗栈、焦点进入与恢复、Esc／遮罩关闭路由、进出场动效 |
 | `src/renderer/components/Disclosure.tsx` | 折叠内容的挂载、`inert` 与进出场动效；长内容自动切换为长动效 |
@@ -410,4 +412,4 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
    - **颜色由语义变量派生**：状态与证据类型的半透明底色、边框写成 `color-mix(in srgb, var(--ok) 24%, transparent)`，不写死 `rgba()`，否则浅色主题会沿用深色主题调好的色值。
 5. **颜色与层级（已完成）**：颜色与阴影收敛为语义变量和固定色板；浮层 z-index 收敛为 `--layer-*` 五档（2026-11-16）。
 6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure（尚未开始）。
-7. **其余组件**：菜单（14 套）尚未收敛；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。
+7. **其余组件**：菜单收敛为 `Menu`（2026-11-16）；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。

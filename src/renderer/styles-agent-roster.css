@@ -227,8 +227,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .surface-tab:hover,
-  .surface-tab-close:hover,
-  .surface-menu .menu-item:hover {
+  .surface-tab-close:hover {
     color: var(--fg);
     background: var(--surface-hover);
   }

@@ -307,9 +307,7 @@
 }
 
 .slash-item.sel,
-.slash-item:hover,
-.mitem:hover,
-.mitem.on {
+.slash-item:hover {
   background: var(--panel3);
 }
 

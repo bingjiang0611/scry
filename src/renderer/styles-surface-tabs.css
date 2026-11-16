@@ -77,7 +77,6 @@
 
 .surface-tab-activate,
 .surface-tab-close,
-.surface-menu .menu-item,
 .surface-card {
   border: 0;
   color: inherit;
@@ -140,11 +139,6 @@
   top: 34px;
   right: 0;
   width: 214px;
-  display: grid;
-  gap: 2px;
-  padding: 4px;
-  border: 1px solid var(--border2);
-  box-shadow: var(--shadow-pop);
   transform-origin: top right;
   animation: surface-menu-in var(--duration-sm) var(--ease-out) backwards;
 }
@@ -156,25 +150,6 @@
 @keyframes surface-menu-in {
   from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: scale(1); }
-}
-
-.surface-menu .menu-item {
-  width: 100%;
-  height: 35px;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--dim);
-  text-align: left;
-}
-
-.surface-menu .menu-item small {
-  color: var(--dim3);
-  font: var(--text-compact-size)/1 var(--font-mono);
 }
 
 .surface-body {

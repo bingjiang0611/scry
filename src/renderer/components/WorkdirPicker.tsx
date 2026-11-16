@@ -93,7 +93,7 @@ export function WorkdirPicker({
         <div
           id={menuId}
           ref={menuRef}
-          className="menu wdmenu"
+          className="menu-surface menu wdmenu"
           role="dialog"
           aria-label="选择工作目录"
           onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
