@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -73,13 +73,17 @@ describe('runtime diagnostics without an attention index', () => {
     const source = JSON.stringify(open)
     await writeFile(join(sessionDir, 'open.json'), source)
     // 每条都要写清最后写下东西的时间和是否仍在增长：只报年龄无法区分「慢」和「卡住」。
+    // 转录文件的实际 mtime 由文件系统决定，按它取值而不是按写进去的时间戳。
+    const touched = open.transcriptPath && kind === 'old transcript'
+      ? (await stat(open.transcriptPath)).mtimeMs
+      : undefined
     const expected = stale ? [{
       provider: 'claude',
       sessionId: open.sessionId,
       startedAt: open.startedAt,
       ageMs: 2 * expiryMs,
-      ...(kind === 'old transcript' ? { lastEventAt: new Date(now - 2 * expiryMs).toISOString() } : {}),
-      quietMs: 2 * expiryMs,
+      ...(touched ? { lastEventAt: new Date(touched).toISOString() } : {}),
+      quietMs: touched ? now - touched : 2 * expiryMs,
       growing: false
     }] : []
 
