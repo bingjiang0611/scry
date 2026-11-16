@@ -12,7 +12,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 41
+        "darwin-arm64": 41,
+        "linux-x64": 41
       }
     },
     "workspace.tree/entriesIndexed": {
@@ -26,7 +27,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1040
+        "darwin-arm64": 1040,
+        "linux-x64": 1040
       }
     },
     "workspace.tree/nameReads": {
@@ -40,7 +42,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1040
+        "darwin-arm64": 1040,
+        "linux-x64": 1040
       }
     },
     "workspace.tree/pathsPublished": {
@@ -54,7 +57,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1050
+        "darwin-arm64": 1050,
+        "linux-x64": 1050
       }
     },
     "workspace.tree/ancestorsRevealed": {
@@ -68,7 +72,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 10
+        "darwin-arm64": 10,
+        "linux-x64": 10
       }
     }
   }
