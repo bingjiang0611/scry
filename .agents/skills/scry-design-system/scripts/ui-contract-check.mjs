@@ -33,8 +33,9 @@ function files(directory, test) {
   })
 }
 
+// New files have no base version; git's complaint about that is expected, so stderr is dropped.
 function showAtBase(path) {
-  try { return git('show', `${base}:${path}`) } catch { return null }
+  try { return execFileSync('git', ['show', `${base}:${path}`], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null }
 }
 
 // 1. New selectors in changed stylesheets.
