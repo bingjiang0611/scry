@@ -1,6 +1,8 @@
-# 第九轮进行中（I4 授权打包重试通过，I5 待收尾）
+# 第九轮待核验
 
-[I4](reports/I4.md)：干净依赖 worktree 的 typecheck、renderer UI 通过。test:unit 仅一次：5797 通过、7 条 5000 ms 超时、4 跳过，没有重跑。pack:artifact 首次执行私有 CLI --version 收到 SIGKILL 后暂停；用户授权沿原路径完整重试一次，176 秒退出 0，打包校验与 smoke 通过。未换路径、安装或改安全策略，原始失败与重试日志均保留。[脱敏门禁](evidence/r9/i4-gates.json)。I5 待收尾，清单仍 unsupported。
+I1–I5 已逐包完成报告并提交推送；**不是兼容性验收通过**。[I5](reports/I5.md) 已按 R9 核对：I1 通过，但 I2/I3 未成功，Qoder 清单保持 unsupported，未改产品代码。
+
+[I4](reports/I4.md)：干净依赖 worktree 的 typecheck、renderer UI 通过。test:unit 仅一次：5797 通过、7 条 5000 ms 超时、4 跳过，没有重跑。pack:artifact 首次执行私有 CLI --version 收到 SIGKILL 后暂停；用户授权沿原路径完整重试一次，176 秒退出 0，打包校验与 smoke 通过。未换路径、安装或改安全策略，原始失败与重试日志均保留。[脱敏门禁](evidence/r9/i4-gates.json)。I5 已完成清单判断，保持 unsupported。
 
 [I1](reports/I1.md)：CLI 1.1.89，三个全新独立实例的 Hook 窗口停止均无需重启即显示中断、提交唯一带 Provider turn id 的 interrupted 记录，来源 scry_run_boundary；pending 全空，续发均 completed。[脱敏结构](evidence/r9/i1-live-stop.json)。
 
