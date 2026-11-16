@@ -372,7 +372,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 ## 迁移路线
 
-存量债务按区域分批偿还，每批都会改变可见外观，因此单独提交、单独验证（隔离 Electron fixture 深浅主题截图 + 受影响的 UI smoke），并在 [设计决策记录](docs/design/decisions.md) 记一条。
+存量债务按区域分批偿还，每批都会改变可见外观，因此单独提交、单独验证（隔离 Electron fixture 深浅主题截图 + 受影响的 UI smoke），并在 [设计决策记录](docs/design/decisions.md) 记一条。第 5–7 步的待定项（层级、文案、菜单、浮动提示）与 Primer、VS Code、Carbon、Atlassian、Radix、Apple HIG 的对比和建议见 [参考案例对比](docs/design/references.md)。
 
 1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
 2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
