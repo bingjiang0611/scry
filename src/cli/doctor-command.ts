@@ -173,7 +173,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     {
       id: 'turns.pending',
       status: health.pendingCount > 0 ? 'warn' : 'pass',
-      detail: `${health.pendingCount} pending item(s): turns or queued hooks`,
+      detail: `${health.pendingCount} pending item(s): turns or queued hooks; ${health.openTurns} turn(s) still open`,
       ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`; for exhausted or unreadable inbox-failed sidecars see scry-turn-recorder README: Retry quarantined hooks' } : {})
     },
     {
@@ -191,12 +191,17 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     },
     {
       id: 'turns.stale',
-      status: staleOpenTurns.length > 0 ? 'warn' : 'pass',
+      status: staleOpenTurns.length > 0 || health.staleOpenTurns > 0 ? 'warn' : 'pass',
       detail: staleOpenTurns.length > 0
-        ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h`
-        : 'no stale open turn',
-      ...(staleOpenTurns.length > 0
-        ? { remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence, never from silence alone' }
+        ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h; ` +
+          `${health.openTurns} open in total, ${health.staleOpenTurns} silent past the 30-minute window`
+        : health.staleOpenTurns > 0
+          ? `${health.staleOpenTurns} of ${health.openTurns} open turn(s) wrote nothing for 30 minutes; under 24h, so not yet listed individually`
+          : `no stale open turn (${health.openTurns} open)`,
+      ...(staleOpenTurns.length > 0 || health.staleOpenTurns > 0
+        ? {
+            remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence or a finished reply plus extended silence, never from silence alone; `scry recorder recover --expire-open` force-closes a turn once you know the process is gone'
+          }
         : {})
     },
     {

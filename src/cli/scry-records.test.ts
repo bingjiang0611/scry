@@ -51,7 +51,8 @@ describe('scry records archive and maintenance', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['turns', 'verify', '--workspace', root])).resolves.toBe(0)
     expect(JSON.parse(stdout.text())).toMatchObject({ ok: true, records: 2, errors: [], identity: expected, openTurnsPending: 2,
-      advisories: expect.arrayContaining(['open turns pending recovery: 2']) })
+      openTurns: 0, staleOpenTurns: 0,
+      advisories: expect.arrayContaining(['turns without a record yet: 0 open, 2 awaiting finalization']) })
     expect([...recordReads.values()]).toEqual([1, 1])
   })
 
@@ -85,7 +86,7 @@ describe('scry records archive and maintenance', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['turns', 'verify', '--workspace', root])).resolves.toBe(0)
     expect(JSON.parse(stdout.text())).toEqual({ ok: true, records: 0, errors: [], archivedThrough: 0,
-      identity: null, openTurnsPending: 0, advisories: [] })
+      identity: null, openTurnsPending: 0, openTurns: 0, staleOpenTurns: 0, advisories: [] })
   })
 
   it('verify does not turn an observer exception into a corrupt-record report', async () => {

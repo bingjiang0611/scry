@@ -75,7 +75,7 @@ describe('Scry CLI arguments', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['--help'])).resolves.toBe(0)
     expect(stdout.text()).toContain('Usage:')
-    expect(stdout.text()).toContain('recorder recover --provider qoder --session-id <id>')
+    expect(stdout.text()).toContain('recorder recover [--provider qoder --session-id <id>] [--expire-open]')
   })
 
   it('--version 不会被空 positional 误判成 help', async () => {

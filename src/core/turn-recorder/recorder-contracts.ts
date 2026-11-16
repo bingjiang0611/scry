@@ -91,6 +91,12 @@ export interface TranscriptRead {
    */
   incompleteReasons?: string[]
   terminalStatus?: AgentTurnRecord['status']
+  /**
+   * The last assistant message's `stop_reason`, verbatim. Providers that never record a terminal
+   * event (Qoder, Claude, OpenCode) still say why the model stopped replying, which is the only
+   * proof that the reply finished rather than that the host died mid-stream.
+   */
+  stopReason?: string
   completedAt?: string
   startedAt?: string
   durationMs?: number

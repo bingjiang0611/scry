@@ -31,7 +31,7 @@ export interface SupportBundle {
     | { enabled: false; reason: string }
     | {
         enabled: true
-        health: { droppedEvents: number; orphanEvents: number; pendingCount: number; oldestPendingAgeMs: number; recoveredRecords: number; lastErrorAt: string | null; lastError: string | null }
+        health: { droppedEvents: number; orphanEvents: number; pendingCount: number; openTurns: number; staleOpenTurns: number; oldestPendingAgeMs: number; recoveredRecords: number; lastErrorAt: string | null; lastError: string | null }
         store: { ok: boolean; records: number; archivedThrough: number; errors: string[] }
         commitHook: { activation: string; ackedThrough: number | null; notifyBacklog: number | null }
       }
@@ -130,6 +130,8 @@ export async function collectSupportBundle(
         droppedEvents: health.droppedEvents,
         orphanEvents: health.orphanEvents,
         pendingCount: health.pendingCount,
+        openTurns: health.openTurns,
+        staleOpenTurns: health.staleOpenTurns,
         oldestPendingAgeMs: health.oldestPendingAgeMs,
         recoveredRecords: health.recoveredRecords,
         lastErrorAt: health.lastError?.at ?? null,

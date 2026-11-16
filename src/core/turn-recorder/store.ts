@@ -24,8 +24,16 @@ export interface RecorderHealth {
   droppedEvents: number
   orphanEvents: number
   missingStartTerminals: number
+  /** Turns awaiting finalization: `closing`, managed, queued hooks, quarantined state. */
   pendingCount: number
   oldestPendingAgeMs: number
+  /**
+   * Open turns that have not reached `closing`, so nothing is waiting to be committed and
+   * `pendingCount` does not see them. A turn can sit here for days after its host died.
+   */
+  openTurns: number
+  /** Those open turns that wrote nothing for the stale window: the ones to look at first. */
+  staleOpenTurns: number
   recoveredRecords: number
 }
 
@@ -310,6 +318,8 @@ const EMPTY_HEALTH: RecorderHealth = {
   missingStartTerminals: 0,
   pendingCount: 0,
   oldestPendingAgeMs: 0,
+  openTurns: 0,
+  staleOpenTurns: 0,
   recoveredRecords: 0
 }
 

@@ -1,6 +1,7 @@
 import { captureUploadEnvironment } from './commit-environment.js'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
+import { staleOpenTurnVerdict } from './recorder-stale-open.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import { recordInvalidHookConfig } from './hook-diagnostics.js'
@@ -167,7 +168,9 @@ async function recoverySessions(
   return markedSessions(dataRoot)
 }
 
-async function pendingHealth(dataRoot: string): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
+async function pendingHealth(
+  dataRoot: string
+): Promise<{ pendingCount: number; oldestPendingAgeMs: number; openTurns: number; staleOpenTurns: number }> {
   return recorderPendingHealth(dataRoot)
 }
 
@@ -190,9 +193,17 @@ export async function recoverRecorder(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
   probe?: RecorderRecoveryProbe,
-  scope?: RecorderRecoveryScope
+  scope?: RecorderRecoveryScope,
+  options: {
+    /**
+     * Close stale open turns that have no completion evidence of their own. Only an operator (or the
+     * App, which knows the child process exited) may assert that; a background pass never guesses.
+     */
+    expireOpen?: boolean
+  } = {}
 ): Promise<{ recovered: number; pending: number; expired: number }> {
   validateRecoveryScope(scope)
+  const expireOpen = options.expireOpen === true
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return { recovered: 0, pending: 0, expired: 0 }
   const expiryMs = OPEN_TURN_EXPIRY_MS
@@ -243,28 +254,45 @@ export async function recoverRecorder(
             // nothing has been failing to finalize, so it must not be reported as an expiry.
             const wasAlreadyClosing = open.status === 'closing'
             if (open.status === 'open') {
-              if (!open.transcriptPath) return { status: 'idle' as const }
-              const transcript = await stableTranscript(
-                open.transcriptPath,
-                `${open.provider}:${open.sessionId}:${open.generation}`,
-                open.provider,
-                open.promptHash,
-                open.providerTurnId,
-                open.transcriptStartOffset,
-                open.requestSetId,
-                open.sessionId,
-                enablement.workspaceRoot,
-                open.piTranscriptAnchor
-              )
-              if (!transcript.terminalStatus || !transcript.completedAt || transcript.identityMatched === false) {
-                // A long tool, approval wait or silent Provider can still be running. Keep its
-                // identity and diff baseline until real terminal evidence arrives.
-                return { status: 'idle' as const }
+              const transcript = open.transcriptPath
+                ? await stableTranscript(
+                    open.transcriptPath,
+                    `${open.provider}:${open.sessionId}:${open.generation}`,
+                    open.provider,
+                    open.promptHash,
+                    open.providerTurnId,
+                    open.transcriptStartOffset,
+                    open.requestSetId,
+                    open.sessionId,
+                    enablement.workspaceRoot,
+                    open.piTranscriptAnchor
+                  )
+                : undefined
+              if (transcript?.terminalStatus && transcript.completedAt && transcript.identityMatched !== false) {
+                open.status = 'closing'
+                open.closingAt = transcript.completedAt
+                open.endReason ??= 'provider_terminal'
+                await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
+              } else {
+                // Nothing terminal arrived. Providers that never write one (Qoder, Claude, OpenCode)
+                // used to stay open forever here: recovery only closed a turn whose transcript parsed
+                // a terminal status, which only Codex and Pi write. Silence alone still proves nothing
+                // — a long tool or an approval wait looks identical — so giving up needs evidence the
+                // Provider's own record shows this turn finished, or an operator saying the process is
+                // gone.
+                const stale = await staleOpenTurnVerdict({ root: item.sessionDir, open, transcript, expireOpen })
+                if (!stale) return { status: 'idle' as const }
+                open.status = 'closing'
+                open.closingAt = stale.at
+                open.endReason = stale.endReason
+                open.terminalFallbackStatus = stale.status
+                await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
+                forcedExpiry = true
+                return finalizeOpenTurn(enablement, open, { timestamp: stale.at }, stale.status, {
+                  allowUnstableTranscript: true,
+                  forcedReason: stale.reason
+                })
               }
-              open.status = 'closing'
-              open.closingAt = transcript.completedAt
-              open.endReason ??= 'provider_terminal'
-              await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
             }
             if (open.status !== 'closing') return { status: 'idle' as const }
             if (open.deferredTerminalAt) {

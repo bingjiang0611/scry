@@ -48,9 +48,15 @@ export interface WorkspaceStatusReport {
     | {
         enabled: true
         dataRoot: string
-        /** Open turns awaiting convergence — not the commit-hook backlog. Full health counters
-         * live in `scry doctor`; duplicating them here would create a second same-meaning surface. */
+        /**
+         * Turns the recorder still owes a record for: those waiting to be committed plus those still
+         * open. A turn that never reaches `closing` is not "pending finalization" internally, but it
+         * is exactly what a reader means by pending work, and leaving it out hid turns open for days.
+         * Full health counters live in `scry doctor`.
+         */
         openTurnsPending: number
+        /** Open turns that wrote nothing for the stale window: the ones worth looking at first. */
+        staleOpenTurns: number
       }
   providers: ProviderStatusRow[]
   /** Stated once instead of per row: the CLI can never observe provider hook trust. */
@@ -141,7 +147,8 @@ export async function workspaceStatus(
     recorder: {
       enabled: true,
       dataRoot: enablement.dataRoot,
-      openTurnsPending: health.pendingCount
+      openTurnsPending: health.pendingCount + health.openTurns,
+      staleOpenTurns: health.staleOpenTurns
     },
     providers,
     trustEvidence: TRUST_UNOBSERVABLE,
