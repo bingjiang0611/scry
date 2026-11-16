@@ -353,7 +353,7 @@
 
 .runtime-composer .permission-mode-popover {
   position: absolute;
-  z-index: 32;
+  z-index: var(--layer-dropdown);
   left: 0;
   bottom: calc(100% + 9px);
   width: min(400px, calc(100vw - 32px));
@@ -455,7 +455,7 @@
 
 .runtime-composer .model-effort-popover {
   position: absolute;
-  z-index: 30;
+  z-index: var(--layer-dropdown);
   right: 0;
   bottom: calc(100% + 7px);
   width: min(258px, calc(100vw - 24px));

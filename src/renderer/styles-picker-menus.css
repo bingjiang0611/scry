@@ -22,7 +22,7 @@
   min-width: 240px;
   border: 1px solid var(--border2);
   padding: 8px;
-  z-index: 20;
+  z-index: var(--layer-dropdown);
 }
 .wdmenu {
   left: 0;

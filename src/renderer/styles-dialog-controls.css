@@ -4,7 +4,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  z-index: 100;
+  z-index: var(--layer-modal);
 }
 .modal-overlay[data-state='enter'] {
   animation: modal-backdrop-in var(--duration-sm) var(--ease-out) backwards;

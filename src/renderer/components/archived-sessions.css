@@ -35,7 +35,7 @@
   bottom: auto;
   left: 0;
   min-width: 216px;
-  z-index: 30;
+  z-index: var(--layer-dropdown);
 }
 
 /* A failed unarchive / delete stays on its row, across both columns, with a retry. */

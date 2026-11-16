@@ -35,7 +35,7 @@
 .workspace-context-recovery button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: var(--r-xs); padding: 4px 8px; font: inherit; }
 .workspace-picker {
   position: fixed;
-  z-index: 1100;
+  z-index: var(--layer-dropdown);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

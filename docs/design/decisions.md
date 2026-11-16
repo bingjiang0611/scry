@@ -201,3 +201,13 @@ macOS 打包后的 smoke 在 PR 上报出两处由本次收敛引入的行为变
 2. **减少动态效果时按钮颜色过渡被关掉**。`styles-buttons.css` 在 `prefers-reduced-motion` 下写了 `transition: none`，而全局约定是把过渡缩短到 `--duration-reduced`、保留颜色反馈（动效 token 检查要求 `.btn` 的背景色过渡仍为 150ms）。已删除这段覆盖。
 3. **Meta Prompts 详情栏失去纵向布局**。清扫无引用类名时删除 `.mp-row .mp-icon-button { margin-right: 4px; }`，前缀 `.mp-row` 残留并拼到下一条规则上，`.mp-detail { display: flex; flex-direction: column; … }` 变成了不匹配任何元素的 `.mp-row .mp-detail`。详情栏退回块级布局，正文不再在栏内滚动，页脚按钮被推到视口之外（1024×653 下底边在 1881px）。已恢复 `.mp-detail`，并以 `.mp-row > .icon-button` 补回复制按钮的 4px 右边距（按钮迁移到 IconButton 后丢失）。随后把每个样式表相对 main 新出现的选择器逐条核对，其余均为有意的迁移（标签页、`.notice-body`、去掉无效成员的 `:where()` 列表、终端录制弹窗布局），没有第二处拼接。416 个渲染片段里没有 Meta Prompts 详情页，所以逐元素比对没有覆盖到它。
 4. **总览与能力弹窗的标签页键盘模型改变**。main 上侧栏、Skills 弹窗与 diff 导航的标签页已经是“只有选中项在 Tab 顺序里、方向键切换并选中”（roving tabindex，WAI-ARIA 推荐写法），总览数据标签与能力弹窗的种类标签则是两个都能 Tab 到、按 Enter 选中。Tabs 原语统一为前者，因此后两处的键盘行为有意改变：Shift+Tab 不再停在未选中的标签上，改用左右方向键。总览 smoke 原先按旧模型断言“Shift+Tab 到达轮次标签、Enter 选中”，已改为用原生方向键输入断言同样的结果（焦点与选中回到轮次标签、面板显示），并额外断言未选中标签不在 Tab 顺序里。侧栏 smoke 早已用方向键驱动同一个原语并通过。
+
+## 浮层层级 token（2026-11-16）
+
+34 处 z-index 中有 17 处属于浮出组件的元素，取值 20 到 1201，彼此顺序没有规则：侧栏会话菜单（90）低于弹窗遮罩（100），diff 菜单（1200）和工作区选择器（1100）又高于所有弹窗。参照 Primer 的命名档位与 Carbon 的“菜单高于浮层面板”（见[参考案例对比](references.md)），改为 `--layer-overlay` 100／`--layer-dropdown` 200／`--layer-modal` 300，另预留 `--layer-modal-dropdown` 400 与 `--layer-tooltip` 500。
+
+- 菜单高于抽屉：窄窗口下右侧面板是固定定位的抽屉，diff 菜单从抽屉里打开，必须在它之上。这一点与 Primer（dropdown 低于 overlay）不同，与 Carbon 一致。
+- 有意的顺序变化：菜单、选择器与右键菜单原先高于弹窗，现在被弹窗盖住；原先低于抽屉的面板内菜单（20）现在高于抽屉。核对过所有渲染到根节点的浮层，没有一个从弹窗内打开，因此弹窗内的菜单行为不变。
+- 不变：同层之间按打开顺序叠放；diff 回合菜单仍比 diff 范围菜单高一级（`calc(var(--layer-dropdown) + 1)`）；组件内部的局部叠放（1–16）保持字面值。
+- 守卫：`design:audit` 新增 `layer` 规则，拒绝 20 及以上的 z-index 字面值；`design-system.test.ts` 检查五个 token 的取值，并禁止在其他样式表重定义。
+- 未验证：真实窗口中的浮层叠放（依赖 CI 的 UI smoke 与人工查看）。

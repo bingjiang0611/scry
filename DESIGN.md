@@ -140,7 +140,7 @@ components:
 | --- | --- | --- |
 | `src/renderer/radius-system.test.ts` | 所有 `border-radius` 必须是 `var(--r-*)`、`50%` 或 `0`；圆形必须声明 `corner-shape: round` | 绝对，无存量例外 |
 | `src/renderer/motion.test.ts` | 缓动曲线只在 `motion.css` 定义 | 绝对 |
-| `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
+| `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、浮层 z-index 只用 `--layer-*`、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
 | `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
 
 `npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。改动界面时按 `.agents/skills/scry-design-system` 的流程执行；它的 `ui-contract-check.mjs` 在推送前列出新出现的选择器、不再渲染却仍被 smoke 选中的类，以及写死数值的 smoke 断言。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
@@ -253,6 +253,18 @@ iOS 使用 Circle、Capsule 与 continuous RoundedRectangle。Notice 为 12pt �
 ## Elevation & Motion
 
 **分层为主，阴影辅助。** 弹窗使用 panel、细边框、`--shadow-pop` 与带 blur 的遮罩；卡片使用 `--shadow-card`。composer、消息和指标有各自的局部反馈，不要把它们压成一种通用卡片，也不要把 `--shadow-pop` 用在非浮层元素上，否则会读成弹窗。
+
+**层级**：浮出组件的元素只用命名层级，顺序由低到高：
+
+| token | 值 | 用于 |
+| --- | --- | --- |
+| `--layer-overlay` | 100 | 窄窗口下浮在主区上的右侧面板（抽屉）、窗格切换时的离场层 |
+| `--layer-dropdown` | 200 | 菜单、选择器、弹出面板、悬停卡片、右键菜单遮罩。高于抽屉，因为菜单会从抽屉里打开 |
+| `--layer-modal` | 300 | 弹窗遮罩与弹窗；打开弹窗时盖住所有菜单 |
+| `--layer-modal-dropdown` | 400 | 预留：从弹窗里打开并渲染到根节点的菜单 |
+| `--layer-tooltip` | 500 | 预留：需要盖过弹窗的 tooltip |
+
+同一层级按打开顺序叠放（后渲染的在上）。组件内部的叠放（吸顶表头、输入框、分隔条、图表提示）用小于 20 的字面值，只在本组件内比较；`design:audit` 拒绝 20 及以上的字面值。
 
 动效 token 在 `motion.css`：hover 用 `--duration-hover`（120ms），进入／退出按 sm／md／lg 档位，缓动只引用 `--ease-*`。所有位移和缩放动效必须有 `prefers-reduced-motion` 回退。焦点环是可操作性提示，不作为装饰光晕扩散。
 
@@ -396,6 +408,6 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
    - **守住契约**：区域内 smoke 断言的行高、宽度与对齐值不变；用计算样式比对列出每一处真实变化并逐条确认。
    - **阅读字号不随取整变化**：会改变正文阅读字号的取整先停下，确认是否需要语义 token（对话正文因此新增 `--text-reading`）。
    - **颜色由语义变量派生**：状态与证据类型的半透明底色、边框写成 `color-mix(in srgb, var(--ok) 24%, transparent)`，不写死 `rgba()`，否则浅色主题会沿用深色主题调好的色值。
-5. **颜色与层级**：颜色与阴影已收敛为语义变量和固定色板（已完成）；z-index 尚未收敛为分层 token（现有约 20 个散落值）。
+5. **颜色与层级（已完成）**：颜色与阴影收敛为语义变量和固定色板；浮层 z-index 收敛为 `--layer-*` 五档（2026-11-16）。
 6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure（尚未开始）。
 7. **其余组件**：菜单（14 套）尚未收敛；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。

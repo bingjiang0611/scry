@@ -183,7 +183,7 @@ body.pane-resizing * {
 .ctx-overlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: var(--layer-dropdown);
 }
 .ctxmenu {
   position: fixed;

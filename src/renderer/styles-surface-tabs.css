@@ -136,7 +136,7 @@
 
 .surface-menu {
   position: absolute;
-  z-index: 60;
+  z-index: var(--layer-dropdown);
   top: 34px;
   right: 0;
   width: 214px;
