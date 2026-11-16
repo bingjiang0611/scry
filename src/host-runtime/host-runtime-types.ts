@@ -36,7 +36,12 @@ export interface RemoteStartOptions {
   // Host-only registration signal for a managed remote workspace (worktree) launch.
   onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void
 }
-export type RemoteRuns = { activeStates: () => ActiveRun[]; get: (runId: string) => { state: ActiveRun } | undefined }
+export type RemoteRuns = {
+  activeStates: () => ActiveRun[]
+  get: (runId: string) => { state: ActiveRun } | undefined
+  // The final state of a run that just left the registry (RunRegistry.departedState).
+  departedState?: (runId: string) => ActiveRun | undefined
+}
 export type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
 export type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
 

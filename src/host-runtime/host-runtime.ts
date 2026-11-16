@@ -44,7 +44,9 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       hostId: () => runtime.remoteHostService!.hostId,
       authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
       getRun: (runId) => {
-        const state = runtime.runs.get(runId)?.state
+        // A run leaves the registry before the ledger records it settled; the read that
+        // follows `run_settled` still gets the run's final trace, not an empty answer.
+        const state = runtime.runs.get(runId)?.state ?? runtime.runs.departedState?.(runId)
         return state ? runtime.boundedLiveRun(state) : null
       },
       workspaceChoices: (request) => runtime.sourceControl.workspaceChoices(request),
