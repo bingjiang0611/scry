@@ -57,3 +57,18 @@ export async function emitPacedStream(input: {
     await sleep(INTERVAL_MS)
   }
 }
+
+// A run whose live trace is past the host's single-response limit (4 MiB - 1 KiB), so a
+// trace read must follow the host's chunked pages. Thinking is not cut by the live
+// projection, which bounds tool bodies only. Held open until the run is stopped, so a
+// test reads it while it is live.
+export const isLargeTracePrompt = (prompt: string): boolean => prompt === 'performance large trace'
+
+export async function emitLargeTrace(input: { runId: string; emit: (event: TraceEvent) => void; held: AbortSignal }): Promise<void> {
+  for (let index = 0; index < 12; index++) {
+    input.emit({ id: `${input.runId}:large:${index}`, runId: input.runId, ts: new Date().toISOString(), kind: 'model', stage: 'thinking',
+      messageId: `${input.runId}:large:${index}`, thinking: `large trace block ${index} `.padEnd(512 * 1024, 'x') })
+  }
+  input.emit({ id: `${input.runId}:large:ready`, runId: input.runId, ts: new Date().toISOString(), kind: 'model', stage: 'text', text: 'large trace ready' })
+  if (!input.held.aborted) await new Promise<void>((resolve) => input.held.addEventListener('abort', () => resolve(), { once: true }))
+}

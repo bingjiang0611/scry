@@ -7,7 +7,7 @@ import type { ProviderAdapter } from './types'
 import { runtimeProviderForProviderId, type AgentSteerInput } from '../../shared/runtime'
 import { HistoricalInput } from './historical-input'
 import { smokeHistoryReaderFacet, smokeReaderRead } from './smoke-history-reader'
-import { emitLongStream, emitPacedStream, isLongStreamPrompt, isPacedStreamPrompt } from './smoke-paced-stream'
+import { emitLargeTrace, emitLongStream, emitPacedStream, isLargeTracePrompt, isLongStreamPrompt, isPacedStreamPrompt } from './smoke-paced-stream'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
 /** Providers the packaged fixture can impersonate. Order is irrelevant; the gate is not. */
@@ -236,6 +236,8 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
           // The soak-only pressure path lives with the other stream fixtures.
           await emitLongStream({ runId: request.runId, emit: request.emit, stopped: () => stopped })
         }
+        // Held open with a live trace past the host's single-response limit.
+        if (isLargeTracePrompt(request.prompt)) await emitLargeTrace({ runId: request.runId, emit: request.emit, held: questionAbort.signal })
         if (request.prompt.startsWith('desktop remote ')) {
           // Canonical recorder fixtures need actual assistant evidence, not the
           // harness result summary masquerading as a model message.

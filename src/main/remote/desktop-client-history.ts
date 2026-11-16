@@ -1,7 +1,8 @@
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { isSupportedImageMimeType } from '../../shared/runtime'
 import type { DesktopHostRead, DesktopRemoteContext, DesktopRemoteHistory } from '../../shared/desktop-remote'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES } from '../../shared/desktop-remote'
+import { assembleByteChunks } from './desktop-byte-chunks'
 import { DesktopRemoteClientCatalog } from './desktop-client-catalog'
 import { context, fail, record, text, uuid, MAX_ITEMS, validateTurn } from './desktop-client-validation'
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES } from './desktop-attachments'
@@ -41,24 +42,8 @@ export abstract class DesktopRemoteClientHistory extends DesktopRemoteClientCata
     first: Record<string, unknown>,
     error: 'invalid_history_response' | 'invalid_trace_response'
   ): Promise<Record<string, unknown>> {
-    const { id, totalBytes } = first
-    if (!uuid(id) || !Number.isSafeInteger(totalBytes) || Number(totalBytes) <= 0 || Number(totalBytes) > DESKTOP_HISTORY_MAX_BYTES) fail(error)
-    const bytes = Buffer.alloc(totalBytes as number)
-    let result = first
-    let offset = 0
-    while (offset < bytes.length) {
-      const length = Math.min(DESKTOP_HISTORY_CHUNK_BYTES, bytes.length - offset)
-      if (result.kind !== 'history_chunk' || result.id !== id || result.totalBytes !== totalBytes || result.offset !== offset || typeof result.data !== 'string' || result.data.length !== 4 * Math.ceil(length / 3)) fail(error)
-      const chunk = Buffer.from(result.data, 'base64')
-      if (chunk.length !== length || chunk.toString('base64') !== result.data) fail(error)
-      chunk.copy(bytes, offset)
-      offset += length
-      if (offset < bytes.length) result = await this.desktop(connectionIdValue, { ...query, chunk: { id, offset } })
-    }
-    let decoded: unknown
-    try { decoded = JSON.parse(bytes.toString('utf8')) } catch { fail(error) }
-    if (!record(decoded)) fail(error)
-    return decoded
+    // The same page validation the App's own daemon trace read uses.
+    return assembleByteChunks(first, (chunk) => this.desktop(connectionIdValue, { ...query, chunk }), () => fail(error))
   }
 
   protected async readImages(id: string, value: DesktopRemoteContext, runId: string, count: unknown, providerTurnId?: string, historyScope?: 'session'): Promise<AgentInputAttachment[]> {
