@@ -395,9 +395,11 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
       await pexecFile('git', ['commit', '-m', 'baseline'], { cwd: root })
       const indexBefore = await readFile(join(root, '.git/index'))
       capture = await beginGitTurnDiff(root)
+      // A clean baseline is the start commit: the preview proves "nothing changed" with one status
+      // read instead of running the whole collection for an empty result.
       expect(await previewGitTurnDiff(capture, undefined, { structuredPaths: [] })).toMatchObject({
         status: 'captured', files: [],
-        collection: { strategy: 'targeted', evidence: 'git_status', candidatePathCount: 0 }
+        collection: { strategy: 'unchanged', evidence: 'git_status', candidatePathCount: 0 }
       })
 
       await writeFile(join(root, 'base.txt'), 'after\n')
@@ -435,7 +437,7 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
       const pair = finishGitTurnAndSessionDiff(capture, baseline)
       const [turn, session] = await Promise.all([pair.turn, pair.session])
       expect(turn).toMatchObject({
-        status: 'captured', files: [], collection: { strategy: 'targeted', candidatePathCount: 0 }
+        status: 'captured', files: [], collection: { strategy: 'unchanged', candidatePathCount: 0 }
       })
       expect(session).toMatchObject({ status: 'captured', afterAt: turn.afterAt, collection: { sharedAfter: 'turn' } })
       expect(session.files).toHaveLength(1)

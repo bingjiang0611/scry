@@ -85,7 +85,11 @@ export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget' | 'policy'
 export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
 
 export interface TurnDiffCollection {
-  strategy: 'targeted' | 'full_fallback'
+  /**
+   * `unchanged` is one cheap status read proving a clean baseline's repository did not change; it
+   * skips the full collection instead of reporting an empty one as if it had been computed.
+   */
+  strategy: 'targeted' | 'full_fallback' | 'unchanged'
   evidence: 'git_status' | 'git_status+structured' | 'fallback'
   candidatePathCount: number
   discoveryMs: number
@@ -250,6 +254,9 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
   const collectionShapeValid =
     (collectionRaw?.strategy === 'targeted' &&
       (collectionRaw.evidence === 'git_status' || collectionRaw.evidence === 'git_status+structured') &&
+      fallbackReason == null) ||
+    (collectionRaw?.strategy === 'unchanged' &&
+      collectionRaw.evidence === 'git_status' &&
       fallbackReason == null) ||
     (collectionRaw?.strategy === 'full_fallback' &&
       collectionRaw.evidence === 'fallback' &&
