@@ -82,6 +82,9 @@ export async function holdSeal(
     if (sealed.length) open.frozenDiffs = sealed
   }
   open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
+  // A hold for this turn's own background work is still this turn's Stop: if later activity
+  // cancels the hold, a superseding prompt must not report the turn as interrupted.
+  if (reason === 'pending_background_tasks') open.stopObservedAt ??= terminalAt
   open.deferredTerminalAt = new Date().toISOString()
   open.deferredTerminalEventId = eventId
   open.deferredTerminalReason = reason

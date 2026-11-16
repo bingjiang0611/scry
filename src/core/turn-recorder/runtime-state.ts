@@ -98,6 +98,12 @@ export interface RecorderOpenTurnState {
   terminalAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
   /** Verdict pinned when closing was deferred, so background finalize cannot upgrade it. */
   terminalFallbackStatus?: AgentTurnRecord['status']
+  /**
+   * When this turn's own Stop was observed. A hold that later background work cancels keeps the
+   * fact: the turn did reach its terminal, so a following prompt supersedes a completed turn. A
+   * session end is not a Stop and does not set it.
+   */
+  stopObservedAt?: string
   endReason?: import('../../shared/turn-record.js').TurnEndReason
   prompt?: string
   promptHash?: string
