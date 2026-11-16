@@ -1,0 +1,111 @@
+{
+  "revision": "abfee7eb",
+  "cli": "1.1.89",
+  "environment": {
+    "platform": "macOS 27.3 arm64",
+    "node": "v24.18.0",
+    "npm": "12.2.0"
+  },
+  "typecheck": {
+    "exitCode": 0,
+    "wallSeconds": 23
+  },
+  "unit": {
+    "runs": 1,
+    "exitCode": 1,
+    "wallSeconds": 832,
+    "vitestSeconds": 827.73,
+    "files": {
+      "passed": 635,
+      "failed": 4,
+      "skipped": 4
+    },
+    "tests": {
+      "passed": 5797,
+      "failed": 7,
+      "skipped": 4
+    },
+    "failures": [
+      {
+        "test": " scripts/check-pacman-package.test.mjs > pacman raw description contract > accepts one nonempty description and preserves equals signs in its value",
+        "reason": "Test timed out in 5000ms"
+      },
+      {
+        "test": " scripts/check-pacman-package.test.mjs > pacman raw description contract > rejects a continuation even when the first description line is nonempty",
+        "reason": "Test timed out in 5000ms"
+      },
+      {
+        "test": " scripts/check-pacman-package.test.mjs > pacman raw description contract > rejects multiple description records instead of silently choosing the last",
+        "reason": "Test timed out in 5000ms"
+      },
+      {
+        "test": " scripts/check-pacman-package.test.mjs > pacman raw description contract > still rejects an empty description",
+        "reason": "Test timed out in 5000ms"
+      },
+      {
+        "test": " scripts/concurrency-trace-launcher.test.ts > concurrency trace launcher contract > rejects unknown flags, extra positionals and illegal values with exit code 2",
+        "reason": "Test timed out in 5000ms"
+      },
+      {
+        "test": " src/cli/managed-tool-hooks.test.ts > preserves tool delivery outside identity-scoped managed Claude ('qoder', {})",
+        "reason": "Test timed out in 5000ms"
+      },
+      {
+        "test": " src/main/conversation-side-chat-snapshot.test.ts > format 4 side-chat snapshot seal > returns the exact huge body and the untouched neighbours",
+        "reason": "Test timed out in 5000ms"
+      }
+    ],
+    "rerun": false,
+    "previousH5NodeStartupRealSeconds": [
+      0.91,
+      0.9,
+      0.9,
+      0.9,
+      0.89
+    ]
+  },
+  "rendererUi": {
+    "exitCode": 0,
+    "wallSeconds": 840
+  },
+  "pack": {
+    "exitCode": 1,
+    "wallSeconds": 112,
+    "failedStep": "check:packaged-app: private CLI --version",
+    "signal": "SIGKILL",
+    "childStatus": null,
+    "smokeExecuted": false,
+    "retried": false,
+    "pathOrPolicyChanged": false
+  },
+  "logs": {
+    "npm-ci.log": {
+      "bytes": 2422,
+      "sha256": "b1b534d9b909754b99ce807b512f021ce8b63ea3bcca75680019649022ae351a"
+    },
+    "electron-install.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "electron-rebuild.log": {
+      "bytes": 90,
+      "sha256": "c720aeca0d43c116c446b6a304bd5480881b8d5877c25af4ca097ff8667ef29d"
+    },
+    "typecheck.log": {
+      "bytes": 285,
+      "sha256": "ac27ad1e61e6306029b297172cb87d4b1e0ca4d34980f33345e76c90a5243b93"
+    },
+    "unit.log": {
+      "bytes": 288500,
+      "sha256": "a88a70db503f0d5f798441199fd806f5cc6da7cefab4f7049fa9b4b58e0c98e0"
+    },
+    "renderer-ui.log": {
+      "bytes": 125680,
+      "sha256": "5ab497a98882d0ab88d29c33fc6a0e3042943c84afcc67cd7f0ecba9b2b399db"
+    },
+    "pack.log": {
+      "bytes": 42015,
+      "sha256": "897f6bcb5775f5f84ca8a9fadae59de54bc90ccceda76402a1816f3f1d9fd84d"
+    }
+  }
+}

@@ -1,4 +1,6 @@
-# 第九轮进行中（I1 通过，I2/I3 未通过，I4–I5 待执行）
+# 第九轮暂停（I4 打包私有 CLI 再次 SIGKILL，I5 未执行）
+
+[I4](reports/I4.md)：干净依赖 worktree 的 typecheck、renderer UI 通过。test:unit 仅一次：5797 通过、7 条 5000 ms 超时、4 跳过，没有重跑。pack:artifact 在 check:packaged-app 执行私有 CLI --version 时再次收到 SIGKILL，按明确边界立即停下，保留产物和完整日志，不重试、不换路径、不安装、不改安全策略。[脱敏门禁](evidence/r9/i4-gates.json)。I5 未执行，清单仍 unsupported；本轮未全部结束，不标待核验。需维护者确认执行策略与续跑边界。
 
 [I1](reports/I1.md)：CLI 1.1.89，三个全新独立实例的 Hook 窗口停止均无需重启即显示中断、提交唯一带 Provider turn id 的 interrupted 记录，来源 scry_run_boundary；pending 全空，续发均 completed。[脱敏结构](evidence/r9/i1-live-stop.json)。
 
