@@ -67,8 +67,11 @@ describe('Pi recorder extension lifecycle', () => {
       contentRef: { bytes: Buffer.byteLength(expectedToolResult), sha256: expectedToolResultHash },
       storage: 'truncated'
     })
-    expect(Buffer.byteLength(tool.outputContent!.content!)).toBe(8_192)
-    expect(tool.outputContent!.content).toBe(expectedToolResult.slice(0, 8_192))
+    // 正文按值结构裁剪：超长的字符串换成带原始长度的 marker，整段仍是合法 JSON，不再是 8 KiB 的
+    // 字节切段（那种正文读回来解析不了，却仍标着 json）。
+    expect(Buffer.byteLength(tool.outputContent!.content!)).toBeLessThanOrEqual(8_192)
+    const bounded = JSON.parse(tool.outputContent!.content!) as Record<string, { storage?: string; originalBytes?: number }>
+    expect(bounded.text).toMatchObject({ storage: 'truncated', originalBytes: 132_415 })
     await expect(readRecorderContent(join(root, '.scry'), tool.inputContent!.contentRef!)).resolves.toBe(JSON.stringify({ text: '你'.repeat(70_000) }))
     await expect(readRecorderContent(join(root, '.scry'), tool.outputContent!.contentRef!)).resolves.toBe(expectedToolResult)
   }, 30_000)
