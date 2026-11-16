@@ -58,8 +58,12 @@ export function registerSuite1(): void {
     const directory = join(root, '.scry/runtime/claude', safeKey('orphan-tool'), 'orphans')
     const [file] = await readdir(directory)
     const orphan = JSON.parse(await readFile(join(directory, file), 'utf8'))
-    expect(orphan.payload).toMatchObject({ storage: 'truncated', encoding: 'json-fragment', reasons: ['field_budget'] })
+    expect(orphan.payload).toMatchObject({ storage: 'truncated', encoding: 'json', reasons: ['field_budget'] })
     expect(Buffer.byteLength(orphan.payload.content)).toBeLessThanOrEqual(1024)
+    // A bounded payload must stay parseable and say how much content each field lost.
+    const bounded = JSON.parse(orphan.payload.content)
+    expect(bounded.tool_response).toMatchObject({ storage: 'truncated', originalBytes: 6000 })
+    expect(bounded.tool_response.preview.startsWith('秘秘')).toBe(true)
     config.capture.prompt = false
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
     await handleRecorderHook({ ...input, payload: payload('private-orphan', { prompt: 'DO_NOT_STORE' }) })
@@ -68,6 +72,46 @@ export function registerSuite1(): void {
     const privateText = await readFile(join(privateDirectory, privateFile), 'utf8')
     expect(privateText).not.toContain('DO_NOT_STORE')
     expect(JSON.parse(privateText)).toMatchObject({ payload: { storage: 'omitted' }, omissionReason: 'capture_policy' })
+  })
+
+  it('bounded orphan payloads stay valid JSON and name the original size of each cut field', async () => {
+    const root = await workspace()
+    const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
+    config.capture.toolOutput = 'full'
+    await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
+    const session = 'orphan-budget-legal-json'
+    // The field case: six PostToolUse and two PreToolUse stops with no open turn to belong to.
+    const events = [
+      ...Array.from({ length: 6 }, (_, index) => ({ event: 'PostToolUse', index, tool: 'Bash' })),
+      ...Array.from({ length: 2 }, (_, index) => ({ event: 'PreToolUse', index: index + 6, tool: 'Read' }))
+    ]
+    for (const entry of events) {
+      await handleRecorderHook({
+        provider: 'claude', workspace: root, event: entry.event,
+        payload: payload(session, {
+          tool_name: entry.tool,
+          tool_use_id: `tool-${entry.index}`,
+          tool_response: `${entry.index}:${'正'.repeat(3000)}`,
+          tool_input: { query: '长'.repeat(2000), attempt: entry.index }
+        })
+      })
+    }
+    const directory = join(root, '.scry/runtime/claude', safeKey(session), 'orphans')
+    const files = await readdir(directory)
+    expect(files).toHaveLength(8)
+    for (const file of files) {
+      const orphan = JSON.parse(await readFile(join(directory, file), 'utf8'))
+      expect(orphan.payload).toMatchObject({ storage: 'truncated', encoding: 'json', reasons: ['field_budget'] })
+      expect(Buffer.byteLength(orphan.payload.content)).toBeLessThanOrEqual(8 * 1024)
+      // Every stored body parses, and each replaced field states the bytes it replaced.
+      const bounded = JSON.parse(orphan.payload.content) as Record<string, unknown>
+      expect(bounded.tool_response).toMatchObject({ storage: 'truncated', originalBytes: 9002 })
+      // The object structure is kept; only the oversized string inside it is replaced.
+      expect(bounded.tool_input).toMatchObject({
+        attempt: expect.any(Number),
+        query: { storage: 'truncated', originalBytes: 6000 }
+      })
+    }
   })
 
   it('interrupted turn ends at its last credible evidence, never at the next prompt', async () => {
