@@ -72,8 +72,16 @@ describe('runtime diagnostics without an attention index', () => {
     }
     const source = JSON.stringify(open)
     await writeFile(join(sessionDir, 'open.json'), source)
-    const expected = stale ? [{ provider: 'claude', sessionId: open.sessionId,
-      startedAt: open.startedAt, ageMs: 2 * expiryMs }] : []
+    // 每条都要写清最后写下东西的时间和是否仍在增长：只报年龄无法区分「慢」和「卡住」。
+    const expected = stale ? [{
+      provider: 'claude',
+      sessionId: open.sessionId,
+      startedAt: open.startedAt,
+      ageMs: 2 * expiryMs,
+      ...(kind === 'old transcript' ? { lastEventAt: new Date(now - 2 * expiryMs).toISOString() } : {}),
+      quietMs: 2 * expiryMs,
+      growing: false
+    }] : []
 
     // Call stale diagnostics first: it must not rely on a previous health/daemon call to rebuild.
     expect(await recorderStaleOpenTurns(dataRoot, expiryMs, now)).toEqual(expected)
