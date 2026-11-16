@@ -75,8 +75,16 @@
     "signal": "SIGKILL",
     "childStatus": null,
     "smokeExecuted": false,
-    "retried": false,
-    "pathOrPolicyChanged": false
+    "retried": true,
+    "pathOrPolicyChanged": false,
+    "authorizedRetry": {
+      "exitCode": 0,
+      "wallSeconds": 176,
+      "packagedAppCheckPassed": true,
+      "smokeExecuted": true,
+      "smokePassed": true,
+      "pathOrPolicyChanged": false
+    }
   },
   "logs": {
     "npm-ci.log": {
@@ -106,6 +114,10 @@
     "pack.log": {
       "bytes": 42015,
       "sha256": "897f6bcb5775f5f84ca8a9fadae59de54bc90ccceda76402a1816f3f1d9fd84d"
+    },
+    "pack-retry.log": {
+      "bytes": 45965,
+      "sha256": "379621874df571e9102eee5dca2c3ca93d7be79a16510c4688bfd88f46fe5ef2"
     }
   }
 }
