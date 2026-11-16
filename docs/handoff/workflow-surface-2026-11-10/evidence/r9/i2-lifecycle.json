@@ -1,0 +1,492 @@
+{
+  "revision": "cab94282",
+  "cli": "1.1.89",
+  "result": "recorder failed; provider completed",
+  "diagnostic": "managed recorder Provider turn id differs from the open lifecycle identity (commit turn id present; 2 lifecycles: 0 with a turn id, 2 from this run, 0 listing it as a continuation; 0 matched)",
+  "commitTurnIdPresent": true,
+  "commitStatus": "completed",
+  "lifecycles": [
+    {
+      "source": "open.json",
+      "turnIdPresent": false,
+      "sameAsCommitTurnId": false,
+      "fromThisRun": true,
+      "continuationTurnIdCount": 0,
+      "status": "closing",
+      "quarantineReason": null
+    },
+    {
+      "source": "quarantined pending-open.json",
+      "turnIdPresent": false,
+      "sameAsCommitTurnId": false,
+      "fromThisRun": true,
+      "continuationTurnIdCount": 0,
+      "status": "closing",
+      "quarantineReason": "managed_replaced"
+    }
+  ],
+  "nativeFrames": 44,
+  "nativePromptIdObservation": {
+    "distinctExplicitPromptIds": 0,
+    "firstOccurrences": [],
+    "status": "unavailable",
+    "reason": "SDK native frames contain no promptId or prompt_id fields; do not infer from message.id or read provider transcripts",
+    "commandLifecycleBoundaries": [
+      {
+        "seq": 15,
+        "state": "queued",
+        "cycle": 0
+      },
+      {
+        "seq": 31,
+        "state": "started",
+        "cycle": 1
+      },
+      {
+        "seq": 69,
+        "state": "completed",
+        "cycle": 1
+      }
+    ]
+  },
+  "nativeTimeline": [
+    {
+      "index": 0,
+      "msFromSend": 22554,
+      "type": "system",
+      "subtype": "init",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 1,
+      "msFromSend": 22579,
+      "type": "system",
+      "subtype": "artifacts_update",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 2,
+      "msFromSend": 22579,
+      "type": "system",
+      "subtype": "permission_policy",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 3,
+      "msFromSend": 22579,
+      "type": "system",
+      "subtype": "available_models_update",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 4,
+      "msFromSend": 22580,
+      "type": "system",
+      "subtype": "hook_diagnostics",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 5,
+      "msFromSend": 22668,
+      "type": "system",
+      "subtype": "hook_started",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 6,
+      "msFromSend": 22670,
+      "type": "system",
+      "subtype": "hook_started",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 7,
+      "msFromSend": 22673,
+      "type": "system",
+      "subtype": "hook_started",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 8,
+      "msFromSend": 22677,
+      "type": "system",
+      "subtype": "hook_started",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 9,
+      "msFromSend": 22681,
+      "type": "command_lifecycle",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 10,
+      "msFromSend": 22714,
+      "type": "system",
+      "subtype": "hook_progress",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 11,
+      "msFromSend": 22714,
+      "type": "system",
+      "subtype": "hook_response",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 12,
+      "msFromSend": 22808,
+      "type": "system",
+      "subtype": "hook_progress",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 13,
+      "msFromSend": 22808,
+      "type": "system",
+      "subtype": "hook_response",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 14,
+      "msFromSend": 23380,
+      "type": "system",
+      "subtype": "hook_response",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 15,
+      "msFromSend": 26091,
+      "type": "system",
+      "subtype": "hook_progress",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 16,
+      "msFromSend": 26098,
+      "type": "system",
+      "subtype": "hook_response",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 17,
+      "msFromSend": 26098,
+      "type": "system",
+      "subtype": "init",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 18,
+      "msFromSend": 26099,
+      "type": "command_lifecycle",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 19,
+      "msFromSend": 34731,
+      "type": "assistant",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 20,
+      "msFromSend": 35942,
+      "type": "assistant",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 21,
+      "msFromSend": 36696,
+      "type": "assistant",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 22,
+      "msFromSend": 39368,
+      "type": "system",
+      "subtype": "task_started",
+      "taskIdPresent": true,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 23,
+      "msFromSend": 39370,
+      "type": "system",
+      "subtype": "background_tasks_changed",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 24,
+      "msFromSend": 39388,
+      "type": "user",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 25,
+      "msFromSend": 42150,
+      "type": "system",
+      "subtype": "background_tasks_changed",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 26,
+      "msFromSend": 42373,
+      "type": "system",
+      "subtype": "task_updated",
+      "taskIdPresent": true,
+      "status": "completed",
+      "operationAborted": false
+    },
+    {
+      "index": 27,
+      "msFromSend": 46705,
+      "type": "system",
+      "subtype": "task_started",
+      "taskIdPresent": true,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 28,
+      "msFromSend": 46709,
+      "type": "system",
+      "subtype": "background_tasks_changed",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 29,
+      "msFromSend": 46728,
+      "type": "user",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 30,
+      "msFromSend": 48698,
+      "type": "user",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 31,
+      "msFromSend": 48800,
+      "type": "user",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 32,
+      "msFromSend": 48915,
+      "type": "system",
+      "subtype": "task_notification",
+      "taskIdPresent": true,
+      "status": "completed",
+      "operationAborted": false
+    },
+    {
+      "index": 33,
+      "msFromSend": 48915,
+      "type": "user",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 34,
+      "msFromSend": 49640,
+      "type": "system",
+      "subtype": "background_tasks_changed",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 35,
+      "msFromSend": 49640,
+      "type": "system",
+      "subtype": "task_updated",
+      "taskIdPresent": true,
+      "status": "completed",
+      "operationAborted": false
+    },
+    {
+      "index": 36,
+      "msFromSend": 52288,
+      "type": "assistant",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 37,
+      "msFromSend": 59888,
+      "type": "result",
+      "subtype": "success",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 38,
+      "msFromSend": 59896,
+      "type": "command_lifecycle",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 39,
+      "msFromSend": 59896,
+      "type": "system",
+      "subtype": "init",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 40,
+      "msFromSend": 59896,
+      "type": "system",
+      "subtype": "task_notification",
+      "taskIdPresent": true,
+      "status": "completed",
+      "operationAborted": false
+    },
+    {
+      "index": 41,
+      "msFromSend": 61035,
+      "type": "user",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 42,
+      "msFromSend": 63967,
+      "type": "assistant",
+      "subtype": null,
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    },
+    {
+      "index": 43,
+      "msFromSend": 70734,
+      "type": "result",
+      "subtype": "success",
+      "taskIdPresent": false,
+      "status": null,
+      "operationAborted": false
+    }
+  ],
+  "mainTimeline": [
+    {
+      "event": "daemon started",
+      "msFromSend": 19880,
+      "durationMs": null,
+      "pidPresent": true
+    },
+    {
+      "event": "query closing",
+      "msFromSend": 72564,
+      "durationMs": null,
+      "pidPresent": false
+    },
+    {
+      "event": "daemon stopping",
+      "msFromSend": 72564,
+      "durationMs": null,
+      "pidPresent": true
+    },
+    {
+      "event": "daemon stopped",
+      "msFromSend": 75180,
+      "durationMs": 2616,
+      "pidPresent": true
+    }
+  ],
+  "recordCount": 0,
+  "pending": {
+    "trace-turn-progress": 0,
+    "managed-turn-progress": 1,
+    "managed-turn-commits": 1
+  },
+  "waitingUiCaptured": false,
+  "eventRowsByStream": {
+    "canonical": 148,
+    "native": 44,
+    "log": 1
+  },
+  "mainStdout": {
+    "bytes": 1280,
+    "sha256": "c96752811798b93fbc39f40601426406a9815e4d0d79938e4aca10038f071132"
+  }
+}

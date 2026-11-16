@@ -1,6 +1,8 @@
-# 第九轮进行中（I1 通过，I2–I5 待执行）
+# 第九轮进行中（I1 通过，I2 recorder 未通过，I3–I5 待执行）
 
 [I1](reports/I1.md)：CLI 1.1.89，三个全新独立实例的 Hook 窗口停止均无需重启即显示中断、提交唯一带 Provider turn id 的 interrupted 记录，来源 scry_run_boundary；pending 全空，续发均 completed。[脱敏结构](evidence/r9/i1-live-stop.json)。
+
+[I2](reports/I2.md)：Provider 已完成，recorder 报提交有 turn id、2 个 lifecycle 均无 turn id、均来自本 run、续接 0、匹配 0；0 条记录，managed progress/commit 各 1。44 条 SDK native 帧无显式 promptId 字段，不能推断 prompt 数量；未读取 Provider transcript 补数。[脱敏诊断](evidence/r9/i2-lifecycle.json)。
 
 **审查方核验第八轮（2026-11-16）。** 以下已在 CLI 1.1.89 上证实：H1 启动窗口停止与负对照；H2 后台 Agent 的流关闭顺序（`Operation aborted` 消失）；H4 长命令审批、reload 后续发、输出中途停止。
 
