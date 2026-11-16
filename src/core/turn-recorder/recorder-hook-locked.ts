@@ -261,8 +261,11 @@ export async function applyHookLocked(
   open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
   open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
   // A session end is not this turn finishing: only the Provider's own terminal event makes a
-  // superseding prompt publish the turn as completed.
-  if (!sessionEndEvent) open.stopObservedAt ??= timestampOf(input.payload)
+  // superseding prompt publish the turn as completed, at the time that event reported.
+  if (!sessionEndEvent) {
+    open.stopObservedAt = terminalAt
+    open.stopObservedAtSource = open.terminalAtSource
+  }
   // A session/process end is not a completion, and it fires while the Provider is shutting down
   // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
   // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot

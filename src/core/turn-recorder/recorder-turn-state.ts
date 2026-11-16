@@ -205,16 +205,21 @@ function credibleAt(value: string | undefined, startedMs: number, ceilingMs: num
 }
 
 /**
- * `completedAt` may only come from this turn's own evidence. Without a terminal observation the last
- * thing actually observed is a lower bound, reported as partial — the alternative used to be the
- * next prompt's arrival, which silently billed the user's idle time to the Agent.
+ * `completedAt` may only come from this turn's own evidence. The turn's own Stop is an exact end: it
+ * is the moment the Provider reported the work finished, and it stays usable after a background wake
+ * cancels a hold, so a following prompt publishes the time the turn actually ended instead of the
+ * last row it happened to write. Without such an observation the last thing actually observed is a
+ * lower bound, reported as partial — the alternative used to be the next prompt's arrival, which
+ * silently billed the user's idle time to the Agent.
  */
 export function resolveTurnEnd(
   open: OpenTurnState,
   startedAt: string,
   transcript: { completedAt?: string },
   events: TraceEvent[],
-  forced?: 'expired'
+  forced?: 'expired',
+  /** Why a turn without terminal evidence was closed anyway, quoted in the end-time note. */
+  forcedNote?: string
 ): { completedAt: string; termination: Evidence<TurnTermination> } {
   const startedMs = Date.parse(startedAt)
   const ceilingMs = Date.now() + TERMINAL_CLOCK_SKEW_MS
@@ -227,12 +232,35 @@ export function resolveTurnEnd(
       termination: available({ reason, completedAtSource: 'provider_transcript', ...observedAt }, ['provider_transcript'])
     }
   }
+  const lastActivity = events
+    .map((event) => credibleAt(event.ts, startedMs, ceilingMs))
+    .filter((value): value is string => !!value)
+    .sort()
+    .at(-1)
+  // A Stop that work continued past is not the end of the turn; the wake's rows are. Only a Stop
+  // that no Agent work followed may claim the end time. The recorder's own delivery bookkeeping for
+  // the Stop itself is stamped when it was applied, milliseconds after the event, and is not work.
+  const stopEnd = credibleAt(open.stopObservedAt, startedMs, ceilingMs)
+  const workAfterStop = events.some((event) =>
+    !(event.kind === 'hook' && event.stage === 'hook_delivery') &&
+    credibleAt(event.ts, startedMs, ceilingMs) != null &&
+    !!stopEnd && Date.parse(event.ts) > Date.parse(stopEnd)
+  )
+  if (stopEnd && !workAfterStop) {
+    const completedAtSource = open.stopObservedAtSource ?? 'recorder_observed_terminal'
+    return {
+      completedAt: stopEnd,
+      // Whose clock the Stop carries is recorded in the source; the end itself was reported, not
+      // inferred from silence.
+      termination: available({ reason, completedAtSource, ...observedAt }, ['lifecycle_hooks'])
+    }
+  }
   const terminalEnd = credibleAt(open.terminalAt, startedMs, ceilingMs)
   if (terminalEnd) {
     const completedAtSource = open.terminalAtSource ?? 'provider_terminal_event'
     return {
       completedAt: terminalEnd,
-      // A hook firing at the end is close to the real end, but it is our clock, not the Provider's.
+      // A session end is our own observation at shutdown, not the Provider ending the turn.
       termination: available(
         { reason, completedAtSource, ...observedAt },
         ['lifecycle_hooks'],
@@ -240,18 +268,15 @@ export function resolveTurnEnd(
       )
     }
   }
-  const lastActivity = events
-    .map((event) => credibleAt(event.ts, startedMs, ceilingMs))
-    .filter((value): value is string => !!value)
-    .sort()
-    .at(-1)
   if (lastActivity) {
     return {
       completedAt: lastActivity,
       termination: partial(
         { reason, completedAtSource: 'last_observed_activity', ...observedAt },
         ['lifecycle_hooks'],
-        'no terminal event was observed; completedAt is the last observed activity and is a lower bound',
+        forcedNote
+          ? `${forcedNote}; completedAt is the last observed activity and is a lower bound`
+          : 'no terminal event was observed; completedAt is the last observed activity and is a lower bound',
         'estimated'
       )
     }
@@ -261,7 +286,9 @@ export function resolveTurnEnd(
     termination: partial(
       { reason, completedAtSource: 'turn_start', ...observedAt },
       ['recorder_open_turn'],
-      'no terminal event and no activity were observed, so this turn has no known end time or duration'
+      forcedNote
+        ? `${forcedNote}; no activity was observed either, so this turn has no known end time or duration`
+        : 'no terminal event and no activity were observed, so this turn has no known end time or duration'
     )
   }
 }

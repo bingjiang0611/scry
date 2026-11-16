@@ -31,8 +31,10 @@ export function registerStopVerdictSuite(): void {
       payload: start(transcript, 'request-1', 'run the build in the background', '2026-07-19T12:00:00.000Z')
     })).resolves.toMatchObject({ status: 'started' })
     // The turn reaches its own Stop; the background task it launched is still reporting.
-    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: stop(transcript) }))
-      .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
+    await expect(handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: { ...stop(transcript), timestamp: '2026-07-19T12:00:20.000Z' }
+    })).resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
     // The wake continues the same segment, and its own tool calls prove work is still going on.
     await appendFile(transcript, `\n${[
       notification('prompt-2', 'task-1', 'call-bg-1'),
@@ -56,6 +58,10 @@ export function registerStopVerdictSuite(): void {
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ turnIndex: 1, status: 'completed' })
     expect(records[0].termination?.value).toMatchObject({ reason: 'provider_terminal' })
+    // 唤醒在这轮 Stop 之后还写了新行：真实结束是被唤醒的那段工作，不是那次 Stop，
+    // 所以结束时间退回最后观测到的活动，并标 estimated。
+    expect(records[0].termination?.value?.completedAtSource).toBe('last_observed_activity')
+    expect(records[0].termination?.quality).toBe('estimated')
     expect(records[0].assistant.value?.text).toContain('Build finished; running the checks.')
   })
 
@@ -70,8 +76,10 @@ export function registerStopVerdictSuite(): void {
       provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
       payload: start(transcript, 'request-1', 'answer briefly', '2026-07-19T12:00:00.000Z')
     })
-    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: stop(transcript) }))
-      .resolves.toMatchObject({ status: 'committed' })
+    await expect(handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: { ...stop(transcript), timestamp: '2026-07-19T12:00:20.000Z' }
+    })).resolves.toMatchObject({ status: 'committed' })
     await appendFile(transcript, `\n${[
       user('prompt-2', 'second question', { requestSetId: 'request-2' }),
       assistantText('prompt-2', 'Second answer.')
@@ -85,6 +93,44 @@ export function registerStopVerdictSuite(): void {
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ status: 'completed' })
     expect(records[0].termination?.value).not.toMatchObject({ reason: 'superseded_by_next_turn' })
+  })
+
+  it('收到 Stop 但被顶替：结束时间取 Stop 时间并标 exact，不是下一轮提问时间', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'qoder-supersede-exact.jsonl')
+    await writeFile(transcript, `${[
+      user('prompt-1', 'run the build in the background', { requestSetId: 'request-1' }),
+      toolUse('prompt-1', 'call-bg-1', 'sleep 300'),
+      launchReceipt('call-bg-1', 'task-1'),
+      assistantText('prompt-1', 'Build started in the background.')
+    ].join('\n')}\n`)
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
+      payload: start(transcript, 'request-1', 'run the build in the background', '2026-07-19T12:00:00.000Z')
+    })
+    // 本轮自己的 Stop 到了，但后台任务还没回来，于是先扣着不发布。
+    await expect(handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root,
+      payload: { ...stop(transcript), timestamp: '2026-07-19T12:00:20.000Z' }
+    })).resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
+    // 后台任务始终没有唤醒；下一轮提问在静默期内到达，替这一轮收尾。
+    await appendFile(transcript, `\n${[
+      user('prompt-2', 'next question', { requestSetId: 'request-2' }),
+      assistantText('prompt-2', 'Second answer.')
+    ].join('\n')}`)
+    await handleRecorderHook({
+      provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
+      payload: start(transcript, 'request-2', 'next question', '2026-07-19T12:00:50.000Z')
+    })
+
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record).toMatchObject({ status: 'completed' })
+    // 结束时间是那次 Stop，不是提问 2 的到达时间，也不是最后一行活动。
+    expect(record.completedAt).toBe('2026-07-19T12:00:20.000Z')
+    expect(record.termination).toMatchObject({
+      quality: 'exact',
+      value: { reason: 'provider_terminal', completedAtSource: 'provider_terminal_event' }
+    })
   })
 
   it('没收到 Stop 就被下一轮顶替：仍记 interrupted 并由下一轮提供边界', async () => {
@@ -112,6 +158,12 @@ export function registerStopVerdictSuite(): void {
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ status: 'interrupted' })
     expect(records[0].termination?.value).toMatchObject({ reason: 'superseded_by_next_turn' })
+    // 没有 Stop 就没有结束证据：结束时间是最后观测到的活动，标 estimated 并说明是下界。
+    expect(records[0].termination).toMatchObject({
+      quality: 'estimated',
+      value: { completedAtSource: 'last_observed_activity' }
+    })
+    expect(records[0].termination?.omissionReason).toContain('no terminal event was observed')
   })
 
   it('收到 Stop 后又被后台唤醒：唤醒仍接续同一段，不新开记录也不改判定', async () => {
@@ -147,5 +199,8 @@ export function registerStopVerdictSuite(): void {
     expect(records[0]).toMatchObject({ turnIndex: 1, status: 'completed' })
     expect(records[0].turnRole).toBeUndefined()
     expect(records[0].assistant.value?.text).toContain('Release published.')
+    // 唤醒段自己的 Stop 才是这一轮的结束。
+    expect(records[0].termination).toMatchObject({ quality: 'exact' })
+    expect(records[0].termination?.value?.completedAtSource).not.toBe('last_observed_activity')
   })
 }
