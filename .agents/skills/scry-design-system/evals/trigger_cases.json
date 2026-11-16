@@ -1,0 +1,25 @@
+{
+  "negative_patterns": ["性能", "卡顿", "发布", "release", "iOS", "SwiftUI", "PR 资格", "翻译"],
+  "should_trigger": [
+    {"text": "给设置页加一个重置按钮", "family": "build"},
+    {"text": "这个弹窗里的提示用什么组件比较好", "family": "build"},
+    {"text": "把会话列表的右键菜单改成统一的菜单样式", "family": "converge"},
+    {"text": "这几个面板的间距看起来不统一，帮我收一下", "family": "converge"},
+    {"text": "design:audit 报了 3 条，帮我处理", "family": "guard"},
+    {"text": "design-system.test.ts 挂了", "family": "guard"},
+    {"text": "这个错误提示的文案改得更清楚一点", "family": "copy"},
+    {"text": "看看这个 UI 改动是否符合设计系统", "family": "review"},
+    {"text": "要不要给按钮加一个 ghost 变体", "family": "extend"}
+  ],
+  "should_not_trigger": [
+    {"text": "打开会话感觉卡，帮我查查性能瓶颈", "family": "performance"},
+    {"text": "帮我发布 0.2.193 版本", "family": "release"},
+    {"text": "iOS 端的连接页布局有问题", "family": "ios"},
+    {"text": "评估一下这个外部 PR 有没有资格合并", "family": "triage"},
+    {"text": "修一下 Codex 登录失败的 bug", "family": "feature"}
+  ],
+  "near_neighbor": [
+    {"text": "总览里的 Token 数显示成 0 了，应该显示不可用", "family": "evidence-semantics"},
+    {"text": "给 Scry 新增一个导出会话功能", "family": "feature"}
+  ]
+}

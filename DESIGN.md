@@ -143,7 +143,7 @@ components:
 | `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
 | `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
 
-`npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
+`npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。改动界面时按 `.agents/skills/scry-design-system` 的流程执行；它的 `ui-contract-check.mjs` 在推送前列出新出现的选择器、不再渲染却仍被 smoke 选中的类，以及写死数值的 smoke 断言。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
 
 删除样式时注意两类陷阱：`:is()`／`:where()` 里只删无效成员，不删整条选择器；文件或规则的章节注释若仍描述剩余规则，要保留。
 

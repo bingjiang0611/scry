@@ -70,7 +70,7 @@ Scry **不是安全沙箱**。它能做授权、指纹校验、观测和治理�
 | 修改对应领域/边界 | [检查清单](../docs/agent/change-checklists.md)，只展开受影响领域 |
 | 普通代码、UI、跨边界或发布验证 | [验证与交付](../docs/agent/verification.md)，按下述范围选择小节 |
 | PR、分诊、评审与门禁 | [贡献指南](../CONTRIBUTING.md)；修改流程必须遵循[维护清单](../docs/agent/pr-workflow.md#workflow-maintenance)；分诊用 `contribution-triage` |
-| 界面样式、组件选择、UX 文案 | [设计系统](../DESIGN.md)：token、组件语义目录、文案规则；`npm run design:audit` 查看设计债务 |
+| 界面样式、组件选择、UX 文案 | [设计系统](../DESIGN.md)：token、组件语义目录、文案规则；`scry-design-system` skill 给出执行顺序、验证与已知陷阱 |
 | 性能分析、优化、指标/门禁维护 | [持续性能闭环](../docs/performance-loop.md)、`scry-performance-climb` skill |
 | 内网 registry、内网需求单、本地内部资料 | `.claude/company-context.local.md`（已 gitignore，缺失时按公开默认配置工作） |
 
