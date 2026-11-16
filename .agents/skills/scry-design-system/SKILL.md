@@ -46,6 +46,21 @@ description: 在 Scry 桌面 renderer 做界面样式、组件选择、布局间
 | 清扫类名时整条删除混有有效成员的 `:where()` | 标题失去 `text-wrap: balance`，指标标签失去大写 | 第 6 步；计算样式比对要覆盖相关属性 |
 | 有意改动的值被 smoke 写死（6px→8px、Tab→方向键） | smoke 失败；且串行 smoke 中前一个失败会遮住后面的 | `ui-contract-check.mjs` 第 3 节；一次改完所有受影响断言 |
 
+## 维护本 skill
+
+本 skill 只写流程、清单和坑，具体规则留在 DESIGN.md。完成一批改动时，碰到下列情况在同一变更里更新本目录：
+
+| 发生了什么 | 更新哪里 |
+|---|---|
+| 新增 primitive、hook 或 token 族 | 第 2 步“先找已有实现”的清单 |
+| 待定模式定下了方案，或已定模式被改动 | 权限表“先问用户”一栏里的已决定模式 |
+| 又有问题进了 CI | “踩过的坑”加一行，并优先把防线做成测试或脚本检查；只写进文档的坑会再踩 |
+| 新增或改名检查命令、测试文件 | [验证清单](references/verification.md) |
+| 该用时没用上，或不该用时被用上 | 开头的 description、[使用场景](references/when-to-use.md) 与 `evals/trigger_cases.json` 的例句 |
+| 移动本目录或改 skill 入口 | 按 [指令加载](../../../docs/agent/instruction-loading.md) 在临时环境验证各客户端仍能发现；`scripts/agent-instructions.test.ts` 同步 |
+
+不新建 `CLAUDE.md` 或 `.claude/skills/` 副本：skill 只保留在 `.agents/skills/` 一处，由 `.agents/AGENTS.md` 的“按任务加载”表路由。
+
 ## 交给用户
 
 - 新 token、新 primitive 或 variant、交互模型变化、待定模式的方案：说明选项、影响范围和推荐，等用户决定。
