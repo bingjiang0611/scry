@@ -194,11 +194,14 @@ describe('Qoder provider adapter · daemon lifecycle and process control', () =>
 
   it('names a new session itself and adopts that id from the first Provider frame without one', async () => {
     useLease({ pid: 903 })
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
     let release = (): void => {}
     sdk.query.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {
         // Hooks can arrive before any frame names the session; an empty id is no id.
         yield { type: 'system', subtype: 'hook_started', hook_id: 'h1', hook_name: 'SessionStart', hook_event: 'SessionStart', session_id: '' }
+        // A daemon that ignores the preset reports its own id: both adoptions are logged, ids are not.
+        yield { type: 'system', subtype: 'init', session_id: 'daemon-own-session' }
         await new Promise<void>((resolve) => { release = resolve })
       },
       close: vi.fn().mockResolvedValue(undefined),
@@ -212,11 +215,17 @@ describe('Qoder provider adapter · daemon lifecycle and process control', () =>
     await untilQueried()
     const requested = sdk.query.mock.calls[0][0].options.sessionId as string
     expect(requested).toMatch(/^[0-9a-f-]{36}$/)
-    for (let attempt = 0; attempt < 20 && !seen.length; attempt += 1) await Promise.resolve()
-    expect(seen).toEqual([requested])
-    expect(handle.getExternalSessionId?.()).toBe(requested)
+    for (let attempt = 0; attempt < 20 && seen.length < 2; attempt += 1) await Promise.resolve()
+    expect(seen).toEqual([requested, 'daemon-own-session'])
+    const adoptions = info.mock.calls.filter(([label]) => label === '[scry] qoder session adopted').map(([, json]) => JSON.parse(String(json)))
+    info.mockRestore()
+    expect(adoptions).toEqual([
+      expect.objectContaining({ owner: 'run:run-preset-session', preset: true, adoptions: 1 }),
+      expect.objectContaining({ owner: 'run:run-preset-session', preset: false, adoptions: 2 })
+    ])
+    expect(JSON.stringify(adoptions)).not.toMatch(/daemon-own-session|[0-9a-f]{8}-[0-9a-f]{4}/)
     handle.interrupt()
-    await expect(handle.promise).resolves.toMatchObject({ externalSessionId: requested, stopped: true })
+    await expect(handle.promise).resolves.toMatchObject({ externalSessionId: 'daemon-own-session', stopped: true })
   })
 
   it('does not name a resumed session, and follows an id the Provider reports', async () => {

@@ -30,7 +30,16 @@ describe('a missing fork archive says whether the session or the workspace key d
       { cwd: '/tmp/ws', sessionId: 'secret-other' },
       { cwd: '/elsewhere', sessionId: 'secret-third' }
     ], { cwd: '/tmp/ws', sessionId: 'secret-session' })
-    expect(message).toBe('找不到可分支的已结束轮次：没有找到该会话的归档（该会话在其他工作目录下有 1 份归档；本工作目录下有 1 个其他会话的归档）')
+    expect(message).toBe('找不到可分支的已结束轮次：没有找到该会话的归档（该会话在其他工作目录下有 1 份归档；本工作目录下有 1 个其他会话的归档，其中 0 个以这一轮结尾；会话列表没有请求的会话，没有归档这一轮的会话）')
     expect(message).not.toMatch(/secret|tmp/)
+  })
+
+  it('round nine I3 shape: the run is archived under the other session, and the catalog lists one of the two ids', () => {
+    const summaries = [{ cwd: '/ws', sessionId: 'secret-archived', runId: 'secret-run' }]
+    const key = { cwd: '/ws', sessionId: 'secret-requested', runId: 'secret-run' }
+    expect(describeMissingForkArchive(summaries, key, [{ externalSessionId: 'secret-requested' }]))
+      .toContain('其中 1 个以这一轮结尾；会话列表有请求的会话，没有归档这一轮的会话')
+    expect(describeMissingForkArchive(summaries, key, [{ externalSessionId: 'secret-archived' }]))
+      .toContain('其中 1 个以这一轮结尾；会话列表没有请求的会话，有归档这一轮的会话')
   })
 })

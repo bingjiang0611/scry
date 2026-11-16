@@ -47,8 +47,11 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   // before any message carries the id, so a stop in that window would otherwise leave
   // Provider evidence with no session to recover it under.
   const requestedSessionId = request.resume ? undefined : randomUUID()
+  let adoptions = 0
   const adoptSessionId = (id: string): void => {
     if (id === externalSessionId) return
+    // No ids in the log: only whether the id is Scry's preset and how often it changed (I3).
+    qoderLifecycleLog('session adopted', `run:${request.runId}`, { preset: id === requestedSessionId, adoptions: ++adoptions })
     externalSessionId = id
     // A resumed run must never accept input into a different native session.
     history.verifySession(id)

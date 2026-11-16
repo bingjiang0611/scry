@@ -219,7 +219,8 @@ export function createForkOperations({
         })
         if (!archive) {
           const summaries = await discoverTraceArchiveSessionsAsync(app.getPath('userData'), [providerId])
-          throw new Error(describeMissingForkArchive(summaries, { cwd: catalogCwd, sessionId: request.sourceSessionId }))
+          const catalog = (() => { try { return appSessionStore().load().filter((entry) => entry.providerId === providerId) } catch { return [] } })()
+          throw new Error(describeMissingForkArchive(summaries, { cwd: catalogCwd, sessionId: request.sourceSessionId, runId: request.sourceRunId }, catalog))
         }
         const { source, prefix } = verifyForkArchiveBoundary(archive, request)
         const codexHookTrust = providerId === 'codex' && cwd ? await resolveCodexHookTrust(cwd, providerRegistry) : []

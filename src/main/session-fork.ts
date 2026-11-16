@@ -46,10 +46,19 @@ export function verifyForkArchiveBoundary(
  * Counts only; no IDs or paths.
  */
 export function describeMissingForkArchive(
-  summaries: ReadonlyArray<{ cwd: string; sessionId: string }>,
-  key: { cwd: string; sessionId: string }
+  summaries: ReadonlyArray<{ cwd: string; sessionId: string; runId?: string }>,
+  key: { cwd: string; sessionId: string; runId?: string },
+  catalog: ReadonlyArray<{ externalSessionId?: string; runId?: string }> = []
 ): string {
   const sameSessionElsewhere = summaries.filter((entry) => entry.sessionId === key.sessionId && entry.cwd !== key.cwd).length
-  const sameWorkspace = summaries.filter((entry) => entry.cwd === key.cwd).length
-  return `找不到可分支的已结束轮次：没有找到该会话的归档（该会话在其他工作目录下有 ${sameSessionElsewhere} 份归档；本工作目录下有 ${sameWorkspace} 个其他会话的归档）`
+  const sameWorkspace = summaries.filter((entry) => entry.cwd === key.cwd)
+  // Round nine I3: 0 elsewhere, 1 other session here. Which side holds the wrong session id:
+  // is this run archived under that other session, and which of the two ids does the catalog list?
+  const runHere = sameWorkspace.filter((entry) => !!key.runId && entry.runId === key.runId)
+  const listsRequested = catalog.some((entry) => entry.externalSessionId === key.sessionId)
+  const listsArchived = runHere.some((entry) => catalog.some((item) => item.externalSessionId === entry.sessionId))
+  const yes = (value: boolean): string => value ? '有' : '没有'
+  return `找不到可分支的已结束轮次：没有找到该会话的归档（该会话在其他工作目录下有 ${sameSessionElsewhere} 份归档；` +
+    `本工作目录下有 ${sameWorkspace.length} 个其他会话的归档，其中 ${runHere.length} 个以这一轮结尾；` +
+    `会话列表${yes(listsRequested)}请求的会话，${yes(listsArchived)}归档这一轮的会话）`
 }
