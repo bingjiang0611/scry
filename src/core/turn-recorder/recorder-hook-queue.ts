@@ -20,12 +20,23 @@ export function validQueuedCapture(queued: QueuedHook, provider: ProviderId): bo
     capture.sessionId === queued.sessionId
 }
 
+/**
+ * Persist a hook event durably before it can be dropped.
+ *
+ * Returns the inbox entry path so a caller that applies the event inline can remove that exact
+ * copy afterwards; leaving it would replay the same event as a later duplicate.
+ */
 export async function queueHook(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
   sessionId: string,
-  arrivedAt: string
-): Promise<void> {
+  arrivedAt: string,
+  /**
+   * `reason` explains the queue in the operator log; `announce: false` keeps a queue drain silent,
+   * for a copy that the caller applies and removes inline in the same critical section.
+   */
+  options: { reason?: string; announce?: boolean } = {}
+): Promise<string> {
   const entry: QueuedHook = {
     schemaVersion: 1,
     provider: input.provider,
@@ -40,15 +51,19 @@ export async function queueHook(
   // Names sort by arrival; the UUID only separates hooks that arrive in the same millisecond.
   const name = `${String(Date.parse(arrivedAt)).padStart(15, '0')}-${randomUUID()}.json`
   const root = recorderSessionRoot(enablement.dataRoot, input.provider, sessionId)
+  const path = join(root, 'inbox', name)
   const sessionKey = safeKey(sessionId)
   // This must not take the session lock: a busy session is precisely why this hook is queued.
   // Hold the attention lock from index-first publication until the inbox entry is durable.
   await withSessionAttentionLock(enablement.dataRoot, input.provider, sessionKey, async () => {
     await markSessionAttention(enablement.dataRoot, input.provider, sessionKey)
-    await writeJsonAtomic(join(root, 'inbox', name), entry)
+    await writeJsonAtomic(path, entry)
   })
-  await appendRotatingLog(
-    join(enablement.dataRoot, 'logs', 'recorder.log'),
-    `${new Date().toISOString()} WARN ${input.queueOnly ? 'daemon delivery uncertain' : 'session lock busy'}; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
-  ).catch(() => undefined)
+  if (options.announce !== false) {
+    await appendRotatingLog(
+      join(enablement.dataRoot, 'logs', 'recorder.log'),
+      `${new Date().toISOString()} WARN ${options.reason ?? (input.queueOnly ? 'daemon delivery uncertain' : 'session lock busy')}; queued ${input.provider} ${input.event} for replay (arrived ${arrivedAt})`
+    ).catch(() => undefined)
+  }
+  return path
 }

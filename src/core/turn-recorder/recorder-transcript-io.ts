@@ -1,4 +1,4 @@
-import { open as openFile, stat } from 'node:fs/promises'
+import { openTranscriptRead, statTranscript } from './recorder-transcript-fs.js'
 
 export interface TranscriptSnapshotIdentity {
   dev: number
@@ -56,7 +56,7 @@ export async function readTranscriptWindow(
   // snapshot from that authority rather than silently advancing the start cursor.
   const start = preferredStart
   const length = boundedEnd - start
-  const handle = await openFile(path, 'r')
+  const handle = await openTranscriptRead(path)
   const buffer = Buffer.allocUnsafe(length)
   let bytesRead = 0
   let before: TranscriptSnapshotIdentity | undefined
@@ -75,7 +75,7 @@ export async function readTranscriptWindow(
   }
   let pathIdentity: TranscriptSnapshotIdentity | undefined
   try {
-    pathIdentity = transcriptIdentity(await stat(path))
+    pathIdentity = transcriptIdentity(await statTranscript(path))
   } catch {
     // A rotated-away path is unstable even when the already-open handle was still readable.
   }

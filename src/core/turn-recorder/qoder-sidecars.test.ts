@@ -43,7 +43,7 @@ async function fixture() {
 }
 
 describe('Qoder native sidecar custody and attribution', () => {
-  it.each(['valid', 'session', 'cwd', 'parent', 'agent', 'replay', 'row-scope', 'missing', 'symlink', 'directory-symlink', 'oversize'])(
+  it.each(['valid', 'session', 'cwd', 'parent', 'agent', 'replay', 'row-scope', 'missing', 'symlink', 'directory-symlink'])(
     'canonical child calls keep proven parents without duplicated usage: %s', async mode => {
       const f = await fixture()
       const base = { session_id: 'session', cwd: f.root, transcript_path: f.path }
@@ -57,7 +57,7 @@ describe('Qoder native sidecar custody and attribution', () => {
       if (mode === 'agent') childRows[0].agentId = 'foreign'
       if (mode === 'replay') childRows[0].isReplay = true
       if (mode === 'row-scope') childRows[1].parent_tool_use_id = 'foreign'
-      if (mode !== 'missing') await writeFile(f.childPath, jsonl(childRows) + (mode === 'oversize' ? ' '.repeat(256 * 1024) : ''))
+      if (mode !== 'missing') await writeFile(f.childPath, jsonl(childRows))
       if (mode === 'symlink') {
         const outside = join(f.root, 'outside.jsonl')
         await writeFile(outside, jsonl(childRows))
@@ -110,5 +110,75 @@ describe('Qoder native sidecar custody and attribution', () => {
     expect(present.identityMatched).toBe(true)
     expect(present.complete).toBe(true)
     expect(present.events).toEqual(expect.arrayContaining([expect.objectContaining({ toolUseId: 'read', parentToolUseId: 'spawn' })]))
+  })
+
+  it('keeps the rows that fit of a 600 KB child transcript and names the truncation in the record', async () => {
+    const f = await fixture()
+    const lateChildText = 'late child analysis '.repeat(32 * 1024)
+    // One oversized assistant row straddles the byte budget, so the cut lands mid-line and the
+    // retained prefix must end on a row boundary rather than parsing half of it.
+    const oversizeChild = jsonl([
+      ...f.childRows,
+      { ...f.childRows[0], type: 'assistant', uuid: 'late', parentUuid: 'cd', message: { id: 'late-answer', content: [{ type: 'text', text: lateChildText }] } }
+    ])
+    expect(Buffer.byteLength(oversizeChild)).toBeGreaterThan(600_000)
+    const base = { session_id: 'session', cwd: f.root, transcript_path: f.path }
+    await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'UserPromptSubmit', payload: {
+      ...base, request_set_id: 'R', prompt: 'inspect', timestamp: '2026-09-09T00:00:00.000Z'
+    } })
+    await writeFile(f.childPath, oversizeChild)
+    await writeFile(f.path, jsonl(f.parentRows))
+    for (const [event, timestamp, detail] of [
+      ['PreToolUse:Read', '2026-09-09T00:00:00.200Z', { tool_input: { file_path: 'seed.txt' } }],
+      ['PostToolUse:Read', '2026-09-09T00:00:00.300Z', { tool_response: 'seed' }]
+    ] as const) await handleRecorderHook({ provider: 'qoder', workspace: f.root, event, payload: {
+      ...base, parent_request_set_id: 'R', tool_name: 'Read', tool_use_id: 'read', timestamp, ...detail
+    } })
+    await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'Stop', payload: {
+      ...base, parent_request_set_id: 'R', timestamp: '2026-09-09T00:00:01.000Z'
+    } })
+
+    const records = await listRecords(join(f.root, '.scry'))
+    expect(records).toHaveLength(1)
+    const record = records[0]
+    // The child's internal evidence inside the budget survives; the parent's answer and usage stay authoritative.
+    expect(record.assistant.value?.text).toBe('root answer')
+    expect(record.usage.value).toMatchObject({ inputTokens: 5, outputTokens: 2 })
+    expect(record.tools.value?.filter(tool => tool.id === 'read')).toHaveLength(1)
+    expect(record.tools.value?.find(tool => tool.id === 'read')?.parentId).toBe('spawn')
+    expect(record.modelSegments?.value).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'child answer', agentId: 'child', parentId: 'spawn' })
+    ]))
+    // Bytes beyond the budget were never parsed, so they cannot be claimed.
+    expect(record.modelSegments?.value?.some(segment => segment.text?.includes('late child analysis'))).toBe(false)
+
+    // Partial status is preserved, and the reason names the child, the cause and how much was kept.
+    expect(record.tools.status).toBe('partial')
+    const reason = record.tools.omissionReason ?? ''
+    const truncation = /child agent transcript exceeds the 262144 byte per-child budget \(agent child, (.+agent-child\.jsonl)\): kept (\d+) of (\d+) bytes/.exec(reason)
+    expect(truncation).not.toBeNull()
+    const retained = Number(truncation![2])
+    const total = Number(truncation![3])
+    expect(total).toBe(Buffer.byteLength(oversizeChild))
+    expect(retained).toBeLessThanOrEqual(262_144)
+    expect(retained).toBeGreaterThan(0)
+    expect(reason).toContain('transcript snapshot was incomplete')
+  })
+
+  it('reads a child transcript under the budget without a truncation claim', async () => {
+    const f = await fixture()
+    const base = { session_id: 'session', cwd: f.root, transcript_path: f.path }
+    await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'UserPromptSubmit', payload: {
+      ...base, request_set_id: 'R', prompt: 'inspect', timestamp: '2026-09-09T00:00:00.000Z'
+    } })
+    await writeFile(f.childPath, jsonl(f.childRows))
+    await writeFile(f.path, jsonl(f.parentRows))
+    await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'Stop', payload: {
+      ...base, parent_request_set_id: 'R', timestamp: '2026-09-09T00:00:01.000Z'
+    } })
+    const records = await listRecords(join(f.root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].tools.omissionReason).toBeUndefined()
+    expect(records[0].tools.status).toBe('available')
   })
 })
