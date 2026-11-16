@@ -15,6 +15,7 @@ import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProvid
 import { holdSeal, refreshSealWindow } from './recorder-segment.js'
 import { resumeAfterStorage } from './git.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
+import { hostProcessChain } from './host-process.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -127,7 +128,9 @@ export async function applyHookLocked(
       input.payload,
       input.managed === true,
       protectNextStart,
-      input.uploadEnvironment, input.capture
+      input.uploadEnvironment, input.capture,
+      undefined, undefined,
+      input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
     )
     // The prompt is now part of the published open turn; the queued copy would replay as a duplicate.
     if (supersededStart) await rm(supersededStart, { force: true })

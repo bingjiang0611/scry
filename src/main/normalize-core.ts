@@ -3,6 +3,7 @@
 
 import type { ModelUsageRow, TraceEvent, TraceKind } from '../shared/trace.js'
 import { classifyTool, fileOpOf, parseMcp } from '../shared/trace.js'
+import { skillLifetimeKey } from '../shared/logical-calls.js'
 import { classifyDanger } from './danger.js'
 
 export interface NormalizeCtx {
@@ -15,6 +16,8 @@ export interface NormalizeCtx {
   latestContextModel?: string // contextTokens 的模型身份；多模型 usage 不能按 modelUsage 顺序猜窗口
   contextTokensFromUsage?: (usage: unknown) => number // Provider-specific cache 口径；缺省为 Anthropic 分项相加
   lastSkillName?: string // Skill 注入与原生 Skill 调用去重；路径引用不参与
+  skillMarkerByName?: Map<string, TraceEvent> // 本轮已落盘的 Skill 证据（激活/注入），后续注入只补事实不重复记一条
+  providerId?: import('../shared/provider.js').ProviderId // transcript 派生的证据（如人工介入）要带上 Provider 身份
   toolUseById?: Map<string, TraceEvent> // SDK tool_result 不重复携带工具身份时，用对应 tool_use 补全
   agentToolUseIds?: Set<string> // task_* 只回指已观测的 Agent tool_use，不把其他后台任务混进来
   agentTaskToolUseById?: Map<string, string> // 仅保留由 Agent tool_use 建立的 task_id 别名
@@ -66,28 +69,54 @@ export function injectedSkillName(text: string): string | undefined {
   return cleanSkillPart(m[1].split('/').filter(Boolean).pop())
 }
 
+/**
+ * The host's own activation notice, e.g. `Skill **name** activated.` It is a Provider system line,
+ * not model text and not a tool call: it only proves the host loaded the skill.
+ */
+export function activatedSkillName(text: string): string | undefined {
+  const m = text.trim().match(/^Skill \*\*(.+?)\*\* activated\.?$/i)
+  if (!m) return undefined
+  return cleanSkillPart(m[1])
+}
+
 export function cleanSkillPart(part: string | undefined): string | undefined {
   const s = part?.trim().replace(/[),;]+$/g, '')
   if (!s || s === '.' || s === '..') return undefined
   return s
 }
 
+/**
+ * Record one sighting of a skill. A host activation notice (`plugin:skill`) and the injected skill
+ * body (`.../skills/skill`) are the same fact seen twice, so they share one entry keyed by the skill
+ * name's last segment; the second sighting only adds its own timestamp instead of duplicating a row
+ * or being dropped.
+ */
 export function skillInjectionEvent(ctx: NormalizeCtx, name: string, input: Record<string, unknown>, messageId?: string): TraceEvent[] {
   const skill = cleanSkillPart(name)
   if (!skill) return []
-  const key = skill.toLowerCase()
+  const key = skillLifetimeKey(skill)
+  const seenAt = ctx.now()
+  const sighting = input.source === 'skill_activation' ? 'activatedAt' : 'injectedAt'
+  const existing = ctx.skillMarkerByName?.get(key)
+  if (existing) {
+    const merged = { ...((existing.input as Record<string, unknown> | undefined) ?? {}) }
+    if (merged[sighting] === undefined) merged[sighting] = seenAt
+    if (sighting === 'injectedAt' && existing.name !== skill) merged.injectedName = skill
+    existing.input = merged
+    return []
+  }
   if (ctx.lastSkillName === key) return []
   ctx.lastSkillName = key
-  return [
-    base(ctx, {
-      kind: 'skill',
-      stage: `skill:${skill}`,
-      tool: 'Skill',
-      name: skill,
-      input,
-      messageId
-    })
-  ]
+  const event = base(ctx, {
+    kind: 'skill',
+    stage: `skill:${skill}`,
+    tool: 'Skill',
+    name: skill,
+    input: { ...input, [sighting]: seenAt },
+    messageId
+  })
+  ;(ctx.skillMarkerByName ??= new Map()).set(key, event)
+  return [event]
 }
 
 export function transcriptUsageResult(msg: Record<string, unknown> | undefined, ctx: NormalizeCtx): TraceEvent | null {

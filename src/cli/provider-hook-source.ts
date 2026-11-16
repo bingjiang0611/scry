@@ -79,7 +79,7 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
   code="$(post_body | curl -s -o /dev/null -w '%{http_code}' --max-time "$deadline" \
     --unix-socket "$socket" -X POST \
     -H 'x-scry-protocol: ${PROTOCOL_VERSION}' -H '${RECORDER_VERSION_HEADER}: ${RECORDER_VERSION}' \
-    -H "x-scry-provider: $1" -H "x-scry-event: $2" \
+    -H "x-scry-provider: $1" -H "x-scry-event: $2" -H "x-scry-client-pid: $$" \
     -H 'content-type: application/octet-stream' --data-binary @- http://localhost${HOOK_EVENT_PATH} 2>/dev/null)"
   rc=$?
   [ "$rc" = "0" ] && [ "$code" = "200" ] && exit 0

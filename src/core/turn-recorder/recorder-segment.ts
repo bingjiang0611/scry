@@ -13,6 +13,7 @@ import {
   type RecorderHookInput, type RecorderHookResult, type TranscriptRead
 } from './recorder-contracts.js'
 import { beginOpenTurn, degradeEvidenceSections, storeLifecycleEvent } from './recorder-turn-state.js'
+import { hostProcessChain } from './host-process.js'
 import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript } from './recorder-transcript-background.js'
 import { snapshotSessionNetDiff } from './git.js'
 import { segmentFreeze } from './recorder-segment-diff.js'
@@ -149,7 +150,8 @@ export async function beginContinuationTurn(
       ...(previous.publishedEvents != null ? { publishedEvents: previous.publishedEvents } : {}),
       ...(previous.providerTurnId ? { providerTurnId: previous.providerTurnId } : {}),
       ...(requestSetId ? { requestSetId } : {})
-    }
+    },
+    input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
   )
   // A wake payload may omit the path; the continued turn's own transcript is the same file.
   if (transcriptPath && open.transcriptPath !== transcriptPath) {
@@ -192,6 +194,15 @@ export function segmentTranscriptView(open: OpenTurnState, transcript: Transcrip
     ownsRows: measurable,
     ...(open.continuation.providerTurnId ? { providerTurnId: open.continuation.providerTurnId } : {})
   }
+}
+
+/**
+ * 一条记录自己的起点：接续段从它自己的 wake 开始（前一段已经封箱，不能共用它的起点），
+ * 其余轮次用 transcript 里的真实提问时间；没有提问时间时才退回开启采集的时间。
+ */
+export function recordStartedAt(open: OpenTurnState, transcriptStartedAt?: string): string {
+  if (open.continuation) return open.startedAt
+  return transcriptStartedAt ?? open.startedAt
 }
 
 /** Label a continuation segment: no user prompt, no Git baseline, and content only after the seal. */

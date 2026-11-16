@@ -6,6 +6,7 @@ import type { TurnDiffSnapshot } from '../../shared/trace.js'
 import type { GitTurnDiffCapture } from './git.js'
 import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
+import { hostProcessState, processTable } from './host-process.js'
 import {
   ATTENTION_PROVIDERS, attentionIndexPresent, clearSessionAttention, markSessionAttention,
   markedSessions, publishAttentionIndexReady, withSessionAttentionLock, type MarkedSession
@@ -121,6 +122,11 @@ export interface RecorderOpenTurnState {
   terminalDiffs?: Array<{ repository: string; snapshot: TurnDiffSnapshot }>
   continuationProviderTurnIds?: string[]
   managedByScry?: boolean
+  /**
+   * The processes this turn's host sat in when it opened, nearest first. Only an observation taken
+   * at start time: recovery can say a recorded host is still running, never that the session is alive.
+   */
+  host?: import('./host-process.js').HostProcess[]
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalEventId?: string
@@ -333,6 +339,12 @@ export interface RecorderOpenTurnInspection {
   quietMs: number
   growing: boolean
   stale: boolean
+  /**
+   * Whether the processes that hosted this stale turn at start are still there. Set only for stale
+   * turns, and only because `recover --expire-open` refuses to close a turn whose host may still be
+   * waiting on a person or a tool: the operator needs to see why nothing was closed.
+   */
+  host?: 'running' | 'gone' | 'unknown'
 }
 
 /** When this turn last wrote anything, and how long ago that was. Shared by health and recovery. */
@@ -376,6 +388,15 @@ export async function recorderOpenTurns(
       growing: quietMs < quietThreshold,
       stale: open.status === 'open' && !open.managedByScry && quietMs >= quietThreshold
     })
+  }
+  // One process table read for every stale turn in this workspace, and none when nothing is stale.
+  const waiting = result.filter((turn) => turn.stale)
+  if (waiting.length) {
+    const table = await processTable()
+    for (const turn of waiting) {
+      const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(join(dataRoot, 'runtime', turn.provider, safeKey(turn.sessionId))))
+      turn.host = await hostProcessState(open?.host, table)
+    }
   }
   return result
 }

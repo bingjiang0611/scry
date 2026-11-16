@@ -21,18 +21,26 @@ export function captureRecordMetadata(
 
 /**
  * A claim happens mid-turn, so its Git baseline cannot contain work the turn already did before the
- * claim. Say that instead of presenting the snapshot as the whole turn.
+ * claim. Say that instead of presenting the snapshot as the whole turn, and name the measured lag
+ * between the turn's real prompt and the baseline when both are known.
  */
 export function applyCaptureBaselineCaveat(
   evidence: TurnEvidence,
-  capture: RecorderOpenTurnState['capture']
+  capture: RecorderOpenTurnState['capture'],
+  startedAt?: string
 ): void {
   const diffs = evidence.diff.value
   if (!capture?.baselineAt || evidence.diff.status !== 'available' || !diffs || diffs.length === 0) return
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN
+  const baselineMs = Date.parse(capture.baselineAt)
+  const lagMs = Number.isFinite(startedMs) && Number.isFinite(baselineMs) && baselineMs > startedMs
+    ? baselineMs - startedMs
+    : undefined
   evidence.diff = partial(
     diffs,
     evidence.diff.source,
-    'session capture started mid-turn: the Git baseline was taken at the claim, so changes this turn made before it are not in this snapshot',
+    'session capture started mid-turn: the Git baseline was taken at the claim, so changes this turn made before it are not in this snapshot' +
+      (lagMs != null ? ` (baseline ${lagMs} ms after the prompt)` : ''),
     'exact'
   )
 }

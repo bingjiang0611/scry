@@ -30,12 +30,14 @@ function callFromEvent(
   resultById: Map<string, TraceEvent>,
   mcpRef?: McpCallRef,
   order?: number,
-  completedOrder?: number
+  completedOrder?: number,
+  humanInterventionIds?: Set<string>
 ): TurnCall {
   const result = event.toolUseId ? resultById.get(event.toolUseId) : undefined
   const completedAt = result?.ts
   const started = Date.parse(event.ts)
   const completed = completedAt ? Date.parse(completedAt) : NaN
+  const humanWait = !!event.toolUseId && humanInterventionIds?.has(event.toolUseId) === true
   return {
     ...(event.toolUseId ? { id: event.toolUseId } : {}),
     ...(event.parentToolUseId ? { parentId: event.parentToolUseId } : {}),
@@ -54,6 +56,8 @@ function callFromEvent(
     ...(result?.text || result?.output ? { outputSummary: outputSummary(result.output ?? result.text) } : {}),
     ...(result?.isError ? { error: outputSummary(result.output ?? result.text) ?? 'tool failed' } : {}),
     ...(event.fileOp && event.filePath ? { file: { operation: event.fileOp, path: event.filePath } } : {}),
+    // 这段墙钟是等人回答，不是工具执行：标出配对介入，避免与人工等待时间重复计入。
+    ...(humanWait && event.toolUseId ? { humanInterventionId: event.toolUseId } : {}),
     ...(event.isMcp
       ? {
           mcp: {
@@ -145,19 +149,23 @@ export function aggregateCallEvidence(
   const starts = logicalEvents.filter((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )
+  // 介入的问题是它自己的工具请求：同一 toolUseId 的调用墙钟属于人工等待。
+  const humanInterventionIds = new Set(logicalEvents
+    .map((event) => event.intervention?.request.questionId)
+    .filter((id): id is string => !!id))
   // AgentTurnRecord v1 的 Tool / Skill / MCP 是互斥 evidence 容器。Agent 为兼容 v1 仍存入
   // tools，但用 category=agent 明确分列；MCP 不能同时再进入 tools，否则总调用会重复相加。
   const toolCandidates: CallCandidate[] = starts
     .filter((event) => event.kind === 'agent' || (event.kind === 'tool' && !event.isMcp))
     .map((event) => ({
-      call: callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)),
+      call: callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event), humanInterventionIds),
       event,
       section: 'tools'
     }))
   const skillCandidates: CallCandidate[] = starts
     .filter((event) => event.kind === 'skill')
     .map((event) => ({
-      call: callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event)),
+      call: callFromEvent(event, resultById, undefined, eventOrder.get(event), resultOrder(event), humanInterventionIds),
       event,
       section: 'skills'
     }))
@@ -166,7 +174,7 @@ export function aggregateCallEvidence(
     .flatMap((event) => {
       const refs = mcpCallsForEvent(event)
       return refs.map((ref): CallCandidate => ({
-        call: callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event)),
+        call: callFromEvent(event, resultById, ref, eventOrder.get(event), resultOrder(event), humanInterventionIds),
         event,
         section: 'mcps'
       }))

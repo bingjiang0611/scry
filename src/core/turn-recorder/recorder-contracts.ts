@@ -29,6 +29,11 @@ export interface RecorderHookInput {
    * process would drop the delivery entirely.
    */
   deferDelivery?: boolean
+  /**
+   * Pid of the process that delivered this event, when the transport knows it (the hook script
+   * passes its own `$$`). Recovery uses the chain around it to tell a live host from a dead one.
+   */
+  ancestryFromPid?: number
 }
 
 export interface RecorderHookResult {
