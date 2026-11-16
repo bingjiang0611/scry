@@ -247,6 +247,22 @@ export const SIDEBAR_ACTIVITY_COPY = {
   overflow: (count: number) => `另有 ${count} 条，请搜索定位`
 } as const
 
+/** Sidebar notices for sessions the user is not looking at; history stays in the activity view. */
+export const BACKGROUND_NOTICE_COPY = {
+  region: '后台通知',
+  open: (title: string) => `打开会话：${title}`,
+  dismiss: (title: string) => `关闭通知：${title}`,
+  untitled: '未命名会话',
+  kind: {
+    attention: '需要回复',
+    failed: '运行失败',
+    interrupted: '运行中断',
+    cancelled: '运行已取消',
+    completed: '已完成',
+    updated: '有新结果'
+  }
+} as const
+
 export { REMOTE_ACCESS_COPY, REMOTE_ATTACHMENTS_COPY, REMOTE_SESSION_COPY } from './remote-copy'
 
 export const SLASH_COMMAND_COPY = {

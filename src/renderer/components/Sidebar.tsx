@@ -28,6 +28,8 @@ import { useTabIndicator } from '../hooks/useTabIndicator'
 import { browserStorage } from '../browser-storage'
 import { persistSidebarView, readStoredSidebarView, type SidebarView } from '../sidebar-view'
 import { Tabs } from './primitives/Tabs'
+import { BackgroundNotices } from './BackgroundNotices'
+import type { BackgroundNotice } from '../background-notices'
 import { Button } from './primitives/Button'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
@@ -46,6 +48,9 @@ export const Sidebar = memo(function Sidebar({
   runningRunIds = new Set<string>(),
   waitingQuestionRunIds = new Set<string>(),
   unreadSessionKeys = new Set<string>(),
+  backgroundNotices = [],
+  onOpenBackgroundNotice,
+  onDismissBackgroundNotice,
   backgroundWorkByRun = {},
   version = '0.1.0',
   onNewChat,
@@ -89,6 +94,10 @@ export const Sidebar = memo(function Sidebar({
   /** One-pass child totals/running/attention per parent, already computed by the shell. */
   waitingQuestionRunIds?: ReadonlySet<string>
   unreadSessionKeys?: ReadonlySet<string>
+  /** Notices for sessions the user is not looking at; shown above the settings footer. */
+  backgroundNotices?: readonly BackgroundNotice[]
+  onOpenBackgroundNotice?: (notice: BackgroundNotice) => void
+  onDismissBackgroundNotice?: (key: string) => void
   backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
   version?: string
   onNewChat: () => void
@@ -342,6 +351,9 @@ export const Sidebar = memo(function Sidebar({
           }}
         />
       )}
+
+      {onOpenBackgroundNotice && onDismissBackgroundNotice && <BackgroundNotices notices={backgroundNotices}
+        onOpen={onOpenBackgroundNotice} onDismiss={onDismissBackgroundNotice} />}
 
       {archiveUndo && onUndoArchive && (
         <div className="sb-undo" role="status">
