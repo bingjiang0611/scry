@@ -443,8 +443,18 @@ export async function recorderStaleOpenTurns(
   dataRoot: string,
   expiryMs: number,
   now = Date.now()
-): Promise<Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }>> {
-  const result: Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }> = []
+): Promise<Array<{
+  provider: ProviderId
+  sessionId: string
+  startedAt: string
+  ageMs: number
+  /** The newest thing this turn wrote, so a reader can tell "idle for a day" from "age only". */
+  lastEventAt?: string
+  quietMs: number
+  /** Still writing inside the stale window: slow, not stuck. */
+  growing: boolean
+}>> {
+  const result: Awaited<ReturnType<typeof recorderStaleOpenTurns>> = []
   for (const { provider, sessionDir } of await attentionSessions(dataRoot)) {
     const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
     if (!open || open.status !== 'open' || open.managedByScry) continue
@@ -455,7 +465,16 @@ export async function recorderStaleOpenTurns(
       // Unreadable transcript counts as no activity: the turn cannot converge from it either.
       if (touchedAt != null && now - touchedAt <= expiryMs) continue
     }
-    result.push({ provider, sessionId: open.sessionId, startedAt: open.startedAt, ageMs: now - startedAt })
+    const { lastAt, quietMs } = await openTurnQuiet(sessionDir, open, now)
+    result.push({
+      provider,
+      sessionId: open.sessionId,
+      startedAt: open.startedAt,
+      ageMs: now - startedAt,
+      ...(lastAt ? { lastEventAt: new Date(lastAt).toISOString() } : {}),
+      quietMs: Number.isFinite(quietMs) ? quietMs : now - startedAt,
+      growing: quietMs < STALE_OPEN_TURN_QUIET_MS
+    })
   }
   return result
 }

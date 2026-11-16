@@ -18,7 +18,7 @@
   - 还在等工具结果（`stop_reason: tool_use`）、有未完成的后台任务、transcript 读不到或身份对不上的轮次一律保持 open：静默本身不是结束证据。
 - **结束时间的证据等级说清楚。** 收到本轮 Stop 时，`completedAt` 取 Stop 事件时间，`termination.quality` 为 `exact`，`completedAtSource` 记来源（`provider_terminal_event`：宿主自带时间戳；`recorder_observed_terminal`：宿主不写时间，取收到 Stop 的时刻）；Stop 之后还有本轮工作（后台唤醒、继续干活）时不采用这个时间，退回最后可观测活动并标 `estimated`。没有 Stop 而被下一轮顶替、按 transcript 推定结束、或会话结束时收尾的轮次，结束时间都是下界，`quality: 'estimated'`，`termination.omissionReason` 写明原因。
 - **哪些证据够标 `exact`。** 只有两种：收到本轮 Stop 且其后没有本轮 Agent 工作（claude / codex / qoder / pi 都会发 Stop，时间用事件自身或收到时刻）；或宿主终态事件自带时间戳（`provider_terminal_event`）。以下几种一律 `estimated`：transcript 解析出的终态（Codex / Pi 的 transcript 会写终态状态，时间是最后一行时间，不是宿主声明的结束）、recorder 自己观测到的 idle/会话结束（OpenCode 的 idle 通知没有按轮次的时间戳，SessionEnd 是 Scry 的观测而不是 Provider 的结论）、最后可观测活动、以及按开头时间兜底。
-- **health 能看见卡住的轮次。** `health.json` 新增 `openTurns` 与 `staleOpenTurns`（静默超过 30 分钟且未进入收尾的 open 轮次）；`scry status` 的 `openTurnsPending` 改为「等待收尾 + 仍 open」，不再只数 `closing`/managed 轮次，`scry records verify` 的 advisory 与 `scry doctor` 的 `turns.stale` 一并列出。`scry recorder recover` 输出 `{recovered, pending, expired}`，`expired` 只统计被迫收尾的轮次。
+- **health 能看见卡住的轮次。** `health.json` 新增 `openTurns` 与 `staleOpenTurns`（静默超过 30 分钟且未进入收尾的 open 轮次）；`scry status` 的 `openTurnsPending` 改为「等待收尾 + 仍 open」，不再只数 `closing`/managed 轮次，`scry records verify` 的 advisory 与 `scry doctor` 的 `turns.stale` 一并列出；doctor 逐条给出该轮最后写下东西的时间、已静默多久、是否仍在增长（还在增长的是慢，不是卡住），健康计数里的 `pendingCount` 只数等待收尾的条目。`scry recorder recover` 输出 `{recovered, pending, expired}`，`expired` 只统计被迫收尾的轮次。
 
 ## 未发布：OpenCode / Pi 终态收敛
 

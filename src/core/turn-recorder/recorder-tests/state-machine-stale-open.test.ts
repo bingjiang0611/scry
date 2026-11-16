@@ -114,6 +114,7 @@ export function registerStaleOpenTurnSuite(): void {
     const [turn] = await recorderOpenTurns(join(root, '.scry'))
     expect(turn).toMatchObject({ stale: true, growing: false })
     expect(turn.quietMs).toBeGreaterThan(30 * MINUTE)
+    expect(turn.lastEventAt).toBeTruthy()
 
     // 操作者知道进程已经没了：这时才允许按 interrupted 收尾，并写明来源。
     await expect(recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true }))

@@ -194,7 +194,9 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       status: staleOpenTurns.length > 0 || health.staleOpenTurns > 0 ? 'warn' : 'pass',
       detail: staleOpenTurns.length > 0
         ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h; ` +
-          `${health.openTurns} open in total, ${health.staleOpenTurns} silent past the 30-minute window`
+          `${health.openTurns} open in total, ${health.staleOpenTurns} silent past the 30-minute window; ` +
+          staleOpenTurns.map((turn) => `${turn.provider}/${turn.sessionId}: last ${turn.lastEventAt ?? 'nothing recorded'} ` +
+            `(${Math.round(turn.quietMs / 60_000)}min ago, ${turn.growing ? 'still writing' : 'silent'})`).join('; ')
         : health.staleOpenTurns > 0
           ? `${health.staleOpenTurns} of ${health.openTurns} open turn(s) wrote nothing for 30 minutes; under 24h, so not yet listed individually`
           : `no stale open turn (${health.openTurns} open)`,
