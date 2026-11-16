@@ -138,7 +138,11 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
         return 2
       }
     }
-    const result = await recoverRecorder(workspace, process.env, undefined, scope)
+    // Only a person can assert that a host process is gone. Without this, a Provider that never
+    // writes a terminal event leaves its turn open forever once the session stops producing events.
+    const result = await recoverRecorder(workspace, process.env, undefined, scope, {
+      expireOpen: args.flags.has('expire-open')
+    })
     print(result)
     return scope && result.pending > 0 ? 3 : 0
   }

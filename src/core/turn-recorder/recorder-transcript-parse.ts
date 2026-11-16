@@ -359,6 +359,7 @@ export async function parseTranscriptSnapshot(args: {
     complete: stable && !snapshot.truncated && qoderSidecarsComplete,
     ...(incompleteReasons.length ? { incompleteReasons } : {}),
     ...(turn?.userText ? { userText: turn.userText } : {}),
+    ...(turn?.stopReason ? { stopReason: turn.stopReason } : {}),
     events,
     observable: {
       tools: turns.length > 0 || qoderSidecarObservable?.tools === true,

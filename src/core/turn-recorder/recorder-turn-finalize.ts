@@ -151,7 +151,11 @@ export async function finalizeOpenTurn(
     turnDiff
   }))
   const startedAt = transcript.startedAt ?? open.startedAt
-  const end = resolveTurnEnd(open, startedAt, transcript, mergedEvents, options.forcedReason ? 'expired' : undefined)
+  const end = resolveTurnEnd(
+    open, startedAt, transcript, mergedEvents,
+    options.forcedReason ? 'expired' : undefined,
+    options.forcedReason
+  )
   const completedAt = end.completedAt
   const startedMs = Date.parse(startedAt)
   const completedMs = Date.parse(completedAt)

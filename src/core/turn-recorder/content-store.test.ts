@@ -72,16 +72,19 @@ describe('recorder content store', () => {
     expect(evidence.tools.value![0].outputContent?.contentRef).toEqual(field.contentRef)
   })
 
-  it('keeps a reference when a later turn budget truncates a small field', async () => {
+  it('keeps a reference when the turn budget leaves no room for a small field', async () => {
     const dataRoot = await root()
+    // Zero turn budget: every body is dropped from the record, which is exactly the state whose
+    // reference must survive. A JSON body that cannot fit any valid form also spends no budget, so
+    // this is the only setting where the field after it is dropped for budget reasons.
     const persisted = await persistToolEventContent(events('small complete body'), {
-      toolOutput: 'full-redacted', toolContentFieldBytes: 1024, toolContentTurnBytes: 4
+      toolOutput: 'full-redacted', toolContentFieldBytes: 1024, toolContentTurnBytes: 0
     }, 'fixture', (content, encoding) => writeRecorderContent(dataRoot, content, encoding))
     expect(persisted[1].outputContent).toMatchObject({ storage: 'complete', contentRef: { bytes: 19 } })
 
     const call = aggregateTurnEvidence({
       events: persisted,
-      toolContentPolicy: { toolOutput: 'full-redacted', toolContentFieldBytes: 1024, toolContentTurnBytes: 4 }
+      toolContentPolicy: { toolOutput: 'full-redacted', toolContentFieldBytes: 1024, toolContentTurnBytes: 0 }
     }).tools.value![0]
     expect(call.outputContent).toMatchObject({ storage: 'omitted', savedBytes: 0, contentRef: { bytes: 19 } })
     expect(await readRecorderContent(dataRoot, call.outputContent!.contentRef!)).toBe('small complete body')

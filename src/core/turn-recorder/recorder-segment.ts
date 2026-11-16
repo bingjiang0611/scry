@@ -8,7 +8,8 @@ import {
 } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import {
-  BACKGROUND_WAKE_PROVIDERS, providerTurnIdOf, stringAt, terminalStatus, timestampOf, transcriptPathOf,
+  BACKGROUND_WAKE_PROVIDERS, explicitTimestampOf, providerTurnIdOf, stringAt, terminalStatus, timestampOf,
+  transcriptPathOf,
   type RecorderHookInput, type RecorderHookResult, type TranscriptRead
 } from './recorder-contracts.js'
 import { beginOpenTurn, degradeEvidenceSections, storeLifecycleEvent } from './recorder-turn-state.js'
@@ -82,6 +83,14 @@ export async function holdSeal(
     if (sealed.length) open.frozenDiffs = sealed
   }
   open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
+  // A hold for this turn's own background work is still this turn's Stop: if later activity
+  // cancels the hold, a superseding prompt must not report the turn as interrupted, and it still
+  // knows when the turn ended. An unidentified early terminal may belong to an earlier turn, so it
+  // proves nothing about this one.
+  if (reason === 'pending_background_tasks') {
+    open.stopObservedAt = terminalAt
+    open.stopObservedAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
+  }
   open.deferredTerminalAt = new Date().toISOString()
   open.deferredTerminalEventId = eventId
   open.deferredTerminalReason = reason

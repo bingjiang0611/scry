@@ -90,7 +90,7 @@ export async function applyHookLocked(
           open.managedByScry ? 'managed_replaced' : 'legacy_migration'
         )
       } else {
-        const fallback = open.status === 'closing' ? 'completed' : 'interrupted'
+        const fallback = open.status === 'closing' || open.stopObservedAt ? 'completed' : 'interrupted'
         protectNextStart ||= fallback === 'interrupted' &&
           STALE_TERMINAL_PROVIDERS.has(input.provider) &&
           !open.providerTurnId &&
@@ -260,6 +260,12 @@ export async function applyHookLocked(
   open.terminalAt = terminalAt
   open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
   open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
+  // A session end is not this turn finishing: only the Provider's own terminal event makes a
+  // superseding prompt publish the turn as completed, at the time that event reported.
+  if (!sessionEndEvent) {
+    open.stopObservedAt = terminalAt
+    open.stopObservedAtSource = open.terminalAtSource
+  }
   // A session/process end is not a completion, and it fires while the Provider is shutting down
   // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
   // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot

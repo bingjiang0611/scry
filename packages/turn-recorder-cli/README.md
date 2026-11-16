@@ -68,7 +68,7 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 `status` 的三个阶段不可互相代替:`configured` 只证明配置写入,`hookSeen` 证明 hook 真的到达 recorder,`recordSeen` 才证明轮次已提交。`trusted` 永远是 `unknown` —— Codex 需要交互式确认,其余 Provider 不向 CLI 暴露信任状态;写 `n/a` 等于声称"不需要信任"。
 
-`openTurnsPending`（未收敛的 open turn）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。
+`openTurnsPending`（本工作区还没有 record 的轮次：等待收尾的 + 仍 open 的）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。健康计数里 `pendingCount` 只数等待收尾的条目，`openTurns` / `staleOpenTurns` 单独数仍 open 的轮次（后者已静默超过 30 分钟）。
 
 Agent、skill 与提示词不应主动调用这些命令。
 

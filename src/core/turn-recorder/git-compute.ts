@@ -148,6 +148,60 @@ async function untrackedPaths(
   }
 }
 
+/**
+ * Prove with one status read that a clean baseline's repository did not change.
+ *
+ * Returns the collection evidence when the repository is provably untouched, and undefined when the
+ * full pipeline has to run: a changed path, a moved HEAD, a tool event that named a path inside this
+ * repository, or a check that could not finish. Anything unproven takes the expensive path, so a skip
+ * never hides a change.
+ */
+async function unchangedSinceCleanBaseline(
+  capture: GitTurnDiffCapture,
+  options: GitTurnDiffFinishOptions,
+  deadline: number
+): Promise<TurnDiffCollection | undefined> {
+  if (options.forceFull === true) return undefined
+  if (process.env.SCRY_TURN_DIFF_STRATEGY?.trim().toLowerCase() === 'full') return undefined
+  if (!capture.baselineClean || !capture.repoRoot || !capture.head) return undefined
+  // This turn's own tool events named a path here: the diff is needed whatever a status read says,
+  // and asking would only add another Git process.
+  if (targetedPathspec(capture, options.structuredPaths ?? []).length > 0) return undefined
+  const started = Date.now()
+  try {
+    const stdout = await gitCommand(
+      snapshotGitArgs([], ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal', '--',
+        ...(capture.pathspec ?? [capture.scope ?? '.'])]),
+      { cwd: capture.repoRoot, deadline }
+    )
+    // The header carries HEAD; every other record names a changed path or an untracked entry.
+    const records = stdout.split('\0').filter(Boolean)
+    const head = records.find((record) => record.startsWith('# branch.oid '))?.slice('# branch.oid '.length).trim()
+    if (!head || head !== capture.head) return undefined
+    if (records.some((record) => !record.startsWith('# '))) return undefined
+    // `status` deliberately skips assume-unchanged entries, and a modification behind that flag is
+    // still this turn's change. Only the full pipeline clears the shield; here it just means "ask again".
+    if (await anyAssumeUnchanged(capture, deadline)) return undefined
+    return { strategy: 'unchanged', evidence: 'git_status', candidatePathCount: 0, discoveryMs: Date.now() - started }
+  } catch {
+    return undefined
+  }
+}
+
+/** True when the index hides paths from `status`; any doubt is reported as true. */
+async function anyAssumeUnchanged(capture: GitTurnDiffCapture, deadline: number): Promise<boolean> {
+  try {
+    const stdout = await gitCommand(
+      snapshotGitArgs([], ['ls-files', '-v', '-z', '--', ...(capture.pathspec ?? [capture.scope ?? '.'])]),
+      { cwd: capture.repoRoot!, deadline }
+    )
+    // Lowercase tags mark assume-unchanged entries; a normal cached file is reported as `H`.
+    return stdout.split('\0').some((record) => /^[a-z] /.test(record))
+  } catch {
+    return true
+  }
+}
+
 export async function computeGitTurnDiff(
   capture: GitTurnDiffCapture,
   deadlineMs: number,
@@ -158,6 +212,39 @@ export async function computeGitTurnDiff(
 ): Promise<TurnDiffSnapshot> {
   const started = Date.now()
   let afterAt = new Date(started).toISOString()
+  if (!sharedAfter && capture.status === 'ready' && capture.beforeTree && capture.tempDir && capture.objectDir) {
+    // A clean baseline is the start commit, so deciding "this repository did not change" costs one
+    // status read instead of the whole discovery/targeted/fallback pipeline. Anything unproven takes
+    // that pipeline, so the skip can only ever save work, never hide a change.
+    const unchanged = await unchangedSinceCleanBaseline(capture, options, started + deadlineMs)
+    if (unchanged) {
+      if (onAfter) {
+        // A segment a later background wake can continue still needs its end state, and that state is
+        // the start commit: hand over the tree reference the repository already holds instead of
+        // writing a snapshot of a worktree that did not change. The published index path is never read
+        // for a commit baseline, so it stays the empty path the full pipeline would have filled.
+        onAfter({
+          tree: capture.beforeTree,
+          afterAt,
+          indexFile: join(capture.tempDir, 'after.index'),
+          objectDir: capture.objectDir,
+          ...(capture.alternateObjectDirs ? { alternateObjectDirs: capture.alternateObjectDirs } : {}),
+          filterOverrides: [],
+          collection: unchanged
+        })
+      }
+      return terminalSnapshot(
+        capture,
+        'captured',
+        undefined,
+        [],
+        afterAt,
+        Date.now() - started,
+        consume ? await cleanupCapture(capture) : 'ok',
+        unchanged
+      )
+    }
+  }
   if (capture.status !== 'ready' || !capture.repoRoot || !capture.scope || !capture.beforeTree || !capture.tempDir || !capture.objectDir) {
     return terminalSnapshot(
       capture,

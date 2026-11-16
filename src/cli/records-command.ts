@@ -230,10 +230,20 @@ export async function turnsCommand(args: ParsedArgs): Promise<number> {
       if (!identity.role.coverage.complete) advisories.push(`turn role incomplete: ${JSON.stringify(identity.role.statusCounts)}`)
       if (!identity.taskLink.coverage.complete) advisories.push(`task link incomplete: ${JSON.stringify(identity.taskLink.statusCounts)}`)
     }
-    if (health && health.pendingCount > 0) advisories.push(`open turns pending recovery: ${health.pendingCount}`)
+    if (health && health.pendingCount + health.openTurns > 0) {
+      advisories.push(`turns without a record yet: ${health.openTurns} open, ${health.pendingCount} awaiting finalization` +
+        (health.staleOpenTurns > 0 ? `; ${health.staleOpenTurns} open turn(s) silent past the stale window` : ''))
+    }
     // `maxSequence` is internal allocation evidence for doctor; keep this frozen CLI shape unchanged.
     const { maxSequence: _maxSequence, ...visible } = result
-    print({ ...visible, openTurnsPending: health?.pendingCount ?? null, identity, advisories })
+    print({
+      ...visible,
+      openTurnsPending: health ? health.pendingCount + health.openTurns : null,
+      openTurns: health?.openTurns ?? null,
+      staleOpenTurns: health?.staleOpenTurns ?? null,
+      identity,
+      advisories
+    })
     return result.ok ? 0 : 4
   }
   throw new Error('usage: scry turns list|show|timeline|summary [sessionId|--all]|export|export-bundle|content|verify ...')
