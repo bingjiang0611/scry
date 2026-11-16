@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { qodercliAuth, type SDKUserMessage } from '@qoder-ai/qoder-agent-sdk'
 import type { AgentPermissionMode } from '../../shared/runtime'
+import { maskSecrets } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import { authorizedMcpServers } from '../mcp-config'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from '../process-diagnostics'
@@ -41,6 +42,37 @@ export function livePrompt(
       await wait
     })(),
     release
+  }
+}
+
+const STDERR_KEPT_CHARS = 8_192
+const STDERR_REPORTED_CHARS = 4_096
+
+/**
+ * The end of the CLI's stderr, for a run that fails. The SDK keeps stderr only for a CLI
+ * it spawned itself; Scry spawns this one (for its process identity), so without this
+ * an exit reads "Qoder CLI process exited with code 1" and nothing says why. A diagnostic,
+ * not Provider evidence: bounded and with secrets masked before it reaches any reason.
+ */
+export class QoderStderrTail {
+  #text = ''
+  #truncated = false
+
+  push(chunk: string): void {
+    this.#text += chunk
+    if (this.#text.length <= STDERR_KEPT_CHARS) return
+    this.#text = this.#text.slice(-STDERR_KEPT_CHARS)
+    this.#truncated = true
+  }
+
+  /** The error the run fails with, followed by the CLI's own last words when it said any. */
+  attach(error: unknown): unknown {
+    // A cut buffer starts mid-line, possibly mid-secret: drop that line before masking.
+    const kept = this.#truncated ? this.#text.slice(this.#text.indexOf('\n') + 1) : this.#text
+    const tail = (maskSecrets(kept.trim()) ?? '').slice(-STDERR_REPORTED_CHARS)
+    if (!tail || !(error instanceof Error) || error.message.includes(tail)) return error
+    error.message = `${error.message}\nQoder CLI stderr (last ${tail.length} chars, secrets masked):\n${tail}`
+    return error
   }
 }
 
@@ -92,7 +124,8 @@ export function qoderOptions(
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
   mcpExecution?: AuthorizedMcpExecution,
-  managedIdentity?: ProviderRunRequest['managedRecorderIdentity']
+  managedIdentity?: ProviderRunRequest['managedRecorderIdentity'],
+  stderrTail?: QoderStderrTail
 ): Record<string, unknown> {
   const executable = qoderExecutable()
   if (!executable) throw new Error('Qoder CLI 未找到')
@@ -153,6 +186,9 @@ export function qoderOptions(
             const identityPromise = captureProcessIdentity(child.pid)
             if (child.pid) onPid(child.pid, identityPromise)
             child.once('exit', (code, signal) => onExit?.(code, signal))
+            // Read even when nobody keeps it: an unread pipe would stall a CLI that writes a lot.
+            child.stderr?.setEncoding('utf8')
+            child.stderr?.on('data', (chunk: string) => stderrTail?.push(chunk))
             options.signal.addEventListener('abort', () => signalProcessTree(identityPromise, 'SIGTERM'), { once: true })
             return child
           }
