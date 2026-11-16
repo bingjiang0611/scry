@@ -1,10 +1,24 @@
-export async function exerciseSidebarPerformance({ webContents, pointer, read, wait, click }) {
+export async function exerciseSidebarPerformance({ webContents, pointer, read, wait, click, remotePollControl = false }) {
+  if (remotePollControl) await wait(`Number(document.body.dataset.remoteProbePublication) >= 2`)
+  const initialPublications = remotePollControl ? await read('Number(document.body.dataset.remotePublications)') : 0
   const initialRenders = await read('Number(document.body.dataset.sidebarRenders)')
   for (let index = 1; index <= 20; index++) {
     await click('#stream')
     await wait(`document.querySelector('#stream').textContent === 'Stream ${index}'`)
+    if (remotePollControl && index === 10) {
+      // Wait for an actual production 3000ms poll receipt, not a sleep or retry.
+      await wait(`Number(document.body.dataset.remotePublications) > ${initialPublications} && document.body.dataset.remoteProbePublication === document.body.dataset.remotePublications`)
+      await read(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+      console.log('SCRY_REMOTE_POLL_RECEIPT=' + JSON.stringify(await read(`({
+        stream: document.querySelector('#stream').textContent,
+        publications: Number(document.body.dataset.remotePublications) - ${initialPublications},
+        sidebarRenders: Number(document.body.dataset.sidebarRenders) - ${initialRenders},
+        error: document.body.dataset.remoteProbeError
+      })`)))
+    }
   }
   const streamRenders = await read('Number(document.body.dataset.sidebarRenders)') - initialRenders
+  console.log('SCRY_SIDEBAR_STREAM_WORK=' + JSON.stringify({ streamCommits: 20, historicalSessions: 277, sidebarStreamRenders: streamRenders }))
   if (streamRenders !== 0) throw new Error(`Streaming rerendered Sidebar ${streamRenders} times`)
   await click('.sb-sess')
   await wait(`document.body.dataset.pickedTick === '20'`)

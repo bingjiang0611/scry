@@ -9,11 +9,6 @@ export const WORKDIR_PICKER_COPY = {
   removeRecentLabel: (dir: string) => `从最近文件夹中移除 ${dir}`
 } as const
 
-export const AGENT_PICKER_COPY = {
-  menuLabel: '选择 Agent',
-  empty: '未检测到 agent CLI：先安装并登录一个 Provider CLI，再重新扫描 PATH。'
-} as const
-
 export const PI_PICKER_COPY = {
   nativePi: '原生 Pi',
   detail: (detected: boolean, version?: string) =>

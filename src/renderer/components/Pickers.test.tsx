@@ -56,3 +56,11 @@ describe('Pi picker launcher aliases', () => {
     expect(choices(picker([claude, detected, saved], claude.id))).toEqual([detected.id])
   })
 })
+
+describe('Agent Profile label', () => {
+  it('retains the full long name in text and tooltip', () => {
+    const name = 'Claude · A deliberately long workspace Agent Profile name'
+    const markup = picker([{ ...detected, name }])
+    expect(markup).toContain(`<span title="${name}">${name}</span>`)
+  })
+})

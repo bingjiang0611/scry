@@ -284,7 +284,7 @@ select:focus-visible,
 }
 
 .sb-section {
-  margin: 24px 8px 8px;
+  margin: var(--space-3) var(--space-2) var(--space-2);
   color: var(--dim2);
   font: var(--weight-medium) var(--text-xs)/16px var(--font-ui);
   letter-spacing: 0;

@@ -152,11 +152,11 @@
 /* A turn already contains both the user prompt and assistant response. Keep the
    boundary visible without stacking two oversized padding bands between turns. */
 .chat-body .transcript-turn {
-  padding-bottom: 16px;
+  padding-bottom: var(--space-3);
 }
 
 .chat-body .transcript-turn + .transcript-turn {
-  padding-top: 24px;
+  padding-top: var(--space-4);
 }
 
 .chat-body .turn-assistant {
@@ -177,12 +177,22 @@
   transform: none;
 }
 
+:root[data-theme='light'] .chat-body .turn-assistant {
+  background: var(--surface-muted);
+}
+
+:root[data-theme='light'] .chat-body .transcript-turn:hover .turn-assistant,
+:root[data-theme='light'] .chat-body .transcript-turn:focus-within .turn-assistant {
+  background: var(--surface-hover);
+}
+
 .chat-body .who {
   min-height: 22px;
   margin-bottom: 4px;
   padding-bottom: 4px;
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  line-height: 1.4;
   letter-spacing: 0.015em;
 }
 
@@ -202,7 +212,7 @@
 }
 
 .chat-body .turn-flow {
-  gap: 12px;
+  gap: var(--space-2);
   margin: 4px 0 0;
   padding-left: 0;
 }
@@ -258,6 +268,16 @@
   transition: color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
+.chat-body .files-summary {
+  margin-top: var(--space-2);
+  border-radius: var(--r-sm);
+}
+
+.chat-body .files-summary > summary {
+  min-height: 36px;
+  padding-inline: var(--space-3);
+}
+
 .chat-body .turn-hooks-summary > summary:hover,
 .chat-body .files-summary > summary:hover {
   background: var(--surface-hover);
@@ -292,7 +312,8 @@
   border: 0;
   background: transparent;
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  color: var(--dim2);
   letter-spacing: 0.015em;
 }
 
@@ -302,10 +323,16 @@
   margin: 0;
 }
 
-.chat-body .turn-footer .lbl {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.08em;
+.chat-body .turn-footer .stat b {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.chat-body .turn-footer .stat .lbl {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 

@@ -88,8 +88,8 @@
 .chat-body .who .runid,
 .chat-body .who .mini,
 .chat-body .who .mini b {
-  color: var(--dim3);
-  font-size: var(--text-compact-size);
+  color: var(--dim2);
+  font-size: var(--text-sm);
 }
 
 .chat-body .model-text {
@@ -283,8 +283,16 @@
   font-size: var(--text-sm);
 }
 
+.runtime-composer .composer-action-controls .clipick {
+  flex: 0 0 auto;
+}
+
+.runtime-composer .model-effort-picker {
+  flex: 0 1 auto;
+}
+
 .runtime-composer .composer-action-controls .clibtn {
-  max-width: 126px;
+  max-width: 192px;
 }
 
 .runtime-composer .composer-action-controls .clibtn > span:not(.agicon) {

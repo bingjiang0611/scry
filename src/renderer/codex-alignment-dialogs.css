@@ -278,10 +278,6 @@
     max-width: 70%;
   }
 
-  .runtime-composer .composer-action-controls .clibtn {
-    max-width: 96px;
-  }
-
   .runtime-composer .model-effort-model {
     max-width: 104px;
   }
@@ -316,20 +312,14 @@
     justify-content: flex-end;
   }
 
-  /* The Provider chip keeps its own width budget: a 76px cap showed only "c…" in a
-     400px column. The model picker is the control that shrinks instead. */
-  .composer-action-controls .clipick {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
+  /* Keep the Agent Profile readable; the model picker absorbs the remaining width. */
   .runtime-composer .composer-action-controls .clibtn {
     width: auto;
-    max-width: min(168px, 42cqi);
+    max-width: 192px;
     padding-inline: 8px;
   }
 
-  .model-effort-picker {
+  .runtime-composer .model-effort-picker {
     flex: 1 1 96px;
   }
 
