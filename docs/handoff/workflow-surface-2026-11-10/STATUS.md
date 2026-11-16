@@ -1,4 +1,16 @@
-# 第八轮待核验（H1 通过，H2/H3 未通过，H4 部分通过，H5 unit 未通过）
+# 第九轮进行中（第八轮已核验，Hook 停止已修，两项采证）
+
+**审查方核验第八轮（2026-11-16）。** 以下已在 CLI 1.1.89 上证实：H1 启动窗口停止与负对照；H2 后台 Agent 的流关闭顺序（`Operation aborted` 消失）；H4 长命令审批、reload 后续发、输出中途停止。
+
+- H4 Hook 窗口停止要重启才提交：已改为实时提交（`71ffdb5d`）。
+- H2 recorder 身份不一致、H3 分支找不到归档：报错现在附带计数（`3eb50e4d`）。审查方先前对 H2 的假设已用测试推翻，根因未定，本轮采证。
+- H5 unit 超时：本机 node 启动要 0.9 秒，用例每条要启动约 6 个进程，属于环境成本。打包时的 SIGKILL 重试后通过，原因未知。
+
+清单仍是 `unsupported`，判断正确。做法见 [R9.md](R9.md)，启动提示见 [PROMPT-R9.md](PROMPT-R9.md)。
+
+## 第八轮报告（已核验）
+
+### 第八轮待核验（H1 通过，H2/H3 未通过，H4 部分通过，H5 unit 未通过）
 
 [H1](reports/H1.md) 在本机 Qoder CLI 1.1.89 的独立 test 实例里，启动窗口 114/367/712 ms 三次停止均显示中断、native 0、本 run 守护进程从未开始，下一轮完成；不点停止的负对照正常完成。每例保存主进程标准输出，脱敏结构见 [H1 证据](evidence/r8/h1-startup.json)。[H2](reports/H2.md) 两个后台 Agent 的通知均到达，`query closing` 晚于最后通知后的 result，未再出现 `Operation aborted`；但 managed recorder 仍报 Provider turn id 与 open lifecycle identity 不同，记录未提交，等待 UI 截图未取得。[脱敏时间线](evidence/r8/h2-timeline.json)。[H3](reports/H3.md) 在已完成轮次上点击分支后，报错原因是「没有找到该会话的归档」；只交原因，不修改产品。[H4](reports/H4.md) 长命令审批允许、新对话 reload 续发、输出中途停止通过；Hook 窗口停止初始无记录且 UI 报 recorder open identity 不可用，保留现场并重启后才恢复 interrupted 记录。实时收口不算通过。[脱敏回归结构](evidence/r8/h4-regressions.json)。[H5](reports/H5.md) 干净 worktree 的 typecheck、renderer UI 通过；unit 五条超时，按 R8 空载测 Node 启动耗时后只定向重跑一次，仍五条超时。`pack:artifact` 初次校验私有 CLI 收到 `SIGKILL`；按用户要求沿原路径重试，定向校验和完整打包/校验/smoke 均通过。未绕过安全策略，初次终止原因仍未知。Qoder 清单保持 `unsupported`。H1–H5 已逐包记录，**本轮不是兼容性验收通过**。
 
