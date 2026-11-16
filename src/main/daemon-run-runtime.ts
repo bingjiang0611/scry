@@ -292,12 +292,13 @@ export class DaemonRunRuntime {
       })
       if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
       if (this.#apply(read, cursor)) changed = true
-      // Terminal only after this step's trace: no `done` before the last text.
-      cursor.lifecycle = watch.state
       await this.#publishQuestions(cursor)
       // The step boundary holds the whole read: hand its batch over now, not on the
       // batching timer. One batch per step; flush() keeps the same high water.
       if (changed) this.#bridge.flush()
+      // Terminal only once this step's trace reached the window: no `done` before the
+      // last text, including across the questions round trip above.
+      cursor.lifecycle = watch.state
       if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
       return { changed, lifecycle: cursor.lifecycle }
     } finally {

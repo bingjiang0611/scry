@@ -66,4 +66,56 @@ describe('daemon run runtime: terminal state follows the trace of the same step'
     expect(delivered).toEqual(['one', 'two'])
     expect(runtime.runView(RUN)?.done).toBe(true)
   })
+  it('does not report done before the step has handed its last text to the window', async () => {
+    // The questions round trip sits between applying the read and flushing its batch.
+    let releaseQuestions!: () => void
+    const questionsHeld = new Promise<void>((resolve) => { releaseQuestions = resolve })
+    let questionsStarted!: () => void
+    const questionsRequested = new Promise<void>((resolve) => { questionsStarted = resolve })
+    let watchCall = 0
+    let settle = false
+    let watchSaidSettled = false
+    const delivered: string[] = []
+    const request = async (payload: Record<string, unknown>): Promise<unknown> => {
+      if (payload.op === 'submit') return { runId: RUN, status: 'recorded' }
+      if (payload.op === 'watch') {
+        watchCall += 1
+        const bound = watchCall === 1
+          ? [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: RUN, providerId: 'claude', cwd: '/w' }) }]
+          : []
+        watchSaidSettled = settle
+        return { watch: { state: settle ? 'settled' : 'dispatched', poll: { cursor: watchCall, events: bound } } }
+      }
+      if (payload.op === 'desktop') {
+        if (!watchSaidSettled) return { desktop: { kind: 'trace', run: run([event('one')]), cursor: { revision: 'r1', count: 1 } } }
+        return { desktop: { kind: 'trace_delta', run: run([], true), base: 'r1', revision: 'r2', count: 2, changes: [{ index: 1, item: event('two') }] } }
+      }
+      if (payload.op === 'questions') {
+        if (watchSaidSettled) { questionsStarted(); await questionsHeld }
+        return { questions: [] }
+      }
+      if (payload.op === 'liveRuns') return { liveRuns: { revision: 'v1', runs: [] } }
+      return { error: 'unknown_op' }
+    }
+    const bridge = new TraceOutputBridge({
+      canSend: () => true,
+      send: (batch) => { for (const item of batch.events) if (item.text) delivered.push(item.text) },
+      // A real batching timer: only the step boundary's flush hands the batch over early.
+      schedule: () => () => {}
+    })
+    const runtime = new DaemonRunRuntime({ transport: new DaemonRunTransport(request), send: () => undefined, bridge, waitMs: 0 })
+    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await runtime.step(RUN, { waitMs: 0 })
+
+    settle = true
+    const step = runtime.step(RUN, { waitMs: 0 })
+    await questionsRequested
+    // Mid-step, between the read and its flush: done only once 'two' reached the window.
+    const view = runtime.runView(RUN)
+    expect({ done: view?.done, delivered: delivered.includes('two') }).not.toEqual({ done: true, delivered: false })
+    releaseQuestions()
+    await step
+    expect(delivered).toContain('two')
+    expect(runtime.runView(RUN)?.done).toBe(true)
+  })
 })
