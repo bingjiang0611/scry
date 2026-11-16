@@ -7,7 +7,7 @@ import type { RecorderEnablement } from './config.js'
 import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, type RecorderHookInput, type RecorderHookResult, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, terminalStatus, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
+import { isClaudeTaskNotification, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordClaudeTaskNotification, rememberContinuationProviderTurn, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
 import { snapshotSessionNetDiff } from './git.js'
 import { terminalSnapshot } from './git-capture.js'
 
@@ -70,6 +70,15 @@ export async function applyHookLocked(
       (providerTurnId && open.providerTurnId === providerTurnId) ||
       sameManagedQoderPrompt
     )) return { status: 'duplicate' as const }
+    // One Scry run starts one Qoder daemon with one managed identity, taken from the daemon env,
+    // never from the payload. A further prompt carrying that identity (a background task's notice
+    // starting a follow-up model turn) continues this Scry turn; replacing the open lifecycle left
+    // the run with several id-less lifecycles and no commit (round nine I2, CLI 1.1.89).
+    if (open?.managedByScry && input.managed === true && input.provider === 'qoder' && sameManagedIdentity) {
+      await rememberContinuationProviderTurn(root, open, providerTurnId)
+      await storeLifecycleEvent(enablement, open, input.event, input.payload)
+      return { status: 'recorded' as const, reason: 'managed continuation kept in canonical Scry turn' }
+    }
     if (open) {
       if (open.managedByScry && !input.managed) {
         return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
