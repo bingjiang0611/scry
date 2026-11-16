@@ -8,8 +8,9 @@
 //      which silently disables a live rule. Intended new selectors are fine; spliced ones are not.
 //   2. Classes the base rendered that no renderer source mentions any more, while a UI smoke in
 //      scripts/ still selects them.
-//   3. UI smoke assertions that pin an exact computed value (px, weight, rect size). A deliberate
-//      value change (6px gap snapped to 8px) needs the smoke updated in the same change.
+//   3. UI smoke assertions that pin an exact computed value (px, weight, rect or named height and
+//      width such as `rowHeight !== 40`). A deliberate value change (6px gap snapped to 8px, menu
+//      rows 40px to 32px) needs the smoke updated in the same change.
 //
 // Usage: node .agents/skills/scry-design-system/scripts/ui-contract-check.mjs [base-ref]
 // The base ref defaults to origin/main. Read-only; prints findings and always exits 0.
@@ -79,7 +80,7 @@ for (const name of [...baseClasses].sort()) {
 }
 
 // 3. Smoke assertions that pin exact computed values.
-const PINNED = /(?:===|!==)\s*'-?\d+(?:\.\d+)?px(?:\s+-?\d+(?:\.\d+)?px)*'|font(?:Weight|Size)\)?\s*(?:===|!==)\s*'\d+(?:px)?'|getBoundingClientRect\(\)\.(?:height|width)\s*(?:===|!==)\s*\d+/
+const PINNED = /(?:===|!==)\s*'-?\d+(?:\.\d+)?px(?:\s+-?\d+(?:\.\d+)?px)*'|font(?:Weight|Size)\)?\s*(?:===|!==)\s*'\d+(?:px)?'|[A-Za-z]*(?:[Hh]eight|[Ww]idth)\s*(?:===|!==)\s*[1-9]\d*\b/
 const pinned = []
 for (const [path, text] of smokeText) {
   text.split('\n').forEach((line, index) => {
