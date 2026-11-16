@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { open as openFile, stat } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { parseTranscriptSnapshot } from './recorder-transcript-parse.js'
@@ -7,6 +6,7 @@ import { piTranscriptOffsets } from './recorder-pi-transcript.js'
 import { nestedRecord, stringAt, type PiTranscriptAnchor, type TranscriptRead } from './recorder-contracts.js'
 import { textContent } from './recorder-codex-calls.js'
 import { recordTranscriptAnchorBytes, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { openTranscriptRead, statTranscript } from './recorder-transcript-fs.js'
 
 interface TranscriptSnapshotCacheEntry {
   key: string
@@ -63,7 +63,7 @@ function archivedCodexTranscriptPath(path: string): string | undefined {
 
 async function readableTranscriptPath(path: string, provider: ProviderId): Promise<string> {
   try {
-    await stat(path)
+    await statTranscript(path)
     return path
   } catch {
     if (provider !== 'codex') return path
@@ -71,7 +71,7 @@ async function readableTranscriptPath(path: string, provider: ProviderId): Promi
   const archived = archivedCodexTranscriptPath(path)
   if (!archived) return path
   try {
-    await stat(archived)
+    await statTranscript(archived)
     return archived
   } catch {
     return path
@@ -163,7 +163,7 @@ async function latestAnchorFrom(
   providerTurnId?: string
 ): Promise<AnchorScan> {
   if (from >= endOffset) return { offset: -1, scannedTo: from }
-  const handle = await openFile(path, 'r')
+  const handle = await openTranscriptRead(path)
   const chunkBytes = 1024 * 1024
   let cursor = from
   let pending = Buffer.alloc(0)
@@ -204,7 +204,7 @@ async function latestAnchorFrom(
 
 /** Read the single JSONL line a cached offset points at (the offset may be its preceding newline). */
 async function lineAtAnchor(path: string, offset: number): Promise<string | undefined> {
-  const handle = await openFile(path, 'r')
+  const handle = await openTranscriptRead(path)
   const buffer = Buffer.allocUnsafe(8192)
   try {
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
@@ -243,7 +243,7 @@ async function anchorOffsetFor(
   if (cached) {
     let reusable = false
     try {
-      const info = await stat(path)
+      const info = await statTranscript(path)
       // Append-only growth is proven by dev/ino identity and a size that still covers what was
       // already scanned; a replaced or truncated file cannot reuse this offset.
       if (info.dev === cached.dev && info.ino === cached.ino && info.size >= cached.size) {
@@ -263,7 +263,7 @@ async function anchorOffsetFor(
   }
   const scan = await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)
   try {
-    const info = await stat(path)
+    const info = await statTranscript(path)
     rememberAnchor(key, { ...scan, size: endOffset, dev: info.dev, ino: info.ino })
   } catch {}
   return scan.offset
@@ -277,7 +277,7 @@ async function transcriptAnchorOffset(
   providerTurnId?: string
 ): Promise<AnchorScan> {
   if (endOffset <= 0 || !promptHash && !providerTurnId) return { offset: 0, scannedTo: 0 }
-  const handle = await openFile(path, 'r')
+  const handle = await openTranscriptRead(path)
   const chunkBytes = 1024 * 1024
   let scannedTo = 0
   let cursor = endOffset
@@ -422,7 +422,7 @@ export async function stableTranscript(
   if (endOffsetLimit != null && !(provider === 'pi' && piTranscriptAnchor)) {
     let frozenIdentity: TranscriptSnapshotIdentity
     try {
-      frozenIdentity = transcriptIdentity(await stat(path))
+      frozenIdentity = transcriptIdentity(await statTranscript(path))
     } catch {
       return missingTranscript(providerTurnId, promptHash)
     }
@@ -445,7 +445,7 @@ export async function stableTranscript(
   for (let attempt = 0; attempt < 3; attempt++) {
     let identity: TranscriptSnapshotIdentity
     try {
-      identity = transcriptIdentity(await stat(path))
+      identity = transcriptIdentity(await statTranscript(path))
     } catch {
       return missingTranscript(providerTurnId, promptHash)
     }

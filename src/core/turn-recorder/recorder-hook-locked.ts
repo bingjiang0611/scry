@@ -1,10 +1,11 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
+import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
-import { findRecordById, recordError, safeKey } from './store.js'
+import { describeErrorForLog, findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
-import { validQueuedCapture } from './recorder-hook-queue.js'
+import { validQueuedCapture, queueHook } from './recorder-hook-queue.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
@@ -23,6 +24,8 @@ export async function applyHookLocked(
   const taskNotification = START_EVENTS.has(input.event) && isTaskNotificationPrompt(input.payload)
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
   let open = await readJson<OpenTurnState>(openPath(root))
+  // Set when this start had to be persisted to the inbox before a fallible seal of the open turn.
+  let supersededStart: string | undefined
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
   if (input.provider === 'qoder' && input.event === 'Stop' &&
     await isLateQoderTerminalDuplicate(enablement.dataRoot, root, sessionId, input.payload, open)) {
@@ -98,8 +101,22 @@ export async function applyHookLocked(
         open.closingAt ??= timestampOf(input.payload)
         open.endReason ??= fallback === 'interrupted' ? 'superseded_by_next_turn' : 'provider_terminal'
         await writeJsonAtomic(openPath(root), open, { sync: false })
-        const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
-        if (finalized.status === 'pending') return finalized
+        // Read the closing turn's evidence *after* this prompt is durable. Finalizing the previous
+        // turn reads a Provider file, and that read can fail (a denied `open`, a rotated file). A
+        // lost prompt is unrecoverable, a degraded previous turn is not, so the prompt is queued
+        // first and the queued copy is dropped once it is applied inline below.
+        supersededStart = await queueHook(enablement, input, sessionId, new Date().toISOString(), {
+          reason: 'start of a turn that supersedes an open turn',
+          // Applied below and removed; only a surviving copy belongs in the log.
+          announce: false
+        })
+        try {
+          const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+          // A pending seal keeps the open turn; the queued start replays when it can be closed.
+          if (finalized.status === 'pending') return finalized
+        } catch (error) {
+          await sealUnreadableTurn(enablement, open, input, fallback, error)
+        }
       }
     }
     open = await beginOpenTurn(
@@ -112,6 +129,8 @@ export async function applyHookLocked(
       protectNextStart,
       input.uploadEnvironment, input.capture
     )
+    // The prompt is now part of the published open turn; the queued copy would replay as a duplicate.
+    if (supersededStart) await rm(supersededStart, { force: true })
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
     return { status: 'started' as const }
   }
@@ -267,6 +286,42 @@ export async function applyHookLocked(
 
 export function isLockTimeout(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ELOCKTIMEOUT'
+}
+
+/**
+ * Publish the open turn that a new prompt supersedes even though its evidence could not be read.
+ *
+ * Losing the previous turn's transcript must not cost the incoming turn: the record is sealed from
+ * the lifecycle evidence already stored for it, every section is marked partial with the read
+ * failure as the reason, and the turn keeps its own generation so the new turn's tool calls can
+ * never be attributed to it. An unsealed failure here is not fatal either — the caller opens the new
+ * turn from the prompt it already persisted.
+ */
+async function sealUnreadableTurn(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  open: OpenTurnState,
+  input: RecorderHookInput,
+  fallbackStatus: AgentTurnRecord['status'],
+  error: unknown
+): Promise<void> {
+  const detail = describeErrorForLog(error)
+  const reason = `the previous turn's evidence could not be read (${detail}); only its lifecycle evidence is recorded`
+  await appendRotatingLog(
+    join(enablement.dataRoot, 'logs', 'recorder.log'),
+    `${new Date().toISOString()} WARN ${input.provider} ${open.sessionId} generation ${open.generation}: sealing on lifecycle evidence after a read failure: ${detail}`
+  ).catch(() => undefined)
+  try {
+    await finalizeOpenTurn(enablement, open, input.payload, fallbackStatus, {
+      allowUnstableTranscript: true,
+      transcriptUnavailable: reason
+    })
+  } catch (sealError) {
+    // The turn stays `closing`; recovery retries it, and the incoming prompt still opens below.
+    await appendRotatingLog(
+      join(enablement.dataRoot, 'logs', 'recorder.log'),
+      `${new Date().toISOString()} ERROR ${input.provider} ${open.sessionId} generation ${open.generation}: sealing after a read failure also failed: ${describeErrorForLog(sealError)}`
+    ).catch(() => undefined)
+  }
 }
 
 /**

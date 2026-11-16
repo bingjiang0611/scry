@@ -324,6 +324,7 @@ export async function parseTranscriptSnapshot(args: {
   const events = [...turn?.items ?? []]
   let qoderSidecarsComplete = true
   let qoderSidecarObservable: TranscriptRead['observable'] | undefined
+  const incompleteReasons: string[] = []
   if (args.provider === 'qoder' && turn) {
     // Prompt text can recover display content, but is not billing identity.
     // Only the hook's authoritative ID may select a root; let the native parser
@@ -342,6 +343,11 @@ export async function parseTranscriptSnapshot(args: {
     events.push(...sidecars.events)
     qoderSidecarsComplete = sidecars.complete
     qoderSidecarObservable = sidecars.observable
+    for (const truncation of sidecars.truncations) {
+      incompleteReasons.push(
+        `${truncation.reason} (agent ${truncation.agentId}, ${truncation.path}): kept ${truncation.retainedBytes} of ${truncation.totalBytes} bytes`
+      )
+    }
   }
   return {
     stable,
@@ -351,6 +357,7 @@ export async function parseTranscriptSnapshot(args: {
     ...(turn?.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
     ...(BACKGROUND_WAKE_PROVIDERS.has(args.provider) ? { pendingBackgroundTasks: pendingBackgroundTasks(snapshot.content) } : {}),
     complete: stable && !snapshot.truncated && qoderSidecarsComplete,
+    ...(incompleteReasons.length ? { incompleteReasons } : {}),
     ...(turn?.userText ? { userText: turn.userText } : {}),
     events,
     observable: {

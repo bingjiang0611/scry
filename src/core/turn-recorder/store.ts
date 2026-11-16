@@ -15,7 +15,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, type C
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.72'
+export const RECORDER_VERSION = '0.2.73'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -340,8 +340,30 @@ export async function updateHealth(
   })
 }
 
+/**
+ * One greppable line that can actually locate a failure: the message, the syscall and path the
+ * kernel rejected, and the first application frames of the stack. The rotating log keeps one record
+ * per line, so continuations are folded into the same line instead of being emitted separately.
+ */
+export function describeErrorForLog(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const failure = error as NodeJS.ErrnoException
+  // `EPERM: operation not permitted, open '<path>'` already names both, but an Error built without
+  // a syscall still carries them on the object, and those are the fields worth logging.
+  const operation = typeof failure.syscall === 'string' && typeof failure.path === 'string'
+    ? ` [${failure.syscall} ${failure.path}]`
+    : typeof failure.path === 'string' ? ` [${failure.path}]` : ''
+  const frames = (error.stack ?? '')
+    .split('\n')
+    .filter((line) => line.trim().startsWith('at '))
+    .map((line) => line.trim())
+    .filter((line) => !line.includes('(node:internal') && !line.includes('node:fs'))
+    .slice(0, 5)
+  return [`${error.message}${operation}`, ...frames].join(' | ')
+}
+
 export async function recordError(dataRoot: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = describeErrorForLog(error)
   const at = new Date().toISOString()
   await updateHealth(dataRoot, { lastError: { at, message }, increment: { droppedEvents: 1 } }).catch(() => undefined)
   await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${at} ERROR ${message}`).catch(() => undefined)

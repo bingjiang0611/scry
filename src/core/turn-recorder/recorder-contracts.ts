@@ -85,6 +85,11 @@ export interface TranscriptRead {
   pendingBackgroundTasks?: string[]
   providerTurnId?: string
   complete?: boolean
+  /**
+   * Why a bounded read left this window incomplete, in the record's own words. Empty when the
+   * window is complete or when the cause has no specific description.
+   */
+  incompleteReasons?: string[]
   terminalStatus?: AgentTurnRecord['status']
   completedAt?: string
   startedAt?: string
