@@ -9,4 +9,9 @@
 - Codex 无服务端精确 latency,`response_intervals` 是观测区间,可能包含请求构造、调度、传输与重试。
 - `modelTiming.cumulativeMs` 累计并行子 Agent 时间,`occupiedMs` 是所有模型区间的并集(用于与整轮墙钟比较)。旧记录缺该字段时保持 `unavailable`。
 - `modelSegments` 与 `compactions` 在旧记录缺失时标 `unavailable`,不会误算成 0。
+- 人工介入（`interventions`）只从 transcript 里「提问/拒绝请求 + 对应结果」这一对结构还原：问题正文取提问工具入参，答案取 `tool_result` 的 answers；Provider 明写的 denial 字段区分用户中断与宿主取消。已观测到请求但没观测到答案或取消时标 `partial` 并写 `omissionReason`，不发布「精确的零次介入」。等候时间记在介入上，对应调用的 `humanInterventionId` 指向同一介入，工具执行时间不得重复计入。
+- 文件足迹按操作区分 `succeeded` / `failed` / `rejected` / `unknown`：被拒的读取不算已读，同一路径一次失败不抹掉另一次成功。旧记录没有这个字段，只代表 legacy。
+- Hook 的非阻塞失败（`hook_non_blocking_error`）与非零退出码是失败运行，逐次保留关联 ID、原始退出码、耗时与错误正文；只有成功运行才合并计数。记录里没有 `timedOut` 字段就不推断超时，命令里的 `|| true` 也不能把失败运行改成成功。
+- Skill 的宿主激活通知与注入正文是同一次事实的两次观测，合成一条技能证据；真实 Skill 调用仍然优先，调用总数不受注入影响。
+- 记录 `startedAt` 取 transcript 里本轮提问行的时间，不取开启采集的时间；接续段取自己的 wake 时间。开启采集时间与 diff 基线时间各自保留，不能互相顶替。
 - Recorder 只保证**新生成**记录使用当前口径,不会重写历史记录。
