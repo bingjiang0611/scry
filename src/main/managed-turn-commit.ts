@@ -57,6 +57,7 @@ async function prepareJournalRecord(
   allowCanonicalJournalRecovery = false
 ): Promise<ManagedTurnJournal> {
   const deadline = Date.now() + waitMs
+  let canonicalRecovery = allowCanonicalJournalRecovery
   for (;;) {
     const request = journal.request
     const evidence = request.turn.turnEvidence
@@ -73,7 +74,7 @@ async function prepareJournalRecord(
       status: request.status,
       archiveFingerprint: journal.archiveFingerprint,
       expectedRecordId: journal.recordId,
-      ...(allowCanonicalJournalRecovery ? { allowCanonicalJournalRecovery: true } : {}),
+      ...(canonicalRecovery ? { allowCanonicalJournalRecovery: true } : {}),
       allowObservedInterruption: managedObservedInterruptionAllowed(request),
       termination: managedTermination(journal),
       toolContentPolicy: request.turn.toolContentPolicy
@@ -82,6 +83,14 @@ async function prepareJournalRecord(
       throw new Error(`managed recorder became disabled while a canonical journal was pending: ${prepared.reason}`)
     }
     if ('recordId' in prepared) return { ...journal, recordId: prepared.recordId }
+    if (Date.now() >= deadline && !canonicalRecovery && request.providerId === 'qoder' && request.providerTurnId &&
+        request.turn.items.some((item) => item.kind !== 'harness')) {
+      // A Qoder run settles only after its own daemon stopped, so no hook of this run can still
+      // open the lifecycle: recover the canonical journal now instead of after a restart (H4).
+      // A host-only trace keeps waiting for the restart path, as before.
+      canonicalRecovery = true
+      continue
+    }
     if (Date.now() >= deadline) {
       // Say why the observed-interruption path did not apply, so a pending open identity is
       // diagnosable from the error alone (kinds and stages only; no content).

@@ -175,3 +175,25 @@ describe('Qoder stop after session-level hooks only', () => {
     expect(error?.message).not.toContain('secret')
   })
 })
+
+describe('Qoder stop with a Provider turn id but no open lifecycle', () => {
+  // Round eight H4: a stop after hooks ran left the commit pending live; only a restart's
+  // canonical journal recovery committed it. The run's daemon has stopped by then, so the live
+  // commit may recover the canonical journal itself once the wait for the lifecycle expires.
+  async function withTurnId() {
+    const request = await fixture()
+    request.providerTurnId = request.turn.providerTurnId = 'native-turn'
+    for (const hookEvent of ['SessionStart', 'QueryEnd']) {
+      addEvent(request, { id: `hook-${hookEvent}`, kind: 'hook', stage: 'hook_response', hookId: hookEvent, hookEvent, hookOutcome: 'success' })
+    }
+    return request
+  }
+
+  it('commits the interrupted turn live, with its native id and estimated timing', async () => {
+    const request = await withTurnId()
+    await expect(commitManagedTraceTurn(request, { waitMs: 0 })).resolves.toMatchObject({ recorder: 'committed' })
+    const [record] = await listRecords(join(request.cwd, '.scry'))
+    expect(record).toMatchObject({ status: 'interrupted', providerTurnId: 'native-turn' })
+    expect(record.termination).toMatchObject({ status: 'partial', quality: 'estimated', source: ['scry_run_boundary'] })
+  })
+})
