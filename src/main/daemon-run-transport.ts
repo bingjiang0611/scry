@@ -2,6 +2,8 @@ import type { AgentDataUpdated, AgentQuestionRequest, AgentQuestionResponse } fr
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import { DaemonClientError } from './daemon-client'
+import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
+import { readDaemonTrace } from './daemon-run-trace-read'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
@@ -16,34 +18,12 @@ import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
 // that does not carry the expected fields is `invalid_daemon_response` rather
 // than an empty success.
 
+export { DaemonRunError, type DaemonRunFailure } from './daemon-run-error'
+
 export type DaemonRequest = (
   request: Record<string, unknown>,
   options?: { replayable?: boolean; signal?: AbortSignal }
 ) => Promise<unknown>
-
-export type DaemonRunFailure =
-  | 'daemon_not_running'
-  | 'daemon_device_not_authorized'
-  | 'daemon_run_unknown'
-  | 'daemon_stop_not_confirmed'
-  | 'daemon_answer_not_delivered'
-  | 'daemon_run_control_unavailable'
-  // The request was written and no reply came back: the daemon may or may not have
-  // acted. Callers reconcile (by intent id) and never resend.
-  | 'daemon_outcome_unknown'
-  // A start was submitted, the reply was lost, and the daemon could not confirm what
-  // it recorded. Reported as unknown so the App never starts the same prompt twice.
-  | 'daemon_submit_unknown'
-  | 'invalid_daemon_response'
-
-export class DaemonRunError extends Error {
-  readonly reason: DaemonRunFailure
-  constructor(reason: DaemonRunFailure) {
-    super(reason)
-    this.name = 'DaemonRunError'
-    this.reason = reason
-  }
-}
 
 export interface DaemonSubmitResult {
   intentId: string
@@ -88,10 +68,6 @@ function transportFailure(error: unknown): DaemonRunFailure {
   if (laneWasWrittenUnknown(error)) return 'daemon_outcome_unknown'
   // Unclassified: the write may have landed. Fail closed.
   return 'daemon_outcome_unknown'
-}
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 // Deliberately narrow: the daemon only ever names runs it created itself.
@@ -174,32 +150,7 @@ export class DaemonRunTransport {
    * `settledTail`: the read after `run_settled` still gets the run's final trace.
    */
   async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor }): Promise<DesktopRemoteTraceRead> {
-    const reply = await this.#call({
-      op: 'desktop',
-      query: {
-        kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true, settledTail: true,
-        ...(input.after ? { delta: { after: input.after } } : {})
-      }
-    }, { replayable: true })
-    const desktop = reply.desktop
-    if (!record(desktop)) throw new DaemonRunError('invalid_daemon_response')
-    // The wire says `trace`/`trace_delta`; the renderer contract says
-    // snapshot/delta. A wire shape that names neither is refused, not guessed.
-    if (desktop.kind === 'trace') {
-      const run = desktop.run === null ? null : record(desktop.run) && typeof desktop.run.runId === 'string' ? desktop.run as unknown as ActiveRun : fail()
-      const cursor = traceCursor(desktop.cursor)
-      return { kind: 'snapshot', run, ...(cursor ? { cursor } : {}) }
-    }
-    if (desktop.kind === 'trace_delta') {
-      const base = typeof desktop.base === 'string' ? desktop.base : fail()
-      const cursor = traceCursor({ revision: desktop.revision, count: desktop.count })
-      if (!record(desktop.run) || !Array.isArray(desktop.changes)) throw new DaemonRunError('invalid_daemon_response')
-      return {
-        kind: 'delta', run: desktop.run as unknown as Omit<ActiveRun, 'items'>,
-        base, cursor: cursor ?? fail(), changes: desktop.changes as never
-      }
-    }
-    throw new DaemonRunError('invalid_daemon_response')
+    return await readDaemonTrace((request, options) => this.#call(request, options), input)
   }
 
   async output(input: { runId: string; cursor: number }): Promise<DaemonOutputStream> {
@@ -363,16 +314,6 @@ export class DaemonRunTransport {
     if (error) throw error
     return reply
   }
-}
-
-function traceCursor(value: unknown): DesktopTraceCursor | undefined {
-  if (value === undefined) return undefined
-  if (!record(value) || typeof value.revision !== 'string' || !Number.isSafeInteger(value.count)) return undefined
-  return { revision: value.revision, count: value.count as number }
-}
-
-function fail(): never {
-  throw new DaemonRunError('invalid_daemon_response')
 }
 
 // The notices this App renders. Anything else (a newer daemon's kind) is skipped by the
