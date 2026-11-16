@@ -1,0 +1,120 @@
+{
+  "revision": "cab94282",
+  "cli": "1.1.89",
+  "samples": [
+    {
+      "sample": 1,
+      "hookWindowBeforeBody": true,
+      "restarted": false,
+      "liveInterruptedVisible": true,
+      "firstRecordStatus": "interrupted",
+      "firstProviderTurnIdPresent": true,
+      "terminationSource": [
+        "scry_run_boundary"
+      ],
+      "pendingAfterStop": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "observedMsAfterStop": 13824,
+      "followCompleted": true,
+      "recordStatusesAfterFollow": [
+        "interrupted",
+        "completed"
+      ],
+      "distinctTurnIdCount": 2,
+      "pendingAfterFollow": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "eventRowsByStream": {
+        "canonical": 110,
+        "native": 29,
+        "log": 2
+      },
+      "mainStdout": {
+        "bytes": 1690,
+        "sha256": "4427ac53bdac44cdd9854e5eaf1af1ae76a2df162a39c4522ed6ab6cf661a5f1"
+      },
+      "screenshotsSaved": true
+    },
+    {
+      "sample": 2,
+      "hookWindowBeforeBody": true,
+      "restarted": false,
+      "liveInterruptedVisible": true,
+      "firstRecordStatus": "interrupted",
+      "firstProviderTurnIdPresent": true,
+      "terminationSource": [
+        "scry_run_boundary"
+      ],
+      "pendingAfterStop": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "observedMsAfterStop": 15807,
+      "followCompleted": true,
+      "recordStatusesAfterFollow": [
+        "interrupted",
+        "completed"
+      ],
+      "distinctTurnIdCount": 2,
+      "pendingAfterFollow": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "eventRowsByStream": {
+        "canonical": 110,
+        "native": 29,
+        "log": 2
+      },
+      "mainStdout": {
+        "bytes": 1690,
+        "sha256": "16adec97c7fdc57dfa63cc7abdcfc9a9aa563237b400c81d56128821f55e3ff4"
+      },
+      "screenshotsSaved": true
+    },
+    {
+      "sample": 3,
+      "hookWindowBeforeBody": true,
+      "restarted": false,
+      "liveInterruptedVisible": true,
+      "firstRecordStatus": "interrupted",
+      "firstProviderTurnIdPresent": true,
+      "terminationSource": [
+        "scry_run_boundary"
+      ],
+      "pendingAfterStop": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "observedMsAfterStop": 16505,
+      "followCompleted": true,
+      "recordStatusesAfterFollow": [
+        "interrupted",
+        "completed"
+      ],
+      "distinctTurnIdCount": 2,
+      "pendingAfterFollow": {
+        "trace-turn-progress": 0,
+        "managed-turn-progress": 0,
+        "managed-turn-commits": 0
+      },
+      "eventRowsByStream": {
+        "canonical": 111,
+        "native": 31,
+        "log": 2
+      },
+      "mainStdout": {
+        "bytes": 1690,
+        "sha256": "df4d628a8e2c959b44d369aad18da32d0d46a0573257d9cd433f351404d1b88d"
+      },
+      "screenshotsSaved": true
+    }
+  ]
+}
