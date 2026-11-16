@@ -1,0 +1,27 @@
+{
+  "revision": "cab94282",
+  "cli": "1.1.89",
+  "outcome": "error",
+  "reason": "找不到可分支的已结束轮次：没有找到该会话的归档（该会话在其他工作目录下有 0 份归档；本工作目录下有 1 个其他会话的归档）",
+  "sourceAnswerVisible": true,
+  "sourceRecords": [
+    {
+      "status": "completed",
+      "providerTurnIdPresent": true
+    }
+  ],
+  "sidebarBefore": 1,
+  "sidebarAfter": 1,
+  "sameSessionArchivesInOtherCwds": 0,
+  "otherSessionArchivesInSameCwd": 1,
+  "eventRowsByStream": {
+    "canonical": 70,
+    "native": 22,
+    "log": 1
+  },
+  "mainStdout": {
+    "bytes": 1280,
+    "sha256": "b155f8adce808aab374b659c9ae29231d901dcd7018025e41605c97b7e4b3c53"
+  },
+  "screenshotSaved": true
+}
