@@ -16,13 +16,13 @@ description: 在 Scry 桌面 renderer 做界面样式、组件选择、布局间
 | 用现有 primitive 与 token 实现界面；把手写按钮、通知、标签页迁到 primitive | 新增 primitive，或给 primitive 加 variant／size |
 | 把网格外的值取整到 scale；把写死颜色改为主题变量 | 新增或修改 token 的档位与色值 |
 | 按文案规则改写常驻说明、按钮与错误文案 | 改变交互模型（键盘、焦点顺序、标签页激活方式）或读屏语义 |
-| 同一意图的旧实现收敛到已有目标 | 收敛清单里标“待定”的模式（toast、菜单、层级）的方案选择；先读 [参考案例对比](../../../docs/design/references.md) 再提方案 |
+| 同一意图的旧实现收敛到已有目标 | 收敛清单里尚未决定的模式的方案选择，以及改动已决定的模式（不做通用 toast、`--layer-*` 层级、`Menu` primitive、侧栏后台通知）；先读 [参考案例对比](../../../docs/design/references.md) 与决策记录再提方案 |
 | 更新受影响的 smoke 断言，前提是新值是有意的改动 | 删除或放宽 smoke 断言 |
 
 ## 工作流程
 
 1. **定意图，再选组件**。读 DESIGN.md 的“语义目录”：先说清这块界面要做什么（触发动作、提示结果、切换平级内容、过滤……），再选对应实现。外观相近不是借用另一个组件的理由。
-2. **先找已有实现**。`src/renderer/components/primitives/` 里的 Button、IconButton、Notice、Tabs、Segmented、Skeleton、BusyLabel、TurningIcon、CountProgress，以及 ModalFrame、ModalCloseButton、Disclosure。DESIGN.md 的“收敛清单”列出每个意图的唯一目标；标“不并入”或“待定”的不要自行合并。
+2. **先找已有实现**。`src/renderer/components/primitives/` 里的 Button、IconButton、Notice、Tabs、Segmented、Menu、Skeleton、BusyLabel、TurningIcon、CountProgress，以及 ModalFrame、ModalCloseButton、Disclosure；复制反馈用 `useCopyFeedback`，浮层层级用 `--layer-*`。DESIGN.md 的“收敛清单”列出每个意图的唯一目标；标“不并入”或“待定”的不要自行合并。
 3. **样式只消费 token**。
    - 字号 `var(--text-*)`，字重 `var(--weight-*)`，间距 4 的倍数（1px 只用于 hairline，2px 只用于光学对齐），圆角 `var(--r-*)`，阴影 `var(--shadow-*)`。
    - 颜色只用主题变量。状态与证据类型的浅底色、边框用 `color-mix(in srgb, var(--ok) N%, transparent)`，不写 `rgba()`。
