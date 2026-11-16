@@ -44,6 +44,7 @@ async function harness() {
   const directory = mkdtempSync(join(tmpdir(), 'scry-local-scope-'))
   dirs.push(directory)
   const identity = await ensureHostIdentity(join(directory, 'identity'))
+  const desktopReads: unknown[] = []
   const binding = await createHostController({
     stateDirectory: directory,
     hostId: identity.hostId,
@@ -54,7 +55,8 @@ async function harness() {
     startRun: async () => {},
     gate: new ProviderOperationGate(),
     readSessionStatus: () => 'not_observed',
-    createOutputStore: (dir) => new RunOutputFileStore(dir)
+    createOutputStore: (dir) => new RunOutputFileStore(dir),
+    readDesktop: async (query) => { desktopReads.push(query); return { kind: 'trace', run: null } }
   })
   cleanups.push(() => binding.close())
   const controller = binding.controller
@@ -81,7 +83,7 @@ async function harness() {
   const channel = await openLocalChannel({ directory: join(directory, 'run'), serve: (stream) => local!.serve(stream) })
   cleanups.push(() => local!.close())
   cleanups.push(() => channel.close())
-  return { identity, controller, caPEM: identity.caCertificatePEM, addr, socketPath: channel.socketPath, directory }
+  return { identity, controller, caPEM: identity.caCertificatePEM, addr, socketPath: channel.socketPath, directory, desktopReads }
 }
 
 async function enrollLocal(identity: Awaited<ReturnType<typeof harness>>['identity'], controller: Awaited<ReturnType<typeof harness>>['controller'], directory: string) {
@@ -151,6 +153,25 @@ describe('local grant scope (L1: enrolled over unix socket, useless over the net
     const reply = await overNetwork(addr, caPEM, { certPEM: grant.certificatePEM, keyPEM }, { op: 'providers', detail: 'metadata' })
     expect(reply.error).toBeUndefined()
     expect(reply.providers).toBeDefined()
+  })
+
+  it('lets only the App grant ask for a settled run\'s final trace (settledTail)', async () => {
+    const { identity, controller, caPEM, addr, socketPath, directory, desktopReads } = await harness()
+    const app = await enrollLocal(identity, controller, directory)
+    const { keyPEM, csrPEM } = await deviceKeyAndCSR()
+    const verified = await identity.verifyCSR(csrPEM)
+    const pair = await controller.authority.begin()
+    await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
+    const phone = { certPEM: (await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)).certificatePEM, keyPEM }
+    const query = { kind: 'trace', context: { cwd: AUTHORIZED, providerId: 'codex' }, runId: 'run-1' }
+    // A device grant cannot opt into the departed window: refused before the reader runs.
+    expect(await overNetwork(addr, caPEM!, phone, { op: 'desktop', query: { ...query, settledTail: true } }))
+      .toEqual({ error: 'settled_tail_requires_local_grant' })
+    expect(desktopReads).toEqual([])
+    expect((await overNetwork(addr, caPEM!, phone, { op: 'desktop', query })).desktop).toEqual({ kind: 'trace', run: null })
+    expect((await overLocalSocket(socketPath, caPEM!, app, { op: 'desktop', query: { ...query, settledTail: true } })).desktop)
+      .toEqual({ kind: 'trace', run: null })
+    expect(desktopReads).toEqual([query, { ...query, settledTail: true }])
   })
 
   it('refuses a phone grant presented on the local socket', async () => {

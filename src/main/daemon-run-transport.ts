@@ -169,12 +169,15 @@ export class DaemonRunTransport {
     return { state, cursor: poll.cursor as number, events, output }
   }
 
-  /** One canonical trace read for a live run; the delta cursor is the caller's. */
+  /**
+   * One canonical trace read for a live run; the delta cursor is the caller's.
+   * `settledTail`: the read after `run_settled` still gets the run's final trace.
+   */
   async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor }): Promise<DesktopRemoteTraceRead> {
     const reply = await this.#call({
       op: 'desktop',
       query: {
-        kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true,
+        kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true, settledTail: true,
         ...(input.after ? { delta: { after: input.after } } : {})
       }
     }, { replayable: true })

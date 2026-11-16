@@ -43,10 +43,12 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       userDataDir: inputs.userDataDir,
       hostId: () => runtime.remoteHostService!.hostId,
       authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
-      getRun: (runId) => {
-        // A run leaves the registry before the ledger records it settled; the read that
-        // follows `run_settled` still gets the run's final trace, not an empty answer.
-        const state = runtime.runs.get(runId)?.state ?? runtime.runs.departedState?.(runId)
+      getRun: (runId, options) => {
+        // A run leaves the registry before the ledger records it settled. The App's read
+        // that follows `run_settled` (settledTail, local grant only) still gets the run's
+        // final trace; every other read keeps the device contract: a settled run is `null`
+        // and its evidence lives in the archive.
+        const state = runtime.runs.get(runId)?.state ?? (options?.departed ? runtime.runs.departedState?.(runId) : undefined)
         return state ? runtime.boundedLiveRun(state) : null
       },
       workspaceChoices: (request) => runtime.sourceControl.workspaceChoices(request),

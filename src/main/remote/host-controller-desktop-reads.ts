@@ -12,6 +12,7 @@ import type { HostControllerDependencies } from './host-controller-types'
 // serve; a missing reader is unavailable, never an empty success.
 export interface DesktopReadDeps {
   authorizeDevice(peer: string): void
+  gateway: { grantScope(peer: string): 'local' | 'remote' }
   readDesktop?: HostControllerDependencies['readDesktop']
   desktopWorkbench?: HostControllerDependencies['desktopWorkbench']
   desktopDirectories?: HostControllerDependencies['desktopDirectories']
@@ -25,7 +26,15 @@ export interface DesktopReadDeps {
 export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string, input: unknown): Promise<DesktopHostReadResult> {
   deps.authorizeDevice(peerCertSHA256)
   if (!deps.readDesktop) throw new Error('desktop_protocol_unavailable')
-  const result = await deps.readDesktop(parseDesktopHostRead(input))
+  const query = parseDesktopHostRead(input)
+  // `settledTail` is the App's read of a run that just settled (its final trace from the
+  // registry's short departed window). A device grant is refused, not silently downgraded:
+  // devices keep the contract that a settled run reads `null` and its evidence is in the
+  // archive. The verified grant scope decides, never the transport (pairing.grantScope).
+  if (query.kind === 'trace' && query.settledTail && deps.gateway.grantScope(peerCertSHA256) !== 'local') {
+    throw new Error('settled_tail_requires_local_grant')
+  }
+  const result = await deps.readDesktop(query)
   deps.authorizeDevice(peerCertSHA256)
   if (result.kind !== 'info') return result
   const { sessionActions: _reportedSessionActions, sessionFork: _reportedSessionFork, sessionDelete: _reportedSessionDelete, ...info } = result
