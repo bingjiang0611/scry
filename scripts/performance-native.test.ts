@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { combineNativeShards } from './performance-native-run.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
+const root = new URL('..', import.meta.url).pathname
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
 
@@ -169,6 +170,21 @@ describe('native performance evidence gate', () => {
       '.agents/skills/scry-performance-climb/scripts/timing-run.mjs',
       '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs'
     ]))
+  })
+
+  it('freezes every smoke fixture module a frozen smoke module imports', () => {
+    // The CI native job copies these files into an older baseline checkout. A smoke
+    // module that imports a smoke sibling missing from the list builds against a
+    // baseline that may not have it ("Could not resolve ./smoke-paced-stream").
+    const frozen = new Set(nativeHarnessFiles)
+    const missing: string[] = []
+    for (const file of nativeHarnessFiles.filter(path => /^src\/main\/providers\/smoke[^/]*\.ts$/.test(path))) {
+      for (const [, specifier] of readFileSync(join(root, file), 'utf8').matchAll(/from '\.\/(smoke[^']*)'/g)) {
+        const sibling = `src/main/providers/${specifier}.ts`
+        if (!frozen.has(sibling)) missing.push(`${file} -> ${sibling}`)
+      }
+    }
+    expect(missing).toEqual([])
   })
 
   it('covers the daemon-mode modules in the harness hash and keeps daemon results out of the gate', () => {
