@@ -49,6 +49,20 @@ async function backdateTurn(root: string, session: string, transcript: string, m
   }
 }
 
+const DEAD_PID = 999_999
+
+/**
+ * Host evidence is written at start time, so a test that wants "the host died" must say so: the
+ * process running the test is alive and would otherwise veto every expiry.
+ */
+async function recordHost(root: string, session: string, host: Array<{ pid: number; token?: string }> | undefined): Promise<void> {
+  const path = join(root, '.scry', 'runtime', 'qoder', safeKey(session), 'open.json')
+  const open = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+  if (host) open.host = host
+  else delete open.host
+  await writeFile(path, JSON.stringify(open))
+}
+
 const replyRow = (stopReason: string) => JSON.stringify({
   type: 'assistant', timestamp: new Date(Date.now() - 38 * MINUTE).toISOString(), promptId: 'prompt-1',
   message: { role: 'assistant', stop_reason: stopReason, content: [{ type: 'text', text: 'Here is the summary.' }] }
@@ -117,11 +131,17 @@ export function registerStaleOpenTurnSuite(): void {
     expect(turn.lastEventAt).toBeTruthy()
 
     // 操作者知道进程已经没了：这时才允许按 interrupted 收尾，并写明来源。
+    await recordHost(root, session, [{ pid: DEAD_PID }])
     await expect(recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true }))
       .resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
     const [record] = await listRecords(join(root, '.scry'))
     expect(record.status).toBe('interrupted')
-    expect(record.termination?.omissionReason).toContain('an operator asserted the session is gone')
+    expect(record.termination?.quality).toBe('estimated')
+    expect(record.termination?.value?.reason).toBe('expired')
+    expect(record.termination?.omissionReason).toContain(`every process that hosted this turn at start is gone (recorded pids ${DEAD_PID})`)
+    // 恢复收尾带着不确定：正文证据标 partial 并写明原因，不冒充逐次观测到的结束。
+    expect(record.tools.status).toBe('partial')
+    expect(record.tools.omissionReason).toContain('force-closed')
   }, 40_000)
 
   it('没有 transcript：静默不是中断证据，只有显式过期才收尾', async () => {
@@ -144,11 +164,62 @@ export function registerStaleOpenTurnSuite(): void {
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
     expect(await readHealth(join(root, '.scry'))).toMatchObject({ openTurns: 1, staleOpenTurns: 1 })
 
+    // 没有进程证据时只能按操作者的断言收尾，措辞必须保留这一点。
+    await recordHost(root, session, undefined)
+    await expect(recorderOpenTurns(join(root, '.scry'))).resolves.toMatchObject([{ host: 'unknown' }])
     await expect(recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true }))
       .resolves.toMatchObject({ recovered: 1, expired: 1 })
     const [record] = await listRecords(join(root, '.scry'))
     expect(record.status).toBe('interrupted')
+    expect(record.termination?.omissionReason).toContain('an operator asserted the session is gone')
     expect(record.user.value?.text).toContain('summarize the repository')
     expect(JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8').catch(() => 'null'))).toBeNull()
+  }, 40_000)
+
+  it('宿主进程还活着：即使长时间静默也不自动收尾，只在 health 里标 stale', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'host-alive.jsonl')
+    await writeFile(transcript, `${[userRow('summarize the repository'), replyRow('tool_use')].join('\n')}\n`)
+    await qoderTurn(root, transcript)
+    await backdateTurn(root, session, transcript, 35)
+    // 进程确实还在跑：自动调用（每 15 分钟一次的 recover --expire-open）不能替它决定结束。
+    await recordHost(root, session, [{ pid: process.pid }])
+
+    const [turn] = await recorderOpenTurns(join(root, '.scry'))
+    expect(turn).toMatchObject({ stale: true, host: 'running' })
+    await expect(recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true }))
+      .resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
+    expect(await listRecords(join(root, '.scry'))).toEqual([])
+    expect(await readHealth(join(root, '.scry'))).toMatchObject({ openTurns: 1, staleOpenTurns: 1 })
+
+    // 进程真的退出后（pid 不再存在），同一开关才收尾。
+    await recordHost(root, session, [{ pid: DEAD_PID }])
+    await expect(recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true }))
+      .resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record).toMatchObject({ status: 'interrupted' })
+    expect(record.termination?.value?.reason).toBe('expired')
+  }, 40_000)
+
+  it('同一轮被收尾后重复执行 --expire-open 不产生第二条记录', async () => {
+    const root = await workspace()
+    const transcript = join(root, 'idempotent.jsonl')
+    await writeFile(transcript, `${[userRow('summarize the repository'), replyRow('tool_use')].join('\n')}\n`)
+    await qoderTurn(root, transcript)
+    await backdateTurn(root, session, transcript, 35)
+    await recordHost(root, session, [{ pid: DEAD_PID }])
+
+    const first = await recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true })
+    expect(first).toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    const second = await recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true })
+    const third = await recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true })
+    expect(second).toEqual({ recovered: 0, pending: 0, expired: 0 })
+    expect(third).toEqual({ recovered: 0, pending: 0, expired: 0 })
+    // 幂等：仍然只有一条记录，sequence 与收尾时间都没有变。
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ recordId: record?.recordId, sequence: record?.sequence, completedAt: record?.completedAt })
+    await expect(recorderOpenTurns(join(root, '.scry'))).resolves.toEqual([])
   }, 40_000)
 }

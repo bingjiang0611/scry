@@ -202,7 +202,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
           : `no stale open turn (${health.openTurns} open)`,
       ...(staleOpenTurns.length > 0 || health.staleOpenTurns > 0
         ? {
-            remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence or a finished reply plus extended silence, never from silence alone; `scry recorder recover --expire-open` force-closes a turn once you know the process is gone'
+            remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence or a finished reply plus extended silence, never from silence alone; `scry recorder recover --expire-open` closes a turn that wrote nothing for 30 minutes once its host process is gone; it still leaves turns alone while the recorded host process runs'
           }
         : {})
     },

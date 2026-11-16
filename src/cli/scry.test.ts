@@ -23,6 +23,22 @@ describe('Scry CLI arguments', () => {
     expect(() => parseArgs(['doctor', '--workspace'])).toThrow('missing value')
   })
 
+  it('recover --expire-open 是布尔开关，不吞后面的位置参数', () => {
+    // CodeLens 每 15 分钟自动执行这条命令；未注册时它直接以 unknown option 退出 1。
+    const parsed = parseArgs(['recorder', 'recover', '--expire-open', '--workspace', '/repo'])
+    expect(parsed.flags.get('expire-open')).toBe(true)
+    expect(parsed.flags.get('workspace')).toBe('/repo')
+    expect(parsed.positionals).toEqual(['recorder', 'recover'])
+    expect(() => parseArgs(['recorder', 'recover', '--expire-open=1'])).toThrow('does not accept a value')
+  })
+
+  it('带 --expire-open 的 recover 能跑通并返回 JSON 结果', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--expire-open'])).resolves.toBe(0)
+    expect(JSON.parse(stdout.text())).toMatchObject({ recovered: 0, pending: 0, expired: 0 })
+  })
+
   it('scoped recorder recovery fails closed on unpaired or unsupported scope', async () => {
     await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder']))
       .rejects.toThrow('--provider and --session-id must be provided together')

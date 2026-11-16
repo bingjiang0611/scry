@@ -413,6 +413,8 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
 
   for (const record of selected) {
     for (const entry of filesByRecord.get(record)!) {
+      // 被拒、失败或结果未知的访问不是已发生的读写：只有成功（含旧记录未标状态）才算足迹。
+      if (entry.file.status && entry.file.status !== 'succeeded') continue
       rowOf(entry.file.path)[entry.file.operation]++
     }
   }
@@ -455,6 +457,7 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
     if (filesByRecord.get(record)!.some((entry) => entry.call)) continue
     if (!availableArray(record.files)) continue
     for (const file of record.files.value) {
+      if (file.status && file.status !== 'succeeded') continue
       if (file.operation === 'read') exactRead.add(file.path)
       else if (!written.has(file.path)) {
         written.add(file.path)

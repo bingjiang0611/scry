@@ -47,7 +47,8 @@ export async function beginOpenTurn(
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment,
   capture?: SessionCaptureContext,
   claim?: CaptureClaimIdentity,
-  continuation?: import('./runtime-state.js').RecorderContinuation
+  continuation?: import('./runtime-state.js').RecorderContinuation,
+  host?: import('./host-process.js').HostProcess[]
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
@@ -102,6 +103,7 @@ export async function beginOpenTurn(
     ...(piTranscriptAnchor ? { piTranscriptAnchor } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(requestSetId ? { requestSetId } : {}),
+    ...(host?.length ? { host } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
     ...(continuation ? { continuation } : {}),

@@ -1,5 +1,6 @@
 import type { AgentTurnRecord, TurnEndReason } from '../../shared/turn-record.js'
 import type { TranscriptRead } from './recorder-contracts.js'
+import { hostProcessState } from './host-process.js'
 import { openTurnQuiet, STALE_OPEN_TURN_QUIET_MS, type RecorderOpenTurnState } from './runtime-state.js'
 
 /**
@@ -29,7 +30,10 @@ export interface StaleOpenTurnVerdict {
  *    was lost. Published as `completed` with an estimated end time, because the end is the last row
  *    we can see, not the moment the host reported.
  * 2. an operator asserts the process is gone (`expireOpen`), which is the only honest source for a
- *    session that died before producing anything to read.
+ *    session that died before producing anything to read. Even then the pass refuses while a
+ *    process that hosted the turn at start is still running: an approval wait, a long local tool and
+ *    a person away from the keyboard all write nothing while they last, and an automatic caller
+ *    (CodeLens runs `recover --expire-open` every 15 minutes) cannot know which one it is looking at.
  *
  * A turn whose transcript is missing or unreadable has no proof either way and stays open: the
  * earlier attempts to treat "no transcript" as an interruption published turns that were still
@@ -73,11 +77,17 @@ export async function staleOpenTurnVerdict(args: {
     }
   }
   if (args.expireOpen) {
+    // A live host vetoes an automatic expiry: the turn may still be waiting on a person, a tool or a
+    // plan approval, all of which write nothing to the transcript while they wait.
+    const host = await hostProcessState(open.host)
+    if (host === 'running') return undefined
     return {
       status: 'interrupted',
       at,
       endReason: 'expired',
-      reason: `no terminal event was observed and an operator asserted the session is gone; the turn was force-closed after ${silentFor} of silence`
+      reason: host === 'gone'
+        ? `no terminal event was observed and every process that hosted this turn at start is gone (recorded pids ${open.host!.map((process) => process.pid).join(', ')}); recovery force-closed the turn after ${silentFor} of silence`
+        : `no terminal event was observed and an operator asserted the session is gone; recovery force-closed the turn after ${silentFor} of silence`
     }
   }
   return undefined

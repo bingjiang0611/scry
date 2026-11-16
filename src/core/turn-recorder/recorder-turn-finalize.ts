@@ -15,7 +15,7 @@ import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './rec
 import { stableTranscript } from './recorder-transcript-cache.js'
 import { degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { unmatchedIdentityReason } from './recorder-transcript-background.js'
-import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
+import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { rm } from 'node:fs/promises'
@@ -150,7 +150,7 @@ export async function finalizeOpenTurn(
     stage: 'turn_diff',
     turnDiff
   }))
-  const startedAt = transcript.startedAt ?? open.startedAt
+  const startedAt = recordStartedAt(open, transcript.startedAt)
   const end = resolveTurnEnd(
     open, startedAt, transcript, mergedEvents,
     options.forcedReason ? 'expired' : undefined,
@@ -199,6 +199,8 @@ export async function finalizeOpenTurn(
       errors: hasToolEvidence || transcript.observable.errors || events.some((event) =>
         event.kind === 'harness' && event.stage === 'task_error' && event.isError === true
       ),
+      // 只能由能观测用户提问的 Provider 转写来证伪；其他 Provider 标 unavailable，不报“零次介入”。
+      interventions: transcript.observed && (open.provider === 'claude' || open.provider === 'qoder'),
       diff: enablement.config.capture.diff
     }
   })
@@ -229,7 +231,7 @@ export async function finalizeOpenTurn(
       requestedRoots: open.captures.map(capture => capture.repository)
     }
   }
-  applyCaptureBaselineCaveat(evidence, open.capture)
+  applyCaptureBaselineCaveat(evidence, open.capture, startedAt)
   applyDiffExcludeEvidence(evidence)
   if ((diffs.length > 0 || evidence.diff.discovery) && !evidence.diff.source.includes('repository_discovery')) {
     evidence.diff.source.push('repository_discovery')

@@ -293,7 +293,8 @@ export async function parseTranscriptSnapshot(args: {
   const turns = parseTranscriptToTurns(snapshot.content, {
     runId: args.runId,
     newId: () => `transcript-${randomUUID()}`,
-    now: () => new Date().toISOString()
+    now: () => new Date().toISOString(),
+    providerId: args.provider
   })
   const identityEligible = (turn: typeof turns[number]): boolean =>
     turn.identityEligible !== false && turn.identityContradictory !== true
@@ -359,6 +360,8 @@ export async function parseTranscriptSnapshot(args: {
     complete: stable && !snapshot.truncated && qoderSidecarsComplete,
     ...(incompleteReasons.length ? { incompleteReasons } : {}),
     ...(turn?.userText ? { userText: turn.userText } : {}),
+    // 真实提问时间来自转写里的提问行；开启采集时间与 diff 基线时间另存。
+    ...(turn?.startedAt ? { startedAt: turn.startedAt } : {}),
     ...(turn?.stopReason ? { stopReason: turn.stopReason } : {}),
     events,
     observable: {

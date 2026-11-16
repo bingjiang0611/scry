@@ -17,6 +17,7 @@ import {
   transcriptUsageResult
 } from './normalize-core.js'
 import { normalizeHookAttachment, normalizeHookMessage } from './normalize-hooks.js'
+import { transcriptIntervention } from './normalize-intervention.js'
 import {
   mergeInjectedTranscriptIdentity,
   transcriptIdentityContradictory,
@@ -50,6 +51,11 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
   if (m.type === 'user') {
     // SDK 在 user message 里回传工具结果（tool_result），生成事件供 renderer 合并进对应 tool_use
     const content = (m.message as Record<string, unknown> | undefined)?.content
+    // Qoder 把注入的技能正文写成字符串 content。它不是用户说的话，也不能整段当用户输入。
+    if (typeof content === 'string') {
+      const name = injectedSkillName(content)
+      return name ? skillInjectionEvent(ctx, name, { source: 'skill_injection' }) : []
+    }
     if (Array.isArray(content)) {
       const out: TraceEvent[] = []
       const resultBlocks = (content as Array<Record<string, unknown>>).filter((block) => block.type === 'tool_result')
@@ -77,6 +83,35 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
             )
             if (taskId) (ctx.agentTaskToolUseById ??= new Map()).set(taskId, toolUseId)
           }
+          const toolFailure = b.is_error === true ||
+            (outerFailure?.failed === true && (
+              outerFailure.toolUseId === toolUseId ||
+              (!outerFailure.toolUseId && resultBlocks.length === 1)
+            )) ||
+            (started?.isMcp === true && mcpPayloadFailed(output))
+          // 人工介入只能从“提问/拒绝请求 + 对应结果”这一对结构里还原。
+          const intervention = transcriptIntervention({
+            ctx,
+            started,
+            toolUseId,
+            isError: toolFailure,
+            outerResult: resultMetadataApplies ? outerResult : undefined,
+            text: output
+          })
+          if (intervention.intervention) {
+            out.push(base(ctx, {
+              kind: 'human',
+              stage: 'intervention',
+              toolUseId,
+              durationMs: intervention.intervention.durationMs,
+              intervention: intervention.intervention,
+              runtimeMetadata: { source: 'provider_transcript_intervention' }
+            }))
+          }
+          // 被拒的工具请求没执行：结果事件要带上这个事实，下游不能当成已读/已写。
+          const denialResolution = intervention.intervention?.kind === 'permission'
+            ? intervention.intervention.resolution
+            : undefined
           out.push(
             base(ctx, {
               kind: 'tool',
@@ -93,14 +128,13 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
               filePath: started?.filePath,
               text: output,
               output,
-              isError: b.is_error === true ||
-                (outerFailure?.failed === true && (
-                  outerFailure.toolUseId === toolUseId ||
-                  (!outerFailure.toolUseId && resultBlocks.length === 1)
-                )) ||
-                (started?.isMcp === true && mcpPayloadFailed(output)),
-              ...(agentResultStatus ? {
-                runtimeMetadata: { source: 'provider_agent_result', agentStatus: agentResultStatus }
+              isError: toolFailure,
+              ...(agentResultStatus || intervention.gap || denialResolution ? {
+                runtimeMetadata: {
+                  ...(agentResultStatus ? { source: 'provider_agent_result', agentStatus: agentResultStatus } : {}),
+                  ...(intervention.gap ? { interventionGap: intervention.gap } : {}),
+                  ...(denialResolution ? { denialResolution } : {})
+                }
               } : {})
             })
           )
@@ -255,6 +289,8 @@ export function extractUserText(content: unknown): string {
 
 export interface ParsedTurn {
   userText: string
+  /** The prompt line's own timestamp: the turn's real start, independent of when recording opened. */
+  startedAt?: string
   providerTurnId?: string
   /** `stop_reason` of the last assistant message, verbatim; absent when the log never reported one. */
   stopReason?: string
@@ -315,6 +351,7 @@ function syncTranscriptContext(ctx: NormalizeCtx, lineCtx: NormalizeCtx): void {
   ctx.latestContextTokens = lineCtx.latestContextTokens
   ctx.latestContextModel = lineCtx.latestContextModel
   ctx.lastSkillName = lineCtx.lastSkillName
+  ctx.skillMarkerByName = lineCtx.skillMarkerByName
   ctx.toolUseById = lineCtx.toolUseById
   ctx.agentToolUseIds = lineCtx.agentToolUseIds
   ctx.agentTaskToolUseById = lineCtx.agentTaskToolUseById
@@ -368,7 +405,11 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
           suppressMetaAssistant = true
           continue
         }
-        if (text && !injectedSkill) lineCtx.lastSkillName = undefined
+        if (text && !injectedSkill) {
+          // 真实用户输入结束上一段技能寿命：同名技能在下一轮重新注入要另起一条证据。
+          lineCtx.lastSkillName = undefined
+          lineCtx.skillMarkerByName = undefined
+        }
         const userEvents = normalizeSdkMessage(o, lineCtx)
         if (injectedSkill && cur) {
           // Qoder writes the command wrapper before the meta skill line. The wrapper is
@@ -379,8 +420,10 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
           cur.items.push(...userEvents)
         } else if (text) {
           suppressMetaAssistant = false
+          const startedAt = typeof o.timestamp === 'string' && Number.isFinite(Date.parse(o.timestamp)) ? o.timestamp : undefined
           cur = {
             userText: text,
+            ...(startedAt ? { startedAt } : {}),
             ...(transcriptProviderTurnId(o) ? { providerTurnId: transcriptProviderTurnId(o) } : {}),
             ...(transcriptRequestSetId(o) ? { requestSetId: transcriptRequestSetId(o) } : {}),
             ...(transcriptIdentityEligible(o) ? {} : { identityEligible: false }),

@@ -95,7 +95,9 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       workspace,
       payload,
       managed,
-      queueOnly: daemonTried || daemonUnknownDelivery
+      queueOnly: daemonTried || daemonUnknownDelivery,
+      // This process was started by the hook script, so its parent chain is the host's chain.
+      ancestryFromPid: process.ppid
     })
     // A failed curl response is unknown delivery, not permission to stop/restart a live peer.
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
