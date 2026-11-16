@@ -4,6 +4,7 @@ import { WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type Workspace
 import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
+import { Menu, MenuItem, MenuSeparator } from './primitives/Menu'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { usePresence } from '../hooks/usePresence'
 import { MOTION } from '../motion'
@@ -45,6 +46,7 @@ export function WorkspaceContextMenu({
     }
     document.addEventListener('pointerdown', dismissPointer, true)
     document.addEventListener('keydown', dismissEscape)
+    if (!menuRef.current?.contains(document.activeElement)) menuRef.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus()
     return () => {
       document.removeEventListener('pointerdown', dismissPointer, true)
       document.removeEventListener('keydown', dismissEscape)
@@ -52,20 +54,22 @@ export function WorkspaceContextMenu({
   }, [presence.state, presence.requestClose])
   const content = (
     <div className="ctx-overlay" data-state={presence.state} onClick={(event) => { if (event.target === event.currentTarget) close() }} onContextMenu={(event) => { event.preventDefault(); close() }}>
-      <div ref={(node) => { menuRef.current = node; presence.ref(node) }} className="ctxmenu workspace-context" data-state={presence.state} role="menu" style={{ left: context.x, top: context.y, transformOrigin: 'top left' }}>
-        {context.entry?.kind === 'file' && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onOpenFile(context.entry!); close() }}><Icon name="file" /> 打开</button>}
-        {context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onAddReference(context.entry!); close() }}><Icon name="message" /> 添加到对话</button>}
+      <Menu ref={(node) => { menuRef.current = node; presence.ref(node) }} className="ctxmenu workspace-context" data-state={presence.state}
+        label={context.entry ? `${context.entry.name} 的操作` : '文件区操作'} style={{ left: context.x, top: context.y, transformOrigin: 'top left' }}>
+        {context.entry?.kind === 'file' && <MenuItem className="ctxitem" icon={<Icon name="file" />} onClick={() => { onOpenFile(context.entry!); close() }}>打开</MenuItem>}
+        {context.entry && <MenuItem className="ctxitem" icon={<Icon name="message" />} onClick={() => { onAddReference(context.entry!); close() }}>添加到对话</MenuItem>}
         {(!context.entry || context.entry.kind === 'directory') && <>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onStartCreate('file', context.entry?.path); close() }}><Icon name="file" /> 新建文件</button>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onStartCreate('directory', context.entry?.path); close() }}><Icon name="folder" /> 新建文件夹</button>
+          <MenuItem className="ctxitem" icon={<Icon name="file" />} onClick={() => { onStartCreate('file', context.entry?.path); close() }}>新建文件</MenuItem>
+          <MenuItem className="ctxitem" icon={<Icon name="folder" />} onClick={() => { onStartCreate('directory', context.entry?.path); close() }}>新建文件夹</MenuItem>
         </>}
         {context.entry && <>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onMove(context.entry!); close() }}><Icon name="folder" /> 移动到…</button>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRename(context.entry!); close() }}><Icon name="file" /> 重命名</button>
-          <button type="button" className="ctxitem del" role="menuitem" onClick={() => { onDelete(context.entry!); close() }}><Icon name="x" /> 移入废纸篓</button>
+          <MenuItem className="ctxitem" icon={<Icon name="folder" />} onClick={() => { onMove(context.entry!); close() }}>移动到…</MenuItem>
+          <MenuItem className="ctxitem" icon={<Icon name="edit" />} onClick={() => { onRename(context.entry!); close() }}>重命名</MenuItem>
+          <MenuSeparator />
+          <MenuItem danger className="ctxitem del" icon={<Icon name="trash" />} onClick={() => { onDelete(context.entry!); close() }}>移入废纸篓</MenuItem>
         </>}
-        {!context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRefresh(); close() }}><Icon name="refresh" /> 刷新</button>}
-      </div>
+        {!context.entry && <MenuItem className="ctxitem" icon={<Icon name="refresh" />} onClick={() => { onRefresh(); close() }}>刷新</MenuItem>}
+      </Menu>
     </div>
   )
   return typeof document === 'undefined' ? content : createPortal(content, document.body)

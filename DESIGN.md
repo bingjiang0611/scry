@@ -140,10 +140,10 @@ components:
 | --- | --- | --- |
 | `src/renderer/radius-system.test.ts` | 所有 `border-radius` 必须是 `var(--r-*)`、`50%` 或 `0`；圆形必须声明 `corner-shape: round` | 绝对，无存量例外 |
 | `src/renderer/motion.test.ts` | 缓动曲线只在 `motion.css` 定义 | 绝对 |
-| `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
+| `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、浮层 z-index 只用 `--layer-*`、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
 | `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
 
-`npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
+`npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。改动界面时按 `.agents/skills/scry-design-system` 的流程执行；它的 `ui-contract-check.mjs` 在推送前列出新出现的选择器、不再渲染却仍被 smoke 选中的类，以及写死数值的 smoke 断言。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
 
 删除样式时注意两类陷阱：`:is()`／`:where()` 里只删无效成员，不删整条选择器；文件或规则的章节注释若仍描述剩余规则，要保留。
 
@@ -254,6 +254,18 @@ iOS 使用 Circle、Capsule 与 continuous RoundedRectangle。Notice 为 12pt �
 
 **分层为主，阴影辅助。** 弹窗使用 panel、细边框、`--shadow-pop` 与带 blur 的遮罩；卡片使用 `--shadow-card`。composer、消息和指标有各自的局部反馈，不要把它们压成一种通用卡片，也不要把 `--shadow-pop` 用在非浮层元素上，否则会读成弹窗。
 
+**层级**：浮出组件的元素只用命名层级，顺序由低到高：
+
+| token | 值 | 用于 |
+| --- | --- | --- |
+| `--layer-overlay` | 100 | 窄窗口下浮在主区上的右侧面板（抽屉）、窗格切换时的离场层 |
+| `--layer-dropdown` | 200 | 菜单、选择器、弹出面板、悬停卡片、右键菜单遮罩。高于抽屉，因为菜单会从抽屉里打开 |
+| `--layer-modal` | 300 | 弹窗遮罩与弹窗；打开弹窗时盖住所有菜单 |
+| `--layer-modal-dropdown` | 400 | 预留：从弹窗里打开并渲染到根节点的菜单 |
+| `--layer-tooltip` | 500 | 预留：需要盖过弹窗的 tooltip |
+
+同一层级按打开顺序叠放（后渲染的在上）。组件内部的叠放（吸顶表头、输入框、分隔条、图表提示）用小于 20 的字面值，只在本组件内比较；`design:audit` 拒绝 20 及以上的字面值。
+
 动效 token 在 `motion.css`：hover 用 `--duration-hover`（120ms），进入／退出按 sm／md／lg 档位，缓动只引用 `--ease-*`。所有位移和缩放动效必须有 `prefers-reduced-motion` 回退。焦点环是可操作性提示，不作为装饰光晕扩散。
 
 iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous 圆角和 1pt 描边，没有使用 Material 或背景模糊；不要从名称推断玻璃效果。
@@ -272,11 +284,12 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 关闭弹窗 | `ModalCloseButton` | 手写 `<button>×</button>` |
 | 在同一视图内切换平级内容（换掉整块面板） | `<Tabs>`：`--selected` 下划线，方向键／Home／End 切换 | 用按钮组或 `aria-pressed` 模拟标签页；用标签页做页面导航 |
 | 在 2–4 个互斥选项中过滤或换算同一份内容，立即生效 | `<Segmented>`：`role="group"` + `aria-pressed` | 用标签页做过滤；下拉菜单（选项少时多一次点击） |
-| 从较多选项中选择，或选项需要说明 | 菜单／选择器（`.menu` 结构，键盘可达） | 平铺一排按钮 |
+| 从较多选项中选择、或对当前对象执行一组命令 | `<Menu>` + `<MenuItem>`：单选项传 `checked`，危险操作传 `danger` 并放最后，分组用 `MenuSeparator`／`MenuLabel` | 平铺一排按钮；在菜单里放输入框或行内按钮（这类做成弹出面板） |
 | 描述对象的状态或属性 | 徽章 `.badge`（非交互，文字 + 颜色） | 可点击的徽章；只靠颜色的徽章 |
 | 实时连接或运行状态 | 状态点 + 文字标签 | 只有颜色的圆点 |
 | 需要用户注意、但不阻断操作的结果 | `<Notice tone>`：info／warn／bad；`layout="strip"` 贴面板边缘，默认 box 放在相关内容旁；最多一个小按钮 | 全局弹窗；只有颜色、没有图标与文字的提示；自己写底色与边框 |
-| 一次性操作反馈（已复制、已保存） | 短暂的 toast 或按钮旁的状态字 | 常驻的 Notice |
+| 一次性操作反馈（已复制、已保存） | 结果在界面上已经可见时只做读屏播报（`role="status"`）；否则在触发按钮旁给状态，复制统一用 `useCopyFeedback`（图标变成勾，成功 2 秒后恢复，失败保留到下次尝试） | 浮动 toast；常驻的 Notice；自动消失的错误 |
+| 用户没在看的会话需要回复、失败或完成 | 后台通知 `BackgroundNotices`：侧栏底部、设置上方，随文档流排列，最多三条；需要回复、失败、中断的保留到处理，其余 10 秒后消失（悬停、聚焦或窗口在后台时暂停） | 浮在内容上的 toast（会挡住发送按钮）；为当前正在看的会话弹通知；把通知当作运行成功的证据 |
 | 必须用户决定才能继续 | 弹窗 `ModalFrame` | 把可选细节塞进弹窗 |
 | 低频的解释、定义、来源说明 | tooltip 或可展开的 `Disclosure` | 常驻的说明段落 |
 | 大块可选细节（原始输入输出、日志） | `Disclosure` 折叠 | 默认展开 |
@@ -294,8 +307,9 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | 标签页 | ~~`.sc-tabs`、`.sb-view-tabs`、`.overview-data-tabs`、`.skill-scope-tabs`、`.capability-kind-tabs`、`.diff-navigation-tabs`；无引用的 `.panel-tabs`、`.vtabs`~~ | **已完成（2026-11-15）**：`Tabs` |
 | 分段控件 | ~~`.usage-segmented`、`.capability-source-tabs`~~ | **已完成（2026-11-15）**：`Segmented`。`.seg-chip` 是指标徽章，不属于分段控件 |
 | 不并入 | `.surface-tabs`、`.terminal-tabs`（可关闭、可拖动）；`.settings-tab`（设置页左侧导航，`aria-current`） | 保留独立实现，但选中色、下划线与字号对齐 `Tabs` |
-| 待定 | `.mp-notice`（浮动 toast）；`.overview-session-notice`、`.surface-chooser-notice`（按钮旁的状态字） | 等 toast 模式确定后统一 |
-| 菜单 | `.menu`、`.wdmenu`、`.climenu`、`.ctxmenu`、`.slash-menu`、`.surface-menu`、`.sb-project-menu`、`.sb-session-menu`、`.diff-scope-menu`、`.diff-turn-menu`、`.arch-provider-menu` | 共享 `.menu` 结构与菜单项样式；定位与触发逻辑仍由调用方负责 |
+| 就近反馈 | ~~`.mp-notice`（浮动 toast）~~；`.overview-session-notice`、`.surface-chooser-notice`、`.desktop-remote__copy-status`（按钮旁的状态字） | **已确定（2026-11-16）**：不做通用 toast，结果就近显示；复制反馈用 `useCopyFeedback` |
+| 菜单 | ~~`.climenu`、`.arch-provider-menu`、`.sb-session-menu`、`.sb-project-menu`、`.ctxmenu`、`.surface-menu` 各自的容器与条目样式~~ | **已完成（2026-11-16）**：`Menu` + `styles-menus.css`；定位、开关与动效仍由调用方负责 |
+| 不并入菜单 | `.diff-scope-menu`／`.diff-turn-menu`（虚拟列表子菜单，`aria-activedescendant`）、`.workspace-picker`（带搜索的列表）、`.wdmenu`／`.location-menu`（`role="dialog"` 的选择面板，行内有移除按钮）、`.slash-menu`、模型与权限弹出面板 | 弹出面板，不用 `role="menu"`；选择面板复用 `.menu-surface` 与 `.mitem` 的外观 |
 
 ### 已有 primitive
 
@@ -306,6 +320,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | `src/renderer/components/primitives/Notice.tsx` | tone：info（默认）／warn／bad；layout：box／strip；size：md／sm；`action` 放一两个 sm 按钮。图标随 tone 自动给出；`role`（status／alert）由调用方决定，primitive 不隐式添加。正文里的 `<b>` 是标题样式 |
 | `src/renderer/components/primitives/Tabs.tsx` | `items` 的 `id`／`controls`／`title`／`count` 保持原 DOM 合同；自动激活，只有选中项在 Tab 顺序中；`tabRef`／`listRef`／`children` 支持动效指示条。颜色在 `aria-selected` 同一帧切换，不做颜色过渡 |
 | `src/renderer/components/primitives/Segmented.tsx` | `role="group"` + `aria-pressed`；`value` 可为字符串或数字 |
+| `src/renderer/components/primitives/Menu.tsx` | `Menu`（`role="menu"`、`aria-label` 必填，`className` 只放定位与测试钩子）、`MenuItem`（`checked` 给出对勾列与 `menuitemradio`，`danger`、`icon`、`trailing`）、`MenuSeparator`、`MenuLabel`。键盘：上下方向键循环、Home／End、按首字母跳转，只在启用的菜单项之间移动；打开时聚焦第一项、Esc 与 Tab 关闭由调用方处理。条目 32px，图标要么全有、要么全无 |
 | `src/renderer/components/primitives/ModalCloseButton.tsx` | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。不承担焦点陷阱或确认关闭逻辑 |
 | `src/renderer/components/ModalFrame.tsx` | 弹窗栈、焦点进入与恢复、Esc／遮罩关闭路由、进出场动效 |
 | `src/renderer/components/Disclosure.tsx` | 折叠内容的挂载、`inert` 与进出场动效；长内容自动切换为长动效 |
@@ -348,8 +363,21 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
    - 需要注意的结果 → 行内 Notice，问题解决后消失；
    - 必须决定才能继续 → 弹窗。
    说明性段落不常驻显示。
-4. **诚实表达缺失**：缺证据写“不可用”“未提供”并说明原因，不写成 `0`、“无”或“一切正常”；与证据语义（`exact`／`estimated`／`partial`／`unavailable`）保持一致。
-5. **错误信息**：说明发生了什么、影响什么、下一步能做什么；不暴露堆栈，也不责备用户。
+4. **诚实表达缺失**：缺证据写“不可用”“未提供”并说明原因，不写成 `0`、“无”或“一切正常”；与证据语义（`exact`／`estimated`／`partial`／`unavailable`）保持一致。已知存在的内容暂时读不到时说明“不可用”，不显示通用的空状态。
+5. **错误信息**：先说什么停止了或做不了，再说影响，最后必须给出用户能做的下一步（重试、换一种方式、去哪里查看）；正文不复述标题。不暴露堆栈，不责备用户，不过度道歉，失败时不用轻松的语气。
+6. **反馈沿用触发控件的动词**：点“移除项目”后的状态写“正在移除…”“已移除”，不换成另一个近义词。
+7. **空状态**：一句事实加至多一个下一步操作；错误造成的空状态不放插图。
+
+### 用词表
+
+| 词 | 用于 | 例 |
+|---|---|---|
+| 删除 | 销毁对象，之后无法从 Scry 找回 | 删除 Scry 副本、删除提示词、删除录制 |
+| 移除 | 从列表或集合中拿掉，对象本身仍然存在 | 移除项目、移除主机、移除排队消息 |
+| 清除 | 清空字段、选择或筛选 | 清除候选文件选择 |
+| 存档／恢复 | 从活动列表移到存档，或移回来；数据保留 | 存档会话、恢复会话 |
+| 停止 | 请求结束正在运行的任务；结果以运行记录为准 | 停止运行、停止后台任务 |
+| 不用“确定”“好的” | 按钮写具体动作；只有确实找不到具体动词时才用“确定” | “删除会话”而不是“确定” |
 
 ## Do's and Don'ts
 
@@ -372,7 +400,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 
 ## 迁移路线
 
-存量债务按区域分批偿还，每批都会改变可见外观，因此单独提交、单独验证（隔离 Electron fixture 深浅主题截图 + 受影响的 UI smoke），并在 [设计决策记录](docs/design/decisions.md) 记一条。
+存量债务按区域分批偿还，每批都会改变可见外观，因此单独提交、单独验证（隔离 Electron fixture 深浅主题截图 + 受影响的 UI smoke），并在 [设计决策记录](docs/design/decisions.md) 记一条。第 5–7 步的待定项（层级、文案、菜单、浮动提示）与 Primer、VS Code、Carbon、Atlassian、Radix、Apple HIG 的对比和建议见 [参考案例对比](docs/design/references.md)。
 
 1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
 2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
@@ -383,6 +411,6 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
    - **守住契约**：区域内 smoke 断言的行高、宽度与对齐值不变；用计算样式比对列出每一处真实变化并逐条确认。
    - **阅读字号不随取整变化**：会改变正文阅读字号的取整先停下，确认是否需要语义 token（对话正文因此新增 `--text-reading`）。
    - **颜色由语义变量派生**：状态与证据类型的半透明底色、边框写成 `color-mix(in srgb, var(--ok) 24%, transparent)`，不写死 `rgba()`，否则浅色主题会沿用深色主题调好的色值。
-5. **颜色与层级**：颜色与阴影已收敛为语义变量和固定色板（已完成）；z-index 尚未收敛为分层 token（现有约 20 个散落值）。
+5. **颜色与层级（已完成）**：颜色与阴影收敛为语义变量和固定色板；浮层 z-index 收敛为 `--layer-*` 五档（2026-11-16）。
 6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure（尚未开始）。
-7. **其余组件**：菜单（14 套）尚未收敛；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。
+7. **其余组件**：菜单收敛为 `Menu`（2026-11-16）；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。

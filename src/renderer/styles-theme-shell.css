@@ -104,6 +104,14 @@
   --statusbar-h: 26px;
   --shadow-pop: 0 20px 64px rgba(0, 0, 0, 0.64);
   --shadow-card: none;
+  /* Layers for anything that floats outside its component. Menus sit above drawers because
+     they open from them; modals cover every menu; ordering inside one component keeps a
+     local literal below 20. Equal layers stack in the order they were opened (DOM order). */
+  --layer-overlay: 100;
+  --layer-dropdown: 200;
+  --layer-modal: 300;
+  --layer-modal-dropdown: 400;
+  --layer-tooltip: 500;
 }
 
 :root[data-theme='light'] {
@@ -309,5 +317,5 @@ body {
   height: var(--leaving-height) !important;
   pointer-events: none !important;
   overflow: hidden;
-  z-index: 20;
+  z-index: var(--layer-overlay);
 }

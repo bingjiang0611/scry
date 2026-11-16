@@ -97,6 +97,8 @@ export interface AppShellProps {
   /** Pending question kind per run; a clarification is not an approval request. */
   questionKindsByRun: ReadonlyMap<string, import('@shared/runtime').AgentQuestionKind>
   unreadSessionKeys: ReadonlySet<string>
+  /** -1 until the first unread snapshot has arrived. */
+  unreadRevision: number
   backgroundWorkByRun: ReturnType<typeof import('./hooks/useBackgroundWork').useBackgroundWork>
   catalogHealth: ReturnType<typeof useWorkspaceState>['catalogHealth']
   summary: ReturnType<typeof import('./components/PinnedSummary').usePinnedSummaryVisibility>

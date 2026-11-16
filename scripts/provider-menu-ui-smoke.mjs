@@ -76,8 +76,8 @@ async function exerciseProviderMenus() {
     menuGap: getComputedStyle(firstRow.parentElement).gap
   }
 
-  // 菜单行的规格：40px 行高、行间无额外间距，图标 20px 由上面的断言锁住。
-  if (metrics.rowHeight !== 40) throw new Error('menu row height ' + metrics.rowHeight + 'px, expected 40px')
+  // 菜单行的规格：Menu primitive 的 32px 行高、行间无额外间距，图标 20px 由上面的断言锁住。
+  if (metrics.rowHeight !== 32) throw new Error('menu row height ' + metrics.rowHeight + 'px, expected 32px')
   if (metrics.rowGapBelow !== 0) throw new Error('menu rows must not add spacing between them, got ' + metrics.rowGapBelow)
 
   // 对勾列在最左，且只有当前项显示。

@@ -23,6 +23,9 @@ import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
 import { PinnedSummaryHost } from './components/PinnedSummary'
+import { useBackgroundNotices } from './hooks/useBackgroundNotices'
+import { useEventCallback } from './hooks/useEventCallback'
+import type { BackgroundNotice } from './background-notices'
 import { EmptySessionOverview } from './app-model'
 import packageJson from '../../package.json'
 
@@ -43,7 +46,7 @@ export function AppShell(props: AppShellProps) {
     handleRightSurfaceAction, openTurnInChat, diffInspector, openWorkspaceDiff, workspaceRefreshKey,
     workspaceOpenRequests, setScopeDirty, addWorkspaceReference, showLlmPerformance, setShowLlmPerformance,
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo, sessionSaves,
-    setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, backgroundWorkByRun,
+    setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, unreadRevision, backgroundWorkByRun,
     catalogHealth, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
@@ -84,6 +87,17 @@ export function AppShell(props: AppShellProps) {
   const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
   useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   useConversationAttention(view === 'conversation' && mainLiveVisible ? logicalConversation?.id : undefined)
+  const backgroundNotices = useBackgroundNotices({ unreadSessionKeys, unreadRevision, projects, runningRunIds, waitingQuestionRunIds })
+  // Stable identity keeps the memoized Sidebar from re-rendering for the callback alone.
+  const openBackgroundNotice = useEventCallback((notice: BackgroundNotice): void => {
+    backgroundNotices.dismiss(notice.key)
+    if (notice.target.kind === 'conversation') { pickConversation(notice.target.conversation); return }
+    const { cwd: sessionCwd, session: noticeSession } = notice.target
+    const pick = (sidebarActions as Pick<ComponentProps<typeof Sidebar>, 'onPick'>).onPick
+    pick(sessionCwd, noticeSession.sessionId, noticeSession.providerId, noticeSession.externalSessionId,
+      noticeSession.runId && runningRunIds.has(noticeSession.runId) ? noticeSession.runId : undefined,
+      noticeSession.agentProfileId, noticeSession.preview, noticeSession.runId)
+  })
   return (
     <div ref={shellRef} className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${narrowSingleColumn ? ' narrow-single-column' : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} data-narrow-pane={narrowSingleColumn ? (shellPanelVisible ? 'panel' : 'main') : undefined} style={appStyle}>
       <Sidebar {...(sidebarActions as ComponentProps<typeof Sidebar>)} id="sidebar-pane" draftStore={draftStore} version={packageJson.version} projects={projects}
@@ -93,6 +107,7 @@ export function AppShell(props: AppShellProps) {
         activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
         activeProviderId={integrations.selectedProviderId} activeAgentProfileId={integrations.providerContext.agentProfileId}
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
+        backgroundNotices={backgroundNotices.notices} onOpenBackgroundNotice={openBackgroundNotice} onDismissBackgroundNotice={backgroundNotices.dismiss}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo} sessionSaves={sessionSaves}
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}

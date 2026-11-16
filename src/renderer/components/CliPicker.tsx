@@ -7,8 +7,7 @@ import { basename } from '../format'
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
-import { MenuCheck } from './menu-parts'
-import { moveMenuFocus } from './WorkdirPicker'
+import { Menu, MenuCheck, MenuItem, MenuLabel, MenuSeparator } from './primitives/Menu'
 
 export interface AgentProviderGroup {
   id: string
@@ -114,44 +113,36 @@ export function CliPicker({
         <Icon name={disabled ? 'lock' : 'chevronDown'} className="chev" />
       </button>
       {open && !disabled && (
-        <div
+        <Menu
           id={menuId}
           ref={menuRef}
           className="menu climenu"
-          role="menu"
-          aria-label={AGENT_PICKER_COPY.menuLabel}
+          label={AGENT_PICKER_COPY.menuLabel}
           onMouseLeave={dismissMenu}
-          onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
         >
           <div className="cltitle" role="none">
             {scopeLabel}
             <div className="dim">{sel?.name ?? '未检测到'}</div>
           </div>
-          <div className="mhdr" role="none">Provider</div>
+          <MenuLabel>Provider</MenuLabel>
           {agents.length === 0 && <div className="dim pad" role="none">{AGENT_PICKER_COPY.empty}</div>}
           {codeAgents.map((a) => (
-            <button
-              type="button"
-              role="menuitemradio"
+            <MenuItem
               key={a.id}
-              className="mitem"
+              checked={a.id === selectedId}
               data-agent-id={a.id}
-              aria-checked={a.id === selectedId}
               title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
               disabled={unavailableIds?.has(a.id)}
+              icon={<span className="agicon"><ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} /></span>}
               onClick={() => {
                 onSelect(a.id)
                 dismissMenu()
               }}
             >
-              <MenuCheck selected={a.id === selectedId} />
-              <span className="agicon">
-                <ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} />
-              </span>
               <span className="agent-option-name">{a.name}{unavailableIds?.has(a.id) && a.id !== selectedId ? ' · 不可用' : ''}</span>
-            </button>
+            </MenuItem>
           ))}
-          {piAgents.length > 0 && <div className="mhdr" role="none">Pi · Profiles</div>}
+          {piAgents.length > 0 && <MenuLabel>Pi · Profiles</MenuLabel>}
           {piAgents.map((agent) => (
             <div className="agent-option-row" key={agent.id} role="none">
               <button
@@ -188,18 +179,18 @@ export function CliPicker({
               )}
             </div>
           ))}
-          {(onAddPi || onRescan) && <div className="mdiv" role="separator" />}
+          {(onAddPi || onRescan) && <MenuSeparator />}
           {onAddPi && (
-            <button type="button" role="menuitem" className="mitem" onClick={() => { onAddPi(); dismissMenu() }}>
-              <Icon name="plus" /> 添加 Pi Agent…
-            </button>
+            <MenuItem icon={<Icon name="plus" />} onClick={() => { onAddPi(); dismissMenu() }}>
+              添加 Pi Agent…
+            </MenuItem>
           )}
           {onRescan && (
-            <button type="button" role="menuitem" className="mitem" onClick={() => onRescan()}>
-              <Icon name="refresh" /> 重新扫描 PATH
-            </button>
+            <MenuItem icon={<Icon name="refresh" />} onClick={() => onRescan()}>
+              重新扫描 PATH
+            </MenuItem>
           )}
-        </div>
+        </Menu>
       )}
     </div>
   )

@@ -15,7 +15,7 @@ describe('canonical agent instructions', () => {
     expect(existsSync(resolve(root, 'CLAUDE.md'))).toBe(false)
   })
 
-  it.each(['contribution-triage', 'scry-performance-climb'])(
+  it.each(['contribution-triage', 'scry-design-system', 'scry-performance-climb'])(
     'keeps %s only in the shared skills directory',
     (name) => {
       expect(lstatSync(resolve(root, '.agents/skills', name, 'SKILL.md')).isFile()).toBe(true)

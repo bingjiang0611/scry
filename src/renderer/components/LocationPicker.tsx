@@ -177,7 +177,7 @@ function MachineLocationPicker({
         <div
           id={menuId}
           ref={menuRef}
-          className="menu wdmenu location-menu"
+          className="menu-surface menu wdmenu location-menu"
           role="dialog"
           aria-label="选择执行位置"
           onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}

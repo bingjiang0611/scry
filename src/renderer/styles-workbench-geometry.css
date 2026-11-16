@@ -157,7 +157,7 @@
   bottom: auto;
   width: 244px;
   min-width: 0;
-  z-index: 90;
+  z-index: var(--layer-dropdown);
 }
 
 .sb-session-menu {
@@ -165,12 +165,12 @@
   bottom: auto;
   width: 200px;
   min-width: 0;
-  z-index: 90;
+  z-index: var(--layer-dropdown);
 }
 
 .session-hover-card {
   position: fixed;
-  z-index: 85;
+  z-index: var(--layer-dropdown);
   width: max-content;
   max-width: min(340px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
@@ -256,10 +256,6 @@
 .sb-project-menu-head code {
   color: var(--dim3);
   font: var(--text-2xs)/1.25 var(--font-mono);
-}
-
-.sb-project-remove {
-  color: var(--bad) !important;
 }
 
 .project-dialog {

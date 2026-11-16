@@ -69,7 +69,7 @@
   border: 1px solid var(--border2);
   border-radius: var(--r-md);
   overflow: hidden;
-  z-index: 30;
+  z-index: var(--layer-dropdown);
 }
 .slash-head {
   display: flex;

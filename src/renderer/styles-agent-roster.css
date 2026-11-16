@@ -227,8 +227,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .surface-tab:hover,
-  .surface-tab-close:hover,
-  .surface-menu .menu-item:hover {
+  .surface-tab-close:hover {
     color: var(--fg);
     background: var(--surface-hover);
   }
@@ -271,7 +270,7 @@
     right: 0;
     bottom: 0;
     left: auto;
-    z-index: 30;
+    z-index: var(--layer-overlay);
     width: min(var(--overview-panel-w), calc(100vw - var(--sidebar-w) - var(--pane-resizer-w)));
     box-shadow: var(--shadow-side-panel);
   }

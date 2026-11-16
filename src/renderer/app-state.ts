@@ -60,6 +60,8 @@ export function useAppState() {
   /** Kind of the pending question of a run: a clarification is not an approval request. */
   const [questionKindsByRun, setQuestionKindsByRun] = useState<ReadonlyMap<string, AgentQuestionKind>>(() => new Map())
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<ReadonlySet<string>>(() => new Set())
+  /** -1 until main's first unread snapshot arrives; background notices use it as their baseline. */
+  const [unreadRevision, setUnreadRevision] = useState(-1)
   const unreadRevisionRef = useRef(-1)
   const terminalRunIdsRef = useRef(new Set<string>())
   const localRunIdsRef = useRef(new Set<string>())
@@ -79,6 +81,7 @@ export function useAppState() {
       if (snapshot.revision < unreadRevisionRef.current) return
       unreadRevisionRef.current = snapshot.revision
       setUnreadSessionKeys(new Set(snapshot.unreadSessionKeys))
+      setUnreadRevision(snapshot.revision)
     }
     const unsubscribe = window.scry.onUnreadSessions?.(applySnapshot)
     void window.scry.unreadSessions?.().then(applySnapshot).catch(() => { })
@@ -310,6 +313,7 @@ export function useAppState() {
     questionKindsByRun,
     setQuestionKindsByRun,
     unreadSessionKeys,
+    unreadRevision,
     terminalRunIdsRef,
     localRunIdsRef,
     localStartsRef,

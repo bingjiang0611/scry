@@ -20,12 +20,12 @@
   position: absolute;
   bottom: calc(100% + 6px);
   min-width: 240px;
-  border: 1px solid var(--border2);
-  padding: 8px;
-  z-index: 20;
+  z-index: var(--layer-dropdown);
 }
+/* The workdir and location pickers are panels (role="dialog") on the menu surface; they keep a wider inset. */
 .wdmenu {
   left: 0;
+  padding: var(--space-2);
 }
 .wdrecent-list {
   max-height: 200px;
@@ -108,8 +108,7 @@
   width: min(286px, calc(100vw - 32px));
   min-width: 0;
 }
-.cltitle,
-.mhdr {
+.cltitle {
   padding: 8px 8px 4px;
   font-size: var(--text-xs);
   text-transform: uppercase;
@@ -127,20 +126,6 @@
 }
 .climenu .mitem {
   min-width: 0;
-}
-
-/* 单选菜单的对勾列：未选中也占位，名称从同一列开始（agent / provider 筛选共用）。 */
-.menu-check {
-  width: 18px;
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  color: var(--fg);
-}
-
-.menu-check .ico {
-  width: 14px;
-  height: 14px;
 }
 
 .climenu .mitem,
@@ -216,48 +201,10 @@
 .climenu .ck {
   flex: none;
 }
-.mitem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 8px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  white-space: nowrap;
-}
-button.mitem {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-button.mitem:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-.mitem.on {
-  color: var(--fg);
-}
-.mitem .ck {
-  margin-left: auto;
-  color: var(--ok);
-  font-size: var(--text-sm);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 .agicon {
   width: 18px;
   display: inline-grid;
   place-items: center;
-}
-.mdiv {
-  height: 1px;
-  background: var(--border);
-  margin: 8px 4px;
 }
 .dim {
   color: var(--dim);

@@ -12,7 +12,9 @@ const themeShell = readFileSync(join(rendererDirectory, 'styles-theme-shell.css'
 const TYPE_SCALE = { '2xs': 10, xs: 11, sm: 12, md: 13, base: 14, reading: 15, lg: 16, xl: 20, '2xl': 24 }
 const WEIGHTS = { regular: 400, medium: 500, semibold: 600, bold: 700 }
 const SPACE = { '0_5': 2, 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 8: 32, 10: 40, 12: 48 }
-const TOKEN_DEFINITION = /--(?:text-(?:2xs|xs|sm|md|base|reading|lg|xl|2xl)|weight-[a-z]+|space-[0-9_]+)\s*:/
+// Menus open from drawers, so they sit above them; modals cover every menu.
+const LAYERS = { overlay: 100, dropdown: 200, modal: 300, 'modal-dropdown': 400, tooltip: 500 }
+const TOKEN_DEFINITION = /--(?:text-(?:2xs|xs|sm|md|base|reading|lg|xl|2xl)|weight-[a-z]+|space-[0-9_]+|layer-[a-z-]+)\s*:/
 
 function cssFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -26,6 +28,7 @@ describe('design tokens', () => {
   it('defines one type, weight and 4px spacing scale in the theme shell', () => {
     for (const [name, px] of Object.entries(TYPE_SCALE)) expect(themeShell).toContain(`--text-${name}: ${px}px;`)
     for (const [name, weight] of Object.entries(WEIGHTS)) expect(themeShell).toContain(`--weight-${name}: ${weight};`)
+    for (const [name, value] of Object.entries(LAYERS)) expect(themeShell).toContain(`--layer-${name}: ${value};`)
     for (const [name, px] of Object.entries(SPACE)) {
       expect(themeShell).toContain(`--space-${name}: ${px}px;`)
       expect(px === 2 || px % 4 === 0).toBe(true)
@@ -50,11 +53,14 @@ describe('design debt audit', () => {
       .c { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--fg); padding: 4px 12px }
       .d button:hover, .e button:not(:where(.btn, .icon-button, [role='tab'])):hover, .g button:not(.btn):hover, .f .btn { cursor: pointer }
       :root[data-platform='macos'] .topbar button, .h button { -webkit-app-region: no-drag; user-select: none }
+      .i { z-index: 1200 } .j { z-index: 16 } .k { z-index: var(--layer-dropdown) } .l { z-index: calc(var(--layer-dropdown) + 1) }
     `)
     expect(found.fontSize.map((item: { text: string }) => item.text)).toEqual(['font: var(--weight-semibold) 11.5px/1 var(--font-mono)'])
     expect(found.fontWeight.map((item: { text: string }) => item.text)).toEqual(['font-weight: 550'])
     expect(found.spacing.map((item: { text: string }) => item.text)).toEqual(['padding: 6px var(--space-2)', 'margin: -3px 0 2px'])
     expect(found.color.map((item: { text: string }) => item.text)).toEqual(['color: #fff'])
+    // Floating layers use the named scale; small literals only order siblings inside one component.
+    expect(found.layer.map((item: { text: string }) => item.text)).toEqual(['z-index: 1200'])
     // A bare :not() raises specificity and overrides component rules, so only the :where() form counts.
     // Behavior-only rules (window drag band, pointer events, selection) must keep reaching every button.
     expect(found.buttonReset.map((item: { text: string }) => item.text)).toEqual(['.d button:hover', '.g button:not(.btn):hover'])

@@ -14,13 +14,14 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const rendererRoot = join(repoRoot, 'src/renderer')
 
-export const METRICS = /** @type {const} */ (['fontSize', 'fontWeight', 'spacing', 'color', 'buttonReset'])
+export const METRICS = /** @type {const} */ (['fontSize', 'fontWeight', 'spacing', 'color', 'layer', 'buttonReset'])
 
 export const METRIC_RULES = {
   fontSize: 'font-size / font shorthand uses a px literal instead of var(--text-*)',
   fontWeight: 'font-weight uses a number instead of var(--weight-*)',
   spacing: 'padding / margin / gap uses a px value off the 4px grid (1px hairline and 2px optical are allowed)',
   color: 'a non-token declaration uses a raw color literal instead of a theme variable',
+  layer: 'z-index of 20 or more uses a literal instead of var(--layer-*); literals below 20 are for ordering inside one component',
   buttonReset: 'a container-wide `… button` rule does not exclude the primitives with :not(:where(.btn, .icon-button, [role=tab], .segmented > button)); rules that only set -webkit-app-region, pointer-events or user-select must not exclude them'
 }
 
@@ -108,6 +109,7 @@ export function auditCss(source, { primitiveSheet = false } = {}) {
       }
     }
     for (const _ of value.match(COLOR_LITERAL) ?? []) found.color.push({ line, text })
+    if (property === 'z-index' && /^-?\d+$/.test(value) && Math.abs(Number(value)) >= 20) found.layer.push({ line, text })
   }
   for (const { selector, line, properties } of primitiveSheet ? [] : selectors(source)) {
     if (!CONTAINER_BUTTON.test(selector) || EXCLUDES_PRIMITIVES.test(selector)) continue

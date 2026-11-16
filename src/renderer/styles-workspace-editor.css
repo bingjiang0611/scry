@@ -149,21 +149,6 @@
   min-width: 180px;
 }
 
-.ctxmenu .ctxitem {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--dim);
-  background: transparent;
-  border: 0;
-  text-align: left;
-}
-
-.ctxmenu .ctxitem.del {
-  color: var(--bad);
-}
-
 .workspace-editorbar {
   flex: 0 0 auto;
   display: flex;
@@ -262,7 +247,7 @@
 .workspace-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--layer-modal);
   display: grid;
   place-items: center;
   padding: 20px;

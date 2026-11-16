@@ -9,6 +9,7 @@ import { META_PROMPT_COPY, MODAL_COPY } from '../constants/copy'
 import './meta-prompts.css'
 import { Button } from './primitives/Button'
 import { IconButton } from './primitives/IconButton'
+import { useCopyFeedback } from '../hooks/useCopyFeedback'
 
 type LibraryState = { status: 'ready'; prompts: MetaPrompt[] } | { status: 'error'; error: string }
 type Notice = { error: boolean; text: string }
@@ -37,11 +38,6 @@ export function MetaPromptsView({ onBack, onInsert }: {
   const deleteTitleId = useId()
   const listMotion = useFirstReadyList(library.status === 'ready')
   useEffect(() => { searchRef.current?.focus() }, [])
-  useEffect(() => {
-    if (!notice || notice.error) return
-    const timer = window.setTimeout(() => setNotice(null), 2400)
-    return () => window.clearTimeout(timer)
-  }, [notice])
 
   const prompts = library.status === 'ready' ? library.prompts : []
   const visible = filterMetaPrompts(prompts, query)
@@ -56,14 +52,6 @@ export function MetaPromptsView({ onBack, onInsert }: {
     } catch (error) {
       setNotice({ error: true, text: `保存失败：${errorMessage(error)}。原提示词未被更改。` })
       return false
-    }
-  }
-  const copy = async (prompt: MetaPrompt): Promise<void> => {
-    try {
-      await window.scry.copyText(prompt.body)
-      setNotice({ error: false, text: `已复制「${prompt.title}」` })
-    } catch (error) {
-      setNotice({ error: true, text: `复制失败：${errorMessage(error)}。可以选择正文手动复制。` })
     }
   }
   const save = (title: string, body: string): void => {
@@ -111,7 +99,7 @@ export function MetaPromptsView({ onBack, onInsert }: {
                   <button type="button" className="mp-row-select" aria-pressed={selected?.id === prompt.id} onClick={() => setSelectedId(prompt.id)}>
                     <strong>{prompt.title}</strong><span>{prompt.body.split('\n')[0]}</span>
                   </button>
-                  <IconButton label={`复制：${prompt.title}`} title="复制提示词" onClick={() => { void copy(prompt) }}><Icon name="copy" /></IconButton>
+                  <RowCopyButton prompt={prompt} />
                 </div>
               ))}
               {visible.length === 0 && (
@@ -126,15 +114,14 @@ export function MetaPromptsView({ onBack, onInsert }: {
                 <IconButton label="删除提示词" title="删除" onClick={() => { setNotice(null); setDeleting(selected) }}><Icon name="trash" /></IconButton>
               </div></header>
               <pre className="mp-body">{selected.body}</pre>
-              <footer className="mp-detail-footer"><span>{Array.from(selected.body).length} 字 · 纯文本</span><div className="mp-actions">
-                <Button onClick={() => onInsert(selected.body)}>放入当前会话</Button>
-                <Button variant="primary" onClick={() => { void copy(selected) }}><Icon name="copy" /> 复制提示词</Button>
-              </div></footer>
+              <PromptFooter key={selected.id} prompt={selected} onInsert={onInsert} />
             </> : <div className="mp-empty mp-detail-empty"><strong>{prompts.length === 0 ? '保存常用指令，下次直接使用' : '没有可预览的提示词'}</strong>{prompts.length === 0 && <Button onClick={() => setEditor({ prompt: null })}><Icon name="plus" /> 新建提示词</Button>}</div>}
           </article>
         </div>
       )}
-      {notice && !editor && !deleting && <p className={`mp-notice${notice.error ? ' error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
+      {/* Saving and deleting already show their result (the editor closes, the list changes);
+          the outcome is only announced. Errors stay inside the dialog that caused them. */}
+      {notice && !notice.error && !editor && !deleting && <p className="visually-hidden" role="status">{notice.text}</p>}
       {editor && <PromptEditor prompt={editor.prompt} error={notice?.error ? notice.text : null} onSave={save} onClose={() => { setEditor(null); setNotice(null) }} />}
       {deleting && <ModalFrame labelledBy={deleteTitleId} className="mp-delete-modal" onClose={reason => { setDeleting(null); if (reason !== 'button') setNotice(null) }}>
         <div className="modal-head"><b id={deleteTitleId}>删除这条提示词？</b><ModalCloseButton aria-label={MODAL_COPY.cancelDelete} onClick={() => requestModalClose()} /></div>
@@ -143,6 +130,44 @@ export function MetaPromptsView({ onBack, onInsert }: {
       </ModalFrame>}
     </section>
   )
+}
+
+/**
+ * Copy feedback sits next to the copy button: the icon turns into a check and a short
+ * status says what was copied; a failure stays, with its reason, until the next try.
+ * Keyed by prompt, so a result never carries over to another prompt.
+ */
+function PromptFooter({ prompt, onInsert }: { prompt: MetaPrompt; onInsert: (body: string) => void }) {
+  const promptCopy = useCopyFeedback()
+  const { state } = promptCopy.status
+  return <footer className="mp-detail-footer">
+    <span>{Array.from(prompt.body).length} 字 · 纯文本</span>
+    <p className={state === 'failed' ? 'mp-copy-status error' : 'mp-copy-status'} role={state === 'failed' ? 'alert' : 'status'}>
+      {state === 'copied' ? `已复制「${prompt.title}」`
+        : promptCopy.status.state === 'failed' ? `复制失败：${promptCopy.status.reason}。可以选择正文手动复制。` : ''}
+    </p>
+    <div className="mp-actions">
+      <Button onClick={() => onInsert(prompt.body)}>放入当前会话</Button>
+      <Button variant="primary" onClick={() => promptCopy.copy(prompt.body)}><Icon name={state === 'copied' ? 'check' : 'copy'} /> 复制提示词</Button>
+    </div>
+  </footer>
+}
+
+/**
+ * The list's copy shortcut confirms on itself: the icon turns into a check and the result is
+ * announced. A failure stays visible under the row until the next try. The live regions only
+ * exist while there is something to say, so an idle list adds no empty status elements.
+ */
+function RowCopyButton({ prompt }: { prompt: MetaPrompt }) {
+  const rowCopy = useCopyFeedback()
+  const { status } = rowCopy
+  return <>
+    <IconButton label={`复制：${prompt.title}`} title="复制提示词" onClick={() => rowCopy.copy(prompt.body)}>
+      <Icon name={status.state === 'copied' ? 'check' : 'copy'} />
+    </IconButton>
+    {status.state === 'copied' && <span className="visually-hidden" role="status">{`已复制「${prompt.title}」`}</span>}
+    {status.state === 'failed' && <p className="mp-row-copy-error" role="alert">{`复制失败：${status.reason}`}</p>}
+  </>
 }
 
 function PromptEditor({ prompt, error, onSave, onClose }: {
