@@ -8,11 +8,19 @@ import electron from 'electron'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { exerciseTranscriptDisplayLock } from './session-display-lock-checks.mjs'
 import { exerciseSidebarPerformance } from './session-performance-sidebar-checks.mjs'
+import { sessionPerformanceInstrumentation } from './session-performance-instrumentation.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const temp = await mkdtemp(join(tmpdir(), 'scry-session-performance-'))
+const controls = {
+  remotePoll: process.argv.includes('--remote-poll-control'),
+  unisolatedRemote: process.argv.includes('--unisolated-remote-control'),
+  negativeCallback: process.argv.includes('--negative-callback-control'),
+  negativeNavigation: process.argv.includes('--negative-navigation-control'),
+  sidebarOnly: process.argv.includes('--sidebar-only')
+}
 
-async function exercise(webContents, pointer) {
+async function exercise(webContents, pointer, controls) {
   const read = async (expression) => {
     const result = await webContents.executeJavaScript(`(async () => {
       try { return { value: await (${expression}) }; }
@@ -45,6 +53,7 @@ async function exercise(webContents, pointer) {
   }
   await wait(`document.hasFocus()`)
   await wait(`document.querySelectorAll('[data-run-id]').length === 40 && document.querySelectorAll('[data-virtualized]').length > 20`)
+  if (controls.sidebarOnly) return exerciseSidebarPerformance({ webContents, pointer, read, wait, click, remotePollControl: controls.remotePoll })
   const initialPageMounted = await read(`document.querySelectorAll('.transcript-turn:not([data-virtualized])').length`)
   const viewport = await read(`(() => { const element = document.querySelector('.chat-transcript'); return { width: element.clientWidth, height: element.clientHeight }; })()`)
   if (viewport.width < 600 || viewport.height < 500) throw new Error(`Invalid transcript viewport: ${JSON.stringify(viewport)}`)
@@ -62,7 +71,7 @@ async function exercise(webContents, pointer) {
   await wait(`document.querySelector('[data-run-id="turn-100"] .model-text')?.textContent.includes('Answer 100')`)
   await click('#reset-history')
   await wait(`document.querySelectorAll('[data-run-id]').length === 40 && document.querySelectorAll('[data-virtualized]').length > 20`)
-  const sidebar = await exerciseSidebarPerformance({ webContents, pointer, read, wait, click })
+  const sidebar = await exerciseSidebarPerformance({ webContents, pointer, read, wait, click, remotePollControl: controls.remotePoll })
   await click('#load-older')
   await wait(`document.querySelectorAll('[data-run-id]').length === 80`)
   await click('#load-older')
@@ -178,18 +187,7 @@ try {
   await build({
     configFile: false, root: temp, envDir: temp, logLevel: 'error', esbuild: { jsx: 'automatic' },
     worker: { format: 'es' },
-    plugins: [{ name: 'count-session-row-executions', enforce: 'pre', transform(code, id) {
-      if (process.argv.includes('--negative-navigation-control') && id === join(root, 'src/renderer/hooks/useChatNavigation.ts')) {
-        // Recreate the old one-shot/same-ID behavior without changing source.
-        return code.replace('setRequest({ runId, eventId })', 'setRequest(current => current?.runId === runId ? current : { runId, eventId })')
-          .replace('new ResizeObserver(schedule)', 'new ResizeObserver(() => {})')
-          .replace('new MutationObserver(schedule)', 'new MutationObserver(() => {})')
-      }
-      if (id !== join(root, 'src/renderer/components/SidebarSessionRow.tsx')) return
-      const marker = '  const pinned = Boolean(session.pinnedAt)'
-      if (code.split(marker).length !== 2) throw new Error('SessionRow instrumentation anchor changed')
-      return code.replace(marker, `  document.body.dataset.sessionRowRenders = String(Number(document.body.dataset.sessionRowRenders ?? 0) + 1)\n${marker}`)
-    } }],
+    plugins: [sessionPerformanceInstrumentation(root, controls)],
     resolve: { alias: { '@shared': join(root, 'src/shared') } },
     define: { 'process.env.NODE_ENV': '"production"' },
     build: { outDir: temp, emptyOutDir: false, copyPublicDir: false, minify: false,
@@ -215,7 +213,7 @@ try {
         win.webContents.focus();
         const exerciseTranscriptDisplayLock = ${exerciseTranscriptDisplayLock.toString()};
         const exerciseSidebarPerformance = ${exerciseSidebarPerformance.toString()};
-        const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()});
+        const result = await (${exercise.toString()})(win.webContents, ${nativeUiPointer.toString()}, ${JSON.stringify(controls)});
         console.log('SCRY_SESSION_PERFORMANCE=' + JSON.stringify(result));
         app.exit(0);
       } catch (error) { console.error(error); app.exit(1); }
@@ -234,7 +232,10 @@ try {
       clearTimeout(timer)
       const result = output.match(/^SCRY_SESSION_PERFORMANCE=(.+)$/m)?.[1]
       if (code !== 0 || !result) reject(new Error(`Session performance fixture failed (${code ?? signal}):\n${output.slice(-8000)}`))
-      else { console.log(result); resolve() }
+      else {
+        if (controls.remotePoll) console.log(output.split('\n').filter(line => /^SCRY_(REMOTE_|SIDEBAR_)/.test(line)).join('\n'))
+        console.log(result); resolve()
+      }
     })
   })
 } finally { await rm(temp, { recursive: true, force: true }) }

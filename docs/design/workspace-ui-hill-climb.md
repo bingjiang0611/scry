@@ -71,7 +71,7 @@ sol 的 `highStandard: false`；luna 的 `highStandard: true` 只表达其“可
 
 ### 建议取舍与真实样式链
 
-- **采纳 sol 的 footer 减重**：仅 `.chat-body .turn-footer .stat .lbl` 使用 `--weight-regular`（600→400）、`letter-spacing: 0`（原 0.08em）；`.stat b` 使用 `--weight-medium`（600→500）。字号仍为标签 11px、值 12px，颜色／字段／数值／单位均不变。保留既有大写转换，不改文案；DESIGN 并未要求这类紧凑指标取消大写，本次先靠字重与字距恢复阅读层级，不叠加另一个视觉决定。
+- **采纳 sol 的 footer 减重**：仅 `.chat-body .turn-footer .stat .lbl` 使用 `--weight-regular`（600→400）、`letter-spacing: 0`（原 0.08em）；`.stat b` 使用 `--weight-medium`（600→500）。字号仍为标签 11px、值 12px，颜色／字段／数值／单位均不变。标签统一大写，不改文案；此前 base 的 uppercase 被 session-evidence-chat.css 更高 specificity 的 lowercase 覆盖，最终选择器明确为 uppercase。
 - **拒绝无证据缩 composer**：它是 64px 编辑区域，不是空态占位。`codex-alignment-editorial.css` 的 textarea height/min-height 与 `chat-preview-ui-checks.mjs` 的 64px 合同一致。不能因当前无草稿就削减编辑能力；sol 也明确认为这不是浪费。当前真实 App 的 8 份布局均测得 editorHeight=64。
 - **拒绝按旧 `.turn` margin 再缩轮次**：`Transcript.tsx` 实际同时渲染 `turn transcript-turn`。`styles-chat-entry.css` 的 24px、`styles-evidence-session.css` 的 32px margin-bottom，已被后加载且更具体的 `session-evidence-chat.css` 中 `.chat-body .transcript-turn { margin: 0 auto; }` 覆盖；没有额外完成态 margin 叠加。当前 8 份布局均测得 margin-bottom=0px，保留首批批准的 12px 底／16px 相邻顶内边距。
 - **不重复强化浅色边框**：最终浅色卡片已使用 surface-muted，hover/focus-within 使用 surface-hover；文件证据仍有独立浅底。本轮截图没有提供足以支持再升 1–2 级或增加边框的明确失败证据，sol 认为双主题协调。沿用已批准的少嵌套容器方向，不盲目叠框或改 token。
@@ -121,3 +121,11 @@ sol 的 `highStandard: true`；luna 的深色与浅色 `highStandard` 均为 `tr
 仅抽取 Agent picker copy、统一对话布局检查与设计决策主题文档；不改变 UI、业务、权限、评分或既有断言。focused 10 文件／50 项、web typecheck、设计审计、脚本语法、build 与完整统一对话 App smoke 通过。日志前缀 `/tmp/scry-ui-size-`（focused、typecheck、audit、build、app）。
 
 新截图目录 `/var/folders/14/517c2bss5sx11zd24qqq5lgc0000gp/T/scry-unified-rendering-6mInr6/`；8 份 layout JSON 与第三轮 `XpOtf8` 同名文件逐字节一致，比较记录 `/tmp/scry-ui-size-layout-equivalence.log`。文案对象及 17 节历史决策原文迁移检查通过（`/tmp/scry-ui-size-migration.log`）；原有 smoke 主体逐字保持 HEAD，仅新增 import 与检查调用。此为渲染不变证据，沿用第三轮视觉结论，不新增设计或评分。未暂存、提交或推送；正式 staged 文件体积门禁由主控执行。Linux 仍未验证。
+
+### PR107 CI Sidebar 计数隔离（2026-11-16）
+
+- `2470aa70` 的 packaged-electron (2) 报 `Streaming rerendered Sidebar 1 times`。本地普通 smoke 一次通过不等于 flake。
+- 受控复现保留 277 sessions／20 次 native stream：第 10 次等待生产 store 的真实 3000ms poll receipt。缺少 preload API 时，store 再发布 error snapshot，Sidebar 随后执行 1 次，原 0 次门槛失败（`/tmp/scry-ci-old-poll.log`，exit 1）。这是与 CI 同形的污染机制证据；历史 runner 未采集 store 发布，不能声称拿到了其逐事件归因。
+- 仅在该 fixture 的 remote hook 边界固定空 snapshot。独立 probe 仍订阅真实 store；同一 poll 发布后 Sidebar 执行 0 次（`/tmp/scry-ci-fixed-poll.log`，exit 0）。此隔离不证明整个生产 remote store 正确，也不宣称生产性能变快。
+- 构建时故意破坏生产 `useEventCallback` 的稳定引用，仍在隔离后测得 20 次 Sidebar 执行并失败（`/tmp/scry-ci-negative-callback.log`，exit 1）。原导航负对照仍失败；完整原命令通过（`/tmp/scry-ci-negative-navigation.log` exit 1、`/tmp/scry-ci-full-performance.log` exit 0）。未改 CSP、UI 或门槛；未重跑 CI，Linux 未验证。
+- 可重复入口：`node scripts/session-performance-ui-smoke.mjs --sidebar-only --remote-poll-control`；追加 `--unisolated-remote-control` 复现污染，或追加 `--negative-callback-control` 检查真实 callback 回归。原完整命令与 `--negative-navigation-control` 不变。

@@ -105,7 +105,7 @@
 
 ## 统计脚注减重：第 2 轮评审修正（2026-11-16）
 
-本轮只改最终 footer 两个选择器：标签字重 semibold→regular（400）、字距 0.08em→0；数值字重 semibold→medium（500）。保留标签 11px／值 12px、现有颜色、字段、单位与大写转换，不改文案。避免连续粗体等宽统计串压过回答和文件证据。
+本轮只改最终 footer 两个选择器：标签字重 semibold→regular（400）、字距 0.08em→0；数值字重 semibold→medium（500）。保留标签 11px／值 12px、现有颜色、字段与单位；标签统一大写，不改文案。此前 base 的 uppercase 被 session-evidence-chat.css 更高 specificity 的 lowercase 覆盖，最终选择器明确为 uppercase。避免连续粗体等宽统计串压过回答和文件证据。
 
 核实真实样式链后不采纳额外压缩：textarea 的 64px 是编辑能力与既有 smoke 合同；真实 transcript 的 `.turn` 底 margin 已被更具体规则覆写为 0，并没有额外 24px 完成态间距。顶部图标已有 32px 框／16px 图标／1.6 stroke，行内分支沿用 sm 文字按钮；浅色卡片沿用前批 surface-muted，不重复增加嵌套边框或更改 primitive。
 
