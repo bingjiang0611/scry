@@ -140,10 +140,18 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
         return 2
       }
     }
-    // Only a person can assert that a host process is gone. Without this, a Provider that never
-    // writes a terminal event leaves its turn open forever once the session stops producing events.
+    // Only proof closes a turn that never wrote a terminal event: silence alone, or a host that may
+    // still be running, is not evidence. `--session` narrows that proof to the sessions whose host
+    // is known to be gone, so one unprovable turn cannot block the rest of the workspace.
+    const expireOpen = args.flags.has('expire-open')
+    const expireSessions = args.repeated?.get('session') ?? (flag(args, 'session') ? [flag(args, 'session')!] : [])
+    if (expireSessions.length && !expireOpen) throw new Error('--session requires --expire-open')
+    for (const session of expireSessions) {
+      if (!session.trim() || /[\r\n]/.test(session)) throw new Error('--session must be a non-empty single line')
+    }
     const result = await recoverRecorder(workspace, process.env, undefined, scope, {
-      expireOpen: args.flags.has('expire-open')
+      expireOpen,
+      ...(expireSessions.length ? { expireSessions } : {})
     })
     print(result)
     return scope && result.pending > 0 ? 3 : 0

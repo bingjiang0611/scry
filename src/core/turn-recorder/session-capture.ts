@@ -61,6 +61,8 @@ export async function startSessionCapture(args: {
   payload: Record<string, unknown>
   cli: { entry?: string; nodeDir?: string }
   env?: NodeJS.ProcessEnv
+  /** Pid of the process that asked for the capture; the turn records the chain above it. */
+  ancestryFromPid?: number
 }): Promise<CaptureAck & { transport: Record<string, unknown> }> {
   const workspaceRoot = await canonicalWorkspaceRoot(args.workspace)
   const dataRoot = await canonicalDataRoot(workspaceRoot, args.dataDir)
@@ -103,7 +105,10 @@ export async function startSessionCapture(args: {
     transcriptPath: resolve(transcriptPath)
   }
   await withRecorderSessionLock(enablement.dataRoot, args.provider, args.sessionId, async () => {
-    await beginCaptureTurn(enablement, args.provider, args.sessionId, context, state.transcriptPath, args.payload)
+    await beginCaptureTurn(
+      enablement, args.provider, args.sessionId, context, state.transcriptPath, args.payload,
+      args.ancestryFromPid
+    )
     await writeJsonAtomic(statePath, state)
     await writeJsonAtomic(captureContextPath(enablement.dataRoot, args.provider, args.sessionId), captureWireContext(context))
   }, { waitMs: 10_000 })
@@ -234,6 +239,8 @@ export async function applySessionCaptureHook(args: {
   queueOnly?: boolean
   deferDelivery?: boolean
   env?: NodeJS.ProcessEnv
+  /** Pid of the process that delivered this hook, when the transport knows it. */
+  ancestryFromPid?: number
 }): Promise<CaptureAck & { reason?: string }> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
   const sessionId = args.sessionId ?? sessionIdOf(args.payload)
@@ -273,7 +280,8 @@ export async function applySessionCaptureHook(args: {
     capture: captureStateContext(state),
     queueOnly: args.queueOnly,
     deferDelivery: args.deferDelivery,
-    env: args.env
+    env: args.env,
+    ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
   })
   // The edited file names the repository; its PreToolUse arrives before the write, so the baseline
   // taken here is the pre-edit state.

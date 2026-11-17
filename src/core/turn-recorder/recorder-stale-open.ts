@@ -77,17 +77,15 @@ export async function staleOpenTurnVerdict(args: {
     }
   }
   if (args.expireOpen) {
-    // A live host vetoes an automatic expiry: the turn may still be waiting on a person, a tool or a
-    // plan approval, all of which write nothing to the transcript while they wait.
-    const host = await hostProcessState(open.host)
-    if (host === 'running') return undefined
+    // Only proof closes the turn. A live host means the turn may still be waiting on a person, a tool
+    // or a plan approval, all of which write nothing while they wait; an unrecorded host proves
+    // nothing either, and an automatic caller cannot know the difference. Both stay open.
+    if (await hostProcessState(open.host) !== 'gone') return undefined
     return {
       status: 'interrupted',
       at,
       endReason: 'expired',
-      reason: host === 'gone'
-        ? `no terminal event was observed and every process that hosted this turn at start is gone (recorded pids ${open.host!.map((process) => process.pid).join(', ')}); recovery force-closed the turn after ${silentFor} of silence`
-        : `no terminal event was observed and an operator asserted the session is gone; recovery force-closed the turn after ${silentFor} of silence`
+      reason: `no terminal event was observed and every process that hosted this turn at start is gone (recorded pids ${open.host!.map((process) => process.pid).join(', ')}); recovery force-closed the turn after ${silentFor} of silence`
     }
   }
   return undefined

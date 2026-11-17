@@ -52,7 +52,7 @@ if [ "\${SCRY_RECORDER_TRANSPORT:-}" != "direct" ] && [ -S "$socket" ] && comman
   code="$(printf '\\0%s' "$payload" | curl -s -o "$ack" -w '%{http_code}' --max-time "$deadline" \\
     --unix-socket "$socket" -X POST \\
     -H 'x-scry-protocol: 2' -H ${quote(`x-scry-recorder-version: ${args.recorderVersion}`)} \\
-    -H 'x-scry-capture-mode: session' \\
+    -H 'x-scry-capture-mode: session' -H "x-scry-client-pid: $$" \\
     -H "x-scry-provider: $provider" -H "x-scry-event: $event" \\
     -H 'content-type: application/octet-stream' --data-binary @- \\
     "http://localhost${args.eventPath}" 2>/dev/null)"

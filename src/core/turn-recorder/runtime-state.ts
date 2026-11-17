@@ -6,7 +6,7 @@ import type { TurnDiffSnapshot } from '../../shared/trace.js'
 import type { GitTurnDiffCapture } from './git.js'
 import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
-import { hostProcessState, processTable } from './host-process.js'
+import { hostProcessState, processTable, type HostProcessState, type ProcessTableEntry } from './host-process.js'
 import {
   ATTENTION_PROVIDERS, attentionIndexPresent, clearSessionAttention, markSessionAttention,
   markedSessions, publishAttentionIndexReady, withSessionAttentionLock, type MarkedSession
@@ -341,8 +341,8 @@ export interface RecorderOpenTurnInspection {
   stale: boolean
   /**
    * Whether the processes that hosted this stale turn at start are still there. Set only for stale
-   * turns, and only because `recover --expire-open` refuses to close a turn whose host may still be
-   * waiting on a person or a tool: the operator needs to see why nothing was closed.
+   * turns, and only because `recover --expire-open` needs `gone` before it closes anything: the
+   * operator needs to see why a silent turn stayed open (`running`, or `unknown` for no evidence).
    */
   host?: 'running' | 'gone' | 'unknown'
 }
@@ -474,8 +474,17 @@ export async function recorderStaleOpenTurns(
   quietMs: number
   /** Still writing inside the stale window: slow, not stuck. */
   growing: boolean
+  /** Same meaning as `RecorderOpenTurnInspection.host`: why a forced expiry would not act. */
+  host?: HostProcessState
 }>> {
   const result: Awaited<ReturnType<typeof recorderStaleOpenTurns>> = []
+  let table: Map<number, ProcessTableEntry> | undefined
+  let tableRead = false
+  // One process table for the whole listing: `ps` costs more than the lookups it serves.
+  const hostTable = async (): Promise<Map<number, ProcessTableEntry> | undefined> => {
+    if (!tableRead) { tableRead = true; table = await processTable() }
+    return table
+  }
   for (const { provider, sessionDir } of await attentionSessions(dataRoot)) {
     const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
     if (!open || open.status !== 'open' || open.managedByScry) continue
@@ -494,7 +503,8 @@ export async function recorderStaleOpenTurns(
       ageMs: now - startedAt,
       ...(lastAt ? { lastEventAt: new Date(lastAt).toISOString() } : {}),
       quietMs: Number.isFinite(quietMs) ? quietMs : now - startedAt,
-      growing: quietMs < STALE_OPEN_TURN_QUIET_MS
+      growing: quietMs < STALE_OPEN_TURN_QUIET_MS,
+      host: await hostProcessState(open.host, await hostTable())
     })
   }
   return result

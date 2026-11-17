@@ -84,7 +84,9 @@ describe('runtime diagnostics without an attention index', () => {
       ageMs: 2 * expiryMs,
       ...(touched ? { lastEventAt: new Date(touched).toISOString() } : {}),
       quietMs: touched ? now - touched : 2 * expiryMs,
-      growing: false
+      growing: false,
+      // 这个 open.json 没写宿主链：诊断必须如实说判断不了，而不是当成已退出。
+      host: 'unknown'
     }] : []
 
     // Call stale diagnostics first: it must not rely on a previous health/daemon call to rebuild.

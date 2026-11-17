@@ -10,6 +10,7 @@ import { encodeHookEnvironment } from './commit-environment'
 import { HOOK_EVENT_PATH, RECORDER_VERSION_HEADER } from './daemon-transport'
 import { RECORDER_VERSION } from './store'
 import { listRecords } from './store'
+import { safeKey } from './store-index'
 
 const roots: string[] = []
 
@@ -53,6 +54,7 @@ it('delivers a captured session straight to the daemon socket and publishes the 
     dataDir: join(root, '.scry'),
     context: context(transcriptPath),
     cli: { entry: join(root, 'dist', 'cli', 'scry.js'), nodeDir: join(root, 'node-bin') },
+    ancestryFromPid: process.pid,
     payload: {
       session_id: 'sess-d',
       hook_event_name: 'PreToolUse',
@@ -73,12 +75,20 @@ it('delivers a captured session straight to the daemon socket and publishes the 
   expect(source).toContain('recorder hook')
   expect(source).toContain('--capture-mode session')
   expect(source).toContain('x-scry-capture-mode: session')
+  // 采集接收器也要报自己的 pid：没有它，采集轮次的 open.json 记不到宿主进程链。
+  expect(source).toContain('x-scry-client-pid: $$')
   expect(source).toContain(started.transport.socketPath as string)
   // The same versioned handshake ordinary hooks use: an older daemon refuses before applying.
   expect(started.transport.eventPath).toBe(HOOK_EVENT_PATH)
   expect(source).toContain(`http://localhost${HOOK_EVENT_PATH}`)
   expect(source).toContain(`x-scry-recorder-version: ${RECORDER_VERSION}`)
   expect(source).toContain('SCRY_RECORDER_DAEMON_REJECTED=1')
+
+  // 采集轮次的 open.json 也要记宿主进程链：claim 打开的那一轮来自 start 的调用者。
+  const sessionDir = join(root, '.scry', 'runtime', 'codex', safeKey('sess-d'))
+  const claimOpen = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8'))
+  expect(claimOpen.host[0].pid).toBe(process.pid)
+  expect(claimOpen.host.length).toBeGreaterThan(0)
 
   const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
   try {
@@ -89,7 +99,7 @@ it('delivers a captured session straight to the daemon socket and publishes the 
       transcript_path: transcriptPath,
       timestamp: '2026-07-19T12:00:05.000Z'
     })
-    const post = (version: string) => daemonRequest(started.transport.socketPath as string, {
+    const post = (version: string, extra: Record<string, string> = {}) => daemonRequest(started.transport.socketPath as string, {
       method: 'POST',
       path: HOOK_EVENT_PATH,
       timeoutMs: 5_000,
@@ -99,7 +109,8 @@ it('delivers a captured session straight to the daemon socket and publishes the 
         'x-scry-capture-mode': 'session',
         'x-scry-provider': 'codex',
         'x-scry-event': 'Stop',
-        'content-type': 'application/octet-stream'
+        'content-type': 'application/octet-stream',
+        ...extra
       },
       body
     })
@@ -120,6 +131,32 @@ it('delivers a captured session straight to the daemon socket and publishes the 
     const records = await listRecords(join(root, '.scry'))
     expect(records).toHaveLength(1)
     expect(records[0].capture).toMatchObject({ captureId: 'capture-daemon', source: 'manual', task: null })
+
+    // 下一轮由采集 hook 自己打开：daemon 转进来的 pid 必须继续带到 open.json。
+    const nextBody = encodeHookEnvironment(env, {
+      session_id: 'sess-d',
+      hook_event_name: 'UserPromptSubmit',
+      transcript_path: transcriptPath,
+      timestamp: '2026-07-19T12:00:09.000Z'
+    })
+    const next = await daemonRequest(started.transport.socketPath as string, {
+      method: 'POST',
+      path: HOOK_EVENT_PATH,
+      timeoutMs: 5_000,
+      headers: {
+        'x-scry-protocol': '2',
+        [RECORDER_VERSION_HEADER]: RECORDER_VERSION,
+        'x-scry-capture-mode': 'session',
+        'x-scry-provider': 'codex',
+        'x-scry-event': 'UserPromptSubmit',
+        'x-scry-client-pid': String(process.pid),
+        'content-type': 'application/octet-stream'
+      },
+      body: nextBody
+    })
+    expect(next.statusCode).toBe(200)
+    const nextOpen = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8'))
+    expect(nextOpen.host[0].pid).toBe(process.pid)
   } finally {
     await chmod(receiver, 0o600).catch(() => undefined)
     await daemon.close()

@@ -196,13 +196,14 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
         ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h; ` +
           `${health.openTurns} open in total, ${health.staleOpenTurns} silent past the 30-minute window; ` +
           staleOpenTurns.map((turn) => `${turn.provider}/${turn.sessionId}: last ${turn.lastEventAt ?? 'nothing recorded'} ` +
-            `(${Math.round(turn.quietMs / 60_000)}min ago, ${turn.growing ? 'still writing' : 'silent'})`).join('; ')
+            `(${Math.round(turn.quietMs / 60_000)}min ago, ${turn.growing ? 'still writing' : 'silent'}` +
+            `${turn.host ? `, host ${turn.host}` : ''})`).join('; ')
         : health.staleOpenTurns > 0
           ? `${health.staleOpenTurns} of ${health.openTurns} open turn(s) wrote nothing for 30 minutes; under 24h, so not yet listed individually`
           : `no stale open turn (${health.openTurns} open)`,
       ...(staleOpenTurns.length > 0 || health.staleOpenTurns > 0
         ? {
-            remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence or a finished reply plus extended silence, never from silence alone; `scry recorder recover --expire-open` closes a turn that wrote nothing for 30 minutes once its host process is gone; it still leaves turns alone while the recorded host process runs'
+            remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence or a finished reply plus extended silence, never from silence alone; `scry recorder recover --expire-open` closes a turn that wrote nothing for 30 minutes only after proving every recorded host process is gone; a running host or one with no recorded process evidence both stay open (add `--session <id>` to expire only the sessions you know are over)'
           }
         : {})
     },

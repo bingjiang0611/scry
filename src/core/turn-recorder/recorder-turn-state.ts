@@ -10,6 +10,7 @@ import { markSessionAttention, withSessionAttentionLock } from './attention.js'
 import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
+import { hostProcessChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
@@ -158,7 +159,8 @@ export async function beginCaptureTurn(
   sessionId: string,
   context: SessionCaptureContext,
   transcriptPath: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  ancestryFromPid?: number
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<OpenTurnState>(openPath(root))
@@ -195,7 +197,7 @@ export async function beginCaptureTurn(
     ...(transcript?.userText ? { userText: transcript.userText } : {}),
     ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
     baselineAt: new Date().toISOString()
-  })
+  }, undefined, ancestryFromPid ? await hostProcessChain(ancestryFromPid) : undefined)
 }
 
 /** A timestamp is usable as an end time only inside this turn's own window. */

@@ -155,6 +155,9 @@ describe('scry doctor schema and exit codes', () => {
     const stale = report.checks.find((check: any) => check.id === 'turns.stale')
     expect(stale.status).toBe('warn')
     expect(stale.remediation).toContain('terminal evidence')
+    expect(stale.remediation).toContain('--session <id>')
+    // 没有进程证据的轮次不会被 --expire-open 收掉，诊断要给出这个原因。
+    expect(stale.detail).toContain('host unknown')
     expect(stale.detail).toContain('termination unconfirmed')
     expect(report.staleOpenTurns).toMatchObject([{ provider: 'claude', sessionId: 'stale-1' }])
     // pendingCount 只统计 managed/closing/quarantined，孤儿轮次不在其中，所以必须单独报。
