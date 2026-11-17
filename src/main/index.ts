@@ -1,3 +1,4 @@
+import './daemon-mode-default-entry'
 import { app, ipcMain, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
