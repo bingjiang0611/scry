@@ -5,7 +5,7 @@ import { LoadingStatus } from './LoadingStatus'
 import type { UsageAnalytics, UsageAnalyticsBreakdownRow, UsageAnalyticsRangeDays } from '@shared/trace'
 import { Icon } from './primitives/Icon'
 import { TurningIcon } from './primitives/TurningIcon'
-import { ANALYTICS_COPY as copy } from '../constants/copy'
+import { ANALYTICS_COPY as copy } from '../constants/analytics-copy'
 import { formatAggregateTokens, formatCost, formatDay, formatKnownTokens, formatShare, metricValue, metricEvidence, modelBreakdownRows, tokensOf, ProviderMark, providerLabel, displayCostEvidence, tokenEvidence, tokenComplete, isApproximateCost, usdFormatter, ranges, UsageChart, type BreakdownMode, type ChartMetric } from './AnalyticsChart'
 import { Segmented } from './primitives/Segmented'
 export interface AnalyticsViewProps {

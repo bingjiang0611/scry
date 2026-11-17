@@ -8,7 +8,7 @@ import type { ProviderId } from '@shared/provider'
 import { QODER_PRICING_URL, QODER_USD_BASIS } from '@shared/qoder-pricing'
 
 import { ProviderGlyph } from './ProviderGlyph'
-import { ANALYTICS_COPY as copy } from '../constants/copy'
+import { ANALYTICS_COPY as copy } from '../constants/analytics-copy'
 
 export type ChartMetric = 'cost' | 'tokens'
 export type BreakdownMode = 'model' | 'day'

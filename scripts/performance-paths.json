@@ -133,6 +133,8 @@
         "src/renderer/app-interaction.tsx",
         "src/renderer/app-view.tsx",
         "src/renderer/app-shell.tsx",
+        "src/renderer/hooks/useBackgroundNoticeOpening.ts",
+        "src/renderer/hooks/useRevealTurnInChat.ts",
         "src/renderer/components/SidebarProjects.tsx",
         "src/renderer/components/SidebarSessionRow.tsx",
         "src/main/bootstrap/workspace-runtime.ts",

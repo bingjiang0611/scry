@@ -1,6 +1,6 @@
 import type { DeleteArchivedSessionsResult, DeleteSessionResult } from '../../shared/provider'
 import { callDaemonChannel, installDaemonChannelGuard, installDaemonChannelResultHandler } from '../daemon-channel-gate'
-import { SESSION_DELETION_PROMPT, archivedDeletionPrompt, untouchedDeletion } from './session-lifecycle'
+import { SESSION_DELETION_PROMPT, archivedDeletionPrompt, untouchedDeletion } from './session-deletion-prompts'
 
 // Daemon mode: the session lifecycle runs in the daemon, the dialogs stay in this window
 // (maintainer decision, B4 D2). The App asks before it sends, and reports what came back
