@@ -200,10 +200,17 @@ export async function recoverRecorder(
      * App, which knows the child process exited) may assert that; a background pass never guesses.
      */
     expireOpen?: boolean
+    /**
+     * Restrict forced expiry to these sessions. A workspace can hold one turn whose host cannot be
+     * proven gone; without this, that single turn would make every automatic caller drop the flag
+     * and leave all the others stuck too. Absent means the whole workspace, as before.
+     */
+    expireSessions?: readonly string[]
   } = {}
 ): Promise<{ recovered: number; pending: number; expired: number }> {
   validateRecoveryScope(scope)
   const expireOpen = options.expireOpen === true
+  const expireSessions = options.expireSessions?.length ? new Set(options.expireSessions) : undefined
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return { recovered: 0, pending: 0, expired: 0 }
   const expiryMs = OPEN_TURN_EXPIRY_MS
@@ -280,7 +287,10 @@ export async function recoverRecorder(
                 // — a long tool or an approval wait looks identical — so giving up needs evidence the
                 // Provider's own record shows this turn finished, or an operator saying the process is
                 // gone.
-                const stale = await staleOpenTurnVerdict({ root: item.sessionDir, open, transcript, expireOpen })
+                const stale = await staleOpenTurnVerdict({
+                  root: item.sessionDir, open, transcript,
+                  expireOpen: expireOpen && (!expireSessions || expireSessions.has(open.sessionId))
+                })
                 if (!stale) return { status: 'idle' as const }
                 open.status = 'closing'
                 open.closingAt = stale.at

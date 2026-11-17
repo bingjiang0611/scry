@@ -26,12 +26,19 @@
 - Pi 扩展在进程收到 `SIGINT` 时，先按队列顺序持久化当前轮次的 `interrupted` Stop，再移除自己的监听并重新发送同一信号。这样保留原生信号退出语义，同时避免非交互 `pi -p` 直接退出后遗留永不收口的 `open.json`。
 - 两项修复只影响新轮次，不重写历史记录。OpenCode 工作区需要 repair/re-init 更新生成插件；Pi 需要更新并重新加载用户级扩展。
 
+## 0.2.76 `--expire-open` 只认进程证据、采集路径带上宿主 pid、可按会话收尾
+
+- **采集接收器过去不带宿主 pid。** CodeLens 会话的事件经 `.scry/capture/receiver.sh` 投递，脚本只带 `x-scry-capture-mode: session`，采集路径（`serveCaptureRequest` → `applySessionCaptureHook` → `handleRecorderHook`）也不传投递进程，因此采集轮次的 `open.json` 里 `host` 一直是 `null`，`--expire-open` 对它们永远没有进程证据。0.2.76 起 receiver 与 `provider-hook.sh` 一样带 `x-scry-client-pid: $$`，daemon 与 CLI 兜底路径都把该 pid 的进程链记入 `open.json`；claim 打开的第一轮也记录发起采集的进程链。
+- **宿主状态未知时不再收尾。** 0.2.75 只在 `running` 时否决，`unknown`（没有 `host`、旧钩子脚本不带 pid、进程表读不到）会直接收尾，与「核对不到就当作还在跑」的说明相反。0.2.76 起只有 `gone`（每个记录过的进程都被确认是同一进程且已不存在）才收尾；`unknown` 一律保持 open，`scry doctor` 与 `turns` 检查写明 `host: unknown` 与静默时长，让人看见为什么没收。
+- **可按会话收尾。** 以前 `--expire-open` 是全工作区开关：只要有一个轮次判断不了宿主，自动调用方就不敢带这个开关，其余本可收尾的轮次也一起卡住。新增可重复的 `--session <id>`，只在 `--expire-open` 下有效，只对列出的会话做强制收尾；不带 `--session` 时保持原行为（仍是全工作区，但仍只收有进程证据的轮次）。
+- 三项只影响新轮次与新的收尾决定，不改写已发布记录。
+
 ## 0.2.75 `recover --expire-open` 可用性与收尾门槛
 
 - **0.2.74 及更早的 CLI 没有注册这个开关。** `--expire-open` 会被参数解析当成未知选项，以 `unknown option: --expire-open` 退出 1；`scry doctor` 文案推荐它，CodeLens 每 15 分钟对开启了 scry 的工作区自动调用它，两条路径此前都拿不到任何收尾结果。0.2.75 起 `--expire-open` 是已注册的布尔开关，`scry recorder recover --expire-open` 正常执行并输出 `{recovered, pending, expired}`。
 - **它自带两道门槛，因为它会被定期自动调用，不能等同「操作者此刻断言进程已退出」：**
   - 静默窗口：轮次写下的文件（存下的事件与 transcript）必须已经静默满 30 分钟，没人再写就说明不了「还在思考」，30 分钟也远大于审批等待以外的常规工具等待；仍在增长的一律不动。
-  - 宿主进程：开启轮次时把投递事件的进程链（钩子脚本的 pid 及其 3 层父进程，不含 init）记进 `open.json` 的 `host`，收尾前逐个核对 pid 与启动标记；只要还有一个在跑就不动，因为它们可能只是没在写文件（等人审批、等长工具、人离开键盘）。核对不到（旧轮次没有 `host`、旧钩子脚本不带 pid、进程表读不到）时只有静默窗口一条证据，措辞保留为「操作者断言会话已不存在」，不冒充进程已退出。
+  - 宿主进程：开启轮次时把投递事件的进程链（钩子脚本的 pid 及其 3 层父进程，不含 init）记进 `open.json` 的 `host`，收尾前逐个核对 pid 与启动标记；只要还有一个在跑就不动，因为它们可能只是没在写文件（等人审批、等长工具、人离开键盘）。核对不到（旧轮次没有 `host`、旧钩子脚本不带 pid、进程表读不到）时不收尾；该行为在 0.2.76 收紧，见下节。
 
 ## 0.2.52 sequence 水位、投递空洞与丢失结果恢复
 

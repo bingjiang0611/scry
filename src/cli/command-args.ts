@@ -11,8 +11,8 @@ export interface ParsedArgs {
   repeated?: Map<string, string[]>
 }
 
-export const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'session-id', 'event', 'socket', 'after', 'limit', 'offset', 'snapshot', 'before', 'out', 'sequence', 'record-id', 'app-data', 'capture-mode', 'data-dir'])
-export const REPEATABLE_FLAGS = new Set(['record-id'])
+export const VALUE_FLAGS = new Set(['workspace', 'providers', 'provider', 'session-id', 'event', 'socket', 'after', 'limit', 'offset', 'snapshot', 'before', 'out', 'sequence', 'record-id', 'session', 'app-data', 'capture-mode', 'data-dir'])
+export const REPEATABLE_FLAGS = new Set(['record-id', 'session'])
 export const BOOLEAN_FLAGS = new Set(['all', 'all-dead', 'apply', 'check', 'expire-open', 'help', 'json', 'managed', 'no-update-check', 'force', 'quiet', 'start-daemon', 'stdin', 'verbose', 'version', 'yes'])
 
 export function parseArgs(argv: string[]): ParsedArgs {

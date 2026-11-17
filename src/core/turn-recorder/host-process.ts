@@ -125,10 +125,10 @@ async function psTable(): Promise<Map<number, ProcessTableEntry> | undefined> {
 /**
  * Whether the processes that hosted this turn at start are still running.
  *
- * `running` is the only answer that changes a decision: an automatic `recover --expire-open` must
- * never close a turn whose host may still deliver events. `gone` means every recorded process was
- * observed to be the same process and none of them exists; `unknown` means no chain was recorded or
- * the table could not be read, and then silence alone decides, as it always has.
+ * Only `gone` is proof: every recorded process was observed to be the same process and none of them
+ * exists. `running` means the host may still deliver events, and `unknown` means no chain was
+ * recorded or the table could not be read. Both of those refuse forced expiry — silence is not a
+ * statement about a process, so a turn with no host evidence stays open.
  */
 export type HostProcessState = 'running' | 'gone' | 'unknown'
 

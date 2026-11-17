@@ -34,7 +34,9 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
       dataDir,
       ...(flag(args, 'session-id') ? { sessionId: flag(args, 'session-id') } : {}),
       payload,
-      queueOnly: process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
+      queueOnly: process.env.SCRY_RECORDER_DAEMON_TRIED === '1',
+      // This process was started by the receiver script, so its parent is the host's chain.
+      ancestryFromPid: process.ppid
     })
     // The receiver only falls back when the daemon did not apply this event: no daemon, or one from
     // another recorder version that refused the handshake. Start ours so the rest of the session
@@ -89,6 +91,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         dataDir,
         context,
         payload: envelope.payload,
+        ancestryFromPid: process.ppid,
         cli: {
           ...(process.argv[1] ? { entry: process.argv[1] } : {}),
           nodeDir: dirname(process.execPath)

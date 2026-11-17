@@ -8,6 +8,19 @@ scry recorder recover --workspace "$WORKSPACE" --provider qoder --session-id "$S
 
 目前只支持 Qoder。缺少任一参数、空 session ID 或其他 provider 均明确拒绝，不退回整个工作区恢复。不带这两个参数的原有 `recover` 仍处理整个工作区。
 
+## 只对指定会话做强制收尾
+
+`--expire-open` 是要「收掉判断不了宿主的遗留轮次」时才用的开关，而一个工作区里常常只有一个会话的宿主无法确认。把收尾范围缩到已知结束的会话：
+
+```bash
+scry recorder recover --workspace "$WORKSPACE" --expire-open --session "$SESSION_A" --session "$SESSION_B"
+```
+
+- `--session` 可重复，必须与 `--expire-open` 一起用，单独出现直接报错；空值或多行值也拒绝。
+- 只对列出的会话尝试强制收尾，其他会话的正常恢复（终态证据、结束回复 + 长时间静默）不受影响，也不会被强制收尾。
+- 不带 `--session` 时行为不变：整个工作区都尝试，但仍只收「静默满 30 分钟且宿主进程链确认全部不存在」的轮次。
+- 与 `--provider/--session-id` 不同：那两个参数把整个恢复缩到一个会话，`--session` 只缩小强制收尾的范围。
+
 ## 隔离范围
 
 - 只恢复目标会话的 open 和 inbox；持久身份必须与请求一致。

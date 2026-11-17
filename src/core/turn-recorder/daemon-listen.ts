@@ -247,7 +247,8 @@ export async function listenRecorderDaemon(args: {
       if (captureMode === 'session') {
         await serveCaptureRequest({
           enablement, provider, event, payload, env: hookEnv, response,
-          recovery: () => scheduleRecovery(true), deliveries: deliveryInFlight
+          recovery: () => scheduleRecovery(true), deliveries: deliveryInFlight,
+          ...(clientPid !== undefined ? { ancestryFromPid: clientPid } : {})
         })
         return
       }
