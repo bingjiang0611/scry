@@ -91,6 +91,8 @@ export interface RecorderOpenTurnState {
   generation: number
   turnIndex: number
   status: 'open' | 'closing'
+  /** Capture opens publish their identity before the baseline; only complete is adoptable. */
+  initialization?: 'pending' | 'complete'
   startedAt: string
   /** When closing began. Bookkeeping for pending health only — never an end time. */
   closingAt?: string
