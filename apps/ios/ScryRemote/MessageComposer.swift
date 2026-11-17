@@ -126,7 +126,7 @@ struct MessageComposer: View {
             sendControl
           }
         }
-        if let sendBlockReason { Text(sendBlockReason).font(Typography.meta).foregroundStyle(Palette.bad)
+        if let sendBlockReason { Text(ConnectionCopy.sendBlocked(sendBlockReason)).font(Typography.meta).foregroundStyle(Palette.bad)
           .accessibilityIdentifier("send-blocked-reason") }
         if let modelSelectionIssue { Text(modelSelectionIssue).font(Typography.meta).foregroundStyle(Palette.bad) }
         if let attachmentError { Text(attachmentError).font(Typography.meta).foregroundStyle(Palette.bad) }

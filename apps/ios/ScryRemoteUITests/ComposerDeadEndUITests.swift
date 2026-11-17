@@ -2,9 +2,7 @@ import XCTest
 
 // Regressions for three composer dead-ends found on a real device:
 //   1. the folder sheet stayed on “读取文件夹…” because `.idle` never asked the host,
-//   2. a blocked send showed a grey arrow with no reason and an unusable “retry”
-//      (covered by Checks/composer-dead-ends.py: the fixture cannot reach that
-//      state without a real host, so it is verified on a paired phone instead),
+//   2. a blocked send showed a grey arrow with no reason and an unusable “retry”,
 //   3. the model list was laid out at full content height and only clipped, so a
 //      drag rubber-banded and rows above the fold could not be selected.
 // Fixtures never touch a relay or a Provider.
@@ -34,6 +32,19 @@ final class ComposerDeadEndUITests: XCTestCase {
       app.staticTexts["无法读取文件夹"].waitForExistence(timeout: 10)
     XCTAssertTrue(listed, "folder sheet never left 读取文件夹…")
     XCTAssertFalse(app.staticTexts["读取文件夹…"].exists)
+  }
+
+  func testBlockedSendExplainsItselfAndRecovers() {
+    // `-uiForceStalePermission` injects the state at its source: the host offers no
+    // permission matching the restored choice. Re-reading cannot resolve it.
+    launch("transcript", extra: ["-uiForceStalePermission"])
+    let reason = app.staticTexts["send-blocked-reason"]
+    XCTAssertTrue(reason.waitForExistence(timeout: 15), "a blocked send still shows no reason")
+    XCTAssertTrue(reason.label.hasPrefix("现在无法发送："), "reason was not framed: \(reason.label)")
+    let recover = app.buttons["使用默认设置"]
+    XCTAssertTrue(recover.waitForExistence(timeout: 10), "the block offers no recovery that can succeed")
+    recover.tap()
+    XCTAssertTrue(reason.waitForNonExistence(timeout: 15), "恢复默认设置 left the send blocked")
   }
 
   func testModelListScrollsAndAutomaticModelIsSelectable() {

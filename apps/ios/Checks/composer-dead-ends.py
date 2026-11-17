@@ -18,6 +18,10 @@ chat = (root / 'ChatView.swift').read_text()
 popover = (root / 'Sheets/ModelEffortPopover.swift').read_text()
 store = (root / 'RemoteRunStore.swift').read_text()
 
+def at(source: str, needle: str) -> int:
+    return source.find(needle)
+
+
 checks: list[tuple[str, bool]] = []
 
 # 1. Both pickers issue the first read themselves; a spinner without a request is
@@ -31,13 +35,21 @@ checks.append(('idle-and-loading-are-distinct-states',
                'case .idle, .loading:\n        ProgressView(ConnectionCopy.readingFolders)' not in pickers))
 
 # 2. A stopped send says why, and the reason is not masked by a history notice.
+checks.append(('no-model-claim-while-loading', 'if providerControlsLoading { return nil }' in store))
 checks.append(('composer-renders-the-block-reason', 'accessibilityIdentifier("send-blocked-reason")' in composer))
 checks.append(('composer-names-the-block-reason', 'sendBlockReason.map(ConnectionCopy.sendBlocked)' in composer))
-checks.append(('transcript-passes-the-block-reason', 'sendBlockReason: runBusy || controlsMatch ? nil' in transcript))
+checks.append(('composer-sentence-is-framed', 'Text(ConnectionCopy.sendBlocked(sendBlockReason))' in composer))
+checks.append(('transcript-passes-the-block-reason', 'sendBlockReason: runBusy || run.controlsReady ? nil' in transcript))
+checks.append(('arrow-follows-real-readiness', 'sendDisabled: runBusy || !run.controlsReady ||' in transcript))
 checks.append(('chat-passes-the-block-reason', 'sendBlockReason: runBusy || run.chosen == nil || run.controlsReady ? nil' in chat))
-transcript_notice = transcript[transcript.index('private var status: SessionStatusLine?'):transcript.index('private func reloadProviders')]
-checks.append(('blocking-reason-outranks-history-notice',
-               transcript_notice.index('!controlsMatch') < transcript_notice.index('if let history = historyIssue')))
+status_start = at(transcript, 'private var status: SessionStatusLine?')
+reload_start = at(transcript, 'private func reloadProviders')
+transcript_notice = transcript[status_start:reload_start] if min(status_start, reload_start) >= 0 else ''
+blocking = at(transcript_notice, '!run.controlsReady')
+history = at(transcript_notice, 'if let history = historyIssue')
+checks.append(('blocking-reason-outranks-history-notice', blocking >= 0 and history >= 0 and blocking < history))
+checks.append(('recovery-is-explicit-not-a-refresh', 'private func applyRestoredDefaults()' in transcript
+               and 'run.useProviderDefaultsForRestoredControls() { return }\n    reloadProviders()' not in transcript.replace('private func applyRestoredDefaults() {\n    if run.useProviderDefaultsForRestoredControls() { return }', '')))
 checks.append(('recovery-resets-invalid-restored-controls',
                'func useProviderDefaultsForRestoredControls() -> Bool' in store
                and 'guard !restoredControlErrors.isEmpty else { return false }' in store

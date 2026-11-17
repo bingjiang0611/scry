@@ -222,6 +222,8 @@ final class RemoteRunStore {
     return modelOptions.first(where: { $0.selectionId == chosenModelId })
   }
   var modelSelectionIssue: String? {
+    // Nothing is known until the Provider's options arrive.
+    if providerControlsLoading { return nil }
     if let error = restoredControlErrors[.model] ?? restoredControlErrors[.effort] { return error }
     if let chosenModelId, !modelOptions.contains(where: { $0.selectionId == chosenModelId }) {
       return ConnectionCopy.selectedModelUnavailable
@@ -530,7 +532,16 @@ final class RemoteRunStore {
   private var commandsRequestGeneration = 0
   private var latestProviderPreference: (id: String?, agentProfileId: String?) = (nil, nil)
   private enum RestoredControl { case model, effort, permission }
-  private var restoredControlErrors: [RestoredControl: String] = [:]
+  private var storedRestoredControlErrors: [RestoredControl: String] = [:]
+  private var restoredControlErrors: [RestoredControl: String] {
+    get {
+      #if DEBUG
+      if forcedStalePermission { return [.permission: ConnectionCopy.permissionUnavailable] }
+      #endif
+      return storedRestoredControlErrors
+    }
+    set { storedRestoredControlErrors = newValue }
+  }
   private var restoredControlsError: String? { restoredControlErrors.values.first }
   private var pendingQuestionAnswerId: String?
 
@@ -538,6 +549,9 @@ final class RemoteRunStore {
   private static let metadataFreshness: TimeInterval = 5 * 60
   #if DEBUG
   private var mockMode = false
+  // Fixture: the host reports a permission the restored choice no longer names.
+  private var forcedStalePermission =
+    ProcessInfo.processInfo.arguments.contains("-uiForceStalePermission")
   private var historyTestOffline = false
   // Test data enters the real catalog request/caching path; other transports
   // remain disabled by mockMode and cannot reach stored credentials.
@@ -953,6 +967,9 @@ final class RemoteRunStore {
   @discardableResult
   func useProviderDefaultsForRestoredControls() -> Bool {
     guard !restoredControlErrors.isEmpty else { return false }
+    #if DEBUG
+    forcedStalePermission = false
+    #endif
     if restoredControlErrors[.permission] != nil, let provider = chosenProvider {
       let preferred = provider.permissions?.first(where: { $0.isDefault == true })?.id
         ?? provider.permissions?.first(where: { $0.id == "default" })?.id

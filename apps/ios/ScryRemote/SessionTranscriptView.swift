@@ -306,14 +306,14 @@ struct SessionTranscriptView: View {
       }
       return .init(text: ConnectionCopy.sending, busy: true)
     }
-    if !runBusy, historyAllowsControls, !controlsMatch, run.providers != .loading {
+    if !runBusy, historyAllowsControls, !run.controlsReady, run.providers != .loading {
       // Blocking reason first: without it the arrow just looks dead behind a
       // history notice. A restored choice the Provider no longer offers cannot be
       // fixed by re-reading, so offer the explicit default reset instead.
       return .init(text: run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable,
                    tone: .warning,
                    action: .init(title: run.restoredControlsBlockSend ? ConnectionCopy.useProviderDefaults : ConnectionCopy.retry,
-                                 perform: reloadProviders))
+                                 perform: run.restoredControlsBlockSend ? applyRestoredDefaults : reloadProviders))
     }
     if let history = historyIssue { return history }
     if !runBusy, historyAllowsControls, let notice = run.providerControlsNotice {
@@ -324,9 +324,16 @@ struct SessionTranscriptView: View {
   }
 
 
+  // Explicit recovery: drop ONLY the restored choices the Provider no longer offers.
+  // Never fold this into a refresh — that would silently change the user's
+  // permission or model when the app merely becomes active.
+  private func applyRestoredDefaults() {
+    if run.useProviderDefaultsForRestoredControls() { return }
+    reloadProviders()
+  }
+
   private func reloadProviders() {
     guard let s = session else { return }
-    if run.restoredControlsBlockSend, run.useProviderDefaultsForRestoredControls() { return }
     if controlsMatch { run.retryProviderControls() }
     else { run.loadSessionProviderControls(providerId: s.providerId, agentProfileId: s.agentProfileId, cwd: s.cwd, force: true) }
   }
@@ -352,8 +359,8 @@ struct SessionTranscriptView: View {
       MessageComposer(text: composer.text, attachments: composer.attachments,
                       placeholder: !run.hasConnection ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
                       disabled: !run.hasConnection,
-                      sendDisabled: runBusy || !controlsMatch || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      sendBlockReason: runBusy || controlsMatch ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable),
+                      sendDisabled: runBusy || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      sendBlockReason: runBusy || run.controlsReady ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable),
                       contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue,
