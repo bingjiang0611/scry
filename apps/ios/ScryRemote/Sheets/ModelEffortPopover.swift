@@ -20,6 +20,12 @@ struct ModelEffortPopover: View {
     return effortOptions
   }
 
+  // Row estimates: modelRow is minHeight 46 plus 6pt vertical padding on both
+  // sides; a description adds a line, which only makes the content taller than
+  // the viewport, so the list keeps scrolling instead of clipping.
+  private var modelListHeight: CGFloat { min(CGFloat(modelOptions.count + 1) * 58 + 8, 280) }
+  private var effortListHeight: CGFloat { min(CGFloat(activeEfforts.count + 1) * 46, 220) }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 4) {
@@ -27,7 +33,7 @@ struct ModelEffortPopover: View {
         Text(SheetCopy.nextTurn).font(Typography.meta).foregroundStyle(Palette.dim2)
       }
       ScrollView {
-        LazyVStack(spacing: 2) {
+        VStack(spacing: 2) {
           Button { onModel?(nil) } label: {
             modelRow(ConnectionCopy.automaticModel, description: nil, isDefault: false, selected: selectedModelId == nil)
           }
@@ -43,7 +49,10 @@ struct ModelEffortPopover: View {
           }
         }
       }
-      .frame(maxHeight: 280).fixedSize(horizontal: false, vertical: true)
+      // A bounded height is what makes this list scrollable. `fixedSize` sized it
+      // to its ideal (content) height and the popover only clipped it, so a drag
+      // rubber-banded back with no scroll offset and rows above stayed unreachable.
+      .frame(height: modelListHeight)
       .scrollBounceBehavior(.basedOnSize)
       if !activeEfforts.isEmpty {
         Rectangle().fill(Palette.border3).frame(height: 1)
@@ -58,12 +67,12 @@ struct ModelEffortPopover: View {
           .accessibilityElement(children: .contain).accessibilityIdentifier("effort-segments")
         } else {
           ScrollView {
-            LazyVStack(spacing: 2) {
+            VStack(spacing: 2) {
               effortRow(ConnectionCopy.defaultEffort, id: nil)
               ForEach(activeEfforts, id: \.id) { option in effortRow(option.label, id: option.id) }
             }
           }
-          .frame(maxHeight: 220).fixedSize(horizontal: false, vertical: true)
+          .frame(height: effortListHeight)
           .scrollBounceBehavior(.basedOnSize)
           .accessibilityElement(children: .contain).accessibilityIdentifier("effort-list")
         }

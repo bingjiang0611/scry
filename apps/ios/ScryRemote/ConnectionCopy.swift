@@ -226,6 +226,8 @@ enum ConnectionCopy {
     let date = Date(timeIntervalSince1970: observedAt / 1000)
     return "主机读取于 \(date.formatted(date: .abbreviated, time: .shortened))"
   }
+  static let useProviderDefaults = "使用默认设置"
+  static func sendBlocked(_ reason: String) -> String { "现在无法发送：\(reason)" }
   static let providerControlsLoading = "正在读取所选 Provider 设置…"
   static let legacyProviderControls = "旧版主机能力快照；发送时由主机重验"
   static let restoredModelUnavailable = "恢复的 Model 当前不可用，已阻止静默替换"

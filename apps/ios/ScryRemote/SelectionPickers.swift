@@ -85,7 +85,13 @@ struct ProjectPickerSheet: View {
       else { run.loadDirectories() }
     }) {
       switch run.directories {
-      case .idle, .loading:
+      case .idle:
+        // `.idle` means nothing was requested yet: open the sheet and start the
+        // first read. Rendering the spinner without issuing a request left the
+        // list on "读取文件夹…" forever.
+        ProgressView(ConnectionCopy.readingFolders).frame(maxWidth: .infinity).padding(.top, 40)
+          .task { if case .idle = run.directories { run.loadDirectories() } }
+      case .loading:
         ProgressView(ConnectionCopy.readingFolders).frame(maxWidth: .infinity).padding(.top, 40)
       case let .loaded(listing):
         VStack(alignment: .leading, spacing: 0) {
@@ -152,7 +158,10 @@ struct ProviderPickerSheet: View {
     SelectionSheet(title: ConnectionCopy.chooseProviderTitle, subtitle: ConnectionCopy.chooseProviderSubtitle,
                    onRefresh: { run.loadProviders(force: true) }) {
       switch run.providers {
-      case .idle, .loading:
+      case .idle:
+        ProgressView(ConnectionCopy.readingProviders).frame(maxWidth: .infinity).padding(.top, 40)
+          .task { if case .idle = run.providers { run.loadProviders() } }
+      case .loading:
         ProgressView(ConnectionCopy.readingProviders).frame(maxWidth: .infinity).padding(.top, 40)
       case let .loaded(list):
         VStack(spacing: 0) {
