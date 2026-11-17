@@ -154,7 +154,8 @@ struct ChatView: View {
     }
     if !runBusy, let notice = run.providerControlsNotice {
       return .init(text: notice, busy: run.providerControlsLoading,
-                   action: run.providerControlsLoading ? nil : .init(title: run.controlsReady ? ConnectionCopy.refreshProviderControls : ConnectionCopy.retry, perform: run.retryProviderControls))
+                   action: run.providerControlsLoading ? nil : .init(title: run.controlsReady ? ConnectionCopy.refreshProviderControls : (run.restoredControlsBlockSend ? ConnectionCopy.useProviderDefaults : ConnectionCopy.retry),
+                                                                   perform: { if run.restoredControlsBlockSend, run.useProviderDefaultsForRestoredControls() { return }; run.retryProviderControls() }))
     }
     return nil
   }
@@ -165,6 +166,7 @@ struct ChatView: View {
                       placeholder: !paired ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
                       disabled: !paired,
                       sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      sendBlockReason: runBusy || run.chosen == nil || run.controlsReady ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable),
                       contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue,

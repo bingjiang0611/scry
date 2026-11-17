@@ -231,6 +231,9 @@ final class RemoteRunStore {
     }
     return nil
   }
+  // True when the only thing keeping controls unready is a restored choice the
+  // Provider no longer offers, which re-reading cannot resolve.
+  var restoredControlsBlockSend: Bool { !restoredControlErrors.isEmpty }
   var controlsReady: Bool {
     guard restoredControlsError == nil, providerControlsError == nil, !providerControlsLoading,
           providerControlsLoaded, let provider = chosenProvider, provider.available,
@@ -941,6 +944,25 @@ final class RemoteRunStore {
     } else {
       loadProviderControls(providerId: provider.id, cwd: cwd, agentProfileId: provider.agentProfileId)
     }
+  }
+
+  // A restored choice (permission/model/effort) can be invalid for the Provider
+  // the host just resolved. Re-reading the same snapshot cannot fix that, so this
+  // explicit action drops ONLY the invalid restored choices back to the Provider's
+  // reported defaults. A valid user choice is never touched.
+  @discardableResult
+  func useProviderDefaultsForRestoredControls() -> Bool {
+    guard !restoredControlErrors.isEmpty else { return false }
+    if restoredControlErrors[.permission] != nil, let provider = chosenProvider {
+      let preferred = provider.permissions?.first(where: { $0.isDefault == true })?.id
+        ?? provider.permissions?.first(where: { $0.id == "default" })?.id
+        ?? provider.permissions?.first?.id ?? "default"
+      choosePermission(preferred)
+    }
+    if restoredControlErrors[.model] != nil || restoredControlErrors[.effort] != nil {
+      chooseModel(nil)
+    }
+    return true
   }
 
   func loadSessionProviderControls(providerId: String, agentProfileId: String?, cwd: String, force: Bool = false) {
@@ -4461,6 +4483,21 @@ final class RemoteRunStore {
     chooseProvider(availableProviders[0])
     providerControlsLoaded = true
     providerControlsCwd = chosen?.path
+    // Fixture for the model popover: a list that overflows its viewport.
+    if ProcessInfo.processInfo.arguments.contains("-uiMockManyModels") {
+      var overflow: [G0Transport.RunModelOption] = []
+      for index in 1...12 {
+        overflow.append(G0Transport.RunModelOption(id: "overflow-\(index)", providerId: "openai",
+                                                   label: "回归模型 \(index)", description: "用于验证列表可滚动", efforts: efforts))
+      }
+      let provider = G0Transport.RunProviderRef(id: "codex", label: "Codex", available: true, modelId: overflow[0].id,
+                                               models: overflow, efforts: efforts, permissions: permissions)
+      providers = .loaded([provider] + availableProviders.dropFirst())
+      chooseProvider(provider)
+      providerControlsLoaded = true
+      providerControlsCwd = chosen?.path
+    }
+
     commands = .loaded([
       .init(name: "review", description: "审查当前改动", argumentHint: "[范围]", source: "builtin"),
       .init(name: "compact", description: "压缩当前会话上下文", source: "builtin"),
@@ -4531,6 +4568,9 @@ final class RemoteRunStore {
     resultSummary = "输入 18,420 · 输出 1,286 · $0.084"
     liveExternalSessionId = "codex-mock-session"
     loadMockDirectories(path: chosen?.path)
+    // The folder sheet must issue the first read itself: without this fixture the
+    // mock already holds a listing and the `.idle` path is never exercised.
+    if ProcessInfo.processInfo.arguments.contains("-uiMockDirectoriesIdle") { directories = .idle }
     activeSessionIdentity = .opened(providerId: "codex", cwd: roots[0].path, externalSessionId: "codex-pinned-1")
     if ProcessInfo.processInfo.arguments.contains("-uiMockReconciledChat"), let identity = activeSessionIdentity {
       completedLiveTurns[identity] = [.init(id: "old-ledger", runId: "old-ledger", prompt: "恢复前的问题",
