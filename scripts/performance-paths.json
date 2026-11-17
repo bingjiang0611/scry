@@ -38,6 +38,7 @@
         "pi.catalog.probe",
         "ipc.agent:mcpGuardScan",
         "ipc.agent:mcpSnapshot",
+        "ipc.agent:cancelMcpSnapshot",
         "ipc.agent:testMcp",
         "ipc.agent:reauthenticateMcp"
       ],

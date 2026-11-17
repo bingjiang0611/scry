@@ -18,6 +18,7 @@
   --resizer-line: #444444;
   --accent: #6aa8ff;
   --accent-fg: #f4f7fb;
+  --fill-fg: var(--bg);
   --accent-soft: rgba(106, 168, 255, 0.12);
   --accent-line: rgba(106, 168, 255, 0.4);
   --selected: #50e3c2;
@@ -59,8 +60,37 @@
   --diff-del-fg: #f2aaa7;
   --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --text-supporting-size: 12px;
-  --text-compact-size: 11px;
+  /* Type scale: the only font sizes components may use. Off-scale sizes are
+     tracked debt in design-system-baseline.json and may only shrink. */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  /* Transcript reading text only (assistant answers, user messages); UI chrome stays on --text-base. */
+  --text-reading: 15px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-supporting-size: var(--text-sm);
+  --text-compact-size: var(--text-xs);
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  /* Spacing scale on a 4px grid. Nest by semantics: a container's inset is one
+     step larger than the gap between its children. 2px is reserved for
+     optical alignment; 1px only for hairlines. */
+  --space-0_5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
   /* Nested radius stack: 20 - 8 = 12, 12 - 4 = 8, 8 - 4 = 4. */
   --r-xs: 4px;
   --r-sm: 8px;
@@ -74,6 +104,14 @@
   --statusbar-h: 26px;
   --shadow-pop: 0 20px 64px rgba(0, 0, 0, 0.64);
   --shadow-card: none;
+  /* Layers for anything that floats outside its component. Menus sit above drawers because
+     they open from them; modals cover every menu; ordering inside one component keeps a
+     local literal below 20. Equal layers stack in the order they were opened (DOM order). */
+  --layer-overlay: 100;
+  --layer-dropdown: 200;
+  --layer-modal: 300;
+  --layer-modal-dropdown: 400;
+  --layer-tooltip: 500;
 }
 
 :root[data-theme='light'] {
@@ -96,6 +134,7 @@
   --resizer-line: #d2d7dd;
   --accent: #3f72b7;
   --accent-fg: #ffffff;
+  --fill-fg: #ffffff;
   --accent-soft: rgba(63, 114, 183, 0.1);
   --accent-line: rgba(63, 114, 183, 0.45);
   --selected: #137b66;
@@ -182,14 +221,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "ss01", "cv11";
   background-image: none;
-}
-
-::selection {
-  background: var(--accent-soft);
 }
 
 * {
@@ -247,7 +281,6 @@ body {
 .main-area {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  container-type: inline-size;
   container-name: main-pane;
   min-width: 0;
   min-height: 0;
@@ -284,5 +317,5 @@ body {
   height: var(--leaving-height) !important;
   pointer-events: none !important;
   overflow: hidden;
-  z-index: 20;
+  z-index: var(--layer-overlay);
 }

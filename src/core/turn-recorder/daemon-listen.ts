@@ -229,6 +229,14 @@ export async function listenRecorderDaemon(args: {
         writeJson(response, 400, { ok: false, error: 'invalid provider or event' })
         return
       }
+      // The hook script reports its own pid so the daemon can record the chain the event came from.
+      // Empty or malformed means the transport did not know it; that is not an error.
+      const clientPidHeader = header(request, 'x-scry-client-pid')
+      const clientPid = clientPidHeader && /^\d{1,10}$/.test(clientPidHeader) ? Number(clientPidHeader) : undefined
+      if (clientPid !== undefined && clientPid <= 1) {
+        writeJson(response, 400, { ok: false, error: 'invalid client pid' })
+        return
+      }
       const captureMode = header(request, 'x-scry-capture-mode')
       if (captureMode !== undefined && captureMode !== 'session') {
         writeJson(response, 400, { ok: false, error: 'unsupported capture mode' })
@@ -239,13 +247,15 @@ export async function listenRecorderDaemon(args: {
       if (captureMode === 'session') {
         await serveCaptureRequest({
           enablement, provider, event, payload, env: hookEnv, response,
-          recovery: () => scheduleRecovery(true), deliveries: deliveryInFlight
+          recovery: () => scheduleRecovery(true), deliveries: deliveryInFlight,
+          ...(clientPid !== undefined ? { ancestryFromPid: clientPid } : {})
         })
         return
       }
       const result = await handleRecorderHook({
         provider, event, workspace: enablement.workspaceRoot, payload,
-        env: hookEnv, deferDelivery: true
+        env: hookEnv, deferDelivery: true,
+        ...(clientPid !== undefined ? { ancestryFromPid: clientPid } : {})
       })
       scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })

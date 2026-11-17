@@ -33,6 +33,17 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).not.toContain('没有本机已存档会话')
   })
 
+  it('已存档会话仍在读取时不冒充读取失败或空列表', () => {
+    const html = renderToStaticMarkup(
+      <ArchivedChatsPanel projects={null} loading onRefresh={async () => {}} onSessionsChanged={() => {}} />
+    )
+    expect(html).not.toContain('会话索引不可用')
+    expect(html).not.toContain('没有本机已存档会话')
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('本机已存档会话')
+    expect(html).toContain('class="arch-danger" disabled=""')
+  })
+
   it('确实没有已存档会话时给出引导空态，并禁用全部删除', () => {
     const html = renderToStaticMarkup(
       <ArchivedChatsPanel projects={[]} onRefresh={async () => {}} onSessionsChanged={() => {}} />
@@ -104,7 +115,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(skillHtml).not.toContain('正在读取 Skill…')
     expect(skillHtml).not.toContain('未发现')
     expect(skillHtml).not.toContain('0 个结果')
-    expect(skillHtml).toContain('class="modal-refresh" disabled=""')
+    // Busy blocks a second press without leaving the keyboard order or greying out.
+    expect(skillHtml).toContain('class="modal-refresh" aria-disabled="true" aria-busy="true"')
 
     const mcpHtml = renderToStaticMarkup(
       <McpModal

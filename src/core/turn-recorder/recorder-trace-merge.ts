@@ -29,7 +29,10 @@ export function dedupeTraceEvents(events: TraceEvent[]): TraceEvent[] {
           }
       : event.toolUseId
       ? {
-          lifecycle: event.stage === 'tool_result' ? 'result' : 'start',
+          // 介入与被介入的工具共享 toolUseId，但不是同一个生命周期事件。
+          lifecycle: event.stage === 'tool_result'
+            ? 'result'
+            : event.stage === 'intervention' ? 'intervention' : 'start',
           toolUseId: event.toolUseId
         }
       : undefined

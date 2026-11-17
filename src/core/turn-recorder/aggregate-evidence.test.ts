@@ -272,7 +272,9 @@ describe('aggregateTurnEvidence model, call and diff evidence', () => {
       durationMs: 2000
     }
     const evidence = aggregateTurnEvidence({
-      events: [{ id: 'human-1', ts: intervention.closedAt, runId: 'r', kind: 'human', stage: 'intervention', intervention }]
+      events: [{ id: 'human-1', ts: intervention.closedAt, runId: 'r', kind: 'human', stage: 'intervention', intervention }],
+      // 介入证据只能由能观测用户提问的调用方声明；默认值不再假定可观测。
+      observable: { interventions: true }
     })
 
     expect(evidence.interventions).toEqual({
@@ -348,7 +350,8 @@ describe('aggregateTurnEvidence model, call and diff evidence', () => {
     expect(evidence.diff).toMatchObject({
       status: 'partial',
       quality: 'exact',
-      omissionReason: 'one or more file patches were omitted or truncated: policy'
+      omissionReason: 'one or more file patches were omitted or truncated: policy; ' +
+        '1 file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude'
     })
   })
 })

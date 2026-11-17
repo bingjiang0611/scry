@@ -180,8 +180,9 @@ jobs:
         run: npm run check:cli-runtime
 
   # Preserve the serial smoke order in three contiguous slices. Packaging runs
-  # with the shortest slice. Normal PRs use four macOS slots including native
-  # performance; remote/iOS changes may queue one of the six jobs at the five-slot cap.
+  # with the shortest slice. Normal PRs use these three macOS slots; native performance
+  # joins them only when the native harness changes, and remote/iOS changes add two more
+  # jobs, which compete for the five-slot cap.
   # Diffs that cannot reach the App (tests, Agent docs, iOS) skip only this macOS job.
   packaged-electron:
     needs: changes

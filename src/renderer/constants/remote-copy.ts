@@ -88,6 +88,8 @@ export const REMOTE_ACCESS_COPY = {
   generateSshInvite: '生成 SSH 邀请',
   sshInvite: 'SSH 邀请',
   copyInvite: '复制邀请',
+  inviteCopied: '邀请已复制',
+  inviteCopyFailed: (reason: string) => `邀请没有复制：${reason}`,
   closeInvite: '关闭 SSH 邀请',
   pairPhone: '配对手机',
   closePairing: '关闭配对码',

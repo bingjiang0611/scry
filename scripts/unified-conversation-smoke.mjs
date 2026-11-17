@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
 import { exerciseConversationFork } from './conversation-fork-smoke.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
+import { checkConversationLayout } from './unified-conversation-layout.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
 import { exercisePiAgentSwitch, exerciseConversationImages } from './conversation-agent-switch-smoke.mjs'
 import { exerciseConversationDeletion, verifyConversationDeletionRestart } from './conversation-deletion-smoke.mjs'
@@ -211,6 +212,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
         await Promise.allSettled(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation=>animation.finished));
         await new Promise(resolve=>requestAnimationFrame(resolve));
       })()`)
+      await checkConversationLayout(evaluate, screenshots, name)
       const image = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
       writeFileSync(join(screenshots, `${name}-${theme}.png`), Buffer.from(image.data, 'base64'))
     }

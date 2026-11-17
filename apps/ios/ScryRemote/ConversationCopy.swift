@@ -13,6 +13,8 @@ enum ConversationCopy {
   static let expanded = "已展开"
   static let collapsed = "已折叠"
   static let copy = "复制"
+  static let imageUnavailable = "无法显示该图片"
+  static let closePreview = "关闭预览"
   static let details = "本轮详情"
   static func usage(_ value: String?, pending: Bool) -> String { "用量 · " + (value ?? (pending ? "运行结束后由 Mac 提供" : "Mac 未提供")) }
   static func runID(_ value: String?) -> String { "Run · " + (value ?? "未提供") }

@@ -63,7 +63,7 @@ struct DraftAttachment: Identifiable, Equatable {
 }
 
 struct AttachmentPreviewItem: Identifiable {
-  let id = UUID()
+  let id: UUID
   let name: String
   let data: Data
 }
@@ -98,6 +98,7 @@ struct AttachmentImagePreview: View {
   @Environment(\.dismiss) private var dismiss
   @State private var scale: CGFloat = 1
   @State private var baseScale: CGFloat = 1
+  @AccessibilityFocusState private var closeFocused: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   init(item: AttachmentPreviewItem) {
@@ -120,14 +121,16 @@ struct AttachmentImagePreview: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .accessibilityLabel(item.name)
       } else {
-        Text("无法显示该图片").foregroundStyle(Palette.dim).frame(maxWidth: .infinity, maxHeight: .infinity)
+        Text(ConversationCopy.imageUnavailable).foregroundStyle(Palette.dim).frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       Button { dismiss() } label: {
         Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.fg)
           .frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
       }
-      .accessibilityLabel("关闭预览").padding(16)
+      .accessibilityLabel(ConversationCopy.closePreview)
+      .accessibilityFocused($closeFocused).padding(16)
     }
+    .onAppear { closeFocused = true }
   }
 }
 #endif
@@ -137,6 +140,8 @@ struct AttachmentImagePreview: View {
 struct SentAttachmentList: View {
   let attachments: [RemoteRunStore.SentAttachment]
   @State private var previewing: AttachmentPreviewItem?
+  @Namespace private var imageTransition
+  @AccessibilityFocusState private var previewSource: UUID?
 
   var body: some View {
     let images = attachments.filter { $0.imageData != nil }
@@ -147,22 +152,35 @@ struct SentAttachmentList: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 64, maximum: 96), spacing: 6)], alignment: .leading, spacing: 6) {
           ForEach(images) { item in
             if let data = item.imageData {
-              Button { previewing = AttachmentPreviewItem(name: item.name, data: data) } label: {
+              Button { previewing = AttachmentPreviewItem(id: item.id, name: item.name, data: data) } label: {
                 AttachmentThumbnail(data: data, side: 64)
+                  .zoomSource(item.id, in: imageTransition)
+                  .submittedElement(.submittedAttachment(attachments.firstIndex(where: { $0.id == item.id })!))
               }
-              .buttonStyle(.plain).accessibilityLabel("查看 \(item.name)")
+              .buttonStyle(.plain).accessibilityLabel(ConnectionCopy.viewAttachment(item.name))
+              .accessibilityFocused($previewSource, equals: item.id)
             }
           }
         }
       }
       #endif
       ForEach(others) { item in
-        Label(item.name, systemImage: item.kind == .image ? Symbol.photo : Symbol.file)
-          .font(.system(size: 11, weight: .medium)).lineLimit(1)
+        Label {
+          Text(item.name)
+            .submittedElement(.submittedAttachment(attachments.firstIndex(where: { $0.id == item.id })!))
+        } icon: {
+          Image(systemName: item.kind == .image ? Symbol.photo : Symbol.file)
+        }
+        .font(.system(size: 11, weight: .medium)).lineLimit(1)
       }
     }
     #if canImport(UIKit)
-    .fullScreenCover(item: $previewing) { AttachmentImagePreview(item: $0) }
+    .fullScreenCover(item: $previewing) { item in
+      AttachmentImagePreview(item: item).zoomDestination(item.id, in: imageTransition)
+    }
+    .onChange(of: previewing?.id) { previous, current in
+      if current == nil { previewSource = previous }
+    }
     #endif
   }
 }

@@ -2,11 +2,13 @@ import { useEffect, useId, useMemo, useState } from 'react'
 import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary } from '@shared/llm-performance'
 import { llmMetricSamples } from '@shared/llm-performance'
 import { ModalFrame, requestModalClose } from './Modals'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
 import { MetricChart, MetricHelp, ModelComparison } from './LlmPerformanceCharts'
 import { compareModels, type RangeHours } from './llm-performance-data'
+import { Notice } from './primitives/Notice'
 import './llm-performance.css'
 
 const RANGES: RangeHours[] = [1, 24, 168]
@@ -91,13 +93,13 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
         <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeLlmPerformance} />
       </header>
       <div className="llm-perf-body">
-        {summaryError && <p className="llm-perf-alert" role="alert">{copy.summaryError(summaryError)}</p>}
+        {summaryError && <Notice tone="bad" className="llm-perf-alert" role="alert">{copy.summaryError(summaryError)}</Notice>}
         <section className="llm-perf-comparison" aria-labelledby={`${titleId}-comparison`}>
           <div className="llm-perf-section-head">
             <h3 id={`${titleId}-comparison`}>{copy.comparison}</h3>
           </div>
-          {historyError ? <p className="llm-perf-alert" role="alert">{copy.historyError(historyError)}</p>
-            : !history ? <div className="llm-perf-empty">{copy.reading}</div>
+          {historyError ? <Notice tone="bad" className="llm-perf-alert" role="alert">{copy.historyError(historyError)}</Notice>
+            : !history ? <div className="llm-perf-loading" aria-busy="true"><DelayedSkeletonRows loading rows={4} meta rowHeight={48} label={copy.reading} /></div>
               : !current ? <div className="llm-perf-empty">{speedSamples.length || firstTokenSamples.length ? copy.emptyRange : copy.empty}</div>
                 : <ModelComparison groups={groups} selected={current.model} colorOf={colorOf} onSelect={setSelected} />}
           {oldestKept != null && oldestKept > from && <p className="llm-perf-truncated">{copy.truncated(history!.rows.length)}</p>}

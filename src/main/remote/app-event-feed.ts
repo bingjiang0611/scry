@@ -37,7 +37,9 @@ export interface AppEventsReply {
  * trace health and questions are not here: the App reads those per run, with backpressure.
  */
 export const DAEMON_WINDOW_NOTICES: ReadonlySet<string> = new Set([
-  'agent:turnDone', 'agent:error', 'agent:session', 'agent:stopState', 'agent:backgroundWork', 'agent:questionAttention'
+  'agent:turnDone', 'agent:error', 'agent:session', 'agent:stopState', 'agent:backgroundWork', 'agent:questionAttention',
+  // The archived-session purge's progress, from the daemon's lifecycle (not the run pipeline).
+  'agent:deleteArchivedProgress'
 ])
 
 export const APP_EVENTS_MAX_WAIT_MS = 25_000

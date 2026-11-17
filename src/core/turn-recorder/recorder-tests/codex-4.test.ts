@@ -168,7 +168,7 @@ export function registerSuite12(): void {
       expect.objectContaining({ id: 'exec-1:2', name: 'Bash', mcp: expect.objectContaining({ server: 'workitem', action: 'query' }) })
     ])
     expect(record.skills.value?.map((call) => call.name)).toEqual(['rate-workflow'])
-    expect(record.files.value).toEqual([{ path: '/repo/new.txt', operation: 'edit' }])
+    expect(record.files.value).toEqual([{ path: '/repo/new.txt', operation: 'edit', status: 'succeeded' }])
     expect(record.usage.value).toMatchObject({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, reasoningTokens: 5 })
   })
 

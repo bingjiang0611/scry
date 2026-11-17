@@ -3,9 +3,13 @@ import {
   RIGHT_SURFACE_DEFINITIONS, rightSurfaceTabKey, type RightSurfaceKind, type RightSurfaceTab
 } from '../right-surface'
 import { Icon } from './primitives/Icon'
+import { Menu, MenuItem } from './primitives/Menu'
 import { usePresence } from '../hooks/usePresence'
 import { MOTION } from '../motion'
 import { RightSurfaceTabStrip, rightSurfacePanelId } from './RightSurfaceTabStrip'
+import { Button } from './primitives/Button'
+import { IconButton } from './primitives/IconButton'
+import { Notice } from './primitives/Notice'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
 
@@ -128,24 +132,9 @@ export function RightSurfacePanel({
     }
   }, [menuOpen, menuPresence.state, menuPresence.requestClose])
 
+  // Item movement, Home/End and typeahead come from the Menu primitive; Tab leaves the menu.
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const items = menuItemRefs.current.filter((item): item is HTMLButtonElement => item != null)
-    if (items.length < 1) return
-    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement)
-    let nextIndex: number | null = null
-
-    if (event.key === 'ArrowDown') nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length
-    if (event.key === 'ArrowUp') nextIndex = currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length
-    if (event.key === 'Home') nextIndex = 0
-    if (event.key === 'End') nextIndex = items.length - 1
-    if (event.key === 'Tab') {
-      closeMenu(false)
-      return
-    }
-    if (nextIndex == null) return
-
-    event.preventDefault()
-    items[nextIndex]?.focus()
+    if (event.key === 'Tab') closeMenu(false)
   }
 
   return (
@@ -173,15 +162,12 @@ export function RightSurfacePanel({
             else onCloseSideChat?.(tab.conversationId)
           }}
         />
-        {layoutNotice && <p className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</p>}
+        {layoutNotice && <Notice tone="warn" layout="strip" className="surface-layout-notice" role="status" data-layout-unsaved>{layoutNotice}</Notice>}
 
         <div className="surface-actions">
           <div className="surface-add-wrap">
-            <button
+            <IconButton label="添加 Surface" active={menuOpen}
               ref={addButtonRef}
-              className={`icon-button${menuOpen ? ' on' : ''}`}
-              type="button"
-              aria-label="添加 Surface"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-controls={menuOpen ? menuId : undefined}
@@ -201,88 +187,75 @@ export function RightSurfacePanel({
               }}
             >
               <Icon name="plus" />
-            </button>
+            </IconButton>
             {menuOpen && (
-              <div
+              <Menu
                 ref={(node) => { menuRef.current = node; menuPresence.ref(node) }}
                 id={menuId}
                 className="surface-menu"
                 data-state={menuPresence.state}
-                role="menu"
-                aria-label="可用的 Surface"
+                label="可用的 Surface"
                 onKeyDown={onMenuKeyDown}
               >
                 {sideChatEntry && (
                   <>
-                    <button
+                    <MenuItem
                       ref={(node) => { menuItemRefs.current[0] = node }}
                       className="menu-item"
-                      type="button"
-                      role="menuitem"
+                      icon={<Icon name="message" />}
                       title={sideChatEntry.unavailableReason}
                       disabled={sideChatEntry.creating || Boolean(sideChatEntry.unavailableReason)}
+                      trailing={sideChatEntry.unavailableReason ? '不可用' : undefined}
                       onClick={() => { sideChatEntry.onSelect(); closeMenu(true) }}
                     >
-                      <Icon name="message" />
                       <span>{sideChatEntry.label}</span>
-                      {sideChatEntry.unavailableReason ? <small>不可用</small> : null}
-                    </button>
-                    <button
+                    </MenuItem>
+                    <MenuItem
                       ref={(node) => { menuItemRefs.current[1] = node }}
                       className="menu-item"
-                      type="button"
-                      role="menuitem"
+                      icon={<Icon name="clock" />}
                       onClick={() => { sideChatEntry.onOpenHistory(); closeMenu(true) }}
                     >
-                      <Icon name="clock" />
                       <span>{sideChatEntry.historyLabel}</span>
-                    </button>
+                    </MenuItem>
                   </>
                 )}
                 {RIGHT_SURFACE_DEFINITIONS.map((definition, index) => {
                   const isOpen = openIds.includes(definition.kind)
                   return (
-                    <button
+                    <MenuItem
                       ref={(node) => { menuItemRefs.current[sideChatEntry ? index + 2 : index] = node }}
                       className="menu-item"
-                      type="button"
-                      role="menuitem"
                       key={definition.kind}
+                      icon={<Icon name={definition.icon} />}
                       aria-current={activeId === definition.kind && !activeSideChatId ? 'page' : undefined}
                       title={unavailable?.[definition.kind]}
+                      trailing={unavailable?.[definition.kind] ? '不可用' : isOpen ? '已打开' : undefined}
                       onClick={() => {
                         onOpen(definition.kind)
                         closeMenu(true)
                       }}
                     >
-                      <Icon name={definition.icon} />
                       <span>{definition.label}</span>
-                      {unavailable?.[definition.kind] ? <small>不可用</small> : isOpen && <small>已打开</small>}
-                    </button>
+                    </MenuItem>
                   )
                 })}
-              </div>
+              </Menu>
             )}
           </div>
-          <button
-            className={`icon-button${maximized ? ' on' : ''}`}
-            type="button"
-            aria-label={maximized ? '恢复右侧工作区' : '最大化右侧工作区'}
+          <IconButton label={maximized ? '恢复右侧工作区' : '最大化右侧工作区'} active={maximized}
             aria-pressed={maximized}
             title={maximized ? '恢复面板' : '最大化面板'}
             onClick={onToggleMaximized}
           >
             <Icon name={maximized ? 'collapse' : 'expand'} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="隐藏右侧工作区"
+          </IconButton>
+          <IconButton label="隐藏右侧工作区"
             title="隐藏右侧工作区"
             onClick={onHide}
           >
             <Icon name="panel" />
-          </button>
+          </IconButton>
         </div>
       </div>
 
@@ -325,7 +298,7 @@ export function RightSurfacePanel({
               {sideChatEntry && (
                 <div className="surface-chooser-footer">
                   {sideChatEntry.notice && <p className="surface-chooser-notice" role="status" data-side-chat-creation-notice>{sideChatEntry.notice}</p>}
-                  <button type="button" className="btn" onClick={sideChatEntry.onOpenHistory}>{sideChatEntry.historyLabel}</button>
+                  <Button onClick={sideChatEntry.onOpenHistory}>{sideChatEntry.historyLabel}</Button>
                 </div>
               )}
             </div>

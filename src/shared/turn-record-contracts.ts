@@ -1,5 +1,6 @@
 import type { CreditUsageEvidence } from './credit-usage.js'
 import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger, WorkspaceOverlapEvidence, WorktreeBaselineReason } from './trace.js'
+import type { TurnDiffExcludeEvidence } from './turn-diff.js'
 import type { AgentSteerEvidence, AgentImageMimeType, AgentIntervention } from './runtime.js'
 import type { ProviderId } from './provider.js'
 
@@ -35,16 +36,35 @@ export interface TurnCall {
   error?: string
   file?: { operation: 'read' | 'write' | 'edit'; path: string }
   mcp?: { server?: string; action?: string; tool?: string }
+  /**
+   * Set when this call's wall time is human wait rather than execution: the id equals
+   * `interventions[].request.questionId`. Consumers that sum tool execution time must leave these
+   * calls out; the wait is already reported once, by the intervention's own `durationMs`.
+   */
+  humanInterventionId?: string
 }
 
 export interface TurnHookCall {
   order?: number
   lifecycleEvents?: number
   runs?: number
+  /** Legacy: runs before 0.2.75 collapsed failures into a count. New records keep each failed run. */
   failed?: number
   event: string
   name?: string
   command?: string
+  /**
+   * Provider correlation id of one run (the tool-use id the hook fired on). Only unmerged failed
+   * runs carry it: a collapsed success group has no single id to name.
+   */
+  id?: string
+  /**
+   * The run's own exit code, verbatim. `-1` is preserved as `-1`; it is not rewritten to a timeout
+   * or to success, and a shell `|| true` in the command does not turn a failed run into a success.
+   */
+  exitCode?: number
+  /** Bounded provider error text for this run, quoted not interpreted. */
+  error?: string
   startedAt?: string
   completedAt?: string
   durationMs?: number
@@ -129,6 +149,14 @@ export interface TurnTranscriptSource {
 export interface TurnFile {
   path: string
   operation: 'read' | 'write' | 'edit'
+  /**
+   * What the turn can prove about this access, one entry per (path, operation):
+   * `succeeded` a provider result confirmed it, `failed` the result reported an error, `rejected`
+   * the request was denied (by the user or by the host) and never ran, `unknown` no result was
+   * observed. Only `succeeded` counts as an observed access. Absent on records written before
+   * 0.2.75, which only had the attempt and must keep reading as an observed access.
+   */
+  status?: 'succeeded' | 'failed' | 'rejected' | 'unknown'
 }
 
 export interface TurnDiffSnapshotRecord {
@@ -152,6 +180,11 @@ export interface TurnDiffSnapshotRecord {
   baselineCommit?: string
   baselineCreatedAt?: string
   baselineReason?: WorktreeBaselineReason
+  /**
+   * 接入方为这次会话声明的 diff 排除：实际命中的路径与因此没进 `files` 的文件数。
+   * 只记路径和数量，不记文件正文；缺失 = 这次 diff 没有因声明少任何文件。
+   */
+  diffExclude?: TurnDiffExcludeEvidence
 }
 
 export interface TurnDanger {

@@ -115,6 +115,7 @@ enum ConnectionCopy {
   static let notPaired = "尚未配对"
   static let refresh = "刷新会话"
   static let refreshing = "正在刷新会话…"
+  static let readingToolPanel = "正在读取…"
   static let more = "更多选项"
   static func moreWithStatus(_ status: String) -> String { "\(more)，\(status)" }
   static let refreshSuccess = "刷新成功"

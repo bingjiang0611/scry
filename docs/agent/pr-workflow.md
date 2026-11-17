@@ -4,7 +4,7 @@
 
 从 [t3code `960d576`](https://github.com/pingdotgg/t3code/tree/960d5761c13f68a2f10635bcd26489a5fa404ec1) 移植贡献指南、PR 模板、分诊 Skill、vouch/size 工作流和评审配置模式。其 MIT 版权与许可保留在 [.github/upstream/t3code-LICENSE](../../.github/upstream/t3code-LICENSE)。不采用上游模型黑名单、产品特定规则或依赖体系。
 
-权威关系：[CONTRIBUTING.md](../../CONTRIBUTING.md) 管贡献准入；[CLAUDE.md](../../CLAUDE.md) 管 Scry 工程与安全合同；[verification.md](verification.md) 管验证范围。Skill 只执行这些规则，不建立另一套产品政策。
+权威关系：[CONTRIBUTING.md](../../CONTRIBUTING.md) 管贡献准入；[AGENTS.md](../../.agents/AGENTS.md) 管 Scry 工程与安全合同；[verification.md](verification.md) 管验证范围。Skill 只执行这些规则，不建立另一套产品政策。
 
 ## 当前交付与待启用项
 
@@ -17,10 +17,10 @@
 ## 日常路径
 
 1. 明显小 Bug 可直接开 PR；较大 Bug 先 Issue 分诊，新功能/行为先取得方向与范围批准。
-2. 任务分支开发 → 完成对应验证 → 默认执行本地提交前自查 → 提交本次授权改动并报告。推送与开 PR 仍需明确授权；获授权后再确认待推送提交没有夹带既有无关改动。
+2. 任务分支开发 → 完成对应验证 → 默认执行本地提交前自查 → 提交本次授权改动并报告。随后默认推送任务分支并开 PR，推送前确认没有夹带既有无关改动。
 3. PR 说明问题、范围、批准、验证和未验证项。CI 与贡献分诊可并行。
 4. 分诊按完整证据给出 eligible、exempt、ineligible、needs-info 或 incomplete。保护标签/维护者介入阻止自动关闭。现有服务可能独立自动评审；分诊通过不表示评审完成。
-5. 维护者处理评审发现、敏感边界决定及不能由 CI 替代的验收，再手动合并。分诊和 AI 都不拥有 merge/release 权限。
+5. 维护者处理评审发现、敏感边界决定及不能由 CI 替代的验收，再手动合并。2026-11-13 起 main 无 ruleset，CI 只作参考、不阻塞，本地验证后即可合并。分诊和 AI 都不拥有 merge/release 权限。
 
 ### 平台环境与验证信息
 
@@ -40,7 +40,7 @@
 
 每次改动任务完成验证后、提交和宣称完成前，由执行任务的 Agent 主动自查，无需单独请求或额外启动 Reviewer。已有任务提交的，在最终交付前检查本任务累计改动；自查后又有修改的，重验受影响部分。纯文档也自查，但仍按纯文档范围验证，不因此跑构建或全量测试。
 
-依据本次已确认的需求与授权、CONTRIBUTING.md、CLAUDE.md 和 verification.md，检查：
+依据本次已确认的需求与授权、CONTRIBUTING.md、.agents/AGENTS.md 和 verification.md，检查：
 
 1. **需求与批准**：是否解决用户要求的问题；敏感边界或有意行为变化是否已经明确获批。维护者在当前任务中的明确授权可作为本地证据，提 PR 时再按模板说明，不为自查强制创建 Issue 或 PR。
 2. **范围**：本任务各项改动是否服务于同一目标；是否夹带无关清理、用户 WIP 或无关提交。
@@ -50,25 +50,11 @@
 
 授权范围内可修复的问题先修复并重验，再提交。缺少必要批准、关键验证受阻或范围无法安全分离时，报告具体阻碍和负责人，停止对应提交/交付完成声明；用户明确要求保存未完成工作时，可提交并标明 WIP，不得称自查通过。非本次验收必需的剩余限制如实说明，不把所有环境缺失都升级为无关阻碍。
 
-交付中简述“本地自查结论、关键依据、未验证项/阻碍”即可，不要求新增报告文件。本地自查不使用 PR 分诊豁免，也不要求不存在的 PR 编号、远端评论或服务接线；不把结果称为正式 PR 分诊通过、独立评审通过或合并批准。推送、创建/评论/关闭 PR、触发收费服务和合并的授权保持不变。
+交付中简述“本地自查结论、关键依据、未验证项/阻碍”即可，不要求新增报告文件。本地自查不使用 PR 分诊豁免，也不要求不存在的 PR 编号、远端评论或服务接线；不把结果称为正式 PR 分诊通过、独立评审通过或合并批准。自查后默认推送任务分支并创建 PR；评论或关闭他人 PR、触发收费服务和合并仍须明确授权。
 
 ## 工作流接线
 
-| 文件 | 行为 | 门禁身份 |
-| --- | --- | --- |
-| `ci.yml` | changes 后并行执行 Node/typecheck、`check:harness-bindings`、shell/App build、4 片 coverage（合并报告）、Node 20/22/24 CLI 编译与运行/包校验、3 片 macOS 15 renderer UI（第 2 片打包，第 3 片共享一次新鲜 App 构建）、Linux App / pacman 检查与 Xvfb 下真实 Electron 的 daemon 模式 smoke（开发布局与打包产物）；桌面 typecheck 仅在 node 执行，独立 CLI 发布命令仍包含它；main push 同组只留最新 run 并全量验证 | `Check` 汇总全部 jobs（含 changes 与 `packaged-linux`）；纯文档时全部跳过，`desktop=false` 时仅 macOS 分片跳过，其余失败、取消、缺失或意外跳过均拒绝 |
-| `performance.yml` | changes 后并行执行 compare 与 native；Node 在同一 runner 按 A1/B1…A20/B20 交替采样并记录阶段耗时，counter 随后执行；native 顺序、各场景负载与预算不变 | `Performance Check` 汇总 changes 与两个测量 jobs；纯文档时全部跳过，`desktop=false` 时仅 native 跳过并在评论标明未测量；评论不属于正确性门禁 |
-| `validation-changes.yml` | CI/Performance 共用的只读 diff；仅 README.md 与 docs/**/*.md 跳过全部验证；只改测试、Agent 指导、PR/Issue 模板、名单或 apps/ios 时 `desktop=false`，Ubuntu 验证照跑；无法读取 diff 时失败，手动 dispatch 与 main push 总是全验 | 不在触发器上过滤 required workflow，三个原有必需检查名不变 |
-| `.github/actions/cache-electron/action.yml` | 仅 Electron runtime jobs 使用；按 OS/架构/锁定 Electron 版本缓存 ZIP 与校验文件，原安装器继续校验 SHA256；不缓存 node_modules、App 或编译输出，不使用宽泛 restore prefix | 不替代运行时校验，首次下载失败仍失败 |
-| `remote-g0.yml` | 每个 PR 发出检查，仅 remote/iOS/工作流的非 README 改动并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 共用 4 个 macOS slot，remote/iOS 变化时最多 6 个 job 竞争 GitHub Free 的 5 个 slot，可能有一个排队）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
-| `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
-| `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
-
-size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥1000；忽略空白改动，纯测试 PR 仍计算测试行。二进制改动没有行数，这个标签不表示风险。移植补充了标签定义任务的 push/手动触发入口、PR retarget 的 edited 事件，适配 Scry fixture 路径，并禁止 git 外部 diff/textconv。
-
-`pull_request_target` 标签任务只运行可信 workflow/Action，以 PR 为数据，不安装 PR 依赖、不构建 PR 代码、不运行 PR 脚本。不得在这些有写权限的 job 中切到 PR head 执行代码。PR 构建/测试 job 保持只读 token；`performance.yml` 的独立 `comment` job 仅对同仓库 PR 使用 `actions: read` 和 `pull-requests: write`，读取被动报告 artifact 并发布评论，不 checkout、构建或执行 PR 代码。fork 仅保留只读 summary/artifact。不添加 Provider、签名或生产凭据。
-
-`performance-ratchet.yml` 用 `GITHUB_TOKEN` 创建的 PR 通常不会触发后续 PR Actions。当前保持原行为：维护者在获授权后用个人身份关闭再重新打开该 PR，以触发正常检查，并核实 head 与检查结果；不要免检合并。若频繁产生此类 PR，再单独授权最小权限 GitHub App token，不能为了自动化添加宽权限 PAT。
+具体 jobs、影响范围分流、报告语义与 token 边界见 [CI 验证接线](validation-workflows.md)。
 
 ## 外部启用顺序（维护者执行或明确授权 Agent）
 
@@ -78,7 +64,7 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 4. 用测试 PR 验证下表，包括 fork、更新 head、失败和无影响路径。先确保三个汇总检查都真实出现，不能预先添加永远不产生的 required context。
 5. 启用 main ruleset：要求 PR、`Check`、`Performance Check`、`Remote Check`；禁止删除与 force push；要求解决 review conversations；仅允许 Squash。检查来源限制为 GitHub Actions，不把任意同名第三方状态当作门禁。
 6. 单维护者阶段所需 Approval 数为 0，保持人工合并、关闭 auto-merge；这不构成独立人工审查。不要把 AI Approval 当作敏感边界决定。当前 ruleset 无 bypass；任何应急放宽都需要维护者单独授权、记录并恢复，不由 Agent 自行执行。
-7. 确认实际 App 评审和 ruleset 拒绝效果后，在交付记录写明已启用的服务、实际检查名与验收 PR。未完成的项继续标为未验证。
+7. （2026-11-13 维护者已删除该 ruleset；恢复时按第 5 步重建。）确认实际 App 评审和 ruleset 拒绝效果后，在交付记录写明已启用的服务、实际检查名与验收 PR。未完成的项继续标为未验证。
 
 ### 单维护者治理限制（2026-10-30 确认）
 
@@ -92,7 +78,11 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 | --- | --- |
 | 任一 CI/性能任务失败、取消或无理由跳过 | 汇总失败，启用 ruleset 后不能合并 |
 | 仅各目录 README.md 或 docs/**/*.md | changes 明确输出 false；重型 CI/性能任务跳过，`Check`、`Performance Check`、`Remote Check` 仍产生成功结果，不悬挂 required context |
-| 文档混有代码、配置或不可读 diff | 不按纯文档放行；前两者完整验证，后者检测失败、汇总失败 |
+| 文档混有代码、配置或不可读 diff | 不按纯文档放行；前两者按实际影响范围验证，后者检测失败、汇总失败 |
+| 仅 apps/ios（可混文档） | `required=true`、`desktop=false`、`node_performance=false`；Node/native 性能测量跳过并标明未测量；其余 Ubuntu 与 Remote 验证保留，三个汇总门禁仍必需 |
+| iOS 混有 Node 源码、测试、依赖、工作流或 Agent 指导 | `node_performance=true`；Node 测量必须成功，失败、取消、缺失或跳过均拒绝 |
+| 普通 App 改动（未动 native harness） | `desktop=true`、`native_performance=false`；PR 上 native 跳过并在评论中标明合入后在 main 测量；native 成功、失败或取消都使汇总失败 |
+| 改动 native harness 或性能工作流 / main push / 手动 dispatch | `native_performance=true`；native 必须成功；main push 时 `node_performance=false`，compare 必须跳过 |
 | remote/iOS 未改动 | changes 输出 false，transport、ios 全部跳过，Remote Check 成功 |
 | remote/iOS/工作流有改动 | 两项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
 | remote diff 不可读取 | 检测失败，Remote Check 失败；不能按无影响处理 |
@@ -108,17 +98,17 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 
 ## 维护清单（修改流程时必读）
 
-规则只在权威文件中定义，模板、Skill 和评审配置按需引用；不要维护多份相互独立的同义规则。修改 PR 政策、模板、分诊、工作流或后台配置时，必须按本节检查同步范围、验证和实际生效结果。
+规则只在权威文件中定义，模板、Skill 和评审配置按需引用；不要维护多份相互独立的同义规则。修改 PR 政策、模板、分诊、工作流或后台配置时，必须按本节检查唯一源目录与发现入口范围、验证和实际生效结果。
 
 ### 改哪层，同步哪里
 
 | 变化 | 主要修改位置 | 必须核对的关联项 |
 | --- | --- | --- |
 | 贡献准入、批准或豁免规则 | `CONTRIBUTING.md` | 分诊 Skill、案例和必要的模板提示；政策变化由维护者决定 |
-| 工程、安全或平台边界 | `CLAUDE.md`、`docs/agent/verification.md` | 领域检查清单和相关模板；评审器引用权威规则，不复制整套合同 |
+| 工程、安全或平台边界 | `.agents/AGENTS.md`、`docs/agent/verification.md` | 领域检查清单和相关模板；评审器引用权威规则，不复制整套合同 |
 | 提交信息经常缺失 | `.github/pull_request_template.md`、`.github/ISSUE_TEMPLATE/` | 只补必要信息；文案改动不顺带增加必填项或无关验收 |
 | CI 任务、命令或平台 | `.github/workflows/` | 本文的接线表、汇总逻辑和合同测试；新增任务不得被汇总漏掉，检查改名须核对 Ruleset 的 required context |
-| 分诊行为 | `.agents/skills/contribution-triage/`、`.claude/skills/contribution-triage/` | 两份 Skill 与案例同步；用案例验证语义，不只检查文本相同 |
+| 分诊行为 | `.agents/skills/contribution-triage/` | 唯一 Skill 正文与案例同步；用案例验证语义，不保留 Claude 副本 |
 | 贡献者信任或分诊豁免 | `.github/VOUCHED.td`、`.github/TRIAGE_EXEMPTIONS.td` | 由维护者确认，区分可信身份与分诊豁免；核验标签，不能据此跳过 CI 或安全检查 |
 | AI 评审误报、漏报 | `.coderabbit.yaml`、`.macroscope/` | 优先修正具体指令；确认服务实际启用范围，不默认增加服务、权限或费用 |
 | 性能指标或预算 | 现有性能配置与台账 | 遵循[性能闭环](../performance-loop.md)，不通过减负载、放宽预算或重试掩盖回归 |
@@ -130,9 +120,9 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 3. **按范围验证**：
    - 纯文档或模板文案：检查 diff、引用、锚点和需要的 YAML 格式，不触发 App 构建或全套测试。
    - 工作流逻辑：运行 `npm run test:unit -- scripts/pr-workflow.test.ts scripts/ci-workflow.test.ts scripts/ci-changes.test.ts scripts/electron-download-cache.test.ts` 及受影响检查；关键拒绝路径应有能证明保护失效时失败的负对照。
-   - Skill：用 `npm run test:unit -- scripts/agent-skills-sync.test.ts` 检查同步；行为变化还须按分诊案例复核判断，机械测试不代替语义评估。
+   - Skill：用 `npm run test:unit -- scripts/agent-instructions.test.ts` 检查唯一源目录与发现入口；行为变化还须按分诊案例复核判断，机械测试不代替语义评估。
    - 平台或性能行为：按验证指南和性能闭环执行，保留失败、测量环境和未验证项；配置存在不等于对应平台已验收。
-4. **自查与提审**：按[本地自查](#local-preflight)核对最终 diff、范围和证据。获得授权后才推送、开 PR 或操作后台；PR 说明规则变化、风险和验证结果，维护者负责合并决定。
+4. **自查与提审**：按[本地自查](#local-preflight)核对最终 diff、范围和证据。推送并开 PR；操作后台仍需授权；PR 说明规则变化、风险和验证结果，维护者负责合并决定。
 5. **核验实际生效**：标签或触发器变化合入后，用获授权的受控 PR 验证真实事件；记录目标仓库、事件、head、检查或标签结果。后台保护变更先保存原配置，修改后读回；经明确批准的临时例外须恢复原规则并核验，记录剩余问题和负责人，不把失败改写成成功。未执行的远端核验继续标为待验证。
 
 ### 日常维护节奏与责任

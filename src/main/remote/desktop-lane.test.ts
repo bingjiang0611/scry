@@ -73,6 +73,13 @@ describe('desktop lane routing', () => {
       expect(laneForRequest(request), method).toBe('bulk')
     }
   })
+
+  it('sends a push/fetch cancel on control, so it is not queued behind the push it cancels', () => {
+    const cancel = { op: 'desktopWorkbench', query: { surface: 'sourceControl', cwd: '/w', method: 'cancel', args: [] } }
+    expect(laneForRequest(cancel)).toBe('control')
+    // Still a write: a lost reply is reported unknown, never silently sent again.
+    expect(replayableRequest(cancel)).toBe(false)
+  })
 })
 
 describe('terminal lane (P3-terminal)', () => {
@@ -94,6 +101,11 @@ describe('long lane', () => {
     for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp', 'mcpGuardScan']) expect(laneForRequest({ op: 'mcp', method }), method).toBe('long')
     expect(replayableRequest({ op: 'mcp', method: 'mcpGuardScan' })).toBe(true)
     for (const method of ['mcpSnapshot', 'testMcp', 'reauthenticateMcp']) expect(replayableRequest({ op: 'mcp', method }), method).toBe(false)
+  })
+
+  it('sends a live-check cancel on the control lane so it is not queued behind the check', () => {
+    expect(laneForRequest({ op: 'mcp', method: 'cancelMcpSnapshot' })).toBe('control')
+    expect(replayableRequest({ op: 'mcp', method: 'cancelMcpSnapshot' })).toBe(true)
   })
 
   it('takes the billing sync there too, and leaves the quick billing reads on bulk', () => {

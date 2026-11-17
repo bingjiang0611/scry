@@ -1,4 +1,5 @@
 // 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
+import type { SessionSaveState } from '../session-save-state'
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { relTime } from '../format'
@@ -26,6 +27,10 @@ import { SidebarProjectMenu } from './SidebarProjectMenu'
 import { useTabIndicator } from '../hooks/useTabIndicator'
 import { browserStorage } from '../browser-storage'
 import { persistSidebarView, readStoredSidebarView, type SidebarView } from '../sidebar-view'
+import { Tabs } from './primitives/Tabs'
+import { BackgroundNotices } from './BackgroundNotices'
+import type { BackgroundNotice } from '../background-notices'
+import { Button } from './primitives/Button'
 
 const sessionKey = (cwd: string, session: SessionMeta): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
@@ -43,6 +48,9 @@ export const Sidebar = memo(function Sidebar({
   runningRunIds = new Set<string>(),
   waitingQuestionRunIds = new Set<string>(),
   unreadSessionKeys = new Set<string>(),
+  backgroundNotices = [],
+  onOpenBackgroundNotice,
+  onDismissBackgroundNotice,
   backgroundWorkByRun = {},
   version = '0.1.0',
   onNewChat,
@@ -56,6 +64,7 @@ export const Sidebar = memo(function Sidebar({
   onRemoveProject,
   onRevealProject,
   archiveUndo = null,
+  sessionSaves,
   onUndoArchive,
   onAnalytics,
   analyticsActive = false,
@@ -87,6 +96,10 @@ export const Sidebar = memo(function Sidebar({
   /** One-pass child totals/running/attention per parent, already computed by the shell. */
   waitingQuestionRunIds?: ReadonlySet<string>
   unreadSessionKeys?: ReadonlySet<string>
+  /** Notices for sessions the user is not looking at; shown above the settings footer. */
+  backgroundNotices?: readonly BackgroundNotice[]
+  onOpenBackgroundNotice?: (notice: BackgroundNotice) => void
+  onDismissBackgroundNotice?: (key: string) => void
   backgroundWorkByRun?: Readonly<Record<string, BackgroundWork>>
   version?: string
   onNewChat: () => void
@@ -100,6 +113,8 @@ export const Sidebar = memo(function Sidebar({
   onRemoveProject?: (project: ProjectMeta) => void | Promise<void>
   onRevealProject?: (project: ProjectMeta) => void
   archiveUndo?: { preview: string } | null
+  /** Save status of optimistic row changes, keyed like the rows themselves. */
+  sessionSaves?: ReadonlyMap<string, SessionSaveState>
   onUndoArchive?: () => void
   onAnalytics?: () => void
   analyticsActive?: boolean
@@ -179,6 +194,7 @@ export const Sidebar = memo(function Sidebar({
       agentProfileId: session.agentProfileId, cwd, sessionId: session.externalSessionId ?? session.sessionId }))}
     backgroundWork={session.runId ? backgroundWorkByRun[session.runId] : undefined}
     onPick={onPick} onTogglePin={onTogglePin} onArchive={onArchive}
+    saveState={sessionSaves?.get(sessionKey(cwd, session))}
     onMenu={onRenameSession ? openSessionMenu : undefined} />
   const renderConversation = (conversation: ConversationSummary) => <div className="sb-sess-row" data-motion-key={view === 'projects' ? `conversation:${conversation.id}` : undefined} key={conversation.id}>
     <button className={`sb-sess${activeConversationId === conversation.id ? ' active' : ''}`} aria-current={activeConversationId === conversation.id ? 'true' : undefined} onClick={() => onPickConversation?.(conversation)} data-conversation-id={conversation.id}>
@@ -216,7 +232,7 @@ export const Sidebar = memo(function Sidebar({
               aria-current={analyticsActive ? 'page' : undefined}
               onClick={onAnalytics}
             >
-              <Icon name="chart" /> 分析
+              <Icon name="overview" /> 分析
             </button>
           )}
           {onLlmPerformance && (
@@ -254,20 +270,23 @@ export const Sidebar = memo(function Sidebar({
         </nav>
       )}
 
-      <div className="sb-view-tabs" ref={viewTabsRef} role="tablist" aria-label={activityCopy.navigation} onKeyDown={(event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-        event.preventDefault()
-        const next = event.key === 'Home' ? 'projects' : event.key === 'End' ? 'activity' : view === 'projects' ? 'activity' : 'projects'
-        setView(next)
-        document.getElementById(`${tabId}-${next}`)?.focus()
-      }}>
-        {(['projects', 'activity'] as const).map((tab) => <button key={tab} ref={(node) => { viewTabRefs.current.set(tab, node) }} type="button" role="tab"
-          id={`${tabId}-${tab}`} aria-selected={view === tab} aria-controls={`${tabId}-panel`}
-          tabIndex={view === tab ? 0 : -1} title={tab === 'activity' ? activityCopy.scope : undefined} onClick={() => setView(tab)}>
-          {activityCopy[tab]}
-        </button>)}
+      <Tabs
+        className="sb-view-tabs"
+        listRef={viewTabsRef}
+        label={activityCopy.navigation}
+        value={view}
+        onChange={setView}
+        tabRef={(tab, node) => { viewTabRefs.current.set(tab, node) }}
+        items={(['projects', 'activity'] as const).map(tab => ({
+          value: tab,
+          label: activityCopy[tab],
+          id: `${tabId}-${tab}`,
+          controls: `${tabId}-panel`,
+          title: tab === 'activity' ? activityCopy.scope : undefined
+        }))}
+      >
         <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
-      </div>
+      </Tabs>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
         {catalogHealthError ? (
           <div className="sb-empty" role="status" data-catalog-read-error>{projectCopy.catalogReadFailed(catalogHealthError)}</div>
@@ -340,12 +359,15 @@ export const Sidebar = memo(function Sidebar({
         />
       )}
 
+      {onOpenBackgroundNotice && onDismissBackgroundNotice && <BackgroundNotices notices={backgroundNotices}
+        onOpen={onOpenBackgroundNotice} onDismiss={onDismissBackgroundNotice} />}
+
       {archiveUndo && onUndoArchive && (
         <div className="sb-undo" role="status">
           <span>已存档「{archiveUndo.preview || '(无预览)'}」</span>
-          <button type="button" onClick={onUndoArchive}>
+          <Button size="sm" onClick={onUndoArchive}>
             <Icon name="undo" /> 撤销
-          </button>
+          </Button>
         </div>
       )}
 

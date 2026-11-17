@@ -41,6 +41,8 @@ export interface SideChatHistory {
 
 export interface SideChatWorkspace {
   records: ReadonlyMap<string, ConversationSummary>
+  /** True while this tab's summary has not been answered yet: loading, not unreadable. */
+  isPending: (conversationId: string) => boolean
   tabs: SideChatTabView[]
   entry: SideChatEntry
   history: SideChatHistory
@@ -104,6 +106,9 @@ export function useSideChatWorkspace({
   statusOf?: (conversation: ConversationSummary) => string | undefined
 }): SideChatWorkspace {
   const [records, setRecords] = useState<ReadonlyMap<string, ConversationSummary>>(() => new Map())
+  // Ids whose lookup has come back, whatever the answer. Until then a missing record
+  // means "not read yet", which must not be shown as "unreadable".
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set())
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [unknownCommand, setUnknownCommand] = useState<SideChatCreateCommand>()
@@ -150,6 +155,7 @@ export function useSideChatWorkspace({
       if (!fenceHolds(pinnedScope, pinnedSource)) return
       const outcome = restoreTabOutcome(ids, answer)
       mergeRecords(outcome.restored)
+      setAnswered((previous) => ids.every((id) => previous.has(id)) ? previous : new Set([...previous, ...ids]))
       if (outcome.missing.length > 0) latest.current.onDrop(outcome.missing)
     }
     try {
@@ -356,6 +362,11 @@ export function useSideChatWorkspace({
   }), [openIds, records, statusOf])
 
   const refresh = useCallback((): void => { void validateTabs() }, [validateTabs])
+  // Without an api or a source no lookup will ever run, so nothing is pending: the
+  // tab honestly reads as unavailable, as before.
+  const canLookup = Boolean(api && source)
+  const isPending = useCallback((conversationId: string): boolean =>
+    canLookup && !records.has(conversationId) && !answered.has(conversationId), [answered, canLookup, records])
   const clearCreated = useCallback((): void => setCreatedId(undefined), [])
-  return { records, tabs, entry, history, refresh, closeChild: onClose, createdId, clearCreated }
+  return { records, isPending, tabs, entry, history, refresh, closeChild: onClose, createdId, clearCreated }
 }

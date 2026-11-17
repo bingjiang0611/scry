@@ -45,8 +45,12 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   const terminal = terminalLane(op, request)
   if (terminal) return terminal
   // MCP starts servers and may wait for a browser sign-in; a billing sync reads pages.
-  if (op === 'mcp') return 'long'
+  // Cancelling a live check must not queue behind the check it cancels, so it takes the
+  // short control lane while the snapshot holds `long`.
+  if (op === 'mcp') return (request as { method?: unknown }).method === 'cancelMcpSnapshot' ? 'control' : 'long'
   if (op === 'billing' && (request as { method?: unknown }).method === 'syncBillingAdmin') return 'long'
+  // Cancelling a running push/fetch must not queue behind it on the workbench lane.
+  if (op === 'desktopWorkbench' && (request as { query?: { method?: unknown } }).query?.method === 'cancel') return 'control'
   if (workbenchWrite(op, request)) return 'workbench'
   if (writeOperations.has(op)) return 'control'
   if (idempotentControlOperations.has(op)) return 'control'
@@ -63,7 +67,11 @@ export function laneForRequest(request: unknown): DesktopLaneName {
 
 export function replayableRequest(request: unknown): boolean {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
-  if (op === 'mcp') return (request as { method?: unknown }).method === 'mcpGuardScan'
+  // Aborting an already-aborted check changes nothing, so a lost reply may be asked again.
+  if (op === 'mcp') {
+    const method = (request as { method?: unknown }).method
+    return method === 'mcpGuardScan' || method === 'cancelMcpSnapshot'
+  }
   if (op === 'terminal') {
     const method = (request as { method?: unknown }).method
     return typeof method === 'string' && terminalReadMethods.has(method)

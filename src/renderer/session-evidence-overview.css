@@ -11,52 +11,25 @@
   top: auto;
   z-index: 10;
   gap: 0;
-  padding: 0;
   border-bottom: 0;
   background: var(--overview-surface);
 }
 
 .overview-dossier .overview-panel-title {
   min-height: 44px;
-  padding: 0 10px 0 13px;
+  padding: 0 8px 0 12px;
   border-bottom: 0;
 }
 
-.overview-dossier .overview-panel-title strong { font-size: 14px; }
+.overview-dossier .overview-panel-title strong { font-size: var(--text-base); }
 /* 证据标签是注释，不是标题：让「总览」单独占住面板头部的重量。 */
-.overview-dossier .overview-panel-title em { color: var(--dim2); font-size: 10px; letter-spacing: 0; text-transform: none; }
-
-.overview-dossier .panel-tabs {
-  height: 33px;
-  gap: 2px;
-  padding: 0 8px;
-}
-
-.overview-dossier .panel-tabs button {
-  position: relative;
-  height: 33px;
-  padding: 0 5px;
-  border: 0;
-  color: var(--dim3);
-  font-size: 12px;
-}
-
-.overview-dossier .panel-tabs button.active { color: var(--fg); }
-.overview-dossier .panel-tabs button.active::after {
-  position: absolute;
-  right: 8px;
-  bottom: 0;
-  left: 8px;
-  height: 2px;
-  background: var(--selected);
-  content: "";
-}
+.overview-dossier .overview-panel-title em { color: var(--dim2); font-size: var(--text-2xs); letter-spacing: 0; text-transform: none; }
 
 .overview-dossier .overview-scroll-content {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 18px;
+  padding-bottom: 16px;
 }
 
 .overview-dossier .ctx-gauge {
@@ -65,8 +38,8 @@
   flex-direction: column;
   gap: 0;
   align-items: stretch;
-  margin: 6px 12px 0;
-  padding: 6px 0 8px;
+  margin: 8px 12px 0;
+  padding: 8px 0 8px;
   border-bottom: 0;
   background: transparent;
 }
@@ -78,16 +51,15 @@
   justify-content: space-between;
   gap: 12px;
   color: var(--dim2);
-  font: 10px/1 var(--font-mono);
+  font: var(--text-2xs)/1 var(--font-mono);
 }
 .overview-dossier .ctx-head b {
   color: var(--fg);
-  font: 650 15px/1 var(--font-mono);
+  font: var(--weight-semibold) var(--text-base)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .overview-dossier .ctx-track {
-  height: 8px;
-  margin: 9px 0 7px;
+  margin: 8px 0 8px;
   overflow: hidden;
   border-radius: var(--r-xs);
   background: var(--border3);
@@ -103,19 +75,19 @@
 .overview-dossier .ctx-gauge.warm .ctx-track > span { background: var(--warn); }
 .overview-dossier .ctx-gauge.hot .ctx-track > span { background: var(--bad); }
 .overview-dossier .ctx-gauge.empty .ctx-track > span { width: 0; }
-.overview-dossier .ctx-copy .lbl { font-size: 10px; letter-spacing: 0; }
+.overview-dossier .ctx-copy .lbl { font-size: var(--text-2xs); letter-spacing: 0; }
 /* 显示用量是主证据，窗口总量是参照；显示文本仍是「已用 / 窗口」。 */
 .overview-dossier .ctx-copy .v {
   margin-top: 0;
   color: var(--dim2);
-  font: 500 13px/1.2 var(--font-mono);
+  font: var(--weight-medium) var(--text-md)/1.2 var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
-.overview-dossier .ctx-copy .v b { color: var(--fg); font-weight: 650; }
+.overview-dossier .ctx-copy .v b { color: var(--fg); font-weight: var(--weight-semibold); }
 .overview-dossier .ctx-copy .v span { color: var(--dim2); }
-.overview-dossier .ctx-gauge.empty .ctx-copy .v { font-size: 11px; }
-.overview-dossier .ctx-copy .sub { margin-top: 5px; font-size: 10.5px; line-height: 1.5; }
+.overview-dossier .ctx-gauge.empty .ctx-copy .v { font-size: var(--text-xs); }
+.overview-dossier .ctx-copy .sub { margin-top: 4px; font-size: var(--text-xs); line-height: 1.5; }
 
 .overview-dossier .overview-verdict,
 .overview-dossier .overview-verdict.ok,
@@ -131,8 +103,8 @@
 }
 
 .overview-dossier .overview-verdict-line > div { grid-template-columns: auto max-content; gap: 8px; }
-.overview-dossier .overview-verdict-line strong { font-size: 13px; font-weight: 620; }
-.overview-dossier .overview-verdict-line em { font-size: 10px; }
+.overview-dossier .overview-verdict-line strong { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.overview-dossier .overview-verdict-line em { font-size: var(--text-2xs); }
 /* 状态点沿用面板标题的软光环写法，颜色随判词状态，不另造强调色。 */
 .overview-dossier .overview-verdict-line .sdot { width: 7px; }
 .overview-dossier .overview-verdict.ok .overview-verdict-line .sdot { box-shadow: 0 0 0 2px var(--ok-soft); }
@@ -140,7 +112,7 @@
 .overview-dossier .overview-verdict.bad .overview-verdict-line .sdot { box-shadow: 0 0 0 2px var(--bad-soft); }
 
 .overview-dossier .overview-metric-grid {
-  margin: 10px 12px 0;
+  margin: 8px 12px 0;
   border-top: 1px solid var(--border3);
   background: transparent;
   gap: 0;
@@ -151,7 +123,7 @@
   min-height: 0;
   gap: 0;
   justify-content: flex-start;
-  padding: 11px 0 12px;
+  padding: 12px 0 12px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -167,22 +139,20 @@
   border-bottom: 1px solid var(--border3);
 }
 
-.overview-dossier .overview-metric > span { margin-bottom: 4px; font-size: 10px; }
+.overview-dossier .overview-metric > span { margin-bottom: 4px; font-size: var(--text-2xs); }
 .overview-dossier .overview-metric > strong {
   font-size: clamp(14px, 4.2cqi, 17px);
   letter-spacing: -0.025em;
 }
 /* 两列派生指标用一条竖线分隔，保持左右两侧同一基线。 */
-.overview-dossier .overview-metric:nth-child(2) { padding-right: 13px; }
+.overview-dossier .overview-metric:nth-child(2) { padding-right: 12px; }
 .overview-dossier .overview-metric:nth-child(3) {
-  padding-left: 13px;
+  padding-left: 12px;
   border-left: 1px solid var(--border3);
 }
 .overview-dossier .overview-metric.lead > span { margin-bottom: 0; }
 .overview-dossier .overview-metric.lead > strong {
-  font-size: 26px;
   line-height: 1;
-  letter-spacing: -0.04em;
 }
 
 /* 指标格不可点击：悬停不抬升、不改底色，避免伪造操作反馈。 */
@@ -192,12 +162,11 @@
 }
 
 .overview-dossier .panel-section {
-  margin: 10px 12px 0;
+  margin: 8px 12px 0;
   padding: 0;
   border: 0;
   background: transparent;
 }
-
 
 .overview-dossier .panel-section h4 {
   min-height: 31px;
@@ -208,13 +177,13 @@
   margin: 0;
   border-bottom: 0;
   color: var(--dim2);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.overview-dossier .panel-section h4 .more { font-size: 10px; letter-spacing: 0; text-transform: none; }
-.overview-dossier .panel-section .filerow { min-height: 36px; padding: 6px 0; border-bottom: 0; font-size: 11.5px; }
+.overview-dossier .panel-section h4 .more { font-size: var(--text-2xs); letter-spacing: 0; text-transform: none; }
+.overview-dossier .panel-section .filerow { padding: 8px 0; border-bottom: 0; font-size: var(--text-sm); }
 
 .overview-session-head {
   display: flex;
@@ -226,7 +195,7 @@
 .overview-session-compact {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--dim2);
   font-size: var(--text-supporting-size);
 }
@@ -234,7 +203,7 @@
 .overview-session-count {
   margin-left: 4px;
   color: var(--fg);
-  font: 600 14px/1.3 var(--font-mono);
+  font: var(--weight-semibold) var(--text-base)/1.3 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -243,7 +212,7 @@
   display: inline-flex;
 }
 
-.overview-session-scope > button,
+.overview-session-scope > button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)),
 .overview-session-copy,
 .overview-session-id-toggle {
   display: inline-flex;
@@ -264,7 +233,7 @@
   top: 100%;
   right: 0;
   width: 230px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: var(--r-md);
   background: var(--panel2);
   color: var(--fg);
@@ -290,11 +259,11 @@
   width: 22px;
   flex: 0 0 auto;
   color: var(--dim3);
-  font: 700 10px/1 var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.overview-session-id-toggle { min-width: 0; padding: 3px 0; color: var(--fg); }
+.overview-session-id-toggle { min-width: 0; padding: 4px 0; color: var(--fg); }
 .overview-session-id-toggle code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--text-supporting-size)/1.5 var(--font-mono); }
 .overview-session-copy { flex: 0 0 28px; width: 28px; height: 28px; }
 .overview-session-copy:disabled { cursor: default; opacity: .45; }
@@ -303,39 +272,14 @@
 .overview-session-missing { color: var(--dim3); }
 .overview-session-full-id { padding: 8px 0 0 28px; overflow-wrap: anywhere; }
 .overview-session-full-id code { color: var(--dim2); font: var(--text-compact-size)/1.7 var(--font-mono); }
-.overview-session-notice { padding-top: 6px; color: var(--dim2); font-size: var(--text-compact-size); }
+.overview-session-notice { padding-top: 8px; color: var(--dim2); font-size: var(--text-compact-size); }
 .overview-session-notice[role='alert'] { color: var(--bad); }
-
-.overview-dossier .overview-data-tabs {
-  height: 33px;
-  margin: 16px 12px 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.overview-dossier .overview-data-tabs button {
-  height: 33px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--dim);
-  font-size: 11.5px;
-}
-.overview-dossier .overview-data-tabs button.active {
-  border-bottom-color: var(--selected);
-  background: transparent;
-  box-shadow: none;
-  color: var(--fg);
-}
 
 .overview-dossier .turn-call-list { gap: 0; }
 .overview-dossier .turn-call-row {
   grid-template-columns: 31px minmax(0, 1fr);
   gap: 8px;
   min-height: 0;
-  padding: 9px 0;
 }
 
 .overview-dossier .turn-call-row.is-selected {
@@ -351,15 +295,13 @@
   border-radius: var(--r-xs);
   background: var(--panel2);
   color: var(--dim2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
-.overview-dossier .turn-call-main { gap: 6px; }
-.overview-dossier .turn-call-head { font-size: 11.5px; }
+.overview-dossier .turn-call-main { gap: 8px; }
+.overview-dossier .turn-call-head { font-size: var(--text-sm); }
 .overview-dossier .turn-call-groups {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 3px;
 }
 
 .overview-dossier .turn-call-group {
@@ -367,25 +309,20 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content 9px;
   align-items: center;
-  gap: 3px;
-  padding: 0 4px;
   overflow: hidden;
-  border-color: var(--border3);
-  border-radius: 0;
-  background: var(--overview-surface);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .overview-dossier .turn-call-group.agent { grid-template-columns: minmax(0, 1fr) max-content; }
 .overview-dossier .turn-call-kind { overflow: hidden; padding: 0; border-radius: 0; background: transparent; text-overflow: ellipsis; white-space: nowrap; }
-.overview-dossier .turn-call-count { font-size: 10px; }
+.overview-dossier .turn-call-count { font-size: var(--text-2xs); }
 .overview-dossier .turn-call-toggle-icon .ico { width: 11px; height: 11px; }
 
-.overview-dossier .turn-call-detail-slot { gap: 5px; }
+.overview-dossier .turn-call-detail-slot { gap: 4px; }
 .overview-dossier .turn-call-detail,
 .overview-dossier .turn-intervention,
 .overview-dossier .turn-file-footprint,
-.overview-dossier .turn-tool-error { border-radius: 0; font-size: 11px; }
+.overview-dossier .turn-tool-error { border-radius: 0; font-size: var(--text-xs); }
 
 .overview-dossier .hook-instance-index,
 .overview-dossier .hook-instance-source,
@@ -395,7 +332,7 @@
 .overview-dossier .hook-issue .hook-run-status,
 .overview-dossier .hook-issue-meta,
 .overview-dossier .hook-config-scope,
-.overview-dossier .hook-config-matcher { font-size: 10px; }
-.overview-dossier .hook-evidence pre { font-size: 10.5px; line-height: 1.5; }
+.overview-dossier .hook-config-matcher { font-size: var(--text-2xs); }
+.overview-dossier .hook-evidence pre { font-size: var(--text-xs); line-height: 1.5; }
 
-.overview-dossier .psrc { margin: 10px 0 0; color: var(--dim3); font-size: 10px; line-height: 1.5; }
+.overview-dossier .psrc { margin: 8px 0 0; color: var(--dim3); font-size: var(--text-2xs); line-height: 1.5; }

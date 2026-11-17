@@ -11,6 +11,14 @@
       "why": "git 与 workspace 授权归 daemon"
     },
     {
+      "channel": "sourceControl:cancel",
+      "route": "forward",
+      "op": "desktopWorkbench",
+      "surface": "sourceControl",
+      "method": "cancel",
+      "why": "git 与 workspace 授权归 daemon；取消的是 daemon 里正在跑的 push/fetch，走 control lane，不排在它之后"
+    },
+    {
       "channel": "sourceControl:diff",
       "route": "forward",
       "op": "desktopWorkbench",

@@ -14,7 +14,7 @@ const aggregate = {
   cacheWriteKnownRows: 0, reasoningKnownRows: 0, tokenKnownRows: 3, costKnownRows: 0,
   exactCostRows: 0, providerReportedCostRows: 0, estimatedCostRows: 0, inferredCostRows: 0
 }
-function render(credits: number | null | undefined) {
+function render(credits: number | null | undefined, view: { rangeDays?: 7 | 30; loading?: boolean } = {}) {
   const qoderCredits = credits === undefined ? undefined : { ...evidence, credits }
   const row = { ...aggregate, qoderCredits,
     costUsd: credits == null ? null : credits * QODER_USD_PER_CREDIT,
@@ -28,7 +28,7 @@ function render(credits: number | null | undefined) {
     byDay: [{ ...row, day: '2026-09-09' }],
     dailyByProvider: [{ ...row, day: '2026-09-09', provider: 'qoder' }]
   }
-  return renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false} error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
+  return renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={view.rangeDays ?? 7} loading={view.loading ?? false} error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
 }
 
 describe('AnalyticsView Qoder Credits', () => {
@@ -181,5 +181,22 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(render(0)).toContain('class="usage-provider-row"')
     expect(render(0.0001)).toContain('&lt;0.01 Credits')
     expect(render(0.0001)).toContain('&lt;$0.01')
+  })
+})
+
+describe('AnalyticsView range switch', () => {
+  it('keeps the previous range on screen, dimmed and labelled as the previous range', () => {
+    const html = render(12.5, { rangeDays: 30, loading: true })
+    expect(html).toContain('data-stale-range="true"')
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('正在读取最近 30 天')
+    expect(html).toContain('下方仍是')
+    expect(html).toContain('aria-pressed="true">30')
+  })
+
+  it('shows the plain period once the range matches', () => {
+    const html = render(12.5)
+    expect(html).not.toContain('data-stale-range')
+    expect(html).not.toContain('下方仍是')
   })
 })

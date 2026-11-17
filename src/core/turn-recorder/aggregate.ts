@@ -23,6 +23,27 @@ function hash(text: string | Uint8Array): string {
   return `sha256:${createHash('sha256').update(text).digest('hex')}`
 }
 
+type TurnFileStatus = 'succeeded' | 'failed' | 'rejected' | 'unknown'
+
+/** 结果能证明什么，就只记什么：被拒的尝试不是已读，没有结果的尝试不是成功。 */
+function fileStatusOf(event: TraceEvent, result: TraceEvent | undefined): TurnFileStatus {
+  if (result) {
+    // 归一化阶段只在 Provider 明确写出拒绝时标记 denialResolution，不靠工具报错正文猜。
+    if (typeof result.runtimeMetadata?.denialResolution === 'string') return 'rejected'
+    return result.isError ? 'failed' : 'succeeded'
+  }
+  // 没有配对结果时，事件本身可能就是结果（Codex 的 file_op 直接来自 patch_apply_end）。
+  if (event.isError === true) return 'failed'
+  if (event.isError === false) return 'succeeded'
+  return 'unknown'
+}
+
+/** 成功吸收失败；同类负面证据里拒绝最能解释“为什么没有发生”。 */
+function strongerFileStatus(left: TurnFileStatus, right: TurnFileStatus): TurnFileStatus {
+  const rank: Record<TurnFileStatus, number> = { succeeded: 3, rejected: 2, failed: 1, unknown: 0 }
+  return rank[right] > rank[left] ? right : left
+}
+
 export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
   const output: TurnModelSegment[] = []
   const eventOrder = new Map(events.map((event, index) => [event, index]))
@@ -96,6 +117,34 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
   return output
 }
 
+/**
+ * Name what policy omitted, from the record's own manifest: the untracked files that exceeded the
+ * manifest limit keep their path and line counts, so the count and their directories stay provable
+ * without reading any body. Bodies are the only thing this reason has to explain.
+ */
+function policyOmissionReason(files: Array<{ path: string; change?: string }>): string {
+  const untracked = files.filter((file) => file.change === 'added')
+  const other = files.length - untracked.length
+  const directories = new Map<string, number>()
+  for (const file of untracked) {
+    const segments = file.path.split('/').filter(Boolean)
+    const top = segments.length > 1 ? segments[segments.length - 2] : '.'
+    directories.set(top, (directories.get(top) ?? 0) + 1)
+  }
+  const distribution = [...directories]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 5)
+    .map(([dir, count]) => `${dir} (${count})`)
+    .join(', ')
+  return [
+    untracked.length > 0
+      ? `${untracked.length} new untracked file(s) exceeded the manifest limit and keep only their path and line counts` +
+        (distribution ? `; directories: ${distribution}` : '')
+      : '',
+    other > 0 ? `${other} file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude` : ''
+  ].filter(Boolean).join('; ')
+}
+
 export function aggregateTurnEvidence(args: {
   userText?: string
   events: TraceEvent[]
@@ -130,7 +179,8 @@ export function aggregateTurnEvidence(args: {
     files: true,
     errors: true,
     diff: true,
-    interventions: true,
+    // 介入证据只能由产物提供者证明存在；无证据的调用方不能把它读成“零次介入”。
+    interventions: false,
     ...args.observable
   }
   const resultById = new Map<string, TraceEvent>()
@@ -162,9 +212,19 @@ export function aggregateTurnEvidence(args: {
   const assistantSegments = modelSegments.filter((segment) => segment.kind === 'text' && !segment.agentId && !segment.parentId)
   const assistantText = assistantSegments.map((segment) => segment.text).join('')
   const assistantContentRefs = assistantSegments.flatMap((segment) => segment.contentRefs ?? [])
-  const fileMap = new Map<string, 'read' | 'write' | 'edit'>()
+  const fileMap = new Map<string, { path: string; operation: 'read' | 'write' | 'edit'; status: TurnFileStatus }>()
   for (const event of args.events) {
-    if (event.stage !== 'tool_result' && event.filePath && event.fileOp) fileMap.set(event.filePath, event.fileOp)
+    if (event.stage === 'tool_result' || !event.filePath || !event.fileOp) continue
+    const result = event.toolUseId ? resultById.get(event.toolUseId) : undefined
+    const status = fileStatusOf(event, result)
+    const key = `${event.filePath}\u0000${event.fileOp}`
+    const previous = fileMap.get(key)
+    // 同一路径同一种操作的多次尝试合并为一条：成功不会被另一次失败抹掉。
+    fileMap.set(key, {
+      path: event.filePath,
+      operation: event.fileOp,
+      status: previous ? strongerFileStatus(previous.status, status) : status
+    })
   }
   const diffSnapshots = limitTurnDiffPatchBytes(args.events.flatMap((event) => event.turnDiff ? [event.turnDiff] : []))
   const diffs = diffSnapshots.map((diff) => {
@@ -179,6 +239,13 @@ export function aggregateTurnEvidence(args: {
         ? [file.patchReason ?? 'unknown']
         : []
   )))
+  // A policy omission has two causes the record can still name: the integrator's own exclusion list,
+  // and a turn whose new untracked files exceeded the manifest limit. Both keep the file list.
+  const policyOmitted = diffs.flatMap((diff) => diff.files.filter((file) =>
+    file.patchStatus === 'unavailable' && file.patchReason === 'policy'))
+  const policyReason = policyOmitted.length === 0
+    ? undefined
+    : policyOmissionReason(policyOmitted)
   // 新建 worktree 拿不到可信基线时，记清楚是哪一种原因，不把「无法归因」退化成一句泛化文案。
   const worktreeBaselineReasons = new Set(diffs.flatMap((diff) => diff.baselineReason ? [diff.baselineReason] : []))
   const dangers = starts.flatMap((event) =>
@@ -196,6 +263,17 @@ export function aggregateTurnEvidence(args: {
   const callCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['tool_input', 'tool_response']))
   const modelSegmentCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['assistant_response', 'model_segments']))
   const interventions = args.events.flatMap((event) => event.intervention ? [event.intervention] : [])
+  // 观测到提问/被拒但没有观测到答案或取消：这条介入不能补，只能标 partial 并写明原因。
+  const interventionGaps = [
+    ...new Set(args.events
+      .map((event) => typeof event.runtimeMetadata?.interventionGap === 'string'
+        ? event.runtimeMetadata.interventionGap as string
+        : undefined)
+      .filter((reason): reason is string => !!reason)),
+    ...args.events
+      .filter((event) => event.stage !== 'tool_result' && event.tool === 'AskUserQuestion' && !!event.toolUseId && !resultById.has(event.toolUseId))
+      .map((event) => `a question (tool use ${event.toolUseId}) was never closed: neither an answer nor a cancellation was observed`)
+  ]
   const compactions: TurnCompaction[] = args.events.flatMap((event) => {
     if (event.kind !== 'harness' || event.stage !== 'context_compaction') return []
     return [{
@@ -315,7 +393,7 @@ export function aggregateTurnEvidence(args: {
         }
       : {}),
     files: observable.files
-      ? available([...fileMap].map(([path, operation]) => ({ path, operation })), [source])
+      ? available([...fileMap.values()], [source])
       : unavailable('provider file events were not observable', [source]),
     diff: !observable.diff
       ? unavailable('turn diff capture was disabled or unavailable', [source])
@@ -331,7 +409,8 @@ export function aggregateTurnEvidence(args: {
                   ? worktreeBaselineReasons.size > 0
                     ? `one or more repository snapshots were unavailable: new worktree baselines were untrustworthy (${[...worktreeBaselineReasons].join(', ')})`
                     : 'one or more repository snapshots were unavailable'
-                  : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}`,
+                  : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}` +
+                    (policyReason ? `; ${policyReason}` : ''),
                 'exact'
               )
             : {
@@ -349,8 +428,10 @@ export function aggregateTurnEvidence(args: {
     errors: !observable.errors
       ? unavailable('provider error events were not observable', [source])
       : errorCaptureReason ? partial(errors, [source], errorCaptureReason, 'exact') : available(errors, [source]),
-    interventions: observable.interventions
-      ? available(interventions, [source])
-      : unavailable('provider user-input events were not observable', [source])
+    interventions: !observable.interventions
+      ? unavailable('provider user-input events were not observable', [source])
+      : interventionGaps.length > 0
+        ? partial(interventions, [source], interventionGaps.join('; '), 'exact')
+        : available(interventions, [source])
   }
 }

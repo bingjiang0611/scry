@@ -6,6 +6,7 @@ import type { TurnDiffSnapshot } from '../../shared/trace.js'
 import type { GitTurnDiffCapture } from './git.js'
 import type { RepositoryDiscovery } from './config.js'
 import { listFiles, readJson, withDirectoryLock } from './io.js'
+import { hostProcessState, processTable, type HostProcessState, type ProcessTableEntry } from './host-process.js'
 import {
   ATTENTION_PROVIDERS, attentionIndexPresent, clearSessionAttention, markSessionAttention,
   markedSessions, publishAttentionIndexReady, withSessionAttentionLock, type MarkedSession
@@ -98,6 +99,14 @@ export interface RecorderOpenTurnState {
   terminalAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
   /** Verdict pinned when closing was deferred, so background finalize cannot upgrade it. */
   terminalFallbackStatus?: AgentTurnRecord['status']
+  /**
+   * When this turn's own Stop was observed, and whose clock said so. A hold that later background
+   * work cancels keeps the fact: the turn did reach its terminal, so a following prompt supersedes a
+   * completed turn, and the ending it reported is the end time. A session end is not a Stop and does
+   * not set it.
+   */
+  stopObservedAt?: string
+  stopObservedAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
   endReason?: import('../../shared/turn-record.js').TurnEndReason
   prompt?: string
   promptHash?: string
@@ -113,6 +122,11 @@ export interface RecorderOpenTurnState {
   terminalDiffs?: Array<{ repository: string; snapshot: TurnDiffSnapshot }>
   continuationProviderTurnIds?: string[]
   managedByScry?: boolean
+  /**
+   * The processes this turn's host sat in when it opened, nearest first. Only an observation taken
+   * at start time: recovery can say a recorded host is still running, never that the session is alive.
+   */
+  host?: import('./host-process.js').HostProcess[]
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalEventId?: string
@@ -142,6 +156,8 @@ export interface RecorderOpenTurnState {
     source: string
     task: string | null
     openedAt: string
+    /** Absolute paths this session keeps out of its diffs; only the diff is affected. */
+    diffExclude?: string[]
     baselineAt?: string
   }
   /** Stop intent for a captured session; the turn still finishes from its own terminal events. */
@@ -301,11 +317,109 @@ async function attentionSessions(dataRoot: string): Promise<MarkedSession[]> {
     : await reconcileAttentionIndex(dataRoot)
 }
 
+/** How long an open turn must be silent before its own finished reply counts as its end. */
+export const STALE_OPEN_TURN_QUIET_MS = 30 * 60 * 1_000
+
+/**
+ * What one open turn still owes the store, in the terms a reader can check.
+ *
+ * `lastEventAt` and `quietMs` come from the files the turn actually wrote (its stored events and its
+ * transcript), never from wall-clock age alone: a turn waiting on a long tool keeps growing, and one
+ * whose host died stops. `stale` is just "silent past the threshold" — it is not a verdict, because
+ * ending a turn needs evidence of its own.
+ */
+export interface RecorderOpenTurnInspection {
+  provider: ProviderId
+  sessionId: string
+  status: 'open' | 'closing'
+  managed: boolean
+  startedAt: string
+  ageMs: number
+  lastEventAt?: string
+  quietMs: number
+  growing: boolean
+  stale: boolean
+  /**
+   * Whether the processes that hosted this stale turn at start are still there. Set only for stale
+   * turns, and only because `recover --expire-open` needs `gone` before it closes anything: the
+   * operator needs to see why a silent turn stayed open (`running`, or `unknown` for no evidence).
+   */
+  host?: 'running' | 'gone' | 'unknown'
+}
+
+/** When this turn last wrote anything, and how long ago that was. Shared by health and recovery. */
+export async function openTurnQuiet(
+  sessionDir: string,
+  open: RecorderOpenTurnState,
+  now = Date.now()
+): Promise<{ lastAt?: number; quietMs: number }> {
+  const lastAt = Math.max(
+    await turnLastEventAt(sessionDir, open) ?? 0,
+    (open.transcriptPath ? await transcriptTouchedAt(open.transcriptPath) : null) ?? 0
+  )
+  return lastAt ? { lastAt, quietMs: Math.max(0, now - lastAt) } : { quietMs: Number.POSITIVE_INFINITY }
+}
+
+/**
+ * Every open turn in the workspace. A diagnostic: it stats stored events and transcripts, so the
+ * callers are CLI commands and health refreshes, never the hook hot path.
+ */
+export async function recorderOpenTurns(
+  dataRoot: string,
+  options: { now?: number; quietMs?: number } = {}
+): Promise<RecorderOpenTurnInspection[]> {
+  const now = options.now ?? Date.now()
+  const quietThreshold = options.quietMs ?? STALE_OPEN_TURN_QUIET_MS
+  const result: RecorderOpenTurnInspection[] = []
+  for (const { provider, sessionDir } of await attentionSessions(dataRoot)) {
+    const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
+    if (!open) continue
+    const startedMs = Date.parse(open.startedAt)
+    const { lastAt, quietMs } = await openTurnQuiet(sessionDir, open, now)
+    result.push({
+      provider,
+      sessionId: open.sessionId,
+      status: open.status,
+      managed: open.managedByScry === true,
+      startedAt: open.startedAt,
+      ageMs: Number.isFinite(startedMs) ? Math.max(0, now - startedMs) : 0,
+      ...(lastAt ? { lastEventAt: new Date(lastAt).toISOString() } : {}),
+      quietMs: Number.isFinite(quietMs) ? quietMs : 0,
+      growing: quietMs < quietThreshold,
+      stale: open.status === 'open' && !open.managedByScry && quietMs >= quietThreshold
+    })
+  }
+  // One process table read for every stale turn in this workspace, and none when nothing is stale.
+  const waiting = result.filter((turn) => turn.stale)
+  if (waiting.length) {
+    const table = await processTable()
+    for (const turn of waiting) {
+      const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(join(dataRoot, 'runtime', turn.provider, safeKey(turn.sessionId))))
+      turn.host = await hostProcessState(open?.host, table)
+    }
+  }
+  return result
+}
+
+/** The newest stored event this turn wrote; its transcript is the other half of "is it moving". */
+async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState): Promise<number | undefined> {
+  const eventsDir = join(recorderTurnRoot(sessionDir, open.generation), 'events')
+  const names = await readdir(eventsDir).catch(() => [] as string[])
+  let newest: number | undefined
+  for (const name of names) {
+    const touched = await stat(join(eventsDir, name)).then((info) => info.mtimeMs, () => Number.NaN)
+    if (Number.isFinite(touched) && (newest === undefined || touched > newest)) newest = touched
+  }
+  return newest
+}
+
 export async function recorderPendingHealth(
   dataRoot: string
-): Promise<{ pendingCount: number; oldestPendingAgeMs: number }> {
+): Promise<{ pendingCount: number; oldestPendingAgeMs: number; openTurns: number; staleOpenTurns: number }> {
   let pendingCount = 0
   let oldestPendingAgeMs = 0
+  let openTurns = 0
+  let staleOpenTurns = 0
   const now = Date.now()
   for (const { sessionDir: root } of await attentionSessions(dataRoot)) {
       for (const entry of await recorderInboxEntries(root)) {
@@ -328,8 +442,17 @@ export async function recorderPendingHealth(
           oldestPendingAgeMs = Math.max(oldestPendingAgeMs, Math.max(0, now - started))
         }
       }
+      // An open turn that never reached `closing` is not "pending finalization" — nothing is waiting
+      // to be committed — but it is the turn a reader means by "still open", and the one that goes
+      // missing from a count that only looks at closing/managed turns.
+      if (open) {
+        openTurns++
+        const { quietMs } = await openTurnQuiet(root, open, now)
+        const silence = Number.isFinite(quietMs) ? quietMs : now - (Date.parse(open.startedAt) || now)
+        if (open.status === 'open' && !open.managedByScry && silence >= STALE_OPEN_TURN_QUIET_MS) staleOpenTurns++
+      }
     }
-  return { pendingCount, oldestPendingAgeMs }
+  return { pendingCount, oldestPendingAgeMs, openTurns, staleOpenTurns }
 }
 
 /**
@@ -341,8 +464,27 @@ export async function recorderStaleOpenTurns(
   dataRoot: string,
   expiryMs: number,
   now = Date.now()
-): Promise<Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }>> {
-  const result: Array<{ provider: ProviderId; sessionId: string; startedAt: string; ageMs: number }> = []
+): Promise<Array<{
+  provider: ProviderId
+  sessionId: string
+  startedAt: string
+  ageMs: number
+  /** The newest thing this turn wrote, so a reader can tell "idle for a day" from "age only". */
+  lastEventAt?: string
+  quietMs: number
+  /** Still writing inside the stale window: slow, not stuck. */
+  growing: boolean
+  /** Same meaning as `RecorderOpenTurnInspection.host`: why a forced expiry would not act. */
+  host?: HostProcessState
+}>> {
+  const result: Awaited<ReturnType<typeof recorderStaleOpenTurns>> = []
+  let table: Map<number, ProcessTableEntry> | undefined
+  let tableRead = false
+  // One process table for the whole listing: `ps` costs more than the lookups it serves.
+  const hostTable = async (): Promise<Map<number, ProcessTableEntry> | undefined> => {
+    if (!tableRead) { tableRead = true; table = await processTable() }
+    return table
+  }
   for (const { provider, sessionDir } of await attentionSessions(dataRoot)) {
     const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
     if (!open || open.status !== 'open' || open.managedByScry) continue
@@ -353,7 +495,17 @@ export async function recorderStaleOpenTurns(
       // Unreadable transcript counts as no activity: the turn cannot converge from it either.
       if (touchedAt != null && now - touchedAt <= expiryMs) continue
     }
-    result.push({ provider, sessionId: open.sessionId, startedAt: open.startedAt, ageMs: now - startedAt })
+    const { lastAt, quietMs } = await openTurnQuiet(sessionDir, open, now)
+    result.push({
+      provider,
+      sessionId: open.sessionId,
+      startedAt: open.startedAt,
+      ageMs: now - startedAt,
+      ...(lastAt ? { lastEventAt: new Date(lastAt).toISOString() } : {}),
+      quietMs: Number.isFinite(quietMs) ? quietMs : now - startedAt,
+      growing: quietMs < STALE_OPEN_TURN_QUIET_MS,
+      host: await hostProcessState(open.host, await hostTable())
+    })
   }
   return result
 }

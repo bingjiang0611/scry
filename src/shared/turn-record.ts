@@ -143,6 +143,7 @@ function isTurnCall(value: unknown): value is TurnCall {
     const file = raw.file as Record<string, unknown>
     if (typeof file.path !== 'string' || !['read', 'write', 'edit'].includes(String(file.operation))) return false
   }
+  if (raw.humanInterventionId !== undefined && !isOptionalString(raw.humanInterventionId)) return false
   if (raw.mcp !== undefined) {
     if (!raw.mcp || typeof raw.mcp !== 'object' || Array.isArray(raw.mcp)) return false
     const mcp = raw.mcp as Record<string, unknown>
@@ -159,7 +160,8 @@ function isTurnHook(value: unknown): value is TurnHookCall {
   if (raw.durationMs !== undefined && !isNonNegativeNumber(raw.durationMs)) return false
   if (raw.startedAt !== undefined && !isDateString(raw.startedAt)) return false
   if (raw.completedAt !== undefined && !isDateString(raw.completedAt)) return false
-  return ['name', 'command'].every((key) => isOptionalString(raw[key]))
+  if (raw.exitCode !== undefined && !Number.isSafeInteger(raw.exitCode)) return false
+  return ['name', 'command', 'id', 'error'].every((key) => isOptionalString(raw[key]))
 }
 
 function isTurnUsage(value: unknown): value is TurnUsage {
@@ -177,7 +179,8 @@ function isTurnUsage(value: unknown): value is TurnUsage {
 function isTurnFile(value: unknown): value is TurnFile {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
-  return typeof raw.path === 'string' && raw.path.length > 0 && ['read', 'write', 'edit'].includes(String(raw.operation))
+  return typeof raw.path === 'string' && raw.path.length > 0 && ['read', 'write', 'edit'].includes(String(raw.operation)) &&
+    (raw.status === undefined || ['succeeded', 'failed', 'rejected', 'unknown'].includes(String(raw.status)))
 }
 
 function isTurnDiff(value: unknown): value is TurnDiffSnapshotRecord {

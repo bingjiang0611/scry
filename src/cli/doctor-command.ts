@@ -93,16 +93,24 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const absent = delivery?.absentCount ? `; ${delivery.absentCount} absent sequence(s) acknowledged with no record file: ` +
     delivery.absentRanges!.map(([from, to]) => from === to ? `${from}` : `${from}-${to}`).join(', ') +
     (delivery.absentTruncated ? ' (range sample truncated)' : '') : ''
+  // A workspace that records turns but has no activated callback keeps every record on disk and
+  // never uploads it. That is a warning with the exact fix, never a silent pass.
+  const queuedWithoutHook = delivery === undefined && !deliveryError && activation.status !== 'trusted' && activation.status !== 'host-provided'
+    ? await commitNotificationStatus(enablement.dataRoot, process.env).then((status) => status.notifyBacklog).catch(() => null)
+    : null
   const deliveryCheck: Check = {
     id: 'commitHook.delivery',
-    status: deliveryError || deadCount > 0 ? 'fail' : retry ? 'warn' : 'pass',
+    status: deliveryError || deadCount > 0 ? 'fail' : retry || (queuedWithoutHook ?? 0) > 0 ? 'warn' : 'pass',
     detail: deliveryError ?? (deadCount > 0
       ? `${deadCount} recorder dead letter(s); latest ${delivery!.deadLetters!.length}: ` +
         delivery!.deadLetters!.map(item => `sequence ${item.sequence}: ${item.attempts} failed attempts (${item.reason})`).join('; ') +
         (retryDetail ? `; ${retryDetail}` : '')
       : retryDetail ? retryDetail
-      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure${absent}` : 'commit hook not configured'),
-    ...(deliveryError || deadCount > 0 || retry ? {
+      : delivery ? `${delivery.notifyBacklog} notification(s) pending; no recorded delivery failure${absent}`
+      : queuedWithoutHook
+        ? `${queuedWithoutHook} record(s) are committed but no commit callback is activated (${activation.status}), so nothing will upload them; start the collection host once (Scry App or \`codelens scry capture start\`) or declare a workspace commitHook in scry.config.json`
+        : 'commit hook not configured'),
+    ...(deliveryError || deadCount > 0 || retry || (queuedWithoutHook ?? 0) > 0 ? {
       remediation: 'inspect the callback and sequence diagnostics; repair the cause before `scry recorder notify-retry --sequence N` or `--all-dead`; dead letters are not ACKs'
     } : {})
   }
@@ -165,7 +173,7 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     {
       id: 'turns.pending',
       status: health.pendingCount > 0 ? 'warn' : 'pass',
-      detail: `${health.pendingCount} pending item(s): turns or queued hooks`,
+      detail: `${health.pendingCount} pending item(s): turns or queued hooks; ${health.openTurns} turn(s) still open`,
       ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`; for exhausted or unreadable inbox-failed sidecars see scry-turn-recorder README: Retry quarantined hooks' } : {})
     },
     {
@@ -183,12 +191,20 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     },
     {
       id: 'turns.stale',
-      status: staleOpenTurns.length > 0 ? 'warn' : 'pass',
+      status: staleOpenTurns.length > 0 || health.staleOpenTurns > 0 ? 'warn' : 'pass',
       detail: staleOpenTurns.length > 0
-        ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h`
-        : 'no stale open turn',
-      ...(staleOpenTurns.length > 0
-        ? { remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence, never from silence alone' }
+        ? `${staleOpenTurns.length} open turn(s) without recent activity; termination unconfirmed; oldest ${Math.round(Math.max(...staleOpenTurns.map((turn) => turn.ageMs)) / 3_600_000)}h; ` +
+          `${health.openTurns} open in total, ${health.staleOpenTurns} silent past the 30-minute window; ` +
+          staleOpenTurns.map((turn) => `${turn.provider}/${turn.sessionId}: last ${turn.lastEventAt ?? 'nothing recorded'} ` +
+            `(${Math.round(turn.quietMs / 60_000)}min ago, ${turn.growing ? 'still writing' : 'silent'}` +
+            `${turn.host ? `, host ${turn.host}` : ''})`).join('; ')
+        : health.staleOpenTurns > 0
+          ? `${health.staleOpenTurns} of ${health.openTurns} open turn(s) wrote nothing for 30 minutes; under 24h, so not yet listed individually`
+          : `no stale open turn (${health.openTurns} open)`,
+      ...(staleOpenTurns.length > 0 || health.staleOpenTurns > 0
+        ? {
+            remediation: 'inspect the Provider session/process; `scry recorder recover` only finalizes turns with terminal evidence or a finished reply plus extended silence, never from silence alone; `scry recorder recover --expire-open` closes a turn that wrote nothing for 30 minutes only after proving every recorded host process is gone; a running host or one with no recorded process evidence both stay open (add `--session <id>` to expire only the sessions you know are over)'
+          }
         : {})
     },
     {

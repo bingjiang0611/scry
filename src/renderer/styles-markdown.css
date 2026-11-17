@@ -1,16 +1,11 @@
 /* 用户气泡里的 markdown：在蓝底上调整可读性（code/链接/引用/标题边框） */
 .user-md {
-  font-size: 13.5px;
+  font-size: var(--text-md);
 }
 .user-md code {
-  background: rgba(0, 0, 0, 0.28);
   color: var(--fg);
-}
-.user-md pre {
-  background: rgba(0, 0, 0, 0.3);
 }
 .user-md a {
-  color: var(--fg);
   text-decoration: underline;
 }
 .user-md h1,
@@ -26,13 +21,13 @@
   min-height: 28px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   margin: 8px 0 0 auto;
   padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   color: var(--dim2);
-  font: 500 11.5px/1 var(--font-ui);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-ui);
   cursor: pointer;
 }
 
@@ -48,18 +43,16 @@
 
 /* skill 注入注记：中性折叠，区别于用户蓝气泡（它不是用户输入） */
 .skillinject {
-  margin: 6px 0 14px;
+  margin: 8px 0 16px;
   border: 1px dashed var(--border2);
-  border-radius: var(--r-sm);
-  background: var(--panel);
 }
 .si-head {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-height: 40px;
   padding: 8px 12px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--dim);
   cursor: pointer;
 }
@@ -71,7 +64,7 @@
   margin-left: auto;
 }
 .si-body {
-  padding: 4px 14px 12px;
+  padding: 4px 16px 12px;
   border-top: 1px solid var(--border);
   max-height: 420px;
   overflow: auto;
@@ -99,7 +92,7 @@
 .md > .md-format-whole {
   float: right;
   margin: 0 0 8px 12px;
-  padding: 4px 9px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-xs);
   background: var(--bg2);
@@ -116,7 +109,7 @@
 .md h4 {
   margin: 1.35em 0 0.55em;
   color: var(--fg);
-  font-weight: 680;
+  font-weight: var(--weight-semibold);
   line-height: 1.32;
   letter-spacing: -0.01em;
   text-wrap: balance;
@@ -146,7 +139,7 @@
 }
 .md li::marker {
   color: var(--dim2);
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
 }
 .md li > p { margin: 0.3em 0; }
 .md > ul > li + li,
@@ -218,7 +211,7 @@
 }
 .md pre {
   margin: 0.95em 0;
-  padding: 12px 14px;
+  padding: 12px 16px;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -230,7 +223,7 @@
   padding: 0;
   border: 0;
   background: none;
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: pre;
   overflow-wrap: normal;
 }
@@ -253,13 +246,13 @@
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.45;
 }
 .md th,
 .md td {
   max-width: 34ch;
-  padding: 6px 9px;
+  padding: 8px 8px;
   border-right: 1px solid var(--border2);
   border-bottom: 1px solid var(--border2);
   overflow-wrap: anywhere;
@@ -276,11 +269,11 @@
   top: 0;
   background: var(--panel2);
   color: var(--fg);
-  font-weight: 650;
+  font-weight: var(--weight-semibold);
 }
 .md a {
   color: var(--accent);
-  font-weight: 540;
+  font-weight: var(--weight-medium);
   text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.18em;
@@ -302,7 +295,7 @@
 }
 .md strong {
   color: var(--fg);
-  font-weight: 680;
+  font-weight: var(--weight-semibold);
 }
 
 .md img,
@@ -322,9 +315,9 @@
 .filerow {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-height: 40px;
-  padding: 5px 14px;
+  padding: 4px 16px;
 }
 .fbadge {
   width: 18px;
@@ -332,8 +325,8 @@
   border-radius: var(--r-xs);
   display: grid;
   place-items: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
   color: var(--bg);
 }
 .fbadge.r {
@@ -357,6 +350,6 @@
 }
 .fname {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--fg);
 }

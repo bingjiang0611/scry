@@ -3,6 +3,7 @@ import type { BackgroundServiceAction, BackgroundServiceStatus } from '../../sha
 import { describeActionResult, projectBackgroundService, type BackgroundServiceNotice } from '../background-service-view'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import type { RendererPlatform } from '../platform'
+import { Button } from './primitives/Button'
 import './background-service.css'
 
 // Settings «后台服务» (B4-S S0-1). The section only shows and asks: every confirmation
@@ -30,23 +31,23 @@ export function BackgroundServicePanel({
 }): JSX.Element {
   const view = status ? projectBackgroundService(status, now, platform) : null
   const button = (action: BackgroundServiceAction, primary = false) => (
-    <button
-      type="button"
-      className={`btn ${primary ? 'primary' : ''} ${action === 'quit' ? 'background-service__quit' : ''}`}
+    <Button
+      {...(primary ? { variant: 'primary' as const } : {})}
+      {...(action === 'quit' ? { className: 'background-service__quit' } : {})}
       disabled={busy !== null}
       aria-busy={busy === action || undefined}
       onClick={() => onAction(action)}
     >
       {busy === action ? `${LABELS[action]}…` : LABELS[action]}
-    </button>
+    </Button>
   )
   return (
     <div className="settings-body background-service">
       <div className="settings-copy background-service__head">
         <b>后台服务</b>
-        <button type="button" className="btn" disabled={busy !== null} onClick={onRefresh}>
+        <Button disabled={busy !== null} onClick={onRefresh}>
           {busy === 'reading' ? '读取中…' : '刷新'}
-        </button>
+        </Button>
       </div>
       {readError && <p className="background-service__notice bad" role="alert">读取后台服务状态失败：{readError}</p>}
       {!view && !readError && <p className="background-service__muted">读取中…</p>}

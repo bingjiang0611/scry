@@ -39,18 +39,14 @@
   flex: 1;
   flex-direction: column;
   overflow: hidden;
-  background: var(--overview-surface);
 }
 
 .surface-topbar {
-  height: var(--topbar-h);
-  min-height: var(--topbar-h);
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 7px;
+  gap: 4px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border3);
-  background: var(--overview-surface);
 }
 
 .surface-tabs {
@@ -58,7 +54,6 @@
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 3px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -70,23 +65,18 @@
 .surface-tab {
   min-width: 0;
   max-width: 150px;
-  height: 29px;
   display: flex;
   flex: 0 1 auto;
   align-items: center;
-  border-radius: var(--r-md);
   color: var(--dim2);
 }
 
 .surface-tab.active {
   color: var(--fg);
-  background: var(--surface-strong);
 }
 
 .surface-tab-activate,
 .surface-tab-close,
-.right-surface-panel .icon-button,
-.surface-menu .menu-item,
 .surface-card {
   border: 0;
   color: inherit;
@@ -96,11 +86,10 @@
 
 .surface-tab-activate {
   min-width: 0;
-  height: 29px;
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0 4px 0 8px;
   background: transparent;
 }
@@ -109,8 +98,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
-  font-weight: 550;
 }
 
 .surface-icon {
@@ -123,7 +110,7 @@
   display: grid;
   flex: none;
   place-items: center;
-  margin-right: 3px;
+  margin-right: 4px;
   padding: 0;
   border-radius: var(--r-xs);
   background: transparent;
@@ -146,35 +133,12 @@
   position: relative;
 }
 
-.right-surface-panel .icon-button {
-  width: 29px;
-  height: 29px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--dim2);
-}
-
-.right-surface-panel .icon-button.on {
-  color: var(--fg);
-  background: var(--surface-strong);
-}
-
 .surface-menu {
   position: absolute;
-  z-index: 60;
+  z-index: var(--layer-dropdown);
   top: 34px;
   right: 0;
   width: 214px;
-  display: grid;
-  gap: 2px;
-  padding: 5px;
-  border: 1px solid var(--border2);
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--panel2) 97%, transparent);
-  box-shadow: var(--shadow-pop);
   transform-origin: top right;
   animation: surface-menu-in var(--duration-sm) var(--ease-out) backwards;
 }
@@ -186,25 +150,6 @@
 @keyframes surface-menu-in {
   from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: scale(1); }
-}
-
-.surface-menu .menu-item {
-  width: 100%;
-  height: 35px;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 0 9px;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--dim);
-  text-align: left;
-}
-
-.surface-menu .menu-item small {
-  color: var(--dim3);
-  font: var(--text-compact-size)/1 var(--font-mono);
 }
 
 .surface-body {
@@ -237,7 +182,7 @@
   flex: 1;
 }
 
-.surface-content .workspace-head > .iconbtn:last-child,
+.surface-content .workspace-head > .icon-button:last-child,
 .surface-content .diff-review-close {
   display: none;
 }
@@ -263,15 +208,15 @@
 .empty-heading h2 {
   margin: 0;
   color: var(--fg);
-  font-size: 16px;
-  font-weight: 620;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
 }
 
 .empty-heading p {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: var(--dim2);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .surface-card-grid {
@@ -285,17 +230,15 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 15px;
+  padding: 16px;
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--panel2);
   color: var(--fg);
   text-align: left;
   transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
 }
 
 .surface-card .card-icon {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
   color: var(--dim);
 }
 
@@ -305,29 +248,29 @@
 }
 
 .surface-card strong {
-  font-size: 13px;
-  font-weight: 620;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .surface-card p {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: var(--dim2);
-  font-size: 11.5px;
+  font-size: var(--text-sm);
   line-height: 1.55;
 }
 
 .surface-unavailable {
   align-content: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--dim2);
   text-align: center;
 }
 
 .surface-unavailable b {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .surface-unavailable span {
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }

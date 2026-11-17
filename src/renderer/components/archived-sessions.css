@@ -16,13 +16,13 @@
 .arch-provider-trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 24px;
   padding: 0;
   border: 0;
   background: none;
   color: var(--fg);
-  font: 12px/1 var(--font-ui);
+  font: var(--text-sm)/1 var(--font-ui);
   cursor: pointer;
 }
 
@@ -35,5 +35,18 @@
   bottom: auto;
   left: 0;
   min-width: 216px;
-  z-index: 30;
+  z-index: var(--layer-dropdown);
 }
+
+/* A failed unarchive / delete stays on its row, across both columns, with a retry. */
+.arch-row-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.arch-row-error button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button)) { flex: none; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }

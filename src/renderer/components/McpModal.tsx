@@ -1,14 +1,14 @@
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { useId, useRef, useState } from 'react'
 import type { McpStatus } from '../format'
 import type { McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
-import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
-import { DelayedLoadingStatus } from './LoadingStatus'
 
 
 import './archived-sessions.css'
@@ -85,6 +85,9 @@ export function McpModal({
   const readStarted = useReadStarted(configRefreshing)
   const mcpUnavailable = capability === null && !loading && readStarted
   const showMcpLoading = useDelayedFlag(loading)
+  // Checking every MCP starts servers and can take tens of seconds; say so after 10s.
+  // The check belongs to the app, not this window, so closing it does not stop it.
+  const slowRuntimeCheck = useDelayedFlag(refreshing && readsRuntime && !readsPiSnapshot, 10_000, 0)
   const authenticationInProgress = Object.values(status).some((item) => item.authenticating)
   const [expanded, setExpanded] = useState<string | null>(null)
   const mcpMotion = useFirstReadyList(mcps.length > 0)
@@ -103,7 +106,7 @@ export function McpModal({
           </div>
         </div>
         <div className="inventory-modal__head-actions">
-          {showMcpLoading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? LOADING_COPY.readingConfig : readsPiSnapshot ? LOADING_COPY.piSnapshot : LOADING_COPY.detectingMcp, role: 'status' }} quiet />}
+          {showMcpLoading && <EvidenceState value={{ state: 'pending', label: loadingConfig ? LOADING_COPY.readingConfig : readsPiSnapshot ? LOADING_COPY.piSnapshot : slowRuntimeCheck ? LOADING_COPY.detectingMcpSlow : LOADING_COPY.detectingMcp, role: 'status' }} quiet />}
           <button
             className={'modal-refresh' + (readsRuntime ? ' mcp-refresh-all' : '')}
             onClick={onRefresh}
@@ -115,7 +118,7 @@ export function McpModal({
                 : '重新读取当前 Provider 的原生 MCP 配置与运行状态'}
             aria-label={readsPiSnapshot ? '刷新 Pi MCP 快照' : readsRuntime ? '检测全部 MCP 运行状态' : '刷新 MCP 状态'}
           >
-            {showMcpLoading && refreshing && readsRuntime ? <span className="spinner" /> : <Icon name="refresh" />}
+            <TurningIcon busy={refreshing} />
             {readsRuntime && <span>{showMcpLoading && refreshing ? (readsPiSnapshot ? LOADING_COPY.refreshing : LOADING_COPY.detecting) : refreshLabel}</span>}
           </button>
           <ModalCloseButton ref={closeRef} onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeMcp} />
@@ -142,7 +145,7 @@ export function McpModal({
 
       <div className="modal-body inventory-modal__body inventory-modal__body--mcp" aria-busy={loading}>
         {mcps.length === 0 && mcpUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.mcpUnavailable}</div>
-          : mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedLoadingStatus loading={loading} title={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
+          : mcps.length === 0 && (loadingConfig || capability === null) ? <DelayedSkeletonRows loading={loading} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} /> : mcps.length === 0 ? (
           <div className="inventory-empty" role="status">
             <strong>{LOADING_COPY.mcpEmpty}</strong>
             <p>{LOADING_COPY.mcpNoConfigEvidence}</p>

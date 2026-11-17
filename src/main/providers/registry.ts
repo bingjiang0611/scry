@@ -209,9 +209,10 @@ export class ProviderRegistry {
   mcpSnapshot(
     context: ProviderContext,
     refresh = false,
-    execution?: AuthorizedMcpExecution
+    execution?: AuthorizedMcpExecution,
+    signal?: AbortSignal
   ): Promise<CapabilityEnvelope<McpSnapshot>> {
-    return this.disabled<McpSnapshot>(context) ?? this.get(context.providerId).mcp?.snapshot(context, refresh, execution) ??
+    return this.disabled<McpSnapshot>(context) ?? this.get(context.providerId).mcp?.snapshot(context, refresh, execution, signal) ??
       Promise.resolve(capabilityUnavailable(context, 'unsupported', '该 Provider 没有可用的 MCP 状态接口'))
   }
 

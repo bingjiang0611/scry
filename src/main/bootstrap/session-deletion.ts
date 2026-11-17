@@ -11,7 +11,7 @@ export type { SessionDeletionRequest } from './session-lifecycle'
 // window's dialogs. In daemon mode the gate answers these channels from the daemon,
 // which runs the same lifecycle without dialogs (session-lifecycle-daemon.ts asks first).
 
-export interface SessionDeletionDependencies extends Omit<SessionLifecycleDependencies, 'publishDataUpdated' | 'confirm' | 'notifyFailure'> {
+export interface SessionDeletionDependencies extends Omit<SessionLifecycleDependencies, 'publishDataUpdated' | 'publishDeleteProgress' | 'confirm' | 'notifyFailure'> {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
   getWindow: () => BrowserWindow | null
   rendererCanReceive: () => boolean
@@ -44,6 +44,10 @@ export function registerSessionDeletionHandlers(deps: SessionDeletionDependencie
   const lifecycle = createSessionLifecycle({
     ...deps,
     publishDataUpdated: (event) => { if (rendererCanReceive()) getWindow()?.webContents.send('agent:dataUpdated', event) },
+    publishDeleteProgress: (progress) => {
+      const window = getWindow()
+      if (window && !window.isDestroyed()) window.webContents.send('agent:deleteArchivedProgress', progress)
+    },
     confirm: confirmWithDialog(getWindow),
     notifyFailure: notifyWithDialog(getWindow)
   })

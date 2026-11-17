@@ -206,6 +206,14 @@
       "why": "翻页读 daemon 自己的历史缓存（由 loadSession 建立）"
     },
     {
+      "channel": "agent:cancelMcpSnapshot",
+      "route": "new-op",
+      "op": "mcp",
+      "method": "cancelMcpSnapshot",
+      "path": "providers",
+      "why": "实时检测在 daemon 进程内登记，取消必须到同一进程；走 control lane，不排在被取消的 long 请求之后"
+    },
+    {
       "channel": "agent:mcpGuardScan",
       "route": "new-op",
       "op": "mcp",

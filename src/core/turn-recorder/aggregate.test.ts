@@ -20,7 +20,9 @@ describe('aggregateTurnEvidence', () => {
     expect(JSON.stringify(evidence.user)).not.toContain(steer.attachments[0].dataBase64)
     expect(evidence.usage.value).toMatchObject({ inputTokens: 10, outputTokens: 3 })
     expect(evidence.tools.value).toEqual([])
-    expect(evidence.interventions?.value).toEqual([])
+    // 没有介入证据的来源不能写成“精确的零次介入”。
+    expect(evidence.interventions).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
+    expect(evidence.interventions?.value).toBeUndefined()
   })
 
   it('retains unknown delivery as unknown instead of treating it as an accepted supplementary message', () => {
@@ -387,6 +389,70 @@ describe('aggregateTurnEvidence', () => {
         costUsd
       }] }).usage.value).toMatchObject({ inputTokens: 7, costUsd: undefined })
     }
+  })
+
+
+  it('失败的 Hook 运行逐次保留关联 ID、退出码与错误正文，成功的运行才能合并', () => {
+    const events: TraceEvent[] = [
+      {
+        id: 'fail-a', ts: '2026-01-01T00:00:01.000Z', runId: 'r', kind: 'hook', stage: 'hook_response',
+        hookId: 'tool-a', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse',
+        hookCommand: 'gate PostToolUse qoder || true', hookOutcome: 'error', hookExitCode: -1,
+        durationMs: 5004, output: 'Failed with non-blocking status code: Hook timed out after 5s', isError: true
+      },
+      {
+        id: 'fail-b', ts: '2026-01-01T00:00:02.000Z', runId: 'r', kind: 'hook', stage: 'hook_response',
+        hookId: 'tool-b', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse',
+        hookCommand: 'gate PostToolUse qoder || true', hookOutcome: 'error', hookExitCode: -1,
+        durationMs: 0, output: 'Failed with non-blocking status code: No stderr output', isError: true
+      },
+      {
+        id: 'ok-a', ts: '2026-01-01T00:00:03.000Z', runId: 'r', kind: 'hook', stage: 'hook_response',
+        hookId: 'tool-c', hookName: 'PostToolUse:Read', hookEvent: 'PostToolUse',
+        hookCommand: 'gate PostToolUse qoder', hookOutcome: 'success', hookExitCode: 0, durationMs: 10
+      },
+      {
+        id: 'ok-b', ts: '2026-01-01T00:00:04.000Z', runId: 'r', kind: 'hook', stage: 'hook_response',
+        hookId: 'tool-d', hookName: 'PostToolUse:Read', hookEvent: 'PostToolUse',
+        hookCommand: 'gate PostToolUse qoder', hookOutcome: 'success', hookExitCode: 0, durationMs: 12
+      }
+    ]
+    const hooks = aggregateTurnEvidence({ events, observable: { hooks: true } }).hooks.value ?? []
+    expect(hooks.map((hook) => [hook.status, hook.id ?? null, hook.exitCode ?? null, hook.durationMs ?? null])).toEqual([
+      ['failed', 'tool-a', -1, 5004],
+      ['failed', 'tool-b', -1, 0],
+      ['success', null, null, 22]
+    ])
+    expect(hooks[0]?.error).toBe('Failed with non-blocking status code: Hook timed out after 5s')
+    expect(hooks[2]?.runs).toBe(2)
+  })
+
+  it('文件足迹按操作合并证据：一次失败不抹掉另一次成功，被拒永远不算已读', () => {
+    const event = (id: string, ts: string, filePath: string, fileOp: 'read' | 'write', toolUseId: string): TraceEvent => ({
+      id, ts, runId: 'r', kind: 'tool', stage: `tool:${fileOp}`, tool: fileOp === 'read' ? 'Read' : 'Write',
+      toolUseId, filePath, fileOp
+    })
+    const result = (id: string, ts: string, toolUseId: string, isError: boolean, denied = false): TraceEvent => ({
+      id, ts, runId: 'r', kind: 'tool', stage: 'tool_result', toolUseId, isError,
+      ...(denied ? { runtimeMetadata: { denialResolution: 'user_cancelled' } } : {})
+    })
+    const events: TraceEvent[] = [
+      event('r1', '2026-01-01T00:00:01.000Z', '/repo/a.ts', 'read', 'read-1'),
+      result('r1r', '2026-01-01T00:00:02.000Z', 'read-1', true),
+      event('r2', '2026-01-01T00:00:03.000Z', '/repo/a.ts', 'read', 'read-2'),
+      result('r2r', '2026-01-01T00:00:04.000Z', 'read-2', false),
+      event('r3', '2026-01-01T00:00:05.000Z', '/repo/b.ts', 'read', 'read-3'),
+      result('r3r', '2026-01-01T00:00:06.000Z', 'read-3', true, true),
+      event('r4', '2026-01-01T00:00:07.000Z', '/repo/c.ts', 'read', 'read-4'),
+      event('w1', '2026-01-01T00:00:08.000Z', '/repo/a.ts', 'write', 'write-1'),
+      result('w1r', '2026-01-01T00:00:09.000Z', 'write-1', false)
+    ]
+    expect(aggregateTurnEvidence({ events, observable: { files: true } }).files.value).toEqual([
+      { path: '/repo/a.ts', operation: 'read', status: 'succeeded' },
+      { path: '/repo/b.ts', operation: 'read', status: 'rejected' },
+      { path: '/repo/c.ts', operation: 'read', status: 'unknown' },
+      { path: '/repo/a.ts', operation: 'write', status: 'succeeded' }
+    ])
   })
 
 })

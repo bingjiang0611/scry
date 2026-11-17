@@ -1,0 +1,7 @@
+// Shared UI-test target settings; the app target has its own configuration.
+PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote.uitests
+GENERATE_INFOPLIST_FILE = YES
+TEST_TARGET_NAME = ScryRemote
+TARGETED_DEVICE_FAMILY = 1
+CODE_SIGN_STYLE = Automatic

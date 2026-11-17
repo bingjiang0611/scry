@@ -19,20 +19,29 @@ struct WorkspaceShell: View {
   @Environment(ExecutionTargetCoordinator.self) private var targets
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var drawerOpen: Bool
-  @State private var drawerUsesReleaseCurve = false
+  @State private var drawerProgress: CGFloat
+  @State private var presentedProgress: CGFloat = 0
+  @State private var dragOrigin: CGFloat?
+  @GestureState private var dragging = false
+  @State private var drawerRelease: Motion.DrawerRelease?
+  @AccessibilityFocusState private var sidebarButtonFocused: Bool
   // A new-session request while the page is already shown must focus again; the
   // ticket changes so the composer cannot mistake a repeat request for no-op.
   @State private var focusTicket = 1
   @State private var showTargets = false
+  @Namespace private var targetTransition
 
   init(focusComposer: Bool) {
     self.focusComposer = focusComposer
     #if DEBUG
     // Preview only: `-drawerOpen` starts with the drawer open for screenshots and
     // UI tests. It is not persisted and does not touch AppModel.
-    _drawerOpen = State(initialValue: ProcessInfo.processInfo.arguments.contains("-drawerOpen"))
+    let open = ProcessInfo.processInfo.arguments.contains("-drawerOpen")
+    _drawerOpen = State(initialValue: open)
+    _drawerProgress = State(initialValue: open ? 1 : 0)
     #else
     _drawerOpen = State(initialValue: false)
+    _drawerProgress = State(initialValue: 0)
     #endif
   }
 
@@ -50,11 +59,14 @@ struct WorkspaceShell: View {
 
   var body: some View {
     GeometryReader { proxy in
+      let width = min(proxy.size.width * 0.85, 340)
       ZStack(alignment: .leading) {
         page
         dimmer
-        drawer(width: min(proxy.size.width * 0.85, 340))
+        drawer(width: width)
       }
+      .coordinateSpace(name: "workspace-drawer")
+      .simultaneousGesture(drawerGesture(width: width))
     }
     .background(Palette.main)
     // The drawer's list is loaded on arrival, so the first look is complete
@@ -69,8 +81,14 @@ struct WorkspaceShell: View {
       }
     }
     .onChange(of: drawerOpen) { _, open in targets.setHomeVisible(open) }
+    .onChange(of: dragging) { _, active in
+      // GestureState also resets when a scroll view or the system cancels the drag.
+      if !active, dragOrigin != nil { setDrawer(drawerOpen) }
+    }
     .onDisappear { targets.setHomeVisible(false) }
-    .sheet(isPresented: $showTargets) { targetPicker }
+    .sheet(isPresented: $showTargets) {
+      targetPicker.zoomDestination("host", in: targetTransition)
+    }
   }
 
   // MARK: - New session page (drawer collapsed)
@@ -84,22 +102,13 @@ struct WorkspaceShell: View {
     .environment(run)
     // An open drawer is the only surface to read or touch: the page behind it
     // must not stay in the VoiceOver order.
-    .accessibilityHidden(drawerOpen)
+    .accessibilityHidden(drawerOpen || dragOrigin != nil)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     // Without a hit test shape, the drag below only starts on the page's text and
     // controls: the empty middle of the page would ignore a left-edge swipe and
     // the drawer could not be opened from there (found on-device in L1b).
     .contentShape(Rectangle())
-    // Edge swipe opens the drawer instead of navigating back: this page is the
-    // root the drawer belongs to. Thresholds are the ones the root gesture used.
-    .simultaneousGesture(
-      DragGesture(minimumDistance: 18).onEnded { value in
-        guard !drawerOpen, value.startLocation.x <= 24 else { return }
-        let horizontal = value.translation.width
-        let vertical = abs(value.translation.height)
-        if horizontal > 72 && horizontal > vertical * 1.35 { setDrawer(true, released: true) }
-      }
-    )
+
   }
 
   private var topBar: some View {
@@ -111,6 +120,7 @@ struct WorkspaceShell: View {
       .buttonStyle(.plain)
       .accessibilityLabel(ConnectionCopy.openSidebar)
       .accessibilityIdentifier("sidebar-toggle")
+      .accessibilityFocused($sidebarButtonFocused)
       Spacer(minLength: 4)
       hostChip
       Spacer(minLength: 4)
@@ -142,6 +152,7 @@ struct WorkspaceShell: View {
       .foregroundStyle(Palette.fg)
       .padding(.horizontal, 14).frame(minHeight: 36)
       .background(Palette.panel2, in: Capsule())
+      .zoomSource("host", in: targetTransition)
       .frame(minHeight: 44).contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -175,29 +186,27 @@ struct WorkspaceShell: View {
 
   // MARK: - Drawer
 
-  private var drawerEffect: Motion.Effect {
-    if drawerUsesReleaseCurve { return .drawerRelease }
-    return drawerOpen ? .drawerOpen : .drawerClose
-  }
-
   private var dimmer: some View {
-    Color.black.opacity(drawerOpen ? 0.28 : 0)
+    Color.black.opacity(0.28 * drawerProgress)
       .ignoresSafeArea()
       .contentShape(Rectangle())
       .onTapGesture { setDrawer(false) }
-      .allowsHitTesting(drawerOpen)
+      .allowsHitTesting(drawerOpen || dragOrigin != nil)
       .accessibilityElement()
       .accessibilityAddTraits(.isButton)
       .accessibilityLabel(ConnectionCopy.closeSidebar)
       .accessibilityHidden(!drawerOpen)
-      .animation(Motion.animation(drawerEffect, reduceMotion: reduceMotion), value: drawerOpen)
+      .animation(dragOrigin == nil ? Motion.drawerAnimation(open: drawerOpen, release: drawerRelease, reduceMotion: reduceMotion) : nil, value: drawerProgress)
   }
 
   private func drawer(width: CGFloat) -> some View {
     SidebarDrawer(onCollapse: { setDrawer(false) },
                   onNewSession: { scope, cwd in startNewSession(scope: scope, cwd: cwd) },
-                  onOpenSettings: { setDrawer(false); model.route = .settings })
+                  onOpenSettings: { setDrawer(false); model.route = .settings }, isPresented: drawerOpen)
       .environment(targets.localStore)
+      // A horizontal drag moves the pressed button with the finger. Cancel its
+      // press while dragging, otherwise releasing can also create/open a session.
+      .disabled(dragOrigin != nil)
       .frame(width: width)
       // The panel edge and the page must not repaint the status bar or home
       // indicator area, so the surface extends through the vertical insets.
@@ -205,23 +214,43 @@ struct WorkspaceShell: View {
         Palette.sidebar.ignoresSafeArea(edges: .vertical)
           .overlay(alignment: .trailing) { Rectangle().fill(Palette.border).frame(width: 0.5) }
       }
-      .shadow(color: .black.opacity(0.10), radius: 30, x: 8)
-      .offset(x: reduceMotion || drawerOpen ? 0 : -width)
-      .animation(reduceMotion ? nil : Motion.animation(drawerEffect, reduceMotion: false), value: drawerOpen)
-      .opacity(drawerOpen ? 1 : 0)
-      .animation(Motion.animation(drawerEffect, reduceMotion: reduceMotion), value: drawerOpen)
-      .allowsHitTesting(drawerOpen)
+      .shadow(color: .black.opacity(0.10 * drawerProgress), radius: 30, x: 8)
+      // Observe inside the offset: outside it SwiftUI reports the unchanged
+      // layout box (minX == 0), which would make a closed drawer appear open.
+      .onGeometryChange(for: CGFloat.self) { geometry in
+        1 + geometry.frame(in: .named("workspace-drawer")).minX / width
+      } action: { presentedProgress = $0 }
+      .offset(x: reduceMotion ? 0 : (drawerProgress - 1) * width)
+      // Normal motion moves an opaque panel; only Reduce Motion fades its surface.
+      .opacity(reduceMotion ? drawerProgress : 1)
+      .animation(dragOrigin == nil ? Motion.drawerAnimation(open: drawerOpen, release: drawerRelease, reduceMotion: reduceMotion) : nil, value: drawerProgress)
+      .allowsHitTesting(drawerOpen || dragOrigin != nil)
       .accessibilityHidden(!drawerOpen)
-      // Swipe left on the panel closes it, with the same thresholds and the same
-      // reduced-motion contract: position stays fixed so the opacity fade remains visible.
-      .simultaneousGesture(
-        DragGesture(minimumDistance: 18).onEnded { value in
-          guard drawerOpen else { return }
-          let horizontal = -value.translation.width
-          let vertical = abs(value.translation.height)
-          if horizontal > 72 && horizontal > vertical * 1.35 { setDrawer(false, released: true) }
+  }
+
+  private func drawerGesture(width: CGFloat) -> some Gesture {
+    DragGesture(minimumDistance: 10)
+      .updating($dragging) { _, active, _ in active = true }
+      .onChanged { value in
+        if dragOrigin == nil {
+          let visible = reduceMotion ? drawerProgress : presentedProgress
+          guard (visible > 0 ? value.startLocation.x <= width * visible : value.startLocation.x <= 24),
+                abs(value.translation.width) > abs(value.translation.height) * 1.35 else { return }
+          // A closing panel can be grabbed anywhere it is still visible, not
+          // only at the edge used to open a fully closed drawer.
+          dragOrigin = reduceMotion ? drawerProgress : presentedProgress
+          Self.resignKeyboard()
         }
-      )
+        if let origin = dragOrigin {
+          drawerProgress = DrawerPosition.progress(origin: origin, translation: value.translation.width, width: width)
+        }
+      }
+      .onEnded { value in
+        guard let origin = dragOrigin else { return }
+        let open = DrawerPosition.opens(origin: origin, predictedTranslation: value.predictedEndTranslation.width, width: width)
+        let remaining = (open ? 1.0 : 0.0) - drawerProgress
+        setDrawer(open, release: .init(velocity: value.velocity.width / width, remaining: remaining))
+      }
   }
 
   private var targetPicker: some View {
@@ -244,13 +273,15 @@ struct WorkspaceShell: View {
 
   // MARK: - Actions
 
-  private func setDrawer(_ open: Bool, released: Bool = false) {
-    guard drawerOpen != open else { return }
+  private func setDrawer(_ open: Bool, release: Motion.DrawerRelease? = nil) {
     // The drawer owns the keyboard: opening it must not type into a field the
     // user can no longer see.
     if open { Self.resignKeyboard() }
-    drawerUsesReleaseCurve = released
+    dragOrigin = nil
+    drawerRelease = release
     drawerOpen = open
+    drawerProgress = open ? 1 : 0
+    if !open { sidebarButtonFocused = true }
   }
 
   // Every new-session entry names its target scope, so this never has to repeat

@@ -107,7 +107,8 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
   const setAnalyticsRange = useCallback((rangeDays: UsageAnalyticsRangeDays): void => {
     analyticsRangeRef.current = rangeDays
     setAnalyticsRangeState(rangeDays)
-    setAnalytics(null)
+    // Keep the previous range on screen (labelled as such by the view) instead of
+    // tearing the dashboard down; the seq guard drops any answer for the old range.
     setAnalyticsCreditsLoading(false)
     loadAnalytics(rangeDays)
   }, [loadAnalytics])

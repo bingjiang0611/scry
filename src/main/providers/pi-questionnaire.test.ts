@@ -31,7 +31,7 @@ function setup(custom = false) {
 }
 
 describe('Pi grouped questionnaire', () => {
-  it('waits for a full review, then replays final choices in native order with one user request', async () => {
+  it.each(['1,3', '1,3; custom answer'])('reviews once and replays native choices with multi-select placeholder %s', async (placeholder) => {
     const { group } = setup()
     let finish!: (response: AgentQuestionResponse) => void
     const ask = vi.fn((_request: AgentQuestionRequest) => new Promise<AgentQuestionResponse>((resolve) => { finish = resolve }))
@@ -45,23 +45,45 @@ describe('Pi grouped questionnaire', () => {
       'What matters?': '2', 'Which parts?': '1,2', 'When to review?': '2'
     } })
     expect(await pending).toEqual({ type: 'extension_ui_response', id: 'first', value: '2. Speed — Finish sooner' })
-    expect(group.matches(second)).toBe(true)
-    expect(await group.reply(second, ask)).toMatchObject({ id: 'second', value: '1,2' })
+    const multiSelect = { ...second, placeholder }
+    expect(group.matches(multiSelect)).toBe(true)
+    expect(await group.reply(multiSelect, ask)).toMatchObject({ id: 'second', value: '1,2' })
     expect(group.matches(third)).toBe(true)
     expect(await group.reply(third, ask)).toMatchObject({ id: 'third', value: '2. Later — At the end' })
     expect(ask).toHaveBeenCalledTimes(1)
     expect(group.matches(first)).toBe(false)
   })
 
-  it('preserves custom text even when it equals an option index', async () => {
+  it.each(['', '1. Now — Before continuing\n2. Later — At the end\n\n'])('preserves custom text with follow-up options %j', async (options) => {
     const { group, ask } = setup(true)
     await group.reply(first, ask)
     await group.reply(second, ask)
     expect(await group.reply(third, ask)).toMatchObject({ value: '3. Type something.' })
-    const input = { id: 'custom', method: 'input', title: '[Review] When to review?\n\nType your answer:' }
-    expect(group.matches({ ...input, title: '[Other] When to review?\n\nType your answer:' })).toBe(false)
+    const input = { id: 'custom', method: 'input', title: `[Review] When to review?\n\n${options}Type your answer:` }
+    expect(group.matches({ ...input, title: input.title.replace('[Review]', '[Other]') })).toBe(false)
+    expect(group.matches({ ...input, title: input.title.replace('When to review?', 'Different question?') })).toBe(false)
+    if (options) expect(group.matches({ ...input, title: input.title.replace('Before continuing', 'Changed') })).toBe(false)
     expect(group.matches(input)).toBe(true)
     expect(await group.reply(input, ask)).toEqual({ type: 'extension_ui_response', id: 'custom', value: '1' })
+    expect(ask).toHaveBeenCalledTimes(1)
+  })
+
+  it('replays a custom answer after previews and keeps later answers without another user request', async () => {
+    const { group } = setup()
+    const ask = vi.fn(async (): Promise<AgentQuestionResponse> => ({
+      runId: 'run', questionId: 'tool', behavior: 'answered',
+      answers: { 'What matters?': 'Custom goal', 'Which parts?': '1,2', 'When to review?': '2' },
+      nativeCustomAnswers: ['What matters?']
+    }))
+    expect(group.matches(first)).toBe(true)
+    expect(await group.reply(first, ask)).toMatchObject({ value: '3. Type something.' })
+    const input = { id: 'custom', method: 'input', title: '[Goal] What matters?\n\n1. Control — Stay in control\n2. Speed — Finish sooner\n\nType your answer:' }
+    expect(group.matches(input)).toBe(true)
+    expect(await group.reply(input, ask)).toMatchObject({ value: 'Custom goal' })
+    expect(group.matches(second)).toBe(true)
+    expect(await group.reply(second, ask)).toMatchObject({ value: '1,2' })
+    expect(group.matches(third)).toBe(true)
+    expect(await group.reply(third, ask)).toMatchObject({ value: '2. Later — At the end' })
     expect(ask).toHaveBeenCalledTimes(1)
   })
 

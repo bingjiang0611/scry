@@ -2,11 +2,43 @@
 
 [返回 CLI README](../README.md)
 
+## 未发布：Stop 之后的判定、仓库扫描预筛与合法 JSON 截断
+
+- **收到过本轮 Stop 的轮次记 `completed`。** 之前，一轮已经收到自己的 Stop（例如为后台任务延迟封箱、随后被唤醒取消封箱继续工作），下一轮提问在静默窗口内到达时，这一轮会被封成 `interrupted` / `superseded_by_next_turn`。现在 `open.json` 用 `stopObservedAt` 记住「本轮终态曾到达」，取消封箱不会抹掉这个事实；没收到 Stop 就被下一轮顶替的轮次仍是 `interrupted`，结束时间仍是最后可信活动。SessionEnd 不是 Stop，不写这个字段。后台唤醒的接续逻辑不变：已封箱的叫醒新开接续段，静默窗口内的叫醒仍延长同一段。
+- **每轮仓库扫描先做便宜预筛。** 仓库在轮次开始时干净时，基线就是那个起点提交，不需要冻结工作树快照；收尾先跑一次 `git status --porcelain=v2 --branch --untracked-files=normal`，只有状态非空、HEAD 移动、或本轮工具事件点到了该仓库内的路径，才走完整的 discovery/targeted/fallback 采集。被跳过的仓库在记录里标 `diff.collection.strategy: 'unchanged'`（`evidence: 'git_status'`），不冒充「算过一遍的空 diff」。检查失败、超时或无法证明时一律走完整采集，跳过只可能省工，不可能藏改动。`SCRY_TURN_DIFF_STRATEGY=full` 和 `forceFull` 仍强制完整采集。
+- **截断后的 JSON 仍是合法 JSON。** 孤立事件等 JSON 正文超出字段预算时，之前是在字节边界上切断 JSON 文本（`encoding: 'json-fragment'`），读回来无法解析。现在按值结构裁剪：超长的字符串换成 `{"storage":"truncated","originalBytes":N,"preview":"…"}`，结构与其余字段保持原样；结构本身装不下时用一个写明原始字节数的 marker 代替整个正文；连 marker 都放不下时按 omitted 处理（不留不可解析的前缀）。`encoding` 保持 `'json'`，历史 `json-fragment` 数据仍照旧读取。
+- 以上只影响新轮次与新写的正文，不重写历史记录。
+
+## 未发布：没有终态事件的轮次如何收尾，以及结束时间的证据等级
+
+- **没有终态事件的开放轮次不再永远挂着。** Qoder、Claude、OpenCode 不往 transcript 里写终态状态，只有 Codex 和 Pi 会写；恢复逻辑之前只认「transcript 解析出终态」，所以这些宿主一旦丢了 Stop，`open.json` 就永远停在 `open`，也不会进入提交队列。现在恢复按证据分级处理：
+  - 会话真的结束（收到 SessionEnd）：按 transcript 已有内容收尾，`reason: 'session_end'`。
+  - transcript 最后一条回复已结束（`stop_reason` 不是 `tool_use`）、身份匹配成功、且该会话的文件已静默超过 30 分钟：按 transcript 收尾，`status: 'completed'`、`reason: 'expired'`，结束时间取最后一次可观测活动（下界），`quality: 'estimated'`，`omissionReason` 写明用了哪个 `stop_reason`、静默了多久。
+  - 只有 `scry recorder recover --expire-open`（或宿主明确报告子进程已退出）才强制收尾仍无证据的轮次，记 `interrupted`，`termination.quality: 'estimated'`、`reason: 'expired'`，`omissionReason` 写明是恢复收尾以及用了哪条证据。后台/守护进程的自动恢复绝不使用这一条。
+  - 还在等工具结果（`stop_reason: tool_use`）、有未完成的后台任务、transcript 读不到或身份对不上的轮次一律保持 open：静默本身不是结束证据。
+- **结束时间的证据等级说清楚。** 收到本轮 Stop 时，`completedAt` 取 Stop 事件时间，`termination.quality` 为 `exact`，`completedAtSource` 记来源（`provider_terminal_event`：宿主自带时间戳；`recorder_observed_terminal`：宿主不写时间，取收到 Stop 的时刻）；Stop 之后还有本轮工作（后台唤醒、继续干活）时不采用这个时间，退回最后可观测活动并标 `estimated`。没有 Stop 而被下一轮顶替、按 transcript 推定结束、或会话结束时收尾的轮次，结束时间都是下界，`quality: 'estimated'`，`termination.omissionReason` 写明原因。
+- **哪些证据够标 `exact`。** 只有两种：收到本轮 Stop 且其后没有本轮 Agent 工作（claude / codex / qoder / pi 都会发 Stop，时间用事件自身或收到时刻）；或宿主终态事件自带时间戳（`provider_terminal_event`）。以下几种一律 `estimated`：transcript 解析出的终态（Codex / Pi 的 transcript 会写终态状态，时间是最后一行时间，不是宿主声明的结束）、recorder 自己观测到的 idle/会话结束（OpenCode 的 idle 通知没有按轮次的时间戳，SessionEnd 是 Scry 的观测而不是 Provider 的结论）、最后可观测活动、以及按开头时间兜底。
+- **health 能看见卡住的轮次。** `health.json` 新增 `openTurns` 与 `staleOpenTurns`（静默超过 30 分钟且未进入收尾的 open 轮次）；`scry status` 的 `openTurnsPending` 改为「等待收尾 + 仍 open」，不再只数 `closing`/managed 轮次，`scry records verify` 的 advisory 与 `scry doctor` 的 `turns.stale` 一并列出；doctor 逐条给出该轮最后写下东西的时间、已静默多久、是否仍在增长（还在增长的是慢，不是卡住），健康计数里的 `pendingCount` 只数等待收尾的条目。`scry recorder recover` 输出 `{recovered, pending, expired}`，`expired` 只统计被迫收尾的轮次。
+
 ## 未发布：OpenCode / Pi 终态收敛
 
 - OpenCode 插件把原生 `messageID` 作为同轮 `turn_id` 贯穿 start、tool 与 idle 终态。已知轮次不再因为缺少身份而进入 180 秒陈旧终态宽限期；无法取得原生消息身份时仍保留原有保守路径，不猜测。非交互进程收到 `SIGINT` 且只有一个活动轮次时，插件同步提交该轮 `interrupted` Stop 后再重新发送信号；存在多个活动轮次时不猜测目标，保留 open 状态供后续真实终态或恢复处理。
 - Pi 扩展在进程收到 `SIGINT` 时，先按队列顺序持久化当前轮次的 `interrupted` Stop，再移除自己的监听并重新发送同一信号。这样保留原生信号退出语义，同时避免非交互 `pi -p` 直接退出后遗留永不收口的 `open.json`。
 - 两项修复只影响新轮次，不重写历史记录。OpenCode 工作区需要 repair/re-init 更新生成插件；Pi 需要更新并重新加载用户级扩展。
+
+## 0.2.76 `--expire-open` 只认进程证据、采集路径带上宿主 pid、可按会话收尾
+
+- **采集接收器过去不带宿主 pid。** CodeLens 会话的事件经 `.scry/capture/receiver.sh` 投递，脚本只带 `x-scry-capture-mode: session`，采集路径（`serveCaptureRequest` → `applySessionCaptureHook` → `handleRecorderHook`）也不传投递进程，因此采集轮次的 `open.json` 里 `host` 一直是 `null`，`--expire-open` 对它们永远没有进程证据。0.2.76 起 receiver 与 `provider-hook.sh` 一样带 `x-scry-client-pid: $$`，daemon 与 CLI 兜底路径都把该 pid 的进程链记入 `open.json`；claim 打开的第一轮也记录发起采集的进程链。
+- **宿主状态未知时不再收尾。** 0.2.75 只在 `running` 时否决，`unknown`（没有 `host`、旧钩子脚本不带 pid、进程表读不到）会直接收尾，与「核对不到就当作还在跑」的说明相反。0.2.76 起只有 `gone`（每个记录过的进程都被确认是同一进程且已不存在）才收尾；`unknown` 一律保持 open，`scry doctor` 与 `turns` 检查写明 `host: unknown` 与静默时长，让人看见为什么没收。
+- **可按会话收尾。** 以前 `--expire-open` 是全工作区开关：只要有一个轮次判断不了宿主，自动调用方就不敢带这个开关，其余本可收尾的轮次也一起卡住。新增可重复的 `--session <id>`，只在 `--expire-open` 下有效，只对列出的会话做强制收尾；不带 `--session` 时保持原行为（仍是全工作区，但仍只收有进程证据的轮次）。
+- 三项只影响新轮次与新的收尾决定，不改写已发布记录。
+
+## 0.2.75 `recover --expire-open` 可用性与收尾门槛
+
+- **0.2.74 及更早的 CLI 没有注册这个开关。** `--expire-open` 会被参数解析当成未知选项，以 `unknown option: --expire-open` 退出 1；`scry doctor` 文案推荐它，CodeLens 每 15 分钟对开启了 scry 的工作区自动调用它，两条路径此前都拿不到任何收尾结果。0.2.75 起 `--expire-open` 是已注册的布尔开关，`scry recorder recover --expire-open` 正常执行并输出 `{recovered, pending, expired}`。
+- **它自带两道门槛，因为它会被定期自动调用，不能等同「操作者此刻断言进程已退出」：**
+  - 静默窗口：轮次写下的文件（存下的事件与 transcript）必须已经静默满 30 分钟，没人再写就说明不了「还在思考」，30 分钟也远大于审批等待以外的常规工具等待；仍在增长的一律不动。
+  - 宿主进程：开启轮次时把投递事件的进程链（钩子脚本的 pid 及其 3 层父进程，不含 init）记进 `open.json` 的 `host`，收尾前逐个核对 pid 与启动标记；只要还有一个在跑就不动，因为它们可能只是没在写文件（等人审批、等长工具、人离开键盘）。核对不到（旧轮次没有 `host`、旧钩子脚本不带 pid、进程表读不到）时不收尾；该行为在 0.2.76 收紧，见下节。
 
 ## 0.2.52 sequence 水位、投递空洞与丢失结果恢复
 

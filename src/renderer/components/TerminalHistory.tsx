@@ -1,8 +1,13 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import type { TerminalRecordingListPage, TerminalRecordingSummary } from '@shared/terminal'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
+import { useStaleWhileRefresh } from '../hooks/useStaleWhileRefresh'
 import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
 import { ModalFrame, requestModalClose } from './Modals'
-import { Icon } from './primitives/Icon'
+import { Button } from './primitives/Button'
+import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { SkeletonRows } from './primitives/Skeleton'
+import { TurningIcon } from './primitives/TurningIcon'
 
 export function terminalRecordingLabel(item: TerminalRecordingSummary): string {
   if (item.active) return item.state === 'failed' ? 'Shell 运行中 · 录制失败' : 'Shell 运行中'
@@ -21,36 +26,28 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedAp
   const titleId = useId()
   const api = useMemo(() => injectedApi ?? defaultTerminalApi, [injectedApi])
   const [after, setAfter] = useState<string>()
-  const [revision, setRevision] = useState(0)
-  const [page, setPage] = useState<TerminalRecordingListPage | null>(null)
-  const [busy, setBusy] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let current = true
-    setBusy(true)
-    setPage(null)
-    setError(null)
-    void api.terminalRecordingList({ after, limit: 20 }).then((value) => {
-      if (current) setPage(value)
-    }).catch((cause) => {
-      if (current) setError(cause instanceof Error ? cause.message : String(cause))
-    }).finally(() => { if (current) setBusy(false) })
-    return () => { current = false }
-  }, [after, api, revision])
+  // The cursor is the whole key: another page is another answer and starts empty;
+  // refreshing the same page keeps its rows on screen until the new read lands.
+  const list = useStaleWhileRefresh<TerminalRecordingListPage>(after ?? '', (cursor) =>
+    api.terminalRecordingList({ after: cursor || undefined, limit: 20 }))
+  const page = list.data ?? null
+  const busy = list.status === 'loading' || list.status === 'refreshing'
+  const error = list.error
+  const showSkeleton = useDelayedFlag(list.status === 'loading')
   return (
-    <ModalFrame labelledBy={titleId} onClose={onClose}>
+    <ModalFrame labelledBy={titleId} className="terminal-history-modal" onClose={onClose}>
       <header className="modal-head">
         <h2 id={titleId}>终端录制历史</h2>
-        <button type="button" className="icon-btn" onClick={() => requestModalClose()} aria-label="关闭录制历史"><Icon name="x" /></button>
+        <ModalCloseButton onClick={() => requestModalClose()} aria-label="关闭录制历史" />
       </header>
       <div className="modal-body">
         <p title={cwd ?? '用户主目录'}>当前工作区：{cwd ?? '用户主目录'} · 原文可能含密钥</p>
-        {busy && <p role="status">正在读取录制索引…</p>}
-        {error && <p role="alert">录制列表不可用：{error}</p>}
+        {error && <p role="alert">{page ? '刷新失败，下面是上次读取的列表：' : '录制列表不可用：'}{error}</p>}
         {page?.partial && <p role="alert">部分索引不可读，列表可能不完整；未展示其标识或内容。</p>}
         {!canOpen && <p role="status">终端标签页已达上限，请先关闭一个标签页。</p>}
         {page && page.items.length === 0 && <p>本页没有可列出的录制。</p>}
-        <div className="arch-list">
+        <div className="arch-list" aria-busy={busy}>
+          {list.status === 'loading' && showSkeleton && <SkeletonRows rows={5} meta rowHeight={60} label="正在读取录制索引…" />}
           {page?.items.map((item) => (
             <div className="arch-row" key={item.id} data-recording-id={item.id}>
               <div className="arch-row-copy">
@@ -61,15 +58,17 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedAp
                   <span>{item.startedAt === undefined ? '开始时间未知' : new Date(item.startedAt).toLocaleString()}</span>
                 </div>
               </div>
-              <button type="button" className="arch-unarch" disabled={busy || item.active || !canOpen} onClick={() => onOpen(item)} aria-label={`只读打开 ${item.id}`}>只读打开</button>
+              <button type="button" className="arch-unarch" disabled={item.active || !canOpen} onClick={() => onOpen(item)} aria-label={`只读打开 ${item.id}`}>只读打开</button>
             </div>
           ))}
         </div>
       </div>
       <footer className="modal-foot">
         <span>按 ID 分页 · 回放时校验正文 · 不恢复 Shell</span>
-        <button type="button" className="btn" disabled={busy} onClick={() => { setAfter(undefined); setRevision((value) => value + 1) }}>首页 / 刷新</button>
-        <button type="button" className="btn" disabled={busy || !page?.nextCursor} onClick={() => setAfter(page?.nextCursor ?? undefined)}>下一页</button>
+        <Button aria-busy={list.status === 'refreshing'} onClick={() => { if (after === undefined) list.refresh(); else setAfter(undefined) }}>
+          <TurningIcon busy={list.status === 'refreshing'} /> 首页 / 刷新
+        </Button>
+        <Button disabled={busy || !page?.nextCursor} onClick={() => setAfter(page?.nextCursor ?? undefined)}>下一页</Button>
       </footer>
     </ModalFrame>
   )

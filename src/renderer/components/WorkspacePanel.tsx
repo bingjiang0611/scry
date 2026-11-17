@@ -6,6 +6,7 @@ import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } 
 export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 
 import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { WorkspaceFileTree } from './WorkspaceFileTree'
 import { workspaceCopy as copy } from '../constants/workspace-copy'
 
@@ -74,6 +75,10 @@ type ItemDialog =
   | { kind: 'rename'; entry: WorkspaceEntry; value: string }
   | { kind: 'move'; entry: WorkspaceEntry; value: string }
 
+// Upper bound on open folders read again by one refresh; any beyond it keep their
+// previous listing until a later refresh reaches them.
+const MAX_REFRESHED_DIRECTORIES = 16
+
 export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi, ops }: WorkspacePanelProps) {
   const api = useMemo<WorkspaceApi>(() => injectedApi ?? defaultWorkspaceApi, [injectedApi])
   const capabilities = useMemo(() => resolveWorkspaceOps(ops), [ops])
@@ -95,7 +100,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const handledOpenRequestId = useRef<number | null>(null)
 
   const loadDirectory = useCallback(
-    async (path = '', cursor?: string): Promise<void> => {
+    async (path = '', cursor?: string, refreshing = false): Promise<void> => {
       const sequence = (loadSequence.current.get(path) ?? 0) + 1
       loadSequence.current.set(path, sequence)
       setLoading((current) => new Set(current).add(path))
@@ -111,6 +116,13 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         setNextCursors((current) => ({ ...current, [path]: result.nextCursor }))
       } catch (loadError) {
         if (loadSequence.current.get(path) !== sequence) return
+        // An open folder that no longer reads during an in-place refresh is folded away,
+        // like a fresh tree would not show it; the root and explicit opens still report.
+        if (refreshing && path) {
+          setExpanded((current) => { const next = new Set(current); next.delete(path); return next })
+          setChildren((current) => { const { [path]: _gone, ...rest } = current; return rest })
+          return
+        }
         setError(errorMessage(loadError))
       } finally {
         if (loadSequence.current.get(path) === sequence) {
@@ -125,11 +137,21 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     [api, cwd, readOnlySource]
   )
 
-  const refresh = useCallback((): void => {
+  // Another workspace is another tree: start empty.
+  const reset = useCallback((): void => {
     setChildren({})
     setExpanded(new Set())
     setNextCursors({})
     void loadDirectory()
+  }, [loadDirectory])
+
+  // The same workspace read again keeps its tree and open folders on screen and
+  // reads each open level once; each level is replaced when its own answer lands.
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
+  const refresh = useCallback((): void => {
+    void loadDirectory()
+    for (const path of [...expandedRef.current].slice(0, MAX_REFRESHED_DIRECTORIES)) void loadDirectory(path, undefined, true)
   }, [loadDirectory])
 
   useEffect(() => {
@@ -137,8 +159,8 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     initializedCwd.current = cwd
     setSelected(null)
     setDirty(false)
-    refresh()
-  }, [active, cwd, refresh])
+    reset()
+  }, [active, cwd, reset])
 
   useEffect(() => {
     if (!active || refreshKey === handledRefreshKey.current || dirty) return
@@ -293,9 +315,9 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       {capabilities.notice && <p className="workspace-node-note" role="note">{capabilities.notice}</p>}
       <header className="workspace-head">
         {selected ? (
-          <button type="button" className="iconbtn" onClick={() => confirmLeave() && setSelected(null)} title={copy.backToFiles}>
+          <IconButton size={selected ? 'sm' : 'md'} label={copy.backToFiles} onClick={() => confirmLeave() && setSelected(null)}>
             <Icon name="chevronRight" className="workspace-back" />
-          </button>
+          </IconButton>
         ) : (
           <Icon name="folder" />
         )}
@@ -307,17 +329,18 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
         </div>
         {!selected && (
           <>
-            {!readOnlySource && <button type="button" className="iconbtn" onClick={() => startCreate('file')} title={copy.createFile}>
+            {!readOnlySource && <IconButton size={selected ? 'sm' : 'md'} label={copy.createFile} onClick={() => startCreate('file')}>
               <Icon name="plus" />
-            </button>}
-            <button type="button" className="iconbtn" onClick={refresh} title={copy.refreshFiles}>
-              <Icon name="refresh" />
-            </button>
+            </IconButton>}
+            <IconButton size={selected ? 'sm' : 'md'} label={copy.refreshFiles} onClick={() => { if (!loading.has('')) refresh() }}
+              aria-busy={loading.has('')} aria-disabled={loading.has('')}>
+              <TurningIcon busy={loading.has('')} />
+            </IconButton>
           </>
         )}
-        <button type="button" className="iconbtn" onClick={requestClose} title={copy.closeFiles}>
+        <IconButton size={selected ? 'sm' : 'md'} label={copy.closeFiles} onClick={requestClose}>
           <Icon name="x" />
-        </button>
+        </IconButton>
       </header>
 
       {error && (
@@ -415,10 +438,10 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
               {copy.trashDescription(deleteTarget.name)}
             </p>
             <div className="workspace-dialog-actions">
-              <button type="button" className="btn" disabled={mutating} onClick={() => setDeleteTarget(null)}>{copy.cancelFileOperation}</button>
-              <button type="button" className="btn danger" disabled={mutating} onClick={() => void trash()}>
+              <Button disabled={mutating} onClick={() => setDeleteTarget(null)}>{copy.cancelFileOperation}</Button>
+              <Button variant="danger" disabled={mutating} onClick={() => void trash()}>
                 {mutating ? copy.processingFile : copy.moveToTrash}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -429,4 +452,6 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
 
 
 import { WorkspaceContextMenu, WorkspaceDialog, FileEditor } from './WorkspaceDialogs'
+import { Button } from './primitives/Button'
+import { IconButton } from './primitives/IconButton'
 export { WorkspaceContextMenu, WorkspaceDialog, FileEditor }

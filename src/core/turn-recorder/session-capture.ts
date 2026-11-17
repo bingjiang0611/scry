@@ -1,9 +1,10 @@
-import { chmod, stat } from 'node:fs/promises'
+import { chmod, realpath, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { readJson, writeJsonAtomic, writeTextAtomic } from './io.js'
 import { RECORDER_VERSION } from './store.js'
 import { handleRecorderHook, recorderEnablement } from './recorder.js'
+import { resolveCommitHookActivation } from './commit-hook-grant.js'
 import type { RecorderEnablement } from './config.js'
 import { recorderSocketPath, PROTOCOL_VERSION, HOOK_EVENT_PATH } from './daemon-transport.js'
 import { recorderOpenPath, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState } from './runtime-state.js'
@@ -23,6 +24,7 @@ import {
   captureStatePath,
   captureWireContext,
   readCaptureState,
+  unionDiffExclude,
   type CaptureAck,
   type SessionCaptureContext,
   type SessionCaptureState
@@ -59,6 +61,8 @@ export async function startSessionCapture(args: {
   payload: Record<string, unknown>
   cli: { entry?: string; nodeDir?: string }
   env?: NodeJS.ProcessEnv
+  /** Pid of the process that asked for the capture; the turn records the chain above it. */
+  ancestryFromPid?: number
 }): Promise<CaptureAck & { transport: Record<string, unknown> }> {
   const workspaceRoot = await canonicalWorkspaceRoot(args.workspace)
   const dataRoot = await canonicalDataRoot(workspaceRoot, args.dataDir)
@@ -71,6 +75,12 @@ export async function startSessionCapture(args: {
   await ensureWorkspaceConfig(workspaceRoot, dataRoot)
   const enablement = await recorderEnablement(workspaceRoot, args.env)
   if (!enablement.enabled) throw new CaptureRequestError('recorder_unavailable', `recorder is not enabled: ${enablement.reason}`)
+  // The host tells us its commit callback exactly once, in this process. Record it now: the turns this
+  // capture produces are committed later by the daemon and the hook receiver, which never inherit the
+  // host's environment and would otherwise find no callback at all.
+  if ((args.env ?? process.env).SCRY_RECORDER_COMMIT_HOOK?.trim()) {
+    await resolveCommitHookActivation(workspaceRoot, enablement.config, args.env ?? process.env)
+  }
   const transcriptPath = transcriptPathOf(args.payload) ?? args.context.transcriptPath
   try {
     const info = await stat(transcriptPath)
@@ -80,25 +90,73 @@ export async function startSessionCapture(args: {
   }
   const transport = captureTransport(enablement, workspaceRoot, args.provider, args.sessionId, args.env)
   const statePath = captureStatePath(enablement.dataRoot, args.provider, args.sessionId)
+  const context = await resolveDiffExclude(args.context)
   const existing = await readCaptureState(enablement.dataRoot, args.provider, args.sessionId)
   if (existing && existing.captureId === args.context.captureId) {
+    await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, context.diffExclude)
     await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
-    return { status: 'already_started', ack: captureAck('start', 'already_started', args.context), transport }
+    return { status: 'already_started', ack: captureAck('start', 'already_started', context), transport }
   }
   const state: SessionCaptureState = {
-    ...args.context,
+    ...context,
     schemaVersion: 1,
     workspaceRoot,
     dataRoot: enablement.dataRoot,
     transcriptPath: resolve(transcriptPath)
   }
   await withRecorderSessionLock(enablement.dataRoot, args.provider, args.sessionId, async () => {
-    await beginCaptureTurn(enablement, args.provider, args.sessionId, args.context, state.transcriptPath, args.payload)
+    await beginCaptureTurn(
+      enablement, args.provider, args.sessionId, context, state.transcriptPath, args.payload,
+      args.ancestryFromPid
+    )
     await writeJsonAtomic(statePath, state)
-    await writeJsonAtomic(captureContextPath(enablement.dataRoot, args.provider, args.sessionId), captureWireContext(args.context))
+    await writeJsonAtomic(captureContextPath(enablement.dataRoot, args.provider, args.sessionId), captureWireContext(context))
   }, { waitMs: 10_000 })
   await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
-  return { status: 'started', ack: captureAck('start', 'started', args.context), transport }
+  return { status: 'started', ack: captureAck('start', 'started', context), transport }
+}
+
+/**
+ * A repeated start of this capture may only add exclusion paths: a later stage of the same workflow
+ * can never narrow what an earlier one asked for. The union is written to the session state, the
+ * published context and the open turn, which are the places the diff path reads it from.
+ */
+async function adoptDiffExclude(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  provider: ProviderId,
+  sessionId: string,
+  state: SessionCaptureState,
+  added: string[] | undefined
+): Promise<void> {
+  const merged = unionDiffExclude(state.diffExclude, added)
+  if (merged.length === (state.diffExclude?.length ?? 0)) return
+  await withRecorderSessionLock(enablement.dataRoot, provider, sessionId, async () => {
+    const current = await readCaptureState(enablement.dataRoot, provider, sessionId)
+    if (!current || current.captureId !== state.captureId) return
+    const next = unionDiffExclude(current.diffExclude, merged)
+    await writeJsonAtomic(captureStatePath(enablement.dataRoot, provider, sessionId),
+      { ...current, diffExclude: next } satisfies SessionCaptureState)
+    await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId),
+      captureWireContext({ ...captureStateContext(current), diffExclude: next }))
+    const root = recorderSessionRoot(enablement.dataRoot, provider, sessionId)
+    const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
+    if (open?.capture) {
+      await writeJsonAtomic(recorderOpenPath(root),
+        { ...open, capture: { ...open.capture, diffExclude: next } }, { sync: false })
+    }
+  }, { waitMs: 10_000 })
+}
+
+/**
+ * A declared path comes from the integrator's own shell, so it can reach this workspace through a
+ * symlink (`/var` and `/private/var` are one directory). Resolve each path once, before it is stored:
+ * the diff comparison against the repository root Git reports is lexical. A path that does not exist
+ * yet keeps its declared form and simply excludes nothing until it does.
+ */
+async function resolveDiffExclude(context: SessionCaptureContext): Promise<SessionCaptureContext> {
+  if (!context.diffExclude?.length) return context
+  const paths = await Promise.all(context.diffExclude.map(async (path) => realpath(path).catch(() => path)))
+  return { ...context, diffExclude: [...new Set(paths)] }
 }
 
 async function ensureReceiver(
@@ -181,6 +239,8 @@ export async function applySessionCaptureHook(args: {
   queueOnly?: boolean
   deferDelivery?: boolean
   env?: NodeJS.ProcessEnv
+  /** Pid of the process that delivered this hook, when the transport knows it. */
+  ancestryFromPid?: number
 }): Promise<CaptureAck & { reason?: string }> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
   const sessionId = args.sessionId ?? sessionIdOf(args.payload)
@@ -220,7 +280,8 @@ export async function applySessionCaptureHook(args: {
     capture: captureStateContext(state),
     queueOnly: args.queueOnly,
     deferDelivery: args.deferDelivery,
-    env: args.env
+    env: args.env,
+    ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
   })
   // The edited file names the repository; its PreToolUse arrives before the write, so the baseline
   // taken here is the pre-edit state.

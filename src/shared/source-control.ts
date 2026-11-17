@@ -183,6 +183,8 @@ export interface SourceControlApi {
   operations: (request: ScRef) => Promise<ScOperation[]>
   reconcile: (request: ScRef & { operationId: string }) => Promise<ScOperation>
   acknowledge: (request: ScRef & { operationId: string }) => Promise<ScOperation>
+  /** Cancels a running push/fetch; false when there was nothing to cancel. */
+  cancel: (request: ScRef & { operationId: string }) => Promise<boolean>
   pullRequests: (request: ScRef & { repository: string }) => Promise<ScRead<ScPrList>>
   pullRequest: (request: ScPrRef) => Promise<ScRead<ScPr>>
   saveCommitDraft: (draft: ScCommitDraft) => Promise<void>

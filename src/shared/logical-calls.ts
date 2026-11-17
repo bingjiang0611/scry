@@ -4,6 +4,11 @@ export function isOverviewToolErrorEvent(event: TraceEvent): boolean {
   return event.stage === 'tool_result' && event.isError === true
 }
 
+/** 同一技能的激活名（`plugin:skill`）与注入名（技能目录名）共用一个生命周期键。 */
+export function skillLifetimeKey(name: string): string {
+  return name.split(/[:/]/).filter(Boolean).pop()?.toLowerCase() ?? name.toLowerCase()
+}
+
 function skillSource(event: TraceEvent): string | undefined {
   const input = event.input as Record<string, unknown> | undefined
   return typeof input?.source === 'string' ? input.source : undefined
@@ -14,13 +19,19 @@ export function isSkillReferenceEvidence(event: TraceEvent): boolean {
   return source === 'skill_file' || source === 'skill_path_in_bash' || source === 'skill_path_in_command'
 }
 
+/** 宿主激活通知与注入正文只证明“这个技能被装上”，不是一次工具调用。 */
+export function isSkillMarkerEvidence(event: TraceEvent): boolean {
+  const source = skillSource(event)
+  return source === 'skill_activation' || source === 'skill_injection'
+}
+
 // 旧 Skill trace 可能同时包含真实调用、注入和文件路径引用。调用统计只接受 Provider 明确调用
 // 或 Skill 注入；单纯读取、diff、git show 中出现路径不能冒充执行。
 export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
   const skillEvents = new Map<string, TraceEvent[]>()
   for (const event of items) {
     if (event.kind !== 'skill' || event.stage === 'tool_result') continue
-    const name = event.name ?? 'Skill'
+    const name = skillLifetimeKey(event.name ?? 'Skill')
     const events = skillEvents.get(name)
     if (events) events.push(event)
     else skillEvents.set(name, [event])
@@ -28,7 +39,7 @@ export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
 
   const kept = new Set<TraceEvent>()
   for (const events of skillEvents.values()) {
-    const direct = events.filter((event) => skillSource(event) !== 'skill_injection' && !isSkillReferenceEvidence(event))
+    const direct = events.filter((event) => !isSkillMarkerEvidence(event) && !isSkillReferenceEvidence(event))
     if (direct.length > 0) {
       const identities = new Set<string>()
       for (const event of direct) {
@@ -43,8 +54,10 @@ export function logicalCallEventsForTurn(items: TraceEvent[]): TraceEvent[] {
       }
       continue
     }
-    const injected = events.find((event) => skillSource(event) === 'skill_injection')
-    if (injected) kept.add(injected)
+    // 没有真实调用时，激活/注入是该技能唯一的证据：只留一条，注入优先（它带正文）。
+    const marker = events.find((event) => skillSource(event) === 'skill_injection') ??
+      events.find((event) => skillSource(event) === 'skill_activation')
+    if (marker) kept.add(marker)
   }
 
   const callIdentities = new Set<string>()

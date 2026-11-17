@@ -59,12 +59,19 @@ describe('full raw tool content', () => {
     expect(JSON.stringify(aggregated)).toContain('MCP_SENTINEL')
   })
 
-  it('replaying captured JSON with a smaller field budget yields a fragment, not an exception or complete JSON', () => {
+  it('replaying captured JSON with a smaller field budget keeps parseable JSON that states each loss', () => {
     const raw = events('ok')
-    raw[0].inputContent = captureToolContent({ a: '1234567890' }, { source: 'fixture', maxBytes: 100 })
-    const safe = sanitizeToolEvents(raw, { ...policy, toolContentFieldBytes: 5 }, 'fixture')
-    expect(safe[0].inputContent).toMatchObject({ content: '{"a":', encoding: 'json-fragment', storage: 'truncated', reasons: ['field_budget'] })
-    expect(isToolContent(safe[0].inputContent)).toBe(true)
+    raw[0].inputContent = captureToolContent({ a: 'x'.repeat(200), b: 1 }, { source: 'fixture', maxBytes: 1024 })
+    const safe = sanitizeToolEvents(raw, { ...policy, toolContentFieldBytes: 120 }, 'fixture')
+    const bounded = safe[0].inputContent!
+    expect(bounded).toMatchObject({ encoding: 'json', storage: 'truncated', reasons: ['field_budget'] })
+    expect(bounded.savedBytes).toBeLessThanOrEqual(120)
+    // The budget cut one field, so the stored body must still parse and say what it replaced.
+    const parsed = JSON.parse(bounded.content!) as { a: { storage: string; originalBytes: number; preview: string }; b: number }
+    expect(parsed.a).toMatchObject({ storage: 'truncated', originalBytes: 200 })
+    expect(parsed.a.preview.startsWith('xxx')).toBe(true)
+    expect(parsed.b).toBe(1)
+    expect(isToolContent(bounded)).toBe(true)
   })
 
   it('does not parse or reformat JSON-like text and preserves historical redaction provenance', () => {
@@ -130,13 +137,40 @@ describe('full raw tool content', () => {
     }
   })
 
-  it('cuts UTF-8 safely and labels JSON fragments', () => {
+  it('cuts UTF-8 safely and never cuts JSON into a fragment', () => {
     const text = captureToolContent('中😀文', { source: 'fixture', maxBytes: 5 })
     expect(text).toMatchObject({ content: '中', savedBytes: 3, storage: 'truncated', reasons: ['field_budget'] })
-    const json = captureToolContent({ text: '中😀文' }, { source: 'fixture', maxBytes: 12 })
-    expect(json.encoding).toBe('json-fragment')
-    expect(json.content).not.toContain('�')
+    // A JSON body keeps a valid structure: the oversized string becomes a marker, not a byte cut.
+    const json = captureToolContent({ text: '中😀文'.repeat(50) }, { source: 'fixture', maxBytes: 128 })
+    expect(json).toMatchObject({ encoding: 'json', storage: 'truncated', reasons: ['field_budget'] })
+    expect(json.savedBytes).toBeLessThanOrEqual(128)
+    const parsed = JSON.parse(json.content!) as { text: { storage: string; originalBytes: number; preview: string } }
+    expect(parsed.text).toMatchObject({ storage: 'truncated', originalBytes: 500 })
+    expect(parsed.text.preview.startsWith('中😀文')).toBe(true)
+    expect(Buffer.byteLength(parsed.text.preview)).toBeLessThan(500)
+    expect(json.content).not.toContain('\uFFFD')
     expect(isToolContent(json)).toBe(true)
+    // Too small for even a marker: omit instead of storing an unparseable prefix.
+    const tiny = captureToolContent({ text: '中😀文'.repeat(50) }, { source: 'fixture', maxBytes: 12 })
+    expect(tiny).toMatchObject({ encoding: 'json-fragment', storage: 'omitted', savedBytes: 0, reasons: ['field_budget'] })
+    expect(tiny.content).toBeUndefined()
+    expect(isToolContent(tiny)).toBe(true)
+  })
+
+  it('keeps a body of many small values valid JSON by naming the whole body it replaced', () => {
+    const value = { items: Array.from({ length: 400 }, (_, index) => index) }
+    const captured = captureToolContent({ ...value, note: 'a'.repeat(4096) }, { source: 'fixture', maxBytes: 512 })
+    expect(captured).toMatchObject({ encoding: 'json', storage: 'truncated', reasons: ['field_budget'] })
+    expect(captured.savedBytes).toBeLessThanOrEqual(512)
+    const parsed = JSON.parse(captured.content!) as { items?: unknown[]; note?: { originalBytes?: number }; storage?: string; originalBytes?: number }
+    if (parsed.storage === 'truncated') {
+      // Structure overhead alone exceeded the budget: the whole body is replaced by one marker.
+      expect(parsed.originalBytes).toBeGreaterThan(512)
+    } else {
+      expect(parsed.note).toMatchObject({ storage: 'truncated', originalBytes: 4098 })
+      expect(parsed.items).toHaveLength(400)
+    }
+    expect(isToolContent(captured)).toBe(true)
   })
 
   it('fails closed on cycles, accessors and unsupported values without invoking them', () => {

@@ -87,11 +87,13 @@ const SERIAL_RENDERER_UI_ORDER = [
 ]
 
 describe('required PR checks', () => {
-  for (const [file, dependencies, desktopJobs] of [
-    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron']],
-    ['performance.yml', ['changes', 'compare', 'native'], ['native']]
+  // The fourth entry is the changes output that gates the macOS App jobs: CI keys them on desktop,
+  // Performance keys native on native_performance, which implies desktop.
+  for (const [file, dependencies, desktopJobs, desktopOutput] of [
+    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
+    ['performance.yml', ['changes', 'compare', 'native'], ['native'], 'native_performance']
   ] as const) {
-    const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop } })
+    const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop, node_performance: required, native_performance: desktop } })
     const success = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('true', 'true') : { result: 'success' }]))
     const skipped = Object.fromEntries(dependencies.map(key => [key, key === 'changes' ? changes('false', 'false') : { result: 'skipped' }]))
     const isDesktop = (key: string) => (desktopJobs as readonly string[]).includes(key)
@@ -110,7 +112,7 @@ describe('required PR checks', () => {
       expect(gate(file, { ...noDesktop, changes: changes('true', 'unknown') })).not.toBe(0)
       // desktop=true without required=true is contradictory, never a skip.
       expect(gate(file, { ...skipped, changes: changes('false', 'true') })).not.toBe(0)
-      for (const key of desktopJobs) expect(jobs[key].if).toBe("${{ needs.changes.outputs.desktop == 'true' }}")
+      for (const key of desktopJobs) expect(jobs[key].if).toBe(`\${{ needs.changes.outputs.${desktopOutput} == 'true' }}`)
     })
     it.each(dependencies.filter(key => key !== 'changes'))(`${file} with desktop=false requires the exact skip/pass for %s`, key => {
       const results = isDesktop(key) ? ['success', 'failure', 'cancelled'] : ['skipped', 'failure', 'cancelled']
@@ -263,8 +265,10 @@ describe('required PR checks', () => {
     expect(ci.concurrency['cancel-in-progress']).toBe("${{ github.event_name != 'workflow_dispatch' }}")
     expect(Object.keys(ci.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     const detect = load(readFileSync(join(root, '.github/workflows/validation-changes.yml'), 'utf8')) as { jobs: { changes: { steps: Step[] } } }
-    expect(detect.jobs.changes.steps.find(step => step.name === 'Detect executable changes')!.run)
-      .toContain('if [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = push ] ||')
+    // Main pushes validate every CI gate; scripts/ci-changes.test.ts runs this script for each event.
+    const run = detect.jobs.changes.steps.find(step => step.name === 'Detect executable changes')!.run!
+    expect(run).toContain(`if [ "$EVENT_NAME" = push ]; then\n  printf 'required=true\\ndesktop=true\\n`)
+    expect(run).toContain('if [ "$EVENT_NAME" = workflow_dispatch ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then')
   })
 
   it('never filters the required workflows at the trigger level', () => {
@@ -277,7 +281,9 @@ describe('required PR checks', () => {
       for (const [name, job] of Object.entries(jobs)) {
         if (['changes', 'check', 'comment', 'unit-coverage'].includes(name)) continue
         expect(job.needs).toBe('changes')
-        const output = ['packaged-electron', 'native'].includes(name) ? 'desktop' : 'required'
+        const output = name === 'compare' ? 'node_performance'
+          : name === 'native' ? 'native_performance'
+            : name === 'packaged-electron' ? 'desktop' : 'required'
         expect(job.if).toBe(`\${{ needs.changes.outputs.${output} == 'true' }}`)
       }
     }

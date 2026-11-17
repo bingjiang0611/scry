@@ -8,5 +8,8 @@ export const MCP_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:mcpSnapshot': { op: 'mcp', method: 'mcpSnapshot', read: false },
   'agent:testMcp': { op: 'mcp', method: 'testMcp', read: false },
   'agent:reauthenticateMcp': { op: 'mcp', method: 'reauthenticateMcp', read: false },
-  'agent:mcpGuardScan': { op: 'mcp', method: 'mcpGuardScan', read: true }
+  'agent:mcpGuardScan': { op: 'mcp', method: 'mcpGuardScan', read: true },
+  // Aborts the daemon's own in-flight live check; it travels on the control lane so it
+  // is not queued behind that check on `long`.
+  'agent:cancelMcpSnapshot': { op: 'mcp', method: 'cancelMcpSnapshot', read: true }
 }

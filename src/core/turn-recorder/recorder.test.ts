@@ -7,6 +7,7 @@ import { registerSuite5 } from './recorder-tests/state-machine-5.test'
 import { registerSuite6 } from './recorder-tests/state-machine-6.test'
 import { registerSuite7 } from './recorder-tests/state-machine-7.test'
 import { registerContinuationSuite } from './recorder-tests/state-machine-continuation.test'
+import { registerContinuationCaptureSuite } from './recorder-tests/state-machine-continuation-capture.test'
 import { registerSegmentDiffSuite } from './recorder-tests/state-machine-segment-diff.test'
 import { registerQoderSessionEndSuite } from './recorder-tests/state-machine-qoder-sessionend.test'
 import { registerSuite8 } from './recorder-tests/merge.test'
@@ -27,6 +28,9 @@ import { registerSuite22 } from './recorder-tests/delivery-hole.test'
 import { registerSuite23 } from './recorder-tests/codex-compaction.test'
 import { registerSuite24 } from './recorder-tests/worktree-creation.test'
 import { registerSuite25 } from './recorder-tests/worktree-creation-old.test'
+import { registerStopVerdictSuite } from './recorder-tests/state-machine-stop-verdict.test'
+import { registerDiffPrefilterSuite } from './recorder-tests/state-machine-diff-prefilter.test'
+import { registerStaleOpenTurnSuite } from './recorder-tests/state-machine-stale-open.test'
 
 // Keep the original single-suite worker, registration order and shared cleanup.
 describe('turn recorder state machine', () => {
@@ -39,7 +43,11 @@ describe('turn recorder state machine', () => {
   registerSuite7()
   registerQoderSessionEndSuite()
   registerContinuationSuite()
+  registerContinuationCaptureSuite()
   registerSegmentDiffSuite()
+  registerStopVerdictSuite()
+  registerDiffPrefilterSuite()
+  registerStaleOpenTurnSuite()
 })
 
 registerSuite8()

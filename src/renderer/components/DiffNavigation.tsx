@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from 'react'
 import { DIFF_COPY as copy } from '../constants/diff-copy'
 import type { DiffCommitHistory } from '../hooks/useDiffCommitHistory'
 import { useFixedVirtualRows } from '../hooks/useFixedVirtualRows'
+import { Tabs } from './primitives/Tabs'
 
 function Commits({ history }: { history: DiffCommitHistory }) {
   const id = useId()
@@ -51,17 +52,19 @@ export function DiffNavigation({ history, fileCount, children }: { history?: Dif
   const id = useId()
   if (!history) return <aside className="diff-navigation">{children}</aside>
   return <aside className="diff-navigation">
-    <div className="diff-navigation-tabs" role="tablist" aria-label={copy.navigation}>
-      {(['files', 'commits'] as const).map(tab => <button type="button" role="tab" key={tab} id={`${id}-${tab}`}
-        tabIndex={history.tab === tab ? 0 : -1} aria-selected={history.tab === tab} aria-controls={`${id}-content`}
-        onClick={() => history.setTab(tab)} onKeyDown={event => {
-          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-          event.preventDefault()
-          const next = event.key === 'Home' ? 'files' : event.key === 'End' ? 'commits' : tab === 'files' ? 'commits' : 'files'
-          history.setTab(next)
-          document.getElementById(`${id}-${next}`)?.focus()
-        }}>{copy[tab]}{tab === 'files' && fileCount != null && <span>{fileCount}</span>}</button>)}
-    </div>
+    <Tabs
+      className="diff-navigation-tabs"
+      label={copy.navigation}
+      value={history.tab}
+      onChange={history.setTab}
+      items={(['files', 'commits'] as const).map(tab => ({
+        value: tab,
+        label: copy[tab],
+        count: tab === 'files' && fileCount != null ? fileCount : undefined,
+        id: `${id}-${tab}`,
+        controls: `${id}-content`
+      }))}
+    />
     {history.selected && <button className="diff-all-changes" type="button" onClick={() => void history.select(null)}>{copy.allChanges}</button>}
     <div className="diff-navigation-content" role="tabpanel" id={`${id}-content`} aria-labelledby={`${id}-${history.tab}`}>
       {history.tab === 'files' ? children : <Commits history={history} />}

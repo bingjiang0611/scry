@@ -29,6 +29,11 @@ export interface RecorderHookInput {
    * process would drop the delivery entirely.
    */
   deferDelivery?: boolean
+  /**
+   * Pid of the process that delivered this event, when the transport knows it (the hook script
+   * passes its own `$$`). Recovery uses the chain around it to tell a live host from a dead one.
+   */
+  ancestryFromPid?: number
 }
 
 export interface RecorderHookResult {
@@ -85,7 +90,18 @@ export interface TranscriptRead {
   pendingBackgroundTasks?: string[]
   providerTurnId?: string
   complete?: boolean
+  /**
+   * Why a bounded read left this window incomplete, in the record's own words. Empty when the
+   * window is complete or when the cause has no specific description.
+   */
+  incompleteReasons?: string[]
   terminalStatus?: AgentTurnRecord['status']
+  /**
+   * The last assistant message's `stop_reason`, verbatim. Providers that never record a terminal
+   * event (Qoder, Claude, OpenCode) still say why the model stopped replying, which is the only
+   * proof that the reply finished rather than that the host died mid-stream.
+   */
+  stopReason?: string
   completedAt?: string
   startedAt?: string
   durationMs?: number

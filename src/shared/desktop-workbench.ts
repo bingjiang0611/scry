@@ -72,7 +72,7 @@ export type DesktopWorkbenchResult<Request extends DesktopWorkbenchRequest> =
 
 export const DESKTOP_WORKBENCH_METHODS = {
   workspace: ['workspaceList', 'workspaceRead', 'workspaceReadPage', 'workspaceReadKnown', 'workspaceReadPageKnown', 'workspaceOpenExternal', 'workspaceOpenKnownExternal', 'workspaceWrite', 'workspaceCreate', 'workspaceRename', 'workspaceMove', 'workspaceTrash'],
-  sourceControl: ['read', 'diff', 'mutate', 'operations', 'reconcile', 'acknowledge', 'pullRequests', 'pullRequest', 'saveCommitDraft', 'loadCommitDraft', 'saveDraft', 'loadDraft'],
+  sourceControl: ['read', 'diff', 'mutate', 'operations', 'reconcile', 'acknowledge', 'cancel', 'pullRequests', 'pullRequest', 'saveCommitDraft', 'loadCommitDraft', 'saveDraft', 'loadDraft'],
   terminal: ['terminalStart', 'terminalActive', 'terminalAttach', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'terminalDetach', 'terminalRecordingList', 'terminalRecordingRead', 'terminalRecordingDelete', 'terminalEvents']
 } as const satisfies { [Surface in keyof DesktopWorkbenchApis]: readonly (keyof DesktopWorkbenchApis[Surface])[] }
 

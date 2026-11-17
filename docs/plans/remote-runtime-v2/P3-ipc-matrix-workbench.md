@@ -5,6 +5,7 @@
 | channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |
 |---|---|---|---|---|---|
 | `sourceControl:acknowledge` | forward | `desktopWorkbench:acknowledge` | — | 等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验） | git 与 workspace 授权归 daemon |
+| `sourceControl:cancel` | forward | `desktopWorkbench:cancel` | — | 等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验；本机 App 另走 control lane，避免排在被取消的 push/fetch 之后） | git 与 workspace 授权归 daemon；取消的是 daemon 里正在跑的 push/fetch，走 control lane，不排在它之后 |
 | `sourceControl:diff` | forward | `desktopWorkbench:diff` | — | 等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验） | git 与 workspace 授权归 daemon |
 | `sourceControl:loadCommitDraft` | forward | `desktopWorkbench:loadCommitDraft` | — | 等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验） | git 与 workspace 授权归 daemon |
 | `sourceControl:loadDraft` | forward | `desktopWorkbench:loadDraft` | — | 等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验） | git 与 workspace 授权归 daemon |

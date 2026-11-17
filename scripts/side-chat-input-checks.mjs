@@ -2,7 +2,7 @@ import { CHILD_COMPOSER, json } from './side-chat-driving.mjs'
 import { exerciseSideChatUntrustedText } from './side-chat-untrusted-text-checks.mjs'
 
 /** Native composition and untrusted Provider text acceptance for the selected child. */
-export async function exerciseSideChatInput({ cdp, evaluate, check, childId, controls, showChild }) {
+export async function exerciseSideChatInput({ cdp, evaluate, check, childId, controls, showChild, ipcCountsPath }) {
   const { capture, click, clearDraft, keyStroke, wait, conversation, inputs } = controls
   // 6. Real IME composition must not send, and committing it must not lose the text.
   // End activates the last tab, which need not be the conversation under test.
@@ -26,7 +26,9 @@ export async function exerciseSideChatInput({ cdp, evaluate, check, childId, con
   await capture('layout-ime')
 
   // 7. Snapshot and Provider text is untrusted: it renders as text, never as markup.
-  const injected = await exerciseSideChatUntrustedText({ cdp, evaluate, check, childId, click, wait, capture, conversation })
+  const { injected, lateRecordedRunId } = await exerciseSideChatUntrustedText({
+    cdp, evaluate, check, childId, click, wait, capture, conversation, ipcCountsPath })
 
-  return { ime: { value: composing.value, dispatchedDuringComposition: imeDispatched }, untrustedText: injected }
+  return { ime: { value: composing.value, dispatchedDuringComposition: imeDispatched },
+    lateRecordedRunId, untrustedText: injected }
 }

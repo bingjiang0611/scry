@@ -2,11 +2,11 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：176 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：60，一半 main 一半 daemon（`split`）：7，转发到现有 op：25，需要新增 op：84
+- 生产特权 IPC channel：178 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：60，一半 main 一半 daemon（`split`）：7，转发到现有 op：26，需要新增 op：85
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 18 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
-- 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 30 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
+- 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 31 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
 ## 判定规则
 
@@ -31,6 +31,7 @@
 | `agent:adoptActiveRun` | new-op | `runControl:adoptActiveRun` | controls | — | run 登记表在 daemon |
 | `agent:answerQuestion` | forward | `answerQuestion` | — | 等价 | 待答问题在 daemon |
 | `agent:billingState` | new-op | `billing:billingState` | analytics | — | 计费账本在 daemon 持有的 scry.db 里 |
+| `agent:cancelMcpSnapshot` | new-op | `mcp:cancelMcpSnapshot` | providers | — | 实时检测在 daemon 进程内登记，取消必须到同一进程；走 control lane，不排在被取消的 long 请求之后 |
 | `agent:catalogHealth` | new-op | `sessionStore:catalogHealth` | navigation | — | 会话账本在 daemon |
 | `agent:chooseFolder` | split | `workspaceSelection:chooseFolder` | navigation | main: 原生目录选择框与窗口的当前工作区（同 agent:setCwd）留在 main；daemon 只收选择框给出的路径，校验 canonical 目录并 rememberProject，App 在 daemon 回答后再选中该目录 | 选择框与持久化分开 |
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |

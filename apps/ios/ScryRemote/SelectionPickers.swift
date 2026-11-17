@@ -32,6 +32,7 @@ struct FolderBrowseRow: View {
   let ref: G0Transport.RunProjectRef
   let selected: Bool
   let onOpen: () -> Void
+  var transition: Namespace.ID?
 
   var body: some View {
     Button(action: onOpen) {
@@ -39,6 +40,7 @@ struct FolderBrowseRow: View {
         Image(systemName: Symbol.folder).font(.system(size: 16)).foregroundStyle(Palette.dim).frame(width: 22)
         VStack(alignment: .leading, spacing: 3) {
           Text(ref.label).font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.fg).lineLimit(2)
+            .directoryTitle(ref.path, in: transition)
           Text(ref.path).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(2)
         }
         Spacer()
@@ -78,29 +80,58 @@ struct ProjectPickerSheet: View {
   @Environment(RemoteRunStore.self) var run
   @Environment(\.dismiss) private var dismiss
   let onChoose: (G0Transport.RunProjectRef) -> Void
+  @Namespace private var directoryTransition
+  @State private var pendingDirectory: G0Transport.RunProjectRef?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  private func browse(_ directory: G0Transport.RunProjectRef?) {
+    withAnimation(Motion.animation(.page, reduceMotion: reduceMotion)) {
+      pendingDirectory = directory
+      run.loadDirectories(path: directory?.path)
+    }
+  }
+
+  /// Shared by `.idle` and `.loading`: both are "no listing yet", but only `.idle`
+  /// issues the first read (see the `.task` in `body`).
+  @ViewBuilder private var readingPlaceholder: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      if let pendingDirectory {
+        // Requested directory, not a successful listing. Match the real
+        // heading's inset; selection stays unavailable until the host replies.
+        Color.clear.frame(height: 44).accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(pendingDirectory.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.fg)
+            .directoryTitle(pendingDirectory.path, in: directoryTransition)
+          Text(pendingDirectory.path).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(3)
+        }.padding(.vertical, 12)
+      }
+      PlaceholderRows(label: ConnectionCopy.readingFolders, count: 5, rowHeight: 58, detail: true, horizontalPadding: 0)
+    }
+  }
 
   var body: some View {
     SelectionSheet(title: ConnectionCopy.chooseFolderTitle, subtitle: ConnectionCopy.chooseFolderSubtitle, onRefresh: {
-      if case let .loaded(listing) = run.directories { run.loadDirectories(path: listing.current?.path) }
-      else { run.loadDirectories() }
+      if case let .loaded(listing) = run.directories { browse(listing.current) }
+      else { browse(nil) }
     }) {
       switch run.directories {
       case .idle:
         // `.idle` means nothing was requested yet: open the sheet and start the
-        // first read. Rendering the spinner without issuing a request left the
+        // first read. Rendering the placeholder without issuing a request left the
         // list on "读取文件夹…" forever.
-        ProgressView(ConnectionCopy.readingFolders).frame(maxWidth: .infinity).padding(.top, 40)
+        readingPlaceholder
           .task { if case .idle = run.directories { run.loadDirectories() } }
       case .loading:
-        ProgressView(ConnectionCopy.readingFolders).frame(maxWidth: .infinity).padding(.top, 40)
+        readingPlaceholder
       case let .loaded(listing):
         VStack(alignment: .leading, spacing: 0) {
           if let current = listing.current {
-            Button { run.loadDirectories(path: listing.parent?.path) } label: {
+            Button { browse(listing.parent) } label: {
               HStack(spacing: 9) {
                 Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
                 Text(listing.parent?.label ?? ConnectionCopy.authorizedProjects).font(.system(size: 14, weight: .medium))
                   .foregroundStyle(Palette.accentText)
+                  .directoryTitle(listing.parent?.path, in: directoryTransition)
                 Spacer()
               }
               .foregroundStyle(Palette.accent).frame(minHeight: 44).contentShape(Rectangle())
@@ -109,6 +140,7 @@ struct ProjectPickerSheet: View {
 
             VStack(alignment: .leading, spacing: 4) {
               Text(current.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(Palette.fg)
+                .directoryTitle(current.path, in: directoryTransition)
               Text(current.path).font(.system(size: 11)).foregroundStyle(Palette.dim).lineLimit(3)
               Button {
                 onChoose(current)
@@ -130,7 +162,8 @@ struct ProjectPickerSheet: View {
               Text(ConnectionCopy.noSubfolders).font(.system(size: 14)).foregroundStyle(Palette.dim).padding(.vertical, 18)
             } else {
               ForEach(listing.directories, id: \.path) { ref in
-                FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path) { run.loadDirectories(path: ref.path) }
+                FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path,
+                                onOpen: { browse(ref) }, transition: directoryTransition)
               }
             }
           } else if listing.directories.isEmpty {
@@ -138,7 +171,8 @@ struct ProjectPickerSheet: View {
                        symbol: Symbol.folder)
           } else {
             ForEach(listing.directories, id: \.path) { ref in
-              FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path) { run.loadDirectories(path: ref.path) }
+              FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path,
+                              onOpen: { browse(ref) }, transition: directoryTransition)
             }
           }
         }
@@ -149,20 +183,42 @@ struct ProjectPickerSheet: View {
   }
 }
 
+private struct DirectoryTitle: ViewModifier {
+  let path: String?
+  let namespace: Namespace.ID?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if let path, let namespace, !reduceMotion {
+      content.matchedGeometryEffect(id: path, in: namespace).transition(Motion.none)
+    } else { content }
+  }
+}
+
+private extension View {
+  func directoryTitle(_ path: String?, in namespace: Namespace.ID?) -> some View {
+    modifier(DirectoryTitle(path: path, namespace: namespace))
+  }
+}
+
 struct ProviderPickerSheet: View {
   @Environment(RemoteRunStore.self) var run
   @Environment(\.dismiss) private var dismiss
   let onChoose: (G0Transport.RunProviderRef) -> Void
+
+  private var readingPlaceholder: some View {
+    PlaceholderRows(label: ConnectionCopy.readingProviders, count: 4, rowHeight: 56, icon: false, detail: true, horizontalPadding: 0)
+  }
 
   var body: some View {
     SelectionSheet(title: ConnectionCopy.chooseProviderTitle, subtitle: ConnectionCopy.chooseProviderSubtitle,
                    onRefresh: { run.loadProviders(force: true) }) {
       switch run.providers {
       case .idle:
-        ProgressView(ConnectionCopy.readingProviders).frame(maxWidth: .infinity).padding(.top, 40)
+        readingPlaceholder
           .task { if case .idle = run.providers { run.loadProviders() } }
       case .loading:
-        ProgressView(ConnectionCopy.readingProviders).frame(maxWidth: .infinity).padding(.top, 40)
+        readingPlaceholder
       case let .loaded(list):
         VStack(spacing: 0) {
           ForEach(list, id: \.selectionId) { ref in

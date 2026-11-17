@@ -39,7 +39,7 @@ describe('BackgroundServicePanel', () => {
       version: '1.0.0', startedAt: null, devices: null, activeRuns: null
     }))
     expect(html).toContain('后台服务的版本（1.0.0）与本 App（2.0.0）不一致')
-    expect(html).toContain('class="btn primary "')
+    expect(html).toContain('class="btn primary"')
     expect(html.match(/class="unknown"/g)?.length).toBe(3)
     // Unknown is never a count.
     expect(html).not.toContain('0 台')
@@ -71,7 +71,7 @@ describe('BackgroundServicePanel', () => {
     expect(linux).toContain('gnome-keyring')
     expect(linux).toContain('不可用（daemon_credential_unavailable:unsafe_credential_storage）')
     // Restarting the daemon does not bring a keyring; the restart button stays, but secondary.
-    expect(linux).not.toContain('class="btn primary "')
+    expect(linux).not.toContain('class="btn primary"')
     expect(buttons(linux)).toEqual(['刷新', '重启后台服务', '退出 Scry 与后台服务'])
     expect(render(status, { platform: 'macos' })).not.toContain('gnome-keyring')
   })

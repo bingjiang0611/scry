@@ -39,7 +39,9 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
         return deps.links.sideChatCascade.run(scope)
       }
     },
-    publishDataUpdated: (event) => events.append({ kind: 'data', event })
+    publishDataUpdated: (event) => events.append({ kind: 'data', event }),
+    // The archived purge's real count, forwarded to the App's window as in process.
+    publishDeleteProgress: (progress) => events.append({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
   })
   deps.links.deleteOneSession = (request, options) => lifecycle.deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof lifecycle.deleteOneSession>[1])
   return {

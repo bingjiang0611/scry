@@ -7,12 +7,12 @@
 .clibtn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: var(--panel2);
   border: 1px solid var(--border2);
   border-radius: var(--r-sm);
   color: var(--fg);
-  padding: 6px 11px;
+  padding: 8px 12px;
   cursor: pointer;
   font: inherit;
 }
@@ -20,15 +20,12 @@
   position: absolute;
   bottom: calc(100% + 6px);
   min-width: 240px;
-  background: var(--panel2);
-  border: 1px solid var(--border2);
-  border-radius: var(--r-md);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  padding: 6px;
-  z-index: 20;
+  z-index: var(--layer-dropdown);
 }
+/* The workdir and location pickers are panels (role="dialog") on the menu surface; they keep a wider inset. */
 .wdmenu {
   left: 0;
+  padding: var(--space-2);
 }
 .wdrecent-list {
   max-height: 200px;
@@ -45,7 +42,7 @@
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding-right: 42px;
+  padding-right: 40px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -65,11 +62,11 @@
 }
 .wdrecent-copy b {
   color: var(--fg);
-  font: 600 12px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
 }
 .wdrecent-copy code {
   color: var(--dim3);
-  font: 10px/1.2 var(--font-mono);
+  font: var(--text-2xs)/1.2 var(--font-mono);
 }
 .wdrecent-remove {
   position: absolute;
@@ -111,10 +108,9 @@
   width: min(286px, calc(100vw - 32px));
   min-width: 0;
 }
-.cltitle,
-.mhdr {
-  padding: 8px 10px 4px;
-  font-size: 11px;
+.cltitle {
+  padding: 8px 8px 4px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--dim2);
@@ -125,30 +121,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   letter-spacing: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--fg);
 }
 .climenu .mitem {
   min-width: 0;
 }
 
-/* 单选菜单的对勾列：未选中也占位，名称从同一列开始（agent / provider 筛选共用）。 */
-.menu-check {
-  width: 18px;
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  color: var(--fg);
-}
-
-.menu-check .ico {
-  width: 14px;
-  height: 14px;
-}
-
 .climenu .mitem,
 .arch-provider-menu .mitem {
-  gap: 10px;
+  gap: 8px;
 }
 .agent-option-name {
   min-width: 0;
@@ -160,7 +142,7 @@
   min-width: 0;
 }
 .agent-option-pick {
-  padding-right: 38px;
+  padding-right: 40px;
 }
 .agent-option-copy {
   min-width: 0;
@@ -176,12 +158,12 @@
 }
 .agent-option-copy b {
   color: var(--fg);
-  font: 600 12px/1.2 var(--font-ui);
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
 }
 .agent-option-copy small {
   /* 版本与检测来源是给中文界面读的短句，不用等宽字体和小号字号。 */
   color: var(--dim2);
-  font: 11px/1.35 var(--font-ui);
+  font: var(--text-xs)/1.35 var(--font-ui);
 }
 .agent-option-remove {
   position: absolute;
@@ -219,55 +201,14 @@
 .climenu .ck {
   flex: none;
 }
-.mitem {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 40px;
-  padding: 8px 10px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  white-space: nowrap;
-}
-button.mitem {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-button.mitem:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-.mitem:hover {
-  background: var(--panel2);
-}
-.mitem.on {
-  color: var(--fg);
-}
-.mitem .ck {
-  margin-left: auto;
-  color: var(--ok);
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 .agicon {
   width: 18px;
   display: inline-grid;
   place-items: center;
 }
-.mdiv {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 4px;
-}
 .dim {
   color: var(--dim);
 }
 .pad {
-  padding: 6px 10px;
+  padding: 8px 8px;
 }

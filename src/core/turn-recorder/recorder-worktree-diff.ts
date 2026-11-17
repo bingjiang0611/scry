@@ -36,6 +36,7 @@ export async function newWorktreeTurnDiffs(
     captureRoot,
     excludedPaths: [enablement.dataRoot],
     events,
-    patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames
+    patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
+    diffExclude: [...(enablement.config.capture.diffExclude ?? []), ...(open.capture?.diffExclude ?? [])]
   })))
 }

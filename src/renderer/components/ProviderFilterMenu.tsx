@@ -7,9 +7,8 @@ import { PROVIDER_FILTER_COPY } from '../constants/copy'
 
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
-import { MenuCheck } from './menu-parts'
+import { Menu, MenuItem, MenuSeparator } from './primitives/Menu'
 import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
-import { moveMenuFocus } from './WorkdirPicker'
 
 /** Provider id 不是给人读的；未知来源单独说明，不冒充成某个 Provider。 */
 export function providerFilterLabel(provider: string): string {
@@ -63,44 +62,23 @@ export function ProviderFilterMenu({
         <Icon name="chevronDown" />
       </button>
       {open && (
-        <div
-          id={menuId}
-          ref={menuRef}
-          className="menu arch-provider-menu"
-          role="menu"
-          aria-label={PROVIDER_FILTER_COPY.label}
-          onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
-        >
-          <button
-            type="button"
-            role="menuitemradio"
-            className="mitem"
-            aria-checked={value === 'all'}
-            onClick={() => pick('all')}
-          >
-            <MenuCheck selected={value === 'all'} />
-            <Icon name="grid" />
+        <Menu id={menuId} ref={menuRef} className="menu arch-provider-menu" label={PROVIDER_FILTER_COPY.label}>
+          <MenuItem checked={value === 'all'} icon={<Icon name="grid" />} onClick={() => pick('all')}>
             <span>{providerFilterLabel('all')}</span>
-          </button>
-          <div className="mdiv" role="separator" />
+          </MenuItem>
+          <MenuSeparator />
           {providers.map((provider) => (
-            <button
+            <MenuItem
               key={provider}
-              type="button"
-              role="menuitemradio"
-              className="mitem"
+              checked={value === provider}
               data-provider-option={provider}
-              aria-checked={value === provider}
+              icon={provider === 'legacy_unknown' ? <Icon name="box" /> : <ProviderGlyph provider={provider as ProviderId} />}
               onClick={() => pick(provider)}
             >
-              <MenuCheck selected={value === provider} />
-              {provider === 'legacy_unknown'
-                ? <Icon name="box" />
-                : <ProviderGlyph provider={provider as ProviderId} />}
               <span>{providerFilterLabel(provider)}</span>
-            </button>
+            </MenuItem>
           ))}
-        </div>
+        </Menu>
       )}
     </div>
   )

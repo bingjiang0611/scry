@@ -37,7 +37,7 @@ describe('workbench forwards', () => {
   it('forwards every workspace and source-control row of the matrix, and only those', () => {
     const forwarded = rows.filter((row) => !REFUSED.has(row.channel)).map((row) => row.channel).sort()
     expect(Object.keys(WORKBENCH_FORWARDS).sort()).toEqual(forwarded)
-    expect(forwarded).toHaveLength(19)
+    expect(forwarded).toHaveLength(20)
   })
 
   it('builds the matrix surface and method, bound to the window workspace', () => {
@@ -78,7 +78,8 @@ describe('workbench forwards', () => {
       const read = DESKTOP_WORKBENCH_READ_METHODS.has(request.query.method)
       expect(entry.read, channel).toBe(read)
       expect(replayableRequest(request), channel).toBe(read)
-      expect(laneForRequest(request), channel).toBe(read ? 'bulk' : 'workbench')
+      // A cancel is a write (never replayed) but must not wait behind the push it cancels.
+      expect(laneForRequest(request), channel).toBe(read ? 'bulk' : channel === 'sourceControl:cancel' ? 'control' : 'workbench')
     }
     expect(WORKBENCH_FORWARDS['workspace:write']!.read).toBe(false)
     expect(WORKBENCH_FORWARDS['sourceControl:mutate']!.read).toBe(false)

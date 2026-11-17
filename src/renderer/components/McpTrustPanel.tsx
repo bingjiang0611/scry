@@ -5,6 +5,7 @@ import type { McpMeta } from '../env'
 import type { Finding, InventoryTarget, ScanReport, Severity } from '../../cli/mcpguard-core'
 import { isMcpGuardReport } from '@shared/mcpguard-report'
 import { Icon } from './primitives/Icon'
+import { Notice } from './primitives/Notice'
 
 type TrustTone = 'ok' | 'warn' | 'bad' | 'muted'
 
@@ -282,9 +283,9 @@ export function McpTrustPanel({
           运行时 MCP <span>{mcpLive.length ? `${mcpLive.length} live` : runtimeName}</span>
         </summary>
         {missingAuth.length > 0 && (
-          <div className="mcp-auth-banner">
-            <Icon name="alert" /> {missingAuth.length} 个 MCP server 需要授权 · 按当前运行时处理
-          </div>
+          <Notice tone="warn" size="sm" className="mcp-auth-banner">
+            {missingAuth.length} 个 MCP server 需要授权 · 按当前运行时处理
+          </Notice>
         )}
         {attentionLive.slice(0, 8).map((item) => (
           <div className="billing-row" key={`${item.name}-${item.status}`} title={item.serverVersion ?? item.name}>

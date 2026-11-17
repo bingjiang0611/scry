@@ -4,6 +4,16 @@
 
 ## 路径地图和覆盖边界
 
+### 性能任务的证据与授权合同
+
+- **指标诚实**：测不到写 `unavailable` + 原因，不记 0。毫秒结论注明机器负载。
+- **只降不升**：不手改 `scripts/performance-ratchet.json` 来放宽；门限或基线升高、删除指标需写 `raise` 记录并经维护者同意（CI 性能检查不阻塞合并，不再要求 `performance-raise-approved` 标签）。收紧用 `npm run performance:propose`。candidate 升为门禁需要稳定、敏感、相关三项证据，并经维护者确认。
+- **性能任务才强制测**：做性能优化、宣称变快或用户要求时，运行 `npm run performance:measure`（可加 `--scenario`），每个 `worse` 说明是必要工作还是回归，回归先修。普通改动碰到热路径时可选测，不作为提交或合并前置条件。
+- **不骗计数**：测量代码（collector、`scripts/performance-*.mjs`、workload）与优化代码分开提交；不缩小 workload、不换调用方式、不把工作挪到不计数的地方来让数字变小。
+- **如实宣称**：说“更快”要写明级别——L1 计数下降、L2 受控或真实 App 毫秒下降、L3 发布后日常记录（同场景 ≥30 样本、≥2 会话）——并说明减少的工作去了哪里。不用 L1 冒充 L2/L3。
+- **测速纪律**：毫秒测量串行，经 `.agents/skills/scry-performance-climb/scripts/timing-run.mjs` 加锁；计数可并行。不为性能测试加 sleep、重试或扩大超时来变绿。
+- **日常记录**：`userData/performance` 只读、先快照再分析、不上传、不粘贴会话内容。改记录格式、保留策略或采集内容需维护者同意。
+
 权威清单入口是 [`scripts/performance-paths.json`](../scripts/performance-paths.json)，其中 `include` 按领域展开片段；文件与 Git diff 映射位于 [`workbench.json`](../scripts/performance-paths/workbench.json)。可运行 `npm run performance:inventory` 检查引用和注册入口。新增未归类的 main IPC channel / named trace 会使检查失败。namespace 下新增方法自动归属该组，但仍需人工更新相应的具体场景、数据规模和验收。
 
 | 路径 ID | 用户操作 | 并行责任组 |
@@ -100,7 +110,7 @@ npm run performance:report -- '<userData>/performance' '<baseline-build>' '<cand
 - 判定（`performance-ratchet.mjs check`）：每项单独判定，不能互相抵消。gating 项超过门限加误差、重复测量差异超过误差、缺失或 unavailable 都失败；低于门限报告 `tightenable`。
 - 基线（candidate）：每个 candidate 在 `baselines` 中按平台（如 `darwin-arm64`、`linux-x64`）记录最近接受的值。`check` 用同平台基线把它标为 `worse`/`unchanged`/`better`，报告顶部列出所有 `worse`，但**不让 CI 失败**；没有同平台基线时只显示数值，不跨平台下结论。CPU 指令数只在 Linux 可测，macOS 不记基线。2026-10-16 已用 `d26ddb1` 在 macOS 记录 25 项基线；负向对照：在 `sessionHistoryPage` 中多调用一次 `JSON.stringify`，`history.page/json.stringify.calls` 1→2 被标为 `worse`，其余 24 项 `unchanged`，`check` 仍通过。
 - 收紧（`propose`）：把 gating 门限降到新观测值；为当前平台补记缺失的 candidate 基线，或把基线降到更低的新值。不提升、不升级 candidate、不删除。基线升高或删除会掩盖 `worse`，`guard` 视同放宽，需要批准。CI 不用 PR 代码回写仓库；更新由人工审查或受信任任务提交。
-- 放宽（`guard`）：提高门限、扩大误差、降级或删除 gating 项，必须写 `raise: { from, to, reason }`，并由维护者给 PR 加 `performance-raise-approved` 标签后重新运行。改变 workload、单位或层就是新指标，必须使用新键。
+- 放宽（`guard`）：提高门限、扩大误差、降级或删除 gating 项，必须写 `raise: { from, to, reason }` 并经维护者同意。CI 仍据 `performance-raise-approved` 标签判断 guard 结果，但 2026-11-15 起 CI 不阻塞合并，该标签不是合并前置条件。改变 workload、单位或层就是新指标，必须使用新键。
 
 ## 并行优化任务合同
 

@@ -3,6 +3,7 @@ import type { ProjectMeta } from '../env'
 import { MODAL_COPY, SIDEBAR_PROJECT_COPY as copy } from '../constants/copy'
 import { ModalFrame, requestModalClose } from './Modals'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { Button } from './primitives/Button'
 
 export function ProjectDialog({
   mode,
@@ -42,8 +43,8 @@ export function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={() => requestModalClose()}>{copy.cancel}</button>
-            <button type="submit" className="btn primary" disabled={!name.trim()}>{copy.save}</button>
+            <Button onClick={() => requestModalClose()}>{copy.cancel}</Button>
+            <Button variant="primary" type="submit" disabled={!name.trim()}>{copy.save}</Button>
           </div>
         </form>
       ) : (
@@ -53,8 +54,8 @@ export function ProjectDialog({
             <code>{project.cwd}</code>
           </div>
           <div className="project-dialog-actions">
-            <button type="button" className="btn" onClick={() => requestModalClose()}>{copy.cancel}</button>
-            <button type="button" className="btn project-remove-confirm" onClick={() => void onRemove()}>{copy.remove}</button>
+            <Button onClick={() => requestModalClose()}>{copy.cancel}</Button>
+            <Button variant="danger" onClick={() => void onRemove()}>{copy.remove}</Button>
           </div>
         </>
       )}

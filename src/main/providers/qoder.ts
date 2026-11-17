@@ -134,7 +134,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
       }
     },
     mcp: {
-      snapshot: (context, refresh = false, execution) => readQoderMcpSnapshot(homeDir, context, refresh, execution),
+      snapshot: (context, refresh = false, execution, signal) => readQoderMcpSnapshot(homeDir, context, refresh, execution, signal),
       reauthenticate: (context, targetId, execution, interaction) =>
         reauthenticateQoderMcp(context, targetId, execution, interaction)
     },

@@ -113,6 +113,7 @@ export const WORKBENCH_FORWARDS: DaemonForwardTable = {
   'sourceControl:operations': sourceControl('operations'),
   'sourceControl:reconcile': sourceControl('reconcile'),
   'sourceControl:acknowledge': sourceControl('acknowledge'),
+  'sourceControl:cancel': sourceControl('cancel'),
   'sourceControl:pullRequests': sourceControl('pullRequests'),
   'sourceControl:pullRequest': sourceControl('pullRequest'),
   'sourceControl:saveCommitDraft': sourceControl('saveCommitDraft', nothing),

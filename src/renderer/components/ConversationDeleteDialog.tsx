@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
 import { ModalFrame, requestModalClose } from './Modals'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
+import { Button } from './primitives/Button'
 
 export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   id: string
@@ -12,21 +14,27 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   const [preview, setPreview] = useState<ConversationDeletionPreview>()
   const [result, setResult] = useState<ConversationDeletionResult>()
   const [error, setError] = useState<string>()
+  // A failed read of the deletion scope can be read again; a failed delete cannot be
+  // retried from here (it may have partly run), so the two are kept apart.
+  const [previewError, setPreviewError] = useState<string>()
+  const [previewAttempt, setPreviewAttempt] = useState(0)
   const [working, setWorking] = useState(false)
   const pending = useRef(false)
   const attempted = useRef(false)
   const cancel = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     let cancelled = false
+    setPreviewError(undefined)
     void window.scry.conversations.previewDeletion(id).then(
       preview => { if (!cancelled) setPreview(preview) },
-      error => { if (!cancelled) setError(ipcErrorMessage(error)) }
+      error => { if (!cancelled) setPreviewError(ipcErrorMessage(error)) }
     )
     return () => { cancelled = true }
-  }, [id])
+  }, [id, previewAttempt])
+  const showChecking = useDelayedFlag(!preview && !previewError)
   useEffect(() => {
-    if (!working && (result || error)) cancel.current?.focus()
-  }, [working, result, error])
+    if (!working && (result || error || previewError)) cancel.current?.focus()
+  }, [working, result, error, previewError])
   const close = (): void => { if (!pending.current) onClose(attempted.current) }
   const confirm = async (): Promise<void> => {
     if (!preview || pending.current) return
@@ -60,15 +68,17 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       {preview.sideChats.length > 20 && <p>另有 {preview.sideChats.length - 20} 个未列出，同样会被删除。</p>}
     </details>}
     {preview?.targets.some(target => target.sharedWith.length > 0) && <p role="note">本次仍被引用的整组副本会继续保留。引用消失后，可在已存档对话中重新预览并明确确认回收；不会自动清理。</p>}
-    {!preview && !error && <p role="status">正在核对全部绑定、尝试和共享引用…</p>}
+    <p role="status" aria-busy={!preview && !previewError}>{showChecking && !preview && !previewError ? '正在核对全部绑定、尝试和共享引用…' : ''}</p>
+    {previewError && <p role="alert">无法核对删除范围：{previewError}
+      <Button size="sm" onClick={() => setPreviewAttempt(value => value + 1)}>重新核对</Button></p>}
     {error && <p role="alert">{error}</p>}
     {result && <section role="status"><b>{result.ok ? '逻辑入口已删除；下列记录按合同保留' : '未完整删除；关闭后可重新预览剩余范围'}</b>
       <ul>{result.retained.map(item => <li key={item}>{item}</li>)}</ul>
       {result.failed.map((failure, index) => <p key={index}>{failure.store}: {failure.error}</p>)}
     </section>}
     <div className="unified-actions">
-      <button ref={cancel} className="btn" disabled={working} onClick={() => requestModalClose()}>{result ? '关闭' : '取消'}</button>
-      {!result && <button className="btn danger" disabled={working || !preview || Boolean(error)} onClick={() => { void confirm() }}>{working ? '正在清理…' : preview?.reclaim ? '确认回收已无引用的副本' : '确认删除 Scry 副本'}</button>}
+      <Button ref={cancel} disabled={working} onClick={() => requestModalClose()}>{result ? '关闭' : '取消'}</Button>
+      {!result && <Button variant="danger" disabled={working || !preview || Boolean(error) || Boolean(previewError)} onClick={() => { void confirm() }}>{working ? '正在清理…' : preview?.reclaim ? '确认回收已无引用的副本' : '确认删除 Scry 副本'}</Button>}
     </div>
   </ModalFrame>
 }

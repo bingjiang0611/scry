@@ -40,9 +40,8 @@
 .surface-topbar {
   height: var(--window-titlebar-h, var(--topbar-h));
   min-height: var(--window-titlebar-h, var(--topbar-h));
-  padding-inline: 9px;
+  padding-inline: 8px;
   border-bottom-color: var(--border3);
-  background: transparent;
 }
 
 .surface-tabs {
@@ -58,14 +57,13 @@
   background: var(--surface-strong);
 }
 
-.surface-tab-activate,
-.right-surface-panel .icon-button {
+.surface-tab-activate {
   height: 30px;
 }
 
 .surface-tab-activate .label {
-  font-size: 12px;
-  font-weight: 580;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
 
 .surface-body,
@@ -76,10 +74,6 @@
   background: transparent;
 }
 
-.surface-menu {
-  border-radius: var(--r-md);
-  background: var(--panel);
-}
 
 .surface-card {
   border-color: var(--border);
@@ -110,8 +104,8 @@
 }
 
 .modal-head > b {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
 }
 
 .modal-x,
@@ -133,7 +127,7 @@
 
 .settings-rail {
   gap: 2px;
-  padding: 14px 10px;
+  padding: 16px 8px;
   border-right-color: var(--border3);
   background: var(--sidebar-surface);
 }
@@ -143,7 +137,7 @@
   padding-inline: 12px;
   border-radius: var(--r-sm);
   color: var(--dim);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .settings-tab.active {
@@ -157,18 +151,18 @@
 
 .settings-body {
   gap: 24px;
-  padding: 28px 30px;
+  padding: 28px 32px;
 }
 
 .settings-copy b {
-  font-size: 20px;
-  font-weight: 650;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.02em;
 }
 
 .settings-copy span {
   color: var(--dim2);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .settings-pane .theme-options {
@@ -177,7 +171,7 @@
 
 .theme-option {
   min-height: 88px;
-  padding: 14px;
+  padding: 16px;
   border-radius: var(--r-md);
   background: var(--panel);
 }
@@ -207,7 +201,7 @@
 .inventory-modal .inventory-modal__head,
 .inventory-modal--mcp .inventory-modal__head {
   min-height: 66px;
-  padding: 12px 18px;
+  padding: 12px 16px;
   background: var(--panel);
 }
 
@@ -228,7 +222,6 @@
 }
 
 .inventory-context,
-.skill-scope-tabs,
 .inventory-toolbar,
 .inventory-state-legend {
   border-color: var(--border3);
@@ -244,13 +237,6 @@
 .inventory-search:focus-within {
   background: var(--panel);
   box-shadow: inset 0 0 0 1px var(--border2);
-}
-
-.skill-scope-tabs button.active::after {
-  right: 20%;
-  left: 20%;
-  border-radius: var(--r-xs);
-  background: var(--accent);
 }
 
 .skill-ledger__row,
@@ -278,15 +264,6 @@
   background: var(--panel2);
 }
 
-.menu,
-.ctxmenu,
-.sb-project-menu {
-  border-color: var(--border);
-  border-radius: var(--r-md);
-  background: var(--panel);
-  box-shadow: var(--shadow-pop);
-}
-
 @container main-pane (max-width: 720px) {
   .chat-body,
   .runtime-composer {
@@ -299,10 +276,6 @@
 
   .composer-context .wdpick {
     max-width: 70%;
-  }
-
-  .runtime-composer .composer-action-controls .clibtn {
-    max-width: 96px;
   }
 
   .runtime-composer .model-effort-model {
@@ -339,26 +312,20 @@
     justify-content: flex-end;
   }
 
-  /* The Provider chip keeps its own width budget: a 76px cap showed only "c…" in a
-     400px column. The model picker is the control that shrinks instead. */
-  .composer-action-controls .clipick {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
+  /* Keep the Agent Profile readable; the model picker absorbs the remaining width. */
   .runtime-composer .composer-action-controls .clibtn {
     width: auto;
-    max-width: min(168px, 42cqi);
-    padding-inline: 6px;
+    max-width: 192px;
+    padding-inline: 8px;
   }
 
-  .model-effort-picker {
+  .runtime-composer .model-effort-picker {
     flex: 1 1 96px;
   }
 
   .model-effort-trigger {
     width: 100%;
-    padding-inline: 6px;
+    padding-inline: 8px;
   }
 
   .model-effort-model {
@@ -370,7 +337,7 @@
   }
 
   .permission-mode-trigger {
-    padding-inline: 7px;
+    padding-inline: 8px;
   }
 
   .permission-mode-popover {

@@ -85,7 +85,11 @@ export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget' | 'policy'
 export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
 
 export interface TurnDiffCollection {
-  strategy: 'targeted' | 'full_fallback'
+  /**
+   * `unchanged` is one cheap status read proving a clean baseline's repository did not change; it
+   * skips the full collection instead of reporting an empty one as if it had been computed.
+   */
+  strategy: 'targeted' | 'full_fallback' | 'unchanged'
   evidence: 'git_status' | 'git_status+structured' | 'fallback'
   candidatePathCount: number
   discoveryMs: number
@@ -177,7 +181,20 @@ export interface TurnDiffSnapshot {
   baselineReason?: WorktreeBaselineReason
   /** 并行工作区重叠证据；缺失 = 旧记录或未观测，不能读成「独占归因」。 */
   workspaceOverlap?: WorkspaceOverlapEvidence
+  /**
+   * 接入方为这次会话声明的 diff 排除：实际命中的路径，以及因此没进 `files` 的文件数。
+   * 只记路径和数量，不记文件正文；缺失 = 这次 diff 没有因接入方声明而少任何文件。
+   */
+  diffExclude?: TurnDiffExcludeEvidence
 }
+
+/** 接入方声明排除的路径，以及因此没进 `files` 的文件数。只有路径和数量，没有正文。 */
+export interface TurnDiffExcludeEvidence {
+  paths: string[]
+  files: number
+}
+
+
 
 export function nonNegativeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null
@@ -238,6 +255,9 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     (collectionRaw?.strategy === 'targeted' &&
       (collectionRaw.evidence === 'git_status' || collectionRaw.evidence === 'git_status+structured') &&
       fallbackReason == null) ||
+    (collectionRaw?.strategy === 'unchanged' &&
+      collectionRaw.evidence === 'git_status' &&
+      fallbackReason == null) ||
     (collectionRaw?.strategy === 'full_fallback' &&
       collectionRaw.evidence === 'fallback' &&
       fallbackReason != null)
@@ -275,6 +295,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
         ? { baselineStatus: 'partial' as const, baselineReason }
         : undefined
   const workspaceOverlap = normalizeWorkspaceOverlap(raw.workspaceOverlap)
+  const diffExclude = normalizeDiffExcludeEvidence(raw.diffExclude)
   return {
     version: 1,
     status: raw.status as TurnDiffStatus,
@@ -290,6 +311,18 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     ...(collection ? { collection } : {}),
     ...(baseline ? { baseline } : {}),
     ...(worktreeBaseline ? { baselineSource: 'worktree-creation-reflog' as const, ...worktreeBaseline } : {}),
-    ...(workspaceOverlap ? { workspaceOverlap } : {})
+    ...(workspaceOverlap ? { workspaceOverlap } : {}),
+    ...(diffExclude ? { diffExclude } : {})
   }
+}
+
+/** 只保留能重新校验的份数：路径非空字符串，文件数是非负整数。 */
+function normalizeDiffExcludeEvidence(value: unknown): TurnDiffExcludeEvidence | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const files = nonNegativeInteger(raw.files)
+  if (!Array.isArray(raw.paths) || files == null || files === 0) return undefined
+  const paths = raw.paths.flatMap((item): string[] =>
+    typeof item === 'string' && item.length > 0 && item.length <= 1024 ? [item] : [])
+  return paths.length ? { paths, files } : undefined
 }

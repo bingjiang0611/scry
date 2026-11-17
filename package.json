@@ -1,6 +1,6 @@
 {
   "name": "scry",
-  "version": "0.2.249",
+  "version": "0.2.250",
   "description": "本地桌面 app：通过原生 Provider adapter 驱动 AI coding agent，把执行过程实时画成 trace 树（可观测/可控制/可恢复）",
   "desktopName": "scry.desktop",
   "private": true,
@@ -60,6 +60,7 @@
     "bench:session-history": "vitest bench src/main/session-history.bench.ts src/main/transcript-archive.bench.ts --run",
     "bench:renderer": "vitest bench src/renderer/performance.bench.tsx --run",
     "soak:performance": "node scripts/performance-soak.mjs",
+    "design:audit": "node scripts/design-system-audit.mjs",
     "performance:inventory": "node scripts/performance-report.mjs inventory",
     "performance:report": "node scripts/performance-report.mjs report",
     "performance:bench": "node scripts/performance-bench.mjs",

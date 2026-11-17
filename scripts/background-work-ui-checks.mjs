@@ -14,6 +14,7 @@ export async function exercise() {
   click('#new-run')
   await wait(() => status() === '等待后台任务')
   check(!document.querySelector('.skeleton'), 'Background wait still shows generation skeleton')
+  check(!document.querySelector('.who .running .spin'), 'Background wait still shows the generation ring')
   check(!document.querySelector('.model-text.streaming'), 'Background wait still shows streaming cursor')
   check(document.querySelectorAll('.background-work-task').length === 2, 'Missing observed tasks')
   const panel = document.querySelector('.background-work-panel')
@@ -50,7 +51,9 @@ export async function exercise() {
   await wait(() => document.querySelectorAll('.background-work-task').length === 1)
   check(document.querySelector('[aria-label="停止任务 b"]'), 'Wrong task removed')
   click('#resume')
-  await wait(() => status() === '运行中' && document.querySelector('.skeleton'))
+  // Generation is shown by the header's running ring; the answer placeholder only
+  // stands in before the first output, so it is not the generation signal here.
+  await wait(() => status() === '运行中' && document.querySelector('.who .running .spin'))
   const wholeBefore = Number(document.querySelector('#fixture').dataset.wholeStops)
   click('.run-status-stop')
   await wait(() => Number(document.querySelector('#fixture').dataset.wholeStops) === wholeBefore + 1)

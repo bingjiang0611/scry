@@ -35,7 +35,7 @@ struct ChatView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      header
+      header.conversationArrival()
       ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", followLatestRequest: latestReadRequest) {
             if !hasTurn {
               EmptyState(title: ConversationCopy.startTitle,
@@ -46,7 +46,9 @@ struct ChatView: View {
               }) { $0 }
               if run.prompt != nil {
                 ForEach(ConversationTurn.focused(run).withSplitPlans(splitPlans["focused"] ?? [:])
-                  .withLastLineIDs([0: run.output.last?.id ?? -1]).rows(id: "focused")) { $0 }
+                  .withLastLineIDs([0: run.output.last?.id ?? -1]).rows(id: "focused")) {
+                    $0.environment(\.submittedTurn, run.activeSessionIdentity)
+                  }
               }
             }
       }

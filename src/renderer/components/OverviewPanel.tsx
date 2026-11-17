@@ -1,3 +1,4 @@
+import { useCopyFeedback } from '../hooks/useCopyFeedback'
 // 右栏纵览：会话 verdict 卡 + context 占用 + 每轮调用 + 文件与 diff 证据。
 import { memo, useId, useState, type CSSProperties, type MouseEvent } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
@@ -10,6 +11,7 @@ import { Icon } from './primitives/Icon'
 import { OverviewSessionPanel } from './OverviewSessionPanel'
 import { OverviewTurnCalls } from './OverviewTurnCalls'
 import { useOverviewPanelModel } from './overview-panel-model'
+import { Tabs } from './primitives/Tabs'
 // 拆分后仍由此模块对外提供原来的公开面，避免调用方与测试四处追新路径。
 export { TurnToolErrorDetails, overviewToolErrors } from './OverviewToolErrors'
 export type { OverviewToolError } from './OverviewToolErrors'
@@ -32,7 +34,8 @@ function formatOverviewCredits(value: number): string {
 
 function OverviewSessionSummary({ sessionId, compactions }: { sessionId: string | null; compactions: number }) {
   const [expanded, setExpanded] = useState(false)
-  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const idCopy = useCopyFeedback()
+  const copyStatus = idCopy.status.state
   const [scopeDismissed, setScopeDismissed] = useState(false)
   const scopeId = useId()
   const fullId = useId()
@@ -65,7 +68,7 @@ function OverviewSessionSummary({ sessionId, compactions }: { sessionId: string 
           </button>
         ) : <span className="overview-session-missing">{copy.missingId}</span>}
         <button type="button" className="overview-session-copy" disabled={!sessionId} aria-label={copy.copy} title={copy.copy} onClick={() => {
-          if (sessionId) void window.scry.copyText(sessionId).then(() => setCopyStatus('copied')).catch(() => setCopyStatus('failed'))
+          if (sessionId) idCopy.copy(sessionId)
         }}><Icon name={copyStatus === 'copied' ? 'check' : 'copy'} /></button>
       </div>
       <div id={fullId} className="overview-session-full-id" hidden={!expanded}><code>{sessionId}</code></div>
@@ -229,30 +232,16 @@ function OverviewPanelBody({
       )}
 
       {turns.length > 0 && (
-        <div className="overview-data-tabs" role="tablist" aria-label={OVERVIEW_SESSION_COPY.dataDimensions}>
-          <button
-            type="button"
-            id="overview-turns-tab"
-            role="tab"
-            aria-selected={overviewDataTab === 'turns'}
-            aria-controls="overview-turns-panel"
-            className={overviewDataTab === 'turns' ? 'active' : ''}
-            onClick={() => setOverviewDataTab('turns')}
-          >
-            轮次数据
-          </button>
-          <button
-            type="button"
-            id="overview-session-tab"
-            role="tab"
-            aria-selected={overviewDataTab === 'session'}
-            aria-controls="overview-session-panel"
-            className={overviewDataTab === 'session' ? 'active' : ''}
-            onClick={() => setOverviewDataTab('session')}
-          >
-            会话数据
-          </button>
-        </div>
+        <Tabs
+          className="overview-data-tabs"
+          label={OVERVIEW_SESSION_COPY.dataDimensions}
+          value={overviewDataTab}
+          onChange={setOverviewDataTab}
+          items={[
+            { value: 'turns', label: '轮次数据', id: 'overview-turns-tab', controls: 'overview-turns-panel' },
+            { value: 'session', label: '会话数据', id: 'overview-session-tab', controls: 'overview-session-panel' }
+          ]}
+        />
       )}
 
       {(

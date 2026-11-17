@@ -1,6 +1,6 @@
 # scry-turn-recorder
 
-Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,把每个顶层用户轮次写成 `.scry/` 下的一个 JSON 文件。
+Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,把观测到的 Agent 轮次工作写成 `.scry/` 下的 JSON 记录。轮次可能由用户或编排器发起,后台唤醒还可能形成续段记录；记录数量不等于人工回合数。
 
 - **不上传任何数据**,不依赖 Electron 或原生模块。
 - **不是沙箱**:它记录发生了什么,不限制 Agent 能做什么。
@@ -9,7 +9,7 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 ## 安装与接入
 
 ```bash
-npm install -g scry-turn-recorder@0.2.69
+npm install -g scry-turn-recorder@0.2.76
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
@@ -68,7 +68,7 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 `status` 的三个阶段不可互相代替:`configured` 只证明配置写入,`hookSeen` 证明 hook 真的到达 recorder,`recordSeen` 才证明轮次已提交。`trusted` 永远是 `unknown` —— Codex 需要交互式确认,其余 Provider 不向 CLI 暴露信任状态;写 `n/a` 等于声称"不需要信任"。
 
-`openTurnsPending`（未收敛的 open turn）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。
+`openTurnsPending`（本工作区还没有 record 的轮次：等待收尾的 + 仍 open 的）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。健康计数里 `pendingCount` 只数等待收尾的条目，`openTurns` / `staleOpenTurns` 单独数仍 open 的轮次（后者已静默超过 30 分钟）。
 
 Agent、skill 与提示词不应主动调用这些命令。
 
@@ -108,6 +108,10 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 
 > ⚠️ **关闭正文不等于脱敏。** 即使 `prompt`、`assistant` 关闭且 `toolOutput: "none"`,以下内容仍会落盘:**工具入参**(Bash 命令原文、Edit 的 old/new 字符串)、**文件路径**、**diff patch**(除非 `diff: false`)。当前没有单独关闭工具入参的开关。要求本地不留代码与命令的场景,应设 `diff: false` 并评估工具入参是否可接受,或者干脆不在该仓库启用。
 
+## 排除 diff 路径
+
+详见[正文、存储与性能：排除 diff 路径](docs/storage-and-performance.md#排除-diff-路径)。
+
 ## 详细参考
 
 - [轮次生命周期、恢复与版本记录](docs/lifecycle.md)
@@ -117,21 +121,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 
 ## 多仓库覆盖与诊断
 
-以下字段由包含本次可靠性改动的 CLI 写出；历史 record 不回填，缺少字段不能当作零。
-
-- `diff.discovery.requestedRoots`：本轮发现并请求采集的目录清单，数组长度是该清单的数量，不是磁盘上的全部仓库数，也不保证每个目录已解析出有效 Git root。仅在发现阶段有证据时出现。
-- `diff.discovery.maxDepth` 与 `depthLimitedDirectories`：本轮使用的深度上限、因该上限未继续下探的目录数。后者不是“漏掉的仓库数”。默认深度仍为 2，上限 5；排除目录及目录符号链接仍不下探。
-- `diff.discovery.worktreeDiscovery`：所有者或结果触及上限、Git 查询失败时出现；`incomplete: true` 不代表工作区没有其他 worktree。查询最多 32 个已发现仓库，按排序分批、每批最多 4 个 Git 进程；每个所有者最多接纳 128 条工作区内结果，Git 查询共享 5 秒预算。越界和排除目录不进入采集范围。超过上限时应先将关键仓库作为独立 workspace；扩大预算前须测量完整 turn-start，而不是仅看目录扫描时间。
-- `diff.value[]`：逐项查看 `status`（`captured` / `timeout` / `failed` / `unavailable`）及可用的 `reason`。`requestedRoot` 是已知请求目录；`repoRoot` 只在 Git 解析到它时提供。不同仓库即使同时结束也保留独立结果。
-- 深度边界只作为 `discovery` 元数据保留，不单独改变 diff 的 status/quality 或增加 `omissionReason`。`available` 表示已纳入清单的快照可用，不证明磁盘上所有仓库都已采集。真实缺失证据仍按原规则降级并写原因；恢复时无法可信归因 diff，仍为 `unavailable`，不补造快照、耗时或成功状态。没有 `diff.value` 不等于发现了零个仓库。
-
-`doctor` 的 `repositories.depth` 只额外查看 depth+1 一层，最多探测 32 个边界目录、128 个目录项。仅在实际发现 `.git` 时 warn、列出路径并提示调整 `repositories.maxDepth` / `repositories.exclude`。没有发现时 pass；即使探测不完整也不告警，但 detail 会明确说明上限或不可读，不能把 pass 当作已确认没有更深仓库。不会自动扩大采集范围。
-
-`doctor` 和 `support-bundle` 的 `userHookSkips` 单独汇总 `${XDG_STATE_HOME:-$HOME/.local/state}/scry/hook-skip.log` 中的 `bridge_not_found`。其 `value.workspaceAttribution` 固定为 `unknown`：日志没有工作区身份，不能加到当前工作区的 `hookSkips` 或失败计数中。`hook.userBridgeSkips` 对非空、截断或不可用的窗口给出 warning，但不改变当前工作区退出码。缺失日志是已观察的空窗口，不证明 Provider 加载过 hook；不可读或受检路径为符号链接则为 `unavailable`，没有伪造的零值。
-
-用户级汇总只读当前日志及 `.1`，各最多读取尾部 1 MiB，不旋转或重写日志。截断时为 `partial`；`count` 是可见保留窗口的行数，`recentCount` 包括近 24 小时及时间不明的行。bundle 不包含原始用户级日志或任意时间文本。OpenCode plugin 不使用 shell bootstrap 的 `bridge_not_found` 日志，不能据此假设 Provider 能力相同。
-
-升级 CLI 后执行 `scry integrations repair --yes` 并重启 Provider，让旧 `provider-hook.sh` 也在入口清除继承的内部 daemon-attempt 标记。daemon 在线 curl 快路径没有新增进程。
+详见[正文、存储与性能：多仓库覆盖与诊断](docs/storage-and-performance.md#多仓库覆盖与诊断)。
 
 ## 退出码
 

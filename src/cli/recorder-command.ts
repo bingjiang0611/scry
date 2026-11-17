@@ -95,7 +95,9 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       workspace,
       payload,
       managed,
-      queueOnly: daemonTried || daemonUnknownDelivery
+      queueOnly: daemonTried || daemonUnknownDelivery,
+      // This process was started by the hook script, so its parent chain is the host's chain.
+      ancestryFromPid: process.ppid
     })
     // A failed curl response is unknown delivery, not permission to stop/restart a live peer.
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
@@ -138,7 +140,19 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
         return 2
       }
     }
-    const result = await recoverRecorder(workspace, process.env, undefined, scope)
+    // Only proof closes a turn that never wrote a terminal event: silence alone, or a host that may
+    // still be running, is not evidence. `--session` narrows that proof to the sessions whose host
+    // is known to be gone, so one unprovable turn cannot block the rest of the workspace.
+    const expireOpen = args.flags.has('expire-open')
+    const expireSessions = args.repeated?.get('session') ?? (flag(args, 'session') ? [flag(args, 'session')!] : [])
+    if (expireSessions.length && !expireOpen) throw new Error('--session requires --expire-open')
+    for (const session of expireSessions) {
+      if (!session.trim() || /[\r\n]/.test(session)) throw new Error('--session must be a non-empty single line')
+    }
+    const result = await recoverRecorder(workspace, process.env, undefined, scope, {
+      expireOpen,
+      ...(expireSessions.length ? { expireSessions } : {})
+    })
     print(result)
     return scope && result.pending > 0 ? 3 : 0
   }

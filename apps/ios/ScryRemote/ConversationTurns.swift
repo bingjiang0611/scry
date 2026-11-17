@@ -351,7 +351,13 @@ struct ConversationTurnRow<TurnID: Hashable>: View, Identifiable {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    turn.rowView(row, truncated: truncated, provider: provider, reduceMotion: reduceMotion)
+    Group {
+      if case .prompt = row {
+        turn.rowView(row, truncated: truncated, provider: provider, reduceMotion: reduceMotion)
+      } else {
+        turn.rowView(row, truncated: truncated, provider: provider, reduceMotion: reduceMotion).conversationArrival()
+      }
+    }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.bottom, last ? 34 : 0)
   }

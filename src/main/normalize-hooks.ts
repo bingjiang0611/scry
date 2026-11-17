@@ -2,7 +2,7 @@
 // model text, kept separate from SDK message normalization.
 
 import type { TraceEvent } from '../shared/trace.js'
-import { base, stringValue, type NormalizeCtx } from './normalize-core.js'
+import { activatedSkillName, base, skillInjectionEvent, stringValue, type NormalizeCtx } from './normalize-core.js'
 
 function agentTaskToolUseId(
   message: Record<string, unknown>,
@@ -120,6 +120,9 @@ export function normalizeHookMessage(m: Record<string, unknown>, ctx: NormalizeC
     })]
   }
   if ((subtype === 'local_command_output' || subtype === 'informational') && typeof m.content === 'string') {
+    // The host's skill activation notice is skill evidence, not text the model said.
+    const activated = activatedSkillName(m.content)
+    if (activated) return skillInjectionEvent(ctx, activated, { source: 'skill_activation' })
     return [base(ctx, {
       kind: 'model',
       stage: 'text',
@@ -184,6 +187,7 @@ export function normalizeHookAttachment(m: Record<string, unknown>, ctx: Normali
     type !== 'hook_success' &&
     type !== 'hook_additional_context' &&
     type !== 'hook_cancelled' &&
+    type !== 'hook_non_blocking_error' &&
     type !== 'async_hook_response'
   ) return []
   const hookName = typeof a.hookName === 'string' ? a.hookName : 'hook'
@@ -201,9 +205,13 @@ export function normalizeHookAttachment(m: Record<string, unknown>, ctx: Normali
       ? 'progress'
       : type === 'hook_cancelled'
         ? 'cancelled'
-        : exitCode != null && exitCode !== 0
+        : type === 'hook_non_blocking_error'
+          // A non-blocking failure still failed: the run's own exit code stays authoritative, and the
+          // missing `timedOut` field is not filled in from the error text.
           ? 'error'
-          : 'success'
+          : exitCode != null && exitCode !== 0
+            ? 'error'
+            : 'success'
   const output = content || stdout || stderr || (type === 'hook_cancelled' ? 'hook cancelled' : undefined)
   return [
     base(ctx, {

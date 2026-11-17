@@ -1,9 +1,15 @@
 import { useState } from 'react'
+import type { DeleteArchivedProgress } from '@shared/provider'
 
 import type { ProjectMeta, SessionMeta } from '../env'
 
 import type { DeleteArchivedSessionsResult } from '@shared/provider'
+import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { Icon } from './primitives/Icon'
+import { useAsyncAction } from '../hooks/useAsyncAction'
+import { BusyLabel } from './primitives/BusyLabel'
+import { CountProgress } from './primitives/CountProgress'
+import { SkeletonRows } from './primitives/Skeleton'
 import { ProviderFilterMenu } from './ProviderFilterMenu'
 
 
@@ -24,6 +30,7 @@ const archivedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
   minute: '2-digit'
 })
+const rowKey = (session: SessionMeta): string => `${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
 const archivedAtLabel = (ms?: number): string =>
   ms == null
     ? '存档时间未知'
@@ -38,10 +45,13 @@ const DELETE_FAILURE_LABEL: Record<NonNullable<DeleteArchivedSessionsResult['fai
 
 export function ArchivedChatsPanel({
   projects,
+  loading = false,
   onRefresh,
   onSessionsChanged
 }: {
+  /** null with loading=false means the index read failed. */
   projects: ProjectMeta[] | null
+  loading?: boolean
   onRefresh: () => Promise<void>
   onSessionsChanged: () => void
 }) {
@@ -50,6 +60,34 @@ export function ArchivedChatsPanel({
   const [projectFilter, setProjectFilter] = useState<string>('all')
   const [failures, setFailures] = useState<DeleteArchivedSessionsResult['failures']>([])
   const [busy, setBusy] = useState(false)
+  // Per-row unarchive / delete: the pressed button shows it, other writes wait, and a
+  // failure stays on that row with a retry (these used to reject unhandled).
+  const rowAction = useAsyncAction<string>()
+  const rowBusy = busy || rowAction.pending !== null
+  const showSkeleton = useDelayedFlag(loading)
+  // Bulk delete is permanent and counted: never optimistic, shown as real progress.
+  const [progress, setProgress] = useState<DeleteArchivedProgress | null>(null)
+  const showProgress = useDelayedFlag(progress !== null && progress.done < progress.total)
+
+  if (!projects && loading) {
+    // The title does not depend on the index, so it shows at once; the rows
+    // wait behind the shared delay so a fast read never flashes a skeleton.
+    return (
+      <>
+        <div className="arch-head">
+          <div className="settings-copy">
+            <b>{archivedCopy.localTitle}</b>
+          </div>
+          <button type="button" className="arch-danger" disabled>
+            <Icon name="trash" /> {archivedCopy.deleteAllLocal}
+          </button>
+        </div>
+        <div className="arch-list" aria-busy="true">
+          {showSkeleton && <SkeletonRows rows={4} meta rowHeight={60} label={archivedCopy.loading} />}
+        </div>
+      </>
+    )
+  }
 
   if (!projects) {
     return (
@@ -79,9 +117,7 @@ export function ArchivedChatsPanel({
     onSessionsChanged()
   }
 
-  const unarchive = async (cwd: string, session: SessionMeta): Promise<void> => {
-    setBusy(true)
-    try {
+  const unarchive = (cwd: string, session: SessionMeta): void => rowAction.run(`unarchive:${rowKey(session)}`, async () => {
       await window.scry.setSessionArchived(
         {
           providerId: session.providerId,
@@ -92,14 +128,9 @@ export function ArchivedChatsPanel({
         false
       )
       await afterChange()
-    } finally {
-      setBusy(false)
-    }
-  }
+  })
 
-  const deleteOne = async (cwd: string, session: SessionMeta): Promise<void> => {
-    setBusy(true)
-    try {
+  const deleteOne = (cwd: string, session: SessionMeta): void => rowAction.run(`delete:${rowKey(session)}`, async () => {
       const result = await window.scry.deleteSession({
         providerId: session.providerId,
         agentProfileId: session.agentProfileId,
@@ -111,18 +142,20 @@ export function ArchivedChatsPanel({
         setFailures([{ preview: session.preview, reason: result.reason ?? 'partial_failure' }])
       }
       await afterChange()
-    } finally {
-      setBusy(false)
-    }
-  }
+  })
 
   const deleteAll = async (): Promise<void> => {
     setBusy(true)
+    const unsubscribe = typeof window.scry.onDeleteArchivedProgress === 'function'
+      ? window.scry.onDeleteArchivedProgress(setProgress)
+      : () => {}
     try {
       const result = await window.scry.deleteArchivedSessions()
       setFailures(result.failures)
       await afterChange()
     } finally {
+      unsubscribe()
+      setProgress(null)
       setBusy(false)
     }
   }
@@ -133,14 +166,16 @@ export function ArchivedChatsPanel({
         <div className="settings-copy">
           <b>{archivedCopy.localTitle}</b>
         </div>
-        <button
-          type="button"
-          className="arch-danger"
-          disabled={total === 0 || busy}
-          onClick={() => void deleteAll()}
-        >
-          <Icon name="trash" /> {archivedCopy.deleteAllLocal}
-        </button>
+        {progress && showProgress
+          ? <CountProgress label={archivedCopy.deleting} done={progress.done} total={progress.total} failed={progress.failed} />
+          : <button
+            type="button"
+            className="arch-danger"
+            disabled={total === 0 || rowBusy}
+            onClick={() => void deleteAll()}
+          >
+            <Icon name="trash" /> {archivedCopy.deleteAllLocal}
+          </button>}
       </div>
 
       {failures.length > 0 && (
@@ -213,20 +248,28 @@ export function ArchivedChatsPanel({
                       className="arch-del"
                       title="永久删除"
                       aria-label={`永久删除：${session.preview || '(无预览)'}`}
-                      disabled={busy}
-                      onClick={() => void deleteOne(session.cwd ?? project.cwd, session)}
+                      aria-busy={rowAction.pending === `delete:${rowKey(session)}`}
+                      disabled={rowBusy && rowAction.pending !== `delete:${rowKey(session)}`}
+                      onClick={() => { if (!rowBusy) deleteOne(session.cwd ?? project.cwd, session) }}
                     >
-                      <Icon name="trash" />
+                      <BusyLabel busy={rowAction.showBusy && rowAction.pending === `delete:${rowKey(session)}`}><Icon name="trash" /></BusyLabel>
                     </button>
                     <button
                       type="button"
                       className="arch-unarch"
-                      disabled={busy}
-                      onClick={() => void unarchive(session.cwd ?? project.cwd, session)}
+                      aria-busy={rowAction.pending === `unarchive:${rowKey(session)}`}
+                      disabled={rowBusy && rowAction.pending !== `unarchive:${rowKey(session)}`}
+                      onClick={() => { if (!rowBusy) unarchive(session.cwd ?? project.cwd, session) }}
                     >
-                      取消存档
+                      <BusyLabel busy={rowAction.showBusy && rowAction.pending === `unarchive:${rowKey(session)}`}>取消存档</BusyLabel>
                     </button>
                   </div>
+                  {rowAction.error?.key.endsWith(`:${rowKey(session)}`) && (
+                    <p className="arch-row-error" role="alert">
+                      {rowAction.error.text}
+                      <button type="button" onClick={rowAction.retry}>重试</button>
+                    </p>
+                  )}
                 </div>
               ))}
             </div>

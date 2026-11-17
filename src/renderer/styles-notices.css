@@ -1,0 +1,73 @@
+/* The single definition of inline notices (components/primitives/Notice.tsx).
+   Context rules may set margins or truncation through a hook class, but tone,
+   padding, radius and color live here. */
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-muted);
+  color: var(--dim);
+  font: var(--text-sm)/1.5 var(--font-ui);
+}
+
+/* 14px icon centered on the first 18px line box. */
+.notice-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: var(--space-0_5);
+  vertical-align: 0;
+}
+
+.notice-body {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notice-body b {
+  color: var(--fg);
+  font-weight: var(--weight-semibold);
+}
+
+.notice-actions {
+  display: flex;
+  flex: none;
+  align-self: center;
+  gap: var(--space-2);
+}
+
+.notice.warn {
+  border-color: color-mix(in srgb, var(--warn) 28%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.notice.bad {
+  border-color: color-mix(in srgb, var(--bad) 28%, transparent);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.notice.strip {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  padding: var(--space-2) var(--space-4);
+}
+
+.notice.sm {
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.notice.sm .notice-icon {
+  width: 12px;
+  height: 12px;
+  margin-top: var(--space-0_5);
+}

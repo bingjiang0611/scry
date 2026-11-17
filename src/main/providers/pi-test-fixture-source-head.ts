@@ -157,7 +157,7 @@ process.stdin.on('data', (chunk) => {
         leafId = entry.id
         send({ type: 'tool_execution_start', toolCallId: 'batch-tool', toolName: 'ask_user_question', args: { questions: [
           { header: 'Goal', question: 'What matters?', multiSelect: false, options: [{ label: 'Control', description: 'Stay in control' }, { label: 'Speed', description: 'Finish sooner' }] },
-          { header: 'Review', question: 'When to review?', multiSelect: false, options: [{ label: 'Now', description: 'Before continuing' }, { label: 'Later', description: 'At the end' }] }
+          { header: 'Review', question: 'When to review?', multiSelect: command.message.endsWith('-multi'), options: [{ label: 'Now', description: 'Before continuing' }, { label: 'Later', description: 'At the end' }] }
         ] } })
         send({ type: 'extension_ui_request', id: 'batch-first', method: 'select', title: '[Goal] What matters?', options: ['1. Control — Stay in control', '2. Speed — Finish sooner', '3. Type something.'] })
         continue

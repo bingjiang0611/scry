@@ -21,6 +21,8 @@ export async function serveCaptureRequest(args: {
   response: ServerResponse
   recovery: () => void
   deliveries: Set<Promise<unknown>>
+  /** Pid reported by the receiver script; without it the turn records no host evidence. */
+  ancestryFromPid?: number
 }): Promise<void> {
   let ack: Record<string, unknown>
   try {
@@ -31,7 +33,8 @@ export async function serveCaptureRequest(args: {
       dataDir: args.enablement.dataRoot,
       payload: args.payload,
       env: args.env,
-      deferDelivery: true
+      deferDelivery: true,
+      ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
     })).ack
   } catch (error) {
     // A refusal before apply stays a 4xx so the guard's fallback may still deliver the event.

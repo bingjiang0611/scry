@@ -1,22 +1,6 @@
 .sb-view-tabs {
-  position: relative;
-  display: flex;
-  gap: 24px;
-  margin: 8px 12px 12px;
+  margin: var(--space-2) var(--space-3) var(--space-3);
 }
-
-.sb-view-tabs [role='tab'] {
-  min-height: 32px;
-  padding: 4px 0;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  background: transparent;
-  color: var(--dim);
-  font: 500 12px/1 var(--font-ui);
-  cursor: pointer;
-}
-
-.sb-view-tabs [aria-selected='true'] { color: var(--fg); border-bottom-color: var(--fg); }
 
 .sb-activity {
   position: relative;
@@ -32,7 +16,7 @@
   gap: 8px;
   margin: 24px 12px 8px;
   color: var(--fg);
-  font: 500 13px/20px var(--font-ui);
+  font: var(--weight-medium) var(--text-md)/20px var(--font-ui);
   letter-spacing: 0;
 }
 
@@ -162,4 +146,4 @@
 .sb-activity-item:hover > .sb-activity-status,
 .sb-activity-item:focus-within > .sb-activity-status { visibility: hidden; }
 .sb-activity .sb-act:not(:hover):not(.on) { color: var(--dim); }
-.sb-activity-limit { margin: 8px 10px; color: var(--dim2); font-size: 12px; }
+.sb-activity-limit { margin: 8px 8px; color: var(--dim2); font-size: var(--text-sm); }

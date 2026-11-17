@@ -4,10 +4,13 @@ import { WORKSPACE_FILE_PREVIEW_UNSUPPORTED, type WorkspaceEntry, type Workspace
 import { WORKSPACE_EDITOR_COPY } from '../constants/copy'
 import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
+import { Menu, MenuItem, MenuSeparator } from './primitives/Menu'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { usePresence } from '../hooks/usePresence'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { MOTION } from '../motion'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
+import { Button } from './primitives/Button'
 
 // Readable IPC errors (daemon mode names its absences); the checks below still match
 // the handler's own message, which this keeps.
@@ -48,6 +51,7 @@ export function WorkspaceContextMenu({
     }
     document.addEventListener('pointerdown', dismissPointer, true)
     document.addEventListener('keydown', dismissEscape)
+    if (!menuRef.current?.contains(document.activeElement)) menuRef.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus()
     return () => {
       document.removeEventListener('pointerdown', dismissPointer, true)
       document.removeEventListener('keydown', dismissEscape)
@@ -55,20 +59,25 @@ export function WorkspaceContextMenu({
   }, [presence.state, presence.requestClose])
   const content = (
     <div className="ctx-overlay" data-state={presence.state} onClick={(event) => { if (event.target === event.currentTarget) close() }} onContextMenu={(event) => { event.preventDefault(); close() }}>
-      <div ref={(node) => { menuRef.current = node; presence.ref(node) }} className="ctxmenu workspace-context" data-state={presence.state} role="menu" style={{ left: context.x, top: context.y, transformOrigin: 'top left' }}>
-        {context.entry?.kind === 'file' && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onOpenFile(context.entry!); close() }}><Icon name="file" /> 打开</button>}
-        {context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onAddReference(context.entry!); close() }}><Icon name="message" /> 添加到对话</button>}
+      <Menu ref={(node) => { menuRef.current = node; presence.ref(node) }} className="ctxmenu workspace-context" data-state={presence.state}
+        label={context.entry ? `${context.entry.name} 的操作` : '文件区操作'} style={{ left: context.x, top: context.y, transformOrigin: 'top left' }}>
+        {context.entry?.kind === 'file' && <MenuItem className="ctxitem" icon={<Icon name="file" />} onClick={() => { onOpenFile(context.entry!); close() }}>打开</MenuItem>}
+        {context.entry && <MenuItem className="ctxitem" icon={<Icon name="message" />} onClick={() => { onAddReference(context.entry!); close() }}>添加到对话</MenuItem>}
         {(!context.entry || context.entry.kind === 'directory') && <>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onStartCreate('file', context.entry?.path); close() }}><Icon name="file" /> 新建文件</button>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onStartCreate('directory', context.entry?.path); close() }}><Icon name="folder" /> 新建文件夹</button>
+          <MenuItem className="ctxitem" icon={<Icon name="file" />} onClick={() => { onStartCreate('file', context.entry?.path); close() }}>新建文件</MenuItem>
+          <MenuItem className="ctxitem" icon={<Icon name="folder" />} onClick={() => { onStartCreate('directory', context.entry?.path); close() }}>新建文件夹</MenuItem>
         </>}
         {context.entry && <>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onMove(context.entry!); close() }}><Icon name="folder" /> 移动到…</button>
-          <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRename(context.entry!); close() }}><Icon name="file" /> 重命名</button>
-          {onDelete && <button type="button" className="ctxitem del" role="menuitem" onClick={() => { onDelete(context.entry!); close() }}><Icon name="x" /> 移入废纸篓</button>}
+          <MenuItem className="ctxitem" icon={<Icon name="folder" />} onClick={() => { onMove(context.entry!); close() }}>移动到…</MenuItem>
+          <MenuItem className="ctxitem" icon={<Icon name="edit" />} onClick={() => { onRename(context.entry!); close() }}>重命名</MenuItem>
+          {/* Absent when the host does not offer deletion: hidden, not shown and then failing. */}
+          {onDelete && <>
+            <MenuSeparator />
+            <MenuItem danger className="ctxitem del" icon={<Icon name="trash" />} onClick={() => { onDelete(context.entry!); close() }}>移入废纸篓</MenuItem>
+          </>}
         </>}
-        {!context.entry && <button type="button" className="ctxitem" role="menuitem" onClick={() => { onRefresh(); close() }}><Icon name="refresh" /> 刷新</button>}
-      </div>
+        {!context.entry && <MenuItem className="ctxitem" icon={<Icon name="refresh" />} onClick={() => { onRefresh(); close() }}>刷新</MenuItem>}
+      </Menu>
     </div>
   )
   return typeof document === 'undefined' ? content : createPortal(content, document.body)
@@ -109,10 +118,10 @@ export function WorkspaceDialog({
         <h3>{title}</h3>
         <input ref={inputRef} value={value} onChange={(event) => onChange(event.target.value)} aria-label={title} />
         <div className="workspace-dialog-actions">
-          <button type="button" className="btn" disabled={busy} onClick={onClose}>取消</button>
-          <button type="submit" className="btn primary" disabled={busy || !value.trim()}>
+          <Button disabled={busy} onClick={onClose}>取消</Button>
+          <Button variant="primary" type="submit" disabled={busy || !value.trim()}>
             {busy ? '处理中…' : '确认'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -276,7 +285,8 @@ export function FileEditor({
   }, [api, cwd, entry.path, loading, onError, page, readOnly, readPage])
 
   const markdown = /\.(md|mdx)$/i.test(entry.name)
-  if (loading && !snapshot && !page) return <div className="workspace-empty">读取文件…</div>
+  // Text lines in the editor's place: the file's layout is known to be lines of text.
+  if (loading && !snapshot && !page) return <div className="workspace-editor" aria-busy="true"><DelayedSkeletonRows loading rows={10} rowHeight={22} label="读取文件…" /></div>
   if (externallyOpened) return <div className="workspace-empty">已使用系统默认应用打开 {entry.name}</div>
   if (!snapshot && !page) return <div className="workspace-empty">文件无法打开</div>
   if (page && (!readPage || page.hasMore || page.offset > 0)) {
@@ -285,14 +295,14 @@ export function FileEditor({
       <div className="workspace-editor">
         <div className="workspace-editorbar">
           <span>分页只读 · {start}–{page.nextOffset} / {page.totalBytes} bytes</span>
-          <button type="button" className="btn" disabled={loading || pageBack.length === 0} onClick={() => {
+          <Button size="sm" disabled={loading || pageBack.length === 0} onClick={() => {
             const offset = pageBack.at(-1)
             if (offset !== undefined) void movePage(offset, pageBack.slice(0, -1))
-          }}>上一页</button>
-          <button type="button" className="btn" disabled={loading || !page.hasMore} onClick={() =>
+          }}>上一页</Button>
+          <Button size="sm" disabled={loading || !page.hasMore} onClick={() =>
             void movePage(page.nextOffset, [...pageBack, page.offset])
-          }>下一页</button>
-          <button type="button" className="btn" disabled={loading} onClick={() => void load()}>{WORKSPACE_EDITOR_COPY.reload}</button>
+          }>下一页</Button>
+          <Button size="sm" disabled={loading} onClick={() => void load()}>{WORKSPACE_EDITOR_COPY.reload}</Button>
         </div>
         <div className="workspace-editorbody">
           <div className="workspace-source">
@@ -308,19 +318,15 @@ export function FileEditor({
       <div className="workspace-editorbar">
         <div className="workspace-editor-actions" role="group" aria-label={WORKSPACE_EDITOR_COPY.actions}>
           {markdown && (
-            <button
-              type="button"
-              className="btn"
+            <Button size="sm"
               aria-expanded={sourceExpanded}
               onClick={() => setSourceExpanded((expanded) => !expanded)}
             >
               <Icon name={sourceExpanded ? 'collapse' : 'expand'} />
               {sourceExpanded ? WORKSPACE_EDITOR_COPY.collapseSource : WORKSPACE_EDITOR_COPY.expandSource}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="btn workspace-reload"
+          <Button className="workspace-reload" size="sm"
             disabled={saving}
             onClick={() => {
               if (!dirty || window.confirm(WORKSPACE_EDITOR_COPY.confirmReload)) void load()
@@ -328,11 +334,11 @@ export function FileEditor({
           >
             <Icon name="refresh" />
             {WORKSPACE_EDITOR_COPY.reload}
-          </button>
+          </Button>
           {!readOnly && (!markdown || sourceExpanded || dirty) && (
-            <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
+            <Button variant="primary" size="sm" disabled={!dirty || saving} onClick={() => void save()}>
               {saving ? WORKSPACE_EDITOR_COPY.saving : WORKSPACE_EDITOR_COPY.save}
-            </button>
+            </Button>
           )}
         </div>
         <span>{WORKSPACE_EDITOR_COPY.status(

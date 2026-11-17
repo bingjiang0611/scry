@@ -13,6 +13,7 @@
     "agent:start": "不同：远程用 SCRY_REMOTE_PERMISSION_MODE、走 resolveRemoteProjectDirectory、detail 字段更少；本机用用户权限模式（含 full_access）并允许空 cwd 会话。按 grant scope 选策略，两者都不缩水",
     "agent:stop": "等价",
     "sourceControl:acknowledge": "等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验）",
+    "sourceControl:cancel": "等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验；本机 App 另走 control lane，避免排在被取消的 push/fetch 之后）",
     "sourceControl:diff": "等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验）",
     "sourceControl:loadCommitDraft": "等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验）",
     "sourceControl:loadDraft": "等价（同一 sourceControlHandlers，经 desktopWorkbench sourceControl surface，每次按 repositoryId 与 workspace 授权重验）",

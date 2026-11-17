@@ -1,14 +1,13 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type { SkillMeta } from '../env'
 
 import type { CapabilityEnvelope } from '@shared/provider'
-import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
-import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
-import { DelayedLoadingStatus } from './LoadingStatus'
 
 
 import './archived-sessions.css'
@@ -17,7 +16,8 @@ import './archived-sessions.css'
 
 import { ModalFrame, requestModalClose } from './ModalFrame'
 
-import { EvidenceState, InventoryContext, filterSkillsForScope, scopeClass, scopeShortLabel, useReadStarted, type SkillScopeFilter } from './CapabilityEvidence'
+import { InventoryContext, filterSkillsForScope, scopeClass, scopeShortLabel, useReadStarted, type SkillScopeFilter } from './CapabilityEvidence'
+import { Tabs } from './primitives/Tabs'
 export { filterSkillsForScope } from './CapabilityEvidence'
 
 export function SkillsModal({
@@ -51,7 +51,6 @@ export function SkillsModal({
   const initialSkillsLoading = (refreshing || capability === null) && skills.length === 0
   const readStarted = useReadStarted(refreshing)
   const skillsUnavailable = capability === null && !refreshing && readStarted
-  const showSkillsLoading = useDelayedFlag(refreshing)
   const listMotion = useFirstReadyList(filtered.length > 0)
   const projectCount = skills.filter((skill) => skill.scope === 'project').length
   const userCount = skills.filter((skill) => skill.scope === 'user').length
@@ -72,22 +71,6 @@ export function SkillsModal({
     scopeChosenRef.current = true
     setScope(next)
   }
-  const onScopeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-    const current = visibleScopes.indexOf(scope)
-    const next = event.key === 'Home'
-      ? visibleScopes[0]
-      : event.key === 'End'
-        ? visibleScopes.at(-1)
-        : event.key === 'ArrowRight'
-          ? visibleScopes[(current + 1) % visibleScopes.length]
-          : event.key === 'ArrowLeft'
-            ? visibleScopes[(current - 1 + visibleScopes.length) % visibleScopes.length]
-            : undefined
-    if (!next) return
-    event.preventDefault()
-    chooseScope(next)
-    window.requestAnimationFrame(() => document.getElementById(`${titleId}-${next}-tab`)?.focus())
-  }
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={searchRef} className="skills-modal inventory-modal inventory-modal--skills" onClose={onClose}>
       <div className="modal-head inventory-modal__head">
@@ -100,9 +83,9 @@ export function SkillsModal({
           <p>查看当前 Provider 在这个工作目录里实际发现了哪些 Skill。</p>
         </div>
         <div className="inventory-modal__head-actions">
-          {showSkillsLoading && <EvidenceState value={{ state: 'pending', label: LOADING_COPY.reading, role: 'status' }} quiet />}
-          <button className="modal-refresh" onClick={onRefresh} disabled={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
-            <Icon name="refresh" />
+          {/* One indicator per wait: the refresh icon turns; no separate pill. */}
+          <button className="modal-refresh" onClick={() => { if (!refreshing) onRefresh() }} aria-disabled={refreshing} aria-busy={refreshing} title="重新读取当前 Provider 的 Skill 清单" aria-label="刷新 Skills">
+            <TurningIcon busy={refreshing} />
           </button>
           <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSkills} />
         </div>
@@ -120,49 +103,19 @@ export function SkillsModal({
         </div>
       )}
 
-      <div className="skill-scope-tabs" role="tablist" aria-label="Skill 来源">
-        <button
-          type="button"
-          id={titleId + '-project-tab'}
-          role="tab"
-          tabIndex={scope === 'project' ? 0 : -1}
-          aria-selected={scope === 'project'}
-          aria-controls={titleId + '-skills-panel'}
-          className={scope === 'project' ? 'active' : ''}
-          onClick={() => chooseScope('project')}
-          onKeyDown={onScopeKeyDown}
-        >
-          {LOADING_COPY.skillScope.project} {!initialSkillsLoading && <span>{projectCount}</span>}
-        </button>
-        <button
-          type="button"
-          id={titleId + '-user-tab'}
-          role="tab"
-          tabIndex={scope === 'user' ? 0 : -1}
-          aria-selected={scope === 'user'}
-          aria-controls={titleId + '-skills-panel'}
-          className={scope === 'user' ? 'active' : ''}
-          onClick={() => chooseScope('user')}
-          onKeyDown={onScopeKeyDown}
-        >
-          {LOADING_COPY.skillScope.user} {!initialSkillsLoading && <span>{userCount}</span>}
-        </button>
-        {providerCount > 0 && (
-          <button
-            type="button"
-            id={titleId + '-provider-tab'}
-            role="tab"
-            tabIndex={scope === 'provider' ? 0 : -1}
-            aria-selected={scope === 'provider'}
-            aria-controls={titleId + '-skills-panel'}
-            className={scope === 'provider' ? 'active' : ''}
-            onClick={() => chooseScope('provider')}
-            onKeyDown={onScopeKeyDown}
-          >
-            {LOADING_COPY.skillScope.provider} <span>{providerCount}</span>
-          </button>
-        )}
-      </div>
+      <Tabs
+        className="skill-scope-tabs"
+        label="Skill 来源"
+        value={scope}
+        onChange={chooseScope}
+        items={visibleScopes.map(value => ({
+          value,
+          label: LOADING_COPY.skillScope[value],
+          count: value === 'provider' ? providerCount : initialSkillsLoading ? undefined : value === 'project' ? projectCount : userCount,
+          id: `${titleId}-${value}-tab`,
+          controls: `${titleId}-skills-panel`
+        }))}
+      />
 
       <div className="inventory-toolbar">
         <label className="inventory-search">
@@ -189,7 +142,7 @@ export function SkillsModal({
         aria-busy={refreshing}
       >
         {skillsUnavailable ? <div className="inventory-empty" role="status">{LOADING_COPY.skillsUnavailable}</div>
-          : initialSkillsLoading && <DelayedLoadingStatus loading={refreshing} title={LOADING_COPY.skills} />}
+          : initialSkillsLoading && <DelayedSkeletonRows loading={refreshing} rows={6} meta rowHeight={56} label={LOADING_COPY.skills} />}
         {filtered.length === 0 && !initialSkillsLoading && (
           <div className="inventory-empty" role="status">
             <strong>{scopeSkills.length === 0 ? LOADING_COPY.skillsEmpty(scopeLabel) : LOADING_COPY.skillsNoMatch(scopeLabel)}</strong>

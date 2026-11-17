@@ -20,7 +20,7 @@
 
 | 层 | 改动 |
 |---|---|
-| daemon | 管线的窗口接收端按允许列表（`DAEMON_WINDOW_NOTICES`，就是上面那六种）把通知写入事件流 `{ kind: 'window', channel, payload }`，载荷与进程内相同，按顺序发送、不合并。文本流、流健康状态和提问不在列表里，App 按 run 自己读取，并有背压。「是否有窗口可接收」保持 false，因为它还决定提问走台账、让 daemon 自己的文本流保持空闲。窗口接收端新增 `acceptsNotices`，只让那两条被这个开关挡住的通知通过 |
+| daemon | 管线的窗口接收端按允许列表（`DAEMON_WINDOW_NOTICES`，就是上面那六种，加上由 daemon 会话生命周期发出的 `agent:deleteArchivedProgress`：已存档会话批量删除的真实进度）把通知写入事件流 `{ kind: 'window', channel, payload }`，载荷与进程内相同，按顺序发送、不合并。文本流、流健康状态和提问不在列表里，App 按 run 自己读取，并有背压。「是否有窗口可接收」保持 false，因为它还决定提问走台账、让 daemon 自己的文本流保持空闲。窗口接收端新增 `acceptsNotices`，只让那两条被这个开关挡住的通知通过 |
 | App | 只接受允许列表里的频道，载荷必须是对象。事件 pump 按顺序逐条处理。`DaemonRunRuntime.deliverAfterRead` 在转交某个 run 的通知之前，先不等待地读一次这个 run，并把文本全部推给窗口，所以「这一轮结束」不会早于最后的文本（进程内也是先推送文本，再发结束）。`agent:stopState` 同时发给这个 run 的订阅，和进程内一样 |
 
 ## W2：按 run 订阅能看到 daemon 的 run

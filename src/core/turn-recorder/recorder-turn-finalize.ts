@@ -10,16 +10,16 @@ import { appendRotatingLog, writeJsonAtomic } from './io.js'
 import { RECORDER_VERSION, commitRecord, clearRuntimeTurn, stableHash } from './store.js'
 import { releaseStaleAttention, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { terminalStatus, type RecorderHookResult, resolveModelIdentity } from './recorder-contracts.js'
+import { terminalStatus, type RecorderHookResult, type TranscriptRead, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 import { degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { unmatchedIdentityReason } from './recorder-transcript-background.js'
-import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
+import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { rm } from 'node:fs/promises'
-import { applyCaptureBaselineCaveat, captureRecordMetadata } from './record-capture-metadata.js'
+import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence, captureRecordMetadata } from './record-capture-metadata.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -34,6 +34,12 @@ export async function finalizeOpenTurn(
      * terminal already arrived stays `completed` - what this gates is giving up, not the verdict.
      */
     forcedReason?: string
+    /**
+     * The turn's own transcript could not be read (a denied `open`, a rotated file). Publish the turn
+     * from the lifecycle evidence already stored for it instead of dropping it, and say why: nothing
+     * parsed from the transcript may be claimed, and no other turn's bytes may be adopted.
+     */
+    transcriptUnavailable?: string
   } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
@@ -41,49 +47,57 @@ export async function finalizeOpenTurn(
   // A continuation is the same native turn as its predecessor, so it reads that turn's rows and
   // slices off what was already published; the wake's own request id never appears natively.
   const continuation = open.continuation
-  let transcript = open.transcriptPath
-    ? await stableTranscript(
-        open.transcriptPath,
-        runId,
-        open.provider,
-        continuation ? undefined : open.promptHash,
-        continuation?.providerTurnId ?? open.providerTurnId,
-        open.transcriptStartOffset,
-        continuation ? undefined : open.requestSetId,
-        open.sessionId,
-        enablement.workspaceRoot,
-        open.piTranscriptAnchor,
-        open.captureTranscriptEndOffset
-      )
-    : {
-        stable: true,
-        observed: false,
-        complete: true,
-        events: [],
-        observable: {
-          tools: false,
-          skills: false,
-          mcps: false,
-          hooks: false,
-          usage: false,
-          files: false,
-          errors: false
+  const unobservedTranscript = {
+    stable: true,
+    observed: false,
+    complete: false,
+    events: [] as TraceEvent[],
+    observable: {
+      tools: false,
+      skills: false,
+      mcps: false,
+      hooks: false,
+      usage: false,
+      files: false,
+      errors: false
+    }
+  }
+  let transcript: TranscriptRead = options.transcriptUnavailable
+    ? unobservedTranscript
+    : open.transcriptPath
+      ? await stableTranscript(
+          open.transcriptPath,
+          runId,
+          open.provider,
+          continuation ? undefined : open.promptHash,
+          continuation?.providerTurnId ?? open.providerTurnId,
+          open.transcriptStartOffset,
+          continuation ? undefined : open.requestSetId,
+          open.sessionId,
+          enablement.workspaceRoot,
+          open.piTranscriptAnchor,
+          open.captureTranscriptEndOffset
+        )
+      : {
+          ...unobservedTranscript,
+          complete: true
         }
-      }
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
-  const unmatchedReason = unmatchedIdentityReason(open, options.forcedReason)
+  const unmatchedReason = options.transcriptUnavailable ?? unmatchedIdentityReason(open, options.forcedReason)
   let retainedWindow = false
-  if (transcript.identityMatched === false) {
+  if (transcript.identityMatched === false || options.transcriptUnavailable) {
     // A prompt cancelled before model execution may never reach the native transcript, and a session
     // end can close that turn on lifecycle evidence alone. Ordinary turn ends keep waiting for
     // identity. Once giving up is decided, keep the rows this turn wrote: publishing hooks only
     // would throw away a body the transcript still held.
     if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
-    const window = await forcedIdentityWindow(open, runId, enablement.workspaceRoot)
-    retainedWindow = window.retained
-    transcript = window.transcript
+    if (!options.transcriptUnavailable) {
+      const window = await forcedIdentityWindow(open, runId, enablement.workspaceRoot)
+      retainedWindow = window.retained
+      transcript = window.transcript
+    }
   }
   const view = segmentTranscriptView(open, transcript)
   transcript = view.transcript
@@ -136,8 +150,12 @@ export async function finalizeOpenTurn(
     stage: 'turn_diff',
     turnDiff
   }))
-  const startedAt = transcript.startedAt ?? open.startedAt
-  const end = resolveTurnEnd(open, startedAt, transcript, mergedEvents, options.forcedReason ? 'expired' : undefined)
+  const startedAt = recordStartedAt(open, transcript.startedAt)
+  const end = resolveTurnEnd(
+    open, startedAt, transcript, mergedEvents,
+    options.forcedReason ? 'expired' : undefined,
+    options.forcedReason
+  )
   const completedAt = end.completedAt
   const startedMs = Date.parse(startedAt)
   const completedMs = Date.parse(completedAt)
@@ -181,13 +199,17 @@ export async function finalizeOpenTurn(
       errors: hasToolEvidence || transcript.observable.errors || events.some((event) =>
         event.kind === 'harness' && event.stage === 'task_error' && event.isError === true
       ),
+      // 只能由能观测用户提问的 Provider 转写来证伪；其他 Provider 标 unavailable，不报“零次介入”。
+      interventions: transcript.observed && (open.provider === 'claude' || open.provider === 'qoder'),
       diff: enablement.config.capture.diff
     }
   })
   if (transcript.complete === false) {
     degradeEvidenceSections(
       evidence,
-      'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
+      transcript.incompleteReasons?.length
+        ? `transcript snapshot was incomplete: ${transcript.incompleteReasons.join('; ')}`
+        : 'transcript snapshot was incomplete or one or more child agent transcripts were unavailable'
     )
   }
   applyContinuationEvidence(evidence, open, ownsTranscriptRows, enablement.config.capture.diff)
@@ -197,13 +219,20 @@ export async function finalizeOpenTurn(
     evidence, options.forcedReason, identityUnmatched, unmatchedReason, retainedWindow,
     enablement.config.capture.diff && open.captures.some(({ capture }) => capture.status === 'ready')
   )
+  if (options.transcriptUnavailable) {
+    // Everything this turn holds came from lifecycle hooks; nothing may read as complete, and the
+    // reason names the evidence that was missing rather than the turn.
+    degradeEvidenceSections(evidence, options.transcriptUnavailable)
+    evidence.diff = unavailable(options.transcriptUnavailable)
+  }
   if (open.repositoryDiscovery) {
     evidence.diff.discovery = {
       ...open.repositoryDiscovery,
       requestedRoots: open.captures.map(capture => capture.repository)
     }
   }
-  applyCaptureBaselineCaveat(evidence, open.capture)
+  applyCaptureBaselineCaveat(evidence, open.capture, startedAt)
+  applyDiffExcludeEvidence(evidence)
   if ((diffs.length > 0 || evidence.diff.discovery) && !evidence.diff.source.includes('repository_discovery')) {
     evidence.diff.source.push('repository_discovery')
   }
@@ -218,7 +247,9 @@ export async function finalizeOpenTurn(
     if (!enablement.config.capture.prompt || !enablement.config.capture.assistant || !isFullToolContentPolicy(contentPolicy)) {
       return disabled('raw transcript capture disabled by content policy')
     }
-    if (!transcript.source) return unavailable('stable transcript bytes were not available for this turn')
+    if (!transcript.source) {
+      return unavailable(options.transcriptUnavailable ?? 'stable transcript bytes were not available for this turn')
+    }
     const source = transcript.source
     if (Buffer.byteLength(source.content) !== source.endOffset - source.startOffset) {
       return unavailable('transcript range was not valid UTF-8 and could not be stored exactly')

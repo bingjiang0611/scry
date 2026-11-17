@@ -108,8 +108,8 @@ export class ScGit {
     private readonly authorizeLocalRemote: (path: string) => string
   ) {}
 
-  run(root: string, args: string[], read = true, timeout = 15_000): Promise<string> {
-    return this.process.run('git', [...readConfig, ...(read ? readOnly : []), ...args], root, { timeout })
+  run(root: string, args: string[], read = true, timeout = 15_000, signal?: AbortSignal): Promise<string> {
+    return this.process.run('git', [...readConfig, ...(read ? readOnly : []), ...args], root, { timeout, ...(signal ? { signal } : {}) })
   }
 
   async identity(cwd: string): Promise<GitIdentity> {
@@ -439,19 +439,20 @@ export class ScGit {
     return target
   }
 
-  async remoteHead(identity: GitIdentity, target: string, branch: string): Promise<string | null> {
+  async remoteHead(identity: GitIdentity, target: string, branch: string, signal?: AbortSignal): Promise<string | null> {
     const output = await this.run(
       identity.root,
       ['ls-remote', '--refs', '--', target, `refs/heads/${branch}`],
       false,
-      60_000
+      60_000,
+      signal
     )
     const lines = output.trim().split('\n').filter(Boolean)
     if (lines.length > 1) throw new Error('远端分支查询结果不唯一')
     return lines.length ? lines[0].split('\t')[0] : null
   }
 
-  async push(identity: GitIdentity, target: string, branch: string, head: string): Promise<void> {
+  async push(identity: GitIdentity, target: string, branch: string, head: string, signal?: AbortSignal): Promise<void> {
     await this.run(
       identity.root,
       [
@@ -464,11 +465,12 @@ export class ScGit {
         `${head}:refs/heads/${branch}`
       ],
       false,
-      90_000
+      90_000,
+      signal
     )
   }
 
-  async fetch(identity: GitIdentity, target: string, remote: string): Promise<void> {
+  async fetch(identity: GitIdentity, target: string, remote: string, signal?: AbortSignal): Promise<void> {
     await this.run(
       identity.root,
       [
@@ -481,7 +483,8 @@ export class ScGit {
         `+refs/heads/*:refs/remotes/${remote}/*`
       ],
       false,
-      90_000
+      90_000,
+      signal
     )
   }
 }

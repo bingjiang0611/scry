@@ -1,7 +1,9 @@
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import type { ScExpected, ScInlineComment, ScMutation, ScPr, ScPrList, ScRead, ScRepository, ScReviewDraft } from '@shared/source-control'
 import { ModalFrame, requestModalClose } from './Modals'
 import { Patch } from './SourceControlPatch'
+import { Notice } from './primitives/Notice'
 
 type Confirmation = { title: string; detail: string; run: () => Promise<void> }
 
@@ -46,9 +48,9 @@ export function GithubPullRequestPanelBody({
           </button>
         </section>
         {list?.status !== 'available' && list && (
-          <p role="alert" className="sc-notice">
+          <Notice tone="warn" role="alert" className="sc-notice">
             {list.reason}
-          </p>
+          </Notice>
         )}
         {list?.status === 'available' && (
           <>
@@ -82,7 +84,7 @@ export function GithubPullRequestPanelBody({
                 <input value={headRepository} onChange={(event) => setHeadRepository(event.target.value)} />
               </label>
               <p>源分支：{repo.branch ?? '无分支'} · 必须先推送，本操作不会夹带自动推送。</p>
-              {headRepository.toLowerCase() === repository.toLowerCase() && repo.branch === baseBranch && <p className="sc-notice">当前源分支与目标相同。请先在终端创建功能分支，不能创建同分支 PR。</p>}
+              {headRepository.toLowerCase() === repository.toLowerCase() && repo.branch === baseBranch && <Notice tone="warn" className="sc-notice">当前源分支与目标相同。请先在终端创建功能分支，不能创建同分支 PR。</Notice>}
               <label>
                 目标分支
                 <input value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)} />
@@ -130,7 +132,7 @@ export function GithubPullRequestPanelBody({
             </details>
           </>
         )}
-        {loadingPr && <p role="status">正在读取 GitHub 证据…</p>}
+        <DelayedSkeletonRows loading={loadingPr} rows={3} meta rowHeight={52} label="正在读取 GitHub 证据…" />
         {pr && prExpected && (
           <>
             <section className="sc-section">
@@ -228,7 +230,7 @@ export function GithubPullRequestPanelBody({
               <section className="sc-section">
                 <h3>审查草稿</h3>
                 {staleDraft && (
-                  <div className="sc-notice">
+                  <Notice tone="warn" className="sc-notice">
                     草稿绑定旧 HEAD/base 或其他账户。禁止自动重定位或提交。
                     <button
                       onClick={() =>
@@ -242,7 +244,7 @@ export function GithubPullRequestPanelBody({
                     >
                       丢弃旧草稿并重新审查
                     </button>
-                  </div>
+                  </Notice>
                 )}
                 <label>
                   审查正文

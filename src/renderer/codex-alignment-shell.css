@@ -18,6 +18,8 @@
   --draft-fg: #c7b795;
   --accent: #5b9cff;
   --accent-fg: #ffffff;
+  /* Text on filled accent/bad controls: white is 2.75:1 on these dark-theme fills, ink is 6.6:1. */
+  --fill-fg: #151515;
   --accent-soft: rgb(91 156 255 / 12%);
   --accent-line: rgb(91 156 255 / 48%);
   --selected: #5b9cff;
@@ -40,6 +42,47 @@
   --shadow-card:
     0 1px 0 rgb(255 255 255 / 3%),
     0 10px 30px rgb(0 0 0 / 18%);
+  /* Local elevation steps. Values match what components used inline before they became tokens. */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 8%);
+  --shadow-thumb: 0 1px 4px rgb(0 0 0 / 20%);
+  --shadow-float: 0 12px 32px rgb(0 0 0 / 45%);
+  --shadow-composer: 0 10px 30px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 7%);
+  --shadow-composer-focus: 0 12px 34px rgb(0 0 0 / 13%), 0 0 0 1px var(--accent-soft);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 20%);
+  /* Fixed, theme-independent swatches. Theme previews always show both palettes, and a
+     QR code must sit on white to scan, whatever theme is active. */
+  --theme-preview-dark-bg: #151515;
+  --theme-preview-dark-panel: #1c1c1c;
+  --theme-preview-dark-line: #333331;
+  --theme-preview-dark-ink: #343434;
+  --theme-preview-light-bg: #f7f7f5;
+  --theme-preview-light-panel: #ffffff;
+  --theme-preview-light-line: #e4e4df;
+  --theme-preview-light-ink: #e7e7e3;
+  --qr-surface: #ffffff;
+  /* Dark-theme analytics canvas, a step below --bg. */
+  --bg-deep: #0d0d0c;
+  --shadow-side-panel: -18px 0 48px rgb(0 0 0 / 44%);
+  /* The terminal is always dark, whatever the app theme, so its palette is fixed. */
+  --terminal-bg: #090b0e;
+  --terminal-fg: #eceef2;
+  --terminal-fg-strong: #f2f4f7;
+  --terminal-fg-bright: #ffffff;
+  --terminal-dim: #8f98a7;
+  --terminal-muted: #7c8592;
+  --terminal-scrollbar: #4f5865;
+  --terminal-line: rgb(255 255 255 / 7%);
+  --terminal-line-strong: rgb(255 255 255 / 12%);
+  --terminal-line-control: rgb(255 255 255 / 14%);
+  --terminal-surface: rgb(255 255 255 / 7%);
+  --terminal-surface-active: rgb(255 255 255 / 7.5%);
+  --terminal-surface-hover: rgb(255 255 255 / 8%);
+  --terminal-button: #15191f;
+  --terminal-button-fg: #d9dde5;
+  --terminal-state-idle: #68707d;
+  --terminal-state-running: #7ed9a0;
+  --terminal-state-error: #ef767a;
+  --terminal-state-starting: #d9b86c;
 }
 
 :root[data-theme='light'] {
@@ -61,6 +104,7 @@
   --resizer-line: #e8e8e4;
   --accent: #3f7ee8;
   --accent-fg: #ffffff;
+  --fill-fg: #ffffff;
   --accent-soft: rgb(63 126 232 / 9%);
   --accent-line: rgb(63 126 232 / 42%);
   --selected: #3f7ee8;
@@ -86,10 +130,11 @@
   --shadow-card:
     0 1px 2px rgb(35 35 32 / 6%),
     0 12px 30px rgb(35 35 32 / 7%);
+  --shadow-xs: 0 1px 2px rgb(35 35 32 / 6%);
 }
 
 body {
-  font: 14px/1.55 var(--font-ui);
+  font: var(--text-base)/1.55 var(--font-ui);
   letter-spacing: -0.004em;
 }
 
@@ -146,8 +191,8 @@ select:focus-visible,
 }
 
 .sb-brand .name {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0;
 }
 
@@ -166,8 +211,8 @@ select:focus-visible,
   margin: 0;
   padding: 0 12px;
   background: transparent;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .sb-new:hover {
@@ -177,7 +222,7 @@ select:focus-visible,
 
 .sb-new .kbd {
   color: var(--dim2);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .sb-search {
@@ -193,11 +238,10 @@ select:focus-visible,
 
 .sb-search:focus-within {
   background: var(--panel);
-  box-shadow: 0 0 0 1px var(--border2);
 }
 
 .sb-search input {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .sb-nav {
@@ -209,8 +253,8 @@ select:focus-visible,
   min-height: 36px;
   padding: 0 12px;
   color: var(--dim);
-  font-size: 13px;
-  font-weight: 400;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
 }
 
 .sb-navitem:hover,
@@ -221,20 +265,16 @@ select:focus-visible,
 }
 
 .sb-sess.active {
-  background: var(--selected-soft);
   color: var(--fg);
-  box-shadow: inset 2px 0 0 var(--selected);
 }
 
 .sb-proj-row.active .sb-proj-head {
   background: var(--surface-strong);
-  color: var(--fg);
-  box-shadow: none;
 }
 
 .sb-sess.active .sb-sesstext {
   color: var(--fg);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .sb-navitem.active .ico,
@@ -244,9 +284,9 @@ select:focus-visible,
 }
 
 .sb-section {
-  margin: 24px 8px 8px;
+  margin: var(--space-3) var(--space-2) var(--space-2);
   color: var(--dim2);
-  font: 500 11px/16px var(--font-ui);
+  font: var(--weight-medium) var(--text-xs)/16px var(--font-ui);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -263,8 +303,8 @@ select:focus-visible,
 }
 
 .sb-proj-head .pname {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
 }
 
 .sb-proj-row.active .sb-proj-head {
@@ -287,21 +327,21 @@ select:focus-visible,
 }
 
 .sb-sesstext {
-  font-size: 13px;
-  font-weight: 400;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
 }
 
 .sb-draft {
   flex: none;
   color: var(--draft-fg);
   font-size: var(--text-compact-size);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
 .sidebar .sb-sess .sb-provider {
   color: var(--dim2);
-  font: 500 var(--text-compact-size)/1 var(--font-ui);
+  font: var(--weight-medium) var(--text-compact-size)/1 var(--font-ui);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -341,10 +381,9 @@ select:focus-visible,
 /* Conversation chrome ------------------------------------------------------- */
 
 .topbar {
-  gap: 10px;
-  padding: 0 14px;
+  gap: 8px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border3);
-  background: color-mix(in srgb, var(--main-surface) 96%, transparent);
 }
 
 .tb-thread {
@@ -363,8 +402,8 @@ select:focus-visible,
 .tb-thread b {
   max-width: min(28vw, 240px);
   overflow: hidden;
-  font-size: 13.5px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -377,11 +416,10 @@ select:focus-visible,
 }
 
 .tb-statusbar {
-  gap: 6px;
+  gap: 8px;
 }
 
 .tb-agent-status,
-.tb-context,
 .tb-action {
   height: 32px;
   min-height: 32px;
@@ -395,15 +433,15 @@ select:focus-visible,
   max-width: 240px;
   padding-inline: 8px;
   color: var(--dim);
-  font-size: 12px;
-  font-weight: 520;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
 
 .tb-agent-status .agent-version {
   color: var(--dim2);
   font-family: var(--font-mono);
   font-size: var(--text-compact-size);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 
 .tb-agent-status .dot {

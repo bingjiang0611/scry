@@ -48,14 +48,46 @@ interface HookRun {
   event: string
   name?: string
   command?: string
+  id?: string
+  exitCode?: number
+  error?: string
   startedAt: string
   completedAt?: string
   durationMs?: number
   status: TurnCallStatus
 }
 
-// 相同 event+name+command 的多次运行折叠成一条：保留 runs/failed 计数，丢弃逐次的 id/exitCode，
-// 大幅压缩重复命令串（同一 hook 脚本在每个工具调用上重复触发）。
+/** 错误正文是有界引用，不是解析结果：截断只影响长度，不改变结论。 */
+const HOOK_ERROR_MAX = 500
+function boundedError(text: string | undefined): string | undefined {
+  if (!text) return undefined
+  return text.length <= HOOK_ERROR_MAX ? text : `${text.slice(0, HOOK_ERROR_MAX - 1)}…`
+}
+
+/**
+ * 失败的运行不合并：每次失败都保留自己的关联 ID、命令、原始退出码、耗时与错误正文。
+ * 合并后只剩 runs/failed 计数，就无法再定位是哪次工具调用的 hook 失败、退出了多少。
+ */
+function failedHookRun(run: HookRun): TurnHookCall {
+  return {
+    ...(run.order != null ? { order: run.order } : {}),
+    lifecycleEvents: run.lifecycleEvents,
+    runs: 1,
+    event: run.event,
+    ...(run.name ? { name: run.name } : {}),
+    ...(run.command ? { command: run.command } : {}),
+    ...(run.id ? { id: run.id } : {}),
+    ...(run.exitCode != null ? { exitCode: run.exitCode } : {}),
+    ...(run.error ? { error: run.error } : {}),
+    ...(run.startedAt ? { startedAt: run.startedAt } : {}),
+    ...(run.completedAt ? { completedAt: run.completedAt } : {}),
+    ...(run.durationMs != null ? { durationMs: run.durationMs } : {}),
+    status: run.status
+  }
+}
+
+// 相同 event+name+command 的多次成功运行折叠成一条：保留 runs 计数，丢弃逐次的 id/exitCode，
+// 大幅压缩重复命令串（同一 hook 脚本在每个工具调用上重复触发）。失败运行不走这里。
 function collapseHookRuns(runs: HookRun[]): TurnHookCall[] {
   const groups = new Map<string, HookRun[]>()
   for (const run of runs) {
@@ -66,19 +98,17 @@ function collapseHookRuns(runs: HookRun[]): TurnHookCall[] {
   }
   return [...groups.values()].map((group) => {
     const first = group[0]
-    const failed = group.filter((run) => run.status === 'failed').length
     const orders = group.map((run) => run.order).filter((value): value is number => value != null)
     const startedAt = group.map((run) => run.startedAt).sort()[0]
     const completedAts = group.map((run) => run.completedAt).filter((value): value is string => !!value).sort()
     const hasDuration = group.some((run) => run.durationMs != null)
     const durationMs = group.reduce((sum, run) => sum + (run.durationMs ?? 0), 0)
     const status: TurnCallStatus =
-      failed > 0 ? 'failed' : group.some((run) => run.status === 'unknown') ? 'unknown' : first.status
+      group.some((run) => run.status === 'unknown') ? 'unknown' : first.status
     return {
       ...(orders.length > 0 ? { order: Math.min(...orders) } : {}),
       lifecycleEvents: group.reduce((sum, run) => sum + run.lifecycleEvents, 0),
       runs: group.length,
-      ...(failed > 0 ? { failed } : {}),
       event: first.event,
       ...(first.name ? { name: first.name } : {}),
       ...(first.command ? { command: first.command } : {}),
@@ -94,7 +124,10 @@ export function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent,
   const groups = new Map<string, TraceEvent[]>()
   for (const event of events) {
     if (event.kind !== 'hook' || event.stage === HOOK_DELIVERY_STAGE || isRecorderHook(event)) continue
-    const key = event.hookId ? `hook:${event.hookId}` : `event:${event.id}`
+    // 一个工具调用会长出 PreToolUse / PostToolUse 等不同 hook 运行，它们共享 tool-use 关联 ID 但不是同一次运行。
+    const key = event.hookId
+      ? `hook:${event.hookId}\u0000${event.hookEvent ?? ''}`
+      : `event:${event.id}`
     const group = groups.get(key) ?? []
     group.push(event)
     groups.set(key, group)
@@ -112,17 +145,29 @@ export function aggregateHooks(events: TraceEvent[], eventOrder: Map<TraceEvent,
         ? Math.max(0, completedMs - startedMs)
         : undefined
     )
+    const status = hookStatus(terminal)
     return {
       ...(eventOrder.get(first) != null ? { order: eventOrder.get(first) } : {}),
       lifecycleEvents: ordered.length,
       event: last.hookEvent ?? first.hookEvent ?? last.name ?? first.name ?? 'Hook',
       ...(last.hookName ?? first.hookName ? { name: last.hookName ?? first.hookName } : {}),
       ...(last.hookCommand ?? first.hookCommand ? { command: last.hookCommand ?? first.hookCommand } : {}),
+      ...(terminal.hookId ?? first.hookId ? { id: terminal.hookId ?? first.hookId } : {}),
+      ...(terminal.hookExitCode != null ? { exitCode: terminal.hookExitCode } : {}),
+      ...(status === 'failed' ? { error: boundedError(terminal.output ?? terminal.text) } : {}),
       startedAt: started.ts,
       ...(terminal !== started ? { completedAt: terminal.ts } : {}),
       ...(durationMs != null ? { durationMs } : {}),
-      status: hookStatus(terminal)
+      status
     }
   })
-  return [...collapseHookRuns(runs), ...aggregateHookDeliveries(events, eventOrder)]
+  const merged = [
+    ...collapseHookRuns(runs.filter((run) => run.status !== 'failed')),
+    ...runs.filter((run) => run.status === 'failed').map(failedHookRun)
+  ].sort((left, right) =>
+    (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
+    (left.startedAt ?? '').localeCompare(right.startedAt ?? '') ||
+    left.event.localeCompare(right.event)
+  )
+  return [...merged, ...aggregateHookDeliveries(events, eventOrder)]
 }

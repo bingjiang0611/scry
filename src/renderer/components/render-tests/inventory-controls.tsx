@@ -28,8 +28,8 @@ describe('Skill/MCP 操作能力渲染', () => {
     expect(html).toContain('发现证据')
     expect(html).toContain('Scry 只读取、不改写 Skill 配置')
     expect(html).toContain('role="tablist" aria-label="Skill 来源"')
-    expect(html).toContain('项目 Skill <span>1</span>')
-    expect(html).toContain('用户 Skill <span>1</span>')
+    expect(html).toContain('项目 Skill<span class="tab-count">1</span>')
+    expect(html).toContain('用户 Skill<span class="tab-count">1</span>')
     expect(html).not.toContain('user-home')
     expect(filterSkillsForScope([
       { name: 'project-audit', dir: '/repo', scope: 'project', description: 'audit', enabled: true },
@@ -55,7 +55,7 @@ describe('Skill/MCP 操作能力渲染', () => {
     )
 
     expect(filterSkillsForScope([providerSkill], 'provider')).toEqual([providerSkill])
-    expect(html).toContain('Provider Skill <span>1</span>')
+    expect(html).toContain('Provider Skill<span class="tab-count">1</span>')
     expect(html).toContain('scry-e2e-audit')
     expect(html).toContain('inventory-scope--unknown')
   })

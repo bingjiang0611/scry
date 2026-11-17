@@ -23,6 +23,36 @@ describe('Scry CLI arguments', () => {
     expect(() => parseArgs(['doctor', '--workspace'])).toThrow('missing value')
   })
 
+  it('recover --expire-open 是布尔开关，不吞后面的位置参数', () => {
+    // CodeLens 每 15 分钟自动执行这条命令；未注册时它直接以 unknown option 退出 1。
+    const parsed = parseArgs(['recorder', 'recover', '--expire-open', '--workspace', '/repo'])
+    expect(parsed.flags.get('expire-open')).toBe(true)
+    expect(parsed.flags.get('workspace')).toBe('/repo')
+    expect(parsed.positionals).toEqual(['recorder', 'recover'])
+    expect(() => parseArgs(['recorder', 'recover', '--expire-open=1'])).toThrow('does not accept a value')
+  })
+
+  it('--session 可重复且只在 --expire-open 下有效', () => {
+    const parsed = parseArgs(['recorder', 'recover', '--expire-open', '--session', 's-1', '--session', 's-2'])
+    expect(parsed.repeated?.get('session')).toEqual(['s-1', 's-2'])
+    expect(parsed.flags.get('session')).toBe('s-2')
+  })
+
+  it('--session 缺少 --expire-open 或为空时明确拒绝', async () => {
+    const root = await workspace()
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--session', 's-1']))
+      .rejects.toThrow('--session requires --expire-open')
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--expire-open', '--session', '']))
+      .rejects.toThrow('missing value for --session')
+  })
+
+  it('带 --expire-open 的 recover 能跑通并返回 JSON 结果', async () => {
+    const root = await workspace()
+    const stdout = captureStdout()
+    await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--expire-open'])).resolves.toBe(0)
+    expect(JSON.parse(stdout.text())).toMatchObject({ recovered: 0, pending: 0, expired: 0 })
+  })
+
   it('scoped recorder recovery fails closed on unpaired or unsupported scope', async () => {
     await expect(runScryCli(['recorder', 'recover', '--provider', 'qoder']))
       .rejects.toThrow('--provider and --session-id must be provided together')
@@ -75,7 +105,8 @@ describe('Scry CLI arguments', () => {
     const stdout = captureStdout()
     await expect(runScryCli(['--help'])).resolves.toBe(0)
     expect(stdout.text()).toContain('Usage:')
-    expect(stdout.text()).toContain('recorder recover --provider qoder --session-id <id>')
+    expect(stdout.text()).toContain('recorder recover [--provider qoder --session-id <id>] [--expire-open')
+    expect(stdout.text()).toContain('--session <id>')
   })
 
   it('--version 不会被空 positional 误判成 help', async () => {

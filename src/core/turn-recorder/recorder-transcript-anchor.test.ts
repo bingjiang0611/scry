@@ -163,6 +163,17 @@ describe('transcript anchor reuse', () => {
     expect(shape(warm)).toEqual(shape(cold))
   })
 
+  it('Qoder opt-in archive starts with the current prompt, not the preceding turn', async () => {
+    const path = await transcriptPath()
+    const earlier = JSON.stringify({ type: 'user', message: { role: 'user', content: 'previous question' } }) + '\n'
+    const current = JSON.stringify({ type: 'user', message: { role: 'user', content: 'capture this question' } }) + '\n'
+    await writeFile(path, earlier + current)
+
+    const read = await stableTranscript(path, 'qoder:opt-in', 'qoder', hashOf('capture this question'))
+    expect(read.source?.startOffset).toBe(Buffer.byteLength(earlier))
+    expect(read.source?.content).toBe(current)
+  })
+
   it('Qoder command wrapper uses the prompt anchor while the injected identity selects the turn', async () => {
     const path = await transcriptPath()
     const command = '<command-name>/rate-native</command-name><command-args>42</command-args>'

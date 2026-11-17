@@ -86,6 +86,7 @@ struct SessionTranscriptView: View {
         }
       }
       .id(sessionIdentity)
+      .conversationArrival()
       .task(id: splitRevision) { await refreshSplitBlocks() }
       statusStrip
       if !readOnly { footer }
@@ -212,6 +213,7 @@ struct SessionTranscriptView: View {
   private var header: some View {
     RemoteHeader(title: session?.label.isEmpty == false ? session!.label : ConnectionCopy.session,
                  subtitle: headerSubtitle, providerId: session?.providerId, titleLineLimit: 2,
+                 transitionIdentity: sessionIdentity,
                  backAction: { model.goBack() }) {
       HStack(spacing: 0) {
         CircleButton(symbol: "sidebar.right", label: SheetCopy.overview) { showOverview = true }

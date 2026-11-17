@@ -65,7 +65,9 @@ export function appendCodexPatchResult(
       kind: 'harness',
       stage: 'file_op',
       filePath: path,
-      fileOp: 'edit'
+      fileOp: 'edit',
+      // patch_apply_end 是本事件的权威结果：Provider 用 success:false 声明应用失败。
+      isError: payload.success === false
     })
   }
   current.observable.files = current.observable.files || changes.length > 0

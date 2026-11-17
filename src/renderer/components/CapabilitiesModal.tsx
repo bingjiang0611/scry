@@ -1,9 +1,11 @@
-import { useId, useRef, useState } from 'react'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
+import { useEffect, useId, useRef, useState } from 'react'
+import { MCP_LIVE_CHECK_CANCEL, type ProviderId } from '@shared/provider'
 import type { McpStatus } from '../format'
 import type { SkillMeta, McpMeta } from '../env'
 import type { McpLiveStatus } from '@shared/trace'
 import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
-import { Icon } from './primitives/Icon'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
@@ -19,6 +21,8 @@ import './archived-sessions.css'
 
 import { ModalFrame, requestModalClose } from './ModalFrame'
 import { EvidenceState, type EvidenceValue, useReadStarted, evidenceForRuntime } from './CapabilityEvidence'
+import { Tabs } from './primitives/Tabs'
+import { Segmented } from './primitives/Segmented'
 type CapabilityView = 'skills' | 'mcp'
 type CapabilitySource = 'all' | 'project' | 'user'
 
@@ -32,20 +36,13 @@ function CapabilitySourceTabs({
   label: string
 }) {
   return (
-    <div className="capability-source-tabs" role="tablist" aria-label={label}>
-      {(['all', 'project', 'user'] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          role="tab"
-          aria-selected={source === value}
-          className={source === value ? 'active' : ''}
-          onClick={() => onChange(value)}
-        >
-          {value === 'all' ? '全部' : value === 'project' ? '项目' : '用户'}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      className="capability-source-tabs"
+      label={label}
+      value={source}
+      onChange={onChange}
+      options={[{ value: 'all', label: '全部' }, { value: 'project', label: '项目' }, { value: 'user', label: '用户' }]}
+    />
   )
 }
 
@@ -65,6 +62,8 @@ export function CapabilitiesModal({
   onTestMcp,
   onReauthenticateMcp,
   onRefreshMcp,
+  onCancelMcp,
+  mcpProviderId,
   onClose
 }: {
   view: CapabilityView
@@ -82,6 +81,9 @@ export function CapabilitiesModal({
   onTestMcp: (targetId: string) => void
   onReauthenticateMcp?: (targetId: string) => void
   onRefreshMcp: () => void
+  /** Stops a running live check where the Provider allows it (MCP_LIVE_CHECK_CANCEL). */
+  onCancelMcp?: () => Promise<boolean>
+  mcpProviderId?: ProviderId
   onClose: () => void
 }) {
   const titleId = useId()
@@ -91,6 +93,9 @@ export function CapabilitiesModal({
   const activeCapability = view === 'skills' ? skillCapability : mcpCapability
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
+  const [cancelState, setCancelState] = useState<'idle' | 'requested' | 'unavailable'>('idle')
+  // Each check starts with a fresh cancel control.
+  useEffect(() => { if (!mcpRefreshing) setCancelState('idle') }, [mcpRefreshing])
   const skillsReadStarted = useReadStarted(skillsRefreshing)
   const mcpReadStarted = useReadStarted(mcpConfigRefreshing)
   const skillsUnavailable = skillCapability === null && !skillsRefreshing && skillsReadStarted
@@ -119,10 +124,13 @@ export function CapabilitiesModal({
     >
       <div className="capabilities-head">
         <h2 id={titleId} className="inventory-sr-only">Capabilities</h2>
-        <div className="capability-kind-tabs" role="tablist" aria-label="能力类型">
-          <button type="button" role="tab" aria-selected={view === 'skills'} className={view === 'skills' ? 'active' : ''} onClick={() => chooseView('skills')}>Skills</button>
-          <button type="button" role="tab" aria-selected={view === 'mcp'} className={view === 'mcp' ? 'active' : ''} onClick={() => chooseView('mcp')}>MCP</button>
-        </div>
+        <Tabs
+          className="capability-kind-tabs"
+          label="能力类型"
+          value={view}
+          onChange={chooseView}
+          items={[{ value: 'skills', label: 'Skills' }, { value: 'mcp', label: 'MCP' }]}
+        />
         <span className="capabilities-head__spacer" />
         {view === 'mcp' && (
           <button
@@ -132,8 +140,25 @@ export function CapabilitiesModal({
             disabled={loadingMcp || authenticationInProgress}
             aria-label="刷新 MCP 运行状态"
           >
-            {showMcpLoading && mcpRefreshing ? <span className="spinner" /> : <Icon name="refresh" />}
+            <TurningIcon busy={mcpRefreshing} />
             <span>{showMcpLoading && mcpRefreshing ? LOADING_COPY.detecting : LOADING_COPY.refresh}</span>
+          </button>
+        )}
+        {/* Offered only for a Provider whose check runs in a process it owns; for the
+            others a cancel would only stop waiting while the check went on. */}
+        {view === 'mcp' && mcpRefreshing && onCancelMcp && mcpProviderId && MCP_LIVE_CHECK_CANCEL[mcpProviderId]?.cancellable && (
+          <button
+            className="capabilities-refresh capabilities-cancel"
+            type="button"
+            aria-busy={cancelState === 'requested'}
+            aria-disabled={cancelState !== 'idle'}
+            onClick={() => {
+              if (cancelState !== 'idle') return
+              setCancelState('requested')
+              void onCancelMcp().then((accepted) => { if (!accepted) setCancelState('unavailable') }, () => setCancelState('unavailable'))
+            }}
+          >
+            <span>{cancelState === 'requested' ? LOADING_COPY.cancellingMcp : cancelState === 'unavailable' ? LOADING_COPY.cancelMcpUnavailable : LOADING_COPY.cancelMcp}</span>
           </button>
         )}
         <ModalCloseButton ref={closeRef} className="capabilities-close" onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeCapabilities} />
@@ -168,7 +193,7 @@ export function CapabilitiesModal({
               <strong>{LOADING_COPY.skillsUnavailable}</strong>
               <button type="button" className="capabilities-refresh" onClick={onRefreshSkills}>{LOADING_COPY.refresh}</button>
             </div>
-          ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedLoadingStatus loading={skillsRefreshing} title={LOADING_COPY.skills} /> : (
+          ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedSkeletonRows loading={skillsRefreshing} rows={6} meta rowHeight={56} label={LOADING_COPY.skills} /> : (
             <div className="capabilities-empty" role="status">
               <strong>{skillCapability?.data == null ? LOADING_COPY.skillsSourceUnread : LOADING_COPY.skillsSourceEmpty}</strong>
             </div>
@@ -256,7 +281,7 @@ export function CapabilitiesModal({
               </article>
             )
           }) : mcpUnavailable ? <div className="capabilities-empty" role="status"><strong>{LOADING_COPY.mcpUnavailable}</strong></div>
-            : loadingMcpConfig || mcpCapability === null ? <DelayedLoadingStatus loading={loadingMcp} title={LOADING_COPY.mcp} /> : (
+            : loadingMcpConfig || mcpCapability === null ? <DelayedSkeletonRows loading={loadingMcp} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} /> : (
             <div className="capabilities-empty" role="status">
               <strong>{mcpCapability?.data == null ? LOADING_COPY.mcpSourceUnread : LOADING_COPY.mcpSourceEmpty}</strong>
             </div>

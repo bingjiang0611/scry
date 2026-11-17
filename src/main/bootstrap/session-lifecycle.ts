@@ -1,4 +1,4 @@
-import type { ProviderContext, ProviderId, SessionProviderId, DeleteSessionResult, DeleteArchivedSessionsResult } from '../../shared/provider'
+import type { ProviderContext, ProviderId, SessionProviderId, DeleteSessionResult, DeleteArchivedSessionsResult, DeleteArchivedProgress } from '../../shared/provider'
 import type { AgentDataUpdated } from '../../shared/runtime'
 import type { Conversation } from '../../shared/conversation'
 import type { ConversationDeletionPreview } from '../../shared/conversation-api'
@@ -50,6 +50,8 @@ export interface SessionLifecycleDependencies {
   /** A Provider session's side chats, deleted with it (they live only in its panel). */
   sideChatCascade: SideChatCascade
   publishDataUpdated: (event: AgentDataUpdated) => void
+  /** The real count of archived sessions handled so far, for the renderer to show in place. */
+  publishDeleteProgress?: (progress: DeleteArchivedProgress) => void
   /** Asks the user; false or absent answer means no. Absent when the caller already asked. */
   confirm?: (prompt: { message: string; detail: string; button: string }) => Promise<boolean>
   notifyFailure?: (notice: { message: string; detail: string }) => Promise<void>
@@ -332,10 +334,14 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
     }
     let deleted = 0
     const failures: DeleteArchivedSessionsResult['failures'] = []
-    for (const target of targets) {
+    // Progress is the real count of sessions handled so far; the renderer shows it in place.
+    const progress = (done: number): void => deps.publishDeleteProgress?.({ done, total: targets.length, failed: failures.length })
+    progress(0)
+    for (const [index, target] of targets.entries()) {
       const result = await deleteOneSession(target.request, { confirm: false, notifyFailure: false })
       if (result.ok) deleted += 1
       else failures.push({ preview: target.preview, reason: result.reason ?? 'partial_failure' })
+      progress(index + 1)
     }
     if (failures.length > 0) {
       await deps.notifyFailure?.({

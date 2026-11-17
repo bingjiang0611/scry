@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { normalizeSessionTitle, SESSION_TITLE_MAX_LENGTH } from '@shared/session-title'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { ConversationAdoptionDialog } from './ConversationAdoptionDialog'
+import { Menu, MenuItem } from './primitives/Menu'
 import type { SessionMeta } from '../env'
 import { ModalFrame, requestModalClose } from './Modals'
 import { usePresence } from '../hooks/usePresence'
@@ -10,6 +11,7 @@ import { MOTION } from '../motion'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
+import { Button } from './primitives/Button'
 
 export interface SessionMenuTarget {
   cwd: string
@@ -37,12 +39,7 @@ export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
       if (event.target instanceof Node && !menuRef.current?.contains(event.target)) presence.requestClose('pointer')
     }
     const key = (event: KeyboardEvent): void => {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault()
-        const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
-        const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
-        buttons[(index + (event.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length]?.focus()
-      }
+      // Item movement and typeahead come from the Menu primitive; the document listener only closes.
       if (event.key === 'Escape' || event.key === 'Tab') {
         event.preventDefault()
         presence.requestClose('escape')
@@ -61,13 +58,11 @@ export function SessionRenameMenu({ target, onRename, onAdopted, onClose }: {
   if (editing === 'rename') return <SessionRenameDialog title={target.session.preview}
     onSave={(title) => onRename(target.cwd, target.session, title)} onClose={onClose} />
   const menu = (
-    <div ref={(node) => { menuRef.current = node; presence.ref(node) }} role="menu" aria-label="会话操作" className="menu sb-session-menu" data-state={presence.state}
-      style={{ left: target.left, top: Math.min(target.top, (typeof window === 'undefined' ? target.top : window.innerHeight) - (canAdopt ? 96 : 48)), transformOrigin: 'top left' }}>
-      <button type="button" role="menuitem" className="mitem" onClick={() => { target.trigger.focus(); setEditing('rename') }}>
-        <Icon name="edit" /> 重命名
-      </button>
-      {canAdopt && <button type="button" role="menuitem" className="mitem" disabled={target.session.pending} onClick={() => { target.trigger.focus(); setEditing('adopt') }}>迁入已捕获历史…</button>}
-    </div>
+    <Menu ref={(node) => { menuRef.current = node; presence.ref(node) }} label="会话操作" className="menu sb-session-menu" data-state={presence.state}
+      style={{ left: target.left, top: Math.min(target.top, (typeof window === 'undefined' ? target.top : window.innerHeight) - (canAdopt ? 80 : 48)), transformOrigin: 'top left' }}>
+      <MenuItem icon={<Icon name="edit" />} onClick={() => { target.trigger.focus(); setEditing('rename') }}>重命名</MenuItem>
+      {canAdopt && <MenuItem icon={<Icon name="archive" />} disabled={target.session.pending} onClick={() => { target.trigger.focus(); setEditing('adopt') }}>迁入已捕获历史…</MenuItem>}
+    </Menu>
   )
   return typeof document === 'undefined' ? menu : createPortal(menu, document.body)
 }
@@ -120,8 +115,8 @@ export function SessionRenameDialog({ title, onSave, onClose }: {
           {error && <p id={`${id}-error`} role="alert" className="session-rename-error">{error}</p>}
         </div>
         <div className="project-dialog-actions">
-          <button type="button" className="btn" disabled={saving} onClick={() => requestModalClose()}>取消</button>
-          <button type="submit" className="btn primary" disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</button>
+          <Button disabled={saving} onClick={() => requestModalClose()}>取消</Button>
+          <Button variant="primary" type="submit" disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</Button>
         </div>
       </form>
     </ModalFrame>

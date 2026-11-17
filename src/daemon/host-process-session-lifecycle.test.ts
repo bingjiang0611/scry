@@ -38,7 +38,13 @@ describe('daemon session lifecycle', () => {
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [])).error).toBe('已存档会话删除未经确认')
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [2])).result).toMatchObject({ ok: false, reason: 'catalog_changed', deleted: 0 })
       expect(sessions().some((session) => session.externalSessionId === 'native-a')).toBe(true)
+      const beforePurge = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [1])).result).toMatchObject({ ok: true, deleted: 1 })
+      // The purge's real count reaches the App's window on the event feed, in order.
+      const purgeNotices = await daemon.request({ op: 'appEvents', epoch: beforePurge.events.epoch, cursor: beforePurge.events.cursor, waitMs: 0 })
+      const progress = (purgeNotices.events.items as Array<{ kind: string; channel?: string; payload?: unknown }>)
+        .filter((item) => item.kind === 'window' && item.channel === 'agent:deleteArchivedProgress').map((item) => item.payload)
+      expect(progress).toEqual([{ done: 0, total: 1, failed: 0 }, { done: 1, total: 1, failed: 0 }])
       expect(sessions().some((session) => session.externalSessionId === 'native-a')).toBe(false)
 
       // A single deletion; the App hears of it through the event feed.

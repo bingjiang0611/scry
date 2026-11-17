@@ -5,6 +5,24 @@ import type { McpLiveStatus } from './trace.js'
 export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
 export type SessionProviderId = ProviderId | 'legacy_unknown'
 export type ProviderCapability = 'skills' | 'mcp' | 'commands' | 'account'
+
+/**
+ * Whether a running "check every MCP" can be cancelled, per Provider. Only a check
+ * that runs in a process it owns (and already closes on timeout) can be stopped; a
+ * check sent to a shared server would only stop being waited for while the server
+ * keeps starting MCP servers, which is not a cancel. Decided per Provider, never
+ * inferred.
+ */
+export const MCP_LIVE_CHECK_CANCEL: Record<ProviderId, { cancellable: true } | { cancellable: false; reason: string }> = {
+  claude: { cancellable: true },
+  qoder: { cancellable: true },
+  codex: { cancellable: false, reason: 'Codex 的 MCP 检测在共享的 app-server 里运行，不能单独取消' },
+  opencode: { cancellable: false, reason: 'OpenCode 的 MCP 检测在共享的 OpenCode server 里运行，不能单独取消' },
+  pi: { cancellable: false, reason: 'Pi 没有 MCP 运行状态接口，只读取快照' }
+}
+
+/** The reason a cancelled MCP check reports; the runtime state stays unknown. */
+export const MCP_CHECK_CANCELLED = '已取消检测；没有取得 MCP 运行状态'
 export type CapabilityMode = 'manage' | 'read' | 'none'
 export type CapabilityState = 'ready' | 'degraded' | 'unknown' | 'unsupported'
 export type DangerCoverage = 'classified' | 'unsupported'
@@ -50,6 +68,13 @@ export interface DeleteSessionResult {
   deleted: Array<'recovery journals' | 'database turn outbox' | 'usage' | 'database' | 'attachments' | 'transcripts' | 'catalog'>
   retained: string[]
   failed: Array<{ store: string; error: string }>
+}
+
+/** Count of a running bulk delete; sent after each session is handled, never estimated. */
+export interface DeleteArchivedProgress {
+  done: number
+  total: number
+  failed: number
 }
 
 export interface DeleteArchivedSessionsResult {

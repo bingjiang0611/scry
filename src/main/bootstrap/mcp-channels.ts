@@ -3,7 +3,7 @@ import type { ProviderRegistry } from '../providers/registry'
 import type { McpExecutionOperation, McpExecutionSnapshot } from '../mcp-execution-trust'
 import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { AuthorizedMcpExecution } from '../providers/types'
-import { capabilityUnavailable } from '../../shared/provider'
+import { capabilityUnavailable, capabilityUnknown, MCP_CHECK_CANCELLED, MCP_LIVE_CHECK_CANCEL } from '../../shared/provider'
 import { isSafeOAuthAuthorizationUrl, prepareOAuthLoopback } from '../oauth-loopback'
 import { buildMcpExecutionSnapshot } from '../mcp-execution-trust'
 import { isMcpGuardReport } from '../../shared/mcpguard-report'
@@ -11,7 +11,7 @@ import { providerOperationKey } from '../provider-operation-gate'
 import { shellEnv } from '../claude-locate'
 import type { ChannelHandlers } from './startup-channels'
 
-// The four MCP channels, as main has always answered them, shared with the daemon
+// The five MCP channels, as main has always answered them, shared with the daemon
 // (B4-L4) so daemon mode runs the same trust and fingerprint checks: every live probe,
 // test and re-auth re-verifies the MCP execution snapshot and fails closed. What differs
 // is injected: who may authenticate here, and how an OAuth page reaches a browser (main
@@ -32,6 +32,13 @@ export interface McpChannelDependencies {
   assertOwner: () => void
 }
 
+// Live checks in flight in THIS process, keyed so a person can cancel exactly that Provider
+// profile and workspace. In daemon mode the daemon holds the Provider operation, so the
+// cancel must run in the same process as the check it aborts.
+const liveChecks = new Map<string, Set<AbortController>>()
+const liveCheckKey = (context: ProviderContext): string =>
+  `${providerOperationKey(context.providerId, context.agentProfileId)}\0${context.cwd ?? ''}`
+
 export function mcpChannelHandlers(deps: McpChannelDependencies) {
   const { providerRegistry, withProviderOperation, ensureMcpExecutionAuthorized, authorizedMcpExecution, homeDir, getRuns, canonicalProviderCwd, providerOperationGate, openExternal, assertOwner } = deps
   return {
@@ -44,10 +51,31 @@ export function mcpChannelHandlers(deps: McpChannelDependencies) {
         )
       }
       if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
-      return withProviderOperation(p.context.providerId, async () => {
-        const snapshot = p.refresh ? await ensureMcpExecutionAuthorized(p.context, 'live') : null
-        return providerRegistry.mcpSnapshot(p.context, p.refresh, authorizedMcpExecution(snapshot))
-      }, p.context.agentProfileId)
+      // A live check is registered under its own key so a person can cancel exactly it;
+      // the adapter honours the signal only where MCP_LIVE_CHECK_CANCEL allows.
+      const key = liveCheckKey(p.context)
+      const controller = new AbortController()
+      const running = liveChecks.get(key) ?? new Set<AbortController>()
+      running.add(controller)
+      liveChecks.set(key, running)
+      try {
+        return await withProviderOperation(p.context.providerId, async () => {
+          if (controller.signal.aborted) return capabilityUnknown(p.context, 'read', MCP_CHECK_CANCELLED)
+          const snapshot = p.refresh ? await ensureMcpExecutionAuthorized(p.context, 'live') : null
+          return providerRegistry.mcpSnapshot(p.context, p.refresh, authorizedMcpExecution(snapshot), controller.signal)
+        }, p.context.agentProfileId)
+      } finally {
+        running.delete(controller)
+        if (running.size === 0 && liveChecks.get(key) === running) liveChecks.delete(key)
+      }
+    },
+    'agent:cancelMcpSnapshot': (context: ProviderContext): boolean => {
+      // Not cancellable for this Provider: nothing is aborted, and the renderer never
+      // offered the control. Returning false keeps a stale renderer honest.
+      if (!MCP_LIVE_CHECK_CANCEL[context.providerId]?.cancellable) return false
+      const running = [...liveChecks.get(liveCheckKey(context)) ?? []].filter((controller) => !controller.signal.aborted)
+      for (const controller of running) controller.abort()
+      return running.length > 0
     },
     'agent:testMcp': async (p: { context: ProviderContext; targetId: string }) => {
       assertOwner()

@@ -7,8 +7,19 @@ import { flushCodexUserInputs, recordCodexUserInput, type CodexUserInputState } 
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 import { codexIdentityFromSessionMeta, recordCodexItemCompleted, recordCodexSubAgentActivity } from './recorder-codex-rollout-children.js'
 import { attachCodexCompactions, codexCompactionMarker, type CodexCompactionMarker } from './recorder-codex-compaction.js'
+import { codexTurnUsageDelta, type CodexUsageBaseline } from './recorder-codex-usage.js'
 
-export function parseCodexRollout(content: string, runId: string, sessionIdentity?: CodexRolloutIdentity): { recognized: boolean; turns: ParsedTranscriptTurn[]; identity: CodexRolloutIdentity } {
+export function parseCodexRollout(
+  content: string,
+  runId: string,
+  sessionIdentity?: CodexRolloutIdentity,
+  /**
+   * Cumulative usage the session had reached before this window. A turn window that starts at the
+   * turn's own `task_started` cannot see the previous cumulative frame, so the caller reads that one
+   * bounded fact forward; without it Codex deltas would report lifetime totals as this turn's usage.
+   */
+  usageBaseline?: CodexUsageBaseline
+): { recognized: boolean; turns: ParsedTranscriptTurn[]; identity: CodexRolloutIdentity } {
   const turns: ParsedTranscriptTurn[] = []
   let identity: CodexRolloutIdentity = sessionIdentity ?? { isSubagent: false }
   let identitySeen = !!sessionIdentity?.sessionId
@@ -22,8 +33,8 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     cacheCreationTokens: 0,
     reasoningTokens: 0
   })
-  let cumulativeUsage = emptyUsage()
-  let turnUsageBaseline = emptyUsage()
+  let cumulativeUsage: UsageCounters = usageBaseline ? { ...usageBaseline } : emptyUsage()
+  let turnUsageBaseline: UsageCounters = usageBaseline ? { ...usageBaseline } : emptyUsage()
   let latestTurnCumulative: UsageCounters | undefined
   let usage: Required<Pick<TraceEvent, 'tokensIn' | 'tokensOut' | 'cacheReadTokens' | 'cacheCreationTokens' | 'reasoningTokens'>> = {
     tokensIn: 0,
@@ -72,15 +83,7 @@ export function parseCodexRollout(content: string, runId: string, sessionIdentit
     if (!current || usageFinished) return
     usageFinished = true
     if (!usageObserved) return
-    const finalUsage = latestTurnCumulative
-      ? {
-          tokensIn: Math.max(0, latestTurnCumulative.tokensIn - turnUsageBaseline.tokensIn),
-          tokensOut: Math.max(0, latestTurnCumulative.tokensOut - turnUsageBaseline.tokensOut),
-          cacheReadTokens: Math.max(0, latestTurnCumulative.cacheReadTokens - turnUsageBaseline.cacheReadTokens),
-          cacheCreationTokens: Math.max(0, latestTurnCumulative.cacheCreationTokens - turnUsageBaseline.cacheCreationTokens),
-          reasoningTokens: Math.max(0, latestTurnCumulative.reasoningTokens - turnUsageBaseline.reasoningTokens)
-        }
-      : usage
+    const finalUsage = latestTurnCumulative ? codexTurnUsageDelta(latestTurnCumulative, turnUsageBaseline) : usage
     // One model per turn is the only case where usage and context can be attributed; several
     // models stay unattributed instead of picking one.
     const model = turnModels.size === 1 ? [...turnModels][0] : undefined

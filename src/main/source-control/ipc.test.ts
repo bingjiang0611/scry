@@ -26,6 +26,7 @@ describe('production source-control IPC boundary', () => {
       'operations',
       'reconcile',
       'acknowledge',
+      'cancel',
       'pullRequests',
       'pullRequest',
       'saveDraft',

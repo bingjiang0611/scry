@@ -42,56 +42,66 @@ typography:
     fontSize: 14px
     lineHeight: 1.55
     letterSpacing: "-0.004em"
-  desktop-button:
-    fontFamily: "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Segoe UI\", system-ui, sans-serif"
-    fontSize: 12.5px
-  desktop-nav:
-    fontFamily: "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Segoe UI\", system-ui, sans-serif"
-    fontSize: 13.5px
-    fontWeight: 500
   desktop-mono:
     fontFamily: "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+  scale:
+    text-2xs: 10px
+    text-xs: 11px
+    text-sm: 12px
+    text-md: 13px
+    text-base: 14px
+    text-reading: 15px
+    text-lg: 16px
+    text-xl: 20px
+    text-2xl: 24px
+  weight:
+    regular: 400
+    medium: 500
+    semibold: 600
+    bold: 700
+spacing:
+  space-0_5: 2px
+  space-1: 4px
+  space-2: 8px
+  space-3: 12px
+  space-4: 16px
+  space-5: 20px
+  space-6: 24px
+  space-8: 32px
+  space-10: 40px
+  space-12: 48px
 rounded:
-  xs: 7px
-  sm: 10px
-  md: 14px
+  xs: 4px
+  sm: 8px
+  md: 12px
   lg: 20px
   pill: 999px
-  navigation-item: 9px
-  badge: 6px
-  surface-card: 12px
-  modal: 18px
 components:
   button-primary:
     backgroundColor: "{colors.desktop-dark-accent}"
     textColor: "{colors.desktop-dark-accent-fg}"
-    typography: "{typography.desktop-button}"
     rounded: "{rounded.md}"
-    padding: 6px 12px
+    minHeight: 40px
   button-secondary:
     backgroundColor: "{colors.desktop-dark-panel}"
     textColor: "{colors.desktop-dark-fg}"
-    typography: "{typography.desktop-button}"
     rounded: "{rounded.md}"
-    padding: 6px 12px
+    minHeight: 40px
   search-input:
     rounded: "{rounded.sm}"
     height: 36px
-    padding: 0 10px
   navigation-item:
-    typography: "{typography.desktop-nav}"
-    rounded: "{rounded.navigation-item}"
-    height: 34px
-    padding: 0 10px
+    rounded: "{rounded.sm}"
+    height: 36px
   badge:
     textColor: "{colors.desktop-dark-dim}"
-    rounded: "{rounded.badge}"
-    padding: 3px 9px
+    rounded: "{rounded.xs}"
   surface-card:
     backgroundColor: "{colors.desktop-dark-panel2}"
     textColor: "{colors.desktop-dark-fg}"
-    rounded: "{rounded.surface-card}"
-    padding: 15px
+    rounded: "{rounded.md}"
+  modal:
+    rounded: "{rounded.lg}"
 ---
 
 # Design System: Scry
@@ -110,173 +120,297 @@ components:
 - 系统字体承载操作与阅读，等宽字体承载代码、路径和数据。
 - 平台各自保留交互习惯；未知、禁用和失败不能被美化成成功。
 
-### 范围与依据
+本文是桌面 renderer 的设计规范与 iOS 的对应约束。带日期的具体界面决策与当时的验证证据见 [设计决策记录](docs/design/decisions.md)；设计稿、原型和截图放在本地 `designs/`、`artifacts/`，不随仓库分发。
 
-这是现有实现的记录，不是重设计。用户已确认上述比喻、气质、语义色名，以及“分层为主，阴影辅助”“柔和边界，明确操作”。仅记录稳定的共享样式与代表组件；不把当前未提交功能升级为全局规范。
+## 系统如何运转
 
-设计稿、原型和截图放在本地 `designs/`、`artifacts/` 目录，不随仓库分发；文档里指向这两个目录的链接只在维护者本机可打开。
+设计系统由三层组成，每一层只引用上一层，不跳层写字面值：
 
-桌面入口 `src/renderer/main.tsx` 依次导入 styles、analytics-evidence、inventory-evidence、session-evidence、codex-alignment 的 CSS。最后一层覆盖基础变量，但仍须遵守选择器优先级和组件局部样式。iOS 依据 `apps/ios/ScryRemote/Theme.swift`、`Components.swift` 和 `HomeView.swift`。原始代码路径与内容指纹见配套 `.impeccable/design.json`。
-
-2026-10-21 补充了真实运行界面的视觉抽查，替代此前截图超时的证据缺口。桌面记录已更新为安装 0.2.214、用户手动重启后的观察：
-
-| 对象 | 实际观察 | 版本与范围 |
+| 层 | 内容 | 位置 |
 | --- | --- | --- |
-| 桌面深色 | 重启后的会话导航、正文、代码块与输入区正常显示 | Scry 0.2.214；macOS 窗口 1280 × 880 pt；新进程启动晚于安装 |
-| 桌面浅色 | 用户切换后，侧栏、正文、工具状态、运行中输入区未见明显错位或主题混用 | 同一 0.2.214 进程与窗口；保留用户选择的浅色，不自动切回 |
-| iOS 固定深色 | 真机主页与设置页；系统文字、列表层级、底部搜索和圆形操作按钮 | iPhone 13、iOS 26.5.2、390 × 844 pt；com.scry.remote.local 0.1.15 (22)，通过 iCTRL 操作 |
+| 尺度 token | 字号、字重、间距、圆角、动效时长与缓动 | `src/renderer/styles-theme-shell.css` 的 `:root`（动效在 `motion.css`）。唯一定义处，其他文件不得重定义 |
+| 语义 token | 画布、表面、边界、文字层级、强调、状态、证据类型、Provider、阴影 | `styles-theme-shell.css` 给出基础值，最后加载的 `codex-alignment-shell.css` 覆写深浅主题的最终色值与阴影 |
+| 组件 | 按钮、徽章、通知、菜单、弹窗、标签页等 | 组件 CSS 与 `src/renderer/components/primitives/`；只消费前两层 |
 
-初次桌面抽查时，磁盘安装包为 0.2.212、工作区为 0.2.213，旧进程身份未确认；该记录保留在 sidecar 中。后续安装的 0.2.214 已通过构建、打包校验和 Electron 冒烟检查，安装归档与验证产物的 SHA-256 一致。用户手动重启后，已补齐该安装版本的桌面双主题视觉证据；此前完整单测有 Pi 超时，按用户要求直接构建安装，不能据此声称全量测试通过。
+入口 `src/renderer/main.tsx` 依次导入 styles、motion、analytics-evidence、inventory-evidence、session-evidence、codex-alignment。最后一层覆盖语义色值，但不得改写尺度 token（`radius-system.test.ts` 与 `design-system.test.ts` 会拒绝）。
 
-所见配色方向、层次与组件形态符合本文记录；未据截图推断精确色值、对比度合规或所有状态可用。未发送或停止 Agent 任务，未改权限或配对；手机回到原设置页。此次不覆盖 iOS 会话详情、键盘、动态字体、横屏及全流程。手机安装包与当前源码的构建对应关系仍未确认；桌面结果只适用于已核验的 0.2.214 安装产物，不自动覆盖后续工作区改动。
+### 守卫
 
-仓库 `artifacts/llm-performance-dark.png` 与 `artifacts/llm-performance-light.png` 的 SHA-256 相同，均呈现深色性能页，仍不能用作浅色证据。另在 Chrome 的 1512 × 764 视口核对过六种提取标本的深浅主题默认外观，并确认搜索输入可聚焦；标本检查不等于 App 全状态验收。真实界面含私人会话信息，截图未写入仓库。
+| 守卫 | 范围 | 强度 |
+| --- | --- | --- |
+| `src/renderer/radius-system.test.ts` | 所有 `border-radius` 必须是 `var(--r-*)`、`50%` 或 `0`；圆形必须声明 `corner-shape: round` | 绝对，无存量例外 |
+| `src/renderer/motion.test.ts` | 缓动曲线只在 `motion.css` 定义 | 绝对 |
+| `src/renderer/design-system.test.ts` | 所有 renderer 样式表：字号与字重只用 token、间距落在 4px 网格、颜色只用主题变量、浮层 z-index 只用 `--layer-*`、容器级 `… button` 规则以 `:not(:where(...))` 排除 primitive | 绝对：任何一条发现都使测试失败 |
+| `components/primitives/Button.test.tsx`、`Feedback.test.tsx` | 按钮、通知、标签页、分段控件只在各自样式表定义；退役类名不得回归；TSX 不得手写 `className="btn…"` 或 `role="tablist"` | 绝对 |
+
+`npm run design:audit` 列出发现（`-- --verbose` 给出逐行明细），有发现时退出码非零。改动界面时按 `.agents/skills/scry-design-system` 的流程执行；它的 `ui-contract-check.mjs` 在推送前列出新出现的选择器、不再渲染却仍被 smoke 选中的类，以及写死数值的 smoke 断言。没有基线和豁免：新增的样式要么用 token，要么先在本文与主题层扩展 token，并在 PR 中说明为何现有档位不够。
+
+删除样式时注意两类陷阱：`:is()`／`:where()` 里只删无效成员，不删整条选择器；文件或规则的章节注释若仍描述剩余规则，要保留。
 
 ## Colors
 
-前置 token 按 desktop-dark、desktop-light、ios 分域，数值是本次提取的规范快照；源代码修改后应刷新，不另造一套运行时主题。CSS 组件示例绑定现有变量，因此跟随所在页面主题；frontmatter 中按钮和卡片的颜色引用描述桌面深色默认态。
+frontmatter 中的颜色是 desktop-dark、desktop-light、ios 三域的规范快照，取自最终覆写层；源代码修改后应刷新，不另造一套运行时主题。
 
-- **中性色：** bg 是外层画布，panel／panel2 是内容与次级表面，border 是边界，fg／dim 是主次文字。侧栏与正文还使用专门 surface 变量，不能一律替换成 bg。
-- **强调蓝：** accent 用于操作、焦点和重点；selected 用于选中语义。当前二者色值相同，仍保留独立变量。
-- **状态色：** ok／warn／bad 分别表达对应的成功、警告和失败状态；状态成立必须有真实证据。Provider、读写类型另有专用色，不与状态色混用。
-- **iOS：** canvas／surface／message 分别承载画布、导航背景和消息背景；ink／muted 表达文字层级，blue 是强调色，green／amber／negative 用于相应语义。当前 Palette 是固定色值，没有提取出独立浅色调色板，不宣称两套原生主题齐备。
-- 透明背景、柔和强调底、边框和 Provider 色继续引用原 CSS／Swift 定义；本文件不是完整颜色清单。明暗、色盲和对比度合规未由本次记录证明。
+| 语义组 | 变量 | 用途 |
+| --- | --- | --- |
+| 画布与表面 | `--bg`、`--panel`、`--panel2`、`--panel3`、`--panel-hi`、`--sidebar-surface`、`--main-surface`、`--overview-surface` | 外层画布、内容表面、次级与悬浮表面；侧栏与正文有专用 surface，不能一律换成 `--bg` |
+| 叠层 | `--surface-faint` … `--surface-strong`、`--surface-inset*` | hover、按下、内嵌区；随主题切换明暗方向，组件不得自写 `rgb(255 255 255 / x%)` |
+| 边界 | `--border`、`--border2`、`--border3` | 常规、强调、发丝分隔 |
+| 文字 | `--fg`、`--dim`、`--dim2`、`--dim3` | 主文字到三级文字；三级文字仍需 4.5:1，不用更浅的灰冒充层级 |
+| 强调与选中 | `--accent`、`--accent-soft`、`--accent-line`、`--selected*` | 主操作、焦点、当前选中；二者色值目前相同，仍保留独立变量 |
+| 填充控件文字 | `--fill-fg` | 实心强调色／危险色控件上的文字：深色主题为深色字（白字在 `#5b9cff` 上仅 2.75:1），浅色主题为白字 |
+| 状态 | `--ok`、`--warn`、`--bad` 及 `-soft` | 成功、需要注意、失败；状态成立必须有真实证据 |
+| 证据类型 | `--read`、`--write`、`--edit`、`--mcp`、`--skill`、`--agent` | 工具调用的读写类别；不与状态色混用 |
+| Provider | `--provider-*` | 只用于识别来源，不表达授权、成功或完整性 |
+| 阴影 | `--shadow-card`、`--shadow-pop`、`--shadow-xs`、`--shadow-menu`、`--shadow-float`、`--shadow-thumb`、`--shadow-composer(-focus)`、`--shadow-side-panel` | 卡片、弹窗、细微抬升、菜单与浮动提示、浮动控件、滑块、输入框、窄屏浮动右栏；新的阴影先找最近的一档 |
+| 填充控件文字 | `--fill-fg` | 见上文 |
+| 固定色板 | `--terminal-*`、`--theme-preview-*`、`--qr-surface`、`--bg-deep` | 不随主题变化的颜色：终端始终是深色、主题预览要同时展示两套配色、二维码必须是白底、分析页深色画布 |
+
+状态与证据类型的半透明底色和边框一律由语义变量派生：`color-mix(in srgb, var(--ok) 24%, transparent)`。写死的 `rgba()` 会让浅色主题沿用深色主题调好的色值。
+
+iOS：canvas／surface／message 承载画布、导航背景和消息背景；ink／muted 表达文字层级，blue 是强调色，green／amber／negative 用于相应语义。当前 Palette 是固定色值，没有独立浅色调色板。明暗、色盲和对比度合规未由本文整体证明，具体界面需单独验收。
 
 ## Typography
 
-桌面正文采用平台 UI 字体栈；中文包括 PingFang SC 回退。`--font-mono` 声明 JetBrains Mono 及系统等宽回退，不代表字体已随包分发。基本字级见 frontmatter，不新增营销用展示字体。
+### 字号
 
-欢迎页标题使用 clamp(27px, 3.2cqi, 34px)、650 字重；这属于欢迎页，不是全 App 标题标准。导航、按钮和辅助标签保持紧凑；支持文字与紧凑文字变量分别为 12px 和 11px。
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| `--text-2xs` | 10px | 等宽微标、指标标签、徽章计数 |
+| `--text-xs` | 11px | 紧凑辅助文字、时间戳、表头（`--text-compact-size` 是其别名） |
+| `--text-sm` | 12px | 按钮、辅助说明、表单标签（`--text-supporting-size` 是其别名） |
+| `--text-md` | 13px | 次级正文、导航、列表行 |
+| `--text-base` | 14px | 界面默认文字：面板正文、表单、列表说明 |
+| `--text-reading` | 15px | 只用于对话阅读正文：助手回答与用户消息（Markdown 标题按 em 随之缩放） |
+| `--text-lg` | 16px | 面板标题、弹窗标题 |
+| `--text-xl` | 20px | 区块标题 |
+| `--text-2xl` | 24px | 页面标题、主证据数值 |
 
-iOS 使用 SwiftUI 系统字体与 SF Symbols：RemoteHeader 标题 17pt semibold，副标题 11.5pt；项目分组标题 18pt semibold，列表标题常见 15.5pt。代码同时存在固定字号和语义 text style，不能声称已全面支持 Dynamic Type。使用系统图标，而非把桌面 SVG 强行搬成同尺寸触控按钮。
+- 组件只用上表 token。半像素字号（10.5、11.5、12.5、13.5）不进入 scale：相邻档位只差 1px，再加半档只会制造无法区分的层级。
+- 允许的例外只有三类：`inherit`／`0`；Markdown 内部的相对 `em` 比例；欢迎页等展示标题的 `clamp()` 流式字号。
+- 大号数字（总览主指标、用量总额等）上限是 `--text-2xl`，不另设展示字号。
+- 等宽字体与界面字体共用同一字号 scale。`--font-mono` 声明 JetBrains Mono 及系统回退，不代表字体已随包分发。
 
-## Layout
+### 字重
 
-桌面默认侧栏 230px、拖动区 8px、右侧纵览 380px；这些是起始值，不是锁死的宽度。顶部栏变量为 52px，状态栏为 26px。主工作区使用 grid 与独立滚动，正文和 composer 共用证据列，最大列宽 960px，gutter 为 clamp(20px, 3cqi, 36px)。
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| `--weight-regular` | 400 | 正文 |
+| `--weight-medium` | 500 | 导航、按钮、强调的正文片段 |
+| `--weight-semibold` | 600 | 标题、判词、主数值 |
+| `--weight-bold` | 700 | 等宽微标等极小字号的可读性补偿，正文不用 |
 
-响应式以实际容器而非仅窗口宽度判断：main-pane 在 720px 收紧 gutter，在 560px 调整标题；composer-pane 在 560px 换行控件。窗口 900px 以下调整设置弹窗；右侧 surface 在 1180px 以下有独立浮层规则。它们是局部阈值，不组成通用移动 Web 断点体系。
+层级首先靠字号与颜色拉开，不靠 550／620／650 这类相邻字重微调；相差 50 的字重在系统字体上几乎不可分辨，只会让同类元素看起来不一致。
 
-iOS 为原生单列流程。RemoteHeader 最小高度 56pt；列表常用 19pt 水平内边距，底部搜索区 18pt；不要将这些局部数值扩成虚构 spacing scale。CircleButton／PlainIcon 普通触控框至少 44pt，填充圆按钮为 46pt。不同屏幕、键盘、safe area 和大字体适配仍须按实际界面验证。
+iOS 使用 SwiftUI 系统字体与 SF Symbols：RemoteHeader 标题 17pt semibold，副标题 11.5pt；项目分组标题 18pt semibold，列表标题常见 15.5pt。代码同时存在固定字号和语义 text style，不能声称已全面支持 Dynamic Type。
 
-## Elevation & Depth
+## Spacing & Layout
 
-**分层为主，阴影辅助。** 桌面有真实的 card 与 popover 阴影，不是完全扁平。弹窗使用 panel、细边框、较强浮层阴影与带 blur 的遮罩；composer、消息和指标各自有局部阴影／悬浮反馈，不能把它们压成一种通用卡片。
+### 间距 scale
 
-精确 shadow 与 motion 值放在 sidecar。基础控件常见 140ms 状态过渡，后置皮肤常见 150ms；部分 hover 会位移。已有 prefers-reduced-motion 规则覆盖一组具体控件，不代表所有动效已验收。焦点环是可操作性提示，不作为装饰光晕扩散。
+| Token | 值 | 典型用途 |
+| --- | --- | --- |
+| `--space-0_5` | 2px | 光学对齐补偿（图标与文字基线、细边内缩），不用于组织布局 |
+| `--space-1` | 4px | 图标与标签之间、紧密成组的元素 |
+| `--space-2` | 8px | 控件内图标间距、同组控件之间、紧凑容器内边距 |
+| `--space-3` | 12px | 按钮水平内边距、列表行内边距、卡片内同组元素之间 |
+| `--space-4` | 16px | 卡片与面板内边距、段落组之间 |
+| `--space-5` | 20px | 弹窗内边距、正文列 gutter 下限 |
+| `--space-6` | 24px | 面板分区之间 |
+| `--space-8` / `--space-10` / `--space-12` | 32 / 40 / 48px | 页面级留白、空状态 |
 
-iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous 圆角和 1pt 描边，没有使用 Material 或背景模糊。文档保留其实现含义，不从名称推断玻璃效果。
+间距值必须落在 4px 网格上；1px 只用于发丝线补偿，2px 只用于光学对齐。新代码优先写 token，存量 4 的倍数字面值与 token 等价、可逐步替换。
+
+### 按语义嵌套分配间距
+
+1. **由内到外递增**：同一组内元素的间距 < 组与组之间的间距 < 容器内边距。例如按钮内图标与文字 8px，按钮之间 8px，按钮组与上方内容 16px，所在卡片内边距 16px。
+2. **容器内边距四边一致**：卡片、通知、弹窗主体、输入框等容器，在内容是单块时上下左右使用同一个值；只有当一条边需要对齐外部网格（例如与正文列左缘对齐）时才单独调整，并在注释中说明。
+3. **同级等距**：同一列表、同一工具栏中的兄弟元素用同一个 gap，不为个别元素单独加 margin。用 `gap` 表达兄弟间距，`padding` 表达容器内缩，避免 `margin` 叠加。
+4. **嵌套圆角同心**：外层圆角 = 内层圆角 + 内边距。现有 radius stack 按此设计：20 − 8 = 12，12 − 4 = 8，8 − 4 = 4。
+
+### 布局尺寸
+
+桌面默认侧栏 230px、拖动区 8px、右侧纵览 380px；这些是起始值，不是锁死的宽度。顶部栏 52px，状态栏 26px。主工作区使用 grid 与独立滚动，正文和 composer 共用证据列，最大列宽 960px，gutter 为 clamp(20px, 3cqi, 36px)。
+
+响应式以容器而非窗口宽度判断：main-pane 在 720px 收紧 gutter，在 560px 调整标题；composer-pane 在 560px 换行控件；窗口 900px 以下调整设置弹窗；右侧 surface 在 1180px 以下有独立浮层规则。它们是局部阈值，不组成通用移动 Web 断点体系。
+
+iOS 为原生单列流程。RemoteHeader 最小高度 56pt；列表常用 19pt 水平内边距，底部搜索区 18pt；CircleButton／PlainIcon 普通触控框至少 44pt，填充圆按钮为 46pt。iOS 不套用桌面间距 token。
 
 ## Shapes
 
-全局桌面圆角见 frontmatter 的 xs／sm／md／lg／pill，它们由最后加载的皮肤覆盖。navigation-item／badge／surface-card／modal 记录实际局部例外，不是新增 CSS 变量；搜索采用 sm 对应尺寸。不要仅凭最近的 token 将局部例外统一化。
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| `--r-xs` | 4px | 徽章、行内代码、小标签 |
+| `--r-sm` | 8px | 导航项、搜索框、菜单项、紧凑控件 |
+| `--r-md` | 12px | 按钮、卡片、菜单与弹出层 |
+| `--r-lg` | 20px | 弹窗、composer 等最外层容器 |
+| `--r-pill` | 999px | 胶囊与圆形控件 |
+
+支持 `corner-shape: superellipse()` 的环境自动使用连续圆角（`styles-theme-shell.css` 中的渐进增强），不支持时回退为普通圆角，没有额外运行时成本；`50%` 与 `--r-pill` 的元素必须显式声明 `corner-shape: round`，保持真圆。
 
 iOS 使用 Circle、Capsule 与 continuous RoundedRectangle。Notice 为 12pt 圆角；底部搜索区为 24pt 圆角、48pt 高。两端圆角语言相近，但没有共用尺寸合同。
 
+## Elevation & Motion
+
+**分层为主，阴影辅助。** 弹窗使用 panel、细边框、`--shadow-pop` 与带 blur 的遮罩；卡片使用 `--shadow-card`。composer、消息和指标有各自的局部反馈，不要把它们压成一种通用卡片，也不要把 `--shadow-pop` 用在非浮层元素上，否则会读成弹窗。
+
+**层级**：浮出组件的元素只用命名层级，顺序由低到高：
+
+| token | 值 | 用于 |
+| --- | --- | --- |
+| `--layer-overlay` | 100 | 窄窗口下浮在主区上的右侧面板（抽屉）、窗格切换时的离场层 |
+| `--layer-dropdown` | 200 | 菜单、选择器、弹出面板、悬停卡片、右键菜单遮罩。高于抽屉，因为菜单会从抽屉里打开 |
+| `--layer-modal` | 300 | 弹窗遮罩与弹窗；打开弹窗时盖住所有菜单 |
+| `--layer-modal-dropdown` | 400 | 预留：从弹窗里打开并渲染到根节点的菜单 |
+| `--layer-tooltip` | 500 | 预留：需要盖过弹窗的 tooltip |
+
+同一层级按打开顺序叠放（后渲染的在上）。组件内部的叠放（吸顶表头、输入框、分隔条、图表提示）用小于 20 的字面值，只在本组件内比较；`design:audit` 拒绝 20 及以上的字面值。
+
+动效 token 在 `motion.css`：hover 用 `--duration-hover`（120ms），进入／退出按 sm／md／lg 档位，缓动只引用 `--ease-*`。所有位移和缩放动效必须有 `prefers-reduced-motion` 回退。焦点环是可操作性提示，不作为装饰光晕扩散。
+
+iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous 圆角和 1pt 描边，没有使用 Material 或背景模糊；不要从名称推断玻璃效果。
+
 ## Components
 
-配套 sidecar 收录六个桌面代表实例。它们是提取的样式标本，不是可执行产品流程；不发起请求，也不代替 React 或 SwiftUI 组件。文案仅在标本数据中集中保存。
+### 语义目录：按意图选组件
 
-| 组件 | 来源与默认形态 | 状态与边界 |
+先确定这块界面要做什么，再选组件；不要因为外观相近就借用另一个组件。
+
+| 意图 | 用 | 不用 |
 | --- | --- | --- |
-| 主按钮 | .btn.primary；强调色填充、最小高度 40px | hover 混入白色；禁用 opacity 0.45；保留 focus-visible 与按下反馈 |
-| 次按钮 | .btn；panel 底、border2 边框 | hover 使用 panel3／accent-line；不自动变为主按钮 |
-| 搜索输入 | .sb-search；36px 高容器、无边框内输入 | focus-within 的边界与外环来自后置皮肤；不是所有输入框的默认样式 |
-| 导航项 | .sb-navitem；34px 高、左对齐 | active 保留 surface-hover 底和继承的选中 inset 线；会话行另有自己的选中样式 |
-| 状态标签 | .badge；紧凑文字与边框 | 默认非交互；ok／bad 按证据着色，不添加虚构 hover 动作 |
-| Surface 入口卡片 | .surface-card；最小高度 124px | 这是可操作入口，含 hover、focus 与按下反馈；不是所有内容容器的模板 |
+| 触发一个动作（提交、保存、运行） | `<Button>`；一组里最多一个 `variant="primary"`；不可逆确认用 `variant="danger"`；返回、取消这类低强调动作可用 `variant="quiet"` | 链接样式的按钮；同一视图里两个主按钮；手写 `className="btn"` |
+| 工具栏里只有图标的动作 | `<IconButton label=…>`（`label` 必填，同时作为 tooltip） | 无标签的图标；为图标按钮另写一套 hover |
+| 打开一个选择菜单（Provider、模型、工作目录） | 选择器触发器（`.wdbtn`、`.clibtn`、`.location-button`），显示当前值 | `<Button>`：它表达“执行”，不表达“当前选择是什么” |
+| 关闭弹窗 | `ModalCloseButton` | 手写 `<button>×</button>` |
+| 在同一视图内切换平级内容（换掉整块面板） | `<Tabs>`：`--selected` 下划线，方向键／Home／End 切换 | 用按钮组或 `aria-pressed` 模拟标签页；用标签页做页面导航 |
+| 在 2–4 个互斥选项中过滤或换算同一份内容，立即生效 | `<Segmented>`：`role="group"` + `aria-pressed` | 用标签页做过滤；下拉菜单（选项少时多一次点击） |
+| 从较多选项中选择、或对当前对象执行一组命令 | `<Menu>` + `<MenuItem>`：单选项传 `checked`，危险操作传 `danger` 并放最后，分组用 `MenuSeparator`／`MenuLabel` | 平铺一排按钮；在菜单里放输入框或行内按钮（这类做成弹出面板） |
+| 描述对象的状态或属性 | 徽章 `.badge`（非交互，文字 + 颜色） | 可点击的徽章；只靠颜色的徽章 |
+| 实时连接或运行状态 | 状态点 + 文字标签 | 只有颜色的圆点 |
+| 需要用户注意、但不阻断操作的结果 | `<Notice tone>`：info／warn／bad；`layout="strip"` 贴面板边缘，默认 box 放在相关内容旁；最多一个小按钮 | 全局弹窗；只有颜色、没有图标与文字的提示；自己写底色与边框 |
+| 一次性操作反馈（已复制、已保存） | 结果在界面上已经可见时只做读屏播报（`role="status"`）；否则在触发按钮旁给状态，复制统一用 `useCopyFeedback`（图标变成勾，成功 2 秒后恢复，失败保留到下次尝试） | 浮动 toast；常驻的 Notice；自动消失的错误 |
+| 用户没在看的会话需要回复、失败或完成 | 后台通知 `BackgroundNotices`：侧栏底部、设置上方，随文档流排列，最多三条；需要回复、失败、中断的保留到处理，其余 10 秒后消失（悬停、聚焦或窗口在后台时暂停） | 浮在内容上的 toast（会挡住发送按钮）；为当前正在看的会话弹通知；把通知当作运行成功的证据 |
+| 必须用户决定才能继续 | 弹窗 `ModalFrame` | 把可选细节塞进弹窗 |
+| 低频的解释、定义、来源说明 | tooltip 或可展开的 `Disclosure` | 常驻的说明段落 |
+| 大块可选细节（原始输入输出、日志） | `Disclosure` 折叠 | 默认展开 |
+| 空列表、无数据 | 空状态：一句事实 + 可选的一个下一步 | 插画加营销语；显示成 `0` |
 
-**对话与 composer：** 延续共享正文列；正文、工具证据与输入控制分层。runtime-composer 的 send 使用独立的圆形按钮样式，不能用 .btn.primary 的矩形标本替代。
+### 收敛清单
 
-**弹窗：** .modal 使用 18px 圆角、panel 表面和 popover 阴影；头部最小高度 60px。承载受保护的设置或决策，不将任意细节都塞进弹窗。
+审计发现同一意图存在多套平行实现。它们各自的尺寸、hover 和焦点规则不同，是“看起来不统一”的主要来源。后续按下表收敛到一个实现，迁移时保持各调用方的行为与无障碍属性：
 
-**原生组件：** 复用 CircleButton、PlainIcon、Notice、EmptyState、StatusDot 和 RemoteHeader。连接点的 green 仅对应 connected；pairing 为 amber；offline／notPaired 为 faint。标签、空状态和错误说明保留具体语义，不能只靠颜色传达。
-
-### 可复用实现（2026-10-21 提取）
-
-本轮不新增颜色、尺寸或圆角 token；继续使用现有 CSS 与 `Palette`。提取只集中同用途的重复结构，不重设计外观。
-
-| 实现 | 已迁移范围 | 使用合同 |
+| 意图 | 现存实现 | 收敛目标 |
 | --- | --- | --- |
-| `src/renderer/components/primitives/ModalCloseButton.tsx` | 9 个文件中的 14 处弹窗关闭按钮 | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。默认使用现有 X 图标；两处字符外观通过 children 保留。继续使用 `.modal-x`，不承担弹窗焦点陷阱或确认关闭逻辑。 |
-| `apps/ios/ScryRemote/Components.swift` 的 `MoreMenu` | `HomeView`、`ChatView`、`SessionTranscriptView` | 原生 `Menu`、17pt medium 省略号、44 × 44pt 区域；默认名称来自 `ConnectionCopy.more`。历史页通过 `moreWithStatus` 保留当前历史状态；菜单操作与可用条件仍由页面提供。 |
+| 文字按钮 | ~~`.btn` 双重定义、`.hosts-button`、`.mp-button`、`.turn-branch-btn`、`.project-remove-confirm`~~ | **已完成（2026-11-15）**：`Button` + `styles-buttons.css` |
+| 图标按钮 | ~~`.iconbtn`、`.icon-button` 局部覆写、`.mp-icon-button`、无样式的 `.icon-btn`~~ | **已完成（2026-11-15）**：`IconButton` |
+| 行内通知 | ~~`.sc-notice`、`.sc-inline-notice`、`.composer-notice`、`.conversation-history-notice`、`.diff-review-notice`、`.side-chat-surface-notice`、`.surface-layout-notice`、`.termination-notice`、`.hosts-alert`、`.llm-perf-alert`、`.mcp-auth-banner`~~ | **已完成（2026-11-15）**：`Notice`；类名保留为定位与测试钩子 |
+| 标签页 | ~~`.sc-tabs`、`.sb-view-tabs`、`.overview-data-tabs`、`.skill-scope-tabs`、`.capability-kind-tabs`、`.diff-navigation-tabs`；无引用的 `.panel-tabs`、`.vtabs`~~ | **已完成（2026-11-15）**：`Tabs` |
+| 分段控件 | ~~`.usage-segmented`、`.capability-source-tabs`~~ | **已完成（2026-11-15）**：`Segmented`。`.seg-chip` 是指标徽章，不属于分段控件 |
+| 不并入 | `.surface-tabs`、`.terminal-tabs`（可关闭、可拖动）；`.settings-tab`（设置页左侧导航，`aria-current`） | 保留独立实现，但选中色、下划线与字号对齐 `Tabs` |
+| 就近反馈 | ~~`.mp-notice`（浮动 toast）~~；`.overview-session-notice`、`.surface-chooser-notice`、`.desktop-remote__copy-status`（按钮旁的状态字） | **已确定（2026-11-16）**：不做通用 toast，结果就近显示；复制反馈用 `useCopyFeedback` |
+| 菜单 | ~~`.climenu`、`.arch-provider-menu`、`.sb-session-menu`、`.sb-project-menu`、`.ctxmenu`、`.surface-menu` 各自的容器与条目样式~~ | **已完成（2026-11-16）**：`Menu` + `styles-menus.css`；定位、开关与动效仍由调用方负责 |
+| 不并入菜单 | `.diff-scope-menu`／`.diff-turn-menu`（虚拟列表子菜单，`aria-activedescendant`）、`.workspace-picker`（带搜索的列表）、`.wdmenu`／`.location-menu`（`role="dialog"` 的选择面板，行内有移除按钮）、`.slash-menu`、模型与权限弹出面板 | 弹出面板，不用 `role="menu"`；选择面板复用 `.menu-surface` 与 `.mitem` 的外观 |
 
-桌面示例：
+### 已有 primitive
+
+| 实现 | 合同 |
+| --- | --- |
+| `src/renderer/components/primitives/Button.tsx` | variant：primary / secondary（默认）/ quiet / danger；size：md（32px，弹窗与面板）/ sm（28px，工具栏与行内）。默认 `type="button"`，表单主操作显式传 `type="submit"`；`className` 只用于测试钩子与定位，不改尺寸、颜色和圆角 |
+| `src/renderer/components/primitives/IconButton.tsx` | `label` 必填，同时生成 `aria-label` 与 `title`；size：md（32px，图标 16px）/ sm（28px，图标 14px）；`active` 只控制视觉，`aria-pressed`／`aria-expanded` 仍由调用方给出 |
+| `src/renderer/components/primitives/Notice.tsx` | tone：info（默认）／warn／bad；layout：box／strip；size：md／sm；`action` 放一两个 sm 按钮。图标随 tone 自动给出；`role`（status／alert）由调用方决定，primitive 不隐式添加。正文里的 `<b>` 是标题样式 |
+| `src/renderer/components/primitives/Tabs.tsx` | `items` 的 `id`／`controls`／`title`／`count` 保持原 DOM 合同；自动激活，只有选中项在 Tab 顺序中；`tabRef`／`listRef`／`children` 支持动效指示条。颜色在 `aria-selected` 同一帧切换，不做颜色过渡 |
+| `src/renderer/components/primitives/Segmented.tsx` | `role="group"` + `aria-pressed`；`value` 可为字符串或数字 |
+| `src/renderer/components/primitives/Menu.tsx` | `Menu`（`role="menu"`、`aria-label` 必填，`className` 只放定位与测试钩子）、`MenuItem`（`checked` 给出对勾列与 `menuitemradio`，`danger`、`icon`、`trailing`）、`MenuSeparator`、`MenuLabel`。键盘：上下方向键循环、Home／End、按首字母跳转，只在启用的菜单项之间移动；打开时聚焦第一项、Esc 与 Tab 关闭由调用方处理。条目 32px，图标要么全有、要么全无 |
+| `src/renderer/components/primitives/ModalCloseButton.tsx` | 必填 `aria-label`，引用集中文案；固定 `type="button"`，保留 `disabled`、点击回调、DOM ref 和附加 class。不承担焦点陷阱或确认关闭逻辑 |
+| `src/renderer/components/ModalFrame.tsx` | 弹窗栈、焦点进入与恢复、Esc／遮罩关闭路由、进出场动效 |
+| `src/renderer/components/Disclosure.tsx` | 折叠内容的挂载、`inert` 与进出场动效；长内容自动切换为长动效 |
+| `apps/ios/ScryRemote/Components.swift` 的 `MoreMenu` | 原生 `Menu`、17pt medium 省略号、44 × 44pt 区域；菜单操作与可用条件由页面提供 |
 
 ```tsx
+<Button onClick={() => requestModalClose()}>{copy.cancel}</Button>
+<Button variant="primary" type="submit" disabled={!name.trim()}>{copy.save}</Button>
+<IconButton label={copy.refreshFiles} onClick={refresh}><Icon name="refresh" /></IconButton>
 <ModalCloseButton ref={closeRef} aria-label={MODAL_COPY.closeMcp} onClick={onClose} />
 ```
 
-iOS 示例：
+按钮的样式只在 `src/renderer/styles-buttons.css` 定义；`Button.test.tsx` 拒绝在其他文件重新定义 `.btn`／`.icon-button`、拒绝已退役的类名，也拒绝在 TSX 里手写 `className="btn…"`。
 
-```swift
-MoreMenu(label: ConnectionCopy.moreWithStatus(historyStatus)) {
-  Button(ConnectionCopy.settings) { model.route = .settings }
-}
-```
+### 代表组件的当前形态
 
-验证：桌面静态渲染对照保留原 DOM，隔离 Electron 以原生坐标和键盘验证关闭、禁用、ref、非提交行为，并查看深浅主题。iPhone 13 已安装本轮真机构建，核对主页与历史页菜单的展开、44pt 区域、状态文案和进入设置；没有发送或停止 Agent。`ChatView` 的真机入口需要手机发起的任务，本轮未发起该任务，因此该调用方只有编译验证。
-
-2026-10-21 用户重启后，已核对进程启动时间和安装归档哈希，并在真实桌面 App 的 1512 × 885 pt 深色窗口检查设置弹窗：关闭按钮实际点击后，重新读取界面确认弹窗消失、工作区恢复。该结果仅覆盖设置这一代表调用方；键盘、禁用、ref 和非提交行为仍以隔离 Electron 检查为依据，不声称全部弹窗逐一验收。保留本次观察时的深色主题，未编辑草稿或附件，未发送或停止 Agent。
-
-### 侧栏「动态」的加强（2026-10-21）
-
-范围是 `SidebarActivity` 与 `sidebar-activity.css` 呈现的侧栏动态列表；项目视图、标签栏、行交互、文案模块和证据语义不变。此前的平铺文字仍保留，只把「哪个时刻正在发生」做成整块列表的峰值：
-
-| 决定 | 理由 | 落地 |
+| 组件 | 来源与默认形态 | 状态与边界 |
 | --- | --- | --- |
-| 分组标题成为「幕」 | 整屏只有等高灰色文字时，用户无从分段 | 标签 + 通栏细线（`--border3`）；进行中的标签与线更亮（`--fg` / `--border2`），已完成的标签降到 `--dim` |
-| 右侧状态列 | 运行状态原先只藏在标题扫光里，右列只有已完成图标 | 进行中的旋转环与「需要回复 / 已完成」图标居中对齐；悬停或聚焦时让位给操作按钮 |
-| 修正强调反转 | 运行中的标题原本比已完成更暗，最重要的工作是最淡的文字 | 运行中标题回到 `--fg`，扫光带改为向中间调调制（深色里像阴影、浅色里像高光），已完成标题为 `--dim` |
-| 完成段更密 | 归档是检索对象，不是当前工作 | 已完成行 28px、运行中与需要回复行 34px |
+| 主按钮 | `Button variant="primary"`；强调色填充、`--fill-fg` 文字、32px、`--r-md` | hover 混入白色；禁用 opacity 0.45；焦点环来自全局 focus-visible |
+| 次按钮 | `Button`；panel 底、`--border2` 边框 | hover 使用 panel3／accent-line；不自动变为主按钮 |
+| 危险按钮 | `Button variant="danger"`；`--bad` 填充 | 只用于不可逆确认；触发确认流程的入口用次按钮 |
+| 发送按钮 | runtime-composer 的 send；独立圆形按钮 | 不能用 `.btn.primary` 的矩形样式替代 |
+| 搜索输入 | `.sb-search`；36px 高、`--r-sm` | focus-within 的边界与外环来自后置皮肤；不是所有输入框的默认样式 |
+| 导航项 | `.sb-navitem`；36px 高、左对齐、`--r-sm` | active 使用 surface-hover 底；会话行另有自己的选中样式 |
+| 状态标签 | `.badge`；紧凑文字与边框、`--r-xs` | 默认非交互；ok／bad 按证据着色，不添加虚构 hover 动作 |
+| Surface 入口卡片 | `.surface-card`；最小高度 124px、`--r-md` | 可操作入口，含 hover、focus 与按下反馈；不是所有内容容器的模板 |
+| 弹窗 | `.modal`；`--r-lg`、panel 表面、`--shadow-pop`；头部最小高度 60px | 承载受保护的设置或决策 |
 
-保留的既有决定：无卡片、无数量徽章、无项目副标题；动态标题与项目列表保持相同字号与字重；每组 40 行上限、布局动画、指针按住不漂移、`prefers-reduced-motion` 与强制颜色回退均不变。
+原生组件复用 CircleButton、PlainIcon、Notice、EmptyState、StatusDot 和 RemoteHeader。连接点的 green 仅对应 connected；pairing 为 amber；offline／notPaired 为 faint。
 
-验证：隔离 Electron fixture `node scripts/session-capability-ui-smoke.mjs --sidebar-activity-only` 通过全部检查，其中新增三项针对本次设计承诺（运行中标记与状态图标同列、完成段行高更小、运行中标题亮度高于完成段）；把行高改回 34px 或把状态环移出该列后，对应断言会失败。深浅主题在 280px 侧栏宽度逐张查看，运行中扫光仍以像素差确认可见。未保留其他临时测量脚本。
+## UX 文案
 
-### 总览证据块：横向刻度（2026-10-22）
+文案集中在 `src/renderer/constants/*-copy.ts`（如 `copy.ts`、`conversation-copy.ts`），组件不内联可见文字。
 
-范围是 `OverviewPanel` 面板头到数据标签页之间的证据块：上下文占用、判词行、Token 总量与派生指标、会话摘要。轮次列表、证据语义与控件行为不变。设计稿先出四稿（`designs/scry-overview-bolder`，A 环 + 通栏卡片 / B 台账 / C 横向刻度 / D 单峰），用户选定 C。
+1. **先定位，再写字**：动笔前说清这个页面或面板是做什么的。只保留一个核心标题和完成任务所需的键值对；标题已经说明的内容，不在副标题和说明里重复。
+2. **书面、准确、简短**：用陈述句和名词短语，不用营销语（“强大”“轻松”“一键搞定”）、口语（“哦”“啦”“搞定了”）和感叹号。动作按钮用动词开头，写清对象：“删除会话”，不写“确定”。
+3. **按使用频率决定形态**：
+   - 每次都需要看的 → 常驻标签或键值对；
+   - 偶尔需要的解释、定义、来源 → tooltip 或 `Disclosure`；
+   - 需要注意的结果 → 行内 Notice，问题解决后消失；
+   - 必须决定才能继续 → 弹窗。
+   说明性段落不常驻显示。
+4. **诚实表达缺失**：缺证据写“不可用”“未提供”并说明原因，不写成 `0`、“无”或“一切正常”；与证据语义（`exact`／`estimated`／`partial`／`unavailable`）保持一致。已知存在的内容暂时读不到时说明“不可用”，不显示通用的空状态。
+5. **错误信息**：先说什么停止了或做不了，再说影响，最后必须给出用户能做的下一步（重试、换一种方式、去哪里查看）；正文不复述标题。不暴露堆栈，不责备用户，不过度道歉，失败时不用轻松的语气。
+6. **反馈沿用触发控件的动词**：点“移除项目”后的状态写“正在移除…”“已移除”，不换成另一个近义词。
+7. **空状态**：一句事实加至多一个下一步操作；错误造成的空状态不放插图。
 
-| 决定 | 理由 | 落地 |
-| --- | --- | --- |
-| 占用改用横向刻度 | 58px 环与 16px 数值同级，占用率读不出主次；环还占 66px 高度 | 一行「上下文占用 … 26%」，8px 轨道按 26% 填充，下面一行「已用 / 窗口」13px（已用 `--fg`，窗口 `--dim2`）；显示文本仍是「已用 / 窗口」 |
-| 阈值跟随判词 | 占用接近窗口上限是要人介入的状态，不该只在环上换色 | 轨道填充沿用既有阈值：≥50% 用 `--warn`，≥80% 用 `--bad`，其余 `--accent` |
-| 指标去卡片 | 三格等高卡片读作同级，380px 下还空出一格 | 一条发丝线起头：主证据行左右分置（标签 10px、数值 26px `--accent`），下面并排两格由一条竖线分隔，不再有卡片底色和圆角 |
-| 让出一个峰值 | 会话压缩计数 20px、标签页填充胶囊都比证据本身响 | 计数 14px；标签页去掉填充与内描边，只留 `--selected` 下划线；面板头说明降到 `--dim2` |
-| 判词行保留状态点 | 状态要能一眼读出，不能只是灰字 | 判词 13px/620，7px 状态点配 2px 同态软光环（复用面板标题写法） |
+### 用词表
 
-保留的既有决定：未新增颜色、字体或组件原语；缺证据仍显示 `—`；隐藏 tooltip、aria 文案、会话摘要的 ID 展开/复制与失焦回退、标签页的 tab 语义与键盘往返都不变。文案「上下文占用」「暂无上下文数据」移入 `OVERVIEW_SESSION_COPY`。
-
-验证：`npx vitest run src/renderer` 849 项通过；`npm run typecheck:web` 通过；`node scripts/session-capability-ui-smoke.mjs --overview-only` 深浅两主题 × 380/340/535 通过，`firstTurnTop` 430.34（契约 ≤460，比上一版矮约 19px）、`headerHeight` 44、间距 14/10/8、双列、三格指标、无横向溢出；`--summary-only` 通过（`.ctx-copy` 文本仍为「100.0k / 272.0k」这类原样比值，改用 `.ctx-track` 后 aria 校验同步更新）。另用临时 fixture 渲染真实数值（26%、70.5k / 272.0k、1.7M、$31.81）逐张比对深浅主题与三种宽度，并确认空态（— + 空轨道 + 暂无上下文数据）。对比度：轨道填充与底色 5.72:1（深）/ 3.72:1（浅），单看填充与面板底色的 3:1 图形下限通过；主证据数值 5.72:1 / 3.72:1（26px）。已知限制：指标标签仍是全应用约定的 10px `--dim2`，浅色主题 3.52:1，属既有标签色决定，本次未改。
-
-### 已回答问答块：台账式记录（2026-10-23）
-
-范围只有 `AskUserQuestionResult` 渲染的 `.question-result` 内层块：状态行、问题与答案、`查看原始输入与输出` 折叠。外层工具组行、工具卡行与待回答的内联表单都不动。设计稿先出四稿（`designs/scry-question-result-bolder`，A 裸渲染现状 / B 倒置 / C 台账 / D 单行），用户选定 C。
-
-前置事实：这块从 `ab5601b` 起就没有任何样式——`.question-result*` 规则在该提交里从 `styles.css` 整段删除且没有补回，真实界面渲染的是浏览器默认的 `<dl>`（上边距 1em）、`<dd>`（缩进 40px）与 `<summary>`。所以这一轮是重建而不是再加一层装饰。
-
-| 决定 | 理由 | 落地 |
-| --- | --- | --- |
-| 状态与等待压成一行等宽小字 | 「已回答」是判词，问题数与等待是附注，三者不该占同等视觉重量 | `--ok` 10px/650 等宽配 11px 对勾图标（未完成类判词改 `--bad` 与预警图标），问题数与等待 10.5px `--dim2`，等待靠右 |
-| 问答成行、答案落在右轨 | 问题与答案同行才读得出对应关系；短答案需要锚点 | 两列 grid（`1fr` / `minmax(84px, 38%)`），问题 12.5px `--dim`、答案 13px/600 `--fg` 右对齐；等待时长与答案共用同一条右边缘 |
-| 只用发丝线分隔 | 旧版（已删除）给每条问答套了 `--panel2` 卡片，与工具卡形成嵌套容器 | 块顶、列表顶、行间、折叠前各一条 `--border3` 发丝线，无新容器、无新圆角 |
-| 窄栏退化为上下两行 | 右栏打开时两列会被挤到读不出对应关系 | `@container main-pane (max-width: 640px)` 转单列，答案改左对齐 |
-| 缺答案单独标记 | 「没拿到答案」不能与「用户选了某项」同形 | `dd.missing` 用 `--dim2` 与 500 字重；没有 duration 时不渲染等待 |
-
-保留的既有决定：判词文案（已回答 / 用户取消 / Provider 取消 / 未完成）、`<dl>/<dt>/<dd>` 语义、`question-result-fallback` 与 `<details>` 折叠、`aria-label` 都不变，未新增文案与颜色。原始输入输出区沿用 `--surface-inset` 底、11.5px 等宽与 280px 上限，与 `.tool-detail` 同一写法。
-
-验证：`npx vitest run src/renderer/components/AskUserQuestionDialog.test.tsx` 14 项、`src/renderer/components/render.test.tsx` 244 项通过；`npm run typecheck:web` 与 `npm run build` 通过。新增 `node scripts/session-capability-ui-smoke.mjs --question-result-only`：在隔离 Electron fixture 里用真实 React + 真实 CSS 断言 `dl` 不再带浏览器边距、行是两列 grid、答案 600 字重右对齐、等待与答案右边缘相差 ≤1px、判词取 `--ok` 变量而非字面色、取消态渲染 `dd.missing` 且不编造等待、`summary` 可键盘聚焦且展开后箭头旋转、560px 容器下退化为单列左对齐；把本轮 CSS 注释掉重跑该检查会失败（已作为对照执行一次）。深色与浅色截图（`SCRY_QUESTION_RESULT_SCREENSHOT`）各看一次。已知限制：右对齐的长答案（如 4 行）左侧参差，这是台账方向的已知代价；桌面打包版内未用真实会话重放（需要一次真实 Provider 的回答），本轮只做到隔离 Electron fixture 与真实 CSS。
+| 词 | 用于 | 例 |
+|---|---|---|
+| 删除 | 销毁对象，之后无法从 Scry 找回 | 删除 Scry 副本、删除提示词、删除录制 |
+| 移除 | 从列表或集合中拿掉，对象本身仍然存在 | 移除项目、移除主机、移除排队消息 |
+| 清除 | 清空字段、选择或筛选 | 清除候选文件选择 |
+| 存档／恢复 | 从活动列表移到存档，或移回来；数据保留 | 存档会话、恢复会话 |
+| 停止 | 请求结束正在运行的任务；结果以运行记录为准 | 停止运行、停止后台任务 |
+| 不用“确定”“好的” | 按钮写具体动作；只有确实找不到具体动词时才用“确定” | “删除会话”而不是“确定” |
 
 ## Do's and Don'ts
 
 ### Do
-- 复用当前主题变量及平台原生组件；先检查最终覆盖层。
+- 用 `var(--text-*)`、`var(--weight-*)`、`var(--space-*)` 或 4 的倍数、`var(--r-*)` 和主题颜色变量；先检查最终覆写层。
+- 先按语义目录选组件，再写样式；同一意图复用同一个实现。按钮用 `<Button>`／`<IconButton>`。
 - 用文字、图标和状态共同说明证据；保留来源和缺失状态。
 - 复用现有文案模块；保留键盘焦点、禁用态与原生触控标签。
 - 新增模式前检查桌面双主题和 iOS 原生约束；具体界面再验收。
 
 ### Don't
-- 不要把基础 styles.css 的旧色值或 designs/ 原型直接当作当前产品规范。
+- 不要写半像素字号、550／620 这类中间字重、5／7／9／10／14px 这类网格外间距。
+- 不要在组件里写 `#hex`、`rgb()`、`oklch()` 等裸颜色；需要新颜色时先在主题层定义语义变量。
+- 不要为一个新功能另起一套按钮、通知或标签页样式；扩展收敛目标而不是复制。
+- 不要写 `.panel button { … }` 这种覆盖容器内所有按钮的规则；确需重置原生按钮时写成 `.panel button:not(:where(.btn, .icon-button, [role='tab'], .segmented > button))`。必须用 `:where()`：直接写 `:not(.btn, …)` 会把规则的优先级抬高到参数里最高的那一项，反过来压过组件自己的样式。只改行为的规则（`-webkit-app-region`、`pointer-events`、`user-select`）例外：它们必须覆盖 primitive，例如 macOS 标题栏里的 `no-drag` 漏掉 Button／IconButton，按钮就会落进窗口拖拽区而点不动。
 - 不要把 Provider 品牌色、选中态或连接点当作成功、授权或完整性证明。
+- 不要把基础 `styles-theme-shell.css` 的颜色旧值或 `designs/` 原型直接当作当前产品规范；颜色以最终覆写层为准。
 - 不要把 iOS 的 glass helper 描述成已实现的系统材质或背景模糊。
 - 不要把文档示例、历史截图或代码扫描当作当前 App 的视觉与无障碍验收。
+
+## 迁移路线
+
+存量债务按区域分批偿还，每批都会改变可见外观，因此单独提交、单独验证（隔离 Electron fixture 深浅主题截图 + 受影响的 UI smoke），并在 [设计决策记录](docs/design/decisions.md) 记一条。第 5–7 步的待定项（层级、文案、菜单、浮动提示）与 Primer、VS Code、Carbon、Atlassian、Radix、Apple HIG 的对比和建议见 [参考案例对比](docs/design/references.md)。
+
+1. **地基（已完成）**：尺度 token、守卫与基线；在 scale 上的字号与字重已等价替换为 token，外观不变。
+2. **核心控件（已完成）**：`Button`／`IconButton` primitive 与单一 `styles-buttons.css`，迁移全部文字与图标按钮调用点。
+3. **通知与标签页（已完成）**：`Notice`、`Tabs`、`Segmented` 与 `styles-notices.css`、`styles-tabs.css`；容器级 `button` 规则改为排除 primitive，并纳入债务棘轮。
+4. **按区域偿还字号与间距（已完成）**：侧栏 → 对话与工具证据 → 输入框 → 总览 → 设置与清单 → 分析视图 → 其余工作区界面，全部清零后守卫改为绝对规则。每个区域用的方法：
+   - **先删死代码**：同一选择器、同一属性被后加载的顶层规则无条件重新声明的，先加载的那条一定不生效，直接删除；删除后用真实组件的计算样式比对确认零变化。
+   - **再按固定规则取整**：间距取最近的 4 的倍数，恰在中间（6、10、14、18、22、30）时取 8 的倍数；字号 ≥12 的半像素向下取（12.5→12、13.5→13），<12 的向上取（9、9.5→10，10.5→11，11.5→12）；中间字重按角色取 500 或 600。
+   - **守住契约**：区域内 smoke 断言的行高、宽度与对齐值不变；用计算样式比对列出每一处真实变化并逐条确认。
+   - **阅读字号不随取整变化**：会改变正文阅读字号的取整先停下，确认是否需要语义 token（对话正文因此新增 `--text-reading`）。
+   - **颜色由语义变量派生**：状态与证据类型的半透明底色、边框写成 `color-mix(in srgb, var(--ok) 24%, transparent)`，不写死 `rgba()`，否则浅色主题会沿用深色主题调好的色值。
+5. **颜色与层级（已完成）**：颜色与阴影收敛为语义变量和固定色板；浮层 z-index 收敛为 `--layer-*` 五档（2026-11-16）。
+6. **文案**：按 UX 文案规则逐面板审查常驻说明，改为 tooltip、Notice 或 Disclosure（尚未开始）。
+7. **其余组件**：菜单收敛为 `Menu`（2026-11-16）；浮动 toast 的模式待定；可关闭的标签条与设置导航保留独立实现，但选中色与字号应对齐 `Tabs`。

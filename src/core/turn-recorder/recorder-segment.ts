@@ -8,10 +8,12 @@ import {
 } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import {
-  BACKGROUND_WAKE_PROVIDERS, providerTurnIdOf, stringAt, terminalStatus, timestampOf, transcriptPathOf,
+  BACKGROUND_WAKE_PROVIDERS, explicitTimestampOf, providerTurnIdOf, stringAt, terminalStatus, timestampOf,
+  transcriptPathOf,
   type RecorderHookInput, type RecorderHookResult, type TranscriptRead
 } from './recorder-contracts.js'
 import { beginOpenTurn, degradeEvidenceSections, storeLifecycleEvent } from './recorder-turn-state.js'
+import { hostProcessChain } from './host-process.js'
 import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript } from './recorder-transcript-background.js'
 import { snapshotSessionNetDiff } from './git.js'
 import { segmentFreeze } from './recorder-segment-diff.js'
@@ -64,6 +66,7 @@ export async function holdSeal(
     try {
       const snapshot = await snapshotSessionNetDiff({ ...capture, opChain: undefined, finishPromise: undefined }, undefined, {
         patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
+        diffExclude: [...(enablement.config.capture.diffExclude ?? []), ...(open.capture?.diffExclude ?? [])],
         completePatches: true,
         ...(frozen ? { onAfter: frozen.option(repository) } : {})
       })
@@ -81,6 +84,14 @@ export async function holdSeal(
     if (sealed.length) open.frozenDiffs = sealed
   }
   open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
+  // A hold for this turn's own background work is still this turn's Stop: if later activity
+  // cancels the hold, a superseding prompt must not report the turn as interrupted, and it still
+  // knows when the turn ended. An unidentified early terminal may belong to an earlier turn, so it
+  // proves nothing about this one.
+  if (reason === 'pending_background_tasks') {
+    open.stopObservedAt = terminalAt
+    open.stopObservedAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
+  }
   open.deferredTerminalAt = new Date().toISOString()
   open.deferredTerminalEventId = eventId
   open.deferredTerminalReason = reason
@@ -139,7 +150,8 @@ export async function beginContinuationTurn(
       ...(previous.publishedEvents != null ? { publishedEvents: previous.publishedEvents } : {}),
       ...(previous.providerTurnId ? { providerTurnId: previous.providerTurnId } : {}),
       ...(requestSetId ? { requestSetId } : {})
-    }
+    },
+    input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
   )
   // A wake payload may omit the path; the continued turn's own transcript is the same file.
   if (transcriptPath && open.transcriptPath !== transcriptPath) {
@@ -182,6 +194,15 @@ export function segmentTranscriptView(open: OpenTurnState, transcript: Transcrip
     ownsRows: measurable,
     ...(open.continuation.providerTurnId ? { providerTurnId: open.continuation.providerTurnId } : {})
   }
+}
+
+/**
+ * 一条记录自己的起点：接续段从它自己的 wake 开始（前一段已经封箱，不能共用它的起点），
+ * 其余轮次用 transcript 里的真实提问时间；没有提问时间时才退回开启采集的时间。
+ */
+export function recordStartedAt(open: OpenTurnState, transcriptStartedAt?: string): string {
+  if (open.continuation) return open.startedAt
+  return transcriptStartedAt ?? open.startedAt
 }
 
 /** Label a continuation segment: no user prompt, no Git baseline, and content only after the seal. */

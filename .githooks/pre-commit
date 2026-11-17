@@ -1,3 +1,8 @@
 #!/bin/sh
-set -eu
-node scripts/check-staged-file-size.mjs
+set -u
+# The size budget is advisory since 2026-11-15 (maintainer decision): report oversized
+# staged files, never block the commit. `npm run check:staged-file-size` still exits 1.
+if ! node scripts/check-staged-file-size.mjs; then
+  echo 'Warning only: the commit continues. Prefer splitting large files by responsibility.' >&2
+fi
+exit 0

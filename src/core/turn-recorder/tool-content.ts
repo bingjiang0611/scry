@@ -37,18 +37,102 @@ function serializableValue(value: unknown, seen: Set<object>, depth: number): un
 
 export function limitToolContent(field: ToolContent, bytes: number, reason: 'field_budget' | 'turn_budget'): ToolContent {
   if (field.content === undefined || field.savedBytes <= bytes) return field
+  const { content: _content, ...metadata } = field
+  if (field.encoding === 'json') {
+    // A byte cut of JSON text is not JSON. Bound the value structure instead, so what is kept can
+    // still be parsed and every removed field states the size of what it replaced.
+    const bounded = bytes > 0 ? limitJsonContent(field.content, bytes) : undefined
+    if (bounded === undefined) {
+      return {
+        ...metadata,
+        encoding: 'json-fragment',
+        savedBytes: 0,
+        storage: 'omitted',
+        reasons: [...new Set([...field.reasons, reason])]
+      }
+    }
+    return {
+      ...metadata,
+      content: bounded,
+      savedBytes: Buffer.byteLength(bounded),
+      encoding: 'json',
+      storage: 'truncated',
+      reasons: [...new Set([...field.reasons, reason])]
+    }
+  }
   const content = bytes > 0
     ? new StringDecoder('utf8').write(Buffer.from(field.content).subarray(0, bytes))
     : ''
-  const { content: _content, ...metadata } = field
   return {
     ...metadata,
     ...(content ? { content } : {}),
     savedBytes: Buffer.byteLength(content),
-    encoding: field.encoding === 'json' ? 'json-fragment' : field.encoding,
     storage: content ? 'truncated' : 'omitted',
     reasons: [...new Set([...field.reasons, reason])]
   }
+}
+
+/**
+ * Stand-in for one JSON value the budget could not keep.
+ *
+ * It is the same vocabulary the surrounding envelope uses (`storage`), so a reader that already
+ * understands a bounded body sees this loss the same way, and `originalBytes` says how much content
+ * the marker replaced instead of leaving the reader to guess.
+ */
+export interface TruncatedJsonValue {
+  storage: 'truncated'
+  /** Bytes the replaced value serialized to. */
+  originalBytes: number
+  /** UTF-8 prefix of a replaced string, so the reader still sees what the field held. */
+  preview?: string
+}
+
+function utf8Prefix(text: string, bytes: number): string {
+  if (bytes <= 0) return ''
+  return new StringDecoder('utf8').write(Buffer.from(text).subarray(0, bytes))
+}
+
+function truncatedJsonValue(value: unknown, previewBytes: number): TruncatedJsonValue {
+  // The length a reader cares about is the field's own content, not the JSON quotes around it.
+  const originalBytes = typeof value === 'string'
+    ? Buffer.byteLength(value)
+    : value === undefined ? 0 : Buffer.byteLength(JSON.stringify(value) ?? '')
+  const preview = typeof value === 'string' ? utf8Prefix(value, previewBytes) : ''
+  return preview ? { storage: 'truncated', originalBytes, preview } : { storage: 'truncated', originalBytes }
+}
+
+/** Replace every string longer than `cap` bytes with a marker that states its original length. */
+function truncateJsonStrings(value: unknown, cap: number): unknown {
+  if (typeof value === 'string') return Buffer.byteLength(value) > cap ? truncatedJsonValue(value, cap) : value
+  if (Array.isArray(value)) return value.map((item) => truncateJsonStrings(item, cap))
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) out[key] = truncateJsonStrings(item, cap)
+    return out
+  }
+  return value
+}
+
+/**
+ * The largest form of `content` that fits `bytes` and is still JSON.
+ *
+ * Long strings keep a readable prefix; when the structure alone cannot fit (a body of thousands of
+ * small values), one marker states the original size rather than shipping an unparseable cut.
+ * Returns undefined when even that marker does not fit: there is nothing honest to keep.
+ */
+function limitJsonContent(content: string, bytes: number): string | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    return undefined
+  }
+  for (let cap = bytes; cap > 0; cap = Math.floor(cap / 2)) {
+    const candidate = JSON.stringify(truncateJsonStrings(parsed, cap))
+    if (Buffer.byteLength(candidate) <= bytes) return candidate
+  }
+  const marker = JSON.stringify({ storage: 'truncated', originalBytes: Buffer.byteLength(content) })
+  return Buffer.byteLength(marker) <= bytes ? marker : undefined
 }
 
 export function captureToolContent(value: unknown, options: {
@@ -82,17 +166,33 @@ export function captureToolContent(value: unknown, options: {
 export function sanitizeCapturedContent(field: ToolContent, maxBytes?: number | null): ToolContent {
   if (!isToolContent(field)) return { ...captureToolContent(undefined, { source: 'invalid_content' }), reasons: ['serialization_failed'] }
   if (field.content === undefined) return field
+  // A JSON body is re-bounded structurally: cutting its text would leave something that no longer
+  // parses while still claiming to be JSON. Legacy fragments keep that label honestly.
+  if (field.encoding === 'json' && isJsonText(field.content)) {
+    return maxBytes == null || field.savedBytes <= maxBytes
+      ? field
+      : limitToolContent(field, maxBytes, 'field_budget')
+  }
   const checked = captureToolContent(field.content, { source: field.source, maxBytes })
   const { content: _content, ...metadata } = field
   return {
     ...metadata,
     ...(checked.content !== undefined ? { content: checked.content } : {}),
     savedBytes: checked.savedBytes,
-    encoding: field.encoding === 'json' && checked.storage !== 'complete' ? 'json-fragment' : field.encoding,
+    encoding: field.encoding === 'json' ? 'json-fragment' : field.encoding,
     storage: checked.storage === 'complete' ? field.storage : checked.storage,
     // Preserve historical provenance: already-redacted bytes cannot be recovered by disabling redaction.
     redaction: field.redaction,
     reasons: [...new Set([...field.reasons, ...checked.reasons])]
+  }
+}
+
+function isJsonText(content: string): boolean {
+  try {
+    JSON.parse(content)
+    return true
+  } catch {
+    return false
   }
 }
 

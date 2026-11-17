@@ -8,9 +8,13 @@ import { forgetRemoteCatalog, refreshRemoteCatalog, useRemoteCatalogs } from '..
 import { bridge, ClientPairForm } from './DesktopRemote'
 import { HostStateDot, hostState } from './LocationPicker'
 import { ModalFrame, requestModalClose } from './Modals'
+import { useAsyncAction } from '../hooks/useAsyncAction'
+import { BusyLabel } from './primitives/BusyLabel'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
+import { Button } from './primitives/Button'
+import { Notice } from './primitives/Notice'
 
 // Connect-time refusals include the version gate: say which end to upgrade
 // instead of showing a raw protocol code.
@@ -31,24 +35,23 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
     <section className="remote-connections-settings" aria-label={copy.outboundTitle}>
       <header className="remote-access-header">
         <h2>{copy.title}</h2>
-        <button type="button" className="hosts-button is-primary" onClick={() => setAdding(true)}>
+        <Button variant="primary" onClick={() => setAdding(true)}>
           <Icon name="plus" /> {copy.addHost}
-        </button>
+        </Button>
       </header>
       <section className="remote-access-section" aria-label={copy.outboundTitle}>
         <h3>{copy.outboundTitle}</h3>
         {readError && (
-          <div className="hosts-alert" role="alert">
-            <span>{copy.connectionReadError(readError)}</span>
-            <button type="button" className="hosts-button" onClick={() => void refreshDesktopConnections()}>{copy.retry}</button>
-          </div>
+          <Notice tone="warn" className="hosts-alert" role="alert" action={<Button size="sm" onClick={() => void refreshDesktopConnections()}>{copy.retry}</Button>}>
+            {copy.connectionReadError(readError)}
+          </Notice>
         )}
         {!loaded && !readError && <p className="hosts-muted">{copy.loadingHosts}</p>}
         {loaded && !readError && connections.length === 0 && (
           <div className="hosts-empty">
             <b>{copy.noHosts}</b>
             <p>{copy.noHostsHint}</p>
-            <button type="button" className="hosts-button" onClick={() => setAdding(true)}>{copy.addHost}</button>
+            <Button onClick={() => setAdding(true)}>{copy.addHost}</Button>
           </div>
         )}
         <ul className="hosts-list">
@@ -80,6 +83,8 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
   )
 }
 
+type HostAction = 'connect' | 'finishPairing' | 'disconnect' | 'forget'
+
 function HostRow({
   connection,
   readError,
@@ -97,15 +102,18 @@ function HostRow({
 }) {
   const state = hostState(connection, readError, refreshing)
   const entry = useRemoteCatalogs().get(connection.id)
-  const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const run = async (action: () => Promise<void>): Promise<void> => {
-    setBusy(true); setError(null)
-    try { await action(); await refreshDesktopConnections() }
-    catch (reason) { setError(errorText(reason)) }
-    finally { setBusy(false) }
-  }
+  // SSH round trips take seconds: the pressed button shows it (after the shared delay),
+  // a second press is ignored, and a failure stays on this row with a retry.
+  const action = useAsyncAction<HostAction>(errorText)
+  const busy = action.pending !== null
+  const run = (key: HostAction, work: () => Promise<void>): void =>
+    action.run(key, async () => { await work(); await refreshDesktopConnections() })
+  const pressed = (key: HostAction) => ({
+    'aria-busy': action.pending === key,
+    'aria-disabled': busy,
+    disabled: busy && action.pending !== key
+  })
   const api = bridge()
   const detailsId = useId()
   return (
@@ -121,30 +129,34 @@ function HostRow({
         <span className="hosts-state" data-state={state}><HostStateDot state={state} />{desktopConnectionLabel(connection, readError, refreshing)}</span>
         <span className="hosts-row-actions">
           {connection.state === 'disconnected' && (
-            <button type="button" className="hosts-button" disabled={busy} onClick={() => void run(async () => {
+            <Button {...pressed('connect')} onClick={() => run('connect', async () => {
               await api.connect(connection.id)
               await refreshRemoteCatalog(connection.id)
-            })}>{copy.connect}</button>
+            })}><BusyLabel busy={action.showBusy && action.pending === 'connect'}>{copy.connect}</BusyLabel></Button>
           )}
           {connection.state === 'pairing' && (
-            <button type="button" className="hosts-button" disabled={busy} onClick={() => void run(async () => { await api.finishPairing(connection.id) })}>{copy.finishPairing}</button>
+            <Button {...pressed('finishPairing')} onClick={() => run('finishPairing', async () => { await api.finishPairing(connection.id) })}><BusyLabel busy={action.showBusy && action.pending === 'finishPairing'}>{copy.finishPairing}</BusyLabel></Button>
           )}
           {connection.state === 'connected' && (
-            <button type="button" className="hosts-button" disabled={busy} onClick={() => void run(() => api.disconnect(connection.id))}>{copy.disconnect}</button>
+            <Button {...pressed('disconnect')} onClick={() => run('disconnect', () => api.disconnect(connection.id))}><BusyLabel busy={action.showBusy && action.pending === 'disconnect'}>{copy.disconnect}</BusyLabel></Button>
           )}
           <button type="button" className="hosts-row-expand" aria-label={copy.hostDetails(expanded, connection.label)} onClick={onToggle}>
             <Icon name={expanded ? 'chevronUp' : 'chevronDown'} />
           </button>
         </span>
       </div>
-      {error && <p className="hosts-error" role="alert">{error}</p>}
+      {action.error && (
+        <Notice tone="bad" className="hosts-error" role="alert" action={<Button size="sm" onClick={action.retry}>{copy.retry}</Button>}>
+          {action.error.text}
+        </Notice>
+      )}
       {expanded && (
         <div className="hosts-row-details" id={detailsId}>
           <div className="hosts-address-summary">
             <dl>
               <dt>{copy.hostFingerprint}</dt><dd><code>{connection.anchorSHA256}</code></dd>
             </dl>
-            <button type="button" className="hosts-button" disabled={busy} onClick={() => setEditing(true)}><Icon name="edit" /> {copy.editAddress}</button>
+            <Button disabled={busy} onClick={() => setEditing(true)}><Icon name="edit" /> {copy.editAddress}</Button>
           </div>
           <h4>{copy.projects}</h4>
           {state !== 'connected'
@@ -157,16 +169,16 @@ function HostRow({
                 <li key={project.path}>
                   <Icon name="folder" />
                   <span className="hosts-identity"><b>{project.label}</b><code>{project.path}</code></span>
-                  <button type="button" className="hosts-button" disabled={state !== 'connected'} onClick={() => onNewSession(project.path)}>{copy.newSession}</button>
+                  <Button disabled={state !== 'connected'} onClick={() => onNewSession(project.path)}>{copy.newSession}</Button>
                 </li>
               ))}
             </ul>
           )}
           <div className="hosts-forget">
-            <button type="button" className="hosts-button is-danger" disabled={busy} onClick={() => void run(async () => {
+            <Button variant="danger" {...pressed('forget')} onClick={() => run('forget', async () => {
               await api.forget(connection.id)
               forgetRemoteCatalog(connection.id)
-            })}>{copy.removeHost}</button>
+            })}><BusyLabel busy={action.showBusy && action.pending === 'forget'}>{copy.removeHost}</BusyLabel></Button>
             <span className="hosts-muted">{copy.removeHostEffect}</span>
           </div>
         </div>
@@ -218,8 +230,8 @@ function HostAddressEditor({ connection, onClose }: { connection: DesktopRemoteC
         </div>
         {error && <p className="desktop-remote__error" role="alert">{error}</p>}
         <div className="hosts-address-actions">
-          <button type="button" className="hosts-button" disabled={saving} onClick={() => requestModalClose()}>{copy.cancel}</button>
-          <button type="submit" className="hosts-button is-primary" disabled={saving || !changed}>{saving ? copy.saving : copy.saveAddress}</button>
+          <Button disabled={saving} onClick={() => requestModalClose()}>{copy.cancel}</Button>
+          <Button variant="primary" type="submit" disabled={saving || !changed}>{saving ? copy.saving : copy.saveAddress}</Button>
         </div>
       </form>
     </ModalFrame>

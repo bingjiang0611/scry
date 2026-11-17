@@ -144,6 +144,7 @@ const sourceControl: SourceControlApi = {
   operations: request => ipcRenderer.invoke('sourceControl:operations', request),
   reconcile: request => ipcRenderer.invoke('sourceControl:reconcile', request),
   acknowledge: request => ipcRenderer.invoke('sourceControl:acknowledge', request),
+  cancel: request => ipcRenderer.invoke('sourceControl:cancel', request),
   pullRequests: request => ipcRenderer.invoke('sourceControl:pullRequests', request),
   pullRequest: request => ipcRenderer.invoke('sourceControl:pullRequest', request),
   saveCommitDraft: request => ipcRenderer.invoke('sourceControl:saveCommitDraft', request),
@@ -215,6 +216,8 @@ const api = {
   listSkills: (context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> => ipcRenderer.invoke('agent:listSkills', context),
   mcpSnapshot: (context: ProviderContext, refresh = false): Promise<CapabilityEnvelope<McpSnapshot>> =>
     ipcRenderer.invoke('agent:mcpSnapshot', { context, refresh }),
+  cancelMcpSnapshot: (context: ProviderContext): Promise<boolean> =>
+    ipcRenderer.invoke('agent:cancelMcpSnapshot', context),
   mcpGuardScan: async (context: ProviderContext): Promise<CapabilityEnvelope<ScanReport>> => {
     const envelope = await ipcRenderer.invoke('agent:mcpGuardScan', context) as CapabilityEnvelope<unknown>
     if (envelope.data !== null && !isMcpGuardReport(envelope.data)) throw new Error('main 返回了无效的 mcpguard 报告')

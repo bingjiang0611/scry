@@ -17,6 +17,7 @@ import type { WorkspaceFileTarget } from '../../workspace-links'
 import type { SessionHistoryWindow, TraceLiveHealth } from '../../hooks/useAgentSession'
 import type { ComposerDraftStore } from '../../composer-drafts'
 import type { RendererSteerEvidence } from '../../steer'
+import type { StopRequest } from '../../run-stop-status'
 
 export interface ChatViewProps {
   turns: Turn[]
@@ -70,6 +71,8 @@ export interface ChatViewProps {
   slashSel: number
   pendingQuestions?: AgentQuestionRequest[]
   stopStates?: Readonly<Record<string, AgentStopState>>
+  /** The local stop press, until main reports its own stop phase. */
+  stopRequest?: StopRequest
   historyWindow?: SessionHistoryWindow | null
   historyOlderLoading?: boolean
   onLoadOlderTurns?: () => void
