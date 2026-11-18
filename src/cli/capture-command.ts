@@ -151,6 +151,10 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         captureId: prepared.context.captureId,
         sessionId,
         recorderVersion: RECORDER_VERSION,
+        // The claim is not applied yet, so the status stays `queued`. The transport is real either
+        // way: the caller may write it down now and only rely on it as a fallback.
+        transport: prepared.transport,
+        ...(prepared.context.diffExclude?.length ? { diffExclude: prepared.context.diffExclude } : {}),
         inbox: {
           entry: basename(queued.path),
           directory: queued.inbox,
