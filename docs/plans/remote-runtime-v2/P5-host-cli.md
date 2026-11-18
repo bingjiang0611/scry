@@ -21,9 +21,9 @@
 | `invite desktop` | 需要时开桌面访问，生成 `scry-desktop1:` | `remote:desktop:invite` | TTY | 拒绝 |
 | `invite … --wait` | 前台等设备提交证明，随即进入 `approve` | 同上 | TTY | 拒绝 |
 | `approve [<配对>]` | §3.5 | `remote:pairing:confirm` | TTY + 输入指纹 | 拒绝 |
-| `cancel <配对>` | 取消待确认配对 | `remote:pairing:cancel` | 确认；`--yes` 须完整 id | 拒绝（[决定 10.2](P5-headless-host.md#102-需要维护者决定)） |
-| `revoke <设备>` | 撤销设备 | `remote:device:revoke` | 同上 | 拒绝（同上） |
-| `desktop-off` | 关闭桌面访问，不撤销设备 | `remote:desktop:disable` | 确认 | 拒绝（同上） |
+| `cancel <配对>` | 取消待确认配对 | `remote:pairing:cancel` | 确认；`--yes` 须完整 id | 可用，并通知（[决定 10](P5-headless-host.md#101-已决定维护者-2026-11-18评审后都按推荐)） |
+| `revoke <设备>` | 撤销设备 | `remote:device:revoke` | 同上 | 可用，并通知 |
+| `desktop-off` | 关闭桌面访问，不撤销设备 | `remote:desktop:disable` | 确认 | 可用，并通知 |
 | `restart` | §3.8 | `background-service-stop.ts` | 有 run 时确认 | 可用（不走 admin socket） |
 | `login-start enable\|disable\|status` | §3.10 | 登录时启动模块 | `enable` 要 TTY 确认 | 可用（不走 admin socket） |
 
@@ -52,7 +52,7 @@ daemon 在 `<stateDir>/host-admin/`（0700）里开 `host-admin.sock`。**listen
 
 只有 §3.2 中走 admin socket 的方法，调用 `pairingChannelHandlers` 与后台服务自报，和 App 同一份 authority 检查。开关关闭时只放行 `status`、`pending`、`devices`。其余一律 `unsupported_method`：run、会话、文件、终端、项目授权、MCP/Hook trust、本机入网、开关本身、后台服务停止。
 
-开关关闭时仍开 socket、只读：无界面机器上能看到后台服务、配对与设备状态，并得到「命令行批准未开启」（exit 4）这个明确原因，而不是与「后台服务未运行」混在一起的连接失败。只读方法给不出新信息：同一用户本就能读 `pairing-state.json`。
+开关关闭时仍开 socket，只放行只读与只收紧的方法（`cancel`、`revoke`、`desktop-off`）：无界面机器上能看到后台服务、配对与设备状态，并得到「命令行批准未开启」（exit 4）这个明确原因，而不是与「后台服务未运行」混在一起的连接失败。只读方法给不出新信息：同一用户本就能读 `pairing-state.json`。
 
 ### 3.5 批准流程
 

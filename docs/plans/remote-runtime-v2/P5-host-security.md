@@ -40,7 +40,7 @@
 | 打开 | 只在 App 设置里；main 先原生确认（说明 §4.1 第三行的后果），再经本机 op `localHostAdmin` 写入。没有任何命令行命令能打开它 |
 | 关闭 | App 设置里，不确认 |
 | 持久化 | daemon 写 `<userData>/remote/host-admin.json`（0600，原子写）；同一用户能改这个文件，与 §4.1 第一行同一结论 |
-| 关闭时的 admin socket | 开着，只读（[P5-host-cli](P5-host-cli.md) §3.4） |
+| 关闭时的 admin socket | 开着，只读加只收紧的方法，后者每次通知（[P5-host-cli](P5-host-cli.md) §3.4） |
 | 纯无界面 Linux | 须在 App 界面里打开一次（本机显示或转发） |
 
 通知：命令行 `approve`、`revoke`、`desktop-off`，以及开关被打开时：
@@ -72,7 +72,7 @@
 | supervisor | 版本取自 bundle；冲突 exit 2；`launchedBy` 透传；**SIGTERM 后等子进程退出**：假 daemon 收到 SIGTERM 后延迟退出，supervisor 必须晚于它退出；超过上限记 `daemon_stop_timeout` | CI |
 | 清理 | 满表后 `begin` 与 `enrollLocal` 恢复可用；有效 grant 不动；清理结果能被旧读取端读 | CI |
 | grant 字段 | 发布 1 读取端：缺失、两种值、非法值、local grant 带字段；读后写回不丢字段 | CI |
-| host-process | admin socket：挑战错/缺/重放/符号链接/非 0600/他人属主；socket 权限；版本不一致；开关关时只读；白名单外全拒；速率；中文消息映射为机器码；邀请→证明→错指纹被拒→对的通过→`approvedVia: host_cli` 与通知；撤销本机 grant 被拒 | 临时 userData，扩展 `host-process-pairing.test.ts` |
+| host-process | admin socket：挑战错/缺/重放/符号链接/非 0600/他人属主；socket 权限；版本不一致；开关关时只读与只收紧可用、其余拒绝；白名单外全拒；速率；中文消息映射为机器码；邀请→证明→错指纹被拒→对的通过→`approvedVia: host_cli` 与通知；撤销本机 grant 被拒 | 临时 userData，扩展 `host-process-pairing.test.ts` |
 | 命令行 | node-pty 下交互通过；管道下 `invite`/`approve` 拒绝；带运行标记拒绝；指纹 <16 位、歧义拒绝；后台服务未运行 exit 2 且不生成 `daemon.lock`；`restart` 只发一次 SIGTERM | 临时 userData |
 | IPC | `setLoginStart`、`setCliApproval` 的 sender 与参数校验；preload 映射 | CI |
 | 打包 smoke | 渲染服务文件到临时目录，用极简环境（`env -i HOME=… PATH=/usr/bin:/bin`，不给 `SHELL`）按其中的程序与参数启动 → 后台服务就绪、握手构建一致、`scry-host status` 可用、SIGTERM 后 daemon 先于 supervisor 退出；`check-packaged-app` 收录 `bin/scry-host` | L2 |

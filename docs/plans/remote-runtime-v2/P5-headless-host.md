@@ -189,10 +189,10 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 7. **自动重写服务文件**只在「解析出是我们的、同一 userData、旧程序路径已不存在」时。
 8. **64 条上限**：第 2 步前单独清理，见 [P5-host-security](P5-host-security.md) §4.5。
 9. **停止、策略、环境**：停止等待、`SHELL`、日志预建在 P5-0，策略变量在 P5-1（[P5-host-security](P5-host-security.md) §7）。
+10. **开关关闭时放行只收紧的命令**：`cancel`、`revoke`、`desktop-off` 仍可用，每次都通知（[P5-host-security](P5-host-security.md) §4.3）；无界面机器丢了手机可经 SSH 撤销。
+11. **`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL`** 与其余非机密策略变量一起写进服务文件（§2.2）。
 
-### 10.2 需要维护者决定
-
-1. 开关关闭时，是否也放行只收紧权限的 `cancel`、`revoke`、`desktop-off`。建议放行：纯无界面机器上手机丢了，SSH 进去就能撤销；这些方法给不出新权限，滥用只是拒绝服务，同一用户本就能删配对状态；每次都通知（[P5-host-security](P5-host-security.md) §4.3）。本设计暂按只读处理。
+没有待决定事项。
 
 ## 评审后修订（2026-11-18）
 
