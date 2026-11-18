@@ -209,3 +209,58 @@ describe('native comparison scope', () => {
     expect(detect(base)).toEqual({ status: 0, output: ALL })
   })
 })
+
+// The recorder core, the scry CLI that ships it and that CLI's package metadata are
+// validated on Ubuntu (node, unit, cli-compat, packaged-linux) and do not need the
+// macOS renderer, mac layout or App security gates. Mixed PRs keep every gate.
+describe('recorder-only validation', () => {
+  it.each([
+    'src/core/turn-recorder/managed.ts', 'src/core/turn-recorder/content/tool-content.ts',
+    'src/cli/scry.ts', 'src/cli/mcpguard.ts', 'src/cli/records-command.ts',
+    'packages/turn-recorder-cli/package.json',
+    'packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs'
+  ])('validates on Ubuntu but skips the macOS App gates for recorder inputs: %s', path => {
+    const { write, commit, detect } = fixture()
+    write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: NO_DESKTOP })
+  })
+
+  it.each([
+    'src/core/turn-recorder/managed.ts', 'src/cli/scry.ts', 'packages/turn-recorder-cli/package.json'
+  ])('keeps every gate when a recorder input is mixed with App source: %s', path => {
+    const { write, commit, detect } = fixture()
+    write(path); write('src/main.ts'); commit()
+    expect(detect()).toEqual({ status: 0, output: APP })
+  })
+
+  it('keeps the macOS App gates when a recorder input is mixed with renderer code', () => {
+    const { write, commit, detect } = fixture()
+    write('src/core/turn-recorder/managed.ts'); write('src/renderer/App.tsx'); commit()
+    expect(detect()).toEqual({ status: 0, output: APP })
+  })
+
+  it.each([
+    'src/shared/turn-record.ts', 'src/core/recorder-tests/fixture.ts', 'src/core/turn-recorder.ts',
+    'scripts/turn-recorder-bench.mjs'
+  ])('does not widen the exemption to a similarly named path: %s', path => {
+    const { write, commit, detect } = fixture()
+    write(path); commit()
+    expect(detect()).toEqual({ status: 0, output: APP })
+  })
+
+  it('detects App source renamed into the recorder tree', () => {
+    const { git, write, commit, detect } = fixture()
+    write('src/core/turn-recorder/aggregate.ts'); commit()
+    const base = git('rev-parse', 'HEAD')
+    git('mv', 'src/main.ts', 'src/core/turn-recorder/moved.ts'); commit()
+    expect(detect(base)).toEqual({ status: 0, output: APP })
+  })
+
+  it('detects a recorder file renamed out of the recorder tree', () => {
+    const { git, write, commit, detect } = fixture()
+    write('src/core/turn-recorder/aggregate.ts'); commit()
+    const base = git('rev-parse', 'HEAD')
+    git('mv', 'src/core/turn-recorder/aggregate.ts', 'src/main/aggregate.ts'); commit()
+    expect(detect(base)).toEqual({ status: 0, output: APP })
+  })
+})

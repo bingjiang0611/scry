@@ -82,6 +82,23 @@ jobs:
             ':(top,exclude).github/VOUCHED.td' ':(top,exclude).github/TRIAGE_EXEMPTIONS.td'
             ':(top,glob,exclude)apps/ios/**'
           )
+          # Recorder-only inputs: the top-level turn recorder core, the scry CLI that
+          # ships the recorder (`tsconfig.recorder.json` compiles src/cli/scry.ts into
+          # packages/turn-recorder-cli/dist), and that package's metadata.
+          #
+          # They remain fully validated on Ubuntu: node runs typecheck, the whole App
+          # build, build:cli and the recorder artifact pack; unit runs every main/CLI
+          # shard; cli-compat runs src/cli and src/core/turn-recorder tests on Node
+          # 20/22/24 plus the tarball smoke; packaged-linux packages the App and boots
+          # the packaged executable under Xvfb. What only macOS adds is the renderer DOM
+          # smokes, the electron-builder layout check and the App security smokes, none
+          # of which asserts recorder behaviour. A recorder regression that only shows
+          # on macOS is still caught by the full matrix every main push.
+          recorder=(
+            ':(top,glob,exclude)src/core/turn-recorder/**'
+            ':(top,glob,exclude)src/cli/**'
+            ':(top,glob,exclude)packages/turn-recorder-cli/**'
+          )
           # A PR runs the macOS native comparison only when it changes the frozen native harness or
           # the workflow that runs it (scripts/performance-native.mjs nativeHarnessFiles; a contract
           # test keeps the two lists equal). Other App changes are measured after merge on main, or on
@@ -107,7 +124,7 @@ jobs:
           # validates iOS; mixed non-documentation inputs retain Node measurements.
           elif ! changed "${documentation[@]}" ':(top,glob,exclude)apps/ios/**'; then
             printf 'required=true\ndesktop=false\nnode_performance=false\nnative_performance=false\n' >> "$GITHUB_OUTPUT"
-          elif changed "${desktop_free[@]}"; then
+          elif changed "${desktop_free[@]}" "${recorder[@]}"; then
             native=false
             if touched "${native_harness[@]}"; then native=true; fi
             printf 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=%s\n' "$native" >> "$GITHUB_OUTPUT"
