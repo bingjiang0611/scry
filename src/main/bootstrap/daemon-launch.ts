@@ -1,7 +1,8 @@
-import { accessSync, closeSync, constants, mkdirSync, openSync } from 'node:fs'
+import { accessSync, closeSync, constants } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { daemonLaunchEnvironment } from '../../daemon/supervisor'
+import { openDaemonLog } from '../../daemon/daemon-log'
 
 // Starting the background service from the App. The App does not run the daemon
 // itself and never owns its lifetime: it starts the supervisor, which owns restart
@@ -63,9 +64,7 @@ export function spawnDaemonSupervisor(input: {
   // owns. One append-only file per user data directory, readable by the user only.
   let log: number
   try {
-    const directory = join(input.userDataDir, 'logs')
-    mkdirSync(directory, { recursive: true, mode: 0o700 })
-    log = openSync(join(directory, 'daemon.log'), 'a', 0o600)
+    log = openDaemonLog(input.userDataDir)
   } catch (error) {
     return { status: 'failed', reason: `daemon_log_unavailable:${(error as NodeJS.ErrnoException)?.code ?? 'unknown'}` }
   }
