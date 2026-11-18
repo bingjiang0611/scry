@@ -24,6 +24,7 @@ export interface ProcessTableEntry extends HostProcess {
  * the safe direction, because the silence window still decides on its own.
  */
 const MAX_DEPTH = 3
+const C_LSTART = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) {1,2}\d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/
 
 /**
  * The processes a turn's host sits in, nearest first. Only an observation: the caller decides what a
@@ -66,7 +67,12 @@ export async function liveHostProcesses(
     const current = table.get(recorded.pid)
     if (!current) continue
     // A token on one side only cannot prove a match; a differing token proves a different process.
-    if (recorded.token && current.token && recorded.token !== current.token) continue
+    if (recorded.token && current.token && recorded.token !== current.token) {
+      // Legacy ps tokens may be localized (and trimmed). Changing locale cannot prove pid reuse;
+      // only the recorder's numeric ticks or C-locale dates support this comparison.
+      if (!/^ticks:\d+$/.test(recorded.token) && !C_LSTART.test(recorded.token)) return undefined
+      continue
+    }
     live.push(recorded)
   }
   return live
@@ -105,8 +111,10 @@ async function procTable(): Promise<Map<number, ProcessTableEntry> | undefined> 
 /** macOS and other POSIX systems: one `ps` call for the whole table. */
 async function psTable(): Promise<Map<number, ProcessTableEntry> | undefined> {
   const stdout = await new Promise<string | undefined>((resolvePromise) => {
-    execFile('ps', ['-axo', 'pid=,ppid=,lstart='], { maxBuffer: 8 * 1024 * 1024, timeout: 5_000 }, (error, out) =>
-      resolvePromise(error ? undefined : String(out)))
+    // This table has no argv: a C locale makes lstart stable without touching the host's locale.
+    execFile('ps', ['-axo', 'pid=,ppid=,lstart='], {
+      maxBuffer: 8 * 1024 * 1024, timeout: 5_000, env: { ...process.env, LC_ALL: 'C' }
+    }, (error, out) => resolvePromise(error ? undefined : String(out)))
   })
   if (!stdout) return undefined
   const table = new Map<number, ProcessTableEntry>()

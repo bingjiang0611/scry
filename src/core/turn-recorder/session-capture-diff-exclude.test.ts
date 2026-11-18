@@ -122,6 +122,10 @@ it('the exclusion belongs to the capture, so the next capture of the session sta
   const state = await readJson<Record<string, unknown>>(captureStatePath(join(root, '.scry'), 'codex', 'sess-1'))
   expect(state?.captureId).toBe('capture-2')
   expect(state).not.toHaveProperty('diffExclude')
+  // An old open turn may still belong to capture-1; retrying capture-2 must not inherit it.
+  await start(root, transcriptPath, undefined, 'capture-2')
+  expect(await readJson(captureStatePath(join(root, '.scry'), 'codex', 'sess-1'))).not.toHaveProperty('diffExclude')
+  expect(await readJson(captureContextPath(join(root, '.scry'), 'codex', 'sess-1'))).not.toHaveProperty('diffExclude')
 })
 
 it('rejects exclusion paths that are not absolute', () => {
