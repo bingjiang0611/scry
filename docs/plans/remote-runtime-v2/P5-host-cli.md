@@ -1,110 +1,115 @@
-# P5 · 宿主命令行批准、安全分析与协议（只设计）
+# P5 · 宿主命令行 `scry-host` 与协议（只设计）
 
-状态：设计稿，不含实现。本文是 [P5-headless-host](P5-headless-host.md) 的第 2 步部分（§3–§5），章节编号与之连续；现状、第 1 步、测试、拆分与待决定事项见该文。维护者 2026-11-18 选方案 a：在执行端上用命令行批准新设备，不采用从已配对设备批准（方案 b）。
+状态：设计稿，不含实现。本文是 [P5-headless-host](P5-headless-host.md) 的第 2 步（§3、§5），章节编号与之连续；安全分析与缓解见 [P5-host-security](P5-host-security.md) §4。维护者 2026-11-18 选方案 a：在执行端上用命令行批准新设备；评审后（同日）加上默认关闭的「允许命令行批准」开关等缓解。
 
 ## 3. 第二步：宿主命令行 `scry-host`
 
 ### 3.1 入口
 
-新的 App 私有入口 `<resources>/bin/scry-host`，形式同 `build/scry-cli`：按 bundle 布局找 Electron，不查 `PATH`；先 `unset` [P5-headless-host](P5-headless-host.md) §2.1 那组 Node 变量，再以 `ELECTRON_RUN_AS_NODE=1` 运行 asar 内 `out/main/host-cli.js`。
+新的 App 私有入口 `<resources>/bin/scry-host`，形式同 `build/scry-cli`：按 bundle 布局找 Electron，不查 `PATH`；先清掉 [P5-headless-host](P5-headless-host.md) §2.1 那组变量，再以 `ELECTRON_RUN_AS_NODE=1` 运行 asar 内 `out/main/host-cli.js`。userData 按 App 的默认规则推出（代码里没有 `setPath('userData')`），测试实例不支持。
 
-不放进 `scry`：`src/cli/scry.ts` 是 recorder CLI，要求独立于 Electron/SQLite、可单独经 npm 分发并自动更新（[Recorder 合同](../../agent/change-checklists.md#recorder--cli-改动)）；Linux 上 `/usr/bin/scry` 还指向 App 本体（`scripts/check-pacman-package.mjs:96`）。设置页提供带绝对路径的「复制命令」。
+不放进 `scry`：`src/cli/scry.ts` 是 recorder CLI，要求独立于 Electron、可单独经 npm 分发（[Recorder 合同](../../agent/change-checklists.md#recorder--cli-改动)）。Linux 上 `/usr/bin/scry` 很可能是 electron-builder 默认 install 脚本建的、指向 App 本体的链接（`electron-builder.yml:71` `executableName: scry`）；仓库检查只验证 install 脚本存在且语法正确（`scripts/check-pacman-package.mjs:96-103`），没有断言这个链接，以 Linux 实机为准。设置页提供带绝对路径的「复制命令」。
 
 ### 3.2 命令
 
-| 命令 | 作用 | 复用的 handler | 交互 |
-|---|---|---|---|
-| `status [--json]` | 后台服务版本/pid/拉起方、登录时启动、远程访问、桌面端口、待确认数、设备数 | `remote:status`、`remote:desktop:status`、后台服务自报 | 否 |
-| `invite phone` | 生成 `scry1:` 文本码；会取消之前未完成的邀请 | `remote:pairing:begin` | 需要 TTY |
-| `invite desktop` | 需要时开启桌面访问，生成 `scry-desktop1:` 邀请 | `remote:desktop:invite` | 需要 TTY |
-| `invite … --wait` | 留在前台等设备提交证明，随即进入 `approve` | 同上 | 需要 TTY |
-| `pending [--json]` | 待确认配对：设备名、完整指纹、剩余时间 | `remote:status` | 否 |
-| `approve [<配对>]` | 见 §3.5 | `remote:pairing:confirm` | 需要 TTY，必须输入指纹 |
-| `cancel <配对>` | 取消待确认配对（authority 只有取消，没有单独的拒绝状态） | `remote:pairing:cancel` | 确认；`--yes` 须给完整 pairingId |
-| `devices [--json]` | 已配对设备，不含本机 App 的 local grant | `remote:status` | 否 |
-| `revoke <设备>` | 撤销设备 | `remote:device:revoke` | 确认；`--yes` 须给完整 deviceId |
-| `desktop-off` | 关闭桌面访问，不撤销设备 | `remote:desktop:disable` | 确认 |
+| 命令 | 作用 | 复用 | 交互 | 开关关闭时 |
+|---|---|---|---|---|
+| `status [--json]` | 后台服务版本/pid/拉起方、进行中的 run 数、登录时启动、远程访问、有效远程配置、批准开关、配对记录用量 | `remote:status`、`remote:desktop:status`、自报 | 否 | 可用 |
+| `pending [--json]` | 待确认配对：设备名、完整指纹、剩余时间 | `remote:status` | 否 | 可用 |
+| `devices [--json]` | 已配对设备与「记录为」的批准方式，不含本机 App | `remote:status` | 否 | 可用 |
+| `invite phone` | 生成 `scry1:` 文本码 | `remote:pairing:begin` | TTY | 拒绝 |
+| `invite desktop` | 需要时开桌面访问，生成 `scry-desktop1:` | `remote:desktop:invite` | TTY | 拒绝 |
+| `invite … --wait` | 前台等设备提交证明，随即进入 `approve` | 同上 | TTY | 拒绝 |
+| `approve [<配对>]` | §3.5 | `remote:pairing:confirm` | TTY + 输入指纹 | 拒绝 |
+| `cancel <配对>` | 取消待确认配对 | `remote:pairing:cancel` | 确认；`--yes` 须完整 id | 拒绝（[决定 10.2](P5-headless-host.md#102-需要维护者决定)） |
+| `revoke <设备>` | 撤销设备 | `remote:device:revoke` | 同上 | 拒绝（同上） |
+| `desktop-off` | 关闭桌面访问，不撤销设备 | `remote:desktop:disable` | 确认 | 拒绝（同上） |
+| `restart` | §3.8 | `background-service-stop.ts` | 有 run 时确认 | 可用（不走 admin socket） |
+| `login-start enable\|disable\|status` | §3.10 | 登录时启动模块 | `enable` 要 TTY 确认 | 可用（不走 admin socket） |
 
-退出码：0 成功；1 用法或拒绝；2 后台服务未运行；3 版本不一致；5 用户取消。`<配对>`、`<设备>` 交互时可用唯一前缀（≥8 字符），不唯一即拒绝。
+退出码：0 成功；1 用法或拒绝；2 后台服务未运行；3 版本不一致；4 命令行批准未开启；5 用户取消；6 速率限制。`<配对>`、`<设备>` 交互时可用唯一前缀（≥8 字符），不唯一即拒绝。
 
-### 3.3 认证
+已有未完成的邀请时，`invite` 先说明「新邀请会取消它」（`pairing.ts:57-58`）并要确认。
 
-App 的入网方式不能给命令行用：local grant 只能有一个，新入网会撤销 App 的（`pairing.ts:202-204`）；App 有 grant 时没有入网 secret（`local-enrollment.ts:71-75`）；每次调用发一个 grant 会很快碰到 64 条上限（`pairing.ts:50`、`191`），且撤销的 grant 不清理。
+### 3.3 认证：每个请求一次挑战
 
-方案：daemon 在状态目录再开一个 `host-admin.sock`（0600，目录 0700），并在每次启动时写 `host-admin-token`（32 字节随机，0600，原子写，退出时删除；可重复使用，不按时间过期）。
+App 的入网方式不能给命令行用：local grant 只能有一个，新入网会撤销 App 的（`pairing.ts:202-204`）；App 有 grant 时没有入网 secret（`local-enrollment.ts:71-75`）；每次发 grant 会碰到 64 条上限（`pairing.ts:50`、`191`）。
 
-- 每个连接一条换行结尾的 JSON 请求、一条回复，形式同 `enroll.sock`（`local-enrollment.ts:105-137`）：`{version:1, token, client:{version, build}, method, args}`。
-- 校验顺序：token（`timingSafeEqual`，文件权限不是 0600 即拒）→ 构建身份完全相同（`sameBuild`，否则 `daemon_version_mismatch` 并带上运行中的版本）→ method 在白名单 → 参数 schema。
-- 证明与 `enroll.sock` 同级：同一 uid 才能连上 socket、读到 token。不签发证书，不写 grant，不碰 `pairing-state.json` 的格式。Node 没有对端凭据 API（`local-channel.ts:11-15`），不声称做了 uid 校验之外的事。
-- 网络端点（relay、SSH 转发的两个端口）够不到它。
+daemon 在 `<stateDir>/host-admin/`（0700）里开 `host-admin.sock`。**listen 前把 umask 收到 0177**，listen 后恢复并复核 0600；不沿用 `local-channel.ts:51-53` 的先 listen 再 chmod。
 
-既有上限：配对记录与 grant 各最多 64 条，从不清理（`pairing.ts:50`、`191`，`pairing-state.ts:100`）；每次邀请占一条配对记录，取消、过期的也留着。命令行让邀请更便宜，会更早碰到 `pairing_capacity_exceeded`，此后手机和桌面都无法再配对。`status` 显示已用条数；是否清理见 [P5-headless-host](P5-headless-host.md) 决定 8。
+每个连接一个请求：
+
+1. 命令行发 `{version:1, client:{version, build}}`。构建身份不同（`sameBuild`）即回 `daemon_version_mismatch` 与运行中的版本。
+2. daemon 在 `host-admin/` 里以 `O_CREAT|O_EXCL|O_NOFOLLOW`、0600 新建 `challenge-<32 位十六进制>`，写入 32 字节随机数，回文件名。
+3. 命令行校验文件名格式，以 `O_NOFOLLOW` 打开后 `fstat`：普通文件、属主是自己、0600；不满足即拒。不用 `statSync`（`local-enrollment.ts:59` 会跟随符号链接）。读出后连同 `method`、`args` 发回。
+4. daemon 删除挑战文件（成功、失败、10 s 超时、断开都删），`timingSafeEqual` 比对，再查开关、白名单、速率、参数 schema。
+
+证明的是「调用者能读一个只有本用户能读的文件」，不是「连上了 socket」：SSH streamlocal 转发能把 unix socket 送到别处（`pairing.ts:216-218` 已把它列为威胁），但转发端读不到挑战文件。磁盘上没有长期 secret，也没有轮换竞态。不签发证书，不写 grant；Node 没有对端凭据 API（`local-channel.ts:11-15`），不声称做了更多。
+
+回复只带机器码，同 `enroll.sock`（`local-enrollment.ts:131-134`）。`pairingChannelHandlers` 抛的中文消息（`bootstrap/pairing-channels.ts:21`、`35`、`39`、`45`）在 socket 层映射为 `remote_host_disabled`、`invalid_arguments`、`local_grant_not_revocable`。
 
 ### 3.4 白名单
 
-只有 §3.2 表中的 handler，调用的是 `pairingChannelHandlers` 与后台服务自报，和 App 走同一份代码、同一组 authority 检查。其余一律 `unsupported_method`：run、会话、文件、终端、项目授权、MCP/Hook trust、本机入网、后台服务停止/重启。
+只有 §3.2 中走 admin socket 的方法，调用 `pairingChannelHandlers` 与后台服务自报，和 App 同一份 authority 检查。开关关闭时只放行 `status`、`pending`、`devices`。其余一律 `unsupported_method`：run、会话、文件、终端、项目授权、MCP/Hook trust、本机入网、开关本身、后台服务停止。
+
+开关关闭时仍开 socket、只读：无界面机器上能看到后台服务、配对与设备状态，并得到「命令行批准未开启」（exit 4）这个明确原因，而不是与「后台服务未运行」混在一起的连接失败。只读方法给不出新信息：同一用户本就能读 `pairing-state.json`。
 
 ### 3.5 批准流程
 
-1. 只列 `awaiting_local_confirmation` 的配对；`created`（设备还没提交证明）显示「等待设备」。
+1. 只列 `awaiting_local_confirmation` 的配对；`created` 显示「等待设备」。
 2. 显示设备名、pairingId 前 8 位、完整 64 位指纹（每 4 位分组）、与 App 相同的前 16 位、剩余时间。
-3. 要求输入设备上显示的指纹：至少 16 位十六进制，忽略空格与大小写；必须是该行指纹的前缀；多行同时匹配即拒绝（`fingerprint_ambiguous`）。
+3. 要求输入设备上显示的指纹：至少 16 位十六进制，忽略空格与大小写；必须是该行指纹的前缀；多行匹配即拒（`fingerprint_ambiguous`）。
 4. 说明后果（设备成为 owner 设备、`scope: remote`、可按现有权限模式运行 Provider）后，要求输入 `yes`。
-5. 提交 `confirm(pairingId, 该行的完整指纹)`，与 App 一样钉住指纹；authority 再查一次指纹与 2 分钟期限，设备换了密钥或过期即失败（`pairing.ts:108-109`、`257-263`）。过期就重新邀请。
-6. 领取语义不变：批准后设备随时领取证书。
+5. 提交 `confirm(pairingId, 该行完整指纹)`；authority 再查指纹与 2 分钟期限（`pairing.ts:108-109`、`257-263`）。
+6. 成功后通知 App 与已配对设备（[P5-host-security](P5-host-security.md) §4.3）。
 
-这比 App 界面多一步「输入指纹」。App 界面本步不改。
+### 3.6 非交互与运行标记
 
-### 3.6 非交互
-
-- `invite`、`approve` 要求 stdin 与 stdout 都是 TTY，否则 `host_cli_requires_tty`。没有 `--yes`、没有「全部批准」、没有 `--fingerprint`。
+- `invite`、`approve` 要求 stdin 与 stdout 都是 TTY，否则 `host_cli_requires_tty`。没有 `--yes`、「全部批准」、`--fingerprint`。
+- 调用者环境里有 `SCRY_MANAGED_RUN_ID` 或 `SCRY_HOST_CHILD` 时，`invite`、`approve`、`login-start enable` 拒绝（`host_cli_inside_agent`）。来源与局限见 [P5-host-security](P5-host-security.md) §4.2。
 - 邀请里的 secret 只打到 TTY，不写日志、不进 `--json`。
-- `cancel`、`revoke`、`desktop-off` 只收紧权限，可用 `--yes` + 完整 id 在脚本里执行。
-- TTY 只防误操作和无人值守的调用，不是安全边界：同一用户的进程可以用伪终端绕过（§4）。
+- TTY 与运行标记只防误操作和被注入的 Agent，不是安全边界。
 
-### 3.7 记录
+### 3.7 批准方式记在 grant 里
 
-- daemon 日志每次一行：method、结果码、pairingId/deviceId、指纹前 16 位；不写 secret 与邀请文本。
-- 新增 `<userData>/remote/pairing-audit.jsonl`（0600，追加）：`{at, action, via, pairingId?, deviceId?, publicKeySHA256?}`，`via` 为 `app` 或 `host_cli`。App 经本机 op 的动作也写，记 `app`。
-- grant 的 `source` 保持 `local_confirmation`：`pairing-state.ts:106-108` 严格校验键与取值，加字段或新值会让旧版本读不了配对状态。
-- 设备列表（App 与 `devices`）显示「批准方式：App / 命令行 / 未记录」；本设计之前的 grant 记「未记录」，不当作 App。
+- `DeviceGrant` 新增可选键 `approvedVia: 'app' | 'host_cli'`，只用于 `scope: remote`。值由调用路径定（本机 op 记 `app`，admin socket 记 `host_cli`），不是参数。
+- 分两次发布。读取端严格校验键（`pairing-state.ts:88-90`、`106-108`），多一个键旧版本就判 `invalid_pairing_state`：
+  - 发布 1（P5-5a）：读取端接受缺失或这两个值，并在返回对象里原样保留（`113-114` 逐字段重建，漏掉就会在下次写回时丢失）；不写。
+  - 发布 2（P5-7，与 P5-6 同发）：确认时写入。
+  - 先例是 `scope`（`103-105`）：新读取端把缺失当默认，旧读取端读不了新状态；这里多一次发布补上旧读取端。发布 2 降级到发布 1 之前的版本仍会读不了，发布说明写明。
+- 界面写「批准方式（记录为）：App / 命令行」，旧 grant 显示「未记录」。配对状态文件没有完整性保护，不显示为已核实。
+- 不另设审计文件作为事实来源；daemon 日志每次一行：method、结果码、pairingId/deviceId、指纹前 16 位，不写 secret 与邀请文本。
 
-### 3.8 后台服务没在跑
+### 3.8 后台服务没在跑、版本不一致、重启
 
-命令行**不拉起后台服务**，exit 2，并给出下一步：已装服务时打印 `launchctl kickstart gui/<uid>/com.scry.daemon` 或 `systemctl --user start scry-daemon.service`；没装时让用户打开 App 或开启登录时启动。原因：在 SSH 会话里直接拉起，进程会归属那个会话（Linux 注销即被杀，macOS 不在 Aqua 会话里），环境也与 App/服务不同；只读的 `status` 更不能有启动副作用。版本不一致时 exit 3，打印两边版本和同一条重启命令。
+- 后台服务未运行：exit 2，不拉起。已装服务时打印 `launchctl kickstart gui/<uid>/com.scry.daemon` 或 `systemctl --user start scry-daemon.service`；没装时提示 `scry-host login-start enable` 或打开 App。在 SSH 会话里直接拉起，进程会归属那个会话，环境也不同。
+- 版本不一致：exit 3，打印两边版本，提示 `scry-host restart`。
+- `restart`：服务正在跑时 `kickstart`/`start` 什么都不做，所以单独提供。复用 `background-service-stop.ts` 的身份复核与一次 SIGTERM，不发第二个信号；run 数取自 `status`；有 run 时先说明会中断几个并要确认，数不出来也问（同 `background-service-actions.ts:60-63`）。daemon 退出后，已装服务就经服务管理器拉起；没装就停在这里并说明。不走 admin socket，开关关闭也可用。
 
 ### 3.9 与 App 界面批准对照
 
 | 检查 | App | `scry-host` |
 |---|---|---|
-| 调用者证明 | local grant（mTLS over unix socket） | token + 0600 socket，同一 uid |
+| 调用者证明 | local grant（mTLS over unix socket） | 一次性挑战文件 |
+| 前提 | 无 | 「允许命令行批准」已开；不在运行标记下；速率内 |
 | 版本 | 构建身份完全一致 | 同 |
-| 指纹 | 显示 16 位，点击后提交完整指纹 | 显示完整 64 位，须输入 ≥16 位，提交完整指纹 |
-| 期限 / 单个待确认 / 领取 | 2 分钟；新邀请取消旧的；以宿主状态为准 | 同 |
+| 指纹 | 显示 16 位，提交完整指纹 | 显示完整 64 位，须输入 ≥16 位，提交完整指纹 |
+| 期限 / 单个待确认 | 2 分钟；新邀请取消旧的 | 同 |
 | 设备得到的权限 | `owner-device`、`scope: remote` | 同 |
-| 记录 | 新增 `via: app` | `via: host_cli` |
+| 记录 | `approvedVia: app` | `approvedVia: host_cli`；另通知 App 与设备 |
 
-## 4. 安全分析
+### 3.10 `login-start`
 
-| 方面 | 今天 | 之后 | 结论 |
-|---|---|---|---|
-| 同一 uid 的进程 | 已能读明文 CA 私钥（`host-identity.ts:24-28`），改无完整性校验的 `pairing-state.json`，或写入网请求文件、重启 daemon 抢走 local grant（`local-enrollment-request.ts`） | 多一条有文档、低成本的路径；不必抢 App 的 local grant，少了一个可见的副作用 | **信任边界不变，门槛降低**。补偿：审计、设备列表显示批准方式 |
-| Provider / Agent（含 `full_access`、自动授权的仓库 MCP/Hook） | 本就能以本机用户执行任意命令 | 能调用 `scry-host`；TTY 要求可被伪终端绕过 | 不新增权限，但打开不可信仓库后，配对新设备变成两条命令的事 |
-| 已配对设备 | 经 Provider 在宿主执行命令 | 同上，可间接走命令行批准，实际效果接近方案 b | 不是新权限；维护者需知悉 |
-| SSH 登录者 | 同一 uid，同第一行 | 正是本步要服务的人 | 符合维护者的判断 |
-| 网络暴露 | 无新端口 | `host-admin.sock` 只是 unix socket | 不变 |
-| 指纹钉住、期限、取消、撤销 | authority 检查 | 同一 authority、同一 handler | 不变 |
-| 后台服务环境 | App 过滤后的环境 | 服务管理器环境 → 服务文件清理 + supervisor allowlist | 须实现保证（[P5-headless-host](P5-headless-host.md) §2.1、§2.5） |
-| trust gate、`full_access` 语义 | daemon 内每次重验 | 不变 | 不变 |
-| renderer | 不涉及服务 | 只多一个布尔参数 | 不变 |
-| macOS 隐私授权（TCC） | 后台服务由 App 拉起 | 由 launchd 拉起，访问 `~/Documents` 等目录的授权归属可能不同 | **未验证**，L3 必查 |
-
-同一 macOS/Linux 用户下的并发攻击者不在信任模型内（AGENTS §3），本设计不对它作更强承诺。
+- 用 [P5-headless-host](P5-headless-host.md) §2.3 的同一模块，同样的平台放行规则与失败机器码。
+- `enable` 要求 TTY，说明「装一个随登录常驻、可被已配对设备远程访问的服务」后要输入 `yes`；不打开「允许命令行批准」。
+- 纯无界面 Linux 由此第一次拉起后台服务（经 `systemctl --user start`，不归属 SSH 会话）。命令行批准仍须在 App 界面里打开一次（本机显示或转发均可）。
+- macOS 上 `bootstrap gui/<uid>` 要求该用户有图形会话；只有 SSH 时按退出码报告，plist 已写入则下次图形登录生效。
 
 ## 5. 协议与版本
 
-- `REMOTE_PROTOCOL_VERSION` 不变（`src/shared/desktop-remote.ts:180`）。
-- 本机 op 表不增加；新增一个只在本机的端点 `host-admin.sock`，帧格式自带 `version: 1`，复用现有 handler。
-- 不向远程开放任何东西，`scripts/daemon-ipc-remote-approvals.json` 保持空。
-- IPC：新增 `remote:backgroundService:setLoginStart`（main）；`BackgroundServiceStatus` 加 `loginStart`；`BackgroundServiceSelfReport` 加 `launchedBy`。App 与后台服务同一构建，不需要兼容层。
-- 持久化：新增 `pairing-audit.jsonl`；`pairing-state.json` 格式不变。
+- `REMOTE_PROTOCOL_VERSION` 不变（`src/shared/desktop-remote.ts:180`）。通知设备用新的可协商宿主能力；旧设备看不到，不降级为别的形式。
+- 新增只在本机的端点 `host-admin.sock`，帧自带 `version: 1`。
+- 本机 op 新增 `localHostAdmin`（读写批准开关），只在本机 socket、`scope: local` 上；admin socket 与远程都够不到。
+- 不向远程开放任何新方法，`scripts/daemon-ipc-remote-approvals.json` 保持空。
+- IPC：新增 `remote:backgroundService:setLoginStart`、`remote:hostAdmin:setCliApproval`（都在 main，都带原生确认）；`BackgroundServiceStatus` 加 `loginStart`、`cliApproval`；`BackgroundServiceSelfReport` 加 `launchedBy` 与有效远程配置；app-event-feed 加一种通知。App 与后台服务同一构建，不需要兼容层。
+- 持久化：`pairing-state.json` 的 grant 加可选 `approvedVia`（§3.7 两次发布）；新增 `<userData>/remote/host-admin.json`（0600，开关与速率计数）。

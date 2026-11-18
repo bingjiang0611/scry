@@ -83,8 +83,12 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 |---|---|---|
 | 分步做，与 P4 分开 | 第 1 步「登录时启动」：设置开关安装/卸载 launchd 或 `systemd --user` 服务，登录或重启后不开 App 也有后台服务；App 仍装在这台机器上 | [P5-headless-host](P5-headless-host.md) |
 | 第 2 步：不靠执行端界面批准新设备 | 方案 a，在执行端上用命令行批准。能以同一 OS 用户登录这台机器的人，已有本机授权模型的权限（上文 2026-11-07 第一行）。方案 b（从已配对设备批准）不采用 | [P5-host-cli](P5-host-cli.md) |
-| 不依赖 App 的独立安装包 | P4 之后再做；本轮只记在「不做/以后」 | [P5-headless-host](P5-headless-host.md) §8 |
+| 不依赖 App 的独立安装包 | P4 之后再做；本轮只记在「不做/以后」 | [P5-host-security](P5-host-security.md) §8 |
+
+评审后（同日）「都按推荐」：supervisor 停止时等 daemon、远程策略随服务写入、命令行批准默认关且只能在 App 里打开、挑战认证、运行标记、通知与速率、批准方式分两次发布写进 grant。仍待定一项：开关关闭时是否放行只收紧的命令（[P5-headless-host](P5-headless-host.md) §10）。
 
 ## 需要决定
 
-无。B4-S 的决定见 [P3-b4s-plan](P3-b4s-plan.md) 末节。
+1. P5：「允许命令行批准」关闭时，是否放行只收紧权限的 `cancel`、`revoke`、`desktop-off`（[P5-headless-host](P5-headless-host.md) §10.2）。
+
+B4-S 的决定见 [P3-b4s-plan](P3-b4s-plan.md) 末节。
