@@ -355,8 +355,7 @@ async function cachedTranscriptSnapshot(args: {
   piTranscriptAnchor?: PiTranscriptAnchor
   endOffset?: number
   identity: TranscriptSnapshotIdentity
-}): Promise<TranscriptRead> {
-  const key = transcriptSnapshotCacheKey(args)
+}, key = transcriptSnapshotCacheKey(args)): Promise<TranscriptRead> {
   const cached = transcriptSnapshotCache.get(key)
   if (cached) {
     transcriptSnapshotCache.delete(key)
@@ -417,6 +416,23 @@ export async function stableTranscript(
   // Recompute an exact JSONL turn anchor. Older persisted offsets were heuristic
   // byte rewinds and may begin inside a large prompt, so they are never evidence.
   startOffset = 0
+  // Key the requested projection, not its derived byte offsets. Looking up only after locating
+  // the anchor re-scans the entire Codex rollout even on a snapshot cache hit. File identity,
+  // the frozen boundary and Pi entry IDs still invalidate the projection; child sources are
+  // deliberately never cached by cachedTranscriptSnapshot.
+  const selectionKey = (identity: TranscriptSnapshotIdentity, stable = true) => transcriptSnapshotCacheKey({
+    path, stable, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd,
+    piTranscriptAnchor, endOffset: endOffsetLimit, identity
+  })
+  const cachedSelection = (identity: TranscriptSnapshotIdentity): TranscriptRead | undefined => {
+    const key = selectionKey(identity)
+    const cached = transcriptSnapshotCache.get(key)
+    if (!cached) return undefined
+    transcriptSnapshotCache.delete(key)
+    transcriptSnapshotCache.set(key, cached)
+    transcriptSnapshotCacheHits++
+    return cached.read
+  }
   let previous = -1
   let latestIdentity: TranscriptSnapshotIdentity | undefined
   if (endOffsetLimit != null && !(provider === 'pi' && piTranscriptAnchor)) {
@@ -426,6 +442,8 @@ export async function stableTranscript(
     } catch {
       return missingTranscript(providerTurnId, promptHash)
     }
+    const cached = cachedSelection(frozenIdentity)
+    if (cached) return cached
     const boundary = Math.min(frozenIdentity.size, Math.max(0, endOffsetLimit))
     return cachedTranscriptSnapshot({
       path,
@@ -440,7 +458,7 @@ export async function stableTranscript(
       cwd,
       endOffset: boundary,
       identity: frozenIdentity
-    })
+    }, selectionKey(frozenIdentity))
   }
   for (let attempt = 0; attempt < 3; attempt++) {
     let identity: TranscriptSnapshotIdentity
@@ -450,6 +468,8 @@ export async function stableTranscript(
       return missingTranscript(providerTurnId, promptHash)
     }
     latestIdentity = identity
+    const cached = cachedSelection(identity)
+    if (cached) return cached
     if (identity.size === previous) {
       let endOffset = identity.size
       if (provider === 'pi' && piTranscriptAnchor) {
@@ -459,7 +479,7 @@ export async function stableTranscript(
       } else {
         startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId)
       }
-      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, piTranscriptAnchor, endOffset, identity })
+      return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, piTranscriptAnchor, endOffset, identity }, selectionKey(identity))
     }
     previous = identity.size
     await new Promise((resolve) => setTimeout(resolve, 25))
@@ -487,7 +507,7 @@ export async function stableTranscript(
         piTranscriptAnchor,
         endOffset,
         identity: latestIdentity
-      })
+      }, selectionKey(latestIdentity, false))
     : parseTranscriptSnapshot({
         path,
         endOffset: 0,

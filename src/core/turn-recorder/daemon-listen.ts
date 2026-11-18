@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
 import { type ProviderId } from '../../shared/provider.js'
 import { applyHookEnvironment } from './commit-environment.js'
 import { recorderEnablement, recoverRecorder, handleRecorderHook, drainRecorderDelivery } from './recorder.js'
-import { appendRotatingLog, readJson, writeJsonAtomic, writeTextAtomic } from './io.js'
+import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic, writeTextAtomic } from './io.js'
+import type { RecorderEnablement } from './config.js'
 import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION } from './store.js'
@@ -36,7 +37,7 @@ function positiveInt(value: string | undefined, fallback: number, min: number, m
   return Number.isSafeInteger(parsed) && parsed > 0 ? Math.max(min, Math.min(max, parsed)) : fallback
 }
 
-export async function listenRecorderDaemon(args: {
+interface RecorderDaemonListenOptions {
   workspace: string
   socketPath?: string
   idleMs?: number
@@ -55,13 +56,23 @@ export async function listenRecorderDaemon(args: {
    * network access. Returning the installed version only affects what gets logged.
    */
   idleUpdate?: () => Promise<string | null>
-}): Promise<RecorderDaemonHandle> {
+}
+
+export async function listenRecorderDaemon(args: RecorderDaemonListenOptions): Promise<RecorderDaemonHandle> {
   const env = args.env ?? process.env
   const enablement = await recorderEnablement(args.workspace, env)
   if (!enablement.enabled) throw new Error(`recorder is disabled: ${enablement.reason}`)
   const socketPath = recorderSocketPath(enablement.workspaceRoot, args.socketPath
     ? { ...env, SCRY_RECORDER_SOCKET: args.socketPath }
     : env)
+  // Separate from the launcher's lock: the parent waits for this child. Direct serve callers
+  // and different workspaces sharing a socket must serialize ownership and listen here too.
+  return withDirectoryLock(`${socketPath}.listen.lock`, () => startRecorderDaemon(args, enablement, socketPath, env))
+}
+
+async function startRecorderDaemon(
+  args: RecorderDaemonListenOptions, enablement: Extract<RecorderEnablement, { enabled: true }>, socketPath: string, env: NodeJS.ProcessEnv
+): Promise<RecorderDaemonHandle> {
   const instanceId = env[OWNER_TOKEN_ENV]?.trim() || randomUUID()
   const markerPath = ownerPath(socketPath)
   const idleMs = args.idleMs ?? positiveInt(env.SCRY_RECORDER_IDLE_MS, DEFAULT_IDLE_MS, 1_000, MAX_IDLE_MS)
@@ -85,7 +96,7 @@ export async function listenRecorderDaemon(args: {
     if (recoveryInFlight) return recoveryInFlight
     recoveryInFlight = Promise.resolve()
       .then(() => args.recoveryProbe?.())
-      .then(() => recoverRecorder(enablement.workspaceRoot, env))
+      .then(() => recoverRecorder(enablement.workspaceRoot, env, undefined, undefined, { incremental: true }))
       .catch(async (error) => {
         const message = error instanceof Error ? error.message : String(error)
         await appendRotatingLog(daemonLog, `${new Date().toISOString()} ERROR recovery: ${message}`).catch(() => undefined)
@@ -147,6 +158,13 @@ export async function listenRecorderDaemon(args: {
             ).catch(() => undefined)
           }
         }
+        // Updating can await the registry while a new hook arrives. Do not close its owner.
+        if (closing || activityGeneration !== scheduledGeneration) return
+        if (await recorderHasOpenTurn(enablement.dataRoot)) {
+          scheduleIdle()
+          return
+        }
+        if (activityGeneration !== scheduledGeneration) return
         await closeDaemon()
       })()
     }, idleMs)
@@ -188,10 +206,13 @@ export async function listenRecorderDaemon(args: {
   await rm(socketPath, { force: true })
 
   const server: Server = createServer(async (request, response) => {
-    activityGeneration++
+    const activity = request.method === 'POST' && (request.url === HOOK_EVENT_PATH || request.url === '/v1/hook')
+    if (activity) {
+      activityGeneration++
+      if (idleTimer) clearTimeout(idleTimer)
+    }
     requestCount++
     lastRequestAt = new Date().toISOString()
-    if (idleTimer) clearTimeout(idleTimer)
     try {
       if (request.method === 'GET' && request.url === '/v1/status') {
         // `captureProtocol` tells CodeLens' guard whether this daemon serves session capture at all.
@@ -272,7 +293,7 @@ export async function listenRecorderDaemon(args: {
       if (!response.headersSent) writeJson(response, statusCode, { ok: false, error: message })
       else response.end()
     } finally {
-      if (!closing) scheduleIdle()
+      if (activity && !closing) scheduleIdle()
     }
   })
 
@@ -290,8 +311,13 @@ export async function listenRecorderDaemon(args: {
       // HTTP responses can finish before delivery; shutdown must not release a workspace still in use.
       await Promise.all(deliveryInFlight)
     }).finally(async () => {
-      await rm(socketPath, { force: true }).catch(() => undefined)
-      await removeOwnedMarker(markerPath, instanceId).catch(() => undefined)
+      // A live owner cannot be replaced by another starter. Keep the marker until the socket
+      // is removed; do not reacquire the listen lock here (startup failure already holds it).
+      const currentOwner = await readJson<DaemonOwner>(markerPath)
+      if (currentOwner?.instanceId === instanceId) {
+        await rm(socketPath, { force: true })
+        await removeOwnedMarker(markerPath, instanceId)
+      }
     })
     return closing
   }

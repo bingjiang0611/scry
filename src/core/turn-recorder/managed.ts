@@ -180,7 +180,9 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     const current = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
     const candidates = [
       ...(current ? [current] : []),
-      ...(await recorderQuarantinedOpenTurns(root))
+      // This identity/ambiguity check is an explicit handoff, not a background poll. Include
+      // restored or legacy-writer evidence before claiming a provisional turn.
+      ...(await recorderQuarantinedOpenTurns(root, { reconcile: true }))
     ]
     let matches = candidates.filter(
       (candidate) =>
