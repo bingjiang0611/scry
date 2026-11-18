@@ -9,6 +9,8 @@ export interface DaemonExit {
   runtimeMs?: number
   /** Sanitized machine code only; never stderr text. */
   reason?: string
+  /** The exit followed a stop request: never a reason to restart. */
+  stopRequested?: boolean
 }
 export interface SupervisorOptions {
   directory: string
@@ -19,14 +21,27 @@ export interface SupervisorOptions {
   stableRunMs?: number
   sleep?: (ms: number) => Promise<void>
   now?: () => number
+  /** Aborted when the supervisor itself is asked to stop: no further launch after it. */
+  stopSignal?: AbortSignal
 }
 export type SupervisorResult =
   | { status: 'stopped'; attempts: number }
+  /** The daemon was asked to stop and was still running at the bound. */
+  | { status: 'stop-timeout'; attempts: number }
   | { status: 'already-running'; attempts: number }
   | { status: 'failed'; attempts: number; reason: string }
   | { status: 'exhausted'; attempts: number }
 
 const FAILURE_FILE = 'supervisor-failure.json'
+const STOP_TIMEOUT_REASON = 'daemon_stop_timeout'
+
+/**
+ * How long a stopping supervisor waits for the daemon after forwarding SIGTERM. Below the
+ * 30 s a service manager allows (systemd TimeoutStopSec, launchd ExitTimeOut) so the
+ * supervisor leaves before it is killed, and long enough for the daemon's dispose
+ * (terminal recording, remote release, both locks).
+ */
+export const DAEMON_STOP_TIMEOUT_MS = 25_000
 
 function atomicJson(path: string, value: unknown): void {
   const temp = `${path}.tmp-${process.pid}`
@@ -47,8 +62,12 @@ export async function superviseDaemon(options: SupervisorOptions): Promise<Super
   let restarts = 0
   let lastExit: DaemonExit = { code: null, signal: null }
   while (true) {
+    if (options.stopSignal?.aborted) return { status: 'stopped', attempts }
     attempts += 1
     lastExit = await options.launch()
+    // A stop is not a crash and not a launch failure: no restart and no failure record,
+    // which the App reads as "this launch failed" (daemon-launch-failure.ts).
+    if (lastExit.stopRequested) return { status: lastExit.reason === STOP_TIMEOUT_REASON ? 'stop-timeout' : 'stopped', attempts }
     if (lastExit.code === 0) return { status: 'stopped', attempts }
     if (lastExit.code === 3) return { status: 'already-running', attempts }
     if (lastExit.code === 2) {
@@ -124,27 +143,45 @@ export function launchDaemonOnce(input: {
   daemonEntry: string
   env: NodeJS.ProcessEnv
   signal?: AbortSignal
+  stopTimeoutMs?: number
 }): Promise<DaemonExit> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now()
     const child = spawn(input.executable, [input.daemonEntry], {
       env: input.env,
       stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: true,
-      ...(input.signal ? { signal: input.signal, killSignal: 'SIGTERM' } : {})
+      windowsHide: true
     })
     let diagnostic = ''
     child.stderr?.on('data', (chunk) => {
       if (diagnostic.length < 4096) diagnostic += String(chunk).slice(0, 4096 - diagnostic.length)
     })
+    let stopRequested = false
+    let stopTimer: NodeJS.Timeout | undefined
+    // Stopping forwards exactly one SIGTERM to this child (the pid spawn returned), then
+    // waits for its exit: the daemon's own handler runs its cleanup once. No second
+    // signal and no SIGKILL; past the bound the service manager owns what is left.
+    const stop = (): void => {
+      if (stopRequested) return
+      stopRequested = true
+      child.kill('SIGTERM')
+      stopTimer = setTimeout(() => {
+        resolve({ code: null, signal: null, runtimeMs: Date.now() - startedAt, reason: STOP_TIMEOUT_REASON, stopRequested })
+      }, input.stopTimeoutMs ?? DAEMON_STOP_TIMEOUT_MS)
+    }
     child.once('error', (error) => {
-      if (input.signal?.aborted && (error as NodeJS.ErrnoException).name === 'AbortError') resolve({ code: 0, signal: 'SIGTERM' })
-      else reject(error)
+      // After a stop request only the exit or the bound settles: a failed kill is
+      // followed by the exit of a child that was already gone.
+      if (!stopRequested) reject(error)
     })
     child.once('exit', (code, signal) => {
+      if (stopTimer) clearTimeout(stopTimer)
+      input.signal?.removeEventListener('abort', stop)
       const reason = diagnostic.match(/(?:^|\n)((?:daemon|remote)_[a-z0-9_]+)/)?.[1]
-      resolve({ code, signal, runtimeMs: Date.now() - startedAt, ...(reason ? { reason } : {}) })
+      resolve({ code, signal, runtimeMs: Date.now() - startedAt, ...(reason ? { reason } : {}), ...(stopRequested ? { stopRequested } : {}) })
     })
+    if (input.signal?.aborted) stop()
+    else input.signal?.addEventListener('abort', stop, { once: true })
   })
 }
 

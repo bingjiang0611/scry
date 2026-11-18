@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchDaemonOnce, superviseDaemon, writeSupervisorTemplates } from './supervisor'
+
+const waitFor = async (predicate: () => boolean): Promise<void> => {
+  const deadline = Date.now() + 5_000
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('waitFor timed out')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
 
 const roots: string[] = []
 const root = (): string => { const value = mkdtempSync(join(tmpdir(), 'scry-supervisor-')); roots.push(value); return value }
@@ -107,6 +115,92 @@ describe('daemon supervisor', () => {
     const result = await launchDaemonOnce({ executable: process.execPath, daemonEntry: entry, env: process.env })
     expect(result).toMatchObject({ code: 2, signal: null, reason: 'daemon_paths_missing' })
     expect(JSON.stringify(result)).not.toContain('secret body')
+  })
+
+  // A service manager stops the supervisor, not the daemon. The supervisor must hand one
+  // SIGTERM to the daemon and stay until the daemon's cleanup has run: once it exits, the
+  // service manager kills whatever is left and the cleanup is cut short.
+  it('on stop forwards one SIGTERM and resolves only after the daemon has exited', async () => {
+    const directory = root()
+    const entry = join(directory, 'slow-stop.mjs')
+    const marker = join(directory, 'cleanup-done')
+    const signals = join(directory, 'signals')
+    const ready = join(directory, 'ready')
+    writeFileSync(entry, [
+      "import { appendFileSync, writeFileSync } from 'node:fs'",
+      "process.on('SIGTERM', () => {",
+      `  appendFileSync(${JSON.stringify(signals)}, 'TERM\\n')`,
+      `  setTimeout(() => { writeFileSync(${JSON.stringify(marker)}, 'done'); process.exit(0) }, 400)`,
+      '})',
+      `writeFileSync(${JSON.stringify(ready)}, 'ready')`,
+      'setInterval(() => {}, 1000)'
+    ].join('\n'))
+    const abort = new AbortController()
+    const launched = launchDaemonOnce({ executable: process.execPath, daemonEntry: entry, env: process.env, signal: abort.signal })
+    await waitFor(() => existsSync(ready))
+    abort.abort()
+    abort.abort()
+    const result = await launched
+    expect(existsSync(marker)).toBe(true)
+    expect(readFileSync(signals, 'utf8')).toBe('TERM\n')
+    expect(result).toMatchObject({ code: 0, signal: null, stopRequested: true })
+  })
+
+  it('reports daemon_stop_timeout when the daemon outlives the stop bound, without a second signal', async () => {
+    const directory = root()
+    const entry = join(directory, 'stuck-stop.mjs')
+    const signals = join(directory, 'signals')
+    const ready = join(directory, 'ready')
+    // Ignores SIGTERM and leaves by itself well after the bound, so the test leaves no process.
+    writeFileSync(entry, [
+      "import { appendFileSync, writeFileSync } from 'node:fs'",
+      `process.on('SIGTERM', () => { appendFileSync(${JSON.stringify(signals)}, 'TERM\\n') })`,
+      `writeFileSync(${JSON.stringify(ready)}, 'ready')`,
+      'setTimeout(() => process.exit(0), 2000)'
+    ].join('\n'))
+    const abort = new AbortController()
+    const launched = launchDaemonOnce({ executable: process.execPath, daemonEntry: entry, env: process.env, signal: abort.signal, stopTimeoutMs: 300 })
+    await waitFor(() => existsSync(ready))
+    abort.abort()
+    const result = await launched
+    expect(result).toMatchObject({ code: null, signal: null, reason: 'daemon_stop_timeout', stopRequested: true })
+    expect(readFileSync(signals, 'utf8')).toBe('TERM\n')
+  })
+
+  it('stops without restarting once a stop was requested, whatever the exit code', async () => {
+    const abort = new AbortController()
+    let launches = 0
+    const result = await superviseDaemon({
+      directory: root(),
+      stopSignal: abort.signal,
+      launch: async () => { launches += 1; abort.abort(); return { code: 1, signal: null, stopRequested: true } },
+      sleep: async () => undefined
+    })
+    expect(result).toEqual({ status: 'stopped', attempts: 1 })
+    expect(launches).toBe(1)
+  })
+
+  it('reports a stop timeout without writing a launch failure record', async () => {
+    const directory = root()
+    const result = await superviseDaemon({
+      directory,
+      launch: async () => ({ code: null, signal: null, reason: 'daemon_stop_timeout', stopRequested: true })
+    })
+    expect(result).toEqual({ status: 'stop-timeout', attempts: 1 })
+    expect(existsSync(join(directory, 'supervisor-failure.json'))).toBe(false)
+  })
+
+  it('does not launch again when the stop arrives during the restart delay', async () => {
+    const abort = new AbortController()
+    let launches = 0
+    const result = await superviseDaemon({
+      directory: root(),
+      stopSignal: abort.signal,
+      launch: async () => { launches += 1; return { code: 1, signal: null } },
+      sleep: async () => { abort.abort() }
+    })
+    expect(result).toEqual({ status: 'stopped', attempts: 1 })
+    expect(launches).toBe(1)
   })
 
   it('resets its restart budget after a stable run', async () => {
