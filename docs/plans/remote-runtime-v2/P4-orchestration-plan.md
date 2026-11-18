@@ -1,107 +1,109 @@
-# P4 · §7 依赖 · §8 性能 · §9 迁移 · §10 测试 · §11 决定 · §12 矛盾
+# P4 · §7 依赖 · §8 性能 · §9 迁移与工期 · §10 测试
 
-属于 [P4 设计](P4-orchestration-design.md)。行号以 `72c83932` 为准。
+属于 [P4 设计](P4-orchestration-design.md)。行号说明见总体设计开头。决定、评审核对与术语（原 §11–§13）在 2026-11-18 移到 [P4-orchestration-decisions](P4-orchestration-decisions.md)。
 
 ## 7. 依赖与顺序
 
-| 关系 | 现状 | 建议 |
+| 关系 | 现状 | 结论（2026-11-18） |
 |---|---|---|
-| S3（删除进程内路径） | 打包构建自 main `c35d0191` 默认走 daemon；开发构建与测试实例仍默认进程内，`SCRY_HOST_DAEMON=0` 可切回（`daemon-mode-default.ts:1-8`）。S3 未做 | **S3 先于 P4-2**（决定 D）。只要进程内路径还在，日志成为权威后每条命令要有两份实现：进程内的 main 会直接写 H1、H3，App 还有自己的回执（`agent-runtime-ipc.ts:56`）；而 S3 的静态检查本来就要禁止 main 加载 `better-sqlite3`。P4-0、P4-1 只在 daemon 内、只做影子写，可与 S3 并行 |
-| 两本账合并 | STATUS-BATCH4：「B4-S 之后再议」 | P4-2 合并 run 与 turn 投递生命周期；会话元数据、绑定、删除、分支仍归 `ConversationStore`（决定 G）。不单独先做一次合并，那会是要扔掉的工作 |
-| P5 | 第 1 步登录时启动、第 2 步命令行批准；不改协议版本（[P5-host-cli](P5-host-cli.md) §5） | P4 占用协议 v3（§5.7）。配对与 grant 不进日志权威；P5 若采纳独立审计文件（[P5-headless-host](P5-headless-host.md) 决定 4），其「批准方式」（`via`: `app` / `host_cli`）以后作为 `device.*` 事件的证据引用 `pairing-audit:<offset>`，不另造字段。P5 的无界面运行反而受益：手机订阅不依赖 App 在线 |
-| macOS 真机验证（默认打开的 daemon） | S0 于 `5363521` 收口（[b4-s0-final](status/b4-s0-final.md)）；`c35d0191` 之后的默认打开构建按任务说明仍待 macOS 真机复核 | P4-2 之前要有这份证据。P4 改变 run 的权威存储，回归时需要一个已知良好的基线 |
+| S3（删除进程内路径） | 打包构建自 main `c35d0191` 默认走 daemon；开发构建与测试实例仍默认进程内，`SCRY_HOST_DAEMON=0` 可切回（`daemon-mode-default.ts:1-9`）。S3 未做 | **S3 只需先于删除 `off` 路径**，即 P4-5b 与 P4-6（决定 D）。进程内路径就是今天的 `off` 实现，P4 不给它加功能，所以不存在「第二份实现」。P4-0 到 P4-4 可与 S3 并行，两个条件：off↔on 增量导入已做（§9，P4-1）；CI 有 daemon 模式作业（下一行） |
+| daemon 模式 CI 作业 | CI 只有 daemon 模式的 smoke（`.github/workflows/ci.yml:374`）；单元与集成测试走进程内，`shadow`/`on` 平时不会被执行 | P4-1 加一个作业：相关测试在 `SCRY_HOST_DAEMON=1` 下各跑 `SCRY_ORCHESTRATION=shadow` 与 `on` |
+| 两本账合并 | STATUS-BATCH4：「B4-S 之后再议」 | P4-2 合并 run 与 turn 投递生命周期；边界见 core §2.8（决定 G） |
+| P5（无界面执行端） | 第 1 步登录时启动、第 2 步命令行批准，与 P4 分开做（[P5-headless-host](P5-headless-host.md) §10.1）；不改协议版本，加一个可协商宿主能力（[P5-host-cli](P5-host-cli.md) §5） | 配对与 grant 不进日志权威。批准方式写在 grant 的 `approvedVia` 里（P5 §10.1 第 4 条），不另设审计文件，所以首稿设想的 `pairing-audit:<offset>` 引用作废。并行时的三处冲突见下表 |
+| macOS 真机基线 | S0 于 `5363521` 收口（[b4-s0-final](status/b4-s0-final.md)）；`c35d0191` 之后的默认打开构建仍待 macOS 真机复核 | P4-2 之前要有这份证据：P4 改变 run 的权威存储，回归时需要已知良好的基线 |
+
+与 P5 并行的冲突：
+
+| 冲突 | 规则 |
+|---|---|
+| `host-process.ts` 的启动顺序 | 先打开编排库并完成恢复（core §2.4），再开任何 socket。库不可用时 socket 照开，命令类 op 带原因拒绝；P5 的只读与只收紧方法（`cancel`、`revoke`、`desktop-off`）照常可用 |
+| `AppEventFeed` 归属 | P4-3 缩小它，P5-5 给它加一种通知。后合入的一方适配：P5 的通知归入提示 `hostNotice`（protocol §5.3），P4-6 不删它 |
+| 无人值守重启更频繁 | 正是决定 B 改写的理由（core §2.4）；启动恢复的耗时进 §8 |
 
 ## 8. 性能
 
-### 8.1 目标（提案，按 S1 的做法由数据确认后批准）
+### 8.1 目标（按 S1 的做法由数据确认后批准）
 
 | 指标 | 目标 | 怎么测 |
 |---|---|---|
 | 打开已缓存会话的首屏 | 一次请求（超过 512 KiB 时加分块续读）；daemon 模式 P50 不高于当前 daemon 模式 | `scripts/session-open-bench.mjs <场景> --daemon`，四个场景；记录往返次数与字节 |
-| 事件提交延迟（决策 + 事务 + fsync） | P50 ≤ 2 ms、P95 ≤ 10 ms（提案） | P4-1 影子写时在 daemon 内计时，macOS 与 Linux 各两轮 |
-| 首 token | 不放宽 [P3-s1-absolute-cap](P3-s1-absolute-cap.md)：热启动两轮 P95 ≤ 200 ms、P50 ≤ 150 ms。启动路径上多出两次提交（intent、领取），预计 < 5 ms；预分配 canonical id 省掉绑定等待（§2.4） | `scripts/daemon-mode-timing.mjs`，计时锁下串行 |
+| **首 token 前的提交** | **次数 2**（intent+领取；admitted+dispatched，core §2.4）；**合计 P95 ≤ 8 ms（门禁）** | daemon 内计时，记录次数与合计。理由：[P3-s1-absolute-cap](P3-s1-absolute-cap.md) 的 P50 余量只有 16–22 ms（该文 :82），提交只能占一半 |
+| 单次提交（决策 + 事务 + fsync） | P50 ≤ 2 ms、P95 ≤ 10 ms（记录，非门禁） | 同上，macOS 与 Linux 各两轮 |
+| 首 token | 不放宽 S1：热启动两轮 P95 ≤ 200 ms、P50 ≤ 150 ms；预分配 canonical id 省掉绑定等待（core §2.7） | `scripts/daemon-mode-timing.mjs`，计时锁下串行 |
 | 空闲 RPC | 每客户端空闲 60 s 内个位数 | 远程请求计时（`remote-request-timing.ts`） |
-| 变化到达 | 提交后 ≤ 250 ms 到客户端（本机），无 tick | 真实 daemon socket 测试 |
-| 每 run 事件数与写入 | ≤ 12 事件、≤ 12 次事务（paced 20 段） | 计数器 |
+| 本机变化到达 | 提交后个位数到十几 ms 到达 App，无 tick。首稿的 250 ms 太松 | 真实 daemon socket 测试 |
+| 每 run 事件数与写入 | ≤12 事件、≤12 次事务（paced 20 段） | 计数器 |
 
-### 8.2 门禁与登记
+### 8.2 每段重测与新增测量
 
-- `scripts/performance-budgets.json`、`performance-paths.json`、`performance-ratchet.json` 永不放宽。
+- **每段重测**：P4-1（影子写：提交延迟，以及叠加在 H1 之上的成本）、P4-2（成为权威：首 token 与提交合计）、P4-3（本机订阅：到达延迟）各按 S1 的流程测一次：同一构建、paced fixture、计时锁、记录负载，负载/核 > 0.5 作废重测。
+- **持久性成本**：`synchronous=FULL` 相对 `scry.db` 是新成本。`scry.db` 没有设 `synchronous`（`db-connection.ts:48-49`），better-sqlite3 编译时设了 `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`（依赖的 `deps/defines.gypi:16`），即 NORMAL。相对今天的 run 路径，FULL 取代 H1 每条的 fsync（`session-ledger-file.ts:139`）；只有 P4-1 影子写期间是纯叠加。
+- **旧台账镜像**（P4-2 到删除 `off` 之间）在提交**之后**由可重放 effect 异步写出，不在首 token 路径上，也不是严格的回退保证（§9）。
+- 另测：WAL 大小与检查点停顿（检查点期间提交的 P99）；大正文的提交（1.2 MB，data §4.7）；同一线程上 `scry.db` 的 `recordTurn` 与编排提交的 P99；远程 scope 逐行授权的成本（会话快照，行数分档）；启动恢复的耗时。
+
+### 8.3 macOS fullfsync 与文件系统
+
+- **事实**：Node 的 `fsyncSync` 在 macOS 上走 libuv 的 Apple 分支，发 `F_FULLFSYNC`（按 libuv 源码，未在本仓库实测），所以今天 H1 每条都刷到盘。SQLite 的 `synchronous=FULL` 在 `fullfsync` 关闭（默认）时只发普通 `fsync`。首稿「FULL 与 H1 持久性相同」在 macOS 上不成立。
+- **测量**：P4-1 在维护者的 Mac 上，`PRAGMA fullfsync` 开与关各两轮，测首 token（S1 流程）与首 token 前提交合计。
+- **规则**：开着仍满足 S1 两条上限，且提交合计 P95 ≤ 8 ms，就开。否则关，改设 `checkpoint_fullfsync=ON`，并在本节写明窗口：掉电（不是进程崩溃）可能丢最近几次提交。这比今天 H1 弱，测量后报维护者确认。
+- **Linux**：ext4 与 btrfs 都测（btrfs 的 fsync 更贵）；缺目标机标 not-run，不以 macOS 结果代替。
+- **网络文件系统**：userData 在 NFS 等网络文件系统上时，打开前检测（`statfs` 类型），显示明确的 unavailable 文案：「后台服务的运行记录需要本地磁盘，当前数据目录在网络文件系统上」。不静默回退。
+
+### 8.4 门禁与登记
+
+- `scripts/performance-budgets.json`、`performance-paths.json`、`performance-ratchet.json` 永不放宽；「首 token 前提交合计」加进门禁。
 - 订阅路径与 EventSink 登记进 `performance-paths.json` 的 `sources`，未登记则 `performance-feedback.test.ts` 失败；相关场景：`history.page`、`trace.delivery`、`remote.loopback`、`navigation.catalog`。
-- 毫秒数据按 AGENTS「快速迭代」：计时锁、记录负载、负载/核 > 0.5 作废重测。
 
-### 8.3 风险
+### 8.5 风险
 
 | 风险 | 说明 | 应对 |
 |---|---|---|
-| 进度事件的写放大 | 按文本增量记事件，一轮会有数百次事务 | 只记生命周期转折（§4.6），输出前进只发提示 |
-| 事件循环阻塞 | better-sqlite3 同步；统计库的大事务（`recordTurn`）与编排在同一线程 | 测量提交延迟的 P95；统计写入已有文件 outbox（`db-outbox.ts`），必要时按批让出 |
-| WAL 检查点停顿 | 长读事务会拖住检查点 | 快照读是短同步读；监控 WAL 大小 |
-| 侧栏规模 | 今天每次 `sessionsPage` 对每个 cwd 做一次 realpath（`host-runtime.ts:176-181`） | canonical cwd 在写入时固定（§2.2），读取只走索引 |
+| 进度事件的写放大 | 按文本增量记事件，一轮会有数百次事务 | 只记生命周期转折（data §4.6），输出前进只发提示 |
+| 事件循环阻塞 | better-sqlite3 同步；`recordTurn` 与编排在同一线程 | 测两者的 P99（§8.2）；统计写入已有文件 outbox（`db-outbox.ts`），必要时按批让出 |
+| WAL 检查点停顿 | 长读事务会拖住检查点 | 快照读是短同步读；测停顿与 WAL 大小 |
+| 侧栏规模 | 今天每次 `sessionsPage` 对每个 cwd 做一次 realpath（`host-runtime.ts:176-181`） | canonical cwd 在写入时固定，读取只走索引（protocol §5.5） |
 
-## 9. 迁移
+## 9. 迁移与工期
 
-| 段 | 内容 | 规模 | 依赖 |
+| 段 | 内容 | 周 | 依赖 |
 |---|---|---|---|
-| P4-0 | 纯决策器（抽出 H1 的转移表）、表结构与迁移列表、EventSink、策略表；临时库单测；Recorder Core 导入测试 | 1 周 | — |
-| P4-1 | 影子写：daemon 在 H1 `#emit`、H3 `settle` 处同时提交事件与 projection，测试比对；测提交延迟。`SCRY_ORCHESTRATION=shadow`，只在 daemon 读 | 1 周 | P4-0 |
-| P4-2 | 日志成为 run 与 turn 的权威：submit、send、stop、answer 进命令；`remote-dispatcher` 变为 `provider.run.start` 的执行器；启动时导入 H1（`dispatched` → `failed(host_restarted)`，`recorded` → `pending`）；H1 文件改为由日志镜像写出，供回退 | 2 周 | S3、macOS 真机基线 |
-| P4-3 | 本机订阅：App 切换（§6 第 1 行） | 1 周 | P4-2 |
-| P4-4 | 会话目录与详情 projection；导入 `app-sessions.json` 元数据（决定 E）；首屏快照；renderer 读 projection | 1.5 周 | P4-3 |
-| P4-5 | 远程协议 v3：Desktop、iOS；删除旧 op 与 renderer 读循环 | 1.5 周 | P4-4 |
-| P4-6 | 清理：删除 H1 文件与镜像、`CommandReceipts`、`AppEventFeed` 的持久类、`result` 标记里的数字 | 0.5 周 | P4-5 |
+| P4-0 | 纯决策器（抽出 H1 转移表）、拒绝分类、表结构、独立迁移执行器（拒绝更高版本）、EventSink 与 fail closed、策略表、正文存储、单写者三层、Recorder Core 导入测试；临时库单测 | 1.5 | — |
+| P4-1 | 影子写：daemon 在 H1 `#emit`、H3 `settle` 处同时提交事件与 projection，测试比对；影子写失败只让影子 fail open，不影响 run，并计数；off↔on 增量导入与 `orch_legacy_run`；daemon 模式 CI 作业；首轮测量（含 fullfsync、ext4/btrfs） | 1.5 | P4-0 |
+| P4-2 | 日志成为 run 与 turn 投递的权威：submit、send、stop、answer、`resolveIntent` 进命令；intent 与领取同事务、派发栅栏、复核、pending TTL；恢复查 recorder 证据；两本账对账；旧台账异步镜像；重测 | 3 | P4-1、macOS 真机基线 |
+| P4-3 | 本机订阅：App 切换（§6 第 1 行）；`AppEventFeed` 缩小并接 P5 通知；重测 | 1.25 | P4-2 |
+| P4-4 | 会话目录与详情 projection；导入 `app-sessions.json` 元数据（决定 E，增量）；`catalog.scan` 触发；transcript 区间引用；首屏快照；renderer 读 projection；删除会话的清除与墓碑 | 2 | P4-3 |
+| P4-5a | `subscribe` 作为 v2 能力：Desktop、iOS、执行目标转发、keyset 分页、逐行授权；真机验证 | 2 | P4-4 |
+| P4-5b | 升 v3，只删旧 op（宿主、Desktop、iOS、转发白名单）；删除开关 | 0.5 | P4-5a 真机通过、S3 |
+| P4-6 | 清理：删除 H1 文件与镜像、`CommandReceipts`、`AppEventFeed` 的持久类、`result` 标记里的数字，改正 `run-output-log.ts:7-9` 注释 | 0.5 | P4-5b |
 
-合计约 8.5 周，不含 S3。
+**合计约 12 周（11–13），不含 S3**；等维护者安装真机客户端的时间不计入。首稿 8.5 周；增加的部分：P4-2 +1 周（复核、TTL、证据恢复、两本账对账、放行停止）；P4-4 +0.5 周（扫描触发、清除与墓碑）；协议拆成 5a/5b 并加转发与真机轮 +1 周；P4-0/P4-1 各 +0.5 周（迁移执行器、正文、增量导入、CI 作业、首轮测量）；P4-3 +0.25 周。落在评审 10–12 周的上沿，主要因为协议拆两段要多一轮真机验证。
 
-**开关与回退。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5 之间。P4-2 到 P4-4 期间，日志为权威、H1 文件由日志镜像写出，所以切回 `off` 后旧路径仍有完整台账（期间新增的会话行已回写 `app-sessions.json`，§4.4）。P4-5 升协议之后不再有开关，回退只能是回到之前的构建；旧构建不认识编排库，`migrateDatabase` 遇到更高的 `user_version` 不做任何事（`db-migrations.ts:41-42`），H1 文件在 P4-6 之前仍可用。
+**开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。开发构建与测试实例默认进程内（`daemon-mode-default.ts:6-9`），所以同一份 userData 在进程内与 daemon 之间来回是开发者的日常，不是罕见回退。规则：
 
-**旧会话（重新评估 PLAN「P4 只对新会话生效」）。** 照原样做，侧栏要同时读 projection 与旧目录，客户端又要自己拼，违背「客户端不自己拼顺序」。建议（决定 E）：P4-4 一次性导入 `app-sessions.json` 的会话元数据为 `session.imported`（证据引用文件哈希），侧栏只读 projection；**不导入** turn 正文。旧会话详情的 `detail` 快照带 `legacyBefore: true`，宿主在同一回答里附上旧只读路径的首页，客户端不合并。旧会话里新发生的 turn 正常进 projection。
+1. 每次以 `shadow` 或 `on` 启动，都读旧台账中 seq 大于 `orch_meta.legacy_ledger_seq` 的条目，幂等导入：按 scoped intent id 查回执，按台账 run id 查 `orch_legacy_run`，已有就跳过。`off` 期间派发了却没有终态的 run 记 `unavailable`；只记录未派发的按 core §2.4 的 pending 规则处理（多半已过期，记 `not_sent`）。`app-sessions.json` 的哈希与 `legacy_catalog_sha256` 不同就做同样的增量导入。
+2. `on` 期间旧台账由 `legacy.mirror` 在提交后异步写出，并推进 `legacy_ledger_seq`。崩溃后下次启动补写；补写之前切到 `off` 会少最近的 run，所以它**不是**严格的回退保证。
+3. 不选「on → off 单向」：那会让 S3 之前保留的逃生开关（`SCRY_HOST_DAEMON=0`）要么拒绝启动，要么静默分叉历史。
+
+P4-5b 之后不再有开关，回退只能回到之前的构建：旧构建不认识 `orchestration.db`，H1 文件在 P4-6 之前仍可用。
+
+**旧会话（决定 E）。** P4-4 导入 `app-sessions.json` 的会话元数据为 `session.imported`（证据引用文件哈希），侧栏只读 projection；**不导入** turn 正文。旧会话详情的 `detail` 快照带 `legacyBefore: true`，宿主在同一回答里附上旧只读路径的首页，客户端不合并。旧会话里新发生的 turn 正常进 projection，`ordinal_origin: since_import`（data §3.2）。
 
 ## 10. 测试
 
 | 类别 | 断言 | 级别 |
 |---|---|---|
-| 幂等重放 | 同 `commandId` 同载荷：一组事件、一行 outbox、一次 Provider 调用（fake provider 计数）、相同回执；不同载荷：`command_payload_conflict`；回答丢失后重试拿到原回执；daemon 重启后重试仍是原回执 | CI |
-| 提交与副作用之间崩溃 | 领取前崩溃：按决定 B；领取后崩溃：`voided` + `failed(host_restarted)`，Provider 调用次数不变；会话 run：`conversation_start_unavailable`，turn 记为 `not_sent`（今天是 `unknown`） | CI，真实 daemon 进程 + SIGKILL |
-| 乱序与重置 | 旧 cursor 补发；`logId` 不同、cursor 超前、低于 `pruned_through`、缺口超 128 条或 256 KB 都回快照；不认识的类型触发快照；两条 lane 并发命令按 seq 串行 | CI |
-| 证据可追溯 | 每个 `run.finalized` 的引用都能解析到存在的字节且哈希一致；解析不到的必须是 `unavailable` + 原因；事件里没有用量数字；projection 空值不显示为 0 | CI |
-| projection 一致 | 保留期内从空 projection 重放全部事件，结果与在线 projection 逐字段相同（含 `rev_seq`）；随机命令序列的性质测试 | CI |
-| 轮询已删除 | 空闲 60 s RPC 个位数；静态检查：`LIVE_RUNS_TICK_MS`、renderer 远程读循环、iOS 800 ms 回退不存在 | CI |
-| 授权 | 撤销后下一次唤醒失败；remote scope 看不到项目根外的行与本机字段；本机 op 在网络端点 `unsupported_op` | CI |
+| 幂等与回执 | 同 `commandId` 同载荷：一组事件、一行 outbox、一次 Provider 调用（fake provider 计数）、相同回执；不同载荷 `command_payload_conflict`；回答丢失后重试拿原回执；daemon 重启后、事件裁剪后仍是原回执；可重试拒绝不留回执；结果命令重复投递不产生第二组事件 | CI |
+| `resolveIntent` | 找不到时写墓碑；迟到的原提交得到 `command_payload_conflict`，Provider 调用 0 次 | CI |
+| 派发与重启 | core §2.4 表格逐行，真实 daemon 进程 + SIGKILL：已领取未派发 → `not_sent`，Provider 0 次；已派发 → `unavailable`，有 recorder 证据时按证据收尾；pending 未过期复核后派发一次，过期或时钟回拨 → `not_sent`（`SCRY_ORCHESTRATION_PENDING_TTL_MS` 调小，记录变量与值）；intent 与派发之间撤销 grant → `grant_revoked`；开着的提问同事务关闭 | CI |
+| fail closed | 注入 IOERR / FULL / fsync 失败 → fence，命令可重试拒绝，停止仍生效；损坏文件、更高 `user_version` → 拒绝打开；迁移执行器不调用 `repairMissingUsageLedger`；第二个连接因 EXCLUSIVE 失败；main 不导入编排模块（静态检查） | CI |
+| 乱序与重置 | 旧 cursor 补发；`hostId`/`logId` 不同、cursor 超前、低于 `pruned_through`、扫描超界、相关事件超 128 条或 256 KB 都回快照；回答的 `seq` 是扫描位置，截断时不丢事件；不认识的类型触发快照；`logId` 变化后客户端不自动重发 `unknown`；两条 lane 并发命令按 seq 串行 | CI |
+| off↔on | on → off（进程内写入 H1 与目录）→ on：增量导入一次，再启动不重复；镜像滞后时切 off 的行为与文档一致 | CI（daemon 模式作业） |
+| 两本账 | 文件有 turn 无事件 → `not_sent`；事件有结论文件仍 pending → 回写；绑定不一致 → `conversation_binding_conflict` | CI |
+| 证据可追溯 | 每个 `run.finalized` 的引用都能解析到存在的字节且哈希一致；transcript 区间引用在文件删除后为 `unavailable(source_removed)`；导入结局不为 `exact`；`host_restarted` 的 `settled_at` 为空；事件里没有用量数字；projection 空值不显示为 0 | CI |
+| projection | 未裁剪窗口内、排除已清除会话，从空重放与在线 projection 逐字段相同（含 `rev_seq`）；随机命令序列的性质测试；schema 版本迁移改写行 | CI |
+| 删除会话 | 正文文件被删、预览被擦除、projection 行消失、远程客户端收到墓碑；`scry.db` 不可用时结果为 `unavailable` | CI |
+| 轮询已删除 | 空闲 60 s RPC 个位数；静态检查：`LIVE_RUNS_TICK_MS`、renderer 远程读循环、iOS 800 ms 回退不存在（P4-5b 后） | CI |
+| 授权 | 撤销后下一次唤醒失败；remote scope 看不到项目根外的行与本机字段；本机 op 在网络端点 `unsupported_op`；执行目标转发只在 Mac2 声明能力时开放 `subscribe` | CI |
 | Recorder 独立 | `src/core/turn-recorder` 不导入 `better-sqlite3` 与编排模块 | CI |
-| 控制实验 | 去掉「领取先于执行」、去掉回执查询、去掉 cwd 授权，各自让对应测试失败 | CI |
-| 真机 | macOS：SIGKILL daemon 于运行中、App 重启接回、v2 手机连 v3 宿主的提示、打包产物（`better-sqlite3` 解包）、中文系统语言 + 中文工作区路径。Linux：Ubuntu runner 的打包 smoke；Arch/Hyprland 目标机缺失则标 not-run | **L3，需真机** |
-
-## 11. 需要维护者决定
-
-旧合同 §11 的 6 条：决定 3 的库已由代码回答（`better-sqlite3@12.11.1`），但引出 A；4、5、6 按建议不再待决（§6、§5.4、§4.5）；1、2 并入下表的说明。
-
-| # | 决定 | 建议 | 取舍 |
-|---|---|---|---|
-| A | 编排表放进现有 `scry.db`（PLAN 已定），还是同库同迁移函数、**单独一个文件** `orchestration.db` | **单独文件**，打开失败时 daemon 拒绝接收命令（fail closed），不像 `scry.db` 那样降级 | 同文件：符合 PLAN、一条迁移链；但 `initDb` 失败会让 run 权威一起消失，统计库的修复迁移（V16）也会挡住 run。单文件：两条迁移链、两个 WAL |
-| B | 已记录、从未被领取的 `provider.run.start`，重启后派发一次（Scry 现状），还是一律作废（t3code） | **保留现状**，作为唯一显式例外；领取先于执行保证它从未开始。会话 run 例外的例外：交接内容在内存，照旧失败 | 作废更保守，但设备已收到 `recorded`，作废等于改变已承诺的行为；派发可能在宿主停机很久后才发生 |
-| C | 事件保留期 | **30 天**；回执 30 天 | t3code 1 天。按每轮约 10 条、每条约 300 B，每天 100 轮约 0.3 MB/天；更长保留便于重建与排查，代价是磁盘 |
-| D | S3 是否先于 P4-2 | **是**；P4-0、P4-1 并行 | 不先做 S3，就要在 main 里第二次实现命令与回执，或在 P4 期间禁止 `SCRY_HOST_DAEMON=0` |
-| E | 旧会话 | **导入元数据，不导入 turn**（§9） | 维持 PLAN 原样：侧栏两源，客户端拼接 |
-| F | 协议版本 | **P4 占用 v3，只升一次**（P4-5）；同时修正 iOS 的 `info.protocol == 1` | 分多次升：每次都要手机与宿主同批更新 |
-| G | 两本账合并的范围 | **P4-2 只合并 run 与 turn 投递生命周期**；`ConversationStore` 保留元数据、绑定、删除、分支 | 全部合并：概念最干净，但删除、分支、侧聊各自有两阶段持久化，P4 的规模会再加 2–3 周 |
-
-旧决定 1（`SessionLedger` 演进还是新建）：按 A 与 §2.1，新建 Orchestrator + EventSink，复用 `SessionLedger` 的转移表与重复检测，文件存储退役；`LedgerStore` 接口只覆盖追加，容纳不了同一事务里的 projection 与 outbox。旧决定 2（进度粒度）：只记生命周期（§4.6），按 REVIEW-BATCH1 的建议。若维护者不同意，在对应决定里说明即可。
-
-## 12. 与 PLAN、旧合同、任务说明的矛盾
-
-1. **库的「可降级」与权威不兼容。** PLAN 已定「放进现有 App SQLite」；现有连接失败即 no-op（`db-connection.ts:55-61`）。见 A。
-2. **B4-S 决定与 main 不一致。** [P3-b4s-plan](P3-b4s-plan.md) 2026-11-12 决定「一步到位、不留逃生开关」；`c35d0191` 默认打开但保留 `SCRY_HOST_DAEMON=0`，开发与测试默认进程内，S3 未做。文档没有记录这次改变。
-3. **证据标记是两个维度。** 旧合同把 `partial` 放进 `quality`；代码与 GLOSSARY 中 `status` 与 `quality` 分开（`turn-record-contracts.ts:8-9`）。
-4. **lane 数。** PLAN 写 4 条；代码 8 条（`desktop-lane.ts:41`）。
-5. **用量的「权威」没有质量标记。** `run-output-log.ts:7-9` 称台账 `result` 标记是 exact 用量权威，但标记没有 `status`/`quality`/来源（`remote-run-binding.ts:196`）。
-6. **iOS 的 info 版本检查。** 宿主回 2，iOS 要 1（§5.7）。读码结论，未真机验证。
-7. **P5 的「批准方式」不在 grant 上。** 任务说明称 P5 给 grant 加字段；P5 实际建议 grant 格式不动，另写 `pairing-audit.jsonl` 的 `via`（[P5-host-cli](P5-host-cli.md) §3.7），且该项仍是 P5 的待决定 4。
-8. **「首屏由快照一次返回」。** 内容不进事件，快照必须捎带内容通道的首页；超过 512 KiB 需要分块续读。
-9. **重启后派发与不变量 4。** PLAN「宿主侧丢失进程的副作用作废，不重放」；现有代码重启后派发「已记录未派发」的 intent（`host-controller-surface.ts:107-116`）。两者不冲突（从未开始），但 t3code 选择作废，需显式确认（B）。
-10. **工期。** PLAN 5–6 周；本文估 8.5 周，不含 S3。
-11. **旧合同的位置。** 旧合同范围写 `src/main/remote/`、Electron main；现在权威在 daemon，代码仍多在 `src/main/**` 但由 `src/daemon/host-process.ts` 装配。
-
-## 13. 建议的术语（未改 GLOSSARY）
-
-概念确认后在实现提交里补：**编排事件**（宿主决定的已发生事实，只引用证据）、**命令回执**（同一命令 id 的唯一结果）、**投影**（由事件维护、供读取的当前状态）、**副作用请求**（提交后才执行的外部动作，分进程绑定与可重放）、**订阅游标**（`logId` + `seq`）、**易失提示**（不进日志、可丢的唤醒）。
+| 控制实验 | 去掉「领取先于执行」、去掉派发前复核、去掉回执查询、去掉 cwd 授权，各自让对应测试失败 | CI |
+| 真机 | macOS：SIGKILL daemon 于运行中、App 重启接回、fullfsync 开关两轮测量、v2 手机在 P4-5a 用能力、v2 手机连 v3 宿主的提示、打包产物（`better-sqlite3` 解包）、中文系统语言 + 中文工作区路径。Linux：Ubuntu runner 打包 smoke；ext4 与 btrfs 测量；Arch/Hyprland 目标机缺失则标 not-run | **L3，需真机** |
