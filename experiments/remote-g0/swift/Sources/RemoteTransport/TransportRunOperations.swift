@@ -198,7 +198,7 @@ extension G0Transport {
 
   static func providerDiscoveryCapability(_ bytes: Data, expectedTarget: ExecutionTargetBinding? = nil) throws -> Int? {
     let response = try decodeRun(bytes, expectedTarget: expectedTarget)
-    guard let info = response.desktop, info.kind == "info", info.protocol == 1, info.execution == "canonical",
+    guard let info = response.desktop, info.kind == "info", info.protocol == RelaySession.protocolVersion, info.execution == "canonical",
           info.providerDiscovery == nil || info.providerDiscovery == 2 else { throw ProbeError.unexpectedReply }
     return info.providerDiscovery
   }

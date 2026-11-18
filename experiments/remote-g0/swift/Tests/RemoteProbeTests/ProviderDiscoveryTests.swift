@@ -12,12 +12,23 @@ final class ProviderDiscoveryTests: XCTestCase {
   }
 
   func testMissingCapabilityIsLegacyNotSelectedSupport() throws {
-    let legacy = Data(#"{"desktop":{"kind":"info","protocol":1,"execution":"canonical"}}"#.utf8)
-    let current = Data(#"{"desktop":{"kind":"info","protocol":1,"execution":"canonical","providerDiscovery":2}}"#.utf8)
+    let legacy = Data(#"{"desktop":{"kind":"info","protocol":2,"execution":"canonical"}}"#.utf8)
+    let current = Data(#"{"desktop":{"kind":"info","protocol":2,"execution":"canonical","providerDiscovery":2}}"#.utf8)
     XCTAssertNil(try G0Transport.providerDiscoveryCapability(legacy))
     XCTAssertEqual(try G0Transport.providerDiscoveryCapability(current), 2)
-    let unsupported = Data(#"{"desktop":{"kind":"info","protocol":1,"execution":"canonical","providerDiscovery":3}}"#.utf8)
+    let unsupported = Data(#"{"desktop":{"kind":"info","protocol":2,"execution":"canonical","providerDiscovery":3}}"#.utf8)
     XCTAssertThrowsError(try G0Transport.providerDiscoveryCapability(unsupported))
+  }
+
+  // The host answers `info` with REMOTE_PROTOCOL_VERSION (src/shared/desktop-remote.ts),
+  // the same version this client stamps on every relay request. An info reply carrying
+  // any other version is not this protocol and must not be read as a capability.
+  func testInfoReplyMustCarryTheRelayProtocolVersion() throws {
+    XCTAssertEqual(RelaySession.protocolVersion, 2)
+    let host = Data(#"{"desktop":{"kind":"info","protocol":2,"hostId":"h","execution":"canonical","traceDelta":1,"providerDiscovery":2}}"#.utf8)
+    XCTAssertEqual(try G0Transport.providerDiscoveryCapability(host), 2)
+    let stale = Data(#"{"desktop":{"kind":"info","protocol":1,"execution":"canonical","providerDiscovery":2}}"#.utf8)
+    XCTAssertThrowsError(try G0Transport.providerDiscoveryCapability(stale))
   }
 
   func testSelectedReplyRequiresTheNegotiatedMarker() throws {
