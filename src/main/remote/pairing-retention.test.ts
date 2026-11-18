@@ -140,8 +140,9 @@ describe('pairing history cleanup (synthetic crypto adapter)', () => {
     store.value = stateOf(hostId, [lapsed, ...revoked, live])
     const authority = open()
     expect(store.commits).toBe(1)
-    const removed = [lapsed, ...revoked.slice(0, 5)]
-    const kept = revoked.slice(5)
+    // 21 stale grants: the 5 that stopped working first go, the newest 16 stay.
+    const removed = [lapsed, ...revoked.slice(0, 4)]
+    const kept = revoked.slice(4)
     const state = authority.inspectLocal()
     expect(state.grants.map(g => g.deviceId)).toEqual([...kept, live].map(s => s.grant.deviceId))
     for (const s of removed) {

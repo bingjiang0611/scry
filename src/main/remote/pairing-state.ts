@@ -132,9 +132,10 @@ export function validatePairingState(value: unknown): PairingState {
     return fail('invalid_pairing_state')
   })
   // publicKeySHA256 uniqueness applies only to ACTIVE grants: a revoked grant is
-  // retained for audit history and may share a device key with a new active grant
-  // issued after the same device re-pairs. deviceId and certificateSHA256 stay
-  // globally unique (each issuance mints a distinct cert).
+  // retained for audit history (the newest 16, pairing-retention.ts) and may share
+  // a device key with a new active grant issued after the same device re-pairs.
+  // deviceId and certificateSHA256 stay globally unique (each issuance mints a
+  // distinct cert).
   const activeKeys = grants.filter(g => g.revokedAt === null).map(g => g.publicKeySHA256)
   if (new Set(pairings.map(p => p.pairingId)).size !== pairings.length || new Set(grants.map(g => g.deviceId)).size !== grants.length ||
       new Set(activeKeys).size !== activeKeys.length || new Set(grants.map(g => g.certificateSHA256)).size !== grants.length ||

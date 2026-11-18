@@ -63,6 +63,7 @@
   - 两类都按时间保留最近 16 条，作为可见历史。
 - 有效 grant 及其 `paired` 记录不动；未完成的配对不动。
 - 清理后的状态是原状态的子集，旧版本照常能读。`status` 显示已用条数。
+- 已实现（`pairing-retention.ts`）：grant 按失效时间（撤销与到期取早者）排；本机当前 local grant 到期未撤销也不动；历史留满时，有效 grant（含本机）达 31 条 `begin` 仍报满。`status` 显示条数随 P5-6 的 `scry-host status` 做。
 
 ## 6. 测试与验证
 
@@ -92,7 +93,7 @@
 | P5-2 | 设置开关、原生确认、IPC、文案；经服务管理器拉起与回退；采用时比对配置 | M | P5-1 |
 | P5-3 | 打包 smoke | S | P5-2 |
 | P5-4 | 第 1 步实机验收，按平台 | — | P5-3 |
-| P5-5a | 配对记录清理；grant 读取端兼容 `approvedVia`（发布 1） | S | — |
+| P5-5a | 配对记录清理（**已实现**，见 §4.5 末条）；grant 读取端兼容 `approvedVia`（发布 1，未做） | S | — |
 | P5-5b | 「允许命令行批准」开关（daemon 持久化、App 原生确认）；运行标记 | M | — |
 | P5-5 | admin socket、挑战认证、白名单、速率、通知、机器码 | M | P5-5b |
 | P5-6 | `scry-host` 入口、`restart`、`login-start`、wrapper、打包 allowlist | M | P5-5、P5-5a、P5-1 |
