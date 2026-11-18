@@ -8,6 +8,7 @@
 | [REVIEW.md](REVIEW.md) | 方案前的代码证据核对，执行时的事实基础 | 核验方 |
 | [EXECUTION.md](EXECUTION.md) | 执行 agent 的任务书（Batch 1） | 核验方 |
 | [STATUS.md](STATUS.md) | 执行进度、证据、阻塞、需要决定的问题 | 执行 agent |
+| [P5-headless-host.md](P5-headless-host.md)、[P5-host-cli.md](P5-host-cli.md) | 无界面执行端设计稿：登录时启动、执行端命令行批准新设备（维护者 2026-11-18 决定） | 设计方 |
 
 ## 协作方式
 

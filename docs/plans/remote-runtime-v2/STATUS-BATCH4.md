@@ -77,6 +77,14 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 1. `remote:desktop:*` 交给 daemon：已实现（本机 op `localDesktopHost`）。
 2. 撤销 App 自己的本机连接：暂不提供入口。
 
+## 已决定（维护者 2026-11-18，无界面执行端）
+
+| 决策 | 结论 | 落地 |
+|---|---|---|
+| 分步做，与 P4 分开 | 第 1 步「登录时启动」：设置开关安装/卸载 launchd 或 `systemd --user` 服务，登录或重启后不开 App 也有后台服务；App 仍装在这台机器上 | [P5-headless-host](P5-headless-host.md) |
+| 第 2 步：不靠执行端界面批准新设备 | 方案 a，在执行端上用命令行批准。能以同一 OS 用户登录这台机器的人，已有本机授权模型的权限（上文 2026-11-07 第一行）。方案 b（从已配对设备批准）不采用 | [P5-host-cli](P5-host-cli.md) |
+| 不依赖 App 的独立安装包 | P4 之后再做；本轮只记在「不做/以后」 | [P5-headless-host](P5-headless-host.md) §8 |
+
 ## 需要决定
 
 无。B4-S 的决定见 [P3-b4s-plan](P3-b4s-plan.md) 末节。
