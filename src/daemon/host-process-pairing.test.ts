@@ -63,4 +63,28 @@ describe('daemon pairing and host status', () => {
       else process.env.SCRY_REMOTE_HOST = saved
     }
   }, 30_000)
+
+  // P5-host-security §4.5: every invitation used one of 64 records, so a long-running
+  // daemon eventually refused new devices and the App's own re-enrollment.
+  it('keeps inviting past the 64-record table, and the App re-enrolls after a restart', async () => {
+    const saved = process.env.SCRY_REMOTE_HOST
+    process.env.SCRY_REMOTE_HOST = '1'
+    const first = await startTestDaemon()
+    let second: Awaited<ReturnType<typeof startTestDaemon>> | undefined
+    try {
+      for (let i = 0; i < 70; i++) expect((await first.localOp('localPairing', 'begin', [])).error).toBeUndefined()
+      await first.dispose()
+      // The restart enrolls the App over the local socket again (startTestDaemon does).
+      second = await startTestDaemon({ root: first.root })
+      const state = second.host.service.authority.inspectLocal()
+      expect(state.pairings.filter((p) => p.state === 'cancelled' || p.state === 'expired').length).toBeLessThanOrEqual(17)
+      expect(state.grants.filter((grant) => grant.scope === 'local' && grant.revokedAt === null)).toHaveLength(1)
+      expect((await second.localOp('localPairing', 'begin', [])).error).toBeUndefined()
+    } finally {
+      await first.dispose()
+      await second?.dispose()
+      if (saved === undefined) delete process.env.SCRY_REMOTE_HOST
+      else process.env.SCRY_REMOTE_HOST = saved
+    }
+  }, 60_000)
 })
