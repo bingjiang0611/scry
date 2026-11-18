@@ -1,5 +1,5 @@
 import { ensureShellEnv } from '../main/shell'
-import { readSupervisorProcessConfig, type DaemonProcessConfig } from './daemon-config'
+import { readSupervisorProcessConfig, type SupervisorProcessConfig } from './daemon-config'
 import { daemonLaunchEnvironment } from './supervisor'
 
 // What the supervisor entry decides before it launches anything, kept apart from the
@@ -7,7 +7,7 @@ import { daemonLaunchEnvironment } from './supervisor'
 // supervisor runs as ELECTRON_RUN_AS_NODE (daemon-imports.test.ts).
 
 export interface SupervisorLaunchPlan {
-  config: DaemonProcessConfig
+  config: SupervisorProcessConfig
   daemonEnv: NodeJS.ProcessEnv
 }
 
@@ -33,7 +33,8 @@ export function prepareSupervisorLaunch(env: NodeJS.ProcessEnv, options: {
     resourcesPath: config.resourcesPath,
     appVersion: config.appVersion,
     isPackaged: config.isPackaged,
-    startedBy: `supervisor:${options.pid}`
+    startedBy: `supervisor:${options.pid}`,
+    ...(config.launchedBy ? { launchedBy: config.launchedBy } : {})
   })
   return { config, daemonEnv }
 }

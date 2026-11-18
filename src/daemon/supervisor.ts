@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { EXIT_DETERMINISTIC_STARTUP } from './startup-failure'
+import type { DaemonLaunchedBy } from './daemon-config'
 
 export interface DaemonExit {
   code: number | null
@@ -121,6 +122,11 @@ export function daemonLaunchEnvironment(input: {
   appVersion: string
   isPackaged: boolean
   startedBy: string
+  /**
+   * Set explicitly by whoever starts the supervisor, never inherited: the name is not in
+   * FORWARDED_ENV, so a value in the caller's environment cannot leak through.
+   */
+  launchedBy?: DaemonLaunchedBy
 }): NodeJS.ProcessEnv {
   const source = input.source ?? process.env
   const env: NodeJS.ProcessEnv = {}
@@ -134,7 +140,8 @@ export function daemonLaunchEnvironment(input: {
     SCRY_DAEMON_RESOURCES_PATH: input.resourcesPath,
     SCRY_DAEMON_APP_VERSION: input.appVersion,
     SCRY_DAEMON_PACKAGED: input.isPackaged ? '1' : '0',
-    SCRY_DAEMON_STARTED_BY: input.startedBy
+    SCRY_DAEMON_STARTED_BY: input.startedBy,
+    ...(input.launchedBy ? { SCRY_DAEMON_LAUNCHED_BY: input.launchedBy } : {})
   }
 }
 

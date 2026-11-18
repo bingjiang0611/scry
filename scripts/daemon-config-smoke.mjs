@@ -42,13 +42,13 @@ if (conflict.status !== 2 || !conflict.stderr.includes('daemon_config_version_co
 }
 results.push({ entry: 'supervisor', conflict: 'test-version', exitCode: conflict.status })
 
-// Without a version or SHELL, the supervisor hands the daemon its bundle version and a
-// default SHELL. A stand-in daemon records what it received and exits 0.
+// Started as a login service would start it (no version, no SHELL), the supervisor
+// hands the daemon its bundle version, a default SHELL and launchedBy=service. A stand-in daemon records what it received and exits 0.
 const root = mkdtempSync(join(tmpdir(), 'scry-config-smoke-'))
 try {
   const fakeDaemon = join(root, 'daemon.mjs')
   const received = join(root, 'received.json')
-  const keys = ['SHELL', 'SCRY_DAEMON_APP_VERSION', 'SCRY_DAEMON_STARTED_BY']
+  const keys = ['SHELL', 'SCRY_DAEMON_APP_VERSION', 'SCRY_DAEMON_STARTED_BY', 'SCRY_DAEMON_LAUNCHED_BY']
   writeFileSync(fakeDaemon, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(received)}, JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map((key) => [key, process.env[key] ?? null]))))\n`)
   const { SCRY_DAEMON_APP_VERSION: _version, ...withoutVersion } = required
   const minimal = {
@@ -58,13 +58,14 @@ try {
     SCRY_DAEMON_STATE_DIR: join(root, 'state'),
     SCRY_DAEMON_USER_DATA_DIR: join(root, 'userData'),
     SCRY_DAEMON_ENTRY: fakeDaemon,
+    SCRY_DAEMON_LAUNCHED_BY: 'service',
     ELECTRON_RUN_AS_NODE: '1'
   }
   const started = run(supervisor, minimal)
   if (started.status !== 0) throw new Error(`supervisor without version/SHELL failed: status=${started.status} signal=${started.signal} stderr=${started.stderr}`)
   const seen = JSON.parse(readFileSync(received, 'utf8'))
   const shell = process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'
-  if (seen.SHELL !== shell || seen.SCRY_DAEMON_APP_VERSION !== bundleVersion || !/^supervisor:\d+$/.test(seen.SCRY_DAEMON_STARTED_BY ?? '')) {
+  if (seen.SHELL !== shell || seen.SCRY_DAEMON_APP_VERSION !== bundleVersion || seen.SCRY_DAEMON_LAUNCHED_BY !== 'service' || !/^supervisor:\d+$/.test(seen.SCRY_DAEMON_STARTED_BY ?? '')) {
     throw new Error(`supervisor handed the daemon an unexpected environment: ${JSON.stringify(seen)}`)
   }
   results.push({ entry: 'supervisor', handedToDaemon: seen, exitCode: started.status })

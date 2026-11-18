@@ -44,6 +44,23 @@ describe('supervisor entry', () => {
     expect(plan.daemonEnv.SCRY_DAEMON_APP_VERSION).toBe('9.8.7')
   })
 
+  it('passes launchedBy to the daemon explicitly and leaves STARTED_BY to the supervisor', () => {
+    for (const launchedBy of ['app', 'service'] as const) {
+      const plan = prepareSupervisorLaunch({ ...required, SCRY_DAEMON_LAUNCHED_BY: launchedBy, SCRY_DAEMON_STARTED_BY: 'app:7' }, { pid: 42, bundleVersion: undefined, platform: 'linux' })
+      expect(plan.config.launchedBy).toBe(launchedBy)
+      expect(plan.daemonEnv.SCRY_DAEMON_LAUNCHED_BY).toBe(launchedBy)
+      expect(plan.daemonEnv.SCRY_DAEMON_STARTED_BY).toBe('supervisor:42')
+    }
+    const unnamed = prepareSupervisorLaunch({ ...required }, { pid: 42, bundleVersion: undefined, platform: 'linux' })
+    expect(unnamed.config.launchedBy).toBeUndefined()
+    expect('SCRY_DAEMON_LAUNCHED_BY' in unnamed.daemonEnv).toBe(false)
+  })
+
+  it('refuses a launchedBy other than app or service', () => {
+    expect(() => prepareSupervisorLaunch({ ...required, SCRY_DAEMON_LAUNCHED_BY: 'cron' }, { pid: 42, bundleVersion: undefined, platform: 'linux' }))
+      .toThrow('daemon_config_invalid_scry_daemon_launched_by')
+  })
+
   it('refuses a version that is not this bundle\'s', () => {
     expect(() => prepareSupervisorLaunch({ ...required }, { pid: 42, bundleVersion: '1.2.3', platform: 'linux' }))
       .toThrow('daemon_config_version_conflict')

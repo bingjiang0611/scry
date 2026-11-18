@@ -50,7 +50,8 @@ export function spawnDaemonSupervisor(input: {
     resourcesPath: input.resourcesPath,
     appVersion: input.appVersion,
     isPackaged: input.isPackaged,
-    startedBy: `app:${process.pid}`
+    startedBy: `app:${process.pid}`,
+    launchedBy: 'app'
   })
   // Check the two files before spawning: a missing executable would otherwise be an
   // unhandled 'error' event on a detached child, not a reported failure.

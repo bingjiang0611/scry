@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchDaemonOnce, superviseDaemon, writeSupervisorTemplates } from './supervisor'
+import { daemonLaunchEnvironment, launchDaemonOnce, superviseDaemon, writeSupervisorTemplates } from './supervisor'
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
   const deadline = Date.now() + 5_000
@@ -201,6 +201,13 @@ describe('daemon supervisor', () => {
     })
     expect(result).toEqual({ status: 'stopped', attempts: 1 })
     expect(launches).toBe(1)
+  })
+
+  it('sets launchedBy only from its explicit argument, never from the source environment', () => {
+    const base = { stateDirectory: '/s', userDataDir: '/u', appPath: '/a', resourcesPath: '/r', appVersion: '1', isPackaged: true, startedBy: 'x' }
+    const source = { HOME: '/h', SCRY_DAEMON_LAUNCHED_BY: 'service' }
+    expect('SCRY_DAEMON_LAUNCHED_BY' in daemonLaunchEnvironment({ ...base, source })).toBe(false)
+    expect(daemonLaunchEnvironment({ ...base, source, launchedBy: 'app' }).SCRY_DAEMON_LAUNCHED_BY).toBe('app')
   })
 
   it('resets its restart budget after a stable run', async () => {
