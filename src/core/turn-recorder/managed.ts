@@ -1,3 +1,4 @@
+// Routing probe: comment-only change, no behaviour.
 import { observedInterruptionRecordId, reserveObservedInterruption } from './managed-interruption.js'
 import { isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
 import { rm } from 'node:fs/promises'
