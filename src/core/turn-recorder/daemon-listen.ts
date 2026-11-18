@@ -297,10 +297,7 @@ async function startRecorderDaemon(
     }
   })
 
-  // `closed` includes ownership cleanup, not just the socket's close event. Consumers may
-  // remove the workspace immediately afterwards; cleanup must not recreate it or race them.
-  let resolveClosed!: () => void
-  const closed = new Promise<void>((resolvePromise) => { resolveClosed = resolvePromise })
+  const closed = new Promise<void>((resolvePromise) => server.once('close', resolvePromise))
   const close = closeDaemon = async (): Promise<void> => {
     if (closing) return closing
     closing = new Promise<void>((resolvePromise) => {
@@ -321,7 +318,7 @@ async function startRecorderDaemon(
         await rm(socketPath, { force: true })
         await removeOwnedMarker(markerPath, instanceId)
       }
-    }).finally(resolveClosed)
+    })
     return closing
   }
 

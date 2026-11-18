@@ -1,5 +1,5 @@
 import { access, readdir, stat } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { TurnDiffSnapshot } from '../../shared/trace.js'
@@ -211,11 +211,16 @@ export function withRecorderSessionKeyLock<T>(
   }, options)
 }
 
+/** Derived indexes live outside runtime sessions: readers must not create or fsync session state. */
+export function recorderQuarantineIndexPath(root: string): string {
+  return join(dirname(dirname(dirname(root))), 'quarantine-index', basename(dirname(root)), `${basename(root)}.json`)
+}
+
 // An index of candidates, not a replacement for pending-open.json. Publish index-first under
 // one lock; readers prune missing candidates under the same lock. Legacy/restored state is
 // reconciled once on initialization and by explicit full recovery, never every idle poll.
 async function quarantineGenerations(root: string, reconcile = false): Promise<string[]> {
-  const indexed = await readJson<string[]>(join(root, 'quarantine-index.json'))
+  const indexed = await readJson<string[]>(recorderQuarantineIndexPath(root))
   if (!reconcile && Array.isArray(indexed) && indexed.every(value =>
     typeof value === 'string' && basename(value) === value && value !== '.' && value !== '..'
   )) return indexed
@@ -232,18 +237,18 @@ async function quarantineGenerations(root: string, reconcile = false): Promise<s
     })
     if (exists) generations.push(entry.name)
   }
-  await writeJsonAtomic(join(root, 'quarantine-index.json'), generations)
+  await writeJsonAtomic(recorderQuarantineIndexPath(root), generations)
   return generations
 }
 
 export async function publishQuarantinedOpenTurn(
   root: string, open: RecorderOpenTurnState & { quarantinedAt: string; reason: string }
 ): Promise<void> {
-  await withDirectoryLock(join(root, 'quarantine-index.lock'), async () => {
+  await withDirectoryLock(`${recorderQuarantineIndexPath(root)}.lock`, async () => {
     const generations = await quarantineGenerations(root)
     const generation = basename(recorderTurnRoot(root, open.generation))
     if (!generations.includes(generation)) {
-      await writeJsonAtomic(join(root, 'quarantine-index.json'), [...generations, generation])
+      await writeJsonAtomic(recorderQuarantineIndexPath(root), [...generations, generation])
     }
     await writeJsonAtomic(join(root, 'turns', generation, 'pending-open.json'), open, { sync: false })
   })
@@ -252,7 +257,7 @@ export async function publishQuarantinedOpenTurn(
 export async function recorderQuarantinedOpenTurns(
   root: string, options: { reconcile?: boolean } = {}
 ): Promise<RecorderOpenTurnState[]> {
-  return withDirectoryLock(join(root, 'quarantine-index.lock'), async () => {
+  return withDirectoryLock(`${recorderQuarantineIndexPath(root)}.lock`, async () => {
     const generations = await quarantineGenerations(root, options.reconcile)
     const result: RecorderOpenTurnState[] = []
     const retained: string[] = []
@@ -262,7 +267,7 @@ export async function recorderQuarantinedOpenTurns(
       if (open) result.push(open)
       if (open || await pathExists(path)) retained.push(generation)
     }
-    if (retained.length !== generations.length) await writeJsonAtomic(join(root, 'quarantine-index.json'), retained)
+    if (retained.length !== generations.length) await writeJsonAtomic(recorderQuarantineIndexPath(root), retained)
     return result
   })
 }
@@ -454,7 +459,14 @@ async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState):
       if (error.code === 'ENOENT') return undefined
       throw error
     })
-    return info ? `${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}` : undefined
+    if (!info) return undefined
+    // Restoring or touching open state invalidates the event observation too. In particular,
+    // operator aging/repair must not inherit a clock sampled before that repair.
+    const state = await stat(recorderOpenPath(sessionDir)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    return `${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}:${state?.ino}:${state?.mtimeMs}:${state?.ctimeMs}`
   }
   const identity = await directoryIdentity()
   if (!identity) return undefined

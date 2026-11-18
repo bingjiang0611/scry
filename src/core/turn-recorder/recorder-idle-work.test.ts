@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { stableTranscript, resetTranscriptSnapshotCache } from './recorder-transcript-cache'
 import { resetTranscriptReadStats, transcriptReadStats } from './recorder-transcript-io'
 import { handleRecorderHook, recoverRecorder } from './recorder'
-import { publishQuarantinedOpenTurn, recorderQuarantinedOpenTurns, recorderPendingHealth, recorderTurnRoot } from './runtime-state'
+import { publishQuarantinedOpenTurn, recorderQuarantinedOpenTurns, recorderPendingHealth, recorderTurnRoot, recorderQuarantineIndexPath } from './runtime-state'
 import type { RecorderOpenTurnState } from './runtime-state'
 import { listenRecorderDaemon, recorderDaemonStatus, sendRecorderDaemonHook } from './daemon'
 
@@ -75,10 +75,10 @@ it('indexes legacy quarantines once, publishes new candidates index-first, and r
   const legacy = { ...open, generation: 101 }
   await fs.mkdir(recorderTurnRoot(session, 101), { recursive: true })
   await fs.writeFile(join(recorderTurnRoot(session, 101), 'pending-open.json'), JSON.stringify(legacy))
-  await fs.rm(join(session, 'quarantine-index.json'), { force: true })
+  await fs.rm(recorderQuarantineIndexPath(session), { force: true })
   vi.mocked(fs.readdir).mockRejectedValueOnce(Object.assign(new Error('injected scan failure'), { code: 'EIO' }))
   await expect(recorderQuarantinedOpenTurns(session)).rejects.toMatchObject({ code: 'EIO' })
-  await expect(fs.access(join(session, 'quarantine-index.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(fs.access(recorderQuarantineIndexPath(session))).rejects.toMatchObject({ code: 'ENOENT' })
   expect(await recorderQuarantinedOpenTurns(session)).toEqual([legacy])
   vi.mocked(fs.readdir).mockClear()
   const next = { ...open, generation: 102, quarantinedAt: new Date().toISOString(), reason: 'managed_replaced' }

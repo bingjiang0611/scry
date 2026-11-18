@@ -95,7 +95,7 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 ### 0.2.77：空闲恢复与退出
 
 - 恢复等待仍按 1、2、4、8、15 秒退避；新 hook 重置等待。保留无 hook 的 transcript 终态恢复，不用静默伪造完成。
-- daemon 只检查 attention 中的待处理会话，不再每 64 次轮询扫描整个历史。隔离轮次的 `quarantine-index.json` 是可重建的候选索引，`turns/<补零 generation>/pending-open.json` 仍是事实源。先写索引，再写状态；初始化或扫描失败不发布“空索引”。
+- daemon 只检查 attention 中的待处理会话，不再每 64 次轮询扫描整个历史。隔离轮次的 `.scry/quarantine-index/<provider>/<session>.json` 是可重建的候选索引（不写入会话目录），`turns/<补零 generation>/pending-open.json` 仍是事实源。先写索引，再写状态；初始化或扫描失败不发布“空索引”。
 - 新安装/索引缺失时初始化；显式 `scry recorder recover` 每次重建发现索引。恢复备份或混用旧版直接写者后，应执行一次该命令；不要让旧版直接写者长期与新版 daemon 混用。该索引不替代事实文件，也不删除隔离证据。
 - 无待恢复轮次时，默认 30 分钟无 hook 自动退出。状态查询不再延长寿命。仍有 open、队列或隔离证据时继续保活；长期等待工具/审批不是完成证据。更新检查期间收到新 hook 不会关闭该会话。
 - 同一 socket 的直接 `serve` 也串行认领，避免两个进程互相 unlink；不自动清理此前已启动的旧版孤儿进程。检查存量进程时须核对 PID、工作区、版本和 owner，不按进程名批量杀进程。
