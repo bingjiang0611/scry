@@ -14,10 +14,10 @@ import { hostProcessChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
-import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
+import { publishQuarantinedOpenTurn, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
-import type { SessionCaptureContext } from './session-capture-contract.js'
+import { CaptureRequestError, type SessionCaptureContext } from './session-capture-contract.js'
 
 /** What the claim itself supplies: the turn identity read from the transcript, not a hook payload. */
 export interface CaptureClaimIdentity {
@@ -82,6 +82,7 @@ export async function beginOpenTurn(
     generation,
     turnIndex,
     status: 'open',
+    ...(capture ? { initialization: 'pending' as const } : {}),
     startedAt: claim?.startedAt ?? timestampOf(payload),
     startFingerprint: capture ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
     ...(capture ? {
@@ -127,7 +128,6 @@ export async function beginOpenTurn(
       captureRoot: segmentCaptureDir(root, generation),
       excludedPaths: [enablement.dataRoot]
     })
-    await writeJsonAtomic(openPath(root), open, { sync: false })
   } else if (!managedByScry && !continuation && enablement.config.capture.diff) {
     const captureDir = segmentCaptureDir(root, generation)
     const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
@@ -143,9 +143,37 @@ export async function beginOpenTurn(
       repository,
       capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
     })))
+  }
+  if (capture) {
+    open.initialization = 'complete'
+    await writeJsonAtomic(openPath(root), open)
+  } else if (!managedByScry && enablement.config.capture.diff) {
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   return open
+}
+
+export function captureTurnInitializationIssue(
+  open: OpenTurnState, enablement: Extract<RecorderEnablement, { enabled: true }>
+): string | undefined {
+  // Older opens have no marker, but a completed ordinary diff initialization always published
+  // repositoryDiscovery (including the valid no-repository case). A legacy continuation only
+  // proves completion when its captures were published; an empty one remains unknown.
+  // Never invent a lost baseline.
+  const legacyIncomplete = open.initialization === undefined && enablement.config.capture.diff
+    && !open.managedByScry && !open.repositoryDiscovery
+    && (!open.continuation || !open.captures.length)
+  if (open.initialization === 'pending' || legacyIncomplete) {
+    return 'capture baseline initialization was interrupted; the current turn diff is unavailable'
+  }
+  return undefined
+}
+
+export function assertCaptureTurnInitialized(
+  open: OpenTurnState, enablement: Extract<RecorderEnablement, { enabled: true }>
+): void {
+  const issue = captureTurnInitializationIssue(open, enablement)
+  if (issue) throw new CaptureRequestError('recorder_unavailable', `${issue}; refusing to replace its baseline`)
 }
 
 /**
@@ -165,6 +193,7 @@ export async function beginCaptureTurn(
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<OpenTurnState>(openPath(root))
   if (open) {
+    assertCaptureTurnInitialized(open, enablement)
     // A repeated claim adopts the turn it already opened; the boundary never moves.
     if (!open.capture) {
       await writeJsonAtomic(openPath(root), {
@@ -177,7 +206,7 @@ export async function beginCaptureTurn(
           openedAt: context.openedAt,
           ...(context.diffExclude?.length ? { diffExclude: context.diffExclude } : {})
         }
-      }, { sync: false })
+      })
     }
     return readJson<OpenTurnState>(openPath(root)).then((value) => value ?? open)
   }
@@ -303,11 +332,11 @@ export async function quarantineOpenTurn(
   open: OpenTurnState,
   reason: 'managed_replaced' | 'legacy_migration'
 ): Promise<void> {
-  await writeJsonAtomic(join(turnRoot(root, open.generation), 'pending-open.json'), {
+  await publishQuarantinedOpenTurn(root, {
     ...open,
     quarantinedAt: new Date().toISOString(),
     reason
-  }, { sync: false })
+  })
   await rm(openPath(root), { force: true })
   await updateHealth(dataRoot, { lastError: { at: new Date().toISOString(), message: `recorder turn quarantined: ${reason}` } })
 }

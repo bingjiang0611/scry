@@ -2,6 +2,13 @@
 
 [返回 CLI README](../README.md)
 
+## 按会话采集：初始化中断与重复 start
+
+- 新 claim 只在基线初始化和控制状态持久化完成后返回 `started`。遇到未完成初始化的旧 open，拒绝认领，不重新制作历史基线。
+- 已开启的同一 `captureId` 再次 start 返回 `already_started`。如果当前轮次仍为 `initialization=pending`，ACK 的 `warning` 写明 `capture baseline initialization was interrupted; the current turn diff is unavailable`。这只确认会话采集仍开启，不证明当前轮次有完整基线；排除路径仍按并集合并。
+- 该轮经 Stop 或恢复封箱时，已开启的 diff 采集标为 `unavailable`，`omissionReason` 写明基线初始化被中断。后续工具发现的迟到基线也不能补齐先前缺口，不发布为 `available` 或“没有改动”。其他可观测记录仍正常保存。
+- 封箱后，同一会话的下一轮重新初始化基线并继续采集，不把中断状态延续到后续轮次。显式关闭 diff 采集的配置仍记为 `disabled`。
+
 ## 未发布：Stop 之后的判定、仓库扫描预筛与合法 JSON 截断
 
 - **收到过本轮 Stop 的轮次记 `completed`。** 之前，一轮已经收到自己的 Stop（例如为后台任务延迟封箱、随后被唤醒取消封箱继续工作），下一轮提问在静默窗口内到达时，这一轮会被封成 `interrupted` / `superseded_by_next_turn`。现在 `open.json` 用 `stopObservedAt` 记住「本轮终态曾到达」，取消封箱不会抹掉这个事实；没收到 Stop 就被下一轮顶替的轮次仍是 `interrupted`，结束时间仍是最后可信活动。SessionEnd 不是 Stop，不写这个字段。后台唤醒的接续逻辑不变：已封箱的叫醒新开接续段，静默窗口内的叫醒仍延长同一段。

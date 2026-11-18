@@ -13,7 +13,7 @@ import type { RecorderEnablement } from './config.js'
 import { terminalStatus, type RecorderHookResult, type TranscriptRead, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
-import { degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
+import { captureTurnInitializationIssue, degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { unmatchedIdentityReason } from './recorder-transcript-background.js'
 import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
@@ -115,7 +115,9 @@ export async function finalizeOpenTurn(
   // An expired turn's baseline can be days old, so finishing its diff would attribute every later
   // change — including other turns' work — to this one. Release the baseline instead of publishing
   // an attribution we cannot defend, and say why.
-  if (options.forcedReason || open.terminalDiffs || identityUnmatched) {
+  const initializationIssue = open.capture ? captureTurnInitializationIssue(open, enablement) : undefined
+  const discardDiff = !!options.forcedReason || identityUnmatched || !!initializationIssue
+  if (discardDiff || open.terminalDiffs) {
     await Promise.all(open.captures.map(async ({ repository, capture }) => {
       try {
         await cancelGitTurnDiff(capture)
@@ -128,16 +130,15 @@ export async function finalizeOpenTurn(
   // 回合中途 `git worktree add` 新建的工作树在回合开始时没有基线。它的基线只能来自 git 自己的
   // 创建记录（reflog 第一条）；拿不到就不计。发现放在收尾，hook 热路径不新增调用。
   // deferred-terminal 轮的基线已冻结在 Provider 边界（terminalDiffs），不再叠加工作树 view。
-  const worktreeDiffs: Promise<TurnDiffSnapshot[]> = !enablement.config.capture.diff || options.forcedReason ||
-    identityUnmatched || open.terminalDiffs
+  const worktreeDiffs: Promise<TurnDiffSnapshot[]> = !enablement.config.capture.diff || discardDiff || open.terminalDiffs
     ? Promise.resolve([])
     : newWorktreeTurnDiffs(enablement, open, mergedEvents)
   const frozen = segmentFreeze({
     enabled: enablement.config.capture.diff,
     open,
-    gaveUp: !!options.forcedReason || identityUnmatched
+    gaveUp: discardDiff
   })
-  const collected = options.forcedReason || identityUnmatched
+  const collected = discardDiff
     ? { diffs: [] as TurnDiffSnapshot[], frozen: undefined }
     : await collectTurnDiffs({ enablement, open, mergedEvents, worktreeDiffs, frozen })
   const diffs = collected.diffs
@@ -224,6 +225,11 @@ export async function finalizeOpenTurn(
     // reason names the evidence that was missing rather than the turn.
     degradeEvidenceSections(evidence, options.transcriptUnavailable)
     evidence.diff = unavailable(options.transcriptUnavailable)
+  }
+  if (initializationIssue && enablement.config.capture.diff) {
+    const previous = options.forcedReason || options.transcriptUnavailable || identityUnmatched
+      ? evidence.diff.omissionReason : undefined
+    evidence.diff = unavailable([initializationIssue, previous].filter(Boolean).join('; '))
   }
   if (open.repositoryDiscovery) {
     evidence.diff.discovery = {
