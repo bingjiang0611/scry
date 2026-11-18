@@ -88,9 +88,18 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 
 `npm run bench:git-diff` 可复现这张表(信息用途,不是门禁)。仓库数量会线性放大这一项:壳仓库套 15 个子仓库时,`begin` 并行后仍需 1.6–2.0s。
 
-- **CPU**:daemon 静置几乎不占 CPU(30 秒窗口 CPU time 增量 <0.2s;20 个进行中轮次约 1.3% 单核)。
+- **CPU**：早期 30 秒小样本不足以覆盖长期 open + 大 transcript；0.2.75/0.2.76 会在 snapshot 命中前反复扫描 Codex anchor。0.2.77 将命中检查前置，不变文件不再重读；冷读、文件变化及独立子 transcript 仍须读取真实证据。
 - **内存**:单 daemon 启动后 RSS 约 71 MB,静置 30 秒回落到 64 MB。GC 后堆稳定(40 轮只留 1.7 MB),不是泄漏;RSS 不归还属 V8 高水位。
 - **daemon 是每 workspace 一个,没有全局上限** —— 并行多个 worktree 时占用会叠加,只在需要采集的 worktree 执行 `init`。
+
+### 0.2.77：空闲恢复与退出
+
+- 恢复等待仍按 1、2、4、8、15 秒退避；新 hook 重置等待。保留无 hook 的 transcript 终态恢复，不用静默伪造完成。
+- daemon 只检查 attention 中的待处理会话，不再每 64 次轮询扫描整个历史。隔离轮次的 `quarantine-index.json` 是可重建的候选索引，`turns/<补零 generation>/pending-open.json` 仍是事实源。先写索引，再写状态；初始化或扫描失败不发布“空索引”。
+- 新安装/索引缺失时初始化；显式 `scry recorder recover` 每次重建发现索引。恢复备份或混用旧版直接写者后，应执行一次该命令；不要让旧版直接写者长期与新版 daemon 混用。该索引不替代事实文件，也不删除隔离证据。
+- 无待恢复轮次时，默认 30 分钟无 hook 自动退出。状态查询不再延长寿命。仍有 open、队列或隔离证据时继续保活；长期等待工具/审批不是完成证据。更新检查期间收到新 hook 不会关闭该会话。
+- 同一 socket 的直接 `serve` 也串行认领，避免两个进程互相 unlink；不自动清理此前已启动的旧版孤儿进程。检查存量进程时须核对 PID、工作区、版本和 owner，不按进程名批量杀进程。
+- `scripts/recorder-daemon-cpu-bench.mjs` 提供 600 秒真实等待的隔离 L2 socket 基准。它计 daemon 与小型测试客户端所在进程的 user+system CPU，不含 Git 子进程、真实宿主或上传。历史目录只用合成数据，不改生产账本。
 
 不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
 

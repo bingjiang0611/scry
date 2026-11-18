@@ -14,7 +14,7 @@ import { hostProcessChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecords, stableHash, updateHealth } from './store.js'
-import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
+import { publishQuarantinedOpenTurn, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 import type { SessionCaptureContext } from './session-capture-contract.js'
@@ -303,11 +303,11 @@ export async function quarantineOpenTurn(
   open: OpenTurnState,
   reason: 'managed_replaced' | 'legacy_migration'
 ): Promise<void> {
-  await writeJsonAtomic(join(turnRoot(root, open.generation), 'pending-open.json'), {
+  await publishQuarantinedOpenTurn(root, {
     ...open,
     quarantinedAt: new Date().toISOString(),
     reason
-  }, { sync: false })
+  })
   await rm(openPath(root), { force: true })
   await updateHealth(dataRoot, { lastError: { at: new Date().toISOString(), message: `recorder turn quarantined: ${reason}` } })
 }

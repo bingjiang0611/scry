@@ -5,7 +5,7 @@ import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { TurnDiffSnapshot } from '../../shared/trace.js'
 import type { GitTurnDiffCapture } from './git.js'
 import type { RepositoryDiscovery } from './config.js'
-import { listFiles, readJson, withDirectoryLock } from './io.js'
+import { readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { hostProcessState, processTable, type HostProcessState, type ProcessTableEntry } from './host-process.js'
 import {
   ATTENTION_PROVIDERS, attentionIndexPresent, clearSessionAttention, markSessionAttention,
@@ -211,18 +211,60 @@ export function withRecorderSessionKeyLock<T>(
   }, options)
 }
 
-export async function recorderQuarantinedOpenTurns(
-  root: string
-): Promise<RecorderOpenTurnState[]> {
-  const turns = join(root, 'turns')
-  const result: RecorderOpenTurnState[] = []
-  for (const generation of await listFiles(turns)) {
-    const open = await readJson<RecorderOpenTurnState>(
-      join(turns, generation, 'pending-open.json')
-    )
-    if (open) result.push(open)
+// An index of candidates, not a replacement for pending-open.json. Publish index-first under
+// one lock; readers prune missing candidates under the same lock. Legacy/restored state is
+// reconciled once on initialization and by explicit full recovery, never every idle poll.
+async function quarantineGenerations(root: string, reconcile = false): Promise<string[]> {
+  const indexed = await readJson<string[]>(join(root, 'quarantine-index.json'))
+  if (!reconcile && Array.isArray(indexed) && indexed.every(value =>
+    typeof value === 'string' && basename(value) === value && value !== '.' && value !== '..'
+  )) return indexed
+  const generations: string[] = []
+  const entries = await readdir(join(root, 'turns'), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []
+    throw error // Never persist an empty index after an incomplete scan.
+  })
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const exists = await stat(join(root, 'turns', entry.name, 'pending-open.json')).then(() => true, (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return false
+      throw error
+    })
+    if (exists) generations.push(entry.name)
   }
-  return result
+  await writeJsonAtomic(join(root, 'quarantine-index.json'), generations)
+  return generations
+}
+
+export async function publishQuarantinedOpenTurn(
+  root: string, open: RecorderOpenTurnState & { quarantinedAt: string; reason: string }
+): Promise<void> {
+  await withDirectoryLock(join(root, 'quarantine-index.lock'), async () => {
+    const generations = await quarantineGenerations(root)
+    const generation = basename(recorderTurnRoot(root, open.generation))
+    if (!generations.includes(generation)) {
+      await writeJsonAtomic(join(root, 'quarantine-index.json'), [...generations, generation])
+    }
+    await writeJsonAtomic(join(root, 'turns', generation, 'pending-open.json'), open, { sync: false })
+  })
+}
+
+export async function recorderQuarantinedOpenTurns(
+  root: string, options: { reconcile?: boolean } = {}
+): Promise<RecorderOpenTurnState[]> {
+  return withDirectoryLock(join(root, 'quarantine-index.lock'), async () => {
+    const generations = await quarantineGenerations(root, options.reconcile)
+    const result: RecorderOpenTurnState[] = []
+    const retained: string[] = []
+    for (const generation of generations) {
+      const path = join(root, 'turns', generation, 'pending-open.json')
+      const open = await readJson<RecorderOpenTurnState>(path)
+      if (open) result.push(open)
+      if (open || await pathExists(path)) retained.push(generation)
+    }
+    if (retained.length !== generations.length) await writeJsonAtomic(join(root, 'quarantine-index.json'), retained)
+    return result
+  })
 }
 
 /**
@@ -242,6 +284,7 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
     for (const sessionKey of sessionKeys) {
       const sessionDir = join(providerRoot, sessionKey)
       live.add(`${provider}__${sessionKey}`)
+      await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
       // Nothing is removed on this path. A publisher arriving after the snapshot keeps its marker.
       // Only existing markers or legacy pending evidence need a locked, authoritative recheck.
       if (!indexed.has(`${provider}__${sessionKey}`) && !await sessionHasPendingEvidence(sessionDir)) continue
@@ -401,14 +444,33 @@ export async function recorderOpenTurns(
   return result
 }
 
-/** The newest stored event this turn wrote; its transcript is the other half of "is it moving". */
+const eventClockCache = new Map<string, { identity: string; newest: number | undefined }>()
+
+/** Stored events are atomically renamed into this directory, never rewritten in place. */
 async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState): Promise<number | undefined> {
   const eventsDir = join(recorderTurnRoot(sessionDir, open.generation), 'events')
-  const names = await readdir(eventsDir).catch(() => [] as string[])
+  const directoryIdentity = async (): Promise<string | undefined> => {
+    const info = await stat(eventsDir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    return info ? `${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}` : undefined
+  }
+  const identity = await directoryIdentity()
+  if (!identity) return undefined
+  const cached = eventClockCache.get(eventsDir)
+  if (cached?.identity === identity) return cached.newest
+  const names = await readdir(eventsDir)
   let newest: number | undefined
   for (const name of names) {
-    const touched = await stat(join(eventsDir, name)).then((info) => info.mtimeMs, () => Number.NaN)
+    // A failed scan is not evidence of silence and must never populate the cache.
+    const touched = (await stat(join(eventsDir, name))).mtimeMs
     if (Number.isFinite(touched) && (newest === undefined || touched > newest)) newest = touched
+  }
+  if (await directoryIdentity() === identity) {
+    eventClockCache.delete(eventsDir)
+    eventClockCache.set(eventsDir, { identity, newest })
+    if (eventClockCache.size > 128) eventClockCache.delete(eventClockCache.keys().next().value!)
   }
   return newest
 }

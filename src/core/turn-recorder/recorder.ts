@@ -10,7 +10,7 @@ import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.
 import { resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, updateHealth, safeKey } from './store.js'
-import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
+import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, recorderQuarantinedOpenTurns, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { attentionIndexPresent, markedSessions } from './attention.js'
 import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
@@ -141,24 +141,26 @@ async function activatedCommitHookEnv(
 /**
  * Recovery passes normally visit only the sessions the attention index names. Rebuilding the index
  * from the session directories is what makes an absent index recoverable, so it runs whenever the
- * index is missing (first run, upgrade, deleted data) and periodically afterwards to repair a marker
- * lost to disk-level corruption rather than a crash.
+ * index is missing (first run, upgrade, deleted data). Explicit recovery also reconciles restored
+ * or damaged indexes; daemon polls never enumerate completed history merely because time passed.
  */
-const FULL_INDEX_REBUILD_EVERY = 64
-let recoveryPasses = 0
 
 async function recoverySessions(
   dataRoot: string,
-  scope?: RecorderRecoveryScope
+  scope?: RecorderRecoveryScope,
+  incremental = false
 ): Promise<Array<{ provider: ProviderId; sessionDir: string }>> {
-  if (scope) return [{ provider: scope.provider, sessionDir: recorderSessionRoot(dataRoot, scope.provider, scope.sessionId) }]
-  recoveryPasses++
+  if (scope) {
+    const sessionDir = recorderSessionRoot(dataRoot, scope.provider, scope.sessionId)
+    if (!incremental) await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
+    return [{ provider: scope.provider, sessionDir }]
+  }
   const initialized = await attentionIndexPresent(dataRoot)
-  if (!initialized || recoveryPasses % FULL_INDEX_REBUILD_EVERY === 0) {
+  if (!initialized || !incremental) {
     try {
       return await reconcileAttentionIndex(dataRoot)
     } catch (error) {
-      // A partial initial index is never usable. A failed periodic repair must not starve known work.
+      // A partial initial index is never usable. A failed repair must not starve known work.
       if (!initialized || !await attentionIndexPresent(dataRoot)) throw error
       await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
         `${new Date().toISOString()} WARN attention rebuild: ${error instanceof Error ? error.message : String(error)}`
@@ -200,6 +202,8 @@ export async function recoverRecorder(
      * App, which knows the child process exited) may assert that; a background pass never guesses.
      */
     expireOpen?: boolean
+    /** Daemon polls use durable discovery indexes; explicit recovery retains full repair passes. */
+    incremental?: boolean
     /**
      * Restrict forced expiry to these sessions. A workspace can hold one turn whose host cannot be
      * proven gone; without this, that single turn would make every automatic caller drop the flag
@@ -219,7 +223,7 @@ export async function recoverRecorder(
   let expired = 0
   let managedPresent = false
   try {
-    for (const item of await recoverySessions(enablement.dataRoot, scope)) {
+    for (const item of await recoverySessions(enablement.dataRoot, scope, options.incremental)) {
       try {
         // Hooks queued behind a busy lock must land before this pass judges the open turn.
         if ((await recorderInboxEntries(item.sessionDir)).length) {
