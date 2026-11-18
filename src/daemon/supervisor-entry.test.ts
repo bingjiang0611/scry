@@ -14,7 +14,7 @@ describe('supervisor entry', () => {
   it('fills a missing SHELL with the platform default and hands it to the daemon', () => {
     for (const [platform, shell] of [['linux', '/bin/bash'], ['darwin', '/bin/zsh']] as const) {
       const env: NodeJS.ProcessEnv = { HOME: '/tmp/scry-entry/home', PATH: '/usr/bin:/bin', ...required }
-      const plan = prepareSupervisorLaunch(env, { pid: 42, platform })
+      const plan = prepareSupervisorLaunch(env, { pid: 42, bundleVersion: undefined, platform })
       expect(env.SHELL).toBe(shell)
       expect(plan.daemonEnv.SHELL).toBe(shell)
     }
@@ -22,13 +22,30 @@ describe('supervisor entry', () => {
 
   it('keeps the SHELL it was given', () => {
     const env: NodeJS.ProcessEnv = { SHELL: '/usr/bin/fish', ...required }
-    const plan = prepareSupervisorLaunch(env, { pid: 42, platform: 'linux' })
+    const plan = prepareSupervisorLaunch(env, { pid: 42, bundleVersion: undefined, platform: 'linux' })
     expect(plan.daemonEnv.SHELL).toBe('/usr/bin/fish')
   })
 
   it('marks the daemon as started by this supervisor', () => {
-    const plan = prepareSupervisorLaunch({ ...required }, { pid: 42, platform: 'linux' })
+    const plan = prepareSupervisorLaunch({ ...required }, { pid: 42, bundleVersion: undefined, platform: 'linux' })
     expect(plan.daemonEnv.SCRY_DAEMON_STARTED_BY).toBe('supervisor:42')
     expect(plan.config.stateDirectory).toBe('/tmp/scry-entry/state')
+  })
+
+  it('gives the daemon its own bundle version when the environment names none', () => {
+    const { SCRY_DAEMON_APP_VERSION: _omitted, ...withoutVersion } = required
+    const plan = prepareSupervisorLaunch({ ...withoutVersion }, { pid: 42, bundleVersion: '1.2.3', platform: 'linux' })
+    expect(plan.config.appVersion).toBe('1.2.3')
+    expect(plan.daemonEnv.SCRY_DAEMON_APP_VERSION).toBe('1.2.3')
+  })
+
+  it('keeps the App-launched path: an equal version passes through unchanged', () => {
+    const plan = prepareSupervisorLaunch({ ...required }, { pid: 42, bundleVersion: '9.8.7', platform: 'linux' })
+    expect(plan.daemonEnv.SCRY_DAEMON_APP_VERSION).toBe('9.8.7')
+  })
+
+  it('refuses a version that is not this bundle\'s', () => {
+    expect(() => prepareSupervisorLaunch({ ...required }, { pid: 42, bundleVersion: '1.2.3', platform: 'linux' }))
+      .toThrow('daemon_config_version_conflict')
   })
 })

@@ -14,6 +14,7 @@
 // and a process that has one never matches one that does not (fail closed).
 
 declare const __SCRY_BUILD_ID__: string | undefined
+declare const __SCRY_APP_VERSION__: string | undefined
 
 export interface BuildIdentity {
   version: string
@@ -30,6 +31,16 @@ export function buildIdOf(value: unknown): string | undefined {
 /** This bundle's build id; undefined when the code was not built by electron-vite. */
 export function scryBuildId(): string | undefined {
   return buildIdOf(typeof __SCRY_BUILD_ID__ === 'string' ? __SCRY_BUILD_ID__ : undefined)
+}
+
+/**
+ * The App version this bundle was built as (package.json, the value app.getVersion()
+ * returns), from the same build-time `define` as the build id. The supervisor takes its
+ * version from here so a service file never has to carry one. Undefined when unbundled.
+ */
+export function scryBundleVersion(): string | undefined {
+  const value = typeof __SCRY_APP_VERSION__ === 'string' ? __SCRY_APP_VERSION__ : undefined
+  return value?.trim() ? value : undefined
 }
 
 /** This process as the other side should see it. */

@@ -1,9 +1,10 @@
 import { dirname, join, resolve } from 'node:path'
 import { launchDaemonOnce, superviseDaemon } from './supervisor'
 import { prepareSupervisorLaunch, type SupervisorLaunchPlan } from './supervisor-entry'
+import { scryBundleVersion } from '../shared/build-identity'
 
 let plan: SupervisorLaunchPlan
-try { plan = prepareSupervisorLaunch(process.env, { pid: process.pid }) } catch (error) {
+try { plan = prepareSupervisorLaunch(process.env, { pid: process.pid, bundleVersion: scryBundleVersion() }) } catch (error) {
   process.stderr.write(`${(error as Error).message}\n`)
   process.exit(2)
 }

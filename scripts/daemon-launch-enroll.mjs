@@ -11,7 +11,7 @@
 // is not a result. This is not the App: the App's own spawn call and its credential
 // storage are not exercised here (that is what the desktop acceptance script covers).
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { enrollLocalDevice, frame, waitForSocket } from './daemon-fixture.mjs'
@@ -44,7 +44,8 @@ try {
       SCRY_DAEMON_USER_DATA_DIR: userDataDir,
       SCRY_DAEMON_APP_PATH: resolve('.'),
       SCRY_DAEMON_RESOURCES_PATH: resolve('resources'),
-      SCRY_DAEMON_APP_VERSION: '0.0.0-launch-acceptance',
+      // The App passes app.getVersion(); the supervisor refuses any other than its bundle's.
+      SCRY_DAEMON_APP_VERSION: JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version,
       SCRY_DAEMON_PACKAGED: '0',
       SCRY_DAEMON_STARTED_BY: 'launch-acceptance'
     },
