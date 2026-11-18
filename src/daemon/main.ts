@@ -4,6 +4,7 @@ import { createDaemonHostProcess } from './host-process'
 import { readDaemonProcessConfig } from './daemon-config'
 import { createDaemonSignalShutdown } from './signal-shutdown'
 import { classifyDaemonStartupFailure } from './startup-failure'
+import { ensureShellEnv } from '../main/shell'
 
 // Daemon entry. It runs on the App's Electron binary with ELECTRON_RUN_AS_NODE=1,
 // so it gets the same Node, the same ABI for better-sqlite3 and the same signature;
@@ -12,6 +13,10 @@ import { classifyDaemonStartupFailure } from './startup-failure'
 //
 // The App passes its own userData directory; a daemon that guesses one would write
 // to the wrong ledger, so a missing value fails loudly instead of defaulting.
+// Started by a service manager or a script, the daemon may have no SHELL; its shell probe
+// and terminals would otherwise fall back to a zsh that Linux may not have.
+ensureShellEnv()
+
 let config: ReturnType<typeof readDaemonProcessConfig>
 try { config = readDaemonProcessConfig(process.env) } catch (error) {
   process.stderr.write(`${(error as Error).message}\n`)
