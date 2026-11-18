@@ -153,9 +153,9 @@ export async function beginOpenTurn(
   return open
 }
 
-export function assertCaptureTurnInitialized(
+export function captureTurnInitializationIssue(
   open: OpenTurnState, enablement: Extract<RecorderEnablement, { enabled: true }>
-): void {
+): string | undefined {
   // Older opens have no marker, but a completed ordinary diff initialization always published
   // repositoryDiscovery (including the valid no-repository case). A legacy continuation only
   // proves completion when its captures were published; an empty one remains unknown.
@@ -164,8 +164,16 @@ export function assertCaptureTurnInitialized(
     && !open.managedByScry && !open.repositoryDiscovery
     && (!open.continuation || !open.captures.length)
   if (open.initialization === 'pending' || legacyIncomplete) {
-    throw new CaptureRequestError('recorder_unavailable', 'capture turn initialization did not complete; refusing to replace its baseline')
+    return 'capture baseline initialization was interrupted; the current turn diff is unavailable'
   }
+  return undefined
+}
+
+export function assertCaptureTurnInitialized(
+  open: OpenTurnState, enablement: Extract<RecorderEnablement, { enabled: true }>
+): void {
+  const issue = captureTurnInitializationIssue(open, enablement)
+  if (issue) throw new CaptureRequestError('recorder_unavailable', `${issue}; refusing to replace its baseline`)
 }
 
 /**

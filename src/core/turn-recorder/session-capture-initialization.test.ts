@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as config from './config'
 import * as io from './io'
+import * as hostProcess from './host-process'
 import { listRecords } from './store'
+import { recoverRecorder } from './recorder'
 import { applySessionCaptureHook, startSessionCapture } from './session-capture'
 import { captureContextPath, captureStatePath, type SessionCaptureContext } from './session-capture-contract'
 import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state'
@@ -14,12 +16,24 @@ import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } fro
 const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-async function fixture() {
+async function fixture(withGit = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'scry-capture-initialization-')))
   roots.push(root)
+  if (withGit) {
+    const exec = promisify(execFile)
+    const git = (...args: string[]) => exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
+      cwd: root,
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TEMPLATE_DIR: '' }
+    })
+    await git('init')
+    await writeFile(join(root, 'tracked.txt'), 'before\n')
+    await git('add', 'tracked.txt')
+    await git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture')
+  }
   const dataRoot = join(root, '.scry')
   const transcriptPath = join(root, 'rollout.jsonl')
   const timestamp = '2026-11-17T12:00:00.000Z'
@@ -98,17 +112,8 @@ it('repairs interrupted context publication before acknowledging a repeated star
 })
 
 it('reuses a real Git baseline after publication fails, preserving immediate changes and the turn boundary', async () => {
-  const f = await fixture()
-  const exec = promisify(execFile)
-  const git = (...args: string[]) => exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
-    cwd: f.options.workspace,
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TEMPLATE_DIR: '' }
-  })
-  await git('init')
+  const f = await fixture(true)
   const tracked = join(f.options.workspace, 'tracked.txt')
-  await writeFile(tracked, 'before\n')
-  await git('add', 'tracked.txt')
-  await git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture')
   const write = io.writeJsonAtomic
   const publication = vi.spyOn(io, 'writeJsonAtomic').mockImplementation(async (path, value, options) => {
     if (path === f.statePath) throw new Error('interrupted control publication')
@@ -136,7 +141,7 @@ it('reuses a real Git baseline after publication fails, preserving immediate cha
   expect(files.find(file => file.path.endsWith('/new.txt'))?.patchContent?.content).toContain('+new after ACK')
 }, 30_000)
 
-it('refuses a repeated claim when a later turn interrupted initialization', async () => {
+it('acknowledges an existing capture with an incomplete-turn warning, but refuses a new claim', async () => {
   const f = await fixture()
   await startSessionCapture(f.options)
   vi.spyOn(config, 'discoverRepositories').mockRejectedValueOnce(new Error('interrupted later turn'))
@@ -145,8 +150,100 @@ it('refuses a repeated claim when a later turn interrupted initialization', asyn
     payload: { ...f.options.payload, timestamp: '2026-11-17T13:00:00.000Z', prompt: 'next request' }
   })).rejects.toThrow('interrupted later turn')
   expect(await io.readJson(f.openPath)).toMatchObject({ initialization: 'pending', generation: 2 })
-  await expect(startSessionCapture(f.options)).rejects.toMatchObject({ code: 'recorder_unavailable' })
+  const exclusion = join(f.options.workspace, 'next-stage')
+  // The session remains opted in. Repeating its claim does not certify the current turn's baseline.
+  const ack = await startSessionCapture({
+    ...f.options, context: { ...f.options.context, diffExclude: [exclusion] }
+  })
+  expect(ack.status).toBe('already_started')
+  expect(ack.ack).toMatchObject({
+    action: 'start', status: 'already_started', captureId: 'capture',
+    warning: expect.stringContaining('baseline initialization was interrupted')
+  })
+  expect(await io.readJson(f.openPath)).toMatchObject({
+    initialization: 'pending', generation: 2, captures: [], capture: { diffExclude: [exclusion] }
+  })
+  expect(await io.readJson(f.contextPath)).toMatchObject({ diffExclude: [exclusion] })
+  await expect(startSessionCapture({
+    ...f.options, context: { ...f.options.context, captureId: 'different-claim' }
+  })).rejects.toMatchObject({ code: 'recorder_unavailable' })
 })
+
+it.each(['Stop', 'recover', 'expire'])('seals an interrupted baseline honestly through %s, then captures the next turn', async closing => {
+  const f = await fixture(true)
+  const appendEvent = (timestamp: string, payload: Record<string, unknown>) => appendFile(
+    f.options.context.transcriptPath, `${JSON.stringify({ timestamp, type: 'event_msg', payload })}\n`
+  )
+  const begin = async (number: number) => {
+    const timestamp = `2026-11-17T12:0${number}:00.000Z`
+    const prompt = `fixture request ${number}`
+    await appendEvent(timestamp, { type: 'task_started', turn_id: `turn-${number}` })
+    await appendEvent(timestamp, { type: 'user_message', message: prompt })
+    return applySessionCaptureHook({
+      ...f.options, event: 'UserPromptSubmit',
+      payload: { ...f.options.payload, timestamp, prompt, turn_id: `turn-${number}` }
+    })
+  }
+  const complete = (number: number, turnId = `turn-${number}`) => appendEvent(
+    `2026-11-17T12:0${number}:10.000Z`, { type: 'task_complete', turn_id: turnId, last_agent_message: 'done' }
+  )
+  const stop = (number: number) => applySessionCaptureHook({
+    ...f.options, event: 'Stop',
+    payload: { ...f.options.payload, timestamp: `2026-11-17T12:0${number}:11.000Z` }
+  })
+  await startSessionCapture(f.options)
+  await complete(1, 'turn')
+  await stop(1)
+  vi.spyOn(config, 'discoverRepositories').mockRejectedValueOnce(new Error('interrupted baseline discovery'))
+  await expect(begin(2)).rejects.toThrow('interrupted baseline discovery')
+  expect(await io.readJson(f.openPath)).toMatchObject({ initialization: 'pending', generation: 2, captures: [] })
+  const tracked = join(f.options.workspace, 'tracked.txt')
+  await writeFile(tracked, 'changed without a baseline\n')
+  if (closing === 'expire') {
+    // Controlled gone-host evidence and clock advancement; this is not a real-host expiry test.
+    const pending = await io.readJson<RecorderOpenTurnState>(f.openPath)
+    await io.writeJsonAtomic(f.openPath, {
+      ...pending, host: [{ pid: 2147483647, startedAt: 'Tue Nov 17 12:00:00 2026' }]
+    })
+    vi.spyOn(hostProcess, 'hostProcessState').mockResolvedValue('gone')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + 31 * 60_000)
+    const result = await recoverRecorder(f.options.workspace, process.env, undefined, undefined, {
+      expireOpen: true, expireSessions: ['session']
+    })
+    expect(result.expired).toBe(1)
+    vi.useRealTimers()
+  } else {
+    // A later tool can discover a repository, but its late baseline cannot cover the lost interval.
+    await applySessionCaptureHook({
+      ...f.options, event: 'PreToolUse', payload: {
+        ...f.options.payload, timestamp: '2026-11-17T12:02:02.000Z',
+        tool_name: 'Edit', tool_input: { file_path: tracked, old_string: 'changed', new_string: 'later' }
+      }
+    })
+    expect((await io.readJson<RecorderOpenTurnState>(f.openPath))?.captures).toHaveLength(1)
+    await complete(2)
+    if (closing === 'Stop') await stop(2)
+    else expect((await recoverRecorder(f.options.workspace)).recovered).toBe(1)
+  }
+  const interrupted = (await listRecords(f.options.dataDir)).find(record => record.generation === 2)
+  expect(interrupted?.diff.status).toBe('unavailable')
+  expect(interrupted?.diff.omissionReason).toContain('baseline initialization was interrupted')
+  expect(interrupted?.diff.value).toBeUndefined()
+  expect(await io.readJson(f.openPath)).toBeNull()
+
+  await begin(3)
+  expect(await io.readJson(f.openPath)).toMatchObject({ initialization: 'complete', generation: 3 })
+  expect((await startSessionCapture(f.options)).ack.warning).toBeUndefined()
+  await writeFile(join(f.options.workspace, 'tracked.txt'), 'captured after recovery\n')
+  await complete(3)
+  await stop(3)
+  const next = (await listRecords(f.options.dataDir)).find(record => record.generation === 3)
+  expect(next?.diff.status).toBe('available')
+  const files = next?.diff.value?.flatMap(snapshot => snapshot.files) ?? []
+  expect(files.find(file => file.path.endsWith('/tracked.txt'))?.patchContent?.content)
+    .toContain('+captured after recovery')
+}, 30_000)
 
 it('keeps exclusions persisted in control when open publication is interrupted', async () => {
   const f = await fixture()

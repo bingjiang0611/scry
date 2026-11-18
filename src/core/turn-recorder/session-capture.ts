@@ -8,7 +8,7 @@ import { resolveCommitHookActivation } from './commit-hook-grant.js'
 import type { RecorderEnablement } from './config.js'
 import { recorderSocketPath, PROTOCOL_VERSION, HOOK_EVENT_PATH } from './daemon-transport.js'
 import { recorderOpenPath, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState } from './runtime-state.js'
-import { assertCaptureTurnInitialized, beginCaptureTurn } from './recorder-turn-state.js'
+import { captureTurnInitializationIssue, beginCaptureTurn } from './recorder-turn-state.js'
 import { sessionIdOf, transcriptPathOf } from './recorder-contracts.js'
 import { captureReceiverSource } from './session-capture-receiver.js'
 import { recordCaptureRepositories } from './session-capture-discovery.js'
@@ -98,10 +98,11 @@ export async function startSessionCapture(args: {
     dataRoot: enablement.dataRoot,
     transcriptPath: resolve(transcriptPath)
   }
+  let warning: string | undefined
   const status = await withRecorderSessionLock(enablement.dataRoot, args.provider, args.sessionId, async () => {
     const existing = await readCaptureState(enablement.dataRoot, args.provider, args.sessionId)
     if (existing && existing.captureId === context.captureId) {
-      await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, context.diffExclude)
+      warning = await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, context.diffExclude)
       return 'already_started' as const
     }
     await beginCaptureTurn(
@@ -113,7 +114,7 @@ export async function startSessionCapture(args: {
     return 'started' as const
   }, { waitMs: 10_000 })
   await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
-  return { status, ack: captureAck('start', status, context), transport }
+  return { status, ack: { ...captureAck('start', status, context), ...(warning ? { warning } : {}) }, transport }
 }
 
 /**
@@ -127,12 +128,13 @@ async function adoptDiffExclude(
   sessionId: string,
   state: SessionCaptureState,
   added: string[] | undefined
-): Promise<void> {
+): Promise<string | undefined> {
   // Caller holds the session lock. Repair all publications even when the control file already
   // contains the union: a previous process may have stopped between these durable writes.
   const root = recorderSessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
-  if (open) assertCaptureTurnInitialized(open, enablement)
+  // The claim is already active. Report this turn's missing baseline without disabling the session.
+  const warning = open ? captureTurnInitializationIssue(open, enablement) : undefined
   const openCapture = open?.capture?.captureId === state.captureId ? open.capture : undefined
   const merged = unionDiffExclude(unionDiffExclude(state.diffExclude, openCapture?.diffExclude), added)
   // Keep the session-level union first: it must survive even if Stop removes the open turn
@@ -147,6 +149,7 @@ async function adoptDiffExclude(
   }
   await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId),
     captureWireContext({ ...captureStateContext(state), diffExclude: merged }))
+  return warning
 }
 
 /**
