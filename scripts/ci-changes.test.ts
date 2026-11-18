@@ -260,7 +260,7 @@ describe('recorder-only validation', () => {
     const { git, write, commit, detect } = fixture()
     write('src/core/turn-recorder/aggregate.ts'); commit()
     const base = git('rev-parse', 'HEAD')
-    git('mv', 'src/core/turn-recorder/aggregate.ts', 'src/main/aggregate.ts'); commit()
+    git('mv', 'src/core/turn-recorder/aggregate.ts', 'src/aggregate.ts'); commit()
     expect(detect(base)).toEqual({ status: 0, output: APP })
   })
 })
