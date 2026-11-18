@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { daemonLaunchEnvironment, launchDaemonOnce, superviseDaemon, writeSupervisorTemplates } from './supervisor'
+import { daemonLaunchEnvironment, launchDaemonOnce, superviseDaemon } from './supervisor'
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
   const deadline = Date.now() + 5_000
@@ -45,31 +45,6 @@ describe('daemon supervisor', () => {
       expect(result).toEqual({ status: code === 0 ? 'stopped' : 'already-running', attempts: 1 })
       expect(launches).toBe(1)
     }
-  })
-
-  it('generates launchd and systemd user templates without installing them', () => {
-    const directory = root()
-    const files = writeSupervisorTemplates({
-      directory,
-      executable: '/Applications/Scry.app/Contents/MacOS/Scry',
-      supervisorEntry: '/Applications/Scry.app/Contents/Resources/app.asar/out/main/daemon-supervisor.js',
-      daemonEntry: '/Applications/Scry.app/Contents/Resources/app.asar/out/main/daemon.js',
-      userDataDir: '/Users/me/Library/Application Support/Scry',
-      appPath: '/Applications/Scry.app/Contents/Resources/app.asar',
-      resourcesPath: '/Applications/Scry.app/Contents/Resources',
-      appVersion: '9.8.7',
-      isPackaged: true
-    } as Parameters<typeof writeSupervisorTemplates>[0])
-    const launchd = readFileSync(files.launchd, 'utf8')
-    const systemd = readFileSync(files.systemd, 'utf8')
-    for (const key of ['SCRY_DAEMON_APP_PATH', 'SCRY_DAEMON_RESOURCES_PATH', 'SCRY_DAEMON_APP_VERSION', 'SCRY_DAEMON_PACKAGED']) {
-      expect(launchd).toContain(key)
-      expect(systemd).toContain(key)
-    }
-    expect(launchd).toContain('ELECTRON_RUN_AS_NODE')
-    expect(systemd).toContain('Restart=no')
-    expect(files.launchd.startsWith(directory)).toBe(true)
-    expect(files.systemd.startsWith(directory)).toBe(true)
   })
 
   it('does not retry a known configuration failure and records only its code', async () => {

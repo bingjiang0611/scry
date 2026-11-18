@@ -191,32 +191,3 @@ export function launchDaemonOnce(input: {
     else input.signal?.addEventListener('abort', stop, { once: true })
   })
 }
-
-function xml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-}
-function systemd(value: string): string {
-  return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
-}
-
-export function writeSupervisorTemplates(input: {
-  directory: string
-  executable: string
-  supervisorEntry: string
-  daemonEntry: string
-  userDataDir: string
-  appPath: string
-  resourcesPath: string
-  appVersion: string
-  isPackaged: boolean
-}): { launchd: string; systemd: string } {
-  mkdirSync(input.directory, { recursive: true, mode: 0o700 })
-  const stateDirectory = join(input.userDataDir, 'daemon')
-  const launchd = join(input.directory, 'com.scry.daemon.plist')
-  const systemdPath = join(input.directory, 'scry-daemon.service')
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>com.scry.daemon</string>\n<key>ProgramArguments</key><array><string>${xml(input.executable)}</string><string>${xml(input.supervisorEntry)}</string></array>\n<key>EnvironmentVariables</key><dict><key>ELECTRON_RUN_AS_NODE</key><string>1</string><key>SCRY_DAEMON_ENTRY</key><string>${xml(input.daemonEntry)}</string><key>SCRY_DAEMON_STATE_DIR</key><string>${xml(stateDirectory)}</string><key>SCRY_DAEMON_USER_DATA_DIR</key><string>${xml(input.userDataDir)}</string><key>SCRY_DAEMON_APP_PATH</key><string>${xml(input.appPath)}</string><key>SCRY_DAEMON_RESOURCES_PATH</key><string>${xml(input.resourcesPath)}</string><key>SCRY_DAEMON_APP_VERSION</key><string>${xml(input.appVersion)}</string><key>SCRY_DAEMON_PACKAGED</key><string>${input.isPackaged ? '1' : '0'}</string></dict>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><false/>\n</dict></plist>\n`
-  const unit = `[Unit]\nDescription=Scry remote host daemon\n\n[Service]\nType=simple\nEnvironment="ELECTRON_RUN_AS_NODE=1"\nEnvironment="SCRY_DAEMON_STATE_DIR=${systemd(stateDirectory)}"\nEnvironment="SCRY_DAEMON_USER_DATA_DIR=${systemd(input.userDataDir)}"\nEnvironment="SCRY_DAEMON_ENTRY=${systemd(input.daemonEntry)}"\nEnvironment="SCRY_DAEMON_APP_PATH=${systemd(input.appPath)}"\nEnvironment="SCRY_DAEMON_RESOURCES_PATH=${systemd(input.resourcesPath)}"\nEnvironment="SCRY_DAEMON_APP_VERSION=${systemd(input.appVersion)}"\nEnvironment="SCRY_DAEMON_PACKAGED=${input.isPackaged ? '1' : '0'}"\nExecStart="${systemd(input.executable)}" "${systemd(input.supervisorEntry)}"\nRestart=no\n\n[Install]\nWantedBy=default.target\n`
-  writeFileSync(launchd, plist, { mode: 0o600 })
-  writeFileSync(systemdPath, unit, { mode: 0o600 })
-  return { launchd, systemd: systemdPath }
-}
