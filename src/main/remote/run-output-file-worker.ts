@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads'
 import { RunOutputFileStore } from './run-output-file'
 import type { OutputChunk } from './run-output-log'
 
-interface Request { requestId: number; op: 'appendBatch' | 'since' | 'close'; value: unknown }
+interface Request { requestId: number; op: 'appendBatch' | 'since' | 'countSince' | 'close'; value: unknown }
 if (!parentPort || !workerData || typeof workerData.directory !== 'string') throw new Error('run_output_worker_invalid_startup')
 const store = new RunOutputFileStore(workerData.directory)
 parentPort.postMessage({ event: 'ready' })
@@ -13,6 +13,10 @@ parentPort.on('message', (request: Request) => {
     if (request.op === 'since') {
       const input = request.value as { runId: string; cursor: number; pageSize?: number }
       value = store.since(input.runId, input.cursor, input.pageSize)
+    }
+    if (request.op === 'countSince') {
+      const input = request.value as { runId: string; cursor: number }
+      value = store.countSince(input.runId, input.cursor)
     }
     if (request.op === 'close') store.close()
     parentPort!.postMessage({ requestId: request.requestId, ok: true, value })

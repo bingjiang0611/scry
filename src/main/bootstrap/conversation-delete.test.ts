@@ -27,8 +27,7 @@ async function setup() {
   const cleaned: Array<{ conversationId: unknown; externalSessionId: unknown }> = []
   const live = new Set<string>()
   const failing = new Set<string>()
-  const registered = registerConversationDeletionHandlers({
-    handleTrusted: (channel, listener) => { handlers.set(channel, listener as Handler) },
+  const registered = registerConversationDeletionHandlers((channel, listener) => { handlers.set(channel, listener as Handler) }, {
     providerContextKey: (providerId, cwd, agentProfileId) => JSON.stringify([providerId, cwd, agentProfileId ?? null]),
     contextAdmission: new ContextAdmission(),
     getStartupManagedRecovery: async () => {},
@@ -36,7 +35,7 @@ async function setup() {
     conversationStore: () => current.store,
     getRuns: () => ({ unsettledStates: () => [...live].map(runId => ({ runId }) as ActiveRun) }),
     invalidateSessionHistoryLoad: () => {},
-    getWindow: () => null,
+    publishDataUpdated: () => {},
     deleteOneSession: async (request, options) => {
       // The production path re-checks the persisted authorization of this exact owner.
       const owner = await current.store.read(String(options.conversationId))

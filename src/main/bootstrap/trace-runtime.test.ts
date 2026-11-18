@@ -39,7 +39,7 @@ function fixture() {
     webContents: { send: (channel: string, payload: unknown) => { sent.push({ channel, payload }) } }
   } as unknown as BrowserWindow
   const runtime = createTraceRuntime({
-    getWindow: () => window,
+    renderer: { send: (channel, payload) => { window.webContents.send(channel, payload) }, isFocused: () => true },
     rendererCanReceive: () => true,
     activeRunSessionKey: (state) => state.sessionId ?? state.runId,
     dockBadge: {

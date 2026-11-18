@@ -4,11 +4,13 @@ import type { ProviderId } from '../../shared/provider'
 import type { AppSession } from '../app-store'
 import { liveConversationDeletionCatalog, planConversationDeletion, resolveConversationDeletionRuns } from '../conversation-deletion'
 import { sideChatsOf, sideChatTitle, withSideChats } from '../conversation-deletion-cascade'
-import type { ConversationBootstrapDependencies } from './conversation'
+import type { ConversationTableDependencies } from './conversation'
 
-type DeletionDependencies = Pick<ConversationBootstrapDependencies, 'handleTrusted' | 'providerContextKey' | 'contextAdmission' |
-  'getStartupManagedRecovery' | 'appSessionStore' | 'conversationStore' | 'getRuns' | 'invalidateSessionHistoryLoad' | 'getWindow' |
+type DeletionDependencies = Pick<ConversationTableDependencies, 'providerContextKey' | 'contextAdmission' |
+  'getStartupManagedRecovery' | 'appSessionStore' | 'conversationStore' | 'getRuns' | 'invalidateSessionHistoryLoad' | 'publishDataUpdated' |
   'deleteOneSession' | 'resolveSessionRunIds' | 'deleteConversationHistory' | 'appUserDataDir'>
+/** The conversation table's collecting registrar: main serves it as IPC, the daemon as local ops. */
+type ChannelRegistrar = (channel: string, listener: (event: unknown, ...args: any[]) => unknown) => void
 
 /** One workspace read shared by every plan of one deletion, so N side chats do not list N times. */
 interface WorkspaceEvidence { others: Conversation[]; sessions: AppSession[] }
@@ -30,9 +32,9 @@ export interface SideChatCascade {
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
-export function registerConversationDeletionHandlers(deps: DeletionDependencies) {
-  const { handleTrusted, providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
-    getRuns, invalidateSessionHistoryLoad, getWindow, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
+export function registerConversationDeletionHandlers(handle: ChannelRegistrar, deps: DeletionDependencies) {
+  const { providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
+    getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
     appUserDataDir } = deps
 
   function assertConversationDeletionIdle(conversation: Conversation): void {
@@ -114,7 +116,7 @@ export function registerConversationDeletionHandlers(deps: DeletionDependencies)
     result.ok = result.failed.length === 0
     if (!result.ok) result.reason = 'partial_failure'
     await conversationStore().finishDeletion(conversation.id, fingerprint, result, plan.targets.some(target => target.sharedWith.length > 0))
-    getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
+    publishDataUpdated({ kind: 'conversation_changed', conversationId: conversation.id })
     return result
   }
 
@@ -172,7 +174,7 @@ export function registerConversationDeletionHandlers(deps: DeletionDependencies)
     }
   }
 
-  handleTrusted('conversation:previewDeletion', async (_event, id: unknown) => {
+  handle('conversation:previewDeletion', async (_event, id: unknown) => {
     if (typeof id !== 'string') throw new Error('对话删除请求无效')
     await getStartupManagedRecovery()
     const conversation = await conversationStore().read(id)
@@ -180,7 +182,7 @@ export function registerConversationDeletionHandlers(deps: DeletionDependencies)
     assertConversationDeletionIdle(conversation)
     return previewWithSideChats(conversation)
   })
-  handleTrusted('conversation:delete', async (_event, id: unknown, fingerprint: unknown): Promise<ConversationDeletionResult> => {
+  handle('conversation:delete', async (_event, id: unknown, fingerprint: unknown): Promise<ConversationDeletionResult> => {
     if (typeof id !== 'string' || typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('对话删除确认无效')
     return contextAdmission.run(`conversation-delete:${id}`, async () => {
       await getStartupManagedRecovery()

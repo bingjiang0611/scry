@@ -3,8 +3,9 @@ import {
   readFileSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import type { LedgerEvent, LedgerRecovery, LedgerSnapshot, LedgerStore } from './session-ledger'
+import { createRemoteLeaseOwner } from './remote-lease-owner'
 
 const MAX_BYTES = 8 * 1024 * 1024
 const COMPACT_AT_BYTES = 6 * 1024 * 1024
@@ -36,7 +37,7 @@ export class SessionLedgerFileStore implements LedgerStore {
     this.lock = join(this.directory, 'session-ledger.lock')
     this.leaseFd = openSync(this.lock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
     try {
-      writeSync(this.leaseFd, JSON.stringify({ pid: process.pid, lease: randomUUID(), createdAt: Date.now() }))
+      writeSync(this.leaseFd, JSON.stringify(createRemoteLeaseOwner()))
       fsyncSync(this.leaseFd)
       this.syncDirectory()
     } catch (error) {

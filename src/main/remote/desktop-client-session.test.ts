@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { setup, ssh } from './desktop-client-fixtures'
@@ -11,7 +12,7 @@ describe('DesktopRemoteClient session write acknowledgements', () => {
       const original = fixture.tlsRequest.getMockImplementation()!
       fixture.tlsRequest.mockImplementation(async (options) => {
         const request = options.request as { op?: string }
-        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: fixture.host.hostId, execution: 'canonical', sessionFork: true, sessionDelete: true } }
+        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', sessionFork: true, sessionDelete: true } }
         if (request.op === 'sessionFork' || request.op === 'sessionDelete') return {}
         return original(options)
       })

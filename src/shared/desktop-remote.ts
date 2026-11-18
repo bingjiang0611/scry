@@ -148,6 +148,7 @@ export interface DesktopRemoteCatalog {
   // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
+  workbenchOps?: { openPath: boolean; trashItem: boolean }
   sessionActions?: true
   // Fork and delete are independent because an older host may implement only one.
   sessionFork?: true
@@ -174,15 +175,21 @@ export interface DesktopRemoteHistory {
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
 export const DESKTOP_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 
+// Version spoken on the run channel. Both ends refuse to talk across a mismatch
+// instead of degrading: a silent half-supported protocol is worse than a refusal.
+export const REMOTE_PROTOCOL_VERSION = 2
+
 export type DesktopHostRead =
   | { kind: 'info' }
   | { kind: 'workspaceChoices'; request: WorkspaceChoicesRequest }
   | { kind: 'validateWorkspaceBranch'; request: { cwd: string; repositoryId: string; name: string } }
   | { kind: 'history'; context: DesktopRemoteContext; historyScope?: 'session'; before?: number; snapshot?: string; byteChunks?: true; images?: true; chunk?: { id: string; offset: number } }
-  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number } }
+  // `settledTail`: the App's own read may still get a run that just left the live registry
+  // (its final trace); only a local-scope grant may ask. Devices keep `run: null` after settle.
+  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number }; settledTail?: true }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: 1; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'workspaceChoices'; value: ScRead<WorkspaceChoices> }
   | { kind: 'validateWorkspaceBranch'; value: ScRead<{ name: string }> }
   | { kind: 'history'; history: DesktopRemoteHistory }
@@ -253,6 +260,10 @@ export interface DesktopRemoteRunStatus {
   externalSessionId?: string
   cwd?: string
   detail?: string
+  // The long poll saw new ledger evidence or a new lifecycle state. A device uses
+  // this to skip redundant content reads; absent means "not reported", never "no
+  // change", so a missing flag must not suppress a read.
+  changed?: boolean
 }
 // A host run on an opened session that this client did not submit (host UI,
 // phone or another desktop). `runId` is the host's stop/answer identity;

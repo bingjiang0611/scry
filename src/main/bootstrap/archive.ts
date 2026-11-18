@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { createHash } from 'node:crypto'
 import {
   deleteTranscriptCopies,
@@ -15,6 +14,7 @@ import { isManagedRecorderProvider, managedRecorderAllowsMissingProviderTurnId, 
 import { persistTraceTurnProgress, persistUnresolvedTraceTurnProgress, isProviderlessTerminalTurn, shouldUseManagedTerminalPersistence } from '../trace-turn-progress'
 import { canonicalOrObservedTurnTiming, commitManagedTraceTurn, persistManagedTraceProgress } from '../managed-turn-commit'
 import { deleteTraceTurnProgress } from '../trace-turn-progress'
+import { storageUserDataDir } from '../storage-paths'
 
 export interface ArchiveTraceTurnArgs {
   agentProfileId: string | null
@@ -45,7 +45,7 @@ export async function cloneForkArchiveTurns(args: {
   runtimeProvider: RuntimeProvider
   cwd: string
 }): Promise<void> {
-  const userDataDir = app.getPath('userData')
+  const userDataDir = storageUserDataDir()
   const clonedRunIds: string[] = []
   try {
     for (const source of args.turns) {
@@ -124,7 +124,7 @@ export function buildTraceArchiveTurn(args: ArchiveTraceTurnArgs): {
       ...(args.forkTurnId ? { forkTurnId: args.forkTurnId } : {}),
       userText: args.userText,
       attachments: args.attachments?.map((attachment) =>
-        storeAttachmentReference(app.getPath('userData'), args.runId, attachment)
+        storeAttachmentReference(storageUserDataDir(), args.runId, attachment)
       ),
       items: persistedItems,
       turnEvidence,
@@ -153,7 +153,7 @@ export async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promi
     if (isProviderlessTerminalTurn(turn)) return
     if (managedPolicy) {
       await persistUnresolvedTraceTurnProgress({
-        userDataDir: app.getPath('userData'),
+        userDataDir: storageUserDataDir(),
         cwd: archiveCwd,
         providerId: args.providerId,
         runtimeProvider: args.runtimeProvider,
@@ -181,7 +181,7 @@ export async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promi
       providerTurnId: args.providerTurnId,
       providerId: args.providerId,
       runtimeProvider: args.runtimeProvider,
-      userDataDir: app.getPath('userData'),
+      userDataDir: storageUserDataDir(),
       turn,
       timing,
       status: args.status
@@ -189,7 +189,7 @@ export async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promi
     return
   }
   await persistTraceTurnProgress({
-    userDataDir: app.getPath('userData'),
+    userDataDir: storageUserDataDir(),
     cwd: archiveCwd,
     sessionId: args.sessionId,
     providerId: args.providerId,
@@ -229,7 +229,7 @@ export async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void
         providerTurnId: args.providerTurnId,
         providerId: args.providerId,
         runtimeProvider: args.runtimeProvider,
-        userDataDir: app.getPath('userData'),
+        userDataDir: storageUserDataDir(),
         turn,
         timing,
         status: args.status
@@ -242,9 +242,9 @@ export async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void
     sessionId: args.sessionId,
     providerId: args.providerId,
     runtimeProvider: args.runtimeProvider,
-    userDataDir: app.getPath('userData'),
+    userDataDir: storageUserDataDir(),
     turn
   })
   if (!ok) throw new Error(`trace archive write failed for ${args.runId}`)
-  await deleteTraceTurnProgress(app.getPath('userData'), args.runId)
+  await deleteTraceTurnProgress(storageUserDataDir(), args.runId)
 }

@@ -22,6 +22,12 @@ export interface RemoteRunTarget {
   cwd: string
   providerId: string
   agentProfileId?: string
+  /**
+   * Scope of the verified grant that submitted this run. A local grant may submit
+   * without naming a directory, because the App itself has a current workspace; a
+   * device grant must name one and prove it is authorized.
+   */
+  grantScope?: 'local' | 'remote'
 }
 
 export type RemoteRunAuthorization =
@@ -44,9 +50,16 @@ export class RemoteRunPolicy {
     if (target.agentProfileId !== undefined && (typeof target.agentProfileId !== 'string' || target.agentProfileId.length > 128)) {
       return { ok: false, reason: 'invalid_target' }
     }
-    let cwd: string
-    try { cwd = this.#workspace.authorize(target.cwd) }
-    catch { return { ok: false, reason: 'workspace_not_authorized' } }
+    // No directory named: only the App's own grant may fall back to its current
+    // workspace, and that fallback happens downstream against the App's own rule.
+    // A device gets no workspace at all rather than an invented one.
+    const unnamed = target.cwd.length === 0
+    if (unnamed && target.grantScope !== 'local') return { ok: false, reason: 'invalid_target' }
+    let cwd = ''
+    if (!unnamed) {
+      try { cwd = this.#workspace.authorize(target.cwd) }
+      catch { return { ok: false, reason: 'workspace_not_authorized' } }
+    }
     const providerKey = providerOperationKey(target.providerId, target.agentProfileId)
     const lease = this.#gate.acquireOperation(providerKey)
     if (!lease.ok) return { ok: false, reason: 'provider_authenticating' }

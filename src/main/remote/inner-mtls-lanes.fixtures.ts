@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -78,7 +79,9 @@ export async function call(addr: { port: number; host: string }, caPEM: string, 
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
-  socket.write(JSON.stringify(request) + '\n')
+  // Every run-channel request declares the protocol version (remote-protocol.ts).
+  const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request } : request
+  socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
   for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy()

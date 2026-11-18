@@ -1,8 +1,35 @@
-import { adminKeyStatus } from './billing-admin'
+// Billing evidence read from SQLite: connection/gateway config, ledger rows and the
+// guardian state projection. The admin sync lives in db-billing-sync.ts.
+// P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
+// 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
+// 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
+import { maskSecrets } from '../shared/trace'
 import { canonicalUsdCostWhere } from './span-ledger'
+import { adminKeyStatus } from './billing-admin'
 import { reconcileUsageLedger } from './billing-ledger'
 import type { BillingGuardianState, BillingProvider, UsageLedgerObject } from '../shared/billing'
-import { billingEnvProvider, billingStateCache, dataRevision, db, gatewayAccountLabel, setBillingStateCache } from './db-state'
+import { billingEnvProvider, billingStateCacheSlot, dataRevision, db } from './db-connection'
+
+export function gatewayAccountLabel(env: NodeJS.ProcessEnv = process.env): string | null {
+  const baseUrl = env.ANTHROPIC_BASE_URL
+  const token = env.ANTHROPIC_AUTH_TOKEN
+  if (!baseUrl || !token) return null
+  try {
+    return new URL(baseUrl).origin
+  } catch {
+    return 'custom-anthropic-gateway'
+  }
+}
+
+export function safeJson(v: unknown): string {
+  const scrub = (input: unknown): unknown => {
+    if (typeof input === 'string') return maskSecrets(input)
+    if (Array.isArray(input)) return input.map(scrub)
+    if (input && typeof input === 'object') return Object.fromEntries(Object.entries(input).map(([k, val]) => [k, scrub(val)]))
+    return input
+  }
+  return JSON.stringify(scrub(v ?? {}))
+}
 
 function envConnections(state: {
   lastOpenAiSync?: number
@@ -308,8 +335,16 @@ function computeBillingState(): BillingGuardianState {
 }
 
 export function billingStateQuery(): BillingGuardianState {
-  if (billingStateCache?.revision === dataRevision) return billingStateCache.value
+  if (billingStateCacheSlot.value?.revision === dataRevision) return billingStateCacheSlot.value.value
   const value = computeBillingState()
-  setBillingStateCache({ revision: dataRevision, value })
+  billingStateCacheSlot.value = { revision: dataRevision, value }
   return value
 }
+
+export const UPSERT_BILLING_SYNC_STATE_SQL = `INSERT INTO billing_sync_state (
+  provider, last_sync_ts, last_error, updated_ts
+) VALUES (?, ?, ?, ?)
+ON CONFLICT(provider) DO UPDATE SET
+  last_sync_ts=COALESCE(excluded.last_sync_ts, billing_sync_state.last_sync_ts),
+  last_error=excluded.last_error,
+  updated_ts=excluded.updated_ts`

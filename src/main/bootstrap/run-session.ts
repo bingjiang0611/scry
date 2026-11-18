@@ -1,5 +1,4 @@
-import { app } from 'electron'
-import type { BrowserWindow } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
@@ -7,8 +6,11 @@ import type { createAppSessionStore } from '../app-store'
 import type { SessionDiffBaselineRegistry } from '../session-diff'
 import type { DockBadgeState } from '../dock-badge'
 import { updateRunAttachmentOwner } from '../attachment-store'
+import { storageUserDataDir } from '../storage-paths'
 
-type SessionRuns = { isViewed: (runId: string) => boolean }
+// `notifyChanged` is the live-run change signal: binding a native session id
+// changes what a paired device reads in the live-run set.
+type SessionRuns = { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
 export function createSessionPublisher(deps: {
   runState: ActiveRun
   providerId: ProviderId
@@ -35,7 +37,7 @@ export function createSessionPublisher(deps: {
   dockBadge: DockBadgeState
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   runs: SessionRuns
-  getWindow: () => BrowserWindow | null
+  renderer: RunRendererSink
   initialSessionId?: string
   sessionRevisionByContext: Map<string, number>
 }) {
@@ -52,9 +54,12 @@ export function createSessionPublisher(deps: {
     const previousSessionKey = deps.scopedSessionKey(deps.runState.externalSessionId ?? deps.runState.sessionId ?? deps.runId)
     deps.runState.sessionId = sessionId
     deps.runState.externalSessionId = sessionId
+    // The device reads the session binding from the live-run set; without the
+    // signal a Mac run that binds late is only visible on the fallback tick.
+    deps.runs.notifyChanged?.()
     if (!deps.managedConversation) deps.dockBadge.rekey(previousSessionKey, deps.scopedSessionKey(sessionId))
     if (deps.cwd) {
-      try { updateRunAttachmentOwner(app.getPath('userData'), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {
+      try { updateRunAttachmentOwner(storageUserDataDir(), deps.runId, { providerId: deps.providerId, cwd: deps.cwd, sessionId }) } catch (error) {
         console.warn('[scry] attachment ownership update deferred:', deps.runId, error)
       }
     }
@@ -74,12 +79,12 @@ export function createSessionPublisher(deps: {
       }
     }
     if (!deps.managedConversation && deps.runs.isViewed(deps.runId)) {
-      deps.dockBadge.view(deps.scopedSessionKey(sessionId), Boolean(deps.getWindow()?.isFocused()))
+      deps.dockBadge.view(deps.scopedSessionKey(sessionId), deps.renderer.isFocused())
     }
     if (notifiedSessionId === sessionId) return
     notifiedSessionId = sessionId
     try {
-      deps.getWindow()?.webContents.send('agent:session', {
+      deps.renderer.send('agent:session', {
         runId: deps.runId,
         sessionId,
         previousSessionId: deps.editSourceSessionId ?? deps.runId,

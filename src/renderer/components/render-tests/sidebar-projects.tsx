@@ -22,6 +22,26 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('暂无会话')
   })
 
+  // B4-L4：读取失败不是「没有项目」，也不是索引文件损坏；说明读失败及原因。
+  it('项目列表读取失败时说明原因，不显示「暂无项目」', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar projects={[]} projectsError="后台服务尚未提供这项功能（agent:listProjects）" activeCwd={null}
+        onNewChat={() => {}} onPick={() => {}} onTogglePin={() => {}} onArchive={() => {}} />
+    )
+    expect(html).toContain('无法读取项目列表：后台服务尚未提供这项功能（agent:listProjects）')
+    expect(html).not.toContain('暂无项目')
+  })
+
+  it('会话索引状态读取失败时说明读失败，不归因到 app-sessions.json', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar projects={[]} catalogHealth={{ status: 'ready', source: 'empty' }}
+        catalogHealthError="后台服务尚未提供这项功能（agent:catalogHealth）" activeCwd={null}
+        onNewChat={() => {}} onPick={() => {}} onTogglePin={() => {}} onArchive={() => {}} />
+    )
+    expect(html).toContain('无法读取会话索引状态：后台服务尚未提供这项功能（agent:catalogHealth）')
+    expect(html).not.toContain('app-sessions.json')
+  })
+
   it('Skill 和 MCP 与分析同组展示，入口不读取数量或连接状态', () => {
     const html = renderToStaticMarkup(
       <Sidebar

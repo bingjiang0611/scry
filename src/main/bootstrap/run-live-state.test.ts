@@ -11,6 +11,7 @@ import { SessionDiffBaselineRegistry } from '../session-diff'
 import { createTraceRuntime } from './trace-runtime'
 import type { TraceRecorderIngestion } from '../trace-tool-content'
 import { createLiveRunState } from './run-live-state'
+import { configureStorage } from '../storage-paths'
 
 const receipts = vi.hoisted(() => ({
   getPath: vi.fn<() => string>(),
@@ -52,6 +53,8 @@ let userDataDir: string
 beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'scry-live-binding-'))
   receipts.getPath.mockReturnValue(userDataDir)
+  // Storage is injected now: the pipeline reads the root here, not from Electron.
+  configureStorage({ userDataDir, appPath: userDataDir })
   receipts.appendUsage.mockClear()
 })
 afterEach(async () => { await rm(userDataDir, { recursive: true, force: true }) })
@@ -68,7 +71,7 @@ const createState = async (runId = 'run-live-binding') => {
     llmNetworkConfiguration: { read: async () => undefined },
     sessionDiffBaselines: new SessionDiffBaselineRegistry(),
     appSessionStore: () => sessions,
-    recordingBlockedSessions: new Map(), getWindow: () => null,
+    recordingBlockedSessions: new Map(), renderer: { send: () => undefined, isFocused: () => false },
     publishTrace: () => { }, rendererCanReceive: () => false,
     mainEventId: (prefix, id) => `${prefix}-${id}`,
     LIVE_TOOL_CONTENT_POLICY: POLICY,
@@ -79,7 +82,7 @@ const createState = async (runId = 'run-live-binding') => {
 }
 let seq = 0
 const boundedRuntime = () => createTraceRuntime({
-  getWindow: () => null,
+  renderer: { send: () => undefined, isFocused: () => false },
   rendererCanReceive: () => false,
   activeRunSessionKey: () => null,
   dockBadge: new DockBadgeState(() => { }),

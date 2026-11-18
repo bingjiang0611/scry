@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { combineNativeShards } from './performance-native-run.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
+const root = new URL('..', import.meta.url).pathname
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
 
@@ -14,7 +15,7 @@ function report() {
   return {
     schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors,
     results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
+      scenario, mode: 'in-process', turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
       artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
       sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
       counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), mutationControl: { baseline: 0, extra: 2 }, passed: true },
@@ -169,6 +170,33 @@ describe('native performance evidence gate', () => {
       '.agents/skills/scry-performance-climb/scripts/timing-run.mjs',
       '.agents/skills/scry-performance-climb/scripts/timing-observation.mjs'
     ]))
+  })
+
+  it('freezes every smoke fixture module a frozen smoke module imports', () => {
+    // The CI native job copies these files into an older baseline checkout. A smoke
+    // module that imports a smoke sibling missing from the list builds against a
+    // baseline that may not have it ("Could not resolve ./smoke-paced-stream").
+    const frozen = new Set(nativeHarnessFiles)
+    const missing: string[] = []
+    for (const file of nativeHarnessFiles.filter(path => /^src\/main\/providers\/smoke[^/]*\.ts$/.test(path))) {
+      for (const [, specifier] of readFileSync(join(root, file), 'utf8').matchAll(/from '\.\/(smoke[^']*)'/g)) {
+        const sibling = `src/main/providers/${specifier}.ts`
+        if (!frozen.has(sibling)) missing.push(`${file} -> ${sibling}`)
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('covers the daemon-mode modules in the harness hash and keeps daemon results out of the gate', () => {
+    expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
+      'scripts/session-open-bench-mode.mjs', 'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-lifecycle.mjs'
+    ]))
+    const daemon = report()
+    daemon.results.short.mode = 'daemon'
+    expect(() => validateNative(daemon)).toThrow('in-process measurements only')
+    const unlabelled = report()
+    Reflect.deleteProperty(unlabelled.results.short, 'mode')
+    expect(() => validateNative(unlabelled)).toThrow('in-process measurements only')
   })
 
   it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {

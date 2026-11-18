@@ -7,6 +7,9 @@ import type { RemoteProjectRef, RemoteProviderRef, RemoteProviderQuery, RemoteSe
 export interface DeviceAuthorizer {
   // True only for a non-revoked, non-expired owner-device grant.
   authorizesCertificate(certificateSHA256: string): boolean
+  // That grant's scope, so policy that differs by scope reads the verified grant
+  // instead of guessing from the transport that carried the frame.
+  grantScope?(certificateSHA256: string): 'local' | 'remote' | undefined
 }
 
 // One host-authorized project directory the device may target. `path` is a
@@ -212,6 +215,8 @@ export interface RemoteHistorySource {
 export interface RemoteOutputReader {
   // Chunks strictly after `cursor` for a run (bounded page) + the next cursor.
   since(runId: string, cursor: number): RunOutputPage | Promise<RunOutputPage>
+  // The same question without the text: how much is newer, and where it ends.
+  countSince(runId: string, cursor: number): { count: number; cursor: number } | Promise<{ count: number; cursor: number }>
 }
 
 export interface RemoteGatewayDependencies {
@@ -246,6 +251,10 @@ export interface SubmitIntentInput {
 export interface SubmitIntentResult {
   runId: string
   status: 'recorded' | 'duplicate'
+  // Position of this intent in the ledger's global sequence. A window that starts
+  // watching here reads its own evidence immediately instead of walking the session's
+  // history page by page.
+  seq: number
 }
 
 export class RemoteGatewayError extends Error {

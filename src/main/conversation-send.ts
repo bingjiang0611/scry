@@ -24,6 +24,11 @@ export interface ConversationSendContext {
   deps: ConversationServiceDeps
   /** Runs the host is actually managing; the UI's live status reads this set. */
   active: Set<string>
+  /**
+   * The turn's record settled, so its run leaves `active` and observers may say so
+   * (ConversationService announces it as `onTurnSettled`). Absent: only leave the set.
+   */
+  settled?: (conversationId: string, runId: string) => void
 }
 
 /** Everything one send needs once the pre-dispatch plan is frozen. */
@@ -156,10 +161,14 @@ async function prepareDispatch(
  * runner, and the receipt decides the durable delivery: accepted, not sent, or unknown.
  */
 export async function sendConversationMessage(
-  { deps, active }: ConversationSendContext,
+  { deps, active, settled: onSettled }: ConversationSendContext,
   input: unknown
 ): Promise<ConversationSendResult> {
   const request = parseSend(input)
+  const leaveActive = (runId: string): void => {
+    if (onSettled) onSettled(request.conversationId, runId)
+    else active.delete(runId)
+  }
   const prompt = request.prompt
   if (!prompt.trim() && !request.attachments?.length) throw new Error('对话请求不能为空')
   if (/^\s*\//.test(prompt)) throw new Error('统一对话仅支持普通文本，不支持 slash 命令')
@@ -314,7 +323,7 @@ export async function sendConversationMessage(
             console.error('[scry] failed to record unknown managed outcome:', settlementError)
           }
           throw error
-        } finally { active.delete(runId); await reader?.close() }
+        } finally { leaveActive(runId); await reader?.close() }
       }
     }})
     providerStartReturned = true
@@ -341,7 +350,7 @@ export async function sendConversationMessage(
       // The durable attempt could not be settled: the outcome stays unknown.
       console.error('[scry] failed to record conversation send outcome:', settlementError)
     } finally {
-      active.delete(runId)
+      leaveActive(runId)
       await reader?.close()
     }
     // A typed refusal needs both a pre-dispatch refusal and a durable record of it. A

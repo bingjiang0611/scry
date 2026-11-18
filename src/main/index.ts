@@ -1,30 +1,25 @@
+import './daemon-mode-default-entry'
 import { app, ipcMain, dialog, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 import { mainEventId } from './bootstrap/main-event-id'
-import type { AppRunStartOptions } from './bootstrap/run-frontdoor'
 import { startRun } from './bootstrap/run-execution'
-import { startWorkspaceRun, type RemoteWorkspaceRunStart } from './bootstrap/workspace-start'
+import { startWorkspaceRun } from './bootstrap/workspace-start'
 import { createForkOperations } from './bootstrap/run-fork'
 import { createSessionCatalog } from './bootstrap/session-catalog'
 import { createHistoryRuntime } from './bootstrap/history-runtime'
-import { createSessionState, mirrorSessionTranscript } from './bootstrap/session-state'
+import { createMirrorSessionTranscript, createSessionState } from './bootstrap/session-state'
 import { createRemoteConnections, configuredRemotePermissionMode } from './bootstrap/remote-connections'
 import { resolveSessionRunIds } from './db'
 import { SourceControlService } from './source-control/service'
 import { registerSourceControlIpc } from './source-control/ipc'
 import { registerWorkspaceSelectionIpc } from './source-control/workspace-ipc'
-import { readUsageStats } from './usage-jsonl'
-import { LlmNetworkConfigurationCache } from './llm-network-configuration'
 import {
   normalizeAgentForkSessionRequest,
-  type AgentForkSessionResult,
-  type AgentStartRequest,
-  type AgentStartResult
+  type AgentForkSessionResult
 } from '../shared/runtime'
-import { type ProviderContext, type ProviderId } from '../shared/provider'
+import { type ProviderId } from '../shared/provider'
 import { providerOperationKey } from './provider-operation-gate'
-import { CommandReceipts } from './command-receipts'
 import { RemoteHostService } from './remote/remote-host-service'
 import { registerDesktopClientIpc } from './remote/desktop-client-ipc'
 import { createRemoteAttentionTracker } from './remote/remote-attention'
@@ -39,13 +34,17 @@ import type { Conversation } from '../shared/conversation'
 import type { ConversationDeletionPreview } from '../shared/conversation-api'
 import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-lifecycle'
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
-import { createTraceRuntime } from './bootstrap/trace-runtime'
+import { appDaemonModeDeps, daemonModeEnabled } from './bootstrap/daemon-run-mode'
+import { createLazyDaemonRunSurface } from './bootstrap/daemon-run-lazy'
+import { registerBackgroundServiceHandlers } from './bootstrap/background-service'
+import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
 import { createRendererRestartLog } from './bootstrap/renderer-restart'
 import { ensureMcpExecutionAuthorized, authorizedMcpExecution } from './bootstrap/trust'
 import { registerWorkspaceHandlers } from './bootstrap/workspace'
 import { registerAppAgentHandlers } from './bootstrap/app-agent'
+import { catalogChannelHandlers, registerChannelHandlers } from './bootstrap/startup-channels'
 import { registerConversationHandlers } from './bootstrap/conversation'
 import type { SideChatCascade } from './bootstrap/conversation-delete'
 import { registerConversationAttention } from './bootstrap/conversation-attention'
@@ -53,7 +52,6 @@ import { createProviderRuntime } from './bootstrap/provider-runtime'
 import { createWorkspaceRuntime } from './bootstrap/workspace-runtime'
 import { createPiProfileRuntime } from './bootstrap/pi-profiles'
 import { createTerminalRuntime } from './bootstrap/terminal-runtime'
-import type { RemoteRunCompletion } from './remote/remote-run-binding'
 import { registerSessionDeletionHandlers, type SessionDeletionRequest } from './bootstrap/session-deletion'
 import { registerProviderHandlers } from './bootstrap/provider-handlers'
 import { registerProjectHandlers } from './bootstrap/project-handlers'
@@ -73,7 +71,11 @@ const {
   providerOperationGate, recordingRecoveryHint, deletingSessions, adoptingSessionKeys,
   providerContextKey, providerSessionKey, canonicalProviderCwd, withProviderOperation,
   dockBadge, activeRunSessionKey, bumpSessionRevision, resetSessionContext
-} = createSessionState(() => win)
+} = createSessionState({
+  setBadgeCount: (count) => app.setBadgeCount(count),
+  publishUnreadSessions: (snapshot) => { win?.webContents.send('agent:unreadSessions', snapshot) }
+})
+const mirrorSessionTranscript = createMirrorSessionTranscript(app.getPath('userData'))
 const historyRuntime = createHistoryRuntime()
 const { invalidateSessionHistoryLoad } = historyRuntime
 
@@ -83,7 +85,9 @@ function rendererCanReceive(): boolean {
 }
 
 const { terminalOutput, getTerminalManager, getTerminalManagerInstance } = createTerminalRuntime({
-  userDataDir: app.getPath('userData'), getCurrentCwd: () => currentCwd, getHomeDir: () => homeDir,
+  userDataDir: app.getPath('userData'),
+  recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
+  getCurrentCwd: () => currentCwd, getHomeDir: () => homeDir,
   getWindow: () => win, rendererCanReceive
 })
 const { homeDir, homeFileAccess, recentStore, projectStore, rememberProject, knownProjectDirectories, resolveKnownProjectDirectory, remoteProjectRoots, resolveRemoteProjectDirectory } = createWorkspaceRuntime({
@@ -93,14 +97,27 @@ const {
   appSessionStore, conversationStore, conversationService,
   assertLegacyConversationWriteAllowed, listProjectCatalog
 } = createSessionCatalog({
-  recentStore, projectStore, forkManagedConversation, startAppRun,
-  getWindow: () => win,
+  recentStore, projectStore, forkManagedConversation,
+  // The pipeline is assembled after the catalog (it needs the stores), so hand the
+  // catalog a deferred call instead of the const itself.
+  startAppRun: (payload, options) => pipeline.startAppRun(payload, options),
+  userDataDir: app.getPath('userData'),
+  publishDataUpdated: (event) => { win?.webContents.send('agent:dataUpdated', event) },
   unsettledRuns: () => runs.unsettledStates(),
   getProviderRegistry: () => providerRegistry,
   homeDir, resolveKnownProjectDirectory
 })
 const { piProfileStore, detectInstalledAgents, storedPiProfiles, listPiProfiles, resolvePiProfile } = createPiProfileRuntime({ userDataDir: app.getPath('userData') })
-const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({ homeDir, listPiProfiles, resolvePiProfile })
+const { providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents } = createProviderRuntime({
+  homeDir,
+  userDataDir: app.getPath('userData'),
+  appPath: app.getAppPath(),
+  resourcesPath: process.resourcesPath,
+  appVersion: app.getVersion(),
+  isPackaged: app.isPackaged,
+  listPiProfiles,
+  resolvePiProfile
+})
 
 function setCurrentCwd(dir: string | undefined): void {
   currentCwd = dir
@@ -210,12 +227,7 @@ registerProviderHandlers({
   providerOperationKey, providerOperationGate
 })
 
-handleTrusted('agent:listSessions', (_e, context: ProviderContext) => {
-  return appSessionStore().listSessions(context.cwd ?? '', context.providerId, context.agentProfileId)
-})
-
-handleTrusted('agent:listProjects', () => listProjectCatalog())
-handleTrusted('agent:catalogHealth', () => appSessionStore().health())
+registerChannelHandlers(handleTrusted, catalogChannelHandlers({ appSessionStore, listProjectCatalog, recentStore }))
 
 const conversationDeletion = { prepare: undefined as ((conversation: Conversation) => Promise<ConversationDeletionPreview>) | undefined,
   sideChatCascade: undefined as SideChatCascade | undefined }
@@ -223,7 +235,7 @@ const sessionDeletion = registerSessionDeletionHandlers({
   handleTrusted, getRuns: () => runs, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery: () => startupManagedRecovery,
   providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions,
   getWindow: () => win, rendererCanReceive, appUserDataDir: app.getPath('userData'), isOwnedTestApp, requestRunStop,
-  assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge,
+  assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, getCurrentCwd: () => currentCwd,
   prepareConversationDeletion: (conversation) => conversationDeletion.prepare!(conversation),
   sideChatCascade: { count: scope => conversationDeletion.sideChatCascade!.count(scope), run: scope => conversationDeletion.sideChatCascade!.run(scope) }
 })
@@ -256,67 +268,57 @@ historyRuntime.register({
 })
 
 
-const traceRuntime = createTraceRuntime({
-  getWindow: () => win, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId
+// Device-started runs live in the same RunRegistry as Mac runs, so every Mac and
+// remote-history reader sees one active-run truth: history while the first turn
+// is still running, the Mac sidebar/session view, stop, and same-session
+// conflicts. They are never auto-focused. Their questions remain owned by the
+// remote broker, while the canonical RunRegistry state mirrors pending UI.
+const remoteRunIds = new Set<string>()
+// scry runId -> durable ledger runId, the key of the remote question broker.
+const remoteRunLedgerIds = new Map<string, string>()
+
+// daemon 拥有执行时，这里只保留其它通道仍读的登记表与 trace 视图。
+const pipeline = createRunPipeline({
+  renderer: { send: (channel, payload) => { win?.webContents.send(channel, payload) }, isFocused: () => Boolean(win?.isFocused()) },
+  rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId,
+  getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
+  isShuttingDown: () => isShuttingDown, nextRunSequence: () => runSeq++,
+  sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,
+  startWorkspaceRun, startRun, piRunDiagnostics, appSessionStore, providerOperationGate,
+  providerContextKey, providerSessionKey, contextAdmission, resetSessionContext,
+  sessionRevisionByContext, sessionByContext, sessionAliasesByContext, deletingSessions,
+  conversationStore, assertLegacyConversationWriteAllowed, recordingBlockedSessions, homeDir,
+  sessionDiffBaselines, recordingRecoveryHint, sessionBaselineKey, requestRunStop,
+  bumpSessionRevision, remoteRunIds, remoteRunLedgerIds, mirrorSessionTranscript,
+  execution: daemonModeEnabled() ? 'daemon' : 'in-process'
 })
 const {
-  runs, runStopLifecycle, publishQuestionOpened, publishQuestionClosed,
-  userQuestionBroker, traceOutput, flushTraceSend, boundedLiveRun, forgetBoundedRun,
-  LIVE_TOOL_CONTENT_POLICY, publishTrace, runTraces
-} = traceRuntime
-const llmNetworkConfiguration = new LlmNetworkConfigurationCache()
-
-
-function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & { origin?: 'local' }): Promise<AgentStartResult>
-function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion | RemoteWorkspaceRunStart>
-async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion | RemoteWorkspaceRunStart> {
-  if (payload?.workspace !== undefined) return startWorkspaceRun(payload, options, {
-    sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,
-    getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery,
-    start: startAppRun
-  })
-  return startRun(payload, options, {
-    providerRegistry, piRunDiagnostics, appSessionStore, resolveRemoteProjectDirectory, resolveKnownProjectDirectory,
-    providerOperationGate, providerContextKey, providerSessionKey, contextAdmission,
-    resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
-    runs, deletingSessions, conversationStore, assertLegacyConversationWriteAllowed,
-    recordingBlockedSessions, homeDir, llmNetworkConfiguration, sessionDiffBaselines, publishTrace,
-    rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, sessionBaselineKey,
-    dockBadge, userQuestionBroker, publishQuestionOpened, publishQuestionClosed, requestRunStop,
-    bumpSessionRevision, sourceControl, remoteRunIds, remoteRunLedgerIds, boundedLiveRun,
-    forgetBoundedRun, mirrorSessionTranscript, flushTraceSend, runStopLifecycle, runTraces,
-    isShuttingDown: () => isShuttingDown,
-    getCurrentCwd: () => currentCwd,
-    getWindow: () => win,
-    getStartupManagedRecovery: () => startupManagedRecovery,
-    nextRunSequence: () => runSeq++
-  })
-}
-/** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
-const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
+  runs, runStopLifecycle, userQuestionBroker, traceOutput, boundedLiveRun, runTraces,
+  startAppRun, remoteStartReceipts
+} = pipeline
+// 开发开关：daemon 持有台账与 run 时，这些通道由 daemon 的帧回答；未开时保持进程内管线。
+const daemonRun = daemonModeEnabled()
+  ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd,
+    dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces }))
+  : undefined
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
   userQuestionBroker, resolveKnownProjectDirectory, traceOutput, requestRunStop, runTraces,
+  ...(daemonRun ? { daemon: daemonRun } : {}),
   getWindow: () => win,
   getCurrentCwd: () => currentCwd,
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),
   getRemoteHostService: () => remoteHostService
 })
+registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow: () => win })
 
 function requestRunStop(runId: string): boolean {
-  return traceRuntime.requestRunStop(runId)
+  return pipeline.requestRunStop(runId)
 }
 
-const remoteRunIds = new Set<string>()
-const remoteRunLedgerIds = new Map<string, string>()
-handleTrusted('agent:usageStats', (_event, context?: ProviderContext) =>
-  readUsageStats(app.getPath('userData'), context ? {
-    providerId: context.providerId,
-    agentProfileId: context.agentProfileId,
-    cwd: context.cwd ?? ''
-  } : {})
-)
-
+// Remote-access subsystem (iOS control client). Packaged builds start it against
+// the official public relay; development remains opt-in and SCRY_REMOTE_HOST=0
+// is an explicit kill switch. The relay only sees opaque inner-mTLS bytes.
 let remoteHostService: RemoteHostService | null = null
 const remoteAttention = createRemoteAttentionTracker((keys) => dockBadge.setRemote(keys))
 const remoteConnections = createRemoteConnections({

@@ -1,5 +1,4 @@
-import type { BrowserWindow } from 'electron'
-import { app } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider, NormalizedAgentStartRequest, AgentQuestionRequest, AgentPermissionMode, AgentIntervention } from '../../shared/runtime'
@@ -21,6 +20,7 @@ import { openProviderEventWriter } from '../provider-event-log'
 import { createRunProvider } from './run-provider'
 import { cancelGitTurnDiff } from '../git'
 import { authorizedMcpExecution } from './trust'
+import { storageUserDataDir } from '../storage-paths'
 
 type StartRuns = { get: (runId: string) => { control: RunControl } | undefined; register: (state: ActiveRun, control: RunControl, options?: { focus?: boolean }) => void }
 type StartSourceControl = { admitRun: (cwd: string | undefined, callback: () => void) => Promise<void> }
@@ -35,7 +35,7 @@ export type RunStartupDeps = {
   managedInputTextHash?: string; displayPrompt: string; handle: StartHandle; steering: RunSteering
   userQuestionBroker: UserQuestionBroker; publishSessionId: (sessionId: string | undefined) => void; emit: (event: TraceEvent) => void
   runState: ActiveRun; ingestion: LiveTraceIngestion; firstTracePerf: PerformanceTrace; firstTextPerf: PerformanceTrace
-  mainEventId: (prefix: string, runId: string) => string; isRemoteRun: boolean; permissionModeOverride?: AgentPermissionMode
+  mainEventId: (prefix: string, runId: string) => string; isRemoteRun: boolean; appSemantics: boolean; permissionModeOverride?: AgentPermissionMode
   mcpExecutionSnapshot: McpExecutionSnapshot | null; conversationStore: () => ConversationStore; catalogCwd: string
   assertLegacyConversationWriteAllowed: (scope: NativeSessionScope) => Promise<void>
   publishQuestionOpened: (request: AgentQuestionRequest) => void
@@ -48,9 +48,20 @@ export type RunStartupDeps = {
   remoteRunIds: Set<string>; remoteRunLedgerIds: Map<string, string>
   deleteRunAttachments: (userDataDir: string, runId: string) => void; turnDiffCapture: Promise<GitTurnDiffCapture>; sessionBaselineReady: Promise<unknown>
   startPerf: PerformanceTrace; dockBadge: { view: (key: string, focused: boolean) => void }; scopedSessionKey: (id: string) => string
-  getWindow: () => BrowserWindow | null; boundedLiveRun: (run: ActiveRun) => ActiveRun
+  renderer: RunRendererSink; windowCanReceive: boolean; boundedLiveRun: (run: ActiveRun) => ActiveRun
   releaseSessionBaseline?: () => void; interruptedState: { value: boolean }
 }
+/**
+ * Where a Provider question is answered. The App's own run asks in its window, but a
+ * daemon has no window: for a run it executes, the question travels through the ledger
+ * and whoever submits the run answers it - even when the grant is the App's own local
+ * one. The window stays the only option when no ledger seam exists at all.
+ */
+export function questionsGoToWindow(input: { appSemantics: boolean; windowCanReceive: boolean; hasLedgerInput: boolean }): boolean {
+  if (!input.appSemantics) return false
+  return input.windowCanReceive || !input.hasLedgerInput
+}
+
 export function startProviderAfterBaseline<T>(deps: { turnDiffCapture: Promise<unknown>; sessionBaselineReady: Promise<unknown>; markReady: () => void; runProvider: () => Promise<T> }): Promise<T> {
   return Promise.all([deps.turnDiffCapture, deps.sessionBaselineReady]).then(() => {
     deps.markReady()
@@ -88,6 +99,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     ingestion,
     firstTracePerf,
     firstTextPerf,
+    windowCanReceive,
     mainEventId,
     isRemoteRun,
     mcpExecutionSnapshot,
@@ -116,12 +128,13 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     startPerf,
     dockBadge,
     scopedSessionKey,
-    getWindow,
+    renderer,
     boundedLiveRun,
     releaseSessionBaseline,
     interruptedState,
     canonicalLifecycle,
-    assertLegacyConversationWriteAllowed
+    assertLegacyConversationWriteAllowed,
+    appSemantics
   } = deps
   let interrupted = interruptedState.value
   const eventLog = openProviderEventWriter(`${providerId}-${runId}`)
@@ -138,7 +151,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
   if (options.stopSignal && !options.stopSignal.aborted) options.stopSignal.addEventListener('abort', requestRemoteStop)
   let observedProviderStartedAt: string | undefined
   const runProvider = createRunProvider({
-    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: async (request, signal) => isRemoteRun && options.requestUserInput ? options.requestUserInput(request, signal) : userQuestionBroker.request(request, signal), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, isRemoteRun, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
+    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: options.requestUserInput ?? (async (request, signal) => userQuestionBroker.request(request, signal)), askWindow: questionsGoToWindow({ appSemantics, windowCanReceive, hasLedgerInput: Boolean(options.requestUserInput) }), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
   })
 
   let resolveSettled: (() => void) | undefined
@@ -200,16 +213,16 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     }
     releaseSessionBaseline?.()
     try { cleanupProvisional() } catch { /* preserve the original registration error */ }
-    deleteRunAttachments(app.getPath('userData'), runId)
+    deleteRunAttachments(storageUserDataDir(), runId)
     try { await cancelGitTurnDiff(await turnDiffCapture) } catch { /* preserve the original registration error */ }
     throw error
   }
   startPerf.mark('run_registered')
   firstTextPerf.mark('run_registered')
-  if (!isRemoteRun && !managedConversation && !options.workspaceAdmission) dockBadge.view(scopedSessionKey(resume ?? runId), Boolean(getWindow()?.isFocused()))
+  if (!isRemoteRun && !managedConversation && !options.workspaceAdmission) dockBadge.view(scopedSessionKey(resume ?? runId), renderer.isFocused())
   if (!isRemoteRun && !managedConversation && !options.workspaceAdmission) {
     try {
-      getWindow()?.webContents.send('agent:focusedRun', boundedLiveRun(runState))
+      renderer.send('agent:focusedRun', boundedLiveRun(runState))
     } catch (error) {
       console.warn('[scry] focused run renderer notification failed:', runId, error)
     }

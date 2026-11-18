@@ -1,42 +1,17 @@
-import { app } from 'electron'
+// Admin billing sync and fixture import. Writes ledger rows, then re-reads the
+// projection from db-billing-state.ts so both paths share one definition of state.
+// P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
+// 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
+// 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { maskSecrets } from '../shared/trace'
-import {
-  BILLING_AUDIT_LOG_COLS,
-  BILLING_RETENTION_POLICY_COLS,
-  CHARGEBACK_ENTRY_COLS,
-  CONTRACT_PRICE_COLS,
-  GATEWAY_POLICY_COLS,
-  MODEL_PRICE_VERSION_COLS,
-  PROVIDER_RAW_USAGE_COLS,
-  TEAM_LABEL_COLS,
-  USAGE_LEDGER_COLS,
-  sqlInsert
-} from './span-ledger'
+import { PROVIDER_RAW_USAGE_COLS, USAGE_LEDGER_COLS, MODEL_PRICE_VERSION_COLS, TEAM_LABEL_COLS, GATEWAY_POLICY_COLS, BILLING_AUDIT_LOG_COLS, BILLING_RETENTION_POLICY_COLS, CONTRACT_PRICE_COLS, CHARGEBACK_ENTRY_COLS, sqlInsert } from './span-ledger'
 import { fetchAnthropicAdminUsageAndCosts, fetchOpenAiAdminUsageAndCosts, fetchQoderUsageAndCosts, type AdminFetchResult } from './billing-admin'
 import { billingRowsFromAnthropicGatewayPayload } from './billing-ledger'
 import type { BillingFixtureImportResult, BillingProvider, BillingSyncResult } from '../shared/billing'
-import { billingEnvProvider, db, invalidateQueryCaches } from './db-state'
-import { billingStateQuery } from './db-billing-state'
-
-function safeJson(v: unknown): string {
-  const scrub = (input: unknown): unknown => {
-    if (typeof input === 'string') return maskSecrets(input)
-    if (Array.isArray(input)) return input.map(scrub)
-    if (input && typeof input === 'object') return Object.fromEntries(Object.entries(input).map(([k, val]) => [k, scrub(val)]))
-    return input
-  }
-  return JSON.stringify(scrub(v ?? {}))
-}
-
-export const UPSERT_BILLING_SYNC_STATE_SQL = `INSERT INTO billing_sync_state (
-  provider, last_sync_ts, last_error, updated_ts
-) VALUES (?, ?, ?, ?)
-ON CONFLICT(provider) DO UPDATE SET
-  last_sync_ts=COALESCE(excluded.last_sync_ts, billing_sync_state.last_sync_ts),
-  last_error=excluded.last_error,
-  updated_ts=excluded.updated_ts`
+import { billingEnvProvider, db, invalidateQueryCaches } from './db-connection'
+import { billingStateQuery, UPSERT_BILLING_SYNC_STATE_SQL, safeJson } from './db-billing-state'
+import { storageAppPath } from './storage-paths'
 
 export async function syncBillingAdmin(): Promise<BillingSyncResult> {
   if (!db) return { ok: false, rowsImported: 0, ledgerRowsImported: 0, error: 'sqlite unavailable', state: billingStateQuery() }
@@ -126,7 +101,7 @@ export function importBillingFixture(): BillingFixtureImportResult {
   const fixture = 'fixtures/billing/anthropic-gateway-response.json'
   if (!db) return { ok: false, fixture, rowsImported: 0, ledgerRowsImported: 0, error: 'sqlite unavailable', state: billingStateQuery() }
   try {
-    const fp = join(app.getAppPath(), fixture)
+    const fp = join(storageAppPath(), fixture)
     if (!existsSync(fp)) return { ok: false, fixture, rowsImported: 0, ledgerRowsImported: 0, error: 'fixture missing', state: billingStateQuery() }
     const json = JSON.parse(readFileSync(fp, 'utf8')) as {
       responses?: Record<string, unknown>[]

@@ -1,5 +1,3 @@
-import { historyProfileSelection, historyScopeSelection } from './remote-gateway'
-
 // Wire-level constants and limits of the phone-facing inner-mTLS protocol,
 // shared by the host, its connection handler and its request dispatch.
 
@@ -34,18 +32,4 @@ export const MAX_MUX_INFLIGHT = 32
 
 export function isMuxId(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-}
-
-// `history` joins one opened session's version to the liveRuns long-poll.
-// Returns undefined when absent and false when malformed.
-export function parseLiveRunsHistory(value: unknown): { query: { providerId: string; cwd: string; externalSessionId: string; historyScope: 'session' | 'profile'; agentProfileId?: string | null }; known?: string } | undefined | false {
-  if (value === undefined) return undefined
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const h = value as Record<string, unknown>
-  const text = (field: unknown, max: number): field is string => typeof field === 'string' && field.length > 0 && field.length <= max
-  if (!text(h.providerId, 128) || !text(h.cwd, 4096) || !text(h.externalSessionId, 256)) return false
-  if (h.known !== undefined && !text(h.known, 512)) return false
-  const scope = historyScopeSelection(h).historyScope ?? 'profile'
-  const profile = scope === 'profile' ? historyProfileSelection(h, true) : historyProfileSelection(h)
-  return { query: { providerId: h.providerId, cwd: h.cwd, externalSessionId: h.externalSessionId, historyScope: scope, ...profile }, ...(h.known !== undefined ? { known: h.known as string } : {}) }
 }

@@ -1,5 +1,6 @@
-import type { BrowserWindow } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
+import type { AgentDataUpdated } from '../../shared/runtime'
+import { installDaemonConversationSend } from './conversation-daemon-send'
 import type { ProviderContext } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
@@ -7,8 +8,8 @@ import type { ConversationService } from '../conversation-service'
 import type { ActiveRun } from '../../shared/trace'
 import type { ContextAdmission } from '../context-admission'
 import { parseConversationTarget } from '../conversation-request'
-import { parseSideChatCreate, parseSideChatListRequest, parseSideChatSource } from '../conversation-request'
-import type { SideChatSource } from '../../shared/conversation'
+import { registerSideChatChannels } from './conversation-side-chat-channels'
+import { daemonModeEnabled } from '../daemon-channel-gate'
 import { parseConversationLegacySource, prepareConversationAdoption } from '../conversation-adoption'
 import { deleteConversationHistory } from '../conversation-history'
 import { registerConversationDeletionHandlers } from './conversation-delete'
@@ -16,8 +17,12 @@ import { resolveSessionRunIds } from '../db'
 import type { DockBadgeState } from '../dock-badge'
 import { conversationAttentionKey, sessionAttentionKey } from '../../shared/session-attention'
 
-export interface ConversationBootstrapDependencies {
-  handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
+// The conversation channels run in Electron main for the in-process App and, as local
+// ops, in the daemon for an App whose runs it owns (B4-L4). Both build this one table;
+// only how a data change is announced differs (`publishDataUpdated`).
+export type ConversationChannelListener = (event: unknown, ...args: never[]) => unknown
+
+export interface ConversationTableDependencies {
   resolveKnownProjectDirectory: (cwd: string) => string
   providerContextKey: (providerId: ProviderContext['providerId'], cwd: string, agentProfileId?: string) => string
   contextAdmission: Pick<ContextAdmission, 'run' | 'runMany'>
@@ -33,7 +38,7 @@ export interface ConversationBootstrapDependencies {
   adoptingSessionKeys: Set<string>
   conversationService: () => ConversationService
   invalidateSessionHistoryLoad: (reason: string) => void
-  getWindow: () => BrowserWindow | null
+  publishDataUpdated: (event: AgentDataUpdated) => void
   deleteOneSession: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<{ ok: boolean; deleted: string[]; retained: string[]; failed: Array<{ store: string; error: string }>; reason?: string }>
   resolveSessionRunIds: typeof resolveSessionRunIds
   deleteConversationHistory: typeof deleteConversationHistory
@@ -41,8 +46,11 @@ export interface ConversationBootstrapDependencies {
   dockBadge: Pick<DockBadgeState, 'adopt'>
 }
 
-export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
-  const { handleTrusted, resolveKnownProjectDirectory, providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore, getRuns, providerRegistry, deletingSessions, adoptingSessionKeys, conversationService, invalidateSessionHistoryLoad, getWindow, deleteOneSession, resolveSessionRunIds, deleteConversationHistory, appUserDataDir, providerSessionKey, assertLegacyConversationWriteAllowed, rememberProject } = deps
+export function conversationChannelTable(deps: ConversationTableDependencies) {
+  const handlers: Record<string, ConversationChannelListener> = {}
+  // Collect instead of registering: main registers the table as IPC, the daemon serves it.
+  const handle = (channel: string, listener: (event: unknown, ...args: any[]) => unknown): void => { handlers[channel] = listener }
+  const { resolveKnownProjectDirectory, providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore, getRuns, providerRegistry, deletingSessions, adoptingSessionKeys, conversationService, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory, appUserDataDir, providerSessionKey, assertLegacyConversationWriteAllowed, rememberProject } = deps
   async function adoptLegacyConversation(input: unknown, fingerprint?: string, requireHandoff = false) {
     const source = parseConversationLegacySource(input)
     source.cwd = resolveKnownProjectDirectory(source.cwd)
@@ -89,19 +97,19 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
             cwd: source.cwd, sessionId }), conversationAttentionKey(conversation.id))
         }
         invalidateSessionHistoryLoad('session adopted into logical conversation')
-        getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
+        publishDataUpdated({ kind: 'conversation_changed', conversationId: conversation.id })
         return (await conversationService().list(source.cwd)).find(item => item.id === conversation.id)!
       } finally { for (const key of reservations) adoptingSessionKeys.delete(key) }
     })
   }
-  handleTrusted('conversation:fork', async (_event, request: unknown) => {
+  handle('conversation:fork', async (_event, request: unknown) => {
     await getStartupManagedRecovery()
     const result = await conversationService().fork(request)
     invalidateSessionHistoryLoad('logical conversation fork')
-    getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: result.id })
+    publishDataUpdated({ kind: 'conversation_changed', conversationId: result.id })
     return result
   })
-  handleTrusted('conversation:previewAdoption', async (_event, input: unknown, target?: unknown) => {
+  handle('conversation:previewAdoption', async (_event, input: unknown, target?: unknown) => {
     const source = parseConversationLegacySource(input)
     source.cwd = resolveKnownProjectDirectory(source.cwd)
     if (target !== undefined) {
@@ -115,16 +123,18 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
     }
     return adoptLegacyConversation(source, undefined, target !== undefined)
   })
-  handleTrusted('conversation:adopt', (_event, source: unknown, fingerprint: unknown) => {
+  handle('conversation:adopt', (_event, source: unknown, fingerprint: unknown) => {
     if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
     return adoptLegacyConversation(source, fingerprint)
   })
-  const { prepareConversationDeletion, sideChatCascade } = registerConversationDeletionHandlers({
-    handleTrusted, providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
-    getRuns, invalidateSessionHistoryLoad, getWindow, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
+  // Deletion (with its side-chat cascade) is registered through the same collecting
+  // `handle`, so main and the daemon serve it alike.
+  const { prepareConversationDeletion, sideChatCascade } = registerConversationDeletionHandlers(handle, {
+    providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
+    getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
     appUserDataDir
   })
-  handleTrusted('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
+  handle('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
     if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')
     if (change && typeof change === 'object' && 'kind' in change && change.kind === 'archive') {
       const conversation = await conversationStore().read(id)
@@ -134,116 +144,59 @@ export function registerConversationHandlers(deps: ConversationBootstrapDependen
       }
     }
     const result = await conversationService().update(id, revision, change)
-    getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: id })
+    publishDataUpdated({ kind: 'conversation_changed', conversationId: id })
     return result
   })
-  handleTrusted('conversation:create', async (_event, cwd: unknown) => {
+  handle('conversation:create', async (_event, cwd: unknown) => {
     if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')
     const resolved = resolveKnownProjectDirectory(cwd)
     rememberProject(resolved)
     const conversation = await conversationService().create(resolved)
-    getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: conversation.id })
+    publishDataUpdated({ kind: 'conversation_changed', conversationId: conversation.id })
     return conversation
   })
-  handleTrusted('conversation:list', (_event, cwd: unknown) => {
+  handle('conversation:list', (_event, cwd: unknown) => {
     if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('统一对话工作区无效')
     return conversationService().list(resolveKnownProjectDirectory(cwd))
   })
-  handleTrusted('conversation:read', (_event, id: unknown, beforeOrdinal?: unknown) => {
+  handle('conversation:read', (_event, id: unknown, beforeOrdinal?: unknown) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('统一对话 ID 无效')
     if (beforeOrdinal !== undefined && (!Number.isSafeInteger(beforeOrdinal) || Number(beforeOrdinal) < 0)) {
       throw new Error('统一对话分页游标无效')
     }
     return conversationService().read(id, beforeOrdinal as number | undefined)
   })
-  handleTrusted('conversation:readItem', (_event, id: unknown, ref: unknown) => {
+  handle('conversation:readItem', (_event, id: unknown, ref: unknown) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('统一对话 ID 无效')
     return conversationService().readItem(id, ref)
   })
-  handleTrusted('conversation:preview', (_event, id: unknown, request: unknown) => {
+  handle('conversation:preview', (_event, id: unknown, request: unknown) => {
     if (typeof id !== 'string' || !id.trim() || !request || typeof request !== 'object') throw new Error('统一对话预览请求无效')
     return conversationService().preview(id, request)
   })
-  handleTrusted('conversation:send', (_event, request: unknown) => {
+  handle('conversation:send', (_event, request: unknown) => {
     if (!request || typeof request !== 'object') throw new Error('统一对话发送请求无效')
     return conversationService().send(request)
   })
-  /**
-   * Read-only source authorization. A managed (conversation) source must belong to
-   * an authorized known project; a native source additionally has to match one
-   * registered catalog session for its Provider/profile/cwd inside the service seam.
-   * Listing keeps working from the children's own frozen provenance after the
-   * original source record is gone.
-   */
-  function nativeSourceDeleting(source: Extract<SideChatSource, { kind: 'native-session' }>): boolean {
-    // A delete reserves the alias it was asked for; the source may name either alias.
-    const row = appSessionStore().load().find(session => session.providerId === source.providerId &&
-      session.agentProfileId === source.agentProfileId && session.cwd === source.cwd &&
-      (session.externalSessionId === source.nativeSessionId || session.sessionId === source.nativeSessionId))
-    return [source.nativeSessionId, row?.externalSessionId, row?.sessionId, row?.runId]
-      .some(id => id && deletingSessions.has(providerSessionKey(source.providerId, source.cwd, id, source.agentProfileId)))
-  }
-  async function authorizeSideChatSource(input: unknown, options: { requireSource?: boolean } = {}): Promise<SideChatSource> {
-    const source = parseSideChatSource(input)
-    if (source.kind === 'native-session') return { ...source, cwd: resolveKnownProjectDirectory(source.cwd) }
-    const conversation = await conversationStore().read(source.conversationId)
-    if (!conversation) {
-      if (options.requireSource !== false) throw new Error('侧聊来源对话不存在或已删除；不会自动创建空快照')
-      return source
-    }
-    // A deleted tombstone still names its project; capture itself refuses deletion.
-    resolveKnownProjectDirectory(conversation.cwd)
-    return source
-  }
-  handleTrusted('conversation:previewSideChat', async (_event, source: unknown, options?: unknown) => {
-    await getStartupManagedRecovery()
-    const authorized = await authorizeSideChatSource(source)
-    return conversationService().previewSideChat(authorized, options)
-  })
-  handleTrusted('conversation:createSideChat', async (_event, request: unknown) => {
-    // Shape first, then source authorization: an untyped request never reads the ledger.
-    const parsed = parseSideChatCreate(request)
-    // In flight from before the first wait: a read-back during authorization or startup
-    // recovery must not answer not-found for a create that is about to publish.
-    return conversationService().trackSideChatCreate(parsed.commandId, async () => {
-      const authorized = await authorizeSideChatSource(parsed.source)
-      await getStartupManagedRecovery()
-      const publish = () => conversationService().createSideChat({ ...parsed, source: authorized })
-      // A Provider session's delete reserves itself and counts its side chats under this
-      // admission. Publishing under it too means a child is either counted by that delete
-      // or refused here, never left behind with no source panel to open it from.
-      const created = authorized.kind === 'native-session'
-        ? await contextAdmission.run(providerContextKey(authorized.providerId, authorized.cwd, authorized.agentProfileId), async () => {
-          if (nativeSourceDeleting(authorized)) throw new Error('侧聊来源会话正在删除，不能创建侧边会话')
-          return publish()
-        })
-        : await publish()
-      getWindow()?.webContents.send('agent:dataUpdated', { kind: 'conversation_changed', conversationId: created.id })
-      return created
-    })
-  })
-  handleTrusted('conversation:listSideChats', async (_event, request: unknown) => {
-    const parsed = parseSideChatListRequest(request)
-    await getStartupManagedRecovery()
-    const authorized = await authorizeSideChatSource(parsed.source, { requireSource: false })
-    return conversationService().listSideChats({ ...parsed, source: authorized })
-  })
-  /**
-   * Read-only creation receipt lookup. The source is authorized exactly like list;
-   * the service proves the found child's own provenance belongs to that source. A
-   * not-found answer never creates a child and is not evidence about a lost IPC.
-   */
-  handleTrusted('conversation:findSideChatCommand', async (_event, source: unknown, commandId: unknown) => {
-    if (typeof commandId !== 'string') throw new Error('侧聊创建命令无效')
-    await getStartupManagedRecovery()
-    const authorized = await authorizeSideChatSource(source, { requireSource: false })
-    return conversationService().findSideChatCommand(authorized, commandId)
-  })
-  handleTrusted('conversation:readSideChatSnapshot', (_event, id: unknown, cursor?: unknown) => {
-    if (typeof id !== 'string' || !id.trim()) throw new Error('统一对话 ID 无效')
-    if (cursor !== undefined && typeof cursor !== 'string') throw new Error('侧聊正文游标无效')
-    return conversationService().readSideChatSnapshot(id, cursor)
+  registerSideChatChannels(handle, {
+    resolveKnownProjectDirectory, getStartupManagedRecovery, conversationStore, conversationService, publishDataUpdated,
+    appSessionStore, contextAdmission, providerContextKey, providerSessionKey, deletingSessions
   })
 
+  return { handlers, prepareConversationDeletion, sideChatCascade }
+}
+
+export interface ConversationBootstrapDependencies extends Omit<ConversationTableDependencies, 'publishDataUpdated'> {
+  handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
+  getWindow: () => BrowserWindow | null
+}
+
+export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
+  const publishDataUpdated = (event: AgentDataUpdated): void => { deps.getWindow()?.webContents.send('agent:dataUpdated', event) }
+  // Daemon mode: the daemon's own handlers announce their writes through its event feed
+  // (P3f); the send also needs its run followed here.
+  if (daemonModeEnabled()) installDaemonConversationSend(publishDataUpdated)
+  const { handlers, prepareConversationDeletion, sideChatCascade } = conversationChannelTable({ ...deps, publishDataUpdated })
+  for (const [channel, listener] of Object.entries(handlers)) deps.handleTrusted(channel, listener)
   return { prepareConversationDeletion, sideChatCascade }
 }

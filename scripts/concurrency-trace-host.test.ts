@@ -115,6 +115,35 @@ describe('concurrency trace host component', () => {
     })
   })
 
+  // Production encodes a reply once on the host and decodes it once in the lane client. A
+  // fixture that also round-trips it itself pays that cost twice and inflates every read.
+  it('encodes and decodes each trace reply exactly once on the fake wire', async () => {
+    const runs = new Map<string, ActiveRun>()
+    const run = seeded('run-wk-a')
+    runs.set(run.runId, run)
+    await withHost(1, runs, async (host) => {
+      const peer = host.peers[0]
+      const { stringify, parse } = JSON
+      let encodes = 0
+      let decodes = 0
+      JSON.stringify = ((value: unknown, ...rest: unknown[]) => {
+        if (value !== null && typeof value === 'object' && Object.hasOwn(value, 'desktop')) encodes++
+        return (stringify as (...args: unknown[]) => string)(value, ...rest)
+      }) as typeof JSON.stringify
+      JSON.parse = ((text: string, ...rest: unknown[]) => {
+        if (typeof text === 'string' && /^\{("keepAlive":true,)?"desktop":/.test(text)) decodes++
+        return (parse as (...args: unknown[]) => unknown)(text, ...rest)
+      }) as typeof JSON.parse
+      try {
+        expect((await peer.client.traceDelta(peer.connectionId, CONTEXT, run.runId)).kind).toBe('snapshot')
+      } finally {
+        JSON.stringify = stringify
+        JSON.parse = parse
+      }
+      expect({ encodes, decodes }).toEqual({ encodes: 1, decodes: 1 })
+    })
+  })
+
   it('shares one revision between peers and resets only after a controlled read sequence', async () => {
     const runs = new Map<string, ActiveRun>()
     const target = seeded('run-wk-t')

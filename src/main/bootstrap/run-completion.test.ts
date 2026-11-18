@@ -1,7 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { BrowserWindow } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { normalizeAgentStartRequest } from '../../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
@@ -36,7 +35,9 @@ async function fixture() {
   const store = createAppSessionStore(userData)
   const record = vi.spyOn(store, 'record')
   const send = vi.fn()
-  const getWindow = () => ({ webContents: { send } }) as unknown as BrowserWindow
+  const notifyChanged = vi.fn()
+  // The pipeline only ever sees a sink; the fake window is this test's own capture.
+  const renderer = { send, isFocused: () => false }
   const runState: ActiveRun = { runId: 'run-1', userText: 'question', done: false, items: [] }
   let observedSessionId: string | undefined
   let diffContext = 'run-1'
@@ -50,7 +51,7 @@ async function fixture() {
     sessionDiffBaselines: new SessionDiffBaselineRegistry(),
     sessionByContext: new Map(), sessionAliasesByContext: new Map(), sessionRevisionByContext: new Map(),
     scopedSessionKey: id => id, dockBadge: new DockBadgeState(() => undefined),
-    appSessionStore: () => store, runs: { isViewed: () => false }, getWindow
+    appSessionStore: () => store, runs: { isViewed: () => false, notifyChanged }, renderer
   })
   const timing: TraceEvent = { id: 'timing', runId: runState.runId, ts: new Date(0).toISOString(), kind: 'model', stage: 'text', text: '' }
   const ctx: RunCompletionContext = {
@@ -60,7 +61,7 @@ async function fixture() {
     options: {}, displayPrompt: 'question', attachments: [], runState, managedCommitHookEnv: undefined,
     managedRecorderEnabled: false, canonicalLifecycle: true, isRemoteRun: false,
     recordingRecoveryHint: 'recover', recordingBlockedSessions: new Map(), scopedSessionKey: id => id,
-    getWindow, emit: () => undefined, finishTurnWallTiming: () => timing,
+    renderer, emit: () => undefined, finishTurnWallTiming: () => timing,
     finalizeTurnDiff: async () => undefined, finalizeSessionDiff: async () => undefined,
     persistLlmPerformance: async () => undefined, observedProviderStartedAt: undefined,
     getObservedSessionId: () => observedSessionId, getResume: () => undefined, publishSessionId,
@@ -71,7 +72,7 @@ async function fixture() {
     markTerminalAttention: () => undefined, firstTextPerf: new PerformanceTrace('test.first_text'),
     runs: { isFocused: () => false }
   }
-  return { ctx, store, record, observed, send, publishSessionId }
+  return { ctx, store, record, observed, send, publishSessionId, notifyChanged }
 }
 
 describe('terminal catalog publication', () => {
@@ -120,5 +121,13 @@ describe('terminal catalog publication', () => {
     expect(current.send).toHaveBeenCalledWith('agent:error', expect.objectContaining({ category: 'catalog', message: expect.stringContaining('catalog write failed') }))
     expect(current.store.load()).toEqual([])
     expect(archiveTraceTurn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('session binding signal', () => {
+  it('notifies the live-run readers so a bound session is visible without a tick', async () => {
+    const { publishSessionId, notifyChanged } = await fixture()
+    publishSessionId('native-session-1')
+    expect(notifyChanged).toHaveBeenCalled()
   })
 })

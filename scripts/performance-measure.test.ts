@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { collectorFiles } from './performance-counters.mjs'
-import { compareObservations, filterObservations, parseArgs } from './performance-measure.mjs'
+import { compareObservations, filterObservations, formatValue, parseArgs } from './performance-measure.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const run = promisify(execFile)
@@ -62,4 +62,16 @@ describe('performance measurement tool', () => {
       rmSync(output, { recursive: true, force: true })
     }
   }, 120_000)
+})
+
+describe('performance measure table values', () => {
+  it('prints an unavailable row as its state instead of crashing the compare table', () => {
+    // A metric unavailable on both sides (e.g. SQLite in a runtime with another ABI)
+    // carries the string `unavailable`; the whole compare used to end with
+    // `value.toFixed is not a function` after the measurements were already written.
+    expect(formatValue('unavailable')).toBe('unavailable')
+    expect(formatValue(undefined)).toBe('n/a')
+    expect(formatValue(12)).toBe('12')
+    expect(formatValue(1.234)).toBe('1.23')
+  })
 })

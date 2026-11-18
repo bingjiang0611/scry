@@ -1,10 +1,11 @@
 import { createHash, X509Certificate as NodeCertificate } from 'node:crypto'
 import { isRemoteProviderObservationTime, isRemoteSessionOutcome, type DesktopHostInvitation, type DesktopRemoteConnection, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopSshTarget, type RemoteProviderRef, type RemoteProjectRef, type RemoteSessionRef } from '../../shared/desktop-remote'
-import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, type DesktopAttachmentCapability } from './desktop-attachments'
+import { type DesktopAttachmentCapability } from './desktop-attachments'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { TraceEvent } from '../../shared/trace'
 import type { LoadedSessionTurn } from '../../shared/session-history'
 import type { DesktopDeviceIdentity, DesktopSshTunnel } from './desktop-transport'
+import type { DesktopLaneConnector } from './desktop-lane'
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 export const MAC_RUN_ID = /^(?:remote-)?run-[0-9a-z]{1,24}-[0-9a-z]{1,12}$/
@@ -18,6 +19,9 @@ export const STATE_FILE = 'desktop-client.state'
 export interface DesktopRemoteClientTransportDeps {
   generateIdentity?: () => Promise<DesktopDeviceIdentity>
   openTunnel?: (options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => Promise<DesktopSshTunnel>
+  // One persistent lane channel to the run channel. Absent => the production TLS
+  // lane connector. Tests inject a fake channel instead of TLS.
+  openLane?: DesktopLaneConnector
   tlsRequest?: (options: {
     path: string
     caPEM: string
@@ -51,7 +55,15 @@ export interface StoredConnection {
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
 export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1; managedWorktrees?: 1 }
-export interface RunStatusCursor { cursor: number; scryRunId?: string; externalSessionId?: string; cwd?: string }
+export interface RunStatusCursor {
+  cursor: number
+  scryRunId?: string
+  externalSessionId?: string
+  // The run's own cwd (a worktree start runs outside the submitted project).
+  cwd?: string
+  // Last lifecycle state handed back to the caller, for change detection.
+  state?: string
+}
 
 export function fail(code: string): never { throw new Error(code) }
 export function submitFailure(error: unknown): string {
@@ -158,31 +170,6 @@ export function validateDeleteSessionResult(value: unknown): DeleteSessionResult
   return value as unknown as DeleteSessionResult
 }
 
-export function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopAttachmentCapability } {
-  if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info' || response.desktop.protocol !== 1 ||
-      response.desktop.hostId !== hostId || response.desktop.execution !== 'canonical' ||
-      (response.desktop.providerDiscovery !== undefined && response.desktop.providerDiscovery !== 2) ||
-      (response.desktop.managedWorktrees !== undefined && response.desktop.managedWorktrees !== 1) ||
-      (response.desktop.directorySelection !== undefined && response.desktop.directorySelection !== true) ||
-      (response.desktop.workbench !== undefined && response.desktop.workbench !== 1) ||
-      (response.desktop.sessionActions !== undefined && response.desktop.sessionActions !== true) ||
-      (response.desktop.sessionFork !== undefined && response.desktop.sessionFork !== true) ||
-      (response.desktop.sessionDelete !== undefined && response.desktop.sessionDelete !== true) ||
-      (response.desktop.traceDelta !== undefined && response.desktop.traceDelta !== 1)) fail('desktop_capability_unavailable')
-  const attachmentInfo = response.desktop.attachments
-  if (attachmentInfo !== undefined && (!record(attachmentInfo) || attachmentInfo.transport !== 'chunked' || attachmentInfo.maxBytes !== DESKTOP_ATTACHMENT_MAX_BYTES || attachmentInfo.maxTotalBytes !== DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES || attachmentInfo.maxCount !== DESKTOP_ATTACHMENT_MAX_COUNT || attachmentInfo.chunkBytes !== DESKTOP_ATTACHMENT_CHUNK_BYTES)) fail('desktop_capability_unavailable')
-  return {
-    ...(response.desktop.providerDiscovery === 2 ? { providerDiscovery: 2 as const } : {}),
-    ...(response.desktop.managedWorktrees === 1 ? { managedWorktrees: 1 as const } : {}),
-    ...(response.desktop.directorySelection === true ? { directorySelection: true as const } : {}),
-    ...(response.desktop.workbench === 1 ? { workbench: 1 as const } : {}),
-    ...(response.desktop.sessionActions === true ? { sessionActions: true as const } : {}),
-    ...(response.desktop.sessionFork === true ? { sessionFork: true as const } : {}),
-    ...(response.desktop.sessionDelete === true ? { sessionDelete: true as const } : {}),
-    ...(response.desktop.traceDelta === 1 ? { traceDelta: 1 as const } : {}),
-    ...(attachmentInfo ? { attachments: attachmentInfo as unknown as DesktopAttachmentCapability } : {})
-  }
-}
 
 export function context(value: unknown): DesktopRemoteContext {
   if (!record(value) || !text(value.cwd, 16_384) || !text(value.providerId, 256) ||

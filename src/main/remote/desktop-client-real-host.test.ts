@@ -7,6 +7,8 @@ import { describe, expect, it, vi, type MockInstance } from 'vitest'
 import { ensureHostIdentity } from './host-identity'
 import { desktopTlsRequest, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
+import { connectDesktopLane } from './desktop-lane'
+import { faultyLaneConnector } from './desktop-lane-fixtures'
 import { createHostController } from './host-controller-factory'
 import { InnerMtlsHost } from './inner-mtls-host'
 import type { MacRunView } from './host-controller'
@@ -87,20 +89,21 @@ describe('DesktopRemoteClient over real host TLS', () => {
     let dropSubmitResponse = true
     let dropBeforeDelivery = false
     let lateSubmit: Parameters<typeof tlsRequest>[0] | undefined
-    const tlsRequest = async (options: { path: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal }): Promise<unknown> => {
+    // Pairing stays one-shot; the run channel uses real TLS lanes to the real host.
+    const tlsRequest = async (options: { path?: string; caPEM: string; certPEM: string; keyPEM: string; request: unknown; signal?: AbortSignal }): Promise<unknown> => {
       wire.push(options.request)
-      if (dropBeforeDelivery && (options.request as { op?: string }).op === 'submit') {
-        dropBeforeDelivery = false
-        lateSubmit = options
-        throw new Error('request_delivery_unknown')
-      }
       const address = options.path === `pair:${pairAddress.port}` ? pairAddress : runAddress
-      const response = await desktopTlsRequest({ ...options, path: undefined, host: address.host, port: address.port })
-      if (dropSubmitResponse && (options.request as { op?: string }).op === 'submit') { dropSubmitResponse = false; throw new Error('response_lost_after_delivery') }
-      return response
+      return await desktopTlsRequest({ ...options, path: undefined, host: address.host, port: address.port })
     }
+    const openLane = faultyLaneConnector(endpoint => connectDesktopLane({ ...endpoint, path: undefined, host: runAddress.host, port: runAddress.port }), (request, endpoint) => {
+      wire.push(request)
+      if (request.op !== 'submit') return 'deliver'
+      if (dropBeforeDelivery) { dropBeforeDelivery = false; lateSubmit = { ...endpoint, request }; return 'drop_before_delivery' }
+      if (dropSubmitResponse) { dropSubmitResponse = false; return 'drop_reply' }
+      return 'deliver'
+    })
     const openTunnel = async (): Promise<DesktopSshTunnel> => ({ pairPath: `pair:${pairAddress.port}`, runPath: `run:${runAddress.port}`, alive: true, close: async () => {} })
-    let client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
+    let client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest, openLane })
     try {
       const pairing = await binding.controller.authority.begin()
       const invitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: identity.hostId, anchorPEM: identity.caCertificatePEM, pairPort: pairAddress.port, runPort: runAddress.port, pairingId: pairing.pairingId, secret: pairing.secret, expiresAt: pairing.expiresAt })).toString('base64url')}`
@@ -109,7 +112,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const paired = await client.finishPairing(pending.connection.id)
       expect(paired.state).toBe('paired')
       await client.dispose()
-      client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest })
+      client = new DesktopRemoteClient({ directory: join(directory, 'client'), encrypt, decrypt }, { openTunnel, tlsRequest, openLane })
       await client.restoreConnections()
       await expect(client.list()).resolves.toMatchObject([{ id: pending.connection.id, state: 'connected' }])
       const catalog = await client.catalog(pending.connection.id)
@@ -130,13 +133,13 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(wire.filter((request) => (request as { operation?: string }).operation?.startsWith('pair.'))).toHaveLength(pairingRequests)
       await expect(client.history(pending.connection.id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' })).resolves.toMatchObject({ turns: [] })
       const sessionContext = { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' }
-      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toBeNull()
+      await expect(client.liveRun(pending.connection.id, sessionContext, { waitMs: 0 })).resolves.toBeNull()
       hostUiRuns = [
         { runId: 'run-other-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-other', prompt: 'other', questions: [], stopping: false },
         { runId: 'run-hostui-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-real', prompt: '继续', questions: [], stopping: false }
       ]
-      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
-      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' })).resolves.toBeNull()
+      await expect(client.liveRun(pending.connection.id, sessionContext, { waitMs: 0 })).resolves.toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
+      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' }, { waitMs: 0 })).resolves.toBeNull()
       hostUiRuns = []
       if (!captureFailure) {
         const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
@@ -196,10 +199,16 @@ describe('DesktopRemoteClient over real host TLS', () => {
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
       await expect(client.intents(pending.connection.id)).resolves.toEqual([])
       expect(outputReads).not.toHaveBeenCalled()
-      expect(wire.some((request) => (request as { op?: string }).op === 'watch')).toBe(false)
-      const polls = wire.filter((request): request is { op: string; cursor: number } => (request as { op?: string }).op === 'poll')
-      expect(polls[0]?.cursor).toBe(0)
-      expect(polls[1]?.cursor).toBeGreaterThan(0)
+      // The lifecycle long poll never reads the shadow output spool: that is what
+      // `output: false` buys, and the only watch shape this client may send.
+      const watches = wire.filter((request) => (request as { op?: string }).op === 'watch')
+      expect(watches.length).toBeGreaterThan(0)
+      expect(watches.every((request) => (request as { output?: unknown }).output === false)).toBe(true)
+      // The ledger cursor advances across the long polls: the device never re-reads
+      // events it already applied.
+      const cursors = watches.map((request) => (request as { cursor: number }).cursor)
+      expect(cursors[0]).toBe(0)
+      expect(cursors.at(-1)).toBeGreaterThan(0)
       const grant = binding.controller.authority.inspectLocal().grants[0]
       expect(providerStarts).toBe(1)
       dropBeforeDelivery = true

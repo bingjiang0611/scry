@@ -1,4 +1,5 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
+import { recordRunStage } from '../run-stage-timing'
 import { createHash } from 'node:crypto'
 import type { RunOutputPage } from './run-output-log'
 import { parseRemoteWorkspaceQuery, type RemoteWorkspaceResult } from './remote-workspace'
@@ -70,12 +71,7 @@ export {
   historyProfileSelection
 } from './remote-gateway-types'
 export type { RemoteProjectRef, RemoteControlOption, RemoteModelOption, RemoteProviderRef, RemoteProviderQuery, RemoteSessionRef, RemoteCommandCatalog, RemoteCommandRef } from '../../shared/desktop-remote'
-import {
-  MAX_CATALOG_ITEMS,
-  MAX_CATALOG_PAGE,
-  projectRefs,
-  sessionRefs
-} from './remote-gateway-sanitizers'
+import { projectRefs } from './remote-gateway-sanitizers'
 import {
   readHistory,
   readHistoryPage,
@@ -86,6 +82,7 @@ import {
 } from './remote-gateway-history'
 import { listDirectories, listDirectoriesPage, type RemoteGatewayDirectoryContext } from './remote-gateway-directory'
 import { listCommands, listProviderControls, listProviders, listProvidersFull, type RemoteGatewayCatalogContext } from './remote-gateway-catalog'
+import { listSessions, listSessionsPage, type RemoteGatewaySessionContext } from './remote-gateway-session-list'
 
 // G1 application service: the device-facing surface that a verified remote peer
 // reaches once its inner-mTLS identity is established. It composes the two host
@@ -124,10 +121,9 @@ export function scopedIntentId(peerCertSHA256: string, intentId: string): string
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`
 }
 
-const SESSION_SNAPSHOT_TTL_MS = 30_000
-const MAX_SESSION_SNAPSHOTS = 32
 export class RemoteGateway {
   #authority: DeviceAuthorizer
+  #runScopes = new Map<string, 'local' | 'remote'>()
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
   #directories?: RemoteDirectorySource
@@ -194,12 +190,33 @@ export class RemoteGateway {
   submitIntent(peerCertSHA256: string, input: SubmitIntentInput): SubmitIntentResult {
     this.#authorize(peerCertSHA256)
     const candidateRunId = SessionLedger.newRunId()
+    // Arrival, before anything durable: the segment to `intentDurable` is the ledger's
+    // own cost, not the caller's.
+    recordRunStage(candidateRunId, 'submit')
     const receipt = this.#ledger.recordIntent({
       intentId: scopedIntentId(peerCertSHA256, input.intentId),
       runId: candidateRunId,
       detail: input.detail
     })
-    return { runId: receipt.event.runId, status: receipt.status }
+    // Remember who submitted this run, so the executor can select semantics by grant
+    // scope without re-reading the frame's transport. In-memory on purpose: an intent
+    // dispatched after a restart belongs to nobody the daemon can still prove, so it
+    // falls back to the device semantics below.
+    // `recordIntent` appends and fsyncs synchronously, so its return is the durable
+    // boundary: the segment from `submit` is the ledger's own price.
+    recordRunStage(receipt.event.runId, 'intentDurable')
+    this.#runScopes.set(receipt.event.runId, this.grantScope(peerCertSHA256))
+    return { runId: receipt.event.runId, status: receipt.status, seq: receipt.event.seq }
+  }
+
+  /** The verified grant's scope; unknown becomes the stricter device semantics. */
+  grantScope(peerCertSHA256: string): 'local' | 'remote' {
+    return this.#authority.grantScope?.(peerCertSHA256) === 'local' ? 'local' : 'remote'
+  }
+
+  /** Scope of the peer that submitted this run, for policy that differs by scope. */
+  runScope(runId: string): 'local' | 'remote' {
+    return this.#runScopes.get(runId) ?? 'remote'
   }
 
   // Reconcile a submit whose receipt was lost. Scoped like submitIntent, so a
@@ -289,72 +306,11 @@ export class RemoteGateway {
 
   // Compatibility endpoint for older clients. New clients drain listSessionsPage.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
-    this.#authorize(peerCertSHA256)
-    return sessionRefs((this.#sessions?.list() ?? []).filter(session => !session.archivedAt))
+    return listSessions(this.#sessionContext(), peerCertSHA256)
   }
 
   listSessionsPage(peerCertSHA256: string, input: RemoteSessionPageQuery): RemoteSessionPage {
-    this.#authorize(peerCertSHA256)
-    const cursor = input?.cursor ?? 0
-    const limit = input?.limit ?? MAX_CATALOG_PAGE
-    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new RemoteGatewayError('invalid_session_cursor')
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CATALOG_PAGE) throw new RemoteGatewayError('invalid_session_limit')
-    if (input.includeArchived !== undefined && typeof input.includeArchived !== 'boolean') throw new RemoteGatewayError('invalid_session_query')
-    if (input.known !== undefined && (typeof input.known !== 'string' || !/^[a-f0-9]{64}$/.test(input.known) ||
-        cursor !== 0 || input.snapshot !== undefined)) throw new RemoteGatewayError('invalid_session_query')
-    const filter = input.includeArchived === true
-    const baseKey = `${peerCertSHA256}:${filter}`
-    const now = Date.now()
-    for (const [key, cached] of this.#sessionCatalogs) {
-      if (cached.expiresAt <= now) this.#sessionCatalogs.delete(key)
-    }
-    const revision = this.#sessions?.revision?.() ?? ''
-    let cached: { sessions: readonly RemoteSessionRef[]; snapshot: string; revision: string; expiresAt: number } | undefined
-
-    if (input.snapshot !== undefined) {
-      const key = `${baseKey}:${revision}:${input.snapshot}`
-      cached = this.#sessionCatalogs.get(key)
-      // An expired/evicted token, or one issued under an older source
-      // revision, cannot be rebuilt from current content: doing so could make
-      // a stale cursor appear valid after a concurrent refresh.
-      if (!cached || cached.revision !== revision) throw new RemoteGatewayError('session_snapshot_changed')
-      // Without a source revision there is no second invalidation signal. The
-      // retained object is the honest frozen page walk until TTL/cap eviction;
-      // authorization is still checked above on every request.
-      // Refresh recency without changing the immutable catalog itself.
-      cached.expiresAt = now + SESSION_SNAPSHOT_TTL_MS
-      this.#sessionCatalogs.delete(key)
-      this.#sessionCatalogs.set(key, cached)
-    } else {
-      const sessions = sessionRefs((this.#sessions?.list() ?? []).filter(session => filter || !session.archivedAt), MAX_CATALOG_ITEMS + 1)
-      if (sessions.length > MAX_CATALOG_ITEMS) throw new RemoteGatewayError('session_capacity_exceeded')
-      const immutable = Object.freeze(sessions.map((session) => Object.freeze(session)))
-      const snapshot = createHash('sha256').update(JSON.stringify(immutable)).digest('hex')
-      cached = { sessions: immutable, snapshot, revision, expiresAt: now + SESSION_SNAPSHOT_TTL_MS }
-      const key = `${baseKey}:${revision}:${snapshot}`
-      this.#sessionCatalogs.delete(key)
-      this.#sessionCatalogs.set(key, cached)
-      while (this.#sessionCatalogs.size > MAX_SESSION_SNAPSHOTS) {
-        const oldest = this.#sessionCatalogs.keys().next().value
-        if (oldest === undefined) break
-        this.#sessionCatalogs.delete(oldest)
-      }
-    }
-
-    if (cursor > cached.sessions.length) throw new RemoteGatewayError('invalid_session_cursor')
-    // The phone's copy is the current catalog: confirm it instead of resending
-    // every page. The snapshot is the same content hash a full walk returns.
-    if (input.known !== undefined && input.known === cached.snapshot) {
-      return { sessions: [], cursor: cached.sessions.length, total: cached.sessions.length, hasMore: false, snapshot: cached.snapshot, unchanged: true }
-    }
-    const end = Math.min(cached.sessions.length, cursor + limit)
-    return {
-      sessions: cached.sessions.slice(cursor, end),
-      cursor: end,
-      total: cached.sessions.length,
-      hasMore: end < cached.sessions.length,
-      snapshot: cached.snapshot
-    }
+    return listSessionsPage(this.#sessionContext(), peerCertSHA256, input)
   }
 
   // Small structured first-screen evidence. This deliberately does not call the
@@ -393,6 +349,14 @@ export class RemoteGateway {
     }
   }
 
+  #sessionContext(): RemoteGatewaySessionContext {
+    return {
+      authorize: (peerCertSHA256) => this.#authorize(peerCertSHA256),
+      sessions: this.#sessions,
+      catalogs: this.#sessionCatalogs
+    }
+  }
+
   #directoryContext(): RemoteGatewayDirectoryContext {
     return {
       authorize: (peerCertSHA256) => this.#authorize(peerCertSHA256),
@@ -420,5 +384,13 @@ export class RemoteGateway {
     const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
     if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { chunks: [], cursor }
     return this.#output?.since(input.runId, cursor) ?? { chunks: [], cursor }
+  }
+
+  /** How much output is newer than this cursor, without the text. */
+  async countOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<{ count: number; cursor: number }> {
+    this.#authorize(peerCertSHA256)
+    const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
+    if (typeof input.runId !== 'string' || input.runId.length === 0 || input.runId.length > 128) return { count: 0, cursor }
+    return this.#output?.countSince(input.runId, cursor) ?? { count: 0, cursor }
   }
 }

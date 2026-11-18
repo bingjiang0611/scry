@@ -195,7 +195,7 @@ export function CapabilitiesModal({
             </div>
           ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedSkeletonRows loading={skillsRefreshing} rows={6} meta rowHeight={56} label={LOADING_COPY.skills} /> : (
             <div className="capabilities-empty" role="status">
-              <strong>{LOADING_COPY.skillsSourceEmpty}</strong>
+              <strong>{skillCapability?.data == null ? LOADING_COPY.skillsSourceUnread : LOADING_COPY.skillsSourceEmpty}</strong>
             </div>
           )}
         </div>
@@ -283,7 +283,7 @@ export function CapabilitiesModal({
           }) : mcpUnavailable ? <div className="capabilities-empty" role="status"><strong>{LOADING_COPY.mcpUnavailable}</strong></div>
             : loadingMcpConfig || mcpCapability === null ? <DelayedSkeletonRows loading={loadingMcp} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} /> : (
             <div className="capabilities-empty" role="status">
-              <strong>{LOADING_COPY.mcpSourceEmpty}</strong>
+              <strong>{mcpCapability?.data == null ? LOADING_COPY.mcpSourceUnread : LOADING_COPY.mcpSourceEmpty}</strong>
             </div>
           )}
         </div>

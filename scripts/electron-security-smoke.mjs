@@ -31,34 +31,15 @@ import { prepareSideChatMode } from './side-chat-smoke.mjs'
 import { lostReplyPath, writeConversationFaultEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
+import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
+import { electronSecurityModes } from './electron-security-modes.mjs'
 
-const steerOnly = ['--dev-steer-only', '--steer-only'].includes(process.argv[2])
-const structureOnly = process.argv[2] === '--dev-structure-only'
-const sideChatOnly = process.argv[2] === '--dev-side-chat-only'
-const largeHistoryOnly = process.argv[2] === '--dev-side-chat-large-history-only'
-const sourceControlOnly = ['--dev-source-control-only', '--source-control-only'].includes(process.argv[2])
-const conversationOwnershipOnly = process.argv[2] === '--dev-conversation-ownership-only'
-const unifiedConversationOnly = process.argv[2] === '--dev-unified-conversation-only'
-const performanceOnly = ['--dev-performance-only', '--performance-only'].includes(process.argv[2])
-const nativeHistoryPerformanceOnly = process.argv[2] === '--dev-pi-history-perf-only'
-const nativeHistoryOnly = process.argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
-const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(process.argv[2])
-const sourceFileHistory = fileHistoryOnly ? JSON.parse(readFileSync(resolve(process.argv[3]), 'utf8')) : null
-const devMetaPromptsOnly = process.argv[2] === '--dev-meta-prompts-only'
-const devTerminalOnly = process.argv[2] === '--dev-terminal-only'
-const devQuestionOnly = process.argv[2] === '--dev-question-only'
-const foreground = process.argv.includes('--foreground')
-// Dock attention is cleared only by a genuinely focused native window.
-// Do not silently weaken that acceptance test or activate the app by default.
-if (devQuestionOnly && !foreground) {
-  throw new Error('Dock attention requires native foreground focus; explicitly opt in with --dev-question-only --foreground')
-}
-const devFilesOnly = process.argv[2] === '--dev-files-only'
-const filesOnly = devFilesOnly || process.argv[2] === '--files-only'
-const devApp = process.argv[2] === '--dev-steer-only' || sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || process.argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || process.argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || process.argv[2] === '--dev' || process.argv[2] === '--dev-performance-only'
-const packagedAppArgument = ['--steer-only', '--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(process.argv[2]) ? undefined : process.argv[2]
+const {
+  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument
+} = electronSecurityModes(process.argv)
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
+if (!dev) assertArtifactMatchesSource(appPath)
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
 let child

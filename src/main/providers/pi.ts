@@ -49,6 +49,8 @@ export function createPiAdapter(options: {
     id: 'pi',
     runtimeProvider: 'pi_rpc',
     historicalContext: true,
+    // Pi's catalog probe parks its process in the shared warm pool.
+    catalogWarmPool: true,
     ...(options.historyExtensionPath ? { historyReader: true as const } : {}),
     async continuationKey(context: ProviderContext): Promise<string> {
       const profile = await profileForContext(context)

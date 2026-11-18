@@ -64,7 +64,9 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
     try {
       const pending = await fixture.client.pair({ label: 'Forward failure', ssh, invitation: fixture.invitation })
       await fixture.client.finishPairing(pending.connection.id)
-      fixture.tlsRequest.mockImplementationOnce(async () => {
+      // The run-channel lane replays a lost read once on a fresh tunnel, so a forwarding
+      // failure that is real has to persist across that replay to surface.
+      fixture.tlsRequest.mockImplementation(async () => {
         fixture.setTunnelFailure(failure)
         throw new Error('desktop_tls_request_eof')
       })
@@ -79,7 +81,8 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
       const pending = await fixture.client.pair({ label: 'Stale forward failure', ssh, invitation: fixture.invitation })
       await fixture.client.finishPairing(pending.connection.id)
       fixture.setTunnelFailure('target_unreachable')
-      fixture.tlsRequest.mockRejectedValueOnce(new Error('desktop_tls_request_eof'))
+      // Persistent, so the lane's one replay of the read also ends in the bare EOF.
+      fixture.tlsRequest.mockRejectedValue(new Error('desktop_tls_request_eof'))
       await expect(fixture.client.connect(pending.connection.id)).rejects.toThrow('desktop_tls_request_eof')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })

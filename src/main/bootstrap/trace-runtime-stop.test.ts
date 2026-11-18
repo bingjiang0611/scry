@@ -29,7 +29,7 @@ function control(runId: string, calls: { interrupt: string[]; forceKill: string[
 function runtime() {
   const calls = { interrupt: [] as string[], forceKill: [] as string[] }
   const trace = createTraceRuntime({
-    getWindow: () => null,
+    renderer: { send: () => undefined, isFocused: () => false },
     rendererCanReceive: () => false,
     activeRunSessionKey: (run: ActiveRun) => run.externalSessionId ?? run.runId,
     dockBadge: { markAttention: () => undefined, view: () => undefined, rekey: () => undefined,

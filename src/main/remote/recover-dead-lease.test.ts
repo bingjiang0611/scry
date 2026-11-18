@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { recoverDeadRemoteLease } from './recover-dead-lease'
+import type { ProcessRow } from '../process-diagnostics'
+import { utcRemoteProcessSnapshot } from './remote-lease-owner'
 
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>()
@@ -27,7 +29,8 @@ function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'scry-lease-recovery-'))
   chmodSync(directory, 0o700)
   roots.push(directory)
-  const owner = { pid: process.pid, lease: randomUUID(), createdAt: 0 }
+  const startedAt = utcRemoteProcessSnapshot().get(process.pid)!.startedAt
+  const owner = { pid: process.pid, lease: randomUUID(), createdAt: 0, startedAt, identityKey: `${process.pid}:${startedAt}` }
   const path = join(directory, NAME)
   writeFileSync(path, JSON.stringify(owner), { mode: 0o600 })
   return { directory, path, owner }
@@ -38,13 +41,78 @@ function deadOwner(): void {
 }
 
 describe('trusted remote lease recovery', () => {
-  it('never uses age to steal a live or reused PID, and only probes with signal zero', () => {
+  it('never uses age to steal a live PID, and only probes with signal zero', () => {
     const { directory, path, owner } = fixture()
     const probe = vi.spyOn(process, 'kill')
     expect(() => recoverDeadRemoteLease(directory, NAME)).toThrow('owner_alive')
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(owner)
     expect(readdirSync(directory)).toEqual([NAME])
     expect(probe).toHaveBeenCalledExactlyOnceWith(process.pid, 0)
+  })
+
+  it('recovers a reused PID only when its UTC process identity proves the old owner is gone', () => {
+    const { directory, path, owner } = fixture()
+    const row: ProcessRow = { pid: owner.pid, ppid: 1, status: 'S', startedAt: 'Fri Jan  2 00:00:00 1970', command: 'reused' }
+    const recover = recoverDeadRemoteLease as unknown as typeof recoverDeadRemoteLease &
+      ((directory: string, name: typeof NAME, options: { lister: () => ReadonlyMap<number, ProcessRow> }) => void)
+    recover(directory, NAME, { lister: () => new Map([[owner.pid, row]]) })
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('takes over another live pid whose comparable start identity differs', () => {
+    const { directory, path } = fixture()
+    const pid = 987654
+    const owner = { pid, lease: randomUUID(), createdAt: 0, startedAt: 'Tue Feb  2 00:00:00 2026', identityKey: `${pid}:Tue Feb  2 00:00:00 2026` }
+    writeFileSync(path, JSON.stringify(owner), { mode: 0o600 })
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const row: ProcessRow = {
+      pid,
+      ppid: 1,
+      status: 'S',
+      startedAt: 'Tue Feb  2 00:00:01 2026',
+      identityKey: `${pid}:Tue Feb  2 00:00:01 2026`,
+      command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon'
+    }
+    recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[pid, row]]) })
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('refuses takeover when another live pid has only a legacy identity', () => {
+    const { directory, path } = fixture()
+    const pid = 987654
+    const owner = { pid, lease: randomUUID(), createdAt: 0, startedAt: 'legacy-start', identityKey: `${pid}:legacy-identity` }
+    writeFileSync(path, JSON.stringify(owner), { mode: 0o600 })
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const row: ProcessRow = {
+      pid,
+      ppid: 1,
+      status: 'S',
+      startedAt: 'Tue Feb  2 00:00:01 2026',
+      identityKey: `${pid}:Tue Feb  2 00:00:01 2026`,
+      command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon'
+    }
+    expect(() => recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[pid, row]]) }))
+      .toThrow('identity_unverifiable')
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(owner)
+  })
+
+  it('takes over a stale lease whose pid is this live process with a different identity', () => {
+    const { directory, path } = fixture()
+    // A previous boot left this lease under a pid the OS has since handed to us.
+    const stale = { pid: process.pid, lease: randomUUID(), createdAt: 0, startedAt: 'Mon Jan  1 00:00:00 2026', identityKey: `${process.pid}:Mon Jan  1 00:00:00 2026` }
+    writeFileSync(path, JSON.stringify(stale), { mode: 0o600 })
+    const current = utcRemoteProcessSnapshot().get(process.pid)!
+    const row: ProcessRow = { ...current, command: '/Applications/Scry.app/Contents/MacOS/Scry --daemon' }
+    recoverDeadRemoteLease(directory, NAME, { lister: () => new Map([[process.pid, row]]) })
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('refuses takeover when a live PID identity cannot be determined', () => {
+    const { directory, path, owner } = fixture()
+    const recover = recoverDeadRemoteLease as unknown as typeof recoverDeadRemoteLease &
+      ((directory: string, name: typeof NAME, options: { lister: () => ReadonlyMap<number, ProcessRow> }) => void)
+    expect(() => recover(directory, NAME, { lister: () => new Map() })).toThrow('identity_unverifiable')
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(owner)
   })
 
   it.each(['EPERM', 'EIO'])('preserves the lock when process identity is unconfirmed (%s)', (code) => {

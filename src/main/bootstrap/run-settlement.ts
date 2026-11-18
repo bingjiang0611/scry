@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { ManagedConversationStart } from '../conversation-service'
@@ -79,7 +79,8 @@ export type RunSettlementDeps = {
   settleManagedConversation: (status: 'completed' | 'failed' | 'cancelled' | 'interrupted') => Promise<void>
   interrupted: () => boolean
   flushTraceSend: () => void
-  getWindow: () => BrowserWindow | null
+  // The run's renderer sink (main: its window; the daemon: the App event feed).
+  renderer: Pick<RunRendererSink, 'send'>
   recordingBlockedSessions: Map<string, string>
   scopedSessionKey: (sessionId: string) => string
   recordingRecoveryHint: string
@@ -160,7 +161,7 @@ async function finalizeSettlementFailure(error: unknown, deps: RunSettlementDeps
   }
   if (!deps.runState.done) deps.runState.done = true
   deps.flushTraceSend()
-  deps.getWindow()?.webContents.send('agent:error', {
+  deps.renderer.send('agent:error', {
     runId: deps.runId,
     message: `Scry 处理 Provider 终态失败：${String((error as Error).message)}`,
     category: 'recording',

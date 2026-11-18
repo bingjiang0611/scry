@@ -18,7 +18,9 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   check((await fixture()).localStarts === 0, 'New-session selection started an unrequested local model')
 
   await click('.sb-settings')
-  await click('.settings-rail button:last-child')
+  // By its name, not its position: «后台服务» (B4-S S0-1) now follows «远程访问» in the rail.
+  await read('[...document.querySelectorAll(".settings-rail button")].find(node => node.textContent.trim() === "远程访问").setAttribute("data-remote-settings-tab", "")')
+  await click('[data-remote-settings-tab]')
   await wait('document.querySelector(".remote-pairing")?.textContent.includes("Fixture iPhone")', 'inbound device grant')
   check(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture desktop")'), 'Remote settings omitted saved host')
   check(!(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')

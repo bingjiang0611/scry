@@ -1,5 +1,4 @@
-import { app } from 'electron'
-import type { BrowserWindow } from 'electron'
+import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun, TraceEvent, TurnDiffBaselineOrigin } from '../../shared/trace'
 import type { RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
@@ -30,6 +29,7 @@ import { beginGitTurnDiff, cloneGitTurnDiffCapture } from '../git'
 import type { createAppSessionStore } from '../app-store'
 import type { AppRunStartOptions } from './run-frontdoor'
 import { createLlmPerformanceRecorder } from './run-metrics'
+import { storageUserDataDir } from '../storage-paths'
 
 export type LiveRunState = {
   runId: string
@@ -66,13 +66,13 @@ export async function createLiveRunState(deps: {
   homeDir: string; createRunId: (managed: ManagedConversationStart | undefined, options: AppRunStartOptions) => string
   llmNetworkConfiguration: { read: () => Promise<LlmNetworkConfiguration | undefined> }; sessionDiffBaselines: SessionDiffBaselineRegistry
   appSessionStore: () => ReturnType<typeof createAppSessionStore>; recordingBlockedSessions: Map<string, string>
-  getWindow: () => BrowserWindow | null; publishTrace: (event: TraceEvent) => void; rendererCanReceive: () => boolean
+  renderer: RunRendererSink; publishTrace: (event: TraceEvent) => void; rendererCanReceive: () => boolean
   mainEventId: (prefix: string, runId: string) => string; LIVE_TOOL_CONTENT_POLICY: Parameters<typeof sanitizeToolEvents>[1]
   recordingRecoveryHint: string; userDataDir: string; scopedSessionKey: (id: string) => string
   isRemoteRun: boolean; editSourceSessionId?: string; deleteRunAttachments: (userDataDir: string, runId: string) => void
   sessionBaselineKey: (context: string, sessionId: string) => string
 }) {
-  const { options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey, agentProfileId, managedRecorderEnabled, managedRecorderEnablement, homeDir, createRunId, llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, getWindow, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey } = deps
+  const { options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey, agentProfileId, managedRecorderEnabled, managedRecorderEnablement, homeDir, createRunId, llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, renderer, publishTrace, rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey } = deps
   const runId = createRunId(managedConversation, options)
   if (managedConversation) {
     if (options.runId !== undefined && options.runId !== managedConversation.runId) {
@@ -149,7 +149,7 @@ export async function createLiveRunState(deps: {
       runtimeProvider,
       billingProvider: result?.billingProvider
     })) return
-    getWindow()?.webContents.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
+    renderer.send('agent:dataUpdated', { runId, kind: 'turn_recorded' })
   }
   const cleanupProvisional = (): void => {
     if (resume || runState.externalSessionId) return
@@ -172,7 +172,7 @@ export async function createLiveRunState(deps: {
     // 谁在看这个 run 由 publishTrace 决定：legacy 焦点通道 + 该 run 自己的 scoped 流。
     publish: (event) => publishTrace(event),
     persist: async (event) => {
-      const [persisted] = await persistTraceToolEvents(app.getPath('userData'), catalogCwd, [event], ingestionRecorder)
+      const [persisted] = await persistTraceToolEvents(storageUserDataDir(), catalogCwd, [event], ingestionRecorder)
       return persisted
     },
     // Same-id enrichment only; the helper records the write so the live projection refetches.
@@ -190,7 +190,7 @@ export async function createLiveRunState(deps: {
     if (ev.llmPerformance) runState.llmPerformance = ev.llmPerformance
     if (ev.kind === 'harness' && ev.stage === 'result') {
       appendUsage(
-        app.getPath('userData'),
+        storageUserDataDir(),
         { providerId, agentProfileId, runtimeProvider, cwd, externalSessionId: observedSessionId, runId, source: ev.usageSource },
         ev
       )
@@ -198,7 +198,7 @@ export async function createLiveRunState(deps: {
     const liveEvent = sanitizeToolEvents([ev], LIVE_TOOL_CONTENT_POLICY, 'live_renderer')[0]
     appendCoalescedTrace(runState.items, ev)
     ingestion.enqueue(ev, liveEvent)
-    if (ev.backgroundWork && rendererCanReceive()) getWindow()?.webContents.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
+    if (ev.backgroundWork && (rendererCanReceive() || renderer.acceptsNotices?.())) renderer.send('agent:backgroundWork', { runId, work: ev.backgroundWork })
     // 结构化写入的 tool_result 到达 = 那次写入已经结束（成功或失败都可能已落盘）→ 刷新运行中 Diff
     // 预览。绝不在 tool start 上刷：那时文件通常还没写盘，预览会读到写前状态。
     if (writeCompletions.observe(ev)) notifyDiffChangeRef.current()
@@ -206,7 +206,7 @@ export async function createLiveRunState(deps: {
   }
   const persistLlmPerformance = createLlmPerformanceRecorder({
     runState, request, catalogCwd, runId, providerId, agentProfileId, networkConfiguration,
-    userDataDir: app.getPath('userData')
+    userDataDir: storageUserDataDir()
   })
   emit({
     id: mainEventId('controls', runId),
@@ -248,7 +248,7 @@ export async function createLiveRunState(deps: {
       })
     }
     attachments = prepareRunAttachments(
-      app.getPath('userData'),
+      storageUserDataDir(),
       runId,
       request.attachments,
       cwd ? { providerId, cwd, ...(resume ? { sessionId: resume } : {}) } : undefined
@@ -260,7 +260,7 @@ export async function createLiveRunState(deps: {
       managedInputTextHash = prepared.inputTextHash
     } else runtimePrompt = providerAttachmentPrompt(providerId, runtimePrompt, attachments)
     if (resume) {
-      getWindow()?.webContents.send('agent:session', {
+      renderer.send('agent:session', {
         runId,
         sessionId: resume,
         ...(editSourceSessionId ? { previousSessionId: editSourceSessionId } : {}),
@@ -269,7 +269,7 @@ export async function createLiveRunState(deps: {
         agentProfileId
       })
     } else {
-      getWindow()?.webContents.send('agent:session', {
+      renderer.send('agent:session', {
         runId,
         sessionId: runId,
         ...(editSourceSessionId ? { previousSessionId: editSourceSessionId } : {}),
@@ -280,7 +280,7 @@ export async function createLiveRunState(deps: {
     }
   } catch (error) {
     try { cleanupProvisional() } catch { /* preserve the frontdoor error */ }
-    deleteRunAttachments(app.getPath('userData'), runId)
+    deleteRunAttachments(storageUserDataDir(), runId)
     throw error
   }
   // Git 快照与非 managed Provider 的 recorder 配置读取彼此独立；并行启动，避免把

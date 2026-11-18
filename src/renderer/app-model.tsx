@@ -532,5 +532,6 @@ export function addRunningRunId(previous: ReadonlySet<string>, runId: string, te
 }
 
 export function shouldReloadProjectsForDataUpdate(event: { kind?: string }): boolean {
-  return event.kind === 'session_deleted' || event.kind === 'conversation_changed' || event.kind === 'catalog_recovered'
+  return event.kind === 'session_deleted' || event.kind === 'conversation_changed' || event.kind === 'catalog_recovered' ||
+    event.kind === 'resynchronize'
 }

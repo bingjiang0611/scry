@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { DesktopRemoteForkSessionRequest } from '../../shared/desktop-remote'
 import type { AgentForkSessionResult } from '../../shared/runtime'
@@ -15,6 +14,7 @@ import { readTraceArchiveAsync } from '../transcript-archive'
 import { cloneForkArchiveTurns } from './archive'
 import { resolveCodexHookTrust, resolveOpenCodePluginTrust, authorizedMcpExecution, ensureMcpExecutionAuthorized } from './trust'
 import { canRestartInterruptedLocalOnlySession, type ContextAdmission } from '../context-admission'
+import { storageUserDataDir } from '../storage-paths'
 
 type ForkDeps = {
   userDataDir: string
@@ -175,7 +175,7 @@ export function createForkOperations({
           throw new Error('源 Provider 仍在运行或保存证据，请等待收敛')
         }
         if (!turn.archive) throw new Error('分支轮次缺少已提交归档')
-        const archive = await readTraceArchiveAsync({ userDataDir: app.getPath('userData'), providerId, cwd, sessionId: turn.archive.sessionId })
+        const archive = await readTraceArchiveAsync({ userDataDir: storageUserDataDir(), providerId, cwd, sessionId: turn.archive.sessionId })
         const recorded = archive?.turns.find(item => item.runId === turn.runId)
         if (!recorded?.providerTurnId) throw new Error('归档没有稳定的原生轮次边界')
         const request = {
@@ -212,7 +212,7 @@ export function createForkOperations({
         await getStartupManagedRecovery()
         await assertLegacyConversationWriteAllowed({ providerId, agentProfileId, cwd: catalogCwd, nativeSessionId: request.sourceSessionId })
         const archive = await readTraceArchiveAsync({
-          userDataDir: app.getPath('userData'),
+          userDataDir: storageUserDataDir(),
           providerId,
           cwd: catalogCwd,
           sessionId: request.sourceSessionId

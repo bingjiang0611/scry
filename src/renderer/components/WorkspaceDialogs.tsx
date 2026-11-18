@@ -7,11 +7,14 @@ import { Icon } from './primitives/Icon'
 import { Menu, MenuItem, MenuSeparator } from './primitives/Menu'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { usePresence } from '../hooks/usePresence'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { MOTION } from '../motion'
 import type { ReadOnlyWorkspaceSource, WorkspaceApi } from '../workbench-api'
 import { Button } from './primitives/Button'
 
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable IPC errors (daemon mode names its absences); the checks below still match
+// the handler's own message, which this keeps.
+const errorMessage = (error: unknown): string => ipcErrorMessage(error)
 export function WorkspaceContextMenu({
   context,
   onClose,
@@ -30,7 +33,9 @@ export function WorkspaceContextMenu({
   onStartCreate: (kind: WorkspaceEntryKind, parent?: string) => void
   onMove: (entry: WorkspaceEntry) => void
   onRename: (entry: WorkspaceEntry) => void
-  onDelete: (entry: WorkspaceEntry) => void
+  // Absent when the host does not offer the operation: the item is hidden rather
+  // than shown and then failing.
+  onDelete?: (entry: WorkspaceEntry) => void
   onRefresh: () => void
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -65,8 +70,11 @@ export function WorkspaceContextMenu({
         {context.entry && <>
           <MenuItem className="ctxitem" icon={<Icon name="folder" />} onClick={() => { onMove(context.entry!); close() }}>移动到…</MenuItem>
           <MenuItem className="ctxitem" icon={<Icon name="edit" />} onClick={() => { onRename(context.entry!); close() }}>重命名</MenuItem>
-          <MenuSeparator />
-          <MenuItem danger className="ctxitem del" icon={<Icon name="trash" />} onClick={() => { onDelete(context.entry!); close() }}>移入废纸篓</MenuItem>
+          {/* Absent when the host does not offer deletion: hidden, not shown and then failing. */}
+          {onDelete && <>
+            <MenuSeparator />
+            <MenuItem danger className="ctxitem del" icon={<Icon name="trash" />} onClick={() => { onDelete(context.entry!); close() }}>移入废纸篓</MenuItem>
+          </>}
         </>}
         {!context.entry && <MenuItem className="ctxitem" icon={<Icon name="refresh" />} onClick={() => { onRefresh(); close() }}>刷新</MenuItem>}
       </Menu>

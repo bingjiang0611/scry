@@ -1,85 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createRemoteRunBinding, type RemoteRunBindingDependencies } from './remote-run-binding'
+import { createRemoteRunBinding } from './remote-run-binding'
 import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
-import type { TraceEvent } from '../../shared/trace'
-
-// A controllable fake of providerRegistry.run: it never spawns a CLI. The test
-// drives emit/promise so we can assert the seam's wiring, progress mapping and
-// terminal handling without real Provider cost.
-function fakeRun(script: (req: ProviderRunRequest) => Promise<{ status?: 'completed' | 'failed' | 'cancelled' | 'interrupted' }>) {
-  const calls: ProviderRunRequest[] = []
-  const run = (_providerId: string, request: ProviderRunRequest): ProviderRunHandle => {
-    calls.push(request)
-    return {
-      promise: script(request).then(r => ({ ...r })),
-      interrupt: () => {},
-      forceKill: () => {},
-      forceKillScope: 'run_scoped',
-      getExternalSessionId: () => undefined
-    }
-  }
-  return { run, calls }
-}
-
-const result = (isError: boolean): TraceEvent => ({
-  id: 'r', ts: '2020', runId: 'x', kind: 'harness', stage: 'result', isError,
-  tokensIn: 11, tokensOut: 22, costUsd: 0.5
-})
-const textEvent = (text: string): TraceEvent => ({ id: 't', ts: '2020', runId: 'x', kind: 'model', stage: 'text', text })
-
+import { fakeRun, result, textEvent } from './remote-run-binding-fixtures'
 describe('remote run binding (live seam; no Provider process is spawned)', () => {
-  it('delegates production execution to the canonical App run lifecycle and preserves recording failure', async () => {
-    const startAppRun = vi.fn(async (input: Parameters<NonNullable<import('./remote-run-binding').RemoteRunBindingDependencies['startAppRun']>>[0]) => {
-      input.onTraceEvent(textEvent('canonical output'))
-      return { status: 'completed' as const, recording: 'failed' as const, error: 'archive failed' }
-    })
-    const output = vi.fn()
-    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-1' })
-    await expect(start({
-      runId: 'ledger-canonical', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' },
-      progress: vi.fn(), output
-    })).rejects.toThrow('archive failed')
-    expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({
-      runId: 'canonical-1', ledgerRunId: 'ledger-canonical', request: expect.objectContaining({ prompt: 'go', cwd: '/w' })
-    }))
-    expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'canonical output' })
-  })
-
-  it('passes only the workspace selection to the canonical host lifecycle and rejects it on the legacy executor', async () => {
-    const workspace = { operationId: '11111111-1111-4111-8111-111111111111', intent: {
-      kind: 'current' as const, repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64)
-    } }
-    const startAppRun = vi.fn(async (input: Parameters<NonNullable<RemoteRunBindingDependencies['startAppRun']>>[0]) => {
-      input.onRegistered?.({ cwd: '/managed/topic' })
-      return { status: 'completed' as const, recording: 'committed' as const }
-    })
-    const progress = vi.fn()
-    await createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-worktree' })({
-      runId: 'ledger-worktree', routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },
-      progress, output: vi.fn()
-    })
-    expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
-      cwd: '/source', workspace, expectedExternalSessionId: null
-    }) }))
-    expect(progress).toHaveBeenCalledWith(expect.stringContaining('"cwd":"/managed/topic"'))
-    const { run } = fakeRun(async () => ({ status: 'completed' }))
-    await expect(createRemoteRunBinding({ run })({
-      runId: 'legacy-worktree', routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },
-      progress: vi.fn(), output: vi.fn()
-    })).rejects.toThrow('remote_workspace_requires_canonical_runtime')
-  })
-
-  it('propagates canonical startup rejection as a failed remote lifecycle', async () => {
-    const progress = vi.fn()
-    const startAppRun = vi.fn(async () => { throw new Error('canonical startup failed') })
-    const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-rejected' })
-    await expect(start({
-      runId: 'ledger-rejected', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' },
-      progress, output: () => {}
-    })).rejects.toThrow('canonical startup failed')
-    expect(progress.mock.calls.map(call => JSON.parse(call[0] as string)).at(-1)).toEqual({ event: 'settled', status: 'failed' })
-  })
-
   it('runs the routed provider once and reports a truthful settled lifecycle', async () => {
     const { run, calls } = fakeRun(async (req) => { req.emit(result(false)); return { status: 'completed' } })
     const progress = vi.fn()
@@ -271,4 +194,45 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'codex', prompt: 'go' }, progress: () => {}, output: () => {} }))
       .rejects.toThrow('provider_run_failed: boom detail')
   })
+
+  it('forwards a device stop to the Provider interrupt and settles from the real result', async () => {
+    let interrupted = 0
+    let finish: ((value: { status: 'interrupted' }) => void) | undefined
+    const run = (_providerId: string, _request: ProviderRunRequest): ProviderRunHandle => ({
+      promise: new Promise((resolve) => { finish = resolve }),
+      interrupt: () => { interrupted++; finish?.({ status: 'interrupted' }) },
+      forceKill: () => {}, forceKillScope: 'run_scoped', getExternalSessionId: () => undefined
+    })
+    const progress: string[] = []
+    const stop = new AbortController()
+    const pending = createRemoteRunBinding({ run })({
+      runId: 'ledger-run', routing: { cwd: '/p', providerId: 'claude', prompt: 'go' },
+      progress: (detail) => { if (detail) progress.push(detail) }, output: () => {}, stopSignal: stop.signal
+    })
+    expect(interrupted).toBe(0)
+    stop.abort()
+    await pending
+    expect(interrupted).toBe(1)
+    expect(JSON.parse(progress.at(-1)!)).toEqual({ event: 'settled', status: 'interrupted' })
+  })
+
+  it('fails closed on an empty prompt without ever invoking the provider', async () => {
+    const { run, calls } = fakeRun(async () => ({ status: 'completed' }))
+    const start = createRemoteRunBinding({ run })
+    await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: '   ' }, progress: () => {}, output: () => {} }))
+      .rejects.toThrow('remote_run_missing_prompt')
+    expect(calls).toHaveLength(0)
+  })
+
+  it('fails closed (never auto-approves) when the provider asks an interactive question', async () => {
+    let thrown: unknown
+    const { run } = fakeRun(async (req) => {
+      try { await req.requestUserInput!({} as never, new AbortController().signal) } catch (e) { thrown = e }
+      return { status: 'completed' }
+    })
+    const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-3' })
+    await start({ runId: 'l', routing: { cwd: '/w', providerId: 'claude', prompt: 'q' }, progress: () => {}, output: () => {} })
+    expect((thrown as Error).message).toBe('remote_interactive_input_unsupported')
+  })
+
 })

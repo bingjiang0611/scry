@@ -57,7 +57,7 @@ const createHashAll = (item: TraceEvent): string => createHash('sha256').update(
 
 let seq = 0
 const runtime = () => createTraceRuntime({
-  getWindow: () => null,
+  renderer: { send: () => undefined, isFocused: () => false },
   rendererCanReceive: () => false,
   activeRunSessionKey: () => null,
   dockBadge: new DockBadgeState(() => { }),

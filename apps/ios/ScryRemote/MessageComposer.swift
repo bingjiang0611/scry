@@ -12,6 +12,10 @@ struct MessageComposer: View {
   let placeholder: String
   var disabled = false
   var sendDisabled = false
+  // Why the arrow cannot send right now. Shown next to the composer so a blocked
+  // send never looks like a dead button; nil when sending is possible or the
+  // only missing piece is draft text.
+  var sendBlockReason: String?
   var projectLabel: String?
   var onProject: (() -> Void)?
   var providerId: String?
@@ -82,6 +86,7 @@ struct MessageComposer: View {
               controlCapsule(projectLabel, symbol: Symbol.folder).zoomSource("project", in: selectionTransition)
             }
               .buttonStyle(.plain).disabled(disabled)
+              .accessibilityIdentifier("project-control")
           }
           if let contextLabel { contextControl(contextLabel) }
           Spacer(minLength: 0)
@@ -128,6 +133,8 @@ struct MessageComposer: View {
             sendControl
           }
         }
+        if let sendBlockReason { Text(ConnectionCopy.sendBlocked(sendBlockReason)).font(Typography.meta).foregroundStyle(Palette.bad)
+          .accessibilityIdentifier("send-blocked-reason") }
         if let modelSelectionIssue { Text(modelSelectionIssue).font(Typography.meta).foregroundStyle(Palette.bad) }
         if let attachmentError { Text(attachmentError).font(Typography.meta).foregroundStyle(Palette.bad) }
       }.padding(.horizontal, 10).padding(.bottom, 6)
@@ -292,7 +299,8 @@ struct MessageComposer: View {
         .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(disabled || sendDisabled)
-    .accessibilityLabel(ConnectionCopy.sendMessage)
+    .accessibilityIdentifier("send-button")
+    .accessibilityLabel(sendBlockReason.map(ConnectionCopy.sendBlocked) ?? ConnectionCopy.sendMessage)
   }
 
   private var hasModelControl: Bool {

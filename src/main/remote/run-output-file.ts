@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import {
   closeSync, constants, fstatSync, fsyncSync, ftruncateSync, lstatSync, openSync,
   readSync, realpathSync, unlinkSync, writeSync
 } from 'node:fs'
 import { join } from 'node:path'
 import type { OutputChunk, RunOutputPage, RunOutputStore } from './run-output-log'
+import { createRemoteLeaseOwner } from './remote-lease-owner'
 
 const INDEX_ENTRY_BYTES = 8
 // 16 KiB of control characters can expand sixfold in JSON, plus bounded event metadata.
@@ -97,7 +98,7 @@ export class RunOutputFileStore implements RunOutputStore {
       0o600
     )
     try {
-      writeSync(this.#leaseFd, JSON.stringify({ pid: process.pid, lease: randomUUID(), createdAt: Date.now() }))
+      writeSync(this.#leaseFd, JSON.stringify(createRemoteLeaseOwner()))
       fsyncSync(this.#leaseFd)
       this.#syncDirectory()
     } catch (error) {
@@ -171,6 +172,29 @@ export class RunOutputFileStore implements RunOutputStore {
     } finally {
       closeSync(indexFd)
       closeSync(dataFd)
+    }
+  }
+
+  // Count only: the index is a fixed-length entry per committed chunk, so the answer is
+  // its length. The data file is never opened, and its bodies never read or parsed - a
+  // wake is not evidence, the text always comes from the trace.
+  countSince(runId: string, cursor: number): { count: number; cursor: number } {
+    this.#assertLease()
+    const start = Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0
+    const key = keyOf(runId)
+    let indexFd: number
+    try {
+      indexFd = openSync(join(this.#directory, `${key}.idx`), constants.O_RDONLY | constants.O_NOFOLLOW)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      return { count: 0, cursor: start }
+    }
+    try {
+      assertPrivateFile(indexFd)
+      const committed = Math.floor(fstatSync(indexFd).size / INDEX_ENTRY_BYTES)
+      return { count: Math.max(0, committed - start), cursor: Math.max(start, committed) }
+    } finally {
+      closeSync(indexFd)
     }
   }
 

@@ -35,6 +35,14 @@ export class ConversationService {
 
   constructor(private readonly deps: ConversationServiceDeps) {}
 
+  /** The turn's record settled first, then its run left the active set; only now say so. */
+  private settled(conversationId: string, runId: string): void {
+    this.active.delete(runId)
+    try { this.deps.onTurnSettled?.(conversationId) } catch (error) {
+      console.warn('[scry] conversation settle notice failed:', conversationId, error)
+    }
+  }
+
   private async target(cwd: string, request: ConversationTargetRequest): Promise<ConversationTarget> {
     const continuationKey = await this.deps.resolveContinuationKey({
       providerId: request.providerId,
@@ -201,6 +209,6 @@ export class ConversationService {
 
   /** Typed answer of one send: accepted, host-proven not sent, or a thrown unknown. */
   async send(input: unknown): Promise<ConversationSendResult> {
-    return sendConversationMessage({ deps: this.deps, active: this.active }, input)
+    return sendConversationMessage({ deps: this.deps, active: this.active, settled: (conversationId, runId) => this.settled(conversationId, runId) }, input)
   }
 }

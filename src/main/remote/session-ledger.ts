@@ -68,7 +68,8 @@ export interface SessionLedgerDependencies {
   // Called after an event is durably appended and applied. Live observers use it
   // only as a wake-up signal and still read through since(); it never carries
   // lifecycle authority of its own.
-  onEvent?: (event: LedgerEvent) => void
+  // `intentSeq`: where this event's run starts in the ledger, for a reader that never saw it.
+  onEvent?: (event: LedgerEvent, intentSeq?: number) => void
 }
 
 export interface RecordIntentInput {
@@ -126,7 +127,7 @@ export class SessionLedger {
   #maxRuns: number
   #maxEvents: number
   #pageSize: number
-  #onEvent?: (event: LedgerEvent) => void
+  #onEvent?: (event: LedgerEvent, intentSeq?: number) => void
   #runs = new Map<string, RunEntry>()
   #byIntent = new Map<string, string>()
   #events: LedgerEvent[] = []
@@ -281,7 +282,7 @@ export class SessionLedger {
     this.#lastSeq = full.seq
     this.#events.push(full)
     this.#refreshMinCursor()
-    this.#onEvent?.(full)
+    this.#onEvent?.(full, this.#runs.get(full.runId)?.intentSeq)
     return full
   }
 
@@ -342,6 +343,11 @@ export class SessionLedger {
   runState(runId: string): RunLifecycle | undefined {
     this.#assertDeterminate()
     return this.#runs.get(runId)?.lifecycle
+  }
+
+  // Where a run's own evidence starts: nothing about it predates its intent.
+  intentSeq(runId: string): number | undefined {
+    return this.#runs.get(runId)?.intentSeq
   }
 
   // Read-only lookup for a device whose submit receipt was lost: the intent id

@@ -1,5 +1,5 @@
-import type { BrowserWindow } from 'electron'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
+import { recordRunStage, runStageTimingEnabled } from '../run-stage-timing'
 import type { AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
 import { appendCoalescedTrace, consumeTraceMutations, stampProjection, traceMutationState, type TraceMutationState } from '../live-trace'
 import { sanitizeToolEvent, sanitizeToolEvents, toolContentTurnBudget } from '../../core/turn-recorder/tool-content'
@@ -22,10 +22,22 @@ interface ProjectionCacheEntry {
   seenRevision: number
 }
 
+// Everything this module sends to a view goes through a sink, so the run pipeline
+// has no Electron dependency: main owns the window and forwards each channel to it,
+// while the daemon forwards to whatever transport it has.
+export interface RunRendererSink {
+  send: (channel: string, payload: unknown) => void
+  // Whether the owning window has focus; the dock badge only needs this much.
+  isFocused: () => boolean
+  // The daemon's sink: no window takes the trace stream here (the App reads runs itself),
+  // but the run's window notices still travel, on the App event feed (P3f W1).
+  acceptsNotices?: () => boolean
+}
+
 export function createTraceRuntime({
-  getWindow, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId
+  renderer, rendererCanReceive, activeRunSessionKey, dockBadge, mainEventId
 }: {
-  getWindow: () => BrowserWindow | null
+  renderer: RunRendererSink
   rendererCanReceive: () => boolean
   activeRunSessionKey: (run: ActiveRun) => string | null
   dockBadge: DockBadgeState
@@ -39,7 +51,7 @@ export function createTraceRuntime({
     boundedLiveRun: (run) => boundedLiveRun(run),
     onDemandChange: (runId, demanded) => runs.get(runId)?.control.setDiffPreviewDemand?.(demanded),
     canSend: rendererCanReceive,
-    send: (event) => { getWindow()?.webContents.send(RUN_TRACE_CHANNEL, event) },
+    send: (event) => { renderer.send(RUN_TRACE_CHANNEL, event) },
     warn: (message, detail) => console.warn(`[scry] ${message}:`, detail)
   })
 
@@ -51,9 +63,9 @@ export function createTraceRuntime({
       if (run) run.stopState = state
       // 停止进度只属于拥有这个 run 的视图：legacy 广播留在原处，scoped 视图另走自己的订阅。
       runTraces.publishStopState(state)
-      if (!rendererCanReceive()) return
+      if (!rendererCanReceive() && !renderer.acceptsNotices?.()) return
       flushTraceSend()
-      getWindow()?.webContents.send('agent:stopState', state)
+      renderer.send('agent:stopState', state)
     },
     warn: (message, runId, error) => console.warn(`[scry] ${message}:`, runId, error)
   })
@@ -84,13 +96,13 @@ export function createTraceRuntime({
       ]
       const sessionKey = activeRunSessionKey(run)
       if (sessionKey) dockBadge.markAttention(sessionKey, {
-        windowFocused: Boolean(getWindow()?.isFocused()),
+        windowFocused: renderer.isFocused(),
         sessionViewed: run.conversationId ? dockBadge.isViewed(sessionKey) : runs.isViewed(run.runId),
         needsAttention: true
       })
     }
-    getWindow()?.webContents.send('agent:questionAttention', attentionSummary(request.runId, request))
-    if (runs.isFocused(request.runId)) getWindow()?.webContents.send('agent:userQuestion', request)
+    renderer.send('agent:questionAttention', attentionSummary(request.runId, request))
+    if (runs.isFocused(request.runId)) renderer.send('agent:userQuestion', request)
     // 子会话的提问只走它自己的订阅：legacy 通道会被 useAgentSession 在空焦点时认领。
     runTraces.publishQuestion(request)
   }
@@ -119,15 +131,16 @@ export function createTraceRuntime({
       // 问题已经结束（已答/取消）：这个会话不再等用户，未读角标不能继续挂着。
       dockBadge.releaseQuestionAttention(activeRunSessionKey(run), run.pendingQuestions?.length ?? 0)
     }
-    getWindow()?.webContents.send('agent:questionAttention', attentionSummary(runId))
+    renderer.send('agent:questionAttention', attentionSummary(runId))
     if (runs.isFocused(runId)) {
-      getWindow()?.webContents.send('agent:userQuestionClosed', { kind: 'closed', runId, questionId, ...(intervention ? { intervention } : {}) })
+      renderer.send('agent:userQuestionClosed', { kind: 'closed', runId, questionId, ...(intervention ? { intervention } : {}) })
     }
     runTraces.publishQuestionClosed(runId, questionId)
   }
   const userQuestionBroker = new UserQuestionBroker((change: UserQuestionChange) => {
     if (change.kind === 'open') publishQuestionOpened(change.request)
     else publishQuestionClosed(change.runId, change.questionId, change.intervention)
+    runs.notifyChanged()
   })
   // 性能：把 onTrace 逐条 IPC 合批——流式期每 token 一条 IPC（每秒上百）→ 缓冲一批数组发。
   // 保序（FIFO buffer）、不丢（done/error 前 flushTraceSend 强制清空全部）。
@@ -138,10 +151,10 @@ export function createTraceRuntime({
     // 贴近一帧合批：仍把高频 token 合成数组，但把首字/工具状态额外等待从 50ms
     // 降到约一帧。renderer 还会在 requestAnimationFrame 内统一提交 React state。
     flushMs: 16,
-    send: (payload) => getWindow()?.webContents.send('agent:trace', payload),
+    send: (payload) => renderer.send('agent:trace', payload),
     publishHealth: (state) => {
       if (!rendererCanReceive()) return
-      getWindow()?.webContents.send('agent:traceHealth', state)
+      renderer.send('agent:traceHealth', state)
     },
     warn: (message, state) => console.warn(`[scry] ${message}:`, state)
   })
@@ -156,6 +169,9 @@ export function createTraceRuntime({
    * scoped 通道把同一事件交给拥有该 run 的视图；没有人订阅时直接丢弃，不缓冲。
    */
   function publishTrace(ev: TraceEvent): void {
+    // The first token's evidence, at the seam both modes share: daemon runs travel
+    // on to the ledger, in-process runs go to the window, but this line is the same.
+    if (runStageTimingEnabled() && ev.kind === 'model') recordRunStage(ev.runId, 'firstOutput')
     runTraces.route(ev)
     if (runs.isViewed(ev.runId)) queueTrace(ev)
   }
@@ -269,6 +285,9 @@ export function createTraceRuntime({
       forceKillScope: stopping.forceKillScope
     })
     userQuestionBroker.cancelRun(stopping.runId)
+    // Live-run observers (the remote host's long poll) re-read on this signal
+    // instead of discovering the stop on their next tick.
+    runs.notifyChanged()
     return true
   }
 

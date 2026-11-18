@@ -18,6 +18,12 @@ export interface AppRunStartOptions {
   /** Host-only registration signal used by managed remote workspace launch. */
   onRegistered?: (result: { runId: string; externalSessionId?: string; cwd?: string }) => void
   origin?: 'local' | 'remote'
+  /**
+   * Scope of the verified grant that submitted this run. Only meaningful for
+   * `origin: 'remote'` (a submit through the ledger); an in-process App call is
+   * always the App's own grant. Missing means "not proven", never "local".
+   */
+  grantScope?: 'local' | 'remote'
   runId?: string
   stopSignal?: AbortSignal
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
@@ -27,6 +33,12 @@ export interface AppRunStartOptions {
   onSession?: (externalSessionId: string) => void
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
+  /**
+   * A ledger run resolves only at completion. This reports the moment an in-process
+   * start would have answered (registered and admitted), so a daemon conversation send
+   * can answer then, and settle from the error when the run never got that far.
+   */
+  onStarted?: (runId: string) => void
 }
 
 type FrontdoorDeps = {
@@ -40,8 +52,25 @@ type FrontdoorDeps = {
   providerContextKey: (providerId: ProviderId, cwd: string, profile?: string) => string
 }
 
-export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunStartOptions, deps: FrontdoorDeps) {
+/**
+ * Two facts, never one boolean:
+ *   isRemoteRun  - this run arrived through the ledger (transport/ledger behaviour);
+ *   appSemantics - the submitter is the App itself, so the pipeline must take the
+ *                  App's own path (workspace rules, diff preview, recording failure,
+ *                  admission, question routing).
+ * An in-process call is always the App. A submitted run is the App only when the
+ * verified grant says local; a missing scope is not proven, so it stays remote.
+ */
+export function runSemantics(options: { origin?: 'local' | 'remote'; grantScope?: 'local' | 'remote' }): {
+  isRemoteRun: boolean
+  appSemantics: boolean
+} {
   const isRemoteRun = options.origin === 'remote'
+  return { isRemoteRun, appSemantics: !isRemoteRun || options.grantScope === 'local' }
+}
+
+export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunStartOptions, deps: FrontdoorDeps) {
+  const { isRemoteRun, appSemantics } = runSemantics(options)
   const request = normalizeAgentStartRequest(payload)
   if (request.workspace) throw new Error('工作区选择必须先完成首次发送准备，不能绕过准备入口启动')
   const providerId = request.providerId
@@ -64,13 +93,15 @@ export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunS
   const cwd = request.cwd
     ? (options.workspaceAdmission
       ? canonicalExistingDirectory(request.cwd)
-      : isRemoteRun
-        ? deps.resolveRemoteProjectDirectory(request.cwd)
-        : deps.resolveKnownProjectDirectory(request.cwd))
+      : appSemantics
+        ? deps.resolveKnownProjectDirectory(request.cwd)
+        : deps.resolveRemoteProjectDirectory(request.cwd))
     : deps.currentCwd
+  // A reserved workspace (a new worktree) is admitted for App and remote submitters
+  // alike; the start must land exactly where it was reserved.
   if (options.workspaceAdmission && cwd !== options.workspaceAdmission.cwd)
     throw new Error('工作区预留与真实启动目录不一致')
-  if (!isRemoteRun && !options.workspaceAdmission && request.cwd && deps.currentCwd && cwd !== canonicalExistingDirectory(deps.currentCwd)) {
+  if (appSemantics && !options.workspaceAdmission && request.cwd && deps.currentCwd && cwd !== canonicalExistingDirectory(deps.currentCwd)) {
     throw new AgentRuntimeError('发送请求的工作目录与当前授权目录不一致', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -121,5 +152,5 @@ export function prepareRunFrontdoor(payload: AgentStartRequest, options: AppRunS
   const admissionKeys = managedConversation
     ? [admissionKey, `conversation:${managedConversation.conversationId}`]
     : [admissionKey]
-  return { isRemoteRun, request, providerId, agentProfileId, startPerf, firstTracePerf, firstTextPerf, adapter, runtimeProvider, shellEnvReady, cwd, catalogCwd, startLease, managedConversation, admissionKeys, assertSessionNotArchived }
+  return { isRemoteRun, appSemantics, request, providerId, agentProfileId, startPerf, firstTracePerf, firstTextPerf, adapter, runtimeProvider, shellEnvReady, cwd, catalogCwd, startLease, managedConversation, admissionKeys, assertSessionNotArchived }
 }

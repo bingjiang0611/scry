@@ -1,5 +1,3 @@
-import { dialog } from 'electron'
-import type { BrowserWindow } from 'electron'
 import type { DeleteSessionResult, ProviderId } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { NativeSideChatScope, SideChatCascade } from './conversation-delete'
@@ -15,10 +13,11 @@ const failureOf = (error: unknown): Failure[] => [{ store: 'side chats', error: 
  * is asked and deleted before the session itself: if one cannot be deleted, the session
  * keeps its catalog row as the retry handle and nothing is left half deleted around it.
  */
-export function createSessionSideChats({ appSessionStore, sideChatCascade, getWindow }: {
-  appSessionStore: () => ReturnType<typeof createAppSessionStore>
+export function createSessionSideChats({ appSessionStore, sideChatCascade, notifyFailure }: {
+  appSessionStore: () => Pick<ReturnType<typeof createAppSessionStore>, 'load'>
   sideChatCascade: SideChatCascade
-  getWindow: () => BrowserWindow | null
+  /** The caller's way to tell the user (main: a dialog); absent where the caller reports instead. */
+  notifyFailure?: (notice: { message: string; detail: string }) => Promise<void>
 }) {
   /** Read-only. Throws when a side chat is running or unresolved and so cannot be deleted. */
   async function plan(target: { providerId: ProviderId; agentProfileId?: string; cwd: string; externalSessionId: string }):
@@ -39,12 +38,9 @@ export function createSessionSideChats({ appSessionStore, sideChatCascade, getWi
   }
   /** The session was not deleted because of its side chats; say why instead of failing silently. */
   async function kept(failed: Failure[], notify: boolean, base: Pick<DeleteSessionResult, 'deleted' | 'retained'>): Promise<DeleteSessionResult> {
-    if (notify) {
-      const options = { type: 'error' as const, message: '会话未删除：它的侧边会话还不能删除',
-        detail: failed.map(failure => `${failure.store}: ${failure.error}`).join('\n') }
-      const window = getWindow()
-      if (window && !window.isDestroyed()) await dialog.showMessageBox(window, options)
-      else await dialog.showMessageBox(options)
+    if (notify && notifyFailure) {
+      await notifyFailure({ message: '会话未删除：它的侧边会话还不能删除',
+        detail: failed.map(failure => `${failure.store}: ${failure.error}`).join('\n') })
     }
     return { ok: false, reason: 'partial_failure', ...base, failed }
   }

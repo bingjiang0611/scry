@@ -140,7 +140,7 @@ final class MuxHandlerTests: XCTestCase {
     handler.cancel(id: 1)
     XCTAssertEqual(phase(stream), "cancelled")
     let cancel = try XCTUnwrap(channel.readOutbound(as: ByteBuffer.self))
-    XCTAssertEqual(String(buffer: cancel), "{\"keepAlive\":true,\"id\":2,\"op\":\"cancel\",\"target\":1}\n")
+    XCTAssertEqual(String(buffer: cancel), "{\"keepAlive\":true,\"id\":2,\"protocol\":2,\"op\":\"cancel\",\"target\":1}\n")
     // The host's late items and its cancel reply are dropped by id.
     _ = try channel.writeInbound(ByteBuffer(string: "{\"keepAlive\":true,\"id\":1,\"more\":true}\n{\"keepAlive\":true,\"id\":2,\"cancelled\":true}\n"))
     XCTAssertTrue(handler.acceptsRequests.value)
@@ -156,7 +156,7 @@ final class MuxHandlerTests: XCTestCase {
     XCTAssertEqual(phase(stream), "lost")
     // Without this the host keeps the stream (and its slot) while the phone resubscribes.
     let cancel = try XCTUnwrap(channel.readOutbound(as: ByteBuffer.self))
-    XCTAssertEqual(String(buffer: cancel), "{\"keepAlive\":true,\"id\":2,\"op\":\"cancel\",\"target\":1}\n")
+    XCTAssertEqual(String(buffer: cancel), "{\"keepAlive\":true,\"id\":2,\"protocol\":2,\"op\":\"cancel\",\"target\":1}\n")
     XCTAssertTrue(handler.acceptsRequests.value)
   }
 

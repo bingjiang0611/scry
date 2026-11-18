@@ -5,6 +5,7 @@ import {
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { PairingPersistence, PairingState } from './pairing'
+import { createRemoteLeaseOwner } from './remote-lease-owner'
 
 const MAX_BYTES = 2 * 1024 * 1024
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -28,7 +29,7 @@ export class PairingFileStore implements PairingPersistence {
     this.lock = join(this.directory, 'pairing-state.lock')
     this.leaseFd = openSync(this.lock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
     try {
-      writeFileSync(this.leaseFd, JSON.stringify({ pid: process.pid, lease: randomUUID(), createdAt: Date.now() }))
+      writeFileSync(this.leaseFd, JSON.stringify(createRemoteLeaseOwner()))
       fsyncSync(this.leaseFd)
       this.syncDirectory()
     } catch (error) {

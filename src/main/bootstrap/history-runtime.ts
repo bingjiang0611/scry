@@ -6,6 +6,19 @@ import type { SessionHistoryPage } from '../session-history'
 import { registerLoadSessionHandler, type LoadSessionDependencies } from './history-load'
 import { registerOlderHistoryHandler, type SessionHistoryCache } from './history-older'
 import { registerTurnTerminalEvidenceHandler } from './turn-terminal-evidence'
+import { applySessionSelection, type SessionSelection, type SessionSelectionTarget } from './session-selection'
+import { daemonModeEnabled, installDaemonChannelResultHandler } from '../daemon-channel-gate'
+
+type HistoryInternals = 'getLoadSessionAbortController' | 'setLoadSessionAbortController' |
+  'nextLoadSessionRevision' | 'getLoadSessionRevision' | 'getSessionHistoryCache' | 'setSessionHistoryCache' |
+  'pageWithHookCommands' | 'markIncompleteArchivePage' | 'sessionHistoryCacheKey' | 'applySelection'
+
+// Main applies the window selection itself; the daemon passes its own `applySelection`
+// (a no-op) and reports the selection with the page for the App to apply.
+export type HistoryRegisterDependencies = Omit<LoadSessionDependencies, HistoryInternals> & (
+  | { applySelection: LoadSessionDependencies['applySelection'] }
+  | ({ applySelection?: undefined; getWindow: () => { isFocused: () => boolean } | null } & Omit<SessionSelectionTarget, 'isWindowFocused' | 'providerContextKey'>)
+)
 
 // Hook 命令附写只对当前页的事件做，而不是对整个会话的全部事件做。
 function pageWithHookCommands(
@@ -52,12 +65,21 @@ export function createHistoryRuntime() {
     sessionHistoryCache = null
   }
 
-  function register(deps: Omit<LoadSessionDependencies,
-    'getLoadSessionAbortController' | 'setLoadSessionAbortController' |
-    'nextLoadSessionRevision' | 'getLoadSessionRevision' |
-    'getSessionHistoryCache' | 'setSessionHistoryCache' |
-    'pageWithHookCommands' | 'markIncompleteArchivePage' | 'sessionHistoryCacheKey'
-  >): void {
+  function register(deps: HistoryRegisterDependencies): void {
+    const applySelection = deps.applySelection ?? ((selection) => applySessionSelection({
+      ...deps, providerContextKey: deps.providerContextKey, isWindowFocused: () => Boolean(deps.getWindow()?.isFocused())
+    }, selection))
+    // Daemon mode: the daemon loads the page and reports the selection; this window applies
+    // it here, exactly as the in-process loader would have, and the renderer gets the page.
+    if (!deps.applySelection && daemonModeEnabled()) {
+      installDaemonChannelResultHandler('agent:loadSession', (value) => {
+        if (value === null) return null
+        const loaded = value as { page?: unknown; selection?: SessionSelection } | undefined
+        if (!loaded || typeof loaded !== 'object' || loaded.page === undefined || !loaded.selection) throw new Error('invalid_daemon_response')
+        applySelection(loaded.selection)
+        return loaded.page
+      })
+    }
     const sessionHistoryCacheKey = (payload: ProviderContext, cwd: string): string =>
       `${deps.providerContextKey(payload.providerId, cwd, payload.agentProfileId)}\u0000${payload.externalSessionId ?? ''}`
     const shared = {
@@ -67,7 +89,7 @@ export function createHistoryRuntime() {
       pageWithHookCommands, markIncompleteArchivePage, sessionHistoryCacheKey
     }
     registerLoadSessionHandler({
-      ...deps, ...shared,
+      ...deps, ...shared, applySelection,
       getLoadSessionAbortController: () => loadSessionAbortController,
       setLoadSessionAbortController: (controller) => { loadSessionAbortController = controller },
       nextLoadSessionRevision: () => ++loadSessionRevision

@@ -36,7 +36,7 @@ import {
   isAgentTerminalStatus,
   observedAgentStatus
 } from './qoder-hooks'
-import { livePrompt, qoderExecutable, qoderOptions, signalProcessTree } from './qoder-launch'
+import { livePrompt, QoderStderrTail, qoderExecutable, qoderOptions, signalProcessTree } from './qoder-launch'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
@@ -76,6 +76,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     rejectUnexpectedExit = reject
   })
   let providerFailureSeen = false
+  const stderrTail = new QoderStderrTail()
   let streamedText = ''
   let releaseProviderPrompt = (): void => {}
   const sdkHooks: TraceEvent[] = []
@@ -199,7 +200,8 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           request.permissionMode,
           request.managedRecorder === true,
           request.mcpExecution,
-          request.managedRecorderIdentity
+          request.managedRecorderIdentity,
+          stderrTail
         ),
         ...(request.model && !request.effort ? { model: request.model.id } : {}),
         ...(request.model && request.effort
@@ -376,7 +378,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
         }
       }
     }
-    if (terminalError != null) throw terminalError
+    if (terminalError != null) throw stderrTail.attach(terminalError)
     return {
       externalSessionId,
       providerTurnId: currentProviderTurnId(),

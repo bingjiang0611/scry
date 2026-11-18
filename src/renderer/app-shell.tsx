@@ -1,5 +1,5 @@
 import type { AppShellProps } from './app-shell-types'
-import { lazy, Suspense, useCallback, type ComponentProps } from 'react'
+import { lazy, Suspense, type ComponentProps } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/ConversationView'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -23,9 +23,8 @@ import { SIDE_CHAT_COPY } from './constants/side-chat-copy'
 import { SourceControlPanel } from './components/SourceControlPanel'
 import { AgentsSurface } from './components/AgentsSurface'
 import { PinnedSummaryHost } from './components/PinnedSummary'
-import { useBackgroundNotices } from './hooks/useBackgroundNotices'
-import { useEventCallback } from './hooks/useEventCallback'
-import type { BackgroundNotice } from './background-notices'
+import { useBackgroundNoticeOpening } from './hooks/useBackgroundNoticeOpening'
+import { useRevealTurnInChat } from './hooks/useRevealTurnInChat'
 import { EmptySessionOverview } from './app-model'
 import packageJson from '../../package.json'
 
@@ -47,7 +46,7 @@ export function AppShell(props: AppShellProps) {
     workspaceOpenRequests, setScopeDirty, addWorkspaceReference, showLlmPerformance, setShowLlmPerformance,
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo, sessionSaves,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, unreadRevision, backgroundWorkByRun,
-    catalogHealth, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
+    catalogHealth, catalogHealthError, projectsError, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
     setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
@@ -73,30 +72,16 @@ export function AppShell(props: AppShellProps) {
   })
   const { shellRef, narrowSingleColumn, panel: sideChatPanel, layoutSaved } = workbench
   const primaryPaneVisible = !shellPanelMaximized && !(narrowSingleColumn && shellPanelVisible)
-  const revealTurnInChat = useCallback<AppShellProps['openTurnInChat']>((...args) => {
-    // A hidden timeline has no layout box for the navigation anchor.
-    if (!primaryPaneVisible) {
-      handleRightSurfaceAction({ type: 'hide' })
-      scrollRef.current?.focus({ preventScroll: true })
-    }
-    openTurnInChat(...args)
-  }, [primaryPaneVisible, handleRightSurfaceAction, openTurnInChat, scrollRef])
+  const revealTurnInChat = useRevealTurnInChat({ primaryPaneVisible, handleRightSurfaceAction, openTurnInChat, scrollRef })
   // These surfaces share the primary run projection even when its transcript is hidden.
   const evidenceSurfaceVisible = panelVisible && !rightSurface.activeSideChatId
     && (rightSurface.activeId === 'overview' || rightSurface.activeId === 'diff' || rightSurface.activeId === 'agents')
   const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
   useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   useConversationAttention(view === 'conversation' && mainLiveVisible ? logicalConversation?.id : undefined)
-  const backgroundNotices = useBackgroundNotices({ unreadSessionKeys, unreadRevision, projects, runningRunIds, waitingQuestionRunIds })
-  // Stable identity keeps the memoized Sidebar from re-rendering for the callback alone.
-  const openBackgroundNotice = useEventCallback((notice: BackgroundNotice): void => {
-    backgroundNotices.dismiss(notice.key)
-    if (notice.target.kind === 'conversation') { pickConversation(notice.target.conversation); return }
-    const { cwd: sessionCwd, session: noticeSession } = notice.target
-    const pick = (sidebarActions as Pick<ComponentProps<typeof Sidebar>, 'onPick'>).onPick
-    pick(sessionCwd, noticeSession.sessionId, noticeSession.providerId, noticeSession.externalSessionId,
-      noticeSession.runId && runningRunIds.has(noticeSession.runId) ? noticeSession.runId : undefined,
-      noticeSession.agentProfileId, noticeSession.preview, noticeSession.runId)
+  const backgroundNotices = useBackgroundNoticeOpening({
+    unreadSessionKeys, unreadRevision, projects, runningRunIds, waitingQuestionRunIds, pickConversation,
+    pickSession: (sidebarActions as Pick<ComponentProps<typeof Sidebar>, 'onPick'>).onPick
   })
   return (
     <div ref={shellRef} className={`app app-shell${shellPanelMounted ? ` has-right-panel right-panel-surface${shellPanelMaximized ? ' right-panel-maximized' : ''}${!shellPanelVisible ? ' right-panel-hidden' : ''}` : ''}${narrowSingleColumn ? ' narrow-single-column' : ''}${summaryVisible ? ' pinned-summary-visible' : ''}${summaryVisible && summaryPersistent ? ' pinned-summary-persistent' : ''}${sidebarPane.collapsed ? ' sidebar-collapsed' : ''}`} data-narrow-pane={narrowSingleColumn ? (shellPanelVisible ? 'panel' : 'main') : undefined} style={appStyle}>
@@ -107,9 +92,10 @@ export function AppShell(props: AppShellProps) {
         activeRemote={view === 'remote' && remoteTarget ? { connectionId: remoteTarget.connectionId, cwd: remoteTarget.cwd, externalSessionId: remoteAdoptedSession } : null}
         activeProviderId={integrations.selectedProviderId} activeAgentProfileId={integrations.providerContext.agentProfileId}
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
-        backgroundNotices={backgroundNotices.notices} onOpenBackgroundNotice={openBackgroundNotice} onDismissBackgroundNotice={backgroundNotices.dismiss}
+        backgroundNotices={backgroundNotices.notices} onOpenBackgroundNotice={backgroundNotices.open} onDismissBackgroundNotice={backgroundNotices.dismiss}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo} sessionSaves={sessionSaves}
-        analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth} />
+        analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth}
+        catalogHealthError={catalogHealthError} projectsError={projectsError} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
         value={sidebarPane.width} collapsed={sidebarPane.collapsed} active={sidebarPane.resizing} onPointerDown={sidebarPane.startResize} onKeyDown={sidebarPane.onKeyDown} />
       <div className="main-area has-main-content" id="main-pane" aria-hidden={shellPanelMaximized || undefined} {...(shellPanelMaximized ? { inert: '' } : {})}>

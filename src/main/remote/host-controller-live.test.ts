@@ -1,63 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type MacRunView } from './host-controller'
-import type { IssuedPairingCertificate, PairingDependencies, PairingPersistence, PairingState } from './pairing'
-import type { LedgerEvent, LedgerStore } from './session-ledger'
-import type { WorkspaceAuthorizer } from './remote-run-policy'
-
-const KEY = 'a'.repeat(64)
-const CSR = 'b'.repeat(64)
-const ANCHOR = 'c'.repeat(64)
-const CERT = 'd'.repeat(64)
-const AUTHORIZED = '/authorized/project'
-
-class MemoryPairingStore implements PairingPersistence {
-  value: PairingState | undefined
-  assertAvailable(): void {}
-  load(): unknown { return structuredClone(this.value) }
-  commit(state: PairingState): void { this.value = structuredClone(state) }
-}
-class MemoryLedgerStore implements LedgerStore {
-  log: LedgerEvent[] = []
-  assertAvailable(): void {}
-  loadAll(): LedgerEvent[] { return this.log.map((e) => ({ ...e })) }
-  append(event: LedgerEvent): void { this.log.push({ ...event }) }
-}
-
-const workspace: WorkspaceAuthorizer = {
-  authorize(cwd) { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd }
-}
-
-function pairingDeps(): PairingDependencies {
-  const time = { wall: 1_000_000, monotonic: 0 }
-  const issue = vi.fn(async ({ deviceId }: { deviceId: string }): Promise<IssuedPairingCertificate> => ({
-    deviceId, certificatePEM: 'synthetic certificate, not cryptographic evidence', certificateSHA256: CERT,
-    publicKeySHA256: KEY, expiresAt: time.wall + 3_600_000
-  }))
-  return {
-    store: new MemoryPairingStore(), hostId: randomUUID(), anchorSHA256: ANCHOR,
-    clock: () => time.wall, monotonic: () => time.monotonic,
-    verifyCSR: vi.fn(async (csrPEM: string) => ({ csrPEM, csrSHA256: CSR, publicKeySHA256: KEY })), issue
-  }
-}
-
-type RunProvider = (input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }) => Promise<void>
-
-async function grantedController(runProvider: RunProvider, listProjects?: () => { path: string; label: string }[],
-  extra: Partial<HostControllerDependencies> = {}) {
-  const controller = new HostController({
-    pairing: pairingDeps(), ledgerStore: new MemoryLedgerStore(), workspace, runProvider,
-    ...(listProjects ? { listProjects } : {}),
-    ...extra
-  })
-  const pair = await controller.authority.begin()
-  await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM: 'CSR', deviceLabel: 'iPhone' }, KEY)
-  const grant = await controller.authority.confirmLocal(pair.pairingId, KEY)
-  return { controller, deviceId: grant.deviceId }
-}
-
-const routing = (over: Partial<RemoteIntentRouting> = {}): string =>
-  JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
+import type { MacRunView } from './host-controller'
+import { AUTHORIZED, CERT, grantedController, routing, type RunProvider } from './host-controller-fixtures'
 
 describe('HostController live watch and stop', () => {
   type LiveInput = { runId: string; progress(d?: string): void; output(chunk: { kind: 'output'; text: string }): void; stopSignal: AbortSignal }

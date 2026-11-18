@@ -1,4 +1,3 @@
-import type { BrowserWindow } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import type { RuntimeProvider } from '../../shared/runtime'
@@ -23,13 +22,13 @@ export function createRemoteRunState(deps: {
   runtimeProvider: RuntimeProvider
   runState: ActiveRun
   getObservedSessionId: () => string | undefined
-  getWindow: () => Pick<BrowserWindow, 'isFocused'> | null
+  isWindowFocused: () => boolean
   dockBadge: {
     markAttention: (key: string, value: { windowFocused: boolean; sessionViewed: boolean; needsAttention: boolean }) => void
     isViewed: (key: string) => boolean
   }
   scopedSessionKey: (sessionId: string) => string
-  runs: { isViewed: (runId: string) => boolean }
+  runs: { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
 }) {
   const state: RunTerminalState = {
     terminalArchiveArgs: undefined,
@@ -60,7 +59,7 @@ export function createRemoteRunState(deps: {
     const key = deps.runState.attentionKey ?? (deps.runState.conversationId
       ? conversationAttentionKey(deps.runState.conversationId) : deps.scopedSessionKey(sessionId))
     deps.dockBadge.markAttention(key, {
-      windowFocused: Boolean(deps.getWindow()?.isFocused()),
+      windowFocused: deps.isWindowFocused(),
       sessionViewed: deps.runState.conversationId ? deps.dockBadge.isViewed(key) : deps.runs.isViewed(deps.runId),
       needsAttention
     })

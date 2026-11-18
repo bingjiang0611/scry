@@ -265,8 +265,11 @@ export async function openWorkspaceFileExternally(
   request: WorkspacePathRequest,
   open: (path: string) => Promise<void>,
   fallback?: {
-    /** Supplied by main's existing known-project authority, never renderer payloads. */
-    roots: readonly string[]
+    /**
+     * Supplied by main's existing known-project authority, never renderer payloads. A
+     * function is asked only once the request's own workspace lacks the file.
+     */
+    roots: readonly string[] | (() => Promise<readonly string[]>)
     choose: (candidates: readonly WorkspacePathRequest[]) => Promise<WorkspacePathRequest | null>
   }
 ): Promise<boolean> {
@@ -279,7 +282,8 @@ export async function openWorkspaceFileExternally(
     const candidates = new Map<string, WorkspacePathRequest>()
     // Exact relative paths only: no basename search, recursion, symlink traversal,
     // or speculative opening. Even a unique cross-project match needs consent.
-    for (const cwd of new Set(fallback.roots)) {
+    const roots = typeof fallback.roots === 'function' ? await fallback.roots() : fallback.roots
+    for (const cwd of new Set(roots)) {
       try {
         const candidate = await externalFileTarget({ cwd, path: request.path })
         candidates.set(candidate.path, { cwd: candidate.root, path: candidate.portable })

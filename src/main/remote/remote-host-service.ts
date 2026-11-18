@@ -4,14 +4,15 @@ import { DesktopHostListeners, type DesktopHostListenerPorts } from './desktop-h
 import type { DesktopHostAccess, DesktopHostInvitation } from '../../shared/desktop-remote'
 import { ensureHostIdentity } from './host-identity'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
-import { HostController } from './host-controller'
+import type { HostController } from './host-controller'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
 import { PairingTransport } from './pairing-transport'
+import type { LocalEndpointHandlers } from './host-local-ops'
 import { RelayClient, type RelayDiagnostics } from './relay-client'
+import { hostControllerDependencies, type RemoteHostServiceDependencies } from './remote-host-service-deps'
 import { RemoteLanListener, type LanAdvertisement } from './remote-lan-listener'
 import type { PairingAuthority } from './pairing'
-import type { RemoteHostServiceDependencies } from './remote-host-service-deps'
 import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelayDiagnostics, RemoteStatus } from '../../shared/remote'
 
 // The single object Electron main owns for the remote-access subsystem. It
@@ -37,6 +38,7 @@ export class RemoteHostService {
   #pairing: PairingTransport
   #clients: RelayClient[]
   #relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
+  #localEndpoint: LocalEndpointHandlers | undefined
   #starting: Promise<void> | null = null
   #disposing: Promise<void> | null = null
   #disposed = false
@@ -45,6 +47,7 @@ export class RemoteHostService {
   #desktopRestoreError: string | undefined
   #desktopChanging: Promise<unknown> | null = null
   #desktopSettingsPath: string
+  #serverCredentials: { certificatePEM: string; privateKeyPEM: string }
   #lanConfig: { port?: number; host?: string } | null
   #lan: RemoteLanListener | null = null
   #lanError: string | undefined
@@ -62,9 +65,12 @@ export class RemoteHostService {
     caCertificatePEM: string
     hostId: string
     relayAdvertisement: { host: string; port: number; tls: 'system' | 'plaintext' } | null
+    serverCredentials: { certificatePEM: string; privateKeyPEM: string }
+    localEndpoint?: LocalEndpointHandlers
     lan?: { port?: number; host?: string }
   }) {
     this.#binding = init.binding
+    this.#serverCredentials = init.serverCredentials
     this.#desktopSettingsPath = join(init.stateDirectory, 'desktop-listeners.json')
     this.#host = init.host
     this.#pairing = init.pairing
@@ -73,47 +79,18 @@ export class RemoteHostService {
     this.caCertificatePEM = init.caCertificatePEM
     this.hostId = init.hostId
     this.#relayAdvertisement = init.relayAdvertisement ?? null
+    this.#localEndpoint = init.localEndpoint
     this.#lanConfig = init.lan ?? null
   }
 
   static async create(deps: RemoteHostServiceDependencies): Promise<RemoteHostService> {
     const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
-    const binding = await createHostController({
-      stateDirectory: deps.stateDirectory,
-      ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
-      ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
-      ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
-      hostId: identity.hostId,
-      anchorSHA256: identity.anchorSHA256,
-      verifyCSR: identity.verifyCSR,
-      issue: identity.issue,
-      authorizeWorkspace: deps.authorizeWorkspace,
-      startRun: deps.startRun,
-      gate: deps.gate,
-      attachmentDirectory: join(deps.stateDirectory, 'attachments'),
-      ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),
-      ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
-      ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
-      ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
-      ...(deps.listProvidersFull ? { listProvidersFull: deps.listProvidersFull } : {}),
-      ...(deps.listProviderControls ? { listProviderControls: deps.listProviderControls } : {}),
-      ...(deps.listCommands ? { listCommands: deps.listCommands } : {}),
-      ...(deps.sessionAction ? { sessionAction: deps.sessionAction } : {}),
-      ...(deps.sessionFork ? { sessionFork: deps.sessionFork } : {}),
-      ...(deps.sessionDelete ? { sessionDelete: deps.sessionDelete } : {}),
-      ...(deps.toolPanels ? { toolPanels: deps.toolPanels } : {}),
-      ...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
-      ...(deps.sessionCatalogRevision ? { sessionCatalogRevision: deps.sessionCatalogRevision } : {}),
-      ...(deps.readSessionStatus ? { readSessionStatus: deps.readSessionStatus } : {}),
-      ...(deps.macRuns ? { macRuns: deps.macRuns } : {}),
-      ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
-      ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
-      ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
-      ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})    })
+    const binding = await createHostController(hostControllerDependencies(deps, identity))
     let host: InnerMtlsHost
     let pairing: PairingTransport
+    let server: Awaited<ReturnType<typeof identity.issueHostServer>>
     try {
-      const server = await identity.issueHostServer()
+      server = await identity.issueHostServer()
       const executionTargets = deps.desktopRemoteClient
         ? new ExecutionTargetRouter({
           authorizePeer: (peer) => binding.controller.authorizeDevicePeer(peer),
@@ -151,6 +128,8 @@ export class RemoteHostService {
       caCertificatePEM: identity.caCertificatePEM,
       hostId: identity.hostId,
       relayAdvertisement: deps.relayAdvertisement ?? null,
+      serverCredentials: { certificatePEM: server.certificatePEM, privateKeyPEM: server.privateKeyPEM },
+      ...(deps.localEndpoint ? { localEndpoint: deps.localEndpoint } : {}),
       ...(deps.lan ? { lan: deps.lan } : {})
     })
   }
@@ -162,6 +141,39 @@ export class RemoteHostService {
   get authority(): PairingAuthority { return this.#binding.controller.authority }
   get controller(): HostController { return this.#binding.controller }
   get host(): InnerMtlsHost { return this.#host }
+
+  /**
+   * A second inner-mTLS endpoint for the daemon's own unix socket, marked as the local
+   * transport. It shares the controller, the pinned CA and the server credential, but a
+   * grant enrolled over that socket is refused here if it ever arrives over a network
+   * transport instead.
+   */
+  createLocalHost(info: { version: string; build?: string }): InnerMtlsHost {
+    return new InnerMtlsHost({
+      controller: this.#binding.controller,
+      serverCertPEM: this.#serverCredentials.certificatePEM,
+      serverKeyPEM: this.#serverCredentials.privateKeyPEM,
+      caPEM: this.caCertificatePEM,
+      transport: 'local',
+      info,
+      ...(this.#localEndpoint ? { localEndpoint: this.#localEndpoint } : {})
+    })
+  }
+
+  /** True while a non-revoked, unexpired scope:local grant exists. */
+  hasActiveLocalGrant(now = Date.now()): boolean {
+    return this.#binding.controller.authority.inspectLocal().grants.some((grant) =>
+      grant.scope === 'local' && grant.revokedAt === null && grant.expiresAt > now)
+  }
+
+  /**
+   * Issue the App's own grant. The caller has already proven it can read the 0600
+   * enrollment secret on this machine and holds the private key behind the CSR;
+   * `consumeSecret` is invoked inside the authority's transaction so reuse fails.
+   */
+  enrollLocalDevice(input: { csrPEM: string; deviceLabel: string }, consumeSecret: () => boolean) {
+    return this.#binding.controller.authority.enrollLocal(input, consumeSecret)
+  }
   get pairingTransport(): PairingTransport { return this.#pairing }
   get relayConfigured(): boolean { return this.#clients.length > 0 }
 
@@ -274,6 +286,9 @@ export class RemoteHostService {
   async revokeDevice(deviceId: string): Promise<void> {
     const peers = this.authority.inspectLocal().grants.filter((grant) => grant.deviceId === deviceId).map((grant) => grant.certificateSHA256)
     await this.authority.revoke(deviceId)
+    // Authorization already fails on the next request; closing the kept-alive
+    // tunnels also stops a revoked device from holding a lane open.
+    for (const peer of peers) this.#host.closePeer(peer)
     await Promise.all(peers.map((peer) => this.#binding.controller.releaseDesktopPeer(peer)))
   }
 

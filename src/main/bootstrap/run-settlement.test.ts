@@ -38,7 +38,7 @@ function harness(options: {
     runtimeProvider: 'claude_sdk',
     runState,
     getObservedSessionId: () => undefined,
-    getWindow: () => null,
+    isWindowFocused: () => false,
     dockBadge: { markAttention: () => undefined, isViewed: () => false },
     scopedSessionKey: (sessionId) => `key:${sessionId}`,
     runs: { isViewed: () => false }
@@ -62,7 +62,7 @@ function harness(options: {
     },
     interrupted: () => false,
     flushTraceSend: () => undefined,
-    getWindow: () => null,
+    renderer: { send: () => undefined },
     recordingBlockedSessions: new Map(),
     scopedSessionKey: (sessionId) => `key:${sessionId}`,
     recordingRecoveryHint: 'hint',

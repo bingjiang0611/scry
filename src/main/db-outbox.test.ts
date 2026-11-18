@@ -1,22 +1,17 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-const electronState = vi.hoisted(() => ({ userData: '' }))
-vi.mock('electron', () => ({
-  app: {
-    getPath: () => electronState.userData,
-    getAppPath: () => electronState.userData
-  }
-}))
+import { configureStorage } from './storage-paths'
 
 import { deleteTurnOutboxSessionRows, recordTurn, replayDatabaseTurnOutbox, turnOutboxSessionRunIds } from './db'
 
 let root = ''
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'scry-db-outbox-'))
-  electronState.userData = root
+  // Storage is injected, not read from Electron: this test owns the root.
+  configureStorage({ userDataDir: root, appPath: root })
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 

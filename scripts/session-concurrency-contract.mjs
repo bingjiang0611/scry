@@ -4,7 +4,8 @@ import { distribution, finite, unavailable } from './session-concurrency-aggrega
 // Workload and status contract for the P0 concurrency slice, kept separate from report assembly so
 // the fixed workload, the evidence rules and the completion predicate have one owner.
 // P0 asks "where does a concurrent run block", so the workload must be fixed and replayable.
-// Every prompt below selects an existing offline branch in src/main/providers/smoke.ts; the
+// Every prompt below selects an existing offline branch in src/main/providers/smoke.ts or
+// smoke-paced-stream.ts; the
 // expected structural counts name that fixture's fixed content and are re-verified against the
 // durable archive, so a shrunk or altered workload cannot pass as a fast measurement.
 export const CONCURRENCY_LEVELS = [4, 16]

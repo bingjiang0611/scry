@@ -8,6 +8,7 @@ import type { TraceOutputBridge } from '../trace-output'
 import type { RunTraceRouter } from '../run-trace-router'
 import type { DockBadgeState } from '../dock-badge'
 import type { RendererRestartLog } from './renderer-restart'
+import { detachDaemonTerminalRenderer } from './terminal-daemon'
 
 export interface WindowBootstrapDependencies {
   __dirname: string
@@ -58,6 +59,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   createdWindow.on('closed', () => {
     resetSessionAttention()
     terminalOutput.detachRenderer()
+    void detachDaemonTerminalRenderer()
     // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
     traceOutput.reset()
     runTraces.reset()
@@ -67,6 +69,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
     if (!details.isMainFrame || details.isSameDocument) return
     resetSessionAttention()
     terminalOutput.detachRenderer()
+    void detachDaemonTerminalRenderer()
     traceOutput.reset()
     runTraces.reset()
   })
@@ -76,6 +79,7 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   createdWindow.webContents.on('render-process-gone', (_event, details) => {
     resetSessionAttention()
     terminalOutput.detachRenderer()
+    void detachDaemonTerminalRenderer()
     traceOutput.reset()
     runTraces.reset()
     console.error(`[scry] renderer process gone: reason=${details.reason} exitCode=${details.exitCode}`)

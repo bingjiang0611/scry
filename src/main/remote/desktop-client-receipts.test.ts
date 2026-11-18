@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
@@ -24,7 +25,7 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       expect(resolved).toEqual({ ...receipt, status: 'recorded', runId })
       await expect(fixture.client.resolveIntent(id, receipt.intentId)).resolves.toEqual(resolved)
       const requests = fixture.tlsRequest.mock.calls.map(([call]) => call.request as { op?: string; intentId?: string })
-      expect(requests.filter(request => request.op === 'resolveIntent')).toEqual([{ op: 'resolveIntent', intentId: receipt.intentId }])
+      expect(requests.filter(request => request.op === 'resolveIntent')).toEqual([{ protocol: REMOTE_PROTOCOL_VERSION, op: 'resolveIntent', intentId: receipt.intentId }])
       expect(requests.filter(request => request.op === 'submit')).toHaveLength(1)
       expect(requests.some(request => request.op === 'stop')).toBe(false)
       await fixture.client.dispose()
@@ -48,7 +49,8 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       await fixture.client.connect(id)
       fixture.tlsRequest.mockImplementation(async (options) => {
         const request = options.request as { op?: string }
-        if (request.op === 'runState') {
+        // The run-status read is the lifecycle long poll on its own lane.
+        if (request.op === 'watch') {
           readStarted()
           await gate
           fixture.setTunnelFailure('target_unreachable')
@@ -171,7 +173,7 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       // Simulate a Mac1 restart after the receipt was committed. The same
       // encrypted receipt supplies the downstream key; no fresh UUID is made.
       await fixture.client.dispose()
-      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
+      reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest, openLane: fixture.openLane })
       await reloaded.connect(id)
       const reloadedTarget = (await reloaded.executionTargets())[0]!
       await expect(reloaded.mobileSubmit({ ...input, target: reloadedTarget })).resolves.toEqual({ runId, status: 'duplicate' })

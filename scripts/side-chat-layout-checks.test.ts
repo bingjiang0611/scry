@@ -15,16 +15,20 @@ import { SIDE_CHAT_SURFACE } from './side-chat-driving.mjs'
 it('restores the tested child after keyboard tab activation before composition and injection checks', () => {
   const layout = readFileSync(new URL('./side-chat-layout-checks.mjs', import.meta.url), 'utf8')
   const input = readFileSync(new URL('./side-chat-input-checks.mjs', import.meta.url), 'utf8')
+  const untrusted = readFileSync(new URL('./side-chat-untrusted-text-checks.mjs', import.meta.url), 'utf8')
   const composition = input.slice(input.indexOf('// 6. Real IME'), input.indexOf('const beforeComposition'))
   expect(composition).toMatch(/await showChild\(\)[\s\S]*?await click\(CHILD_COMPOSER\)/)
   expect(layout).toMatch(/check\(tabKeys.every[\s\S]*?await exerciseSideChatInput\(/)
-  expect(input).toContain(".chat-body .chat-transcript")
-  expect(input).toContain('document.elementFromPoint(point.x, point.y) !== scroller')
-  expect(input).not.toContain("driver.pointerAt(`document.querySelector('${CHILD_PANEL} .chat-body')`)")
+  // Step 7 lives in its own module; the composition step hands over to it.
+  expect(input).toMatch(/await exerciseSideChatUntrustedText\(/)
+  expect(untrusted).toContain(".chat-body .chat-transcript")
+  expect(untrusted).toContain('document.elementFromPoint(point.x, point.y) !== scroller')
+  expect(untrusted).not.toContain("driver.pointerAt(`document.querySelector('${CHILD_PANEL} .chat-body')`)")
 })
 
 it('exercises late archived text after the active run clears without weakening markup checks', () => {
-  const input = readFileSync(new URL('./side-chat-input-checks.mjs', import.meta.url), 'utf8')
+  // Step 7 (and its late-record fixture) lives in the untrusted-text module.
+  const input = readFileSync(new URL('./side-chat-untrusted-text-checks.mjs', import.meta.url), 'utf8')
   expect(input).toMatch(/setArchiveVisibility\(false\)[\s\S]*?fixture: archive pending[\s\S]*?setArchiveVisibility\(true\)/)
   expect(input).toContain('recorded.summary.activeRunId == null')
   expect(input).toContain('recorded.turns.at(-1)?.history?.userText === prompt')

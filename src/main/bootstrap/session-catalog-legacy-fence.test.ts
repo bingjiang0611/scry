@@ -39,7 +39,8 @@ async function fixture(): Promise<Fixture> {
   const catalog = createSessionCatalog({
     recentStore: unexpected,
     projectStore: unexpected,
-    getWindow: () => null,
+    userDataDir: userData,
+    publishDataUpdated: () => undefined,
     unsettledRuns: () => unsettled,
     getProviderRegistry: () => ({ continuationKey: unexpected }) as unknown as ProviderRegistry,
     forkManagedConversation: unexpected,

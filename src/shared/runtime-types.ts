@@ -6,6 +6,9 @@ export type AgentDataUpdated =
   | { kind: 'conversation_changed'; conversationId: string }
   // Background catalog recovery added sessions after the project list was already read.
   | { kind: 'catalog_recovered' }
+  // Daemon mode: notices were lost (the daemon restarted, or more changed than its feed
+  // keeps). Anything shown may be stale; every view re-reads what it shows.
+  | { kind: 'resynchronize' }
 
 export type RuntimeBackend = 'local' | 'api'
 export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc'

@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connect } from 'node:net'
@@ -120,7 +121,10 @@ describe('DesktopHostListeners', () => {
     const identity = await ensureHostIdentity(join(directory, 'identity'))
     const server = await identity.issueHostServer()
     const host = new InnerMtlsHost({
-      controller: { listProjects: () => [] } as unknown as HostController,
+      // The host asks the authority whether the peer's grant is valid on this
+      // transport on every frame; this double allows it, so the test still covers
+      // byte forwarding only.
+      controller: { listProjects: () => [], authority: { authorizesCertificate: () => true } } as unknown as HostController,
       serverCertPEM: server.certificatePEM,
       serverKeyPEM: server.privateKeyPEM,
       caPEM: identity.caCertificatePEM
@@ -137,7 +141,8 @@ describe('DesktopHostListeners', () => {
         minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
       })
       await once(socket, 'secureConnect')
-      socket.write('{"op":"projects"}\n')
+      // A device declares the run-channel version; the host refuses without it.
+      socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'projects' }) + '\n')
       let response = ''
       for await (const chunk of socket) {
         response += (chunk as Buffer).toString('utf8')

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ProjectMeta } from '../env'
 import type { CatalogHealth } from '@shared/provider'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 
 export function useWorkspaceState() {
   const [cwd, setCwd] = useState<string | null>(null)
@@ -9,6 +10,10 @@ export function useWorkspaceState() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const [catalogHealth, setCatalogHealth] = useState<CatalogHealth>({ status: 'ready', source: 'empty' })
+  // A failed read is not an empty catalog and not a damaged index file: it keeps its own
+  // state so the sidebar can say the read failed instead of "no projects" (B4-L4).
+  const [projectsError, setProjectsError] = useState<string | null>(null)
+  const [catalogHealthError, setCatalogHealthError] = useState<string | null>(null)
   const projectsRequestSeq = useRef(0)
   const readCatalogHealth = (): Promise<CatalogHealth> => typeof window.scry.catalogHealth === 'function'
     ? window.scry.catalogHealth()
@@ -18,14 +23,15 @@ export function useWorkspaceState() {
     const seq = ++projectsRequestSeq.current
     void Promise.allSettled([window.scry.listProjects(), readCatalogHealth()]).then(([nextProjects, nextHealth]) => {
       if (seq !== projectsRequestSeq.current) return
-      if (nextProjects.status === 'fulfilled') setProjects(nextProjects.value)
-      if (nextHealth.status === 'fulfilled') setCatalogHealth(nextHealth.value)
-      else setCatalogHealth({ status: 'unavailable', source: 'empty', reason: String(nextHealth.reason) })
+      if (nextProjects.status === 'fulfilled') { setProjects(nextProjects.value); setProjectsError(null) }
+      else setProjectsError(ipcErrorMessage(nextProjects.reason))
+      if (nextHealth.status === 'fulfilled') { setCatalogHealth(nextHealth.value); setCatalogHealthError(null) }
+      else setCatalogHealthError(ipcErrorMessage(nextHealth.reason))
     })
   }, [])
 
   const refreshRecent = useCallback((): void => {
-    window.scry.recentFolders().then(setRecent)
+    window.scry.recentFolders().then(setRecent, () => undefined)
   }, [])
 
   const removeRecentFolder = useCallback(async (dir: string): Promise<void> => {
@@ -52,11 +58,14 @@ export function useWorkspaceState() {
     ]).then(([nextProjects, nextRecent, nextHealth]) => {
       if (cancelled) return
       const projectsCurrent = projectsSeq === projectsRequestSeq.current
-      if (nextProjects.status === 'fulfilled' && projectsCurrent) setProjects(nextProjects.value)
+      if (projectsCurrent) {
+        if (nextProjects.status === 'fulfilled') { setProjects(nextProjects.value); setProjectsError(null) }
+        else setProjectsError(ipcErrorMessage(nextProjects.reason))
+      }
       if (nextRecent.status === 'fulfilled') setRecent(nextRecent.value)
       if (projectsCurrent) {
-        if (nextHealth.status === 'fulfilled') setCatalogHealth(nextHealth.value)
-        else setCatalogHealth({ status: 'unavailable', source: 'empty', reason: String(nextHealth.reason) })
+        if (nextHealth.status === 'fulfilled') { setCatalogHealth(nextHealth.value); setCatalogHealthError(null) }
+        else setCatalogHealthError(ipcErrorMessage(nextHealth.reason))
       }
       setHydrated(true)
     })
@@ -75,6 +84,8 @@ export function useWorkspaceState() {
     setActiveSessionId,
     hydrated,
     catalogHealth,
+    catalogHealthError,
+    projectsError,
     loadProjects,
     refreshRecent,
     removeRecentFolder,

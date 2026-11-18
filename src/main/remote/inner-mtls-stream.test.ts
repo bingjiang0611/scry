@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connect } from 'node:tls'
 import { once } from 'node:events'
@@ -28,7 +29,7 @@ describe('InnerMtlsHost pushed run streams', () => {
         lines.push(JSON.parse(line) as Record<string, unknown>)
       }
     })
-    const send = (value: Record<string, unknown>) => socket.write(JSON.stringify({ keepAlive: true, ...value }) + '\n')
+    const send = (value: Record<string, unknown>) => socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, ...value }) + '\n')
     const byId = (id: number) => lines.filter((line) => line.id === id)
     try {
       send({ id: 1, op: 'submit', intentId: randomUUID(), detail: routing({ prompt: 'stream' }) })
@@ -71,13 +72,19 @@ describe('InnerMtlsHost pushed run streams', () => {
         lines.push(JSON.parse(pending.slice(0, end)) as Record<string, unknown>); pending = pending.slice(end + 1)
       }
     })
-    const send = (value: Record<string, unknown>) => socket.write(JSON.stringify({ keepAlive: true, ...value }) + '\n')
+    const send = (value: Record<string, unknown>) => socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, ...value }) + '\n')
     try {
       send({ id: 1, op: 'submit', intentId: randomUUID(), detail: routing({ prompt: 'cancel' }) })
       await vi.waitFor(() => expect(lines.some((line) => line.id === 1)).toBe(true))
       const runId = lines.find((line) => line.id === 1)!.runId as string
       send({ id: 2, op: 'watchStream', runId, cursor: 0, outputCursor: 0 })
       await vi.waitFor(() => expect(lines.some((line) => line.id === 2)).toBe(true), { timeout: 4_000 })
+      // Lane ops answered by the connection itself still pass the version gate: a frame
+      // that does not declare this host's version cancels nothing and opens nothing.
+      socket.write(JSON.stringify({ keepAlive: true, id: 4, op: 'cancel', target: 2 }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, id: 5, op: 'watchStream', runId, cursor: 0, outputCursor: 0 }) + '\n')
+      await vi.waitFor(() => expect(lines.filter((line) => line.id === 4 || line.id === 5)).toHaveLength(2))
+      for (const id of [4, 5]) expect(lines.find((line) => line.id === id)).toMatchObject({ error: 'protocol_mismatch', clientProtocol: null })
       send({ id: 3, op: 'cancel', target: 2 })
       await vi.waitFor(() => expect(lines.find((line) => line.id === 3)).toEqual({ keepAlive: true, id: 3, cancelled: true }))
       const pushed = lines.filter((line) => line.id === 2).length

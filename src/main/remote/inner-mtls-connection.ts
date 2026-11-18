@@ -11,7 +11,18 @@ export interface InnerConnectionContext {
   fingerprint: string
   certificateExpiresAt: number
   maxFrame: number
+  // Checked for every frame, pushed-stream ops included, before anything runs: a reply
+  // here (a transport-scope denial, a protocol refusal, `daemonInfo`) is sent as is.
+  preflight?(request: Record<string, unknown> | undefined): Record<string, unknown> | undefined
   dispatch(request: Record<string, unknown> | undefined): Promise<unknown>
+  // Per-request timing of a dispatched request (remote-request-timing.ts).
+  timing?(request: Record<string, unknown> | undefined): RequestTiming | undefined
+}
+
+export interface RequestTiming {
+  settled(response: unknown): void
+  written(): void
+  failed(): void
 }
 
 export function serveInnerConnection(socket: TLSSocket, context: InnerConnectionContext): void {
@@ -70,10 +81,12 @@ export function serveInnerConnection(socket: TLSSocket, context: InnerConnection
     }
   }
   const dispatchMux = (id: number, request: Record<string, unknown>): void => {
+    const early = context.preflight?.(request)
+    if (early) { writeLine({ keepAlive: true, id, ...early }); return }
     if (request.op === 'cancel') {
       // Stops a pushed stream this lane opened; nothing else can be cancelled.
       const target = request.target
-      if (Object.keys(request).some((key) => !['op', 'target', 'keepAlive', 'deviceLabel'].includes(key)) || !isMuxId(target)) {
+      if (Object.keys(request).some((key) => !['op', 'target', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) || !isMuxId(target)) {
         writeLine({ keepAlive: true, id, error: 'invalid_request' })
         return
       }
@@ -84,7 +97,7 @@ export function serveInnerConnection(socket: TLSSocket, context: InnerConnection
     }
     if (request.op === 'watchStream') {
       const { runId, cursor, outputCursor } = request
-      if (Object.keys(request).some((key) => !['op', 'runId', 'cursor', 'outputCursor', 'keepAlive', 'deviceLabel'].includes(key)) ||
+      if (Object.keys(request).some((key) => !['op', 'runId', 'cursor', 'outputCursor', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) ||
           typeof runId !== 'string' || !Number.isSafeInteger(cursor) || !Number.isSafeInteger(outputCursor)) {
         writeLine({ keepAlive: true, id, error: 'invalid_request' })
         return
@@ -106,16 +119,22 @@ export function serveInnerConnection(socket: TLSSocket, context: InnerConnection
     }
     inflight++
     socket.setTimeout(0)
+    const timing = context.timing?.(request)
     void context.dispatch(request)
       .then((res) => {
         inflight--
-        if (socket.destroyed) return
+        timing?.settled(res)
+        if (socket.destroyed) { timing?.failed(); return }
         // keepAlive then id must be the first keys: clients match this prefix.
         const { id: _id, keepAlive: _keepAlive, ...body } = (res ?? {}) as Record<string, unknown>
         socket.write(JSON.stringify({ keepAlive: true, id, ...body }) + '\n')
+        timing?.written()
         if (inflight === 0) armIdleTimeout()
       })
-      .catch((error) => abort(`dispatch_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`))
+      .catch((error) => {
+        timing?.failed()
+        abort(`dispatch_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`)
+      })
   }
   socket.on('data', (bytes: Buffer) => {
     if (!mux && busy) { abort('data_while_busy'); return }
@@ -150,19 +169,34 @@ export function serveInnerConnection(socket: TLSSocket, context: InnerConnection
       if (buffer.length > 0) { abort('pipelined_request'); return }
       if (kept && !keepAlive) { socket.end(JSON.stringify({ error: 'keep_alive_required' }) + '\n'); return }
       kept ||= keepAlive
+      const early = context.preflight?.(parsed)
+      if (early) {
+        if (keepAlive) { socket.write(`${JSON.stringify({ keepAlive: true, ...early })}\n`); armIdleTimeout() }
+        else socket.end(`${JSON.stringify(early)}\n`)
+        continue
+      }
       busy = true
       socket.setTimeout(0)
+      const timing = context.timing?.(parsed)
       void context.dispatch(parsed)
         .then((res) => {
           busy = false
+          timing?.settled(res)
           if (keepAlive) {
             // keepAlive must be the first key: clients check this exact prefix.
             const reply = JSON.stringify({ keepAlive: true, ...(res as object) }) + '\n'
             socket.write(reply)
+            timing?.written()
             armIdleTimeout()
-          } else socket.end(JSON.stringify(res) + '\n')
+          } else {
+            socket.end(JSON.stringify(res) + '\n')
+            timing?.written()
+          }
         })
-        .catch((error) => abort(`dispatch_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`))
+        .catch((error) => {
+          timing?.failed()
+          abort(`dispatch_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`)
+        })
     }
   })
   socket.on('error', (error) => {

@@ -1,6 +1,7 @@
 import type { DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
-import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, validateInfo, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { validateInfo } from './desktop-client-capabilities'
 import { readRemoteSessionPages } from './desktop-client-session-catalog'
 
 export abstract class DesktopRemoteClientConnections extends DesktopRemoteClientBase {
@@ -85,12 +86,15 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     this.attention?.disconnect(item.id)
     const tunnel = await this.transport.openTunnel({ ...item.ssh, pairPort: item.pairPort, runPort: item.runPort })
     try {
-      const response = await this.request(tunnel.runPath, item, { op: 'desktop', query: { kind: 'info' } }, { tunnel, classifySshFailure: true })
+      // The first run request opens the control lane, so the catalog that follows
+      // reuses this handshake; an old one-shot host fails here as a protocol mismatch.
+      const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, { op: 'desktop', query: { kind: 'info' } }, { tunnel, classifySshFailure: true })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
       try {
+        // The attention baseline reads the session pages on the same lanes as every run request.
         const baseline = await readRemoteSessionPages(async (request) => {
-          const response = await this.request(tunnel.runPath, item, request, { tunnel, classifySshFailure: true })
+          const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, request, { tunnel, classifySshFailure: true })
           if (!record(response)) fail('invalid_catalog_response')
           return response
         })
@@ -105,6 +109,7 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
         ...(capabilities.managedWorktrees === 1 ? { managedWorktrees: 1 as const } : {}) })
       await this.reconcileUnknown(state, item.id)
     } catch (error) {
+      this.lanes.closeConnection(item.id)
       this.active.delete(item.id)
       this.attention?.disconnect(item.id)
       await tunnel.close()

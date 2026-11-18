@@ -1,32 +1,91 @@
+import { handleRunControl } from './host-run-control'
+import { handleAppEvents, handleAttentionViewed, handleLocalOp, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
-import { historyProfileSelection, historyScopeSelection } from './remote-gateway'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
+import { historyProfileSelection } from './remote-gateway'
+import { dispatchHistoryRequest, parseLiveRunsHistory } from './inner-mtls-history-dispatch'
+import { protocolMismatch } from './remote-protocol'
 import type { LanAdvertisement } from './remote-lan-listener'
-import { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, parseLiveRunsHistory } from './inner-mtls-protocol'
+import { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS } from './inner-mtls-protocol'
 
-// One phone request -> one HostController call. Every branch authorizes the
-// verified peer fingerprint inside the controller, never anything in the body.
-export interface InnerRequestContext {
-  controller: HostController
-  fingerprint: string
-  executionTargets?: ExecutionTargetRouter
-  lanAdvertisement: () => LanAdvertisement | undefined
+// The device-facing request vocabulary: which controller capability an
+// authenticated request reaches, and how its envelope is bounded before it does.
+// Authorization is not decided here - every controller call re-checks the
+// verified peer fingerprint, so a revoked device fails on its very next request.
+export interface RemoteRequestEnvelope {
+  op?: string
+  keepAlive?: unknown
+  // Declared by every run-channel request; a mismatch is refused, not inferred.
+  protocol?: number
+  deviceLabel?: unknown
+  intentId?: string
+  detail?: string
+  cursor?: number
+  outputCursor?: number
+  waitMs?: number
+  // watch only: false asks for lifecycle evidence without the shadow output spool,
+  // 'wake' asks whether content exists without transferring it.
+  output?: boolean | 'wake'
+  before?: number
+  limit?: number
+  snapshot?: string
+  runId?: string
+  providerId?: string
+  agentProfileId?: string
+  cwd?: string
+  path?: string
+  externalSessionId?: string
+  historyScope?: string
+  answerId?: string
+  response?: unknown
+  query?: unknown
+  revision?: string
+  history?: unknown
+  context?: unknown
+  action?: unknown
+  includeArchived?: unknown
+  target?: unknown
+  request?: unknown
+  attachmentId?: string
+  offset?: number
+  dataBase64?: string
+  name?: string
+  mimeType?: string
+  size?: number
+  sha256?: string
+  index?: number
+  totalCount?: number
+  // sessionsPage: the catalog snapshot the phone already holds (first page only).
+  known?: string
+  // historyPage: 'deflate' pages the compressed form of the same snapshot bytes.
+  encoding?: string
 }
 
-export async function dispatchInnerRequest(context: InnerRequestContext, parsed: Record<string, unknown> | undefined): Promise<unknown> {
-  const { controller, fingerprint, executionTargets, lanAdvertisement } = context
-  if (!parsed) return { error: 'invalid_request' }
-  const request = parsed as { op?: string; keepAlive?: unknown; deviceLabel?: unknown; intentId?: string; detail?: string; cursor?: number; outputCursor?: number; waitMs?: number; before?: number; limit?: number; snapshot?: string; runId?: string; providerId?: string; agentProfileId?: string; cwd?: string; path?: string; externalSessionId?: string; historyScope?: string; answerId?: string; response?: unknown; query?: unknown; revision?: string; history?: unknown; context?: unknown; action?: unknown; includeArchived?: unknown; target?: unknown; request?: unknown; attachmentId?: string; offset?: number; dataBase64?: string; name?: string; mimeType?: string; size?: number; sha256?: string; index?: number; totalCount?: number; known?: string; encoding?: string }
+export async function dispatchRemoteRequest(
+  controller: HostController,
+  fingerprint: string,
+  parsed: unknown,
+  executionTargets?: ExecutionTargetRouter,
+  localEndpoint?: LocalEndpointHandlers,
+  lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
+): Promise<unknown> {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
+  const request = parsed as RemoteRequestEnvelope
+  // Version gate before any op runs: a request that does not declare this host's
+  // version is answered with both versions, never partially executed.
+  const mismatch = protocolMismatch(request)
+  if (mismatch) return mismatch
   try {
     if (request.op === 'ping') {
-      // Transport keepalive/probe for the gateway tunnel itself; never
-      // forwarded to an execution target.
-      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel'].includes(key)) ||
+      // Transport keepalive/probe for the gateway tunnel itself; never forwarded
+      // to an execution target. Still re-authorizes the verified peer, so a
+      // revoked device cannot keep a tunnel warm.
+      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) ||
           (request.keepAlive !== undefined && typeof request.keepAlive !== 'boolean')) return { error: 'invalid_request' }
-      const { serverTime } = controller.ping(fingerprint)
+      controller.authorizeDevicePeer(fingerprint)
       const lan = lanAdvertisement()
       return { pong: {
-        serverTime, idleTimeoutMs: INNER_IDLE_TIMEOUT_MS,
+        serverTime: Date.now(), idleTimeoutMs: INNER_IDLE_TIMEOUT_MS,
         capabilities: [...HOST_TRANSPORT_CAPABILITIES, ...(lan ? ['lan'] : [])],
         ...(lan ? { lan } : {})
       } }
@@ -35,7 +94,7 @@ export async function dispatchInnerRequest(context: InnerRequestContext, parsed:
       // Discovery runs on the persistent control lane, so it carries the same
       // authenticated phone metadata as other run requests. Strip those
       // transport-only fields here; nothing else may cross this boundary.
-      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel'].includes(key)) ||
+      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) ||
           (request.keepAlive !== undefined && typeof request.keepAlive !== 'boolean')) return { error: 'invalid_request' }
       if (!executionTargets) return { error: 'execution_targets_unavailable' }
       if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
@@ -46,10 +105,12 @@ export async function dispatchInnerRequest(context: InnerRequestContext, parsed:
       if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
       // These describe the authenticated phone's Mac1 transport, not the
       // forwarded operation or Mac2's desktop peer. Keep business validation exact.
-      const { keepAlive: _keepAlive, deviceLabel: _deviceLabel, ...envelope } = request
+      const { keepAlive: _keepAlive, deviceLabel: _deviceLabel, protocol: _protocol, ...envelope } = request
       try { return await executionTargets.dispatch(fingerprint, envelope) } catch (error) { return executionTargetError(error) }
     }
     if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
+    const historyReply = await dispatchHistoryRequest(controller, fingerprint, request)
+    if (historyReply !== undefined) return historyReply
     if (request.op === 'attachmentStart') {
       return await controller.attachmentStart(fingerprint, request)
     }
@@ -77,10 +138,17 @@ export async function dispatchInnerRequest(context: InnerRequestContext, parsed:
     }
     if (request.op === 'watch') {
       if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor) || !Number.isSafeInteger(request.outputCursor) ||
-          !Number.isSafeInteger(request.waitMs)) return { error: 'invalid_request' }
-      return { watch: await controller.watchRun(fingerprint, {
-        runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number
-      }) }
+          !Number.isSafeInteger(request.waitMs) ||
+          (request.output !== undefined && typeof request.output !== 'boolean' && request.output !== 'wake')) return { error: 'invalid_request' }
+      const watch = {
+        runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number,
+        ...(request.output === 'wake' ? { output: 'wake' as const } : {})
+      }
+      // `output: false` skips the shadow output spool; the reply then carries no
+      // output page at all, rather than an empty one that could read as "no content".
+      return request.output === false
+        ? { watch: await controller.watchLifecycle(fingerprint, watch) }
+        : { watch: await controller.watchRun(fingerprint, watch) }
     }
     if (request.op === 'liveRuns') {
       if (!Number.isSafeInteger(request.waitMs) || (request.revision !== undefined &&
@@ -92,6 +160,29 @@ export async function dispatchInnerRequest(context: InnerRequestContext, parsed:
         ...(request.revision !== undefined ? { revision: request.revision } : {}),
         ...(history ? { history } : {})
       }) }
+    }
+    if (request.op === 'runControl') {
+      // App-only: absent on the network endpoint, where the op is refused rather than
+      // silently answered from another process's memory.
+      if (!localEndpoint?.runControl) return { error: 'unsupported_op' }
+      const keys = Object.keys(request)
+      if (keys.some((key) => !['op', 'keepAlive', 'protocol', 'method', 'runId', 'payload'].includes(key))) return { error: 'invalid_request' }
+      return await handleRunControl(localEndpoint.runControl, request)
+    }
+    if (request.op === 'attentionViewed') {
+      return handleAttentionViewed(localEndpoint?.attention, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'appEvents') {
+      // The App's own event feed (P3f); absent on the network endpoint.
+      return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'terminalFeed') {
+      // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.
+      return await handleTerminalFeed(localEndpoint?.terminal, request as unknown as Record<string, unknown>)
+    }
+    if (isLocalOp(request.op)) {
+      // App channels the daemon answers for its own App; absent on the network endpoint.
+      return await handleLocalOp(localEndpoint?.localOps, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (request.op === 'stop') {
       if (typeof request.runId !== 'string') return { error: 'invalid_request' }
@@ -172,6 +263,12 @@ export async function dispatchInnerRequest(context: InnerRequestContext, parsed:
     if (request.op === 'sessionDelete') {
       return { sessionDelete: await controller.sessionDelete(fingerprint, request.request) }
     }
+    if (request.op === 'catalogSnapshot') {
+      // Whole-catalog read in one round trip. A known revision that still matches
+      // answers `unchanged` instead of re-sending it.
+      if (request.revision !== undefined && (typeof request.revision !== 'string' || request.revision.length > 64)) return { error: 'invalid_request' }
+      return { catalogSnapshot: await controller.catalogSnapshot(fingerprint, { ...(typeof request.revision === 'string' ? { revision: request.revision } : {}) }) }
+    }
     if (request.op === 'sessions') {
       // Same owner-device authorization; display-only catalog metadata.
       return { sessions: controller.listSessions(fingerprint) }
@@ -204,59 +301,6 @@ export async function dispatchInnerRequest(context: InnerRequestContext, parsed:
     }
     if (request.op === 'desktopDirectory') {
       return { directory: controller.desktopDirectory(fingerprint, request.query) }
-    }
-    if (request.op === 'historyPreview') {
-      const scope = historyScopeSelection(request).historyScope ?? 'profile'
-      const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
-      if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
-      return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyPreview: await controller.readHistoryPreview(fingerprint, { ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile, providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
-    }
-    if (request.op === 'historyVersion') {
-      const scope = historyScopeSelection(request).historyScope ?? 'profile'
-      const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
-      if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
-      return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyVersion: await controller.readHistoryVersion(fingerprint, { ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile, providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId }) }
-    }
-    if (request.op === 'historyTurnsPage') {
-      const scope = historyScopeSelection(request).historyScope ?? 'profile'
-      const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
-      if (typeof request.providerId !== 'string' || typeof request.cwd !== 'string' || typeof request.externalSessionId !== 'string' ||
-          (request.before !== undefined && !Number.isSafeInteger(request.before)) ||
-          (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
-          (request.snapshot !== undefined && typeof request.snapshot !== 'string')) return { error: 'invalid_request' }
-      return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyTurnsPage: await controller.readHistoryTurnsPage(fingerprint, {
-        ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile,
-        providerId: request.providerId, cwd: request.cwd, externalSessionId: request.externalSessionId,
-        ...(typeof request.before === 'number' ? { before: request.before } : {}),
-        ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
-        ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
-      }) }
-    }
-    if (request.op === 'history') {
-      const scope = historyScopeSelection(request).historyScope ?? 'profile'
-      const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
-      // Legacy bounded response retained for older clients.
-      if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string') return { error: 'invalid_request' }
-      return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), history: await controller.readHistory(fingerprint, { ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile, providerId: request.providerId, cwd: typeof request.cwd === 'string' ? request.cwd : '', externalSessionId: request.externalSessionId }) }
-    }
-    if (request.op === 'historyPage') {
-      const scope = historyScopeSelection(request).historyScope ?? 'profile'
-      const profile = scope === 'profile' ? historyProfileSelection(request, true) : historyProfileSelection(request)
-      if (typeof request.providerId !== 'string' || typeof request.externalSessionId !== 'string' ||
-          (request.cursor !== undefined && !Number.isSafeInteger(request.cursor)) ||
-          (request.limit !== undefined && !Number.isSafeInteger(request.limit)) ||
-          (request.snapshot !== undefined && typeof request.snapshot !== 'string') ||
-          (request.encoding !== undefined && request.encoding !== 'deflate')) return { error: 'invalid_request' }
-      return { historyScope: scope, ...(scope === 'profile' ? { historyProfile: profile } : {}), historyPage: await controller.readHistoryPage(fingerprint, {
-        ...(request.encoding === 'deflate' ? { encoding: 'deflate' as const } : {}),
-        ...(Object.hasOwn(request, 'historyScope') ? { historyScope: scope } : {}), ...profile,
-        providerId: request.providerId,
-        cwd: typeof request.cwd === 'string' ? request.cwd : '',
-        externalSessionId: request.externalSessionId,
-        ...(typeof request.cursor === 'number' ? { cursor: request.cursor } : {}),
-        ...(typeof request.limit === 'number' ? { limit: request.limit } : {}),
-        ...(typeof request.snapshot === 'string' ? { snapshot: request.snapshot } : {})
-      }) }
     }
     if (request.op === 'output') {
       // The assistant's real streamed output content for one run, after cursor.

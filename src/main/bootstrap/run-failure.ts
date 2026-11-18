@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { TraceEvent } from '../../shared/trace'
 import { runTerminationHint } from '../../shared/runtime'
 import type { ProviderRunHandle } from '../providers/types'
@@ -10,6 +9,7 @@ import { providerRecordingPolicy } from '../provider-recording-policy'
 import { updateRunAttachmentOwner } from '../attachment-store'
 import { archiveTraceTurn, persistTerminalProgress, observedTurnTiming } from './archive'
 import type { RunCompletionContext } from './run-completion'
+import { storageUserDataDir } from '../storage-paths'
 
 type RunFailureContext = RunCompletionContext & {
   handle: { current: ProviderRunHandle | null }
@@ -23,7 +23,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     state, providerId, agentProfileId, runtimeProvider, cwd, catalogCwd, runId,
     displayPrompt, attachments, runState, managedCommitHookEnv, managedRecorderEnabled,
     canonicalLifecycle, isRemoteRun, recordingRecoveryHint, recordingBlockedSessions,
-    scopedSessionKey, getWindow, emit, finishTurnWallTiming, finalizeTurnDiff, finalizeSessionDiff,
+    scopedSessionKey, renderer, emit, finishTurnWallTiming, finalizeTurnDiff, finalizeSessionDiff,
     persistLlmPerformance, observedProviderStartedAt, getObservedSessionId, getResume,
     appSessionStore, mirrorSessionTranscript, ingestion, flushTraceSend, persistRunData,
     settleManagedConversation, finishRemote, markTerminalAttention, handle,
@@ -93,7 +93,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     ...(stopped ? {} : { error: message, errorHint: hint })
   }
   if (cwd) {
-    try { updateRunAttachmentOwner(app.getPath('userData'), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
+    try { updateRunAttachmentOwner(storageUserDataDir(), runId, { providerId, cwd, sessionId: storageSessionId }) } catch (error) {
       console.warn('[scry] terminal attachment ownership update failed:', runId, error)
     }
   }
@@ -114,7 +114,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
       for (const correction of failure.corrections) publishTrace({ ...correction })
       if (failure.created) {
         appendUsage(
-          app.getPath('userData'),
+          storageUserDataDir(),
           {
             providerId,
             agentProfileId,
@@ -146,7 +146,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
       lastRunOutcome: stopped ? 'interrupted' : 'failed'
     })
   } catch (catalogError) {
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message: `Provider 已失败，且会话 catalog 更新失败：${String((catalogError as Error).message)}`,
       category: 'catalog',
@@ -166,7 +166,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     }
     state.terminalArchiveArgs = undefined
     flushTraceSend()
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message: recordingMessage,
       category,
@@ -187,7 +187,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     runState.errorHint = recordingRecoveryHint
     recordingBlockedSessions.set(scopedSessionKey(storageSessionId), runState.errorHint)
     flushTraceSend()
-    getWindow()?.webContents.send('agent:error', {
+    renderer.send('agent:error', {
       runId,
       message: recordingMessage,
       category: 'recording',
@@ -196,7 +196,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
   }
   flushTraceSend()
   if (stopped && !canonicalLifecycle) {
-    if (!alreadyDone) getWindow()?.webContents.send('agent:turnDone', {
+    if (!alreadyDone) renderer.send('agent:turnDone', {
       runId,
       stopped: true,
       providerId,
@@ -206,7 +206,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
       ...(forkTurnId ? { forkTurnId } : {})
     })
   } else {
-    getWindow()?.webContents.send('agent:error', { runId, message, category, hint })
+    renderer.send('agent:error', { runId, message, category, hint })
     markTerminalAttention(storageSessionId, true)
   }
   await turnDiffDone
@@ -227,7 +227,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     console.error('[scry] exact turn archive failed:', archiveError)
     if (canonicalLifecycle && providerTurnId) {
       const recordingMessage = `Scry 精确记录提交失败：${String((archiveError as Error).message)}`
-      getWindow()?.webContents.send('agent:error', {
+      renderer.send('agent:error', {
         runId,
         message: recordingMessage,
         category: 'recording',
@@ -237,7 +237,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
   }
   persistRunData(storageSessionId)
   if (stopped && canonicalLifecycle && !alreadyDone && exactRecorded) {
-    getWindow()?.webContents.send('agent:turnDone', {
+    renderer.send('agent:turnDone', {
       runId,
       stopped: true,
       providerId,

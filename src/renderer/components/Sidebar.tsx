@@ -74,6 +74,8 @@ export const Sidebar = memo(function Sidebar({
   onMetaPrompts,
   metaPromptsActive = false,
   catalogHealth,
+  catalogHealthError,
+  projectsError,
   onSettings,
   activeRemote = null,
   onPickRemoteSession,
@@ -122,6 +124,9 @@ export const Sidebar = memo(function Sidebar({
   onMetaPrompts?: () => void
   metaPromptsActive?: boolean
   catalogHealth?: CatalogHealth
+  // The catalog reads themselves failed (not a damaged index): the readable reason.
+  catalogHealthError?: string | null
+  projectsError?: string | null
   onSettings?: () => void
   activeRemote?: ActiveRemoteLocation | null
   onPickRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
@@ -283,7 +288,9 @@ export const Sidebar = memo(function Sidebar({
         <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
       </Tabs>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
-        {catalogHealth && catalogHealth.status !== 'ready' && (
+        {catalogHealthError ? (
+          <div className="sb-empty" role="status" data-catalog-read-error>{projectCopy.catalogReadFailed(catalogHealthError)}</div>
+        ) : catalogHealth && catalogHealth.status !== 'ready' && (
           <div className="sb-empty" role="status" title={catalogHealth.reason}>
             {catalogHealth.status === 'degraded'
               ? '会话索引已从备份恢复；下一次成功写入会修复主索引。'
@@ -300,7 +307,7 @@ export const Sidebar = memo(function Sidebar({
             : renderSession(entry.session.cwd ?? entry.project.cwd, entry.session, entry.project.name)}
           />
         </> : <>
-          <SidebarProjects projects={projects} q={q} remoteGroups={remoteGroups} showRemote={showRemote}
+          <SidebarProjects projects={projects} projectsError={projectsError ?? null} q={q} remoteGroups={remoteGroups} showRemote={showRemote}
             activeCwd={activeCwd} activeSessionId={activeSessionId} collapsed={collapsed} toggle={toggle}
             onNewProjectChat={onNewProjectChat} openProjectMenu={openProjectMenu}
             renderSession={renderSession} renderConversation={renderConversation}

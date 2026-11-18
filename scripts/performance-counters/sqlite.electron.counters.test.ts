@@ -11,6 +11,9 @@ import { applyDataUpdatedEffects } from '../../src/renderer/hooks/useIntegration
 // `*.electron.counters.test.ts` with ELECTRON_RUN_AS_NODE when Electron is installed. Under
 // plain Node the production module reports SQLite unavailable and so does this collector.
 const sqlite = vi.hoisted(() => ({ active: false, prepare: 0, queries: 0, exec: 0, userData: '' }))
+// This collector is also run against older revisions for comparisons. Before M1 the
+// database read its root from Electron, so the mock keeps those revisions measurable;
+// the injection below takes precedence wherever the module exists.
 vi.mock('electron', () => ({ app: { getPath: () => sqlite.userData, getAppPath: () => sqlite.userData } }))
 
 const workload = 'span-results=240;tools=240'
@@ -26,6 +29,14 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 async function installCounter(): Promise<boolean> {
   let Database: { prototype: { prepare: (sql: string) => object; exec: (sql: string) => unknown } }
   try { Database = (await import('better-sqlite3')).default as never } catch { return false }
+  // The JS module loads even when the native binding does not: better-sqlite3 is
+  // built for Electron's ABI, and the binding is resolved on the first Database.
+  // Open one in memory so `installed` means "SQLite really works here", not "the
+  // wrapper resolved".
+  try {
+    const probe = new (Database as unknown as new (path: string) => { close: () => void })(':memory:')
+    probe.close()
+  } catch { return false }
   const prototype = Database.prototype
   const prepare = prototype.prepare
   const exec = prototype.exec
@@ -48,11 +59,20 @@ async function installCounter(): Promise<boolean> {
   return true
 }
 
-const loaded = installCounter().then(async installed => ({ installed, db: await import('../../src/main/db') }))
+// Storage is injected, not read from Electron: this collector owns the temporary root.
+const loaded = installCounter().then(async (installed) => {
+  const storage = await import('../../src/main/storage-paths').catch(() => null)
+  storage?.configureStorage({ userDataDir: root, appPath: root })
+  return { installed, injected: Boolean(storage), db: await import('../../src/main/db') }
+})
 
 async function seededDatabase() {
-  const { installed, db } = await loaded
+  const { installed, injected, db } = await loaded
   db.initDb()
+  // A degraded database would silently turn these three metrics into `unavailable`,
+  // which the performance gate then reads as metrics that disappeared. Older
+  // revisions (used as comparison baselines) keep their Electron-mocked root.
+  if (installed && injected) expect(db.statsQuery().status).toBe('ready')
   if (!installed || db.statsQuery().status !== 'ready') return null
   const now = Date.now()
   for (let index = 0; index < 240; index++) {

@@ -43,69 +43,6 @@ export const TURN_DIFF_REVIEW_COPY = {
   closeLabel: '关闭 Review'
 } as const
 
-export const ANALYTICS_COPY = {
-  // 切换范围时旧数据仍在屏幕上，必须说清它属于哪个范围。
-  staleRange: (next: number, shownFrom: string, shownTo: string): string => `正在读取最近 ${next} 天… 下方仍是 ${shownFrom} – ${shownTo} 的数据`,
-  title: '用量',
-  totalLabel: '原始 Token 成本',
-  composition: '成本构成',
-  compositionChart: '各 Provider 的已知成本占比',
-  byProvider: '按 Provider',
-  overview: '用量概览',
-  tokens: 'Token 用量',
-  processedTokens: '已处理 Token',
-  cacheRead: '缓存输入',
-  input: '已观测输入',
-  output: '输出',
-  cacheWrite: '缓存写入',
-  details: '明细',
-  model: '模型',
-  day: '日期',
-  detailDimension: '明细维度',
-  costUsd: '成本（USD）',
-  share: '占比',
-  token: 'Token',
-  unattributed: '未归因',
-  back: '返回对话',
-  rangeLabel: '分析时间范围',
-  range: (days: number) => `${days} 天`,
-  period: (from: string, to: string) => `${from} 至 ${to}`,
-  periodDisplay: (from: string, to: string) => `${from} – ${to}`,
-  refresh: '刷新分析数据',
-  loading: '正在读取本机用量账本…',
-  creditsPending: '正在计算 Credit；当前只显示用量账本记录',
-  unavailable: '用量分析暂不可用',
-  databaseUnavailable: 'SQLite 尚未初始化，Scry 其他功能不受影响。',
-  retry: '重试',
-  noProviderRecord: '当前范围没有可展示的 Provider 记录',
-  noDetails: '当前范围没有可展示的明细',
-  cost: '成本',
-  tokenToggle: 'Token',
-  dailyCost: '每日成本',
-  dailyTokens: '每日 Token',
-  costTrend: '每日成本趋势',
-  tokenTrend: '每日 Token 趋势',
-  metric: '趋势指标',
-  legend: 'Provider 图例',
-  noCostChart: '该时间范围没有可绘制的成本数据。',
-  noTokenChart: '该时间范围没有可绘制的 Token 数据。',
-  noDailyRecord: '当日无记录',
-  approximateCost: (value: string) => `≈${value}`,
-  creditAmount: (value: number | null) => {
-    if (value == null) return 'Credit 不可用'
-    if (value > 0 && value < 0.01) return '<0.01 Credits'
-    return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} Credits`
-  },
-  chartInstructions: '聚焦图表后，可使用左右方向键逐日查看证据，Home / End 跳到首尾，Esc 收起详情。没有记录或没有该指标证据的日期不连线，也不按零值绘制。',
-  providerEvidence: (cost: string, tokens: string, tokenEvidence: string) => `${cost}；${tokens} Token；${tokenEvidence}`,
-  totalEvidence: (evidence: string, turns: number) => `${evidence}；${turns.toLocaleString()} 轮；不代表实际账单。部分覆盖只表示已知下界。`,
-  tokenCoverage: (known: number, total: number) => `${known}/${total} 条明细已上报`,
-  // 摘要数值只在部分明细上报时才带这行，避免把已知下界读成总量。
-  lowerBoundNote: (known: number, total: number) => `已知下界 · ${known}/${total} 条明细已上报`,
-  partialTokenNote: '已知下界：部分明细未上报',
-  outputEvidence: (known: number, total: number, reasoning: string) => `${known}/${total} 条明细已上报；推理 ${reasoning}`
-} as const
-
 export const META_PROMPT_COPY = {
   discardTitle: '放弃未保存的修改？',
   discardDescription: '放弃后，本次修改不会保存。',
@@ -365,10 +302,13 @@ export const LOADING_COPY = {
   mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
   skills: '正在读取 Skill…',
   skillsSourceEmpty: '当前来源没有 Skill',
+  // The Provider answered without a list (unknown/unsupported): not the same as none.
+  skillsSourceUnread: '未能读取当前来源的 Skill（原因见上方）',
   skillsEmpty: (scope: string) => `未发现${scope}`,
   skillsNoMatch: (scope: string) => `${scope}中没有匹配结果`,
   mcp: '正在读取 MCP 配置…',
   mcpSourceEmpty: '当前来源没有 MCP',
+  mcpSourceUnread: '未能读取当前来源的 MCP（原因见上方）',
   mcpEmpty: '未发现 MCP 配置',
   refresh: '刷新',
   detecting: '检测中…',

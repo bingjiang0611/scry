@@ -57,7 +57,7 @@ export const transmit = (envelope: DesktopRemoteTraceRead): DesktopRemoteTraceRe
 /** Bounded runtime with no window and no renderer: this component measures main-side projection only. */
 export function createBoundedRuntime({ nextEventId }: { nextEventId: (prefix: string, runId: string) => string }) {
   return createTraceRuntime({
-    getWindow: () => null,
+    renderer: { send: () => undefined, isFocused: () => false },
     rendererCanReceive: () => false,
     activeRunSessionKey: () => null,
     dockBadge: new DockBadgeState(() => {}),

@@ -69,7 +69,20 @@ export class RunTraceRouter {
   private readonly byRun = new Map<string, Subscription>()
   private legacyRunId: string | null = null
 
+  // Daemon mode (P3f W2): runs this window follows from its daemon, read-only like the
+  // registry. Its own registry wins; this answers only for runs it does not hold.
+  private attached: RunTraceRouterDeps['runs'] | undefined
+
   constructor(private readonly deps: RunTraceRouterDeps) {}
+
+  attachRuns(source: RunTraceRouterDeps['runs']): () => void {
+    this.attached = source
+    return () => { if (this.attached === source) this.attached = undefined }
+  }
+
+  private runOf(runId: string): { state: ActiveRun } | undefined {
+    return this.deps.runs.get(runId) ?? this.attached?.get(runId)
+  }
 
   subscribe(request: unknown): RunTraceSubscribeResult {
     if (!request || typeof request !== 'object') return { status: 'rejected' }
@@ -85,7 +98,7 @@ export class RunTraceRouter {
     }
     const owner = this.subscriptions.get(subscriptionId)
     if (owner) return { status: 'rejected' }
-    const state = this.deps.runs.get(runId)?.state
+    const state = this.runOf(runId)?.state
     if (!state) return { status: 'unavailable' }
     if (this.subscriptions.size >= MAX_SCOPED_RUN_STREAMS) return { status: 'limit' }
     const subscription: Subscription = {
@@ -270,7 +283,7 @@ export class RunTraceRouter {
   }
 
   private snapshotOf(subscription: Subscription): ActiveRun | undefined {
-    const state = this.deps.runs.get(subscription.runId)?.state
+    const state = this.runOf(subscription.runId)?.state
     if (state) return this.deps.boundedLiveRun(state)
     return subscription.settledSnapshot
   }

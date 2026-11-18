@@ -4,7 +4,7 @@ import { RunOutputWorkerStore } from './run-output-worker'
 
 type Request = {
   requestId: number
-  op: 'appendBatch' | 'since' | 'close'
+  op: 'appendBatch' | 'since' | 'countSince' | 'close'
   value: unknown
 }
 
@@ -37,6 +37,16 @@ const connect = (worker: FakeWorker): RunOutputWorkerStore => {
 const chunk = (text: string) => ({ runId: 'run', kind: 'output' as const, text, at: 1 })
 
 describe('RunOutputWorkerStore', () => {
+  it('asks the worker for the count instead of a page of chunks', async () => {
+    const worker = new FakeWorker()
+    const store = connect(worker)
+    const counted = store.countSince('run', 4)
+    // The request names the count op, so no chunk bodies cross the boundary for a wake.
+    expect(worker.messages[0]).toMatchObject({ op: 'countSince', value: { runId: 'run', cursor: 4 } })
+    worker.reply(0, { count: 2, cursor: 6 })
+    await expect(counted).resolves.toEqual({ count: 2, cursor: 6 })
+  })
+
   it('keeps worker operations ordered with only one request in flight', async () => {
     const worker = new FakeWorker()
     const store = connect(worker)

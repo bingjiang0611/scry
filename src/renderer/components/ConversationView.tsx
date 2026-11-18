@@ -18,8 +18,11 @@ import { missingConversationTurns, projectConversationTurns } from '../conversat
 
 import '../conversation.css'
 import { ConversationViewBody } from './ConversationViewBody'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
+import { useConversationSessionsViewed } from '../conversation-viewed-sessions'
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
+const message = ipcErrorMessage
 /** No turn of a side chat can create a native fork; the backend refuses it as well. */
 const NO_FORKABLE_RUNS: ReadonlySet<string> = new Set()
 
@@ -135,6 +138,7 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     void refresh().catch(error => { if (mounted.current) setError(`读取本轮最终记录失败：${message(error)}`) })
   })
   const live = stream.run
+  useConversationSessionsViewed(conversation.id, !embedded, page)
   useEffect(() => {
     if (stream.status === 'limit') setNotice(CONVERSATION_COPY.liveStreamLimited)
   }, [stream.status, setNotice])
@@ -144,7 +148,8 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     void refresh().catch(error => { if (!disposed) setError(message(error)) })
     const resume = (): void => { if (!document.hidden) void refresh().catch(() => undefined) }
     const off = window.scry.onDataUpdated?.(event => {
-      if (event?.kind === 'conversation_changed' && event.conversationId === conversation.id) {
+      // A resynchronization means notices were lost, possibly about this conversation.
+      if ((event?.kind === 'conversation_changed' && event.conversationId === conversation.id) || event?.kind === 'resynchronize') {
         void refresh().catch(error => { if (!disposed) setError(message(error)) })
       }
       // 终态可先清除 activeRunId，归档正文随后才可读。本页已结束的轮次仍需

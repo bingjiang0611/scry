@@ -218,8 +218,10 @@ function runRatchet(candidate, report, outputDirectory, options) {
   return result
 }
 
-function formatValue(value) {
+export function formatValue(value) {
   if (value === null || value === undefined) return 'n/a'
+  // `unavailable` (and any other state) is printed as the state it is, never as 0.
+  if (typeof value !== 'number') return String(value)
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 

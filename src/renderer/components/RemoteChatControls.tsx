@@ -10,7 +10,8 @@ import { desktopProviderKey, historyTurns } from './DesktopRemote'
 import { initialRemoteRunControls, readRemoteRunControls, remoteRunControlsKey, writeRemoteRunControls } from '../remote-run-controls'
 import type { FoundationState } from './RemoteChatFoundation'
 import type { RemoteChatProps } from './RemoteChat'
-import { errorText, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
+import { errorText, followedLiveRunId, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
+import { createTraceReadScheduler } from './trace-read-scheduler'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
 // ChatView as local sessions; only the controller differs. The host owns Provider
@@ -94,7 +95,34 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     const settlePoll = (key: string, traceChanged: boolean | undefined): void => {
       const quiet = traceChanged === false && key === lastPollKey.current
       lastPollKey.current = key
+      // The host does the waiting now, so a quiet cycle only means the window
+      // expired; the next request is issued straight away. Backoff stays for errors.
       setPollInterval(quiet ? Math.min(QUIET_POLL_MAX_MS, pollIntervalMs.current * 2) : POLL_MS)
+    }
+    // Trace content is read when the shown run is not this run yet, and otherwise at
+    // most once per floor so a burst of ledger events coalesces into one read. A
+    // change skipped inside the floor arms a tail read; a followed run that is still
+    // live reads on the floor without waiting for a poll to return.
+    // The submitted run's own context (its cwd may be a new worktree); every other run
+    // is read in the view's context.
+    let intentTrace: { runId: string; context: DesktopRemoteContext } | undefined
+    const traceContextFor = (runId: string): DesktopRemoteContext => intentTrace?.runId === runId ? intentTrace.context : context
+    const scheduler = createTraceReadScheduler((runId) => {
+      const sequence = pollSequence.current
+      // A tail or live read is not a poll cycle, so it never touches the poll's
+      // backoff key; a failure is still shown as a poll error.
+      void followTrace(runId, sequence, traceContextFor(runId)).catch((reason) => {
+        if (!cancelled && sequence === pollSequence.current) { setPollError(errorText(reason)); setPollFresh(false) }
+      })
+    })
+    // Decide, then read: the caller owns the await so the read is counted exactly
+    // once and the floor starts at request time, not at completion.
+    const readNow = async (runId: string, sequence: number): Promise<boolean | undefined> => {
+      const at = Date.now()
+      try { return await followTrace(runId, sequence, traceContextFor(runId)) }
+      // The read was claimed by decide(); release it even when the read failed, or
+      // the tail and live paths would stay blocked forever.
+      finally { scheduler.markRead(at) }
     }
     const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
@@ -121,9 +149,12 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           }
           let traceChanged: boolean | undefined
           if (live?.scryRunId) {
-            traceChanged = await followTrace(live.scryRunId, sequence)
-            if (traceChanged === undefined) return
-          } else showTrace(null)
+            if (scheduler.decide(live.scryRunId) === 'read-now') {
+              traceChanged = await readNow(live.scryRunId, sequence)
+              if (traceChanged === undefined) return
+            }
+            scheduler.setLive(followedLiveRunId(live))
+          } else { showTrace(null); scheduler.setLive(undefined) }
           settlePoll(JSON.stringify([pending, live]), traceChanged)
           setPollError(null)
           setPollFresh(true)
@@ -180,9 +211,15 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         }
         let traceChanged: boolean | undefined
         if (nextStatus.scryRunId) {
-          traceChanged = await followTrace(nextStatus.scryRunId, sequence, effectiveContext)
-          if (traceChanged === undefined) return
-        } else showTrace(null)
+          // A run started into a worktree reads its trace in the run's own cwd/session,
+          // including the tail read the scheduler may arm for it.
+          intentTrace = { runId: nextStatus.scryRunId, context: effectiveContext }
+          if (scheduler.decide(nextStatus.scryRunId) === 'read-now') {
+            traceChanged = await readNow(nextStatus.scryRunId, sequence)
+            if (traceChanged === undefined) return
+          }
+          scheduler.setLive(undefined)
+        } else { showTrace(null); scheduler.setLive(undefined) }
         settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)
         setPollError(null)
         setPollFresh(true)
@@ -199,6 +236,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     pollRef.current = poll
     return () => {
       cancelled = true
+      scheduler.dispose()
       pollSequence.current += 1
       if (pollRef.current === poll) pollRef.current = undefined
     }

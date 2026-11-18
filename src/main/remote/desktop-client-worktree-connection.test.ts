@@ -82,14 +82,21 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       const runId = randomUUID()
-      for (const response of [null, {}, { state: 'running' }]) {
+      // The lifecycle long poll is the only evidence source; a missing, empty or
+      // unrecognized envelope is rejected rather than read as "no change".
+      for (const response of [null, {}, { watch: null }, { watch: { poll: null } }, { watch: { state: 'running', poll: { events: [], cursor: 0 } } }]) {
         fixture.tlsRequest.mockResolvedValueOnce(response)
         await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
       }
-      fixture.tlsRequest.mockResolvedValueOnce({ state: 'settled' }).mockResolvedValueOnce({ poll: null })
-      await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
-      fixture.tlsRequest.mockResolvedValueOnce({ state: null }).mockResolvedValueOnce({ poll: { events: [], cursor: 0 } })
-      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown' })
+      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'settled', poll: { events: [], cursor: 0 } } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ state: 'settled' })
+      // No state and no evidence is unknown. The previous answer said settled, so
+      // the lifecycle did change; a window that expires with the same state is not
+      // a change and must not make the caller re-read content.
+      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: true })
+      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
+      await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: false })
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 

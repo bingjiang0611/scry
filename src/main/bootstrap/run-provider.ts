@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { recordRunStage } from '../run-stage-timing'
 import { AgentRuntimeError } from '../run-outcome'
 import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest, AgentPermissionMode, RuntimeProvider } from '../../shared/runtime'
 import type { ProviderId } from '../../shared/provider'
@@ -43,7 +44,9 @@ export interface RunProviderBootstrapDependencies {
   stopLatch: AbortController
   stopSignal?: AbortSignal
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
-  isRemoteRun: boolean
+  // The submitter is the App, so questions are answered by the App's own broker.
+  /** Whether this Provider's questions are answered in the App window (see run-startup). */
+  askWindow: boolean
   permissionModeOverride?: AgentPermissionMode
   mcpExecutionSnapshot: McpExecutionSnapshot | null
   conversationStore: Pick<ConversationStore, 'assertManagedWriteAllowed'>
@@ -99,7 +102,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     firstTextPerf,
     mainEventId,
     userQuestionBroker,
-    isRemoteRun,
+    askWindow,
     permissionModeOverride,
     mcpExecutionSnapshot,
     conversationStore,
@@ -120,6 +123,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
   }> => {
     if (interrupted()) return { stopped: true }
     setProviderStartedAt(new Date().toISOString())
+    recordRunStage(runId, 'providerStart')
     firstTracePerf.mark('provider_launch')
     firstTextPerf.mark('provider_launch')
     // Re-hash executable bytes at the actual Provider launch boundary, after all
@@ -186,7 +190,9 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       },
       onExternalSessionId: publishSessionId,
       requestUserInput: async (question, signal) => {
-        if (!isRemoteRun) return userQuestionBroker.request({ ...question, providerId }, signal)
+        // One decision, made where the run's venue is known: the window answers the
+        // App's own run; a daemon has none, so its questions go through the ledger.
+        if (askWindow) return userQuestionBroker.request({ ...question, providerId }, signal)
         if (!requestUserInput) throw new Error('remote_interactive_input_unsupported')
         const openedAtMs = Date.now()
         const remoteQuestion = { ...question, providerId, runId }

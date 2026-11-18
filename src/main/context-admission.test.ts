@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ContextAdmission, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, runConflictsWithSession, waitForCompletedRuns } from './context-admission'
+import { ADMISSION_DEADLINE_MS, ContextAdmission, admitRun, canRestartInterruptedLocalOnlySession, expectedRestartSourceMatches, expectedSessionMatches, runConflictsWithSession, waitForCompletedRuns } from './context-admission'
 
 describe('context admission', () => {
   it('admits an explicit new session while another first turn has no Provider session ID', async () => {
@@ -92,6 +92,92 @@ describe('context admission', () => {
     const action = vi.fn(async () => {})
     await expect(admission.runMany([], action)).rejects.toThrow('at least one')
     expect(action).not.toHaveBeenCalled()
+  })
+
+  // G1：一个永不释放的持有者曾让后续每一轮都停在 admission 里，App 既看不到错误也无法停止。
+  // 有界等待把「永远等待」变成带原因的失败，并且不留下幽灵排队位。
+  it('gives up waiting for a holder that never releases instead of queueing forever', async () => {
+    const admission = new ContextAdmission({ admitDeadlineMs: 30 })
+    let releaseHolder!: () => void
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve })
+    const holder = admission.run('a', () => held)
+    const started = Date.now()
+    await expect(admission.run('a', async () => 'next')).rejects.toThrow('run_admission_timeout')
+    expect(Date.now() - started).toBeLessThan(2_000)
+    // 超时那一轮释放自己的占位：持有者一结束，后续 run 立即通过，而不是排在空气后面。
+    releaseHolder()
+    await holder
+    await expect(admission.run('a', async () => 'after')).resolves.toBe('after')
+  })
+
+  it('keeps waiting without a deadline, so the bound is an explicit choice', async () => {
+    const admission = new ContextAdmission({ admitDeadlineMs: Number.POSITIVE_INFINITY })
+    let releaseHolder!: () => void
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve })
+    const holder = admission.run('a', () => held)
+    const queued = admission.run('a', async () => 'next')
+    await new Promise((resolve) => { setTimeout(resolve, 60) })
+    releaseHolder()
+    await holder
+    await expect(queued).resolves.toBe('next')
+  })
+
+  // The run-admission deadline is a property of starting a run, not of every queue built
+  // on this class: the conversation ledger, deletion and fork serialize on it too, and a
+  // timeout there would refuse a write that has not failed (H1).
+  it('keeps a default admission queued past the run-admission deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const admission = new ContextAdmission()
+      let releaseHolder!: () => void
+      const holder = admission.run('a', () => new Promise<void>((resolve) => { releaseHolder = resolve }))
+      const queuedAction = vi.fn(async () => 'next')
+      const queued = admission.run('a', queuedAction)
+      let outcome: 'pending' | 'resolved' | 'rejected' = 'pending'
+      queued.then(() => { outcome = 'resolved' }, () => { outcome = 'rejected' })
+      await vi.advanceTimersByTimeAsync(ADMISSION_DEADLINE_MS + 5_000)
+      expect(outcome).toBe('pending')
+      expect(queuedAction).not.toHaveBeenCalled()
+      releaseHolder()
+      await holder
+      await expect(queued).resolves.toBe('next')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds a run start that waits behind a holder at the run-admission deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const admission = new ContextAdmission()
+      let releaseHolder!: () => void
+      const holder = admission.runMany(['a'], () => new Promise<void>((resolve) => { releaseHolder = resolve }))
+      const action = vi.fn(async () => 'started')
+      const start = admitRun(admission, ['a'], action)
+      const rejected = expect(start).rejects.toThrow('run_admission_timeout')
+      await vi.advanceTimersByTimeAsync(ADMISSION_DEADLINE_MS + 1)
+      await rejected
+      expect(action).not.toHaveBeenCalled()
+      releaseHolder()
+      await holder
+      // The timed-out start released its own place, so the next one is not stuck behind it.
+      await expect(admitRun(admission, ['a'], async () => 'after')).resolves.toBe('after')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports a UI-complete run that never settles as no longer waitable', async () => {
+    const never = new Promise<void>(() => {})
+    const started = Date.now()
+    await expect(waitForCompletedRuns([{ done: true, settled: never }], { admitDeadlineMs: 30 })).resolves.toBe(false)
+    expect(Date.now() - started).toBeLessThan(2_000)
+    // 控制组：没有 deadline 时同一个输入仍在等待，说明上面的 false 来自边界而不是恰好完成。
+    let finished = false
+    const unbounded = waitForCompletedRuns([{ done: true, settled: never }]).then(() => { finished = true })
+    await new Promise((resolve) => { setTimeout(resolve, 60) })
+    expect(finished).toBe(false)
+    void unbounded
   })
 
   it('waits for a UI-complete run to settle before admitting the queued turn', async () => {

@@ -1,4 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { readFile as readFileAsync } from 'node:fs/promises'
 
 /**
  * 进程身份化与后代树诊断。
@@ -20,14 +22,29 @@ export interface ProcessRow {
   status: string
   /** ps 的 lstart 列原文，作为启动时间指纹（固定 LC_ALL=C 格式）。 */
   startedAt: string
+  /** Exact platform identity when available (Linux boot_id + proc starttime). */
+  identityKey?: string
   command: string
 }
 
 export type ProcessSnapshot = ReadonlyMap<number, ProcessRow>
 
-/** 身份键：PID 复用时启动时间一定不同，所以两者合起来才是身份。 */
-export function processIdentityKey(row: { pid: number; startedAt: string }): string {
-  return `${row.pid}:${row.startedAt}`
+/** Platform identity key; Linux uses boot_id + proc starttime instead of wall-clock text. */
+export function processIdentityKey(row: { pid: number; startedAt: string; identityKey?: string }): string {
+  return row.identityKey ?? `${row.pid}:${row.startedAt}`
+}
+
+// Two identity formats are written today: the exact Linux key, and macOS UTC lstart.
+// macOS lstart is the kernel's absolute process start time rendered in a fixed zone, so
+// it does not drift when the clock is corrected. Anything else is a legacy record whose
+// value we cannot interpret; for those a differing identity is not proof of PID reuse.
+const COMPARABLE_IDENTITY_FORMATS = [
+  /^\d+:linux:[^:]+:\d+$/,
+  /^\d+:[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9]\d \d{2}:\d{2}:\d{2} \d{4}$/
+]
+
+export function processIdentitiesComparable(recorded: string, observed: string): boolean {
+  return COMPARABLE_IDENTITY_FORMATS.some((format) => format.test(recorded) && format.test(observed))
 }
 
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\w+\s+\w+\s+\d+\s+[\d:]+\s+\d+)\s+(.*)$/
@@ -81,6 +98,92 @@ export const defaultProcessIdentityLister: ProcessIdentityLister = (pid) => new 
 
 export function readProcessSnapshot(lister: ProcessLister = defaultProcessLister): ProcessSnapshot {
   return parseProcessSnapshot(lister())
+}
+
+export interface SyncProcessIdentityOptions {
+  platform?: NodeJS.Platform
+  readFile?: (path: string) => string
+  ps?: (pid: number) => string
+}
+
+function linuxProcessRow(pid: number, readFile: (path: string) => string): ProcessRow | undefined {
+  let stat: string
+  try { stat = readFile(`/proc/${pid}/stat`) } catch { return undefined }
+  const close = stat.lastIndexOf(')')
+  if (close < 0) throw new Error('process_identity_invalid_stat')
+  const open = stat.indexOf('(')
+  const commandName = open >= 0 ? stat.slice(open + 1, close) : ''
+  const fields = stat.slice(close + 1).trim().split(/\s+/)
+  // fields[0] is proc field 3 (state); field 22 (starttime) is index 19.
+  const starttime = fields[19]
+  const ppid = Number(fields[1])
+  if (!starttime || !Number.isSafeInteger(ppid)) throw new Error('process_identity_invalid_stat')
+  const bootId = readFile('/proc/sys/kernel/random/boot_id').trim()
+  if (!bootId) throw new Error('process_identity_boot_id_unavailable')
+  let command = commandName
+  try { command = readFile(`/proc/${pid}/cmdline`).replaceAll('\0', ' ').trim() || commandName } catch {}
+  const identityKey = `${pid}:linux:${bootId}:${starttime}`
+  return { pid, ppid, status: fields[0] ?? '', startedAt: `linux:${bootId}:${starttime}`, identityKey, command }
+}
+
+/** Exact synchronous identity for startup locks. Linux avoids wall-clock time and ps. */
+export function readProcessIdentitySync(pid: number, options: SyncProcessIdentityOptions = {}): ProcessRow | undefined {
+  const platform = options.platform ?? process.platform
+  const readFile = options.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
+  if (platform === 'linux') return linuxProcessRow(pid, readFile)
+  let output: string
+  try {
+    output = (options.ps ?? ((target) => execFileSync(
+      '/bin/ps', ['-p', String(target), '-o', 'pid=,ppid=,stat=,lstart=,command='],
+      { encoding: 'utf8', maxBuffer: 64 * 1024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }
+    )))(pid)
+  } catch {
+    return undefined
+  }
+  return parseProcessSnapshot(output).get(pid)
+}
+
+export interface ProcessIdentityOptions {
+  platform?: NodeJS.Platform
+  readFile?: (path: string) => Promise<string>
+  ps?: (pid: number) => Promise<string>
+}
+
+/**
+ * The identity readProcessIdentitySync reads, without blocking: for IPC paths. Same
+ * files on Linux and the same `ps` arguments and zone on macOS, so a key written by the
+ * synchronous reader (daemon.lock) compares equal here.
+ */
+export async function readProcessIdentity(pid: number, options: ProcessIdentityOptions = {}): Promise<ProcessRow | undefined> {
+  const platform = options.platform ?? process.platform
+  if (platform === 'linux') {
+    const read = options.readFile ?? ((path: string) => readFileAsync(path, 'utf8'))
+    const paths = [`/proc/${pid}/stat`, '/proc/sys/kernel/random/boot_id', `/proc/${pid}/cmdline`]
+    const contents = new Map<string, string>()
+    await Promise.all(paths.map(async (path) => { try { contents.set(path, await read(path)) } catch {} }))
+    return linuxProcessRow(pid, (path) => {
+      const value = contents.get(path)
+      if (value === undefined) throw new Error(`process_identity_unreadable:${path}`)
+      return value
+    })
+  }
+  let output: string
+  try {
+    output = await (options.ps ?? ((target) => new Promise<string>((resolve, reject) => {
+      execFile('/bin/ps', ['-p', String(target), '-o', 'pid=,ppid=,stat=,lstart=,command='],
+        { encoding: 'utf8', maxBuffer: 64 * 1024, timeout: PROCESS_IDENTITY_TIMEOUT_MS, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } },
+        (error, stdout) => { if (error) reject(error); else resolve(stdout) })
+    })))(pid)
+  } catch {
+    return undefined
+  }
+  return parseProcessSnapshot(output).get(pid)
+}
+
+let selfIdentity: ProcessRow | undefined
+export function currentProcessIdentitySync(): ProcessRow | undefined {
+  if (!selfIdentity || selfIdentity.pid !== process.pid) selfIdentity = readProcessIdentitySync(process.pid)
+  return selfIdentity
 }
 
 export type ProcessCategory =

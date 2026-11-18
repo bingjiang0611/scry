@@ -1,9 +1,8 @@
-import { app } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { AgentRuntimeError } from '../run-outcome'
 import {
-  expectedRestartSourceMatches, expectedSessionMatches,
+  ADMISSION_DEADLINE_MS, expectedRestartSourceMatches, expectedSessionMatches,
   runConflictsWithSession, waitForCompletedRuns
 } from '../context-admission'
 import type { RunRegistry } from '../run-registry'
@@ -15,6 +14,7 @@ import type { prepareRunFrontdoor, AppRunStartOptions } from './run-frontdoor'
 import { prepareRunRecovery } from './run-recovery'
 import { applyForkOrRestart } from './run-fork'
 import { resolveCodexHookTrust, resolveOpenCodePluginTrust, ensureMcpExecutionAuthorized } from './trust'
+import { storageUserDataDir } from '../storage-paths'
 
 export async function prepareRunAdmission(
   frontdoor: ReturnType<typeof prepareRunFrontdoor>,
@@ -23,7 +23,7 @@ export async function prepareRunAdmission(
     getStartupManagedRecovery, isShuttingDown, providerRegistry, providerContextKey, providerSessionKey,
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
     runs, appSessionStore, deletingSessions, conversationStore,
-    assertLegacyConversationWriteAllowed, recordingBlockedSessions
+    assertLegacyConversationWriteAllowed, recordingBlockedSessions, settleDeadlineMs
   }: {
     providerRegistry: ProviderRegistry
     getStartupManagedRecovery: () => Promise<void>
@@ -40,6 +40,8 @@ export async function prepareRunAdmission(
     conversationStore: () => ConversationStore
     assertLegacyConversationWriteAllowed: (scope: NativeSessionScope) => Promise<void>
     recordingBlockedSessions: Map<string, string>
+    /** 覆盖「等上一轮收尾」的上限；默认 ADMISSION_DEADLINE_MS。 */
+    settleDeadlineMs?: number
   }
 ) {
   const {
@@ -122,7 +124,7 @@ export async function prepareRunAdmission(
     const entry = runs.get(run.runId)
     return entry ? [{ done: run.done, settled: entry.control.settled }] : []
   })
-  if (!(await waitForCompletedRuns(conflictingEntries))) {
+  if (!(await waitForCompletedRuns(conflictingEntries, { admitDeadlineMs: settleDeadlineMs ?? ADMISSION_DEADLINE_MS }))) {
     throw new AgentRuntimeError('同一会话已有一轮正在运行', {
       provider: runtimeProvider,
       stage: 'frontdoor',
@@ -175,7 +177,7 @@ export async function prepareRunAdmission(
   }
   const { managedRecorderEnabled, managedRecorderEnablement, managedCommitHookEnv, recoveredManagedTurns } = await prepareRunRecovery({
     cwd, providerId, runtimeProvider, resume, isLiveManagedRun
-  }, { userDataDir: app.getPath('userData'), startPerf })
+  }, { userDataDir: storageUserDataDir(), startPerf })
   const recordingKey = resume ? scopedSessionKey(resume) : undefined
   if (recordingKey && recoveredManagedTurns > 0) recordingBlockedSessions.delete(recordingKey)
   const recordingFailure = recordingKey ? recordingBlockedSessions.get(recordingKey) : undefined
@@ -210,7 +212,7 @@ export async function prepareRunAdmission(
     request, providerId, agentProfileId, runtimeProvider, cwd, catalogCwd, resume, contextKey,
     expectedSessionId, forkSourceSessionId, restartSourceSessionId, adapter, codexHookTrust,
     openCodePluginTrust, mcpExecutionSnapshot, contextChangedError
-  }, { userDataDir: app.getPath('userData'), sessionByContext, sessionAliasesByContext })
+  }, { userDataDir: storageUserDataDir(), sessionByContext, sessionAliasesByContext })
   const committedResume = managedConversation ? resume : isRemoteRun ? resume : sessionByContext.get(contextKey)
   const committedRevision = sessionRevisionByContext.get(contextKey) ?? 0
   const committedRuns = runs.unsettledStates().filter((run) =>

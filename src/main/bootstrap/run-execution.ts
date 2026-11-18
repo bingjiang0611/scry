@@ -1,22 +1,6 @@
-import { app, type BrowserWindow } from 'electron'
-import type { AgentStartRequest, AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
-import type { ActiveRun, TraceEvent } from '../../shared/trace'
-import type { ProviderId } from '../../shared/provider'
+import type { AgentStartRequest } from '../../shared/runtime'
 import type { ProviderRunHandle } from '../providers/types'
-import type { ProviderRegistry } from '../providers/registry'
-import type { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
-import type { ProviderOperationGate } from '../provider-operation-gate'
-import type { ContextAdmission } from '../context-admission'
-import type { ConversationStore, NativeSessionScope } from '../conversation-store'
-import type { createAppSessionStore } from '../app-store'
-import type { RunRegistry } from '../run-registry'
-import type { RunStopLifecycle } from '../run-stop-lifecycle'
-import type { RunTraceRouter } from '../run-trace-router'
-import type { UserQuestionBroker } from '../user-question'
-import type { DockBadgeState } from '../dock-badge'
-import type { SourceControlService } from '../source-control/service'
-import type { LlmNetworkConfigurationCache } from '../llm-network-configuration'
-import type { SessionDiffBaselineRegistry } from '../session-diff'
+import { admitRun } from '../context-admission'
 import { appendCoalescedTrace } from '../live-trace'
 import { RunSteering } from '../run-steering'
 import { prepareRunAttachments, deleteRunAttachments } from '../attachment-store'
@@ -31,57 +15,9 @@ import { createRemoteRunState } from './run-remote-state'
 import { attachRunSettlement, createManagedConversationSettlement, type RunSettlementDeps } from './run-settlement'
 import { handleRunCompletion } from './run-completion'
 import { handleRunFailure } from './run-failure'
-import type { RunControl } from './run-control'
+import { storageUserDataDir } from '../storage-paths'
+import type { RunHost } from './run-host'
 
-type RunHost = {
-  providerRegistry: ProviderRegistry
-  piRunDiagnostics: PiRunDiagnostics
-  isShuttingDown: () => boolean
-  getCurrentCwd: () => string | undefined
-  getWindow: () => BrowserWindow | null
-  appSessionStore: () => ReturnType<typeof createAppSessionStore>
-  resolveRemoteProjectDirectory: (cwd: string) => string
-  resolveKnownProjectDirectory: (cwd: string) => string
-  providerOperationGate: ProviderOperationGate
-  providerContextKey: (providerId: ProviderId, cwd: string, profile?: string) => string
-  providerSessionKey: (providerId: ProviderId, cwd: string, sessionId: string, profile?: string) => string
-  contextAdmission: ContextAdmission
-  getStartupManagedRecovery: () => Promise<void>
-  resetSessionContext: (key: string) => void
-  sessionRevisionByContext: Map<string, number>
-  sessionByContext: Map<string, string>
-  sessionAliasesByContext: Map<string, Map<string, string>>
-  runs: RunRegistry<ActiveRun, RunControl>
-  deletingSessions: Set<string>
-  conversationStore: () => ConversationStore
-  assertLegacyConversationWriteAllowed: (scope: NativeSessionScope) => Promise<void>
-  recordingBlockedSessions: Map<string, string>
-  homeDir: string
-  nextRunSequence: () => number
-  llmNetworkConfiguration: LlmNetworkConfigurationCache
-  sessionDiffBaselines: SessionDiffBaselineRegistry
-  publishTrace: (event: TraceEvent) => void
-  rendererCanReceive: () => boolean
-  mainEventId: (prefix: string, runId: string) => string
-  LIVE_TOOL_CONTENT_POLICY: Parameters<typeof createLiveRunState>[0]['LIVE_TOOL_CONTENT_POLICY']
-  recordingRecoveryHint: string
-  sessionBaselineKey: (context: string, sessionId: string) => string
-  dockBadge: DockBadgeState
-  userQuestionBroker: UserQuestionBroker
-  publishQuestionOpened: (request: AgentQuestionRequest) => void
-  publishQuestionClosed: (runId: string, questionId: string, intervention?: AgentIntervention) => void
-  requestRunStop: (runId: string) => boolean
-  bumpSessionRevision: (key: string) => void
-  sourceControl: SourceControlService
-  remoteRunIds: Set<string>
-  remoteRunLedgerIds: Map<string, string>
-  boundedLiveRun: (run: ActiveRun) => ActiveRun
-  forgetBoundedRun: (runId: string) => void
-  mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
-  flushTraceSend: () => void
-  runStopLifecycle: RunStopLifecycle
-  runTraces: Pick<RunTraceRouter, 'settle' | 'hasDemand'>
-}
 
 export async function startRun(
   payload: AgentStartRequest,
@@ -89,7 +25,7 @@ export async function startRun(
   host: RunHost
 ): Promise<{ runId: string } | RemoteRunCompletion> {
   const {
-    providerRegistry, isShuttingDown, getCurrentCwd, getWindow, appSessionStore,
+    providerRegistry, isShuttingDown, getCurrentCwd, renderer, appSessionStore,
     resolveRemoteProjectDirectory, resolveKnownProjectDirectory, providerOperationGate,
     providerContextKey, providerSessionKey, contextAdmission, getStartupManagedRecovery,
     resetSessionContext, sessionRevisionByContext, sessionByContext, sessionAliasesByContext,
@@ -105,12 +41,12 @@ export async function startRun(
     providerRegistry, isShuttingDown: isShuttingDown(), currentCwd: getCurrentCwd(), appSessionStore, resolveRemoteProjectDirectory,
     resolveKnownProjectDirectory, providerOperationGate, providerContextKey
   })
-  const { isRemoteRun, request, providerId, agentProfileId, startPerf, firstTracePerf,
+  const { isRemoteRun, appSemantics, request, providerId, agentProfileId, startPerf, firstTracePerf,
     firstTextPerf, adapter, runtimeProvider, cwd, catalogCwd, startLease, managedConversation,
     admissionKeys, assertSessionNotArchived } = frontdoor
   let remoteResult: Promise<RemoteRunCompletion> | undefined
   try {
-    const started = await contextAdmission.runMany(admissionKeys, async () => {
+    const started = await admitRun(contextAdmission, admissionKeys, async () => {
       const admitted = await prepareRunAdmission(frontdoor, options, {
         providerRegistry, getStartupManagedRecovery,
         isShuttingDown,
@@ -126,8 +62,8 @@ export async function startRun(
         options, providerId, runtimeProvider, request, managedConversation, cwd, catalogCwd, resume, contextKey,
         agentProfileId, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedRecorderEnablement, homeDir,
         createRunId: (managed, runOptions) => managed?.runId ?? runOptions.runId ?? `run-${Date.now().toString(36)}-${nextRunSequence()}`,
-        llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, getWindow, publishTrace,
-        rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, userDataDir: app.getPath('userData'),
+        llmNetworkConfiguration, sessionDiffBaselines, appSessionStore, recordingBlockedSessions, renderer, publishTrace,
+        rendererCanReceive, mainEventId, LIVE_TOOL_CONTENT_POLICY, recordingRecoveryHint, userDataDir: storageUserDataDir(),
         scopedSessionKey, isRemoteRun, editSourceSessionId, deleteRunAttachments, sessionBaselineKey
       })
       let { runId, diffContextKey, finishTurnWallTiming, turnChangeJournal, attachments, managedInputTextHash,
@@ -141,7 +77,7 @@ export async function startRun(
         patchExcludeBasenames, runState, publishTrace
       })
       notifyDiffChangeRef.current = () => void diffPreviewer.notifyChange()
-      const diffLifecycle = createRunDiffLifecycle({ isRemoteRun, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
+      const diffLifecycle = createRunDiffLifecycle({ appSemantics, diffPreviewer, turnDiffCapture, turnChangeJournal, patchExcludeBasenames, cwd, contextKey, runId, providerId, runtimeProvider, runState, sessionDiffBaselines, getDiffContextKey: () => diffContextKey, getObservedSessionId: () => liveRunState.observedSessionId, getResume: () => resume, getContextRevision: () => contextRevision, mainEventId, appendCoalescedTrace, publishTrace })
       const { setDiffPreviewDemand, finalizeTurnDiff, cancelTurnDiff, finalizeSessionDiff } = diffLifecycle
       const publishSessionId = createSessionPublisher({
         runState,
@@ -169,7 +105,7 @@ export async function startRun(
         dockBadge,
         appSessionStore,
         runs,
-        getWindow,
+        renderer,
         initialSessionId: resume,
         sessionRevisionByContext
       })
@@ -177,7 +113,7 @@ export async function startRun(
       const steering = new RunSteering(
         runState,
         () => handle.current?.steer,
-        (input) => prepareRunAttachments(app.getPath('userData'), runId, input.attachments,
+        (input) => prepareRunAttachments(storageUserDataDir(), runId, input.attachments,
           cwd ? { providerId, cwd, sessionId: runState.externalSessionId } : undefined, input.messageId),
         emit
       )
@@ -213,6 +149,7 @@ export async function startRun(
         firstTextPerf,
         mainEventId,
         isRemoteRun,
+        appSemantics,
         mcpExecutionSnapshot,
         conversationStore,
         catalogCwd,
@@ -239,7 +176,8 @@ export async function startRun(
         startPerf,
         dockBadge,
         scopedSessionKey,
-        getWindow,
+        renderer,
+        windowCanReceive: rendererCanReceive(),
         boundedLiveRun,
         releaseSessionBaseline,
         interruptedState,
@@ -249,11 +187,11 @@ export async function startRun(
       runtimeStartup.control.setDiffPreviewDemand = setDiffPreviewDemand
       setDiffPreviewDemand?.(runTraces.hasDemand(runId))
       const { runProvider, requestRemoteStop, eventLog, getObservedProviderStartedAt, resolveSettled } = runtimeStartup
-      const remoteState = createRemoteRunState({ isRemoteRun, runId, providerId, runtimeProvider, runState, getObservedSessionId: () => liveRunState.observedSessionId, getWindow, dockBadge, scopedSessionKey, runs })
+      const remoteState = createRemoteRunState({ isRemoteRun, runId, providerId, runtimeProvider, runState, getObservedSessionId: () => liveRunState.observedSessionId, isWindowFocused: () => renderer.isFocused(), dockBadge, scopedSessionKey, runs })
       const runTerminalState = remoteState.state
       remoteResult = remoteState.remoteResult
       const { finishRemote, markTerminalAttention } = remoteState
-      const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: app.getPath('userData') })
+      const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: storageUserDataDir() })
       const runtimePromise = startProviderAfterBaseline({ turnDiffCapture, sessionBaselineReady, markReady: () => firstTextPerf.mark('git_baseline_ready'), runProvider })
       const completionContext = () => ({
         state: runTerminalState,
@@ -275,7 +213,7 @@ export async function startRun(
         recordingRecoveryHint,
         recordingBlockedSessions,
         scopedSessionKey,
-        getWindow,
+        renderer,
         emit,
         finishTurnWallTiming,
         finalizeTurnDiff,
@@ -313,7 +251,7 @@ export async function startRun(
         settleManagedConversation,
         interrupted: runtimeStartup.getInterrupted,
         flushTraceSend,
-        getWindow,
+        renderer,
         recordingBlockedSessions,
         scopedSessionKey,
         recordingRecoveryHint,
@@ -342,6 +280,7 @@ export async function startRun(
       startPerf.finish({ attachments: attachments.length })
       return { runId, ...(runState.externalSessionId ? { externalSessionId: runState.externalSessionId } : {}) }
     })
+    options.onStarted?.(started.runId)
     options.onRegistered?.(started)
     return isRemoteRun ? await remoteResult! : started
   } catch (error) {

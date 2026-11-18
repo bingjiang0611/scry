@@ -10,19 +10,42 @@ export interface RunRegistryControl {
   runId: string
 }
 
+// A run that left the registry stays readable for this long, at most this many of them.
+const DEPARTED_MAX_RUNS = 8
+const DEPARTED_MAX_AGE_MS = 60_000
+
 export class RunRegistry<
   State extends RunRegistryState,
   Control extends RunRegistryControl
 > {
   private readonly entries = new Map<string, { state: State; control: Control }>()
+  private readonly changeListeners = new Set<() => void>()
   private focusedRunId: string | null = null
+  private readonly departed = new Map<string, { state: State; at: number }>()
+
+  /**
+   * 运行集合变化的最小通知：run 注册/移除，以及调用方在状态或提问变化后显式调用
+   * notifyChanged()。轮询方（例如远程宿主的长轮询）据此立刻重读，不必按固定 tick 反复扫描。
+   */
+  subscribe(listener: () => void): () => void {
+    this.changeListeners.add(listener)
+    return () => { this.changeListeners.delete(listener) }
+  }
+
+  notifyChanged(): void {
+    for (const listener of [...this.changeListeners]) {
+      try { listener() } catch { /* 通知失败不能影响 run 本身 */ }
+    }
+  }
 
   // A run started elsewhere (a paired device) must not take over what the Mac
   // UI is showing; it is observable but only focused when the user opens it.
   register(state: State, control: Control, options: { focus?: boolean } = {}): void {
     if (state.runId !== control.runId) throw new Error(`runId mismatch: ${state.runId} != ${control.runId}`)
     this.entries.set(state.runId, { state, control })
+    this.departed.delete(state.runId)
     if (options.focus !== false) this.focusedRunId = state.runId
+    this.notifyChanged()
   }
 
   get(runId: string): { state: State; control: Control } | undefined {
@@ -106,8 +129,35 @@ export class RunRegistry<
     return true
   }
 
-  remove(runId: string): void {
+  /**
+   * The final state of a run that recently left the registry. Not part of the live set:
+   * only a reader that was told the run ended after it left asks for it. The daemon's
+   * ledger records a run settled once its local finalization has removed it here, so the
+   * App's read that follows `run_settled` would otherwise find no run, and lose whatever
+   * the run wrote after the App's previous read (its result, usage and turn diff).
+   * Bounded by count and age; past either, the reader gets no run, as before.
+   */
+  departedState(runId: string, now = Date.now()): State | undefined {
+    this.pruneDeparted(now)
+    return this.departed.get(runId)?.state
+  }
+
+  private pruneDeparted(now: number): void {
+    for (const [runId, entry] of this.departed) {
+      if (this.departed.size <= DEPARTED_MAX_RUNS && now - entry.at < DEPARTED_MAX_AGE_MS) break
+      this.departed.delete(runId)
+    }
+  }
+
+  remove(runId: string, now = Date.now()): void {
+    const entry = this.entries.get(runId)
     this.entries.delete(runId)
+    if (entry) {
+      this.departed.delete(runId)
+      this.departed.set(runId, { state: entry.state, at: now })
+      this.pruneDeparted(now)
+    }
     if (this.focusedRunId === runId) this.focusedRunId = null
+    this.notifyChanged()
   }
 }

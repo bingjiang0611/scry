@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
@@ -5,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
+import { fakeLaneConnector } from './desktop-lane-fixtures'
 import { DesktopRemoteClient } from './desktop-client'
 import type { RemoteAttentionTracker } from './remote-attention'
 
@@ -12,7 +14,7 @@ export const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 export const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 export const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-export async function setup(setupOptions: { submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; sessionsResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; managedWorktrees?: boolean; encrypt?: typeof encrypt; attention?: RemoteAttentionTracker } = {}) {
+export async function setup(setupOptions: { watchState?: string | null; liveRuns?: unknown[]; catalogSnapshot?: (request: Record<string, unknown>) => unknown; projects?: unknown[]; sessionsPage?: Record<string, unknown>; submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; sessionsResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; managedWorktrees?: boolean; encrypt?: typeof encrypt; attention?: RemoteAttentionTracker } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -29,8 +31,10 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
     tunnelShutdowns.push(stop)
     return { pairPath: `pair-${++tunnelCount}`, runPath: `run-${tunnelCount}`, get alive() { return alive }, get failure() { return tunnelFailure }, close: async () => { stop() } }
   }
-  const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> => {
-    const request = options.request as { operation?: string; requestId?: string; pairingId?: string }
+  // The wire handler, shared by the pairing one-shot and the run lanes: run
+  // requests go through a fake lane channel that still records the exact wire
+  // request on the same tlsRequest spy the tests assert on.
+  const handle = async (request: { operation?: string; requestId?: string; pairingId?: string; op?: string; revision?: string }): Promise<unknown> => {
     if (request.operation === 'pair.prove') {
       phase = 'status'
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.pending', pairingId, publicKeySHA256: identity.publicKeySHA256 }
@@ -41,22 +45,46 @@ export async function setup(setupOptions: { submitResponse?: () => unknown; inte
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
-    if (phase === 'status' && (request as { op?: string }).op === 'desktop') return { desktop: { kind: 'info', protocol: 1, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}) } }
-    if ((request as { op?: string }).op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
-    if ((request as { op?: string }).op === 'sessionsPage') return setupOptions.sessionsResponse?.() ?? { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'baseline' } }
-    if ((request as { op?: string }).op === 'submit') {
+    if (phase === 'status' && request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}) } }
+    if (request.op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
+    // Connection-time attention baseline and later catalog pages.
+    if (request.op === 'sessionsPage') return setupOptions.sessionsResponse?.() ?? { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'baseline' } }
+    if (request.op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
     }
-    if ((request as { op?: string }).op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
-    if ((request as { op?: string }).op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
-    if ((request as { op?: string }).op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
-    if ((request as { op?: string }).op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
+    if (request.op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
+    if (request.op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
+    if (request.op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
+    if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
+    // Lifecycle long poll: nothing new, so a caller sees an unchanged run.
+    if (request.op === 'watch') return { watch: { state: setupOptions.watchState ?? null, questions: [], poll: { cursor: 0, minCursor: 0, events: [] } } }
+    if (request.op === 'liveRuns') return { liveRuns: { revision: 'fixture-revision', runs: setupOptions.liveRuns ?? [] } }
+    // Catalog in one round trip. The fixture keeps the same answer for the same
+    // revision so the unchanged path can be exercised.
+    if (request.op === 'catalogSnapshot') {
+      if (setupOptions.catalogSnapshot) return { catalogSnapshot: await setupOptions.catalogSnapshot(request) }
+      const revision = 'fixture-catalog-1'
+      if (request.revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
+      return { catalogSnapshot: {
+        revision,
+        info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}) },
+        projects: setupOptions.projects ?? [],
+        providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }],
+        sessionsPage: setupOptions.sessionsPage ?? (setupOptions.sessionsResponse?.() as { sessionsPage?: unknown } | undefined)?.sessionsPage ??
+          { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture-sessions-1' }
+      } }
+    }
     return { error: 'unexpected_request' }
-  })
+  }
+
+  const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> =>
+    await handle(options.request as { operation?: string; requestId?: string; pairingId?: string; op?: string; revision?: string }))
+
+  const openLane = vi.fn(fakeLaneConnector(tlsRequest))
   const openTunnel = vi.fn(async (_options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => tunnel())
-  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt, attention: setupOptions.attention }, { generateIdentity: async () => identity, openTunnel, tlsRequest })
-  return { directory, host, invitation, client, openTunnel, tlsRequest, phase: () => phase, tunnelCount: () => tunnelCount,
+  const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt, attention: setupOptions.attention }, { generateIdentity: async () => identity, openTunnel, tlsRequest, openLane })
+  return { directory, host, invitation, client, openTunnel, tlsRequest, openLane, phase: () => phase, tunnelCount: () => tunnelCount,
     setTunnelFailure: (reason: NonNullable<DesktopSshTunnel['failure']>['reason']) => { tunnelFailure = { sequence: ++tunnelFailureSequence, reason } },
     dropTunnel: () => tunnelShutdowns.at(-1)!() }
 }

@@ -144,12 +144,19 @@ describe('createHostController (production persistence binding)', () => {
 
     // Execute the actual three file-store implementations in a child, compiled with the
     // project's TypeScript dependency rather than depending on Node's version-specific TS loader.
-    for (const name of ['pairing-file', 'session-ledger-file', 'run-output-file']) {
+    for (const name of ['pairing-file', 'session-ledger-file', 'run-output-file', 'remote-lease-owner']) {
       const source = readFileSync(new URL(`./${name}.ts`, import.meta.url), 'utf8')
-      writeFileSync(join(dir, `${name}.mjs`), transpileModule(source, {
+      const output = transpileModule(source, {
         compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 }
-      }).outputText)
+      }).outputText
+        .replaceAll("from './remote-lease-owner'", "from './remote-lease-owner.mjs'")
+        .replaceAll("from '../process-diagnostics'", "from './process-diagnostics.mjs'")
+      writeFileSync(join(dir, `${name}.mjs`), output)
     }
+    const diagnostics = readFileSync(new URL('../process-diagnostics.ts', import.meta.url), 'utf8')
+    writeFileSync(join(dir, 'process-diagnostics.mjs'), transpileModule(diagnostics, {
+      compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 }
+    }).outputText)
     const script = join(dir, 'owner.mjs')
     writeFileSync(script, `
       import { PairingFileStore } from './pairing-file.mjs'

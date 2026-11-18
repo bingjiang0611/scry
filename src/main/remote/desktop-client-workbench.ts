@@ -1,4 +1,4 @@
-import type { DesktopWorkbenchRequest, DesktopWorkbenchResult } from '../../shared/desktop-workbench'
+import { DESKTOP_WORKBENCH_READ_METHODS, type DesktopWorkbenchRequest, type DesktopWorkbenchResult } from '../../shared/desktop-workbench'
 import { parseDesktopWorkbenchQuery } from './desktop-workbench'
 import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import type { DesktopRemoteContext } from '../../shared/desktop-remote'
@@ -10,7 +10,7 @@ export class DesktopRemoteClientWorkbench extends DesktopRemoteClientRun {
   async workbench<Request extends DesktopWorkbenchRequest>(connectionIdValue: string, request: Request): Promise<DesktopWorkbenchResult<Request>> {
     const query = parseDesktopWorkbenchQuery(request)
     const wire = { op: 'desktopWorkbench', query }
-    const read = ['workspaceList', 'workspaceRead', 'workspaceReadKnown', 'workspaceReadPage', 'workspaceReadPageKnown', 'terminalActive', 'terminalEvents', 'terminalRecordingList', 'terminalRecordingRead', 'read', 'diff', 'operations', 'pullRequests', 'pullRequest', 'loadCommitDraft', 'loadDraft'].includes(query.method)
+    const read = DESKTOP_WORKBENCH_READ_METHODS.has(query.method)
     // Writes are serialized and never automatically retried, including PTY input.
     const response = read ? await this.requestForConnection(connectionIdValue, wire) : await this.write(connectionIdValue, wire)
     if (!record(response) || !Object.hasOwn(response, 'workbench')) fail('invalid_desktop_workbench_response')

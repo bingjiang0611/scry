@@ -159,7 +159,8 @@ final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @uncheck
   // reply has an untracked id and is dropped like any other unknown id.
   private func stopStream(_ entry: Pending, id: Int) {
     guard entry.onItem != nil, entry.written, handshaken, let context, acceptsRequests.value else { return }
-    let bytes = Data("{\"keepAlive\":true,\"id\":\(nextId()),\"op\":\"cancel\",\"target\":\(id)}\n".utf8)
+    // Every run-channel request declares the protocol, a host-side cancel frame included.
+    let bytes = Data("{\"keepAlive\":true,\"id\":\(nextId()),\"protocol\":\(RelaySession.protocolVersion),\"op\":\"cancel\",\"target\":\(id)}\n".utf8)
     context.writeAndFlush(wrapOutboundOut(ByteBuffer(bytes: bytes)), promise: nil)
   }
 

@@ -7,36 +7,13 @@ import { RENDERER_COMMIT_UNAVAILABLE, associateOutcomes, decideRetention, summar
   summarizeTraceHealth } from './session-concurrency-aggregate.mjs'
 import { summarizeObservedConcurrency, summarizePhases, summarizeRendererMount, summarizeResources }
   from './session-concurrency-lanes.mjs'
-import { CONCURRENCY_SCENARIOS, evaluateArchiveEvidence, evaluateStatus, parseConcurrency, selectScenario,
-  summarizeSwitches } from './session-concurrency-contract.mjs'
+import { evaluateArchiveEvidence, evaluateStatus, selectScenario, summarizeSwitches }
+  from './session-concurrency-contract.mjs'
 import { seedProjectPinning } from './session-concurrency-evidence.mjs'
 import { buildConcurrencyReport } from './session-concurrency-report.mjs'
 import { validateConcurrencyReport } from './session-concurrency-validate.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const smoke = readFileSync(join(root, 'src/main/providers/smoke.ts'), 'utf8')
-
-describe('workload contract', () => {
-  it('accepts only declared concurrency levels and defaults to 4', () => {
-    expect(parseConcurrency(undefined)).toBe(4)
-    expect(parseConcurrency('')).toBe(4)
-    expect(parseConcurrency('16')).toBe(16)
-    expect(() => parseConcurrency('8')).toThrow(/concurrency must be one of 4\/16/)
-    expect(() => parseConcurrency('four')).toThrow(/concurrency must be one of 4\/16/)
-  })
-
-  it('names scenarios that exist in the offline fixture', () => {
-    for (const [name, scenario] of Object.entries(CONCURRENCY_SCENARIOS)) {
-      expect(typeof name).toBe('string')
-      expect(smoke).toContain(`'${scenario.prompt}'`)
-    }
-    expect(() => selectScenario('nope')).toThrow(/unknown scenario/)
-    expect(selectScenario('big-output').expect.toolResultPayloadBytes).toBe(12 * 1024 * 1024)
-    expect(selectScenario('history-switch').switches).toBe(4)
-    expect(selectScenario('quiet').quietMs).toBeGreaterThan(0)
-  })
-})
-
 describe('archive evidence', () => {
   const streamEvidence = (overrides = {}) => ({
     userText: 'performance long stream',

@@ -3,12 +3,8 @@ import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import type { ConversationDeletionPreview } from '@shared/conversation-api'
 import type { ConversationDeletionResult } from '@shared/conversation'
 import { ModalFrame, requestModalClose } from './Modals'
+import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { Button } from './primitives/Button'
-
-/** The IPC wrapper main adds to a rejected handler; the channel name is not user copy. */
-const IPC_WRAPPER = /^(?:Error:\s*)?Error invoking remote method '[^']+':\s*(?:Error:\s*)?/
-/** The host's own reason, e.g. which side chat holds the delete, without transport noise. */
-const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(IPC_WRAPPER, '')
 
 export function ConversationDeleteDialog({ id, onChanged, onClose }: {
   id: string
@@ -31,7 +27,7 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
     setPreviewError(undefined)
     void window.scry.conversations.previewDeletion(id).then(
       preview => { if (!cancelled) setPreview(preview) },
-      error => { if (!cancelled) setPreviewError(reasonOf(error)) }
+      error => { if (!cancelled) setPreviewError(ipcErrorMessage(error)) }
     )
     return () => { cancelled = true }
   }, [id, previewAttempt])
@@ -50,7 +46,8 @@ export function ConversationDeleteDialog({ id, onChanged, onClose }: {
       setResult(await window.scry.conversations.delete(id, preview.fingerprint))
       onChanged()
     } catch (error) {
-      setError(`${reasonOf(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
+      // Readable copy without Electron's wrapper; a daemon refusal is named, not raw.
+      setError(`${ipcErrorMessage(error)}。结果不能假定为未删除，请关闭后刷新证据核对；不会自动重试。`)
       onChanged()
     } finally { pending.current = false; setWorking(false) }
   }

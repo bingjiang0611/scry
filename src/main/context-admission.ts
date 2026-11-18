@@ -1,11 +1,52 @@
+/**
+ * 启动一轮 run 时等待同身份持有者让位的上限。持有者永不释放时，后续启动会停在 admission
+ * 里：App 看不到错误、也停不掉那一轮。有界等待把「永远等」变成带原因的失败
+ * （run_admission_timeout / 同一会话已有一轮正在运行），前提是该轮真的没有开始。
+ *
+ * 只用于启动 run（admitRun 与 waitForCompletedRuns 的调用处显式传入）。同一个类还承载会话
+ * 账本的 'ownership' 队列、会话删除与 fork：那些排队的是写入，超时拒绝会让一次并未失败的
+ * 写入（例如 turn 结算）落不了盘，所以它们保持默认的无上限等待。
+ *
+ * 20 s 是暂定值：依据是 fixture（300 次启动 p50 263 ms、最长 3.3 s）与 commit hook 自身
+ * 10 s 上限；真实大仓库的轮次结束 diff 分布尚未取证。
+ */
+export const ADMISSION_DEADLINE_MS = 20_000
+
+export interface AdmissionOptions {
+  /** 等待同身份持有者让位的最长时间；`Infinity` 表示不设上限。 */
+  admitDeadlineMs?: number
+}
+
+/** `true` 表示 work 在 deadline 之前结束；`false` 表示先到了边界。 */
+async function withinDeadline(work: Promise<unknown>, deadlineMs: number): Promise<boolean> {
+  if (!Number.isFinite(deadlineMs)) {
+    await work
+    return true
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work.then(() => true),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), deadlineMs) })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export class ContextAdmission {
   private readonly tails = new Map<string, Promise<void>>()
+  private readonly admitDeadlineMs: number
+
+  constructor(options: AdmissionOptions = {}) {
+    this.admitDeadlineMs = options.admitDeadlineMs ?? Number.POSITIVE_INFINITY
+  }
 
   run<T>(key: string, action: () => Promise<T>): Promise<T> {
     return this.runMany([key], action)
   }
 
-  async runMany<T>(keys: readonly string[], action: () => Promise<T>): Promise<T> {
+  async runMany<T>(keys: readonly string[], action: () => Promise<T>, options: AdmissionOptions = {}): Promise<T> {
     const ownedKeys = [...new Set(keys)]
     if (ownedKeys.length === 0) throw new Error('Context admission requires at least one identity')
     const previous = ownedKeys.map((key) => this.tails.get(key) ?? Promise.resolve())
@@ -13,7 +54,14 @@ export class ContextAdmission {
     const current = new Promise<void>((resolve) => { release = resolve })
     // Reserve every tail before yielding. Nested per-key waits could deadlock A→B vs B→A.
     for (const key of ownedKeys) this.tails.set(key, current)
-    await Promise.all(previous)
+    if (!(await withinDeadline(Promise.all(previous), options.admitDeadlineMs ?? this.admitDeadlineMs))) {
+      // 我们从未运行 action，所以只释放自己占的位；否则后续 run 会排在一个空占位后面。
+      release()
+      for (const key of ownedKeys) {
+        if (this.tails.get(key) === current) this.tails.delete(key)
+      }
+      throw new Error(`run_admission_timeout: 等待同会话上一轮收尾超过 ${options.admitDeadlineMs ?? this.admitDeadlineMs}ms，本轮尚未启动`)
+    }
     try {
       return await action()
     } finally {
@@ -25,12 +73,23 @@ export class ContextAdmission {
   }
 }
 
+/** 启动一轮 run 的准入：与 runMany 相同，但等待持有者让位有 ADMISSION_DEADLINE_MS 上限。 */
+export function admitRun<T>(admission: ContextAdmission, keys: readonly string[], action: () => Promise<T>): Promise<T> {
+  return admission.runMany(keys, action, { admitDeadlineMs: ADMISSION_DEADLINE_MS })
+}
+
 export async function waitForCompletedRuns(
-  runs: Array<{ done: boolean; settled: Promise<void> }>
+  runs: Array<{ done: boolean; settled: Promise<void> }>,
+  options: AdmissionOptions = {}
 ): Promise<boolean> {
   if (runs.some((run) => !run.done)) return false
-  await Promise.all(runs.map((run) => run.settled))
-  return true
+  const settled = Promise.all(runs.map((run) => run.settled))
+  // 不传 deadline 时保持原来的无限等待；只有「等待已收口 run 的收尾」这一处需要上限。
+  if (options.admitDeadlineMs === undefined) {
+    await settled
+    return true
+  }
+  return await withinDeadline(settled, options.admitDeadlineMs)
 }
 
 export function runConflictsWithSession(

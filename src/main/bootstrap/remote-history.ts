@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider'
 import type { ParsedTurn } from '../normalize'
@@ -13,7 +12,7 @@ import type { RemoteHostRuntime } from './remote-host'
 type HistoryRequest = Parameters<typeof bindRemoteHistoryContext>[0]
 type HistoryPageRequest = HistoryRequest & { before?: number; limit?: number; snapshot?: string }
 
-export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime) {
+export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime, userDataDir: string) {
   const bindRemoteHistory = (input: HistoryRequest) =>
     bindRemoteHistoryContext(input, runtime.appSessionStore().load(), runtime.resolveRemoteProjectDirectory)
   return {
@@ -22,7 +21,7 @@ export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime) {
       const canonical = bound.canonical
       return readRemoteHistoryVersion({
         cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
-        userDataDir: app.getPath('userData'),
+        userDataDir: userDataDir,
         historyScope: bound.scope,
         ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {}),
         ...(providerId === 'pi' ? { piSessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions') } : {})
@@ -36,7 +35,7 @@ export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime) {
       const canonical = bound.canonical
       return readRemoteHistoryTurnsPage({
         cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
-        userDataDir: app.getPath('userData'),
+        userDataDir: userDataDir,
         historyScope: bound.scope,
         ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {}),
         ...(providerId === 'pi' ? { piSessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions') } : {})
@@ -53,7 +52,7 @@ export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime) {
         canonical = bound.canonical
         if (historyScope !== undefined || agentProfileId !== undefined) return readRemoteProfilePreview({
           cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
-          userDataDir: app.getPath('userData'), historyScope: bound.scope,
+          userDataDir: userDataDir, historyScope: bound.scope,
           ...(bound.profile !== undefined ? { agentProfileId: bound.profile } : {})
         }, () => runtime.runs.activeStates().find((run) => run.providerId === providerId && run.cwd === canonical &&
           (bound.profile === undefined || (run.agentProfileId ?? null) === bound.profile) && (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
@@ -74,7 +73,7 @@ export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime) {
       }
       if (!canonical) return { status: 'unavailable' as const, reason: 'no_fast_evidence' as const }
       try {
-        const page = await readTraceArchivePageAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir: app.getPath('userData') }, { limit: 2 })
+        const page = await readTraceArchivePageAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir: userDataDir }, { limit: 2 })
         if (!page.archive || page.archive.turns.length === 0) return { status: 'unavailable' as const, reason: 'session_not_found' as const }
         const source = page.readMode === 'indexed' ? 'indexed_archive' as const : page.readMode
         const turns = page.archive.turns.map((turn) => {
@@ -106,12 +105,11 @@ export function createRemoteHistoryHandlers(runtime: RemoteHostRuntime) {
       }
       if (scoped) return readRemoteProfileHistory({
         cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId,
-        userDataDir: app.getPath('userData'), historyScope: scope,
+        userDataDir: userDataDir, historyScope: scope,
         ...(profile !== undefined ? { agentProfileId: profile } : {}),
         ...(providerId === 'pi' ? { piSessionRoot: join(runtime.homeDir, '.pi', 'agent', 'sessions') } : {})
       }, () => runtime.runs.activeStates().find((run) => run.providerId === providerId && run.cwd === canonical &&
         (profile === undefined || (run.agentProfileId ?? null) === profile) && (run.externalSessionId === externalSessionId || run.sessionId === externalSessionId)))
-      const userDataDir = app.getPath('userData')
       const archived = await readTraceArchiveAsync({ cwd: canonical, sessionId: externalSessionId, providerId: providerId as ProviderId, userDataDir })
       let turns: ParsedTurn[] = []
       if (providerId === 'claude' && canonical) {

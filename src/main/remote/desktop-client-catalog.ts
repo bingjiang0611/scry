@@ -1,10 +1,11 @@
-import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteProviderQuery } from '../../shared/desktop-remote'
+import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef, RemoteSessionRef } from '../../shared/desktop-remote'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { ScRead } from '../../shared/source-control'
 import type { WorkspaceBranchChoice, WorkspaceBranchRef, WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceWorktreeChoice } from '../../shared/workspace-selection'
 import { DesktopRemoteClientConnections } from './desktop-client-connections'
-import { context, fail, record, text, pathText, HASH, MAX_ITEMS, validateInfo, validateProject, validateProvider, validateDeleteSessionResult } from './desktop-client-validation'
-import { readRemoteSessionPages } from './desktop-client-session-catalog'
+import { context, fail, record, text, pathText, HASH, MAX_ITEMS, MAX_PAGES, validateProject, validateProvider, validateSession, validateDeleteSessionResult } from './desktop-client-validation'
+import { validateInfo } from './desktop-client-capabilities'
+import { isUnknownFailure } from './desktop-client-intent-rules'
 
 function scReason(value: unknown): string {
   if (!record(value) || !text(value.reason, 16_384)) fail('invalid_workspace_response')
@@ -96,28 +97,66 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     return workspaceBranchRead(result.value)
   }
 
+  // One round trip for info, projects, provider metadata and the first session
+  // page. A host that reports the same revision costs the request and nothing
+  // else: the whole payload is skipped, not re-sent and re-validated.
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
-    const info = await this.desktop(connectionIdValue, { kind: 'info' })
-    const state = await this.state()
-    const item = this.connection(state, connectionIdValue)
-    const capabilities = validateInfo({ desktop: info }, item.hostId)
-    const rawProjects = await this.catalogRequest<unknown>(connectionIdValue, { op: 'projects' }, 'projects')
-    const rawProviders = await this.catalogRequest<unknown>(connectionIdValue, {
-      op: 'providers', ...(capabilities.providerDiscovery === 2 ? { detail: 'metadata' satisfies RemoteProviderQuery['detail'] } : {})
-    }, 'providers')
+    let cached = this.catalogCache.get(connectionIdValue)
+    let response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot', ...(cached ? { revision: cached.revision } : {}) })
+    if (!record(response) || !record(response.catalogSnapshot)) fail('invalid_catalog_response')
+    if (response.catalogSnapshot.unchanged === true && !cached) {
+      // The cache can be dropped by a disconnect between the request and the reply.
+      // Ask again from scratch rather than report a failure the host did not cause.
+      response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot' })
+      if (!record(response) || !record(response.catalogSnapshot)) fail('invalid_catalog_response')
+      cached = undefined
+    }
+    const snapshot = response.catalogSnapshot
+    if (snapshot.unchanged === true) {
+      // Only a fully paged catalog is cached, so unchanged always has an answer.
+      if (!cached || !text(snapshot.revision, 64)) fail('invalid_catalog_response')
+      return this.withAttention(connectionIdValue, cached.catalog)
+    }
+    if (!text(snapshot.revision, 64)) fail('invalid_catalog_response')
+    const item = this.connection(await this.state(), connectionIdValue)
+    const capabilities = validateInfo({ desktop: snapshot.info }, item.hostId)
+    const rawProjects = snapshot.projects
+    const rawProviders = snapshot.providers
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
-    const sessions = await readRemoteSessionPages((request) => this.requestForConnection(connectionIdValue, request))
-    const unreadSessionKeys = this.attention?.catalog(connectionIdValue, { sessions })
-    return { projects: rawProjects.map((item) => validateProject(item)), providers: rawProviders.map((item) => validateProvider(item)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities,
-      ...(unreadSessionKeys ? { unreadSessionKeys: [...unreadSessionKeys] } : {}) }
+    const sessions: RemoteSessionRef[] = []; let cursor = 0; let pageSnapshot: string | undefined
+    const first = snapshot.sessionsPage
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const pageResponse = page === 0 ? first : await this.catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', includeArchived: true, cursor, limit: 100, ...(pageSnapshot ? { snapshot: pageSnapshot } : {}) }, 'sessionsPage')
+      if (!record(pageResponse) || !Array.isArray(pageResponse.sessions) || !Number.isSafeInteger(pageResponse.cursor) || !Number.isSafeInteger(pageResponse.total) || typeof pageResponse.hasMore !== 'boolean' || !text(pageResponse.snapshot, 256)) fail('invalid_catalog_response')
+      if (pageSnapshot !== undefined && pageResponse.snapshot !== pageSnapshot) fail('catalog_snapshot_changed')
+      if (pageResponse.sessions.length > 100 || sessions.length + pageResponse.sessions.length > MAX_ITEMS) fail('catalog_too_large')
+      sessions.push(...pageResponse.sessions.map((session) => validateSession(session)))
+      if (!pageResponse.hasMore) break
+      if ((pageResponse.cursor as number) <= cursor) fail('invalid_catalog_cursor')
+      cursor = pageResponse.cursor as number; pageSnapshot = pageResponse.snapshot as string
+      if (page === MAX_PAGES - 1) fail('catalog_too_large')
+    }
+    const catalog: DesktopRemoteCatalog = { projects: rawProjects.map((project) => validateProject(project)), providers: rawProviders.map((provider) => validateProvider(provider)), sessions, providerEvidence: capabilities.providerDiscovery === 2 ? 'host_snapshot' : 'legacy_host', ...capabilities }
+    this.catalogCache.set(connectionIdValue, { revision: snapshot.revision, catalog, capabilities })
+    return this.withAttention(connectionIdValue, catalog)
+  }
+
+  // Unread keys are this client's view state, derived from the host's catalog evidence
+  // on every read (cached or fresh); they are never stored in the cached catalog.
+  private withAttention(connectionIdValue: string, catalog: DesktopRemoteCatalog): DesktopRemoteCatalog {
+    const unreadSessionKeys = this.attention?.catalog(connectionIdValue, { sessions: catalog.sessions })
+    return unreadSessionKeys ? { ...catalog, unreadSessionKeys: [...unreadSessionKeys] } : catalog
   }
 
   async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {
     const query = context(value)
-    const info = await this.desktop(connectionIdValue, { kind: 'info' })
-    const state = await this.state()
-    const item = this.connection(state, connectionIdValue)
-    const capabilities = validateInfo({ desktop: info }, item.hostId)
+    // Capabilities come from the catalog snapshot this device just read. Without
+    // one, read them now rather than guess: an older host must fail closed.
+    let capabilities = this.catalogCache.get(connectionIdValue)?.capabilities
+    if (!capabilities) {
+      const state = await this.state()
+      capabilities = validateInfo({ desktop: await this.desktop(connectionIdValue, { kind: 'info' }) }, this.connection(state, connectionIdValue).hostId)
+    }
     if (capabilities.providerDiscovery !== 2) fail('provider_controls_unavailable')
     const raw = await this.catalogRequest<unknown>(connectionIdValue, {
       op: 'providers', detail: 'selected', providerId: query.providerId, cwd: query.cwd,
@@ -172,7 +211,7 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     if (validateInfo({ desktop: info }, item.hostId).sessionFork !== true) fail('desktop_session_fork_unsupported')
     let response: unknown
     try { response = await this.write(connectionIdValue, { op: 'sessionFork', request }) }
-    catch (error) { if (this.isUnknown(error)) fail('desktop_session_operation_unknown'); throw error }
+    catch (error) { if (isUnknownFailure(error)) fail('desktop_session_operation_unknown'); throw error }
     if (!record(response) || !record(response.sessionFork) || !text(response.sessionFork.externalSessionId, 256)) fail('desktop_session_operation_unknown')
     return { externalSessionId: response.sessionFork.externalSessionId }
   }
@@ -185,7 +224,7 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     if (validateInfo({ desktop: info }, item.hostId).sessionDelete !== true) fail('desktop_session_delete_unsupported')
     let response: unknown
     try { response = await this.write(connectionIdValue, { op: 'sessionDelete', request }) }
-    catch (error) { if (this.isUnknown(error)) fail('desktop_session_operation_unknown'); throw error }
+    catch (error) { if (isUnknownFailure(error)) fail('desktop_session_operation_unknown'); throw error }
     if (!record(response) || !record(response.sessionDelete)) fail('desktop_session_operation_unknown')
     try { return validateDeleteSessionResult(response.sessionDelete) }
     catch { return fail('desktop_session_operation_unknown') }

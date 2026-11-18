@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -6,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ensureHostIdentity } from './host-identity'
 import { generateDesktopDeviceIdentity } from './desktop-transport'
 import { DesktopRemoteClient } from './desktop-client'
+import { fakeLaneConnector } from './desktop-lane-fixtures'
 import { createDesktopHostReader, parseDesktopHostRead } from './desktop-host-reader'
 import { mergeRemoteTrace } from '../../renderer/remote-trace'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
@@ -38,9 +40,16 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
           certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
       }
       if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
-      if (request.op === 'projects') return { projects: [] }
-      if (request.op === 'providers') return { providers: [] }
-      if (request.op === 'sessionsPage') return { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'catalog' } }
+      if (request.op === 'catalogSnapshot') {
+        const revision = 'catalog-1'
+        if ((request as { revision?: string }).revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
+        return { catalogSnapshot: {
+          revision,
+          info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', providerDiscovery: 2, ...(options.legacyHost ? {} : { traceDelta: 1 }) },
+          projects: [], providers: [],
+          sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'catalog' }
+        } }
+      }
       if (request.op !== 'desktop') return { error: 'unexpected_request' }
       queries.push(JSON.parse(JSON.stringify(request.query)) as Record<string, unknown>)
       const query = JSON.parse(JSON.stringify(request.query)) as Record<string, unknown>
@@ -51,7 +60,7 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
       if (wire.desktop.kind === 'trace_delta') options.tamper?.(wire.desktop)
       return wire
     })
-    const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => ({ pairPath: 'pair', runPath: 'run', alive: true, close: async () => {} }), tlsRequest })
+    const client = new DesktopRemoteClient({ directory, encrypt, decrypt }, { generateIdentity: async () => identity, openTunnel: async () => ({ pairPath: 'pair', runPath: 'run', alive: true, close: async () => {} }), tlsRequest, openLane: fakeLaneConnector(tlsRequest) })
     const pending = await client.pair({ label: 'Target', ssh, invitation })
     const id = pending.connection.id
     await client.finishPairing(id)

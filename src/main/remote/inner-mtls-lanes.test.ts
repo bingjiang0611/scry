@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connect } from 'node:tls'
 import { once } from 'node:events'
@@ -62,20 +63,20 @@ describe('InnerMtlsHost transport lanes (ping, direct route, multiplexing)', () 
     }
     try {
       // Two pipelined requests in one write: the first id switches the lane.
-      socket.write(JSON.stringify({ keepAlive: true, id: 1, op: 'ping' }) + '\n' + JSON.stringify({ keepAlive: true, id: 2, op: 'liveRuns', waitMs: 0 }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 1, op: 'ping' }) + '\n' + JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 2, op: 'liveRuns', waitMs: 0 }) + '\n')
       expect((await reply(1)).pong).toMatchObject({ capabilities: expect.arrayContaining(['mux']) })
       const revision = ((await reply(2)).liveRuns as { revision: string }).revision
       // A long-poll that will wait, then a ping sent after it: the ping answers first.
-      socket.write(JSON.stringify({ keepAlive: true, id: 3, op: 'liveRuns', waitMs: 1_500, revision }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 3, op: 'liveRuns', waitMs: 1_500, revision }) + '\n')
       await new Promise((resolve) => setTimeout(resolve, 50))
-      socket.write(JSON.stringify({ keepAlive: true, id: 4, op: 'ping' }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 4, op: 'ping' }) + '\n')
       await reply(4)
       expect(lines.some((line) => line.startsWith('{"keepAlive":true,"id":3,'))).toBe(false)
       expect((await reply(3)).liveRuns).toBeDefined()
       expect(lines.findIndex((line) => line.includes('"id":4,'))).toBeLessThan(lines.findIndex((line) => line.includes('"id":3,')))
       // Once multiplexed, a request without an id ends the lane explicitly.
       const closed = once(socket, 'close')
-      socket.write(JSON.stringify({ keepAlive: true, op: 'ping' }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, op: 'ping' }) + '\n')
       await closed
       expect(lines.at(-1)).toBe('{"keepAlive":true,"error":"mux_id_required"}')
     } finally { socket.destroy() }

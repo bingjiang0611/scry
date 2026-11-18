@@ -86,6 +86,8 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     traceViewRef.current = view
     setActiveRun(view?.run ?? null)
   }, [])
+  // When the shown run's content was last read. The host long poll reports
+  // change; this floors how often a followed run without ledger events refreshes.
   // Backoff lives outside React state: an interval step must not re-render the transcript.
   const pollIntervalMs = useRef(POLL_MS)
   const applyPollInterval = useRef<(intervalMs: number) => void>(() => {})

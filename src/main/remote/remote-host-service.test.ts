@@ -1,3 +1,4 @@
+import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import 'reflect-metadata'
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -91,7 +92,9 @@ async function deviceCall(devicePort: number, caPEM: string, certPEM: string, ke
   await once(raw, 'connect')
   const socket: TLSSocket = tlsConnect({ socket: raw, ca: caPEM, cert: certPEM, key: keyPEM, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
   await once(socket, 'secureConnect')
-  socket.write(JSON.stringify(request) + '\n')
+  // Speak the wire like a client: every request declares its protocol version.
+  const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request as Record<string, unknown> } : request
+  socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
   for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy()
