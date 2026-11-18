@@ -1,14 +1,15 @@
 import { rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { describeErrorForLog, findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
 import { validQueuedCapture, queueHook } from './recorder-hook-queue.js'
+import { captureStateContext, parseSessionCaptureContext, readCaptureState } from './session-capture-contract.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
+import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedCaptureCommand, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
@@ -334,6 +335,48 @@ async function sealUnreadableTurn(
 }
 
 /**
+ * Apply a queued session-capture claim. The caller already holds the session lock, so the claim's own
+ * recording must not take it again. Loaded lazily: the capture module reads its recorder state from
+ * the same graph that replays this inbox.
+ */
+async function applyQueuedCapture(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  entry: QueuedCaptureCommand
+): Promise<void> {
+  const context = parseSessionCaptureContext(entry.context, entry.provider)
+  if (context.sessionId !== entry.sessionId) {
+    throw new Error(`queued capture claim names another session: ${context.sessionId}`)
+  }
+  const { startSessionCapture, stopSessionCapture } = await import('./session-capture.js')
+  const cli = process.argv[1]
+    ? { entry: process.argv[1], nodeDir: dirname(process.execPath) }
+    : {}
+  if (entry.action === 'start') {
+    await startSessionCapture({
+      workspace: enablement.workspaceRoot,
+      provider: entry.provider,
+      sessionId: entry.sessionId,
+      dataDir: enablement.dataRoot,
+      context,
+      payload: entry.payload,
+      cli,
+      sessionLockHeld: true,
+      ...(entry.ancestryFromPid ? { ancestryFromPid: entry.ancestryFromPid } : {}),
+      ...(entry.hostChain ? { hostChain: entry.hostChain } : {})
+    })
+    return
+  }
+  await stopSessionCapture({
+    workspace: enablement.workspaceRoot,
+    provider: entry.provider,
+    sessionId: entry.sessionId,
+    dataDir: enablement.dataRoot,
+    context,
+    sessionLockHeld: true
+  })
+}
+
+/**
  * Apply queued hooks in arrival order. Caller must hold the session lock. Delivery is
  * at-least-once: a crash between apply and unlink replays the hook, which the lifecycle
  * event ids, start fingerprints and committed-turn checks already absorb.
@@ -370,29 +413,47 @@ export async function replayQueuedHooks(
     }
     if (attempts >= INBOX_MAX_ATTEMPTS) continue
     try {
-      const queued = await readInboxJson<QueuedHook>(entry.path)
+      const queued = await readInboxJson<QueuedHook | QueuedCaptureCommand>(entry.path)
       if (queued === null) continue // ENOENT only: another completed cleanup, not a lost event.
       if (queued.schemaVersion !== 1 || queued.provider !== provider ||
         typeof queued.sessionId !== 'string' || safeKey(queued.sessionId) !== sessionKey ||
         (expectedSessionId !== undefined && queued.sessionId !== expectedSessionId) ||
         typeof queued.event !== 'string' || !queued.payload || typeof queued.payload !== 'object' ||
         Array.isArray(queued.payload) || typeof queued.arrivedAt !== 'string' ||
-        !Number.isFinite(Date.parse(queued.arrivedAt)) ||
-        !validQueuedCapture(queued, provider)) {
+        !Number.isFinite(Date.parse(queued.arrivedAt))) {
         if (expectedSessionId !== undefined && (queued.provider !== provider || queued.sessionId !== expectedSessionId)) {
           throw new Error(`scoped recorder inbox identity differs from requested session: ${entry.name}`)
         }
         throw new Error(`invalid queued recorder hook: ${entry.name}`)
       }
-      await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
-        provider,
-        event: queued.event,
-        workspace: enablement.workspaceRoot,
-        payload: queued.payload,
-        managed: queued.managed,
-        uploadEnvironment: queued.uploadEnvironment,
-        ...(queued.capture ? { capture: queued.capture } : {})
-      }, queued.sessionId))
+      if (queued.kind === 'capture') {
+        if (queued.action !== 'start' && queued.action !== 'stop') {
+          throw new Error(`invalid queued capture action: ${entry.name}`)
+        }
+        await hookArrival.run(queued.arrivedAt, () => applyQueuedCapture(enablement, queued))
+      } else {
+        if (!validQueuedCapture(queued, provider)) {
+          throw new Error(`invalid queued recorder hook: ${entry.name}`)
+        }
+        // A capture event may be queued before the claim that publishes its state, so the context is
+        // resolved from the state at apply time instead of from the entry.
+        const state = queued.captureMode && !queued.capture
+          ? await readCaptureState(enablement.dataRoot, provider, queued.sessionId)
+          : null
+        const capture = queued.capture ?? (state ? captureStateContext(state) : undefined)
+        if (queued.captureMode && !capture) {
+          throw new Error(`queued capture event has no open capture: ${entry.name}`)
+        }
+        await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
+          provider,
+          event: queued.event,
+          workspace: enablement.workspaceRoot,
+          payload: queued.payload,
+          managed: queued.managed,
+          uploadEnvironment: queued.uploadEnvironment,
+          ...(capture ? { capture } : {})
+        }, queued.sessionId))
+      }
     } catch (error) {
       if (expectedSessionId !== undefined && error instanceof Error && error.message.startsWith('scoped recorder inbox identity')) {
         throw error

@@ -87,3 +87,22 @@ export async function recorderHasRetryableInbox(root: string): Promise<boolean> 
   }
   return false
 }
+
+/**
+ * Whether this session's inbox holds a session-capture claim the daemon has not applied yet.
+ *
+ * A capture event may arrive before that claim is applied, so the session state it would be
+ * validated against does not exist yet; this is what tells the two apart from "no capture here".
+ */
+export async function recorderInboxHasCaptureCommand(root: string): Promise<boolean> {
+  for (const entry of await recorderInboxEntries(root, false)) {
+    try {
+      const queued = await readInboxJson<{ kind?: unknown }>(entry.path)
+      if (queued?.kind === 'capture') return true
+    } catch {
+      // Unreadable evidence is not a claim; replay decides what to do with it.
+      continue
+    }
+  }
+  return false
+}

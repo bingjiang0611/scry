@@ -36,7 +36,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     uploadEnvironment: captureUploadEnvironment(input.env ?? process.env),
     payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
   }
-  const enablement = await resolveRecorderEnablement(input.workspace, input.env, input.capture == null)
+  const enablement = await resolveRecorderEnablement(input.workspace, input.env, input.capture == null && input.captureMode !== true)
   if (!enablement.enabled) {
     if (enablement.reason === 'invalid_config') {
       // Observational hook remains fail-open even if the diagnostic directory is unwritable.
@@ -63,8 +63,8 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   }
   try {
     if (input.queueOnly) {
-      await queueHook(enablement, input, sessionId, arrivedAt)
-      return { status: 'pending', reason: 'daemon delivery uncertain; event queued for replay' }
+      await queueHook(enablement, { ...input, captureMode: input.captureMode ?? input.capture != null }, sessionId, arrivedAt)
+      return { status: 'pending', reason: 'delivery queued; the recorder daemon applies it in arrival order' }
     }
     let entered = false
     let result: RecorderHookResult

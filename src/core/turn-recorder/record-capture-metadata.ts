@@ -39,7 +39,7 @@ export function applyCaptureBaselineCaveat(
   evidence.diff = partial(
     diffs,
     evidence.diff.source,
-    'session capture started mid-turn: the Git baseline was taken at the claim, so changes this turn made before it are not in this snapshot' +
+    'session capture started mid-turn: the Git baseline was taken when this capture was applied, so changes this turn made before it are not in this snapshot' +
       (lagMs != null ? ` (baseline ${lagMs} ms after the prompt)` : ''),
     'exact'
   )

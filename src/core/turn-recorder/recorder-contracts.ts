@@ -30,6 +30,11 @@ export interface RecorderHookInput {
    */
   deferDelivery?: boolean
   /**
+   * Delivered in capture mode even when this delivery carries no context yet: the claim that
+   * publishes the capture state may still be ahead of this event in the same inbox.
+   */
+  captureMode?: boolean
+  /**
    * Pid of the process that delivered this event, when the transport knows it (the hook script
    * passes its own `$$`). Recovery uses the chain around it to tell a live host from a dead one.
    */
@@ -346,6 +351,8 @@ export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
 
 export interface QueuedHook {
   schemaVersion: 1
+  /** Absent on entries written before the kind existed; both mean a Provider hook event. */
+  kind?: 'hook'
   provider: ProviderId
   sessionId: string
   event: string
@@ -354,8 +361,42 @@ export interface QueuedHook {
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   /** 会话捕获上下文随条目持久化：重放出来的唤醒仍属于同一个 capture，不是陌生记录。 */
   capture?: import('./session-capture-contract.js').SessionCaptureContext
+  /**
+   * Delivered in `--capture-mode session`. The capture context is resolved from the session state at
+   * replay time, because the claim that publishes it may still be ahead of this event in the inbox.
+   */
+  captureMode?: boolean
   arrivedAt: string
 }
+
+/**
+ * A session-capture claim waiting for the recorder daemon.
+ *
+ * The host hook that proved the session may not spend its five seconds opening a turn, taking a Git
+ * baseline and waiting for the transcript to settle, so it writes this entry and returns. The daemon
+ * applies it in arrival order before the events it opened.
+ */
+export interface QueuedCaptureCommand {
+  schemaVersion: 1
+  kind: 'capture'
+  provider: ProviderId
+  sessionId: string
+  action: 'start' | 'stop'
+  /** The claim's own context, in the wire shape, validated again when the entry is replayed. */
+  context: Record<string, unknown>
+  /** The Provider event the claim was proved on; the turn boundary is read from it. */
+  payload: Record<string, unknown>
+  event: string
+  arrivedAt: string
+  /** CodeLens' request ledger id, echoed in diagnostics so an integrator can correlate. */
+  requestId?: string
+  /** The claimant's pid: its chain reaches the host that must outlive this turn. */
+  ancestryFromPid?: number
+  /** Host processes CodeLens already resolved, used when that pid is gone by replay time. */
+  hostChain?: import('./host-process.js').HostProcess[]
+}
+
+export type QueuedInboxEntry = QueuedHook | QueuedCaptureCommand
 
 
 export function overlapsTurn(parent: ParsedTranscriptTurn, child: ParsedTranscriptTurn): boolean {

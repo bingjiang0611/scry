@@ -1,20 +1,30 @@
-import { dirname } from 'node:path'
-import { type ParsedArgs, workspaceOf, readStdin, flag, providerOf } from './command-args.js'
-import { startRecorderDaemon } from '../core/turn-recorder/daemon.js'
+import { basename, dirname, join } from 'node:path'
+import { type ParsedArgs, flag, providerOf, readStdin, workspaceOf } from './command-args.js'
+import { notifyRecorderInbox, startRecorderDaemon } from '../core/turn-recorder/daemon.js'
+import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
+import { captureStatePath, SESSION_CAPTURE_PROTOCOL, captureReceiverPath } from '../core/turn-recorder/session-capture-contract.js'
 import {
   CaptureRequestError,
-  SESSION_CAPTURE_PROTOCOL,
   captureExitCode,
   parseCaptureEnvelope,
   parseHookPayload,
   parseSessionCaptureContext,
   type SessionCaptureContext
 } from '../core/turn-recorder/session-capture-contract.js'
-import { applySessionCaptureHook, startSessionCapture, stopSessionCapture } from '../core/turn-recorder/session-capture.js'
+import {
+  applySessionCaptureHook,
+  prepareCaptureStart,
+  startSessionCapture,
+  stopSessionCapture
+} from '../core/turn-recorder/session-capture.js'
+import { queueCaptureCommand } from '../core/turn-recorder/recorder-hook-queue.js'
 
 /**
  * Session-capture delivery. `--capture-mode` must be explicit: silently accepting the flag and then
  * applying an ordinary hook would make an opt-in workspace record sessions nobody opened.
+ *
+ * `--queue-only` is the durable path a host hook uses when it may not spend its own five seconds on
+ * recorder work: the event is written to this session's inbox and a daemon applies it later.
  */
 export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
   const mode = flag(args, 'capture-mode')
@@ -27,6 +37,7 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
     const payload = parseHookPayload(await readStdin())
     const dataDir = flag(args, 'data-dir')
     if (!dataDir) throw new CaptureRequestError('invalid_request', '--data-dir is required for session capture')
+    const queueOnly = args.flags.has('queue-only') || process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
     const result = await applySessionCaptureHook({
       workspace: workspaceOf(args),
       provider,
@@ -34,17 +45,23 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
       dataDir,
       ...(flag(args, 'session-id') ? { sessionId: flag(args, 'session-id') } : {}),
       payload,
-      queueOnly: process.env.SCRY_RECORDER_DAEMON_TRIED === '1',
-      // This process was started by the receiver script, so its parent is the host's chain.
+      queueOnly,
+      captureMode: true,
+      // This process was started by the hook script, so its parent is the host's chain.
       ancestryFromPid: process.ppid
     })
-    // The receiver only falls back when the daemon did not apply this event: no daemon, or one from
-    // another recorder version that refused the handshake. Start ours so the rest of the session
-    // uses the fast path; an unknown delivery is never a reason to replace a live peer.
-    const daemonEnabled = process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
-    if (daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED !== '1'
-      && result.status !== 'ignored' && process.argv[1]) {
-      await startRecorderDaemon({ workspace: workspaceOf(args), scriptPath: process.argv[1], waitForReady: false }).catch(() => undefined)
+    if (queueOnly) {
+      // The entry is durable; waking a recorder is a notification, never a wait for its outcome.
+      await notifyRecorderInbox({ workspace: workspaceOf(args), scriptPath: process.argv[1] })
+    } else {
+      // The receiver only falls back when the daemon did not apply this event: no daemon, or one from
+      // another recorder version that refused the handshake. Start ours so the rest of the session
+      // uses the fast path; an unknown delivery is never a reason to replace a live peer.
+      const daemonEnabled = process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
+      if (daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED !== '1'
+        && result.status !== 'ignored' && process.argv[1]) {
+        await startRecorderDaemon({ workspace: workspaceOf(args), scriptPath: process.argv[1], waitForReady: false }).catch(() => undefined)
+      }
     }
     process.stdout.write(`${JSON.stringify(result.ack)}\n`)
     return 0
@@ -68,7 +85,24 @@ function captureFailure(action: 'start' | 'stop' | 'hook', context: SessionCaptu
   return captureExitCode(error.code)
 }
 
-/** CodeLens opens and closes a session here; the recorder owns the turn boundary it implies. */
+/** The chain a claimant resolved, as JSON on the command line: `[{"pid":1,"token":"…"}]`. */
+function hostChainOf(args: ParsedArgs): unknown {
+  const raw = flag(args, 'host-chain')
+  if (raw === undefined) return undefined
+  try {
+    return JSON.parse(raw)
+  } catch {
+    throw new CaptureRequestError('invalid_request', '--host-chain must be a JSON array')
+  }
+}
+
+/**
+ * CodeLens opens and closes a session here; the recorder owns the turn boundary it implies.
+ *
+ * `--defer` writes the claim to the inbox instead of applying it. The hook that proved the session
+ * returns inside its own five seconds, and the daemon opens the turn, takes the Git baseline and
+ * replays the events that arrived in between, in arrival order.
+ */
 export async function captureCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[2]
   let context: SessionCaptureContext | undefined
@@ -83,6 +117,50 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
     const dataDir = flag(args, 'data-dir')
     const workspace = workspaceOf(args)
     if (!dataDir) throw new CaptureRequestError('invalid_request', '--data-dir is required for session capture')
+    if (args.flags.has('defer')) {
+      // The same evidence is proved for both actions: the claim is only accepted when the recorder is
+      // enabled here, the capture root is usable and the transcript is readable.
+      const prepared = await prepareCaptureStart({
+        workspace,
+        provider,
+        sessionId,
+        dataDir,
+        context,
+        payload: envelope.payload,
+        ancestryFromPid: process.ppid,
+        hostChain: hostChainOf(args) as never
+      })
+      const queued = await queueCaptureCommand(prepared.enablement, {
+        provider,
+        sessionId,
+        action,
+        context: prepared.context,
+        payload: envelope.payload,
+        event: flag(args, 'event') ?? (action === 'start' ? 'CaptureStart' : 'CaptureStop'),
+        arrivedAt: new Date().toISOString(),
+        ...(flag(args, 'request-id') ? { requestId: flag(args, 'request-id') } : {}),
+        ancestryFromPid: process.ppid,
+        ...(prepared.hostChain ? { hostChain: prepared.hostChain } : {})
+      })
+      // Nothing has been opened yet: the ACK says queued, and only the inbox can prove otherwise.
+      await notifyRecorderInbox({ workspace: prepared.workspaceRoot, scriptPath: process.argv[1] })
+      process.stdout.write(`${JSON.stringify({
+        protocol: SESSION_CAPTURE_PROTOCOL,
+        action,
+        status: 'queued',
+        captureId: prepared.context.captureId,
+        sessionId,
+        recorderVersion: RECORDER_VERSION,
+        inbox: {
+          entry: basename(queued.path),
+          directory: queued.inbox,
+          failedDirectory: join(dirname(queued.inbox), 'inbox-failed'),
+          statePath: captureStatePath(prepared.enablement.dataRoot, provider, sessionId),
+          receiverPath: captureReceiverPath(prepared.enablement.dataRoot)
+        }
+      })}\n`)
+      return 0
+    }
     if (action === 'start') {
       const result = await startSessionCapture({
         workspace,

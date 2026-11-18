@@ -108,8 +108,39 @@ export async function startRecorderDaemon(args: {
   }, { waitMs: 3_000 })
 }
 
-export async function stopRecorderDaemon(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
-  const socketPath = recorderSocketPath(workspace, env)
+/**
+ * Hand queued inbox work to a recorder that is already running, or start one.
+ *
+ * A hook that has only written its ink dies not make the daemon notice it, so this is the one
+ * thing a delivery does besides the durable write. It is a notification, never a wait: a daemon
+ * that does not answer inside `wakeBudgetMs` still finds the entry on its own next pass, and the
+ * caller never learns the recorder's outcome from here.
+ */
+export async function notifyRecorderInbox(args: {
+  workspace: string
+  scriptPath?: string
+  env?: NodeJS.ProcessEnv
+  wakeBudgetMs?: number
+}): Promise<'started' | 'woken' | 'unavailable'> {
+  const env = args.env ?? process.env
+  const socketPath = recorderSocketPath(args.workspace, env)
+  if (!args.scriptPath) return 'unavailable'
+  const started = await startRecorderDaemon({
+    workspace: args.workspace, scriptPath: args.scriptPath, env, waitForReady: false
+  }).catch(() => null)
+  if (!started) return 'unavailable'
+  if (started.started) return 'started'
+  try {
+    const response = await daemonRequest(socketPath, {
+      method: 'POST', path: '/v1/wake', timeoutMs: Math.max(50, Math.min(1_000, args.wakeBudgetMs ?? 250))
+    })
+    return response.statusCode === 200 ? 'woken' : 'unavailable'
+  } catch {
+    return 'unavailable'
+  }
+}
+
+export async function stopRecorderDaemon(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {  const socketPath = recorderSocketPath(workspace, env)
   try {
     const response = await daemonRequest(socketPath, { method: 'POST', path: '/v1/stop', timeoutMs: 1_000 })
     if (response.statusCode !== 200 || response.body.ok !== true) return false

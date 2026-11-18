@@ -11,6 +11,7 @@ import { recorderOpenPath, recorderSessionRoot, withRecorderSessionLock, type Re
 import { captureTurnInitializationIssue, beginCaptureTurn } from './recorder-turn-state.js'
 import { sessionIdOf, transcriptPathOf } from './recorder-contracts.js'
 import { captureReceiverSource } from './session-capture-receiver.js'
+import { recorderInboxHasCaptureCommand } from './inbox.js'
 import { recordCaptureRepositories } from './session-capture-discovery.js'
 import { canonicalDataRoot, canonicalWorkspaceRoot, ensureWorkspaceConfig } from './session-capture-workspace.js'
 import {
@@ -49,21 +50,34 @@ function captureTransport(
 }
 
 /**
- * Claim a session. Idempotent per captureId: a repeated start adopts the recorded state instead of
- * opening a second generation, and a repeated delivery never moves the turn boundary.
+ * Everything a claim must prove before any turn is opened: a readable transcript, an enabled recorder,
+ * a writable capture root and this capture's resolved exclusion paths. A deferred claim validates the
+ * same evidence when it is queued, so an integrator learns about a refusal before the daemon runs.
  */
-export async function startSessionCapture(args: {
+export interface PreparedCaptureStart {
+  enablement: Extract<RecorderEnablement, { enabled: true }>
+  workspaceRoot: string
+  provider: ProviderId
+  sessionId: string
+  context: SessionCaptureContext
+  state: SessionCaptureState
+  payload: Record<string, unknown>
+  ancestryFromPid?: number
+  hostChain?: import('./host-process.js').HostProcess[]
+  transport: Record<string, unknown>
+}
+
+export async function prepareCaptureStart(args: {
   workspace: string
   provider: ProviderId
   sessionId: string
   dataDir: string
   context: SessionCaptureContext
   payload: Record<string, unknown>
-  cli: { entry?: string; nodeDir?: string }
   env?: NodeJS.ProcessEnv
-  /** Pid of the process that asked for the capture; the turn records the chain above it. */
   ancestryFromPid?: number
-}): Promise<CaptureAck & { transport: Record<string, unknown> }> {
+  hostChain?: import('./host-process.js').HostProcess[]
+}): Promise<PreparedCaptureStart> {
   const workspaceRoot = await canonicalWorkspaceRoot(args.workspace)
   const dataRoot = await canonicalDataRoot(workspaceRoot, args.dataDir)
   if (args.context.sessionId !== args.sessionId) {
@@ -89,7 +103,6 @@ export async function startSessionCapture(args: {
     throw new CaptureRequestError('recorder_unavailable', 'the host transcript is not readable')
   }
   const transport = captureTransport(enablement, workspaceRoot, args.provider, args.sessionId, args.env)
-  const statePath = captureStatePath(enablement.dataRoot, args.provider, args.sessionId)
   const context = await resolveDiffExclude(args.context)
   const state: SessionCaptureState = {
     ...context,
@@ -98,23 +111,67 @@ export async function startSessionCapture(args: {
     dataRoot: enablement.dataRoot,
     transcriptPath: resolve(transcriptPath)
   }
+  return {
+    enablement, workspaceRoot, provider: args.provider, sessionId: args.sessionId, context, state,
+    payload: args.payload, transport,
+    ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {}),
+    ...(args.hostChain ? { hostChain: args.hostChain } : {})
+  }
+}
+
+/**
+ * Claim a session. Idempotent per captureId: a repeated start adopts the recorded state instead of
+ * opening a second generation, and a repeated delivery never moves the turn boundary.
+ */
+export async function startSessionCapture(args: {
+  workspace: string
+  provider: ProviderId
+  sessionId: string
+  dataDir: string
+  context: SessionCaptureContext
+  payload: Record<string, unknown>
+  cli: { entry?: string; nodeDir?: string }
+  env?: NodeJS.ProcessEnv
+  /** Pid of the process that asked for the capture; the turn records the chain above it. */
+  ancestryFromPid?: number
+  /**
+   * Host processes the caller already resolved. A queued claim is replayed by a daemon that is not on
+   * the host's process chain, and the claimant's own pid may be gone by then.
+   */
+  hostChain?: import('./host-process.js').HostProcess[]
+  /**
+   * The caller already holds this session's recording lock: the inbox drain applies queued claims in
+   * arrival order inside the pass that owns it. Taking the lock again would deadlock the drain.
+   */
+  sessionLockHeld?: boolean
+}): Promise<CaptureAck & { transport: Record<string, unknown> }> {
+  const prepared = await prepareCaptureStart(args)
+  const { enablement, workspaceRoot, provider, sessionId, context, state } = prepared
+  const statePath = captureStatePath(enablement.dataRoot, provider, sessionId)
   let warning: string | undefined
-  const status = await withRecorderSessionLock(enablement.dataRoot, args.provider, args.sessionId, async () => {
-    const existing = await readCaptureState(enablement.dataRoot, args.provider, args.sessionId)
+  const apply = async (): Promise<'started' | 'already_started'> => {
+    const existing = await readCaptureState(enablement.dataRoot, provider, sessionId)
     if (existing && existing.captureId === context.captureId) {
-      warning = await adoptDiffExclude(enablement, args.provider, args.sessionId, existing, context.diffExclude)
+      warning = await adoptDiffExclude(enablement, provider, sessionId, existing, context.diffExclude)
       return 'already_started' as const
     }
     await beginCaptureTurn(
-      enablement, args.provider, args.sessionId, context, state.transcriptPath, args.payload,
-      args.ancestryFromPid
+      enablement, provider, sessionId, context, state.transcriptPath, prepared.payload,
+      prepared.ancestryFromPid, prepared.hostChain
     )
     await writeJsonAtomic(statePath, state)
-    await writeJsonAtomic(captureContextPath(enablement.dataRoot, args.provider, args.sessionId), captureWireContext(context))
+    await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId), captureWireContext(context))
     return 'started' as const
-  }, { waitMs: 10_000 })
-  await ensureReceiver(enablement, workspaceRoot, args.provider, args.cli, args.env)
-  return { status, ack: { ...captureAck('start', status, context), ...(warning ? { warning } : {}) }, transport }
+  }
+  const status = args.sessionLockHeld
+    ? await apply()
+    : await withRecorderSessionLock(enablement.dataRoot, provider, sessionId, apply, { waitMs: 10_000 })
+  await ensureReceiver(enablement, workspaceRoot, provider, args.cli, args.env)
+  return {
+    status,
+    ack: { ...captureAck('start', status, context), ...(warning ? { warning } : {}) },
+    transport: prepared.transport
+  }
 }
 
 /**
@@ -197,6 +254,8 @@ export async function stopSessionCapture(args: {
   dataDir: string
   context: SessionCaptureContext
   env?: NodeJS.ProcessEnv
+  /** The caller already holds this session's recording lock; see `startSessionCapture`. */
+  sessionLockHeld?: boolean
 }): Promise<CaptureAck> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
   if (args.context.sessionId !== args.sessionId) {
@@ -210,7 +269,7 @@ export async function stopSessionCapture(args: {
     return { status: 'already_stopping', ack: captureAck('stop', 'already_stopping', args.context) }
   }
   const requestedAt = args.context.stopRequestedAt ?? new Date().toISOString()
-  await withRecorderSessionLock(dataRoot, args.provider, args.sessionId, async () => {
+  const applyStop = async (): Promise<void> => {
     await writeJsonAtomic(captureStatePath(dataRoot, args.provider, args.sessionId), {
       ...state,
       stopRequestedAt: requestedAt,
@@ -227,7 +286,9 @@ export async function stopSessionCapture(args: {
       captureStopRequestedAt: requestedAt,
       ...(size == null ? {} : { captureTranscriptEndOffset: size })
     }, { sync: false })
-  }, { waitMs: 10_000 })
+  }
+  if (args.sessionLockHeld) await applyStop()
+  else await withRecorderSessionLock(dataRoot, args.provider, args.sessionId, applyStop, { waitMs: 10_000 })
   return { status: 'stopping', ack: captureAck('stop', 'stopping', args.context) }
 }
 
@@ -243,6 +304,8 @@ export async function applySessionCaptureHook(args: {
   payload: Record<string, unknown>
   queueOnly?: boolean
   deferDelivery?: boolean
+  /** Delivered in capture mode; see `RecorderHookInput.captureMode`. */
+  captureMode?: boolean
   env?: NodeJS.ProcessEnv
   /** Pid of the process that delivered this hook, when the transport knows it. */
   ancestryFromPid?: number
@@ -255,10 +318,36 @@ export async function applySessionCaptureHook(args: {
   }
   const state = await readCaptureState(dataRoot, args.provider, sessionId)
   if (!state) {
-    // Opt-in means ordinary sessions in this workspace reach no claim. Nothing was applied, and the
-    // caller must not retry: there is nothing to record.
-    const ack = { protocol: SESSION_CAPTURE_PROTOCOL, action: 'hook', status: 'ignored', captureId: null, sessionId }
-    return { status: 'ignored', ack, reason: 'no capture is open for this session' }
+    // A deferred claim writes its entry first and publishes the state when the daemon applies it, so
+    // an event queued in between has no capture to name yet. It is accepted only while that claim is
+    // still waiting in this session's own inbox; nothing is applied here either way.
+    const claimWaiting = args.queueOnly === true &&
+      await recorderInboxHasCaptureCommand(recorderSessionRoot(dataRoot, args.provider, sessionId))
+    if (!claimWaiting) {
+      // Opt-in means ordinary sessions in this workspace reach no claim. Nothing was applied, and the
+      // caller must not retry: there is nothing to record.
+      const ack = { protocol: SESSION_CAPTURE_PROTOCOL, action: 'hook', status: 'ignored', captureId: null, sessionId }
+      return { status: 'ignored', ack, reason: 'no capture is open for this session' }
+    }
+    const queued = await handleRecorderHook({
+      provider: args.provider,
+      event: args.event,
+      workspace: args.workspace,
+      payload: args.payload,
+      queueOnly: true,
+      captureMode: true,
+      deferDelivery: true,
+      env: args.env,
+      ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
+    })
+    return {
+      status: 'accepted',
+      ack: {
+        protocol: SESSION_CAPTURE_PROTOCOL, action: 'hook', status: 'queued',
+        captureId: null, sessionId, recorded: true, result: queued.status
+      },
+      reason: 'capture claim is still queued; the event follows it in the inbox'
+    }
   }
   const context = args.context ?? captureStateContext(state)
   if (context.sessionId !== sessionId) {
@@ -283,7 +372,7 @@ export async function applySessionCaptureHook(args: {
     workspace: args.workspace,
     payload: args.payload,
     capture: captureStateContext(state),
-    queueOnly: args.queueOnly,
+    ...(args.queueOnly ? { queueOnly: true, captureMode: true } : {}),
     deferDelivery: args.deferDelivery,
     env: args.env,
     ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
