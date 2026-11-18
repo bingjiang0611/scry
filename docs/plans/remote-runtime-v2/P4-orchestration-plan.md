@@ -67,7 +67,7 @@
 
 | 段 | 内容 | 周 | 依赖 |
 |---|---|---|---|
-| P4-0 | 纯决策器（抽出 H1 转移表）、拒绝分类、表结构、独立迁移执行器（拒绝更高版本）、EventSink 与 fail closed、策略表、正文存储、单写者三层、Recorder Core 导入测试；临时库单测 | 1.5 | — |
+| P4-0 | 纯决策器（抽出 H1 转移表）、拒绝分类、表结构、独立迁移执行器（拒绝更高版本）、EventSink 与 fail closed、策略表、正文存储、单写者三层、Recorder Core 导入测试、多 Agent 预留列（core §2.10）；临时库单测 | 1.5 | — |
 | P4-1 | 影子写：daemon 在 H1 `#emit`、H3 `settle` 处同时提交事件与 projection，测试比对；影子写失败只让影子 fail open，不影响 run，并计数；off↔on 增量导入与 `orch_legacy_run`；daemon 模式 CI 作业；首轮测量（含 fullfsync、ext4/btrfs） | 1.5 | P4-0 |
 | P4-2 | 日志成为 run 与 turn 投递的权威：submit、send、stop、answer、`resolveIntent` 进命令；intent 与领取同事务、派发栅栏、复核、pending TTL；恢复查 recorder 证据；两本账对账；旧台账异步镜像；重测 | 3 | P4-1、macOS 真机基线 |
 | P4-3 | 本机订阅：App 切换（§6 第 1 行）；`AppEventFeed` 缩小并接 P5 通知；重测 | 1.25 | P4-2 |
@@ -105,5 +105,6 @@ P4-5b 之后不再有开关，回退只能回到之前的构建：旧构建不�
 | 轮询已删除 | 空闲 60 s RPC 个位数；静态检查：`LIVE_RUNS_TICK_MS`、renderer 远程读循环、iOS 800 ms 回退不存在（P4-5b 后） | CI |
 | 授权 | 撤销后下一次唤醒失败；remote scope 看不到项目根外的行与本机字段；本机 op 在网络端点 `unsupported_op`；执行目标转发只在 Mac2 声明能力时开放 `subscribe` | CI |
 | Recorder 独立 | `src/core/turn-recorder` 不导入 `better-sqlite3` 与编排模块 | CI |
+| 多 Agent 预留 | P4 不产生 `task.*` 与 `agent:` actor；`principal` 等于 actor；级联停止的后代集合为空；fork 与侧聊的谱系与会话文件一致；客户端解码器忽略不认识的可选字段 | CI |
 | 控制实验 | 去掉「领取先于执行」、去掉派发前复核、去掉回执查询、去掉 cwd 授权，各自让对应测试失败 | CI |
 | 真机 | macOS：SIGKILL daemon 于运行中、App 重启接回、fullfsync 开关两轮测量、v2 手机在 P4-5a 用能力、v2 手机连 v3 宿主的提示、打包产物（`better-sqlite3` 解包）、中文系统语言 + 中文工作区路径。Linux：Ubuntu runner 打包 smoke；ext4 与 btrfs 测量；Arch/Hyprland 目标机缺失则标 not-run | **L3，需真机** |

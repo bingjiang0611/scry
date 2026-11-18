@@ -14,12 +14,13 @@
 - **存储**：事件日志放单独的 `orchestration.db`，PLAN「已定」同步记了变更与日期。回执与 `resolveIntent` 墓碑永久保留，只裁剪事件。正文走内容寻址文件，删除会话时清除（data §4.3、§4.7）。
 - **off↔on**：每次启动按 `orch_meta` 记下的旧台账位置做幂等增量导入（plan §9）。
 - **macOS `fullfsync`**：先测量，再按写定的规则决定（plan §8.3）。
+- **多 Agent 预留**（维护者同日）：谱系、发起者、作者、级联停止、等待子任务、Agent 幂等命名空间等进 P4-0 的初始表结构，P4 不实现行为（core §2.10）；多 Agent 层见 [P6 草案](P6-multi-agent-draft.md)。
 - **其余**按评审建议：提交失败 fail closed 但放行停止；结果命令用确定性 id；拒绝分黏性与可重试；恢复时先查 recorder 证据；projection 在裁剪后仍是权威并带 schema 版本；单写者；迁移函数的两个陷阱；两本账的边界；外部会话的扫描触发；证据、协议与性能细节。逐项见 decisions §11.1。
 
 | 文件 | 内容 |
 |---|---|
 | 本文 | 修订说明、结论、t3code 对照、目标架构、组件去留 |
-| [P4-orchestration-core](P4-orchestration-core.md) | §2 核心模型：决策、拒绝分类、复核、派发与重启、fail closed、run id、两本账边界、单写者 |
+| [P4-orchestration-core](P4-orchestration-core.md) | §2 核心模型：决策、拒绝分类、复核、派发与重启、fail closed、run id、两本账边界、单写者、多 Agent 预留 |
 | [P4-orchestration-current](P4-orchestration-current.md) | §1 现状映射：今天谁在决定「发生了什么」 |
 | [P4-orchestration-data](P4-orchestration-data.md) | §3 证据合同；§4 库、表、事件、回执、正文、保留与清除 |
 | [P4-orchestration-protocol](P4-orchestration-protocol.md) | §5 订阅协议；§6 三类客户端的改动与顺序 |

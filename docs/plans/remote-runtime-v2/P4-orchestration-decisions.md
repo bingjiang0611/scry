@@ -33,6 +33,7 @@
 | 13 | Linux 测量范围与 NFS | ext4 与 btrfs；网络文件系统显示明确的 unavailable 文案 | plan §8.3 |
 | 14 | 事件 schema | 保留中的事件必须可解码：只增不改 | data §4.2 |
 | 15 | 性能门禁 | 首 token 前提交合计 P95 ≤ 8 ms，并记录次数；每段重测 | plan §8 |
+| 16 | 多 Agent 预留（维护者 2026-11-18 明确裁定） | P4 只预留会话谱系、发起者与代表的用户、作者与回答者、级联停止、等待子任务、Agent 幂等命名空间、重启作废、保留类型名与解码容忍，不实现行为；多 Agent 另写草案；工期约 +1 天，不改总估 | core §2.10、[P6-multi-agent-draft](P6-multi-agent-draft.md) |
 
 旧合同 §11 的 6 条：1（`SessionLedger` 演进还是新建）→ 新建 Orchestrator + EventSink，复用转移表与重复检测，`LedgerStore` 只覆盖追加、容纳不了同一事务里的 projection 与 outbox；2（进度粒度）→ 只记生命周期（data §4.6）；3（库）→ A；4（客户端 outbox）→ protocol §6；5（catalog）→ protocol §5.4；6（策略表）→ data §4.5。
 

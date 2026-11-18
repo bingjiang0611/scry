@@ -87,6 +87,8 @@
 
 索引：`(stream, seq)`、`(run_id, seq)`、`(session_key, seq)`、`(command_id)`。
 
+预留列（core §2.10 R2，**预留，P4 不实现行为**）：`principal`、`via`、`actor_run_id`；`actor` 另有 `agent:<sessionKey>#<bindingId>` 一种，P4 不产生。
+
 **事件 schema 兼容是硬约束。** 保留期内的任何事件都要能被当前构建解码：类型只增不改；字段只增可选的；含义变了就用新类型。客户端遇到不认识的类型按 protocol §5.2 处理。
 
 ### 4.3 `orch_command`（回执，永久保留）
@@ -99,6 +101,7 @@
 - 旧设备 intent 的 scoped id 直接作为 `command_id`，`intentStatus` 变成查回执，语义不变。
 - **`resolveIntent` 是写命令。** 今天它在找不到时先记录一个没有路由的 intent，再取消它，借此挡住迟到的原提交（`remote-gateway.ts:232-245`）。P4 中它写一张墓碑回执：`type='run.submit'`、`payload_sha256='resolved_absent'`、`status='rejected'`、`reason='resolved_absent'`、`result` 带新生成的 run id。回答仍是 `{ runId, state: 'cancelled' }`；迟到的原提交摘要不同，得到 `command_payload_conflict`。
 - 系统结果命令 id 为 `effect:<effectId>:<step>`（core §2.6）。
+- 预留列 `principal`、`via`、`actor_run_id` 与 Agent 命令的 id 规则见 core §2.10 R2、R7（**预留，P4 不实现行为**）。
 - **保留：永久。** 只裁剪事件，不裁剪回执与墓碑。按每天 100 轮、每轮 2–3 条回执，约 60 KB/天、约 20 MB/年。永久保留让客户端 outbox 的重试窗口不再受限；宿主重建库（新 `logId`）时回执随旧库失效，客户端按 protocol §5.2 处理。
 
 ### 4.4 Projection（与事件同一事务更新）
@@ -111,6 +114,8 @@
 | `orch_p_interaction` | `(run_id, question_id)` | kind、source、state、`answer_id`、`answer_sha256`、opened/closed seq | H7 的 512 条内存去重 |
 
 索引：`orch_p_session(archived_at, ts DESC, session_key)` 支撑 keyset 分页（protocol §5.1）；`orch_p_run(lifecycle)`。
+
+预留列（core §2.10，**预留，P4 不实现行为**，进 P4-0 的初始表结构）：`orch_p_session` 的 `parent_session_key`、`root_session_key`、`lineage`、`created_by`（R1；P4 只照抄 fork 与侧聊已有的来源）；`orch_p_turn` 的 `author`（R3）；`orch_p_run` 的 `parent_run_id`（索引，R5）、`waiting_on`（R6）；`orch_p_interaction` 的 `answered_by`（R3）。
 
 - **projection 是权威。** 事件被裁剪之后，projection 不能也不需要从日志重建。「从空重放等于在线 projection」只在未裁剪窗口内、且排除已清除的会话时检验（plan §10）。
 - **形状变化是数据迁移**：随 §4.0 的执行器改写行并提升 `projection_schema_version`，不靠重放。
@@ -141,6 +146,8 @@
 | effect / host | `effect.voided`、`host.started`（daemon 实例身份；客户端据此知道发生过重启） |
 
 不在第一批：设备与配对、未读集合、终端、MCP。新增类型要同时改白名单、projection 与测试。
+
+保留名（core §2.10 R9、R10，**预留，P4 不实现行为**）：`task.requested`、`task.child_bound`、`task.settled`、`task.cancel_requested`；证据引用 `task-result:<taskId>`。`run.stop_requested` 的可选 `cascadeRoot`、`turn.began` 的 `author` 是已有类型上的可选字段。
 
 `run.progress` 的粒度：**只记生命周期转折**，不记文本增量。输出前进只发易失提示（protocol §5.3）；`run.finalized` 一次性带上输出高水位与归档引用。按 S1 的 paced 场景（20 段），一轮约 8–12 个事件，与今天 H1 一轮的条数相当。
 
