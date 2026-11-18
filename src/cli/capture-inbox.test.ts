@@ -78,12 +78,36 @@ it('defers a claim to the inbox and answers queued instead of waiting for the re
   expect(ack.inbox.failedDirectory).toBe(join(sessionRoot, 'inbox-failed'))
   expect(ack.inbox.statePath).toBe(captureStatePath(f.dataRoot, 'codex', 'session'))
   const entries = await readdir(ack.inbox.directory)
-  expect(entries).toEqual([ack.inbox.entry])
+  // The claim, then the event it was proved on: one invocation, one arrival order.
+  expect(entries).toEqual([ack.inbox.entry, ack.inbox.eventEntry])
   expect(JSON.parse(await readFile(join(ack.inbox.directory, entries[0]), 'utf8'))).toMatchObject({
     kind: 'capture', action: 'start', requestId: 'request-1', event: 'PostToolUse'
   })
   // Nothing was opened: only the daemon may do that, and it has not run.
   await expect(readFile(ack.inbox.statePath, 'utf8')).rejects.toThrow()
+  expect(await listRecords(f.dataRoot)).toHaveLength(0)
+})
+
+it('writes the event that proved a deferred claim right behind the claim', async () => {
+  // One invocation, two entries: a second recorder start would spend the host's remaining budget,
+  // and the event would be the one the host kills.
+  const f = await fixture()
+  const payload = { session_id: 'session', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }
+  const result = await cli(JSON.stringify({ capture: f.context, payload }), [
+    'recorder', 'capture', 'start', '--defer', '--event', 'PostToolUse',
+    '--workspace', f.root, '--provider', 'codex', '--session-id', 'session', '--data-dir', f.dataRoot
+  ])
+  expect(result.code).toBe(0)
+  const ack = JSON.parse(result.output)
+  const entries = await readdir(ack.inbox.directory)
+  expect(entries).toHaveLength(2)
+  expect(ack.inbox.eventEntry).toBe(entries[1])
+  expect(JSON.parse(await readFile(join(ack.inbox.directory, entries[0]), 'utf8'))).toMatchObject({ kind: 'capture' })
+  expect(JSON.parse(await readFile(join(ack.inbox.directory, entries[1]), 'utf8'))).toMatchObject({
+    schemaVersion: 1, provider: 'codex', sessionId: 'session', event: 'PostToolUse',
+    captureMode: true, payload
+  })
+  // Nothing was opened: only the daemon may do that, and it has not run.
   expect(await listRecords(f.dataRoot)).toHaveLength(0)
 })
 

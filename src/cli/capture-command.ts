@@ -17,7 +17,7 @@ import {
   startSessionCapture,
   stopSessionCapture
 } from '../core/turn-recorder/session-capture.js'
-import { queueCaptureCommand } from '../core/turn-recorder/recorder-hook-queue.js'
+import { queueCaptureCommand, queueHook } from '../core/turn-recorder/recorder-hook-queue.js'
 
 /**
  * Session-capture delivery. `--capture-mode` must be explicit: silently accepting the flag and then
@@ -130,6 +130,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         ancestryFromPid: process.ppid,
         hostChain: hostChainOf(args) as never
       })
+      const arrivedAt = new Date().toISOString()
       const queued = await queueCaptureCommand(prepared.enablement, {
         provider,
         sessionId,
@@ -137,11 +138,25 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         context: prepared.context,
         payload: envelope.payload,
         event: flag(args, 'event') ?? (action === 'start' ? 'CaptureStart' : 'CaptureStop'),
-        arrivedAt: new Date().toISOString(),
+        arrivedAt,
         ...(flag(args, 'request-id') ? { requestId: flag(args, 'request-id') } : {}),
         ancestryFromPid: process.ppid,
         ...(prepared.hostChain ? { hostChain: prepared.hostChain } : {})
       })
+      // The claim is proved on a host event, and that event belongs to the turn the claim opens. It is
+      // written by this same process, right behind the claim, because a second invocation would spend
+      // the host's remaining budget on another recorder start and the event would be the one dropped.
+      const event = flag(args, 'event')
+      const eventEntry = event && Object.keys(envelope.payload ?? {}).length > 0
+        ? basename(await queueHook(prepared.enablement, {
+            provider,
+            event,
+            workspace: prepared.workspaceRoot,
+            payload: envelope.payload,
+            captureMode: true,
+            deferDelivery: true
+          }, sessionId, arrivedAt, { announce: false }))
+        : undefined
       // Nothing has been opened yet: the ACK says queued, and only the inbox can prove otherwise.
       await notifyRecorderInbox({ workspace: prepared.workspaceRoot, scriptPath: process.argv[1] })
       process.stdout.write(`${JSON.stringify({
@@ -157,6 +172,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         ...(prepared.context.diffExclude?.length ? { diffExclude: prepared.context.diffExclude } : {}),
         inbox: {
           entry: basename(queued.path),
+          ...(eventEntry ? { eventEntry } : {}),
           directory: queued.inbox,
           failedDirectory: join(dirname(queued.inbox), 'inbox-failed'),
           statePath: captureStatePath(prepared.enablement.dataRoot, provider, sessionId),
