@@ -88,7 +88,7 @@
 
 | # | 内容 | 规模 | 依赖 |
 |---|---|---|---|
-| P5-0 | supervisor 停止时等 daemon（含测试）；两个入口调 `ensureShellEnv`；模板：不写版本、拆配置读取、转义、清理变量、停止与重启参数、`launchedBy`、日志预建；删 `SCRY_REMOTE_RELAY_SSH` | S | — |
+| P5-0 | supervisor 停止时等 daemon（含测试）；两个入口调 `ensureShellEnv`；模板：不写版本、拆配置读取、转义、清理变量、停止与重启参数、`launchedBy`、日志预建；删 `SCRY_REMOTE_RELAY_SSH`。**已完成**（2026-11-18，`d0b0beeb`…`63b877b4`；真 launchd/systemd 未验证） | S | — |
 | P5-1 | 无 Electron 依赖的登录时启动模块；策略变量写入与拒绝；daemon 自报有效远程配置 | M | P5-0 |
 | P5-2 | 设置开关、原生确认、IPC、文案；经服务管理器拉起与回退；采用时比对配置 | M | P5-1 |
 | P5-3 | 打包 smoke | S | P5-2 |

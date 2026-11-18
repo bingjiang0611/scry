@@ -1,6 +1,6 @@
 # P5 · 无界面执行端：登录时启动与宿主命令行批准（只设计）
 
-状态：设计稿，不含实现。维护者 2026-11-18 决定分步做，与 P4 分开；同日评审意见全部按推荐采纳（见文末「评审后修订」）。
+状态：设计稿；P5-0 已实现（[P5-host-security](P5-host-security.md) §7），其余未实现。维护者 2026-11-18 决定分步做，与 P4 分开；同日评审意见全部按推荐采纳（见文末「评审后修订」）。
 
 | 步 | 内容 | 文档 |
 |---|---|---|
@@ -89,7 +89,7 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 - `launchedBy`：supervisor 读自己环境里的 `SCRY_DAEMON_LAUNCHED_BY`（只收 `app`/`service`），作为 `daemonLaunchEnvironment` 的显式参数传下去；不进 `FORWARDED_ENV`，不改 `STARTED_BY`。App 拉起时传 `app`。
 - `SHELL`：supervisor 与 daemon 入口都先调 `ensureShellEnv()`（`src/main/shell.ts:11-13`，无 Electron 依赖）。
 - 日志：开启时先建 `<userData>/logs`（0700）与 `daemon.log`（0600），同 `daemon-launch.ts:65-67`；不在 unit 里设 `UMask`。日志不轮转，与 App 拉起时相同。
-- 转义：systemd 值里 `%`→`%%`、`$`→`$$`；plist 走 XML 转义；含换行或其它控制字符的路径拒绝（`login_start_path_unsupported`）。空格、中文路径必须可用。
+- 转义：systemd 值里 `%`→`%%`；`$`→`$$` 只在 `ExecStart=`（`Environment=` 与 `append:` 不展开 `$`，systemd 255 实测）；plist 走 XML 转义；含换行或其它控制字符的路径拒绝（`login_start_path_unsupported`）。空格、中文路径必须可用。
 - `ProcessType`：先实测不设与 `Interactive` 两种下的首 token 时延与 CPU，再定。不设 `Background`（会限流 Provider）。
 
 ### 2.2 远程策略随服务写入
