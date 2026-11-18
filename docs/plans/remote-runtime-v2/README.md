@@ -10,6 +10,7 @@
 | [STATUS.md](STATUS.md) | 执行进度、证据、阻塞、需要决定的问题 | 执行 agent |
 | [P4-orchestration-design.md](P4-orchestration-design.md) 及 `P4-orchestration-*.md` | 编排事件日志设计稿（按 daemon 现状重写，取代 P4-event-log-contract.md） | 设计方 |
 | [P5-headless-host.md](P5-headless-host.md)、[P5-host-cli.md](P5-host-cli.md)、[P5-host-security.md](P5-host-security.md) | 无界面执行端设计稿：登录时启动、执行端命令行批准新设备、安全与拆分（维护者 2026-11-18 决定，同日评审后修订） | 设计方 |
+| [P6-multi-agent-draft.md](P6-multi-agent-draft.md) 及 `P6-multi-agent-*.md` | 多 Agent 编排草案（未批准）：Scry 自有编排 MCP、委派子任务、权限上限、安全模型；依赖 P4 core §2.10 的预留 | 设计方 |
 
 ## 协作方式
 
