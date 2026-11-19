@@ -1,4 +1,4 @@
-结论：需修改（有阻塞问题；「影子与台账一致」的结论目前不成立）
+结论：需修改（第二轮：剩 1 项阻塞、6 项应修，见文末）
 
 # W5（P4-1）核验（核验方，2026-11-19）
 
@@ -38,3 +38,39 @@
 ## 需要维护者决定
 
 见核验方给维护者的汇总：fullfsync 不在 P4-1 定，P4-1 期间先固定为「fullfsync 关、checkpoint_fullfsync 开」（只是影子，没有风险），到 P4-2 把检查点移出提交路径、H1 退出关键路径后重测再定；以及 8 ms 门禁按绝对值还是增量计。
+
+## 复核（第二轮，2026-11-19，修复提交 `c09ec658`、`520b388b`、`637437ff`、`7eb169f0`）
+
+复跑（Linux）：`tsc` 通过；CI 作业命令（shadow）50 个文件 234 个用例通过；台账、网关、CI 工作流、性能登记测试 124 个通过。新测试放到修复前代码上，B1/B2/B3、模式与 TTL、`settledAt` 置空、分批导入、共用转移表等均失败，证明有效。
+
+| 项 | 结论 |
+|---|---|
+| B1 轮次序号 | **部分**：不再撞主键，但序号来自影子自己的 `MAX(ordinal)+1`（`shadow-mirror.ts:272`、`event-sink-statements.ts:56-58`），生产路径上 `routing.ordinal` 从不存在（`managed-launches.ts:36-44` 的明细里没有 ordinal）。核验方探针：一个先有 2 个收编轮次、再派发一轮的会话，会话账本是第 3 轮，影子记成第 1 轮，`deviations` 仍为 0；分支会话、开启影子前就存在的会话同样。settle 时若该轮不存在会按账本序号插入，可能与影子自编的序号冲突，触发 fence 后永久失效 |
+| B2 计数 | 已修：分类计数，fence 置 `failedOpen`，拒绝不进耗时样本；启动导入 fence 也置位（缺测试；导入中的拒绝未计数） |
+| B3 settle | 已修：走 `turn.record_delivery` 事件，重放一致 |
+| 应修 1 重启分歧 | 已修 |
+| 应修 2 编造结束时间 | 已修 |
+| 应修 3 actor | **部分**：实时路径写真实 `peer:<certSHA256>`，App 运行为 `local`，与 core R2/R3 一致；但导入路径仍写 `system`/`remote`（`legacy-import.ts:168,175-177`，导入时拿不到 peer，报告未说明）；回答提问写 `system`（`shadow-mirror.ts:453`），`answered_by` 应为回答的 peer |
+| 应修 3 outbox | **部分**：`provider.run.start` 已标 `done/shadowOnly`，但 `question.respond` 行仍是 `pending`、无 lease、无 `shadowOnly`（`orchestrator.ts:327-337`），P4-2 恢复会处理它 |
+| 应修 3 TTL、`on` 拒绝 | 已修（`on` 只拒绝影子、不影响后台服务；`decide()` 内未再夹紧 TTL，可选） |
+| 应修 4 启动导入 | **部分**：500 条一批正确且中断后可幂等续导（探针验证）；但只测到 2,000 条，H1 上限 10 万条外推要几十秒，仍在 `openLocalChannel` 之前同步执行 |
+| 应修 5 性能登记 | 已修，漏登记新文件 `event-sink-statements.ts` |
+| 应修 6 负面测试 | 已修（daemon 的「1.2 MB」实为约 1.05 MB） |
+| 可选 7 | 部分：`notify()` 已提前，但它只是 resolve promise，被唤醒的 watcher 仍在同步提交之后才运行，报告「不再等 fsync」不成立 |
+
+**测量**：冷样本已排除、提交按 run id 归属。但单轮影子那一对 P95 是 135.0 与 98.8 ms，相差 36.2 ms，超过 `P3-s1-absolute-cap.md:46` 的 25 ms 稳定性规则，**这一对作废**，需重测；多轮一对（111.7 / 112.9 ms）有效，支持「S1 上限满足」。「≤ 8 ms」只覆盖 `sink.execute`（决策加提交，P95 ≤ 3.29 ms），没覆盖解析路由、哈希、读下一序号、以及超过 16 KiB 时正文文件的写入与 fsync（`shadow-mirror.ts:274-277`），所以只能说明数据库提交部分。
+
+**仍需修改（执行方 C）**
+
+阻塞：
+1. **B1**：真实序号要从会话账本或 H1 带进明细与影子；settle 时比较账本序号与影子序号，不一致计为偏差；补收编、分支、跨重启恢复的会话测试。
+
+应修：
+2. 所有影子 outbox 行（含 `question.respond`）标 `done/shadowOnly`。
+3. 重测单轮影子那一对，并在 W5.md 写明原数据作废。
+4. 计时覆盖整个影子钩子，或单独报告未覆盖部分，含大正文样本。
+5. actor：导入回执写 `system` 的处理写进设计或报告；`answered_by` 记录回答的 peer。
+6. 启动导入：在 10 万条规模测一次，或移到 `openLocalChannel` 之后。
+7. `output_seq`：升 schema 版本，或写明删除开发用库（W4 带过来）。
+
+可选：导入 fence 的测试与导入拒绝计数；更正报告里 `notify()` 的说法；登记 `event-sink-statements.ts`；`decide()` 内夹紧 TTL；真 1.2 MB 的 daemon 测试；影子库裁剪；网关 `#runPeers`/`#runScopes` 清理；计时脚本只归属预期 run id。
