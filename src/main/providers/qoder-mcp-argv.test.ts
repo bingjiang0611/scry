@@ -77,4 +77,15 @@ describe('Qoder MCP configuration stays out of the CLI argv', () => {
     await waitFor(recorder.recorded)
     expectPrivateDelivery(recorder.record())
   })
+
+  it('keeps the SDK inline form for a config with `tools`, whose SDK rewrite Scry cannot reproduce', async () => {
+    const withTools = { ...execution(), targets: [{ ...secretMcpTargets[0], config: { ...secretMcpTargets[0].config, tools: [{ name: 'ping', alwaysLoad: true }] } }] }
+    await readQoderMcpSnapshot(locate.home, { providerId: 'qoder', cwd: locate.home }, true, withTools)
+    await waitFor(recorder.recorded)
+    const record = recorder.record()
+    // Known residual exposure, kept on purpose rather than change which tools load.
+    expect(record.configPath).toBeUndefined()
+    expect((record.config as { mcpServers: Record<string, Record<string, unknown>> }).mcpServers.remote)
+      .toMatchObject({ headers: { 'X-Api-Key': 'hdr-secret-1' }, toolOverrides: { ping: { alwaysLoad: true } } })
+  })
 })

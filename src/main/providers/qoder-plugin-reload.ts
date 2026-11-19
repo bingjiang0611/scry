@@ -2,7 +2,7 @@ import { query, type Query } from '@qoder-ai/qoder-agent-sdk'
 import type { NormalizeCtx } from '../normalize-core'
 import type { ProcessIdentity } from '../process-diagnostics'
 import { normalizeQoderMessage } from './qoder-messages'
-import { heldPrompt, qoderOptions, signalProcessTree } from './qoder-launch'
+import { heldPrompt, qoderMcpLaunch, qoderOptions, signalProcessTree } from './qoder-launch'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { newId } from './qoder-shared'
 import { qoderContextTokensFromUsage, qoderTrace } from './qoder-evidence'
@@ -29,6 +29,7 @@ export function runQoderPluginReload(
       now: () => new Date().toISOString(),
       contextTokensFromUsage: qoderContextTokensFromUsage
     }
+    const mcpLaunch = qoderMcpLaunch(request.mcpExecution)
     const promise: Promise<ProviderRunResult> = (async () => {
       q = query({
         prompt: prompt.stream,
@@ -40,7 +41,7 @@ export function runQoderPluginReload(
             undefined,
             request.permissionMode,
             request.managedRecorder === true,
-            request.mcpExecution,
+            mcpLaunch.options,
             request.managedRecorderIdentity
           ),
           abortController: controller
@@ -88,7 +89,7 @@ export function runQoderPluginReload(
         await events
       }
       return { ...providerResult, externalSessionId }
-    })()
+    })().finally(mcpLaunch.dispose)
     return {
       promise,
       interrupt: () => {

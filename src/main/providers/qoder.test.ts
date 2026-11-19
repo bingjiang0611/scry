@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -302,10 +303,10 @@ describe('Qoder provider adapter', () => {
         name: 'tracker', status: 'connected', scope: 'qoder',
         config: { command: '/bin/echo', args: ['approved'] }, tools: [{ name: 'ping' }]
       }])
-      sdk.query.mockReturnValue({
-        initializationResult: vi.fn().mockResolvedValue({}),
-        mcpServerStatus,
-        close: sdk.close
+      let delivered: unknown
+      sdk.query.mockImplementation(({ options }) => {
+        delivered = JSON.parse(readFileSync(options.extraArgs['mcp-config'], 'utf8'))
+        return { initializationResult: vi.fn().mockResolvedValue({}), mcpServerStatus, close: sdk.close }
       })
       await expect(adapter.mcp!.snapshot(
         { providerId: 'qoder', cwd: '/repo' },
@@ -321,8 +322,8 @@ describe('Qoder provider adapter', () => {
           runtime: [expect.objectContaining({ name: 'tracker', status: 'connected', tools: 1 })]
         }
       })
-      expect(sdk.query.mock.calls[0][0].options).toMatchObject({
-        strictMcpConfig: true,
+      expect(sdk.query.mock.calls[0][0].options).toMatchObject({ strictMcpConfig: true, mcpServers: {} })
+      expect(delivered).toEqual({
         mcpServers: { tracker: { command: '/bin/echo', args: ['approved'], env: { PATH: '/bin' } } }
       })
       expect(mcpServerStatus).toHaveBeenCalledOnce()
@@ -489,11 +490,10 @@ describe('Qoder provider adapter', () => {
   it('silently reauthenticates the exact authorized Qoder MCP target before any prompt', async () => {
     const mcpAuthenticate = vi.fn().mockResolvedValue({ requiresUserAction: false })
     const mcpServerStatus = vi.fn().mockResolvedValue([{ name: 'tracker', status: 'connected' }])
-    sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({}),
-      mcpAuthenticate,
-      mcpServerStatus,
-      close: sdk.close
+    let delivered: unknown
+    sdk.query.mockImplementation(({ options }) => {
+      delivered = JSON.parse(readFileSync(options.extraArgs['mcp-config'], 'utf8'))
+      return { initializationResult: vi.fn().mockResolvedValue({}), mcpAuthenticate, mcpServerStatus, close: sdk.close }
     })
     const closeLoopback = vi.fn()
     const waitForCallback = vi.fn()
@@ -528,9 +528,8 @@ describe('Qoder provider adapter', () => {
       strictMcpConfig: true,
       persistSession: false
     })
-    expect(sdk.query.mock.calls[0][0].options.mcpServers).toEqual({
-      tracker: { url: 'https://tracker.example/mcp' }
-    })
+    expect(sdk.query.mock.calls[0][0].options.mcpServers).toEqual({})
+    expect(delivered).toEqual({ mcpServers: { tracker: { url: 'https://tracker.example/mcp' } } })
   })
 
   it('completes interactive Qoder OAuth through the loopback callback before reporting success', async () => {

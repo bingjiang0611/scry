@@ -6,6 +6,7 @@ import { maskSecrets } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
 import { authorizedMcpServers } from '../mcp-config'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from '../process-diagnostics'
+import { writePrivateMcpConfig, type PrivateMcpConfig } from './private-mcp-config'
 import type { AuthorizedMcpExecution, ProviderRunRequest } from './types'
 
 export function heldPrompt(): { stream: AsyncIterable<never>; release: () => void } {
@@ -110,6 +111,31 @@ export function resolveQoderSdkExecutable(executable: string): string {
   }
 }
 
+export interface QoderMcpLaunch {
+  options: { mcpServers: Record<string, unknown>; extraArgs?: PrivateMcpConfig['extraArgs'] }
+  dispose(): void
+}
+
+/**
+ * The authorized MCP servers for one Qoder launch, kept off the CLI argv. The SDK
+ * would serialize them into `--mcp-config <json>`; qodercli reads a value that does
+ * not start with `{` as a file path (`resolveMcpConfigEntry`, 1.1.11 and 1.1.92), so
+ * they go to a private file instead. The SDK's `buildCliMcpServers` passes a config
+ * through unchanged unless it has `tools`, which it rewrites into `toolOverrides` and
+ * `--settings` permission rules; Scry cannot reproduce that exactly, so such a launch
+ * keeps the SDK's inline form, and its argv exposure, rather than change behaviour.
+ */
+export function qoderMcpLaunch(execution?: AuthorizedMcpExecution): QoderMcpLaunch {
+  const servers = authorizedMcpServers(execution)
+  if (Object.values(servers).some((config) => Object.hasOwn(config, 'tools'))) {
+    return { options: { mcpServers: servers }, dispose: () => {} }
+  }
+  const file = writePrivateMcpConfig(servers)
+  return file
+    ? { options: { mcpServers: {}, extraArgs: file.extraArgs }, dispose: file.dispose }
+    : { options: { mcpServers: {} }, dispose: () => {} }
+}
+
 /** The exact CLI entry the SDK launches; identity checks must hash this same path. */
 export function qoderExecutable(): string | undefined {
   const detected = process.env.SCRY_QODERCLI_PATH?.trim() || resolveRuntimeCliBin('qoder')
@@ -123,7 +149,7 @@ export function qoderOptions(
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void,
   permissionMode: AgentPermissionMode = 'default',
   managedRecorder = false,
-  mcpExecution?: AuthorizedMcpExecution,
+  mcp: QoderMcpLaunch['options'] = { mcpServers: {} },
   managedIdentity?: ProviderRunRequest['managedRecorderIdentity'],
   stderrTail?: QoderStderrTail
 ): Record<string, unknown> {
@@ -171,7 +197,7 @@ export function qoderOptions(
     // Qoder must never discover MCP implicitly. Scry injects only the exact
     // fingerprinted configs that passed Scry's Guard and execution checks.
     strictMcpConfig: true,
-    mcpServers: authorizedMcpServers(mcpExecution),
+    ...mcp,
     controlRequestTimeoutMs: 30_000,
     ...(onPid
       ? {
