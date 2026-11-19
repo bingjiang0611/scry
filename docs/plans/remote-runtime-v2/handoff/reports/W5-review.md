@@ -1,4 +1,4 @@
-结论：需修改（第二轮：剩 1 项阻塞、6 项应修，见文末）
+结论：需修改（第三轮：剩 1 项阻塞、3 项应修，见文末）
 
 # W5（P4-1）核验（核验方，2026-11-19）
 
@@ -74,3 +74,29 @@
 7. `output_seq`：升 schema 版本，或写明删除开发用库（W4 带过来）。
 
 可选：导入 fence 的测试与导入拒绝计数；更正报告里 `notify()` 的说法；登记 `event-sink-statements.ts`；`decide()` 内夹紧 TTL；真 1.2 MB 的 daemon 测试；影子库裁剪；网关 `#runPeers`/`#runScopes` 清理；计时脚本只归属预期 run id。
+
+## 复核（第三轮，2026-11-19，修复提交 `b2b064c1`、`593a4426`、`f2ec1965`、`85c787aa`）
+
+复跑（Linux）：`tsc` 通过；`SCRY_HOST_DAEMON=1 SCRY_ORCHESTRATION=shadow` 下编排与 daemon 51 个文件 241 个用例通过；`src/main/remote`、`src/main/conversation` 等 137 个文件 956/957 通过（唯一失败是 root 容器下既有的目录权限测试）。新测试放到修复前的 `0532c496` 上有 8 个真实断言失败，证明有效。文件均 < 20,000 字节，提交身份正确，未碰 CLI、recorder、协议版本与性能门限。
+
+| 项 | 结论 |
+|---|---|
+| B1 实时路径 | 已修：会话账本的真实序号经 `conversation-send.ts:289` → `managed-launches.ts:38-53` → `host-controller-routing.ts:80-90`（只认 App 授权）→ 影子；settle 比较序号、不一致计偏差不 fence。H1 去重安全：intent id 为 `conversation-run:<turn runId>`，重试复用同一轮次，明细逐字节相同，返回重复而非 `intent_payload_conflict`；设备仍不能发 `conversation`；记录只多一个可选字段 |
+| B1 历史导入 | **未修**（核验方复现）：本次修复之前 H1 记下的会话运行，明细里没有序号，导入仍用影子自己的 `MAX+1`（`legacy-import.ts:77` 回落到 `orchestrator.ts:111`）；`resolveTurnOrdinal` 已定义但无人接线（`orchestration-shadow.ts:66` 未传）。探针：会话 C 有 3 条旧运行（真实序号 1–3），实时第 4 轮后，后台补导入把旧运行编成 5、6、7；下一轮实时第 5 轮撞主键，fence，影子永久失效。同步导入同理，对收编过的会话写错序号且偏差为 0 |
+| 应修 2 outbox | 已修，测试断言所有行 |
+| 应修 3 计时与测量 | 方法已修（全钩子 `durationMs` 与仅提交 `sinkDurationMs` 分开，严格按 run id 归属）；作废的单轮一对已声明作废，重测稳定（P95 101.2 / 97.5 ms，差 3.7 ms）。**但**超过 16 KiB 的正文时，首 token 前全钩子 P50 8.65 / P95 9.53 ms，超过 8 ms 门禁，且只有一轮 15 个样本、无首 token 数据，W5.md 却写「无需维护者决定」 |
+| 应修 5 actor | 导入 actor 写 `system` 的理由已写进 plan §9 规则 1；`answered_by` 记录回答的 peer。**新问题**：peer 指纹写进了持久的 H1 `question_answered` 进度标记，且不论是否开启影子；`RemoteGateway.poll` 把进度明细原样返回给所有已授权设备（`remote-gateway.ts:279-290`），等于把一台设备的证书指纹广播给所有配对设备，也改变了影子模式之外的 H1 记录格式。现有客户端能容忍多出的字段，不破坏合同 |
+| 应修 6 启动导入 | 大体已修：提交挪到 `openLocalChannel` 之后、500 条一批让出事件循环；实时与补导入的去重成立，失败与 fence 置失效。**残留**：开 socket 前仍有 2 次同步全量解析台账（`legacy-import.ts:46,336`），之后还有 1 次不让出的解析（`:397`）；核验方在 Linux 上 10 万条（300 字节提示词）每次约 0.55 s，即开 socket 前约 1.1 s、之后再阻塞约 0.55 s，随明细变大增长；报告没有 10 万条的数据 |
+| 应修 7 schema | 已修：V1→V2 重建 `orch_p_run`，更高版本仍拒绝；核验方用完整旧 V1 实测迁移成功 |
+
+**仍需修改（执行方 C）**
+
+阻塞：
+1. 历史导入（同步与后台补导入）以及实时路径的回落，都要从会话账本取真实序号；补测试：实时会话轮次与后台补导入交错进行，以及收编过的会话导入。顺带把未接线的 `resolveTurnOrdinal` 接上或删掉。
+
+应修：
+2. 回答者的 peer 不要写进持久的 H1 标记，改走内存旁路（类似 `runMeta`）；补「运行控制 → broker → 标记」的端到端测试。
+3. 大正文：把正文文件的写入与落盘移出首 token 前的路径（影子阶段不需要它参与派发），或在 W5.md 明确写成「门禁未达标」并列入需要维护者决定；补大正文样本的首 token 数据。
+4. 启动导入只解析一次台账并复用结果，并报告 10 万条规模的实测。
+
+可选：网关的 4096 上限只淘汰已结束的运行；V2 迁移后旧行的 `output_seq=0` 应视为未知；`legacy-import.ts`、`legacy-ledger-reader.ts` 登记进 `performance-paths.json`；影子库裁剪仍未处理（写明延后）；W5.md 里的 `file:///Users/...` 本机链接改为仓库相对路径。
