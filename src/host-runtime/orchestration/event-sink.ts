@@ -119,7 +119,10 @@ export class EventSink {
     }
   }
 
-  execute(command: OrchestrationCommand): DecisionResult {
+  execute(
+    command: OrchestrationCommand,
+    txExtras?: { legacyLedgerSeq?: number; legacyRunMapping?: { ledgerRunId: string; runId: string } }
+  ): DecisionResult {
     if (this.#writeIndeterminate) {
       return {
         kind: 'rejected',
@@ -129,12 +132,36 @@ export class EventSink {
       }
     }
     const decision = decide(command, this.createReadView())
-    if (decision.kind === 'duplicate') return decision
+    if (decision.kind === 'duplicate') {
+      if (txExtras?.legacyLedgerSeq !== undefined) {
+        this.advanceLegacyLedgerSeq(txExtras.legacyLedgerSeq)
+      }
+      return decision
+    }
     if (decision.kind === 'rejected' && !decision.writeReceipt) return decision
-    return this.commitDecision(decision)
+    return this.commitDecision(decision, txExtras)
   }
 
-  private commitDecision(decision: Extract<DecisionResult, { kind: 'accepted' | 'rejected' }>): DecisionResult {
+  private advanceLegacyLedgerSeq(seq: number): void {
+    try {
+      this.handle.db
+        .prepare(
+          `INSERT INTO orch_meta (key, value) VALUES ('legacy_ledger_seq', ?)
+           ON CONFLICT(key) DO UPDATE SET value = CASE
+             WHEN CAST(excluded.value AS INTEGER) > CAST(orch_meta.value AS INTEGER) THEN excluded.value
+             ELSE orch_meta.value
+           END`
+        )
+        .run(String(seq))
+    } catch (error) {
+      this.tripFence(error)
+    }
+  }
+
+  private commitDecision(
+    decision: Extract<DecisionResult, { kind: 'accepted' | 'rejected' }>,
+    txExtras?: { legacyLedgerSeq?: number; legacyRunMapping?: { ledgerRunId: string; runId: string } }
+  ): DecisionResult {
     const db = this.handle.db
     try {
       const tx = db.transaction(() => {
@@ -223,6 +250,21 @@ export class EventSink {
             receipt.via,
             receipt.actorRunId
           )
+        }
+
+        if (txExtras?.legacyRunMapping) {
+          db.prepare(
+            'INSERT OR IGNORE INTO orch_legacy_run (ledger_run_id, run_id) VALUES (?, ?)'
+          ).run(txExtras.legacyRunMapping.ledgerRunId, txExtras.legacyRunMapping.runId)
+        }
+        if (txExtras?.legacyLedgerSeq !== undefined) {
+          db.prepare(
+            `INSERT INTO orch_meta (key, value) VALUES ('legacy_ledger_seq', ?)
+             ON CONFLICT(key) DO UPDATE SET value = CASE
+               WHEN CAST(excluded.value AS INTEGER) > CAST(orch_meta.value AS INTEGER) THEN excluded.value
+               ELSE orch_meta.value
+             END`
+          ).run(String(txExtras.legacyLedgerSeq))
         }
 
         this.#beforeCommitHook?.()
