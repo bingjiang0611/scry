@@ -1,10 +1,13 @@
 import { join } from 'node:path'
 import type { LoginStartPolicyEntry } from '../../shared/background-service'
+import { renderLaunchdPlist, renderSystemdUnit, type ServiceTemplateInput } from '../supervisor-templates'
 import { isLoginStartPolicyEnvKey } from './policy-env'
 
 // Strict parser for our rendered LaunchAgent plist and systemd --user unit (P5 §2.5).
-// Ownership is established solely from parsed executable/asar/userData/env values, never
-// from comments or filename alone.
+// Ownership requires not only matching executable/asar/userData/env values, but also a
+// byte-for-byte match when re-rendered with our template (W2 review S5): any extra key,
+// non-empty cleared var, ExecStartPre=, XML comment, or modified directive is rejected as
+// foreign rather than silently treated as ours.
 
 export type ParsedServiceFile =
   | {
@@ -59,12 +62,12 @@ function unescapeSystemdWords(line: string, expandDollar: boolean): string[] | u
   return words
 }
 
-function verifyCommonFields(
+function extractCommon(
   executable: string,
   supervisorEntry: string,
   env: Map<string, string>,
   label?: string
-): ParsedServiceFile {
+): { parsed: Extract<ParsedServiceFile, { kind: 'ours' }>; templateInput: ServiceTemplateInput } | undefined {
   const electronRunAsNode = env.get('ELECTRON_RUN_AS_NODE')
   const launchedBy = env.get('SCRY_DAEMON_LAUNCHED_BY')
   const userDataDir = env.get('SCRY_DAEMON_USER_DATA_DIR')
@@ -72,35 +75,58 @@ function verifyCommonFields(
   const daemonEntry = env.get('SCRY_DAEMON_ENTRY')
   const appPath = env.get('SCRY_DAEMON_APP_PATH')
   const resourcesPath = env.get('SCRY_DAEMON_RESOURCES_PATH')
+  const packagedRaw = env.get('SCRY_DAEMON_PACKAGED')
   if (
     !executable ||
     electronRunAsNode !== '1' ||
     launchedBy !== 'service' ||
+    (packagedRaw !== '0' && packagedRaw !== '1') ||
     !userDataDir || !stateDir || !daemonEntry || !appPath || !resourcesPath
   ) {
-    return FOREIGN
+    return undefined
   }
-  if (stateDir !== join(userDataDir, 'daemon')) return FOREIGN
-  if (supervisorEntry !== join(appPath, 'out', 'main', 'daemon-supervisor.js')) return FOREIGN
-  if (daemonEntry !== join(appPath, 'out', 'main', 'daemon.js')) return FOREIGN
+  if (stateDir !== join(userDataDir, 'daemon')) return undefined
+  if (supervisorEntry !== join(appPath, 'out', 'main', 'daemon-supervisor.js')) return undefined
+  if (daemonEntry !== join(appPath, 'out', 'main', 'daemon.js')) return undefined
+
   const policyEnv: LoginStartPolicyEntry[] = []
+  const policyPairs: Array<[string, string]> = []
   for (const [key, value] of env.entries()) {
-    if (isLoginStartPolicyEnvKey(key)) policyEnv.push({ key, value })
+    if (isLoginStartPolicyEnvKey(key)) {
+      policyEnv.push({ key, value })
+      policyPairs.push([key, value])
+    }
   }
-  return {
-    kind: 'ours',
-    ...(label ? { label } : {}),
+  const templateInput: ServiceTemplateInput = {
     executable,
     supervisorEntry,
     daemonEntry,
+    userDataDir,
     appPath,
     resourcesPath,
-    userDataDir,
-    policyEnv
+    isPackaged: packagedRaw === '1',
+    ...(policyPairs.length > 0 ? { policyEnv: policyPairs } : {}),
+    ...(label ? { label } : {})
+  }
+  return {
+    parsed: {
+      kind: 'ours',
+      ...(label ? { label } : {}),
+      executable,
+      supervisorEntry,
+      daemonEntry,
+      appPath,
+      resourcesPath,
+      userDataDir,
+      policyEnv
+    },
+    templateInput
   }
 }
 
 export function parseLaunchdPlist(content: string, expectedLabel: string): ParsedServiceFile {
+  // Never match XML comments or hand-edited plists.
+  if (content.includes('<!--')) return FOREIGN
   const labelMatch = content.match(/<key>Label<\/key>\s*<string>([^<]*)<\/string>/)
   if (!labelMatch) return FOREIGN
   const label = unescapeXml(labelMatch[1]!)
@@ -115,18 +141,28 @@ export function parseLaunchdPlist(content: string, expectedLabel: string): Parse
   if (!envBlock) return FOREIGN
   const env = new Map<string, string>()
   for (const match of envBlock[1]!.matchAll(/<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g)) {
-    env.set(unescapeXml(match[1]!), unescapeXml(match[2]!))
+    const key = unescapeXml(match[1]!)
+    if (env.has(key)) return FOREIGN
+    env.set(key, unescapeXml(match[2]!))
   }
-  return verifyCommonFields(args[0]!, args[1]!, env, label)
+  const extracted = extractCommon(args[0]!, args[1]!, env, label)
+  if (!extracted) return FOREIGN
+  try {
+    if (renderLaunchdPlist(extracted.templateInput) !== content) return FOREIGN
+  } catch {
+    return FOREIGN
+  }
+  return extracted.parsed
 }
 
 export function parseSystemdUnit(content: string): ParsedServiceFile {
   let section = ''
   let execArgs: string[] | undefined
   const env = new Map<string, string>()
-  for (const rawLine of content.split(/\r?\n/)) {
+  for (const rawLine of content.split('\n')) {
     const line = rawLine.trim()
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+    if (!line) continue
+    if (line.startsWith('#') || line.startsWith(';')) return FOREIGN
     if (line.startsWith('[') && line.endsWith(']')) {
       section = line
       continue
@@ -143,9 +179,18 @@ export function parseSystemdUnit(content: string): ParsedServiceFile {
       const word = parsed[0]!
       const eq = word.indexOf('=')
       if (eq <= 0) return FOREIGN
-      env.set(word.slice(0, eq), word.slice(eq + 1))
+      const key = word.slice(0, eq)
+      if (env.has(key)) return FOREIGN
+      env.set(key, word.slice(eq + 1))
     }
   }
   if (!execArgs) return FOREIGN
-  return verifyCommonFields(execArgs[0]!, execArgs[1]!, env)
+  const extracted = extractCommon(execArgs[0]!, execArgs[1]!, env)
+  if (!extracted) return FOREIGN
+  try {
+    if (renderSystemdUnit(extracted.templateInput) !== content) return FOREIGN
+  } catch {
+    return FOREIGN
+  }
+  return extracted.parsed
 }

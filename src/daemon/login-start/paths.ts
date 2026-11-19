@@ -1,4 +1,4 @@
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, type ServiceTemplateInput } from '../supervisor-templates'
 
 // Shared path and bundle layout derivation for login-start (P5 §2.3). Plain Node only:
@@ -58,6 +58,15 @@ export function loginStartTargetFromBundle(
     userDataDir,
     isPackaged: true
   }
+}
+
+/**
+ * macOS mounted DMG (`/Volumes/...`) or Gatekeeper App Translocation paths do not survive
+ * a reboot/re-login, so installing a login service pointing there would immediately break.
+ */
+export function isEphemeralMacAppPath(executable: string): boolean {
+  const normalized = resolve(executable)
+  return normalized.startsWith('/Volumes/') || normalized.includes('/AppTranslocation/')
 }
 
 /**
@@ -123,7 +132,9 @@ export function serviceFilePath(input: {
     const dir = input.serviceDirOverride ?? join(input.homeDir, 'Library', 'LaunchAgents')
     return join(dir, `${input.label}.plist`)
   }
-  const configBase = input.xdgConfigHome?.trim() || join(input.homeDir, '.config')
+  // XDG Base Directory Specification: relative XDG_CONFIG_HOME paths must be ignored.
+  const xdg = input.xdgConfigHome?.trim()
+  const configBase = xdg && isAbsolute(xdg) ? xdg : join(input.homeDir, '.config')
   const dir = input.serviceDirOverride ?? join(configBase, 'systemd', 'user')
   return join(dir, input.unitName)
 }
