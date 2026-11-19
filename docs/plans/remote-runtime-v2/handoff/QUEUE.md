@@ -2,14 +2,15 @@
 
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
-- 执行方 A：真机验证（W1，之后 W6）。独占 `/Applications` 安装、日常 App、iPhone。
-- 执行方 B：P5（先 W3，再 W2），之后 W7（Antigravity）。
+- 执行方 A：真机验证（W1、W6，以及 W2b：W2 剩余真机项）。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
+- 执行方 B：P5（W3、W2 代码已通过），现做 W7（Antigravity）。
 - 执行方 C：P4（先 W4，再 W5）。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
 |---|---|---|---|---|---|
 | W1 | macOS 真机基线：默认 daemon、分支现状、iOS 修复 | A | — | — | [tasks/W1-mac-baseline.md](tasks/W1-mac-baseline.md) |
 | W2 | P5 第 1 步：登录时启动（P5-1 至 P5-4） | B | — | W1 通过 | [tasks/W2-p5-login-start.md](tasks/W2-p5-login-start.md) |
+| W2b | P5 第 1 步剩余真机项（AX 确认框、注销再登录、签名包权限、FileVault） | A | W2 代码已通过 | W2 合并前必须完成 | [tasks/W2b-p5-login-start-real-machine.md](tasks/W2b-p5-login-start-real-machine.md) |
 | W3 | P5-5a 剩余：grant 读取端兼容 `approvedVia` | B | — | 至少早于 P5-7 一个发布 | [tasks/W3-p5-grant-reader.md](tasks/W3-p5-grant-reader.md) |
 | W4 | P4-0：决策器、表结构、迁移执行器、EventSink | C | — | W1 通过 | [tasks/W4-p4-0.md](tasks/W4-p4-0.md) |
 | W5 | P4-1：影子写、增量导入、daemon 模式 CI、首轮测量 | C | W4 | W1 通过 | [tasks/W5-p4-1.md](tasks/W5-p4-1.md) |
