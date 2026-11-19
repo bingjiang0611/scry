@@ -88,6 +88,7 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 | 多 Agent 编排 | P4 只是 t3code Orchestration V2 核心的对应物，多 Agent 是其上的另一层。先在 P4 设计里预留钩子（只改文档，P4 不实现行为，工期不变），再仿 t3code 的编排 MCP 写草案 | [P4-orchestration-core](P4-orchestration-core.md) §2.10、[P6-multi-agent-draft](P6-multi-agent-draft.md) |
 | 「第 1 步」暂不做（2026-11-19） | App 发起的 run 由 daemon 直接写记录、绕过 Hook 与命令行，暂不做；P4–P6 不改 scry 命令行、其命令与记录格式 | [P6-multi-agent-decisions](P6-multi-agent-decisions.md) D27 |
 | 已知问题，未修（2026-11-19 记录） | 历史检索给 Claude 的 bearer token 经 SDK 进 `--mcp-config` 参数（`claude.ts:413-415`），本机其他用户可经 `ps` 看到；不在 P6 修，修法另候维护者决定 | [P6-multi-agent-security](P6-multi-agent-security.md) §S4 |
+| 已知问题，未修（2026-11-19 记录） | 范围更大：经授权的仓库/用户 MCP 配置（远程的 `headers`、stdio 的 `env`）也整段进 Provider 的命令行参数——Codex 的 `-c mcp_servers=…`（`codex.ts:148-170`、`:775`），Claude/Qoder SDK 的 `--mcp-config`。配置里若有 API key，本机其他用户可经 `ps` 看到；修法另候维护者决定 | [P6-multi-agent-decisions](P6-multi-agent-decisions.md) §10.3 |
 
 评审后（同日）「都按推荐」：supervisor 停止时等 daemon、远程策略随服务写入、命令行批准默认关且只能在 App 里打开、挑战认证、运行标记、通知与速率、批准方式分两次发布写进 grant。随后「都按推荐」：开关关闭时仍放行只收紧的 `cancel`、`revoke`、`desktop-off`（每次通知）；`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL` 写进服务文件（[P5-headless-host](P5-headless-host.md) §10）。
 
