@@ -17,7 +17,13 @@
 
 维护者会同时开多个执行方，每个只做 [QUEUE.md](QUEUE.md)「执行方」列里分给自己的任务。
 
-- **各用各的克隆**：每个执行方在自己的目录工作（例如 `~/work/scry-A`、`~/work/scry-B`、`~/work/scry-C`），不要共用目录，也不要用维护者日常的检出。同一分支不能在两个 worktree 里同时检出，所以用独立克隆，推送时 `git push origin HEAD:claude/scry-performance-optimization-46ngcf`。
+- **各用各的 worktree**：每个执行方从维护者已有的 scry 检出里开一个独立 worktree，不在维护者日常的工作目录里改动，也不共用目录。同一分支不能在两个 worktree 里同时检出，所以每个 worktree 用自己的本地分支，推送到同一个远程分支：
+  ```bash
+  git -C <维护者的 scry 检出> fetch origin claude/scry-performance-optimization-46ngcf
+  git -C <维护者的 scry 检出> worktree add ~/work/scry-A -b exec/A origin/claude/scry-performance-optimization-46ngcf   # B、C 换成 scry-B/exec/B、scry-C/exec/C
+  cd ~/work/scry-A && QODER_SKIP_DOWNLOAD=1 npm ci
+  ```
+  同步与推送：`git fetch origin claude/scry-performance-optimization-46ngcf && git merge --no-edit FETCH_HEAD`，然后 `git push origin HEAD:claude/scry-performance-optimization-46ngcf`。worktree 之间共享 stash：**禁止**裸用 `git stash` / `git stash pop`，需要暂存时用临时提交。不要删除或改动别人的 worktree 与本地分支；任务全部结束后只清理自己的 worktree（`git worktree remove`），并保留证据目录。
 - **只改自己的文件**：任务单写了范围；超出范围要改别人负责的文件时，改得越小越好，并在报告里写明。合并冲突自己解决，解决不了就停下写进报告，不要覆盖对方的提交。
 - **状态写在自己的报告里**：不要改 QUEUE.md 的表格（避免三方同时改同一行）。状态写在 `reports/<任务号>.md` 第一行，例如 `状态：进行中`。
 - **测量互斥**：要做性能测量、长跑或真实数据对比时，先创建 `~/.local/state/scry-handoff-evidence/MEASURING`（内容写任务号、开始时间、预计结束），做完删除。看到这个文件存在时，其他执行方不要跑构建、全量测试、打包或真实 Provider 运行，可以先做阅读、写代码、写文档；文件超过 4 小时未更新视为遗留，可在报告里记录后忽略。
