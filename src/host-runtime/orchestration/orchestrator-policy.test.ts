@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { RUN_LIFECYCLE_NEXT } from '../../main/remote/session-ledger'
 import { ALL_EFFECT_KINDS, EFFECT_POLICIES, getEffectPolicy } from './effect-policy'
 import { H1_RUN_NEXT, ORCH_RUN_NEXT, canTransitionH1Run, canTransitionRun } from './run-transitions'
 import {
   ORCHESTRATION_EVENT_TYPES,
+  RESERVED_EVIDENCE_PREFIXES,
   RESERVED_TASK_EVENT_TYPES,
+  isReservedEvidenceRef,
   type RunLifecycleState,
   type RunProjectionRow
 } from './types'
@@ -47,7 +50,8 @@ function makeMinimalView(runs: Map<string, RunProjectionRow> = new Map()): Orche
 }
 
 describe('P4-0 transition tables & effect policy', () => {
-  it('enforces every legal and illegal H1 run transition', () => {
+  it('shares the exact H1 run transition table with session-ledger.ts (no copied table drift)', () => {
+    expect(H1_RUN_NEXT).toBe(RUN_LIFECYCLE_NEXT)
     const states = Object.keys(H1_RUN_NEXT) as Array<keyof typeof H1_RUN_NEXT>
     for (const from of states) {
       for (const to of states) {
@@ -213,5 +217,47 @@ describe('P4-0 multi-agent reservations (core §2.10 R1-R12)', () => {
       ok: false,
       reason: 'unknown_event_type'
     })
+  })
+
+  it('reserves R10 task-result: evidence refs and rejects them in P4 events', () => {
+    expect(RESERVED_EVIDENCE_PREFIXES).toContain('task-result:')
+    expect(isReservedEvidenceRef('task-result:task-1')).toBe(true)
+    expect(isReservedEvidenceRef('provider-result:run-1')).toBe(false)
+
+    const dispatchedRun: RunProjectionRow = {
+      runId: 'run-r10',
+      sessionKey: 'session-r10',
+      ownerActor: PEER_A,
+      scope: 'remote',
+      origin: 'remote',
+      provider: 'claude',
+      profile: 'default',
+      cwd: '/tmp/ws',
+      promptPreview: 'p',
+      lifecycle: 'dispatched',
+      stopState: null,
+      outputSeq: null,
+      intentSeq: 1,
+      body: null,
+      settledAt: null,
+      recoveredAt: null,
+      outcome: null,
+      revSeq: 2,
+      parentRunId: null
+    }
+    expect(() =>
+      decide(
+        {
+          type: 'run.effect_result',
+          commandId: 'effect:r10:settled',
+          actor: 'effect:r10',
+          scope: 'system',
+          at: 1_700_000_005_000,
+          payload: { runId: 'run-r10', step: 'settled', evidence: ['task-result:sub-1'] },
+          payloadSha256: sha256Hex('r10')
+        },
+        makeMinimalView(new Map([[dispatchedRun.runId, dispatchedRun]]))
+      )
+    ).toThrow(expect.objectContaining({ code: 'orchestration_invalid_event', message: expect.stringMatching(/R10/) }))
   })
 })

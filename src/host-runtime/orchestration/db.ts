@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, statfsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -22,13 +23,28 @@ const LINUX_NETWORK_FS_MAGIC = new Set([
 ])
 
 export function detectNetworkFilesystem(directory: string): boolean {
-  if (process.platform !== 'linux') return false
-  try {
-    const stats = statfsSync(directory)
-    return LINUX_NETWORK_FS_MAGIC.has(stats.type)
-  } catch {
-    return false
+  if (process.platform === 'linux') {
+    try {
+      const stats = statfsSync(directory)
+      return LINUX_NETWORK_FS_MAGIC.has(stats.type)
+    } catch {
+      return false
+    }
   }
+  if (process.platform === 'darwin') {
+    // One-time open check: BSD `df -T nfs,smbfs,afpfs,webdav,autofs <dir>` exits 0 iff
+    // the directory resides on one of those network filesystem types.
+    try {
+      const res = spawnSync('df', ['-T', 'nfs,smbfs,afpfs,webdav,autofs', directory], {
+        encoding: 'utf8',
+        timeout: 2_000
+      })
+      return res.status === 0 && res.stdout.trim().split('\n').length >= 2
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 export function enforceOrchestrationFileModes(dbPath: string): void {
@@ -96,12 +112,12 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
     db.pragma('synchronous = FULL')
     db.pragma('foreign_keys = ON')
     db.pragma('secure_delete = ON')
-    if (options.fullfsync !== undefined) {
-      db.pragma(`fullfsync = ${options.fullfsync ? 'ON' : 'OFF'}`)
-    }
-    if (options.checkpointFullfsync !== undefined) {
-      db.pragma(`checkpoint_fullfsync = ${options.checkpointFullfsync ? 'ON' : 'OFF'}`)
-    }
+    // Maintainer decision (2026-11-19): P4-1 explicitly fixes fullfsync=OFF and
+    // checkpoint_fullfsync=ON even when env vars are unset; final decision deferred to P4-2.
+    const fullfsync = options.fullfsync ?? false
+    const checkpointFullfsync = options.checkpointFullfsync ?? true
+    db.pragma(`fullfsync = ${fullfsync ? 'ON' : 'OFF'}`)
+    db.pragma(`checkpoint_fullfsync = ${checkpointFullfsync ? 'ON' : 'OFF'}`)
 
     const integrity = db.pragma('integrity_check(1)', { simple: true }) as string
     if (integrity !== 'ok') {

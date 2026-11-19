@@ -74,9 +74,8 @@ function containsForbiddenUsageKey(value: unknown): string | null {
   return null
 }
 
-/** data §3.3: usage numbers must never enter orchestration events. */
+/** data §3.3: usage numbers must never enter any orchestration event. */
 export function assertNoUsageNumbersInEvent(type: string, payload: unknown): void {
-  if (type !== 'run.provider_settled') return
   const forbidden = containsForbiddenUsageKey(payload)
   if (forbidden) {
     throw new OrchestrationStoreError(

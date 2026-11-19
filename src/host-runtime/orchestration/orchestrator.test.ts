@@ -5,7 +5,8 @@ import type {
   RunProjectionRow,
   SessionProjectionRow
 } from './types'
-import { canonicalJson, sha256Hex } from './canonical-json'
+import { assertNoUsageNumbersInEvent, canonicalJson, sha256Hex } from './canonical-json'
+import { makeEvent } from './orchestrator-handlers'
 import {
   decide,
   isRetryableRejection,
@@ -416,5 +417,95 @@ describe('P4-0 pure orchestrator decide()', () => {
     if (imported.kind === 'accepted') {
       expect(imported.events[0].payload.lastRunOutcome).toMatchObject({ quality: 'inferred' })
     }
+  })
+
+  it('rejects progress steps on recorded runs, defaults missing outcome to unavailable, and forbids usage in all events', () => {
+    const recordedRun: RunProjectionRow = {
+      runId: 'remote-run-20',
+      sessionKey: 'session-20',
+      ownerActor: PEER_A,
+      scope: 'remote',
+      origin: 'remote',
+      provider: 'claude',
+      profile: 'default',
+      cwd: '/tmp/ws',
+      promptPreview: 'go',
+      lifecycle: 'recorded',
+      stopState: null,
+      outputSeq: null,
+      intentSeq: 1,
+      body: null,
+      settledAt: null,
+      recoveredAt: null,
+      outcome: null,
+      revSeq: 1,
+      parentRunId: null
+    }
+    const recordedView = makeView({ runs: new Map([[recordedRun.runId, recordedRun]]) })
+
+    for (const [step, payload] of [
+      ['session_bound', { runId: 'remote-run-20', step: 'session_bound' as const, nativeSessionId: 'ps-1' }],
+      ['finalized', { runId: 'remote-run-20', step: 'finalized' as const, outputSeq: 1 }],
+      ['content_gap', { runId: 'remote-run-20', step: 'content_gap' as const, gapReason: 'output_capture_failed' as const }]
+    ] as const) {
+      const res = decide(
+        {
+          type: 'run.effect_result',
+          commandId: `effect:rec:${step}`,
+          actor: 'effect:rec',
+          scope: 'system',
+          at: 1_700_000_005_000,
+          payload,
+          payloadSha256: sha256Hex(`rec-${step}`)
+        },
+        recordedView
+      )
+      expect(res.kind, step).toBe('rejected')
+      if (res.kind === 'rejected') {
+        expect(res.reason, step).toBe('illegal_transition')
+        expect(res.sticky, step).toBe(true)
+      }
+    }
+
+    const dispatchedRun: RunProjectionRow = { ...recordedRun, lifecycle: 'dispatched' }
+    const dispatchedView = makeView({ runs: new Map([[dispatchedRun.runId, dispatchedRun]]) })
+
+    // Missing outcome must never fabricate exact quality
+    const settledWithoutOutcome = decide(
+      {
+        type: 'run.effect_result',
+        commandId: 'effect:no-outcome:settled',
+        actor: 'effect:no-outcome',
+        scope: 'system',
+        at: 1_700_000_006_000,
+        payload: { runId: 'remote-run-20', step: 'settled' },
+        payloadSha256: sha256Hex('no-outcome')
+      },
+      dispatchedView
+    )
+    expect(settledWithoutOutcome.kind).toBe('accepted')
+    if (settledWithoutOutcome.kind === 'accepted') {
+      expect(settledWithoutOutcome.events[0].payload.outcome).toEqual({
+        status: 'unavailable',
+        quality: 'unavailable',
+        source: [],
+        omissionReason: 'outcome_evidence_absent'
+      })
+    }
+
+    // Usage numbers are forbidden in ALL event types, not only run.provider_settled (data §3.3)
+    for (const type of ['run.settled', 'run.finalized', 'session.created', 'turn.began'] as const) {
+      expect(() => assertNoUsageNumbersInEvent(type, { nested: { inputTokens: 42 } }), type).toThrow(
+        expect.objectContaining({ code: 'orchestration_usage_forbidden_in_event' })
+      )
+    }
+    expect(() =>
+      makeEvent(submitCmd(), 0, {
+        type: 'run.settled',
+        stream: 'run:remote-run-20',
+        runId: 'remote-run-20',
+        payload: { runId: 'remote-run-20', costUsd: 0.05 }
+      })
+    ).toThrow(expect.objectContaining({ code: 'orchestration_usage_forbidden_in_event' }))
   })
 })

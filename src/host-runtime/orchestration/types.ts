@@ -116,6 +116,13 @@ export const RESERVED_TASK_EVENT_TYPES = [
   'task.cancel_requested'
 ] as const
 
+/** R10: reserved evidence reference prefixes for P6; P4 never produces them. */
+export const RESERVED_EVIDENCE_PREFIXES = ['task-result:'] as const
+
+export function isReservedEvidenceRef(ref: string): boolean {
+  return RESERVED_EVIDENCE_PREFIXES.some((prefix) => ref.startsWith(prefix))
+}
+
 export interface BodyDescriptor {
   storage: 'inline' | 'external'
   sha256: string
@@ -239,7 +246,7 @@ export interface RunProjectionRow {
   promptPreview: string | null
   lifecycle: RunLifecycleState
   stopState: string | null
-  outputSeq: number
+  outputSeq: number | null
   intentSeq: number
   body: BodyDescriptor | null
   settledAt: number | null

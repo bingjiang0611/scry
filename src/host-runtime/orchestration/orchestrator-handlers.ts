@@ -2,20 +2,22 @@ import { randomUUID } from 'node:crypto'
 import { assertBoundedPayload, assertNoUsageNumbersInEvent } from './canonical-json'
 import { getEffectPolicy, type EffectKind } from './effect-policy'
 import type { OrchestrationCommand, RunEffectResultPayload } from './orchestrator-commands'
-import { canTransitionRun, isTerminalRunLifecycle } from './run-transitions'
-import type {
-  CommandReceiptRow,
-  InteractionProjectionRow,
-  OrchestrationEventType,
-  PendingOrchestrationEvent,
-  PendingOutboxEffect,
-  RejectionReason,
-  RetryableRejectionReason,
-  RunLifecycleState,
-  RunProjectionRow,
-  SessionProjectionRow,
-  StickyRejectionReason,
-  TurnProjectionRow
+import { canTransitionRun } from './run-transitions'
+import {
+  isReservedEvidenceRef,
+  OrchestrationStoreError,
+  type CommandReceiptRow,
+  type InteractionProjectionRow,
+  type OrchestrationEventType,
+  type PendingOrchestrationEvent,
+  type PendingOutboxEffect,
+  type RejectionReason,
+  type RetryableRejectionReason,
+  type RunLifecycleState,
+  type RunProjectionRow,
+  type SessionProjectionRow,
+  type StickyRejectionReason,
+  type TurnProjectionRow
 } from './types'
 
 export interface OrchestratorReadView {
@@ -73,6 +75,12 @@ export function makeEvent(
 ): PendingOrchestrationEvent {
   assertNoUsageNumbersInEvent(fields.type, fields.payload)
   assertBoundedPayload(fields.payload)
+  if (fields.evidence?.some(isReservedEvidenceRef)) {
+    throw new OrchestrationStoreError(
+      'orchestration_invalid_event',
+      'Reserved R10 evidence reference prefix is not allowed in P4'
+    )
+  }
   return {
     eventId: nextId(cmd.idPrefix, 'evt', index),
     at: cmd.at,
@@ -232,7 +240,8 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, events, [], { runId: run.runId, lifecycle: 'dispatched' })
     }
     case 'session_bound': {
-      if (isTerminalRunLifecycle(run.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      // Align with H1: progress/binding only valid after dispatch (not while still recorded).
+      if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       events.push(
         makeEvent(cmd, 0, {
           ...common,
@@ -286,7 +295,7 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, events, [], { runId: run.runId })
     }
     case 'finalized': {
-      if (isTerminalRunLifecycle(run.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       events.push(
         makeEvent(cmd, 0, {
           ...common,
@@ -301,7 +310,7 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, events, [], { runId: run.runId })
     }
     case 'content_gap': {
-      if (isTerminalRunLifecycle(run.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       events.push(
         makeEvent(cmd, 0, {
           ...common,
@@ -317,12 +326,13 @@ export function decideRunEffectResult(
     case 'interrupted': {
       const target: RunLifecycleState = p.step
       if (!canTransitionRun(run.lifecycle, target)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
-      const settledAt = target === 'interrupted' ? null : (p.settledAt ?? cmd.at)
+      const settledAt = target === 'interrupted' ? null : (p.settledAt === undefined ? cmd.at : p.settledAt)
       const recoveredAt = target === 'interrupted' ? (p.recoveredAt ?? cmd.at) : (p.recoveredAt ?? null)
+      // data §3.2: never fabricate `exact` when outcome evidence was not supplied.
       const outcome = p.outcome ?? (
         target === 'interrupted'
           ? { status: 'unavailable', quality: 'unavailable', source: ['host.recovery'], omissionReason: p.reason ?? 'host_restarted' }
-          : { status: 'available', quality: 'exact', source: p.evidence ?? [], value: target }
+          : { status: 'unavailable', quality: 'unavailable', source: p.evidence ?? [], omissionReason: 'outcome_evidence_absent' }
       )
       events.push(
         makeEvent(cmd, 0, {

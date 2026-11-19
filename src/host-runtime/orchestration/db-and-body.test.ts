@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BodyStore } from './body-store'
-import { openOrchestrationDatabase } from './db'
+import { detectNetworkFilesystem, enforceOrchestrationFileModes, openOrchestrationDatabase } from './db'
 import { migrateOrchestrationDatabase } from './migrations'
 import { ORCHESTRATION_SCHEMA_VERSION } from './schema'
 import { INLINE_BODY_MAX_BYTES, OrchestrationStoreError } from './types'
@@ -31,6 +31,9 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         expect(String(handle.db.pragma('locking_mode', { simple: true })).toLowerCase()).toBe('exclusive')
         expect(handle.db.pragma('foreign_keys', { simple: true })).toBe(1)
         expect(handle.db.pragma('secure_delete', { simple: true })).toBe(1)
+        // P4-1 maintainer decision: explicit fullfsync=OFF + checkpoint_fullfsync=ON even without env vars
+        expect(handle.db.pragma('fullfsync', { simple: true })).toBe(0)
+        expect(handle.db.pragma('checkpoint_fullfsync', { simple: true })).toBe(1)
 
         // Verify all tables & multi-agent reservation columns exist
         const tables = (
@@ -68,20 +71,27 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         expect(meta.get('legacy_ledger_seq')).toBe('0')
         expect(meta.has('legacy_catalog_sha256')).toBe(true)
 
-        // Trigger WAL/SHM creation with a write and verify 0600 permissions
+        // Trigger WAL creation with a write and verify 0600 permissions (no -shm under EXCLUSIVE)
         handle.db.prepare("INSERT OR REPLACE INTO orch_meta (key, value) VALUES ('probe', '1')").run()
         handle.enforceModes()
 
         expect(statSync(handle.orchestrationDir).mode & 0o777).toBe(0o700)
         expect(statSync(handle.dbPath).mode & 0o777).toBe(0o600)
-        for (const suffix of ['-wal', '-shm']) {
-          const sidecar = `${handle.dbPath}${suffix}`
-          if (existsSync(sidecar)) {
-            expect(statSync(sidecar).mode & 0o777).toBe(0o600)
-          }
-        }
+        expect(existsSync(`${handle.dbPath}-wal`)).toBe(true)
+        expect(statSync(`${handle.dbPath}-wal`).mode & 0o777).toBe(0o600)
+        expect(existsSync(`${handle.dbPath}-shm`)).toBe(false)
       } finally {
         handle.close()
+      }
+
+      // Direct check: enforceOrchestrationFileModes tightens both -wal and -shm when present with 0644
+      const syntheticBase = join(userData, 'orchestration', 'mode-check.db')
+      for (const path of [syntheticBase, `${syntheticBase}-wal`, `${syntheticBase}-shm`]) {
+        writeFileSync(path, 'x', { mode: 0o644 })
+      }
+      enforceOrchestrationFileModes(syntheticBase)
+      for (const path of [syntheticBase, `${syntheticBase}-wal`, `${syntheticBase}-shm`]) {
+        expect(statSync(path).mode & 0o777).toBe(0o600)
       }
     })
   })
@@ -142,6 +152,8 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
 
   it('refuses to open on a network filesystem with the required unavailable message', () => {
     withTempDir((userData) => {
+      // Real platform check (macOS df -T / Linux statfs) reports local tmpdir as non-network
+      expect(detectNetworkFilesystem(userData)).toBe(false)
       expect(() =>
         openOrchestrationDatabase({
           userDataDir: userData,

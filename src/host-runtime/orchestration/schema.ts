@@ -99,7 +99,7 @@ export const ORCH_DDL_V1: readonly string[] = [
     prompt_preview TEXT,
     lifecycle TEXT NOT NULL,
     stop_state TEXT,
-    output_seq INTEGER NOT NULL DEFAULT 0,
+    output_seq INTEGER,
     intent_seq INTEGER NOT NULL,
     body TEXT,
     settled_at INTEGER,

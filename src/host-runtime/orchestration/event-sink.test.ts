@@ -80,24 +80,59 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         })
         const r1 = sink.execute(sub)
         expect(r1.kind).toBe('accepted')
+        expect(sink.getRun('remote-run-1')?.outputSeq).toBeNull()
+
+        // Re-importing or updating session metadata must preserve active_run_id & pending_questions
+        expect(
+          sink.execute({
+            type: 'run.effect_result',
+            commandId: 'effect:e1:admitted_and_dispatched',
+            actor: 'effect:e1',
+            scope: 'system',
+            at: 1_700_000_002_000,
+            payload: { runId: 'remote-run-1', step: 'admitted_and_dispatched' },
+            payloadSha256: sha256Hex('barrier')
+          }).kind
+        ).toBe('accepted')
+        expect(
+          sink.execute({
+            type: 'run.effect_result',
+            commandId: 'effect:e1:q1',
+            actor: 'effect:e1',
+            scope: 'system',
+            at: 1_700_000_002_500,
+            payload: {
+              runId: 'remote-run-1',
+              step: 'question_opened',
+              questionId: 'q-1',
+              questionKind: 'approval',
+              questionSource: 'provider'
+            },
+            payloadSha256: sha256Hex('q1')
+          }).kind
+        ).toBe('accepted')
+        expect(
+          sink.execute({
+            type: 'session.import',
+            commandId: 'imp-preserve',
+            actor: 'system',
+            scope: 'system',
+            at: 1_700_000_002_600,
+            payload: { sessionKey: 'sess-1', ts: 1_700_000_002_600, title: 'Alpha Updated' },
+            payloadSha256: sha256Hex('imp-preserve')
+          }).kind
+        ).toBe('accepted')
+        const preserved = sink.getSession('sess-1')
+        expect(preserved?.title).toBe('Alpha Updated')
+        expect(preserved?.activeRunId).toBe('remote-run-1')
+        expect(preserved?.pendingQuestions).toBe(1)
 
         // Idempotent replay of identical commandId returns same receipt, no duplicate events/outbox
         const r1Dup = sink.execute(sub)
         expect(r1Dup.kind).toBe('duplicate')
         expect(sink.listEvents().filter((e) => e.type === 'run.intent_recorded')).toHaveLength(1)
 
-        // Dispatch barrier + settle
-        const barrier: OrchestrationCommand = {
-          type: 'run.effect_result',
-          commandId: 'effect:e1:admitted_and_dispatched',
-          actor: 'effect:e1',
-          scope: 'system',
-          at: 1_700_000_002_000,
-          payload: { runId: 'remote-run-1', step: 'admitted_and_dispatched' },
-          payloadSha256: sha256Hex('barrier')
-        }
-        expect(sink.execute(barrier).kind).toBe('accepted')
-
+        // Settle
         const settled: OrchestrationCommand = {
           type: 'run.effect_result',
           commandId: 'effect:e1:settled',
@@ -192,6 +227,77 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
           expect(reopened.listEvents().length).toBe(eventsBefore)
           expect(reopened.getRun('run-2')).toBeUndefined()
           expect(reopened.getReceipt('c2', PEER_A)).toBeUndefined()
+        } finally {
+          reopened.close()
+        }
+      } finally {
+        sink.close()
+      }
+    })
+  })
+
+  it('fences fail-closed on genuine SQLite SQLITE_FULL commit failure without any JS hook', () => {
+    withTempDir((userData) => {
+      const sink = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
+      try {
+        expect(
+          sink.execute(makeSubmit(sink, { commandId: 'full-1', runId: 'run-full-1', sessionKey: 's-full-1', prompt: 'ok' })).kind
+        ).toBe('accepted')
+
+        const eventsBefore = sink.listEvents().length
+        const currentPages = Number(sink.handle.db.pragma('page_count', { simple: true }))
+        // Cap DB growth at current page_count so SQLite itself raises SQLITE_FULL during write
+        sink.handle.db.pragma(`max_page_count = ${currentPages}`)
+
+        const chunk = 'Z'.repeat(8_000)
+        let caught: unknown = null
+        let failedRunId = ''
+        for (let i = 0; i < 40; i += 1) {
+          failedRunId = `run-full-overflow-${i}`
+          try {
+            sink.execute(
+              makeSubmit(sink, {
+                commandId: `full-overflow-${i}`,
+                runId: failedRunId,
+                sessionKey: `s-full-overflow-${i}`,
+                prompt: `${i}:${chunk}`
+              })
+            )
+          } catch (error) {
+            caught = error
+            break
+          }
+        }
+
+        expect(caught).toMatchObject({ code: 'orchestration_write_indeterminate' })
+        expect(String((caught as Error).message)).toMatch(/full/i)
+        expect(sink.isWriteIndeterminate()).toBe(true)
+
+        // Subsequent command is rejected retryably while fenced
+        expect(
+          sink.execute(makeSubmit(sink, { commandId: 'after-full', runId: 'run-after', sessionKey: 's-after', prompt: 'x' }))
+        ).toEqual({
+          kind: 'rejected',
+          reason: 'orchestration_write_indeterminate',
+          sticky: false,
+          writeReceipt: false
+        })
+
+        // Tightening-only stop still works while fenced
+        const registry = new RunRegistry<RunRegistryState, RunRegistryControl>()
+        registry.register({ runId: 'run-full-1', done: false }, { runId: 'run-full-1' })
+        const stopped: string[] = []
+        expect(sink.stopRunBypassingFence('run-full-1', registry, (c) => stopped.push(c.runId))).toEqual(['run-full-1'])
+        expect(stopped).toEqual(['run-full-1'])
+
+        sink.close()
+
+        // Reopen without page cap: failed transaction must have rolled back atomically
+        const reopened = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
+        try {
+          expect(reopened.getRun(failedRunId)).toBeUndefined()
+          expect(reopened.listEvents().length).toBeGreaterThanOrEqual(eventsBefore)
+          expect(reopened.verifyReplayConsistency()).toEqual({ matches: true })
         } finally {
           reopened.close()
         }

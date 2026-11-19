@@ -10,6 +10,8 @@ const ORCH_DIR = resolve(REPO_ROOT, 'src/host-runtime/orchestration')
 const RECORDER_DIR = resolve(REPO_ROOT, 'src/core/turn-recorder')
 
 const IMPORT_RE = /import\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g
+const EXPORT_FROM_RE = /export\s+(type\s+)?(\*|\{[\s\S]*?\})\s+from\s+['"]([^'"]+)['"]/g
+const SIDE_EFFECT_IMPORT_RE = /import\s+['"]([^'"]+)['"]/g
 const REQUIRE_RE = /require\(\s*['"]([^'"]+)['"]\s*\)/g
 
 function stripComments(source: string): string {
@@ -47,6 +49,14 @@ function collectRuntimeSpecifiers(file: string): string[] {
   for (const match of source.matchAll(IMPORT_RE)) {
     if (isValueImport(match[1], match[2] ?? '')) specifiers.push(match[3]!)
   }
+  for (const match of source.matchAll(EXPORT_FROM_RE)) {
+    if (!match[1] && (match[2] === '*' || isValueImport(undefined, match[2] ?? ''))) {
+      specifiers.push(match[3]!)
+    }
+  }
+  for (const match of source.matchAll(SIDE_EFFECT_IMPORT_RE)) {
+    specifiers.push(match[1]!)
+  }
   for (const match of source.matchAll(REQUIRE_RE)) {
     specifiers.push(match[1]!)
   }
@@ -54,8 +64,18 @@ function collectRuntimeSpecifiers(file: string): string[] {
 }
 
 function resolveRelativeTs(from: string, specifier: string): string | undefined {
-  const base = resolve(dirname(from), specifier)
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, resolve(base, 'index.ts'), resolve(base, 'index.tsx')]) {
+  const normalized = specifier.replace(/\.(?:m?js|cjs)$/, '')
+  const base = resolve(dirname(from), normalized)
+  const raw = resolve(dirname(from), specifier)
+  const candidates = [
+    raw,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.mts`,
+    resolve(base, 'index.ts'),
+    resolve(base, 'index.tsx')
+  ]
+  for (const candidate of candidates) {
     try {
       if (statSync(candidate).isFile()) return candidate
     } catch {
@@ -100,12 +120,14 @@ describe('P4-0 static single-writer and Recorder Core import boundaries', () => 
     )
     expect(violations).toEqual([])
 
-    // Negative control: verify the checker detects a real import into orchestration/
+    // Negative control: verify the checker detects direct, .js-suffixed, and re-exported imports into orchestration/
     const tmp = mkdtempSync(join(tmpdir(), 'scry-boundary-neg-'))
     try {
+      const helper = join(tmp, 'reexport.ts')
       const fakeMain = join(tmp, 'fake-main.ts')
       const rel = resolve(ORCH_DIR, 'event-sink')
-      writeFileSync(fakeMain, `import { EventSink } from '${rel}'\nexport const x = EventSink\n`)
+      writeFileSync(helper, `export { EventSink } from '${rel}.js'\n`)
+      writeFileSync(fakeMain, `export { EventSink } from './reexport.js'\n`)
       const detected = findReachableModules(
         fakeMain,
         (target, specifier) =>
@@ -117,29 +139,28 @@ describe('P4-0 static single-writer and Recorder Core import boundaries', () => 
     }
   })
 
-  it('Recorder Core never imports better-sqlite3 or orchestration modules (data §3.4)', () => {
+  it('Recorder Core never transitively imports better-sqlite3 or orchestration modules (data §3.4)', () => {
     const files = listTsFiles(RECORDER_DIR)
     expect(files.length).toBeGreaterThan(0)
+    const isForbidden = (target: string, specifier: string): boolean =>
+      specifier === 'better-sqlite3' ||
+      target.startsWith(`${ORCH_DIR}/`) ||
+      specifier.includes('host-runtime/orchestration') ||
+      specifier.includes('orchestration/')
     const violations: string[] = []
     for (const file of files) {
-      for (const specifier of collectRuntimeSpecifiers(file)) {
-        if (
-          specifier === 'better-sqlite3' ||
-          specifier.includes('host-runtime/orchestration') ||
-          specifier.includes('orchestration/')
-        ) {
-          violations.push(`${file} -> ${specifier}`)
-        }
-      }
+      violations.push(...findReachableModules(file, isForbidden))
     }
     expect(violations).toEqual([])
 
-    // Negative control: verify the checker catches better-sqlite3
+    // Negative control: verify transitive import + .js suffix + re-export catches better-sqlite3
     const tmp = mkdtempSync(join(tmpdir(), 'scry-recorder-neg-'))
     try {
+      const leaf = join(tmp, 'leaf.ts')
       const fakeRecorder = join(tmp, 'fake-recorder.ts')
-      writeFileSync(fakeRecorder, `import Database from 'better-sqlite3'\nexport const db = Database\n`)
-      expect(collectRuntimeSpecifiers(fakeRecorder)).toContain('better-sqlite3')
+      writeFileSync(leaf, `import Database from 'better-sqlite3'\nexport const db = Database\n`)
+      writeFileSync(fakeRecorder, `export { db } from './leaf.js'\n`)
+      expect(findReachableModules(fakeRecorder, isForbidden).length).toBeGreaterThan(0)
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }

@@ -17,13 +17,16 @@ import { INLINE_BODY_MAX_BYTES, OrchestrationStoreError, type PreparedBody } fro
 
 const SHA256_RE = /^[0-9a-f]{64}$/
 
+const IGNORABLE_DIR_FSYNC_CODES = new Set(['EINVAL', 'EBADF', 'EROFS', 'EPERM'])
+
 function fsyncDirectory(dir: string): void {
   let fd: number | null = null
   try {
     fd = openSync(dir, 'r')
     fsyncSync(fd)
-  } catch {
-    // Some filesystems do not support fsync on directory descriptors; ignore only there.
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code ?? ''
+    if (!IGNORABLE_DIR_FSYNC_CODES.has(code)) throw error
   } finally {
     if (fd !== null) closeSync(fd)
   }

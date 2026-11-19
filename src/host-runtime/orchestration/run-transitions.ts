@@ -1,15 +1,11 @@
+import { RUN_LIFECYCLE_NEXT } from '../../main/remote/session-ledger'
 import type { H1RunLifecycle, RunLifecycleState } from './types'
 
 /**
- * Pure transition table extracted from H1 `SessionLedger` (`src/main/remote/session-ledger.ts:102-108`).
+ * Shared H1 transition table directly re-exported from `SessionLedger`
+ * (`src/main/remote/session-ledger.ts`) so drift is impossible.
  */
-export const H1_RUN_NEXT: Readonly<Record<H1RunLifecycle, readonly H1RunLifecycle[]>> = {
-  recorded: ['dispatched', 'cancelled'],
-  dispatched: ['settled', 'failed', 'cancelled'],
-  settled: [],
-  failed: [],
-  cancelled: []
-}
+export const H1_RUN_NEXT: Readonly<Record<H1RunLifecycle, readonly H1RunLifecycle[]>> = RUN_LIFECYCLE_NEXT
 
 export function canTransitionH1Run(from: H1RunLifecycle, to: H1RunLifecycle): boolean {
   return H1_RUN_NEXT[from].includes(to)

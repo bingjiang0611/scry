@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
 import { BodyStore } from './body-store'
 import { assertBoundedPayload, assertNoUsageNumbersInEvent, canonicalJson } from './canonical-json'
@@ -10,6 +11,12 @@ import {
   type DeleteSessionInput,
   type DeleteSessionOutcome
 } from './event-sink-maintenance'
+import {
+  mapEventRow,
+  mapOutboxRow,
+  prepareEventSinkStatements,
+  type EventSinkStatements
+} from './event-sink-statements'
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
 import {
   applyEventToProjection,
@@ -25,7 +32,6 @@ import {
   type CommandReceiptRow,
   type InteractionProjectionRow,
   type OrchestrationEventRow,
-  type OrchestrationScope,
   type OutboxEffectRow,
   type RunProjectionRow,
   type SessionProjectionRow,
@@ -56,6 +62,8 @@ export class EventSink {
   #isProviderAuthenticating: (provider: string, profile: string | null) => boolean
   #beforeCommitHook?: () => void
   #writeIndeterminate = false
+  #walModeEnforced = false
+  #stmts: EventSinkStatements
 
   private constructor(handle: OrchestrationDbHandle, options: EventSinkOptions) {
     this.handle = handle
@@ -64,6 +72,16 @@ export class EventSink {
     this.#maxActiveRuns = options.maxActiveRuns ?? 8
     this.#isProviderAuthenticating = options.isProviderAuthenticating ?? (() => false)
     this.#beforeCommitHook = options.beforeCommitHook
+    this.#stmts = prepareEventSinkStatements(handle.db)
+    this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
+  }
+
+  private enforceModesOnceForWal(): void {
+    if (this.#walModeEnforced) return
+    if (existsSync(`${this.handle.dbPath}-wal`)) {
+      this.handle.enforceModes()
+      this.#walModeEnforced = true
+    }
   }
 
   static open(options: EventSinkOptions): EventSink {
@@ -103,24 +121,8 @@ export class EventSink {
       getInteraction: (runId, questionId) => this.readInteractionRaw(runId, questionId),
       listNonTerminalChildRuns: (parentRunId) => this.listNonTerminalChildRunsRaw(parentRunId),
       listNonTerminalChildRunsBySession: (sessionKey) => this.listNonTerminalChildRunsBySessionRaw(sessionKey),
-      hasActiveRunForSession: (sessionKey) => {
-        const row = this.handle.db
-          .prepare(
-            `SELECT 1 FROM orch_p_run
-             WHERE session_key = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')
-             LIMIT 1`
-          )
-          .get(sessionKey)
-        return Boolean(row)
-      },
-      activeRunCount: () => {
-        const row = this.handle.db
-          .prepare(
-            "SELECT COUNT(*) AS count FROM orch_p_run WHERE lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')"
-          )
-          .get() as { count: number }
-        return row.count
-      },
+      hasActiveRunForSession: (sessionKey) => Boolean(this.#stmts.hasActiveSessionRun.get(sessionKey)),
+      activeRunCount: () => (this.#stmts.activeRunCount.get() as { count: number }).count,
       maxActiveRuns: () => this.#maxActiveRuns,
       isProviderAuthenticating: (provider, profile) => this.#isProviderAuthenticating(provider, profile)
     }
@@ -151,15 +153,7 @@ export class EventSink {
 
   private advanceLegacyLedgerSeq(seq: number): void {
     try {
-      this.handle.db
-        .prepare(
-          `INSERT INTO orch_meta (key, value) VALUES ('legacy_ledger_seq', ?)
-           ON CONFLICT(key) DO UPDATE SET value = CASE
-             WHEN CAST(excluded.value AS INTEGER) > CAST(orch_meta.value AS INTEGER) THEN excluded.value
-             ELSE orch_meta.value
-           END`
-        )
-        .run(String(seq))
+      this.#stmts.advanceLegacySeq.run(String(seq))
     } catch (error) {
       this.tripFence(error)
     }
@@ -174,12 +168,6 @@ export class EventSink {
       const tx = db.transaction(() => {
         let lastSeq: number | null = null
         if (decision.kind === 'accepted') {
-          const insertEvent = db.prepare(
-            `INSERT INTO orch_event (
-              event_id, at, type, stream, session_key, run_id, cwd, command_id,
-              actor, scope, payload, evidence, principal, via, actor_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
           for (const pending of decision.events) {
             if (!ORCHESTRATION_EVENT_TYPES.has(pending.type)) {
               throw new OrchestrationStoreError('orchestration_invalid_event', `Invalid event type: ${pending.type}`)
@@ -187,7 +175,7 @@ export class EventSink {
             assertNoUsageNumbersInEvent(pending.type, pending.payload)
             const payloadJson = assertBoundedPayload(pending.payload)
             const evidenceJson = pending.evidence ? canonicalJson(pending.evidence) : null
-            const info = insertEvent.run(
+            const info = this.#stmts.insertEvent.run(
               pending.eventId,
               pending.at,
               pending.type,
@@ -209,17 +197,11 @@ export class EventSink {
             applyEventToProjection(db, { ...pending, seq })
           }
 
-          const insertOutbox = db.prepare(
-            `INSERT INTO orch_outbox (
-              effect_id, kind, policy, run_id, causation_seq, payload, state,
-              expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL)`
-          )
           const causationSeq = lastSeq ?? 0
           for (const effect of decision.effects) {
             const spec = getEffectPolicy(effect.kind)
             const payloadJson = assertBoundedPayload(effect.payload)
-            insertOutbox.run(
+            this.#stmts.insertOutbox.run(
               effect.effectId,
               effect.kind,
               spec.policy,
@@ -239,12 +221,7 @@ export class EventSink {
         if (receipt) {
           const finalSeq = decision.kind === 'accepted' ? lastSeq : null
           receipt.resultSeq = finalSeq
-          db.prepare(
-            `INSERT INTO orch_command (
-              command_id, actor, type, payload_sha256, accepted_at, status,
-              reason, result, result_seq, principal, via, actor_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).run(
+          this.#stmts.insertCommand.run(
             receipt.commandId,
             receipt.actor,
             receipt.type,
@@ -261,24 +238,16 @@ export class EventSink {
         }
 
         if (txExtras?.legacyRunMapping) {
-          db.prepare(
-            'INSERT OR IGNORE INTO orch_legacy_run (ledger_run_id, run_id) VALUES (?, ?)'
-          ).run(txExtras.legacyRunMapping.ledgerRunId, txExtras.legacyRunMapping.runId)
+          this.#stmts.insertLegacyRun.run(txExtras.legacyRunMapping.ledgerRunId, txExtras.legacyRunMapping.runId)
         }
         if (txExtras?.legacyLedgerSeq !== undefined) {
-          db.prepare(
-            `INSERT INTO orch_meta (key, value) VALUES ('legacy_ledger_seq', ?)
-             ON CONFLICT(key) DO UPDATE SET value = CASE
-               WHEN CAST(excluded.value AS INTEGER) > CAST(orch_meta.value AS INTEGER) THEN excluded.value
-               ELSE orch_meta.value
-             END`
-          ).run(String(txExtras.legacyLedgerSeq))
+          this.#stmts.advanceLegacySeq.run(String(txExtras.legacyLedgerSeq))
         }
 
         this.#beforeCommitHook?.()
       })
       tx()
-      this.handle.enforceModes()
+      this.enforceModesOnceForWal()
       return decision
     } catch (error) {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
@@ -415,24 +384,7 @@ export class EventSink {
     const rows = this.handle.db.prepare('SELECT * FROM orch_event ORDER BY seq ASC').all() as Array<
       Record<string, unknown>
     >
-    return rows.map((row) => ({
-      seq: Number(row.seq),
-      eventId: String(row.event_id),
-      at: Number(row.at),
-      type: String(row.type) as OrchestrationEventRow['type'],
-      stream: String(row.stream),
-      sessionKey: (row.session_key as string | null) ?? null,
-      runId: (row.run_id as string | null) ?? null,
-      cwd: (row.cwd as string | null) ?? null,
-      commandId: (row.command_id as string | null) ?? null,
-      actor: String(row.actor),
-      scope: String(row.scope) as OrchestrationScope,
-      payload: JSON.parse(String(row.payload)) as Record<string, unknown>,
-      evidence: row.evidence ? (JSON.parse(String(row.evidence)) as string[]) : null,
-      principal: String(row.principal),
-      via: (row.via as string | null) ?? null,
-      actorRunId: (row.actor_run_id as string | null) ?? null
-    }))
+    return rows.map(mapEventRow)
   }
 
   listOutbox(): OutboxEffectRow[] {
@@ -440,22 +392,7 @@ export class EventSink {
     const rows = this.handle.db
       .prepare('SELECT * FROM orch_outbox ORDER BY causation_seq ASC, effect_id ASC')
       .all() as Array<Record<string, unknown>>
-    return rows.map((row) => ({
-      effectId: String(row.effect_id),
-      kind: String(row.kind),
-      policy: String(row.policy) as 'process_bound' | 'replayable',
-      runId: (row.run_id as string | null) ?? null,
-      causationSeq: Number(row.causation_seq),
-      payload: JSON.parse(String(row.payload)) as Record<string, unknown>,
-      state: String(row.state) as OutboxEffectRow['state'],
-      expiresAt: row.expires_at === null ? null : Number(row.expires_at),
-      attempts: Number(row.attempts),
-      leaseOwner: (row.lease_owner as string | null) ?? null,
-      claimedAt: row.claimed_at === null ? null : Number(row.claimed_at),
-      completedAt: row.completed_at === null ? null : Number(row.completed_at),
-      resultSeq: row.result_seq === null ? null : Number(row.result_seq),
-      lastError: (row.last_error as string | null) ?? null
-    }))
+    return rows.map(mapOutboxRow)
   }
 
   close(): void {
@@ -463,65 +400,42 @@ export class EventSink {
   }
 
   private readReceiptRaw(commandId: string, actor: string): CommandReceiptRow | undefined {
-    const row = this.handle.db
-      .prepare('SELECT * FROM orch_command WHERE command_id = ? AND actor = ?')
-      .get(commandId, actor) as Record<string, unknown> | undefined
+    const row = this.#stmts.readReceipt.get(commandId, actor) as Record<string, unknown> | undefined
     return row ? mapReceiptRow(row) : undefined
   }
 
   private readRunRaw(runId: string): RunProjectionRow | undefined {
-    const row = this.handle.db.prepare('SELECT * FROM orch_p_run WHERE run_id = ?').get(runId) as
-      | Record<string, unknown>
-      | undefined
+    const row = this.#stmts.readRun.get(runId) as Record<string, unknown> | undefined
     return row ? mapRunRow(row) : undefined
   }
 
   private readSessionRaw(sessionKey: string): SessionProjectionRow | undefined {
-    const row = this.handle.db
-      .prepare('SELECT * FROM orch_p_session WHERE session_key = ?')
-      .get(sessionKey) as Record<string, unknown> | undefined
+    const row = this.#stmts.readSession.get(sessionKey) as Record<string, unknown> | undefined
     return row ? mapSessionRow(row) : undefined
   }
 
   private readTurnByRunIdRaw(runId: string): TurnProjectionRow | undefined {
-    const row = this.handle.db
-      .prepare('SELECT * FROM orch_p_turn WHERE run_id = ?')
-      .get(runId) as Record<string, unknown> | undefined
+    const row = this.#stmts.readTurnByRunId.get(runId) as Record<string, unknown> | undefined
     return row ? mapTurnRow(row) : undefined
   }
 
   private readNextTurnOrdinalRaw(sessionKey: string): number {
-    const row = this.handle.db
-      .prepare('SELECT COALESCE(MAX(ordinal), 0) + 1 AS next_ordinal FROM orch_p_turn WHERE session_key = ?')
-      .get(sessionKey) as { next_ordinal: number }
+    const row = this.#stmts.nextOrdinal.get(sessionKey) as { next_ordinal: number }
     return Number(row.next_ordinal)
   }
 
   private readInteractionRaw(runId: string, questionId: string): InteractionProjectionRow | undefined {
-    const row = this.handle.db
-      .prepare('SELECT * FROM orch_p_interaction WHERE run_id = ? AND question_id = ?')
-      .get(runId, questionId) as Record<string, unknown> | undefined
+    const row = this.#stmts.readInteraction.get(runId, questionId) as Record<string, unknown> | undefined
     return row ? mapInteractionRow(row) : undefined
   }
 
   private listNonTerminalChildRunsRaw(parentRunId: string): RunProjectionRow[] {
-    const rows = this.handle.db
-      .prepare(
-        `SELECT * FROM orch_p_run
-         WHERE parent_run_id = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
-      )
-      .all(parentRunId) as Array<Record<string, unknown>>
+    const rows = this.#stmts.listNonTerminalChildRuns.all(parentRunId) as Array<Record<string, unknown>>
     return rows.map(mapRunRow)
   }
 
   private listNonTerminalChildRunsBySessionRaw(sessionKey: string): RunProjectionRow[] {
-    const rows = this.handle.db
-      .prepare(
-        `SELECT * FROM orch_p_run
-         WHERE session_key = ? AND parent_run_id IS NOT NULL
-           AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
-      )
-      .all(sessionKey) as Array<Record<string, unknown>>
+    const rows = this.#stmts.listNonTerminalChildRunsBySession.all(sessionKey) as Array<Record<string, unknown>>
     return rows.map(mapRunRow)
   }
 }

@@ -79,7 +79,7 @@ export function mapRunRow(row: Record<string, unknown>): RunProjectionRow {
     promptPreview: (row.prompt_preview as string | null) ?? null,
     lifecycle: String(row.lifecycle) as RunLifecycleState,
     stopState: (row.stop_state as string | null) ?? null,
-    outputSeq: Number(row.output_seq ?? 0),
+    outputSeq: row.output_seq === null || row.output_seq === undefined ? null : Number(row.output_seq),
     intentSeq: Number(row.intent_seq),
     body: parseJson<BodyDescriptor>(row.body as string | null),
     settledAt: row.settled_at === null ? null : Number(row.settled_at),
@@ -163,7 +163,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           run_id, session_key, owner_actor, scope, origin, provider, profile, cwd,
           prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body,
           settled_at, recovered_at, outcome, rev_seq, parent_run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'recorded', NULL, 0, ?, ?, NULL, NULL, NULL, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'recorded', NULL, NULL, ?, ?, NULL, NULL, NULL, ?, ?)`
       ).run(
         event.runId,
         event.sessionKey,
@@ -348,12 +348,24 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     case 'session.created':
     case 'session.forked': {
       db.prepare(
-        `INSERT OR REPLACE INTO orch_p_session (
+        `INSERT INTO orch_p_session (
           session_key, conversation_id, provider, profile, cwd, title, ts,
           pinned_at, archived_at, last_run_id, last_run_outcome, active_run_id,
           pending_questions, legacy, rev_seq,
           parent_session_key, root_session_key, lineage, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0, 0, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_key) DO UPDATE SET
+          conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
+          provider = COALESCE(excluded.provider, orch_p_session.provider),
+          profile = COALESCE(excluded.profile, orch_p_session.profile),
+          cwd = COALESCE(excluded.cwd, orch_p_session.cwd),
+          title = COALESCE(excluded.title, orch_p_session.title),
+          ts = MAX(orch_p_session.ts, excluded.ts),
+          rev_seq = excluded.rev_seq,
+          parent_session_key = COALESCE(excluded.parent_session_key, orch_p_session.parent_session_key),
+          root_session_key = COALESCE(excluded.root_session_key, orch_p_session.root_session_key),
+          lineage = COALESCE(excluded.lineage, orch_p_session.lineage),
+          created_by = COALESCE(excluded.created_by, orch_p_session.created_by)`
       ).run(
         String(p.sessionKey),
         (p.conversationId as string | null) ?? null,
@@ -395,12 +407,28 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
 
     case 'session.imported': {
       db.prepare(
-        `INSERT OR REPLACE INTO orch_p_session (
+        `INSERT INTO orch_p_session (
           session_key, conversation_id, provider, profile, cwd, title, ts,
           pinned_at, archived_at, last_run_id, last_run_outcome, active_run_id,
           pending_questions, legacy, rev_seq,
           parent_session_key, root_session_key, lineage, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_key) DO UPDATE SET
+          conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
+          provider = COALESCE(excluded.provider, orch_p_session.provider),
+          profile = COALESCE(excluded.profile, orch_p_session.profile),
+          cwd = COALESCE(excluded.cwd, orch_p_session.cwd),
+          title = excluded.title,
+          ts = MAX(orch_p_session.ts, excluded.ts),
+          pinned_at = excluded.pinned_at,
+          archived_at = excluded.archived_at,
+          last_run_id = COALESCE(excluded.last_run_id, orch_p_session.last_run_id),
+          last_run_outcome = COALESCE(excluded.last_run_outcome, orch_p_session.last_run_outcome),
+          legacy = 1,
+          rev_seq = excluded.rev_seq,
+          parent_session_key = COALESCE(excluded.parent_session_key, orch_p_session.parent_session_key),
+          root_session_key = COALESCE(excluded.root_session_key, orch_p_session.root_session_key),
+          lineage = COALESCE(excluded.lineage, orch_p_session.lineage)`
       ).run(
         String(p.sessionKey),
         (p.conversationId as string | null) ?? null,
