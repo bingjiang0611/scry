@@ -9,6 +9,7 @@ export {
   type PolicyEnvCollection
 } from './policy-env'
 export {
+  isEphemeralMacAppPath,
   loginStartTargetFromBundle,
   loginStartTemplateInput,
   resolveLoginStartOverrides,
@@ -33,7 +34,9 @@ export {
 } from './exec'
 export {
   createLoginStartManager,
+  parseSystemdShowProperties,
   type LoginStartManager,
   type LoginStartManagerDeps,
-  type LoginStartMutationResult
+  type LoginStartMutationResult,
+  type LoginStartPrecheckResult
 } from './manager'

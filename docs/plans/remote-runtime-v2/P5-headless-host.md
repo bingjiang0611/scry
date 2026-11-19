@@ -84,7 +84,7 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 | 日志 | `StandardOutPath`/`StandardErrorPath` = `<userData>/logs/daemon.log` | `StandardOutput=append:`、`StandardError=append:` 同一文件 |
 
 - **停止要等 daemon。** P5-0 改 `launchDaemonOnce`：abort 后不在 AbortError 处结算，等子进程 `exit`，最多 25 s；超时记 `daemon_stop_timeout` 并以非 0 退出。25 s 小于两边的 30 s，daemon 的 dispose 能跑完。launchd 若也把 SIGTERM 发给整个进程组，daemon 收到两次，`signal-shutdown.ts` 只处理一次。
-- 重启只在异常死亡时：supervisor 自己以 0/1 退出不重启；被崩溃信号杀死才由服务管理器拉起。两边的确切语义要实机确认（§6）。
+- 重启只在异常死亡时：supervisor 自己以 0/1 退出不重启。**两端在 `SIGKILL` 上的实测差异**（2026-11-19 维护者确认保持不变）：macOS `KeepAlive={Crashed:true}` 仅在崩溃类信号（`SIGABRT`、`SIGSEGV` 等）后按默认 10 s `ThrottleInterval` 重启，不因 `SIGKILL` 重启（不改 `SuccessfulExit=false`，避免配置错误或锁被占时每 10 s 重启循环；不设 `ThrottleInterval`）；supervisor 若在 macOS 上被 `SIGKILL`，需打开 App 或下次登录恢复。Linux `Restart=on-abnormal` 对 `SIGKILL` 与崩溃信号都会重启。
 - 版本：supervisor 从自身 bundle 取版本（构建期 define，与 `build-identity.ts` 同源），只把它传给 daemon；环境里另给的版本不同即 exit 2 `daemon_config_version_conflict`。`readDaemonProcessConfig` 拆成 supervisor 用（不要求版本）与 daemon 用两份。
 - `launchedBy`：supervisor 读自己环境里的 `SCRY_DAEMON_LAUNCHED_BY`（只收 `app`/`service`），作为 `daemonLaunchEnvironment` 的显式参数传下去；不进 `FORWARDED_ENV`，不改 `STARTED_BY`。App 拉起时传 `app`。
 - `SHELL`：supervisor 与 daemon 入口都先调 `ensureShellEnv()`（`src/main/shell.ts:11-13`，无 Electron 依赖）。
@@ -126,7 +126,7 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 
 - 开：已有后台服务在跑时，服务拉起的 supervisor 遇到 `daemon.lock` 以 3 退出、自己以 0 退出。状态显示「当前由 App 启动；下次登录起由系统服务启动」。
 - 关：只取消下次登录启动，**不停当前后台服务**。
-- 只在打包版、daemon 模式、非测试实例下可用。**按平台放行**：Linux 开关在 Linux 实机验收（P5-4）通过前显示 unavailable；macOS 的结果不代替 Linux。仅在测试实例（`SCRY_TEST_APP=1`）下显式提供非生产标签/单元覆盖（`SCRY_TEST_LOGIN_START_LABEL` / `SCRY_TEST_LOGIN_START_UNIT`，可选 `SCRY_TEST_LOGIN_START_DIR`）时允许针对该测试标签验收，且禁止覆写日常 `com.scry.daemon` / `scry-daemon.service`；日常构建完全忽略这些变量。
+- 只在打包版、daemon 模式、非测试实例下可用。**按平台放行**：Linux 开关在 Linux 实机验收（P5-4）通过前显示 unavailable；macOS 的结果不代替 Linux。仅在带 `SCRY_TEST_APP=1` 启动且显式提供非生产标签/单元覆盖（`SCRY_TEST_LOGIN_START_LABEL` / `SCRY_TEST_LOGIN_START_UNIT`，可选 `SCRY_TEST_LOGIN_START_DIR`）时允许针对该测试标签验收，且禁止覆写日常 `com.scry.daemon` / `scry-daemon.service`；不带 `SCRY_TEST_APP=1` 启动时忽略这些变量。
 - `launchedBy` 核对：Linux 用 `MainPID` 与自报 supervisor pid 比对，一致才显示「由系统服务拉起」；macOS 不解析 `launchctl` 输出，显示为「自报」。
 
 ### 2.4 与 supervisor、两把锁、现有动作的关系
@@ -192,10 +192,4 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 10. **开关关闭时放行只收紧的命令**：`cancel`、`revoke`、`desktop-off` 仍可用，每次都通知（[P5-host-security](P5-host-security.md) §4.3）；无界面机器丢了手机可经 SSH 撤销。
 11. **`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL`** 与其余非机密策略变量一起写进服务文件（§2.2）。
 
-没有待决定事项。
-
-## 评审后修订（2026-11-18）
-
-- 第 1 步：supervisor 停止时等 daemon，补停止超时，只在异常死亡时重启；策略变量随服务写入，含 token 的拒绝；补 `SHELL`、日志预建、版本与 `launchedBy`；清理名单扩充；模块不依赖 Electron、开启前确认、按平台放行；服务文件按实际值识别（§2）。
-- 第 2 步：挑战认证、默认关闭的批准开关、运行标记、通知、速率、`restart`、`login-start`；批准方式进 grant，去掉审计文件；清理覆盖已撤销/过期的 grant（[P5-host-cli](P5-host-cli.md)、[P5-host-security](P5-host-security.md)）。
-- 核对代码后与评审意见的出入：`SCRY_REMOTE_RELAY_SSH` 没有读取方，删掉而不是据此拒绝；`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL` 也影响行为，一并写入；Codex 与终端没有 `SCRY_MANAGED_RUN_ID`，另加 `SCRY_HOST_CHILD`；`remote-attention.ts` 不是推送通道，通知走 app-event-feed 与新的宿主能力。
+没有待决定事项。2026-11-18 评审后修订记录见 [P5-host-security](P5-host-security.md#评审后修订2026-11-18)。

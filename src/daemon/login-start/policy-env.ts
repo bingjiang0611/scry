@@ -4,8 +4,8 @@ import type {
   BackgroundServiceRemoteConfig
 } from '../../shared/background-service'
 import type { ProviderId } from '../../shared/provider'
+import { remoteHostEnabled } from '../../shared/remote-host-policy'
 import { isAgentPermissionMode } from '../../shared/runtime-types'
-import { remoteHostEnabled } from '../../main/remote/remote-defaults'
 
 // Non-secret remote policy environment variables forwarded into a login-start service
 // file (P5-headless-host §2.2 & decision 11). Plain Node only (no Electron dependency).
@@ -33,34 +33,34 @@ export type PolicyEnvCollection =
   | { ok: true; entries: Array<[LoginStartPolicyEnvKey, string]> }
   | { ok: false; reason: string }
 
+/**
+ * Validates one policy value against its real runtime reader without trimming or
+ * rewriting: if the App's own env carries leading/trailing whitespace that a real reader
+ * would ignore (e.g. `SCRY_REMOTE_HOST=" 1"`), writing a trimmed value into the service
+ * file would silently widen policy (W2 review B1).
+ */
 function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string | undefined {
-  if (CONTROL.test(raw)) return undefined
+  if (CONTROL.test(raw) || raw !== raw.trim() || raw.length === 0) return undefined
   switch (key) {
     case 'SCRY_REMOTE_HOST':
     case 'SCRY_REMOTE_RELAY_ENABLED':
-    case 'SCRY_RUN_CONTROLS': {
-      const value = raw.trim()
-      return value === '0' || value === '1' ? value : undefined
-    }
-    case 'SCRY_REMOTE_PERMISSION_MODE': {
-      const value = raw.trim()
-      return isAgentPermissionMode(value) ? value : undefined
-    }
+    case 'SCRY_RUN_CONTROLS':
+      return raw === '0' || raw === '1' ? raw : undefined
+    case 'SCRY_REMOTE_PERMISSION_MODE':
+      return isAgentPermissionMode(raw) ? raw : undefined
     case 'SCRY_DISABLED_PROVIDERS': {
-      const parts = raw.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
-      if (parts.length === 0) return undefined
-      for (const item of parts) {
-        if (!KNOWN_PROVIDERS.has(item as ProviderId)) return undefined
+      const tokens = raw.split(',').map((item) => item.trim())
+      if (tokens.length === 0 || tokens.some((item) => item.length === 0 || !KNOWN_PROVIDERS.has(item.toLowerCase() as ProviderId))) {
+        return undefined
       }
-      return [...new Set(parts)].sort().join(',')
+      // Preserve raw spelling/case verbatim so the service file matches the App's env.
+      return raw
     }
     case 'SCRY_PROVIDER_MANIFEST_URL': {
-      const value = raw.trim()
-      if (!value) return undefined
       try {
-        const url = new URL(value)
+        const url = new URL(raw)
         if (url.protocol !== 'https:' || url.username || url.password) return undefined
-        return value
+        return raw
       } catch {
         return undefined
       }
@@ -70,8 +70,8 @@ function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string |
 
 /**
  * Validates the App's current environment against P5 §2.2 before writing a service file.
- * Refuses `SCRY_REMOTE_RELAY_WS` (carries a token) and any malformed policy value; ignores
- * diagnostic variables (`SCRY_DAEMON_SMOKE_PROVIDER`, `SCRY_RUN_TIMING`) and unrelated env.
+ * Refuses `SCRY_REMOTE_RELAY_WS` (carries a token) and any malformed/untrimmed policy
+ * value; ignores diagnostic variables (`SCRY_DAEMON_SMOKE_PROVIDER`, `SCRY_RUN_TIMING`).
  */
 export function collectLoginStartPolicyEnv(env: NodeJS.ProcessEnv): PolicyEnvCollection {
   if (env.SCRY_REMOTE_RELAY_WS) return { ok: false, reason: 'login_start_secret_env' }
@@ -105,7 +105,8 @@ export function validateParsedPolicyEntries(
 function relayModeOf(env: NodeJS.ProcessEnv): BackgroundServiceRelayMode {
   if (env.SCRY_REMOTE_RELAY_ENABLED === '0') return 'disabled'
   if (env.SCRY_REMOTE_RELAY_WS) return 'custom_ws'
-  if (env.SCRY_REMOTE_RELAY) return 'custom_tcp'
+  // Legacy SCRY_REMOTE_RELAY is not in supervisor's FORWARDED_ENV (daemon mode ignores
+  // it), so deriving custom_tcp here would create false config-mismatch notices.
   return 'public'
 }
 

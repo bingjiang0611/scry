@@ -78,7 +78,7 @@
 | IPC | `setLoginStart`、`setCliApproval` 的 sender 与参数校验；preload 映射 | CI |
 | 打包 smoke | 渲染服务文件到临时目录，用极简环境（`env -i HOME=… PATH=/usr/bin:/bin`，不给 `SHELL`）按其中的程序与参数启动 → 后台服务就绪、握手构建一致、`scry-host status` 可用、SIGTERM 后 daemon 先于 supervisor 退出；`check-packaged-app` 收录 `bin/scry-host` | L2 |
 
-**实机 macOS（需要维护者的 Mac）**：真 `launchctl`；重启后登录即可连；登录项里关闭与重新允许；关闭后（plist 删除、job 未 bootout）再开启；`~/Documents` 下项目的 TCC；ad-hoc 签名的开发构建每次构建 TCC 身份都变；macOS 15「本地网络」权限归属；FileVault 重启后未登录时不运行；`KeepAlive={Crashed}` 的实际重启条件；`ThrottleInterval` 10 s 与 `ensureDaemon` 10 s 等待相撞；`ProcessType` 不设与 `Interactive` 的首 token 与 CPU；注销/关机时 daemon 收尾完整（终端录制、run 结算）；`detached` 的 Provider（`pi-rpc.ts:74`、`qoder-launch.ts:182`）是否成孤儿；Claude CLI 的钥匙串；升级后的不一致弹窗；移动、删除 App；命令行批准手机与桌面及通知。
+**实机 macOS（需要维护者的 Mac）**：真 `launchctl`；重启后登录即可连；登录项里关闭与重新允许；关闭后（plist 删除、job 未 bootout）再开启；`~/Documents` 下项目的 TCC；ad-hoc 签名的开发构建每次构建 TCC 身份都变；macOS 15「本地网络」权限归属；FileVault 重启后未登录时不运行；`KeepAlive={Crashed}` 实测仅在崩溃信号（`SIGABRT` 等）后经默认 10 s `ThrottleInterval` 重启、不对 `SIGKILL` 重启（2026-11-19 维护者确认保留 `Crashed:true`、不加 `ThrottleInterval`，macOS 崩溃验收改用 `SIGABRT`，Linux `Restart=on-abnormal` 则对 `SIGKILL` 也重启）；`ThrottleInterval` 10 s 与 `ensureDaemon` 10 s 等待相撞；`ProcessType` 不设与 `Interactive` 的首 token 与 CPU；注销/关机时 daemon 收尾完整（终端录制、run 结算）；`detached` 的 Provider（`pi-rpc.ts:74`、`qoder-launch.ts:182`）是否成孤儿；Claude CLI 的钥匙串；升级后的不一致弹窗；移动、删除 App；命令行批准手机与桌面及通知。
 
 **实机 Linux（需要维护者的 Linux 机器）**：Arch/Hyprland 上 `systemctl --user`；`Restart=on-abnormal` 的实际条件；`TimeoutStopSec` 内收尾完整；linger 开/关与注销；linger 开机未登录时没有 `SSH_AUTH_SOCK`、密钥环锁着，Provider 的表现；`/usr/bin/scry` 实际指向；pacman 升级后命令行报不一致与 `restart`；日志。
 
@@ -119,3 +119,9 @@
 ## 9. 建议的术语（未改 GLOSSARY）
 
 GLOSSARY 目前没有远程相关条目。建议在实现时补：**执行端**（被远程使用的那台机器；代码里叫 host/宿主）、**后台服务**（用户可见的 daemon 名称）、**登录时启动**、**设备**（经配对获得 grant 的另一台机器，不含本机 App）、**配对邀请**（`scry1:` / `scry-desktop1:`，2 分钟有效）、**待确认配对**、**宿主命令行**（`scry-host`）、**允许命令行批准**（默认关的开关）、**批准方式**（记录为 App / 命令行 / 未记录）。
+
+## 评审后修订（2026-11-18）
+
+- 第 1 步：supervisor 停止时等 daemon，补停止超时，只在异常死亡时重启；策略变量随服务写入，含 token 的拒绝；补 `SHELL`、日志预建、版本与 `launchedBy`；清理名单扩充；模块不依赖 Electron、开启前确认、按平台放行；服务文件按实际值识别（[P5-headless-host](P5-headless-host.md) §2）。
+- 第 2 步：挑战认证、默认关闭的批准开关、运行标记、通知、速率、`restart`、`login-start`；批准方式进 grant，去掉审计文件；清理覆盖已撤销/过期的 grant（[P5-host-cli](P5-host-cli.md)、本文 §4）。
+- 核对代码后与评审意见的出入：`SCRY_REMOTE_RELAY_SSH` 没有读取方，删掉而不是据此拒绝；`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL` 也影响行为，一并写入；Codex 与终端没有 `SCRY_MANAGED_RUN_ID`，另加 `SCRY_HOST_CHILD`；`remote-attention.ts` 不是推送通道，通知走 app-event-feed 与新的宿主能力。
