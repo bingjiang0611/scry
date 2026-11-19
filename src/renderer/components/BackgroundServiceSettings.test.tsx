@@ -142,6 +142,7 @@ describe('BackgroundServicePanel', () => {
     expect(withNotices).toContain('login_start_service_launch_failed')
     expect(withNotices).toContain('退出码 113')
     expect(withNotices).toContain('远程权限模式覆盖')
+    expect(withNotices).toContain('关闭再重新开启「登录时启动」，然后重启后台服务')
   })
 })
 

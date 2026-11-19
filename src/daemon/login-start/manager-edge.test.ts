@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createLoginStartManager, loginStartTemplateInput, runFixedCommand, type CommandResult, type CommandRunner } from './index'
+import {
+  createLoginStartManager, loginStartTemplateInput, parseLaunchctlPrint, runFixedCommand,
+  type CommandResult, type CommandRunner, type ServiceFileRead
+} from './index'
 import { renderLaunchdPlist } from '../supervisor-templates'
 
 // W2 review S2, S7, S8 & optional edge cases: symlink refusal, bootout ownership,
@@ -28,6 +31,7 @@ function makeSetup(options: {
   env?: NodeJS.ProcessEnv
   allowLinux?: boolean
   runner?: CommandRunner
+  readServiceFile?: (path: string) => ServiceFileRead
 } = {}) {
   const root = tempRoot()
   const homeDir = join(root, 'home')
@@ -54,7 +58,8 @@ function makeSetup(options: {
     systemctlAvailable: true,
     target: { executable, appPath, resourcesPath, userDataDir, isPackaged: true },
     env: options.env ?? {},
-    runner
+    runner,
+    ...(options.readServiceFile ? { readServiceFile: options.readServiceFile } : {})
   })
   return { root, homeDir, userDataDir, executable, appPath, resourcesPath, calls, manager }
 }
@@ -132,22 +137,149 @@ describe('login-start security & rollback edge cases (S2, S7, S8)', () => {
     ])
   })
 
-  it('refuses ephemeral macOS DMG / AppTranslocation paths and distinguishes EACCES read errors', async () => {
+  it('refuses ephemeral macOS DMG / AppTranslocation paths and distinguishes EACCES read errors (root-safe)', async () => {
     const dmg = makeSetup({ executableOverride: '/Volumes/Scry/Scry.app/Contents/MacOS/Scry' })
     expect(dmg.manager.availability()).toEqual({ ok: false, reason: 'login_start_ephemeral_app_path' })
     expect(await dmg.manager.status()).toEqual({ state: 'unavailable', reason: 'login_start_ephemeral_app_path' })
 
-    if (process.getuid?.() !== 0) {
-      const s = makeSetup()
-      mkdirSync(join(s.homeDir, 'Library', 'LaunchAgents'), { recursive: true })
-      writeFileSync(s.manager.filePath, 'unreadable', { mode: 0o000 })
-      try {
-        expect(await s.manager.status()).toEqual({ state: 'unavailable', reason: 'login_start_read_failed:EACCES' })
-        expect(await s.manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_read_failed:EACCES' })
-      } finally {
-        chmodSync(s.manager.filePath, 0o600)
+    const eacces = makeSetup({ readServiceFile: () => ({ kind: 'error', code: 'EACCES' }) })
+    expect(await eacces.manager.status()).toEqual({ state: 'unavailable', reason: 'login_start_read_failed:EACCES' })
+    expect(await eacces.manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_read_failed:EACCES' })
+    expect(await eacces.manager.disable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_read_failed:EACCES' })
+  })
+
+  it('parseLaunchctlPrint distinguishes top-level idle/running and ignores inherited env / nested coalition state', () => {
+    const idleWithCoalition = [
+      'gui/501/com.scry.daemon = {',
+      '\tstate = not running',
+      '\tinherited environment = {',
+      '\t\tSCRY_DAEMON_USER_DATA_DIR => /spoofed/inherited',
+      '\t}',
+      '\tenvironment = {',
+      '\t\tSCRY_DAEMON_USER_DATA_DIR => /private/tmp/测试 用户',
+      '\t}',
+      '\tresource coalition = {',
+      '\t\tstate = active',
+      '\t}',
+      '}'
+    ].join('\n')
+    expect(parseLaunchctlPrint(idleWithCoalition)).toEqual({
+      runState: 'idle',
+      userDataDir: '/private/tmp/测试 用户'
+    })
+    expect(parseLaunchctlPrint('gui/501/com.scry.daemon = {\n\tstate = running\n\tpid = 88\n}\n')).toEqual({
+      runState: 'running',
+      userDataDir: null
+    })
+    expect(parseLaunchctlPrint('')).toEqual({ runState: 'unknown', userDataDir: null })
+  })
+
+  it('allows re-enable after disable(running) -> daemon stops when launchctl print shows idle job (R2 #1)', async () => {
+    const calls: string[][] = []
+    let loaded = false
+    let running = false
+    let loadedUserData = ''
+    const { userDataDir, manager } = makeSetup({
+      runner: async (_file, args) => {
+        calls.push(args)
+        if (args[0] === 'print') {
+          if (!loaded) return fail(113)
+          return ok(
+            `gui/501/com.scry.daemon = {\n\tstate = ${running ? 'running' : 'not running'}\n` +
+            `\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => ${loadedUserData}\n\t}\n` +
+            (running ? '\tpid = 4321\n' : '') + '}\n'
+          )
+        }
+        if (args[0] === 'bootstrap') { loaded = true; running = true; loadedUserData = userDataDir; return ok() }
+        if (args[0] === 'bootout') { loaded = false; running = false; return ok() }
+        return ok()
       }
-    }
+    })
+    expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: true })
+    expect(await manager.disable({ daemonRunning: true })).toEqual({ ok: true })
+    expect(existsSync(manager.filePath)).toBe(false)
+    // Daemon subsequently stops cleanly while the launchd job stays loaded & idle.
+    running = false
+    calls.length = 0
+
+    expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: true })
+    expect(existsSync(manager.filePath)).toBe(true)
+    expect(calls).toEqual([
+      ['print', 'gui/501/com.scry.daemon'],
+      ['bootout', 'gui/501/com.scry.daemon'],
+      ['bootstrap', 'gui/501', manager.filePath]
+    ])
+  })
+
+  it('refuses enable(daemonRunning=true) when loaded job has no file and cannot prove ownership (R2 #2)', async () => {
+    const otherRunning =
+      'gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => /other/userData\n\t}\n\tpid = 9999\n}\n'
+    const calls1: string[][] = []
+    const s1 = makeSetup({ runner: async (_f, args) => { calls1.push(args); return ok(otherRunning) } })
+    expect(await s1.manager.enable({ daemonRunning: true })).toEqual({ ok: false, reason: 'login_start_loaded_without_file' })
+    expect(existsSync(s1.manager.filePath)).toBe(false)
+    expect(calls1).toEqual([['print', 'gui/501/com.scry.daemon']])
+
+    // Empty/unparseable print output with no file on disk also fails closed even if daemonRunning=true.
+    const calls2: string[][] = []
+    const s2 = makeSetup({ runner: async (_f, args) => { calls2.push(args); return ok('') } })
+    expect(await s2.manager.enable({ daemonRunning: true })).toEqual({ ok: false, reason: 'login_start_loaded_without_file' })
+    expect(existsSync(s2.manager.filePath)).toBe(false)
+    expect(calls2).toEqual([['print', 'gui/501/com.scry.daemon']])
+  })
+
+  it('allows enable(daemonRunning=true) after disable(running) when launchctl print proves same userData (R2 #2)', async () => {
+    const calls: string[][] = []
+    let userData = ''
+    const s = makeSetup({
+      runner: async (_f, args) => {
+        calls.push(args)
+        return ok(
+          `gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => ${userData}\n\t}\n\tpid = 4321\n}\n`
+        )
+      }
+    })
+    userData = s.userDataDir
+    expect(await s.manager.enable({ daemonRunning: true })).toEqual({ ok: true })
+    expect(existsSync(s.manager.filePath)).toBe(true)
+    expect(calls).toEqual([['print', 'gui/501/com.scry.daemon']])
+  })
+
+  it('startViaService skips bootout when job is already running for our userData and refuses other userData; disable refuses other existing app', async () => {
+    const calls: string[][] = []
+    let printOut = ''
+    const s = makeSetup({ runner: async (_f, args) => { calls.push(args); return args[0] === 'print' ? ok(printOut) : ok() } })
+    mkdirSync(join(s.homeDir, 'Library', 'LaunchAgents'), { recursive: true })
+    writeFileSync(s.manager.filePath, renderLaunchdPlist(loginStartTemplateInput({
+      executable: s.executable, appPath: s.appPath, resourcesPath: s.resourcesPath, userDataDir: s.userDataDir, isPackaged: true
+    })), { mode: 0o600 })
+
+    // Already running for our userData -> do not bootout (avoids ExitTimeOut=30 vs 10 s command timeout).
+    printOut = `gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => ${s.userDataDir}\n\t}\n\tpid = 4321\n}\n`
+    expect(await s.manager.startViaService()).toEqual({ ok: true })
+    expect(calls).toEqual([['print', 'gui/501/com.scry.daemon']])
+
+    // Running for another userData -> refuse, never bootout.
+    calls.length = 0
+    printOut = 'gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => /other/userData\n\t}\n\tpid = 9999\n}\n'
+    expect(await s.manager.startViaService()).toEqual({ ok: false, reason: 'login_start_other_userdata', otherUserDataDir: '/other/userData' })
+    expect(calls).toEqual([['print', 'gui/501/com.scry.daemon']])
+
+    // Disable refuses plist belonging to another still-existing App.
+    const otherExec = join(s.root, 'Other.app', 'Contents', 'MacOS', 'Scry')
+    mkdirSync(join(s.root, 'Other.app', 'Contents', 'MacOS'), { recursive: true })
+    writeFileSync(otherExec, '')
+    const otherPlist = renderLaunchdPlist(loginStartTemplateInput({
+      executable: otherExec, appPath: join(s.root, 'Other.app', 'Contents', 'Resources', 'app.asar'),
+      resourcesPath: join(s.root, 'Other.app', 'Contents', 'Resources'), userDataDir: s.userDataDir, isPackaged: true
+    }))
+    writeFileSync(s.manager.filePath, otherPlist, { mode: 0o600 })
+    calls.length = 0
+    expect(await s.manager.disable({ daemonRunning: false })).toEqual({
+      ok: false, reason: 'login_start_other_app', otherExecutable: otherExec
+    })
+    expect(readFileSync(s.manager.filePath, 'utf8')).toBe(otherPlist)
+    expect(calls).toEqual([])
   })
 
   it('runFixedCommand reports real execFile timeout and missing binary (S8)', async () => {

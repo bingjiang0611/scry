@@ -89,9 +89,16 @@ describe('login-start manager', () => {
     expect(readFileSync(plistPath, 'utf8')).toContain('<key>SCRY_REMOTE_PERMISSION_MODE</key><string>auto_review</string>')
   })
 
-  it('macOS enable keeps a running daemon untouched when already loaded, and bootout+bootstrap when owned file existed', async () => {
+  it('macOS enable keeps a running daemon untouched when already loaded (with ownership proof), and bootout+bootstrap when owned file existed', async () => {
     const calls1: string[][] = []
-    const s1 = setup({ exec: async (_file, args) => { calls1.push(args); return ok() } })
+    let s1UserData = ''
+    const s1 = setup({
+      exec: async (_file, args) => {
+        calls1.push(args)
+        return ok(`gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => ${s1UserData}\n\t}\n\tpid = 4321\n}\n`)
+      }
+    })
+    s1UserData = s1.userDataDir
     expect(await s1.manager.enable({ daemonRunning: true })).toEqual({ ok: true })
     expect(calls1).toEqual([['print', 'gui/501/com.scry.daemon']])
 
@@ -243,8 +250,12 @@ describe('login-start manager', () => {
     ])
   })
 
-  it('macOS startViaService reloads definition via bootout + bootstrap and reports exit code on failure (S3)', async () => {
-    const fn = vi.fn<CommandRunner>(async (_file, args) => args[0] === 'bootstrap' ? fail(125) : ok())
+  it('macOS startViaService checks print, reloads idle definition via bootout + bootstrap, and reports exit code on failure (S3)', async () => {
+    const idlePrint = 'gui/501/com.scry.daemon = {\n\tstate = not running\n}\n'
+    const fn = vi.fn<CommandRunner>(async (_file, args) => {
+      if (args[0] === 'print') return ok(idlePrint)
+      return args[0] === 'bootstrap' ? fail(125) : ok()
+    })
     const s = setup({ exec: fn })
     const plistPath = join(s.homeDir, 'Library', 'LaunchAgents', 'com.scry.daemon.plist')
     mkdirSync(join(s.homeDir, 'Library', 'LaunchAgents'), { recursive: true })
@@ -255,6 +266,7 @@ describe('login-start manager', () => {
       ok: false, reason: 'login_start_service_launch_failed', exitCode: 125
     })
     expect(fn.mock.calls.map(([file, args]) => [file, args])).toEqual([
+      ['/bin/launchctl', ['print', 'gui/501/com.scry.daemon']],
       ['/bin/launchctl', ['bootout', 'gui/501/com.scry.daemon']],
       ['/bin/launchctl', ['bootstrap', 'gui/501', plistPath]]
     ])
