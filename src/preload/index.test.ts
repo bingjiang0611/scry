@@ -133,6 +133,7 @@ const invokeChannels = {
   remoteDesktopHostInvite: 'remote:desktop:invite',
   remoteDesktopHostDisable: 'remote:desktop:disable',
   backgroundServiceStatus: 'remote:backgroundService:status',
+  backgroundServiceRuntimeNotice: 'remote:backgroundService:runtimeNotice',
   restartBackgroundService: 'remote:backgroundService:restart',
   quitWithBackgroundService: 'remote:backgroundService:quit',
   reconnectBackgroundService: 'remote:backgroundService:reconnect',
@@ -205,8 +206,7 @@ describe('preload IPC boundary', () => {
   })
 
   it('sends no renderer argument on the background service channels', async () => {
-    // Main asks for every confirmation itself; nothing the renderer passes may travel.
-    for (const method of ['backgroundServiceStatus', 'restartBackgroundService', 'quitWithBackgroundService', 'reconnectBackgroundService']) {
+    for (const method of ['backgroundServiceStatus', 'backgroundServiceRuntimeNotice', 'restartBackgroundService', 'quitWithBackgroundService', 'reconnectBackgroundService']) {
       electron.invoke.mockClear()
       await callableApi[method]('4242', { confirmed: true })
       expect(electron.invoke.mock.calls[0], method).toEqual([invokeChannels[method as keyof typeof invokeChannels]])

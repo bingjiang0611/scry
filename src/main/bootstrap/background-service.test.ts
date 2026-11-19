@@ -21,8 +21,9 @@ vi.mock('electron', () => ({
 const { registerTrustedIpcHandler } = await import('../ipc-trust')
 const { installDaemonChannelForwarder } = await import('../daemon-channel-gate')
 const { registerBackgroundServiceHandlers } = await import('./background-service')
-const { MISMATCH_RESTART_BUTTON, versionMismatchPrompt } = await import('../background-service-copy')
+const { CONFIRM_BUTTON, MISMATCH_RESTART_BUTTON, versionMismatchPrompt } = await import('../background-service-copy')
 type Lazy = Parameters<typeof registerBackgroundServiceHandlers>[0]['daemon']
+type RegisterExtra = Partial<Parameters<typeof registerBackgroundServiceHandlers>[0]>
 
 const roots: string[] = []
 afterEach(() => {
@@ -43,23 +44,24 @@ function fakeDaemon(ready: Record<string, unknown>) {
   }
 }
 
-function register(daemon: ReturnType<typeof fakeDaemon> | undefined, daemonMode: boolean) {
+function register(daemon: ReturnType<typeof fakeDaemon> | undefined, daemonMode: boolean, extra: RegisterExtra = {}) {
   electron.userData = mkdtempSync(join(tmpdir(), 'scry-bg-service-'))
   roots.push(electron.userData)
   if (daemonMode) process.env.SCRY_HOST_DAEMON = '1'
   const frame = { url: 'file:///app/renderer/index.html' }
-  const contents = { mainFrame: frame }
+  const contents = { mainFrame: frame, send: vi.fn() }
   const win = { webContents: contents, isDestroyed: () => false } as unknown as BrowserWindow
   const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
   registerBackgroundServiceHandlers({
     handleTrusted: (channel, listener) => registerTrustedIpcHandler(
       { handle: (name, registered) => { handlers.set(name, registered as never) } }, channel, () => win, frame.url, listener),
     daemon: daemon as unknown as Lazy,
-    getWindow: () => win
+    getWindow: () => win,
+    ...extra
   })
   const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!(event, ...args)
-  return { handlers, invoke, event, win }
+  return { handlers, invoke, event, win, contents }
 }
 
 describe('background service channels', () => {
@@ -183,5 +185,52 @@ describe('background service channels', () => {
       status: 'failed', reason: 'unpackaged_build'
     })
     expect(electron.showMessageBox).not.toHaveBeenCalled()
+  })
+
+  it('setLoginStart confirms natively before enabling, skips dialog on disable, and runtimeNotice reads without launching daemon (W2 S4/S8)', async () => {
+    const daemon = fakeDaemon({ status: 'ready' })
+    const loginStart = {
+      filePath: '/tmp/com.scry.daemon.plist',
+      label: 'com.scry.daemon',
+      unitName: 'scry-daemon.service',
+      availability: vi.fn(() => ({ ok: true as const })),
+      precheckEnable: vi.fn(() => ({ ok: true as const, policyEnvKeys: ['SCRY_REMOTE_HOST'] })),
+      status: vi.fn(async () => ({ state: 'disabled' as const })),
+      reconcileMovedApp: vi.fn(() => ({ rewritten: false as const })),
+      enable: vi.fn(async () => ({ ok: true as const })),
+      disable: vi.fn(async () => ({ ok: true as const })),
+      canLaunchViaService: vi.fn(() => false),
+      startViaService: vi.fn(async () => ({ ok: true as const }))
+    }
+    const fallback = { reason: 'login_start_service_launch_failed', exitCode: 125 }
+    const { invoke, handlers, event } = register(daemon, true, {
+      loginStart,
+      serviceLaunchFallback: () => fallback
+    })
+
+    // S4: runtimeNotice reads current notice from memory without touching daemon.ready().
+    await expect(invoke('remote:backgroundService:runtimeNotice')).resolves.toEqual({ serviceLaunchFallback: fallback })
+    expect(daemon.ready).not.toHaveBeenCalled()
+    await expect(invoke('remote:backgroundService:runtimeNotice', 'extra')).rejects.toThrow('invalid_request')
+    await expect(Promise.resolve().then(() =>
+      handlers.get('remote:backgroundService:runtimeNotice')!({ ...event, sender: {} } as unknown as IpcMainInvokeEvent)
+    )).rejects.toThrow('非可信 renderer')
+
+    // S8: confirmed enable calls native dialog then loginStart.enable; cancel skips enable; disable skips dialog.
+    electron.showMessageBox.mockResolvedValueOnce({ response: CONFIRM_BUTTON })
+    await expect(invoke('remote:backgroundService:setLoginStart', true)).resolves.toEqual({ status: 'done' })
+    expect(electron.showMessageBox).toHaveBeenCalledTimes(1)
+    expect(loginStart.enable).toHaveBeenCalledWith({ daemonRunning: false })
+
+    electron.showMessageBox.mockClear()
+    loginStart.enable.mockClear()
+    electron.showMessageBox.mockResolvedValueOnce({ response: 1 })
+    await expect(invoke('remote:backgroundService:setLoginStart', true)).resolves.toEqual({ status: 'cancelled' })
+    expect(loginStart.enable).not.toHaveBeenCalled()
+
+    electron.showMessageBox.mockClear()
+    await expect(invoke('remote:backgroundService:setLoginStart', false)).resolves.toEqual({ status: 'done' })
+    expect(electron.showMessageBox).not.toHaveBeenCalled()
+    expect(loginStart.disable).toHaveBeenCalledWith({ daemonRunning: false })
   })
 })

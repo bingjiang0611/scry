@@ -201,6 +201,15 @@ export function loginStartFailureMessage(input: {
   if (input.reason === 'test_instance') {
     return `测试实例默认禁用登录时启动，避免改动日常服务配置${codeSuffix}。`
   }
+  if (input.reason === 'login_start_ephemeral_app_path') {
+    return `当前 Scry 正在磁盘映像（/Volumes）或系统临时移位目录（AppTranslocation）中运行，重启后路径会失效。请先把 Scry 移到「应用程序」再开启登录时启动${codeSuffix}。`
+  }
+  if (input.reason === 'login_start_loaded_without_file') {
+    return `当前会话里已有同名系统服务在加载，但磁盘上没有对应的服务文件，Scry 无法核对其所属数据目录，因此未执行卸载${codeSuffix}。可注销后重登，或手动核对后执行 launchctl bootout。`
+  }
+  if (input.reason.startsWith('login_start_read_failed:')) {
+    return `无法读取已有系统服务文件（权限不足或 I/O 错误），Scry 没有覆盖它${codeSuffix}。`
+  }
   if (input.reason.startsWith('login_start_invalid_env:')) {
     const key = input.reason.slice('login_start_invalid_env:'.length)
     return `环境变量 ${key} 的值无效，不能写入服务文件${codeSuffix}。`

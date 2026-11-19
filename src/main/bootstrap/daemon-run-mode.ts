@@ -70,6 +70,8 @@ export interface DaemonRunModeDeps {
   /** Fallback direct launch when a service-manager launch timed out waiting for ready (P5 §2.4). */
   launchFallback?: DaemonLaunch
   launchFailure?: () => Promise<string | undefined>
+  /** Tests: shorten ensureDaemon's ready wait (defaults to DAEMON_READY_TIMEOUT_MS). */
+  readyTimeoutMs?: number
   waitMs?: number
   onWarn?: (message: string, detail?: unknown) => void
   // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
@@ -144,6 +146,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const launch: DaemonLaunch = deps.launch ?? (async () => ({ status: 'failed' as const, reason: 'daemon_launch_unavailable' }))
   const supervision = {
     probe, launch, appVersion: deps.appVersion, ...(deps.appBuild === undefined ? {} : { appBuild: deps.appBuild }),
+    ...(deps.readyTimeoutMs === undefined ? {} : { readyTimeoutMs: deps.readyTimeoutMs, pollMs: Math.min(25, deps.readyTimeoutMs) }),
     // Polled while waiting for a launched daemon: a refusal ends the wait by name.
     launchFailure: async (): Promise<string | undefined> => refused?.reason ?? await deps.launchFailure?.()
   }

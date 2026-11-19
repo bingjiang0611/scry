@@ -9,7 +9,6 @@ import type {
 import { daemonClientPaths } from '../daemon-client'
 import { requestLocalEnrollment } from '../../daemon/local-enrollment-request'
 import {
-  collectLoginStartPolicyEnv,
   computeEffectiveRemoteConfig,
   createLoginStartManager,
   diffRemoteConfigs,
@@ -200,13 +199,7 @@ export function registerBackgroundServiceHandlers(input: {
   const restart = exclusive(() => restartBackgroundService(actionDeps))
   const setLoginStart = (enabled: boolean) => exclusive(() => setBackgroundServiceLoginStart(enabled, {
     daemonMode: daemon !== undefined,
-    precheckEnable: () => {
-      const avail = loginStart.availability()
-      if (!avail.ok) return avail
-      const policy = collectLoginStartPolicyEnv(env)
-      if (!policy.ok) return policy
-      return { ok: true, policyEnvKeys: policy.entries.map(([key]) => key) }
-    },
+    precheckEnable: () => loginStart.precheckEnable(),
     confirmEnable: async (policyEnvKeys) => await show(confirmLoginStartPrompt(policyEnvKeys)) === CONFIRM_BUTTON,
     isDaemonRunning: async () => (await prepareBackgroundServiceStop(stopDeps)).status === 'running',
     enable: (options) => loginStart.enable(options),
@@ -214,6 +207,7 @@ export function registerBackgroundServiceHandlers(input: {
   }))()
 
   register('remote:backgroundService:status', status)
+  register('remote:backgroundService:runtimeNotice', async () => buildRuntimeNotice())
   register('remote:backgroundService:restart', restart)
   register('remote:backgroundService:quit', exclusive(() => quitWithBackgroundService(actionDeps)))
   register('remote:backgroundService:reconnect', exclusive(() => reconnectBackgroundService(actionDeps)))
@@ -225,6 +219,8 @@ export function registerBackgroundServiceHandlers(input: {
   // Switch on: the gate routes the status channel to the daemon; the App's part comes
   // first and answers it, asking the daemon itself only while connected.
   if (daemon) {
+    // Reconcile moved-App service file once explicitly (status() stays read-only).
+    loginStart.reconcileMovedApp()
     installDaemonChannelGuard('remote:backgroundService:status', async (args) => {
       refuseArguments(args)
       return { result: await status() }

@@ -127,4 +127,22 @@ describe('daemon run mode', () => {
     expect(result).toEqual({ status: 'unavailable', reason: 'daemon_binary_missing' })
     expect(launch).toHaveBeenCalledTimes(1)
   })
+
+  it('invokes launchFallback in a second ensureDaemon pass after daemon_ready_timeout (W2 S8)', async () => {
+    vi.stubEnv('SCRY_HOST_DAEMON', '1')
+    const launch = vi.fn(async () => ({ status: 'started' as const }))
+    const launchFallback = vi.fn(async () => ({ status: 'failed' as const, reason: 'direct_spawn_refused' }))
+    const probe = vi.fn(async () => undefined)
+    const result = await createDaemonRunMode({
+      ...base,
+      credentialCipher: cipher,
+      launch,
+      launchFallback,
+      probe,
+      readyTimeoutMs: 40
+    })
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(launchFallback).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({ status: 'unavailable', reason: 'direct_spawn_refused' })
+  })
 })

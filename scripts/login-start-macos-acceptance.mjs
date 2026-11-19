@@ -1,8 +1,13 @@
 #!/usr/bin/env node
-// P5-4 macOS real-machine LaunchAgent acceptance script.
+// P5-4 macOS real-machine LaunchAgent acceptance script (W2 review S3 + S6).
 // Drives real `/bin/launchctl` strictly against a unique test label
-// (`com.scry.daemon.test.p54.<pid>`) and an isolated temporary userData directory —
-// NEVER touches `com.scry.daemon`, `/Applications/Scry.app`, or daily userData.
+// (`com.scry.daemon.test.p54.<pid>`), a temporary service-file directory
+// (`SCRY_TEST_LOGIN_START_DIR`, never touching `~/Library/LaunchAgents`), and an isolated
+// userData path containing spaces and Chinese characters. Registers SIGINT/SIGTERM
+// cleanup so interruption never leaves a background service behind.
+//
+// Note: invokes the plain-Node login-start module directly (not Electron main IPC or
+// native confirmation dialogs, which are verified by unit tests).
 //
 // Usage:
 //   node scripts/login-start-macos-acceptance.mjs --app dist/mac-arm64/Scry.app/Contents/MacOS/Scry
@@ -35,11 +40,14 @@ const uid = process.getuid()
 const testLabel = `com.scry.daemon.test.p54.${process.pid}`
 const domain = `gui/${uid}`
 const serviceTarget = `${domain}/${testLabel}`
-const temp = realpathSync(mkdtempSync('/tmp/scry-p54-mac-'))
-const userDataDir = join(temp, 'userData')
+const temp = realpathSync(mkdtempSync('/tmp/scry-p54-'))
+// Default macOS userData has spaces; also cover Chinese characters (within 104-byte SUN_LEN).
+const userDataDir = join(temp, '测试 用户')
+const serviceDir = join(temp, 'launch agents')
 const stateDirectory = join(userDataDir, 'daemon')
 const bundlePath = join(temp, 'login-start-bundle.mjs')
 mkdirSync(userDataDir, { recursive: true, mode: 0o700 })
+mkdirSync(serviceDir, { recursive: true, mode: 0o700 })
 
 const timeline = []
 const mark = (event, detail = {}) => timeline.push({ at: new Date().toISOString(), ms: Date.now(), event, ...detail })
@@ -50,6 +58,8 @@ const result = {
   appVersion: target.version,
   executable: target.executable,
   testLabel,
+  userDataDir,
+  serviceDir,
   steps: {},
   timeline
 }
@@ -88,7 +98,21 @@ async function waitUntil(predicate, timeoutMs) {
   return false
 }
 
-let plistPath
+let cleanedUp = false
+function cleanup() {
+  if (cleanedUp) return
+  cleanedUp = true
+  launchctl(['bootout', serviceTarget])
+  try { rmSync(temp, { recursive: true, force: true }) } catch { /* ignore */ }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    cleanup()
+    process.exit(signal === 'SIGINT' ? 130 : 143)
+  })
+}
+
 try {
   buildSync({
     entryPoints: [resolve('src/daemon/login-start/index.ts')],
@@ -99,8 +123,7 @@ try {
   })
   const loginStart = await import(pathToFileURL(bundlePath).href)
 
-  // 1. Refuse SCRY_REMOTE_RELAY_WS before writing any plist.
-  const secretManager = loginStart.createLoginStartManager({
+  const makeManager = (envOverrides) => loginStart.createLoginStartManager({
     platform: 'darwin',
     uid,
     homeDir: homedir(),
@@ -115,8 +138,14 @@ try {
     env: {
       SCRY_TEST_APP: '1',
       SCRY_TEST_LOGIN_START_LABEL: testLabel,
-      SCRY_REMOTE_RELAY_WS: JSON.stringify({ url: 'wss://relay.example', token: 'secret' })
+      SCRY_TEST_LOGIN_START_DIR: serviceDir,
+      ...envOverrides
     }
+  })
+
+  // 1. Refuse SCRY_REMOTE_RELAY_WS before writing any plist.
+  const secretManager = makeManager({
+    SCRY_REMOTE_RELAY_WS: JSON.stringify({ url: 'wss://relay.example', token: 'secret' })
   })
   const secretOutcome = await secretManager.enable({ daemonRunning: false })
   if (secretOutcome.ok || secretOutcome.reason !== 'login_start_secret_env') {
@@ -124,30 +153,15 @@ try {
   }
   result.steps.secretEnvRefused = { ok: true, reason: secretOutcome.reason }
 
-  // 2. Enable login-start with real launchctl bootstrap against the test label.
-  const manager = loginStart.createLoginStartManager({
-    platform: 'darwin',
-    uid,
-    homeDir: homedir(),
-    daemonMode: true,
-    target: {
-      executable: target.executable,
-      appPath: target.appArchive,
-      resourcesPath: target.resources,
-      userDataDir,
-      isPackaged: true
-    },
-    env: {
-      SCRY_TEST_APP: '1',
-      SCRY_TEST_LOGIN_START_LABEL: testLabel,
-      SCRY_REMOTE_HOST: '1',
-      SCRY_REMOTE_PERMISSION_MODE: 'auto_review',
-      SCRY_REMOTE_RELAY_ENABLED: '0',
-      SCRY_DISABLED_PROVIDERS: 'pi'
-    }
+  // 2. Enable login-start into temp serviceDir (never ~/Library/LaunchAgents) with real launchctl bootstrap.
+  const manager = makeManager({
+    SCRY_REMOTE_HOST: '1',
+    SCRY_REMOTE_PERMISSION_MODE: 'auto_review',
+    SCRY_REMOTE_RELAY_ENABLED: '0',
+    SCRY_DISABLED_PROVIDERS: 'pi'
   })
-  plistPath = manager.filePath
-  if (!plistPath.endsWith(`/${testLabel}.plist`) || plistPath.includes('com.scry.daemon.plist')) {
+  const plistPath = manager.filePath
+  if (!plistPath.startsWith(serviceDir) || plistPath.includes('Library/LaunchAgents')) {
     throw new Error(`unsafe_plist_path:${plistPath}`)
   }
 
@@ -166,9 +180,7 @@ try {
     printExitCode: printed.exitCode
   }
 
-  // 3. Verify RunAtLoad/kickstart starts daemon without App, client connects, SHELL + policy match.
-  const kicked = launchctl(['kickstart', serviceTarget])
-  mark('kickstart', { exitCode: kicked.exitCode })
+  // 3. Verify RunAtLoad starts daemon without App, client connects, SHELL + policy match.
   if (!await waitForSocket(join(stateDirectory, 'local.sock'), 20_000, () => true)) {
     throw new Error('local_socket_timeout')
   }
@@ -204,7 +216,7 @@ try {
     remoteConfig: report.remoteConfig
   }
 
-  // 4. Disable login-start while daemon is running: plist deleted, running daemon NOT stopped.
+  // 4. Disable while daemon is running: plist deleted, running daemon NOT stopped.
   const disabled = await manager.disable({ daemonRunning: true })
   if (!disabled.ok) throw new Error(`disable_failed:${JSON.stringify(disabled)}`)
   if (existsSync(plistPath)) throw new Error('plist_not_deleted_on_disable')
@@ -217,27 +229,60 @@ try {
     daemonStillAlive: pidAlive(report.pid)
   }
 
-  // 5. Re-enable while job is still loaded and daemon running (P5 §6 checklist).
-  const reenabled = await manager.enable({ daemonRunning: true })
+  // 5. S3 live verification: re-enable with UPDATED policy env while daemon is running,
+  //    then stop daemon cleanly and launch via startViaService() — launchd must load the
+  //    NEW plist definition (permissionModeOverride=auto_accept_edits), not stale auto_review!
+  const updatedManager = makeManager({
+    SCRY_REMOTE_HOST: '1',
+    SCRY_REMOTE_PERMISSION_MODE: 'auto_accept_edits',
+    SCRY_REMOTE_RELAY_ENABLED: '0',
+    SCRY_DISABLED_PROVIDERS: 'pi'
+  })
+  const reenabled = await updatedManager.enable({ daemonRunning: true })
   if (!reenabled.ok) throw new Error(`reenable_failed:${JSON.stringify(reenabled)}`)
-  result.steps.reenableWhileRunning = { ok: true, plistExists: existsSync(plistPath) }
-
-  // 6. Crash recovery under KeepAlive={Crashed:true}: verify supervisor PID belongs to our
-  //    packaged binary, send SIGABRT (crash signal), wait for launchd ThrottleInterval (10 s),
-  //    and confirm launchd spawns a new supervisor + daemon and the existing client reconnects.
-  const firstSupervisorPid = report.supervisorPid
-  const supCmd = pidCommand(firstSupervisorPid)
+  const supCmd = pidCommand(report.supervisorPid)
   if (!supCmd.includes(target.executable) || !supCmd.includes('daemon-supervisor.js')) {
-    throw new Error(`supervisor_identity_mismatch:pid=${firstSupervisorPid} cmd=${supCmd}`)
+    throw new Error(`supervisor_identity_mismatch:pid=${report.supervisorPid} cmd=${supCmd}`)
+  }
+  mark('s3.stop_old_daemon', { supervisorPid: report.supervisorPid, daemonPid: report.pid })
+  process.kill(report.supervisorPid, 'SIGTERM')
+  if (!await waitUntil(() => !pidAlive(report.pid) && !pidAlive(report.supervisorPid), 20_000)) {
+    throw new Error('s3_old_daemon_stop_timeout')
+  }
+  const relaunched = await updatedManager.startViaService()
+  if (!relaunched.ok) throw new Error(`s3_start_via_service_failed:${JSON.stringify(relaunched)}`)
+  if (!await waitForSocket(join(stateDirectory, 'local.sock'), 20_000, () => true)) {
+    throw new Error('s3_reloaded_socket_timeout')
+  }
+  const reloadedReply = await frame(stateDirectory, credentials, { op: 'localBackgroundService', method: 'status', args: [] })
+  const reloaded = reloadedReply?.result
+  if (!reloaded || reloaded.remoteConfig?.permissionModeOverride !== 'auto_accept_edits') {
+    throw new Error(`s3_stale_definition_loaded:${JSON.stringify(reloadedReply)}`)
+  }
+  mark('s3.reloaded_verified', { daemonPid: reloaded.pid, supervisorPid: reloaded.supervisorPid, permissionModeOverride: reloaded.remoteConfig.permissionModeOverride })
+  result.steps.reloadChangedDefinition = {
+    ok: true,
+    oldPermissionMode: 'auto_review',
+    newPermissionMode: reloaded.remoteConfig.permissionModeOverride,
+    newSupervisorPid: reloaded.supervisorPid,
+    newDaemonPid: reloaded.pid
+  }
+
+  // 6. Crash recovery under KeepAlive={Crashed:true}: SIGABRT verified supervisor PID,
+  //    confirm launchd restarts supervisor + daemon after default 10 s ThrottleInterval.
+  const preCrashSupervisorPid = reloaded.supervisorPid
+  const preCrashCmd = pidCommand(preCrashSupervisorPid)
+  if (!preCrashCmd.includes(target.executable) || !preCrashCmd.includes('daemon-supervisor.js')) {
+    throw new Error(`supervisor_identity_mismatch:pid=${preCrashSupervisorPid} cmd=${preCrashCmd}`)
   }
   const crashAt = Date.now()
-  mark('crash_supervisor.sigabrt', { pid: firstSupervisorPid })
-  process.kill(firstSupervisorPid, 'SIGABRT')
+  mark('crash_supervisor.sigabrt', { pid: preCrashSupervisorPid })
+  process.kill(preCrashSupervisorPid, 'SIGABRT')
   let newSupervisorPid = null
   const restarted = await waitUntil(() => {
     const p = launchctl(['print', serviceTarget])
     const pidMatch = p.stdout.match(/\bpid = (\d+)/)
-    if (pidMatch && Number(pidMatch[1]) !== firstSupervisorPid) {
+    if (pidMatch && Number(pidMatch[1]) !== preCrashSupervisorPid) {
       newSupervisorPid = Number(pidMatch[1])
       return true
     }
@@ -256,14 +301,14 @@ try {
   }
   const crashRecoveryMs = Date.now() - crashAt
   mark('crash_supervisor.recovered', {
-    oldSupervisorPid: firstSupervisorPid,
+    oldSupervisorPid: preCrashSupervisorPid,
     newSupervisorPid,
     newDaemonPid: afterCrash.pid,
     elapsedMs: crashRecoveryMs
   })
   result.steps.keepAliveCrashedSigabrt = {
     ok: true,
-    oldSupervisorPid: firstSupervisorPid,
+    oldSupervisorPid: preCrashSupervisorPid,
     newSupervisorPid,
     newDaemonPid: afterCrash.pid,
     elapsedMs: crashRecoveryMs
@@ -296,11 +341,7 @@ try {
 } catch (error) {
   result.error = error instanceof Error ? error.message : String(error)
 } finally {
-  launchctl(['bootout', serviceTarget])
-  if (plistPath && existsSync(plistPath) && plistPath.includes(testLabel)) {
-    try { rmSync(plistPath, { force: true }) } catch { /* ignore */ }
-  }
-  rmSync(temp, { recursive: true, force: true })
+  cleanup()
 }
 
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)

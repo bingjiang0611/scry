@@ -10,6 +10,8 @@ import type {
 // definitions, and native confirmations are all owned by main.
 export const backgroundServiceApi = {
   backgroundServiceStatus: (): Promise<BackgroundServiceStatus> => ipcRenderer.invoke('remote:backgroundService:status'),
+  backgroundServiceRuntimeNotice: (): Promise<BackgroundServiceRuntimeNotice | null> =>
+    ipcRenderer.invoke('remote:backgroundService:runtimeNotice'),
   restartBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:restart'),
   quitWithBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:quit'),
   reconnectBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:reconnect'),
