@@ -383,10 +383,14 @@ describe('Claude provider adapter', () => {
       { targetId: 'remote-target', name: 'remote', scope: '.mcp.json', transport: 'http', detail: 'https://mcp.example.test', enabled: true }
     ])
     const close = vi.fn()
-    sdk.query.mockReturnValue({
-      initializationResult: vi.fn().mockResolvedValue({}),
-      mcpServerStatus: vi.fn().mockResolvedValue([{ name: 'remote', status: 'connected', tools: [] }]),
-      close
+    let delivered: unknown
+    sdk.query.mockImplementation(({ options }) => {
+      delivered = JSON.parse(readFileSync(options.extraArgs['mcp-config'], 'utf8'))
+      return {
+        initializationResult: vi.fn().mockResolvedValue({}),
+        mcpServerStatus: vi.fn().mockResolvedValue([{ name: 'remote', status: 'connected', tools: [] }]),
+        close
+      }
     })
     const login = vi.fn().mockResolvedValue({ ok: true, status: 'authenticated' as const })
     const adapter = createClaudeAdapter('/tmp/scry-home', login)
@@ -425,9 +429,10 @@ describe('Claude provider adapter', () => {
       options: expect.objectContaining({
         cwd: '/repo',
         strictMcpConfig: true,
-        mcpServers: { remote: { type: 'http', url: 'https://mcp.example.test' } }
+        mcpServers: {}
       })
     }))
+    expect(delivered).toEqual({ mcpServers: { remote: { type: 'http', url: 'https://mcp.example.test' } } })
     expect(close).toHaveBeenCalledOnce()
   })
 

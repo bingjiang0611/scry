@@ -6,7 +6,6 @@ import {
   forkSession,
   getSessionMessages,
   query,
-  type McpServerConfig,
   type McpServerStatus,
   type ModelInfo,
   type SlashCommand
@@ -41,6 +40,7 @@ import { HistoricalInput } from './historical-input'
 import { HISTORY_READER_SERVER, historyReaderEnvironment } from '../conversation-history-reader'
 import { effortOption, permissionOptions } from './run-controls'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
+import { writePrivateMcpConfig } from './private-mcp-config'
 
 interface CachedControls {
   data: AgentRunControlCatalog
@@ -206,18 +206,27 @@ async function readClaudeMcpStatus(
   signal?: AbortSignal
 ): Promise<McpServerStatus[]> {
   if (signal?.aborted) throw new Error(MCP_CHECK_CANCELLED)
+  // Same private file as a run: the SDK would otherwise put headers and env on argv.
+  const mcpConfig = writePrivateMcpConfig(authorizedMcpServers(execution))
   const prompt = heldPrompt()
-  const q = query({
-    prompt: prompt.stream,
-    options: {
-      cwd: execution.cwd,
-      pathToClaudeCodeExecutable: executable,
-      env: claudeRuntimeEnvForExecution(execution),
-      settingSources: settingSourcesFromEnv(),
-      strictMcpConfig: true,
-      mcpServers: authorizedMcpServers(execution) as Record<string, McpServerConfig>
-    }
-  })
+  let q: ReturnType<typeof query>
+  try {
+    q = query({
+      prompt: prompt.stream,
+      options: {
+        cwd: execution.cwd,
+        pathToClaudeCodeExecutable: executable,
+        env: claudeRuntimeEnvForExecution(execution),
+        settingSources: settingSourcesFromEnv(),
+        strictMcpConfig: true,
+        mcpServers: {},
+        ...(mcpConfig ? { extraArgs: mcpConfig.extraArgs } : {})
+      }
+    })
+  } catch (error) {
+    mcpConfig?.dispose()
+    throw error
+  }
   let timer: NodeJS.Timeout | undefined
   try {
     return await Promise.race([
@@ -237,6 +246,7 @@ async function readClaudeMcpStatus(
     if (timer) clearTimeout(timer)
     prompt.release()
     q.close()
+    mcpConfig?.dispose()
   }
 }
 

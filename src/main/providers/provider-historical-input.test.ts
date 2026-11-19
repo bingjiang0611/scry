@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
@@ -62,6 +62,8 @@ beforeEach(() => {
   const sourceHome = join(directory, 'source-home')
   mkdirSync(sourceHome)
   vi.stubEnv('SCRY_CODEX_SOURCE_HOME', sourceHome)
+  // Private MCP config files are created under the OS temp directory.
+  vi.stubEnv('TMPDIR', directory)
   adapters = []
   server.onNotification.mockImplementation((listener) => {
     notify = listener
@@ -109,7 +111,10 @@ describe('run-scoped historical reader at native adapter boundaries', () => {
     const close = vi.fn()
     sdk.query.mockImplementation(({ prompt, options }) => {
       expect(typeof prompt).not.toBe('string')
-      expect(options.mcpServers.scry_history).toEqual({ type: 'http', url: reader.connection.url, headers: { Authorization: `Bearer ${reader.connection.token}` } })
+      // The reader (with its bearer token) reaches the CLI through the private file, not argv.
+      expect(options.mcpServers).toEqual({})
+      expect(JSON.parse(readFileSync(options.extraArgs['mcp-config'], 'utf8')).mcpServers.scry_history)
+        .toEqual({ type: 'http', url: reader.connection.url, headers: { Authorization: `Bearer ${reader.connection.token}` } })
       expect(options.env.NO_PROXY.split(',')).toContain('127.0.0.1')
       expect(options.env.no_proxy).toBe(options.env.NO_PROXY)
       const next = prompt[Symbol.asyncIterator]().next()
