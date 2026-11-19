@@ -13,7 +13,7 @@
 | W3 | P5-5a 剩余：grant 读取端兼容 `approvedVia` | B | — | 至少早于 P5-7 一个发布 | [tasks/W3-p5-grant-reader.md](tasks/W3-p5-grant-reader.md) |
 | W4 | P4-0：决策器、表结构、迁移执行器、EventSink | C | — | W1 通过 | [tasks/W4-p4-0.md](tasks/W4-p4-0.md) |
 | W5 | P4-1：影子写、增量导入、daemon 模式 CI、首轮测量 | C | W4 | W1 通过 | [tasks/W5-p4-1.md](tasks/W5-p4-1.md) |
-| W6 | MCP 密钥不进 Provider 命令行：macOS 真机核对 | A | 核验方推送修复后开放 | W1 通过 | 核验方推送修复时补任务单 |
+| W6 | MCP 密钥不进 Provider 命令行：macOS 真机核对 | A | 修复已推送（`d29a6cf3`…`0bda19ec`），已开放 | W1 通过 | [tasks/W6-argv-secrets.md](tasks/W6-argv-secrets.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛，但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
@@ -21,4 +21,4 @@
 
 **不在队列里（维护者已定的顺序）**：P5 第 2 步（命令行配对）、S3（删除进程内路径）、P4-2 起的各段、P6（含 P6-0 探针，排在 P4 之后，见 [P6-multi-agent-plan](../P6-multi-agent-plan.md) §D）。W1 通过后由核验方补任务单。
 
-**正在由核验方修改的文件，执行方暂不动**：`src/main/providers/codex.ts`、`claude.ts`、`qoder-launch.ts`、`opencode-server.ts`、`pi-run.ts` 中构造 MCP 参数与历史检索凭据的部分（W6 对应的修复）。其他部分可以改，冲突时以合并解决。
+**MCP 参数与凭据**：W6 对应的修复已推送；`src/main/providers/private-mcp-config.ts` 与各 Provider 构造 MCP 参数、历史检索凭据的代码，改动前先读该修复的提交说明，不要把密钥重新放回命令行参数。
