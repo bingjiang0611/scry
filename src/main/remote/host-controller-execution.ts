@@ -6,7 +6,7 @@ import { RemoteRunPolicy, GatedExecutor } from './remote-run-policy'
 import { readRemoteWorkspace } from './remote-workspace'
 import type { RemoteFileDownloads } from './remote-file-download'
 import type { RemoteInteractionBroker } from './remote-interaction-broker'
-import type { SessionLedger } from './session-ledger'
+import type { LedgerEvent, SessionLedger } from './session-ledger'
 import type { RunOutputLog } from './run-output-log'
 import type { PairingAuthority } from './pairing'
 import { ProviderOperationGate } from '../provider-operation-gate'
@@ -47,8 +47,15 @@ export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivit
 }
 
 /** A ledger event wakes parked watchers and names its run for the App event feed. */
-export function ledgerEventObserver(deps: Pick<HostControllerDependencies, 'onRunActivity'>, notify: () => void): (event: { runId: string }, intentSeq?: number) => void {
-  return (event, intentSeq) => { notify(); runActivity(deps, event.runId, { intentSeq: () => intentSeq }) }
+export function ledgerEventObserver(
+  deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent'>,
+  notify: () => void
+): (event: LedgerEvent, intentSeq?: number) => void {
+  return (event, intentSeq) => {
+    try { deps.onLedgerEvent?.(event) } catch { /* shadow observation must never fail a run */ }
+    notify()
+    runActivity(deps, event.runId, { intentSeq: () => intentSeq })
+  }
 }
 
 export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher } {

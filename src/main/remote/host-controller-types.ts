@@ -7,7 +7,7 @@ import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace
 import type { AgentForkLastTurn, AgentRestartLastTurn } from '../../shared/runtime-types'
 import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
 import { type PairingDependencies } from './pairing'
-import { type LedgerStore } from './session-ledger'
+import { type LedgerEvent, type LedgerStore } from './session-ledger'
 import { type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview, type RemoteHistoryVersion, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery } from './remote-gateway'
 import { type RunOutputStore } from './run-output-log'
 import { type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -165,6 +165,8 @@ export interface HostControllerDependencies {
   // run so only that run re-reads. Observation only; it never fails the run.
   // `intentSeq` is where the run's ledger evidence starts (E3).
   onRunActivity?(runId: string, intentSeq?: number): void
+  // Optional shadow observer invoked after each durable H1 ledger append (P4-1 fail-open).
+  onLedgerEvent?(event: LedgerEvent): void
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]
