@@ -91,6 +91,7 @@ export async function beginOpenTurn(
         captureId: capture.captureId,
         source: capture.source,
         task: capture.task,
+        ...(capture.client ? { client: capture.client } : {}),
         openedAt: capture.openedAt,
         ...(capture.diffExclude?.length ? { diffExclude: capture.diffExclude } : {}),
         ...(claim?.baselineAt ? { baselineAt: claim.baselineAt } : {})

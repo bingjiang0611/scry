@@ -18,6 +18,7 @@ import {
   type TurnEvidence,
   type TurnModelSegment
 } from '../../shared/turn-record.js'
+import type { DiffOmissionCode } from '../../shared/turn-record-contracts.js'
 
 function hash(text: string | Uint8Array): string {
   return `sha256:${createHash('sha256').update(text).digest('hex')}`
@@ -117,12 +118,22 @@ export function modelSegmentsFrom(events: TraceEvent[]): TurnModelSegment[] {
   return output
 }
 
+/** One code per cause the omission sentence already names, so a reader never parses that sentence. */
+function patchOmissionCode(reason: string): DiffOmissionCode {
+  if (reason === 'truncated') return 'patch_truncated'
+  if (reason === 'budget') return 'patch_budget'
+  if (reason === 'deadline') return 'patch_deadline'
+  if (reason === 'policy') return 'patch_policy'
+  if (reason === 'git_error') return 'patch_git_error'
+  return 'patch_unavailable'
+}
+
 /**
  * Name what policy omitted, from the record's own manifest: the untracked files that exceeded the
  * manifest limit keep their path and line counts, so the count and their directories stay provable
  * without reading any body. Bodies are the only thing this reason has to explain.
  */
-function policyOmissionReason(files: Array<{ path: string; change?: string }>): string {
+function policyOmissionReason(files: Array<{ path: string; change?: string }>): { reason: string; codes: DiffOmissionCode[] } {
   const untracked = files.filter((file) => file.change === 'added')
   const other = files.length - untracked.length
   const directories = new Map<string, number>()
@@ -136,13 +147,19 @@ function policyOmissionReason(files: Array<{ path: string; change?: string }>): 
     .slice(0, 5)
     .map(([dir, count]) => `${dir} (${count})`)
     .join(', ')
-  return [
-    untracked.length > 0
-      ? `${untracked.length} new untracked file(s) exceeded the manifest limit and keep only their path and line counts` +
-        (distribution ? `; directories: ${distribution}` : '')
-      : '',
-    other > 0 ? `${other} file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude` : ''
-  ].filter(Boolean).join('; ')
+  return {
+    reason: [
+      untracked.length > 0
+        ? `${untracked.length} new untracked file(s) exceeded the manifest limit and keep only their path and line counts` +
+          (distribution ? `; directories: ${distribution}` : '')
+        : '',
+      other > 0 ? `${other} file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude` : ''
+    ].filter(Boolean).join('; '),
+    codes: [
+      ...(untracked.length > 0 ? ['untracked_limit' as const] : []),
+      ...(other > 0 ? ['patch_policy' as const] : [])
+    ]
+  }
 }
 
 export function aggregateTurnEvidence(args: {
@@ -243,9 +260,8 @@ export function aggregateTurnEvidence(args: {
   // and a turn whose new untracked files exceeded the manifest limit. Both keep the file list.
   const policyOmitted = diffs.flatMap((diff) => diff.files.filter((file) =>
     file.patchStatus === 'unavailable' && file.patchReason === 'policy'))
-  const policyReason = policyOmitted.length === 0
-    ? undefined
-    : policyOmissionReason(policyOmitted)
+  const policy = policyOmitted.length === 0 ? undefined : policyOmissionReason(policyOmitted)
+  const policyReason = policy?.reason
   // 新建 worktree 拿不到可信基线时，记清楚是哪一种原因，不把「无法归因」退化成一句泛化文案。
   const worktreeBaselineReasons = new Set(diffs.flatMap((diff) => diff.baselineReason ? [diff.baselineReason] : []))
   const dangers = starts.flatMap((event) =>
@@ -411,7 +427,13 @@ export function aggregateTurnEvidence(args: {
                     : 'one or more repository snapshots were unavailable'
                   : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}` +
                     (policyReason ? `; ${policyReason}` : ''),
-                'exact'
+                'exact',
+                capturedDiffs.length < diffs.length
+                  ? ['snapshot_unavailable']
+                  : [
+                      ...[...incompletePatchReasons].map(patchOmissionCode),
+                      ...(policy?.codes ?? [])
+                    ]
               )
             : {
                 status: 'unavailable',

@@ -351,7 +351,31 @@ describe('aggregateTurnEvidence model, call and diff evidence', () => {
       status: 'partial',
       quality: 'exact',
       omissionReason: 'one or more file patches were omitted or truncated: policy; ' +
-        '1 file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude'
+        '1 file(s) excluded by capture.patchExcludeBasenames or capture.diffExclude',
+      // The same two causes as a code: a reader matches the code, never that sentence.
+      omissionCodes: ['patch_policy']
     })
+  })
+
+  it('新增未跟踪文件超过清单上限时，diff evidence 带 untracked_limit 码', () => {
+    const evidence = aggregateTurnEvidence({ events: [{
+      id: 'diff', ts: '2026-01-01T00:00:01.000Z', runId: 'r', kind: 'harness', stage: 'turn_diff',
+      turnDiff: {
+        version: 1,
+        status: 'captured',
+        files: [
+          { path: '/repo/new-a.ts', change: 'added', added: 3, deleted: 0, patchStatus: 'unavailable', patchReason: 'policy' },
+          { path: '/repo/new-b.ts', change: 'added', added: 4, deleted: 0, patchStatus: 'unavailable', patchReason: 'policy' },
+          { path: '/repo/.factorypath', added: 1, deleted: 1, patchStatus: 'unavailable', patchReason: 'policy' }
+        ],
+        beforeAt: '2026-01-01T00:00:00.000Z',
+        afterAt: '2026-01-01T00:00:01.000Z',
+        captureMs: 1,
+        cleanup: 'ok'
+      }
+    }] })
+
+    expect(evidence.diff.status).toBe('partial')
+    expect(evidence.diff.omissionCodes).toEqual(['patch_policy', 'untracked_limit'])
   })
 })
