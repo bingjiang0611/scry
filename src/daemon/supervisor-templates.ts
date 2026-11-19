@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { daemonLogPath } from './daemon-log'
+import { isLoginStartPolicyEnvKey } from './login-start/policy-env'
 
 // Login service definitions for the background service (P5 §2.1): a launchd LaunchAgent
 // and a systemd --user unit. Rendered only; nothing here installs or loads them.
@@ -38,11 +39,16 @@ export interface ServiceTemplateInput {
   appPath: string
   resourcesPath: string
   isPackaged: boolean
+  /** Validated non-secret policy env snapshot (P5 §2.2). */
+  policyEnv?: ReadonlyArray<readonly [string, string]>
+  /** LaunchAgent label override (test instances only; defaults to LAUNCHD_LABEL). */
+  label?: string
 }
 
 // A newline would end a systemd line early or split an XML string; neither format can
 // carry other control characters faithfully. Spaces and non-ASCII text are fine.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+const SAFE_LABEL = /^[A-Za-z0-9._-]+$/
 
 function fixedEnvironment(input: ServiceTemplateInput): Array<[string, string]> {
   const values: Array<[string, string]> = [
@@ -55,6 +61,13 @@ function fixedEnvironment(input: ServiceTemplateInput): Array<[string, string]> 
     ['SCRY_DAEMON_PACKAGED', input.isPackaged ? '1' : '0'],
     ['SCRY_DAEMON_LAUNCHED_BY', 'service']
   ]
+  if (input.policyEnv) {
+    for (const [key, value] of input.policyEnv) {
+      if (!isLoginStartPolicyEnvKey(key)) throw new Error('login_start_policy_key_unsupported')
+      if (CONTROL.test(value)) throw new Error('login_start_path_unsupported')
+      values.push([key, value])
+    }
+  }
   for (const value of [input.executable, input.supervisorEntry, ...values.map(([, value]) => value)]) {
     if (CONTROL.test(value)) throw new Error('login_start_path_unsupported')
   }
@@ -79,6 +92,8 @@ function systemdOutputPath(value: string): string {
 }
 
 export function renderLaunchdPlist(input: ServiceTemplateInput): string {
+  const label = input.label ?? LAUNCHD_LABEL
+  if (!SAFE_LABEL.test(label)) throw new Error('login_start_path_unsupported')
   const environment = [
     ...fixedEnvironment(input),
     ...LAUNCHD_CLEARED_ENV.map((key): [string, string] => [key, ''])
@@ -89,7 +104,7 @@ export function renderLaunchdPlist(input: ServiceTemplateInput): string {
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
     '<plist version="1.0">',
     '<dict>',
-    `  <key>Label</key><string>${LAUNCHD_LABEL}</string>`,
+    `  <key>Label</key><string>${label}</string>`,
     `  <key>ProgramArguments</key><array><string>${xml(input.executable)}</string><string>${xml(input.supervisorEntry)}</string></array>`,
     '  <key>EnvironmentVariables</key>',
     '  <dict>',

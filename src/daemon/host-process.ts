@@ -346,6 +346,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir,
       appVersion: options.appVersion,
+      isPackaged: options.isPackaged,
       sourceControl,
       providerDiscovery
     }),

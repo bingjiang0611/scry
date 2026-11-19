@@ -7,6 +7,7 @@ import { electronDependents } from '../host-runtime/value-import-graph'
 // throw at startup. Nothing here may import it, transitively or otherwise.
 const ENTRY = resolve(__dirname, 'main.ts')
 const SUPERVISOR_ENTRY = resolve(__dirname, 'supervisor-main.ts')
+const LOGIN_START_ENTRY = resolve(__dirname, 'login-start/manager.ts')
 const MAIN_ENTRY = resolve(__dirname, '../main/index.ts')
 // The daemon reuses main's history readers; they must stay usable without Electron,
 // which is only true while their userData directory is a parameter.
@@ -21,6 +22,12 @@ describe('daemon entry has no Electron dependency', () => {
 
   it('keeps the supervisor on the same plain-Node boundary', () => {
     const { files, electron } = electronDependents(SUPERVISOR_ENTRY)
+    expect(files).toBeGreaterThan(1)
+    expect(electron).toEqual([])
+  })
+
+  it('keeps the login-start module free of Electron (shared by main and scry-host)', () => {
+    const { files, electron } = electronDependents(LOGIN_START_ENTRY)
     expect(files).toBeGreaterThan(1)
     expect(electron).toEqual([])
   })
