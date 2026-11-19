@@ -125,6 +125,26 @@ describe('P4-0 pure orchestrator decide()', () => {
       expiresAt: 1_700_000_060_000,
       leaseOwner: null
     })
+
+    // decide() itself clamps pendingTtlMs strictly to <= 60 s even if a caller passes a larger value
+    const oversized = submitCmd({
+      commandId: 'cmd-oversized-ttl',
+      payload: {
+        runId: 'remote-run-2b',
+        sessionKey: 'session-1',
+        provider: 'claude',
+        profile: 'default',
+        cwd: '/tmp/ws',
+        promptPreview: 'queued',
+        claimMode: 'queued',
+        pendingTtlMs: 3_600_000
+      }
+    })
+    const clamped = decide(oversized, makeView())
+    expect(clamped.kind).toBe('accepted')
+    if (clamped.kind === 'accepted') {
+      expect(clamped.effects[0].expiresAt).toBe(1_700_000_060_000)
+    }
   })
 
   it('replays identical receipt for same commandId + same payload, and sticky-rejects payload conflict', () => {

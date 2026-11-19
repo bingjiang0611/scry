@@ -7,6 +7,8 @@ import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { openOrchestrationDatabase } from '../host-runtime/orchestration/db'
 import { ORCHESTRATION_SCHEMA_VERSION } from '../host-runtime/orchestration/schema'
+import { SessionLedger } from '../main/remote/session-ledger'
+import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
 
@@ -305,6 +307,151 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
         expect(new Set(intents.map((e) => e.runId)).size).toBe(3)
         expect(shadow.mirror.stats().deviations).toBe(0)
         expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+      } finally {
+        await host.dispose()
+      }
+    })
+  })
+
+  it('trips failedOpen when startup legacy import hits a commit failure while keeping live runs working', async () => {
+    const root = tempDir()
+    const userDataDir = join(root, 'userData')
+    const daemonStateDirectory = join(userDataDir, 'daemon')
+    const workspace = join(root, 'ws-import-fence')
+    mkdirSync(workspace, { recursive: true, mode: 0o700 })
+    const canonicalWs = realpathSync(workspace)
+    createRecentFoldersStore(userDataDir).push(canonicalWs)
+
+    const ledgerDir = join(userDataDir, 'remote', 'ledger')
+    mkdirSync(ledgerDir, { recursive: true, mode: 0o700 })
+    const seedStore = new SessionLedgerFileStore(ledgerDir)
+    try {
+      const ledger = new SessionLedger({ store: seedStore })
+      const runId = randomUUID()
+      ledger.recordIntent({
+        intentId: randomUUID(),
+        runId,
+        detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: 'pre-existing' })
+      })
+      ledger.markDispatched(runId)
+      ledger.markSettled(runId)
+    } finally {
+      seedStore.close()
+    }
+
+    await withSmokeEnv('shadow', async () => {
+      const host = await createDaemonHostProcess({
+        userDataDir,
+        daemonStateDirectory,
+        appPath: process.cwd(),
+        resourcesPath: join(process.cwd(), 'resources'),
+        appVersion: 'test',
+        isPackaged: false,
+        createOutputStore: () => new MemoryOutputStore(),
+        log: () => undefined,
+        orchestrationShadowBeforeCommitHook: () => {
+          throw Object.assign(new Error('SQLITE_IOERR_WRITE'), { code: 'SQLITE_IOERR_WRITE' })
+        }
+      })
+      try {
+        expect(host.orchestrationShadow).toBeDefined()
+        expect(host.orchestrationShadow!.mirror.stats().failedOpen).toBe(true)
+        expect(host.orchestrationShadow!.mirror.stats().failures).toBeGreaterThanOrEqual(1)
+
+        const device = await enrollLocal(host.service)
+        const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'submit',
+          intentId: randomUUID(),
+          detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: 'live after import fence' })
+        })
+        expect(sub.error).toBeUndefined()
+        expect(
+          await waitRunTerminal(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, sub.runId)
+        ).toBe('settled')
+      } finally {
+        await host.dispose()
+      }
+    })
+  })
+
+  it('defers >2,000 historical terminal runs until after openLocalChannel while keeping orphan recovery exact', async () => {
+    const root = tempDir()
+    const userDataDir = join(root, 'userData')
+    const daemonStateDirectory = join(userDataDir, 'daemon')
+    const workspace = join(root, 'ws-deferred-import')
+    mkdirSync(workspace, { recursive: true, mode: 0o700 })
+    const canonicalWs = realpathSync(workspace)
+    createRecentFoldersStore(userDataDir).push(canonicalWs)
+
+    const ledgerDir = join(userDataDir, 'remote', 'ledger')
+    mkdirSync(ledgerDir, { recursive: true, mode: 0o700 })
+    const t0 = 1_700_000_000_000
+    const lines: string[] = []
+    let seq = 0
+    for (let i = 0; i < 2_050; i += 1) {
+      const rId = randomUUID()
+      lines.push(
+        JSON.stringify({
+          seq: ++seq,
+          at: t0 + i * 10,
+          runId: rId,
+          kind: 'intent_recorded',
+          intentId: randomUUID(),
+          detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: `hist ${i}` })
+        }),
+        JSON.stringify({ seq: ++seq, at: t0 + i * 10 + 1, runId: rId, kind: 'run_dispatched' }),
+        JSON.stringify({ seq: ++seq, at: t0 + i * 10 + 2, runId: rId, kind: 'run_settled' })
+      )
+    }
+    const orphanId = randomUUID()
+    lines.push(
+      JSON.stringify({
+        seq: ++seq,
+        at: t0 + 50_000,
+        runId: orphanId,
+        kind: 'intent_recorded',
+        intentId: randomUUID(),
+        detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: 'orphan open run' })
+      }),
+      JSON.stringify({ seq: ++seq, at: t0 + 50_001, runId: orphanId, kind: 'run_dispatched' })
+    )
+    writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
+
+    const logs: string[] = []
+    await withSmokeEnv('shadow', async () => {
+      const host = await createDaemonHostProcess({
+        userDataDir,
+        daemonStateDirectory,
+        appPath: process.cwd(),
+        resourcesPath: join(process.cwd(), 'resources'),
+        appVersion: 'test',
+        isPackaged: false,
+        createOutputStore: () => new MemoryOutputStore(),
+        log: (line) => logs.push(line)
+      })
+      try {
+        expect(logs.some((l) => l.includes('daemon.orchestration-shadow-deferred-import'))).toBe(true)
+        const shadow = host.orchestrationShadow!
+        // Orphan open run was already imported synchronously before service.start() and settled as failed
+        expect(shadow.mirror.sink!.getRun(orphanId)?.lifecycle).toBe('failed')
+
+        // Live run can execute immediately while deferred backfill yields in background
+        const device = await enrollLocal(host.service)
+        const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'submit',
+          intentId: randomUUID(),
+          detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: 'live during backfill' })
+        })
+        expect(sub.error).toBeUndefined()
+        expect(
+          await waitRunTerminal(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, sub.runId)
+        ).toBe('settled')
+
+        await shadow.importComplete
+        expect(shadow.mirror.sink!.getRun(sub.runId)?.lifecycle).toBe('settled')
+        expect(shadow.mirror.stats().deviations).toBe(0)
+        const totalRuns = (shadow.mirror.sink!.handle.db.prepare('SELECT COUNT(*) AS c FROM orch_p_run').get() as { c: number }).c
+        expect(totalRuns).toBe(2_052)
       } finally {
         await host.dispose()
       }

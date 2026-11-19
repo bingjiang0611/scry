@@ -63,6 +63,8 @@ export interface ConversationTerminal {
 
 export interface ManagedConversationStart {
   conversationId: string
+  /** Authoritative turn ordinal allocated by ConversationStore (carried to ledger routing & shadow). */
+  ordinal?: number
   /** Attention owner when it is not this conversation (a side chat's source row). */
   attentionKey?: string
   runId: string

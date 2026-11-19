@@ -104,17 +104,8 @@ import { listSessions, listSessionsPage, type RemoteGatewaySessionContext } from
 //
 // This module is pure and NOT wired into live IPC/network/RunRegistry yet.
 
-
-
-
-
-
-
-
-
-
-
 const HASH = /^[0-9a-f]{64}$/
+const MAX_TRACKED_RUN_META = 4096
 
 export function scopedIntentId(peerCertSHA256: string, intentId: string): string {
   const hex = createHash('sha256').update(`${peerCertSHA256}\0${intentId}`).digest('hex').slice(0, 32)
@@ -192,10 +183,8 @@ export class RemoteGateway {
     this.#authorize(peerCertSHA256)
     const candidateRunId = SessionLedger.newRunId()
     const scope = this.grantScope(peerCertSHA256)
-    // Register peer & scope before recordIntent so synchronous ledger observers (P4-1 shadow)
-    // record the exact peer:<sha256> actor and grant scope without waiting for a second lookup.
-    this.#runPeers.set(candidateRunId, peerCertSHA256)
-    this.#runScopes.set(candidateRunId, scope)
+    // Register peer & scope before recordIntent for synchronous shadow observers.
+    this.#rememberRunMeta(candidateRunId, peerCertSHA256, scope)
     // Arrival, before anything durable: the segment to `intentDurable` is the ledger's
     // own cost, not the caller's.
     recordRunStage(candidateRunId, 'submit')
@@ -222,9 +211,21 @@ export class RemoteGateway {
     // `recordIntent` appends and fsyncs synchronously, so its return is the durable
     // boundary: the segment from `submit` is the ledger's own price.
     recordRunStage(receipt.event.runId, 'intentDurable')
-    this.#runPeers.set(receipt.event.runId, peerCertSHA256)
-    this.#runScopes.set(receipt.event.runId, scope)
+    this.#rememberRunMeta(receipt.event.runId, peerCertSHA256, scope)
     return { runId: receipt.event.runId, status: receipt.status, seq: receipt.event.seq }
+  }
+
+  #rememberRunMeta(runId: string, peerCertSHA256: string, scope: 'local' | 'remote'): void {
+    this.#runPeers.delete(runId)
+    this.#runPeers.set(runId, peerCertSHA256)
+    this.#runScopes.delete(runId)
+    this.#runScopes.set(runId, scope)
+    while (this.#runPeers.size > MAX_TRACKED_RUN_META) {
+      const oldest = this.#runPeers.keys().next().value
+      if (oldest === undefined) break
+      this.#runPeers.delete(oldest)
+      this.#runScopes.delete(oldest)
+    }
   }
 
   /** The verified grant's scope; unknown becomes the stricter device semantics. */
@@ -266,8 +267,7 @@ export class RemoteGateway {
     const found = this.#ledger.intentRun(intentId)
     if (found) return { runId: found.runId, state: found.lifecycle }
     const tombstoneRunId = SessionLedger.newRunId()
-    this.#runPeers.set(tombstoneRunId, peerCertSHA256)
-    this.#runScopes.set(tombstoneRunId, this.grantScope(peerCertSHA256))
+    this.#rememberRunMeta(tombstoneRunId, peerCertSHA256, this.grantScope(peerCertSHA256))
     const receipt = this.#ledger.recordIntent({ intentId, runId: tombstoneRunId })
     this.#ledger.markCancelled(receipt.event.runId)
     return { runId: receipt.event.runId, state: 'cancelled' }

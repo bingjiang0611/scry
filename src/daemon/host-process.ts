@@ -359,6 +359,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
   })
+  orchestrationShadow?.startImport()
   // Enrollment bootstraps the App's grant before it owns any certificate. The secret
   // exists only while no local grant is live and is consumed by a single enrollment.
   const enrollment = openLocalEnrollmentStore(options.daemonStateDirectory)

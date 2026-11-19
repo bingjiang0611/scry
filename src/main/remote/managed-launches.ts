@@ -10,6 +10,8 @@ import type { AgentStartRequest } from '../../shared/runtime'
 export interface ConversationRunMarker {
   conversationId: string
   runId: string
+  /** Authoritative turn ordinal from ConversationStore when available. */
+  ordinal?: number
 }
 
 // Generic over the launch payload (the daemon's ManagedConversationStart), so the ledger
@@ -34,12 +36,19 @@ export function conversationIntentId(runId: string): string {
 
 /** Routing the ledger keeps for this run. Attachments stay with the launch. */
 export function conversationRoutingDetail(request: AgentStartRequest, managed: ConversationRunMarker): string {
+  const conversation: ConversationRunMarker = {
+    conversationId: managed.conversationId,
+    runId: managed.runId,
+    ...(typeof managed.ordinal === 'number' && Number.isSafeInteger(managed.ordinal) && managed.ordinal >= 1
+      ? { ordinal: managed.ordinal }
+      : {})
+  }
   return JSON.stringify({
     ...(request.cwd ? { cwd: request.cwd } : {}),
     providerId: request.providerId,
     ...(request.agentProfileId ? { agentProfileId: request.agentProfileId } : {}),
     ...(request.prompt ? { prompt: request.prompt } : {}),
-    conversation: { conversationId: managed.conversationId, runId: managed.runId } satisfies ConversationRunMarker
+    conversation
   })
 }
 

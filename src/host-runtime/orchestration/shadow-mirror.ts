@@ -1,105 +1,33 @@
-import type { Conversation, ConversationDelivery } from '../../shared/conversation'
 import type { LedgerEvent } from '../../main/remote/session-ledger'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { EventSink, type EventSinkOptions } from './event-sink'
 import type { OrchestrationCommand } from './orchestrator-commands'
-import { INLINE_BODY_MAX_BYTES, PROMPT_PREVIEW_MAX_CHARS, USER_TEXT_PREVIEW_MAX_CHARS } from './types'
+import {
+  buildProgressMarkerCommand,
+  parseLedgerIntentRouting,
+  type ConversationTurnSettledInfo,
+  type ShadowCommitSample,
+  type ShadowMirrorStats
+} from './shadow-routing'
+import { INLINE_BODY_MAX_BYTES } from './types'
 
-export interface ShadowCommitSample {
-  runId: string
-  ledgerRunId: string
-  commitKind: string
-  durationMs: number
-  preFirstToken: boolean
-}
+export {
+  parseLedgerIntentRouting,
+  type ConversationTurnSettledInfo,
+  type ParsedIntentRouting,
+  type ShadowCommitSample,
+  type ShadowMirrorStats
+} from './shadow-routing'
 
 export interface ShadowMirrorOptions extends EventSinkOptions {
   leaseOwner?: string
   clock?: () => number
   /** Optional resolver returning the submitting peer cert SHA-256 and grant scope for a ledger run. */
   resolveRunMeta?: (ledgerRunId: string) => { peerCertSHA256?: string; grantScope?: 'local' | 'remote' } | undefined
+  /** Optional fallback resolver returning authoritative H3 ordinal if a legacy routing detail omitted it. */
+  resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
   onCommitTiming?: (sample: ShadowCommitSample) => void
   onError?: (error: unknown) => void
-}
-
-export interface ShadowMirrorStats {
-  acceptedCommits: number
-  /** Alias for acceptedCommits (only accepted commits, never rejected no-ops). */
-  commits: number
-  duplicates: number
-  rejectedSticky: number
-  rejectedRetryable: number
-  failures: number
-  /** Total shadow parity anomalies: sticky rejections + retryable rejections + failures. */
-  deviations: number
-  failedOpen: boolean
-  preFirstTokenCommitsByRun: ReadonlyMap<string, number>
-  preFirstTokenDurationMsByRun: ReadonlyMap<string, number>
-}
-
-export interface ConversationTurnSettledInfo {
-  conversationId: string
-  runId: string
-  conversation: Conversation
-  delivery: Exclude<ConversationDelivery, { status: 'pending' }>
-}
-
-export interface ParsedIntentRouting {
-  provider: string
-  profile: string | null
-  cwd: string
-  promptPreview?: string
-  userTextPreview?: string
-  sessionKey: string | null
-  canonicalRunId: string
-  isConversationRun: boolean
-  ordinal?: number
-}
-
-export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | undefined): ParsedIntentRouting {
-  let provider = 'unknown'
-  let profile: string | null = null
-  let cwd = ''
-  let promptPreview: string | undefined
-  let userTextPreview: string | undefined
-  let sessionKey: string | null = null
-  let canonicalRunId = ledgerRunId
-  let isConversationRun = false
-  let ordinal: number | undefined
-
-  if (detail) {
-    try {
-      const parsed = JSON.parse(detail) as Record<string, unknown>
-      if (typeof parsed.providerId === 'string' && parsed.providerId.length > 0) provider = parsed.providerId
-      else if (typeof parsed.provider === 'string' && parsed.provider.length > 0) provider = parsed.provider
-      if (typeof parsed.agentProfileId === 'string') profile = parsed.agentProfileId
-      else if (typeof parsed.profile === 'string') profile = parsed.profile
-      if (typeof parsed.cwd === 'string') cwd = parsed.cwd
-      if (typeof parsed.prompt === 'string') {
-        promptPreview = parsed.prompt.slice(0, PROMPT_PREVIEW_MAX_CHARS)
-        userTextPreview = parsed.prompt.slice(0, USER_TEXT_PREVIEW_MAX_CHARS)
-      }
-      const conv = parsed.conversation as { conversationId?: unknown; runId?: unknown; ordinal?: unknown } | undefined
-      if (conv && typeof conv === 'object') {
-        if (typeof conv.conversationId === 'string' && conv.conversationId.length > 0) {
-          sessionKey = conv.conversationId
-          isConversationRun = true
-        }
-        if (typeof conv.runId === 'string' && conv.runId.length > 0) {
-          canonicalRunId = conv.runId
-        }
-        if (typeof conv.ordinal === 'number' && Number.isSafeInteger(conv.ordinal) && conv.ordinal >= 1) {
-          ordinal = conv.ordinal
-        }
-      } else if (typeof parsed.resume === 'string' && parsed.resume.length > 0) {
-        sessionKey = parsed.resume
-      }
-    } catch {
-      // Malformed routing detail is still recorded with defaults so shadow parity never throws.
-    }
-  }
-
-  return { provider, profile, cwd, promptPreview, userTextPreview, sessionKey, canonicalRunId, isConversationRun, ordinal }
 }
 
 const PEER_SHA_RE = /^[0-9a-f]{64}$/
@@ -114,6 +42,7 @@ export class ShadowMirror {
   readonly #leaseOwner: string
   readonly #clock: () => number
   readonly #resolveRunMeta?: ShadowMirrorOptions['resolveRunMeta']
+  readonly #resolveTurnOrdinal?: ShadowMirrorOptions['resolveTurnOrdinal']
   readonly #onCommitTiming?: (sample: ShadowCommitSample) => void
   readonly #onError?: (error: unknown) => void
   readonly #ledgerToCanonical = new Map<string, string>()
@@ -123,14 +52,19 @@ export class ShadowMirror {
   #duplicates = 0
   #rejectedSticky = 0
   #rejectedRetryable = 0
+  #ordinalMismatches = 0
+  #importRejections = 0
   #failures = 0
   #failedOpen = false
+  #deferringLegacyWatermark = false
+  #maxDeferredSeq = 0
 
   private constructor(sink: EventSink | null, options: ShadowMirrorOptions) {
     this.sink = sink
     this.#leaseOwner = options.leaseOwner ?? `daemon:${process.pid}`
     this.#clock = options.clock ?? (() => Date.now())
     this.#resolveRunMeta = options.resolveRunMeta
+    this.#resolveTurnOrdinal = options.resolveTurnOrdinal
     this.#onCommitTiming = options.onCommitTiming
     this.#onError = options.onError
     if (!sink) {
@@ -159,8 +93,15 @@ export class ShadowMirror {
       duplicates: this.#duplicates,
       rejectedSticky: this.#rejectedSticky,
       rejectedRetryable: this.#rejectedRetryable,
+      ordinalMismatches: this.#ordinalMismatches,
+      importRejections: this.#importRejections,
       failures: this.#failures,
-      deviations: this.#rejectedSticky + this.#rejectedRetryable + this.#failures,
+      deviations:
+        this.#rejectedSticky +
+        this.#rejectedRetryable +
+        this.#ordinalMismatches +
+        this.#importRejections +
+        this.#failures,
       failedOpen: this.#failedOpen,
       preFirstTokenCommitsByRun: this.#preFirstTokenCommits,
       preFirstTokenDurationMsByRun: this.#preFirstTokenMs
@@ -170,6 +111,27 @@ export class ShadowMirror {
   /** Marks shadow as failed-open (e.g. when startup import trips the sink fence). */
   markFailedOpen(error: unknown): void {
     this.failOpen(error)
+  }
+
+  /** Records rejections observed during incremental startup import so deviations stay honest. */
+  recordImportRejections(count: number): void {
+    if (count > 0) this.#importRejections += count
+  }
+
+  /**
+   * Pauses advancing `legacy_ledger_seq` on live writes while deferred historical import runs
+   * after `openLocalChannel`, then flushes the highest seen live seq once backfill finishes.
+   */
+  setDeferringLegacyWatermark(defer: boolean, flushThroughSeq?: number): void {
+    this.#deferringLegacyWatermark = defer
+    if (!defer && this.sink && !this.#failedOpen && !this.sink.isWriteIndeterminate()) {
+      const target = Math.max(this.#maxDeferredSeq, flushThroughSeq ?? 0)
+      if (target > 0) {
+        const current = Number(this.sink.getMeta('legacy_ledger_seq') ?? '0')
+        if (target > current) this.sink.setMeta('legacy_ledger_seq', String(target))
+      }
+      this.#maxDeferredSeq = 0
+    }
   }
 
   resolveCanonicalRunId(ledgerRunId: string): string {
@@ -200,6 +162,8 @@ export class ShadowMirror {
       ledgerRunId: string
       commitKind: string
       preFirstToken: boolean
+      hookStarted: number
+      bodyBytes?: number
       legacyLedgerSeq?: number
       legacyRunMapping?: { ledgerRunId: string; runId: string }
     }
@@ -209,14 +173,24 @@ export class ShadowMirror {
       this.failOpen(new Error('orchestration_write_indeterminate'))
       return
     }
-    const started = performance.now()
+    let effectiveSeq = meta.legacyLedgerSeq
+    if (this.#deferringLegacyWatermark && effectiveSeq !== undefined) {
+      this.#maxDeferredSeq = Math.max(this.#maxDeferredSeq, effectiveSeq)
+      effectiveSeq = undefined
+    }
+    const sinkStarted = performance.now()
     const result = this.sink.execute(cmd, {
-      ...(meta.legacyLedgerSeq !== undefined ? { legacyLedgerSeq: meta.legacyLedgerSeq } : {}),
+      ...(effectiveSeq !== undefined ? { legacyLedgerSeq: effectiveSeq } : {}),
       ...(meta.legacyRunMapping ? { legacyRunMapping: meta.legacyRunMapping } : {})
     })
-    const durationMs = Number((performance.now() - started).toFixed(3))
+    const ended = performance.now()
+    const sinkDurationMs = Number((ended - sinkStarted).toFixed(3))
+    const durationMs = Number((ended - meta.hookStarted).toFixed(3))
 
-    if (this.sink.isWriteIndeterminate() || (result.kind === 'rejected' && result.reason === 'orchestration_write_indeterminate')) {
+    if (
+      this.sink.isWriteIndeterminate() ||
+      (result.kind === 'rejected' && result.reason === 'orchestration_write_indeterminate')
+    ) {
       this.failOpen(new Error('orchestration_write_indeterminate'))
       return
     }
@@ -233,6 +207,7 @@ export class ShadowMirror {
     }
 
     // Only accepted commits enter commit counts and timing samples (B2).
+    // durationMs covers the entire shadow hook (parse, ordinal, body fsync, hash, EventSink).
     this.#acceptedCommits += 1
     if (meta.preFirstToken) {
       this.#preFirstTokenCommits.set(meta.runId, (this.#preFirstTokenCommits.get(meta.runId) ?? 0) + 1)
@@ -246,7 +221,9 @@ export class ShadowMirror {
       ledgerRunId: meta.ledgerRunId,
       commitKind: meta.commitKind,
       durationMs,
-      preFirstToken: meta.preFirstToken
+      sinkDurationMs,
+      preFirstToken: meta.preFirstToken,
+      ...(meta.bodyBytes !== undefined ? { bodyBytes: meta.bodyBytes } : {})
     })
   }
 
@@ -256,6 +233,7 @@ export class ShadowMirror {
     meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote' }
   ): void {
     if (!this.sink || this.#failedOpen) return
+    const hookStarted = performance.now()
     try {
       if (event.kind === 'intent_recorded') {
         const routing = parseLedgerIntentRouting(event.runId, event.detail)
@@ -269,10 +247,13 @@ export class ShadowMirror {
         if (peerActor.startsWith('peer:')) this.sink.authorizeActor(peerActor)
         const scope: 'local' | 'remote' = runMeta?.grantScope === 'local' ? 'local' : 'remote'
         const ordinal = routing.sessionKey
-          ? (routing.ordinal ?? this.sink.getNextTurnOrdinal(routing.sessionKey))
+          ? (routing.ordinal ??
+            this.#resolveTurnOrdinal?.(routing.sessionKey, routing.canonicalRunId) ??
+            this.sink.getNextTurnOrdinal(routing.sessionKey))
           : undefined
+        const detailBytes = event.detail ? Buffer.byteLength(event.detail, 'utf8') : 0
         const body =
-          event.detail && Buffer.byteLength(event.detail, 'utf8') > INLINE_BODY_MAX_BYTES
+          event.detail && detailBytes > INLINE_BODY_MAX_BYTES
             ? this.sink.bodyStore.prepareBody(event.detail)
             : undefined
         const payload = {
@@ -306,6 +287,8 @@ export class ShadowMirror {
             ledgerRunId: event.runId,
             commitKind: 'intent_recorded',
             preFirstToken: true,
+            hookStarted,
+            bodyBytes: detailBytes,
             legacyLedgerSeq: event.seq,
             legacyRunMapping: { ledgerRunId: event.runId, runId: routing.canonicalRunId }
           }
@@ -331,6 +314,7 @@ export class ShadowMirror {
             ledgerRunId: event.runId,
             commitKind: 'admitted_and_dispatched',
             preFirstToken: true,
+            hookStarted,
             legacyLedgerSeq: event.seq
           }
         )
@@ -338,7 +322,7 @@ export class ShadowMirror {
       }
 
       if (event.kind === 'run_progress') {
-        this.handleProgressMarker(event, runId)
+        this.handleProgressMarker(event, runId, hookStarted)
         return
       }
 
@@ -371,6 +355,7 @@ export class ShadowMirror {
           ledgerRunId: event.runId,
           commitKind: step,
           preFirstToken: false,
+          hookStarted,
           legacyLedgerSeq: event.seq
         }
       )
@@ -379,130 +364,48 @@ export class ShadowMirror {
     }
   }
 
-  private handleProgressMarker(event: LedgerEvent, runId: string): void {
-    if (!event.detail) return
-    let marker: Record<string, unknown>
-    try {
-      marker = JSON.parse(event.detail) as Record<string, unknown>
-    } catch {
-      return
-    }
-    const kind = marker.event
-    if (kind === 'session' && typeof marker.externalSessionId === 'string') {
-      const payload = { runId, step: 'session_bound' as const, nativeSessionId: marker.externalSessionId }
-      this.executeTimed(
-        {
-          type: 'run.effect_result',
-          commandId: `effect:h1-${event.runId}:session:${event.seq}`,
-          actor: `effect:h1-${event.runId}`,
-          scope: 'system',
-          at: event.at,
-          payload,
-          payloadSha256: sha256Hex(canonicalJson(payload))
-        },
-        {
-          runId,
-          ledgerRunId: event.runId,
-          commitKind: 'session_bound',
-          preFirstToken: false,
-          legacyLedgerSeq: event.seq
-        }
-      )
-      return
-    }
-    if (kind === 'question_opened' && typeof marker.questionId === 'string') {
-      const payload = {
-        runId,
-        step: 'question_opened' as const,
-        questionId: marker.questionId,
-        questionKind: typeof marker.kind === 'string' ? marker.kind : 'clarification',
-        questionSource: typeof marker.source === 'string' ? marker.source : 'unknown'
-      }
-      this.executeTimed(
-        {
-          type: 'run.effect_result',
-          commandId: `effect:h1-${event.runId}:qopen:${marker.questionId}:${event.seq}`,
-          actor: `effect:h1-${event.runId}`,
-          scope: 'system',
-          at: event.at,
-          payload,
-          payloadSha256: sha256Hex(canonicalJson(payload))
-        },
-        {
-          runId,
-          ledgerRunId: event.runId,
-          commitKind: 'question_opened',
-          preFirstToken: false,
-          legacyLedgerSeq: event.seq
-        }
-      )
-      return
-    }
-    if (kind === 'question_answered' && typeof marker.questionId === 'string') {
-      const answerId = typeof marker.answerId === 'string' ? marker.answerId : `ans-${event.seq}`
-      const payload = {
-        runId,
-        questionId: marker.questionId,
-        answerId,
-        answerSha256: sha256Hex(answerId)
-      }
-      this.executeTimed(
-        {
-          type: 'question.answer',
-          commandId: `effect:h1-${event.runId}:qans:${marker.questionId}:${event.seq}`,
-          actor: 'system',
-          scope: 'system',
-          at: event.at,
-          payload,
-          payloadSha256: sha256Hex(canonicalJson(payload))
-        },
-        {
-          runId,
-          ledgerRunId: event.runId,
-          commitKind: 'question_answered',
-          preFirstToken: false,
-          legacyLedgerSeq: event.seq
-        }
-      )
-      return
-    }
-    if (kind === 'question_closed' && typeof marker.questionId === 'string') {
-      const payload = {
-        runId,
-        step: 'question_closed' as const,
-        questionId: marker.questionId,
-        reason: typeof marker.resolution === 'string' ? marker.resolution : 'closed'
-      }
-      this.executeTimed(
-        {
-          type: 'run.effect_result',
-          commandId: `effect:h1-${event.runId}:qclose:${marker.questionId}:${event.seq}`,
-          actor: `effect:h1-${event.runId}`,
-          scope: 'system',
-          at: event.at,
-          payload,
-          payloadSha256: sha256Hex(canonicalJson(payload))
-        },
-        {
-          runId,
-          ledgerRunId: event.runId,
-          commitKind: 'question_closed',
-          preFirstToken: false,
-          legacyLedgerSeq: event.seq
-        }
-      )
-    }
+  private handleProgressMarker(event: LedgerEvent, runId: string, hookStarted: number): void {
+    const built = buildProgressMarkerCommand(event, runId)
+    if (!built) return
+    if (built.authorizePeer) this.sink!.authorizeActor(built.authorizePeer)
+    this.executeTimed(built.command, {
+      runId,
+      ledgerRunId: event.runId,
+      commitKind: built.commitKind,
+      preFirstToken: false,
+      hookStarted,
+      legacyLedgerSeq: event.seq
+    })
   }
 
   /**
-   * H3 `ConversationStore.settle` shadow hook (B3): commits a `turn.record_delivery` command
-   * through `EventSink.execute(...)` so events and projections stay atomic and replay-consistent.
+   * H3 `ConversationStore.settle` shadow hook (B1 + B3): compares H3's authoritative ordinal
+   * against the shadow turn's ordinal (counting any mismatch as a deviation without fencing),
+   * and commits `turn.record_delivery` through `EventSink.execute(...)`.
    */
   onConversationTurnSettled(info: ConversationTurnSettledInfo): void {
     if (!this.sink || this.#failedOpen) return
+    const hookStarted = performance.now()
     try {
       const turn = info.conversation.turns.find((candidate) => candidate.runId === info.runId)
       if (!turn) return
+      if (this.sink.isWriteIndeterminate()) {
+        this.failOpen(new Error('orchestration_write_indeterminate'))
+        return
+      }
+      const existingTurn = this.sink.getTurnByRunId(info.runId)
+      if (existingTurn && existingTurn.ordinal !== turn.ordinal) {
+        this.#ordinalMismatches += 1
+        return
+      }
+      if (!existingTurn) {
+        const occupant = this.sink.getTurn(info.conversationId, turn.ordinal)
+        if (occupant && occupant.runId !== info.runId) {
+          this.#ordinalMismatches += 1
+          return
+        }
+      }
+
       const at = this.#clock()
       const delivery = info.delivery.status
       const outcome =
@@ -544,7 +447,8 @@ export class ShadowMirror {
           runId: info.runId,
           ledgerRunId: info.runId,
           commitKind: 'turn_settled',
-          preFirstToken: false
+          preFirstToken: false,
+          hookStarted
         }
       )
     } catch (error) {

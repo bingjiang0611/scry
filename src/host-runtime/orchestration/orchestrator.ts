@@ -143,12 +143,13 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           : {})
       }
       const isImmediate = p.claimMode === 'immediate'
+      const boundedPendingTtlMs = Math.min(Math.max(1, p.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS), DEFAULT_PENDING_TTL_MS)
       const effect = makeEffect(cmd, 0, {
         kind: 'provider.run.start',
         runId: p.runId,
         payload: effectPayload,
         state: p.shadowOnly ? 'done' : isImmediate ? 'running' : 'pending',
-        expiresAt: p.shadowOnly || isImmediate ? null : cmd.at + (p.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS),
+        expiresAt: p.shadowOnly || isImmediate ? null : cmd.at + boundedPendingTtlMs,
         leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : isImmediate ? (p.leaseOwner ?? 'daemon') : null,
         claimedAt: p.shadowOnly || isImmediate ? cmd.at : null
       })
@@ -187,12 +188,15 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           payload: { runId: target.runId, ...(cmd.payload.reason ? { reason: cmd.payload.reason } : {}) }
         })
       ]
+      const shadowOnly = Boolean(cmd.payload.shadowOnly)
       const effects: PendingOutboxEffect[] = [
         makeEffect(cmd, 0, {
           kind: 'provider.run.stop',
           runId: target.runId,
-          payload: { runId: target.runId },
-          state: 'pending'
+          payload: { runId: target.runId, ...(shadowOnly ? { shadowOnly: true } : {}) },
+          state: shadowOnly ? 'done' : 'pending',
+          leaseOwner: shadowOnly ? 'shadow:no-dispatch' : null,
+          claimedAt: shadowOnly ? cmd.at : null
         })
       ]
       const visited = new Set<string>([target.runId])
@@ -217,8 +221,10 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             makeEffect(cmd, effects.length, {
               kind: 'provider.run.stop',
               runId: child.runId,
-              payload: { runId: child.runId, cascadeRoot: target.runId },
-              state: 'pending'
+              payload: { runId: child.runId, cascadeRoot: target.runId, ...(shadowOnly ? { shadowOnly: true } : {}) },
+              state: shadowOnly ? 'done' : 'pending',
+              leaseOwner: shadowOnly ? 'shadow:no-dispatch' : null,
+              claimedAt: shadowOnly ? cmd.at : null
             })
           )
         }
@@ -331,9 +337,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             runId: p.runId,
             questionId: p.questionId,
             answerId: p.answerId,
+            ...(p.shadowOnly ? { shadowOnly: true } : {}),
             ...(p.answerPayload ? { answerPayload: p.answerPayload } : {})
           },
-          state: 'pending'
+          state: p.shadowOnly ? 'done' : 'pending',
+          leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : null,
+          claimedAt: p.shadowOnly ? cmd.at : null
         })
       ]
       return acceptDecision(cmd, events, effects, { runId: p.runId, questionId: p.questionId })

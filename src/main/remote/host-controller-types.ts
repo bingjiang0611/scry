@@ -59,7 +59,7 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   expectedExternalSessionId?: string
   // App submits only: a conversation run whose launch the daemon holds in memory
   // (managed-launches.ts). The run id is the conversation turn's own.
-  conversation?: { conversationId: string; runId: string }
+  conversation?: { conversationId: string; runId: string; ordinal?: number }
 }
 
 // A run the owner started in the Mac UI (RunRegistry), as the host proves it

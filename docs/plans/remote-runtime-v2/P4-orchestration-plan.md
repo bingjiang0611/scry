@@ -81,7 +81,7 @@
 
 **开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。开发构建与测试实例默认进程内（`daemon-mode-default.ts:6-9`），所以同一份 userData 在进程内与 daemon 之间来回是开发者的日常，不是罕见回退。规则：
 
-1. 每次以 `shadow` 或 `on` 启动，都读旧台账中 seq 大于 `orch_meta.legacy_ledger_seq` 的条目，幂等导入：按 scoped intent id 查回执，按台账 run id 查 `orch_legacy_run`，已有就跳过。`off` 期间派发了却没有终态的 run 记 `unavailable`；只记录未派发的按 core §2.4 的 pending 规则处理（多半已过期，记 `not_sent`）。`app-sessions.json` 的哈希与 `legacy_catalog_sha256` 不同就做同样的增量导入。
+1. 每次以 `shadow` 或 `on` 启动，都读旧台账中 seq 大于 `orch_meta.legacy_ledger_seq` 的条目，幂等导入：按 scoped intent id 查回执，按台账 run id 查 `orch_legacy_run`，已有就跳过。`off` 期间派发了却没有终态的 run 在 P4-2 权威模式记 `unavailable`（P4-1 影子模式保留 `dispatched` 交由 H1 `recover()` 同步驱动以保持一致）；只记录未派发的在 P4-2 按 core §2.4 的 pending 规则处理（多半已过期，记 `not_sent`）。**历史导入 actor 说明**：H1 落盘台账只保存已绑定 peer 的 `scopedIntentId`，未落盘原始 `peerCertSHA256`，因此历史导入的回执以 `actor='system'` 落库（实时影子与 P4-2 实时命令均写 `peer:<certSHA256>`）；P4-2 对客户端重传查询回执时按 `(command_id = scopedIntentId, actor IN (peerActor, 'system'))` 兜底历史导入项，因 `scopedIntentId` 已与 `peerCertSHA256` 密码学绑定，不会发生跨设备串号。`app-sessions.json` 的哈希与 `legacy_catalog_sha256` 不同就做同样的增量导入。当未导入历史条目超过 2,000 条时，启动前仅同步导入未终态 run，其余历史终态在 `openLocalChannel` 之后分批让出导入，避免大台账阻塞守护进程就绪。
 2. `on` 期间旧台账由 `legacy.mirror` 在提交后异步写出，并推进 `legacy_ledger_seq`。崩溃后下次启动补写；补写之前切到 `off` 会少最近的 run，所以它**不是**严格的回退保证。
 3. 不选「on → off 单向」：那会让 S3 之前保留的逃生开关（`SCRY_HOST_DAEMON=0`）要么拒绝启动，要么静默分叉历史。
 

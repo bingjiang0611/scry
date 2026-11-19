@@ -34,7 +34,11 @@ export function answerRunQuestion(deps: RunControlDeps, peerCertSHA256: string, 
       if (!deps.macRuns!.answer(input.response)) throw new RemoteInteractionError('question_not_pending')
       return { status: 'answered' }
     }
-    return deps.interactions.answer(input.runId, { answerId: input.answerId, response: input.response })
+    return deps.interactions.answer(input.runId, {
+      answerId: input.answerId,
+      response: input.response,
+      answeredByPeer: peerCertSHA256
+    })
 }
 
 export function answerOwnerRunQuestion(deps: RunControlDeps, runId: string, response: AgentQuestionResponse): boolean {

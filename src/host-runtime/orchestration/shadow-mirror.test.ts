@@ -91,7 +91,12 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         )
         ledger.markProgress(
           run1,
-          JSON.stringify({ event: 'question_answered', questionId: 'q-1', answerId: 'ans-1' })
+          JSON.stringify({
+            event: 'question_answered',
+            questionId: 'q-1',
+            answerId: 'ans-1',
+            answeredByPeer: remotePeer
+          })
         )
         ledger.markProgress(
           run1,
@@ -111,9 +116,9 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         ledger.markDispatched(run2)
         ledger.markCancelled(run2)
 
-        // 3. Failed remote run with ~1.15 MB intent body (just under H1 1.2 MB cap; externalized to BodyStore)
+        // 3. Failed remote run with ~1.2 MB intent body (just under H1 1,200,000 cap; externalized to BodyStore)
         const run3 = SessionLedger.newRunId()
-        const bigBody = 'M'.repeat(1_150_000)
+        const bigBody = 'M'.repeat(1_199_800)
         metaByRun.set(run3, { peerCertSHA256: remotePeer, grantScope: 'remote' })
         ledger.recordIntent({
           intentId: SessionLedger.newIntentId(),
@@ -157,8 +162,18 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           kind: 'approval',
           source: 'provider',
           state: 'closed',
-          answerId: 'ans-1'
+          answerId: 'ans-1',
+          answeredBy: `peer:${remotePeer}`
         })
+
+        // Every shadow outbox row (both provider.run.start AND question.respond) must be done/shadowOnly
+        const outbox = mirror.sink!.listOutbox()
+        expect(outbox.some((row) => row.kind === 'question.respond')).toBe(true)
+        for (const row of outbox) {
+          expect(row.state, row.kind).toBe('done')
+          expect(row.leaseOwner, row.kind).toBe('shadow:no-dispatch')
+          expect(row.payload.shadowOnly, row.kind).toBe(true)
+        }
 
         const shadowRun2 = mirror.sink!.getRun(run2)
         expect(shadowRun2).toMatchObject({
@@ -404,6 +419,71 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         // Replay from empty MUST match online projection after H3 settle!
         expect(mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
         expect(mirror.stats().deviations).toBe(0)
+      } finally {
+        mirror.close()
+      }
+    })
+  })
+
+  it('B1 settle check: counts deviation when H3 settle ordinal disagrees with shadow turn ordinal without fencing', () => {
+    withTempDir((userData) => {
+      const fixedAt = 1_700_000_200_000
+      const mirror = ShadowMirror.open({ userDataDir: userData, clock: () => fixedAt })
+      try {
+        const ledger = new SessionLedger({
+          store: memoryLedgerStore(),
+          clock: () => fixedAt,
+          onEvent: (event) => mirror.onLedgerEvent(event)
+        })
+        const ledgerRun = SessionLedger.newRunId()
+        // Intentionally omit ordinal in routing detail so shadow falls back to 1
+        ledger.recordIntent({
+          intentId: SessionLedger.newIntentId(),
+          runId: ledgerRun,
+          detail: JSON.stringify({
+            providerId: 'codex',
+            cwd: '/tmp/ws-mismatch',
+            prompt: 'stale detail without ordinal',
+            conversation: { conversationId: 'conv-mismatch', runId: 'run-mismatch-3' }
+          })
+        })
+        ledger.markDispatched(ledgerRun)
+        ledger.markSettled(ledgerRun)
+        expect(mirror.sink!.getTurnByRunId('run-mismatch-3')?.ordinal).toBe(1)
+
+        // H3 reports authoritative ordinal=3 -> shadow MUST count ordinalMismatch + deviation and NOT fence
+        const fakeConversation: Conversation = {
+          version: 1,
+          id: 'conv-mismatch',
+          cwd: '/tmp/ws-mismatch',
+          revision: 3,
+          bindings: [{ id: 'b-1', providerId: 'codex', continuationKey: 'k', nativeSessionId: 'ext-m' }],
+          turns: [
+            {
+              origin: 'dispatch',
+              ordinal: 3,
+              runId: 'run-mismatch-3',
+              bindingId: 'b-1',
+              commandId: 'c-3',
+              intentHash: 'h-3',
+              resumeSessionId: null,
+              items: [],
+              importedItems: [],
+              omittedItems: [],
+              delivery: { status: 'accepted', nativeSessionId: 'ext-m', outcome: 'completed', nativeItems: [] }
+            }
+          ]
+        }
+        mirror.onConversationTurnSettled({
+          conversationId: 'conv-mismatch',
+          runId: 'run-mismatch-3',
+          conversation: fakeConversation,
+          delivery: { status: 'accepted', nativeSessionId: 'ext-m', outcome: 'completed', nativeItems: [] }
+        })
+
+        expect(mirror.stats().failedOpen).toBe(false)
+        expect(mirror.stats().ordinalMismatches).toBe(1)
+        expect(mirror.stats().deviations).toBe(1)
       } finally {
         mirror.close()
       }

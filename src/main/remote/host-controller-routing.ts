@@ -77,10 +77,17 @@ function parseConversationMarker(value: unknown, options: { cwdOptional?: boolea
   if (value === undefined) return undefined
   if (!options.cwdOptional || !value || typeof value !== 'object' || Array.isArray(value)) throw new RemoteRunDenied('invalid_target')
   const marker = value as Record<string, unknown>
-  if (Object.keys(marker).some((key) => key !== 'conversationId' && key !== 'runId') ||
+  if (Object.keys(marker).some((key) => key !== 'conversationId' && key !== 'runId' && key !== 'ordinal') ||
     typeof marker.conversationId !== 'string' || !CONVERSATION_ID.test(marker.conversationId) ||
     typeof marker.runId !== 'string' || !CONVERSATION_ID.test(marker.runId)) throw new RemoteRunDenied('invalid_target')
-  return { conversationId: marker.conversationId, runId: marker.runId }
+  if (marker.ordinal !== undefined && (typeof marker.ordinal !== 'number' || !Number.isSafeInteger(marker.ordinal) || marker.ordinal < 1)) {
+    throw new RemoteRunDenied('invalid_target')
+  }
+  return {
+    conversationId: marker.conversationId,
+    runId: marker.runId,
+    ...(typeof marker.ordinal === 'number' ? { ordinal: marker.ordinal } : {})
+  }
 }
 
 function unnamedCwd(options: { cwdOptional?: boolean }): string {

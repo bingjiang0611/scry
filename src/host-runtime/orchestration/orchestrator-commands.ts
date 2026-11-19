@@ -50,11 +50,13 @@ export interface RunResolveIntentPayload {
 export interface RunStopPayload {
   runId: string
   reason?: string
+  shadowOnly?: boolean
 }
 
 export interface SessionStopSubtasksPayload {
   sessionKey: string
   reason?: string
+  shadowOnly?: boolean
 }
 
 export type EffectResultStep =
@@ -101,6 +103,7 @@ export interface QuestionAnswerPayload {
   answerId: string
   answerSha256: string
   answerPayload?: Record<string, unknown>
+  shadowOnly?: boolean
 }
 
 export interface SessionCreatePayload {

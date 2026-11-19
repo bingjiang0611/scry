@@ -8,6 +8,8 @@ const MAX_CLOSED = 512
 export interface RemoteQuestionAnswer {
   answerId: string
   response: AgentQuestionResponse
+  /** Verified peer certificate SHA-256 that answered this question, when invoked via a peer op. */
+  answeredByPeer?: string
 }
 
 export type RemoteQuestionAnswerReceipt = { status: 'answered' | 'duplicate' }
@@ -104,7 +106,8 @@ export class RemoteInteractionBroker {
       questionId,
       answerId: value.answerId,
       digest: answerDigest,
-      behavior: normalized.behavior
+      behavior: normalized.behavior,
+      ...(value.answeredByPeer ? { answeredByPeer: value.answeredByPeer } : {})
     }))
     if (!this.#broker.answer(normalized)) throw new RemoteInteractionError('question_not_pending')
     this.#closed.delete(answerKey)

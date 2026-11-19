@@ -286,6 +286,7 @@ export async function sendConversationMessage(
       permissionMode: request.permissionMode
     }, { managedConversation: {
       conversationId: request.conversationId,
+      ordinal: begun.turn.ordinal,
       ...(attentionKey ? { attentionKey } : {}),
       runId,
       target,

@@ -65,7 +65,9 @@ export function recordOrchestrationCommitTiming(input: {
   ledgerRunId: string
   commitKind: string
   durationMs: number
+  sinkDurationMs?: number
   preFirstToken: boolean
+  bodyBytes?: number
   fullfsync?: boolean
 }): void {
   if (target === null) return
@@ -76,7 +78,9 @@ export function recordOrchestrationCommitTiming(input: {
       ledgerRunId: input.ledgerRunId,
       commitKind: input.commitKind,
       durationMs: input.durationMs,
+      ...(input.sinkDurationMs !== undefined ? { sinkDurationMs: input.sinkDurationMs } : {}),
       preFirstToken: input.preFirstToken,
+      ...(input.bodyBytes !== undefined ? { bodyBytes: input.bodyBytes } : {}),
       ...(input.fullfsync !== undefined ? { fullfsync: input.fullfsync } : {}),
       at: performance.timeOrigin + performance.now(),
       pid: process.pid

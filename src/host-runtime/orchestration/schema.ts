@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 1
+export const ORCHESTRATION_SCHEMA_VERSION = 2
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 1
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -150,4 +150,46 @@ export const ORCH_DDL_V1: readonly string[] = [
   )`
 ]
 
-export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1]
+/**
+ * V2 migration: rebuilds `orch_p_run` with nullable `output_seq INTEGER` so databases created
+ * under early V1 builds (where `output_seq` had `NOT NULL DEFAULT 0`) accept `NULL` cleanly.
+ */
+export const ORCH_DDL_V2: readonly string[] = [
+  `CREATE TABLE orch_p_run_v2 (
+    run_id TEXT PRIMARY KEY,
+    session_key TEXT,
+    owner_actor TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    provider TEXT,
+    profile TEXT,
+    cwd TEXT,
+    prompt_preview TEXT,
+    lifecycle TEXT NOT NULL,
+    stop_state TEXT,
+    output_seq INTEGER,
+    intent_seq INTEGER NOT NULL,
+    body TEXT,
+    settled_at INTEGER,
+    recovered_at INTEGER,
+    outcome TEXT,
+    rev_seq INTEGER NOT NULL,
+    parent_run_id TEXT
+  )`,
+  `INSERT INTO orch_p_run_v2 (
+    run_id, session_key, owner_actor, scope, origin, provider, profile, cwd,
+    prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body,
+    settled_at, recovered_at, outcome, rev_seq, parent_run_id
+  ) SELECT
+    run_id, session_key, owner_actor, scope, origin, provider, profile, cwd,
+    prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body,
+    settled_at, recovered_at, outcome, rev_seq, parent_run_id
+  FROM orch_p_run`,
+  `DROP TABLE orch_p_run`,
+  `ALTER TABLE orch_p_run_v2 RENAME TO orch_p_run`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_p_run_lifecycle ON orch_p_run(lifecycle)`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_p_run_parent ON orch_p_run(parent_run_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_p_run_origin_lifecycle ON orch_p_run(origin, lifecycle)`
+]
+
+export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2]

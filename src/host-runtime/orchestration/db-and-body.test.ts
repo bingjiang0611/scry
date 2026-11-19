@@ -108,6 +108,70 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
     })
   })
 
+  it('migrates an older V1 database (output_seq NOT NULL DEFAULT 0) to V2 nullable output_seq', () => {
+    withTempDir((userData) => {
+      const orchDir = join(userData, 'orchestration')
+      mkdirSync(orchDir, { recursive: true, mode: 0o700 })
+      const dbPath = join(orchDir, 'orchestration.db')
+      const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+      const legacy = new Database(dbPath)
+      try {
+        legacy.pragma('user_version = 1')
+        legacy.exec(`
+          CREATE TABLE orch_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE orch_p_run (
+            run_id TEXT PRIMARY KEY,
+            session_key TEXT,
+            owner_actor TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            provider TEXT,
+            profile TEXT,
+            cwd TEXT,
+            prompt_preview TEXT,
+            lifecycle TEXT NOT NULL,
+            stop_state TEXT,
+            output_seq INTEGER NOT NULL DEFAULT 0,
+            intent_seq INTEGER NOT NULL,
+            body TEXT,
+            settled_at INTEGER,
+            recovered_at INTEGER,
+            outcome TEXT,
+            rev_seq INTEGER NOT NULL,
+            parent_run_id TEXT
+          );
+          INSERT INTO orch_p_run (
+            run_id, owner_actor, scope, origin, lifecycle, output_seq, intent_seq, rev_seq
+          ) VALUES ('old-v1-run', 'system', 'remote', 'remote', 'settled', 5, 1, 2);
+        `)
+      } finally {
+        legacy.close()
+      }
+
+      const upgraded = openOrchestrationDatabase({ userDataDir: userData })
+      try {
+        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(2)
+        // Old row preserved
+        const oldRow = upgraded.db
+          .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
+          .get('old-v1-run') as { output_seq: number | null }
+        expect(oldRow.output_seq).toBe(5)
+        // New row with NULL output_seq is now accepted cleanly
+        expect(() =>
+          upgraded.db
+            .prepare(
+              `INSERT INTO orch_p_run (
+                run_id, owner_actor, scope, origin, lifecycle, output_seq, intent_seq, rev_seq
+              ) VALUES ('new-v2-run', 'system', 'remote', 'remote', 'recorded', NULL, 2, 3)`
+            )
+            .run()
+        ).not.toThrow()
+      } finally {
+        upgraded.close()
+      }
+    })
+  })
+
   it('refuses to open corrupt/non-database files and never auto-rebuilds', () => {
     withTempDir((userData) => {
       const orchDir = join(userData, 'orchestration')
