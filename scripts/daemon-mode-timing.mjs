@@ -127,17 +127,38 @@ const newRunMarks = () => {
 const selectTimeline = (marks, submittedWall, until) => {
   const stages = {}
   const runIds = new Set()
+  const orchCommits = []
   for (const mark of marks) {
     if (typeof mark?.runId !== 'string' || typeof mark?.at !== 'number') continue
     // Anything before the submit belongs to the previous sample.
     if (mark.at < submittedWall - 200 || mark.at > until + 2_000) continue
+    if (mark.stage === 'orchCommit') {
+      orchCommits.push({
+        commitKind: mark.commitKind,
+        durationMs: mark.durationMs,
+        preFirstToken: Boolean(mark.preFirstToken)
+      })
+      continue
+    }
     runIds.add(mark.runId)
     if (stages[mark.stage] === undefined || mark.at < stages[mark.stage]) stages[mark.stage] = mark.at
   }
-  return [...runIds].length === 0 ? null : { ...stages, runIds: [...runIds] }
+  return [...runIds].length === 0 ? null : { ...stages, runIds: [...runIds], orchCommits }
 }
 
-const results = { mode, samples, perInstance, prompt: PROMPT, loadBefore: load(), runs: [], loadAfter: null }
+const results = {
+  mode,
+  samples,
+  perInstance,
+  prompt: PROMPT,
+  orchestration: {
+    mode: process.env.SCRY_ORCHESTRATION ?? 'off',
+    fullfsync: process.env.SCRY_ORCHESTRATION_FULLFSYNC ?? 'default'
+  },
+  loadBefore: load(),
+  runs: [],
+  loadAfter: null
+}
 
 // One App per chunk: daemon mode slows down as one window accumulates settled runs
 // (a new run's bind wait grew past its 3 s budget at 30 runs in one session), so the
@@ -152,6 +173,8 @@ const measure = async (count) => {
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
         // An isolated instance for either mode; the daemon switch is the only difference.
         ...(mode === 'daemon' ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' } : {}),
+        ...(process.env.SCRY_ORCHESTRATION !== undefined ? { SCRY_ORCHESTRATION: process.env.SCRY_ORCHESTRATION } : {}),
+        ...(process.env.SCRY_ORCHESTRATION_FULLFSYNC !== undefined ? { SCRY_ORCHESTRATION_FULLFSYNC: process.env.SCRY_ORCHESTRATION_FULLFSYNC } : {}),
         SCRY_REMOTE_HOST: '0',
         // Stage marks from the App's own main process; off by default everywhere else.
         SCRY_PERF_LOG: '1',
@@ -308,11 +331,42 @@ try {
     }
     return [name, { samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95) }]
   }))
+  const warmFirstText = results.runs
+    .filter((run) => run.index % perInstance !== 0 && typeof run.firstTextMs === 'number')
+    .map((run) => run.firstTextMs)
+  const coldFirstText = results.runs
+    .filter((run) => run.index % perInstance === 0 && typeof run.firstTextMs === 'number')
+    .map((run) => Number(run.firstTextMs.toFixed(2)))
+  const orchPreCounts = []
+  const orchPreSums = []
+  const orchSingles = []
+  for (const run of results.runs) {
+    const commits = run.timeline?.orchCommits ?? []
+    if (commits.length === 0) continue
+    const pre = commits.filter((c) => c.preFirstToken)
+    orchPreCounts.push(pre.length)
+    orchPreSums.push(Number(pre.reduce((acc, c) => acc + c.durationMs, 0).toFixed(3)))
+    for (const c of commits) orchSingles.push(c.durationMs)
+  }
   results.summary = {
     runs: results.runs.length,
     runsWithFirstText: firstText.length,
     firstTextP50: percentile(firstText, 0.5),
     firstTextP95: percentile(firstText, 0.95),
+    warmSamples: warmFirstText.length,
+    warmFirstTextP50: percentile(warmFirstText, 0.5),
+    warmFirstTextP95: percentile(warmFirstText, 0.95),
+    coldFirstText,
+    orchCommits: {
+      runsMeasured: orchPreCounts.length,
+      preFirstTokenCountP50: percentile(orchPreCounts, 0.5),
+      preFirstTokenCountP95: percentile(orchPreCounts, 0.95),
+      preFirstTokenSumP50Ms: percentile(orchPreSums, 0.5),
+      preFirstTokenSumP95Ms: percentile(orchPreSums, 0.95),
+      singleCommitSamples: orchSingles.length,
+      singleCommitP50Ms: percentile(orchSingles, 0.5),
+      singleCommitP95Ms: percentile(orchSingles, 0.95)
+    },
     deltaSamples: intervals.length,
     deltaP50: percentile(intervals, 0.5),
     deltaP95: percentile(intervals, 0.95),
