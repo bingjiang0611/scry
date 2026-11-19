@@ -90,7 +90,7 @@ describe('required PR checks', () => {
   // The fourth entry is the changes output that gates the macOS App jobs: CI keys them on desktop,
   // Performance keys native on native_performance, which implies desktop.
   for (const [file, dependencies, desktopJobs, desktopOutput] of [
-    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
+    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'daemon-orchestration', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
     ['performance.yml', ['changes', 'compare', 'native'], ['native'], 'native_performance']
   ] as const) {
     const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop, node_performance: required, native_performance: desktop } })
