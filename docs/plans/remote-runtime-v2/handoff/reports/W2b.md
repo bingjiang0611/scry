@@ -30,13 +30,13 @@
 | 4 | FileVault | **未验证（排期至最后，与项 2 同批）** | 已核实本机 `fdesetup status` 为 `FileVault is On.`；需要整机重启以验证重启后未登录不可用、登录后自动拉起，按任务单与项 2 同批放到最后执行 |
 | 5 | Linux 真机 | **not-run** | 本机为 macOS 27.0（arm64），无 Linux 真机环境 |
 
-### 当前各执行方状态与测量锁核查（2026-11-20 01:05）
+### 当前各执行方状态与测量锁核查（2026-11-20 02:55）
 
-- **`MEASURING` 文件**：当前不存在（注：执行方 A 推送本报告后拟启动 W1 #12 约 100 分钟长跑，期间将持有 `MEASURING` 并在结束时删除）。
-- **执行方 A（`~/work/scry-A` / `exec/A`）**：W1 进行中（仅余 #12 长跑与受阻的 AX/iPhone 项）；W6 已完成真机核对（`待核验`）；W2b 当前 `受阻`。
-- **执行方 B（`~/work/scry-B` / `exec/B`）**：W3 已通过；W2 代码已通过（`W2-review.md` 第三轮）；**W7（Antigravity A0）正在进行中**（`~/.local/state/scry-handoff-evidence/W7/` 最新写入 2026-11-20 01:01）。
-- **执行方 C（`~/work/scry-C` / `exec/C`）**：W4 已通过；W5 报告状态 `待核验`（`85c787aa`）；另观测到约 23 对 `~/work/scry-C` 下的 `daemon-supervisor.js` + `daemon.js` 空闲进程（CPU 0.0%，执行方 A 未触碰）。
-- **是否满足注销/重启条件**：**否**（B 仍在做 W7、A 尚有 W1 #12 长跑、C 有未确认是否需保留的空闲测试进程，且未与维护者约定停机窗口）。
+- **`MEASURING` 文件**：当前不存在（W1 #12 101 分钟长跑已结束并删除 `MEASURING`）。
+- **执行方 A（`~/work/scry-A` / `exec/A`）**：W1 已完成全部无阻塞项（含 #12 长跑），当前 `受阻`（仅余 AX/iPhone）；W6 `待核验`；W2b `受阻`。
+- **执行方 B（`~/work/scry-B` / `exec/B`）**：W3 已通过；W2 代码已通过（`W2-review.md` 第三轮）；W7（Antigravity A0）请注销前确认已停工。
+- **执行方 C（`~/work/scry-C` / `exec/C`）**：W4 已通过；W5 报告状态 `待核验`；另观测到约 23 对 `~/work/scry-C` 下的 `daemon-supervisor.js` + `daemon.js` 空闲进程（CPU 0.0%，执行方 A 未触碰）。
+- **是否满足注销/重启条件**：**否**（尚未确认 B/C 停工且未与维护者约定停机窗口）。
 
 ## 4. 失败与处理
 
