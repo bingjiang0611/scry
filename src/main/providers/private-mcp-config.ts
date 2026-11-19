@@ -29,19 +29,41 @@ export function writePrivateMcpConfig(
   root = tmpdir()
 ): PrivateMcpConfig | undefined {
   if (Object.keys(servers).length === 0) return undefined
+  const files = writePrivateFiles([['mcp.json', JSON.stringify({ mcpServers: servers })]], root)
+  return { extraArgs: { 'mcp-config': files.paths[0] }, dispose: files.dispose }
+}
+
+export interface PrivateMcpEnvFiles {
+  /** One file per input, in the same order. */
+  paths: string[]
+  /** Idempotent. A leftover from a crash is removed by the next startup sweep. */
+  dispose(): void
+}
+
+/**
+ * Codex stdio MCP env files (see codex-stdio-env.ts): same directory, mode and
+ * sweep as the config file above, one directory per pooled Codex client.
+ */
+export function writePrivateMcpEnvFiles(contents: string[], root = tmpdir()): PrivateMcpEnvFiles | undefined {
+  if (contents.length === 0) return undefined
+  return writePrivateFiles(contents.map((content, index) => [`${index}.env`, content]), root)
+}
+
+function writePrivateFiles(files: Array<[name: string, content: string]>, root: string): PrivateMcpEnvFiles {
   // mkdtemp creates the directory 0700 with an unpredictable name; the pid lets a
   // later startup tell a crashed owner's leftover from a live instance's file.
   const directory = mkdtempSync(join(root, `${DIRECTORY_PREFIX}${process.pid}-`))
-  const path = join(directory, 'mcp.json')
+  const paths = files.map(([name]) => join(directory, name))
   try {
-    writeFileSync(path, JSON.stringify({ mcpServers: servers }), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    // `wx` never follows or reuses an existing path.
+    files.forEach(([, content], index) => writeFileSync(paths[index], content, { encoding: 'utf8', mode: 0o600, flag: 'wx' }))
   } catch (error) {
     rmSync(directory, { recursive: true, force: true })
     throw error
   }
   let disposed = false
   return {
-    extraArgs: { 'mcp-config': path },
+    paths,
     dispose: () => {
       if (disposed) return
       disposed = true

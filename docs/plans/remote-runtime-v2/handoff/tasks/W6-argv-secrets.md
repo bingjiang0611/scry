@@ -10,7 +10,7 @@
 |---|---|---|
 | Claude | 配置写进 0600 私有文件（0700 临时目录），`--mcp-config <路径>`；运行结束删除，启动 5 秒后清扫崩溃遗留 | 无 |
 | Qoder | 同上 | 配置里带 `tools` 键的服务器仍走 SDK 内联参数（测试已钉住） |
-| Codex | 远程静态请求头改为从 app-server 的环境变量读取（`env_http_headers`） | stdio 服务器的 `env` 仍在参数里，等维护者决定方案 |
+| Codex | 远程静态请求头改为从 app-server 的环境变量读取（`env_http_headers`）；stdio 服务器的 `env` 写进 0600 私有文件，由 `/bin/sh -c` 启动脚本读入后 exec 原命令 | 启动脚本无法逐字复现的 `env`（如非法变量名、`SHLVL`）整个服务器仍内联（测试已钉住） |
 | OpenCode、Pi | 原本就不进参数，未改 | — |
 
 ## 项目与验收
@@ -21,11 +21,11 @@
 |---|---|---|
 | 1 | Claude（不可用则标 not-run） | 运行期间 `ps -axww -o pid,command` 中，任何进程的参数里都不出现两个随机值和历史检索 token；stdio 服务器实际收到 `W6_ENV`；运行结束后 `$TMPDIR/scry-mcp-config-*` 目录被删除 |
 | 2 | Qoder（真实运行，已授权） | 同 #1；另放一个带 `tools` 键的服务器，确认它按预期仍出现在参数里（已知例外） |
-| 3 | Codex（真实运行，已授权） | 请求头随机值不出现在任何进程参数里，远程服务器收到该请求头（服务器端记录）；stdio `env` 随机值**仍会**出现在参数里（已知，未修） |
+| 3 | Codex（真实运行，已授权） | 请求头与 stdio `env` 两个随机值都不出现在任何进程参数里；远程服务器收到该请求头（服务器端记录），stdio 服务器实际收到 `W6_ENV`，且其环境里没有多出 `SHLVL`/`PWD`；Codex 日志里该服务器 stderr 可有一行 `SHLVL: readonly variable`（预期）；client 空闲关闭后对应 `scry-mcp-config-*` 目录被删除 |
 | 4 | 崩溃清扫 | 运行中对测试实例的 App 进程 `kill -KILL`（只对自己启动、核实过 PID 的进程），重启测试实例后 5 秒内遗留目录被清扫；不删除其他用户或存活进程的目录 |
 | 5 | macOS 的 `$TMPDIR` | 记录实际路径（macOS 为每个用户独立），确认目录权限 0700、文件 0600 |
 | 6 | 回归 | 两个 Provider 的普通发送、工具调用、停止照常；历史检索在 Claude 上仍可用（若 Claude 不可用标 not-run） |
 
 ## 报告
 
-`reports/W6.md`，第一行写状态。Codex stdio `env` 的方案不在本任务内（等维护者决定）。
+`reports/W6.md`，第一行写状态。记录 `/bin/sh` 实际指向（macOS 默认 bash 3.2）。
