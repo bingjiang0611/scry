@@ -13,7 +13,7 @@ import { shellEnv } from '../claude-locate'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
-import { heldPrompt, qoderMcpLaunch, qoderOptions } from './qoder-launch'
+import { heldPrompt, qoderMcpLaunch, qoderOptions, type QoderMcpLaunch } from './qoder-launch'
 import type { AuthorizedMcpExecution, McpAuthInteraction } from './types'
 
 const QODER_MCP_AUTH_TIMEOUT_MS = 120_000
@@ -130,14 +130,20 @@ export async function reauthenticateQoderMcp(
     return failed(`Qoder 存在多个同名 MCP ${target.name}，无法安全绑定认证目标`)
   }
 
+  let mcpLaunch: QoderMcpLaunch
+  try {
+    mcpLaunch = qoderMcpLaunch({ ...execution, targets: [target] })
+  } catch (error) {
+    return failed(error)
+  }
   let loopback: Awaited<ReturnType<McpAuthInteraction['prepareLoopbackCallback']>>
   try {
     loopback = await interaction.prepareLoopbackCallback()
   } catch (error) {
+    mcpLaunch.dispose()
     return failed(error)
   }
 
-  const mcpLaunch = qoderMcpLaunch({ ...execution, targets: [target] })
   const prompt = heldPrompt()
   let q: ReturnType<typeof query>
   try {

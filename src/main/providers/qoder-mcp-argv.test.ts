@@ -72,6 +72,28 @@ describe('Qoder MCP configuration stays out of the CLI argv', () => {
     expectPrivateDelivery(recorder.record())
   })
 
+  it('fails the run and launches nothing when the private file cannot be written', async () => {
+    vi.stubEnv('TMPDIR', join(recorder.root, 'missing'))
+    const handle = createQoderAdapter(locate.home).run({
+      runId: 'run-unwritable', prompt: 'probe', cwd: locate.home, attachments: [], emit: () => {},
+      mcpExecution: execution()
+    })
+    await expect(handle.promise).rejects.toThrow(/ENOENT/)
+    expect(recorder.recorded()).toBe(false)
+  })
+
+  it('reports a failed reauthentication without opening a loopback when the file cannot be written', async () => {
+    vi.stubEnv('TMPDIR', join(recorder.root, 'missing'))
+    const prepareLoopbackCallback = vi.fn()
+    const result = await createQoderAdapter(locate.home).mcp!.reauthenticate!(
+      { providerId: 'qoder', cwd: locate.home }, 'remote', execution(),
+      { openExternal: vi.fn(), prepareLoopbackCallback }
+    )
+    expect(result.data).toMatchObject({ ok: false, status: 'failed' })
+    expect(prepareLoopbackCallback).not.toHaveBeenCalled()
+    expect(recorder.recorded()).toBe(false)
+  })
+
   it('uses the same private file for the native MCP status check', async () => {
     await readQoderMcpSnapshot(locate.home, { providerId: 'qoder', cwd: locate.home }, true, execution())
     await waitFor(recorder.recorded)

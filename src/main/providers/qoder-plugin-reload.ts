@@ -2,7 +2,7 @@ import { query, type Query } from '@qoder-ai/qoder-agent-sdk'
 import type { NormalizeCtx } from '../normalize-core'
 import type { ProcessIdentity } from '../process-diagnostics'
 import { normalizeQoderMessage } from './qoder-messages'
-import { heldPrompt, qoderMcpLaunch, qoderOptions, signalProcessTree } from './qoder-launch'
+import { heldPrompt, qoderMcpLaunch, qoderOptions, signalProcessTree, type QoderMcpLaunch } from './qoder-launch'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { newId } from './qoder-shared'
 import { qoderContextTokensFromUsage, qoderTrace } from './qoder-evidence'
@@ -29,8 +29,9 @@ export function runQoderPluginReload(
       now: () => new Date().toISOString(),
       contextTokensFromUsage: qoderContextTokensFromUsage
     }
-    const mcpLaunch = qoderMcpLaunch(request.mcpExecution)
-    const promise: Promise<ProviderRunResult> = (async () => {
+    let mcpLaunch: QoderMcpLaunch | undefined
+    const promise: Promise<ProviderRunResult> = (async (): Promise<ProviderRunResult> => {
+      mcpLaunch = qoderMcpLaunch(request.mcpExecution)
       q = query({
         prompt: prompt.stream,
         options: {
@@ -89,7 +90,7 @@ export function runQoderPluginReload(
         await events
       }
       return { ...providerResult, externalSessionId }
-    })().finally(mcpLaunch.dispose)
+    })().finally(() => mcpLaunch?.dispose())
     return {
       promise,
       interrupt: () => {
