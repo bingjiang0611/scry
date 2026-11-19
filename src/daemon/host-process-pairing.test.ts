@@ -1,4 +1,7 @@
 import 'reflect-metadata'
+import { createHash, randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
@@ -87,4 +90,75 @@ describe('daemon pairing and host status', () => {
       else process.env.SCRY_REMOTE_HOST = saved
     }
   }, 60_000)
+
+  // W3 / P5-5a release 1: daemon starts and enrolls the App over a pairing file
+  // whose remote grants already carry `approvedVia`.
+  it('starts and enrolls the App when persisted remote grants carry approvedVia', async () => {
+    const saved = process.env.SCRY_REMOTE_HOST
+    process.env.SCRY_REMOTE_HOST = '1'
+    const first = await startTestDaemon()
+    let second: Awaited<ReturnType<typeof startTestDaemon>> | undefined
+    try {
+      const { userDataDir } = first
+      const pairingFile = join(userDataDir, 'remote', 'pairing', 'pairing-state.json')
+      await first.dispose()
+
+      const envelope = JSON.parse(readFileSync(pairingFile, 'utf8')) as { version: number; payload: string; sha256: string }
+      const state = JSON.parse(envelope.payload) as {
+        version: 1
+        hostId: string
+        anchorSHA256: string
+        pairings: Array<Record<string, unknown>>
+        grants: Array<Record<string, unknown>>
+      }
+      const now = Date.now()
+      const pairingId = randomUUID()
+      const deviceId = randomUUID()
+      state.grants.push({
+        certificatePEM: 'synthetic certificate, not cryptographic evidence',
+        certificateSHA256: 'e'.repeat(64),
+        publicKeySHA256: 'f'.repeat(64),
+        deviceId,
+        expiresAt: now + 3_600_000,
+        pairingId,
+        deviceLabel: 'CLI Approved Phone',
+        authority: 'owner-device',
+        source: 'local_confirmation',
+        scope: 'remote',
+        approvedVia: 'host_cli',
+        confirmedAt: now - 1_000,
+        revokedAt: null
+      })
+      state.pairings.push({
+        pairingId,
+        secretVerifier: createHash('sha256').update(`s${'0'.repeat(42)}`).digest('hex'),
+        createdAt: now - 2_000,
+        expiresAt: now - 2_000 + 120_000,
+        attempts: 0,
+        state: 'paired',
+        deviceId
+      })
+      const payload = JSON.stringify(state)
+      const sha256 = createHash('sha256').update(payload).digest('hex')
+      writeFileSync(pairingFile, JSON.stringify({ version: 1, payload, sha256 }), { mode: 0o600 })
+
+      second = await startTestDaemon({ root: first.root })
+      const status = (await second.localOp('localHostStatus', 'status', [])).result as {
+        enabled: boolean
+        devices: Array<{ deviceId: string; deviceLabel: string }>
+      }
+      expect(status.enabled).toBe(true)
+      expect(status.devices).toContainEqual(expect.objectContaining({ deviceId, deviceLabel: 'CLI Approved Phone' }))
+      const persisted = second.host.service.authority.inspectLocal().grants
+      expect(persisted.find(g => g.deviceId === deviceId)).toMatchObject({ approvedVia: 'host_cli' })
+      const localGrants = persisted.filter(g => g.scope === 'local' && g.revokedAt === null)
+      expect(localGrants).toHaveLength(1)
+      expect('approvedVia' in localGrants[0]!).toBe(false)
+    } finally {
+      await first.dispose()
+      await second?.dispose()
+      if (saved === undefined) delete process.env.SCRY_REMOTE_HOST
+      else process.env.SCRY_REMOTE_HOST = saved
+    }
+  }, 30_000)
 })

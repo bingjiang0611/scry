@@ -39,9 +39,13 @@ export interface DeviceGrant extends IssuedPairingCertificate {
   // grant is only honored on that socket: the network host rejects it outright.
   source: 'local_confirmation' | 'local_socket'
   scope: GrantScope
+  // Recorded approval path for remote grants (P5-host-cli §3.7). Release 1
+  // (P5-5a) accepts and preserves this field on read without writing it yet.
+  approvedVia?: GrantApprovedVia
   confirmedAt: number
   revokedAt: number | null
 }
+export type GrantApprovedVia = 'app' | 'host_cli'
 export type GrantScope = 'local' | 'remote'
 // Which channel accepted the connection. `network` covers TCP listeners, the relay
 // tunnel and SSH; `local` is the 0700/0600 unix socket inside the daemon state dir.
@@ -103,15 +107,25 @@ export function validatePairingState(value: unknown): PairingState {
     // State written before scopes existed only ever held owner-confirmed phone
     // grants, so a missing scope means 'remote' rather than invalid.
     const g = raw.scope === undefined ? { ...raw, scope: 'remote' } : raw
-    keys(g, ['certificatePEM', 'certificateSHA256', 'publicKeySHA256', 'deviceId', 'expiresAt', 'pairingId', 'deviceLabel', 'authority', 'source', 'scope', 'confirmedAt', 'revokedAt'])
+    const hasApprovedVia = Object.prototype.hasOwnProperty.call(g, 'approvedVia')
+    keys(g, [
+      'certificatePEM', 'certificateSHA256', 'publicKeySHA256', 'deviceId', 'expiresAt', 'pairingId',
+      'deviceLabel', 'authority', 'source', 'scope', 'confirmedAt', 'revokedAt',
+      ...(hasApprovedVia ? ['approvedVia'] : [])
+    ])
+    const approvedVia: GrantApprovedVia | undefined = hasApprovedVia
+      ? (g.approvedVia === 'app' || g.approvedVia === 'host_cli' ? g.approvedVia : fail('invalid_pairing_state'))
+      : undefined
     if (g.authority !== 'owner-device' || (g.source !== 'local_confirmation' && g.source !== 'local_socket') ||
         (g.scope !== 'local' && g.scope !== 'remote') || (g.scope === 'local') !== (g.source === 'local_socket') ||
+        (approvedVia !== undefined && g.scope !== 'remote') ||
         !text(g.certificatePEM, 16_384) || !validDeviceLabel(g.deviceLabel) ||
         typeof g.deviceId !== 'string' || !UUID.test(g.deviceId) || typeof g.pairingId !== 'string' || !UUID.test(g.pairingId) ||
         typeof g.certificateSHA256 !== 'string' || !HASH.test(g.certificateSHA256) || typeof g.publicKeySHA256 !== 'string' || !HASH.test(g.publicKeySHA256) ||
         !isTime(g.expiresAt) || !isTime(g.confirmedAt) || g.expiresAt <= g.confirmedAt || (g.revokedAt !== null && !isTime(g.revokedAt))) return fail('invalid_pairing_state')
     return { certificatePEM: g.certificatePEM, certificateSHA256: g.certificateSHA256, publicKeySHA256: g.publicKeySHA256, deviceId: g.deviceId,
-      expiresAt: g.expiresAt, pairingId: g.pairingId, deviceLabel: g.deviceLabel, authority: g.authority, source: g.source, scope: g.scope, confirmedAt: g.confirmedAt, revokedAt: g.revokedAt }
+      expiresAt: g.expiresAt, pairingId: g.pairingId, deviceLabel: g.deviceLabel, authority: g.authority, source: g.source, scope: g.scope,
+      confirmedAt: g.confirmedAt, revokedAt: g.revokedAt, ...(approvedVia !== undefined ? { approvedVia } : {}) }
   })
   const pairings: PairingRecord[] = value.pairings.map((p: unknown) => {
     if (!record(p)) return fail('invalid_pairing_state')
