@@ -211,10 +211,18 @@ describe('Codex stdio env launcher', () => {
       // Codex 0.160.1 starts a stdio server with a cleared env: its default names copied
       // from the app-server env, then the server's `env` on top.
       const codexDefaults = { HOME: root, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', TMPDIR: privateRoot }
+      // The reference is the env the printer sees when Codex would have started it
+      // directly with `env` merged in. Comparing against that run instead of a literal
+      // keeps what the OS adds to every process on its own (macOS CoreFoundation sets
+      // __CF_USER_TEXT_ENCODING for node) on both sides.
+      const direct = spawnSync(process.execPath, [printer], { cwd: root, env: { ...codexDefaults, ...NASTY }, encoding: 'utf8' })
+      expect(direct.status, direct.stderr).toBe(0)
+      const expected = JSON.parse(direct.stdout) as Record<string, string>
+      expect(expected).toMatchObject({ ...codexDefaults, ...NASTY })
       for (const shell of shells()) {
         const result = spawnSync(shell, server.args!, { cwd: root, env: codexDefaults, encoding: 'utf8' })
         expect(result.status, `${shell}: ${result.stderr}`).toBe(0)
-        expect(JSON.parse(result.stdout), shell).toEqual({ ...codexDefaults, PATH: '/usr/bin:/bin', ...NASTY })
+        expect(JSON.parse(result.stdout), shell).toEqual(expected)
       }
     } finally {
       config.dispose?.()
