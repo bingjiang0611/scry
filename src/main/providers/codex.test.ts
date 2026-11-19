@@ -51,7 +51,7 @@ vi.mock('../claude-locate', () => ({
 }))
 
 import { CodexAppServerResponseError } from './codex-app-server'
-import { codexMcpConfigArgs, createCodexAdapter } from './codex'
+import { codexMcpConfig, createCodexAdapter } from './codex'
 
 describe('Codex provider adapter', () => {
   beforeEach(() => {
@@ -136,18 +136,41 @@ describe('Codex provider adapter', () => {
   })
 
   it('clears implicit MCP and serializes only approved Codex configs', () => {
-    expect(codexMcpConfigArgs()).toEqual(['-c', 'mcp_servers={}'])
-    expect(codexMcpConfigArgs({
+    expect(codexMcpConfig()).toEqual({ args: ['-c', 'mcp_servers={}'], env: {} })
+    expect(codexMcpConfig({
       cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
       targets: [
         { targetId: 'stdio', name: 'stdio target', enabled: true, config: { command: '/bin/echo', args: ['ok'], env: { SAFE: '1' } } },
         { targetId: 'off', name: 'off', enabled: false, config: { command: '/bin/off' } },
         { targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test', headers: { Authorization: 'configured' } } }
       ]
-    })).toEqual([
-      '-c',
-      'mcp_servers={"stdio target"={"command"="/bin/echo","args"=["ok"],"env"={"PATH"="/bin","SAFE"="1"},"enabled"=true},"remote"={"url"="https://mcp.example.test","http_headers"={"Authorization"="configured"},"enabled"=true}}'
-    ])
+    }, undefined, 'N')).toEqual({
+      args: [
+        '-c',
+        'mcp_servers={"stdio target"={"command"="/bin/echo","args"=["ok"],"env"={"PATH"="/bin","SAFE"="1"},"enabled"=true},"remote"={"url"="https://mcp.example.test","env_http_headers"={"Authorization"="SCRY_MCP_HEADER_N_0"},"enabled"=true}}'
+      ],
+      env: { SCRY_MCP_HEADER_N_0: 'configured' }
+    })
+  })
+
+  it('keeps inline only the static headers whose env indirection would change Codex behaviour', () => {
+    expect(codexMcpConfig({
+      cwd: '/repo', fingerprint: 'sha256:test', env: {},
+      targets: [{
+        targetId: 'remote', name: 'remote', enabled: true,
+        config: {
+          type: 'http', url: 'https://mcp.example.test',
+          headers: { 'X-Empty': '', 'X-Padded': ' v ', authorization: 'static', 'X-Key': 'k' },
+          env_http_headers: { Authorization: 'USER_TOKEN' }
+        }
+      }]
+    }, undefined, 'N')).toEqual({
+      args: [
+        '-c',
+        'mcp_servers={"remote"={"url"="https://mcp.example.test","http_headers"={"X-Empty"="","X-Padded"=" v ","authorization"="static"},"env_http_headers"={"Authorization"="USER_TOKEN","X-Key"="SCRY_MCP_HEADER_N_0"},"enabled"=true}}'
+      ],
+      env: { SCRY_MCP_HEADER_N_0: 'k' }
+    })
   })
 
   it('lists Codex MCP without app-server, then reads native status from the authorized client', async () => {

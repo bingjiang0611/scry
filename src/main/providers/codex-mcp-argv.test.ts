@@ -62,7 +62,7 @@ describe('Codex MCP configuration on the app-server argv', () => {
     const variable = /"remote"=\{[^}]*"env_http_headers"=\{"X-Api-Key"="([A-Z0-9_]+)"\}/.exec(servers)?.[1]
     expect(variable).toBeDefined()
     expect(env[variable!]).toBe('hdr-secret-1')
-    expect(servers).not.toContain('http_headers"={')
+    expect(servers).not.toContain('"http_headers"=')
     // Known residual: Codex has no clean per-server indirection for stdio env (see
     // STATUS-BATCH4 known issues), so its values stay on argv until that is decided.
     expect(leakedSecrets(args, ['env-secret-2'])).toEqual(['env-secret-2'])
