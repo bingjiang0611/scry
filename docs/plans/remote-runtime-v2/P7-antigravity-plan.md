@@ -1,4 +1,4 @@
-# P7 · Antigravity Provider：测试、拆分、Recorder 备注与待决定（只设计）
+# P7 · Antigravity Provider：测试、拆分、Recorder 备注与决策清单（设计定稿）
 
 接 [P7-antigravity-provider](P7-antigravity-provider.md)（§0–§3）与 [P7-antigravity-integration](P7-antigravity-integration.md)（§4–§5）。标记含义见 provider 篇 §0.2。
 
@@ -6,109 +6,108 @@
 
 ### 6.1 假 ACP Agent 夹具（L0/L1，CI 可跑）
 
-`src/main/providers/fixtures/fake-agy-acp.mjs`：纯 Node 脚本，按 Pi 夹具的做法写进临时目录、`chmod 0755`、经 `SCRY_AGY_PATH` 指过去，并 mock `shellEnv` 防止读到开发者的登录 shell（`src/main/providers/pi-test-fixture.ts:12-30`）。场景由测试写入夹具旁的 JSON 文件选择，不经环境变量传秘密。
+`src/main/providers/fixtures/fake-agy-acp.mjs`：纯 Node 脚本，写进临时目录、`chmod 0755`、经 `SCRY_AGY_PATH` 指向，mock `shellEnv`（同 `pi-test-fixture.ts:12-30`）；场景经夹具旁 JSON 文件注入，不经环境变量传秘密。
 
 | 场景 | 断言 |
 |---|---|
-| 正常一轮：文本、思考、工具、PromptResponse + usage | trace 顺序；token 按 Gemini 口径换算且 reasoning 不重复计入 total |
-| 工具更新重复、乱序、只有 partial、未知 `sessionUpdate` 类型 | 一次逻辑调用；未知类型记原生流、不崩、不伪造事件 |
-| 无 `usage` | 用量 `unavailable`，不是 0 |
-| 带子 Agent 工具（`start_subagent`） | 用量覆盖 `partial`；不设 `turnRole` |
-| `request_permission`：允许一次、始终允许、拒绝、用户取消 | 回给夹具的 `optionId` 正确；取消回 `cancelled` |
+| 握手形状兼容（`protocolVersion: 1` 与 `2`） | 按响应形状校验通过；版本下限只看 `agy --version`；`clientCapabilities` 声明 `fs=false, terminal=false` |
+| 正常一轮：文本、思考、工具、`usage_update`、PromptResponse + `usage` | trace 顺序；`total = input + cachedRead + cachedWrite + output`（`thoughtTokens` **不重复加**）；`modelStatus: 'unobserved'`；费用 `null` 不成 0 |
+| 工具更新重复、乱序、未先见 `tool_call` 的 `request_permission`、未知 `sessionUpdate` | 一次逻辑调用；未先见 `tool_call` 亦建逻辑调用；未知类型原样进原生流、不崩 |
+| 无 `usage` / 取消轮次 / 含子 Agent | 无 `usage` 标 `unavailable`（非 0）；取消或含子 Agent 标 `partial` |
+| `request_permission`（字符串 `id`、同 `kind` 多选项、取消） | 原样保留全部选项；选定 `optionId` 回传正确；取消回 `cancelled` |
 | `interaction_` 提问 | 走提问 UI；`full_access` 下也不自动回答 |
-| `session/new` 回 -32000 / -32603 `No browser…` / stdout 登录提示行 | 判未登录；提示行不进日志与 trace；进程被停止 |
-| stdout 混入非 JSON 行、超长行 | 非 JSON 旁路；超长行判协议错误并停止 |
-| `session/cancel` 后回 `cancelled` | `settled`；结果 `cancelled` |
-| 忽略 cancel | 走 SIGTERM → SIGKILL，阶段如实上报；无 pkill |
-| 中途崩溃 | `failed` 带 stderr 尾巴（已打码）；不当成完成 |
-| `resume` 可用 / 只有 `load`（重放历史） | 重放不进 trace；恢复后模型、思考档、模式被重设 |
-| `configOptions`：模型含 Claude/GPT、`thought_level` 只对部分模型 | 标「经 Antigravity 提供」；档位不跨模型推断 |
-| `set_mode` 拒绝 `yolo`/`auto_edit` | 目录不提供对应档；直接请求时报 `unsupportedPermissionMode` |
-| `mcpServers` 回显 | 参数记录器（`argv-recorder.fixture.ts`）断言 argv 只有 `acp`，token 只在请求体 |
+| 未登录：`-32000` / `-32603 No browser…` / stdout 登录提示行 | 判未登录；提示行整行丢弃不进日志与 trace；`BROWSER` 为退出 0 脚本；进程停止 |
+| 非 JSON stdout 行、超过 16 MiB 单行 | 非 JSON 只计数不落日志；超 16 MiB 判协议错误并停止 |
+| `session/cancel`（含未决审批、无 `sessionId` 阶段、忽略 cancel） | 未决审批先回 `cancelled`；无 `sessionId` 直接 SIGTERM；忽略 cancel 由 `RunStopLifecycle` 升级 `forceKill`（含独立 PGID 后代，无 pkill） |
+| 崩溃与 stderr 尾巴 | `failed`，UI/远程错误经 `maskSecrets`（含 `AIza…` 与 OAuth URL）打码，原生流原样保留 |
+| `resume`（零重放）与 `load`（重放） | `load` 重放不进 trace；恢复后重设模型、思考档、模式；关 stdin 自然退出 |
+| `configOptions`：多厂商模型、动态 `thought_level` | 标「经 Antigravity 提供」；档位随模型变化、不跨模型推断 |
+| 权限模式：`default`、`accept-edits`、`full_access`（`--dangerously-skip-permissions`）、非法档 | 正确映射或报 `unsupportedPermissionMode`；全局权限高于所选/远程上限拒绝启动 |
+| `mcpServers` 注入 | `argv-recorder.fixture.ts` 断言 argv 无 token；run 结束立刻撤销 token 并关服 |
 
-其他单测：环境清洗（`GEMINI_API_KEY` 默认删除、`SCRY_PROVIDER_ENV_ALLOW` 放行、其他 Provider 不再收到 `GEMINI_`/`AGY_`）；工作区配置门禁（符号链接、越界、超大、解析失败均拒绝，指纹变化重验并记 `source: auto`）；`continuationKey` 稳定性；版本 < 1.5.1 判 unavailable。
+其他单测：
+- 环境变量清洗（默认清 `GEMINI_API_KEY`/`AGY_ADC_AUTH`/`SSH_*`、`SCRY_PROVIDER_ENV_ALLOW` 逐个放行、其余 5 个 Provider 清洗 `GEMINI_`/`AGY_`/`ANTIGRAVITY_`）。
+- 工作区配置门禁（`cwd..gitRoot` 4 别名目录 `.agents`/`.agent`/`_agents`/`_agent`、`hooks.json`、`mcp_config.json`、`plugins/<name>/`、`plugins.json` 越界拒绝、工作区 `settings.json` 含权限键拒绝、符号链接拒绝、指纹变化重验记 `source: auto`）。
+- `format-usage.ts`（`antigravity` / `antigravity_acp` 为 `separate`）、`billing-ledger.ts` 与 `usage-ledger-repair.ts`（缺失费用不记 0）、`error-classify.ts`（带 `providerId` 不串台）、`SCRY_EXPERIMENTAL_PROVIDERS`（隐藏注册/探测/远程 discovery 且进 `LOGIN_START_POLICY_ENV_KEYS`）。
+- daemon 路径：用 `src/daemon/host-process.harness.ts` 跑假 Agent，**不改 `host-process.ts`**。
 
-daemon 路径：新增独立测试文件，用现有 `src/daemon/host-process.harness.ts` 跑一轮假 Agent，**不改** `host-process.ts`。
+### 6.2 macOS 真机清单（L3）与 A0 实测状态
 
-### 6.2 macOS 真机清单（L3，维护者已授权真实 run 与费用）
+复用探测脚本已入库：[scripts/agy-a0-probe.mjs](../../scripts/agy-a0-probe.mjs)（及 `scripts/agy-a0-probe/`），原始输出存 `~/.local/state/scry-handoff-evidence/W7/`。环境：macOS 27.0（arm64）、`agy 1.5.12`。
 
-前提：维护者 Mac 已装 `agy` 且已登录；`SCRY_HOST_DAEMON` 打开；临时 workspace 与临时 userData。HOME 必须是真实 HOME（登录在用户钥匙串里），这点与 S0-2「临时 HOME」不同，照实记录；`agy` 会写自己的 `~/.gemini` 数据。
-
-| # | 项目 | 记录 |
-|---|---|---|
-| 1 | `agy --version`、`agy acp --help` | 版本、是否有 `--login`、`--dangerously-skip-permissions`、`--process-per-session` |
-| 2 | `initialize` 原文 | `protocolVersion`、`agentCapabilities`（`loadSession`、`sessionCapabilities.{resume,fork,list}`、`promptCapabilities`）、`authMethods`、`modes` |
-| 3 | 未登录（手工探针：`agy acp --gemini-dir <空临时目录>`，不走产品路径、不登出维护者） | 错误码；是否弹浏览器；stdout 是否出现登录提示 |
-| 4 | 已登录 `session/new` | 模型列表（含 Claude/GPT）、`thought_level` |
-| 5 | 一轮真实任务：读文件、改文件（审批允许与拒绝各一次）、跑命令、提问 | trace、文件足迹、审批往返 |
-| 6 | 会话模式 | 可用模式；`yolo`/`auto_edit` 是否被拒；有无原生 always-proceed 入口（决定 D2） |
-| 7 | 全局 `toolPermission=always-proceed` 时 ACP 的实际行为 | 决定 D3 |
-| 8 | 工具执行中停止 | cancel 到 settle 的耗时；`ps` 按 PID 核对子进程已退出 |
-| 9 | 终端命令子进程的进程组 | 是否与 `agy` 同组 |
-| 10 | 重启后台服务后恢复会话 | `resume`/`load`；模型被重设 |
-| 11 | `mcpServers`（HTTP + header）注入历史检索 | 是否生效；`ps -o args` 不含 token |
-| 12 | 工作区 `.agents/hooks.json`、`.agents/mcp_config.json`（无害 Hook：写一个临时文件） | `agy acp` 是否加载；门禁拒绝路径是否生效 |
-| 13 | PromptResponse `usage` | 与 agy 自己显示的用量对照 |
-| 14 | 工作区副作用 | 是否新建 `.gemini/skills`、`.agents/skills` |
-| 15 | 中文：`LANG=zh_CN.UTF-8`，路径 `~/临时/测试 项目`（含空格），中文文件名与提示词 | `file://` URI、`.meta` 里的 cwd、门禁的 canonical 路径（APFS 的 NFC/NFD 归一）、trace 不乱码 |
-| 16 | 已配对手机发起一轮：审批往返、停止 | 远程链路 |
-| 17 | 登录时启动的后台服务（launchd）读钥匙串 | 是否判已登录 |
-
-每项与 Codex 同一任务对照记录；失败先存原始 ACP 日志（已打码）、退出码、版本。
+| # | 项目 | A0 状态 | 实测结论 / 证据 |
+|---|---|---|---|
+| 1 | `agy --version`、`agy acp --help` | **已测** | `1.5.12`；支持 `--dangerously-skip-permissions`、`--sandbox`、`--login`、`--gemini-dir`、`--process-per-session`（`01-cli-and-layout.txt`、`01b-acp-help-and-creds.txt`） |
+| 2 | `initialize` 发 `1` 与 `2` 原文 | **已测** | 均返回 `protocolVersion: 1`、`agentInfo.version: 1.5.12`、`resume/load/list/close`（无 `fork`）、4 个 `authMethods`（`02-proto.json`） |
+| 3 | 登录与 `authenticate`、未登录隔离 | **已测**（API key 免 auth 待补） | 已登录跳过 `authenticate` 直接 `session/new` 成功；未登录返回 `-32000`，零弹浏览器；凭据按非 SSH=钥匙串（`svce=gemini`/`acct=antigravity`）、SSH=文件双模式（`03-auth.json`） |
+| 4 | 原生权限模式全集与审批 | **部分已测**（`accept-edits`/`auto`/`plan` 写文件待补） | 4 个原生模式 `default`/`accept-edits`/`auto`/`plan` 均可用；`--dangerously-skip-permissions` 实测 `permCount=0`；`request_permission` 的 `id` 为字符串（`04-modes.json`） |
+| 5 | 逐路径加载矩阵与工作区权限覆盖 | **部分已测**（真实 `hooks.json` schema、`_agents`/`plugins`/`plugins.json`/用户级设置待补） | 实测自动执行 `<ws>/.agents/`、`<ws>/.agent/`、`<parent>/.agents/` 与 `~/.gemini/config/mcp_config.json`；未新建 `skills` 目录（`05-paths.json` + 内置 `agy-customizations`） |
+| 6 | `session/new.mcpServers` 与落盘检查 | **已测** | HTTP + Bearer header 生效、argv 无 token，**但 token 写入了 `conversations/<id>.db`**（`06-mcp.json`） |
+| 7 | 进程模型：关 stdin、尾随通知、`resume`/`load` | **已测**（子 Agent 与 `/goal` 终止待补） | 无尾随通知；关 stdin 861 ms 自然退出落盘；`resume` 2.2 s 零重放回忆成功；`load` 1.9 s 重放 5 条（`07-lifecycle.json`） |
+| 8 | cancel、子进程组与 SIGTERM | **已测** | 未决审批 5 ms、命令执行 15 ms 均回 `cancelled` 且子进程清理；**命令子进程在独立 PGID**；空闲 SIGTERM 1,402 ms 退出（`08-cancel.json`） |
+| 9 | 用量口径、动态思考档、模型切换副作用 | **已测**（子 Agent 用量待补） | `total = input + cachedRead + cachedWrite + output`（`thoughtTokens` 已含在 `output` 内）；不报实际模型；切模型不改 `settings.json`（`09-usage.json`） |
+| 10 | 非秘密账号标识 | **已测** | 配置文件与 ACP 均无邮箱/用户 ID，仅 `onboarding.json`、`default_project_id.txt`、ACP `_meta.antigravity.tier`（`10-account-files.txt`、`03-auth.json`） |
+| 11 | macOS `launchd` 最小环境读登录态 | **已测** | 仅 `HOME`+`PATH`+`BROWSER` 下 `session/new` 成功返回 11 个模型（`11-launchd.json`） |
+| 12 | 中文路径与 `LANG=zh_CN.UTF-8` | **待补测** | 首次因 `SSH_*` 触发 `composite_token_storage` 切回文件模式报 `-32000`；修正脚本后遇 `MEASURING` 锁暂停 |
+| A9 | 完整 Scry daemon 端到端 + 手机审批/停止 | **A9 阶段** | 代码完成后执行，与 Codex 同任务对照 |
 
 ### 6.3 Linux
 
-Ubuntu runner 只跑 §6.1。真机：有装了 `agy` 的 Linux 桌面就跑 §6.2 第 1–15 项，并加「`systemd --user` 下 Secret Service 未解锁」一项；没有就标 **not-run**，不以 macOS 通过代替。
+Ubuntu CI 跑 §6.1。真机有装 `agy` 的 Linux 桌面则跑 §6.2 对应项并加「`systemd --user` Secret Service 未解锁」；无则标 **not-run**，不以 macOS 替代。
 
 ## 7. 拆分与顺序
 
+按评审工期评估：完整范围（含 A8）约 **6–8 周**；**4–5 周**可行基线为 A0.5–A5 + A6 门禁（不含历史检索注入与 A8）。A0 剩余 4 项深探在 `MEASURING` 解除后、A1 启动前补完。
+
 | 编号 | 内容 | 大小 | 依赖 |
 |---|---|---|---|
-| A0 | 真机侦察：§6.2 第 1–4、6、7、9、11、12 项，只记录、不合代码 | S | 维护者在场 |
-| A1 | ProviderId/RuntimeProvider 与各处枚举（§4.2 第二表的共享与持久化部分）、`policy-env.ts`、`host-runtime.ts`、`desktop-host-reader.ts` | S | — |
-| A2 | `acp-client.ts` + 假 Agent 夹具 + 分帧/错误单测 | M | A1 |
-| A3 | `antigravity-launch.ts`：发现、版本、环境清洗、spawn、身份、停止；`describe` | M | A2 |
-| A4 | `antigravity-run.ts`/`-events.ts`/`-permissions.ts`/`-usage.ts`：一轮、流式、审批与提问、用量 | L | A3、A0 |
-| A5 | `antigravity-catalog.ts`：模型、思考档、命令、Skill、登录探测与缓存 | M | A3 |
-| A6 | `antigravity-config-trust.ts`、`providerMcpConfigPaths`、历史检索注入 | M | A3、A0 第 11、12 项 |
-| A7 | 渲染层显示名/图标/文案、兼容性清单、`error-classify` | S | A5 |
-| A8 | 输入回执 + `historicalContext` opt-in（侧边会话、交接） | M | A4 |
-| A9 | macOS 真机验收（daemon 模式）与 Linux 标注 | S–M | 全部 |
+| A0 | 真机探测与设计定稿（本阶段；4 项深探待 `MEASURING` 解除后补完） | S | — |
+| A0.5 | 预拆超限/临限旧文件：`claude-locate.ts`、`smoke.ts`、`useAgentSession-helpers.ts`、`turn-record.ts`、`billing-ledger.ts`、`mcp-execution-trust.ts` 等（零行为变化） | S | A0 |
+| A1 | `ProviderId`/`RuntimeProvider` 枚举、`mcp-config.ts` 显式分支、`SCRY_EXPERIMENTAL_PROVIDERS` 与 `LOGIN_START_POLICY_ENV_KEYS`、`policy-env.ts`、`host-runtime.ts`、`desktop-host-reader.ts`、`run-stop-lifecycle.ts` | S | A0.5 |
+| A2 | `acp-client.ts`（16 MiB 上限、字符串 id、非 JSON 计数）+ 假 Agent 夹具 + 单测 | M | A1 |
+| A3 | `antigravity-launch.ts`（发现、版本、清洗、去 `SSH_*`、`BROWSER` 退出 0、停止含独立 PGID 后代）+ `describe` | M | A2 |
+| A4 | `antigravity-run.ts`/`-events.ts`/`-permissions.ts`/`-usage.ts`（一轮、审批/提问、`separate` 用量、费用 `null` 修复） | L | A3 |
+| A5 | `antigravity-catalog.ts`（模型、动态思考档、命令、Skill、缓存与互斥） | M | A3 |
+| A6 | `antigravity-config-trust.ts`（4 别名目录 + `cwd..gitRoot` + 插件/`plugins.json` + 权限键拒绝）+ run 级历史检索 MCP（轮末撤销 token） | M | A3、A0 补测 |
+| A7 | 渲染层显示名/中性字母标/MCP 面板来源、兼容性清单、`error-classify(providerId)`、`GLOSSARY.md` | S | A5 |
+| A8 | 输入回执 + `historicalContext`（侧边会话、交接，可选后置） | M | A4 |
+| A9 | macOS daemon 真机验收（含手机远程）与 Linux 标注 | S–M | A1–A7 |
 
-- 约 4–5 周（单人）；A0 结果可能删掉 `full_access` 与历史检索两块工作。
-- **不碰 `src/daemon/host-process.ts`**。A1 改的共享枚举文件与其他执行方可能冲突：A1 单独一个小提交、先合，冲突面最小。
-- 所有新文件 < 20,000 字节；`antigravity-run.ts` 预计最大，事件映射已拆到 `-events.ts`，仍超就按 resume/prompt 再拆。
-- 每段：L0 相关测试 + 类型检查；A9 前跑一次 L1。
+**不碰 `src/daemon/host-process.ts`**；所有新文件与改动的旧文件严格 `< 20,000` 字节。
 
 ## 8. Recorder 备注（范围外）
 
-Scry 不录制终端里的 `agy`（决定 2）。以后若做 `scry init` 支持，现有线索：
+本期不实现 `scry init` 对 `agy` 的录制。本机 `agy 1.5.12` 内置 `agy-customizations/docs/hooks.md` 证实：
+- **配置位置**：工作区 `{.agents,.agent,_agents,_agent}/hooks.json`、全局 `~/.gemini/config/hooks.json`、插件根目录 `<plugin>/hooks.json`。
+- **Schema**：顶层键为 hook 名称（非 `hooks` 包装），支持 `SessionStart`、`PreToolUse`、`PostToolUse`、`PreInvocation`、`PostInvocation`、`Stop`（无 `UserPromptSubmit`/`SessionEnd`）；仅支持 `type: "command"` 同步执行。
+- **负载**：stdin 传 camelCase JSON（含 `conversationId`、`workspacePaths`、`transcriptPath`、`artifactDirectoryPath`、`modelName`、`lastUserInput`、`hookEventName`、`cwd`）；CLI 日志在 `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl`。
+- **缺口**：轮次起点仍需靠 `PreInvocation` 推断，写入工作区 `hooks.json` 需走 Recorder 合同与 trust。
 
-| 项 | 内容 | 来源 |
+## 9. 决策清单（已定 vs 待维护者决定）
+
+### 9.1 已定（维护者 2026-11-19 + A0 实测闭合）
+
+| # | 项 | 已定结论 |
 |---|---|---|
-| Hook 事件 | `PreToolUse`、`PostToolUse`、`PreInvocation`、`PostInvocation`、`Stop`、`SessionStart`；未见 `UserPromptSubmit`/`SessionEnd` | 〔官方摘要〕〔社区〕 |
-| 配置位置 | 工作区 `.agents/hooks.json`、全局 `~/.gemini/config/hooks.json`、plugin 自带；`/hooks` 列出已加载项；`settings.json` 里的 hooks 键不加载（另有版本说法相反） | 〔官方摘要〕 |
-| 负载 | 含 `transcriptPath`（驼峰） | 〔社区〕 |
-| 原生记录 | `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl` | 〔官方摘要〕 |
-| 可靠性 | IDE 有 `Stop`/`PostToolUse` 不触发的报告；CLI 有 `PreToolUse` 触发的报告 | 〔社区〕 |
+| D1 | 登录与条款 | 复用 CLI 登录态，不做登录、不弹浏览器；文案中性提示条款风险，不下违规结论 |
+| D2 | 原生权限入口 | 实测存在原生 `accept-edits`（→ `auto_accept_edits`）与 `--dangerously-skip-permissions`（→ `full_access`）；无原生对应不伪造、不代答 |
+| D3 | 全局权限覆盖 | 读 `~/.gemini/antigravity-cli/settings.json`，有效权限高于所选档位或远程上限时拒绝启动，turn record 记有效档位 |
+| D5 | 目录探测记录 | 在 0700 临时目录跑短会话，按 `continuationKey` 缓存且与同 profile 的 run 互斥，不删用户 agy 数据 |
+| D6 | ACP 客户端 | 手写最小客户端，不引外部 SDK |
+| D7 | 标识与图标 | `antigravity` / `Antigravity` / `agy` + 中性字母标 |
+| D8 | 可见性与门控 | 新建 `SCRY_EXPERIMENTAL_PROVIDERS=antigravity` 管控注册/探测/远程 discovery，并入 `LOGIN_START_POLICY_ENV_KEYS`；未验证版本仅实验开关可用 |
+| M1–M4 | 缺失决策 | 工作区设置含权限键拒绝启动并说明；一 run 一进程终止后台子 Agent/`/goal` 写明；缺失费用记 `null`（未知）不记 0；Windows 明确不支持 |
 
-结论：机制存在，可行性中等。缺口：轮次起点要靠 `PreInvocation` 推断（无 `UserPromptSubmit`），`Stop` 的输出约定未核实；写入 `.agents/hooks.json` 本身是仓库控制的可执行配置，要走 Recorder 合同与 trust。本期不做任何实现。
+### 9.2 仍需维护者决定
 
-## 9. 需要维护者决定
-
-| # | 问题 | 选项 | 建议 |
+| # | 问题 | 选项 | 推荐 |
 |---|---|---|---|
-| D1 | **条款风险**。搜索摘要显示 Google FAQ 称第三方工具经 Antigravity 个人登录访问服务违反条款，个人方案不支持把 `agy` 包进第三方应用，建议改用 Gemini Enterprise / AI Studio API key；论坛有封号报告。原文未能读取（§0.2） | a) 照决定 1 用个人账号真机验证；b) 验证改用 AI Studio API key（经 `SCRY_PROVIDER_ENV_ALLOW` 放行）或 Enterprise；c) 先暂停 | **b**，并先由维护者读一遍 FAQ 原文。产品里在 Provider 说明加一句「使用前请确认你的 Google 方案允许第三方客户端」，不替用户判断 |
-| D2 | `agy acp` 若没有原生 always-proceed 入口，`full_access` 怎么办 | a) 不提供；b) Scry 端代答所有审批 | **a**。b 让 Scry 成了审批人，且 agy 的 deny 规则仍会拦，不是原生等价语义 |
-| D3 | 用户全局 `toolPermission` 已是 `always-proceed`/`proceed-in-sandbox` 时的 `default` | a) 只读该键，如实改写 `default` 说明；b) 拒绝运行；c) 不管 | **a**（真机第 7 项确认 ACP 下确实生效后再定文案） |
-| D4 | `continuationKey`：登录在钥匙串里，没有可哈希的凭据文件 | a) 用执行入口身份 + canonical `~/.gemini` + 放行变量的哈希，接受同一钥匙串换账号察觉不到；b) 无文件凭据就禁止跨 run 恢复（Qoder 现做法） | **a**。b 会让钥匙串用户永远不能恢复；换账号后的恢复失败由 agy 报错，Scry 如实显示 |
-| D5 | 目录读取的短会话在用户 agy 数据目录留一条会话记录 | a) 留着并写明；b) 按 T3 做法只删 cwd 与 id 都匹配的自有文件 | **a**。记录只出现在临时 cwd 的 `/resume` 列表里；删 Provider 数据是额外写操作 |
-| D6 | ACP 客户端 | a) 手写最小客户端；b) 引入官方 ACP SDK 依赖 | **a**，与 `pi-rpc.ts` 同风格，便于控制分帧上限；不承诺通用 ACP Provider |
-| D7 | 标识与图标 | ProviderId `antigravity`、显示名 Antigravity、可执行 `agy`；图标用中性字母标还是官方图形 | 中性字母标，避免商标问题 |
-| D8 | 默认可见性 | a) 装了 `agy` 就出现（标实验性）；b) 真机通过前需 `SCRY_EXPERIMENTAL_PROVIDERS=antigravity` 才出现 | **b**，直到 D1 有结论且 A9 通过 |
+| D4 | `continuationKey` 账号标识：A0 实测 macOS 非 SSH 凭据在钥匙串（`svce=gemini`/`acct=antigravity`），磁盘与 ACP 均无明文邮箱/账号 ID（仅 `onboarding.json`、tier） | a) 哈希执行入口 + canonical `~/.gemini` + 放行变量（文件存储时附加 token 文件哈希），钥匙串模式界面标「账号未验证」并接受换账号察觉不到；b) 无文件凭据时禁止跨 run 恢复 | **a**（与维持钥匙串体验兼容，且如实标注「账号未验证」） |
+| D9 | 原生 `auto` 模式（"Approve edits and safe commands; ask before irreversible actions"）是否映射到 Scry `auto_review` | a) 首版只提供语义一一对应的 `default`、`auto_accept_edits`（`accept-edits`）、`full_access`（`--dangerously-skip-permissions`），暂不把 `auto` 映射到 `auto_review`；b) 映射到 `auto_review` 并在文案写明由 `agy` 自身分类器放行安全命令 | **a**（`auto` 并非独立审查器，先保持权限语义严格对应；待补测 `auto` 实际询问范围后再议） |
+| D10 | `SSH_*` 与双存储迁移：A0 实测无 `SSH_*` 时 `agy` 读钥匙串并会在刷新时把 `antigravity-oauth-token` 迁入钥匙串删原文件；含 `SSH_*` 时只读文件、忽略钥匙串 | a) 启动 `agy acp` 固定剥离 `SSH_CLIENT`/`SSH_CONNECTION`/`SSH_TTY`（除非用户显式放行 `AGY_ACP_FORCE_FILE_STORAGE`），保证桌面/launchd 始终读钥匙串，并在文档说明 SSH 登录首次在桌面运行会被 `agy` 迁入钥匙串；b) 透传 `SSH_*` | **a**（避免从 SSH 启动守护进程时误报未登录） |
 
-## 附：外部来源
+## 附：外部来源与 A0 证据
 
-- T3 Code `8cf97b5f`：`docs/user/providers-antigravity.md`、`docs/user/providers-acp.md`、`docs/user/permission-modes.md`；`apps/server/src/provider/{antigravityAuthSupport,antigravityCliRelease}.ts`、`acp/Antigravity{AcpSupport,Protocol,TurnOutcome,SessionFiles}.ts`、`Drivers/Antigravity{Driver,Usage,Skills}.ts`；`apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts`；`packages/provider-acp/src/server/adapter.ts`。只借鉴结论，不复制代码。
-- 仅见搜索摘要（未读原文）：<https://antigravity.google/docs/cli/acp/>、<https://antigravity.google/docs/faq>、<https://antigravity.google/docs/hooks?tab=cli>、<https://antigravity.google/docs/settings?tab=cli>、<https://antigravity.google/docs/cli/modes.md>、<https://antigravity.google/docs/agent-settings.md>、<https://antigravity.google/docs/install/?tab=cli>、<https://antigravity.google/docs/cli/commands/resume.md>。
-- 社区：<https://github.com/google-antigravity/antigravity-cli/issues/565>、<https://discuss.ai.google.dev/t/is-invoking-the-official-agy-cli-from-a-local-ai-coding-assistant-allowed-on-an-individual-google-ai-account/185992>、<https://discuss.ai.google.dev/t/bug-antigravity-cli-agy-fails-to-persist-authentication-state-in-wsl-2-environment/146059>、<https://discuss.ai.google.dev/t/stop-and-posttooluse-hooks-in-agents-hooks-json-never-fire-antigravity-ide-1-107-0-windows/178288>、<https://medium.com/google-cloud/a-developers-guide-to-agent-hooks-in-antigravity-cli-4c1440febd11>。
+- 本机 A0 实测（`agy 1.5.12`，2026-11-20）：`~/.local/state/scry-handoff-evidence/W7/{01-cli-and-layout.txt,01b-acp-help-and-creds.txt,01c-settings-and-keychain.txt,01d-subcommands-and-cache.txt,02-proto.json,03-auth.json,04-modes.json,05-paths.json,06-mcp.json,07-lifecycle.json,08-cancel.json,09-usage.json,10-account-files.txt,11-launchd.json}`。
+- 本机内置规范：`~/.gemini/antigravity-cli/builtin/skills/agy-customizations/{SKILL.md,docs/hooks.md,docs/plugins.md,docs/mcp_servers.md,docs/json_configs.md}`。
+- 历史参考：T3 Code `8cf97b5f`（仅在 A0 未覆盖细节作对照，不复制代码）。
