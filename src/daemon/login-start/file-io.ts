@@ -62,3 +62,50 @@ export function parseSystemdShowProperties(stdout: string): { active: boolean; m
   const mainPid = active && Number.isSafeInteger(parsedPid) && parsedPid > 1 ? parsedPid : null
   return { active, mainPid }
 }
+
+export interface LaunchctlPrintInfo {
+  runState: 'idle' | 'running' | 'unknown'
+  userDataDir: string | null
+}
+
+/**
+ * Extracts top-level run state and `environment.SCRY_DAEMON_USER_DATA_DIR` from
+ * `launchctl print gui/<uid>/<label>` output. Tracks block nesting so nested `state`
+ * (e.g. `resource coalition = { state = active }`) or `inherited environment` cannot
+ * spoof ownership or run state. Fails closed to `runState: 'unknown'` on unparseable output.
+ */
+export function parseLaunchctlPrint(stdout: string): LaunchctlPrintInfo {
+  let depth = 0
+  let inJobEnv = false
+  let topState: string | null = null
+  let hasPid = false
+  let userDataDir: string | null = null
+
+  for (const rawLine of stdout.split('\n')) {
+    const line = rawLine.replace(/\r$/, '')
+    const openMatch = line.match(/^\s*([A-Za-z0-9_.\-/ ]+?)\s*=\s*\{\s*$/)
+    if (openMatch) {
+      depth += 1
+      if (depth === 2 && openMatch[1].trim() === 'environment') inJobEnv = true
+      continue
+    }
+    if (/^\s*\}\s*$/.test(line)) {
+      if (depth === 2) inJobEnv = false
+      if (depth > 0) depth -= 1
+      continue
+    }
+    if (depth === 1) {
+      const stateMatch = line.match(/^\s+state\s*=\s*(.+)$/)
+      if (stateMatch) { topState = stateMatch[1].trim(); continue }
+      if (/^\s+pid\s*=\s*\d+\s*$/.test(line)) hasPid = true
+    } else if (depth === 2 && inJobEnv) {
+      const envMatch = line.match(/^\s+SCRY_DAEMON_USER_DATA_DIR\s*=>\s*(.+)$/)
+      if (envMatch) userDataDir = envMatch[1]
+    }
+  }
+
+  const runState = hasPid || topState === 'running'
+    ? 'running'
+    : topState === 'not running' ? 'idle' : 'unknown'
+  return { runState, userDataDir }
+}

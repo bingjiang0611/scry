@@ -1,4 +1,4 @@
-结论：需修改
+结论：需修改（第二轮：无阻塞，剩 4 项应修，见文末「复核」）
 
 # W2 核验（核验方，2026-11-19）
 
@@ -49,3 +49,28 @@
 ## 合并门槛
 
 P5-4 只部分通过（原生确认框未用 AX 实测、未做真实注销再登录、§6 第 7 项 TCC/钥匙串/本地网络/FileVault 未验证），加上上面的决定未定。按 P5-host-security §7，第 1 步在这些关闭、且 W1 通过之前不合入 `main`。
+
+## 复核（第二轮，2026-11-19，修复提交 `eebb2f1f`、`0bf91973`、`eeb6ac1d`）
+
+复跑（Linux）：受影响的 18 个测试文件 151 个用例通过；`tsc` node 与 web 均通过。另把新测试放到修复前的 `53dd5b9f` 上跑：16 个失败，证明它们确实覆盖了修复（符号链接拒绝、回滚恢复、`execFile` 超时与找不到命令、「开启不动运行中的后台服务」4 个在旧代码上也通过，只防回归）。
+
+| 项 | 结论 |
+|---|---|
+| B1 | 已修，有测试（`policy-env.ts:43` 前后空白即拒绝，写入原值；`SCRY_DISABLED_PROVIDERS` 不改大小写） |
+| S1 | 已修，有测试（`manager.ts:146-148`；main 开启前调 `precheckEnable`） |
+| S2 | 部分：`disable` 无文件不再 bootout；但见下面应修 1、2 |
+| S3 | 逻辑已改为 bootout 再 bootstrap，执行方在 Mac 上实测；文案未改（应修 3） |
+| S4、S5、S6、S8 | 已修，有测试；S6 只在执行方的 Mac 上跑过 |
+| S7 | 已修，用假的执行器测试；Linux 真机未跑 |
+| 可选 | 2–5 已修；1 部分：`status()` 已只读，`canLaunchViaService()` 仍会改写（启动路径上有意为之），报告「纯只读」说法要改 |
+
+**仍需修改（执行方 B）**
+
+1. **回归**：后台服务运行中关闭开关（文件删除、任务仍加载）→ 后台服务随后停止 → 再开启时 `daemonRunning=false`，被 `login_start_loaded_without_file` 拒绝（`manager.ts:291-293`），要注销才能恢复。这正是 P5-host-security §6 列的真机场景，验收脚本只在 `daemonRunning:true` 下重开（`login-start-macos-acceptance.mjs:241`）。修法：`launchctl print` 显示没有 pid 的空闲任务可以 bootout（停掉的不是任何运行中的东西），或用其他方式确认归属；补测试与真机复测。
+2. **归属证明被跳过**：`manager.ts:289` 的 `if (daemonRunning) return { ok: true }` 在 `!hadOwnedFile` 检查之前，于是「任务已加载、无文件、我们的后台服务在跑」时会写入我们的 plist，而不证明已加载的任务属于谁；之后 `startViaService`（`:383`）无条件 bootout，可能卸掉别的 userData 的任务。归属证明要放在这个分支之前。
+3. **文案**：`renderer/constants/background-service-copy.ts:118`「关闭再重新开启「登录时启动」或重启后台服务」——两者单独都不生效，改为「关闭再重新开启…，然后重启后台服务」。
+4. **设计文档过期**：`P5-headless-host.md` §2.3 表（`:122-125`）仍写 `kickstart`，没写重新加载、无文件拒绝、只在有自己的文件时 bootout；任务单 `handoff/tasks/W2-p5-login-start.md` 第 5 行仍写 `kill -KILL`，改为 SIGABRT。
+
+**可选**：`startViaService` 只在任务未运行时 bootout，或处理 bootout 10 s 超时与 `ExitTimeOut=30` 的冲突；`disable` 也拒绝 `login_start_other_app`（同 userData 但属于另一个仍存在的 App）；EACCES 测试改为注入读取错误，使 root 下也能跑；严格解析下，模板一旦改动，旧版本写的服务文件会被判为「外来」，下次改模板前要准备旧模板的识别或迁移。
+
+**合并门槛不变**：AX 点原生确认框、真实注销再登录、签名包上的 TCC/钥匙串/本地网络/FileVault、Linux 真机。

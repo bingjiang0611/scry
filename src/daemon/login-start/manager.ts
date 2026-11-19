@@ -6,9 +6,12 @@ import { precreateDaemonLog } from '../daemon-log'
 import { renderLaunchdPlist, renderSystemdUnit } from '../supervisor-templates'
 import {
   LINUX_LOGINCTL, LINUX_SYSTEMCTL, MACOS_LAUNCHCTL, SERVICE_COMMAND_TIMEOUT_MS,
-  executableExists, runFixedCommand, type CommandResult, type CommandRunner
+  commandFailure, executableExists, runFixedCommand, type CommandRunner
 } from './exec'
-import { parseSystemdShowProperties, readRegularServiceFile, writeFileAtomicPrivate } from './file-io'
+import {
+  parseLaunchctlPrint, parseSystemdShowProperties, readRegularServiceFile, writeFileAtomicPrivate,
+  type ServiceFileRead
+} from './file-io'
 import { parseLaunchdPlist, parseSystemdUnit, type ParsedServiceFile } from './parse'
 import {
   isEphemeralMacAppPath, loginStartTemplateInput, resolveLoginStartOverrides, serviceFilePath,
@@ -16,7 +19,7 @@ import {
 } from './paths'
 import { collectLoginStartPolicyEnv, validateParsedPolicyEntries } from './policy-env'
 
-export { parseSystemdShowProperties }
+export { parseLaunchctlPrint, parseSystemdShowProperties }
 
 export type LoginStartMutationResult =
   | { ok: true }
@@ -37,6 +40,7 @@ export interface LoginStartManagerDeps {
   /** Production keeps Linux unavailable until real-machine verification passes (P5 §2.3). */
   allowLinux?: boolean
   systemctlAvailable?: boolean
+  readServiceFile?: (path: string) => ServiceFileRead
   log?: (line: string) => void
 }
 
@@ -56,18 +60,13 @@ export interface LoginStartManager {
   startViaService(): Promise<LoginStartMutationResult>
 }
 
-function commandFailed(baseReason: string, result: CommandResult): LoginStartMutationResult {
-  if (result.timedOut) return { ok: false, reason: `${baseReason}_timeout` }
-  if (result.notFound) return { ok: false, reason: 'login_start_command_missing' }
-  return { ok: false, reason: baseReason, ...(result.exitCode !== null ? { exitCode: result.exitCode } : {}) }
-}
-
 export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStartManager {
   const platform = deps.platform ?? process.platform
   const uid = deps.uid ?? (typeof process.getuid === 'function' ? process.getuid() : -1)
   const env = deps.env ?? process.env
   const homeDir = deps.homeDir ?? homedir()
   const runner = deps.runner ?? runFixedCommand
+  const readServiceFile = deps.readServiceFile ?? readRegularServiceFile
   const allowLinux = deps.allowLinux ?? false
   const log = deps.log ?? (() => undefined)
   const overrides = resolveLoginStartOverrides(env, platform)
@@ -108,7 +107,7 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     | { kind: 'error'; code: string }
     | { kind: 'foreign' }
     | { kind: 'ours'; parsed: Extract<ParsedServiceFile, { kind: 'ours' }>; raw: string } => {
-    const read = readRegularServiceFile(filePath)
+    const read = readServiceFile(filePath)
     if (read.kind === 'missing') return { kind: 'missing' }
     if (read.kind === 'error') return { kind: 'error', code: read.code }
     if (read.kind === 'symlink') return { kind: 'foreign' }
@@ -183,6 +182,22 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     return { enabled: enabledRes.exitCode === 0, mainPid }
   }
 
+  const conflictResult = (
+    conflict: Extract<Ownership, { kind: 'conflict' }>
+  ): { ok: false; reason: string; otherUserDataDir?: string; otherExecutable?: string } => ({
+    ok: false,
+    reason: conflict.reason,
+    ...(conflict.otherUserDataDir ? { otherUserDataDir: conflict.otherUserDataDir } : {}),
+    ...(conflict.otherExecutable ? { otherExecutable: conflict.otherExecutable } : {})
+  })
+
+  const unlinkServiceFile = (): LoginStartMutationResult | null => {
+    try { unlinkSync(filePath); return null } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      return code === 'ENOENT' ? null : { ok: false, reason: `login_start_unlink_failed:${code ?? 'unknown'}` }
+    }
+  }
+
   const precheckEnable = (): LoginStartPrecheckResult => {
     const avail = availability()
     if (!avail.ok) return avail
@@ -190,14 +205,7 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     if (!policy.ok) return policy
     const ownership = inspectReadOnly()
     if (ownership.kind === 'read-error') return { ok: false, reason: `login_start_read_failed:${ownership.code}` }
-    if (ownership.kind === 'conflict') {
-      return {
-        ok: false,
-        reason: ownership.reason,
-        ...(ownership.otherUserDataDir ? { otherUserDataDir: ownership.otherUserDataDir } : {}),
-        ...(ownership.otherExecutable ? { otherExecutable: ownership.otherExecutable } : {})
-      }
-    }
+    if (ownership.kind === 'conflict') return conflictResult(ownership)
     return { ok: true, policyEnvKeys: policy.entries.map(([key]) => key) }
   }
 
@@ -207,11 +215,12 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     const ownership = inspectReadOnly()
     if (ownership.kind === 'read-error') return { state: 'unavailable', reason: `login_start_read_failed:${ownership.code}` }
     if (ownership.kind === 'conflict') {
+      const { reason, otherUserDataDir, otherExecutable } = ownership
       return {
         state: 'conflict',
-        reason: ownership.reason,
-        ...(ownership.otherUserDataDir ? { otherUserDataDir: ownership.otherUserDataDir } : {}),
-        ...(ownership.otherExecutable ? { otherExecutable: ownership.otherExecutable } : {})
+        reason,
+        ...(otherUserDataDir ? { otherUserDataDir } : {}),
+        ...(otherExecutable ? { otherExecutable } : {})
       }
     }
     const rewrittenFrom = ownership.kind === 'ours' ? lastRewrittenFrom : undefined
@@ -254,14 +263,7 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     // S1: enforce ownership + Decision 7 (never overwrite another existing App or userData).
     const ownership = inspectReadOnly()
     if (ownership.kind === 'read-error') return { ok: false, reason: `login_start_read_failed:${ownership.code}` }
-    if (ownership.kind === 'conflict') {
-      return {
-        ok: false,
-        reason: ownership.reason,
-        ...(ownership.otherUserDataDir ? { otherUserDataDir: ownership.otherUserDataDir } : {}),
-        ...(ownership.otherExecutable ? { otherExecutable: ownership.otherExecutable } : {})
-      }
-    }
+    if (ownership.kind === 'conflict') return conflictResult(ownership)
     const previousRaw = ownership.kind === 'ours' || ownership.kind === 'moved' ? ownership.raw : undefined
     const hadOwnedFile = previousRaw !== undefined
 
@@ -283,25 +285,38 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
       const printed = await runner(MACOS_LAUNCHCTL, ['print', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
       if (printed.timedOut || printed.notFound) {
         restorePrevious()
-        return commandFailed('login_start_launchctl_failed', printed)
+        return commandFailure('login_start_launchctl_failed', printed)
       }
       if (printed.exitCode === 0) {
-        if (daemonRunning) return { ok: true }
-        // S2: only bootout when an existing file on disk proved this label belongs to our userData.
-        if (!hadOwnedFile) {
+        const printInfo = parseLaunchctlPrint(printed.stdout)
+        const ownedByPrint = printInfo.userDataDir !== null && resolve(printInfo.userDataDir) === currentUserData
+        const ownedLoadedJob = hadOwnedFile || ownedByPrint
+        const isIdleJob = printInfo.runState === 'idle'
+        // R2 #1 & #2: verify ownership (owned file or launchd env userData) or idle state
+        // BEFORE the daemonRunning shortcut so we never claim/bootout another userData's job.
+        if (!ownedLoadedJob && !isIdleJob) {
           restorePrevious()
           return { ok: false, reason: 'login_start_loaded_without_file' }
+        }
+        if (daemonRunning) {
+          if (ownedLoadedJob) return { ok: true }
+          const bootedIdle = await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
+          if (bootedIdle.exitCode !== 0) {
+            restorePrevious()
+            return commandFailure('login_start_bootout_failed', bootedIdle)
+          }
+          return { ok: true }
         }
         const bootedOut = await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
         if (bootedOut.exitCode !== 0) {
           restorePrevious()
-          return commandFailed('login_start_bootout_failed', bootedOut)
+          return commandFailure('login_start_bootout_failed', bootedOut)
         }
       }
       const bootstrapped = await runner(MACOS_LAUNCHCTL, ['bootstrap', macDomain, filePath], SERVICE_COMMAND_TIMEOUT_MS)
       if (bootstrapped.exitCode !== 0) {
         restorePrevious()
-        return commandFailed('login_start_bootstrap_failed', bootstrapped)
+        return commandFailure('login_start_bootstrap_failed', bootstrapped)
       }
       return { ok: true }
     }
@@ -309,13 +324,13 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     const reloaded = await runner(LINUX_SYSTEMCTL, ['--user', 'daemon-reload'], SERVICE_COMMAND_TIMEOUT_MS)
     if (reloaded.exitCode !== 0) {
       restorePrevious()
-      return commandFailed('login_start_systemctl_failed', reloaded)
+      return commandFailure('login_start_systemctl_failed', reloaded)
     }
     const enabledRes = await runner(LINUX_SYSTEMCTL, ['--user', 'enable', overrides.unitName], SERVICE_COMMAND_TIMEOUT_MS)
     if (enabledRes.exitCode !== 0) {
       restorePrevious()
       await runner(LINUX_SYSTEMCTL, ['--user', 'daemon-reload'], SERVICE_COMMAND_TIMEOUT_MS)
-      return commandFailed('login_start_systemctl_failed', enabledRes)
+      return commandFailure('login_start_systemctl_failed', enabledRes)
     }
     const started = await runner(LINUX_SYSTEMCTL, ['--user', 'start', overrides.unitName], SERVICE_COMMAND_TIMEOUT_MS)
     if (started.exitCode !== 0) {
@@ -325,7 +340,7 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
       }
       restorePrevious()
       await runner(LINUX_SYSTEMCTL, ['--user', 'daemon-reload'], SERVICE_COMMAND_TIMEOUT_MS)
-      return commandFailed('login_start_systemctl_start_failed', started)
+      return commandFailure('login_start_systemctl_start_failed', started)
     }
     return { ok: true }
   }
@@ -333,36 +348,25 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
   const disable = async ({ daemonRunning }: { daemonRunning: boolean }): Promise<LoginStartMutationResult> => {
     const avail = availability()
     if (!avail.ok) return { ok: false, reason: avail.reason }
-    const existing = parseExisting()
-    if (existing.kind === 'error') return { ok: false, reason: `login_start_read_failed:${existing.code}` }
-    if (existing.kind === 'foreign') return { ok: false, reason: 'login_start_foreign_service' }
-    if (existing.kind === 'ours' && resolve(existing.parsed.userDataDir) !== currentUserData) {
-      return { ok: false, reason: 'login_start_other_userdata', otherUserDataDir: existing.parsed.userDataDir }
-    }
+    const ownership = inspectReadOnly()
+    if (ownership.kind === 'read-error') return { ok: false, reason: `login_start_read_failed:${ownership.code}` }
+    if (ownership.kind === 'conflict') return conflictResult(ownership)
 
     if (platform === 'darwin') {
       // S2: when no file exists, we have no ownership proof for the fixed label — never bootout.
-      if (existing.kind === 'missing') return { ok: true }
-      try { unlinkSync(filePath) } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          return { ok: false, reason: `login_start_unlink_failed:${(error as NodeJS.ErrnoException).code ?? 'unknown'}` }
-        }
-      }
-      if (!daemonRunning) {
-        await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
-      }
+      if (ownership.kind === 'missing') return { ok: true }
+      const unlinkErr = unlinkServiceFile()
+      if (unlinkErr) return unlinkErr
+      if (!daemonRunning) await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
       return { ok: true }
     }
 
-    if (existing.kind === 'missing') return { ok: true }
+    if (ownership.kind === 'missing') return { ok: true }
     await runner(LINUX_SYSTEMCTL, ['--user', 'disable', overrides.unitName], SERVICE_COMMAND_TIMEOUT_MS)
-    try { unlinkSync(filePath) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        return { ok: false, reason: `login_start_unlink_failed:${(error as NodeJS.ErrnoException).code ?? 'unknown'}` }
-      }
-    }
+    const unlinkErr = unlinkServiceFile()
+    if (unlinkErr) return unlinkErr
     const reloaded = await runner(LINUX_SYSTEMCTL, ['--user', 'daemon-reload'], SERVICE_COMMAND_TIMEOUT_MS)
-    if (reloaded.exitCode !== 0) return commandFailed('login_start_systemctl_failed', reloaded)
+    if (reloaded.exitCode !== 0) return commandFailure('login_start_systemctl_failed', reloaded)
     return { ok: true }
   }
 
@@ -375,19 +379,28 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
   const startViaService = async (): Promise<LoginStartMutationResult> => {
     const avail = availability()
     if (!avail.ok) return { ok: false, reason: avail.reason }
-    // Verify file ownership (and reconcile moved App) before touching the service manager.
     if (!canLaunchViaService()) return { ok: false, reason: 'login_start_not_installed' }
     if (platform === 'darwin') {
-      // S3: bootout (ignoring not-loaded) then bootstrap reloads any updated plist definition
-      // (policy env or moved App path) from disk and starts immediately via RunAtLoad=true.
-      await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
+      const printed = await runner(MACOS_LAUNCHCTL, ['print', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
+      if (printed.timedOut || printed.notFound) return commandFailure('login_start_service_launch_failed', printed)
+      if (printed.exitCode === 0) {
+        const printInfo = parseLaunchctlPrint(printed.stdout)
+        if (printInfo.runState === 'running') {
+          if (printInfo.userDataDir !== null && resolve(printInfo.userDataDir) !== currentUserData) {
+            return { ok: false, reason: 'login_start_other_userdata', otherUserDataDir: printInfo.userDataDir }
+          }
+          // Already running for our userData: skip bootout (avoids ExitTimeOut=30 vs 10 s timeout).
+          return { ok: true }
+        }
+        await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)
+      }
       const res = await runner(MACOS_LAUNCHCTL, ['bootstrap', macDomain, filePath], SERVICE_COMMAND_TIMEOUT_MS)
-      if (res.exitCode !== 0) return commandFailed('login_start_service_launch_failed', res)
+      if (res.exitCode !== 0) return commandFailure('login_start_service_launch_failed', res)
       return { ok: true }
     }
     await runner(LINUX_SYSTEMCTL, ['--user', 'daemon-reload'], SERVICE_COMMAND_TIMEOUT_MS)
     const res = await runner(LINUX_SYSTEMCTL, ['--user', 'start', overrides.unitName], SERVICE_COMMAND_TIMEOUT_MS)
-    if (res.exitCode !== 0) return commandFailed('login_start_service_launch_failed', res)
+    if (res.exitCode !== 0) return commandFailure('login_start_service_launch_failed', res)
     return { ok: true }
   }
 

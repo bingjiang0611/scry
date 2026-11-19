@@ -115,19 +115,19 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 - App 入口：新通道 `remote:backgroundService:setLoginStart(enabled: boolean)`，`handleTrusted`，照常校验 sender/frame/origin，参数恰好一个布尔值；状态并入 `remote:backgroundService:status` 的 `loginStart`。都留在 main（矩阵记 main）。
 - **开启前原生确认**（main 里，同 `background-service-actions.ts:63`、`93` 的做法）：说明这会装一个随登录常驻、可被已配对设备远程访问的服务。关闭不确认。
 - 命令行入口：`scry-host login-start enable|disable|status`（[P5-host-cli](P5-host-cli.md) §3.10）。开启同样要确认；它**不会**打开「允许命令行批准」。
-- 外部命令只用固定绝对路径与参数，不经 shell，10 s 超时；只看退出码，不解析输出：
+- 外部命令用固定绝对路径与参数，不经 shell，10 s 超时；macOS 仅核对空闲/归属时解析 `print`，Linux 解析 `show` 的 `Key=Value`：
 
-| 动作 | macOS（`/bin/launchctl`） | Linux（`/usr/bin/systemctl --user`，找不到即 unavailable） |
+| 动作 | macOS（`/bin/launchctl`） | Linux（`/usr/bin/systemctl --user`，缺失即 unavailable） |
 |---|---|---|
-| 开 | 预建日志 → 原子写 plist → `print gui/<uid>/com.scry.daemon` 退出码 0 表示已加载：后台服务没在跑就先 `bootout` 再 `bootstrap`，在跑就保留，新定义下次登录生效；未加载则 `bootstrap gui/<uid> <plist>` | 预建日志 → 原子写 unit → `daemon-reload` → `enable` → `start` |
-| 关 | 删 plist；后台服务没在跑时再 `bootout` | `disable` → 删 unit → `daemon-reload`；不 `stop` |
-| 状态 | 文件识别（§2.5）+ `print` 退出码 | `is-enabled`；`show -p ActiveState,MainPID --value`；`loginctl show-user <uid> -p Linger --value` |
-| 由服务拉起 | `kickstart gui/<uid>/com.scry.daemon` | `start scry-daemon.service` |
+| 开 | 预建日志 → 原子写 plist → `print` 为 0 时先核对归属（原文件或 `environment` 同 `userData`）或空闲（无 pid）：不满足则回滚拒 `login_start_loaded_without_file`；在跑且归属确认留现进程（空闲先 `bootout`），未跑则 `bootout` 再 `bootstrap`；未加载直接 `bootstrap` | 预建日志 → 原子写 unit → `daemon-reload` → `enable` → `start`（失败回滚 unit 并 `disable`） |
+| 关 | 仅存在且属本 App 同 `userData` 时删 plist（无文件不 `bootout`）；未跑再 `bootout` | 同 `userData` 且非他 App 时 `disable` → 删 unit → `daemon-reload`；不 `stop` |
+| 状态 | 文件识别（§2.5，只读）+ `print` 退出码 | `is-enabled`；`show -p ActiveState,MainPID`（`Key=Value`）；`loginctl show-user <uid> -p Linger --value` |
+| 由服务拉起 | 核对文件 → `print`：在跑同 `userData` 跳过 `bootout`；已加载未跑先 `bootout` 再 `bootstrap` 重载；未加载直接 `bootstrap` | `daemon-reload` → `start scry-daemon.service` |
 
 - 开：已有后台服务在跑时，服务拉起的 supervisor 遇到 `daemon.lock` 以 3 退出、自己以 0 退出。状态显示「当前由 App 启动；下次登录起由系统服务启动」。
 - 关：只取消下次登录启动，**不停当前后台服务**。
 - 只在打包版、daemon 模式、非测试实例下可用。**按平台放行**：Linux 开关在 Linux 实机验收（P5-4）通过前显示 unavailable；macOS 的结果不代替 Linux。仅在带 `SCRY_TEST_APP=1` 启动且显式提供非生产标签/单元覆盖（`SCRY_TEST_LOGIN_START_LABEL` / `SCRY_TEST_LOGIN_START_UNIT`，可选 `SCRY_TEST_LOGIN_START_DIR`）时允许针对该测试标签验收，且禁止覆写日常 `com.scry.daemon` / `scry-daemon.service`；不带 `SCRY_TEST_APP=1` 启动时忽略这些变量。
-- `launchedBy` 核对：Linux 用 `MainPID` 与自报 supervisor pid 比对，一致才显示「由系统服务拉起」；macOS 不解析 `launchctl` 输出，显示为「自报」。
+- `launchedBy` 核对：Linux 用 `MainPID` 与自报 supervisor pid 比对，一致才显示「由系统服务拉起」；macOS 不核对服务 PID，显示为「自报」。
 
 ### 2.4 与 supervisor、两把锁、现有动作的关系
 
@@ -143,7 +143,7 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 
 ### 2.5 升级、移动、删除 App
 
-识别「是我们的」不靠注释行：按渲染格式严格解析出实际值（程序、asar、userData），或与当前渲染逐字节比较。
+识别「是我们的」不靠注释行：按渲染格式严格解析出实际值（程序、asar、userData）并重渲染逐字节比对（若后续改模板，需先补旧模板识别或迁移，否则旧文件会被判外来）。
 
 | 情形 | 结果 |
 |---|---|
