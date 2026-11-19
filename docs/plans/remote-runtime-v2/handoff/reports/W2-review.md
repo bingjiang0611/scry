@@ -1,4 +1,4 @@
-结论：需修改（第二轮：无阻塞，剩 4 项应修，见文末「复核」）
+结论：代码通过（第三轮）；合并仍待真机门槛项
 
 # W2 核验（核验方，2026-11-19）
 
@@ -74,3 +74,18 @@ P5-4 只部分通过（原生确认框未用 AX 实测、未做真实注销再�
 **可选**：`startViaService` 只在任务未运行时 bootout，或处理 bootout 10 s 超时与 `ExitTimeOut=30` 的冲突；`disable` 也拒绝 `login_start_other_app`（同 userData 但属于另一个仍存在的 App）；EACCES 测试改为注入读取错误，使 root 下也能跑；严格解析下，模板一旦改动，旧版本写的服务文件会被判为「外来」，下次改模板前要准备旧模板的识别或迁移。
 
 **合并门槛不变**：AX 点原生确认框、真实注销再登录、签名包上的 TCC/钥匙串/本地网络/FileVault、Linux 真机。
+
+## 复核（第三轮，2026-11-19，修复提交 `de61be2c`、`549cc6be`）
+
+第二轮 4 项应修均已修好：
+
+1. 回归：新增 `parseLaunchctlPrint`（`file-io.ts`），按块层级只读顶层 `state`/`pid` 与任务自身 `environment` 里的 `SCRY_DAEMON_USER_DATA_DIR`（忽略继承环境与嵌套块，解析不了按 `unknown` 处理即拒绝）；空闲（无 pid）的无文件任务可以 bootout 再 bootstrap。执行方在 Mac 上实测「运行中关闭 → 停止 → `daemonRunning=false` 重开」成功。
+2. 归属证明已移到 `daemonRunning` 捷径之前（`manager.ts`：有自己的文件、或 launchctl 环境里的 userData 与本实例一致、或空闲任务，三者之一才继续）；`startViaService` 先查 launchctl，同 userData 在跑就不 bootout，别的 userData 在跑则拒绝 `login_start_other_userdata`。
+3. 文案已改为「关闭再重新开启「登录时启动」，然后重启后台服务」。
+4. 设计文档 §2.3 表与 §2.5（改模板前须备旧模板识别）、任务单第 5 行（SIGABRT）已更新；`P5-headless-host.md` 19,979 字节，未超限。
+
+可选项也已处理：`disable` 拒绝属于另一个仍存在的 App 的服务；EACCES 用例改为注入读取错误，root 下也能跑；报告里的只读说法已更正。
+
+复跑（Linux）：`tsc` node 与 web 通过；受影响的 18 个测试文件 156 个用例通过。
+
+**合并门槛（不变）**：AX 点原生确认框、真实注销再登录、签名包上的 TCC/钥匙串/本地网络/FileVault、Linux 真机；以及 W1 通过。
