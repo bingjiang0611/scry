@@ -9,8 +9,11 @@ export const percentile = (values, fraction) => {
 export const selectTimeline = (marks, submittedWall, until, expectedRunId) => {
   const stages = {}
   const runIds = new Set()
-  const hasExpected = typeof expectedRunId === 'string' && expectedRunId.length > 0
-  if (hasExpected) runIds.add(expectedRunId)
+  const sampleRunIds = new Set()
+  if (typeof expectedRunId === 'string' && expectedRunId.length > 0) {
+    runIds.add(expectedRunId)
+    sampleRunIds.add(expectedRunId)
+  }
   const pendingOrch = []
   for (const mark of marks) {
     if (typeof mark?.runId !== 'string' || typeof mark?.at !== 'number') continue
@@ -20,14 +23,14 @@ export const selectTimeline = (marks, submittedWall, until, expectedRunId) => {
       continue
     }
     runIds.add(mark.runId)
+    if (mark.stage === 'submit' || mark.stage === 'intentDurable' || mark.stage === 'dispatch') {
+      sampleRunIds.add(mark.runId)
+    }
     if (stages[mark.stage] === undefined || mark.at < stages[mark.stage]) stages[mark.stage] = mark.at
   }
+  const matchIds = sampleRunIds.size > 0 ? sampleRunIds : runIds
   const orchCommits = pendingOrch
-    .filter((mark) =>
-      hasExpected
-        ? mark.runId === expectedRunId || mark.ledgerRunId === expectedRunId
-        : runIds.has(mark.runId) || (typeof mark.ledgerRunId === 'string' && runIds.has(mark.ledgerRunId))
-    )
+    .filter((mark) => matchIds.has(mark.runId) || (typeof mark.ledgerRunId === 'string' && matchIds.has(mark.ledgerRunId)))
     .map((mark) => ({
       runId: mark.runId,
       ledgerRunId: mark.ledgerRunId,
