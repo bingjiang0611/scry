@@ -76,7 +76,7 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         ])
       )
 
-      // Phase 2: Switch to `shadow` (after TTL expired: t0 + 120_000) -> incremental import
+      // Phase 2: Authoritative mode (reconcileOpenRuns: true, after TTL expired) -> incremental import
       {
         const sink = EventSink.open({ userDataDir: userData })
         try {
@@ -84,7 +84,8 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
             sink,
             userDataDir: userData,
             now: t0 + 120_000,
-            pendingTtlMs: 60_000
+            pendingTtlMs: 60_000,
+            reconcileOpenRuns: true
           })
           expect(first.importedRuns).toBe(3)
           expect(first.importedSessions).toBe(1)
@@ -108,15 +109,17 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
           expect(sess?.title).toBe('Legacy Title')
           expect(sess?.lastRunOutcome?.quality).toBe('inferred')
 
-          // Re-running import in same shadow session is a pure no-op (zero duplicates)
+          // Re-running import in same session is a pure no-op (zero duplicates)
           const second = importLegacyStateIncrementally({
             sink,
             userDataDir: userData,
             now: t0 + 121_000,
-            pendingTtlMs: 60_000
+            pendingTtlMs: 60_000,
+            reconcileOpenRuns: true
           })
           expect(second.importedRuns).toBe(0)
           expect(second.importedSessions).toBe(0)
+          expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
         } finally {
           sink.close()
         }
@@ -181,9 +184,143 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
           const intents = sink.listEvents().filter((e) => e.type === 'run.intent_recorded')
           expect(intents).toHaveLength(4)
           expect(new Set(intents.map((e) => e.runId)).size).toBe(4)
+          expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
         } finally {
           sink.close()
         }
+      }
+    })
+  })
+
+  it('keeps open runs faithful in P4-1 shadow mode, marks outbox shadowOnly/done, and leaves snapshot-only settledAt null', () => {
+    withTempDir((userData) => {
+      const ledgerDir = makeLedgerDir(userData)
+      const t0 = 1_700_000_000_000
+      const snapSettled = SessionLedger.newRunId()
+      const snapDispatched = SessionLedger.newRunId()
+      const snapRecorded = SessionLedger.newRunId()
+
+      // Write a snapshot-only ledger (no session-ledger.log tail, so terminalAt is unavailable)
+      writeFileSync(
+        join(ledgerDir, 'session-ledger.snapshot.json'),
+        JSON.stringify({
+          snapshot: {
+            lastSeq: 12,
+            runs: [
+              {
+                runId: snapSettled,
+                intentId: SessionLedger.newIntentId(),
+                intentSeq: 1,
+                intentAt: t0,
+                intentDetail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws', prompt: 'snap settled' }),
+                lifecycle: 'settled'
+              },
+              {
+                runId: snapDispatched,
+                intentId: SessionLedger.newIntentId(),
+                intentSeq: 4,
+                intentAt: t0 + 1000,
+                intentDetail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws', prompt: 'snap open' }),
+                lifecycle: 'dispatched'
+              },
+              {
+                runId: snapRecorded,
+                intentId: SessionLedger.newIntentId(),
+                intentSeq: 7,
+                intentAt: t0 + 2000,
+                intentDetail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws', prompt: 'snap recorded' }),
+                lifecycle: 'recorded'
+              }
+            ]
+          }
+        })
+      )
+
+      const sink = EventSink.open({ userDataDir: userData })
+      try {
+        const summary = importLegacyStateIncrementally({
+          sink,
+          userDataDir: userData,
+          now: t0 + 300_000,
+          reconcileOpenRuns: false,
+          shadowOnly: true
+        })
+        expect(summary.importedRuns).toBe(3)
+
+        // Snapshot-only terminal run: NEVER fabricate settledAt; mark unavailable with explicit reason
+        const settled = sink.getRun(snapSettled)
+        expect(settled?.lifecycle).toBe('settled')
+        expect(settled?.settledAt).toBeNull()
+        expect(settled?.outcome).toEqual({
+          status: 'unavailable',
+          quality: 'unavailable',
+          source: ['legacy-ledger:12'],
+          omissionReason: 'snapshot_terminal_timestamp_unavailable'
+        })
+
+        // Shadow mode preserves open lifecycles so H1 recover()/pump() drive terminal state cleanly
+        expect(sink.getRun(snapDispatched)?.lifecycle).toBe('dispatched')
+        expect(sink.getRun(snapRecorded)?.lifecycle).toBe('recorded')
+
+        // Every imported outbox row is marked done + shadowOnly so P4-2 never re-dispatches them
+        const outbox = sink.listOutbox()
+        expect(outbox).toHaveLength(3)
+        for (const row of outbox) {
+          expect(row.state).toBe('done')
+          expect(row.leaseOwner).toBe('shadow:no-dispatch')
+          expect(row.payload.shadowOnly).toBe(true)
+        }
+        expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+      } finally {
+        sink.close()
+      }
+    })
+  })
+
+  it('batches 2,000 legacy runs into bounded transactions without per-run fsync overhead', () => {
+    withTempDir((userData) => {
+      const ledgerDir = makeLedgerDir(userData)
+      const t0 = 1_700_000_000_000
+      const lines: string[] = []
+      let seq = 0
+      for (let i = 0; i < 2_000; i += 1) {
+        const runId = SessionLedger.newRunId()
+        const intentId = SessionLedger.newIntentId()
+        lines.push(
+          JSON.stringify({
+            seq: ++seq,
+            at: t0 + i * 10,
+            runId,
+            kind: 'intent_recorded',
+            intentId,
+            detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-bulk', prompt: `run ${i}` })
+          }),
+          JSON.stringify({ seq: ++seq, at: t0 + i * 10 + 1, runId, kind: 'run_dispatched' }),
+          JSON.stringify({ seq: ++seq, at: t0 + i * 10 + 2, runId, kind: 'run_settled' })
+        )
+      }
+      writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`)
+
+      const sink = EventSink.open({ userDataDir: userData })
+      try {
+        const started = performance.now()
+        const summary = importLegacyStateIncrementally({
+          sink,
+          userDataDir: userData,
+          now: t0 + 100_000,
+          reconcileOpenRuns: false,
+          shadowOnly: true,
+          batchSize: 500
+        })
+        const elapsedMs = performance.now() - started
+        expect(summary.importedRuns).toBe(2_000)
+        expect(summary.legacyLedgerSeq).toBe(6_000)
+        expect(elapsedMs).toBeLessThan(5_000)
+        // Re-run is a fast no-op
+        const noop = importLegacyStateIncrementally({ sink, userDataDir: userData, now: t0 + 100_001 })
+        expect(noop.importedRuns).toBe(0)
+      } finally {
+        sink.close()
       }
     })
   })

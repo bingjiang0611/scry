@@ -408,7 +408,11 @@
       ],
       "sources": [
         "src/main/remote",
+        "src/main/conversation-store.ts",
         "src/host-runtime/orchestration/event-sink.ts",
+        "src/host-runtime/orchestration/projection.ts",
+        "src/host-runtime/orchestration/shadow-mirror.ts",
+        "src/daemon/orchestration-shadow.ts",
         "src/renderer/components/RemoteChat.tsx",
         "src/renderer/components/RemoteChatFoundation.tsx",
         "src/renderer/components/RemoteChatControls.tsx",

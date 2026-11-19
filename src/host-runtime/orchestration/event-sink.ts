@@ -63,6 +63,7 @@ export class EventSink {
   #beforeCommitHook?: () => void
   #writeIndeterminate = false
   #walModeEnforced = false
+  #inBatchTransaction = false
   #stmts: EventSinkStatements
 
   private constructor(handle: OrchestrationDbHandle, options: EventSinkOptions) {
@@ -159,94 +160,127 @@ export class EventSink {
     }
   }
 
+  /**
+   * Executes multiple `execute()` / `setMeta()` operations inside a single SQLite transaction
+   * (one fsync per batch) for bulk startup import while preserving fail-closed rollback semantics.
+   */
+  runInBatchTransaction<T>(fn: () => T): T {
+    this.assertDeterminate()
+    if (this.#inBatchTransaction) return fn()
+    const db = this.handle.db
+    try {
+      const tx = db.transaction(() => {
+        this.#inBatchTransaction = true
+        try {
+          return fn()
+        } finally {
+          this.#inBatchTransaction = false
+        }
+      })
+      const result = tx()
+      this.enforceModesOnceForWal()
+      return result
+    } catch (error) {
+      if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
+        throw error
+      }
+      this.tripFence(error)
+    }
+  }
+
   private commitDecision(
     decision: Extract<DecisionResult, { kind: 'accepted' | 'rejected' }>,
     txExtras?: { legacyLedgerSeq?: number; legacyRunMapping?: { ledgerRunId: string; runId: string } }
   ): DecisionResult {
     const db = this.handle.db
-    try {
-      const tx = db.transaction(() => {
-        let lastSeq: number | null = null
-        if (decision.kind === 'accepted') {
-          for (const pending of decision.events) {
-            if (!ORCHESTRATION_EVENT_TYPES.has(pending.type)) {
-              throw new OrchestrationStoreError('orchestration_invalid_event', `Invalid event type: ${pending.type}`)
-            }
-            assertNoUsageNumbersInEvent(pending.type, pending.payload)
-            const payloadJson = assertBoundedPayload(pending.payload)
-            const evidenceJson = pending.evidence ? canonicalJson(pending.evidence) : null
-            const info = this.#stmts.insertEvent.run(
-              pending.eventId,
-              pending.at,
-              pending.type,
-              pending.stream,
-              pending.sessionKey,
-              pending.runId,
-              pending.cwd,
-              pending.commandId,
-              pending.actor,
-              pending.scope,
-              payloadJson,
-              evidenceJson,
-              pending.principal,
-              pending.via,
-              pending.actorRunId
-            )
-            const seq = Number(info.lastInsertRowid)
-            lastSeq = seq
-            applyEventToProjection(db, { ...pending, seq })
+    const writeRows = (): void => {
+      let lastSeq: number | null = null
+      if (decision.kind === 'accepted') {
+        for (const pending of decision.events) {
+          if (!ORCHESTRATION_EVENT_TYPES.has(pending.type)) {
+            throw new OrchestrationStoreError('orchestration_invalid_event', `Invalid event type: ${pending.type}`)
           }
-
-          const causationSeq = lastSeq ?? 0
-          for (const effect of decision.effects) {
-            const spec = getEffectPolicy(effect.kind)
-            const payloadJson = assertBoundedPayload(effect.payload)
-            this.#stmts.insertOutbox.run(
-              effect.effectId,
-              effect.kind,
-              spec.policy,
-              effect.runId,
-              causationSeq,
-              payloadJson,
-              effect.state,
-              effect.expiresAt,
-              effect.leaseOwner,
-              effect.claimedAt,
-              effect.state === 'done' ? decision.receipt.acceptedAt : null
-            )
-          }
+          assertNoUsageNumbersInEvent(pending.type, pending.payload)
+          const payloadJson = assertBoundedPayload(pending.payload)
+          const evidenceJson = pending.evidence ? canonicalJson(pending.evidence) : null
+          const info = this.#stmts.insertEvent.run(
+            pending.eventId,
+            pending.at,
+            pending.type,
+            pending.stream,
+            pending.sessionKey,
+            pending.runId,
+            pending.cwd,
+            pending.commandId,
+            pending.actor,
+            pending.scope,
+            payloadJson,
+            evidenceJson,
+            pending.principal,
+            pending.via,
+            pending.actorRunId
+          )
+          const seq = Number(info.lastInsertRowid)
+          lastSeq = seq
+          applyEventToProjection(db, { ...pending, seq })
         }
 
-        const receipt = decision.kind === 'accepted' ? decision.receipt : decision.receipt
-        if (receipt) {
-          const finalSeq = decision.kind === 'accepted' ? lastSeq : null
-          receipt.resultSeq = finalSeq
-          this.#stmts.insertCommand.run(
-            receipt.commandId,
-            receipt.actor,
-            receipt.type,
-            receipt.payloadSha256,
-            receipt.acceptedAt,
-            receipt.status,
-            receipt.reason,
-            receipt.result ? canonicalJson(receipt.result) : null,
-            finalSeq,
-            receipt.principal,
-            receipt.via,
-            receipt.actorRunId
+        const causationSeq = lastSeq ?? 0
+        for (const effect of decision.effects) {
+          const spec = getEffectPolicy(effect.kind)
+          const payloadJson = assertBoundedPayload(effect.payload)
+          this.#stmts.insertOutbox.run(
+            effect.effectId,
+            effect.kind,
+            spec.policy,
+            effect.runId,
+            causationSeq,
+            payloadJson,
+            effect.state,
+            effect.expiresAt,
+            effect.leaseOwner,
+            effect.claimedAt,
+            effect.state === 'done' ? decision.receipt.acceptedAt : null
           )
         }
+      }
 
-        if (txExtras?.legacyRunMapping) {
-          this.#stmts.insertLegacyRun.run(txExtras.legacyRunMapping.ledgerRunId, txExtras.legacyRunMapping.runId)
-        }
-        if (txExtras?.legacyLedgerSeq !== undefined) {
-          this.#stmts.advanceLegacySeq.run(String(txExtras.legacyLedgerSeq))
-        }
+      const receipt = decision.kind === 'accepted' ? decision.receipt : decision.receipt
+      if (receipt) {
+        const finalSeq = decision.kind === 'accepted' ? lastSeq : null
+        receipt.resultSeq = finalSeq
+        this.#stmts.insertCommand.run(
+          receipt.commandId,
+          receipt.actor,
+          receipt.type,
+          receipt.payloadSha256,
+          receipt.acceptedAt,
+          receipt.status,
+          receipt.reason,
+          receipt.result ? canonicalJson(receipt.result) : null,
+          finalSeq,
+          receipt.principal,
+          receipt.via,
+          receipt.actorRunId
+        )
+      }
 
-        this.#beforeCommitHook?.()
-      })
-      tx()
+      if (txExtras?.legacyRunMapping) {
+        this.#stmts.insertLegacyRun.run(txExtras.legacyRunMapping.ledgerRunId, txExtras.legacyRunMapping.runId)
+      }
+      if (txExtras?.legacyLedgerSeq !== undefined) {
+        this.#stmts.advanceLegacySeq.run(String(txExtras.legacyLedgerSeq))
+      }
+
+      this.#beforeCommitHook?.()
+    }
+
+    if (this.#inBatchTransaction) {
+      writeRows()
+      return decision
+    }
+    try {
+      db.transaction(writeRows)()
       this.enforceModesOnceForWal()
       return decision
     } catch (error) {

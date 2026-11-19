@@ -3,6 +3,7 @@ import type { LedgerEvent } from '../../main/remote/session-ledger'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { EventSink, type EventSinkOptions } from './event-sink'
 import type { OrchestrationCommand } from './orchestrator-commands'
+import { INLINE_BODY_MAX_BYTES, PROMPT_PREVIEW_MAX_CHARS, USER_TEXT_PREVIEW_MAX_CHARS } from './types'
 
 export interface ShadowCommitSample {
   runId: string
@@ -48,6 +49,7 @@ export interface ParsedIntentRouting {
   profile: string | null
   cwd: string
   promptPreview?: string
+  userTextPreview?: string
   sessionKey: string | null
   canonicalRunId: string
   isConversationRun: boolean
@@ -59,6 +61,7 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
   let profile: string | null = null
   let cwd = ''
   let promptPreview: string | undefined
+  let userTextPreview: string | undefined
   let sessionKey: string | null = null
   let canonicalRunId = ledgerRunId
   let isConversationRun = false
@@ -72,7 +75,10 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
       if (typeof parsed.agentProfileId === 'string') profile = parsed.agentProfileId
       else if (typeof parsed.profile === 'string') profile = parsed.profile
       if (typeof parsed.cwd === 'string') cwd = parsed.cwd
-      if (typeof parsed.prompt === 'string') promptPreview = parsed.prompt
+      if (typeof parsed.prompt === 'string') {
+        promptPreview = parsed.prompt.slice(0, PROMPT_PREVIEW_MAX_CHARS)
+        userTextPreview = parsed.prompt.slice(0, USER_TEXT_PREVIEW_MAX_CHARS)
+      }
       const conv = parsed.conversation as { conversationId?: unknown; runId?: unknown; ordinal?: unknown } | undefined
       if (conv && typeof conv === 'object') {
         if (typeof conv.conversationId === 'string' && conv.conversationId.length > 0) {
@@ -93,7 +99,7 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
     }
   }
 
-  return { provider, profile, cwd, promptPreview, sessionKey, canonicalRunId, isConversationRun, ordinal }
+  return { provider, profile, cwd, promptPreview, userTextPreview, sessionKey, canonicalRunId, isConversationRun, ordinal }
 }
 
 const PEER_SHA_RE = /^[0-9a-f]{64}$/
@@ -245,14 +251,17 @@ export class ShadowMirror {
   }
 
   /** H1 `#emit` shadow hook: mirrors ledger lifecycle transitions into `orchestration.db`. */
-  onLedgerEvent(event: LedgerEvent): void {
+  onLedgerEvent(
+    event: LedgerEvent,
+    meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote' }
+  ): void {
     if (!this.sink || this.#failedOpen) return
     try {
       if (event.kind === 'intent_recorded') {
         const routing = parseLedgerIntentRouting(event.runId, event.detail)
         this.#ledgerToCanonical.set(event.runId, routing.canonicalRunId)
         const commandId = event.intentId ?? `legacy-intent:${event.runId}`
-        const runMeta = this.#resolveRunMeta?.(event.runId)
+        const runMeta = meta ?? this.#resolveRunMeta?.(event.runId)
         const peerActor =
           runMeta?.peerCertSHA256 && PEER_SHA_RE.test(runMeta.peerCertSHA256)
             ? `peer:${runMeta.peerCertSHA256}`
@@ -262,6 +271,10 @@ export class ShadowMirror {
         const ordinal = routing.sessionKey
           ? (routing.ordinal ?? this.sink.getNextTurnOrdinal(routing.sessionKey))
           : undefined
+        const body =
+          event.detail && Buffer.byteLength(event.detail, 'utf8') > INLINE_BODY_MAX_BYTES
+            ? this.sink.bodyStore.prepareBody(event.detail)
+            : undefined
         const payload = {
           runId: routing.canonicalRunId,
           sessionKey: routing.sessionKey,
@@ -270,6 +283,8 @@ export class ShadowMirror {
           profile: routing.profile,
           cwd: routing.cwd,
           ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
+          ...(routing.userTextPreview !== undefined ? { userTextPreview: routing.userTextPreview } : {}),
+          ...(body ? { body } : {}),
           claimMode: 'immediate' as const,
           leaseOwner: this.#leaseOwner,
           origin: scope,

@@ -93,69 +93,100 @@ describe('P4-1 daemon orchestration shadow integration', () => {
 
       expect(host.orchestrationShadow).toBeDefined()
       const shadow = host.orchestrationShadow!
-      expect(shadow.mode).toEqual({ requested: 'shadow', effective: 'shadow' })
+      expect(shadow.mode).toEqual({ requested: 'shadow', effective: 'shadow', refused: false })
+      expect(shadow.fullfsync).toBe(false)
+      expect(shadow.checkpointFullfsync).toBe(true)
       expect(shadow.mirror.stats().failures).toBe(0)
-
-      // Orphan run imported as interrupted with unavailable(host_restarted)
-      const orphanShadow = shadow.mirror.sink!.getRun(orphanRunId)
-      expect(orphanShadow?.lifecycle).toBe('interrupted')
-      expect(orphanShadow?.settledAt).toBeNull()
+      expect(shadow.mirror.stats().deviations).toBe(0)
 
       const device = await enrollLocal(host.service)
 
-      // 1. Conversation send + H3 settle parity
+      // Orphan run must match H1 recover() exactly (failed, zero illegal_transition deviations)
+      const orphanH1 = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'watch',
+        runId: orphanRunId,
+        cursor: 0,
+        outputCursor: 0,
+        waitMs: 50
+      })
+      const orphanShadow = shadow.mirror.sink!.getRun(orphanRunId)
+      expect(orphanH1.watch.state).toBe('failed')
+      expect(orphanShadow?.lifecycle).toBe(orphanH1.watch.state)
+      expect(shadow.mirror.stats().rejectedSticky).toBe(0)
+      expect(shadow.mirror.stats().deviations).toBe(0)
+
+      // 1. Multi-turn conversation (3 turns) + H3 settle parity + peer actor / local origin
       const created = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation',
         method: 'create',
         args: [canonicalWs]
       })
       const convId = (created.result as { id: string; revision: number }).id
-      const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'conversation',
-        method: 'preview',
-        args: [convId, { providerId: 'codex' }]
-      })
-      const sent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'conversation',
-        method: 'send',
-        args: [
-          {
-            providerId: 'codex',
-            conversationId: convId,
-            expectedRevision: preview.result.revision,
-            expectedContinuationKey: preview.result.target.continuationKey,
-            commandId: randomUUID(),
-            prompt: 'shadow parity check',
-            selectedItems: [],
-            confirmFresh: true
-          }
-        ]
-      })
-      expect(sent.error).toBeUndefined()
-      const ledgerRunId = sent.result.ledger.runId as string
-      const canonicalRunId = sent.result.runId as string
+      const turnRunIds: string[] = []
+      for (let turn = 1; turn <= 3; turn += 1) {
+        const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'conversation',
+          method: 'preview',
+          args: [convId, { providerId: 'codex' }]
+        })
+        const sent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+          op: 'conversation',
+          method: 'send',
+          args: [
+            {
+              providerId: 'codex',
+              conversationId: convId,
+              expectedRevision: preview.result.revision,
+              expectedContinuationKey: preview.result.target.continuationKey,
+              commandId: randomUUID(),
+              prompt: `shadow parity turn ${turn}`,
+              selectedItems: [],
+              confirmFresh: turn === 1
+            }
+          ]
+        })
+        expect(sent.error, `turn ${turn}`).toBeUndefined()
+        const ledgerRunId = sent.result.ledger.runId as string
+        const canonicalRunId = sent.result.runId as string
+        turnRunIds.push(canonicalRunId)
 
-      const state = await waitRunTerminal(
-        host.channel.socketPath,
-        host.service.caCertificatePEM,
-        device.certPEM,
-        device.keyPEM,
-        ledgerRunId
-      )
-      expect(state).toBe('settled')
+        const state = await waitRunTerminal(
+          host.channel.socketPath,
+          host.service.caCertificatePEM,
+          device.certPEM,
+          device.keyPEM,
+          ledgerRunId
+        )
+        expect(state, `turn ${turn}`).toBe('settled')
+        expect(shadow.mirror.stats().preFirstTokenCommitsByRun.get(canonicalRunId)).toBe(2)
 
-      // Compare shadow projection against H1 ledger and H3 ConversationStore
-      const shadowRun = shadow.mirror.sink!.getRun(canonicalRunId)
-      expect(shadowRun?.lifecycle).toBe('settled')
-      expect(shadowRun?.cwd).toBe(canonicalWs)
-      expect(shadowRun?.provider).toBe('codex')
-      expect(shadow.mirror.stats().preFirstTokenCommitsByRun.get(canonicalRunId)).toBe(2)
+        const shadowRun = shadow.mirror.sink!.getRun(canonicalRunId)
+        expect(shadowRun).toMatchObject({
+          runId: canonicalRunId,
+          sessionKey: convId,
+          scope: 'local',
+          origin: 'local',
+          provider: 'codex',
+          cwd: canonicalWs,
+          lifecycle: state
+        })
+        expect(shadowRun?.ownerActor).toMatch(/^peer:[0-9a-f]{64}$/)
 
-      const shadowTurn = shadow.mirror.sink!.getTurn(convId, 1)
-      expect(shadowTurn?.delivery).toBe('accepted')
-      expect(shadow.mirror.stats().failures).toBe(0)
+        const shadowTurn = shadow.mirror.sink!.getTurn(convId, turn)
+        expect(shadowTurn?.runId).toBe(canonicalRunId)
+        expect(shadowTurn?.delivery).toBe('accepted')
+      }
+      expect(turnRunIds).toHaveLength(3)
+      expect(shadow.mirror.stats().deviations).toBe(0)
 
-      // 2. Stop path: start a paced run and request stop mid-flight
+      // All shadow outbox rows must be marked done + shadowOnly
+      for (const row of shadow.mirror.sink!.listOutbox()) {
+        expect(row.state).toBe('done')
+        expect(row.leaseOwner).toBe('shadow:no-dispatch')
+        expect(row.payload.shadowOnly).toBe(true)
+      }
+
+      // 2. Stop path: start a paced run and request stop mid-flight; shadow must match H1 exact state
       const stopIntent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
@@ -174,9 +205,17 @@ describe('P4-1 daemon orchestration shadow integration', () => {
         device.keyPEM,
         stopLedgerRunId
       )
-      expect(['cancelled', 'settled', 'failed']).toContain(stoppedState)
-      expect(shadow.mirror.sink!.getRun(stopLedgerRunId)?.lifecycle).toBe(stoppedState)
-      expect(shadow.mirror.stats().failures).toBe(0)
+      const h1StopState = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'watch',
+        runId: stopLedgerRunId,
+        cursor: 0,
+        outputCursor: 0,
+        waitMs: 50
+      })
+      expect(stoppedState).toBe(h1StopState.watch.state)
+      expect(shadow.mirror.sink!.getRun(stopLedgerRunId)?.lifecycle).toBe(h1StopState.watch.state)
+      expect(shadow.mirror.stats().deviations).toBe(0)
+      expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
     } finally {
       await host?.dispose()
       process.argv.length = saved.argvLen

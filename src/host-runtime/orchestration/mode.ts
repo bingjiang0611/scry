@@ -1,25 +1,37 @@
+import { DEFAULT_PENDING_TTL_MS } from './types'
+
 export type OrchestrationRequestedMode = 'off' | 'shadow' | 'on'
 export type OrchestrationEffectiveMode = 'off' | 'shadow'
 
 export interface OrchestrationModeResolution {
   requested: OrchestrationRequestedMode
   /**
-   * P4-1 implements `off` and `shadow`. When `SCRY_ORCHESTRATION=on` is passed (for example
-   * by the daemon CI matrix before P4-2 switches authority), it runs in `shadow` mode so the
-   * orchestration store, incremental import, and shadow writes execute without changing run authority.
+   * P4-1 implements `off` and `shadow` only. Requesting `SCRY_ORCHESTRATION=on` in P4-1
+   * is explicitly refused (never silently mapped to `shadow`) so stale env vars cannot
+   * unexpectedly flip users into authoritative mode when P4-2 lands.
    */
   effective: OrchestrationEffectiveMode
+  refused: boolean
+  reason?: 'orchestration_on_unsupported_in_p4_1'
 }
 
 export const ORCHESTRATION_MODE_ENV = 'SCRY_ORCHESTRATION'
 export const ORCHESTRATION_FULLFSYNC_ENV = 'SCRY_ORCHESTRATION_FULLFSYNC'
 export const ORCHESTRATION_PENDING_TTL_ENV = 'SCRY_ORCHESTRATION_PENDING_TTL_MS'
+export const MAX_PENDING_TTL_MS = DEFAULT_PENDING_TTL_MS
 
 export function parseOrchestrationMode(env: NodeJS.ProcessEnv): OrchestrationModeResolution {
   const raw = env[ORCHESTRATION_MODE_ENV]?.trim().toLowerCase()
-  if (raw === 'shadow') return { requested: 'shadow', effective: 'shadow' }
-  if (raw === 'on') return { requested: 'on', effective: 'shadow' }
-  return { requested: 'off', effective: 'off' }
+  if (raw === 'shadow') return { requested: 'shadow', effective: 'shadow', refused: false }
+  if (raw === 'on') {
+    return {
+      requested: 'on',
+      effective: 'off',
+      refused: true,
+      reason: 'orchestration_on_unsupported_in_p4_1'
+    }
+  }
+  return { requested: 'off', effective: 'off', refused: false }
 }
 
 export function parseOrchestrationFullfsync(env: NodeJS.ProcessEnv): boolean | undefined {
@@ -29,9 +41,15 @@ export function parseOrchestrationFullfsync(env: NodeJS.ProcessEnv): boolean | u
   return undefined
 }
 
-export function parsePendingTtlMs(env: NodeJS.ProcessEnv, fallback = 60_000): number {
+/**
+ * Parses `SCRY_ORCHESTRATION_PENDING_TTL_MS`, capped strictly at `MAX_PENDING_TTL_MS` (60 s)
+ * so the variable can shorten the TTL for tests without ever extending past Decision B's bound.
+ */
+export function parsePendingTtlMs(env: NodeJS.ProcessEnv, fallback = DEFAULT_PENDING_TTL_MS): number {
+  const boundedFallback = Math.min(Math.max(1, fallback), MAX_PENDING_TTL_MS)
   const raw = env[ORCHESTRATION_PENDING_TTL_ENV]
-  if (!raw) return fallback
+  if (!raw) return boundedFallback
   const parsed = Number(raw)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+  if (!Number.isFinite(parsed) || parsed <= 0) return boundedFallback
+  return Math.min(Math.floor(parsed), MAX_PENDING_TTL_MS)
 }

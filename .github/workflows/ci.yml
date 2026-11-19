@@ -180,16 +180,12 @@ jobs:
         run: npm run check:cli-runtime
 
   # P4-1: 常规单元与集成测试默认走进程内（daemon-mode-default.ts）；
-  # 本作业在 SCRY_HOST_DAEMON=1 下覆盖 SCRY_ORCHESTRATION=shadow 与 on 的编排与守护进程测试。
+  # 本作业在 SCRY_HOST_DAEMON=1 下覆盖 SCRY_ORCHESTRATION=shadow（on 在 P4-1 显式拒绝，由单测覆盖）。
   daemon-orchestration:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        orchestration: [shadow, on]
     env:
       QODER_SKIP_DOWNLOAD: "1"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -202,10 +198,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Daemon orchestration tests (${{ matrix.orchestration }})
+      - name: Daemon orchestration tests (shadow)
         env:
           SCRY_HOST_DAEMON: "1"
-          SCRY_ORCHESTRATION: ${{ matrix.orchestration }}
+          SCRY_ORCHESTRATION: shadow
         run: npx vitest run --maxWorkers=1 src/host-runtime/orchestration src/daemon
 
   # Preserve the serial smoke order in three contiguous slices. Packaging runs

@@ -11,6 +11,17 @@ export interface LegacyImportOptions {
   userDataDir: string
   now?: number
   pendingTtlMs?: number
+  /**
+   * When `false` (P4-1 shadow default), open runs (`recorded`/`dispatched`) are imported faithfully
+   * at their ledger state so H1 `recover()` / `pump()` drive their final state through `onLedgerEvent`
+   * without `illegal_transition` divergence. When `true` (P4-2 authoritative mode), open runs are
+   * reconciled per plan §9 rule 1 (`interrupted` / `pending_expired`).
+   */
+  reconcileOpenRuns?: boolean
+  /** Mark imported outbox rows `done` (`shadowOnly`) so P4-2 recovery never dispatches them. */
+  shadowOnly?: boolean
+  /** Number of legacy runs / sessions committed per SQLite transaction (default 500). */
+  batchSize?: number
 }
 
 export interface LegacyImportSummary {
@@ -107,15 +118,19 @@ function readLegacyLedgerReadOnly(ledgerDir: string): { lastSeq: number; runs: M
 }
 
 /**
- * plan §9 rule 1: idempotent incremental import of H1 `SessionLedger` (entries with
+ * plan §9 rule 1: idempotent, batched incremental import of H1 `SessionLedger` (entries with
  * `seq > orch_meta.legacy_ledger_seq`) and `app-sessions.json` (when sha256 differs from
  * `orch_meta.legacy_catalog_sha256`).
  */
 export function importLegacyStateIncrementally(options: LegacyImportOptions): LegacyImportSummary {
   const { sink, userDataDir } = options
   const now = options.now ?? Date.now()
-  const pendingTtlMs = options.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS
+  const pendingTtlMs = Math.min(options.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS, DEFAULT_PENDING_TTL_MS)
+  const reconcileOpenRuns = options.reconcileOpenRuns ?? false
+  const shadowOnly = options.shadowOnly ?? !reconcileOpenRuns
+  const batchSize = Math.max(1, options.batchSize ?? 500)
   const db = sink.handle.db
+  const stmtLegacyMapping = db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
 
   let importedRuns = 0
   let currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
@@ -128,134 +143,163 @@ export function importLegacyStateIncrementally(options: LegacyImportOptions): Le
         .filter((run) => run.lastSeq > currentLedgerSeq)
         .sort((a, b) => a.intentSeq - b.intentSeq)
 
-      for (const run of sortedRuns) {
-        const routing = parseLedgerIntentRouting(run.ledgerRunId, run.detail)
-        const existingMapping = db
-          .prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
-          .get(run.ledgerRunId) as { run_id: string } | undefined
-        const existingReceipt = sink.getReceipt(run.intentId, 'system')
-        const canonicalRunId = existingMapping?.run_id ?? routing.canonicalRunId
+      for (let offset = 0; offset < sortedRuns.length; offset += batchSize) {
+        const chunk = sortedRuns.slice(offset, offset + batchSize)
+        const isLastChunk = offset + batchSize >= sortedRuns.length
+        sink.runInBatchTransaction(() => {
+          for (const run of chunk) {
+            const routing = parseLedgerIntentRouting(run.ledgerRunId, run.detail)
+            const existingMapping = stmtLegacyMapping.get(run.ledgerRunId) as { run_id: string } | undefined
+            const existingReceipt = sink.getReceipt(run.intentId, 'system')
+            const canonicalRunId = existingMapping?.run_id ?? routing.canonicalRunId
 
-        if (!existingMapping && !existingReceipt && !sink.getRun(canonicalRunId)) {
-          const expired = now < run.intentAt || now > run.intentAt + pendingTtlMs
-          const submitPayload = {
-            runId: canonicalRunId,
-            sessionKey: routing.sessionKey,
-            provider: routing.provider,
-            profile: routing.profile,
-            cwd: routing.cwd,
-            ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
-            claimMode: (run.lifecycle === 'recorded' && !expired ? 'queued' : 'immediate') as 'queued' | 'immediate',
-            pendingTtlMs,
-            origin: 'remote' as const,
-            isConversationRun: routing.isConversationRun
-          }
-          sink.execute(
-            {
-              type: 'run.submit',
-              commandId: run.intentId,
-              actor: 'system',
-              scope: 'remote',
-              at: run.intentAt,
-              payload: submitPayload,
-              payloadSha256: sha256Hex(canonicalJson(submitPayload))
-            },
-            { legacyRunMapping: { ledgerRunId: run.ledgerRunId, runId: canonicalRunId } }
-          )
-          importedRuns += 1
-        }
-
-        const currentRun = sink.getRun(canonicalRunId)
-        if (!currentRun) continue
-
-        if (run.lifecycle === 'recorded') {
-          const expired = now < run.intentAt || now > run.intentAt + pendingTtlMs
-          if (currentRun.lifecycle === 'recorded' && (expired || routing.isConversationRun)) {
-            const reason = routing.isConversationRun ? 'conversation_start_unavailable' : 'pending_expired'
-            const payload = {
-              runId: canonicalRunId,
-              step: 'cancelled' as const,
-              reason,
-              delivery: 'not_sent' as const,
-              evidence: [`legacy-ledger:${run.lastSeq}`]
+            if (!existingMapping && !existingReceipt && !sink.getRun(canonicalRunId)) {
+              const expired = now < run.intentAt || now > run.intentAt + pendingTtlMs
+              const submitPayload = {
+                runId: canonicalRunId,
+                sessionKey: routing.sessionKey,
+                ...(routing.ordinal !== undefined ? { ordinal: routing.ordinal } : {}),
+                provider: routing.provider,
+                profile: routing.profile,
+                cwd: routing.cwd,
+                ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
+                claimMode: (run.lifecycle === 'recorded' && !expired ? 'queued' : 'immediate') as 'queued' | 'immediate',
+                pendingTtlMs,
+                origin: 'remote' as const,
+                isConversationRun: routing.isConversationRun,
+                ...(shadowOnly ? { shadowOnly: true } : {})
+              }
+              sink.execute(
+                {
+                  type: 'run.submit',
+                  commandId: run.intentId,
+                  actor: 'system',
+                  scope: 'remote',
+                  at: run.intentAt,
+                  payload: submitPayload,
+                  payloadSha256: sha256Hex(canonicalJson(submitPayload))
+                },
+                { legacyRunMapping: { ledgerRunId: run.ledgerRunId, runId: canonicalRunId } }
+              )
+              importedRuns += 1
             }
-            sink.execute({
-              type: 'run.effect_result',
-              commandId: `effect:legacy-${run.ledgerRunId}:cancelled`,
-              actor: `effect:legacy-${run.ledgerRunId}`,
-              scope: 'system',
-              at: now,
-              payload,
-              payloadSha256: sha256Hex(canonicalJson(payload))
-            })
-          }
-          continue
-        }
 
-        // Advance to dispatched if legacy run was dispatched or reached terminal via dispatch.
-        if (currentRun.lifecycle === 'recorded' && run.lifecycle !== 'cancelled') {
-          const dispPayload = {
-            runId: canonicalRunId,
-            step: 'admitted_and_dispatched' as const,
-            evidence: [`legacy-ledger:${run.lastSeq}`]
-          }
-          sink.execute({
-            type: 'run.effect_result',
-            commandId: `effect:legacy-${run.ledgerRunId}:admitted_and_dispatched`,
-            actor: `effect:legacy-${run.ledgerRunId}`,
-            scope: 'system',
-            at: run.intentAt,
-            payload: dispPayload,
-            payloadSha256: sha256Hex(canonicalJson(dispPayload))
-          })
-        }
+            const currentRun = sink.getRun(canonicalRunId)
+            if (!currentRun) continue
 
-        const refreshed = sink.getRun(canonicalRunId)
-        if (!refreshed) continue
-        if (['settled', 'failed', 'cancelled', 'interrupted'].includes(refreshed.lifecycle)) continue
+            if (run.lifecycle === 'recorded') {
+              if (!reconcileOpenRuns) continue
+              const expired = now < run.intentAt || now > run.intentAt + pendingTtlMs
+              if (currentRun.lifecycle === 'recorded' && (expired || routing.isConversationRun)) {
+                const reason = routing.isConversationRun ? 'conversation_start_unavailable' : 'pending_expired'
+                const payload = {
+                  runId: canonicalRunId,
+                  step: 'cancelled' as const,
+                  reason,
+                  delivery: 'not_sent' as const,
+                  evidence: [`legacy-ledger:${run.lastSeq}`]
+                }
+                sink.execute({
+                  type: 'run.effect_result',
+                  commandId: `effect:legacy-${run.ledgerRunId}:cancelled`,
+                  actor: `effect:legacy-${run.ledgerRunId}`,
+                  scope: 'system',
+                  at: now,
+                  payload,
+                  payloadSha256: sha256Hex(canonicalJson(payload))
+                })
+              }
+              continue
+            }
 
-        if (run.lifecycle === 'dispatched') {
-          // plan §9 rule 1: dispatched during off without terminal -> unavailable(host_restarted)
-          const payload = {
-            runId: canonicalRunId,
-            step: 'interrupted' as const,
-            reason: 'host_restarted',
-            settledAt: null,
-            recoveredAt: now,
-            evidence: [`legacy-ledger:${run.lastSeq}`]
+            // Advance to dispatched if legacy run was dispatched or reached terminal via dispatch.
+            if (currentRun.lifecycle === 'recorded' && run.lifecycle !== 'cancelled') {
+              const dispPayload = {
+                runId: canonicalRunId,
+                step: 'admitted_and_dispatched' as const,
+                evidence: [`legacy-ledger:${run.lastSeq}`]
+              }
+              sink.execute({
+                type: 'run.effect_result',
+                commandId: `effect:legacy-${run.ledgerRunId}:admitted_and_dispatched`,
+                actor: `effect:legacy-${run.ledgerRunId}`,
+                scope: 'system',
+                at: run.intentAt,
+                payload: dispPayload,
+                payloadSha256: sha256Hex(canonicalJson(dispPayload))
+              })
+            }
+
+            const refreshed = sink.getRun(canonicalRunId)
+            if (!refreshed) continue
+            if (['settled', 'failed', 'cancelled', 'interrupted'].includes(refreshed.lifecycle)) continue
+
+            if (run.lifecycle === 'dispatched') {
+              if (!reconcileOpenRuns) continue
+              // plan §9 rule 1 (P4-2 authoritative): dispatched during off without terminal -> unavailable(host_restarted)
+              const payload = {
+                runId: canonicalRunId,
+                step: 'interrupted' as const,
+                reason: 'host_restarted',
+                settledAt: null,
+                recoveredAt: now,
+                evidence: [`legacy-ledger:${run.lastSeq}`]
+              }
+              sink.execute({
+                type: 'run.effect_result',
+                commandId: `effect:legacy-${run.ledgerRunId}:interrupted`,
+                actor: `effect:legacy-${run.ledgerRunId}`,
+                scope: 'system',
+                at: now,
+                payload,
+                payloadSha256: sha256Hex(canonicalJson(payload))
+              })
+            } else {
+              const step = run.lifecycle as 'settled' | 'failed' | 'cancelled'
+              // data §3.2 #5: never fabricate a terminal timestamp when snapshot compacted it away.
+              const hasTerminalAt = typeof run.terminalAt === 'number' && Number.isFinite(run.terminalAt)
+              const outcome = hasTerminalAt
+                ? {
+                    status: 'available' as const,
+                    quality: 'exact' as const,
+                    source: [`legacy-ledger:${run.lastSeq}`],
+                    value: step
+                  }
+                : {
+                    status: 'unavailable' as const,
+                    quality: 'unavailable' as const,
+                    source: [`legacy-ledger:${run.lastSeq}`],
+                    omissionReason: 'snapshot_terminal_timestamp_unavailable'
+                  }
+              const payload = {
+                runId: canonicalRunId,
+                step,
+                ...(run.terminalDetail ? { reason: run.terminalDetail } : {}),
+                settledAt: hasTerminalAt ? run.terminalAt! : null,
+                outcome,
+                evidence: [`legacy-ledger:${run.lastSeq}`]
+              }
+              sink.execute({
+                type: 'run.effect_result',
+                commandId: `effect:legacy-${run.ledgerRunId}:${step}`,
+                actor: `effect:legacy-${run.ledgerRunId}`,
+                scope: 'system',
+                at: hasTerminalAt ? run.terminalAt! : now,
+                payload,
+                payloadSha256: sha256Hex(canonicalJson(payload))
+              })
+            }
           }
-          sink.execute({
-            type: 'run.effect_result',
-            commandId: `effect:legacy-${run.ledgerRunId}:interrupted`,
-            actor: `effect:legacy-${run.ledgerRunId}`,
-            scope: 'system',
-            at: now,
-            payload,
-            payloadSha256: sha256Hex(canonicalJson(payload))
-          })
-        } else {
-          const step = run.lifecycle as 'settled' | 'failed' | 'cancelled'
-          const payload = {
-            runId: canonicalRunId,
-            step,
-            ...(run.terminalDetail ? { reason: run.terminalDetail } : {}),
-            settledAt: run.terminalAt ?? now,
-            evidence: [`legacy-ledger:${run.lastSeq}`]
+          if (isLastChunk) {
+            sink.setMeta('legacy_ledger_seq', String(legacy.lastSeq))
           }
-          sink.execute({
-            type: 'run.effect_result',
-            commandId: `effect:legacy-${run.ledgerRunId}:${step}`,
-            actor: `effect:legacy-${run.ledgerRunId}`,
-            scope: 'system',
-            at: run.terminalAt ?? now,
-            payload,
-            payloadSha256: sha256Hex(canonicalJson(payload))
-          })
-        }
+        })
       }
 
+      if (sortedRuns.length === 0) {
+        sink.setMeta('legacy_ledger_seq', String(legacy.lastSeq))
+      }
       currentLedgerSeq = legacy.lastSeq
-      sink.setMeta('legacy_ledger_seq', String(currentLedgerSeq))
     }
   }
 
@@ -274,68 +318,79 @@ export function importLegacyStateIncrementally(options: LegacyImportOptions): Le
       } catch {
         entries = []
       }
-      for (const entry of entries) {
-        const sessionKey =
-          (typeof entry.sessionId === 'string' && entry.sessionId) ||
-          (typeof entry.externalSessionId === 'string' && entry.externalSessionId) ||
-          (typeof entry.runId === 'string' && entry.runId) ||
-          ''
-        if (!sessionKey) continue
-        const existing = sink.getSession(sessionKey)
-        const title =
-          typeof entry.title === 'string'
-            ? entry.title
-            : typeof entry.preview === 'string'
-              ? entry.preview.slice(0, 200)
-              : null
-        const ts = typeof entry.ts === 'number' && Number.isFinite(entry.ts) ? entry.ts : now
-        const pinnedAt = typeof entry.pinnedAt === 'number' ? entry.pinnedAt : null
-        const archivedAt = typeof entry.archivedAt === 'number' ? entry.archivedAt : null
-        if (
-          existing &&
-          existing.title === title &&
-          existing.ts === ts &&
-          existing.pinnedAt === pinnedAt &&
-          existing.archivedAt === archivedAt
-        ) {
-          continue
-        }
-        const lastRunOutcome =
-          typeof entry.lastRunOutcome === 'string'
-            ? {
-                status: 'available' as const,
-                quality: 'inferred' as const,
-                source: [`app-sessions:${nextSha}`],
-                value: entry.lastRunOutcome
-              }
-            : null
-        const payload = {
-          sessionKey,
-          provider: typeof entry.providerId === 'string' ? entry.providerId : null,
-          profile: typeof entry.agentProfileId === 'string' ? entry.agentProfileId : null,
-          cwd: typeof entry.cwd === 'string' ? entry.cwd : null,
-          title,
-          ts,
-          pinnedAt,
-          archivedAt,
-          lastRunId: typeof entry.runId === 'string' ? entry.runId : null,
-          lastRunOutcome,
-          evidence: [`app-sessions:${nextSha}`]
-        }
-        const payloadSha = sha256Hex(canonicalJson(payload))
-        const res = sink.execute({
-          type: 'session.import',
-          commandId: `legacy-session:${sessionKey}:${payloadSha.slice(0, 16)}`,
-          actor: 'system',
-          scope: 'system',
-          at: now,
-          payload,
-          payloadSha256: payloadSha
+      for (let offset = 0; offset < entries.length; offset += batchSize) {
+        const chunk = entries.slice(offset, offset + batchSize)
+        const isLastChunk = offset + batchSize >= entries.length
+        sink.runInBatchTransaction(() => {
+          for (const entry of chunk) {
+            const sessionKey =
+              (typeof entry.sessionId === 'string' && entry.sessionId) ||
+              (typeof entry.externalSessionId === 'string' && entry.externalSessionId) ||
+              (typeof entry.runId === 'string' && entry.runId) ||
+              ''
+            if (!sessionKey) continue
+            const existing = sink.getSession(sessionKey)
+            const title =
+              typeof entry.title === 'string'
+                ? entry.title
+                : typeof entry.preview === 'string'
+                  ? entry.preview.slice(0, 200)
+                  : null
+            const ts = typeof entry.ts === 'number' && Number.isFinite(entry.ts) ? entry.ts : now
+            const pinnedAt = typeof entry.pinnedAt === 'number' ? entry.pinnedAt : null
+            const archivedAt = typeof entry.archivedAt === 'number' ? entry.archivedAt : null
+            if (
+              existing &&
+              existing.title === title &&
+              existing.ts === ts &&
+              existing.pinnedAt === pinnedAt &&
+              existing.archivedAt === archivedAt
+            ) {
+              continue
+            }
+            const lastRunOutcome =
+              typeof entry.lastRunOutcome === 'string'
+                ? {
+                    status: 'available' as const,
+                    quality: 'inferred' as const,
+                    source: [`app-sessions:${nextSha}`],
+                    value: entry.lastRunOutcome
+                  }
+                : null
+            const payload = {
+              sessionKey,
+              provider: typeof entry.providerId === 'string' ? entry.providerId : null,
+              profile: typeof entry.agentProfileId === 'string' ? entry.agentProfileId : null,
+              cwd: typeof entry.cwd === 'string' ? entry.cwd : null,
+              title,
+              ts,
+              pinnedAt,
+              archivedAt,
+              lastRunId: typeof entry.runId === 'string' ? entry.runId : null,
+              lastRunOutcome,
+              evidence: [`app-sessions:${nextSha}`]
+            }
+            const payloadSha = sha256Hex(canonicalJson(payload))
+            const res = sink.execute({
+              type: 'session.import',
+              commandId: `legacy-session:${sessionKey}:${payloadSha.slice(0, 16)}`,
+              actor: 'system',
+              scope: 'system',
+              at: now,
+              payload,
+              payloadSha256: payloadSha
+            })
+            if (res.kind === 'accepted') importedSessions += 1
+          }
+          if (isLastChunk) {
+            sink.setMeta('legacy_catalog_sha256', nextSha)
+          }
         })
-        if (res.kind === 'accepted') importedSessions += 1
+      }
+      if (entries.length === 0) {
+        sink.setMeta('legacy_catalog_sha256', nextSha)
       }
       catalogSha256 = nextSha
-      sink.setMeta('legacy_catalog_sha256', catalogSha256)
     }
   }
 

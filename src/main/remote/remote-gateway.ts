@@ -124,6 +124,7 @@ export function scopedIntentId(peerCertSHA256: string, intentId: string): string
 export class RemoteGateway {
   #authority: DeviceAuthorizer
   #runScopes = new Map<string, 'local' | 'remote'>()
+  #runPeers = new Map<string, string>()
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
   #directories?: RemoteDirectorySource
@@ -190,14 +191,30 @@ export class RemoteGateway {
   submitIntent(peerCertSHA256: string, input: SubmitIntentInput): SubmitIntentResult {
     this.#authorize(peerCertSHA256)
     const candidateRunId = SessionLedger.newRunId()
+    const scope = this.grantScope(peerCertSHA256)
+    // Register peer & scope before recordIntent so synchronous ledger observers (P4-1 shadow)
+    // record the exact peer:<sha256> actor and grant scope without waiting for a second lookup.
+    this.#runPeers.set(candidateRunId, peerCertSHA256)
+    this.#runScopes.set(candidateRunId, scope)
     // Arrival, before anything durable: the segment to `intentDurable` is the ledger's
     // own cost, not the caller's.
     recordRunStage(candidateRunId, 'submit')
-    const receipt = this.#ledger.recordIntent({
-      intentId: scopedIntentId(peerCertSHA256, input.intentId),
-      runId: candidateRunId,
-      detail: input.detail
-    })
+    let receipt: ReturnType<SessionLedger['recordIntent']>
+    try {
+      receipt = this.#ledger.recordIntent({
+        intentId: scopedIntentId(peerCertSHA256, input.intentId),
+        runId: candidateRunId,
+        detail: input.detail
+      })
+    } catch (error) {
+      this.#runPeers.delete(candidateRunId)
+      this.#runScopes.delete(candidateRunId)
+      throw error
+    }
+    if (receipt.event.runId !== candidateRunId) {
+      this.#runPeers.delete(candidateRunId)
+      this.#runScopes.delete(candidateRunId)
+    }
     // Remember who submitted this run, so the executor can select semantics by grant
     // scope without re-reading the frame's transport. In-memory on purpose: an intent
     // dispatched after a restart belongs to nobody the daemon can still prove, so it
@@ -205,7 +222,8 @@ export class RemoteGateway {
     // `recordIntent` appends and fsyncs synchronously, so its return is the durable
     // boundary: the segment from `submit` is the ledger's own price.
     recordRunStage(receipt.event.runId, 'intentDurable')
-    this.#runScopes.set(receipt.event.runId, this.grantScope(peerCertSHA256))
+    this.#runPeers.set(receipt.event.runId, peerCertSHA256)
+    this.#runScopes.set(receipt.event.runId, scope)
     return { runId: receipt.event.runId, status: receipt.status, seq: receipt.event.seq }
   }
 
@@ -217,6 +235,14 @@ export class RemoteGateway {
   /** Scope of the peer that submitted this run, for policy that differs by scope. */
   runScope(runId: string): 'local' | 'remote' {
     return this.#runScopes.get(runId) ?? 'remote'
+  }
+
+  /** Submitting peer cert and grant scope for live shadow observation (P4-1). */
+  runMeta(runId: string): { peerCertSHA256?: string; grantScope?: 'local' | 'remote' } | undefined {
+    const peerCertSHA256 = this.#runPeers.get(runId)
+    const grantScope = this.#runScopes.get(runId)
+    if (!peerCertSHA256 && !grantScope) return undefined
+    return { ...(peerCertSHA256 ? { peerCertSHA256 } : {}), ...(grantScope ? { grantScope } : {}) }
   }
 
   // Reconcile a submit whose receipt was lost. Scoped like submitIntent, so a
@@ -239,7 +265,10 @@ export class RemoteGateway {
     const intentId = scopedIntentId(peerCertSHA256, input.intentId)
     const found = this.#ledger.intentRun(intentId)
     if (found) return { runId: found.runId, state: found.lifecycle }
-    const receipt = this.#ledger.recordIntent({ intentId, runId: SessionLedger.newRunId() })
+    const tombstoneRunId = SessionLedger.newRunId()
+    this.#runPeers.set(tombstoneRunId, peerCertSHA256)
+    this.#runScopes.set(tombstoneRunId, this.grantScope(peerCertSHA256))
+    const receipt = this.#ledger.recordIntent({ intentId, runId: tombstoneRunId })
     this.#ledger.markCancelled(receipt.event.runId)
     return { runId: receipt.event.runId, state: 'cancelled' }
   }

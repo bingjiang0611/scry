@@ -46,6 +46,7 @@
 - **事实**：Node 的 `fsyncSync` 在 macOS 上走 libuv 的 Apple 分支，发 `F_FULLFSYNC`（按 libuv 源码，未在本仓库实测），所以今天 H1 每条都刷到盘。SQLite 的 `synchronous=FULL` 在 `fullfsync` 关闭（默认）时只发普通 `fsync`。首稿「FULL 与 H1 持久性相同」在 macOS 上不成立。
 - **测量**：P4-1 在维护者的 Mac 上，`PRAGMA fullfsync` 开与关各两轮，测首 token（S1 流程）与首 token 前提交合计。
 - **规则**：开着仍满足 S1 两条上限，且提交合计 P95 ≤ 8 ms，就开。否则关，改设 `checkpoint_fullfsync=ON`，并在本节写明窗口：掉电（不是进程崩溃）可能丢最近几次提交。这比今天 H1 弱，测量后报维护者确认。
+- **维护者决定（2026-11-19）**：P4-1 期间显式固定为 `PRAGMA fullfsync = OFF`、`PRAGMA checkpoint_fullfsync = ON`（环境变量未设置时亦然）；最终是否开启 `fullfsync` 推迟到 P4-2（待 WAL 检查点移出提交关键路径、且 H1 退出关键路径后重测再定）。首 token 前提交合计的 8 ms 门禁按绝对值计。掉电窗口说明：上述配置下，系统突然掉电（非进程崩溃）可能丢失最近几次尚未触发检查点的提交；P4-1 仅影子写，不影响权威状态。
 - **Linux**：ext4 与 btrfs 都测（btrfs 的 fsync 更贵）；缺目标机标 not-run，不以 macOS 结果代替。
 - **网络文件系统**：userData 在 NFS 等网络文件系统上时，打开前检测（`statfs` 类型），显示明确的 unavailable 文案：「后台服务的运行记录需要本地磁盘，当前数据目录在网络文件系统上」。不静默回退。
 

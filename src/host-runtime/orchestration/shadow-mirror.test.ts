@@ -5,8 +5,10 @@ import { join } from 'node:path'
 import { SessionLedger, type LedgerEvent, type LedgerStore } from '../../main/remote/session-ledger'
 import type { Conversation } from '../../shared/conversation'
 import {
+  MAX_PENDING_TTL_MS,
   parseOrchestrationFullfsync,
-  parseOrchestrationMode
+  parseOrchestrationMode,
+  parsePendingTtlMs
 } from './mode'
 import { ShadowMirror } from './shadow-mirror'
 
@@ -31,32 +33,46 @@ function memoryLedgerStore(): LedgerStore {
 }
 
 describe('P4-1 SCRY_ORCHESTRATION switch parsing', () => {
-  it('defaults to off and parses shadow/on and fullfsync flags', () => {
-    expect(parseOrchestrationMode({})).toEqual({ requested: 'off', effective: 'off' })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'off' })).toEqual({ requested: 'off', effective: 'off' })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'shadow' })).toEqual({ requested: 'shadow', effective: 'shadow' })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'on' })).toEqual({ requested: 'on', effective: 'shadow' })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'bogus' })).toEqual({ requested: 'off', effective: 'off' })
+  it('defaults to off, refuses on in P4-1, and caps pending TTL at 60 s', () => {
+    expect(parseOrchestrationMode({})).toEqual({ requested: 'off', effective: 'off', refused: false })
+    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'off' })).toEqual({ requested: 'off', effective: 'off', refused: false })
+    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'shadow' })).toEqual({ requested: 'shadow', effective: 'shadow', refused: false })
+    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'on' })).toEqual({
+      requested: 'on',
+      effective: 'off',
+      refused: true,
+      reason: 'orchestration_on_unsupported_in_p4_1'
+    })
+    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'bogus' })).toEqual({ requested: 'off', effective: 'off', refused: false })
 
     expect(parseOrchestrationFullfsync({})).toBeUndefined()
     expect(parseOrchestrationFullfsync({ SCRY_ORCHESTRATION_FULLFSYNC: '1' })).toBe(true)
     expect(parseOrchestrationFullfsync({ SCRY_ORCHESTRATION_FULLFSYNC: '0' })).toBe(false)
+
+    expect(parsePendingTtlMs({})).toBe(MAX_PENDING_TTL_MS)
+    expect(parsePendingTtlMs({ SCRY_ORCHESTRATION_PENDING_TTL_MS: '500' })).toBe(500)
+    expect(parsePendingTtlMs({ SCRY_ORCHESTRATION_PENDING_TTL_MS: '3600000' })).toBe(MAX_PENDING_TTL_MS)
+    expect(parsePendingTtlMs({ SCRY_ORCHESTRATION_PENDING_TTL_MS: '-10' })).toBe(MAX_PENDING_TTL_MS)
   })
 })
 
 describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
-  it('mirrors H1 send, question, answer, settle, stop/cancel, and failure field-for-field', () => {
+  it('mirrors H1 send, question, answer, settle, stop/cancel, and failure field-for-field with peer actors', () => {
     withTempDir((userData) => {
+      const localPeer = 'a'.repeat(64)
+      const remotePeer = 'b'.repeat(64)
+      const metaByRun = new Map<string, { peerCertSHA256: string; grantScope: 'local' | 'remote' }>()
       const mirror = ShadowMirror.open({ userDataDir: userData })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),
-          onEvent: (event) => mirror.onLedgerEvent(event)
+          onEvent: (event) => mirror.onLedgerEvent(event, metaByRun.get(event.runId))
         })
 
-        // 1. Full send -> dispatch -> session -> question -> answer -> close -> settle
+        // 1. Full local App send -> dispatch -> session -> question -> answer -> close -> settle
         const run1 = SessionLedger.newRunId()
         const intent1 = SessionLedger.newIntentId()
+        metaByRun.set(run1, { peerCertSHA256: localPeer, grantScope: 'local' })
         ledger.recordIntent({
           intentId: intent1,
           runId: run1,
@@ -83,44 +99,84 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         )
         ledger.markSettled(run1)
 
-        // 2. Cancelled run
+        // 2. Cancelled remote run
         const run2 = SessionLedger.newRunId()
+        const intent2 = SessionLedger.newIntentId()
+        metaByRun.set(run2, { peerCertSHA256: remotePeer, grantScope: 'remote' })
         ledger.recordIntent({
-          intentId: SessionLedger.newIntentId(),
+          intentId: intent2,
           runId: run2,
           detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-1', prompt: 'stop me' })
         })
         ledger.markDispatched(run2)
         ledger.markCancelled(run2)
 
-        // 3. Failed run
+        // 3. Failed remote run with ~1.15 MB intent body (just under H1 1.2 MB cap; externalized to BodyStore)
         const run3 = SessionLedger.newRunId()
+        const bigBody = 'M'.repeat(1_150_000)
+        metaByRun.set(run3, { peerCertSHA256: remotePeer, grantScope: 'remote' })
         ledger.recordIntent({
           intentId: SessionLedger.newIntentId(),
           runId: run3,
-          detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-1', prompt: 'fail me' })
+          detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-1', prompt: 'fail me', blob: bigBody })
         })
         ledger.markDispatched(run3)
         ledger.markFailed(run3, 'provider_crashed')
 
-        // Verify field-for-field parity against H1 SessionLedger
-        expect(mirror.stats().failures).toBe(0)
-        expect(mirror.stats().failedOpen).toBe(false)
-        expect(mirror.stats().preFirstTokenCommitsByRun.get('turn-run-1')).toBe(2)
+        // Verify zero deviations and full field-for-field parity against H1 SessionLedger
+        const st = mirror.stats()
+        expect(st.failures).toBe(0)
+        expect(st.deviations).toBe(0)
+        expect(st.failedOpen).toBe(false)
+        expect(st.preFirstTokenCommitsByRun.get('turn-run-1')).toBe(2)
 
         const shadowRun1 = mirror.sink!.getRun('turn-run-1')
-        expect(shadowRun1?.lifecycle).toBe(ledger.runState(run1))
-        expect(shadowRun1?.provider).toBe('codex')
-        expect(shadowRun1?.cwd).toBe('/tmp/ws-1')
-        expect(shadowRun1?.sessionKey).toBe('conv-1')
+        expect(shadowRun1).toMatchObject({
+          runId: 'turn-run-1',
+          sessionKey: 'conv-1',
+          ownerActor: `peer:${localPeer}`,
+          scope: 'local',
+          origin: 'local',
+          provider: 'codex',
+          profile: null,
+          cwd: '/tmp/ws-1',
+          promptPreview: 'fix bug',
+          lifecycle: ledger.runState(run1),
+          stopState: null,
+          outputSeq: null,
+          parentRunId: null
+        })
+        expect(shadowRun1?.settledAt).toBeTypeOf('number')
+        expect(shadowRun1?.outcome).toMatchObject({ status: 'available', quality: 'exact', value: 'settled' })
+        expect(mirror.sink!.getReceipt(intent1, `peer:${localPeer}`)?.status).toBe('accepted')
 
         const interaction = mirror.sink!.getInteraction('turn-run-1', 'q-1')
-        expect(interaction?.state).toBe('closed')
-        expect(interaction?.answerId).toBe('ans-1')
+        expect(interaction).toMatchObject({
+          runId: 'turn-run-1',
+          questionId: 'q-1',
+          kind: 'approval',
+          source: 'provider',
+          state: 'closed',
+          answerId: 'ans-1'
+        })
 
-        expect(mirror.sink!.getRun(run2)?.lifecycle).toBe(ledger.runState(run2))
-        expect(mirror.sink!.getRun(run3)?.lifecycle).toBe(ledger.runState(run3))
+        const shadowRun2 = mirror.sink!.getRun(run2)
+        expect(shadowRun2).toMatchObject({
+          runId: run2,
+          ownerActor: `peer:${remotePeer}`,
+          scope: 'remote',
+          origin: 'remote',
+          lifecycle: ledger.runState(run2)
+        })
+        expect(mirror.sink!.getReceipt(intent2, `peer:${remotePeer}`)?.status).toBe('accepted')
+
+        const shadowRun3 = mirror.sink!.getRun(run3)
+        expect(shadowRun3?.lifecycle).toBe(ledger.runState(run3))
+        expect(shadowRun3?.body?.storage).toBe('external')
+        expect(shadowRun3?.body?.bytes).toBeGreaterThan(1_150_000)
+        expect(mirror.sink!.bodyStore.hasExternalBody(shadowRun3!.body!.sha256)).toBe(true)
         expect(mirror.sink!.getMeta('legacy_ledger_seq')).toBe(String(ledger.describe().lastSeq))
+        expect(mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
 
         // 4. H3 settle mirrors turn delivery into orch_p_turn
         const fakeConversation: Conversation = {

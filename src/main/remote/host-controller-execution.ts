@@ -46,15 +46,20 @@ export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivit
   try { deps.onRunActivity?.(runId, ledger.intentSeq(runId)) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
 }
 
+const gatewayByDeps = new WeakMap<object, RemoteGateway>()
+
 /** A ledger event wakes parked watchers and names its run for the App event feed. */
 export function ledgerEventObserver(
   deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent'>,
   notify: () => void
 ): (event: LedgerEvent, intentSeq?: number) => void {
   return (event, intentSeq) => {
-    try { deps.onLedgerEvent?.(event) } catch { /* shadow observation must never fail a run */ }
     notify()
     runActivity(deps, event.runId, { intentSeq: () => intentSeq })
+    try {
+      const meta = gatewayByDeps.get(deps)?.runMeta(event.runId)
+      deps.onLedgerEvent?.(event, meta)
+    } catch { /* shadow observation must never fail a run */ }
   }
 }
 
@@ -82,6 +87,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     ...(deps.readHistoryVersion ? { historyVersion: { read: deps.readHistoryVersion } as RemoteHistoryVersionSource } : {}),
     ...(deps.readHistoryTurnsPage ? { historyTurnsPage: { read: deps.readHistoryTurnsPage } as RemoteHistoryTurnsPageSource } : {})
   })
+  gatewayByDeps.set(deps, gateway)
 
   // Runs that got as far as the run start; any other failure was a refusal by the ledger.
   const reached = new Set<string>()
