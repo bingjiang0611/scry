@@ -98,7 +98,7 @@ Codex 的 `default` 在编辑上等于 Claude 的 `auto_accept_edits`，又多�
 | 工具 | 原生审批 | Scry 确认 |
 |---|---|---|
 | `scry_capabilities`、`scry_task_status`、`scry_task_result_read` | adapter 自动放行，四档相同（维护者同意，decisions §9.2） | 无 |
-| `scry_task_delegate`、`scry_task_cancel` | 保留 Provider 原生语义（是否也放行待决定，decisions §9.3 第 1 条） | **每次都要**，四档相同，`full_access` 父 run 也要 |
+| `scry_task_delegate`、`scry_task_cancel` | adapter 放行，不再走 Provider 原生审批（维护者 2026-11-19 同意，decisions §9.3 第 1 条） | **每次都要**，四档相同，`full_access` 父 run 也要 |
 
 | Provider | adapter 如何放行读工具 |
 |---|---|
