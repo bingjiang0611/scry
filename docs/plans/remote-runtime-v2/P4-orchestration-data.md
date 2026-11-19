@@ -87,7 +87,7 @@
 
 索引：`(stream, seq)`、`(run_id, seq)`、`(session_key, seq)`、`(command_id)`。
 
-预留列（core §2.10 R2，**预留，P4 不实现行为**）：`principal`、`via`、`actor_run_id`；`actor` 另有 `agent:<sessionKey>#<bindingId>` 一种，P4 不产生。
+预留列（core §2.10 R2，**预留，P4 不实现行为**）：`principal`、`via`、`actor_run_id`；`actor` 另有 `agent:` 前缀一种（后缀格式由 P6 定），P4 不产生。
 
 **事件 schema 兼容是硬约束。** 保留期内的任何事件都要能被当前构建解码：类型只增不改；字段只增可选的；含义变了就用新类型。客户端遇到不认识的类型按 protocol §5.2 处理。
 
@@ -115,7 +115,7 @@
 
 索引：`orch_p_session(archived_at, ts DESC, session_key)` 支撑 keyset 分页（protocol §5.1）；`orch_p_run(lifecycle)`。
 
-预留列（core §2.10，**预留，P4 不实现行为**，进 P4-0 的初始表结构）：`orch_p_session` 的 `parent_session_key`、`root_session_key`、`lineage`、`created_by`（R1；P4 只照抄 fork 与侧聊已有的来源）；`orch_p_turn` 的 `author`（R3）；`orch_p_run` 的 `parent_run_id`（索引，R5）、`waiting_on`（R6）；`orch_p_interaction` 的 `answered_by`（R3）。
+预留列（core §2.10，**预留，P4 不实现行为**，进 P4-0 的初始表结构）：`orch_p_session` 的 `parent_session_key`、`root_session_key`、`lineage`、`created_by`（R1；P4 只照抄 fork 与侧聊已有的来源）；`orch_p_turn` 的 `author`（R3）；`orch_p_run` 的 `parent_run_id`（索引，R5）；`orch_p_run.origin` 的预留取值 `'agent'` 与索引 `(origin, lifecycle)`（R12）；`orch_p_interaction` 的 `answered_by`（R3）。首稿的 `waiting_on`（R6）2026-11-19 删除，等待计数由 P6 的任务 projection 推导。
 
 - **projection 是权威。** 事件被裁剪之后，projection 不能也不需要从日志重建。「从空重放等于在线 projection」只在未裁剪窗口内、且排除已清除的会话时检验（plan §10）。
 - **形状变化是数据迁移**：随 §4.0 的执行器改写行并提升 `projection_schema_version`，不靠重放。

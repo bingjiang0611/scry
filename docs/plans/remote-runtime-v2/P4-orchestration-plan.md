@@ -105,6 +105,6 @@ P4-5b 之后不再有开关，回退只能回到之前的构建：旧构建不�
 | 轮询已删除 | 空闲 60 s RPC 个位数；静态检查：`LIVE_RUNS_TICK_MS`、renderer 远程读循环、iOS 800 ms 回退不存在（P4-5b 后） | CI |
 | 授权 | 撤销后下一次唤醒失败；remote scope 看不到项目根外的行与本机字段；本机 op 在网络端点 `unsupported_op`；执行目标转发只在 Mac2 声明能力时开放 `subscribe` | CI |
 | Recorder 独立 | `src/core/turn-recorder` 不导入 `better-sqlite3` 与编排模块 | CI |
-| 多 Agent 预留 | P4 不产生 `task.*` 与 `agent:` actor；`principal` 等于 actor；级联停止的后代集合为空；fork 与侧聊的谱系与会话文件一致；客户端解码器忽略不认识的可选字段 | CI |
+| 多 Agent 预留 | P4 不产生 `task.*`、`agent:` actor、`origin = 'agent'` 与会话级停止命令；`principal` 等于 actor；级联停止的后代集合为空；只对 Agent 命令生效的复核行不触发；fork 与侧聊的谱系与会话文件一致；客户端解码器忽略不认识的可选字段 | CI |
 | 控制实验 | 去掉「领取先于执行」、去掉派发前复核、去掉回执查询、去掉 cwd 授权，各自让对应测试失败 | CI |
 | 真机 | macOS：SIGKILL daemon 于运行中、App 重启接回、fullfsync 开关两轮测量、v2 手机在 P4-5a 用能力、v2 手机连 v3 宿主的提示、打包产物（`better-sqlite3` 解包）、中文系统语言 + 中文工作区路径。Linux：Ubuntu runner 打包 smoke；ext4 与 btrfs 测量；Arch/Hyprland 目标机缺失则标 not-run | **L3，需真机** |

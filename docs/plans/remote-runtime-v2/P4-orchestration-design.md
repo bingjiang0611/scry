@@ -14,7 +14,7 @@
 - **存储**：事件日志放单独的 `orchestration.db`，PLAN「已定」同步记了变更与日期。回执与 `resolveIntent` 墓碑永久保留，只裁剪事件。正文走内容寻址文件，删除会话时清除（data §4.3、§4.7）。
 - **off↔on**：每次启动按 `orch_meta` 记下的旧台账位置做幂等增量导入（plan §9）。
 - **macOS `fullfsync`**：先测量，再按写定的规则决定（plan §8.3）。
-- **多 Agent 预留**（维护者同日）：谱系、发起者、作者、级联停止、等待子任务、Agent 幂等命名空间等进 P4-0 的初始表结构，P4 不实现行为（core §2.10）；多 Agent 层见 [P6 草案](P6-multi-agent-draft.md)。
+- **多 Agent 预留**（维护者同日；2026-11-19 P6 评审后修订）：谱系、发起者、作者、级联停止、Agent 幂等命名空间、Agent 发起 run 的来源标记等进 P4-0 的初始表结构，P4 不实现行为（core §2.10）；多 Agent 层见 [P6 草案](P6-multi-agent-draft.md)。P4 不改 scry 命令行、其命令与记录格式。
 - **其余**按评审建议：提交失败 fail closed 但放行停止；结果命令用确定性 id；拒绝分黏性与可重试；恢复时先查 recorder 证据；projection 在裁剪后仍是权威并带 schema 版本；单写者；迁移函数的两个陷阱；两本账的边界；外部会话的扫描触发；证据、协议与性能细节。逐项见 decisions §11.1。
 
 | 文件 | 内容 |

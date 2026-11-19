@@ -86,6 +86,8 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 | 不依赖 App 的独立安装包 | P4 之后再做；本轮只记在「不做/以后」 | [P5-host-security](P5-host-security.md) §8 |
 | P4 设计评审 | 做完整设计（约 12 周，不含 S3）；`subscribe` 先作 v2 能力、真机验证后一次升 v3；立即路径 intent 与领取同事务、pending 有 TTL、派发前复核 grant；`fullfsync` 先测后定；其余按评审建议。无待决定事项 | [P4-orchestration-decisions](P4-orchestration-decisions.md) |
 | 多 Agent 编排 | P4 只是 t3code Orchestration V2 核心的对应物，多 Agent 是其上的另一层。先在 P4 设计里预留钩子（只改文档，P4 不实现行为，工期不变），再仿 t3code 的编排 MCP 写草案 | [P4-orchestration-core](P4-orchestration-core.md) §2.10、[P6-multi-agent-draft](P6-multi-agent-draft.md) |
+| 「第 1 步」暂不做（2026-11-19） | App 发起的 run 由 daemon 直接写记录、绕过 Hook 与命令行，暂不做；P4–P6 不改 scry 命令行、其命令与记录格式 | [P6-multi-agent-decisions](P6-multi-agent-decisions.md) D27 |
+| 已知问题，未修（2026-11-19 记录） | 历史检索给 Claude 的 bearer token 经 SDK 进 `--mcp-config` 参数（`claude.ts:413-415`），本机其他用户可经 `ps` 看到；不在 P6 修，修法另候维护者决定 | [P6-multi-agent-security](P6-multi-agent-security.md) §S4 |
 
 评审后（同日）「都按推荐」：supervisor 停止时等 daemon、远程策略随服务写入、命令行批准默认关且只能在 App 里打开、挑战认证、运行标记、通知与速率、批准方式分两次发布写进 grant。随后「都按推荐」：开关关闭时仍放行只收紧的 `cancel`、`revoke`、`desktop-off`（每次通知）；`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL` 写进服务文件（[P5-headless-host](P5-headless-host.md) §10）。
 

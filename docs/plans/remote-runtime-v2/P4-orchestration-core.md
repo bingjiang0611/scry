@@ -5,9 +5,9 @@
 ## 2.1 Orchestrator
 
 - 输入：已准备的命令 `{ commandId, actor, scope, type, payload, prepared }`。`actor` 是证书指纹（远程）或本机 grant 指纹。
-- `commandId` 按 actor 作用域。设备 intent 沿用 `scopedIntentId`：定义在 `remote-gateway.ts:117-120`（`peer\0intentId` 的哈希排成 UUID 形状），调用处 `:197`、`:227`、`:239`。
+- `commandId` 按 actor 作用域。设备 intent 沿用 `scopedIntentId`：定义在 `remote-gateway.ts:119-122`（`peer\0intentId` 的哈希排成 UUID 形状），调用处 `:197`、`:227`、`:239`。
 - 决策：`decide(command, view) → { events, effects, receipt }`。`view` 是 projection 的只读视图。
-- run 状态机取自 `SessionLedger` 的转移表 `NEXT`（`session-ledger.ts:101-107`）与重复检测（`:295-307`），抽成纯函数后原样复用。
+- run 状态机取自 `SessionLedger` 的转移表 `NEXT`（`session-ledger.ts:102-108`）与重复检测（`:295-307`），抽成纯函数后原样复用。
 - 决策器不做 I/O。异步工作在它之前（§2.3）或之后（§2.6）。
 
 ## 2.2 拒绝：黏性与可重试
@@ -109,26 +109,29 @@ P4-2 起 `conversations/<id>.json` 与日志并存。各管一部分：
 
 扫描结果作为 `session.discovered` 等命令进 Orchestrator。没有订阅者时不扫描。
 
-## 2.10 多 Agent 层的预留（维护者 2026-11-18）
+## 2.10 多 Agent 层的预留（维护者 2026-11-18；P6 评审后修订 2026-11-19）
 
-P6（[P6-multi-agent-draft](P6-multi-agent-draft.md)，草案）让 Provider 里的 Agent 经 Scry 自有的编排 MCP 委派子任务。那是核心之上的另一层。下表的列、字段与规则现在进 P4-0 的初始表结构与决策器，**预留，P4 不实现行为**：P4 中取固定值或为空，没有新命令、新 op、新界面。行号以 `306e194d` 为准。
+P6（[P6-multi-agent-draft](P6-multi-agent-draft.md)，草案）让 Provider 里的 Agent 经 Scry 自有的编排 MCP 委派子任务。那是核心之上的另一层。下表的列、字段与规则现在进 P4-0 的初始表结构与决策器，**预留，P4 不实现行为**：P4 中取固定值或为空，没有新命令、新 op、新界面。行号以 `53117a8f` 为准（与 `306e194d` 之间 `src/` 无改动）。
 
 为什么现在留：projection 在裁剪后是权威（data §4.4），30 天前的事实无法从日志回填；回执永久保留，actor 进了回执就不能再改含义。以后再加，要么做数据迁移且回填不全，要么两套语义并存。
+
+**2026-11-19 修订**（P6 独立评审之后，维护者裁定，见 [P6-multi-agent-decisions](P6-multi-agent-decisions.md) §9.1）：R2 只保留 `agent:` 前缀与三列，后缀格式交给 P6；R4 加三行；R5 加会话级停止，级联改按子 run 的 `parent_run_id`；**R6 删除**；R7 的哈希输入待 P6 定；R11 写明服务形态；新增 R12。P4–P6 不改 scry 命令行、其命令与记录格式。
 
 | # | 钩子 | 预留内容 | P4 中的取值 |
 |---|---|---|---|
 | R1 | 会话谱系 | `orch_p_session` 加 `parent_session_key`、`root_session_key`、`lineage`（`{ kind, source, taskId? }`）、`created_by`（actor）。`kind` 沿用现有名称：`fork`（原生分叉，`Conversation.fork`，`shared/conversation.ts:175-187`）、`side_chat`（侧边会话，`SideChatOrigin`，`:101-110`）；新增 `delegated`（委派任务）。`source` 是来源点 `{ sessionKey, runId?, throughOrdinal? }`，对应 fork 的 `sourceRunId` 与侧聊快照的 `throughRunId`/`throughOrdinal`（`:60-61`） | `fork`、`side_chat` 在 `session.forked`、侧聊的 `session.created` 与导入时照抄会话文件已有字段；`delegated` 不产生。跨 Provider 接续发生在同一会话内（会话绑定 + 历史输入），不是会话谱系 |
-| R2 | 发起者 | actor 加一种：`agent:<sessionKey>#<bindingId>`（经编排 MCP 调用的 Agent，按调用方原生会话作用域；无会话绑定时省略 `#…`）。`orch_command`、`orch_event` 加 `principal`（代表哪个用户 grant：用户命令等于 actor，Agent 命令取调用方 run 的 principal）、`via`（Agent 凭据的随机 id，从不是 token）、`actor_run_id`（调用方 run） | 只有 `peer:`、`system`、`effect:`；`principal` = actor；其余为空 |
+| R2 | 发起者 | actor 加一种前缀 `agent:`（经编排 MCP 调用的 Agent），后缀格式由 P6 定。`orch_command`、`orch_event` 加 `principal`（代表哪个用户 grant：用户命令等于 actor，Agent 命令取调用方 run 的 principal）、`via`（Agent 凭据的随机 id，从不是凭据本身）、`actor_run_id`（调用方 run） | 只有 `peer:`、`system`、`effect:`；`principal` = actor；其余为空 |
 | R3 | 作者与回答者 | `turn.began` 与 `orch_p_turn` 加 `author`：`user` / `agent` / `system` / `unavailable`；`orch_p_interaction` 加 `answered_by`（actor）。界面只把 `peer:` 显示为「用户发送」「用户批准」；`agent:`、`system` 从不显示为用户批准（AGENTS §3，同 recorder 的 `source: auto`） | daemon 派发的 turn 为 `user`；外部发现的为 `unavailable`（GLOSSARY「轮次」）；`answered_by` 为答复的 peer |
-| R4 | 派发前复核 | §2.3 的「提交者的 grant」改读 `principal`。另留三行，只对 `agent:` 命令生效：调用方 run 未终态；凭据未撤销；权限上限仍成立 | `principal` = actor，行为不变；三行不触发 |
-| R5 | 级联停止 | `orch_p_run` 加 `parent_run_id`（索引）；`run.stop_requested` 加可选 `cascadeRoot`。停止父 run 时，决策器在同一事务里给所有未终态的后代 run 记 `run.stop_requested`，各一行进程绑定的 `provider.run.stop`。`RunRegistryState`（`run-registry.ts:1-7`）加内存字段 `parentRunId`，存储 fence 时（§2.5）停止仍能沿内存关系级联 | 后代集合为空 |
-| R6 | 等待子任务 | `orch_p_run` 加 `waiting_on`（可空，如 `{ kind: 'tasks', open: 2 }`），与 lifecycle 正交，不改转移表（`session-ledger.ts:102-108`） | 恒为空 |
-| R7 | 幂等命名空间 | `agent:` 命令的 `command_id` = `sha256(tool \0 clientRequestId)` 排成 UUID（同 `scopedIntentId`，`remote-gateway.ts:119-122`）；联合主键 `(command_id, actor)` 即按调用方原生会话作用域。无 `clientRequestId` 时随机生成，即新工作。只读工具（状态、等待、读取）不是命令，不写回执 | 无 `agent:` 命令 |
+| R4 | 派发前复核 | §2.3 的「提交者的 grant」改读 `principal`。另留六行，只对 `agent:` 命令生效：调用方 run 未终态；调用方 run 没有 `stop_requested`（已请求停止即视为不活跃，决策时同样检查）；凭据未撤销；权限上限仍成立；项目的委派开关仍开；仓库配置指纹等于同一 Provider、同一 canonical cwd 上最近一次用户发起的 run 授权的指纹（没有或不同即 `trust_gate_rejected`，fail closed；只收紧 Agent 发起的 run，用户 run 的自动授权不变） | `principal` = actor，行为不变；六行不触发 |
+| R5 | 级联停止 | `orch_p_run` 加 `parent_run_id`（索引）；`run.stop_requested` 加可选 `cascadeRoot`。停止一个 run 时，决策器在同一事务里给所有 `parent_run_id` 等于它的未终态 run 记 `run.stop_requested`，各一行进程绑定的 `provider.run.stop`。按子 run 行查，不读父 run 行：终态行只保留 24 h（data §4.4）。预留会话级命令「停止全部子任务」，只接受 `peer:`。`RunRegistryState`（`run-registry.ts:1-7`）加内存字段 `parentRunId`，存储 fence 时（§2.5）停止仍能沿内存关系级联 | 后代集合为空；会话级命令不产生 |
+| R6 | （已删除，2026-11-19） | 首稿的 `orch_p_run.waiting_on` 不再预留。「等待 N 个子任务」由 P6 的任务 projection 按父会话推导，不进 run 行 | — |
+| R7 | 幂等命名空间 | `agent:` 命令的 `command_id` 是确定的哈希排成 UUID（形状同 `scopedIntentId`，`remote-gateway.ts:119-122`）；联合主键 `(command_id, actor)` 不变。哈希的输入由 P6 定（草案：含 `actor_run_id`，且委派必须带 `clientRequestId`）。只读工具不是命令，不写回执 | 无 `agent:` 命令 |
 | R8 | 重启 | `agent:` 发起、仍在 `pending` 的 outbox 行：重启时一律 `run.cancelled(caller_run_gone)`，不看 TTL。调用方进程随重启消失、其 run 记 `unavailable(host_restarted)`，委派的权威已不在。只比决定 B 更严 | 不触发 |
 | R9 | 事件类型与客户端 | 保留 `task.requested`、`task.child_bound`、`task.settled`、`task.cancel_requested`，白名单测试断言 P4 不产生。`subscribe` 请求预留可选的 `eventSet`，宿主只发该集合内的类型（缺省为 1，即第一批）；P4-5a 的客户端解码器忽略不认识的**可选字段**，只有不认识的**类型**才按 protocol §5.2 重置 | 不产生 |
-| R10 | 证据引用 | 保留 `task-result:<taskId>`，解析为子 run `run.finalized` 的引用；不复制用量（data §3.3） | 不产生 |
-| R11 | 写者位置 | 编排 MCP 端点只在 daemon 内，命令经 Orchestrator（§2.9）；`off` 与进程内路径不提供多 Agent | 无端点 |
+| R10 | 证据引用 | 保留 `task-result:<taskId>`，解析为子 run `run.finalized` 的引用；不复制用量（data §3.3）。事件裁剪后解析为 `unavailable` 并写原因 | 不产生 |
+| R11 | 写者位置 | 编排 MCP 服务只在 daemon 进程内（P6：Claude、Qoder 为 SDK 进程内服务，Codex 为 loopback 端点），命令经 Orchestrator（§2.9）；`off` 与进程内路径不提供多 Agent | 无服务 |
+| R12 | Agent 发起的 run | `orch_p_run.origin` 预留取值 `'agent'`，加索引 `(origin, lifecycle)`，供 P6 计宿主上 Agent 发起的未终态 run（用户 run 不计入） | 不产生 `'agent'` |
 
-参照 t3code `entity-ids-and-correlation.md`（App id 为主，原生 id 按作用域关联）、`feature-lifecycles.md`（Stop 停止全部委派任务）与 `orchestrator-mcp-server.md`（`clientRequestId` 按 Provider 会话作用域、`createdBy` 与 `creationSource` 分开）。不同处：t3 的级联在提交后由 effect 深度优先发出，因为命令只持有本线程的锁；这里决策器单线程，同一事务即可。
+参照 t3code `entity-ids-and-correlation.md`（App id 为主，原生 id 按作用域关联）、`feature-lifecycles.md`（Stop 停止全部委派任务）与 `orchestrator-mcp-server.md`（`clientRequestId` 按作用域、`createdBy` 与 `creationSource` 分开）。不同处：t3 的级联在提交后由 effect 深度优先发出，因为命令只持有本线程的锁；这里决策器单线程，同一事务即可。
 
-**与已定事项的核对。** 回执永久（决定 C）：只加列，只读工具不写回执。单写者（§2.9）：R11。schema 版本与 projection 权威（决定 11、14）：列进 P4-0 的初始版本，不是迁移；事件字段都是可选的，符合只增不改。协议（决定 F）：不加 op、不升版本；R9 的过滤只在宿主；执行目标转发按键精确校验（`execution-targets.ts:48-51`），跨机委派以后另加能力，不占 v3。决定 B：R8 只收紧。工期约 +1 天（列、可选字段、空级联、解码容忍测试），在 11–13 周之内，不改总估（plan §9）。
+**与已定事项的核对。** 回执永久（决定 C）：只加列，只读工具不写回执。单写者（§2.9）：R11。schema 版本与 projection 权威（决定 11、14）：列进 P4-0 的初始版本，不是迁移；事件字段都是可选的，符合只增不改。协议（决定 F）：不加 op、不升版本；R9 的过滤只在宿主；执行目标转发按键精确校验（`execution-targets.ts:48-51`），跨机委派以后另加能力，不占 v3。决定 B：R8 只收紧。Recorder Core 与 scry 命令行：不动。工期约 +1 天（列、索引、可选字段、空级联、不触发的复核行、解码容忍测试）；2026-11-19 的修订删一列、加一个索引与三行复核，仍在约 +1 天之内，在 11–13 周之内，不改总估（plan §9）。
