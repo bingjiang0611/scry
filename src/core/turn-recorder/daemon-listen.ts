@@ -22,6 +22,8 @@ const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const RECOVERY_POLL_MS = 1_000
 const MAX_RECOVERY_POLL_MS = 15_000
+/** Notification only: a caller that had just written inbox work asks for an immediate pass. */
+const WAKE_PATH = '/v1/wake'
 const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 export const OWNER_TOKEN_ENV = 'SCRY_RECORDER_OWNER_TOKEN'
 
@@ -206,7 +208,8 @@ async function startRecorderDaemon(
   await rm(socketPath, { force: true })
 
   const server: Server = createServer(async (request, response) => {
-    const activity = request.method === 'POST' && (request.url === HOOK_EVENT_PATH || request.url === '/v1/hook')
+    const activity = request.method === 'POST' &&
+      (request.url === HOOK_EVENT_PATH || request.url === '/v1/hook' || request.url === WAKE_PATH)
     if (activity) {
       activityGeneration++
       if (idleTimer) clearTimeout(idleTimer)
@@ -217,6 +220,13 @@ async function startRecorderDaemon(
       if (request.method === 'GET' && request.url === '/v1/status') {
         // `captureProtocol` tells CodeLens' guard whether this daemon serves session capture at all.
         writeJson(response, 200, { running: true, protocol: PROTOCOL_VERSION, captureProtocol: SESSION_CAPTURE_PROTOCOL, recorderVersion: RECORDER_VERSION, pid: process.pid, startedAt, requestCount, errorCount, lastRequestAt })
+        return
+      }
+      // A delivery that only wrote an inbox entry cannot make this process notice it. The wake says
+      // "there is queued work" and nothing else: the answer never claims the work was applied.
+      if (request.method === 'POST' && request.url === WAKE_PATH) {
+        scheduleRecovery(true)
+        writeJson(response, 200, { ok: true, queued: true })
         return
       }
       if (request.method === 'POST' && request.url === '/v1/stop') {

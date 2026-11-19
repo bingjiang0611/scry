@@ -63,13 +63,19 @@ function claimPayload(transcriptPath: string): Record<string, unknown> {
   }
 }
 
-async function start(root: string, transcriptPath: string, diffExclude?: string[], captureId = 'capture-1') {
+async function start(
+  root: string,
+  transcriptPath: string,
+  diffExclude?: string[],
+  captureId = 'capture-1',
+  extra: Partial<SessionCaptureContext> = {}
+) {
   return startSessionCapture({
     workspace: root,
     provider: 'codex',
     sessionId: 'sess-1',
     dataDir: join(root, '.scry'),
-    context: context(transcriptPath, captureId, diffExclude ? { diffExclude } : {}),
+    context: context(transcriptPath, captureId, { ...(diffExclude ? { diffExclude } : {}), ...extra }),
     payload: claimPayload(transcriptPath),
     cli: {}
   })
@@ -128,6 +134,39 @@ it('the exclusion belongs to the capture, so the next capture of the session sta
   expect(await readJson(captureContextPath(join(root, '.scry'), 'codex', 'sess-1'))).not.toHaveProperty('diffExclude')
 })
 
+it('the client travels with the claim and reaches the published context, next to source', async () => {
+  const root = await workspace()
+  const transcriptPath = await transcript(root)
+  const claimed = await startSessionCapture({
+    workspace: root,
+    provider: 'codex',
+    sessionId: 'sess-1',
+    dataDir: join(root, '.scry'),
+    context: context(transcriptPath, 'capture-1', { client: '3eye' }),
+    payload: claimPayload(transcriptPath),
+    cli: {}
+  })
+  expect(claimed.status).toBe('started')
+  // Two different facts: who asked (source) and which client the host ran inside (client).
+  expect(await readJson(captureStatePath(join(root, '.scry'), 'codex', 'sess-1')))
+    .toMatchObject({ source: 'friday', client: '3eye' })
+  expect(await readJson(captureContextPath(join(root, '.scry'), 'codex', 'sess-1')))
+    .toMatchObject({ source: 'friday', client: '3eye' })
+  const session = recorderSessionRoot(join(root, '.scry'), 'codex', 'sess-1')
+  expect((await readJson<RecorderOpenTurnState>(recorderOpenPath(session)))?.capture)
+    .toMatchObject({ source: 'friday', client: '3eye' })
+})
+
+it('a client that is not an identifier is refused instead of becoming a category', () => {
+  const base = { ...context(''), transcript_path: '/tmp/rollout.jsonl' }
+  for (const value of ['3eye studio', 'ThreeEye', '/3eye', 'x'.repeat(33), 3, true]) {
+    expect(() => parseSessionCaptureContext({ ...base, client: value }, 'codex')).toThrow(CaptureRequestError)
+  }
+  expect(parseSessionCaptureContext({ ...base, client: '3eye' }, 'codex').client).toBe('3eye')
+  // Absent stays absent: no recording may read as "captured in a client I did not observe".
+  expect(parseSessionCaptureContext(base, 'codex')).not.toHaveProperty('client')
+})
+
 it('rejects exclusion paths that are not absolute', () => {
   // The wire document is what the recorder validates, so spell it the way CodeLens sends it.
   const base = { ...context(''), transcript_path: '/tmp/rollout.jsonl' }
@@ -178,7 +217,7 @@ it('a claimed session keeps its run directory out of the record diff and says wh
   const root = await repository()
   const transcriptPath = await transcript(root)
   const run = join(root, 'friday-88733196')
-  await start(root, transcriptPath, [run])
+  await start(root, transcriptPath, [run], 'capture-1', { client: '3eye' })
 
   // The workflow writes its own stage material, and the turn also edits a tracked file.
   await mkdir(run, { recursive: true })
@@ -207,6 +246,10 @@ it('a claimed session keeps its run directory out of the record diff and says wh
   // What the exclusion cost stays provable from the record: paths and counts, no bodies.
   expect(workspace?.diffExclude).toEqual({ paths: [run], files: 3 })
   expect(records[0].diff.omissionReason).toContain('3 file(s) were left out of this diff')
+  // The same two facts as codes: a platform matches these, not the sentence above.
+  expect(records[0].diff.omissionCodes).toEqual(['baseline_after_turn_start', 'diff_exclude'])
+  // The record keeps the client next to the source it does not replace.
+  expect(records[0].capture).toMatchObject({ source: 'friday', client: '3eye' })
   expect(JSON.stringify(records[0])).not.toContain('plan.md body')
 })
 

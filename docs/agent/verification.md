@@ -172,12 +172,27 @@ npm run install:mac
 
 正式路径要求 Developer ID Application/`CSC_LINK`、Team ID 与 Apple notarization credentials；安装器会验证 bundle id、App/CLI version、签名、Gatekeeper、staple 和 Team ID 后再原子替换 `/Applications/Scry.app`。不要手工覆盖 App。
 
-独立 CLI 发布只使用：
+独立 CLI 有两条发布路径，包名与 registry 都不同，不要混用：
 
 ```bash
+# 公开 registry，包名是仓库清单里的 scry-turn-recorder
 npm run publish:cli
+
+# 内网 registry，包名是 @ali/scry-turn-recorder
+npm run publish:cli:internal                  # 默认只 dry run：暂存、列 tarball 内容、停下
+npm run publish:cli:internal -- --publish     # 真发布，并回读版本与 dist-tags
 ```
 
-package lifecycle 会强制执行 `check:cli-release`；发布目标是执行者本机 npm 配置（或用 `--registry` 显式指定）的 registry，仓库不再固定任何部署方地址。不要从陈旧 `dist` 手工 `npm publish`。
+内网发布不能直接用 `publish:cli`：它会发成不带作用域的公开名。这段过去靠手工在临时目录
+改 `package.json` 的 `name`、README 安装行与 `publishConfig` 再 `npm publish`，漏一步就会发错包。
+`scripts/publish-cli-internal.mjs` 固定了这一步：复制 `dist` / `integrations` / `docs` / `README.md`
+到临时目录，`name` 改成 `@ali/scry-turn-recorder`，写入 `publishConfig.registry`，把 README 安装行
+指向 scoped 名，去掉在临时目录里会失效的 `prepublishOnly`，再 `npm publish --ignore-scripts`。
+
+前置条件：`npm run build:cli` 已经跑过（`dist` 缺失或陈旧时脚本拒绝发布），`check:cli-release`
+已在 CI 与本地各跑一次（脚本用 `--ignore-scripts`，不会再跑生命周期门禁），目标版本在 registry
+上尚不存在（`--force` 才允许重发同版本）。默认 `--registry https://registry.anpm.alibaba-inc.com/`，
+可用 `--registry` 覆盖。发布后必须回读 `npm view <包名>@<版本> version` 与 `dist-tags`。
+不要从陈旧 `dist` 手工 `npm publish`。
 
 完成对应验证后，Agent 默认主动执行[本地提交前自查](pr-workflow.md#local-preflight)，检查需求与批准、范围、风险、验证证据以及完整 diff / 暂存区；无需用户再次提醒。处理发现的问题后，在任务分支只提交本任务改动，并在交付中简述自查结论与未验证项。随后按 [PR 工作流](pr-workflow.md) 推送任务分支并开 PR，避免混入已有无关未推送提交；合并须用户明确要求。本地自查不替代正式 PR 分诊或独立评审。

@@ -21,6 +21,12 @@ export interface SessionCaptureContext {
   source: string
   task: string | null
   /**
+   * The client application the host runs inside, when that differs from `source`. `source` names who
+   * asked for this capture; `client` names the product the turn happened in, so `source=friday` and
+   * `client=3eye` can describe one turn without either field pretending to be the other.
+   */
+  client?: string
+  /**
    * Absolute paths this session keeps out of its turn diffs, as the integrator declared them.
    * They belong to the claim, never to `scry.config.json`, and only the diff is affected.
    */
@@ -90,6 +96,7 @@ export function parseSessionCaptureContext(value: unknown, provider: ProviderId)
   if (!Number.isFinite(Date.parse(openedAt))) throw new CaptureRequestError('invalid_request', 'capture.openedAt must be an ISO-8601 timestamp')
   const source = text('source')
   if (source.length > 120) throw new CaptureRequestError('invalid_request', 'capture.source is too long')
+  const client = parseClient(raw.client)
   const task = raw.task
   if (task !== null && typeof task !== 'string') {
     throw new CaptureRequestError('invalid_request', 'capture.task must be a string or null')
@@ -110,9 +117,25 @@ export function parseSessionCaptureContext(value: unknown, provider: ProviderId)
     openedAt: new Date(openedAt).toISOString(),
     source,
     task: task as string | null,
+    ...(client ? { client } : {}),
     ...(diffExclude.length ? { diffExclude } : {}),
     ...(typeof stopRequestedAt === 'string' ? { stopRequestedAt: new Date(stopRequestedAt).toISOString() } : {})
   }
+}
+
+/**
+ * The client label is an identifier, not prose: a platform groups and counts by it, so a free-form
+ * string with spaces or slashes would silently become a new category. Absent means "not reported".
+ */
+export const CLIENT_LABEL_LIMIT = 32
+
+export function parseClient(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(value)) {
+    throw new CaptureRequestError('invalid_request',
+      `capture.client must be a lowercase identifier of at most ${CLIENT_LABEL_LIMIT} characters`)
+  }
+  return value
 }
 
 /** At most this many declared paths per session: a workflow declares a handful, not a directory tree. */
@@ -187,6 +210,7 @@ export function captureWireContext(context: SessionCaptureContext): Record<strin
     openedAt: context.openedAt,
     source: context.source,
     task: context.task,
+    ...(context.client ? { client: context.client } : {}),
     ...(context.diffExclude?.length ? { diffExclude: context.diffExclude } : {}),
     ...(context.stopRequestedAt ? { stopRequestedAt: context.stopRequestedAt } : {})
   }

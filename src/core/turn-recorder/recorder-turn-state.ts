@@ -91,6 +91,7 @@ export async function beginOpenTurn(
         captureId: capture.captureId,
         source: capture.source,
         task: capture.task,
+        ...(capture.client ? { client: capture.client } : {}),
         openedAt: capture.openedAt,
         ...(capture.diffExclude?.length ? { diffExclude: capture.diffExclude } : {}),
         ...(claim?.baselineAt ? { baselineAt: claim.baselineAt } : {})
@@ -188,7 +189,9 @@ export async function beginCaptureTurn(
   context: SessionCaptureContext,
   transcriptPath: string,
   payload: Record<string, unknown>,
-  ancestryFromPid?: number
+  ancestryFromPid?: number,
+  /** Host processes the claimant resolved; used when its pid no longer reaches the host. */
+  claimedHostChain?: import('./host-process.js').HostProcess[]
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<OpenTurnState>(openPath(root))
@@ -221,12 +224,17 @@ export async function beginCaptureTurn(
     sessionId,
     enablement.workspaceRoot
   ).catch(() => null)
+  // A deferred claim is applied by the daemon, which is not on the host's chain. The claimant's own
+  // pid still names it while that process lives; when it is already gone, its recorded chain is the
+  // only evidence of which host must outlive this turn.
+  const resolved = ancestryFromPid ? await hostProcessChain(ancestryFromPid) : []
+  const host = resolved.length ? resolved : claimedHostChain
   return beginOpenTurn(enablement, provider, sessionId, 'CaptureStart', payload, false, false, undefined, context, {
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
     ...(transcript?.userText ? { userText: transcript.userText } : {}),
     ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
     baselineAt: new Date().toISOString()
-  }, undefined, ancestryFromPid ? await hostProcessChain(ancestryFromPid) : undefined)
+  }, undefined, host?.length ? host : undefined)
 }
 
 /** A timestamp is usable as an end time only inside this turn's own window. */

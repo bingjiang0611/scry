@@ -157,6 +157,8 @@ export interface RecorderOpenTurnState {
     captureId: string
     source: string
     task: string | null
+    /** The client the host ran inside, when the claim reported one. */
+    client?: string
     openedAt: string
     /** Absolute paths this session keeps out of its diffs; only the diff is affected. */
     diffExclude?: string[]

@@ -83,6 +83,8 @@
 | iOS 混有 Node 源码、测试、依赖、工作流或 Agent 指导 | `node_performance=true`；Node 测量必须成功，失败、取消、缺失或跳过均拒绝 |
 | 普通 App 改动（未动 native harness） | `desktop=true`、`native_performance=false`；PR 上 native 跳过并在评论中标明合入后在 main 测量；native 成功、失败或取消都使汇总失败 |
 | 改动 native harness 或性能工作流 / main push / 手动 dispatch | `native_performance=true`；native 必须成功；main push 时 `node_performance=false`，compare 必须跳过 |
+| 仅 recorder（`src/core/turn-recorder/**`、`src/cli/**`、`packages/turn-recorder-cli/**`） | `desktop=false`，`packaged-electron` 跳过；`node`、`unit`、`cli-compat`、`packaged-linux` 与三个汇总门禁照常产出结果；混入任何 App、renderer、workflow 或依赖改动即恢复 macOS 门禁 |
+| 合并前等待 | 只需 `node`（类型检查）与 `unit`+`unit-coverage`（单测）通过，不等 `packaged-electron` 与 `Performance Check`；命令见 [合并前只等必需检查](validation-workflows.md#merge-required-checks) |
 | remote/iOS 未改动 | changes 输出 false，transport、ios 全部跳过，Remote Check 成功 |
 | remote/iOS/工作流有改动 | 两项并行验证必须全部成功；失败、取消、跳过或缺失结果不能被汇总隐藏 |
 | remote diff 不可读取 | 检测失败，Remote Check 失败；不能按无影响处理 |

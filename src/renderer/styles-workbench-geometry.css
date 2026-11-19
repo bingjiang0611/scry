@@ -185,15 +185,8 @@
   overflow-wrap: anywhere;
 }
 
-.session-hover-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
 .session-hover-heading strong {
-  flex: 1;
-  min-width: 0;
+  display: block;
   font-size: var(--text-md);
   font-weight: var(--weight-medium);
   white-space: normal;

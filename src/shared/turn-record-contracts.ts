@@ -8,12 +8,34 @@ import type { ProviderId } from './provider.js'
 export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
 export type EvidenceStatus = 'available' | 'partial' | 'disabled' | 'unavailable'
 
+/**
+ * Machine-readable causes for a partial evidence section. `omissionReason` stays the human sentence;
+ * a code is what a platform, a test or a dashboard matches on, so it must not be parsed out of text.
+ */
+export const DIFF_OMISSION_CODES = [
+  'baseline_after_turn_start',
+  'continuation_no_baseline',
+  'diff_exclude',
+  'untracked_limit',
+  'patch_policy',
+  'patch_budget',
+  'patch_deadline',
+  'patch_git_error',
+  'patch_truncated',
+  'patch_unavailable',
+  'snapshot_unavailable'
+] as const
+
+export type DiffOmissionCode = (typeof DIFF_OMISSION_CODES)[number]
+
 export interface Evidence<T> {
   status: EvidenceStatus
   quality: EvidenceQuality
   source: string[]
   value?: T
   omissionReason?: string
+  /** Only `diff` writes this today: every cause its `omissionReason` names, in the same order. */
+  omissionCodes?: DiffOmissionCode[]
 }
 
 export type TurnCallStatus = 'started' | 'success' | 'failed' | 'cancelled' | 'unknown'
@@ -291,6 +313,11 @@ export interface AgentTurnRecord extends TurnEvidence {
     /** Verbatim caller string; it is not interpreted as a REQ or any other identifier. */
     source: string
     task: string | null
+    /**
+     * The client application the host ran inside, when it was observed (`3eye`, `qoder`, …). It is
+     * independent of `source`: a workflow that wraps 3eye records both, and absent means unobserved.
+     */
+    client?: string
   }
   /**
    * Whether this turn's role in the session was structurally observed.
