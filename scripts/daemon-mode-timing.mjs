@@ -34,6 +34,7 @@ const option = (name, fallback) => {
 const samples = Number(option('samples', '30'))
 const mode = option('mode', 'daemon')
 const multiTurn = args.includes('--multi-turn')
+const largeBody = args.includes('--large-body')
 if (!['daemon', 'in-process'].includes(mode)) throw new Error(`unknown mode: ${mode}`)
 
 // 20 deltas 150 ms apart: a stream whose steady state is observable in both modes,
@@ -123,6 +124,7 @@ const results = {
   samples,
   perInstance,
   multiTurn,
+  largeBody,
   prompt: PROMPT,
   orchestration: {
     mode: process.env.SCRY_ORCHESTRATION ?? 'off',
@@ -200,11 +202,28 @@ const measure = async (count, chunkIndex) => {
       })()`)
       const submittedWall = await evaluate('window.__timing.submittedAtWall')
       newRunMarks()
+      const largeAttachmentText = largeBody
+        ? `sample-${results.runs.length}-${'X'.repeat(32_000)}`
+        : null
+      const largeAttachmentBytes = largeAttachmentText ? Buffer.from(largeAttachmentText, 'utf8') : null
       const startPayload = {
         prompt: PROMPT,
         providerId: 'codex',
         cwd: workspace,
-        ...(multiTurnSessionId ? { expectedExternalSessionId: multiTurnSessionId } : {})
+        ...(multiTurnSessionId ? { expectedExternalSessionId: multiTurnSessionId } : {}),
+        ...(largeAttachmentBytes
+          ? {
+              attachments: [
+                {
+                  kind: 'text',
+                  name: 'large-body.txt',
+                  mimeType: 'text/plain',
+                  dataBase64: largeAttachmentBytes.toString('base64'),
+                  size: largeAttachmentBytes.length
+                }
+              ]
+            }
+          : {})
       }
       const runId = await evaluate(`(() => {
         const started = performance.now()

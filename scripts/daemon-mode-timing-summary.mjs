@@ -9,7 +9,8 @@ export const percentile = (values, fraction) => {
 export const selectTimeline = (marks, submittedWall, until, expectedRunId) => {
   const stages = {}
   const runIds = new Set()
-  if (typeof expectedRunId === 'string' && expectedRunId.length > 0) runIds.add(expectedRunId)
+  const hasExpected = typeof expectedRunId === 'string' && expectedRunId.length > 0
+  if (hasExpected) runIds.add(expectedRunId)
   const pendingOrch = []
   for (const mark of marks) {
     if (typeof mark?.runId !== 'string' || typeof mark?.at !== 'number') continue
@@ -22,12 +23,18 @@ export const selectTimeline = (marks, submittedWall, until, expectedRunId) => {
     if (stages[mark.stage] === undefined || mark.at < stages[mark.stage]) stages[mark.stage] = mark.at
   }
   const orchCommits = pendingOrch
-    .filter((mark) => runIds.has(mark.runId) || (typeof mark.ledgerRunId === 'string' && runIds.has(mark.ledgerRunId)))
+    .filter((mark) =>
+      hasExpected
+        ? mark.runId === expectedRunId || mark.ledgerRunId === expectedRunId
+        : runIds.has(mark.runId) || (typeof mark.ledgerRunId === 'string' && runIds.has(mark.ledgerRunId))
+    )
     .map((mark) => ({
       runId: mark.runId,
       ledgerRunId: mark.ledgerRunId,
       commitKind: mark.commitKind,
       durationMs: mark.durationMs,
+      ...(typeof mark.sinkDurationMs === 'number' ? { sinkDurationMs: mark.sinkDurationMs } : {}),
+      ...(typeof mark.bodyBytes === 'number' ? { bodyBytes: mark.bodyBytes } : {}),
       preFirstToken: Boolean(mark.preFirstToken)
     }))
   return [...runIds].length === 0 ? null : { ...stages, runIds: [...runIds], orchCommits }
@@ -54,14 +61,24 @@ const SEGMENTS = {
 const summarizeOrchCommits = (runs) => {
   const preCounts = []
   const preSums = []
+  const preSinkSums = []
   const singles = []
+  const singleSinks = []
+  let maxBodyBytes = 0
   for (const run of runs) {
     const commits = run.timeline?.orchCommits ?? []
     if (commits.length === 0) continue
     const pre = commits.filter((c) => c.preFirstToken)
     preCounts.push(pre.length)
     preSums.push(Number(pre.reduce((acc, c) => acc + c.durationMs, 0).toFixed(3)))
-    for (const c of commits) singles.push(c.durationMs)
+    if (pre.every((c) => typeof c.sinkDurationMs === 'number')) {
+      preSinkSums.push(Number(pre.reduce((acc, c) => acc + c.sinkDurationMs, 0).toFixed(3)))
+    }
+    for (const c of commits) {
+      singles.push(c.durationMs)
+      if (typeof c.sinkDurationMs === 'number') singleSinks.push(c.sinkDurationMs)
+      if (typeof c.bodyBytes === 'number' && c.bodyBytes > maxBodyBytes) maxBodyBytes = c.bodyBytes
+    }
   }
   return {
     runsMeasured: preCounts.length,
@@ -69,9 +86,14 @@ const summarizeOrchCommits = (runs) => {
     preFirstTokenCountP95: percentile(preCounts, 0.95),
     preFirstTokenSumP50Ms: percentile(preSums, 0.5),
     preFirstTokenSumP95Ms: percentile(preSums, 0.95),
+    preFirstTokenSinkSumP50Ms: percentile(preSinkSums, 0.5),
+    preFirstTokenSinkSumP95Ms: percentile(preSinkSums, 0.95),
     singleCommitSamples: singles.length,
     singleCommitP50Ms: percentile(singles, 0.5),
-    singleCommitP95Ms: percentile(singles, 0.95)
+    singleCommitP95Ms: percentile(singles, 0.95),
+    singleSinkP50Ms: percentile(singleSinks, 0.5),
+    singleSinkP95Ms: percentile(singleSinks, 0.95),
+    maxBodyBytes
   }
 }
 
