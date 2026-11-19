@@ -67,6 +67,16 @@ describe('Claude MCP configuration stays out of the CLI argv', () => {
     expect(existsSync(record.configPath!)).toBe(false)
   })
 
+  it('returns a failed handle and launches nothing when the private file cannot be written', async () => {
+    vi.stubEnv('TMPDIR', join(recorder.root, 'missing'))
+    const handle = createClaudeAdapter(locate.home).run({
+      runId: 'run-unwritable', prompt: 'probe', cwd: locate.home, attachments: [], emit: () => {},
+      mcpExecution: execution()
+    })
+    await expect(handle.promise).rejects.toThrow(/ENOENT/)
+    expect(recorder.recorded()).toBe(false)
+  })
+
   it('uses the same private file for the native MCP status check', async () => {
     const adapter = createClaudeAdapter(locate.home)
     const result = await adapter.mcp!.snapshot!({ providerId: 'claude', cwd: locate.home }, true, execution())

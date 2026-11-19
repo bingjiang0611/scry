@@ -342,7 +342,13 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
   // The SDK would put these configs (headers, stdio env, history-reader token) on the
   // CLI argv; pass them as a private file instead, removed when this run ends.
   options.mcpServers = {}
-  const mcpConfig = writePrivateMcpConfig(opts.mcpServers ?? {})
+  let mcpConfig: ReturnType<typeof writePrivateMcpConfig>
+  try {
+    mcpConfig = writePrivateMcpConfig(opts.mcpServers ?? {})
+  } catch (error) {
+    // Nothing spawned and no input attempted: a failed handle keeps that evidence.
+    return { promise: Promise.reject(error), interrupt: () => {}, forceKill: () => {}, getSessionId: () => undefined }
+  }
   if (mcpConfig) options.extraArgs = { ...options.extraArgs as Record<string, string | null> | undefined, ...mcpConfig.extraArgs }
   if (opts.requestUserInput) {
     options.canUseTool = async (
