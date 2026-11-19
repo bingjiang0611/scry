@@ -32,7 +32,7 @@
 | 2 | `npm run typecheck`、受影响目录 vitest、`npm run build` | L0/L1 |
 | 3 | 打包 smoke 通过 | 新增脚本入库 |
 | 4 | macOS 真机：用测试标签与测试 userData 开启登录时启动 → `launchctl print gui/$UID/<测试标签>` 退出码为 0 → 注销再登录（或 `launchctl kickstart`）后后台服务自动起来，App 未打开也能被已配对的测试客户端连上 → 关闭开关，服务文件删除，后台服务不被停掉 | 全程不碰 `com.scry.daemon` 这个日常标签；用 AX 操作原生确认框 |
-| 5 | 停止：`launchctl bootout` 测试标签时 daemon 在 30 s 内收尾，无锁残留；supervisor 被 `kill -KILL`（只对自己启动、核实过 PID 的进程）后被重新拉起 | 记录时间线 |
+| 5 | 停止：`launchctl bootout` 测试标签时 daemon 在 30 s 内收尾，无锁残留；supervisor 被 `kill -ABRT`（只对自己启动、核实过 PID 的进程；macOS `KeepAlive={Crashed:true}` 不重启 `SIGKILL`，见 P5-headless-host §2.1）后被重新拉起 | 记录时间线 |
 | 6 | 环境：服务拉起的 daemon 里 `SHELL` 有值、策略变量与 App 一致；含 `SCRY_REMOTE_RELAY_WS` 时开启被拒绝 | daemon 自报 |
 | 7 | 真机上只能确认、其他环境无法确认的项：TCC（`~/Documents` 下工作区）、钥匙串（Codex/Qoder 登录态）、Local Network 权限、FileVault 重启后未登录时不可用 | 能测的测，不能测的标未验证并说明 |
 

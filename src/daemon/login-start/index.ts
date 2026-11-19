@@ -34,9 +34,11 @@ export {
 } from './exec'
 export {
   createLoginStartManager,
+  parseLaunchctlPrint,
   parseSystemdShowProperties,
   type LoginStartManager,
   type LoginStartManagerDeps,
   type LoginStartMutationResult,
   type LoginStartPrecheckResult
 } from './manager'
+export type { LaunchctlPrintInfo, ServiceFileRead } from './file-io'

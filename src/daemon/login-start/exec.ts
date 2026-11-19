@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 
 // Fixed-path, shell-free external command runner for launchctl / systemctl / loginctl
-// (P5-headless-host §2.3). Timeout bounded to 10 s; control decisions look at exit code only.
+// (P5-headless-host §2.3). Timeout bounded to 10 s.
 
 export const MACOS_LAUNCHCTL = '/bin/launchctl'
 export const LINUX_SYSTEMCTL = '/usr/bin/systemctl'
@@ -41,3 +41,12 @@ export const runFixedCommand: CommandRunner = (file, args, timeoutMs) =>
       resolve({ exitCode, stdout: String(stdout ?? ''), timedOut, notFound })
     })
   })
+
+export function commandFailure(
+  baseReason: string,
+  result: CommandResult
+): { ok: false; reason: string; exitCode?: number } {
+  if (result.timedOut) return { ok: false, reason: `${baseReason}_timeout` }
+  if (result.notFound) return { ok: false, reason: 'login_start_command_missing' }
+  return { ok: false, reason: baseReason, ...(result.exitCode !== null ? { exitCode: result.exitCode } : {}) }
+}

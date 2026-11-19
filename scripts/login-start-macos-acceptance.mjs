@@ -229,40 +229,79 @@ try {
     daemonStillAlive: pidAlive(report.pid)
   }
 
-  // 5. S3 live verification: re-enable with UPDATED policy env while daemon is running,
-  //    then stop daemon cleanly and launch via startViaService() — launchd must load the
-  //    NEW plist definition (permissionModeOverride=auto_accept_edits), not stale auto_review!
+  // 5a. R2 #1 live verification: after disable(daemonRunning=true) deleted the plist,
+  //     stop the running daemon cleanly so launchd holds a loaded IDLE job with NO plist,
+  //     then re-enable with daemonRunning=false and updated policy (auto_accept_edits).
+  const supCmd1 = pidCommand(report.supervisorPid)
+  if (!supCmd1.includes(target.executable) || !supCmd1.includes('daemon-supervisor.js')) {
+    throw new Error(`supervisor_identity_mismatch:pid=${report.supervisorPid} cmd=${supCmd1}`)
+  }
+  mark('r2_1.stop_daemon_after_disable', { supervisorPid: report.supervisorPid, daemonPid: report.pid })
+  process.kill(report.supervisorPid, 'SIGTERM')
+  if (!await waitUntil(() => !pidAlive(report.pid) && !pidAlive(report.supervisorPid), 20_000)) {
+    throw new Error('r2_1_old_daemon_stop_timeout')
+  }
+  const idlePrint = launchctl(['print', serviceTarget])
+  if (idlePrint.exitCode !== 0 || existsSync(plistPath)) {
+    throw new Error(`r2_1_expected_loaded_idle_without_plist:exit=${idlePrint.exitCode} plistExists=${existsSync(plistPath)}`)
+  }
   const updatedManager = makeManager({
     SCRY_REMOTE_HOST: '1',
     SCRY_REMOTE_PERMISSION_MODE: 'auto_accept_edits',
     SCRY_REMOTE_RELAY_ENABLED: '0',
     SCRY_DISABLED_PROVIDERS: 'pi'
   })
-  const reenabled = await updatedManager.enable({ daemonRunning: true })
-  if (!reenabled.ok) throw new Error(`reenable_failed:${JSON.stringify(reenabled)}`)
-  const supCmd = pidCommand(report.supervisorPid)
-  if (!supCmd.includes(target.executable) || !supCmd.includes('daemon-supervisor.js')) {
-    throw new Error(`supervisor_identity_mismatch:pid=${report.supervisorPid} cmd=${supCmd}`)
+  const reenabledIdle = await updatedManager.enable({ daemonRunning: false })
+  if (!reenabledIdle.ok) throw new Error(`r2_1_reenable_after_stop_failed:${JSON.stringify(reenabledIdle)}`)
+  if (!await waitForSocket(join(stateDirectory, 'local.sock'), 20_000, () => true)) {
+    throw new Error('r2_1_socket_timeout')
   }
-  mark('s3.stop_old_daemon', { supervisorPid: report.supervisorPid, daemonPid: report.pid })
-  process.kill(report.supervisorPid, 'SIGTERM')
-  if (!await waitUntil(() => !pidAlive(report.pid) && !pidAlive(report.supervisorPid), 20_000)) {
+  const r2Reply = await frame(stateDirectory, credentials, { op: 'localBackgroundService', method: 'status', args: [] })
+  const r2State = r2Reply?.result
+  if (!r2State || r2State.remoteConfig?.permissionModeOverride !== 'auto_accept_edits') {
+    throw new Error(`r2_1_unexpected_config:${JSON.stringify(r2Reply)}`)
+  }
+  mark('r2_1.reenabled_after_stop_verified', { daemonPid: r2State.pid, supervisorPid: r2State.supervisorPid, permissionModeOverride: r2State.remoteConfig.permissionModeOverride })
+  result.steps.reenableAfterDisableAndStop = {
+    ok: true,
+    idlePrintExitCode: idlePrint.exitCode,
+    permissionModeOverride: r2State.remoteConfig.permissionModeOverride,
+    newSupervisorPid: r2State.supervisorPid,
+    newDaemonPid: r2State.pid
+  }
+
+  // 5b. S3 + R2 #2 live verification: disable while running (plist deleted), immediately
+  //     re-enable while running with UPDATED policy (auto_review — ownership proven via
+  //     launchctl print environment), stop old daemon cleanly, and launch via startViaService().
+  const disabledAgain = await updatedManager.disable({ daemonRunning: true })
+  if (!disabledAgain.ok || existsSync(plistPath)) {
+    throw new Error(`s3_disable_failed:${JSON.stringify(disabledAgain)}`)
+  }
+  const reenabledRunning = await manager.enable({ daemonRunning: true })
+  if (!reenabledRunning.ok) throw new Error(`s3_reenable_running_failed:${JSON.stringify(reenabledRunning)}`)
+  const supCmd2 = pidCommand(r2State.supervisorPid)
+  if (!supCmd2.includes(target.executable) || !supCmd2.includes('daemon-supervisor.js')) {
+    throw new Error(`supervisor_identity_mismatch:pid=${r2State.supervisorPid} cmd=${supCmd2}`)
+  }
+  mark('s3.stop_old_daemon', { supervisorPid: r2State.supervisorPid, daemonPid: r2State.pid })
+  process.kill(r2State.supervisorPid, 'SIGTERM')
+  if (!await waitUntil(() => !pidAlive(r2State.pid) && !pidAlive(r2State.supervisorPid), 20_000)) {
     throw new Error('s3_old_daemon_stop_timeout')
   }
-  const relaunched = await updatedManager.startViaService()
+  const relaunched = await manager.startViaService()
   if (!relaunched.ok) throw new Error(`s3_start_via_service_failed:${JSON.stringify(relaunched)}`)
   if (!await waitForSocket(join(stateDirectory, 'local.sock'), 20_000, () => true)) {
     throw new Error('s3_reloaded_socket_timeout')
   }
   const reloadedReply = await frame(stateDirectory, credentials, { op: 'localBackgroundService', method: 'status', args: [] })
   const reloaded = reloadedReply?.result
-  if (!reloaded || reloaded.remoteConfig?.permissionModeOverride !== 'auto_accept_edits') {
+  if (!reloaded || reloaded.remoteConfig?.permissionModeOverride !== 'auto_review') {
     throw new Error(`s3_stale_definition_loaded:${JSON.stringify(reloadedReply)}`)
   }
   mark('s3.reloaded_verified', { daemonPid: reloaded.pid, supervisorPid: reloaded.supervisorPid, permissionModeOverride: reloaded.remoteConfig.permissionModeOverride })
   result.steps.reloadChangedDefinition = {
     ok: true,
-    oldPermissionMode: 'auto_review',
+    oldPermissionMode: 'auto_accept_edits',
     newPermissionMode: reloaded.remoteConfig.permissionModeOverride,
     newSupervisorPid: reloaded.supervisorPid,
     newDaemonPid: reloaded.pid

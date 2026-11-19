@@ -115,7 +115,7 @@ export function formatRemoteConfigMismatchNotice(
   mismatch: NonNullable<BackgroundServiceRuntimeNotice['remoteConfigMismatch']>
 ): string {
   const fields = mismatch.diffs.map((field) => CONFIG_FIELD_LABELS[field]).join('、')
-  return `当前运行的后台服务由系统服务启动，其生效配置与本 App 当前环境不一致（差异：${fields}）。如需应用当前环境，请关闭再重新开启「登录时启动」或重启后台服务。`
+  return `当前运行的后台服务由系统服务启动，其生效配置与本 App 当前环境不一致（差异：${fields}）。如需应用当前环境，请关闭再重新开启「登录时启动」，然后重启后台服务。`
 }
 
 export function runtimeNoticeMessages(notice: BackgroundServiceRuntimeNotice | null | undefined): string[] {
