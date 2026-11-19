@@ -23,6 +23,7 @@ import { cpus, loadavg } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connectCdp, createEvaluate, freePort, launch, waitForTarget } from './desktop-remote-host-smoke/harness.mjs'
+import { buildTimingSummary, selectTimeline } from './daemon-mode-timing-summary.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const args = process.argv.slice(2)
@@ -32,6 +33,7 @@ const option = (name, fallback) => {
 }
 const samples = Number(option('samples', '30'))
 const mode = option('mode', 'daemon')
+const multiTurn = args.includes('--multi-turn')
 if (!['daemon', 'in-process'].includes(mode)) throw new Error(`unknown mode: ${mode}`)
 
 // 20 deltas 150 ms apart: a stream whose steady state is observable in both modes,
@@ -55,11 +57,6 @@ const stopDaemon = (stateDir) => {
 }
 
 const load = () => ({ load1: Number(loadavg()[0].toFixed(2)), cores: cpus().length })
-const percentile = (values, fraction) => {
-  if (values.length === 0) return null
-  const sorted = [...values].sort((left, right) => left - right)
-  return Number(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))].toFixed(2))
-}
 
 // A unix socket path has a hard length limit, and macOS' TMPDIR is long: the daemon
 // refuses to start under it (daemon_socket_path_too_long). /tmp is short on both.
@@ -120,36 +117,12 @@ const newRunMarks = () => {
   }
   return marks
 }
-// One timeline per sample, not per run id: a daemon run has a ledger id and a runtime
-// id, and its marks are written by two processes, so the sample window is what ties them
-// together. A stage keeps its earliest mark inside the window; a missing stage stays
-// missing instead of being filled with a neighbour.
-const selectTimeline = (marks, submittedWall, until) => {
-  const stages = {}
-  const runIds = new Set()
-  const orchCommits = []
-  for (const mark of marks) {
-    if (typeof mark?.runId !== 'string' || typeof mark?.at !== 'number') continue
-    // Anything before the submit belongs to the previous sample.
-    if (mark.at < submittedWall - 200 || mark.at > until + 2_000) continue
-    if (mark.stage === 'orchCommit') {
-      orchCommits.push({
-        commitKind: mark.commitKind,
-        durationMs: mark.durationMs,
-        preFirstToken: Boolean(mark.preFirstToken)
-      })
-      continue
-    }
-    runIds.add(mark.runId)
-    if (stages[mark.stage] === undefined || mark.at < stages[mark.stage]) stages[mark.stage] = mark.at
-  }
-  return [...runIds].length === 0 ? null : { ...stages, runIds: [...runIds], orchCommits }
-}
 
 const results = {
   mode,
   samples,
   perInstance,
+  multiTurn,
   prompt: PROMPT,
   orchestration: {
     mode: process.env.SCRY_ORCHESTRATION ?? 'off',
@@ -163,8 +136,9 @@ const results = {
 // One App per chunk: daemon mode slows down as one window accumulates settled runs
 // (a new run's bind wait grew past its 3 s budget at 30 runs in one session), so the
 // measurement restarts the App instead of reporting a degraded tail as the norm.
-const measure = async (count) => {
+const measure = async (count, chunkIndex) => {
   const port = await freePort()
+  const multiTurnSessionId = multiTurn ? `s1-multi-turn-session-${chunkIndex}` : undefined
   let child
   let cdp
   try {
@@ -226,10 +200,16 @@ const measure = async (count) => {
       })()`)
       const submittedWall = await evaluate('window.__timing.submittedAtWall')
       newRunMarks()
+      const startPayload = {
+        prompt: PROMPT,
+        providerId: 'codex',
+        cwd: workspace,
+        ...(multiTurnSessionId ? { expectedExternalSessionId: multiTurnSessionId } : {})
+      }
       const runId = await evaluate(`(() => {
         const started = performance.now()
         window.__timing.submittedAt = started
-        return window.scry.start({ prompt: ${JSON.stringify(PROMPT)}, providerId: 'codex', cwd: ${JSON.stringify(workspace)} })
+        return window.scry.start(${JSON.stringify(startPayload)})
           .then((receipt) => String(receipt.runId))
       })()`)
       for (let waited = 0; waited < 300; waited++) {
@@ -238,7 +218,7 @@ const measure = async (count) => {
         await sleep(100)
       }
       readPerfLines()
-      const timeline = selectTimeline(newRunMarks(), submittedWall, Date.now())
+      const timeline = selectTimeline(newRunMarks(), submittedWall, Date.now(), runId)
       const sample = await evaluate(`(() => {
         const timing = window.__timing
         const text = timing.events.filter((event) => event.stage === 'text' || event.stage === 'text_delta')
@@ -278,104 +258,10 @@ try {
       stopDaemon(join(userDataDir, 'daemon'))
       rmSync(join(userDataDir, 'daemon'), { recursive: true, force: true })
     }
-    await measure(Math.min(perInstance, samples - done))
+    await measure(Math.min(perInstance, samples - done), Math.floor(done / perInstance) + 1)
   }
   results.loadAfter = load()
-  const firstText = results.runs.map((run) => run.firstTextMs).filter((value) => typeof value === 'number')
-  const intervals = results.runs.flatMap((run) => run.intervals)
-  const settled = results.runs.map((run) => run.settledMs).filter((value) => typeof value === 'number')
-  const lag = results.runs.flatMap((run) => run.lag)
-  const stageValues = {}
-  for (const run of results.runs) {
-    for (const [stage, ms] of Object.entries(run.stages ?? {})) (stageValues[stage] ??= []).push(ms)
-  }
-  results.stages = Object.fromEntries(Object.entries(stageValues).map(([stage, values]) => [stage, {
-    samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95)
-  }]))
-  // The first token, split at the Provider's own first output: what the host spends
-  // before the model says anything, and what the delivery adds after. Absolute marks
-  // from both processes make each segment a subtraction, not an estimate.
-  // A segment reads (timeline, run): both ends must have been measured, and the closures
-  // that compare against the renderer also need the run's own arrival stamp.
-  const segments = {
-    submittedToFirstText: (t) => t.firstTextReceivedAt - t.submittedWall,
-    // The App's own preparation before the Provider starts, measured identically in both
-    // modes: this is the one pre-Provider segment that is not daemon-specific.
-    submittedToProvider: (t) => t.providerStart - t.submittedWall,
-    submitToDurable: (t) => t.intentDurable - t.submit,
-    durableToDispatch: (t) => t.dispatch - t.intentDurable,
-    dispatchToProvider: (t) => t.providerStart - t.dispatch,
-    providerToFirstOutput: (t) => t.firstOutput - t.providerStart,
-    firstOutputToTraceRead: (t) => t.traceRead - t.firstOutput,
-    // F1: the daemon's text-bearing answer is queued at `traceRead`, and the batch leaves
-    // for the window at `bridgeFlush`; this is the hold that used to be a batching timer.
-    traceReadToBridgeQueue: (t) => t.bridgeQueue - t.traceRead,
-    bridgeQueueToFlush: (t) => t.bridgeFlush - t.bridgeQueue,
-    traceReadToWatchReply: (t) => t.watchReply - t.traceRead,
-    watchReplyToAppPush: (t) => t.rendererPush - t.watchReply,
-    appPushToRenderer: (t, run) => run.firstTextReceivedAt - t.rendererPush,
-    firstOutputToRenderer: (t, run) => run.firstTextReceivedAt - t.firstOutput,
-    providerToRenderer: (t, run) => run.firstTextReceivedAt - t.providerStart,
-    submitToFirstText: (t, run) => run.firstTextReceivedAt - t.submit
-  }
-  results.segments = Object.fromEntries(Object.entries(segments).map(([name, read]) => {
-    const values = []
-    for (const run of results.runs) {
-      if (!run.timeline || typeof run.firstTextReceivedAt !== 'number') continue
-      // A segment only counts when both of its ends were actually measured; a missing
-      // mark is a gap in the evidence, never a zero.
-      const timeline = { ...run.timeline, firstTextReceivedAt: run.firstTextReceivedAt, submittedWall: run.submittedWall }
-      let value
-      try { value = read(timeline, run) } catch { continue }
-      if (typeof value === 'number' && Number.isFinite(value)) values.push(Number(value.toFixed(2)))
-    }
-    return [name, { samples: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95) }]
-  }))
-  const warmFirstText = results.runs
-    .filter((run) => run.index % perInstance !== 0 && typeof run.firstTextMs === 'number')
-    .map((run) => run.firstTextMs)
-  const coldFirstText = results.runs
-    .filter((run) => run.index % perInstance === 0 && typeof run.firstTextMs === 'number')
-    .map((run) => Number(run.firstTextMs.toFixed(2)))
-  const orchPreCounts = []
-  const orchPreSums = []
-  const orchSingles = []
-  for (const run of results.runs) {
-    const commits = run.timeline?.orchCommits ?? []
-    if (commits.length === 0) continue
-    const pre = commits.filter((c) => c.preFirstToken)
-    orchPreCounts.push(pre.length)
-    orchPreSums.push(Number(pre.reduce((acc, c) => acc + c.durationMs, 0).toFixed(3)))
-    for (const c of commits) orchSingles.push(c.durationMs)
-  }
-  results.summary = {
-    runs: results.runs.length,
-    runsWithFirstText: firstText.length,
-    firstTextP50: percentile(firstText, 0.5),
-    firstTextP95: percentile(firstText, 0.95),
-    warmSamples: warmFirstText.length,
-    warmFirstTextP50: percentile(warmFirstText, 0.5),
-    warmFirstTextP95: percentile(warmFirstText, 0.95),
-    coldFirstText,
-    orchCommits: {
-      runsMeasured: orchPreCounts.length,
-      preFirstTokenCountP50: percentile(orchPreCounts, 0.5),
-      preFirstTokenCountP95: percentile(orchPreCounts, 0.95),
-      preFirstTokenSumP50Ms: percentile(orchPreSums, 0.5),
-      preFirstTokenSumP95Ms: percentile(orchPreSums, 0.95),
-      singleCommitSamples: orchSingles.length,
-      singleCommitP50Ms: percentile(orchSingles, 0.5),
-      singleCommitP95Ms: percentile(orchSingles, 0.95)
-    },
-    deltaSamples: intervals.length,
-    deltaP50: percentile(intervals, 0.5),
-    deltaP95: percentile(intervals, 0.95),
-    settledP50: percentile(settled, 0.5),
-    settledP95: percentile(settled, 0.95),
-    eventLagSamples: lag.length,
-    eventLagP50: percentile(lag, 0.5),
-    eventLagP95: percentile(lag, 0.95)
-  }
+  Object.assign(results, buildTimingSummary(results.runs, perInstance))
 } catch (error) {
   results.error = String(error?.message ?? error)
 } finally {
