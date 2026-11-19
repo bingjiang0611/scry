@@ -1,15 +1,23 @@
 import { execFile } from 'node:child_process'
-import { appendFile, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it } from 'vitest'
+import { listenRecorderDaemon } from './daemon'
+import { daemonRequest } from './daemon-transport'
 import { listRecords } from './store'
 import { recoverRecorder } from './recorder'
-import { applySessionCaptureHook, prepareCaptureStart } from './session-capture'
+import { applySessionCaptureHook, prepareCaptureStart, startSessionCapture, stopSessionCapture } from './session-capture'
 import { queueCaptureCommand, queueHook } from './recorder-hook-queue'
 import { recorderInboxEntries } from './inbox'
-import { captureStatePath, type SessionCaptureContext } from './session-capture-contract'
+import {
+  RECORDER_INBOX_CONTRACT_VERSION,
+  captureStatePath,
+  type CaptureInboxContract,
+  type SessionCaptureContext
+} from './session-capture-contract'
 import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from './runtime-state'
 import { readJson } from './io'
 
@@ -218,3 +226,136 @@ it('orders a claim and an event written in the same millisecond by the queue, no
   expect(names[0]).toBe(claim.path.slice(claim.path.lastIndexOf('/') + 1))
   expect(names[1]).toBe(event.slice(event.lastIndexOf('/') + 1))
 })
+
+/** Simulate an external guard writing straight to the advertised inbox contract, without Node CLI. */
+async function writeExternalInboxEntry(
+  inbox: CaptureInboxContract,
+  entry: Record<string, unknown>,
+  seq: number
+): Promise<string> {
+  await mkdir(dirname(inbox.attentionLockPath), { recursive: true, mode: 0o700 })
+  await mkdir(inbox.attentionLockPath, { mode: 0o700 })
+  try {
+    await writeFile(join(inbox.attentionLockPath, 'owner.json'),
+      JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: randomUUID() }) + '\n')
+    await mkdir(dirname(inbox.attentionMarkerPath), { recursive: true, mode: 0o700 })
+    await writeFile(inbox.attentionMarkerPath, '', { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EEXIST') throw error
+    })
+    await mkdir(inbox.directory, { recursive: true, mode: 0o700 })
+    await writeFile(inbox.sequencePath, `${seq}\n`)
+    const millis = String(Date.parse(String(entry.arrivedAt))).padStart(15, '0')
+    const name = `${millis}-${String(seq).padStart(9, '0')}-${randomUUID()}.json`
+    const target = join(inbox.directory, name)
+    await writeFile(target, `${JSON.stringify(entry)}\n`)
+    return target
+  } finally {
+    await rm(inbox.attentionLockPath, { recursive: true, force: true })
+  }
+}
+
+it('publishes transport.inbox and lets an external writer drain through daemon /v1/wake', async () => {
+  const f = await fixture()
+  const env = { ...process.env, SCRY_RECORDER_SOCKET: join(tmpdir(), `${basename(f.root)}.sock`) }
+  const started = await startSessionCapture({
+    workspace: f.root, provider: 'codex', sessionId: 'session', dataDir: f.dataRoot,
+    context: f.context, payload: f.claimPayload, cli: {}, env
+  })
+  const inbox = started.transport.inbox as CaptureInboxContract
+  expect(inbox).toMatchObject({
+    schemaVersion: RECORDER_INBOX_CONTRACT_VERSION,
+    directory: join(f.sessionRoot, 'inbox'),
+    sequencePath: join(f.sessionRoot, 'inbox-sequence')
+  })
+  expect(inbox.uploadEnvKeys).toContain('SCRY_TURN_UPLOAD_ENABLED')
+
+  const daemon = await listenRecorderDaemon({
+    workspace: f.root, idleMs: 5_000, recoveryPollMs: 30, maxRecoveryPollMs: 100, env
+  })
+  try {
+    const arrived1 = new Date().toISOString()
+    await writeExternalInboxEntry(inbox, {
+      schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
+      event: 'PostToolUse', payload: f.toolPayload, uploadEnvironment: {}, captureMode: true, arrivedAt: arrived1
+    }, 1)
+    const arrived2 = new Date(Date.parse(arrived1) + 5).toISOString()
+    await writeExternalInboxEntry(inbox, {
+      schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
+      event: 'Stop', payload: f.stopPayload, uploadEnvironment: {}, captureMode: true, arrivedAt: arrived2
+    }, 2)
+    const wake = await daemonRequest(daemon.socketPath, { method: 'POST', path: '/v1/wake', timeoutMs: 1_000 })
+    expect(wake.statusCode).toBe(200)
+
+    const deadline = Date.now() + 5_000
+    let records = await listRecords(f.dataRoot)
+    let remaining = await recorderInboxEntries(f.sessionRoot, false)
+    while ((records.length === 0 || remaining.length > 0) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      records = await listRecords(f.dataRoot)
+      remaining = await recorderInboxEntries(f.sessionRoot, false)
+    }
+    expect(records).toHaveLength(1)
+    expect(records[0].capture?.captureId).toBe('capture')
+    expect(remaining).toEqual([])
+  } finally {
+    await daemon.close()
+  }
+}, 15_000)
+
+it('enforces stop fences, synthetic/title filters and PreToolUse repo discovery on external inbox replay', async () => {
+  const f = await fixture(true)
+  const nested = join(f.root, 'nested-repo')
+  await mkdir(nested, { recursive: true })
+  const exec = promisify(execFile)
+  await exec('git', ['-c', 'core.hooksPath=/dev/null', 'init', '-q'], { cwd: nested })
+  await writeFile(join(nested, 'file.txt'), 'v1\n')
+  await exec('git', ['-c', 'core.hooksPath=/dev/null', 'add', 'file.txt'], { cwd: nested })
+  await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'init'], { cwd: nested })
+
+  const started = await startSessionCapture({
+    workspace: f.root, provider: 'codex', sessionId: 'session', dataDir: f.dataRoot,
+    context: f.context, payload: f.claimPayload, cli: {}
+  })
+  const inbox = started.transport.inbox as CaptureInboxContract
+  const baseMs = Date.now()
+  // PreToolUse referencing a file in nested-repo must trigger capture repository discovery on replay.
+  await writeExternalInboxEntry(inbox, {
+    schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
+    event: 'PreToolUse',
+    payload: {
+      session_id: 'session', hook_event_name: 'PreToolUse', tool_name: 'Edit',
+      tool_input: { file_path: join(nested, 'file.txt') }, transcript_path: f.transcriptPath
+    },
+    uploadEnvironment: {}, captureMode: true, arrivedAt: new Date(baseMs).toISOString()
+  }, 1)
+  // Synthetic prompt in inbox must be ignored without superseding the open turn.
+  await writeExternalInboxEntry(inbox, {
+    schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
+    event: 'UserPromptSubmit',
+    payload: { session_id: 'session', prompt: 'meta', synthetic: true, transcript_path: f.transcriptPath },
+    uploadEnvironment: {}, captureMode: true, arrivedAt: new Date(baseMs + 2).toISOString()
+  }, 2)
+  await recoverRecorder(f.root)
+  const open = await readJson<RecorderOpenTurnState>(f.openPath)
+  expect(open?.generation).toBe(1)
+  expect(open?.captures.some(item => item.repository === nested)).toBe(true)
+
+  // Stop capture, close current turn, then enqueue a post-stop UserPromptSubmit: it must not open a new turn.
+  await stopSessionCapture({
+    workspace: f.root, provider: 'codex', sessionId: 'session', dataDir: f.dataRoot, context: f.context
+  })
+  await writeExternalInboxEntry(inbox, {
+    schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
+    event: 'Stop', payload: f.stopPayload, uploadEnvironment: {}, captureMode: true,
+    arrivedAt: new Date(baseMs + 5).toISOString()
+  }, 3)
+  await writeExternalInboxEntry(inbox, {
+    schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
+    event: 'UserPromptSubmit',
+    payload: { session_id: 'session', prompt: 'after stop', transcript_path: f.transcriptPath },
+    uploadEnvironment: {}, captureMode: true, arrivedAt: new Date(baseMs + 10).toISOString()
+  }, 4)
+  await recoverRecorder(f.root)
+  expect(await listRecords(f.dataRoot)).toHaveLength(1)
+  expect(await readJson<RecorderOpenTurnState>(f.openPath)).toBeNull()
+}, 15_000)

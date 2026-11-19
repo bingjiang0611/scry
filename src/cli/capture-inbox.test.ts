@@ -71,7 +71,14 @@ it('defers a claim to the inbox and answers queued instead of waiting for the re
   expect(result.code).toBe(0)
   const ack = JSON.parse(result.output)
   expect(ack).toMatchObject({
-    protocol: 'codelens.session-capture.v1', action: 'start', status: 'queued', captureId: 'capture', sessionId: 'session'
+    protocol: 'codelens.session-capture.v1', action: 'start', status: 'queued', captureId: 'capture', sessionId: 'session',
+    transport: {
+      inbox: {
+        schemaVersion: 1,
+        directory: join(recorderSessionRoot(f.dataRoot, 'codex', 'session'), 'inbox'),
+        sequencePath: join(recorderSessionRoot(f.dataRoot, 'codex', 'session'), 'inbox-sequence')
+      }
+    }
   })
   const sessionRoot = recorderSessionRoot(f.dataRoot, 'codex', 'session')
   expect(ack.inbox.directory).toBe(join(sessionRoot, 'inbox'))

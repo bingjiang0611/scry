@@ -27,8 +27,12 @@ export function attentionRoot(dataRoot: string): string {
   return join(dataRoot, 'runtime', 'attention')
 }
 
-function markerName(provider: ProviderId, sessionKey: string): string {
-  return `${provider}__${sessionKey}`
+export function attentionMarkerPath(dataRoot: string, provider: ProviderId, sessionKey: string): string {
+  return join(attentionRoot(dataRoot), `${provider}__${sessionKey}`)
+}
+
+export function attentionLockPath(dataRoot: string, provider: ProviderId, sessionKey: string): string {
+  return join(dataRoot, 'locks', 'attention', provider, `${sessionKey}.lock`)
 }
 
 /** Never acquire a session/commit lock inside this lock, or hold it for Git or transcript work. */
@@ -38,7 +42,7 @@ export function withSessionAttentionLock<T>(
   sessionKey: string,
   action: () => Promise<T>
 ): Promise<T> {
-  return withDirectoryLock(join(dataRoot, 'locks', 'attention', provider, `${sessionKey}.lock`), action)
+  return withDirectoryLock(attentionLockPath(dataRoot, provider, sessionKey), action)
 }
 
 /** Caller holds the attention lock through publication of the indexed state. */
@@ -51,7 +55,7 @@ export async function markSessionAttention(
   await mkdir(root, { recursive: true })
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await writeFile(join(root, markerName(provider, sessionKey)), '', { flag: 'wx' })
+      await writeFile(attentionMarkerPath(dataRoot, provider, sessionKey), '', { flag: 'wx' })
       await syncDirectory(root)
       return
     } catch (error) {
@@ -71,7 +75,7 @@ export async function clearSessionAttention(
   provider: ProviderId,
   sessionKey: string
 ): Promise<void> {
-  await rm(join(attentionRoot(dataRoot), markerName(provider, sessionKey)), { force: true })
+  await rm(attentionMarkerPath(dataRoot, provider, sessionKey), { force: true })
 }
 
 export interface MarkedSession {
