@@ -3,7 +3,7 @@
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
 - 执行方 A：真机验证（W1，之后 W6）。独占 `/Applications` 安装、日常 App、iPhone。
-- 执行方 B：P5（先 W3，再 W2）。
+- 执行方 B：P5（先 W3，再 W2），之后 W7（Antigravity）。
 - 执行方 C：P4（先 W4，再 W5）。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
@@ -14,6 +14,7 @@
 | W4 | P4-0：决策器、表结构、迁移执行器、EventSink | C | — | W1 通过 | [tasks/W4-p4-0.md](tasks/W4-p4-0.md) |
 | W5 | P4-1：影子写、增量导入、daemon 模式 CI、首轮测量 | C | W4 | W1 通过 | [tasks/W5-p4-1.md](tasks/W5-p4-1.md) |
 | W6 | MCP 密钥不进 Provider 命令行：macOS 真机核对 | A | 修复已推送（`d29a6cf3`…`0bda19ec`），已开放 | W1 通过 | [tasks/W6-argv-secrets.md](tasks/W6-argv-secrets.md) |
+| W7 | Antigravity：真机探测（A0）与设计定稿 | B | — | 不含产品代码；A1 起另补任务单 | [tasks/W7-antigravity-a0.md](tasks/W7-antigravity-a0.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛，但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
