@@ -1,6 +1,62 @@
+import type { ProviderId } from './provider'
+import type { AgentPermissionMode } from './runtime-types'
+
 // The settings section «后台服务» (B4-S S0-1): what the App knows about its local daemon,
 // and what each of the four actions did. Every field the App could not establish is
 // `null` and is shown as unknown: a daemon that did not answer has no "0 devices".
+
+/** Who started this background service: the App directly, or the OS login service (P5 §2.1). */
+export type BackgroundServiceLaunchedBy = 'app' | 'service'
+
+/** How the background service reaches remote devices, without exposing any relay token. */
+export type BackgroundServiceRelayMode = 'public' | 'custom_ws' | 'custom_tcp' | 'disabled'
+
+/** Effective non-secret remote policy the daemon (or App env) resolves (P5 §2.2). */
+export interface BackgroundServiceRemoteConfig {
+  remoteHostEnabled: boolean
+  relayMode: BackgroundServiceRelayMode
+  permissionModeOverride: AgentPermissionMode | null
+  disabledProviders: ProviderId[]
+  runControlsEnabled: boolean
+  providerManifestUrl: string | null
+}
+
+export type BackgroundServiceConfigField = keyof BackgroundServiceRemoteConfig
+
+export interface LoginStartPolicyEntry {
+  key: string
+  value: string
+}
+
+export type LoginStartStatus =
+  | { state: 'unavailable'; reason: string }
+  | { state: 'disabled'; loaded?: boolean; linuxLinger?: 'yes' | 'no' | 'unknown' }
+  | {
+    state: 'enabled'
+    loaded: boolean
+    policyEnv: LoginStartPolicyEntry[]
+    rewrittenFromExecutable?: string
+    linuxLinger?: 'yes' | 'no' | 'unknown'
+    linuxMainPid?: number | null
+  }
+  | {
+    state: 'conflict'
+    reason: 'login_start_other_userdata' | 'login_start_other_app' | 'login_start_foreign_service'
+    otherUserDataDir?: string
+    otherExecutable?: string
+  }
+
+/** Runtime warnings the App carries onto both Settings and the run/send path (P5 §2.2, §2.4). */
+export interface BackgroundServiceRuntimeNotice {
+  /** Service manager launch failed; the App fell back to spawning the supervisor directly. */
+  serviceLaunchFallback?: { reason: string; exitCode?: number }
+  /** Adopted a service-launched daemon whose effective remote policy differs from App env. */
+  remoteConfigMismatch?: {
+    diffs: BackgroundServiceConfigField[]
+    expected: BackgroundServiceRemoteConfig
+    actual: BackgroundServiceRemoteConfig
+  }
+}
 
 /** How this App reaches its daemon right now. */
 export type BackgroundServiceConnection =
@@ -28,6 +84,12 @@ export interface BackgroundServiceSelfReport {
   devices: BackgroundServiceDevices
   /** Runs the daemon has not settled yet. */
   activeRuns: number
+  /** Self-reported launcher; absent when started by an older App or ad-hoc script. */
+  launchedBy?: BackgroundServiceLaunchedBy
+  /** Self-reported supervisor pid (`SCRY_DAEMON_STARTED_BY=supervisor:<pid>`), used on Linux for MainPID checks. */
+  supervisorPid?: number
+  /** Effective non-secret remote policy running in the daemon (P5 §2.2). */
+  remoteConfig?: BackgroundServiceRemoteConfig
 }
 
 export type BackgroundServiceStatus =
@@ -43,6 +105,16 @@ export type BackgroundServiceStatus =
     startedAt: number | null
     devices: BackgroundServiceDevices | null
     activeRuns: number | null
+    /** Who started the running daemon; null when unknown. */
+    launchedBy?: BackgroundServiceLaunchedBy | null
+    /** On Linux, true only when systemd MainPID matches the daemon's reported supervisor pid. */
+    launchedByVerified?: boolean
+    /** Effective remote policy reported by the running daemon; null when unknown. */
+    remoteConfig?: BackgroundServiceRemoteConfig | null
+    /** Login-start service state for this App and userDataDir (P5 §2.3). */
+    loginStart?: LoginStartStatus
+    /** Non-silent warnings from service-launch fallback or adopted-daemon policy drift. */
+    runtimeNotice?: BackgroundServiceRuntimeNotice
     /** When the App read this, so the section can say how fresh it is. */
     checkedAt: number
   }

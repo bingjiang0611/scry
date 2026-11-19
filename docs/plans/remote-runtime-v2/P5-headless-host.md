@@ -126,7 +126,7 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 
 - 开：已有后台服务在跑时，服务拉起的 supervisor 遇到 `daemon.lock` 以 3 退出、自己以 0 退出。状态显示「当前由 App 启动；下次登录起由系统服务启动」。
 - 关：只取消下次登录启动，**不停当前后台服务**。
-- 只在打包版、daemon 模式、非测试实例下可用。**按平台放行**：Linux 开关在 Linux 实机验收（P5-4）通过前显示 unavailable；macOS 的结果不代替 Linux。
+- 只在打包版、daemon 模式、非测试实例下可用。**按平台放行**：Linux 开关在 Linux 实机验收（P5-4）通过前显示 unavailable；macOS 的结果不代替 Linux。仅在测试实例（`SCRY_TEST_APP=1`）下显式提供非生产标签/单元覆盖（`SCRY_TEST_LOGIN_START_LABEL` / `SCRY_TEST_LOGIN_START_UNIT`，可选 `SCRY_TEST_LOGIN_START_DIR`）时允许针对该测试标签验收，且禁止覆写日常 `com.scry.daemon` / `scry-daemon.service`；日常构建完全忽略这些变量。
 - `launchedBy` 核对：Linux 用 `MainPID` 与自报 supervisor pid 比对，一致才显示「由系统服务拉起」；macOS 不解析 `launchctl` 输出，显示为「自报」。
 
 ### 2.4 与 supervisor、两把锁、现有动作的关系

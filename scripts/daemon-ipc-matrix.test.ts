@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { CONVERSATION_MATRIX_DOC, MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderConversationMatrix, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
+import { CLIENT_MATRIX_DOC, CONVERSATION_MATRIX_DOC, MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderClientMatrix, renderConversationMatrix, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
 
 const routing = loadRouting()
 const matrix = buildMatrix(routing)
 
 describe('daemon IPC routing matrix', () => {
   it('classifies every privileged channel and only privileged channels', () => {
-    expect(matrix.channels).toBe(178)
+    expect(matrix.channels).toBe(179)
     expect(matrix.defects).toEqual([])
     expect(matrix.rows.filter((row) => row.route === 'main').length).toBeGreaterThan(0)
     expect(matrix.rows.filter((row) => row.route === 'forward').length).toBeGreaterThan(0)
@@ -54,14 +54,14 @@ describe('daemon IPC routing matrix', () => {
 
   it('fails when the preload invokes a channel the registration scan did not find', () => {
     const invoked = preloadChannels()
-    expect(invoked.size).toBe(178)
+    expect(invoked.size).toBe(179)
     const missed = buildMatrix(routing, undefined, new Set([...invoked, 'agent:registeredSomeNewWay']))
     expect(missed.defects).toEqual([{ channel: 'agent:registeredSomeNewWay', problem: expect.stringContaining('registration scan did not find it') }])
   })
 
   it('reads its own inputs instead of trusting an empty scan', () => {
     const channels = collectChannels().map((entry) => entry.channel)
-    expect(channels.length).toBe(178)
+    expect(channels.length).toBe(179)
     // Registered through a handler table and through the `handle(` parameter name; both
     // were missing from the first scan, which only matched handleTrusted('literal').
     expect(channels).toContain('sourceControl:read')
@@ -101,6 +101,7 @@ describe('daemon IPC routing matrix', () => {
     expect(readFileSync(MATRIX_DOC, 'utf8')).toBe(renderMatrix(matrix))
     expect(readFileSync(WORKBENCH_MATRIX_DOC, 'utf8')).toBe(renderWorkbenchMatrix(matrix))
     expect(readFileSync(CONVERSATION_MATRIX_DOC, 'utf8')).toBe(renderConversationMatrix(matrix))
+    expect(readFileSync(CLIENT_MATRIX_DOC, 'utf8')).toBe(renderClientMatrix(matrix))
     expect(readFileSync(OPS_DOC, 'utf8')).toBe(renderOps(matrix, routing))
   })
 

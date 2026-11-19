@@ -13,6 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 export const MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix.md')
 export const WORKBENCH_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-workbench.md')
 export const CONVERSATION_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-conversation.md')
+export const CLIENT_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-client.md')
 const ROUTING = join(root, 'scripts/daemon-ipc-routing.json')
 const ROUTING_WORKBENCH = join(root, 'scripts/daemon-ipc-routing-workbench.json')
 const ROUTING_CLIENT = join(root, 'scripts/daemon-ipc-routing-client.json')
@@ -234,13 +235,14 @@ export function buildMatrix(routing = loadRouting(), dir = MAIN_DIR, invoked = d
 
 export const OPS_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-ops.md')
 
-import { renderConversationMatrix, renderMatrix, renderOps, renderWorkbenchMatrix } from './daemon-ipc-matrix-render.mjs'
-export { renderConversationMatrix, renderMatrix, renderOps, renderWorkbenchMatrix } from './daemon-ipc-matrix-render.mjs'
+import { renderClientMatrix, renderConversationMatrix, renderMatrix, renderOps, renderWorkbenchMatrix } from './daemon-ipc-matrix-render.mjs'
+export { renderClientMatrix, renderConversationMatrix, renderMatrix, renderOps, renderWorkbenchMatrix } from './daemon-ipc-matrix-render.mjs'
 
 const DOCS = [
   [MATRIX_DOC, renderMatrix],
   [WORKBENCH_MATRIX_DOC, renderWorkbenchMatrix],
   [CONVERSATION_MATRIX_DOC, renderConversationMatrix],
+  [CLIENT_MATRIX_DOC, renderClientMatrix],
   [OPS_DOC, (matrix) => renderOps(matrix, loadRouting())]
 ]
 

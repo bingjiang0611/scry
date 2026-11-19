@@ -9,7 +9,7 @@ import { pruneStalePairings } from './pairing-retention'
 // Re-exported so the persisted-shape names keep one owner (pairing-state) while
 // callers keep importing them from the authority module they already use.
 export type {
-  DeviceGrant, GrantScope, GrantTransport, IssuedPairingCertificate, PairingDependencies,
+  DeviceGrant, GrantApprovedVia, GrantScope, GrantTransport, IssuedPairingCertificate, PairingDependencies,
   PairingPersistence, PairingReceipt, PairingRecord, PairingState, VerifiedPairingCSR
 } from './pairing-state'
 export { validatePairingState } from './pairing-state'
