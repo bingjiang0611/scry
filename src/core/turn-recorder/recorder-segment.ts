@@ -224,7 +224,8 @@ export function applyContinuationEvidence(
       .filter(Boolean)
       .join('; ')
     evidence.diff = evidence.diff.status === 'partial' && evidence.diff.value
-      ? partial(evidence.diff.value, evidence.diff.source, reason, 'exact')
+      ? partial(evidence.diff.value, evidence.diff.source, reason, 'exact',
+          [...(evidence.diff.omissionCodes ?? []), 'continuation_no_baseline'])
       : unavailable(reason, evidence.diff.source)
   }
   if (!ownsRows) {

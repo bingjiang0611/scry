@@ -1,5 +1,5 @@
 import { isTurnRepositoryDiscovery, isDateString, isEvidence, isOptionalString, isNonNegativeNumber, isCompactionsEvidence, isModelSegmentsEvidence, isModelTimingEvidence, isTurnTranscriptSource } from './turn-evidence-validation.js'
-import type { AgentTurnRecord, Evidence, EvidenceQuality, TurnCall, TurnHookCall, TurnUsage, TurnFile, TurnDiffSnapshotRecord, TurnDanger, TurnRole, TurnError, TurnRecordValidationResult, TurnRecordValidationIssue } from './turn-record-contracts.js'
+import type { AgentTurnRecord, DiffOmissionCode, Evidence, EvidenceQuality, TurnCall, TurnHookCall, TurnUsage, TurnFile, TurnDiffSnapshotRecord, TurnDanger, TurnRole, TurnError, TurnRecordValidationResult, TurnRecordValidationIssue } from './turn-record-contracts.js'
 import { isToolContentRef, isToolContent } from './tool-content.js'
 import { isSupportedImageMimeType } from './runtime.js'
 import { isCreditUsageEvidence, creditSourcesMatchProvider } from './credit-usage.js'
@@ -88,8 +88,21 @@ export function disabled<T>(reason: string): Evidence<T> {
   return { status: 'disabled', quality: 'unavailable', source: ['config'], omissionReason: reason }
 }
 
-export function partial<T>(value: T, source: string[], reason: string, quality: EvidenceQuality = 'inferred'): Evidence<T> {
-  return { status: 'partial', quality, source, value, omissionReason: reason }
+export function partial<T>(
+  value: T,
+  source: string[],
+  reason: string,
+  quality: EvidenceQuality = 'inferred',
+  codes: DiffOmissionCode[] = []
+): Evidence<T> {
+  return {
+    status: 'partial',
+    quality,
+    source,
+    value,
+    omissionReason: reason,
+    ...(codes.length > 0 ? { omissionCodes: [...new Set(codes)] } : {})
+  }
 }
 
 function isEvidencePayload(value: unknown, validate: (payload: unknown) => boolean, allowUnavailableValue = false): boolean {
@@ -272,7 +285,8 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
       typeof capture.protocol === 'string' && capture.protocol.length > 0 &&
       typeof capture.captureId === 'string' && capture.captureId.length > 0 &&
       typeof capture.source === 'string' && capture.source.length > 0 &&
-      (capture.task === null || typeof capture.task === 'string'),
+      (capture.task === null || typeof capture.task === 'string') &&
+      (capture.client === undefined || (typeof capture.client === 'string' && /^[a-z0-9][a-z0-9-]{0,31}$/.test(capture.client))),
     '$.capture', 'must be the claiming session capture identity')
   }
 

@@ -14,7 +14,8 @@ export function captureRecordMetadata(
       protocol: capture.protocol,
       captureId: capture.captureId,
       source: capture.source,
-      task: capture.task
+      task: capture.task,
+      ...(capture.client ? { client: capture.client } : {})
     }
   }
 }
@@ -41,7 +42,8 @@ export function applyCaptureBaselineCaveat(
     evidence.diff.source,
     'session capture started mid-turn: the Git baseline was taken when this capture was applied, so changes this turn made before it are not in this snapshot' +
       (lagMs != null ? ` (baseline ${lagMs} ms after the prompt)` : ''),
-    'exact'
+    'exact',
+    ['baseline_after_turn_start']
   )
 }
 
@@ -63,6 +65,7 @@ export function applyDiffExcludeEvidence(evidence: TurnEvidence): void {
     diffs,
     evidence.diff.source,
     previous ? `${previous}; ${note}` : note,
-    evidence.diff.quality ?? 'exact'
+    evidence.diff.quality ?? 'exact',
+    [...(evidence.diff.omissionCodes ?? []), 'diff_exclude']
   )
 }

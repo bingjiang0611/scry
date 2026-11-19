@@ -1,4 +1,4 @@
-import type { TurnRepositoryDiscovery, Evidence, TurnModelTimingLane, TurnModelCallTiming, TurnModelTiming, TurnModelSegment, TurnTranscriptSource, TurnCompaction } from './turn-record-contracts.js'
+import { DIFF_OMISSION_CODES, type TurnRepositoryDiscovery, type Evidence, type TurnModelTimingLane, type TurnModelCallTiming, type TurnModelTiming, type TurnModelSegment, type TurnTranscriptSource, type TurnCompaction } from './turn-record-contracts.js'
 import { isToolContentRef } from './tool-content.js'
 
 
@@ -9,6 +9,10 @@ export function isEvidence(value: unknown): value is Evidence<unknown> {
   if (!['exact', 'estimated', 'inferred', 'unavailable'].includes(String(raw.quality))) return false
   if (!Array.isArray(raw.source) || !raw.source.every((source) => typeof source === 'string' && source.length > 0)) return false
   if (raw.omissionReason !== undefined && (typeof raw.omissionReason !== 'string' || raw.omissionReason.length === 0)) return false
+  if (raw.omissionCodes !== undefined && (!Array.isArray(raw.omissionCodes) ||
+      raw.omissionCodes.length === 0 || raw.omissionCodes.length > DIFF_OMISSION_CODES.length ||
+      new Set(raw.omissionCodes).size !== raw.omissionCodes.length ||
+      !raw.omissionCodes.every((code) => (DIFF_OMISSION_CODES as readonly unknown[]).includes(code)))) return false
   if (raw.status === 'available') return raw.value !== undefined && raw.quality !== 'unavailable' && raw.source.length > 0
   if (raw.status === 'partial') return raw.value !== undefined && raw.quality !== 'unavailable' && typeof raw.omissionReason === 'string' && raw.source.length > 0
   // Early schema-v1 writers omitted omissionReason, so readers retain that historical compatibility.

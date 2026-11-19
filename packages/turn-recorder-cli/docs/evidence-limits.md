@@ -16,3 +16,5 @@
 - 强制收尾（`recover --expire-open`）只认进程证据：静默满 30 分钟 + 记录过的宿主进程链全部确认不存在，才把轮次收成 `interrupted` 并标 `estimated`，原因写明按恢复收尾。宿主仍在跑、或根本没有进程证据（旧轮次、旧钩子脚本、进程表读不到）一律保持 open，静默不算「已结束」的证据。`--session <id>` 可重复，只对指定会话强制收尾。
 - 记录 `startedAt` 取 transcript 里本轮提问行的时间，不取开启采集的时间；接续段取自己的 wake 时间。开启采集时间与 diff 基线时间各自保留，不能互相顶替。
 - Recorder 只保证**新生成**记录使用当前口径,不会重写历史记录。
+- 会话捕获记录里的 `source` 与 `client` 是两件事：`source` 是谁要求采集，`client` 是这轮发生在哪个客户端里（例如 `source=friday` + `client=3eye`）。`client` 缺失只表示没观测到，不能读成“不在任何客户端里”；它只能是 `[a-z0-9][a-z0-9-]{0,31}` 形式的标识，不是自由文案。
+- `diff` 为 `partial` 时，`omissionReason` 是给人读的句子，`omissionCodes` 是同一批原因的封闭枚举（`baseline_after_turn_start` / `continuation_no_baseline` / `diff_exclude` / `untracked_limit` / `patch_policy` / `patch_budget` / `patch_deadline` / `patch_git_error` / `patch_truncated` / `patch_unavailable`）。平台与测试按码判断，不从句子解析；旧记录没有该字段表示只有文案。
