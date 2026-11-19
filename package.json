@@ -28,6 +28,7 @@
     "check:cli-release": "npm run typecheck && npm run check:cli-runtime",
     "check:cli-runtime": "vitest run src/cli src/core/turn-recorder src/shared/turn-record.test.ts src/shared/credit-usage.test.ts src/shared/trace.test.ts src/shared/runtime.test.ts src/main/normalize.test.ts src/main/danger.test.ts src/main/claude-locate.test.ts src/main/managed-turn-commit.test.ts && npm run build:cli && npm run smoke:cli-package",
     "publish:cli": "npm publish ./packages/turn-recorder-cli",
+    "publish:cli:internal": "node scripts/publish-cli-internal.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "check:staged-file-size": "node scripts/check-staged-file-size.mjs",
     "check:harness-bindings": "node scripts/check-harness-bindings.mjs",
