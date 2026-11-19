@@ -7,6 +7,9 @@ const isWorkbenchRow = (row) => row.target.startsWith('desktopWorkbench:') || ro
 // Unified conversation channels have their own file, so each generated file stays under
 // the 20 KB pre-commit limit.
 const isConversationRow = (row) => !isWorkbenchRow(row) && row.channel.startsWith('conversation:')
+// Desktop remote client channels (daemon-ipc-routing-client.json) have their own file
+// for the same 20 KB pre-commit limit.
+const isClientRow = (row) => !isWorkbenchRow(row) && !isConversationRow(row) && row.channel.startsWith('desktopRemote:')
 const matrixRow = (row) => `| \`${row.channel}\` | ${row.route} | \`${row.target}\` | ${row.path} | ${row.note} | ${row.why} |`
 const MATRIX_HEADER = ['| channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |', '|---|---|---|---|---|---|']
 
@@ -21,6 +24,7 @@ export function renderMatrix({ rows, defects, channels }) {
     `- 留在 main：${count('main')}，一半 main 一半 daemon（\`split\`）：${count('split')}，转发到现有 op：${count('forward')}，需要新增 op：${count('new-op')}`,
     '- 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)',
     `- 统一对话（\`conversation:*\`，共 ${rows.filter(isConversationRow).length} 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)`,
+    `- 桌面远程客户端（\`desktopRemote:*\`，共 ${rows.filter(isClientRow).length} 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)`,
     `- 工作台行（\`desktopWorkbench\` 转发的 workspace / sourceControl，与 App 终端 op \`terminal\`，共 ${rows.filter(isWorkbenchRow).length} 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)`,
     '',
     '## 判定规则',
@@ -40,7 +44,7 @@ export function renderMatrix({ rows, defects, channels }) {
     '',
     ...MATRIX_HEADER
   ]
-  for (const row of rows) if (!isWorkbenchRow(row) && !isConversationRow(row)) lines.push(matrixRow(row))
+  for (const row of rows) if (!isWorkbenchRow(row) && !isConversationRow(row) && !isClientRow(row)) lines.push(matrixRow(row))
   if (defects.length > 0) {
     lines.push('', '## 未分类', '')
     for (const defect of defects) lines.push(`- \`${defect.channel}\`：${defect.problem}`)
@@ -69,6 +73,18 @@ export function renderConversationMatrix({ rows }) {
     ...MATRIX_HEADER
   ]
   for (const row of rows) if (isConversationRow(row)) lines.push(matrixRow(row))
+  return `${lines.join('\n')}\n`
+}
+
+export function renderClientMatrix({ rows }) {
+  const lines = [
+    '# P3 附录 · IPC 路由矩阵：桌面远程客户端（生成文件）',
+    '',
+    '本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing-client.json` 后重新生成。判定规则与其余 channel 见 [P3-ipc-matrix](P3-ipc-matrix.md)。',
+    '',
+    ...MATRIX_HEADER
+  ]
+  for (const row of rows) if (isClientRow(row)) lines.push(matrixRow(row))
   return `${lines.join('\n')}\n`
 }
 

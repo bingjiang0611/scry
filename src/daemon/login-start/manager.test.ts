@@ -1,0 +1,250 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createLoginStartManager, loginStartTemplateInput, type CommandResult, type CommandRunner } from './index'
+import { renderLaunchdPlist } from '../supervisor-templates'
+
+const roots: string[] = []
+function tempRoot(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'scry-login-start-'))
+  roots.push(dir)
+  return dir
+}
+afterEach(() => { for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }) })
+
+function ok(stdout = ''): CommandResult { return { exitCode: 0, stdout, timedOut: false, notFound: false } }
+function fail(exitCode = 1, stdout = ''): CommandResult { return { exitCode, stdout, timedOut: false, notFound: false } }
+
+function setup(options: {
+  platform?: NodeJS.Platform
+  isPackaged?: boolean
+  daemonMode?: boolean
+  env?: NodeJS.ProcessEnv
+  allowLinux?: boolean
+  systemctlAvailable?: boolean
+  exec?: CommandRunner
+} = {}) {
+  const root = tempRoot()
+  const homeDir = join(root, 'home')
+  const userDataDir = join(root, 'userData')
+  const appDir = join(root, 'Scry.app', 'Contents')
+  const executable = join(appDir, 'MacOS', 'Scry')
+  const resourcesPath = join(appDir, 'Resources')
+  const appPath = join(resourcesPath, 'app.asar')
+  mkdirSync(join(appDir, 'MacOS'), { recursive: true })
+  mkdirSync(resourcesPath, { recursive: true })
+  mkdirSync(homeDir, { recursive: true })
+  writeFileSync(executable, '')
+  const calls: Array<{ file: string; args: string[] }> = []
+  const runner: CommandRunner = options.exec ?? (async (file, args) => {
+    calls.push({ file, args })
+    return ok()
+  })
+  const manager = createLoginStartManager({
+    platform: options.platform ?? 'darwin',
+    uid: 501,
+    homeDir,
+    daemonMode: options.daemonMode ?? true,
+    target: { executable, appPath, resourcesPath, userDataDir, isPackaged: options.isPackaged ?? true },
+    env: options.env ?? {},
+    runner,
+    ...(options.allowLinux !== undefined ? { allowLinux: options.allowLinux } : {}),
+    ...(options.systemctlAvailable !== undefined ? { systemctlAvailable: options.systemctlAvailable } : {})
+  })
+  return { root, homeDir, userDataDir, executable, appPath, resourcesPath, calls, manager }
+}
+
+describe('login-start manager', () => {
+  it('enforces platform, packaged, daemon-mode, and test-instance gating', async () => {
+    expect(await setup({ daemonMode: false }).manager.status()).toEqual({ state: 'unavailable', reason: 'daemon_mode_disabled' })
+    expect(await setup({ isPackaged: false }).manager.status()).toEqual({ state: 'unavailable', reason: 'unpackaged_build' })
+    expect(await setup({ env: { SCRY_TEST_APP: '1' } }).manager.status()).toEqual({ state: 'unavailable', reason: 'test_instance' })
+    expect(await setup({ platform: 'linux' }).manager.status()).toEqual({ state: 'unavailable', reason: 'linux_unverified' })
+    expect(await setup({ platform: 'linux', allowLinux: true, systemctlAvailable: false }).manager.status())
+      .toEqual({ state: 'unavailable', reason: 'systemd_unavailable' })
+    expect(await setup({ platform: 'win32' }).manager.status()).toEqual({ state: 'unavailable', reason: 'unsupported_platform' })
+  })
+
+  it('macOS enable precreates log (0700/0600), writes plist (0600) with policy env, and runs print -> bootstrap', async () => {
+    const calls: Array<{ file: string; args: string[] }> = []
+    const { homeDir, userDataDir, manager } = setup({
+      env: { SCRY_REMOTE_HOST: '1', SCRY_REMOTE_PERMISSION_MODE: 'auto_review' },
+      exec: async (file, args) => {
+        calls.push({ file, args })
+        if (args[0] === 'print') return fail(113)
+        return ok()
+      }
+    })
+    const result = await manager.enable({ daemonRunning: false })
+    expect(result).toEqual({ ok: true })
+    const plistPath = join(homeDir, 'Library', 'LaunchAgents', 'com.scry.daemon.plist')
+    expect(existsSync(plistPath)).toBe(true)
+    expect(statSync(plistPath).mode & 0o777).toBe(0o600)
+    expect(statSync(join(userDataDir, 'logs')).mode & 0o777).toBe(0o700)
+    expect(statSync(join(userDataDir, 'logs', 'daemon.log')).mode & 0o777).toBe(0o600)
+    expect(calls).toEqual([
+      { file: '/bin/launchctl', args: ['print', 'gui/501/com.scry.daemon'] },
+      { file: '/bin/launchctl', args: ['bootstrap', 'gui/501', plistPath] }
+    ])
+    expect(readFileSync(plistPath, 'utf8')).toContain('<key>SCRY_REMOTE_PERMISSION_MODE</key><string>auto_review</string>')
+  })
+
+  it('macOS enable keeps a running daemon untouched when already loaded, and bootout+bootstrap when not running', async () => {
+    const calls1: string[][] = []
+    const s1 = setup({
+      exec: async (_file, args) => { calls1.push(args); return ok() }
+    })
+    expect(await s1.manager.enable({ daemonRunning: true })).toEqual({ ok: true })
+    expect(calls1).toEqual([['print', 'gui/501/com.scry.daemon']])
+
+    const calls2: string[][] = []
+    const s2 = setup({
+      exec: async (_file, args) => { calls2.push(args); return ok() }
+    })
+    expect(await s2.manager.enable({ daemonRunning: false })).toEqual({ ok: true })
+    expect(calls2).toEqual([
+      ['print', 'gui/501/com.scry.daemon'],
+      ['bootout', 'gui/501/com.scry.daemon'],
+      ['bootstrap', 'gui/501', join(s2.homeDir, 'Library', 'LaunchAgents', 'com.scry.daemon.plist')]
+    ])
+  })
+
+  it('macOS enable reverts newly created plist if bootstrap fails, and refuses secret env before writing', async () => {
+    const secret = setup({ env: { SCRY_REMOTE_RELAY_WS: '{"url":"wss://r.example","token":"t"}' } })
+    expect(await secret.manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_secret_env' })
+    expect(existsSync(join(secret.homeDir, 'Library', 'LaunchAgents', 'com.scry.daemon.plist'))).toBe(false)
+
+    const failed = setup({
+      exec: async (_file, args) => args[0] === 'print' ? fail(113) : fail(125)
+    })
+    expect(await failed.manager.enable({ daemonRunning: false })).toEqual({
+      ok: false, reason: 'login_start_bootstrap_failed', exitCode: 125
+    })
+    expect(existsSync(join(failed.homeDir, 'Library', 'LaunchAgents', 'com.scry.daemon.plist'))).toBe(false)
+  })
+
+  it('macOS disable deletes plist, skips bootout while daemon is running, and runs bootout when stopped', async () => {
+    const callsRunning: string[][] = []
+    const s1 = setup({ exec: async (_f, args) => { callsRunning.push(args); return args[0] === 'print' ? fail(113) : ok() } })
+    await s1.manager.enable({ daemonRunning: false })
+    callsRunning.length = 0
+    expect(await s1.manager.disable({ daemonRunning: true })).toEqual({ ok: true })
+    expect(existsSync(join(s1.homeDir, 'Library', 'LaunchAgents', 'com.scry.daemon.plist'))).toBe(false)
+    expect(callsRunning).toEqual([])
+
+    const callsStopped: string[][] = []
+    const s2 = setup({ exec: async (_f, args) => { callsStopped.push(args); return args[0] === 'print' ? fail(113) : ok() } })
+    await s2.manager.enable({ daemonRunning: false })
+    callsStopped.length = 0
+    expect(await s2.manager.disable({ daemonRunning: false })).toEqual({ ok: true })
+    expect(callsStopped).toEqual([['bootout', 'gui/501/com.scry.daemon']])
+  })
+
+  it('auto-rewrites ONLY when ours + same userData + old executable missing; never overwrites other userData, other existing app, or foreign file', async () => {
+    const { root, homeDir, userDataDir, executable, appPath, resourcesPath, manager } = setup({
+      exec: async () => ok()
+    })
+    const agentsDir = join(homeDir, 'Library', 'LaunchAgents')
+    mkdirSync(agentsDir, { recursive: true })
+    const plistPath = join(agentsDir, 'com.scry.daemon.plist')
+
+    // 1. Foreign file -> conflict, untouched
+    writeFileSync(plistPath, '<plist><dict><key>Label</key><string>com.scry.daemon</string></dict></plist>')
+    expect(await manager.status()).toEqual({ state: 'conflict', reason: 'login_start_foreign_service' })
+    expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_foreign_service' })
+
+    // 2. Ours, different userData -> conflict with path, untouched
+    const otherUserData = join(root, 'other-userData')
+    writeFileSync(plistPath, renderLaunchdPlist(loginStartTemplateInput({
+      executable, appPath, resourcesPath, userDataDir: otherUserData, isPackaged: true
+    })))
+    expect(await manager.status()).toEqual({
+      state: 'conflict', reason: 'login_start_other_userdata', otherUserDataDir: otherUserData
+    })
+    expect(await manager.enable({ daemonRunning: false })).toEqual({
+      ok: false, reason: 'login_start_other_userdata', otherUserDataDir: otherUserData
+    })
+
+    // 3. Ours, same userData, different executable that STILL EXISTS -> conflict, not rewritten
+    const otherExec = join(root, 'Other.app', 'Contents', 'MacOS', 'Scry')
+    mkdirSync(join(root, 'Other.app', 'Contents', 'MacOS'), { recursive: true })
+    writeFileSync(otherExec, '')
+    writeFileSync(plistPath, renderLaunchdPlist(loginStartTemplateInput({
+      executable: otherExec, appPath: join(root, 'Other.app', 'Contents', 'Resources', 'app.asar'),
+      resourcesPath: join(root, 'Other.app', 'Contents', 'Resources'), userDataDir, isPackaged: true
+    })))
+    expect(await manager.status()).toEqual({
+      state: 'conflict', reason: 'login_start_other_app', otherExecutable: otherExec
+    })
+
+    // 4. Remove old executable (App moved) -> auto-rewritten in place, preserving policy env
+    rmSync(otherExec)
+    writeFileSync(plistPath, renderLaunchdPlist(loginStartTemplateInput({
+      executable: otherExec, appPath: join(root, 'Other.app', 'Contents', 'Resources', 'app.asar'),
+      resourcesPath: join(root, 'Other.app', 'Contents', 'Resources'), userDataDir, isPackaged: true
+    }, { policyEnv: [['SCRY_REMOTE_HOST', '1']] })))
+    const afterMove = await manager.status()
+    expect(afterMove).toMatchObject({
+      state: 'enabled',
+      loaded: true,
+      rewrittenFromExecutable: otherExec,
+      policyEnv: [{ key: 'SCRY_REMOTE_HOST', value: '1' }]
+    })
+    expect(readFileSync(plistPath, 'utf8')).toContain(executable)
+  })
+
+  it('Linux enable, status (Linger + MainPID), disable (no stop), and startViaService follow exact systemctl sequence', async () => {
+    const calls: Array<{ file: string; args: string[] }> = []
+    const { homeDir, manager } = setup({
+      platform: 'linux',
+      allowLinux: true,
+      systemctlAvailable: true,
+      exec: async (file, args) => {
+        calls.push({ file, args })
+        if (file === '/usr/bin/systemctl' && args[1] === 'show') return ok('active\n9876\n')
+        if (file === '/usr/bin/loginctl') return ok('no\n')
+        return ok()
+      }
+    })
+    expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: true })
+    expect(calls).toEqual([
+      { file: '/usr/bin/systemctl', args: ['--user', 'daemon-reload'] },
+      { file: '/usr/bin/systemctl', args: ['--user', 'enable', 'scry-daemon.service'] },
+      { file: '/usr/bin/systemctl', args: ['--user', 'start', 'scry-daemon.service'] }
+    ])
+    const unitPath = join(homeDir, '.config', 'systemd', 'user', 'scry-daemon.service')
+    expect(existsSync(unitPath)).toBe(true)
+
+    calls.length = 0
+    const status = await manager.status()
+    expect(status).toEqual({
+      state: 'enabled',
+      loaded: true,
+      policyEnv: [],
+      linuxLinger: 'no',
+      linuxMainPid: 9876
+    })
+
+    calls.length = 0
+    expect(await manager.startViaService()).toEqual({ ok: true })
+    expect(calls).toEqual([{ file: '/usr/bin/systemctl', args: ['--user', 'start', 'scry-daemon.service'] }])
+
+    calls.length = 0
+    expect(await manager.disable({ daemonRunning: true })).toEqual({ ok: true })
+    expect(existsSync(unitPath)).toBe(false)
+    expect(calls).toEqual([
+      { file: '/usr/bin/systemctl', args: ['--user', 'disable', 'scry-daemon.service'] },
+      { file: '/usr/bin/systemctl', args: ['--user', 'daemon-reload'] }
+    ])
+  })
+
+  it('macOS startViaService calls launchctl kickstart and reports exit code on failure', async () => {
+    const fn = vi.fn<CommandRunner>(async () => fail(113))
+    const { manager } = setup({ exec: fn })
+    expect(await manager.startViaService()).toEqual({
+      ok: false, reason: 'login_start_service_launch_failed', exitCode: 113
+    })
+    expect(fn).toHaveBeenCalledWith('/bin/launchctl', ['kickstart', 'gui/501/com.scry.daemon'], expect.any(Number))
+  })
+})

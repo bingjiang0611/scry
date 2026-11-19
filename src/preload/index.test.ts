@@ -135,7 +135,8 @@ const invokeChannels = {
   backgroundServiceStatus: 'remote:backgroundService:status',
   restartBackgroundService: 'remote:backgroundService:restart',
   quitWithBackgroundService: 'remote:backgroundService:quit',
-  reconnectBackgroundService: 'remote:backgroundService:reconnect'
+  reconnectBackgroundService: 'remote:backgroundService:reconnect',
+  setBackgroundServiceLoginStart: 'remote:backgroundService:setLoginStart'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const desktopChannels = {
@@ -166,7 +167,8 @@ const listenerChannels = {
   onQuestion: 'agent:userQuestion',
   onQuestionAttention: 'agent:questionAttention',
   onQuestionClosed: 'agent:userQuestionClosed',
-  onError: 'agent:error'
+  onError: 'agent:error',
+  onBackgroundServiceNotice: 'remote:backgroundService:notice'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 beforeEach(() => {
@@ -209,6 +211,9 @@ describe('preload IPC boundary', () => {
       await callableApi[method]('4242', { confirmed: true })
       expect(electron.invoke.mock.calls[0], method).toEqual([invokeChannels[method as keyof typeof invokeChannels]])
     }
+    electron.invoke.mockClear()
+    await callableApi.setBackgroundServiceLoginStart(true, '/etc/evil', { confirmed: true })
+    expect(electron.invoke.mock.calls[0]).toEqual(['remote:backgroundService:setLoginStart', true])
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

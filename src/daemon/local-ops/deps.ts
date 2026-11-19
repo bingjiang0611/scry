@@ -43,6 +43,8 @@ export interface DaemonLocalEndpointDeps {
   userDataDir: string
   // What this daemon reports as its version (the «后台服务» section, B4-S S0-1).
   appVersion: string
+  /** Packaged flag used to compute the daemon's effective remote policy self-report. */
+  isPackaged: boolean
   // Worktree selection reads, and the repository ids they hand out, live in this one service.
   sourceControl: SourceControlService
   // The metadata paired devices see; Provider context and Pi profile changes invalidate it.

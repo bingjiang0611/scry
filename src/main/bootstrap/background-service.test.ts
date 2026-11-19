@@ -164,4 +164,24 @@ describe('background service channels', () => {
     expect(daemon.restart).not.toHaveBeenCalled()
     expect(daemon.holdLaunches).not.toHaveBeenCalled()
   })
+
+  it('setLoginStart enforces trusted sender, strict single boolean arg, native confirm on enable, no confirm on disable', async () => {
+    const daemon = fakeDaemon({ status: 'ready' })
+    const { handlers, invoke, event } = register(daemon, true)
+    await expect(Promise.resolve().then(() =>
+      handlers.get('remote:backgroundService:setLoginStart')!({ ...event, sender: {} } as unknown as IpcMainInvokeEvent, true)
+    )).rejects.toThrow('非可信 renderer')
+    for (const bad of [[], ['true'], [1], [{ enabled: true }], [true, 'extra']]) {
+      await expect(invoke('remote:backgroundService:setLoginStart', ...bad)).rejects.toThrow('invalid_request')
+    }
+    // Unpackaged mock app refuses before showing confirmation dialog.
+    await expect(invoke('remote:backgroundService:setLoginStart', true)).resolves.toMatchObject({
+      status: 'failed', reason: 'unpackaged_build'
+    })
+    expect(electron.showMessageBox).not.toHaveBeenCalled()
+    await expect(invoke('remote:backgroundService:setLoginStart', false)).resolves.toMatchObject({
+      status: 'failed', reason: 'unpackaged_build'
+    })
+    expect(electron.showMessageBox).not.toHaveBeenCalled()
+  })
 })
