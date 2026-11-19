@@ -5,6 +5,8 @@ import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
 import { readDaemonLaunchFailure } from '../daemon-launch-failure'
+import { createServiceLaunchController, type ServiceLaunchController } from '../background-service-launch'
+import type { LoginStartManager } from '../../daemon/login-start'
 import { DaemonRunRuntime, type DaemonRunRuntimeDeps } from '../daemon-run-runtime'
 import type { RunTraceRouter } from '../run-trace-router'
 import { startDaemonRunEvents } from '../daemon-run-events'
@@ -65,6 +67,8 @@ export interface DaemonRunModeDeps {
   /** Client-level probe: a thrown DaemonClientError is a refusal, `undefined` is absence. */
   probe?: () => Promise<BuildIdentity | undefined>
   launch?: DaemonLaunch
+  /** Fallback direct launch when a service-manager launch timed out waiting for ready (P5 §2.4). */
+  launchFallback?: DaemonLaunch
   launchFailure?: () => Promise<string | undefined>
   waitMs?: number
   onWarn?: (message: string, detail?: unknown) => void
@@ -143,7 +147,10 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     // Polled while waiting for a launched daemon: a refusal ends the wait by name.
     launchFailure: async (): Promise<string | undefined> => refused?.reason ?? await deps.launchFailure?.()
   }
-  const supervised = await ensureDaemon(supervision)
+  let supervised = await ensureDaemon(supervision)
+  if (!refused && supervised.status === 'unavailable' && supervised.reason === 'daemon_ready_timeout' && deps.launchFallback) {
+    supervised = await ensureDaemon({ ...supervision, launch: deps.launchFallback })
+  }
   if (refused) return refusal(refused)
   if (supervised.status === 'version-mismatch') {
     return { ...mismatch(supervised.running, supervised.runningBuild), dispose: () => client.close() }
@@ -236,6 +243,10 @@ export function appDaemonModeDeps(input: {
   rendererCanReceive?: () => boolean
   runTraces?: DaemonRunModeDeps['runTraces']
   env?: NodeJS.ProcessEnv
+  /** Shared login-start manager so App launches via launchd/systemd when installed (P5 §2.4). */
+  loginStart?: LoginStartManager
+  /** Called whenever a service-manager launch falls back to direct supervisor spawn. */
+  onServiceLaunchFallback?: (fallback: ReturnType<ServiceLaunchController['latestFallback']>) => void
 }): DaemonRunModeDeps {
   const userDataDir = app.getPath('userData')
   const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -244,6 +255,28 @@ export function appDaemonModeDeps(input: {
   const appPath = app.getAppPath()
   const isPackaged = app.isPackaged
   let launchedAt = Number.POSITIVE_INFINITY
+  const spawnDirect = () => {
+    launchedAt = Date.now()
+    const started = spawnDaemonSupervisor({
+      target: daemonLaunchTarget({ isPackaged, appPath, execPath: process.execPath }),
+      stateDirectory: daemonStateDirectory,
+      userDataDir,
+      appPath,
+      resourcesPath: process.resourcesPath,
+      appVersion,
+      isPackaged,
+      ...(input.env ? { env: input.env } : {})
+    })
+    return started.status === 'started' ? { status: 'started' as const } : { status: 'failed' as const, reason: started.reason ?? 'daemon_spawn_failed' }
+  }
+  const serviceLaunch = input.loginStart
+    ? createServiceLaunchController({
+      canLaunchViaService: () => input.loginStart!.canLaunchViaService(),
+      startViaService: () => input.loginStart!.startViaService(),
+      spawnDirect,
+      ...(input.onServiceLaunchFallback ? { onFallbackChange: input.onServiceLaunchFallback } : {})
+    })
+    : undefined
   return {
     userDataDir,
     daemonStateDirectory,
@@ -287,17 +320,13 @@ export function appDaemonModeDeps(input: {
     launchFailure: () => readDaemonLaunchFailure(daemonStateDirectory, launchedAt),
     launch: async () => {
       launchedAt = Date.now()
-      const started = spawnDaemonSupervisor({
-        target: daemonLaunchTarget({ isPackaged, appPath, execPath: process.execPath }),
-        stateDirectory: daemonStateDirectory,
-        userDataDir,
-        appPath,
-        resourcesPath: process.resourcesPath,
-        appVersion,
-        isPackaged,
-        ...(input.env ? { env: input.env } : {})
-      })
-      return started.status === 'started' ? { status: 'started' as const } : { status: 'failed' as const, reason: started.reason ?? 'daemon_spawn_failed' }
-    }
+      return serviceLaunch ? await serviceLaunch.launch() : spawnDirect()
+    },
+    ...(serviceLaunch ? {
+      launchFallback: async () => {
+        launchedAt = Date.now()
+        return await serviceLaunch.fallbackAfterTimeout()
+      }
+    } : {})
   }
 }

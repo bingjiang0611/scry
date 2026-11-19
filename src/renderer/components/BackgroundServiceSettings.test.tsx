@@ -98,6 +98,51 @@ describe('BackgroundServicePanel', () => {
     expect(render(daemon(), { result: describeActionResult('quit', { status: 'failed', reason: 'stop-timeout', message: '没有退出' }) })).toContain('没有退出')
     expect(describeActionResult('restart', { status: 'cancelled' }).text).toContain('没有被停止')
   })
+
+  it('shows login-start toggle, policy snapshot, platform unavailable, conflict, and runtime notices (P5-2)', () => {
+    const enabled = render(daemon({
+      launchedBy: 'app',
+      loginStart: {
+        state: 'enabled',
+        loaded: true,
+        policyEnv: [{ key: 'SCRY_REMOTE_HOST', value: '1' }],
+        linuxLinger: 'no'
+      }
+    }), { onToggleLoginStart: () => {} })
+    expect(enabled).toContain('关闭登录时启动')
+    expect(enabled).toContain('SCRY_REMOTE_HOST=1')
+    expect(enabled).toContain('当前由 App 启动；下次登录起由系统服务启动。')
+    expect(enabled).toContain('loginctl enable-linger')
+
+    const linuxUnavailable = render(daemon({
+      loginStart: { state: 'unavailable', reason: 'linux_unverified' }
+    }), { onToggleLoginStart: () => {} })
+    expect(linuxUnavailable).toContain('linux_unverified')
+    expect(buttons(linuxUnavailable)).not.toContain('开启登录时启动')
+
+    const conflict = render(daemon({
+      loginStart: { state: 'conflict', reason: 'login_start_other_userdata', otherUserDataDir: '/Users/other/Scry' }
+    }), { onToggleLoginStart: () => {} })
+    expect(conflict).toContain('/Users/other/Scry')
+    expect(conflict).toContain('login_start_other_userdata')
+
+    const withNotices = render(daemon({
+      launchedBy: 'service',
+      launchedByVerified: false,
+      runtimeNotice: {
+        serviceLaunchFallback: { reason: 'login_start_service_launch_failed', exitCode: 113 },
+        remoteConfigMismatch: {
+          diffs: ['permissionModeOverride'],
+          expected: { remoteHostEnabled: true, relayMode: 'public', permissionModeOverride: null, disabledProviders: [], runControlsEnabled: true, providerManifestUrl: null },
+          actual: { remoteHostEnabled: true, relayMode: 'public', permissionModeOverride: 'auto_review', disabledProviders: [], runControlsEnabled: true, providerManifestUrl: null }
+        }
+      }
+    }))
+    expect(withNotices).toContain('由系统服务拉起（自报）')
+    expect(withNotices).toContain('login_start_service_launch_failed')
+    expect(withNotices).toContain('退出码 113')
+    expect(withNotices).toContain('远程权限模式覆盖')
+  })
 })
 
 describe('formatUptime', () => {

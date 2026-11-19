@@ -141,3 +141,69 @@ export function restartFailedNotice(message: string): BackgroundServicePrompt {
     cancelId: 0
   }
 }
+
+/** Native confirmation shown before installing the login-start background service (P5 §2.3). */
+export function confirmLoginStartPrompt(policyEnvKeys: readonly string[]): BackgroundServicePrompt {
+  const details = [
+    '开启后会安装一个随系统登录自动启动并常驻的后台服务：即使不打开 Scry，已配对设备也可以远程访问本机。',
+    '以后关闭「登录时启动」只会取消下次登录自动启动，不会停止当时正在运行的后台服务。'
+  ]
+  if (policyEnvKeys.length > 0) {
+    details.push(`开启时会把当前环境中的策略变量快照写入服务文件：${policyEnvKeys.join('、')}。修改环境后需先关闭再开启。`)
+  }
+  return {
+    type: 'warning',
+    title: '开启登录时启动',
+    message: '安装随系统登录常驻的后台服务',
+    detail: details.join('\n\n'),
+    buttons: ['开启登录时启动', '取消'],
+    defaultId: CANCEL_BUTTON,
+    cancelId: CANCEL_BUTTON
+  }
+}
+
+/** Readable failure sentence for login-start mutations, always keeping machine/exit codes visible (P5 §2.8). */
+export function loginStartFailureMessage(input: {
+  reason: string
+  exitCode?: number
+  otherUserDataDir?: string
+  otherExecutable?: string
+}): string {
+  const codeSuffix = input.exitCode !== undefined
+    ? `（${input.reason}，退出码 ${input.exitCode}）`
+    : `（${input.reason}）`
+  if (input.reason === 'login_start_secret_env') {
+    return `当前环境设置了含密钥的 SCRY_REMOTE_RELAY_WS，为避免把密钥写入明文服务文件，不能开启登录时启动${codeSuffix}。请去掉该环境变量，或不使用登录时启动。`
+  }
+  if (input.reason === 'login_start_bootstrap_failed') {
+    return `系统拒绝加载后台服务（可能在「系统设置 → 通用 → 登录项」中被关闭）${codeSuffix}。`
+  }
+  if (input.reason === 'login_start_other_userdata') {
+    const target = input.otherUserDataDir ? `（${input.otherUserDataDir}）` : ''
+    return `系统服务已指向另一个数据目录${target}，Scry 没有覆盖它${codeSuffix}。`
+  }
+  if (input.reason === 'login_start_other_app') {
+    const target = input.otherExecutable ? `（${input.otherExecutable}）` : ''
+    return `系统服务已指向另一份仍存在的 Scry 程序${target}，Scry 没有覆盖它${codeSuffix}。`
+  }
+  if (input.reason === 'login_start_foreign_service') {
+    return `已有同名系统服务文件，但不是 Scry 生成的，Scry 没有修改它${codeSuffix}。`
+  }
+  if (input.reason === 'linux_unverified') {
+    return `Linux 平台的登录时启动尚未通过真机验收，当前不可用${codeSuffix}。`
+  }
+  if (input.reason === 'systemd_unavailable') {
+    return `当前系统未检测到 /usr/bin/systemctl，无法安装 systemd 用户服务${codeSuffix}。`
+  }
+  if (input.reason === 'unpackaged_build') {
+    return `仅打包版支持开启登录时启动${codeSuffix}。`
+  }
+  if (input.reason === 'test_instance') {
+    return `测试实例默认禁用登录时启动，避免改动日常服务配置${codeSuffix}。`
+  }
+  if (input.reason.startsWith('login_start_invalid_env:')) {
+    const key = input.reason.slice('login_start_invalid_env:'.length)
+    return `环境变量 ${key} 的值无效，不能写入服务文件${codeSuffix}。`
+  }
+  return `登录时启动操作没有完成${codeSuffix}。`
+}

@@ -1,18 +1,28 @@
 /* Settings «后台服务». Token-based like the remote-access tab; unknown values are
    dimmed so they never read as a healthy zero. */
 .background-service { max-width: 620px; }
-.background-service__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.background-service__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .background-service__rows { display: flex; flex-direction: column; margin: 0; }
 .background-service__row {
-  display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px;
-  padding: 8px 0; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: var(--space-3);
+  padding: var(--space-2) 0; border-bottom: 1px solid var(--border);
 }
 .background-service__row dt { color: var(--dim); font-size: var(--text-sm); }
 .background-service__row dd { margin: 0; color: var(--fg); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .background-service__row dd.unknown { color: var(--dim2); font-style: italic; }
-.background-service__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.background-service__section {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-3) 0; border-bottom: 1px solid var(--border);
+}
+.background-service__section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap;
+}
+.background-service__section-title { display: flex; flex-direction: column; gap: var(--space-1); }
+.background-service__section-title b { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--fg); }
+.background-service__policy { display: flex; flex-direction: column; gap: var(--space-1); }
+.background-service__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .background-service__quit { color: var(--bad); }
-.background-service__muted { margin: 0; color: var(--dim2); font-size: var(--text-sm); }
+.background-service__muted { margin: 0; color: var(--dim2); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .background-service__notice {
   margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--r-md); font-size: var(--text-sm); line-height: 1.5;
   border: 1px solid var(--border2); background: var(--panel2); color: var(--fg);

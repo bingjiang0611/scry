@@ -6,9 +6,9 @@ import { PaneSplitter } from './components/PaneSplitter'
 import { SessionChatView } from './components/ChatView'
 import { MetaPromptsView } from './components/MetaPromptsView'
 import { ViewChrome } from './components/ViewChrome'
-import { LlmPerformancePanel } from './components/LlmPerformancePanel'
 import { OverviewPanel } from './components/OverviewPanel'
-import { CapabilitiesModal, SettingsModal } from './components/Modals'
+import { AppShellModals } from './components/AppShellModals'
+import { BackgroundServiceNoticeStrip } from './components/BackgroundServiceNoticeStrip'
 import { RemoteView } from './components/RemoteView'
 import { DiffInspector } from './components/DiffInspector'
 import { WorkspacePanel } from './components/WorkspacePanel'
@@ -101,6 +101,7 @@ export function AppShell(props: AppShellProps) {
       <div className="main-area has-main-content" id="main-pane" aria-hidden={shellPanelMaximized || undefined} {...(shellPanelMaximized ? { inert: '' } : {})}>
         <>
           {view !== 'chat' && view !== 'conversation' && view !== 'remote' && <div className="aux-view-topbar" aria-hidden="true" />}
+          {(view === 'chat' || view === 'conversation') && <BackgroundServiceNoticeStrip onOpenSettings={() => setSettingsTab('service')} />}
           {view === 'conversation' ? <>
             {conversationError && <p role="alert">{conversationError}</p>}
             {logicalConversation ? <>
@@ -183,27 +184,12 @@ export function AppShell(props: AppShellProps) {
       )}
       {sideChatPanel.history.open && <SideChatHistoryDialog history={sideChatPanel.history}
         onClose={sideChatPanel.history.close} />}
-      <>{showLlmPerformance && <LlmPerformancePanel open onClose={() => setShowLlmPerformance(false)} />}{(showSkills || showMcp) && <CapabilitiesModal
-        key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
-        view={showMcp ? 'mcp' : 'skills'}
-        onViewChange={(nextView) => { if (nextView === 'skills') openSkills(); else openMcp() }}
-        skills={integrations.skills}
-        skillCapability={integrations.skillCapability}
-        skillsRefreshing={integrations.skillsRefreshing}
-        onRefreshSkills={integrations.refreshSkills}
-        mcps={integrations.mcps}
-        status={integrations.mcpStatus}
-        live={integrations.mcpLive}
-        mcpConfigRefreshing={integrations.mcpConfigRefreshing}
-        mcpRefreshing={integrations.mcpRefreshing}
-        onCancelMcp={integrations.cancelMcpLive}
-        mcpProviderId={integrations.selectedProviderId}
-        mcpCapability={integrations.mcpCapability}
-        onTestMcp={integrations.testMcp}
-        onReauthenticateMcp={integrations.reauthenticateMcp}
-        onRefreshMcp={integrations.pullMcpLive}
-        onClose={() => { setShowSkills(false); setShowMcp(false); setShowLlmPerformance(false) }}
-      />}{settingsTab !== null && <SettingsModal initialTab={settingsTab} theme={theme} onThemeChange={changeTheme} onSessionsChanged={() => { setArchiveUndo(null); workspace.loadProjects() }} onNewRemoteSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)} onClose={() => setSettingsTab(null)} />}</>
+      <AppShellModals
+        cwd={cwd} integrations={integrations} showLlmPerformance={showLlmPerformance} setShowLlmPerformance={setShowLlmPerformance}
+        showSkills={showSkills} showMcp={showMcp} openSkills={openSkills} openMcp={openMcp} setShowSkills={setShowSkills} setShowMcp={setShowMcp}
+        settingsTab={settingsTab} setSettingsTab={setSettingsTab} theme={theme} changeTheme={changeTheme}
+        setArchiveUndo={setArchiveUndo} workspace={workspace} openRemoteLocation={openRemoteLocation}
+      />
     </div>
   )
 }
