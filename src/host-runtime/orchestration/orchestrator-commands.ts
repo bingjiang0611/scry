@@ -38,6 +38,8 @@ export interface RunSubmitPayload {
   pendingTtlMs?: number
   origin?: 'local' | 'remote' | 'system'
   isConversationRun?: boolean
+  /** P4-1 shadow writes mark outbox rows done + shadowOnly so P4-2 recovery never dispatches them. */
+  shadowOnly?: boolean
 }
 
 export interface RunResolveIntentPayload {
@@ -174,12 +176,25 @@ export interface TurnBeganPayload {
   author: TurnAuthor
 }
 
+export interface TurnRecordDeliveryPayload {
+  sessionKey: string
+  runId: string
+  ordinal: number
+  ordinalOrigin?: OrdinalOrigin
+  delivery: Exclude<TurnDeliveryState, 'pending'>
+  outcome?: Evidence<string>
+  reason?: string
+  evidence?: string[]
+  settledAt?: number | null
+}
+
 export type OrchestrationCommand =
   | (BaseCommand & { type: 'run.submit'; payload: RunSubmitPayload })
   | (BaseCommand & { type: 'run.resolve_intent'; payload: RunResolveIntentPayload })
   | (BaseCommand & { type: 'run.stop'; payload: RunStopPayload })
   | (BaseCommand & { type: 'session.stop_subtasks'; payload: SessionStopSubtasksPayload })
   | (BaseCommand & { type: 'run.effect_result'; payload: RunEffectResultPayload })
+  | (BaseCommand & { type: 'turn.record_delivery'; payload: TurnRecordDeliveryPayload })
   | (BaseCommand & { type: 'question.answer'; payload: QuestionAnswerPayload })
   | (BaseCommand & { type: 'session.create'; payload: SessionCreatePayload })
   | (BaseCommand & { type: 'session.rename'; payload: SessionRenamePayload })

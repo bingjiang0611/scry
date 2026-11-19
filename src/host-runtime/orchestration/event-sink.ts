@@ -75,6 +75,11 @@ export class EventSink {
     return this.#writeIndeterminate
   }
 
+  /** Registers a verified peer actor so shadow/live commands under that peer pass auth checks. */
+  authorizeActor(actor: string): void {
+    this.#authorizedActors.add(actor)
+  }
+
   private assertDeterminate(): void {
     if (this.#writeIndeterminate) {
       throw new OrchestrationStoreError('orchestration_write_indeterminate')
@@ -93,6 +98,8 @@ export class EventSink {
       getReceipt: (commandId, actor) => this.readReceiptRaw(commandId, actor),
       getRun: (runId) => this.readRunRaw(runId),
       getSession: (sessionKey) => this.readSessionRaw(sessionKey),
+      getTurnByRunId: (runId) => this.readTurnByRunIdRaw(runId),
+      getNextTurnOrdinal: (sessionKey) => this.readNextTurnOrdinalRaw(sessionKey),
       getInteraction: (runId, questionId) => this.readInteractionRaw(runId, questionId),
       listNonTerminalChildRuns: (parentRunId) => this.listNonTerminalChildRunsRaw(parentRunId),
       listNonTerminalChildRunsBySession: (sessionKey) => this.listNonTerminalChildRunsBySessionRaw(sessionKey),
@@ -206,7 +213,7 @@ export class EventSink {
             `INSERT INTO orch_outbox (
               effect_id, kind, policy, run_id, causation_seq, payload, state,
               expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, NULL, NULL)`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL)`
           )
           const causationSeq = lastSeq ?? 0
           for (const effect of decision.effects) {
@@ -222,7 +229,8 @@ export class EventSink {
               effect.state,
               effect.expiresAt,
               effect.leaseOwner,
-              effect.claimedAt
+              effect.claimedAt,
+              effect.state === 'done' ? decision.receipt.acceptedAt : null
             )
           }
         }
@@ -387,6 +395,16 @@ export class EventSink {
     return row ? mapTurnRow(row) : undefined
   }
 
+  getTurnByRunId(runId: string): TurnProjectionRow | undefined {
+    this.assertDeterminate()
+    return this.readTurnByRunIdRaw(runId)
+  }
+
+  getNextTurnOrdinal(sessionKey: string): number {
+    this.assertDeterminate()
+    return this.readNextTurnOrdinalRaw(sessionKey)
+  }
+
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined {
     this.assertDeterminate()
     return this.readInteractionRaw(runId, questionId)
@@ -463,6 +481,20 @@ export class EventSink {
       .prepare('SELECT * FROM orch_p_session WHERE session_key = ?')
       .get(sessionKey) as Record<string, unknown> | undefined
     return row ? mapSessionRow(row) : undefined
+  }
+
+  private readTurnByRunIdRaw(runId: string): TurnProjectionRow | undefined {
+    const row = this.handle.db
+      .prepare('SELECT * FROM orch_p_turn WHERE run_id = ?')
+      .get(runId) as Record<string, unknown> | undefined
+    return row ? mapTurnRow(row) : undefined
+  }
+
+  private readNextTurnOrdinalRaw(sessionKey: string): number {
+    const row = this.handle.db
+      .prepare('SELECT COALESCE(MAX(ordinal), 0) + 1 AS next_ordinal FROM orch_p_turn WHERE session_key = ?')
+      .get(sessionKey) as { next_ordinal: number }
+    return Number(row.next_ordinal)
   }
 
   private readInteractionRaw(runId: string, questionId: string): InteractionProjectionRow | undefined {

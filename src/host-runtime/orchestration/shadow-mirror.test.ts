@@ -195,4 +195,162 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
       }
     })
   })
+
+  it('B1: mirrors multi-turn conversations and resumed native sessions without ordinal PK collision', () => {
+    withTempDir((userData) => {
+      const mirror = ShadowMirror.open({ userDataDir: userData })
+      try {
+        const ledger = new SessionLedger({
+          store: memoryLedgerStore(),
+          onEvent: (event) => mirror.onLedgerEvent(event)
+        })
+
+        // 3 turns in the same conversation
+        for (let turn = 1; turn <= 3; turn++) {
+          const ledgerRunId = SessionLedger.newRunId()
+          const canonicalRunId = `conv-turn-${turn}`
+          ledger.recordIntent({
+            intentId: SessionLedger.newIntentId(),
+            runId: ledgerRunId,
+            detail: JSON.stringify({
+              providerId: 'codex',
+              cwd: '/tmp/ws-multi',
+              prompt: `turn ${turn}`,
+              conversation: { conversationId: 'conv-multi', runId: canonicalRunId }
+            })
+          })
+          ledger.markDispatched(ledgerRunId)
+          ledger.markSettled(ledgerRunId)
+        }
+
+        // 2 turns in a resumed native session
+        for (let turn = 1; turn <= 2; turn++) {
+          const ledgerRunId = SessionLedger.newRunId()
+          ledger.recordIntent({
+            intentId: SessionLedger.newIntentId(),
+            runId: ledgerRunId,
+            detail: JSON.stringify({
+              providerId: 'codex',
+              cwd: '/tmp/ws-multi',
+              prompt: `resume turn ${turn}`,
+              resume: 'native-sess-42'
+            })
+          })
+          ledger.markDispatched(ledgerRunId)
+          ledger.markSettled(ledgerRunId)
+        }
+
+        const st = mirror.stats()
+        expect(st.failures).toBe(0)
+        expect(st.failedOpen).toBe(false)
+        expect(st.deviations).toBe(0)
+        expect(mirror.sink!.getTurn('conv-multi', 1)?.runId).toBe('conv-turn-1')
+        expect(mirror.sink!.getTurn('conv-multi', 2)?.runId).toBe('conv-turn-2')
+        expect(mirror.sink!.getTurn('conv-multi', 3)?.runId).toBe('conv-turn-3')
+        expect(mirror.sink!.getTurn('native-sess-42', 1)).toBeDefined()
+        expect(mirror.sink!.getTurn('native-sess-42', 2)).toBeDefined()
+      } finally {
+        mirror.close()
+      }
+    })
+  })
+
+  it('B2: classifies rejected/duplicate decisions, excludes rejections from timing samples, and trips failedOpen on fence', () => {
+    withTempDir((userData) => {
+      const timingSamples: Array<{ commitKind: string; durationMs: number }> = []
+      const mirror = ShadowMirror.open({
+        userDataDir: userData,
+        onCommitTiming: (sample) => timingSamples.push({ commitKind: sample.commitKind, durationMs: sample.durationMs })
+      })
+      try {
+        // Trigger a sticky invalid_target rejection (unknown run) -> must NOT count as accepted or timing sample
+        mirror.onLedgerEvent({
+          seq: 1,
+          at: 1_700_000_000_000,
+          runId: SessionLedger.newRunId(),
+          kind: 'run_dispatched'
+        })
+        const st = mirror.stats()
+        expect(st.acceptedCommits).toBe(0)
+        expect(st.rejectedSticky).toBe(1)
+        expect(st.deviations).toBe(1)
+        expect(timingSamples).toHaveLength(0)
+
+        // Mark failed open explicitly (e.g. startup import fence) -> further events are skipped without silent commits
+        mirror.markFailedOpen(new Error('import_fence'))
+        expect(mirror.stats().failedOpen).toBe(true)
+        expect(mirror.stats().failures).toBe(1)
+      } finally {
+        mirror.close()
+      }
+    })
+  })
+
+  it('B3: routes H3 onConversationTurnSettled through EventSink and preserves replay consistency', () => {
+    withTempDir((userData) => {
+      const fixedAt = 1_700_000_123_456
+      const mirror = ShadowMirror.open({
+        userDataDir: userData,
+        clock: () => fixedAt
+      })
+      try {
+        const ledger = new SessionLedger({
+          store: memoryLedgerStore(),
+          clock: () => fixedAt,
+          onEvent: (event) => mirror.onLedgerEvent(event)
+        })
+        const run1 = SessionLedger.newRunId()
+        ledger.recordIntent({
+          intentId: SessionLedger.newIntentId(),
+          runId: run1,
+          detail: JSON.stringify({
+            providerId: 'codex',
+            cwd: '/tmp/ws-b3',
+            prompt: 'first',
+            conversation: { conversationId: 'conv-b3', runId: 'run-b3-1' }
+          })
+        })
+        ledger.markDispatched(run1)
+        ledger.markSettled(run1)
+
+        const fakeConversation: Conversation = {
+          version: 1,
+          id: 'conv-b3',
+          cwd: '/tmp/ws-b3',
+          revision: 2,
+          bindings: [{ id: 'b-1', providerId: 'codex', continuationKey: 'k', nativeSessionId: 'ext-b3' }],
+          turns: [
+            {
+              origin: 'dispatch',
+              ordinal: 1,
+              runId: 'run-b3-1',
+              bindingId: 'b-1',
+              commandId: 'c-1',
+              intentHash: 'h-1',
+              resumeSessionId: null,
+              items: [],
+              importedItems: [],
+              omittedItems: [],
+              delivery: { status: 'accepted', nativeSessionId: 'ext-b3', outcome: 'completed', nativeItems: [] }
+            }
+          ]
+        }
+        mirror.onConversationTurnSettled({
+          conversationId: 'conv-b3',
+          runId: 'run-b3-1',
+          conversation: fakeConversation,
+          delivery: { status: 'accepted', nativeSessionId: 'ext-b3', outcome: 'completed', nativeItems: [] }
+        })
+
+        const turn = mirror.sink!.getTurn('conv-b3', 1)
+        expect(turn?.delivery).toBe('accepted')
+        expect(turn?.revSeq).toBeGreaterThan(0)
+        // Replay from empty MUST match online projection after H3 settle!
+        expect(mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(mirror.stats().deviations).toBe(0)
+      } finally {
+        mirror.close()
+      }
+    })
+  })
 })

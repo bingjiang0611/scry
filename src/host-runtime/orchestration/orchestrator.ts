@@ -108,6 +108,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         })
       ]
       if (p.sessionKey) {
+        const ordinal = p.ordinal ?? view.getNextTurnOrdinal?.(p.sessionKey) ?? 1
+        const ordinalOrigin =
+          p.ordinalOrigin ?? (view.getSession(p.sessionKey)?.legacy ? 'since_import' : 'native')
         events.push(
           makeEvent(cmd, 1, {
             type: 'turn.began',
@@ -118,8 +121,8 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             payload: {
               sessionKey: p.sessionKey,
               runId: p.runId,
-              ordinal: p.ordinal ?? 1,
-              ordinalOrigin: p.ordinalOrigin ?? 'native',
+              ordinal,
+              ordinalOrigin,
               userTextPreview: truncatePreview(p.userTextPreview ?? p.promptPreview, USER_TEXT_PREVIEW_MAX_CHARS),
               author: 'user'
             }
@@ -132,6 +135,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         provider: p.provider,
         profile: p.profile,
         cwd: p.cwd,
+        ...(p.shadowOnly ? { shadowOnly: true } : {}),
         ...(p.body
           ? p.body.storage === 'inline'
             ? { body: { storage: 'inline', sha256: p.body.sha256, bytes: p.body.bytes, inline: p.body.inline } }
@@ -143,10 +147,10 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         kind: 'provider.run.start',
         runId: p.runId,
         payload: effectPayload,
-        state: isImmediate ? 'running' : 'pending',
-        expiresAt: isImmediate ? null : cmd.at + (p.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS),
-        leaseOwner: isImmediate ? (p.leaseOwner ?? 'daemon') : null,
-        claimedAt: isImmediate ? cmd.at : null
+        state: p.shadowOnly ? 'done' : isImmediate ? 'running' : 'pending',
+        expiresAt: p.shadowOnly || isImmediate ? null : cmd.at + (p.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS),
+        leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : isImmediate ? (p.leaseOwner ?? 'daemon') : null,
+        claimedAt: p.shadowOnly || isImmediate ? cmd.at : null
       })
       return acceptDecision(cmd, events, [effect], { runId: p.runId })
     }
@@ -252,6 +256,50 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
 
     case 'run.effect_result':
       return decideRunEffectResult(cmd, view)
+
+    case 'turn.record_delivery': {
+      const p = cmd.payload
+      const events: PendingOrchestrationEvent[] = []
+      const existingTurn = view.getTurnByRunId?.(p.runId)
+      const session = view.getSession(p.sessionKey)
+      if (!existingTurn) {
+        events.push(
+          makeEvent(cmd, events.length, {
+            type: 'turn.began',
+            stream: `session:${p.sessionKey}`,
+            sessionKey: p.sessionKey,
+            runId: p.runId,
+            cwd: session?.cwd ?? null,
+            payload: {
+              sessionKey: p.sessionKey,
+              runId: p.runId,
+              ordinal: p.ordinal,
+              ordinalOrigin: p.ordinalOrigin ?? (session?.legacy ? 'since_import' : 'native'),
+              userTextPreview: null,
+              author: 'user'
+            }
+          })
+        )
+      }
+      events.push(
+        makeEvent(cmd, events.length, {
+          type: 'turn.delivery',
+          stream: `session:${p.sessionKey}`,
+          sessionKey: p.sessionKey,
+          runId: p.runId,
+          cwd: session?.cwd ?? null,
+          payload: {
+            runId: p.runId,
+            delivery: p.delivery,
+            ...(p.reason ? { reason: p.reason } : {}),
+            ...(p.outcome ? { outcome: p.outcome } : {}),
+            ...(p.settledAt !== undefined ? { settledAt: p.settledAt } : {})
+          },
+          evidence: p.evidence ?? null
+        })
+      )
+      return acceptDecision(cmd, events, [], { sessionKey: p.sessionKey, runId: p.runId, delivery: p.delivery })
+    }
 
     case 'question.answer': {
       const p = cmd.payload

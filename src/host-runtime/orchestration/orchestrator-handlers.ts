@@ -14,7 +14,8 @@ import type {
   RunLifecycleState,
   RunProjectionRow,
   SessionProjectionRow,
-  StickyRejectionReason
+  StickyRejectionReason,
+  TurnProjectionRow
 } from './types'
 
 export interface OrchestratorReadView {
@@ -22,6 +23,8 @@ export interface OrchestratorReadView {
   getReceipt(commandId: string, actor: string): CommandReceiptRow | undefined
   getRun(runId: string): RunProjectionRow | undefined
   getSession(sessionKey: string): SessionProjectionRow | undefined
+  getTurnByRunId?(runId: string): TurnProjectionRow | undefined
+  getNextTurnOrdinal?(sessionKey: string): number
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined
   listNonTerminalChildRuns(parentRunId: string): RunProjectionRow[]
   listNonTerminalChildRunsBySession(sessionKey: string): RunProjectionRow[]
@@ -96,7 +99,7 @@ export function makeEffect(
     kind: EffectKind
     runId?: string | null
     payload: Record<string, unknown>
-    state: 'pending' | 'running'
+    state: 'pending' | 'running' | 'done'
     expiresAt?: number | null
     leaseOwner?: string | null
     claimedAt?: number | null

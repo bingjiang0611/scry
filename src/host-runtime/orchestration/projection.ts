@@ -328,11 +328,16 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     case 'turn.delivery': {
       db.prepare(
         `UPDATE orch_p_turn
-         SET delivery = ?, outcome = COALESCE(?, outcome), evidence = COALESCE(?, evidence), rev_seq = ?
+         SET delivery = ?,
+             outcome = COALESCE(?, outcome),
+             settled_at = COALESCE(?, settled_at),
+             evidence = COALESCE(?, evidence),
+             rev_seq = ?
          WHERE run_id = ?`
       ).run(
         String(p.delivery),
         p.outcome ? canonicalJson(p.outcome) : null,
+        p.settledAt === undefined ? null : (p.settledAt as number | null),
         event.evidence ? canonicalJson(event.evidence) : null,
         event.seq,
         String(p.runId)

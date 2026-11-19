@@ -14,14 +14,24 @@ export interface ShadowCommitSample {
 
 export interface ShadowMirrorOptions extends EventSinkOptions {
   leaseOwner?: string
+  clock?: () => number
+  /** Optional resolver returning the submitting peer cert SHA-256 and grant scope for a ledger run. */
+  resolveRunMeta?: (ledgerRunId: string) => { peerCertSHA256?: string; grantScope?: 'local' | 'remote' } | undefined
   onCommitTiming?: (sample: ShadowCommitSample) => void
   onError?: (error: unknown) => void
 }
 
 export interface ShadowMirrorStats {
-  failures: number
-  failedOpen: boolean
+  acceptedCommits: number
+  /** Alias for acceptedCommits (only accepted commits, never rejected no-ops). */
   commits: number
+  duplicates: number
+  rejectedSticky: number
+  rejectedRetryable: number
+  failures: number
+  /** Total shadow parity anomalies: sticky rejections + retryable rejections + failures. */
+  deviations: number
+  failedOpen: boolean
   preFirstTokenCommitsByRun: ReadonlyMap<string, number>
   preFirstTokenDurationMsByRun: ReadonlyMap<string, number>
 }
@@ -33,7 +43,7 @@ export interface ConversationTurnSettledInfo {
   delivery: Exclude<ConversationDelivery, { status: 'pending' }>
 }
 
-interface ParsedIntentRouting {
+export interface ParsedIntentRouting {
   provider: string
   profile: string | null
   cwd: string
@@ -41,6 +51,7 @@ interface ParsedIntentRouting {
   sessionKey: string | null
   canonicalRunId: string
   isConversationRun: boolean
+  ordinal?: number
 }
 
 export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | undefined): ParsedIntentRouting {
@@ -51,6 +62,7 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
   let sessionKey: string | null = null
   let canonicalRunId = ledgerRunId
   let isConversationRun = false
+  let ordinal: number | undefined
 
   if (detail) {
     try {
@@ -61,7 +73,7 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
       else if (typeof parsed.profile === 'string') profile = parsed.profile
       if (typeof parsed.cwd === 'string') cwd = parsed.cwd
       if (typeof parsed.prompt === 'string') promptPreview = parsed.prompt
-      const conv = parsed.conversation as { conversationId?: unknown; runId?: unknown } | undefined
+      const conv = parsed.conversation as { conversationId?: unknown; runId?: unknown; ordinal?: unknown } | undefined
       if (conv && typeof conv === 'object') {
         if (typeof conv.conversationId === 'string' && conv.conversationId.length > 0) {
           sessionKey = conv.conversationId
@@ -69,6 +81,9 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
         }
         if (typeof conv.runId === 'string' && conv.runId.length > 0) {
           canonicalRunId = conv.runId
+        }
+        if (typeof conv.ordinal === 'number' && Number.isSafeInteger(conv.ordinal) && conv.ordinal >= 1) {
+          ordinal = conv.ordinal
         }
       } else if (typeof parsed.resume === 'string' && parsed.resume.length > 0) {
         sessionKey = parsed.resume
@@ -78,30 +93,38 @@ export function parseLedgerIntentRouting(ledgerRunId: string, detail: string | u
     }
   }
 
-  return { provider, profile, cwd, promptPreview, sessionKey, canonicalRunId, isConversationRun }
+  return { provider, profile, cwd, promptPreview, sessionKey, canonicalRunId, isConversationRun, ordinal }
 }
+
+const PEER_SHA_RE = /^[0-9a-f]{64}$/
 
 /**
  * P4-1 fail-open shadow mirror (plan §9 P4-1).
  * Mirrors H1 `SessionLedger.#emit` and H3 `ConversationStore.settle` into `orchestration.db`
- * without altering any user-visible run behavior. Any storage error trips shadow fail-open,
- * increments the failure counter, and lets the live run proceed untouched.
+ * strictly through `EventSink.execute(...)` without altering any user-visible run behavior.
  */
 export class ShadowMirror {
   readonly sink: EventSink | null
   readonly #leaseOwner: string
+  readonly #clock: () => number
+  readonly #resolveRunMeta?: ShadowMirrorOptions['resolveRunMeta']
   readonly #onCommitTiming?: (sample: ShadowCommitSample) => void
   readonly #onError?: (error: unknown) => void
   readonly #ledgerToCanonical = new Map<string, string>()
   readonly #preFirstTokenCommits = new Map<string, number>()
   readonly #preFirstTokenMs = new Map<string, number>()
+  #acceptedCommits = 0
+  #duplicates = 0
+  #rejectedSticky = 0
+  #rejectedRetryable = 0
   #failures = 0
   #failedOpen = false
-  #commits = 0
 
   private constructor(sink: EventSink | null, options: ShadowMirrorOptions) {
     this.sink = sink
     this.#leaseOwner = options.leaseOwner ?? `daemon:${process.pid}`
+    this.#clock = options.clock ?? (() => Date.now())
+    this.#resolveRunMeta = options.resolveRunMeta
     this.#onCommitTiming = options.onCommitTiming
     this.#onError = options.onError
     if (!sink) {
@@ -125,12 +148,22 @@ export class ShadowMirror {
 
   stats(): ShadowMirrorStats {
     return {
+      acceptedCommits: this.#acceptedCommits,
+      commits: this.#acceptedCommits,
+      duplicates: this.#duplicates,
+      rejectedSticky: this.#rejectedSticky,
+      rejectedRetryable: this.#rejectedRetryable,
       failures: this.#failures,
+      deviations: this.#rejectedSticky + this.#rejectedRetryable + this.#failures,
       failedOpen: this.#failedOpen,
-      commits: this.#commits,
       preFirstTokenCommitsByRun: this.#preFirstTokenCommits,
       preFirstTokenDurationMsByRun: this.#preFirstTokenMs
     }
+  }
+
+  /** Marks shadow as failed-open (e.g. when startup import trips the sink fence). */
+  markFailedOpen(error: unknown): void {
+    this.failOpen(error)
   }
 
   resolveCanonicalRunId(ledgerRunId: string): string {
@@ -166,13 +199,35 @@ export class ShadowMirror {
     }
   ): void {
     if (!this.sink || this.#failedOpen) return
+    if (this.sink.isWriteIndeterminate()) {
+      this.failOpen(new Error('orchestration_write_indeterminate'))
+      return
+    }
     const started = performance.now()
-    this.sink.execute(cmd, {
+    const result = this.sink.execute(cmd, {
       ...(meta.legacyLedgerSeq !== undefined ? { legacyLedgerSeq: meta.legacyLedgerSeq } : {}),
       ...(meta.legacyRunMapping ? { legacyRunMapping: meta.legacyRunMapping } : {})
     })
     const durationMs = Number((performance.now() - started).toFixed(3))
-    this.#commits += 1
+
+    if (this.sink.isWriteIndeterminate() || (result.kind === 'rejected' && result.reason === 'orchestration_write_indeterminate')) {
+      this.failOpen(new Error('orchestration_write_indeterminate'))
+      return
+    }
+
+    if (result.kind === 'duplicate') {
+      this.#duplicates += 1
+      return
+    }
+
+    if (result.kind === 'rejected') {
+      if (result.sticky) this.#rejectedSticky += 1
+      else this.#rejectedRetryable += 1
+      return
+    }
+
+    // Only accepted commits enter commit counts and timing samples (B2).
+    this.#acceptedCommits += 1
     if (meta.preFirstToken) {
       this.#preFirstTokenCommits.set(meta.runId, (this.#preFirstTokenCommits.get(meta.runId) ?? 0) + 1)
       this.#preFirstTokenMs.set(
@@ -197,24 +252,36 @@ export class ShadowMirror {
         const routing = parseLedgerIntentRouting(event.runId, event.detail)
         this.#ledgerToCanonical.set(event.runId, routing.canonicalRunId)
         const commandId = event.intentId ?? `legacy-intent:${event.runId}`
+        const runMeta = this.#resolveRunMeta?.(event.runId)
+        const peerActor =
+          runMeta?.peerCertSHA256 && PEER_SHA_RE.test(runMeta.peerCertSHA256)
+            ? `peer:${runMeta.peerCertSHA256}`
+            : 'system'
+        if (peerActor.startsWith('peer:')) this.sink.authorizeActor(peerActor)
+        const scope: 'local' | 'remote' = runMeta?.grantScope === 'local' ? 'local' : 'remote'
+        const ordinal = routing.sessionKey
+          ? (routing.ordinal ?? this.sink.getNextTurnOrdinal(routing.sessionKey))
+          : undefined
         const payload = {
           runId: routing.canonicalRunId,
           sessionKey: routing.sessionKey,
+          ...(ordinal !== undefined ? { ordinal } : {}),
           provider: routing.provider,
           profile: routing.profile,
           cwd: routing.cwd,
           ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
           claimMode: 'immediate' as const,
           leaseOwner: this.#leaseOwner,
-          origin: 'remote' as const,
-          isConversationRun: routing.isConversationRun
+          origin: scope,
+          isConversationRun: routing.isConversationRun,
+          shadowOnly: true
         }
         this.executeTimed(
           {
             type: 'run.submit',
             commandId,
-            actor: 'system',
-            scope: 'remote',
+            actor: peerActor,
+            scope,
             at: event.at,
             payload,
             payloadSha256: sha256Hex(canonicalJson(payload))
@@ -266,6 +333,12 @@ export class ShadowMirror {
         runId,
         step: step as 'settled' | 'failed' | 'cancelled',
         ...(event.detail ? { reason: event.detail } : {}),
+        outcome: {
+          status: 'available' as const,
+          quality: 'exact' as const,
+          source: [`legacy-ledger:${event.seq}`],
+          value: step
+        },
         evidence: [`legacy-ledger:${event.seq}`]
       }
       this.executeTimed(
@@ -406,46 +479,59 @@ export class ShadowMirror {
     }
   }
 
-  /** H3 `ConversationStore.settle` shadow hook: mirrors settled turn delivery into `orch_p_turn`. */
+  /**
+   * H3 `ConversationStore.settle` shadow hook (B3): commits a `turn.record_delivery` command
+   * through `EventSink.execute(...)` so events and projections stay atomic and replay-consistent.
+   */
   onConversationTurnSettled(info: ConversationTurnSettledInfo): void {
     if (!this.sink || this.#failedOpen) return
     try {
-      const db = this.sink.handle.db
       const turn = info.conversation.turns.find((candidate) => candidate.runId === info.runId)
       if (!turn) return
-      const now = Date.now()
+      const at = this.#clock()
       const delivery = info.delivery.status
       const outcome =
         info.delivery.status === 'accepted'
           ? {
-              status: 'available',
-              quality: 'exact',
+              status: 'available' as const,
+              quality: 'exact' as const,
               source: [`conversation:${info.conversationId}`],
               value: info.delivery.outcome
             }
           : {
-              status: 'unavailable',
-              quality: 'unavailable',
+              status: 'unavailable' as const,
+              quality: 'unavailable' as const,
               source: [`conversation:${info.conversationId}`],
               omissionReason: info.delivery.reason
             }
-      const existingTurn = db
-        .prepare('SELECT 1 FROM orch_p_turn WHERE run_id = ?')
-        .get(info.runId)
-      if (existingTurn) {
-        db.prepare(
-          'UPDATE orch_p_turn SET delivery = ?, outcome = ?, settled_at = COALESCE(settled_at, ?) WHERE run_id = ?'
-        ).run(delivery, canonicalJson(outcome), now, info.runId)
-      } else {
-        db.prepare(
-          `INSERT OR IGNORE INTO orch_p_turn (
-            session_key, ordinal, run_id, ordinal_origin, user_text_preview,
-            delivery, outcome, started_at, settled_at, recovered_at,
-            content_ref, evidence, rev_seq, author
-          ) VALUES (?, ?, ?, 'native', NULL, ?, ?, ?, ?, NULL, NULL, NULL, 0, 'user')`
-        ).run(info.conversationId, turn.ordinal, info.runId, delivery, canonicalJson(outcome), now, now)
+      const payload = {
+        sessionKey: info.conversationId,
+        runId: info.runId,
+        ordinal: turn.ordinal,
+        delivery,
+        outcome,
+        ...(info.delivery.status !== 'accepted' ? { reason: info.delivery.reason } : {}),
+        settledAt: at,
+        evidence: [`conversation:${info.conversationId}`]
       }
-      this.sink.handle.enforceModes()
+      const payloadSha256 = sha256Hex(canonicalJson(payload))
+      this.executeTimed(
+        {
+          type: 'turn.record_delivery',
+          commandId: `effect:h3-${info.conversationId}-${info.runId}:${delivery}`,
+          actor: `effect:h3-${info.conversationId}`,
+          scope: 'system',
+          at,
+          payload,
+          payloadSha256
+        },
+        {
+          runId: info.runId,
+          ledgerRunId: info.runId,
+          commitKind: 'turn_settled',
+          preFirstToken: false
+        }
+      )
     } catch (error) {
       this.failOpen(error)
     }
