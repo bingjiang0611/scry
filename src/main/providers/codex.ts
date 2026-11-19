@@ -54,6 +54,8 @@ import type {
 import { effortOption, permissionOptions, unsupportedPermissionMode } from './run-controls'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
+import { codexStdioEnvFile, codexStdioLauncher, codexStdioLauncherEnv } from './codex-stdio-env'
+import { writePrivateMcpEnvFiles } from './private-mcp-config'
 
 export function codexAccess(mode: AgentPermissionMode | undefined): {
   approvalPolicy: 'never' | 'on-request'
@@ -149,6 +151,8 @@ export interface CodexMcpConfig {
   args: string[]
   /** Added to the app-server env: header values `env_http_headers` refers to by name. */
   env: Record<string, string>
+  /** Removes the stdio env files; present when there are any. Codex reads them on each server (re)start. */
+  dispose?: () => void
 }
 
 /**
@@ -160,9 +164,9 @@ export interface CodexMcpConfig {
  * non-string values (Codex skips an empty env header and may trim one), and a
  * header the config's own `env_http_headers` also sets, compared case-insensitively
  * (Codex applies that override after static headers; one map would make the winner
- * arbitrary). Stdio `env` stays inline: `env_vars` forwards a parent variable only
- * under its own name, so per-server values could collide with each other and with
- * variables Codex itself reads.
+ * arbitrary). Stdio `env` goes to a private file that a fixed /bin/sh launcher reads
+ * before exec'ing the original command (codex-stdio-env.ts); `env_vars` would forward
+ * a parent variable only under its own name, so per-server values could collide.
  */
 export function codexMcpConfig(
   execution?: AuthorizedMcpExecution,
@@ -171,8 +175,11 @@ export function codexMcpConfig(
 ): CodexMcpConfig {
   const servers: Record<string, Record<string, unknown>> = {}
   const env: Record<string, string> = {}
+  const launched: Array<{ name: string; env: Record<string, string> }> = []
   for (const [name, config] of Object.entries(authorizedMcpServers(execution))) {
     if (!isRemoteMcpConfig(config)) {
+      const launcherEnv = codexStdioLauncherEnv(config)
+      if (launcherEnv) launched.push({ name, env: launcherEnv })
       servers[name] = {
         command: config.command,
         args: config.args,
@@ -215,7 +222,14 @@ export function codexMcpConfig(
     servers[HISTORY_READER_SERVER] = { url: historyReader.url, bearer_token_env_var: 'SCRY_HISTORY_READER_TOKEN',
       enabled: true, enabled_tools: [HISTORY_READER_TOOL], startup_timeout_sec: 10, tool_timeout_sec: 10 }
   }
-  return { args: ['-c', `mcp_servers=${tomlInline(servers)}`], env }
+  const files = writePrivateMcpEnvFiles(launched.map((item) => codexStdioEnvFile(item.env)))
+  try {
+    launched.forEach((item, index) => { servers[item.name] = codexStdioLauncher(servers[item.name], files!.paths[index]) })
+    return { args: ['-c', `mcp_servers=${tomlInline(servers)}`], env, ...(files ? { dispose: files.dispose } : {}) }
+  } catch (error) {
+    files?.dispose()
+    throw error
+  }
 }
 
 function codexMcpStatus(value: unknown): McpLiveStatus[] {
@@ -691,6 +705,13 @@ export function createCodexAdapter(
   const clientActivity = new Map<CodexAppServerClient, number>()
   const clientLastUsed = new Map<CodexAppServerClient, number>()
   const clientIdleTimers = new Map<CodexAppServerClient, ReturnType<typeof setTimeout>>()
+  // Stdio MCP env files live as long as the pooled client that may (re)start the servers.
+  const clientFiles = new Map<CodexAppServerClient, () => void>()
+  const releaseClientFiles = (client: CodexAppServerClient): void => {
+    const dispose = clientFiles.get(client)
+    clientFiles.delete(client)
+    dispose?.()
+  }
   const CLIENT_IDLE_MS = 60_000
   const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
   const forcedSkillReloads = new Map<string, number>()
@@ -818,12 +839,19 @@ export function createCodexAdapter(
       ...mcp.args,
       ...appServerArgs
     ]
-    const client = new CodexAppServerClient({
-      command: path,
-      args,
-      cwd,
-      env: { ...(historyReader ? historyReaderEnvironment(env) : env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
-    })
+    let client: CodexAppServerClient
+    try {
+      client = new CodexAppServerClient({
+        command: path,
+        args,
+        cwd,
+        env: { ...(historyReader ? historyReaderEnvironment(env) : env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
+      })
+    } catch (error) {
+      mcp.dispose?.()
+      throw error
+    }
+    if (mcp.dispose) clientFiles.set(client, mcp.dispose)
     clients.set(key, client)
     clientLastUsed.set(client, Date.now())
     lastClient = client
@@ -844,7 +872,11 @@ export function createCodexAdapter(
       clients.delete(key)
     }
     if (lastClient === client) lastClient = null
-    if (registered) await client.shutdown()
+    try {
+      if (registered) await client.shutdown()
+    } finally {
+      releaseClientFiles(client)
+    }
   }
 
   const request = async <T>(
@@ -2049,7 +2081,11 @@ export function createCodexAdapter(
       clientIdleTimers.clear()
       clientActivity.clear()
       clientLastUsed.clear()
-      await Promise.all([...clients.values()].map((client) => client.shutdown()))
+      try {
+        await Promise.all([...clients.values()].map((client) => client.shutdown()))
+      } finally {
+        for (const client of [...clientFiles.keys()]) releaseClientFiles(client)
+      }
       clients.clear()
       modelCache.clear()
       forcedSkillReloads.clear()

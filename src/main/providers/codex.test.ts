@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TraceEvent } from '../../shared/trace'
@@ -137,20 +137,25 @@ describe('Codex provider adapter', () => {
 
   it('clears implicit MCP and serializes only approved Codex configs', () => {
     expect(codexMcpConfig()).toEqual({ args: ['-c', 'mcp_servers={}'], env: {} })
-    expect(codexMcpConfig({
+    const config = codexMcpConfig({
       cwd: '/repo', fingerprint: 'sha256:test', env: { PATH: '/bin' },
       targets: [
         { targetId: 'stdio', name: 'stdio target', enabled: true, config: { command: '/bin/echo', args: ['ok'], env: { SAFE: '1' } } },
         { targetId: 'off', name: 'off', enabled: false, config: { command: '/bin/off' } },
         { targetId: 'remote', name: 'remote', enabled: true, config: { type: 'http', url: 'https://mcp.example.test', headers: { Authorization: 'configured' } } }
       ]
-    }, undefined, 'N')).toEqual({
-      args: [
-        '-c',
-        'mcp_servers={"stdio target"={"command"="/bin/echo","args"=["ok"],"env"={"PATH"="/bin","SAFE"="1"},"enabled"=true},"remote"={"url"="https://mcp.example.test","env_http_headers"={"Authorization"="SCRY_MCP_HEADER_N_0"},"enabled"=true}}'
-      ],
-      env: { SCRY_MCP_HEADER_N_0: 'configured' }
-    })
+    }, undefined, 'N')
+    try {
+      // The stdio env goes to a private file the /bin/sh launcher reads (codex-mcp-argv.test.ts).
+      const envFile = /^mcp_servers=\{"stdio target"=\{"command"="\/bin\/sh","args"=\["-c","(?:[^"\\]|\\.)*","sh","([^"]+)","\/bin\/echo","ok"\],"enabled"=true\},/
+        .exec(config.args[1])?.[1]
+      expect(envFile).toBeDefined()
+      expect(readFileSync(envFile!, 'utf8')).toBe("PATH='/bin'\nSAFE='1'\n")
+      expect(config.args[1]).toMatch(/,"remote"=\{"url"="https:\/\/mcp\.example\.test","env_http_headers"=\{"Authorization"="SCRY_MCP_HEADER_N_0"\},"enabled"=true\}\}$/)
+      expect(config.env).toEqual({ SCRY_MCP_HEADER_N_0: 'configured' })
+    } finally {
+      config.dispose?.()
+    }
   })
 
   it('keeps inline only the static headers whose env indirection would change Codex behaviour', () => {
@@ -207,7 +212,7 @@ describe('Codex provider adapter', () => {
       expect(appServer.request).toHaveBeenCalledWith('mcpServerStatus/list', { threadId: null, detail: 'full' })
       expect(appServer.options.at(-1)?.args).toEqual(expect.arrayContaining([
         '-c',
-        'mcp_servers={"tracker"={"command"="/bin/echo","args"=["approved"],"env"={"PATH"="/bin"},"enabled"=true}}'
+        expect.stringMatching(/^mcp_servers=\{"tracker"=\{"command"="\/bin\/sh","args"=\["-c","(?:[^"\\]|\\.)*","sh","[^"]+","\/bin\/echo","approved"\],"enabled"=true\}\}$/)
       ]))
     } finally {
       await adapter.dispose?.()
