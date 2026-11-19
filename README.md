@@ -126,8 +126,11 @@ npm install -g --prefix "$HOME/.local" scry-turn-recorder@0.2.64
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-维护者发布前运行 `npm run publish:cli`。该命令会通过 package lifecycle 强制执行
-typecheck、tests、CLI build，再发布到本机 npm 配置（或 `--registry`）指定的 registry；不要从陈旧 `dist` 手工发布。
+维护者发布前运行 `npm run publish:cli`（公开名 `scry-turn-recorder`）或
+`npm run publish:cli:internal`（内网 `@ali/scry-turn-recorder`，默认 dry run，加 `-- --publish`
+才发布）。前者通过 package lifecycle 强制执行 typecheck、tests、CLI build；后者要求先跑过
+`npm run build:cli` 与 `check:cli-release`，只改包名与 registry，不会把公开名发到内网。
+见 [`docs/agent/verification.md`](./docs/agent/verification.md)。不要从陈旧 `dist` 手工发布。
 
 合同与接入约束见 [`packages/turn-recorder-cli/README.md`](./packages/turn-recorder-cli/README.md) 及 `src/shared/turn-record.ts`。
 

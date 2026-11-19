@@ -60,6 +60,8 @@ Scry 是 local-first 的 AI coding agent 观测与治理工具，**不是安全�
 
 常规交付使用任务分支和 PR，不直接推送 main。一个 PR 只包含本次授权改动，不混入本地已有的未推送提交。标题使用简短的 conventional commit 格式，例如 `fix(recorder): preserve unavailable usage evidence`。
 
+不以快进合并或直接推送代替评审：没有 PR 记录、没有评审的改动不得直接进入 main，也不得据此发版。绕过 PR 直推 main 的提交在交付时必须单独标出，并补一个事后 PR 留下评审记录与对应的 CI 结果。
+
 Agent 完成验证和自查后默认推送任务分支并创建 PR；合并须维护者明确要求。维护者身份遵守 [AGENTS.md](.agents/AGENTS.md)；外部贡献者保留自己的公开身份。合并由维护者操作；不以分诊或机器人 Approval 自动合并。推荐 Squash；发布和安装仍各自遵守现有授权与验证流程。
 
 ### 减少 CI 排队
@@ -68,5 +70,5 @@ Agent 完成验证和自查后默认推送任务分支并创建 PR；合并须�
 
 - 评审意见在本地全部改完、跑过受影响的测试后一次推送，不逐条推送；CI 运行中不为小改动再推。
 - 推送前先在本地跑受影响的测试，不把 CI 当作第一次验证；本地验证是合并前唯一的必需检查。
-- recorder/CLI 升版本时，把版本号改动放进最后一个功能 PR，不再单开 `chore(cli): release` PR；合并后仍在 main 上执行 `npm run publish:cli`。main 的 CI 只保留最新一次 run，发布记录需要该提交的 CI 结果时，等它跑完再合并下一个 PR。
+- recorder/CLI 升版本时，把版本号改动放进最后一个功能 PR，不再单开 `chore(cli): release` PR；合并后在 main 上执行 `npm run publish:cli`（公开）或 `npm run publish:cli:internal -- --publish`（内网 `@ali/`，先跑 `build:cli` 与 `check:cli-release`，见 [验证与交付](docs/agent/verification.md)）。main 的 CI 只保留最新一次 run，发布记录需要该提交的 CI 结果时，等它跑完再合并下一个 PR。
 - 不必等 CI 跑完再合并，也不必为跟上 main 更新分支；main 的 CI 变红时优先修复。
