@@ -125,10 +125,10 @@ export function useSessionHoverCard(session: SessionMeta, cwd: string, projectNa
         onMouseEnter={clear} onMouseLeave={dismiss}>
         <div className="session-hover-heading">
           <strong>{session.preview || '(无标题)'}</strong>
-          <span className="session-hover-age">{validTime ? relTime(session.mtime) : '时间未知'}</span>
         </div>
         <div className="session-hover-project"><Icon name="folder" />
           <span className="session-hover-project-name">{cwd ? projectName || cwd.split('/').filter(Boolean).at(-1) || cwd : '未关联工作目录'}</span>
+          <span className="session-hover-age">{validTime ? relTime(session.mtime) : '时间未知'}</span>
           <span className="session-hover-provider">{providerNames[session.providerId]}{running ? ` · ${runLabel}` : ''}</span>
         </div>
       </div>, document.body
