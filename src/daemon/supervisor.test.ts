@@ -187,9 +187,21 @@ describe('daemon supervisor', () => {
 
   it('forwards only allowlisted variables: SCRY_REMOTE_RELAY_SSH has no reader and is dropped', () => {
     const base = { stateDirectory: '/s', userDataDir: '/u', appPath: '/a', resourcesPath: '/r', appVersion: '1', isPackaged: true, startedBy: 'x' }
-    const env = daemonLaunchEnvironment({ ...base, source: { HOME: '/h', SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_REMOTE_RELAY_SSH: 'host', NODE_OPTIONS: '--require /x' } })
+    const env = daemonLaunchEnvironment({
+      ...base,
+      source: {
+        HOME: '/h',
+        SCRY_REMOTE_RELAY_ENABLED: '0',
+        SCRY_ORCHESTRATION: 'shadow',
+        SCRY_ORCHESTRATION_FULLFSYNC: '1',
+        SCRY_REMOTE_RELAY_SSH: 'host',
+        NODE_OPTIONS: '--require /x'
+      }
+    })
     expect(env.HOME).toBe('/h')
     expect(env.SCRY_REMOTE_RELAY_ENABLED).toBe('0')
+    expect(env.SCRY_ORCHESTRATION).toBe('shadow')
+    expect(env.SCRY_ORCHESTRATION_FULLFSYNC).toBe('1')
     expect('SCRY_REMOTE_RELAY_SSH' in env).toBe(false)
     expect('NODE_OPTIONS' in env).toBe(false)
   })

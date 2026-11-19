@@ -22,39 +22,22 @@ import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { createHostRuntime } from '../host-runtime/host-runtime'
 import { remoteLanConfig } from '../main/remote/remote-lan-config'
 import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
-import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
+import type { RemoteHostService } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
-import { openLocalChannel, type LocalChannel } from './local-channel'
+import { openLocalChannel } from './local-channel'
 import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
 import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
 import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
 import { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
-import { createDaemonTerminalService, type DaemonTerminalServiceDeps } from './terminal-service'
-import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
+import { createDaemonTerminalService } from './terminal-service'
+import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
+import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
+import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 
-export interface DaemonHostProcessOptions {
-  userDataDir: string
-  daemonStateDirectory: string
-  appPath: string
-  resourcesPath: string
-  appVersion: string
-  isPackaged: boolean
-  gatewayLabel?: string
-  createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
-  log?: (line: string) => void
-  /** Tests: a fake PTY, recordings in this process, a fixed shell environment, a short reclaim. */
-  terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
-}
-
-export interface DaemonHostProcess {
-  service: RemoteHostService
-  channel: LocalChannel
-  enrollSocket: LocalEnrollSocket
-  dispose(): Promise<void>
-}
+export type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 
 const unavailable = (capability: string): never => {
   throw new Error(`daemon_capability_unavailable:${capability}`)
@@ -321,6 +304,13 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
 
   await refreshRemoteProviderSnapshot()
+  const orchestrationShadow = attachDaemonOrchestrationShadow({
+    userDataDir: options.userDataDir,
+    env: process.env,
+    conversationStore: catalog.conversationStore,
+    log,
+    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {})
+  })
   const remoteStateDirectory = join(options.userDataDir, 'remote')
   const relay = await resolveRemoteRelay(remoteStateDirectory)
   const service = await createHostRuntime({
@@ -337,6 +327,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     toolPanels: undefined,
     managedLaunches: conversationSend.launches,
     onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
+    ...(orchestrationShadow ? { onLedgerEvent: orchestrationShadow.onLedgerEvent } : {}),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
       runs: () => pipeline.runs,
@@ -385,6 +376,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     service,
     channel,
     enrollSocket,
+    ...(orchestrationShadow ? { orchestrationShadow } : {}),
     dispose: async () => {
       if (disposed) return
       disposed = true
@@ -398,6 +390,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       await channel.close()
       await localHost.close()
       await service.dispose()
+      orchestrationShadow?.close()
     }
   }
 }

@@ -110,7 +110,11 @@ const FORWARDED_ENV = [
   'SCRY_DAEMON_SMOKE_PROVIDER',
   // Measurement only: writes per-stage wall-clock marks that the timing script folds
   // into one timeline. Off unless the variable is set; no product behavior changes.
-  'SCRY_RUN_TIMING'
+  'SCRY_RUN_TIMING',
+  // P4 orchestration switch & measurement controls (read only by the daemon).
+  'SCRY_ORCHESTRATION',
+  'SCRY_ORCHESTRATION_FULLFSYNC',
+  'SCRY_ORCHESTRATION_PENDING_TTL_MS'
 ] as const
 
 export function daemonLaunchEnvironment(input: {

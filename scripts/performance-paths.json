@@ -408,6 +408,7 @@
       ],
       "sources": [
         "src/main/remote",
+        "src/host-runtime/orchestration/event-sink.ts",
         "src/renderer/components/RemoteChat.tsx",
         "src/renderer/components/RemoteChatFoundation.tsx",
         "src/renderer/components/RemoteChatControls.tsx",

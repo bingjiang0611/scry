@@ -63,6 +63,7 @@ export interface HostControllerFactoryDependencies {
   }): Promise<void>
   onDispatchRefused?: HostControllerDependencies['onDispatchRefused']
   onRunActivity?: HostControllerDependencies['onRunActivity']
+  onLedgerEvent?: HostControllerDependencies['onLedgerEvent']
   gate: ProviderOperationGate
   // Tests and embedded hosts may inject an equivalent store. Production omits this
   // and always owns the file store inside the dedicated worker.
@@ -191,6 +192,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     runProvider: deps.startRun,
     ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
     ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
+    ...(deps.onLedgerEvent ? { onLedgerEvent: deps.onLedgerEvent } : {}),
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
     ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),

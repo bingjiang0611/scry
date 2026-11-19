@@ -58,3 +58,28 @@ export function recordRunStage(runId: string, stage: RunStage): void {
     })}\n`)
   } catch { /* observation must never block a run */ }
 }
+
+/** Records one orchestration commit timing sample when SCRY_RUN_TIMING=1 (P4-1 measurement). */
+export function recordOrchestrationCommitTiming(input: {
+  runId: string
+  ledgerRunId: string
+  commitKind: string
+  durationMs: number
+  preFirstToken: boolean
+  fullfsync?: boolean
+}): void {
+  if (target === null) return
+  try {
+    appendFileSync(target, `${JSON.stringify({
+      stage: 'orchCommit',
+      runId: input.runId,
+      ledgerRunId: input.ledgerRunId,
+      commitKind: input.commitKind,
+      durationMs: input.durationMs,
+      preFirstToken: input.preFirstToken,
+      ...(input.fullfsync !== undefined ? { fullfsync: input.fullfsync } : {}),
+      at: performance.timeOrigin + performance.now(),
+      pid: process.pid
+    })}\n`)
+  } catch { /* observation must never block a run */ }
+}
