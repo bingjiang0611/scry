@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import type { ConversationStore } from '../main/conversation-store'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
-import { SessionLedgerError, type LedgerEvent, type LedgerRecovery, type LedgerStore } from '../main/remote/session-ledger'
+import {
+  SessionLedgerError,
+  type LedgerEvent,
+  type LedgerRecovery,
+  type LedgerSnapshot,
+  type LedgerStore
+} from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
@@ -89,43 +95,89 @@ export async function attachDaemonOrchestrationAuthority<
     ...(options.beforeCommitHook ? { beforeCommitHook: options.beforeCommitHook } : {})
   })
 
-  let deferredPlan: LegacyLedgerPlan | undefined
-  let deferredStarted = false
-  let cancelDeferred: (() => void) | undefined
-  let resolveImportComplete: (() => void) | undefined
-  let importComplete: Promise<void> = Promise.resolve()
+  try {
+    let deferredPlan: LegacyLedgerPlan | undefined
+    let deferredStarted = false
+    let cancelDeferred: (() => void) | undefined
+    let resolveImportComplete: (() => void) | undefined
+    let importComplete: Promise<void> = Promise.resolve()
 
-  const plan = await loadLegacyLedgerPlanAsync(sink, options.userDataDir)
-  if (plan.unimportedRuns.length > deferredThreshold) {
-    importLegacyStateIncrementally({
-      sink,
-      userDataDir: options.userDataDir,
+    const plan = await loadLegacyLedgerPlanAsync(sink, options.userDataDir)
+    if (plan.unimportedRuns.length > deferredThreshold) {
+      importLegacyStateIncrementally({
+        sink,
+        userDataDir: options.userDataDir,
+        pendingTtlMs,
+        reconcileOpenRuns: true,
+        shadowOnly: false,
+        openOnly: true,
+        plan,
+        resolveTurnOrdinal
+      })
+      deferredPlan = plan
+      importComplete = new Promise<void>((resolve) => {
+        resolveImportComplete = resolve
+      })
+    } else if (plan.unimportedRuns.length > 0 || plan.lastSeq > plan.currentLedgerSeq) {
+      importLegacyStateIncrementally({
+        sink,
+        userDataDir: options.userDataDir,
+        pendingTtlMs,
+        reconcileOpenRuns: true,
+        shadowOnly: false,
+        plan,
+        resolveTurnOrdinal
+      })
+    }
+
+    // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
+    const recovery = recoverOrchestrationOnStartup({ sink, leaseOwner })
+    await reconcileTwoLedgersOnStartup({ sink, conversationStore: options.conversationStore() })
+
+    return buildAuthorityRuntime({
+      options,
+      mode,
+      fullfsync,
+      checkpointFullfsync,
       pendingTtlMs,
-      reconcileOpenRuns: true,
-      shadowOnly: false,
-      openOnly: true,
-      plan,
-      resolveTurnOrdinal
-    })
-    deferredPlan = plan
-    importComplete = new Promise<void>((resolve) => {
-      resolveImportComplete = resolve
-    })
-  } else if (plan.unimportedRuns.length > 0 || plan.lastSeq > plan.currentLedgerSeq) {
-    importLegacyStateIncrementally({
+      leaseOwner,
+      resolveTurnOrdinal,
       sink,
-      userDataDir: options.userDataDir,
-      pendingTtlMs,
-      reconcileOpenRuns: true,
-      shadowOnly: false,
-      plan,
-      resolveTurnOrdinal
+      recovery,
+      deferredPlan,
+      importComplete,
+      resolveImportComplete,
+      setDeferredControl: (cancel) => { cancelDeferred = cancel },
+      getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
+  } catch (error) {
+    sink.close()
+    throw error
   }
+}
 
-  // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
-  const recovery = recoverOrchestrationOnStartup({ sink, leaseOwner })
-  await reconcileTwoLedgersOnStartup({ sink, conversationStore: options.conversationStore() })
+function buildAuthorityRuntime<
+  State extends RunRegistryState,
+  Control extends RunRegistryControl
+>(ctx: {
+  options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
+  mode: OrchestrationModeResolution
+  fullfsync: boolean
+  checkpointFullfsync: boolean
+  pendingTtlMs: number
+  leaseOwner: string
+  resolveTurnOrdinal: ReturnType<typeof createConversationOrdinalResolver>
+  sink: EventSink
+  recovery: RecoverOrchestrationSummary
+  deferredPlan: LegacyLedgerPlan | undefined
+  importComplete: Promise<void>
+  resolveImportComplete: (() => void) | undefined
+  setDeferredControl: (cancel: (() => void) | undefined) => void
+  getDeferredControl: () => { deferredStarted: boolean; cancelDeferred: (() => void) | undefined; setStarted: () => void }
+}): DaemonOrchestrationAuthority {
+  const { options, mode, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
+  let deferredPlan = ctx.deferredPlan
+  const { importComplete, resolveImportComplete } = ctx
 
   const engine = new AuthorityEngine({
     sink,
@@ -150,7 +202,8 @@ export async function attachDaemonOrchestrationAuthority<
       const fileStore = new SessionLedgerFileStore(ledgerDirectory)
       backingFileStore = fileStore
       const initial: LedgerRecovery = fileStore.loadRecovery?.() ?? { events: fileStore.loadAll() }
-      const memoryEvents: LedgerEvent[] = [...initial.events]
+      let currentSnapshot: LedgerSnapshot | undefined = initial.snapshot
+      let memoryEvents: LedgerEvent[] = [...initial.events]
       const mirror = new LegacyMirrorWorker({
         sink,
         ledgerStore: fileStore,
@@ -165,12 +218,32 @@ export async function attachDaemonOrchestrationAuthority<
         assertAvailable: () => {
           if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
         },
-        loadAll: () => [...memoryEvents],
-        loadRecovery: () => ({ ...(initial.snapshot ? { snapshot: initial.snapshot } : {}), events: [...memoryEvents] }),
+        loadAll: () => [...(currentSnapshot?.retainedEvents ?? []), ...memoryEvents],
+        loadRecovery: () => ({
+          ...(currentSnapshot ? { snapshot: structuredClone(currentSnapshot) } : {}),
+          events: [...memoryEvents]
+        }),
+        shouldCompact: (nextEvent) => {
+          if ((currentSnapshot?.retainedEvents.length ?? 0) + memoryEvents.length >= 8192) return true
+          try {
+            return fileStore.shouldCompact(nextEvent)
+          } catch {
+            return false
+          }
+        },
+        compact: (snapshot) => {
+          if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
+          // Snapshot MUST be deep-cloned: SessionLedger assigns `this.#events = snapshot.retainedEvents`
+          // and pushes subsequent events onto that same array before our async mirror serializes it.
+          const frozen = structuredClone(snapshot)
+          currentSnapshot = frozen
+          memoryEvents = []
+          mirror.enqueueCompact(frozen)
+        },
         append: (event) => {
           if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
           memoryEvents.push(event)
-          // Async off-critical-path H1 mirror (plan §9): ZERO sync file fsync during submit/dispatch.
+          // Idle-flushed bounded H1 mirror (plan §9): ZERO sync file fsync pre-first-token.
           mirror.enqueue(event)
         }
       }
@@ -337,11 +410,12 @@ export async function attachDaemonOrchestrationAuthority<
 
   let closed = false
   const startImport = (): void => {
-    if (!deferredPlan || deferredStarted || closed || sink.isWriteIndeterminate()) {
+    const ctrl = ctx.getDeferredControl()
+    if (!deferredPlan || ctrl.deferredStarted || closed || sink.isWriteIndeterminate()) {
       resolveImportComplete?.()
       return
     }
-    deferredStarted = true
+    ctrl.setStarted()
     const targetPlan = deferredPlan
     deferredPlan = undefined
     const handle = startDeferredLegacyImport({
@@ -353,7 +427,7 @@ export async function attachDaemonOrchestrationAuthority<
       plan: targetPlan,
       resolveTurnOrdinal
     })
-    cancelDeferred = handle.cancel
+    ctx.setDeferredControl(handle.cancel)
     handle.promise
       .then((summary) => {
         options.log(
@@ -387,7 +461,7 @@ export async function attachDaemonOrchestrationAuthority<
     close: async () => {
       if (closed) return
       closed = true
-      cancelDeferred?.()
+      ctx.getDeferredControl().cancelDeferred?.()
       resolveImportComplete?.()
       options.conversationStore().setTurnSettledObserver(undefined)
       await legacyMirror?.close()
