@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { cpus, loadavg, platform, release, tmpdir } from 'node:os'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
@@ -215,15 +216,13 @@ async function runDataset(mod, spec) {
     const preStart = performance.now()
     const sink = mod.EventSink.open({ userDataDir: root, fullfsync: false, checkpointFullfsync: true })
     const afterOpen = performance.now()
-    const parseLoopLagSamples = []
-    let parseLastTick = performance.now()
-    const parseProbe = setInterval(() => {
-      const now = performance.now()
-      parseLoopLagSamples.push(Math.max(0, now - parseLastTick - 5))
-      parseLastTick = now
-    }, 5)
+    // Use monitorEventLoopDelay + a trailing setImmediate tick so structured-clone deserialization
+    // stalls at the end of `loadLegacyLedgerPlanAsync` are ALWAYS captured (W9 Must-Fix 8).
+    const parseMonitor = monitorEventLoopDelay({ resolution: 1 })
+    parseMonitor.enable()
     const plan = await mod.loadLegacyLedgerPlanAsync(sink, root)
-    clearInterval(parseProbe)
+    await new Promise((r) => setImmediate(r))
+    parseMonitor.disable()
     const afterPlan = performance.now()
     const openSummary = mod.importLegacyStateIncrementally({
       sink,
@@ -236,14 +235,8 @@ async function runDataset(mod, spec) {
     })
     const afterOpenImport = performance.now()
 
-    const loopLagSamples = []
-    let lastTick = performance.now()
-    const probe = setInterval(() => {
-      const now = performance.now()
-      loopLagSamples.push(Math.max(0, now - lastTick - 5))
-      lastTick = now
-    }, 5)
-
+    const backfillMonitor = monitorEventLoopDelay({ resolution: 1 })
+    backfillMonitor.enable()
     const postStart = performance.now()
     const deferred = mod.startDeferredLegacyImport({
       sink,
@@ -254,16 +247,16 @@ async function runDataset(mod, spec) {
       plan
     })
     const deferredSummary = await deferred.promise
+    await new Promise((r) => setImmediate(r))
     const postEnd = performance.now()
-    clearInterval(probe)
+    backfillMonitor.disable()
 
     const noopStart = performance.now()
     const noopPlan = await mod.loadLegacyLedgerPlanAsync(sink, root)
     const noopEnd = performance.now()
     sink.close()
 
-    const sortedParseLag = [...parseLoopLagSamples].sort((a, b) => a - b)
-    const sortedLag = [...loopLagSamples].sort((a, b) => a - b)
+    const nsToMs = (ns) => Number((Math.max(0, ns) / 1e6).toFixed(2))
     return {
       case: spec.name,
       shape: {
@@ -279,7 +272,8 @@ async function runDataset(mod, spec) {
       preSocket: {
         openDbMs: Number((afterOpen - preStart).toFixed(2)),
         parsePlanOnceMs: Number((afterPlan - afterOpen).toFixed(2)),
-        parseMainThreadMaxLagMs: sortedParseLag.length > 0 ? Number(sortedParseLag[sortedParseLag.length - 1].toFixed(2)) : 0,
+        parseMainThreadMaxLagMs: nsToMs(parseMonitor.max),
+        parseMainThreadP95LagMs: nsToMs(parseMonitor.percentile(95)),
         importOpenRunsMs: Number((afterOpenImport - afterPlan).toFixed(2)),
         totalPreSocketBlockMs: Number((afterOpenImport - preStart).toFixed(2)),
         importedOpenRuns: openSummary.importedRuns
@@ -289,11 +283,10 @@ async function runDataset(mod, spec) {
         importedRuns: deferredSummary.importedRuns,
         rejectedCommands: deferredSummary.rejectedCommands,
         finalLegacyLedgerSeq: deferredSummary.legacyLedgerSeq,
-        eventLoopProbeSamples: sortedLag.length,
         eventLoopPauseMs: {
-          p50: pct(sortedLag, 0.5),
-          p95: pct(sortedLag, 0.95),
-          max: sortedLag.length > 0 ? Number(sortedLag[sortedLag.length - 1].toFixed(2)) : 0
+          p50: nsToMs(backfillMonitor.percentile(50)),
+          p95: nsToMs(backfillMonitor.percentile(95)),
+          max: nsToMs(backfillMonitor.max)
         }
       },
       subsequentStartupNoopPlanMs: Number((noopEnd - noopStart).toFixed(2)),

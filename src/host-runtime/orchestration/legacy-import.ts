@@ -4,7 +4,7 @@ import { canonicalJson, sha256Hex } from './canonical-json'
 import { createConversationOrdinalResolver, type TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
 import { importCatalogEntries, repairMissingShadowBodies } from './legacy-catalog-and-repair'
-import { readLegacyLedgerAsync, readLegacyLedgerReadOnly, type LegacyRunState } from './legacy-ledger-reader'
+import { readLegacyLedgerReadOnly, readLegacyLedgerStreamedAsync, type LegacyRunState } from './legacy-ledger-reader'
 import { parseLedgerIntentRouting } from './shadow-routing'
 import { DEFAULT_PENDING_TTL_MS } from './types'
 
@@ -97,7 +97,7 @@ export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): Lega
   return buildLegacyLedgerPlan(currentLedgerSeq, readLegacyLedgerReadOnly(ledgerDir))
 }
 
-/** Off-main-thread variant of `loadLegacyLedgerPlan` using `worker_threads` (W9 P4-2). */
+/** Off-main-thread variant of `loadLegacyLedgerPlan` using streamed `worker_threads` chunks (W9 P4-2). */
 export async function loadLegacyLedgerPlanAsync(sink: EventSink, userDataDir: string): Promise<LegacyLedgerPlan> {
   const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
   const ledgerDir = join(userDataDir, 'remote', 'ledger')
@@ -110,8 +110,24 @@ export async function loadLegacyLedgerPlanAsync(sink: EventSink, userDataDir: st
       runsByLedgerId: new Map()
     }
   }
-  const legacy = await readLegacyLedgerAsync(ledgerDir)
-  return buildLegacyLedgerPlan(currentLedgerSeq, legacy)
+  const streamed = await readLegacyLedgerStreamedAsync(ledgerDir, { minSeqExclusive: currentLedgerSeq })
+  if (streamed.lastSeq <= currentLedgerSeq) {
+    return {
+      currentLedgerSeq,
+      lastSeq: streamed.lastSeq,
+      unimportedRuns: [],
+      openRuns: [],
+      runsByLedgerId: streamed.runs
+    }
+  }
+  const openRuns = streamed.sortedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
+  return {
+    currentLedgerSeq,
+    lastSeq: streamed.lastSeq,
+    unimportedRuns: streamed.sortedRuns,
+    openRuns,
+    runsByLedgerId: streamed.runs
+  }
 }
 
 /** Counts legacy runs with `lastSeq > legacy_ledger_seq` to decide sync vs deferred post-socket import. */
@@ -393,10 +409,19 @@ export function startDeferredLegacyImport(
     let offset = 0
     let importedRuns = 0
     let rejectedCommands = 0
+    sink.setIdleCheckpointPaused(true)
+    const finishResolve = (summary: LegacyImportSummary): void => {
+      sink.setIdleCheckpointPaused(false)
+      resolve(summary)
+    }
+    const finishReject = (error: unknown): void => {
+      sink.setIdleCheckpointPaused(false)
+      reject(error)
+    }
 
     const step = (): void => {
       if (cancelled || sink.isWriteIndeterminate()) {
-        resolve({
+        finishResolve({
           importedRuns,
           importedSessions: 0,
           rejectedCommands,
@@ -435,7 +460,7 @@ export function startDeferredLegacyImport(
           currentLedgerSeq = plan.lastSeq
         }
         const catalog = importCatalogEntries(sink, userDataDir, now, batchSize)
-        resolve({
+        finishResolve({
           importedRuns,
           importedSessions: catalog.importedSessions,
           rejectedCommands: rejectedCommands + catalog.rejectedCommands,
@@ -443,7 +468,7 @@ export function startDeferredLegacyImport(
           catalogSha256: catalog.catalogSha256
         })
       } catch (error) {
-        reject(error)
+        finishReject(error)
       }
     }
 

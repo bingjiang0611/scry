@@ -422,6 +422,7 @@
         "src/host-runtime/orchestration/authority-dispatch.ts",
         "src/host-runtime/orchestration/authority-engine.ts",
         "src/host-runtime/orchestration/recovery.ts",
+        "src/host-runtime/orchestration/recorder-evidence.ts",
         "src/host-runtime/orchestration/legacy-mirror.ts",
         "src/daemon/orchestration-shadow.ts",
         "src/daemon/orchestration-authority.ts",

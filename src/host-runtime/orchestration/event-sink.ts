@@ -84,6 +84,7 @@ export class EventSink {
   #inBatchTransaction = false
   #checkpointIntervalMs: number
   #checkpointTimer: ReturnType<typeof setTimeout> | null = null
+  #idleCheckpointPaused = false
   #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
 
@@ -99,8 +100,24 @@ export class EventSink {
     this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
   }
 
+  /**
+   * Pauses/resumes the idle WAL PASSIVE checkpoint timer during bulk deferred backfill
+   * so a multi-megabyte WAL checkpoint never fires synchronously mid-backfill on the main thread.
+   */
+  setIdleCheckpointPaused(paused: boolean): void {
+    this.#idleCheckpointPaused = paused
+    if (paused && this.#checkpointTimer) {
+      clearTimeout(this.#checkpointTimer)
+      this.#checkpointTimer = null
+    } else if (!paused) {
+      this.scheduleIdleCheckpoint()
+    }
+  }
+
   private scheduleIdleCheckpoint(): void {
-    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#checkpointTimer) return
+    if (this.#idleCheckpointPaused || this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#checkpointTimer) {
+      return
+    }
     const timer = setTimeout(() => {
       this.#checkpointTimer = null
       this.checkpointPassive()

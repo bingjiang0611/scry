@@ -15,6 +15,8 @@ export interface LegacyRunState {
   terminalDetail?: string
 }
 
+const STREAM_CHUNK_SIZE = 500
+
 const LEGACY_LEDGER_WORKER_SOURCE = `
 'use strict';
 const { existsSync, readFileSync } = require('node:fs');
@@ -22,6 +24,9 @@ const { join } = require('node:path');
 const { parentPort, workerData } = require('node:worker_threads');
 
 const ledgerDir = workerData.ledgerDir;
+const minSeqExclusive = typeof workerData.minSeqExclusive === 'number' ? workerData.minSeqExclusive : -1;
+const chunkSize = typeof workerData.chunkSize === 'number' && workerData.chunkSize > 0 ? workerData.chunkSize : 500;
+const includeAllRuns = Boolean(workerData.includeAllRuns);
 const runs = new Map();
 let lastSeq = 0;
 
@@ -91,40 +96,97 @@ if (existsSync(logPath)) {
   }
 }
 
-parentPort.postMessage({ lastSeq, entries: [...runs.entries()] });
+// Perform filtering and sorting inside the worker thread so main thread never sorts 100k items.
+const selected = [];
+if (includeAllRuns) {
+  for (const run of runs.values()) selected.push(run);
+} else if (lastSeq > minSeqExclusive) {
+  for (const run of runs.values()) {
+    if (run.lastSeq > minSeqExclusive) selected.push(run);
+  }
+}
+selected.sort((a, b) => a.intentSeq - b.intentSeq);
+
+let offset = 0;
+function sendNext() {
+  if (offset < selected.length) {
+    const slice = selected.slice(offset, offset + chunkSize);
+    offset += slice.length;
+    parentPort.postMessage({ type: 'chunk', runs: slice });
+  } else {
+    parentPort.postMessage({ type: 'done', lastSeq });
+  }
+}
+
+parentPort.on('message', (cmd) => {
+  if (cmd === 'next') sendNext();
+});
+sendNext();
 `
+
+export interface StreamedLegacyLedgerResult {
+  lastSeq: number
+  sortedRuns: LegacyRunState[]
+  runs: Map<string, LegacyRunState>
+}
 
 /**
  * Off-main-thread parser for H1 `session-ledger.snapshot.json` + `session-ledger.log` (W9 P4-2).
- * Uses an inline `worker_threads` worker so 100k-run ledgers never block the daemon event loop.
+ * Filters & sorts inside the worker and streams 500-run chunks with `setImmediate` backpressure so
+ * main-thread structured-clone deserialization never blocks the event loop >50 ms even at 100k runs.
  */
-export function readLegacyLedgerAsync(
-  ledgerDir: string
-): Promise<{ lastSeq: number; runs: Map<string, LegacyRunState> }> {
+export function readLegacyLedgerStreamedAsync(
+  ledgerDir: string,
+  options?: { minSeqExclusive?: number; includeAllRuns?: boolean; chunkSize?: number }
+): Promise<StreamedLegacyLedgerResult> {
   if (!existsSync(ledgerDir)) {
-    return Promise.resolve({ lastSeq: 0, runs: new Map() })
+    return Promise.resolve({ lastSeq: 0, sortedRuns: [], runs: new Map() })
   }
   return new Promise((resolve, reject) => {
     const worker = new Worker(LEGACY_LEDGER_WORKER_SOURCE, {
       eval: true,
-      workerData: { ledgerDir }
+      workerData: {
+        ledgerDir,
+        minSeqExclusive: options?.minSeqExclusive ?? -1,
+        includeAllRuns: options?.includeAllRuns ?? false,
+        chunkSize: options?.chunkSize ?? STREAM_CHUNK_SIZE
+      }
     })
+    const sortedRuns: LegacyRunState[] = []
+    const runs = new Map<string, LegacyRunState>()
     let settled = false
-    worker.once('message', (msg: { lastSeq: number; entries: Array<[string, LegacyRunState]> }) => {
-      settled = true
-      resolve({ lastSeq: msg.lastSeq, runs: new Map(msg.entries) })
-    })
-    worker.once('error', (error) => {
+    const finish = (cb: () => void): void => {
       if (settled) return
       settled = true
-      reject(error)
-    })
-    worker.once('exit', (code) => {
+      void worker.terminate()
+      cb()
+    }
+    worker.on('message', (msg: { type: 'chunk'; runs: LegacyRunState[] } | { type: 'done'; lastSeq: number }) => {
       if (settled) return
-      settled = true
-      reject(new Error(`legacy ledger worker exited unexpectedly with code ${code}`))
+      if (msg.type === 'chunk') {
+        for (const run of msg.runs) {
+          sortedRuns.push(run)
+          runs.set(run.ledgerRunId, run)
+        }
+        setImmediate(() => {
+          if (!settled) worker.postMessage('next')
+        })
+        return
+      }
+      finish(() => resolve({ lastSeq: msg.lastSeq, sortedRuns, runs }))
     })
+    worker.once('error', (error) => finish(() => reject(error)))
+    worker.once('exit', (code) =>
+      finish(() => reject(new Error(`legacy ledger worker exited unexpectedly with code ${code}`)))
+    )
   })
+}
+
+export async function readLegacyLedgerAsync(
+  ledgerDir: string
+): Promise<{ lastSeq: number; runs: Map<string, LegacyRunState> }> {
+  const streamed = await readLegacyLedgerStreamedAsync(ledgerDir, { includeAllRuns: true })
+  return { lastSeq: streamed.lastSeq, runs: streamed.runs }
 }
 
 /** Read-only parser for H1 `session-ledger.snapshot.json` + `session-ledger.log`. */

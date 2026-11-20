@@ -368,4 +368,17 @@ describe('P4-2 gap 3: off-main-thread legacy ledger parsing', () => {
       }
     })
   })
+
+  it('includes performance-orchestration-scenario.ts in ABAB harness without static orchestration imports', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { pathToFileURL } = await import('node:url')
+    const harnessPath = pathToFileURL(join(process.cwd(), 'scripts/performance-abab-harness.mjs')).href
+    const { performanceAbabHarnessFiles } = (await import(/* @vite-ignore */ harnessPath)) as {
+      performanceAbabHarnessFiles: string[]
+    }
+    expect(performanceAbabHarnessFiles).toContain('scripts/performance-orchestration-scenario.ts')
+    const scenarioSrc = readFileSync(join(process.cwd(), 'scripts/performance-orchestration-scenario.ts'), 'utf8')
+    // Must not have static value imports from src/host-runtime/orchestration/ so baseline worktrees (e.g. main) never crash.
+    expect(scenarioSrc).not.toMatch(/^\s*import\s+(?!type\b).*src\/host-runtime\/orchestration\//m)
+  })
 })

@@ -1,69 +1,112 @@
-import { join } from 'node:path'
+import { existsSync, realpathSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { expect } from 'vitest'
-import { canonicalJson, sha256Hex } from '../src/host-runtime/orchestration/canonical-json'
-import { EventSink } from '../src/host-runtime/orchestration/event-sink'
+import { buildMcpExecutionSnapshot } from '../src/main/mcp-execution-trust'
 import type { Fixture, Scenario } from './performance-baseline-fixture'
 
-/** P4-2 pre-first-token orchestration commit budget scenario (P95 <= 8 ms absolute). */
+const PEER_SHA = 'b'.repeat(64)
+
+type LoadedOrchestrationModules = {
+  EventSink: typeof import('../src/host-runtime/orchestration/event-sink').EventSink
+  AuthorityEngine: typeof import('../src/host-runtime/orchestration/authority-engine').AuthorityEngine
+}
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const authorityEngineModulePath = join(repoRoot, 'src/host-runtime/orchestration/authority-engine.ts')
+const eventSinkModulePath = join(repoRoot, 'src/host-runtime/orchestration/event-sink.ts')
+
+let loadedPromise: Promise<LoadedOrchestrationModules | null> | undefined
+
+function loadOrchestrationModules(): Promise<LoadedOrchestrationModules | null> {
+  if (!loadedPromise) {
+    if (!existsSync(authorityEngineModulePath) || !existsSync(eventSinkModulePath)) {
+      loadedPromise = Promise.resolve(null)
+    } else {
+      loadedPromise = Promise.all([
+        import('../src/host-runtime/orchestration/event-sink'),
+        import('../src/host-runtime/orchestration/authority-engine')
+      ]).then(([sinkMod, engineMod]) => ({
+        EventSink: sinkMod.EventSink,
+        AuthorityEngine: engineMod.AuthorityEngine
+      }))
+    }
+  }
+  return loadedPromise
+}
+
+/**
+ * P4-2 pre-first-token orchestration commit budget scenario (P95 <= 8 ms absolute).
+ * Exercises the REAL `AuthorityEngine.submitAsync` + `AuthorityEngine.beforeDispatch` hook path
+ * (`realpathSync`, workspace authorization, peer authorization, MCP trust gate, body check, 2 SQLite commits).
+ * Loads orchestration modules dynamically so ABAB baselines (e.g. `main`) lacking P4-2 modules never crash.
+ */
 export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scenario {
   let seq = 0
-  let sink: EventSink | undefined
-  const getSink = (): EventSink => {
-    if (!sink) {
-      sink = EventSink.open({
-        userDataDir: join(fixture.root, 'orch-bench'),
-        fullfsync: false,
-        checkpointFullfsync: true,
-        checkpointIntervalMs: 0,
-        maxActiveRuns: 10_000
-      })
-    }
-    return sink
-  }
+  let engine: InstanceType<LoadedOrchestrationModules['AuthorityEngine']> | undefined
+  const canonicalWorkspace = realpathSync(fixture.workspace)
+
   return {
     lane: 'disk',
-    workload: 'orchestration-pre-first-token=2-commits;fullfsync=false',
+    workload: 'orchestration-pre-first-token=real-hooks+2-commits;fullfsync=false',
     iterations: 2,
     warmups: 1,
     samples: 20,
-    run: () => {
-      const s = getSink()
+    run: async () => {
+      const mods = await loadOrchestrationModules()
+      if (!mods) {
+        return { skipped: 1, commits: 0 }
+      }
+      if (!engine) {
+        const sink = mods.EventSink.open({
+          userDataDir: join(fixture.root, 'orch-bench'),
+          fullfsync: false,
+          checkpointFullfsync: true,
+          checkpointIntervalMs: 0,
+          maxActiveRuns: 10_000
+        })
+        engine = new mods.AuthorityEngine({
+          sink,
+          leaseOwner: 'bench',
+          pendingTtlMs: 30_000
+        })
+      }
+
       const id = ++seq
-      const runId = `orch-bench-run-${id}`
-      const now = 1_700_000_000_000 + id
-      const submitPayload = {
-        runId,
-        sessionKey: `orch-bench-sess-${id}`,
-        ordinal: 1,
+      const detail = JSON.stringify({
+        providerId: 'codex',
+        cwd: canonicalWorkspace,
+        prompt: `fixed orchestration pre-first-token prompt #${id}`
+      })
+      const submitted = await engine.submitAsync({
+        peerCertSHA256: PEER_SHA,
+        grantScope: 'remote',
+        commandId: `bench-cmd-${id}`,
+        detail
+      })
+      expect(submitted.kind).toBe('accepted')
+      if (submitted.kind !== 'accepted') throw new Error(`unexpected submit result: ${submitted.kind}`)
+
+      const gate = engine.beforeDispatch({
+        runId: submitted.runId,
+        cwd: canonicalWorkspace,
         provider: 'codex',
         profile: null,
-        cwd: fixture.workspace,
-        promptPreview: 'fixed orchestration pre-first-token prompt',
-        claimMode: 'immediate' as const,
-        leaseOwner: 'bench',
-        origin: 'remote' as const
-      }
-      const s1 = s.execute({
-        type: 'run.submit',
-        commandId: `bench-cmd-${id}`,
-        actor: 'system',
-        scope: 'remote',
-        at: now,
-        payload: submitPayload,
-        payloadSha256: sha256Hex(canonicalJson(submitPayload))
+        actor: `peer:${PEER_SHA}`,
+        authorizeWorkspace: (cwd) => realpathSync(cwd),
+        isPeerAuthorized: (peer) => peer === PEER_SHA,
+        isProviderAuthenticating: () => false,
+        verifyTrustGate: () => {
+          const snapshot = buildMcpExecutionSnapshot({
+            providerId: 'codex',
+            cwd: canonicalWorkspace,
+            homeDir: fixture.home,
+            env: process.env
+          })
+          return snapshot.errors.length === 0
+        }
       })
-      expect(s1.kind).toBe('accepted')
-      const dispPayload = { runId, step: 'admitted_and_dispatched' as const }
-      const s2 = s.execute({
-        type: 'run.effect_result',
-        commandId: `bench-disp-${id}`,
-        actor: `effect:${runId}`,
-        scope: 'system',
-        at: now + 1,
-        payload: dispPayload,
-        payloadSha256: sha256Hex(canonicalJson(dispPayload))
-      })
-      expect(s2.kind).toBe('accepted')
+      expect(gate.ok).toBe(true)
       return { commits: 2, events: 3, outboxRows: 1 }
     }
   }
