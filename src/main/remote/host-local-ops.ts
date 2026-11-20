@@ -27,7 +27,7 @@ export interface LocalEndpointHandlers {
   }
   // Daemon-to-App pull/reply bridge for ExecutionTargetRouter (W10).
   executionTargetBridge?: {
-    poll(peer: string, waitMs: number): Promise<{ calls: unknown[] }>
+    poll(peer: string, waitMs: number, signal?: AbortSignal): Promise<{ calls: unknown[] }>
     submitResult(peer: string, input: { callId: string; ok: boolean; result?: unknown; error?: string }): { accepted: boolean }
   }
 }
@@ -80,13 +80,14 @@ const TARGET_RESULT_KEYS = ['op', 'keepAlive', 'protocol', 'callId', 'ok', 'resu
 export async function handleExecutionTargetWork(
   bridge: LocalEndpointHandlers['executionTargetBridge'],
   request: Record<string, unknown>,
-  peer: string
+  peer: string,
+  signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
   if (!bridge) return { error: 'unsupported_op' }
   const { waitMs } = request
   if (Object.keys(request).some((key) => !TARGET_WORK_KEYS.includes(key)) ||
     !Number.isSafeInteger(waitMs) || (waitMs as number) < 0) return { error: 'invalid_request' }
-  return await bridge.poll(peer, waitMs as number)
+  return await bridge.poll(peer, waitMs as number, signal)
 }
 
 /** The primary App's reply to a forwarded execution-target call; absent on the network endpoint. */

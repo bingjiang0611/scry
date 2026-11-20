@@ -6,7 +6,7 @@ import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { generateDesktopDeviceIdentity } from '../main/remote/desktop-transport'
 import { REMOTE_PROTOCOL_VERSION, type ExecutionTargetRef } from '../shared/desktop-remote'
-import { DEFAULT_MAX_FRAME } from '../main/remote/inner-mtls-protocol'
+import { MAX_EXECUTION_TARGET_RESULT_BYTES } from './app-execution-target-bridge'
 
 const TARGET: ExecutionTargetRef = {
   id: 'conn-mac2',
@@ -314,7 +314,7 @@ describe('daemon execution target routing via App bridge', () => {
       // Do not reply -> times out cleanly.
       await expect(req1Promise).resolves.toEqual({ error: 'execution_target_timeout' })
 
-      // Oversized result rejected by frame bound.
+      // Oversized result within wire cap is rejected by bridge immediately (not waiting for timeout).
       const work2Promise = appPoll.request({ op: 'executionTargetWork', waitMs: 5_000 })
       const req2Promise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, {
         op: 'target',
@@ -322,17 +322,76 @@ describe('daemon execution target routing via App bridge', () => {
         request: { op: 'projects' }
       })
       const work2 = await work2Promise
-      const huge = 'x'.repeat(DEFAULT_MAX_FRAME + 100)
-      await expect(appReply.request({
+      const overCap = 'x'.repeat(MAX_EXECUTION_TARGET_RESULT_BYTES + 16)
+      const res2 = await appReply.request({
         op: 'executionTargetResult',
         callId: work2.calls[0].callId,
         ok: true,
-        result: { blob: huge }
-      })).rejects.toThrow('socket_closed')
-      // Because result was rejected by frame cap, call times out cleanly rather than returning oversized data.
-      await expect(req2Promise).resolves.toEqual({ error: 'execution_target_timeout' })
+        result: { blob: overCap }
+      })
+      expect(res2).toMatchObject({ error: 'execution_target_response_too_large' })
+      await expect(req2Promise).resolves.toEqual({ error: 'execution_target_response_too_large' })
     } finally {
       appPoll.destroy()
+      appReply.destroy()
+      await host.dispose()
+    }
+  })
+
+  it('returns gateway-only discovery on App disconnect mid-flight and cancels dead targetWork polls over local.sock', async () => {
+    const { host, port } = await startDaemon({ executionTargetCallTimeoutMs: 10_000 })
+    const app = await enrollLocalWithLabel(host.service, 'Scry App 0.2.250')
+    const phone = await pairRemotePhone(host.service)
+    const appPoll1 = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
+    const appReply = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
+    try {
+      // 1. Only targetWork socket closes while control socket (appReply) stays open:
+      // dead poll must NOT steal the next call; replacement poll receives it immediately.
+      const deadWork = appPoll1.request({ op: 'executionTargetWork', waitMs: 5_000 }).catch(() => 'closed')
+      // Give the server a tick to register poll #1 before tearing down only appPoll1.
+      await new Promise((r) => setTimeout(r, 30))
+      appPoll1.destroy()
+      await deadWork
+
+      const appPoll2 = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
+      try {
+        const reqPromise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, {
+          op: 'target',
+          target: { id: TARGET.id, binding: TARGET.binding },
+          request: { op: 'projects' }
+        })
+        const work2 = await appPoll2.request({ op: 'executionTargetWork', waitMs: 5_000 })
+        expect(work2.calls).toHaveLength(1)
+        await appReply.request({
+          op: 'executionTargetResult',
+          callId: work2.calls[0].callId,
+          ok: true,
+          result: { projects: [{ path: '/mac2/ok', label: 'ok' }] }
+        })
+        await expect(reqPromise).resolves.toEqual({
+          projects: [{ path: '/mac2/ok', label: 'ok' }],
+          executionTarget: { id: TARGET.id, binding: TARGET.binding }
+        })
+
+        // 2. App disconnects completely mid-discovery -> discovery returns gateway-only targets: [] without error.
+        const discWorkPromise = appPoll2.request({ op: 'executionTargetWork', waitMs: 5_000 })
+        const discPromise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, { op: 'executionTargets' })
+        const discWork = await discWorkPromise
+        expect(discWork.calls).toHaveLength(1)
+        appPoll2.destroy()
+        appReply.destroy()
+        await expect(discPromise).resolves.toEqual({
+          executionTargets: {
+            version: 1,
+            gateway: { hostId: host.service.hostId, label: 'Mac1' },
+            targets: []
+          }
+        })
+      } finally {
+        appPoll2.destroy()
+      }
+    } finally {
+      appPoll1.destroy()
       appReply.destroy()
       await host.dispose()
     }

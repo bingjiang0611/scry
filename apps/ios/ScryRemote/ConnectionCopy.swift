@@ -104,8 +104,6 @@ enum ConnectionCopy {
   static let targetCapacity = "保留的执行主机已达上限，请先核实未完成的消息。"
   static let targetDiscoveryFailure = "暂时无法更新执行主机，已保留原目标。"
   static let forwardingUnsupported = "Mac1 尚不支持转发（unknown_op），请更新 Mac1 上的 Scry。"
-  static let targetGatewayOffline = "在这台 Mac 上打开 Scry 后才能使用其他主机"
-  static let targetsUnavailable = "当前主机暂未启用其他主机转发"
   static func targetDiscoveryDiagnostic(_ detail: String) -> String { "执行主机发现失败：\(detail)" }
   static func relayTLSHandshakeFailure(_ detail: String) -> String { "外层中继 TLS 握手失败：\(detail)" }
   static func hostTLSHandshakeFailure(_ detail: String) -> String { "内层主机 mTLS 握手失败：\(detail)" }

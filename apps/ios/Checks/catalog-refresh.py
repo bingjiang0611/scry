@@ -31,7 +31,7 @@ for path in [
     module_maps.append(package / '.build/checkouts' / path)
 sources = ['RemoteRunStore', 'RemoteRunClient', 'RemoteSessionRegistry', 'RemoteHistoryCache', 'RemoteConnection',
            'RemoteKeychain', 'RemotePairingClient', 'PairingCode', 'AppModel', 'ConnectionCopy',
-           'ExecutionTargetCoordinator', 'ConversationCopy']
+           'ExecutionTargetCoordinator', 'ExecutionTargetErrorPolicy', 'ConversationCopy']
 with tempfile.TemporaryDirectory(prefix='scry-catalog-binary-') as temporary:
     executable = Path(temporary) / 'catalog-refresh-checks'
     command = ['xcrun', 'swiftc', '-D', 'DEBUG', '-swift-version', '5', '-parse-as-library',
