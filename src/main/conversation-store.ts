@@ -90,12 +90,31 @@ export class ConversationStore implements ConversationLedger {
   private ownershipScan: { generation: number; promise: Promise<Map<string, Conversation>> } | undefined
   private ownershipGeneration = 0
   private recoveryFailure: Error | undefined
+  private beforeTurnSettled?: (info: {
+    conversationId: string
+    runId: string
+    ordinal: number
+    conversation: Conversation
+    delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+  }) => void
   private onTurnSettled?: (info: {
     conversationId: string
     runId: string
     conversation: Conversation
     delivery: Exclude<ConversationDelivery, { status: 'pending' }>
   }) => void
+
+  setBeforeTurnSettledObserver(
+    observer: ((info: {
+      conversationId: string
+      runId: string
+      ordinal: number
+      conversation: Conversation
+      delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+    }) => void) | undefined
+  ): void {
+    this.beforeTurnSettled = observer
+  }
 
   setTurnSettledObserver(
     observer: ((info: {
@@ -322,7 +341,7 @@ export class ConversationStore implements ConversationLedger {
   }
 
   async settle(id: string, runId: string, result: Exclude<ConversationDelivery, { status: 'pending' }>, finalItems: ConversationItemRef[], archive?: ConversationArchiveRef): Promise<Conversation> {
-    const settled = await settleConversationTurn(this, id, runId, result, finalItems, archive)
+    const settled = await settleConversationTurn(this, id, runId, result, finalItems, archive, this.beforeTurnSettled)
     try {
       this.onTurnSettled?.({ conversationId: id, runId, conversation: settled, delivery: result })
     } catch {

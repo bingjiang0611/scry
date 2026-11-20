@@ -16,7 +16,7 @@ import { redeliverGrantedCommitHooksAtStartup } from '../commit-hook-startup'
 import { resolveGrantedManagedCommitHookEnv, withoutCommitHookCapability } from './trust'
 
 export async function runStartupRecovery({
-  userDataDir, recorderCli, startupPerf, conversationStore, runs, deferMs = 250
+  userDataDir, recorderCli, startupPerf, conversationStore, runs, deferMs = 250, skipConversationRecovery = false
 }: {
   userDataDir: string
   recorderCli?: string
@@ -24,6 +24,8 @@ export async function runStartupRecovery({
   conversationStore: () => Pick<ConversationStore, 'recoverAll'>
   runs: { unsettledStates: () => ActiveRun[] }
   deferMs?: number
+  /** When P4-2 orchestration is active, two-ledger reconciliation runs before generic recoverAll. */
+  skipConversationRecovery?: boolean
 }): Promise<void> {
   // Let the first window render before touching historical recovery trees.
   if (deferMs > 0) await new Promise((resolve) => setTimeout(resolve, deferMs))
@@ -35,12 +37,14 @@ export async function runStartupRecovery({
   cleanupTraceTurnProgressTemps(userDataDir)
   await cleanupTraceArchiveTemps(userDataDir)
   startupPerf.mark('recovery_temps_cleaned')
-  try {
-    await conversationStore().recoverAll(new Set(runs.unsettledStates().map((run) => run.runId)))
-  } catch (error) {
-    // Do not discard corrupt ownership. Every legacy write still checks the store
-    // and rejects unreadable/conflicting ledgers or pending/unknown ownership.
-    console.warn('[scry] conversation startup recovery failed:', error)
+  if (!skipConversationRecovery) {
+    try {
+      await conversationStore().recoverAll(new Set(runs.unsettledStates().map((run) => run.runId)))
+    } catch (error) {
+      // Do not discard corrupt ownership. Every legacy write still checks the store
+      // and rejects unreadable/conflicting ledgers or pending/unknown ownership.
+      console.warn('[scry] conversation startup recovery failed:', error)
+    }
   }
   try {
     const traceProgress = await recoverTraceTurnProgress(userDataDir, {

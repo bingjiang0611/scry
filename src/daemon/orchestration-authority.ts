@@ -33,6 +33,7 @@ import {
   recoverOrchestrationOnStartup,
   type RecoverOrchestrationSummary
 } from '../host-runtime/orchestration/recovery'
+import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
@@ -131,7 +132,11 @@ export async function attachDaemonOrchestrationAuthority<
     }
 
     // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
-    const recovery = recoverOrchestrationOnStartup({ sink, leaseOwner })
+    const recovery = recoverOrchestrationOnStartup({
+      sink,
+      leaseOwner,
+      findRecorderEvidence: createRecorderEvidenceFinder(options.userDataDir, sink)
+    })
     await reconcileTwoLedgersOnStartup({ sink, conversationStore: options.conversationStore() })
 
     return buildAuthorityRuntime({
@@ -382,16 +387,16 @@ function buildAuthorityRuntime<
     isWriteIndeterminate: () => sink.isWriteIndeterminate()
   }
 
-  options.conversationStore().setTurnSettledObserver((info) => {
+  // Decision G: in authoritative `on` mode, commit `turn.record_delivery` to orchestration.db
+  // BEFORE `ConversationStore.persist` writes `conversations/<id>.json`.
+  options.conversationStore().setBeforeTurnSettledObserver((info) => {
     if (sink.isWriteIndeterminate()) return
-    const turn = info.conversation.turns.find((candidate) => candidate.runId === info.runId)
-    if (!turn) return
     const at = Date.now()
     const delivery = info.delivery.status
     const payload = {
       sessionKey: info.conversationId,
       runId: info.runId,
-      ordinal: turn.ordinal,
+      ordinal: info.ordinal,
       delivery,
       ...(info.delivery.status !== 'accepted' ? { reason: info.delivery.reason } : {}),
       settledAt: at,
@@ -463,7 +468,7 @@ function buildAuthorityRuntime<
       closed = true
       ctx.getDeferredControl().cancelDeferred?.()
       resolveImportComplete?.()
-      options.conversationStore().setTurnSettledObserver(undefined)
+      options.conversationStore().setBeforeTurnSettledObserver(undefined)
       await legacyMirror?.close()
       try {
         backingFileStore?.close()
