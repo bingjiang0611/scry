@@ -150,6 +150,11 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           : {})
       }
       const isImmediate = p.claimMode === 'immediate'
+      if (p.dispatchImmediately && isImmediate && !p.shadowOnly && !p.historicalBackfill) {
+        const dispatchFields = { stream: `run:${p.runId}`, sessionKey: p.sessionKey, runId: p.runId, cwd: p.cwd, payload: { runId: p.runId } }
+        events.push(makeEvent(cmd, events.length, { ...dispatchFields, type: 'run.admitted' }))
+        events.push(makeEvent(cmd, events.length, { ...dispatchFields, type: 'run.dispatched' }))
+      }
       const boundedPendingTtlMs = Math.min(Math.max(1, p.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS), DEFAULT_PENDING_TTL_MS)
       const effect = makeEffect(cmd, 0, {
         kind: 'provider.run.start',

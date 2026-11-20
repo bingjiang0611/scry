@@ -15,6 +15,13 @@ export function tryRealpath(cwd: string | null | undefined): string | null {
   }
 }
 
+export interface AuthorityImmediateDispatchChecks {
+  authorizeWorkspace: (cwd: string) => string
+  isPeerAuthorized: (peerCertSHA256: string) => boolean
+  isProviderAuthenticating: (provider: string, profile: string | null) => boolean
+  verifyTrustGate?: (provider: string, cwd: string | null, runId: string) => boolean
+}
+
 export interface AuthoritySubmitInput {
   peerCertSHA256?: string
   grantScope: 'local' | 'remote'
@@ -23,6 +30,8 @@ export interface AuthoritySubmitInput {
   /** Optional explicit runId (defaults to routing.canonicalRunId or fresh UUID). */
   runId?: string
   claimMode?: 'immediate' | 'queued'
+  /** Optional §2.3 pre-dispatch checks to enable single-commit immediate submit+dispatch. */
+  immediateDispatch?: AuthorityImmediateDispatchChecks
 }
 
 export interface AuthorityBeforeDispatchInput {
@@ -64,6 +73,29 @@ export function buildSubmitCommandForAuthority(options: {
       sink.getNextTurnOrdinal(routing.sessionKey))
     : undefined
   const detailBytes = input.detail ? Buffer.byteLength(input.detail, 'utf8') : 0
+  let claimMode = input.claimMode ?? ('immediate' as const)
+  let dispatchImmediately = false
+  if (input.immediateDispatch && claimMode === 'immediate') {
+    const check = runAuthorityPreDispatchRecheck(
+      {
+        runId,
+        cwd: routing.cwd,
+        provider: routing.provider,
+        profile: routing.profile,
+        actor,
+        authorizeWorkspace: input.immediateDispatch.authorizeWorkspace,
+        isPeerAuthorized: input.immediateDispatch.isPeerAuthorized,
+        isProviderAuthenticating: input.immediateDispatch.isProviderAuthenticating,
+        ...(input.immediateDispatch.verifyTrustGate
+          ? { verifyTrustGate: () => input.immediateDispatch!.verifyTrustGate!(routing.provider, routing.cwd || null, runId) }
+          : {})
+      },
+      preparedRealCwd,
+      routing.cwd
+    )
+    if (check.ok) dispatchImmediately = true
+    else if (check.action === 'requeue') claimMode = 'queued'
+  }
   const payload = {
     runId,
     sessionKey: routing.sessionKey,
@@ -74,7 +106,8 @@ export function buildSubmitCommandForAuthority(options: {
     ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
     ...(routing.userTextPreview !== undefined ? { userTextPreview: routing.userTextPreview } : {}),
     ...(preparedBody ? { body: preparedBody } : {}),
-    claimMode: input.claimMode ?? ('immediate' as const),
+    claimMode,
+    ...(dispatchImmediately ? { dispatchImmediately: true } : {}),
     leaseOwner,
     pendingTtlMs,
     origin: input.grantScope,

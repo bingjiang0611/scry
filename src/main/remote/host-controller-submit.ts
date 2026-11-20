@@ -1,6 +1,6 @@
 import type { DesktopAttachmentReference, DesktopAttachmentStore } from './desktop-attachments'
 import { stampAttachmentPeer, parseRouting } from './host-controller-routing'
-import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import type { OrchestrationAuthorityHooks, OrchestrationImmediateDispatchChecks } from './orchestration-seam'
 import type { RemoteGateway, scopedIntentId as ScopedIntentId } from './remote-gateway'
 import type { RemoteDispatcher } from './remote-dispatcher'
 import type { RunLifecycle, SessionLedger } from './session-ledger'
@@ -16,6 +16,7 @@ export interface SubmitDeps {
   attachmentStore?: DesktopAttachmentStore
   scopedIntentId: typeof ScopedIntentId
   orchestration?: OrchestrationAuthorityHooks
+  immediateDispatch?: OrchestrationImmediateDispatchChecks
 }
 
 export interface SubmitResult { runId: string; status: 'recorded' | 'duplicate'; seq: number }
@@ -31,7 +32,8 @@ export function submitIntent(deps: SubmitDeps, peerCertSHA256: string, input: { 
       peerCertSHA256,
       grantScope: deps.gateway.grantScope(peerCertSHA256),
       scopedIntentId: scoped,
-      detail: input.detail
+      detail: input.detail,
+      ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
     })
     let result: SubmitResult
     try {
@@ -66,7 +68,8 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
       peerCertSHA256: peer,
       grantScope: deps.gateway.grantScope(peer),
       scopedIntentId: scoped,
-      detail
+      detail,
+      ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
     })
     let result: SubmitResult
     try {

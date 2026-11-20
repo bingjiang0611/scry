@@ -134,9 +134,9 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
     db.pragma('synchronous = FULL')
     db.pragma('foreign_keys = ON')
     db.pragma('secure_delete = ON')
-    // Maintainer decision (2026-11-19): P4-1 explicitly fixes fullfsync=OFF and
-    // checkpoint_fullfsync=ON even when env vars are unset; final decision deferred to P4-2.
-    const fullfsync = options.fullfsync ?? false
+    // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON
+    // in P4-2 authoritative mode; callers (e.g. P4-1 shadow or experiments) may explicitly override.
+    const fullfsync = options.fullfsync ?? true
     const checkpointFullfsync = options.checkpointFullfsync ?? true
     db.pragma(`fullfsync = ${fullfsync ? 'ON' : 'OFF'}`)
     db.pragma(`checkpoint_fullfsync = ${checkpointFullfsync ? 'ON' : 'OFF'}`)

@@ -31,8 +31,8 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         expect(String(handle.db.pragma('locking_mode', { simple: true })).toLowerCase()).toBe('exclusive')
         expect(handle.db.pragma('foreign_keys', { simple: true })).toBe(1)
         expect(handle.db.pragma('secure_delete', { simple: true })).toBe(1)
-        // P4-1 maintainer decision: explicit fullfsync=OFF + checkpoint_fullfsync=ON even without env vars
-        expect(handle.db.pragma('fullfsync', { simple: true })).toBe(0)
+        // Maintainer decision (2026-11-20): default fullfsync=ON + checkpoint_fullfsync=ON
+        expect(handle.db.pragma('fullfsync', { simple: true })).toBe(1)
         expect(handle.db.pragma('checkpoint_fullfsync', { simple: true })).toBe(1)
 
         // Verify all tables & multi-agent reservation columns exist

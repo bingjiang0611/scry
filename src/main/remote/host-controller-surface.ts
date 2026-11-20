@@ -21,7 +21,7 @@ import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopRe
 import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
-import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import type { OrchestrationAuthorityHooks, OrchestrationImmediateDispatchChecks } from './orchestration-seam'
 import { resolveIntentCommand, submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
 import { type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
@@ -60,6 +60,7 @@ export class HostController {
   #toolPanels?: HostControllerDependencies['toolPanels']
   #attachmentStore?: DesktopAttachmentStore
   #orchestration?: OrchestrationAuthorityHooks
+  #immediateDispatch: OrchestrationImmediateDispatchChecks
   #watchers: LiveWatchers
   #disposeExecution: () => void
 
@@ -94,6 +95,7 @@ export class HostController {
     })
     this.#gateway = wiring.gateway
     this.#dispatcher = wiring.dispatcher
+    this.#immediateDispatch = wiring.immediateDispatch
     this.#disposeExecution = wiring.dispose
     this.#watchers = new LiveWatchers({
       authorizeDevice: (peer) => this.authorizeDevice(peer),
@@ -247,7 +249,7 @@ export class HostController {
       canSessionDelete: this.#sessionDelete !== undefined,
       workspace: this.#workspace, sessionAction: this.#sessionAction, sessionFork: this.#sessionFork, sessionDelete: this.#sessionDelete,
       isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(this.#macRuns ? { macRuns: this.#macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: this.#macRuns,
-      interactions: this.#interactions, stops: this.#stops, orchestration: this.#orchestration
+      interactions: this.#interactions, stops: this.#stops, orchestration: this.#orchestration, immediateDispatch: this.#immediateDispatch
     }
   }
 
@@ -365,11 +367,6 @@ export class HostController {
     await releaseIntentAttachments(this.#attachmentStore, routing)
   }
 
-
-
-  // A Mac run the device may control: listed now and inside an authorized project.
-
-  // Test/shutdown aid: wait for in-flight executor work to settle.
   async idle(): Promise<void> {
     await this.#dispatcher.idle()
   }

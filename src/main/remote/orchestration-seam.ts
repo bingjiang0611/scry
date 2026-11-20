@@ -5,6 +5,12 @@ import type { LedgerStore, RunLifecycle } from './session-ledger'
  * Kept in `src/main/remote/` with zero imports from `src/host-runtime/orchestration/`
  * so Electron main preserves the Layer 3 single-writer static import boundary (core §2.9).
  */
+export interface OrchestrationImmediateDispatchChecks {
+  isPeerAuthorized: (peerCertSHA256: string) => boolean
+  authorizeWorkspace: (cwd: string) => string
+  isProviderAuthenticating: (provider: string, profile: string | null) => boolean
+}
+
 export interface OrchestrationAuthorityHooks {
   /**
    * Returns an in-memory-backed `LedgerStore` whose appends mirror asynchronously to H1
@@ -17,6 +23,7 @@ export interface OrchestrationAuthorityHooks {
     grantScope: 'local' | 'remote'
     scopedIntentId: string
     detail?: string
+    immediateDispatch?: OrchestrationImmediateDispatchChecks
   }): Promise<{ runId: string; status: 'recorded' | 'duplicate'; seq: number }>
   /** Authoritative sync submit (non-attachment path, durable >16 KiB body BEFORE commit). */
   submitSync(input: {
@@ -24,6 +31,7 @@ export interface OrchestrationAuthorityHooks {
     grantScope: 'local' | 'remote'
     scopedIntentId: string
     detail?: string
+    immediateDispatch?: OrchestrationImmediateDispatchChecks
   }): { runId: string; status: 'recorded' | 'duplicate'; seq: number }
   /** Compensates a committed orchestration submit when the subsequent H1 mirror side-effect throws. */
   compensateSubmitFailure(runId: string, reason: string): void
