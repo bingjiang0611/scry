@@ -25,12 +25,26 @@ export function comparePerformance(base, head, policy) {
   for (const [scenario, budget] of Object.entries(policy.scenarios)) {
     const before = base.results[scenario]
     const after = head.results[scenario]
+    const baselineUnavailable = before?.outcome === 'unavailable'
     for (const result of [before, after]) {
       if (result.lane !== budget.lane || result.workload !== budget.workload || result.iterations !== budget.iterations || result.warmups !== budget.warmups || result.samples !== budget.samples) {
         throw new Error(`Scenario methodology differs: ${scenario}`)
       }
+      if (result === before && baselineUnavailable) continue
       if (result.outcome !== 'completed') throw new Error(`Missing successful outcome: ${scenario}`)
       if (!sameKeys(result.counters, budget.counters)) throw new Error(`Counter coverage differs: ${scenario}`)
+    }
+    if (baselineUnavailable) {
+      for (const [metric, ceiling] of Object.entries(budget.counters)) {
+        const candidate = after.counters[metric]
+        if (![candidate, ceiling].every(finite)) throw new Error(`Invalid counter: ${scenario}.${metric}`)
+        rows.push({ scenario, metric, baseline: 0, candidate, ceiling, status: candidate <= ceiling ? 'pass' : 'regressed' })
+      }
+      const minSamples = budget.samples
+      if (!Number.isInteger(minSamples) || minSamples < 1 || !Array.isArray(after.durationMs) || after.durationMs.length !== minSamples || !after.durationMs.every(finite) || !finite(budget.p95Ms)) throw new Error(`Missing/invalid timing samples: ${scenario}`)
+      const candidate = p95(after.durationMs)
+      rows.push({ scenario, metric: 'batchMeanP95Ms', baseline: 0, candidate, ceiling: budget.p95Ms, status: candidate <= budget.p95Ms ? 'pass' : 'regressed' })
+      continue
     }
     for (const [metric, ceiling] of Object.entries(budget.counters)) {
       const baseline = before.counters[metric]

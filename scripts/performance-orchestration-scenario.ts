@@ -55,7 +55,7 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
     run: async () => {
       const mods = await loadOrchestrationModules()
       if (!mods) {
-        return { skipped: 1, commits: 0 }
+        return { __baselineUnavailable: 1 }
       }
       if (!engine) {
         const sink = mods.EventSink.open({

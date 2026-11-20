@@ -2,6 +2,15 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import type { LedgerEvent, LedgerSnapshot, LedgerSnapshotRun } from '../../main/remote/session-ledger'
+import type { EventSink } from './event-sink'
+
+export interface LegacyLedgerPlan {
+  readonly currentLedgerSeq: number
+  readonly lastSeq: number
+  readonly unimportedRuns: readonly LegacyRunState[]
+  readonly openRuns: readonly LegacyRunState[]
+  readonly runsByLedgerId: ReadonlyMap<string, LegacyRunState>
+}
 
 export interface LegacyRunState {
   ledgerRunId: string
@@ -262,4 +271,52 @@ export function readLegacyLedgerReadOnly(ledgerDir: string): { lastSeq: number; 
   }
 
   return { lastSeq, runs }
+}
+
+function emptyPlan(
+  currentLedgerSeq: number,
+  lastSeq = currentLedgerSeq,
+  runs = new Map<string, LegacyRunState>()
+): LegacyLedgerPlan {
+  return { currentLedgerSeq, lastSeq, unimportedRuns: [], openRuns: [], runsByLedgerId: runs }
+}
+
+function buildLegacyLedgerPlan(
+  currentLedgerSeq: number,
+  legacy: { lastSeq: number; runs: Map<string, LegacyRunState> }
+): LegacyLedgerPlan {
+  if (legacy.lastSeq <= currentLedgerSeq) return emptyPlan(currentLedgerSeq, legacy.lastSeq, legacy.runs)
+  const unimportedRuns = [...legacy.runs.values()]
+    .filter((run) => run.lastSeq > currentLedgerSeq)
+    .sort((a, b) => a.intentSeq - b.intentSeq)
+  const openRuns = unimportedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
+  return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns, openRuns, runsByLedgerId: legacy.runs }
+}
+
+export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): LegacyLedgerPlan {
+  const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
+  const ledgerDir = join(userDataDir, 'remote', 'ledger')
+  if (!existsSync(ledgerDir)) return emptyPlan(currentLedgerSeq)
+  return buildLegacyLedgerPlan(currentLedgerSeq, readLegacyLedgerReadOnly(ledgerDir))
+}
+
+/** Off-main-thread variant of `loadLegacyLedgerPlan` using streamed `worker_threads` chunks (W9 P4-2). */
+export async function loadLegacyLedgerPlanAsync(sink: EventSink, userDataDir: string): Promise<LegacyLedgerPlan> {
+  const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
+  const ledgerDir = join(userDataDir, 'remote', 'ledger')
+  if (!existsSync(ledgerDir)) return emptyPlan(currentLedgerSeq)
+  const streamed = await readLegacyLedgerStreamedAsync(ledgerDir, { minSeqExclusive: currentLedgerSeq })
+  if (streamed.lastSeq <= currentLedgerSeq) return emptyPlan(currentLedgerSeq, streamed.lastSeq, streamed.runs)
+  const openRuns = streamed.sortedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
+  return {
+    currentLedgerSeq,
+    lastSeq: streamed.lastSeq,
+    unimportedRuns: streamed.sortedRuns,
+    openRuns,
+    runsByLedgerId: streamed.runs
+  }
+}
+
+export function peekUnimportedLegacyRunCount(sink: EventSink, userDataDir: string): number {
+  return loadLegacyLedgerPlan(sink, userDataDir).unimportedRuns.length
 }

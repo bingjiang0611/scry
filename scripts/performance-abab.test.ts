@@ -13,7 +13,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 
 function artifact(side: 'baseline' | 'candidate') {
   const results = Object.fromEntries(Object.entries(policy.scenarios).map(([name, budget]) => [name, {
-    ...(budget as object), samples: 20, outcome: 'completed', counters: { ...(budget as { counters: object }).counters }, durationMs: Array(20).fill(10)
+    ...(budget as object), samples: 20, outcome: 'completed', counters: { ...(budget as { counters: object }).counters }, durationMs: Array(20).fill(Math.min(10, (budget as { p95Ms: number }).p95Ms))
   }]))
   const batches = Object.entries(policy.scenarios).flatMap(([scenario, budget]) => Array.from({ length: 20 }, (_, index) => {
     const batch = { side, scenario, batchId: sideBatchId(side, index + 1), stages: [], stageTotals: {}, droppedStageCount: 0 }
@@ -110,5 +110,16 @@ describe('formal Node performance ABAB contract', () => {
     expect(parseAbabArgs(['--candidate', '/candidate', '--output', '/results', '--same-source'])).toMatchObject({ baseline: '/candidate', candidate: '/candidate', sameSource: true, batches: 20 })
     expect(() => parseAbabArgs(['--candidate', '/candidate', '--output', '/results'])).toThrow('--baseline')
     expect(parseProtocolLine('{"id":1,"ok":true}')).toEqual({ id: 1, ok: true })
+  })
+
+  it('evaluates newly-added orchestration scenario against its 8ms absolute ceiling when baseline lacks it', () => {
+    const base = artifact('baseline')
+    const head = artifact('candidate')
+    base.results['orchestration.pre-first-token'].outcome = 'unavailable'
+    base.results['orchestration.pre-first-token'].counters = {}
+    head.results['orchestration.pre-first-token'].durationMs = Array(20).fill(5)
+    expect(comparePerformance(base, head, policy).passed).toBe(true)
+    head.results['orchestration.pre-first-token'].durationMs = Array(20).fill(9)
+    expect(comparePerformance(base, head, policy).passed).toBe(false)
   })
 })
