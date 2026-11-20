@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { resolveTrustRecorderCliPath, shellEnv } from '../claude-locate'
+import { resolveTrustRecorderCliPath, shellEnv, warmShellEnv } from '../claude-locate'
 import { AgentRuntimeError } from '../run-outcome'
 import { codexHookFingerprint, hooksRequiringBypass, type CodexHookInspection, type CodexHookTrustGrant, createCodexHookGrantStore } from '../codex-hook-trust'
 import { createOpenCodePluginGrantStore, type OpenCodeProjectPluginAuthorization } from '../opencode-plugin-trust'
@@ -201,6 +201,7 @@ export async function ensureMcpExecutionAuthorized(
   operation: McpExecutionOperation,
   targetId?: string
 ): Promise<McpExecutionSnapshot | null> {
+  await warmShellEnv()
   const snapshot = await buildMcpExecutionSnapshotAsync({
     providerId: context.providerId,
     cwd: context.cwd,
