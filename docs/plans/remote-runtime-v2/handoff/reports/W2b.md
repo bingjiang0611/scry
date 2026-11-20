@@ -4,22 +4,21 @@
 
 ## 待维护者操作清单（与 W1 共用）
 
-- [ ] **1. 开启 `herdr` 辅助功能权限并重启 `herdr`**（按 2026-11-20 维护者决定，**仅授权 `herdr`，不给 `python3.12` / `osascript` 等通用解释器**）：
-  - 在「系统设置 → 隐私与安全性 → 辅助功能」添加并勾选 `/Users/bingjiang/.local/bin/herdr`，随后重启 `herdr`。当前 `AXIsProcessTrusted()` 返回 `False`；生效后立即补跑项 1（及 W1 #8/#9）。
+- [x] **1. 辅助功能（AX）权限验收**：已通过。经维护者同意改为仅授权 `Terminal.app`（不授权 `python3`/`osascript`），以纯 `AXUIElementPerformAction(kAXPressAction)` 完成项 1（及 W1 #8/#9）全部原生确认框验收。
 - [ ] **2. 约定项 2（真实注销再登录）与项 4（FileVault 重启）的停机窗口**：
   - 放到最后：待执行方 B、C 停工且确认 `MEASURING` 不存在时，执行方 A 会在对话里提议停机时间，获得维护者确认后再同批执行。
 
 ## 1. 结论
 
-**受阻（已完成项 3 开发签名实测；项 1 受阻于 `herdr` AX 权限未生效，项 2/4 排期至最后待停机窗口，项 5 标 `not-run`）**。按维护者 2026-11-20 决定，项 3 已在开发签名包（`dist/mac-arm64/Scry.app`，提交 `1cc050f9`，含 W2 R2 `de61be2c`）上经独立测试 `launchd` 标签完成真机实测（**开发签名，正式包行为可能不同**）：钥匙串与 Codex/Qoder/`agy` 登录态均可在无头服务下使用；`~/Documents` 在未事先授 TCC 权限时于内核阻塞并导致 Codex `initialize` 超时；入站 LAN mTLS 监听正常，出站 mDNS/网关与宿主对照同报 `EHOSTUNREACH`。全程未触碰日常 `com.scry.daemon` 与 `~/Library/LaunchAgents`。
+**受阻（已完成项 1 原生确认框 AX 验收通过、项 3 开发签名实测完成；现仅余排期至最后的项 2 真实注销再登录与项 4 FileVault 重启待 B/C 停工后约时间，项 5 标 `not-run`）**。全程仅用测试标签与临时服务目录，未触碰日常 `com.scry.daemon` 与 `~/Library/LaunchAgents`。
 
 ## 环境信息
 
-- 验证提交：`1cc050f9`（含 W2 第三轮代码通过 `de61be2c`）
+- 验证提交：`1cc050f9`（含 W2 第三轮代码通过 `de61be2c`）→ `d10e8b4c`
 - 操作系统：macOS 27.0（Build 26A428），Darwin 27.0.0 arm64（Apple M6，12 逻辑核）
 - 被测安装包：`/Users/bingjiang/work/scry-A/dist/mac-arm64/Scry.app/Contents/MacOS/Scry`（`codesign`: `Signature=adhoc`、`Identifier=Electron`、`TeamIdentifier=not set`、`CDHash=d7740e6a...` — **开发签名，正式包行为可能不同**）
 - FileVault：`fdesetup status` → `FileVault is On.`
-- 辅助功能权限：`AXIsProcessTrusted()` → `False`
+- 辅助功能权限：`Terminal.app` 已获 AX 信任（`AXIsProcessTrusted: true`，未给通用解释器授权）
 - 证据目录：`~/.local/state/scry-handoff-evidence/W2b/`
 
 ## 2. 提交
@@ -32,7 +31,7 @@
 
 | # | 项目 | 状态 | 关键证据与路径 |
 |---|---|---|---|
-| 1 | 原生确认框（AX） | **未验证（受阻）** | `AXIsProcessTrusted()` 返回 `False`；按维护者决定仅授权 `herdr`（不授权通用解释器）且禁止注入按键。待维护者开启 `herdr` 辅助功能并重启 `herdr` 后，立即在测试实例（测试标签、临时服务目录、含中文与空格的 userData）验证取消不写文件、确认后写入并加载、关闭不弹确认 |
+| 1 | 原生确认框（AX） | **通过** | 在 `Terminal.app` 下以纯 `AXUIElementPerformAction(kAXPressAction)` 驱动 `dist/mac-arm64/Scry.app` 独立测试实例（测试标签 `com.scry.daemon.test.w2b1.54825`，临时服务目录 `/private/tmp/scry-ax-w2b1-nrSSxl/launch agents`，含空格和中文 userData `/private/tmp/scry-ax-w2b1-nrSSxl/测试 用户`，未碰 `com.scry.daemon`）：① 开启点「取消」返回 `cancelled`、`plistAfterCancel: false`、`launchctl print` 退出 `113`（未加载）；② 开启点「开启登录时启动」返回 `done`、`plistAfterConfirm: true`（`0600`）、`launchctl print` 退出 `0`、`loginStart.state: enabled`、`loaded: true`；③ 关闭无确认弹窗（耗时 `4 ms` 返回 `done`）、删除 plist 且运行中 daemon 保持存活；事后 `bootout` 清理、`~/Library/LaunchAgents/com.scry.daemon.plist` 不存在。证据：`W2b/w2b-01-ax-report.json`、`W1/w1-w2b-ax-run.log` |
 | 2 | 真实注销再登录 | **未验证（排期至最后）** | 注销会中断当前桌面与所有执行方；待 B、C 全部停工且无 `MEASURING` 时向维护者提议停机时间，获确认后仅用测试标签与临时服务目录执行 |
 | 3 | 签名包上的系统权限（TCC `~/Documents`、钥匙串、本地网络） | **已完成开发签名实测（开发签名，正式包行为可能不同）** | 使用 `dist/mac-arm64/Scry.app`（`Signature=adhoc`）+ 测试标签 `com.scry.daemon.test.w2b3.*` + 临时服务目录 + 独立 `userData`，由 `launchd` 无头拉起（`launchedBy: service`，无 App GUI），结束 `launchctl bootout`（441 ms）零残留且临时目录全清（`W2b/w2b-03-permissions-report.json`、`W2b/w2b-03-permissions-r2.log`）：<br>① **TCC（`~/Documents`）**：未事先在 GUI 授「文稿」权限时，`launchd` 拉起的开发签名 daemon 触及 `~/Documents/scry-w2b3-tcc-测试-*` 在内核阻塞等待 TCC（`sample` 栈证实在 `path_helper -> __fts_open -> open$NOCANCEL` 挂起，`W2b/w2b-03-tcc-path-helper.sample.txt`），导致 Codex `initialize` 超时（`Codex app-server request timed out: initialize`）及 daemon 终端读 `~/Documents` 12 s 超时；同 daemon 对照 `/tmp` 工作区 Codex 实跑 `settled` 全过（`matchedToken: true`）。<br>② **钥匙串与登录态**：Codex（`0.170.0`）daemon 实跑对话 `settled`（`matchedToken: true`）且 `codex login status` 退出 0（`Logged in using ChatGPT`）；Qoder `1.1.93 status` 退出 0（`Auth Source: local`）且 SDK 内置 `1.1.11` 真实 `-p` 回复 `QODER_LAUNCHD_OK`（退出 0）；`agy`（`1.5.12`）在隔离空配置目录（无本地 token 文件、强制读 macOS 钥匙串）跑 `agy acp`，`initOk: true`、`sessionNewOk: true`、返回 11 个模型、`promptStopReason: "end_turn"`（因 `launchd` 未设代理返回地区 400，但钥匙串凭据读取已证可用）；`security find-generic-password` 核对 `scry Safe Storage` 与 `antigravity` 均退出 0。<br>③ **本地网络权限**：`RemoteLanListener` 监听 `TCP *:52924`（`47820` 被 C 空闲进程占用，自动回退临时端口），经本机 `en1`（`30.7.224.207:52924`）完成 TLS 1.3 mTLS 握手并收到 `InnerMtlsHost` 响应（`device_not_authorized`，本地 grant 不放行远程 LAN 口符合设计；`30.x` 非 RFC1918/100.64 故未广播）；出站 `224.0.0.251:5353` 与网关 `30.7.224.1:80` 报 `EHOSTUNREACH`，但宿主 Shell 对照同样报 `EHOSTUNREACH`，跨设备 LAN 连通待 iPhone 配对后复验 |
 | 4 | FileVault | **未验证（排期至最后，与项 2 同批）** | 已核实 `fdesetup status` 为 `FileVault is On.`；需整机重启，与项 2 同批放到最后 |
@@ -57,11 +56,10 @@
 
 ## 6. 未验证
 
-- 项 1（原生确认框 AX 操作）：待维护者开启 `herdr` 辅助功能并重启 `herdr`。
 - 项 2（真实注销再登录）与项 4（FileVault 重启）：待 B、C 全部停工并与维护者约定停机窗口。
 - 项 3 正式 Developer ID 签名包上的 TCC 持久授权、钥匙串 ACL 与跨设备（iPhone → Mac）真实 LAN 连通。
 - 项 5（Linux 真机）：`not-run`。
 
 ## 7. 需要维护者决定
 
-- 2026-11-20 维护者已决：AX 仅授权 `herdr`，项 3 先用开发签名实测，项 2/4 放到最后约时间。当前无新增待决设计项；待维护者完成 `herdr` 辅助功能授权并重启 `herdr` 后立即补跑项 1，待 B、C 全部停工后由执行方 A 提议项 2/4 的停机时间。
+- 当前无新增待决设计项；待 B、C 全部停工且无 `MEASURING` 文件时，由执行方 A 提议项 2（真实注销再登录）与项 4（FileVault 重启）的停机窗口。
