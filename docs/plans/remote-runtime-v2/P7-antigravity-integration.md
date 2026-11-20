@@ -19,8 +19,8 @@
 | `src/main/providers/acp-client.ts` | 最小 JSON-RPC 2.0 over stdio：按行分帧（单行上限 **16 MiB**）、字符串/数字 `id` 兼容、非 JSON 行只计数不落日志（识别登录提示并丢弃）、请求超时、未知方法回 `-32601` |
 | `src/main/providers/antigravity.ts` | `createAntigravityAdapter(homeDir)`：`describe`、`run`、facet 组装 |
 | `src/main/providers/antigravity-launch.ts` | 找二进制、版本、环境清洗、spawn（detached + `BROWSER` 退出 0 + 去 `SSH_*`）、身份、停止与后代进程组清理 |
-| `src/main/providers/antigravity-run.ts` | 一轮状态机：trust 检查 → `initialize` → `session/new\|resume\|load` → 设模型/思考/模式 → `session/prompt` → 关 stdin 自然退出 |
-| `src/main/providers/antigravity-events.ts` | `session/update` → `TraceEvent`；`recordNative` 原样记录原生流（不经 `maskSecrets`） |
+| `src/main/providers/antigravity-run.ts` | 一轮状态机：trust 检查 → `initialize` → `session/new\|resume\|load`（仅当显式放行 `GEMINI_API_KEY`/ADC 且遇 `-32000` 时调对应非浏览器 `authenticate`）→ 设模型/思考/模式 → `session/prompt` → 关 stdin 自然退出 |
+| `src/main/providers/antigravity-events.ts` | `session/update`（含 `available_commands_update`、`session_info_update`、`usage_update`、`tool_call`/`tool_call_update`）→ `TraceEvent`；`recordNative` 原样记录原生流（不经 `maskSecrets`） |
 | `src/main/providers/antigravity-permissions.ts` | 审批/提问映射（原样保留全部 `options`）、权限档目录、用户全局设置有效档位核对 |
 | `src/main/providers/antigravity-catalog.ts` | 模型/思考/命令/Skill 读取、登录探测、按 `continuationKey` 缓存与同 profile 互斥 |
 | `src/main/providers/antigravity-config-trust.ts` | 工作区与上级目录配置面指纹门禁（§5.4）及独立 grant 存储 |
@@ -104,16 +104,15 @@
 
 - **接线位置（B4）**：不改 `run-admission.ts` / `run-fork.ts` 的 provider 硬编码分支；把工作区配置指纹检查放进 `antigravity` adapter `run()` 的启动边界（fail closed），grant 持久化放在 `antigravity-config-trust.ts` 独立模块。
 - **A0 实测 + 内置文档确认的完整加载面（B5）**：
-  - 实测〔`05-paths.json`〕：`agy acp 1.5.12` 自动加载并执行了 `<ws>/.agents/mcp_config.json`、`<ws>/.agent/mcp_config.json`、**cwd 上级目录 `<parent>/.agents/mcp_config.json`** 以及 `~/.gemini/config/mcp_config.json`。
-  - 内置规范〔`agy-customizations`〕：`agy` 从 `cwd` 向上遍历至仓库根（`.git`），扫描**全部 4 个别名目录**（`.agents/`、`.agent/`、`_agents/`、`_agent/`）下的以下可执行配置：
+  - **实测〔`05-paths.json`、`05b-paths-deep.json`〕**：`agy acp 1.5.12` 自动加载并触发了 `cwd` 与上级目录（至 `.git` 根）全部 4 个别名目录（`.agents/`、`.agent/`、`_agents/`、`_agent/`）与内联插件（`plugins/<name>/`）的 `SessionStart`/`PreToolUse` `hooks.json` 与 `mcp_config.json`，以及用户级 `~/.gemini/config/{hooks,mcp_config}.json`（23 个标记全部触发）；工作区级 `settings.json` 中的权限键未绕过审批（`wsSettingsPermCount: 1`），但**用户级 `~/.gemini/antigravity-cli/settings.json` 中的 `toolPermission`/`permissions.allow` 确实跳过了审批（`userSettingsPermCount: 0`）**；`plugins.json` 指向工作区外绝对路径的条目本次未触发，但内置规范明确文档化了工作区相对路径 `plugins.json`，仍纳入 fail-closed 门禁。
 
 | 候选路径（`cwd` 至 `.git` 根逐级扫描） | 风险 | 处理 |
 |---|---|---|
-| `{.agents,.agent,_agents,_agent}/hooks.json` | 可执行 shell 命令；`PreToolUse` 可返回 `decision:"allow"` 与 `overwrite` 改参〔内置文档〕 | 指纹门禁（fail closed）；`hooks.json` 实际触发路径〔待补测〕 |
-| `{.agents,.agent,_agents,_agent}/mcp_config.json` | 自动拉起 stdio/HTTP MCP〔A0 实测〕 | 进 `providerMcpConfigPaths`，走现有 MCP 执行信任 |
-| `{.agents,.agent,_agents,_agent}/plugins/<name>/{plugin.json,.antigravity-plugin/plugin.json,.gemini-plugin/plugin.json,hooks.json,mcp_config.json}` | 插件可带 hooks 与 MCP〔内置文档〕 | 整个插件清单与可执行配置进指纹门禁 |
-| `{.agents,.agent,_agents,_agent}/plugins.json` | `entries`/`inherits` 可指向工作区外目录〔内置文档〕 | 解析后将所有目标路径纳入指纹；越出允许范围、符号链接或解析失败直接拒绝 |
-| `<ws>/.gemini/settings.json`、`<ws>/.gemini/antigravity-cli/settings.json`、`<ws>/.agents/settings.json`（及上级至 `.git` 根） | 若含 `toolPermission`/`permissions` 键可能抬高权限 | 检测到权限类键直接**拒绝启动**并说明文件路径；其余可执行键同进指纹 |
+| `{.agents,.agent,_agents,_agent}/hooks.json` | 实测 `SessionStart`/`PreToolUse` 自动执行；`PreToolUse` 支持 `decision:"allow"` 与 `overwrite` 改参〔A0 实测 `05b` + 内置文档〕 | 指纹门禁（fail closed） |
+| `{.agents,.agent,_agents,_agent}/mcp_config.json` | 实测 4 别名目录与上级目录均自动拉起 stdio/HTTP MCP〔A0 实测 `05/05b`〕 | 进 `providerMcpConfigPaths`，走现有 MCP 执行信任 |
+| `{.agents,.agent,_agents,_agent}/plugins/<name>/{plugin.json,.antigravity-plugin/plugin.json,.gemini-plugin/plugin.json,hooks.json,mcp_config.json}` | 实测内联插件的 `hooks.json` 与 `mcp_config.json` 均自动执行〔A0 实测 `05b`〕 | 整个插件清单与可执行配置进指纹门禁 |
+| `{.agents,.agent,_agents,_agent}/plugins.json` | `entries`/`inherits` 可指向其他目录〔内置文档〕 | 解析后将所有目标路径纳入指纹；越出允许范围、符号链接或解析失败直接拒绝 |
+| `<ws>/.gemini/settings.json`、`<ws>/.gemini/antigravity-cli/settings.json`、`<ws>/.agents/settings.json`（及上级至 `.git` 根） | 1.5.12 实测未绕过审批，但防版本变化导致工作区抬高权限 | 检测到权限类键（`toolPermission`/`permissions`）直接**拒绝启动**并说明文件路径；其余可执行键同进指纹 |
 | `~/.gemini/config/{mcp_config.json,hooks.json}` | 用户级配置；`mcp_config.json` 进入 `providerMcpConfigPaths` 即一并计入 MCP 指纹 | 照实记录，不与「不门禁」矛盾；在 MCP 面板展示用户级 hooks/MCP 来源 |
 | `{.agents,.agent,_agents,_agent}/skills`、`AGENTS.md`、`GEMINI.md` | 文本指令 | 不进执行门禁（Scry 不是沙箱） |
 
