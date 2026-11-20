@@ -9,7 +9,7 @@ import type { RemoteInteractionBroker } from './remote-interaction-broker'
 import type { LedgerEvent, SessionLedger } from './session-ledger'
 import type { RunOutputLog } from './run-output-log'
 import type { PairingAuthority } from './pairing'
-import { ProviderOperationGate } from '../provider-operation-gate'
+import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
 import { parseRouting } from './host-controller-routing'
 import type { HostControllerDependencies, RemoteIntentRouting } from './host-controller-types'
 
@@ -65,12 +65,15 @@ function resolveAnsweredByPeer(
 
 /** A ledger event wakes parked watchers and names its run for the App event feed. */
 export function ledgerEventObserver(
-  deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent'>,
+  deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent' | 'orchestration'>,
   notify: () => void
 ): (event: LedgerEvent, intentSeq?: number) => void {
   return (event, intentSeq) => {
     notify()
     runActivity(deps, event.runId, { intentSeq: () => intentSeq })
+    if (deps.orchestration && event.kind === 'run_progress') {
+      try { deps.orchestration.onRunProgress(event.runId, event.detail) } catch { /* ignore */ }
+    }
     try {
       const entry = controllerMetaByDeps.get(deps)
       const runMeta = entry?.gateway.runMeta(event.runId)
@@ -159,6 +162,36 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
   })
   const dispatcher = new RemoteDispatcher({
     ledger,
+    ...(deps.orchestration ? {
+      beforeDispatch: (runId, detail) => {
+        const meta = gateway.runMeta(runId)
+        const gate = deps.gate ?? new ProviderOperationGate()
+        const check = deps.orchestration!.beforeDispatch({
+          runId,
+          detail,
+          peerCertSHA256: meta?.peerCertSHA256,
+          grantScope: meta?.grantScope ?? gateway.runScope(runId),
+          isPeerAuthorized: (peer) => input.authority.authorizesCertificate(peer),
+          authorizeWorkspace: (cwd) => deps.workspace.authorize(cwd),
+          isProviderAuthenticating: (provider, profile) => {
+            const lease = gate.acquireOperation(providerOperationKey(provider, profile ?? undefined))
+            if (lease.ok) {
+              lease.release()
+              return false
+            }
+            return true
+          }
+        })
+        if (!check.ok && check.action === 'fail') {
+          try { deps.onDispatchRefused?.({ detail, grantScope: gateway.runScope(runId), error: new Error(check.reason) }) }
+          catch { /* ignore refusal hook error */ }
+        }
+        return check
+      },
+      onSettled: (runId, ok, detail) => {
+        deps.orchestration!.onRunTerminal(runId, ok ? 'settled' : 'failed', detail)
+      }
+    } : {}),
     executor: { execute: async (executorInput) => {
       try {
         const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })

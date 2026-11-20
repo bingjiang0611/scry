@@ -46,18 +46,26 @@ export interface RemoteDispatcherDependencies {
   executor: RemoteExecutor
   // Absent => the output callback is a no-op and only the lifecycle is observable.
   outputSink?: RemoteOutputSink
+  /** P4-2 authoritative pre-dispatch recheck + fence commit before executor runs. */
+  beforeDispatch?(runId: string, detail?: string): { ok: true } | { ok: false; action: 'fail' | 'requeue'; reason: string }
+  /** P4-2 authoritative terminal settlement hook after executor finishes. */
+  onSettled?(runId: string, ok: boolean, detail?: string): void
 }
 
 export class RemoteDispatcher {
   #ledger: SessionLedger
   #executor: RemoteExecutor
   #outputSink?: RemoteOutputSink
+  #beforeDispatch?: RemoteDispatcherDependencies['beforeDispatch']
+  #onSettled?: RemoteDispatcherDependencies['onSettled']
   #inflight = new Set<string>()
 
   constructor(deps: RemoteDispatcherDependencies) {
     this.#ledger = deps.ledger
     this.#executor = deps.executor
     this.#outputSink = deps.outputSink
+    this.#beforeDispatch = deps.beforeDispatch
+    this.#onSettled = deps.onSettled
   }
 
   // Dispatch every intent still awaiting its first dispatch, exactly once.
@@ -67,6 +75,15 @@ export class RemoteDispatcher {
     const started: string[] = []
     for (const intent of this.#ledger.recordedIntents()) {
       if (this.#inflight.has(intent.runId)) continue
+      if (this.#beforeDispatch) {
+        const gate = this.#beforeDispatch(intent.runId, intent.detail)
+        if (!gate.ok) {
+          if (gate.action === 'fail') {
+            try { this.#ledger.markCancelled(intent.runId) } catch { /* already terminal */ }
+          }
+          continue
+        }
+      }
       // The durable transition is the fence. If another pump already advanced
       // this run, markDispatched throws and we skip without invoking anything.
       try {
@@ -121,6 +138,9 @@ export class RemoteDispatcher {
 
   #settle(runId: string, ok: boolean, detail?: string): void {
     this.#inflight.delete(runId)
+    try {
+      this.#onSettled?.(runId, ok, detail)
+    } catch { /* preserve ledger update */ }
     try {
       if (ok) this.#ledger.markSettled(runId)
       else this.#ledger.markFailed(runId, detail)

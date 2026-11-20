@@ -59,7 +59,7 @@ export function attachDaemonOrchestrationShadow(
     )
     return undefined
   }
-  if (mode.effective === 'off') return undefined
+  if (mode.effective !== 'shadow') return undefined
 
   // Maintainer decision (2026-11-19): P4-1 explicitly fixes fullfsync=OFF + checkpoint_fullfsync=ON
   // even when env vars are unset; final fullfsync decision is deferred to P4-2.

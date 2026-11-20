@@ -93,8 +93,9 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       })
       try {
         expect(host.orchestrationShadow).toBeUndefined()
-        expect(existsSync(join(userDataDir, 'orchestration', 'orchestration.db'))).toBe(false)
-        expect(logs.some((line) => line.includes('daemon.orchestration-refused'))).toBe(true)
+        expect(host.orchestrationAuthority).toBeDefined()
+        expect(existsSync(join(userDataDir, 'orchestration', 'orchestration.db'))).toBe(true)
+        expect(logs.some((line) => line.includes('daemon.orchestration-on-ready'))).toBe(true)
 
         const device = await enrollLocal(host.service)
         const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

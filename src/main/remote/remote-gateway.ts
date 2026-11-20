@@ -180,7 +180,7 @@ export class RemoteGateway {
   // intentId: a retry returns the same runId without aliasing another device.
   submitIntent(peerCertSHA256: string, input: SubmitIntentInput): SubmitIntentResult {
     this.#authorize(peerCertSHA256)
-    const candidateRunId = SessionLedger.newRunId()
+    const candidateRunId = input.runId ?? SessionLedger.newRunId()
     const scope = this.grantScope(peerCertSHA256)
     // Register peer & scope before recordIntent for synchronous shadow observers.
     this.#rememberRunMeta(candidateRunId, peerCertSHA256, scope)

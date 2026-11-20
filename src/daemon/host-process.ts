@@ -29,6 +29,7 @@ import type { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
+import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
 import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
 import { createDaemonRemoteAssembly } from './host-process-assembly'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
@@ -231,6 +232,15 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
     ...(options.orchestrationShadowPauseBackfill ? { pauseDeferredBackfill: options.orchestrationShadowPauseBackfill } : {})
   })
+  const orchestrationAuthority = await attachDaemonOrchestrationAuthority({
+    userDataDir: options.userDataDir,
+    env: process.env,
+    conversationStore: catalog.conversationStore,
+    runs: pipeline.runs,
+    requestRunStop,
+    log,
+    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {})
+  })
   const remoteStateDirectory = join(options.userDataDir, 'remote')
   const relay = await resolveRemoteRelay(remoteStateDirectory)
   const service = await createHostRuntime({
@@ -248,6 +258,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     managedLaunches: conversationSend.launches,
     onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
     ...(orchestrationShadow ? { onLedgerEvent: orchestrationShadow.onLedgerEvent } : {}),
+    ...(orchestrationAuthority ? { orchestration: orchestrationAuthority.hooks } : {}),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
       runs: () => pipeline.runs,
@@ -280,6 +291,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     serve: (stream) => localHost.serve(stream)
   })
   orchestrationShadow?.startImport()
+  orchestrationAuthority?.startImport()
   // Enrollment bootstraps the App's grant before it owns any certificate. The secret
   // exists only while no local grant is live and is consumed by a single enrollment.
   const enrollment = openLocalEnrollmentStore(options.daemonStateDirectory)
@@ -298,6 +310,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     channel,
     enrollSocket,
     ...(orchestrationShadow ? { orchestrationShadow } : {}),
+    ...(orchestrationAuthority ? { orchestrationAuthority } : {}),
     dispose: async () => {
       if (disposed) return
       disposed = true
@@ -314,6 +327,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       // Close shadow first so pending bodies flush and the EXCLUSIVE SQLite lock releases
       // immediately even if a pooled provider process is slow to exit; bound provider dispose.
       orchestrationShadow?.close()
+      await orchestrationAuthority?.close()
       const disposeTimeoutMs = Math.max(1, options.providerDisposeTimeoutMs ?? 5_000)
       await new Promise<void>((resolve) => {
         let settled = false

@@ -80,6 +80,12 @@ export function buildSubmitCommandForAuthority(options: {
     origin: input.grantScope,
     isConversationRun: routing.isConversationRun
   }
+  // Hash only client-supplied intent semantics (never the host-allocated fresh runId)
+  // so idempotent retries of the same commandId + detail produce the exact same digest.
+  const semanticHashPayload = {
+    grantScope: input.grantScope,
+    detail: input.detail ?? null
+  }
   return {
     cmd: {
       type: 'run.submit',
@@ -88,7 +94,7 @@ export function buildSubmitCommandForAuthority(options: {
       scope: input.grantScope,
       at: now,
       payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
+      payloadSha256: sha256Hex(canonicalJson(semanticHashPayload))
     },
     runId,
     sessionKey: routing.sessionKey,

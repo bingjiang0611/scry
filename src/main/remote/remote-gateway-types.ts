@@ -247,6 +247,8 @@ export interface RemoteGatewayDependencies {
 export interface SubmitIntentInput {
   intentId: string
   detail?: string
+  /** Optional host-assigned runId supplied by authoritative orchestration (`SCRY_ORCHESTRATION=on`). */
+  runId?: string
 }
 export interface SubmitIntentResult {
   runId: string

@@ -21,7 +21,8 @@ import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopRe
 import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
-import { submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
+import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import { resolveIntentCommand, submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
 import { type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
@@ -58,8 +59,7 @@ export class HostController {
   #sessionDelete?: HostControllerDependencies['sessionDelete']
   #toolPanels?: HostControllerDependencies['toolPanels']
   #attachmentStore?: DesktopAttachmentStore
-  // Wake-up signal for long-poll watchers. Ledger events and output appends bump
-  // it; a watcher always re-reads through the normal authorized readers.
+  #orchestration?: OrchestrationAuthorityHooks
   #watchers: LiveWatchers
 
   constructor(deps: HostControllerDependencies) {
@@ -75,6 +75,7 @@ export class HostController {
     this.#sessionFork = deps.sessionFork
     this.#sessionDelete = deps.sessionDelete
     this.#toolPanels = deps.toolPanels
+    this.#orchestration = deps.orchestration
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: ledgerEventObserver(deps, () => this.#watchers.notify()) })
     this.#attachmentStore = deps.attachmentStore ?? (deps.attachmentDirectory
       ? new DesktopAttachmentStore(deps.attachmentDirectory, (peer, id) => this.#ledger.intentRun(scopedIntentId(peer, id))?.lifecycle)
@@ -104,13 +105,7 @@ export class HostController {
     })
   }
 
-  // Startup only, before any executor exists in this process.
-  //   - A run still `dispatched` lost its executor with the previous process, so
-  //     nothing can ever report its terminal result. Close it as failed with that
-  //     reason instead of leaving the device showing it as running forever. Its
-  //     Provider outcome stays unknown, and it is never re-run.
-  //   - Dispatch any intent that was durably recorded but never dispatched,
-  //     exactly once.
+  // Startup only: fail orphaned dispatched runs and pump undispatched intents.
   recover(): void {
     for (const runId of this.#ledger.dispatchedRuns()) this.#ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
     this.#dispatcher.pump()
@@ -146,15 +141,16 @@ export class HostController {
   }
 
   resolveIntent(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
-    // Do not pump a recovery fence through the submission path.
-    return this.#gateway.resolveIntent(peerCertSHA256, input)
+    return resolveIntentCommand(this.#deps(), peerCertSHA256, input)
   }
 
   poll(peerCertSHA256: string, input: { cursor: number }): ReturnType<SessionLedger['since']> {
+    if (this.#orchestration?.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
     return this.#gateway.poll(peerCertSHA256, input)
   }
 
   runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {
+    if (this.#orchestration?.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
     return this.#gateway.runState(peerCertSHA256, input)
   }
 
@@ -249,7 +245,7 @@ export class HostController {
       canSessionDelete: this.#sessionDelete !== undefined,
       workspace: this.#workspace, sessionAction: this.#sessionAction, sessionFork: this.#sessionFork, sessionDelete: this.#sessionDelete,
       isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(this.#macRuns ? { macRuns: this.#macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: this.#macRuns,
-      interactions: this.#interactions, stops: this.#stops
+      interactions: this.#interactions, stops: this.#stops, orchestration: this.#orchestration
     }
   }
 
