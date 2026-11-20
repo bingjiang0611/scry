@@ -85,6 +85,7 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 | 第 2 步：不靠执行端界面批准新设备 | 方案 a，在执行端上用命令行批准。能以同一 OS 用户登录这台机器的人，已有本机授权模型的权限（上文 2026-11-07 第一行）。方案 b（从已配对设备批准）不采用 | [P5-host-cli](P5-host-cli.md) |
 | 不依赖 App 的独立安装包 | P4 之后再做；本轮只记在「不做/以后」 | [P5-host-security](P5-host-security.md) §8 |
 | P4 设计评审 | 做完整设计（约 12 周，不含 S3）；`subscribe` 先作 v2 能力、真机验证后一次升 v3；立即路径 intent 与领取同事务、pending 有 TTL、派发前复核 grant；`fullfsync` 先测后定；其余按评审建议。无待决定事项 | [P4-orchestration-decisions](P4-orchestration-decisions.md) |
+| P4-2 fullfsync、S3 范围、中继部署（2026-11-20） | macOS `fullfsync` 开启，8 ms 门禁不放宽，压不进去就带数据报回；S3：开发构建与测试实例先改为默认走后台服务，`SCRY_HOST_DAEMON=0` 再保留一个版本；W10 的中继修复部署到线上 | [P4-orchestration-plan](P4-orchestration-plan.md) §8.3、[P3-s3-plan](P3-s3-plan.md) §1 |
 | 多 Agent 编排 | P4 只是 t3code Orchestration V2 核心的对应物，多 Agent 是其上的另一层。先在 P4 设计里预留钩子（只改文档，P4 不实现行为，工期不变），再仿 t3code 的编排 MCP 写草案 | [P4-orchestration-core](P4-orchestration-core.md) §2.10、[P6-multi-agent-draft](P6-multi-agent-draft.md) |
 | 「第 1 步」暂不做（2026-11-19） | App 发起的 run 由 daemon 直接写记录、绕过 Hook 与命令行，暂不做；P4–P6 不改 scry 命令行、其命令与记录格式 | [P6-multi-agent-decisions](P6-multi-agent-decisions.md) D27 |
 | 已修，待真机（2026-11-19） | 历史检索给 Claude 的 bearer token 不再进 `--mcp-config` 参数：Claude 的 run 与 MCP 状态检查改把整份 `mcpServers` 写进 0600 私有文件（0700 临时目录，结束即删，崩溃残留由启动清扫删除），参数只带路径（`private-mcp-config.ts`）。真实 SDK + 参数记录器测试通过；随包与本机 Claude Code 实测能从文件路径加载并连上 MCP。未经真实 run 验证 | [P6-multi-agent-security](P6-multi-agent-security.md) §S4 |
