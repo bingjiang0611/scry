@@ -1,4 +1,4 @@
-结论：第二轮需修改（原 4 项阻塞已修复；新增 2 项阻塞）
+结论：第三轮需修改（N1 只修了一部分：旧台账镜像仍可能让 on 模式重启失败或回退 seq）
 
 # W9 核验（核验方，2026-11-20，提交 `86709fbc`…`1bd2192b`）
 
@@ -113,3 +113,61 @@ macOS 上 S1、fullfsync 的数据和预算 P95 0.574 ms，Linux 无法复现，
    - 「pending 轮次没有对应的 orch run，就记为 `not_sent`」：延后导入还没完成时，可能误判（未复现，请确认）。
 6. 导入的旧 run，`ownerActor` 为 `'system'`，仍会退回使用 `input.actor`，需要写明或处理。
 7. 释放 gate 后的 re-pump 改为只在开启编排时执行。
+
+
+## 复核（第三轮，2026-11-21，提交 `310e1133`…`cd0c7db6`）
+
+**已成立：**
+- **N2**：Linux 上 WAL 峰值 24–32 MiB。
+- **单次提交合并**：不会重复派发，`illegal_transition` 会挡住。
+- **应修 2–7**：全部核实。
+- **fullfsync**：on 模式为「开 + 检查点开」，shadow 保持关，`off` 与未设置不变。预算只新增一项 8 ms 门禁，棘轮没有改动。
+- **默认路径**：未受影响。
+- **变异测试**：全部被拦下。
+
+**Linux 复跑：**
+- `typecheck` 通过。
+- orchestration 与 daemon 在默认、`shadow`、`on` 三种模式下都是 75 个文件、328 个用例全过。
+- `src/main/remote` 只有 1 个失败，是以 root 运行的已知用例。
+- `check:cli-runtime` 1,222 个用例全过。
+- abab 8/8，native 只剩先前就有的 1 个失败。
+
+### 阻塞
+
+1. **B1：写入失败后重试，H1 日志会损坏。**
+   - 镜像失败后直接再调一次 `append`，但 `append` 不会撤回写了一半的内容（`legacy-mirror.ts:198-234`、`session-ledger-file.ts:124-142`）。ext4 磁盘写满时，常见情况是 write 成功、fsync 失败，重试后同一个 seq 写了两次。
+   - 经真实 daemon 复现：seq 2 的 fsync 报一次 ENOSPC，重启时抛 `ledger_log_corrupt`；先写短、再重试成功，重启时抛 `ledger_file_corrupt`。
+2. **B2：封住（fail closed）只停了镜像，daemon 还在继续接单。**
+   - `assertAvailable` 和 `append` 都不看 `mirror.isFailedClosed()`（`orchestration-authority-ledger.ts:157-159`、`183-189`）。
+   - 磁盘持续写满时，run 2 照样被接受并结束。重启后 watch 这个 run 返回 `unknown_run`，seq 从 11 退回到 3 并被重复使用，设备端的游标随之失效。
+3. **B3：崩溃会丢失镜像还没写出的尾部。**
+   - on 模式启动时，设备端台账是从落后的 H1 文件重建的（`:141`）。`legacy.mirror` 名义上是可重放的 effect，但从来没有写入对应的 outbox 行，`legacy-mirror.ts:250-252` 的 UPDATE 实际什么也不改。
+   - 经真实 SIGKILL 复现：提交后立即杀进程，重启后 watch 返回 `unknown_run`，`resolveIntent` 返回 `cancelled`，seq 6 会被另一个事件重复使用。
+
+**核验方要求的修法（不要再修补镜像本身）：** on 模式启动时，设备端台账一律从 orchestration DB（权威）重建，不再从 H1 读取。H1 降为纯下游镜像：
+- 写入失败时，用 DB 生成快照，原子地重写 H1（临时文件 + fsync + rename + 目录 fsync），不对同一个 seq 重复追加。
+- 重写也失败时，只把「H1 可用于回退」标记为不可用，并在报告和日志里写明。on 模式不受影响，继续工作。
+- 切回 `off` 时，如果 H1 落后或已损坏，先用 DB 重新生成 H1，再启动。
+
+这样 B1–B3 一起关闭，也符合 plan 里「旧台账镜像不是严格回退保证」的写法。
+
+测试必须走真实 daemon，覆盖：一次 fsync ENOSPC、短写后重试成功、ENOSPC 持续不断、提交后立即 SIGKILL。每种情况下重启都要成功，seq 不回退，`watch` 能找到 run，`resolveIntent` 给出正确结果。
+
+### 应修
+
+1. **补导入时的检查点会在主线程卡住。** Linux 实测，10 万个 run 的数据集：
+   - 检查点最长停顿 1.06–2.51 s，事件循环最长停顿 2.5 s。
+   - 补导入期间每 50 ms 提交一次时，提交延迟 P95 68 ms，最长 1,078 ms；只算提交本身 P95 11.9 ms，超过 8 ms。
+
+   要把检查点移到 worker（独立连接），或者有等价办法压低停顿。并按 plan §8.2 报告「检查点期间的提交 P99」。
+2. **trust gate 每次提交都在首 token 前计算 MCP 可执行文件的 SHA-256。** 以 125 MB 的 node 为例，每次约 92 ms，冷启动 565 ms；只看文件状态则只要 0.45 ms。要按文件状态戳缓存指纹，跨 run 复用；并补测带 MCP 配置时的 S1。
+3. **文件状态戳用的是 `lstatSync`（`orchestration-trust-gate.ts:23`）。** 配置文件是符号链接时，改了链接指向的文件也发现不了（已复现）。改用 `statSync`，或者链接和目标都记录。
+4. **性能场景的计数是写死的**（`performance-orchestration-scenario.ts:117`），要改成实测；场景名里的 `fullfsync=true` 要按平台标注，Linux 上 SQLite 并不执行 fullfsync。
+5. **更新设计文档。**
+   - core §2.4（第 45、54 行）与 plan §8 表格（第 30 行）：改写合并提交后的语义。提交后、Provider 启动前崩溃，记为 `interrupted` + 送达 `unknown`，而不是 `not_sent`。
+   - 写明 on 模式下旧的 pending run 不会被派发。
+6. **文件余量**：`host-controller-surface.ts`、`orchestration-authority.ts`、`event-sink.ts`、`authority-engine.ts` 都在 19.8–19.96 KB，下次改动前先拆分。
+
+### 无法确认
+
+macOS 上的 5.66 ms、4.416 ms 和检查点 218–249 ms，推测都是在没有 MCP 可执行文件的配置下测的。
