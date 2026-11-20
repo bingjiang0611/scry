@@ -33,15 +33,14 @@ function memoryLedgerStore(): LedgerStore {
 }
 
 describe('P4-1 SCRY_ORCHESTRATION switch parsing', () => {
-  it('defaults to off, refuses on in P4-1, and caps pending TTL at 60 s', () => {
+  it('defaults to off, supports shadow and on in P4-2, and caps pending TTL at 60 s', () => {
     expect(parseOrchestrationMode({})).toEqual({ requested: 'off', effective: 'off', refused: false })
     expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'off' })).toEqual({ requested: 'off', effective: 'off', refused: false })
     expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'shadow' })).toEqual({ requested: 'shadow', effective: 'shadow', refused: false })
     expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'on' })).toEqual({
       requested: 'on',
-      effective: 'off',
-      refused: true,
-      reason: 'orchestration_on_unsupported_in_p4_1'
+      effective: 'on',
+      refused: false
     })
     expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'bogus' })).toEqual({ requested: 'off', effective: 'off', refused: false })
 
