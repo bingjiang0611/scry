@@ -420,7 +420,7 @@ export function createAntigravityCatalog(deps: {
       }
     },
     async skills(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> {
-      return capabilityReady(context, 'read', listAntigravitySkills(context.cwd, deps.homeDir), now())
+      return capabilityReady(context, 'read', listAntigravitySkills(context.cwd, deps.homeDir, { ...shellEnv(), ...process.env }), now())
     },
     invalidate(): void {
       cache.clear()

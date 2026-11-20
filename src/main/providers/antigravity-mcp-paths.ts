@@ -19,14 +19,22 @@ export function antigravityScanRoots(cwd: string): string[] {
   }
 }
 
+function assertAbsoluteGeminiHome(configured: string): string {
+  if (!isAbsolute(configured)) {
+    throw new Error(`已拒绝启动 Antigravity：GEMINI_HOME 必须是绝对路径（当前为相对路径 "${configured}"）`)
+  }
+  return configured
+}
+
 /**
  * Derive `.gemini` root from a sanitized Antigravity launch env (B1).
  * If `rawEnv` is unsanitized, call `antigravityEffectiveGeminiRoot` so an unallowed
  * `GEMINI_HOME` can never diverge from what `agy acp` actually reads.
+ * Rejects relative `GEMINI_HOME` (fail closed) so Scry and `agy` never disagree on resolution.
  */
 export function antigravityGeminiRoot(homeDir: string, sanitizedEnv: NodeJS.ProcessEnv = {}): string {
   const configured = sanitizedEnv.GEMINI_HOME?.trim()
-  if (configured && isAbsolute(configured)) return configured
+  if (configured) return assertAbsoluteGeminiHome(configured)
   return join(homeDir, '.gemini')
 }
 
@@ -38,7 +46,7 @@ export function antigravityEffectiveGeminiRoot(homeDir: string, env: NodeJS.Proc
   const allowed = explicitlyAllowedProviderEnvKeys(env.SCRY_PROVIDER_ENV_ALLOW, 'antigravity')
   if (allowed.has('GEMINI_HOME')) {
     const configured = env.GEMINI_HOME?.trim()
-    if (configured && isAbsolute(configured)) return configured
+    if (configured) return assertAbsoluteGeminiHome(configured)
   }
   return join(homeDir, '.gemini')
 }

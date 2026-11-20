@@ -1,8 +1,9 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TraceEvent } from '../../shared/trace'
+import * as locate from '../claude-locate'
 import { providerMcpConfigPaths } from '../mcp-config'
 import { createAntigravityAdapter } from './antigravity'
 
@@ -31,7 +32,13 @@ const savedEnv = {
   SCRY_PROVIDER_ENV_ALLOW: process.env.SCRY_PROVIDER_ENV_ALLOW
 }
 
+beforeEach(() => {
+  // N1: isolate login-shell-env cache so B1's GEMINI_HOME env mutations never leak across tests (e.g. fast bash on Linux).
+  vi.spyOn(locate, 'shellEnv').mockReturnValue({ PATH: process.env.PATH ?? '/usr/bin:/bin' })
+})
+
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k]
     else process.env[k] = v
@@ -122,6 +129,23 @@ describe('W8 复核 B1：所有 .gemini 根目录推导统一使用清洗后的�
     expect(skillsAllowed.data?.map((s) => s.name)).toContain('decoy-skill')
     const keyWithAllow = await adapter.continuationKey!({ providerId: 'antigravity', cwd: ws })
     expect(keyWithAllow).not.toBe(keyWithoutAllow)
+
+    // 4. 放行相对路径 GEMINI_HOME 时必须 fail closed 拒绝，避免 Scry 与 agy 解析位置不一致
+    process.env.GEMINI_HOME = './relative-gemini'
+    process.env.SCRY_PROVIDER_ENV_ALLOW = 'antigravity:GEMINI_HOME'
+    await expect(
+      adapter.run({
+        runId: 'b1-relative-gemini-home',
+        prompt: 'hi',
+        cwd: ws,
+        attachments: [],
+        permissionMode: 'default',
+        emit: () => undefined
+      }).promise
+    ).rejects.toThrow(/GEMINI_HOME 必须是绝对路径/)
+    expect(() => providerMcpConfigPaths('antigravity', ws, fakeHome, process.env)).toThrow(/GEMINI_HOME 必须是绝对路径/)
+    await expect(adapter.skills!.list({ providerId: 'antigravity', cwd: ws })).rejects.toThrow(/GEMINI_HOME 必须是绝对路径/)
+    await expect(adapter.continuationKey!({ providerId: 'antigravity', cwd: ws })).rejects.toThrow(/GEMINI_HOME 必须是绝对路径/)
   }, 15_000)
 })
 
