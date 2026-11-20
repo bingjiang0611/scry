@@ -7,6 +7,12 @@
 
 ## 1. 需要维护者决定
 
+**已定（维护者 2026-11-20，按核验方推荐）**：
+- 开发构建与 `SCRY_TEST_APP=1` 测试实例改为默认走后台服务，作为 S3 第一步（迁移 14 个 smoke 夹具）。
+- 逃生开关 `SCRY_HOST_DAEMON=0` 再保留一个发布版本：先带着它（以及 W10 的修复）发一个版本，下一个版本再删除进程内代码。
+
+下面两条保留为原始问题记录。
+
 1. **开发版与测试实例默认模式**：当前 `src/main/daemon-mode-default.ts` 仅对 `isPackaged === true` 且未设 `SCRY_TEST_APP=1` 与 `SCRY_HOST_DAEMON` 的启动默认设 `SCRY_HOST_DAEMON=1`。S3 执行前需决定：**开发构建（`npm run dev`）和 `SCRY_TEST_APP=1` 测试实例是否也改为默认走后台服务？**（若改为默认走后台服务，需同步迁移下表 14 个 `SCRY_TEST_APP` smoke 脚本的夹具。）
 2. **逃生开关 `SCRY_HOST_DAEMON=0` 去留**：S3 是一步删除 `SCRY_HOST_DAEMON=0`（与进程内代码一起移除），还是先保留一个发布周期再删？（保留则 S3 期间无法删除进程内代码，只能冻结棘轮。）
 
