@@ -1,4 +1,4 @@
-结论：第三轮需修改（N1 只修了一部分：旧台账镜像仍可能让 on 模式重启失败或回退 seq）
+结论：第四轮需修改（默认路径被 off 回退逻辑破坏；改按决定 H 收敛）
 
 # W9 核验（核验方，2026-11-20，提交 `86709fbc`…`1bd2192b`）
 
@@ -171,3 +171,51 @@ macOS 上 S1、fullfsync 的数据和预算 P95 0.574 ms，Linux 无法复现，
 ### 无法确认
 
 macOS 上的 5.66 ms、4.416 ms 和检查点 218–249 ms，推测都是在没有 MCP 可执行文件的配置下测的。
+
+
+## 复核（第四轮，2026-11-21，提交 `8cfafab8`…`a9fa74ca`）
+
+**已成立：**
+- B1–B3 在要求的四种场景下都能通过真实 daemon 测试。
+- trust gate 的缓存可靠：同大小原地改写、rename 替换、改符号链接目标，都会因 ctime、ino 变化被发现。
+- 性能场景计数改为实测，`p95Ms: 8` 没有放宽。
+- core §2.4 与 plan §8.1 已与代码一致。
+
+**Linux 复跑：**
+- `typecheck` 通过。
+- orchestration 与 daemon 在三种模式下都是 78 个文件、334 个用例通过。
+- remote 只有以 root 运行导致的 1 个已知失败。
+- `check:cli-runtime` 1,222 个用例全过。
+
+### 阻塞
+
+1. **N1：默认路径下，off 回退会用陈旧的 DB 覆盖一份好的 H1。**
+   - `reconcileH1ForOffMode` 无条件执行（`host-process.ts:261`），用 `h1.since(0).cursor`（第一页 256 条的游标）判断是否落后（`orchestration-off-fallback.ts:58`）。
+   - 已复现：只跑过 shadow、未设置模式时，H1 从 480 条被改写成 360 条；之后的任务变成 `unknown_run`，`resolveIntent` 返回 `cancelled`，可能导致重复执行；编号也被重复使用。
+2. **N2：默认路径下，`orchestration.db` 损坏会导致 daemon 起不来**（`:28` 没有捕获错误）。
+3. **N3：全新安装第一次 on 之后，H1 不是合法文件**（`orchestration-authority-ledger.ts:110` 在没有 run 时不写快照），进程内模式和旧版本读取时抛 `ledger_log_corrupt`。
+4. **N4：从 on 切到进程内模式或旧版本，再切回 on，off 期间的 run 会被忽略，编号被重复使用。**
+5. **N5：on 模式重启后，设备事件流被重编号**（`legacy-snapshot-builder.ts:219-231`）：游标在中间的设备收到空结果，也不收到 `reset`，永远错过 `run_settled`；opaque 进度标记丢失，桌面端失去 trace 关联。
+
+### 应修
+
+1. 「检查点在 worker 执行」没有测试（变异存活）。
+2. 每个进度事件都同步提交一次 `h1_seq_floor`，首 token 前约 3 次，没有计入 `onCommitTiming`。按决定 H 改为块预留。
+3. `h1_fallback_unavailable` 在进程内从不重试，也看不到状态。
+4. data 文档（§4.5 等）还写着 `legacy.mirror` 是可重放的 outbox effect；新增的 `orch_meta` 键、从 DB 重建台账、off 回退、NORMAL 窗口都没有写进文档。
+5. 性能标签是写死的字符串。
+6. trust gate 缓存不随 PATH 变化失效（启动时的现有检查能兜住，属于小项）。
+
+### 核验方决定
+
+按 [P4-orchestration-decisions](../../P4-orchestration-decisions.md) 第 14 节的**决定 H** 收敛，不再修补重编号与每事件的编号下限：
+- 设备端统一使用现有的 `reset` 机制。
+- 编号上限改为块预留。
+- H1 在任何时刻都必须是合法文件。
+- 默认路径只在 `orchestration_on_active = 1` 时才做 fail-open 的校正。
+- 写明不支持的回退路径。
+- Linux 补导入停顿记为已知问题。
+
+### 另立任务
+
+现有启动门禁每次运行都要对 MCP 可执行文件算 3 遍 SHA-256：`trust.ts:193-238` 两遍，`run-fork.ts:187-190` 一遍。Linux 上，119 MiB 的 node 每遍约 100 ms，所有模式（包括默认路径）都受影响。这不是 W9 引入的问题，交给 W13。
