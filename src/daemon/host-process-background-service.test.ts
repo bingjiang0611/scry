@@ -91,4 +91,38 @@ describe('daemon background service status (local op)', () => {
       }
     }
   }, 30_000)
+
+  it('gates localHostAdmin:setCliApproval behind SCRY_EXPERIMENTAL_HOST_CLI=1 and persists 0600 host-admin.json (P5-5b)', async () => {
+    const saved = process.env.SCRY_EXPERIMENTAL_HOST_CLI
+    delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
+    const offDaemon = await startTestDaemon()
+    let onDaemon: Awaited<ReturnType<typeof startTestDaemon>> | undefined
+    try {
+      // Flag off: status omits cliApproval, localHostAdmin refuses.
+      const offStatus = await offDaemon.localOp('localBackgroundService', 'status', [])
+      expect('cliApproval' in (offStatus.result as Record<string, unknown>)).toBe(false)
+      expect((await offDaemon.localOp('localHostAdmin', 'setCliApproval', [true])).error).toBe('host_cli_experimental_disabled')
+      await offDaemon.dispose()
+
+      // Flag on: status includes cliApproval, setCliApproval persists to host-admin.json.
+      process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
+      onDaemon = await startTestDaemon({ root: offDaemon.root })
+      expect((await onDaemon.localOp('localBackgroundService', 'status', [])).result).toMatchObject({
+        cliApproval: { enabled: false, updatedAt: null }
+      })
+      expect((await onDaemon.localOp('localHostAdmin', 'setCliApproval', ['yes'])).error).toBe('invalid_request')
+      const toggled = await onDaemon.localOp('localHostAdmin', 'setCliApproval', [true])
+      expect(toggled.error).toBeUndefined()
+      expect(toggled.result).toMatchObject({ enabled: true })
+      expect(onDaemon.host.hostAdmin.isCliApprovalEnabled()).toBe(true)
+      expect((await onDaemon.localOp('localBackgroundService', 'status', [])).result).toMatchObject({
+        cliApproval: { enabled: true }
+      })
+    } finally {
+      await offDaemon.dispose()
+      await onDaemon?.dispose()
+      if (saved === undefined) delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
+      else process.env.SCRY_EXPERIMENTAL_HOST_CLI = saved
+    }
+  }, 30_000)
 })

@@ -1,6 +1,7 @@
 import { pairingChannelHandlers } from '../../main/bootstrap/pairing-channels'
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import type { BackgroundServiceLaunchedBy, BackgroundServiceSelfReport } from '../../shared/background-service'
+import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli'
 import { computeEffectiveRemoteConfig } from '../login-start/policy-env'
 import type { DaemonLocalOpGroup } from './deps'
 
@@ -40,8 +41,19 @@ export const backgroundServiceLocalOps: DaemonLocalOpGroup = (deps) => {
         activeRuns: deps.runs().unsettledStates().length,
         ...(launchedBy ? { launchedBy } : {}),
         ...(supervisorPid !== undefined ? { supervisorPid } : {}),
-        remoteConfig: computeEffectiveRemoteConfig(process.env, deps.isPackaged)
+        remoteConfig: computeEffectiveRemoteConfig(process.env, deps.isPackaged),
+        ...(isHostCliExperimentalEnabled(process.env) && deps.hostAdmin
+          ? { cliApproval: deps.hostAdmin.snapshot() }
+          : {})
       }
+    },
+    'remote:hostAdmin:setCliApproval': (...args: unknown[]) => {
+      if (args.length !== 1 || typeof args[0] !== 'boolean') throw new Error('invalid_request')
+      if (!isHostCliExperimentalEnabled(process.env)) throw new Error('host_cli_experimental_disabled')
+      if (!deps.hostAdmin) throw new Error('host_admin_unavailable')
+      const state = deps.hostAdmin.setCliApprovalEnabled(args[0])
+      deps.log?.(`host-admin method=setCliApproval result=ok enabled=${state.enabled}`)
+      return state
     }
   } as Record<string, LocalOpHandler>
 }

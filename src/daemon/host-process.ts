@@ -33,6 +33,7 @@ import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
 import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
 import { createDaemonRemoteAssembly } from './host-process-assembly'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
+import { HostAdminStore } from './host-admin-store'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 
@@ -253,6 +254,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       : {})
   })
   const remoteStateDirectory = join(options.userDataDir, 'remote')
+  const hostAdmin = new HostAdminStore({
+    stateDirectory: remoteStateDirectory,
+    onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })
+  })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
   const service = await createHostRuntime({
     runtime,
@@ -282,7 +287,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       isPackaged: options.isPackaged,
       sourceControl,
       providerDiscovery,
-      executionTargetBridge: targetBridge.localHandlers
+      executionTargetBridge: targetBridge.localHandlers,
+      hostAdmin,
+      log
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
@@ -323,6 +330,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     service,
     channel,
     enrollSocket,
+    hostAdmin,
     providerOperationGate: session.providerOperationGate,
     ...(orchestrationShadow ? { orchestrationShadow } : {}),
     ...(orchestrationAuthority ? { orchestrationAuthority } : {}),

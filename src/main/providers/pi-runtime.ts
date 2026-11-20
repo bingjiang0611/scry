@@ -352,5 +352,7 @@ export async function piRpcEnvironment(
   const compatibleNode = configuredNode ?? await compatiblePiNode(env, rotom)
   pinPiLauncherNode(profile, env, compatibleNode)
   enableRotomNodeEnvProxy(profile, env)
+  // P5-host-security §4.2: marks Pi Provider child processes so compliant Agents cannot run `scry-host approve`.
+  env.SCRY_HOST_CHILD = 'run'
   return completePiEnvironment(profile, env)
 }

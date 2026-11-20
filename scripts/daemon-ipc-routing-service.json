@@ -34,6 +34,14 @@
       "main": "连接结果（就绪、版本不一致、未授权、不可用及原因）、userData 位置与 daemon.lock 登记且身份复核一致的 pid 由 App 自己确定；连接就绪时才向 daemon 询问其余字段，问不到的显示为未知",
       "op": "localBackgroundService",
       "method": "status"
+    },
+    {
+      "channel": "remote:hostAdmin:setCliApproval",
+      "route": "split",
+      "why": "设置页「允许命令行批准」开关（P5-5b，受 SCRY_EXPERIMENTAL_HOST_CLI=1 隔离）",
+      "main": "检查实验开关、连接就绪与单布尔参数；开启前在 main 弹原生确认框说明后果，确认后再经本机 op 写入 daemon；关闭不确认",
+      "op": "localHostAdmin",
+      "method": "setCliApproval"
     }
   ]
 }
