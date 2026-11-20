@@ -246,7 +246,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     runs: pipeline.runs,
     requestRunStop,
     log,
-    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {})
+    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
+    ...(options.orchestrationMirrorWriteHook ? { mirrorWriteHook: options.orchestrationMirrorWriteHook } : {}),
+    ...(options.orchestrationMirrorMaxPendingEvents !== undefined
+      ? { mirrorMaxPendingEvents: options.orchestrationMirrorMaxPendingEvents }
+      : {})
   })
   const remoteStateDirectory = join(options.userDataDir, 'remote')
   const relay = await resolveRemoteRelay(remoteStateDirectory)

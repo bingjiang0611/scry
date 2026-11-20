@@ -4,14 +4,7 @@ import type { ConversationStore } from '../main/conversation-store'
 import { buildMcpExecutionSnapshot } from '../main/mcp-execution-trust'
 import type { ProviderId } from '../shared/provider'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
-import {
-  SessionLedgerError,
-  type LedgerEvent,
-  type LedgerRecovery,
-  type LedgerSnapshot,
-  type LedgerStore
-} from '../main/remote/session-ledger'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
+import type { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
@@ -24,7 +17,8 @@ import {
   startDeferredLegacyImport,
   type LegacyLedgerPlan
 } from '../host-runtime/orchestration/legacy-import'
-import { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
+import type { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
+import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
 import {
   parseOrchestrationFullfsync,
   parseOrchestrationMode,
@@ -69,6 +63,8 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   requestRunStop: (runId: string) => boolean
   log: (line: string) => void
   beforeCommitHook?: () => void
+  mirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
+  mirrorMaxPendingEvents?: number
   deferredImportThreshold?: number
 }
 
@@ -206,61 +202,18 @@ function buildAuthorityRuntime<
 
   const hooks: OrchestrationAuthorityHooks = {
     createLedgerStore: (ledgerDirectory) => {
-      const fileStore = new SessionLedgerFileStore(ledgerDirectory)
-      backingFileStore = fileStore
-      const initial: LedgerRecovery = fileStore.loadRecovery?.() ?? { events: fileStore.loadAll() }
-      let currentSnapshot: LedgerSnapshot | undefined = initial.snapshot
-      let memoryEvents: LedgerEvent[] = [...initial.events]
-      const mirror = new LegacyMirrorWorker({
+      const created = createAuthorityLedgerStore({
+        ledgerDirectory,
         sink,
-        ledgerStore: fileStore,
-        onError: (error) => {
-          const msg = error instanceof Error ? error.message : String(error)
-          options.log(`daemon.orchestration-legacy-mirror-error ${msg}`)
-        }
+        log: options.log,
+        ...(options.mirrorWriteHook ? { mirrorWriteHook: options.mirrorWriteHook } : {}),
+        ...(options.mirrorMaxPendingEvents !== undefined
+          ? { mirrorMaxPendingEvents: options.mirrorMaxPendingEvents }
+          : {})
       })
-      legacyMirror = mirror
-
-      const store: LedgerStore = {
-        assertAvailable: () => {
-          if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
-        },
-        loadAll: () => [...(currentSnapshot?.retainedEvents ?? []), ...memoryEvents],
-        loadRecovery: () => ({
-          ...(currentSnapshot ? { snapshot: structuredClone(currentSnapshot) } : {}),
-          events: [...memoryEvents]
-        }),
-        shouldCompact: (nextEvent) => {
-          if ((currentSnapshot?.retainedEvents.length ?? 0) + memoryEvents.length >= 8192) return true
-          try {
-            return fileStore.shouldCompact(nextEvent)
-          } catch {
-            return false
-          }
-        },
-        compact: (snapshot) => {
-          if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
-          // Snapshot MUST be deep-cloned: SessionLedger assigns `this.#events = snapshot.retainedEvents`
-          // and pushes subsequent events onto that same array before our async mirror serializes it.
-          const frozen = structuredClone(snapshot)
-          currentSnapshot = frozen
-          memoryEvents = []
-          mirror.enqueueCompact(frozen)
-        },
-        append: (event) => {
-          if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
-          memoryEvents.push(event)
-          // Idle-flushed bounded H1 mirror (plan §9): ZERO sync file fsync pre-first-token.
-          mirror.enqueue(event)
-        }
-      }
-      return {
-        store,
-        close: async () => {
-          await mirror.close()
-          fileStore.close()
-        }
-      }
+      backingFileStore = created.fileStore
+      legacyMirror = created.mirror
+      return { store: created.store, close: created.close }
     },
 
     submitAsync: async (input) => {
