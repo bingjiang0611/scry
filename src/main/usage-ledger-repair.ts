@@ -50,7 +50,10 @@ export function repairMissingUsageLedger(db: Database.Database): void {
     const provider = row.providerId === 'pi' || row.providerId === 'opencode'
       ? billingProviderForUpstream(row.upstreamProvider || undefined) ?? (row.providerId === 'pi' ? 'unknown' : 'opencode')
       : row.providerId === 'claude' ? 'anthropic' : row.providerId
-    const cost = provider === 'qoder' || (row.runtimeProvider === 'pi_rpc' && row.cost === 0) ? null : row.cost
+    const cost = provider === 'qoder' ||
+      ((row.runtimeProvider === 'pi_rpc' || row.runtimeProvider === 'antigravity_acp') && row.cost === 0)
+      ? null
+      : row.cost
     const usage: UsageLedgerObject = {
       id: `${provider}:${row.spanId}${row.hasModel ? `:${row.model}` : ''}`,
       provider, source: 'scry_persisted_usage', sourceKind: 'analytics_report',

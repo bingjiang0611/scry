@@ -144,12 +144,17 @@ export function sdkUsageLedgerRowsFromItems(args: {
         : `${provider}_runtime_result`)
   const isClaudeSdkEstimate = (provider: BillingProvider, usageSource?: string): boolean =>
     provider === 'anthropic' && (!usageSource || usageSource === 'claude_sdk')
-  const sourceKindFor = (provider: BillingProvider, usageSource?: string): BillingSourceKind =>
-    isClaudeSdkEstimate(provider, usageSource) ? 'sdk_estimate' : 'provider_reported'
-  const costSourceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingCostSource): BillingCostSource =>
-    value ?? (isClaudeSdkEstimate(provider, usageSource) ? 'sdk_estimate' : 'provider_reported')
-  const confidenceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingConfidence): BillingConfidence =>
-    value ?? (isClaudeSdkEstimate(provider, usageSource) ? 'estimated' : 'provider_reported')
+  const isAntigravityMissingCost = (provider: BillingProvider, cost: number | null | undefined, usageSource?: string): boolean =>
+    (provider === 'antigravity' || usageSource === 'antigravity_acp' || args.runtimeProvider === 'antigravity_acp' || result.runtimeProvider === 'antigravity_acp') &&
+    cost == null
+  const sourceKindFor = (provider: BillingProvider, usageSource?: string, cost?: number | null): BillingSourceKind =>
+    isClaudeSdkEstimate(provider, usageSource) || isAntigravityMissingCost(provider, cost, usageSource)
+      ? 'sdk_estimate'
+      : 'provider_reported'
+  const costSourceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingCostSource, cost?: number | null): BillingCostSource =>
+    value ?? (isClaudeSdkEstimate(provider, usageSource) || isAntigravityMissingCost(provider, cost, usageSource) ? 'sdk_estimate' : 'provider_reported')
+  const confidenceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingConfidence, cost?: number | null): BillingConfidence =>
+    value ?? (isAntigravityMissingCost(provider, cost, usageSource) ? 'inferred' : isClaudeSdkEstimate(provider, usageSource) ? 'estimated' : 'provider_reported')
   const ts = Date.parse(result.ts)
   const bucket = Number.isNaN(ts) ? args.nowMs : ts
   const rows: UsageLedgerObject[] = []
@@ -164,7 +169,7 @@ export function sdkUsageLedgerRowsFromItems(args: {
         id: `${provider}:${result.id}:${mu.model}`,
         provider,
         source: sourceFor(provider, usageSource),
-        sourceKind: sourceKindFor(provider, usageSource),
+        sourceKind: sourceKindFor(provider, usageSource, mu.costUsd ?? null),
         sessionId: args.sessionId ?? null,
         runId: args.runId,
         spanId: result.id,
@@ -182,8 +187,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
         cost: mu.costUsd ?? null,
         currency: costUnit === 'usd' ? 'USD' : null,
         costUnit,
-        costSource: costSourceFor(provider, usageSource, mu.costSource ?? result.costSource),
-        confidence: confidenceFor(provider, usageSource, mu.costConfidence ?? result.costConfidence),
+        costSource: costSourceFor(provider, usageSource, mu.costSource ?? result.costSource, mu.costUsd ?? null),
+        confidence: confidenceFor(provider, usageSource, mu.costConfidence ?? result.costConfidence, mu.costUsd ?? null),
         attributionMethod: 'direct',
         metadata: runtimeLedgerMetadata({
           runtimeProvider: args.runtimeProvider,
@@ -206,7 +211,7 @@ export function sdkUsageLedgerRowsFromItems(args: {
     id: `${provider}:${result.id}`,
     provider,
     source: sourceFor(provider, result.usageSource),
-    sourceKind: sourceKindFor(provider, result.usageSource),
+    sourceKind: sourceKindFor(provider, result.usageSource, result.costUsd ?? null),
     sessionId: args.sessionId ?? null,
     runId: args.runId,
     spanId: result.id,
@@ -223,8 +228,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
     cost: result.costUsd ?? null,
     currency: costUnit === 'usd' ? 'USD' : null,
     costUnit,
-    costSource: costSourceFor(provider, result.usageSource, result.costSource),
-    confidence: confidenceFor(provider, result.usageSource, result.costConfidence),
+    costSource: costSourceFor(provider, result.usageSource, result.costSource, result.costUsd ?? null),
+    confidence: confidenceFor(provider, result.usageSource, result.costConfidence, result.costUsd ?? null),
     attributionMethod: 'direct',
     metadata: runtimeLedgerMetadata({
       runtimeProvider: args.runtimeProvider,
@@ -257,7 +262,7 @@ function estimateRows(rows: UsageLedgerObject[], prices: LocalModelPriceVersion[
     const reasoning = row.reasoningTokens ?? 0
     if (input + output + cacheRead + cacheWrite + reasoning === 0 || price.inputPerMillion == null || price.outputPerMillion == null) return row
     const includedCacheWrite = row.provider === 'openai' || row.provider === 'codex' ? cacheWrite : 0
-    const uncachedInput = row.provider === 'anthropic' ? input : Math.max(0, input - cacheRead - includedCacheWrite)
+    const uncachedInput = row.provider === 'anthropic' || row.provider === 'antigravity' ? input : Math.max(0, input - cacheRead - includedCacheWrite)
     const normalOutput = price.reasoningPerMillion == null ? output : Math.max(0, output - reasoning)
     const cost = (
       uncachedInput * price.inputPerMillion +
