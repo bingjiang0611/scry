@@ -202,10 +202,14 @@ const measure = async (count, chunkIndex) => {
       })()`)
       const submittedWall = await evaluate('window.__timing.submittedAtWall')
       newRunMarks()
-      const largeAttachmentText = largeBody
-        ? `sample-${results.runs.length}-${'X'.repeat(32_000)}`
+      // Use a unique 32 KiB PNG image attachment so `request.prompt` remains the exact
+      // paced-stream trigger (yielding real `firstTextMs`) while ledger `detail` exceeds 16 KiB (~43 KB JSON).
+      const largeAttachmentBytes = largeBody
+        ? Buffer.concat([
+            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+            Buffer.from(`sample-${results.runs.length}-${'X'.repeat(32_000)}`, 'utf8')
+          ])
         : null
-      const largeAttachmentBytes = largeAttachmentText ? Buffer.from(largeAttachmentText, 'utf8') : null
       const startPayload = {
         prompt: PROMPT,
         providerId: 'codex',
@@ -215,9 +219,9 @@ const measure = async (count, chunkIndex) => {
           ? {
               attachments: [
                 {
-                  kind: 'text',
-                  name: 'large-body.txt',
-                  mimeType: 'text/plain',
+                  kind: 'image',
+                  name: 'large-body.png',
+                  mimeType: 'image/png',
                   dataBase64: largeAttachmentBytes.toString('base64'),
                   size: largeAttachmentBytes.length
                 }
