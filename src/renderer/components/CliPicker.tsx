@@ -3,6 +3,7 @@ import { useEffect, useId, useRef } from 'react'
 import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
 import { providerIdForAgentId } from '@shared/runtime'
 import { AGENT_PICKER_COPY } from '../constants/agent-picker-copy'
+import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { PI_PICKER_COPY } from '../constants/copy'
 import { basename } from '../format'
 import type { DetectedAgent } from '../env'
@@ -132,7 +133,7 @@ export function CliPicker({
               key={a.id}
               checked={a.id === selectedId}
               data-agent-id={a.id}
-              title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
+              title={`${a.path}${a.version ? ' · ' + a.version : ''}${a.accountNote ? ' · ' + a.accountNote : ''}`}
               disabled={unavailableIds?.has(a.id)}
               icon={<span className="agicon"><ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} /></span>}
               onClick={() => {
@@ -140,9 +141,19 @@ export function CliPicker({
                 dismissMenu()
               }}
             >
-              <span className="agent-option-name">{a.name}{unavailableIds?.has(a.id) && a.id !== selectedId ? ' · 不可用' : ''}</span>
+              <span className="agent-option-name">
+                {a.name}
+                {a.accountNote ? ` · ${a.accountNote}` : ''}
+                {unavailableIds?.has(a.id) && a.id !== selectedId ? ' · 不可用' : ''}
+              </span>
             </MenuItem>
           ))}
+          {codeAgents.some((a) => agentGlyphProvider(a.id) === 'antigravity') && (
+            <div className="dim pad" role="none">
+              <div>{ANTIGRAVITY_COPY.tosNotice}</div>
+              <div>{ANTIGRAVITY_COPY.processScopeNotice}</div>
+            </div>
+          )}
           {piAgents.length > 0 && <MenuLabel>Pi · Profiles</MenuLabel>}
           {piAgents.map((agent) => (
             <div className="agent-option-row" key={agent.id} role="none">

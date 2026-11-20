@@ -17,6 +17,7 @@ import { isIncompleteRunTermination, runTerminationHint, runTerminationLabel, ty
 
 import { aggregateCalls, fmtTok, logicalCallEventsForTurn, resultOf } from '../format'
 import type { FileRow } from '../format'
+import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { Notice } from './primitives/Notice'
 
 
@@ -42,13 +43,30 @@ export function TurnFooter({ items, files }: { items: TraceEvent[]; files: FileR
   )
   const hasUsage = result?.tokensIn != null || result?.tokensOut != null || !!result?.cacheReadTokens || !!result?.cacheCreationTokens
   const hasTiming = result?.durationMs != null || result?.durationApiMs != null
+  const meta = result?.runtimeMetadata as Record<string, unknown> | undefined
+  const usageCoverage = meta?.usageCoverage === 'partial' || meta?.usageCoverage === 'unavailable'
+    ? meta.usageCoverage
+    : undefined
+  const usageCoverageReason = typeof meta?.usageCoverageReason === 'string' ? meta.usageCoverageReason : undefined
+  const modelUnobserved = meta?.modelStatus === 'unobserved'
+  const modelOmissionReason = typeof meta?.modelOmissionReason === 'string' ? meta.modelOmissionReason : undefined
   return (
     <div className="turn-footer">
       {result?.tokensIn != null && stat('in', fmtTok(result.tokensIn))}
       {result?.tokensOut != null && stat('out', fmtTok(result.tokensOut))}
       {result?.cacheReadTokens ? stat('cache·r', fmtTok(result.cacheReadTokens)) : null}
       {result?.cacheCreationTokens ? stat('cache·w', fmtTok(result.cacheCreationTokens)) : null}
-      {hasUsage && hasTiming && <span className="sep" />}
+      {usageCoverage && (
+        <span className="stat" title={usageCoverageReason}>
+          <span className="lbl">{usageCoverage === 'partial' ? ANTIGRAVITY_COPY.usagePartial : ANTIGRAVITY_COPY.usageUnavailable}</span>
+        </span>
+      )}
+      {modelUnobserved && (
+        <span className="stat" title={modelOmissionReason}>
+          <span className="lbl">{ANTIGRAVITY_COPY.modelUnobserved}</span>
+        </span>
+      )}
+      {(hasUsage || usageCoverage || modelUnobserved) && hasTiming && <span className="sep" />}
       {result?.durationMs != null && stat('dur', `${(result.durationMs / 1000).toFixed(1)}s`)}
       {result?.durationApiMs != null && stat('api', `${(result.durationApiMs / 1000).toFixed(1)}s`)}
       <span className="sep" />
@@ -81,6 +99,14 @@ export function ToolTerminationNotice({ evidence }: { evidence: NonNullable<Trac
       <b>工具已结束本次执行 · {evidence.tool}</b>
       <span>{evidence.message || '工具未提供结束说明'}</span>
       <span>执行结束不代表目标已验证完成；请先查看工具结果，不要盲目重试。</span>
+    </Notice>
+  )
+}
+
+export function UserAllowRulesNotice({ notice }: { notice: string }) {
+  return (
+    <Notice tone="info" size="sm" role="note">
+      <span>{notice}</span>
     </Notice>
   )
 }

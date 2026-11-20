@@ -26,7 +26,7 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 
 export function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
-  const raw = event?.providerId ?? event?.runtimeProvider?.replace(/_(sdk|cli|server)$/, '') ?? 'agent'
+  const raw = event?.providerId ?? event?.runtimeProvider?.replace(/_(sdk|cli|server|rpc|acp)$/, '') ?? 'agent'
   const label = raw.charAt(0).toUpperCase() + raw.slice(1)
   return { avatar: label.charAt(0), label }
 }

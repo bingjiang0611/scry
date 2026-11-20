@@ -10,6 +10,7 @@ export type ProviderDetectionResult = DetectedAgent & {
   runtimeProvider?: ProviderDescriptor['runtimeProvider']
   transport?: string
   capabilities?: ProviderDescriptor['capabilities']
+  accountNote?: string
   health?: ProviderHealth
   /** Provider 已装但不可用时的原因，与 descriptor 语义一致。 */
   unavailableReason?: string
@@ -173,6 +174,7 @@ export async function composeProviderDetectionResults({
       runtimeProvider: descriptor.runtimeProvider,
       transport: descriptor.transport,
       capabilities: descriptor.capabilities,
+      ...(descriptor.accountNote ? { accountNote: descriptor.accountNote } : {}),
       health: agent.health?.state === 'unavailable'
         ? {
             ...descriptor.health,
