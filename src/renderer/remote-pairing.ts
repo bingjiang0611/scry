@@ -46,6 +46,7 @@ export interface DeviceRow {
   deviceId: string
   label: string
   statusText: string
+  approvedViaText: string
   confirmedAt: number
   expiresAt: number
 }
@@ -78,6 +79,7 @@ function projectDevice(d: RemoteDevice): DeviceRow {
     deviceId: d.deviceId,
     label: d.deviceLabel && d.deviceLabel.trim().length > 0 ? d.deviceLabel : copy.unnamedDevice,
     statusText: copy.paired,
+    approvedViaText: copy.approvedViaLabel(d.approvedVia),
     confirmedAt: d.confirmedAt,
     expiresAt: d.expiresAt
   }

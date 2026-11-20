@@ -16,6 +16,7 @@ import { ProviderOperationGate } from '../provider-operation-gate'
 import { type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { DesktopAttachmentStore } from './desktop-attachments'
 import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import type { HostAdminNotice } from '../../shared/host-admin'
 
 // The structured routing a device intent must resolve to before any Provider
 // run. Carried in the intent detail as JSON; malformed detail is denied.
@@ -209,4 +210,6 @@ export interface HostControllerDependencies {
   gate?: ProviderOperationGate
   attachmentStore?: DesktopAttachmentStore
   attachmentDirectory?: string
+  // P5-7: recent sanitized host CLI admin notices (present only when SCRY_EXPERIMENTAL_HOST_CLI=1).
+  listHostAdminNotices?(): HostAdminNotice[]
 }

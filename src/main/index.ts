@@ -300,7 +300,7 @@ const {
 const loginStartBridge = createDaemonLoginStartBridge(daemonModeEnabled())
 const daemonRun = daemonModeEnabled()
   ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd,
-    dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces,
+    getWindow: () => win, dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces,
     desktopRemoteClient: () => requireDesktopRemoteClient(), ...loginStartBridge.daemonModeOptions }))
   : undefined
 registerAgentRuntimeHandlers({

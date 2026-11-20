@@ -4,6 +4,7 @@ import {
   type BackgroundServiceStatus, type LoginStartPolicyEntry
 } from '../shared/background-service'
 import {
+  CLI_APPROVAL_COPY,
   LOGIN_START_COPY,
   formatLoginStartConflictDetail,
   formatLoginStartStatus,
@@ -29,11 +30,20 @@ export interface BackgroundServiceLoginStartView {
   notices: BackgroundServiceNotice[]
 }
 
+export interface BackgroundServiceCliApprovalView {
+  stateText: string
+  enabled: boolean
+  canToggle: boolean
+  hostCliPath?: string
+  hint: string
+}
+
 export interface BackgroundServiceView {
   rows: BackgroundServiceRow[]
   notice?: BackgroundServiceNotice
   runtimeNotices: BackgroundServiceNotice[]
   loginStart?: BackgroundServiceLoginStartView
+  cliApproval?: BackgroundServiceCliApprovalView
   /** Which actions this state offers; `restartPrimary` when restarting is the fix. */
   actions: { restart: boolean; restartPrimary: boolean; reconnect: boolean; quit: boolean }
 }
@@ -141,6 +151,22 @@ export function projectBackgroundService(
     }
   }
 
+  let cliApprovalView: BackgroundServiceCliApprovalView | undefined
+  if (status.cliApproval) {
+    const cli = status.cliApproval
+    cliApprovalView = {
+      stateText: cli.state === 'enabled'
+        ? CLI_APPROVAL_COPY.stateEnabled
+        : cli.state === 'disabled'
+          ? CLI_APPROVAL_COPY.stateDisabled
+          : CLI_APPROVAL_COPY.stateUnavailable(cli.reason),
+      enabled: cli.state === 'enabled',
+      canToggle: cli.state === 'enabled' || cli.state === 'disabled',
+      ...(cli.state !== 'unavailable' && cli.hostCliPath ? { hostCliPath: cli.hostCliPath } : {}),
+      hint: CLI_APPROVAL_COPY.riskHint
+    }
+  }
+
   const runtimeNotices: BackgroundServiceNotice[] = runtimeNoticeMessages(status.runtimeNotice)
     .map((text) => ({ tone: 'warn', text }))
 
@@ -149,6 +175,7 @@ export function projectBackgroundService(
     ...(notice ? { notice } : {}),
     runtimeNotices,
     ...(loginStartView ? { loginStart: loginStartView } : {}),
+    ...(cliApprovalView ? { cliApproval: cliApprovalView } : {}),
     actions: {
       restart: true,
       restartPrimary: connection.state === 'version-mismatch' || (connection.state === 'unavailable' && !credentialRefused),
@@ -174,5 +201,11 @@ export function describeActionResult(action: BackgroundServiceAction, result: Ba
 export function describeLoginStartResult(enabled: boolean, result: BackgroundServiceActionResult): BackgroundServiceNotice {
   if (result.status === 'done') return { tone: 'info', text: enabled ? LOGIN_START_COPY.enabledDone : LOGIN_START_COPY.disabledDone }
   if (result.status === 'cancelled') return { tone: 'info', text: LOGIN_START_COPY.cancelled }
+  return { tone: 'bad', text: result.message }
+}
+
+export function describeCliApprovalResult(enabled: boolean, result: BackgroundServiceActionResult): BackgroundServiceNotice {
+  if (result.status === 'done') return { tone: 'info', text: enabled ? CLI_APPROVAL_COPY.enabledDone : CLI_APPROVAL_COPY.disabledDone }
+  if (result.status === 'cancelled') return { tone: 'info', text: CLI_APPROVAL_COPY.cancelled }
   return { tone: 'bad', text: result.message }
 }

@@ -16,6 +16,7 @@ const qoderIndexRelative = join('node_modules', '@qoder-ai', 'qoder-agent-sdk', 
 const ptyRootRelative = join('node_modules', 'node-pty')
 const maxBytes = Number(process.env.SCRY_APP_MAX_BYTES || 330 * 1024 * 1024)
 const scryCli = join(resources, 'bin', 'scry')
+const scryHostCli = join(resources, 'bin', 'scry-host')
 const scryCliPackage = join(resources, 'scry-cli', 'package.json')
 const scryPiIntegration = join(resources, 'scry-cli', 'integrations', 'pi-scry-recorder.mjs')
 const electronResources = layout.locales
@@ -105,7 +106,7 @@ for (const forbiddenRoot of ['/.claude', '/.local', '/src', '/docs', '/scripts',
 if (!entries.includes('/out/preload/index.cjs')) {
   throw new Error('packaged app 缺少 sandbox-compatible CommonJS preload')
 }
-for (const daemonEntry of ['/out/main/daemon.js', '/out/main/daemon-supervisor.js']) {
+for (const daemonEntry of ['/out/main/daemon.js', '/out/main/daemon-supervisor.js', '/out/main/host-cli.js']) {
   if (!entries.includes(daemonEntry)) throw new Error(`packaged app 缺少 daemon 入口：${daemonEntry}`)
 }
 // The supervisor's own module graph (entry + the chunks it imports): the bundler moves
@@ -151,6 +152,8 @@ if (process.platform === 'darwin') {
 
 if (!resolve(scryCli).startsWith(resolve(resources) + sep)) throw new Error('App 私有 CLI 不是 Resources 下的绝对路径')
 accessSync(scryCli, constants.X_OK)
+if (!resolve(scryHostCli).startsWith(resolve(resources) + sep)) throw new Error('App 私有 scry-host CLI 不是 Resources 下的绝对路径')
+accessSync(scryHostCli, constants.X_OK)
 if (!existsSync(scryCliPackage)) throw new Error('packaged app 缺少 App 私有 Scry CLI package.json')
 if (!existsSync(scryPiIntegration)) throw new Error('packaged app 缺少 Pi recorder integration')
 const historyExtension = join(resources, 'scry-history', 'pi-history-reader.mjs')

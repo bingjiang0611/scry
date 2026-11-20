@@ -114,7 +114,9 @@ export const REMOTE_ACCESS_COPY = {
   unnamedDevice: '未命名设备',
   awaitingFingerprint: '等待确认指纹',
   deviceConnecting: '设备连接中…',
-  paired: '已配对'
+  paired: '已配对',
+  approvedViaLabel: (via?: 'app' | 'host_cli'): string =>
+    via === 'app' ? '批准方式（记录为）：App' : via === 'host_cli' ? '批准方式（记录为）：命令行' : '批准方式（记录为）：未记录'
 } as const
 
 export const REMOTE_SESSION_COPY = {

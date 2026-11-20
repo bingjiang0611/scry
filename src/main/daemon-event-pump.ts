@@ -1,5 +1,6 @@
 import type { AgentDataUpdated } from '../shared/runtime'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import type { HostAdminNotice } from '../shared/host-admin'
 import { DaemonRunError } from './daemon-run-transport'
 
 // P3f: the App side of the daemon's event feed. One long poll per daemon connection, on
@@ -10,7 +11,15 @@ import { DaemonRunError } from './daemon-run-transport'
 export interface DaemonEventReply {
   epoch: string
   cursor: number
-  items: Array<{ kind: 'data'; event: AgentDataUpdated } | { kind: 'run'; runId: string; intentSeq?: number } | { kind: 'attention'; snapshot: SessionAttentionSnapshot } | { kind: 'window'; channel: string; payload: Record<string, unknown> } | { kind: 'terminal' } | { kind: 'oauth'; url: string }>
+  items: Array<
+    | { kind: 'data'; event: AgentDataUpdated }
+    | { kind: 'run'; runId: string; intentSeq?: number }
+    | { kind: 'attention'; snapshot: SessionAttentionSnapshot }
+    | { kind: 'window'; channel: string; payload: Record<string, unknown> }
+    | { kind: 'terminal' }
+    | { kind: 'oauth'; url: string }
+    | { kind: 'hostAdmin'; notice: HostAdminNotice }
+  >
   reset: boolean
 }
 
@@ -37,6 +46,8 @@ export interface DaemonEventPumpDeps {
   onTerminal?: () => void
   // An MCP OAuth page the daemon asks this App to open (its own re-auth only).
   onOAuth?: (url: string) => void
+  // P5-7: host CLI approval switch / approve / cancel / revoke / desktop-off notice.
+  onHostAdmin?: (notice: HostAdminNotice) => void
   // W1: one of the run pipeline's window notices. Awaited, so notices keep their order;
   // without a handler it goes to the window as it came.
   onWindow?: (channel: string, payload: Record<string, unknown>) => Promise<void> | void
@@ -107,6 +118,7 @@ export class DaemonEventPump {
           else if (item.kind === 'attention') this.#deps.onAttention?.(item.snapshot)
           else if (item.kind === 'terminal') this.#deps.onTerminal?.()
           else if (item.kind === 'oauth') this.#deps.onOAuth?.(item.url)
+          else if (item.kind === 'hostAdmin') this.#deps.onHostAdmin?.(item.notice)
           else if (this.#deps.onWindow) await this.#deps.onWindow(item.channel, item.payload)
           else send(item.channel, item.payload)
         }

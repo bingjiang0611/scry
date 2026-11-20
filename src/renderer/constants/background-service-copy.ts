@@ -29,6 +29,24 @@ export const LOGIN_START_COPY = {
   launchedByServiceSelfReported: '由系统服务拉起（自报）'
 } as const
 
+export const CLI_APPROVAL_COPY = {
+  sectionTitle: '允许命令行批准',
+  enableButton: '开启允许命令行批准',
+  enablingButton: '开启允许命令行批准…',
+  disableButton: '关闭允许命令行批准',
+  disablingButton: '关闭允许命令行批准…',
+  stateEnabled: '已开启',
+  stateDisabled: '已关闭',
+  stateUnavailable: (reason: string) => `不可用（${reason}）`,
+  copyPathButton: '复制 scry-host 路径',
+  copiedPathButton: '已复制 scry-host 路径',
+  pathPrefix: '命令行入口：',
+  riskHint: '开启后，本机当前用户在终端运行 scry-host 可发起邀请并批准新设备；Scry 管理的 Agent 与终端内仍会拒绝。',
+  enabledDone: '已开启允许命令行批准。',
+  disabledDone: '已关闭允许命令行批准。',
+  cancelled: '已取消，没有修改命令行批准开关。'
+} as const
+
 const RELAY_LABELS: Record<BackgroundServiceRelayMode, string> = {
   public: '公共中继',
   custom_ws: '自定义中继（WS）',
