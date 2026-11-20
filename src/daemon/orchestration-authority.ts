@@ -111,28 +111,15 @@ export async function attachDaemonOrchestrationAuthority<
     const plan = await loadLegacyLedgerPlanAsync(sink, options.userDataDir)
     if (plan.unimportedRuns.length > deferredThreshold) {
       importLegacyStateIncrementally({
-        sink,
-        userDataDir: options.userDataDir,
-        pendingTtlMs,
-        reconcileOpenRuns: true,
-        shadowOnly: false,
-        openOnly: true,
-        plan,
-        resolveTurnOrdinal
+        sink, userDataDir: options.userDataDir, pendingTtlMs,
+        reconcileOpenRuns: true, shadowOnly: false, openOnly: true, plan, resolveTurnOrdinal
       })
       deferredPlan = plan
-      importComplete = new Promise<void>((resolve) => {
-        resolveImportComplete = resolve
-      })
+      importComplete = new Promise<void>((resolve) => { resolveImportComplete = resolve })
     } else if (plan.unimportedRuns.length > 0 || plan.lastSeq > plan.currentLedgerSeq) {
       importLegacyStateIncrementally({
-        sink,
-        userDataDir: options.userDataDir,
-        pendingTtlMs,
-        reconcileOpenRuns: true,
-        shadowOnly: false,
-        plan,
-        resolveTurnOrdinal
+        sink, userDataDir: options.userDataDir, pendingTtlMs,
+        reconcileOpenRuns: true, shadowOnly: false, plan, resolveTurnOrdinal
       })
     }
 
@@ -328,6 +315,7 @@ function buildAuthorityRuntime<
       const canonicalRunId = resolveCanonical(input.runId)
       const routing = parseLedgerIntentRouting(canonicalRunId, input.detail)
       const actor = input.peerCertSHA256 ? `peer:${input.peerCertSHA256}` : 'system'
+      let trustGateDetail: string | undefined
       const res = engine.beforeDispatch({
         runId: canonicalRunId,
         cwd: routing.cwd,
@@ -349,14 +337,22 @@ function buildAuthorityRuntime<
               settingSources: targetProvider === 'claude' ? options.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
               env: options.env
             })
-            return snapshot.errors.length === 0
-          } catch {
+            if (snapshot.errors.length > 0) {
+              trustGateDetail = `MCP 配置无法安全执行：${snapshot.errors.join('；')}`
+              return false
+            }
+            return true
+          } catch (error) {
             // Trust gate MUST fail closed on inspection errors.
+            trustGateDetail = error instanceof Error ? error.message : String(error)
             return false
           }
         }
       })
-      if (!res.ok && res.action === 'fail') ledgerToCanonical.delete(input.runId)
+      if (!res.ok && res.action === 'fail') {
+        ledgerToCanonical.delete(input.runId)
+        return trustGateDetail ? { ...res, detail: trustGateDetail } : res
+      }
       return res
     },
 
@@ -437,8 +433,7 @@ function buildAuthorityRuntime<
     isWriteIndeterminate: () => sink.isWriteIndeterminate()
   }
 
-  // Decision G: in authoritative `on` mode, commit `turn.record_delivery` to orchestration.db
-  // BEFORE `ConversationStore.persist` writes `conversations/<id>.json`.
+  // Decision G: commit `turn.record_delivery` before `ConversationStore.persist`.
   options.conversationStore().setBeforeTurnSettledObserver((info) => {
     if (sink.isWriteIndeterminate()) return
     const at = Date.now()
@@ -474,45 +469,21 @@ function buildAuthorityRuntime<
     const targetPlan = deferredPlan
     deferredPlan = undefined
     const handle = startDeferredLegacyImport({
-      sink,
-      userDataDir: options.userDataDir,
-      pendingTtlMs,
-      reconcileOpenRuns: true,
-      shadowOnly: false,
-      plan: targetPlan,
-      resolveTurnOrdinal
+      sink, userDataDir: options.userDataDir, pendingTtlMs,
+      reconcileOpenRuns: true, shadowOnly: false, plan: targetPlan, resolveTurnOrdinal
     })
     ctx.setDeferredControl(handle.cancel)
     handle.promise
-      .then((summary) => {
-        options.log(
-          `daemon.orchestration-on-import-done importedRuns=${summary.importedRuns} importedSessions=${summary.importedSessions}`
-        )
-      })
-      .catch((error) => {
-        const msg = error instanceof Error ? error.message : String(error)
-        options.log(`daemon.orchestration-on-import-failed ${msg}`)
-      })
+      .then((s) => options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`))
+      .catch((e) => options.log(`daemon.orchestration-on-import-failed ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => resolveImportComplete?.())
   }
 
-  options.log(
-    `daemon.orchestration-on-ready fullfsync=${String(fullfsync)} checkpointFullfsync=${String(checkpointFullfsync)} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`
-  )
+  options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
   return {
-    mode,
-    fullfsync,
-    checkpointFullfsync,
-    sink,
-    engine,
-    hooks,
-    recovery,
-    importComplete,
-    startImport,
-    flushLegacyMirror: async () => {
-      await legacyMirror?.flush()
-    },
+    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, startImport,
+    flushLegacyMirror: async () => { await legacyMirror?.flush() },
     close: async () => {
       if (closed) return
       closed = true
@@ -520,11 +491,7 @@ function buildAuthorityRuntime<
       resolveImportComplete?.()
       options.conversationStore().setBeforeTurnSettledObserver(undefined)
       await legacyMirror?.close()
-      try {
-        backingFileStore?.close()
-      } catch {
-        // Backing store may already be closed by HostController.
-      }
+      try { backingFileStore?.close() } catch { /* may already be closed */ }
       sink.close()
     }
   }

@@ -208,7 +208,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
           }
         })
         if (!check.ok && check.action === 'fail') {
-          try { deps.onDispatchRefused?.({ detail, grantScope: gateway.runScope(runId), error: new Error(check.reason) }) }
+          try { deps.onDispatchRefused?.({ detail, grantScope: gateway.runScope(runId), error: new Error(check.detail ?? check.reason) }) }
           catch { /* ignore refusal hook error */ }
         }
         return check

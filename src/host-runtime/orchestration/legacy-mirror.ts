@@ -68,7 +68,17 @@ export class LegacyMirrorWorker {
     if (this.#queue.length > this.#maxPendingEvents) {
       this.#queue.splice(0, this.#queue.length - this.#maxPendingEvents)
     }
-    this.#schedule(this.#idleDelayMs)
+    const isTerminal =
+      event.kind === 'run_settled' || event.kind === 'run_failed' || event.kind === 'run_cancelled'
+    if (isTerminal) {
+      if (this.#timer) {
+        clearTimeout(this.#timer)
+        this.#timer = null
+      }
+      this.#schedule(0)
+    } else {
+      this.#schedule(this.#idleDelayMs)
+    }
   }
 
   /** Enqueues a compacted H1 snapshot and drops all queued events superseded by `snapshot.lastSeq`. */

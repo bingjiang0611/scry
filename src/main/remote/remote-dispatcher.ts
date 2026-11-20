@@ -50,7 +50,10 @@ export interface RemoteDispatcherDependencies {
   beforeDispatch?(
     runId: string,
     detail?: string
-  ): { ok: true } | { ok: false; action: 'fail'; reason: string } | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
+  ):
+    | { ok: true }
+    | { ok: false; action: 'fail'; reason: string; detail?: string }
+    | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
   /** P4-2 authoritative terminal settlement hook after executor finishes. */
   onSettled?(runId: string, ok: boolean, detail?: string): void
 }
@@ -112,7 +115,7 @@ export class RemoteDispatcher {
               if (gate.reason === 'pending_expired' || gate.reason === 'stop_requested') {
                 this.#ledger.markCancelled(intent.runId)
               } else {
-                this.#ledger.markFailed(intent.runId, gate.reason)
+                this.#ledger.markFailed(intent.runId, gate.detail ?? gate.reason)
               }
             } catch { /* already terminal */ }
           } else if (gate.retryAfterMs !== undefined) {

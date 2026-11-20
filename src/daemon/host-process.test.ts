@@ -73,10 +73,19 @@ describe('daemon host process', () => {
       expect(existsSync(staleAtomicTemp)).toBe(false)
       expect(existsSync(host.channel.socketPath)).toBe(true)
       expect(host.service.relayConfigured).toBe(false)
-      const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
-      expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
-      expect(recovered).toContain('run_failed')
-      expect(recovered).toContain('host_restarted')
+      if (host.orchestrationAuthority) {
+        await host.orchestrationAuthority.flushLegacyMirror()
+        const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
+        expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
+        expect(recovered).toContain('run_cancelled')
+        expect(recovered).toContain('host_restarted')
+        expect(host.orchestrationAuthority.sink.getRun(orphan)?.lifecycle).toBe('interrupted')
+      } else {
+        const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
+        expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
+        expect(recovered).toContain('run_failed')
+        expect(recovered).toContain('host_restarted')
+      }
 
       const device = await enrollLocal(host.service)
       const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
