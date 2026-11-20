@@ -17,19 +17,19 @@ import {
   groupFingerprint64,
   normalizeHexPrefix,
   resolveIdQuery,
+  sanitizeTerminalText,
   shortFingerprint16,
   type HostAdminStatusPayload
 } from './host-cli-format'
 import {
-  daemonNotRunningHint,
   EXIT_APPROVAL_DISABLED,
-  EXIT_DAEMON_NOT_RUNNING,
   EXIT_OK,
   EXIT_RATE_LIMITED,
   EXIT_USAGE_OR_REFUSED,
   EXIT_USER_CANCELLED,
   EXIT_VERSION_MISMATCH,
   getLoginStartManager,
+  reportUnavailableAdminSocket,
   runHostCliLoginStart,
   runHostCliRestart,
   type HostCliServiceContext
@@ -79,11 +79,13 @@ function requireTtyAndNotChild(ctx: HostCliServiceContext): number | null {
   return null
 }
 
-function handleAdminFailure(reply: Extract<HostAdminReply, { ok: false }>, ctx: HostCliServiceContext): number {
+async function handleAdminFailure(
+  reply: Extract<HostAdminReply, { ok: false }>,
+  ctx: HostCliServiceContext,
+  options: { jsonStatus?: boolean } = {}
+): Promise<number> {
   if (reply.error === 'daemon_not_running') {
-    const installed = getLoginStartManager(ctx).canLaunchViaService()
-    ctx.stderr(daemonNotRunningHint(ctx, installed))
-    return EXIT_DAEMON_NOT_RUNNING
+    return await reportUnavailableAdminSocket(ctx, options)
   }
   if (reply.error === 'daemon_version_mismatch') {
     const running = reply.daemon ? `${reply.daemon.version}${reply.daemon.build ? ` (${reply.daemon.build})` : ''}` : '未知'
@@ -143,8 +145,9 @@ async function runApproveFlow(
   }
 
   const fullFp = chosen.publicKeySHA256!
+  const safeLabel = sanitizeTerminalText(chosen.deviceLabel ?? '') || '未命名设备'
   ctx.stdout(
-    `设备名:      ${chosen.deviceLabel ?? '未命名设备'}\n` +
+    `设备名:      ${safeLabel}\n` +
     `pairingId:  ${chosen.pairingId.slice(0, 8)} (${chosen.pairingId})\n` +
     `指纹前 16 位: ${shortFingerprint16(fullFp)}\n` +
     `完整指纹:    ${groupFingerprint64(fullFp)}\n` +
@@ -180,9 +183,9 @@ async function runApproveFlow(
     method: 'approve',
     args: { pairingId: chosen.pairingId, publicKeySHA256: fullFp }
   })
-  if (!approveReply.ok) return handleAdminFailure(approveReply, ctx)
+  if (!approveReply.ok) return await handleAdminFailure(approveReply, ctx)
   const approved = approveReply.result as RemoteDevice
-  ctx.stdout(`已批准设备「${approved.deviceLabel}」（deviceId: ${approved.deviceId}）。\n`)
+  ctx.stdout(`已批准设备「${sanitizeTerminalText(approved.deviceLabel ?? '') || '未命名设备'}」（deviceId: ${approved.deviceId}）。\n`)
   return EXIT_OK
 }
 
@@ -241,7 +244,7 @@ export async function runHostCli(argv: readonly string[], io: HostCliIo): Promis
     const json = rest.includes('--json')
     if (rest.some((a) => a !== '--json')) { ctx.stderr(`${USAGE}\n`); return EXIT_USAGE_OR_REFUSED }
     const reply = await callHostAdmin({ daemonStateDirectory: stateDirectory, clientIdentity, method: 'status' })
-    if (!reply.ok) return handleAdminFailure(reply, ctx)
+    if (!reply.ok) return await handleAdminFailure(reply, ctx, { jsonStatus: json })
     const status = reply.result as HostAdminStatusPayload
     const loginStart = await getLoginStartManager(ctx).status().catch(() => undefined)
     if (json) ctx.stdout(`${JSON.stringify({ ...status, ...(loginStart ? { loginStart } : {}) }, null, 2)}\n`)
