@@ -18,7 +18,15 @@ describe('Bash arguments inside native exec scripts', () => {
       command: 'pwd', cwd: '/tmp', yieldTimeMs: 20
     })
   })
-  it.each(['options', '{cmd: getCommand()}', '{cmd: "pwd", ...opts}', '{cmd: "p" + "wd"}',
+  it('keeps literal commands with boolean and null fields', () => {
+    expect(input('{cmd:"pwd", tty:true, yield_time_ms:1000}')).toMatchObject({
+      command: 'pwd', tty: true, yieldTimeMs: 1000
+    })
+    expect(input('{cmd:"pwd", tty:false, workdir:null}')).toMatchObject({
+      command: 'pwd', tty: false, workdir: null
+    })
+  })
+  it.each(['{cmd:"pwd", nested:{tty:true}}', '{cmd:`pwd`}', 'options', '{cmd: getCommand()}', '{cmd: "pwd", ...opts}', '{cmd: "p" + "wd"}',
     '{cmd: "pwd", cmd: other}', '{cmd: "pwd", workdir: cwd}'])('keeps %s unresolved', argument => {
     const actual = input(argument)
     expect(actual).toMatchObject({ raw: argument, commandUnresolved: true })

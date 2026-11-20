@@ -122,12 +122,14 @@ export function literalArgument(value: string): Record<string, unknown> {
   return { raw: value }
 }
 
+type BashLiteral = string | number | boolean | null
+
 /** Parse the whole flat argument or none of it: a trailing spread could override cmd. */
-function staticBashArgument(raw: string): Record<string, string | number> | undefined {
+function staticBashArgument(raw: string): Record<string, BashLiteral> | undefined {
   if (!raw.startsWith('{') || !raw.endsWith('}')) return
   const body = raw.slice(1, -1).trim()
-  const field = /\s*([A-Za-z_$][\w$]*)\s*:\s*("(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*'|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(,|$)/y
-  const result: Record<string, string | number> = Object.create(null)
+  const field = /\s*([A-Za-z_$][\w$]*)\s*:\s*("(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*'|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)\s*(,|$)/y
+  const result: Record<string, BashLiteral> = Object.create(null)
   while (field.lastIndex < body.length) {
     const match = field.exec(body)
     if (!match || match[1] === '__proto__' || Object.hasOwn(result, match[1])) return
@@ -137,7 +139,7 @@ function staticBashArgument(raw: string): Record<string, string | number> | unde
       ? '"' + token.slice(1, -1).replace(/\\.|"/g, part => part === "\\'" ? "'" : part === '"' ? '\\"' : part) + '"'
       : token
     try {
-      const value: string | number = JSON.parse(json)
+      const value: BashLiteral = JSON.parse(json)
       if (typeof value === 'number' && !Number.isFinite(value)) return
       result[match[1]] = value
     } catch {
