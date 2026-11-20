@@ -1,5 +1,11 @@
-import { randomUUID } from 'node:crypto'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
+import {
+  answerQuestionWithSink,
+  recordProgressWithSink,
+  recordTerminalWithSink,
+  resolveIntentWithSink,
+  stopRunWithSink
+} from './authority-commands'
 import {
   buildSubmitCommandForAuthority,
   getRunStartExpiryInfo,
@@ -283,47 +289,13 @@ export class AuthorityEngine {
     grantScope: 'local' | 'remote'
     commandId: string
   }): { runId: string; state: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'cancelled' } {
-    if (this.sink.isWriteIndeterminate()) {
-      throw new OrchestrationStoreError('orchestration_write_indeterminate')
-    }
-    const actor = this.actorForPeer(input.peerCertSHA256)
-    const legacy = this.checkLegacySystemReceipt(input.commandId, actor)
-    if (legacy) {
-      const run = this.sink.getRun(legacy.runId)
-      const state =
-        run?.lifecycle === 'interrupted'
-          ? 'cancelled'
-          : run?.lifecycle === 'admitted'
-            ? 'dispatched'
-            : (run?.lifecycle ?? 'cancelled')
-      return { runId: legacy.runId, state }
-    }
-    const tombstoneRunId = randomUUID()
-    const payload = { targetCommandId: input.commandId, tombstoneRunId }
-    const res = this.sink.execute({
-      type: 'run.resolve_intent',
-      commandId: `resolve:${input.commandId}`,
-      actor,
-      scope: input.grantScope,
-      at: this.#clock(),
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
+    return resolveIntentWithSink({
+      sink: this.sink,
+      actor: this.actorForPeer(input.peerCertSHA256),
+      clock: this.#clock,
+      checkLegacySystemReceipt: (cmdId, actor) => this.checkLegacySystemReceipt(cmdId, actor),
+      input
     })
-    if (res.kind === 'duplicate') {
-      const runId = typeof res.receipt.result?.runId === 'string' ? res.receipt.result.runId : tombstoneRunId
-      if (res.receipt.status === 'rejected' && res.receipt.reason === 'resolved_absent') {
-        return { runId, state: 'cancelled' }
-      }
-      const run = this.sink.getRun(runId)
-      const state =
-        run?.lifecycle === 'interrupted'
-          ? 'cancelled'
-          : run?.lifecycle === 'admitted'
-            ? 'dispatched'
-            : (run?.lifecycle ?? 'cancelled')
-      return { runId, state }
-    }
-    return { runId: tombstoneRunId, state: 'cancelled' }
   }
 
   /** Tightening-only stop (core §2.5 + R5): always stops live runs even during storage fence. */
@@ -336,33 +308,12 @@ export class AuthorityEngine {
     abortLive?: () => boolean
     reason?: string
   }): { status: 'requested' | 'already_requested' | 'not_running' } {
-    if (this.sink.isWriteIndeterminate()) {
-      const stoppedIds =
-        input.registry && input.stopControl
-          ? this.sink.stopRunBypassingFence(input.runId, input.registry, input.stopControl)
-          : []
-      const liveAborted = input.abortLive?.() ?? false
-      return { status: stoppedIds.length > 0 || liveAborted ? 'requested' : 'not_running' }
-    }
-    const existing = this.sink.getRun(input.runId)
-    if (existing?.stopState === 'requested') return { status: 'already_requested' }
-    const actor = this.actorForPeer(input.peerCertSHA256)
-    const payload = { runId: input.runId, ...(input.reason ? { reason: input.reason } : {}) }
-    const res = this.sink.execute({
-      type: 'run.stop',
-      commandId: `stop:${input.runId}`,
-      actor,
-      scope: input.grantScope,
-      at: this.#clock(),
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
+    return stopRunWithSink({
+      sink: this.sink,
+      actor: this.actorForPeer(input.peerCertSHA256),
+      clock: this.#clock,
+      input
     })
-    const stoppedIds =
-      input.registry && input.stopControl
-        ? this.sink.stopRunBypassingFence(input.runId, input.registry, input.stopControl)
-        : []
-    const liveAborted = input.abortLive?.() ?? false
-    return { status: res.kind === 'accepted' || stoppedIds.length > 0 || liveAborted ? 'requested' : 'not_running' }
   }
 
   answerQuestion(input: {
@@ -374,23 +325,11 @@ export class AuthorityEngine {
     answerSha256: string
     answerPayload?: Record<string, unknown>
   }) {
-    const actor = this.actorForPeer(input.peerCertSHA256)
-    const payload = {
-      runId: input.runId,
-      questionId: input.questionId,
-      answerId: input.answerId,
-      answerSha256: input.answerSha256,
-      answeredBy: actor.startsWith('peer:') ? actor : 'unavailable',
-      ...(input.answerPayload ? { answerPayload: input.answerPayload } : {})
-    }
-    return this.sink.execute({
-      type: 'question.answer',
-      commandId: `answer:${input.runId}:${input.questionId}:${input.answerId}`,
-      actor,
-      scope: input.grantScope,
-      at: this.#clock(),
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
+    return answerQuestionWithSink({
+      sink: this.sink,
+      actor: this.actorForPeer(input.peerCertSHA256),
+      clock: this.#clock,
+      input
     })
   }
 
@@ -407,28 +346,7 @@ export class AuthorityEngine {
     isError?: boolean
     evidence?: string[]
   }): void {
-    if (this.sink.isWriteIndeterminate()) return
-    const payload = {
-      runId: input.runId,
-      step: input.step,
-      ...(input.nativeSessionId ? { nativeSessionId: input.nativeSessionId } : {}),
-      ...(input.questionId ? { questionId: input.questionId } : {}),
-      ...(input.questionKind ? { questionKind: input.questionKind } : {}),
-      ...(input.reason ? { reason: input.reason } : {}),
-      ...(input.outputSeq !== undefined ? { outputSeq: input.outputSeq } : {}),
-      ...(input.contentRef ? { contentRef: input.contentRef } : {}),
-      ...(input.isError !== undefined ? { isError: input.isError } : {}),
-      ...(input.evidence ? { evidence: input.evidence } : {})
-    }
-    this.sink.execute({
-      type: 'run.effect_result',
-      commandId: `effect:p4-${input.runId}:${input.step}:${input.commandSuffix}`,
-      actor: `effect:p4-${input.runId}`,
-      scope: 'system',
-      at: this.#clock(),
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
-    })
+    recordProgressWithSink(this.sink, this.#clock, input)
   }
 
   compensateSubmitFailure(runId: string, reason: string): void {
@@ -454,42 +372,7 @@ export class AuthorityEngine {
     evidence?: string[]
   }): void {
     this.#preDispatchedRuns.delete(input.runId)
-    if (this.sink.isWriteIndeterminate()) return
     this.#preparedRealCwdByRun.delete(input.runId)
-    const at = this.#clock()
-    const outcome =
-      input.step === 'interrupted'
-        ? {
-            status: 'unavailable' as const,
-            quality: 'unavailable' as const,
-            source: input.evidence ?? ['host.recovery'],
-            omissionReason: input.reason ?? 'host_restarted'
-          }
-        : {
-            status: 'available' as const,
-            quality: 'exact' as const,
-            source: input.evidence ?? ['provider'],
-            value: input.step
-          }
-    const payload = {
-      runId: input.runId,
-      step: input.step,
-      ...(input.reason ? { reason: input.reason } : {}),
-      ...(input.delivery ? { delivery: input.delivery } : {}),
-      settledAt: input.step === 'interrupted' ? null : at,
-      recoveredAt: input.step === 'interrupted' ? at : null,
-      outcome,
-      ...(input.evidence ? { evidence: input.evidence } : {})
-    }
-    this.sink.execute({
-      type: 'run.effect_result',
-      commandId: `effect:p4-${input.runId}:${input.step}`,
-      actor: `effect:p4-${input.runId}`,
-      scope: 'system',
-      at,
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
-    })
-    updateRunStartOutbox(this.sink, at, input.runId, input.step === 'failed' ? 'failed' : 'done')
+    recordTerminalWithSink(this.sink, this.#clock, input)
   }
 }

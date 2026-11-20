@@ -44,6 +44,8 @@ export interface RunSubmitPayload {
   historicalBackfill?: boolean
   /** Historical backfill when H3 ordinal is missing: skip `turn.began` rather than fabricating MAX+1. */
   skipTurnProjection?: boolean
+  /** H1 SessionLedger `detailDigest(detail)` so DB-rebuilt H1 snapshots match exact idempotency digests. */
+  intentDetailSha256?: string
   /** Single-commit immediate dispatch: atomically emit run.admitted + run.dispatched after §2.3 recheck. */
   dispatchImmediately?: boolean
 }

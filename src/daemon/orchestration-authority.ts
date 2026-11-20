@@ -6,17 +6,12 @@ import type { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
-import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { createConversationOrdinalResolver } from '../host-runtime/orchestration/conversation-ordinal-lookup'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
-import {
-  importLegacyStateIncrementally,
-  loadLegacyLedgerPlanAsync,
-  startDeferredLegacyImport,
-  type LegacyLedgerPlan
-} from '../host-runtime/orchestration/legacy-import'
+import { startDeferredLegacyImport, type LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
 import type { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
+import { runAuthorityStartupSequence } from './orchestration-authority-startup'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import {
   parseOrchestrationFullfsync,
@@ -24,12 +19,7 @@ import {
   parsePendingTtlMs,
   type OrchestrationModeResolution
 } from '../host-runtime/orchestration/mode'
-import {
-  reconcileTwoLedgersOnStartup,
-  recoverOrchestrationOnStartup,
-  type RecoverOrchestrationSummary
-} from '../host-runtime/orchestration/recovery'
-import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
+import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
@@ -97,77 +87,18 @@ export async function attachDaemonOrchestrationAuthority<
   })
 
   try {
-    let deferredPlan: LegacyLedgerPlan | undefined
     let deferredStarted = false
     let cancelDeferred: (() => void) | undefined
-    let resolveImportComplete: (() => void) | undefined
-    let importComplete: Promise<void> = Promise.resolve()
-
-    const plan = await loadLegacyLedgerPlanAsync(sink, options.userDataDir)
-    if (plan.unimportedRuns.length > deferredThreshold) {
-      // Must-Fix 5c: collect pending conversation turn runIds so deferred import never leaves a
-      // settled H1 conversation turn unimported before reconcileTwoLedgersOnStartup checks it.
-      const pendingConvRunIds = new Set<string>()
-      try {
-        const ownership = await options.conversationStore().loadOwnership()
-        for (const conv of ownership.values()) {
-          for (const turn of conv.turns) {
-            if (turn.origin === 'dispatch' && turn.delivery.status === 'pending') {
-              pendingConvRunIds.add(turn.runId)
-            }
-          }
-        }
-      } catch {
-        // Corrupt ownership is surfaced by reconcileTwoLedgersOnStartup below.
-      }
-      importLegacyStateIncrementally({
-        sink, userDataDir: options.userDataDir, pendingTtlMs,
-        reconcileOpenRuns: true, shadowOnly: false, openOnly: true,
-        ...(pendingConvRunIds.size > 0 ? { extraRunIds: pendingConvRunIds } : {}),
-        plan, resolveTurnOrdinal
-      })
-      deferredPlan = plan
-      importComplete = new Promise<void>((resolve) => { resolveImportComplete = resolve })
-    } else if (plan.unimportedRuns.length > 0 || plan.lastSeq > plan.currentLedgerSeq) {
-      importLegacyStateIncrementally({
-        sink, userDataDir: options.userDataDir, pendingTtlMs,
-        reconcileOpenRuns: true, shadowOnly: false, plan, resolveTurnOrdinal
-      })
-    }
-
-    // Must-Fix 5b (Decision G): install before-turn-settled observer BEFORE reconcileTwoLedgersOnStartup
-    // so reconciled turns also commit `turn.record_delivery` prior to persisting conversations/<id>.json.
-    options.conversationStore().setBeforeTurnSettledObserver((info) => {
-      if (sink.isWriteIndeterminate()) return
-      const at = Date.now()
-      const delivery = info.delivery.status
-      const payload = {
-        sessionKey: info.conversationId,
-        runId: info.runId,
-        ordinal: info.ordinal,
-        delivery,
-        ...(info.delivery.status !== 'accepted' ? { reason: info.delivery.reason } : {}),
-        settledAt: at,
-        evidence: [`conversation:${info.conversationId}`]
-      }
-      sink.execute({
-        type: 'turn.record_delivery',
-        commandId: `effect:p4-conv-${info.conversationId}-${info.runId}:${delivery}`,
-        actor: `effect:p4-conv-${info.conversationId}`,
-        scope: 'system',
-        at,
-        payload,
-        payloadSha256: sha256Hex(canonicalJson(payload))
-      })
-    })
-
-    // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
-    const recovery = recoverOrchestrationOnStartup({
+    const startup = await runAuthorityStartupSequence({
       sink,
+      userDataDir: options.userDataDir,
       leaseOwner,
-      findRecorderEvidence: createRecorderEvidenceFinder(options.userDataDir, sink)
+      pendingTtlMs,
+      deferredThreshold,
+      conversationStore: options.conversationStore,
+      resolveTurnOrdinal,
+      log: options.log
     })
-    await reconcileTwoLedgersOnStartup({ sink, conversationStore: options.conversationStore() })
 
     return buildAuthorityRuntime({
       options,
@@ -178,10 +109,10 @@ export async function attachDaemonOrchestrationAuthority<
       leaseOwner,
       resolveTurnOrdinal,
       sink,
-      recovery,
-      deferredPlan,
-      importComplete,
-      resolveImportComplete,
+      recovery: startup.recovery,
+      deferredPlan: startup.deferredPlan,
+      importComplete: startup.importComplete,
+      resolveImportComplete: startup.resolveImportComplete,
       setDeferredControl: (cancel) => { cancelDeferred = cancel },
       getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
@@ -230,11 +161,21 @@ function buildAuthorityRuntime<
   const trustGate = new AuthorityMcpTrustGate()
   let legacyMirror: LegacyMirrorWorker | undefined
   let backingFileStore: SessionLedgerFileStore | undefined
+  let syncMirrorSnapshot: (() => void) | undefined
   let progressCounter = 0
 
   const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
   const trackCanonical = (ledgerRunId: string, canonicalRunId: string): void => {
     if (ledgerRunId === canonicalRunId) return
+    if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
+      try {
+        sink.handle.db
+          .prepare('INSERT OR IGNORE INTO orch_legacy_run (ledger_run_id, run_id) VALUES (?, ?)')
+          .run(ledgerRunId, canonicalRunId)
+      } catch {
+        // Ignore if mapping already present or sink fenced.
+      }
+    }
     ledgerToCanonical.delete(ledgerRunId)
     ledgerToCanonical.set(ledgerRunId, canonicalRunId)
     while (ledgerToCanonical.size > MAX_LEDGER_CANONICAL_MAP) {
@@ -257,6 +198,7 @@ function buildAuthorityRuntime<
       })
       backingFileStore = created.fileStore
       legacyMirror = created.mirror
+      syncMirrorSnapshot = created.syncSnapshotFromDb
       return { store: created.store, close: created.close }
     },
 
@@ -463,7 +405,10 @@ function buildAuthorityRuntime<
     })
     ctx.setDeferredControl(handle.cancel)
     handle.promise
-      .then((s) => options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`))
+      .then((s) => {
+        if (!closed) syncMirrorSnapshot?.()
+        options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`)
+      })
       .catch((e) => options.log(`daemon.orchestration-on-import-failed ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => resolveImportComplete?.())
   }

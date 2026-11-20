@@ -1,10 +1,16 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import { evaluatePreDispatchRecheck, type OrchestrationCommand } from './orchestrator-commands'
 import { parseLedgerIntentRouting } from './shadow-routing'
-import type { OutboxState, PreparedBody } from './types'
+import { INLINE_BODY_MAX_BYTES, type OutboxState, type PreparedBody } from './types'
+
+export function h1DetailDigest(detail: string | undefined): string {
+  return createHash('sha256')
+    .update(detail === undefined ? 'undefined' : `string\0${detail}`)
+    .digest('hex')
+}
 
 export function tryRealpath(cwd: string | null | undefined): string | null {
   if (!cwd) return null
@@ -96,6 +102,17 @@ export function buildSubmitCommandForAuthority(options: {
     if (check.ok) dispatchImmediately = true
     else if (check.action === 'requeue') claimMode = 'queued'
   }
+  // For queued/non-dispatched runs, keep inline body so DB-rebuilt H1 snapshots have exact intentDetail.
+  const effectiveBody: PreparedBody | undefined =
+    preparedBody ??
+    (!dispatchImmediately && input.detail !== undefined && detailBytes <= INLINE_BODY_MAX_BYTES
+      ? {
+          storage: 'inline',
+          sha256: sha256Hex(Buffer.from(input.detail, 'utf8')),
+          bytes: detailBytes,
+          inline: input.detail
+        }
+      : undefined)
   const payload = {
     runId,
     sessionKey: routing.sessionKey,
@@ -105,7 +122,8 @@ export function buildSubmitCommandForAuthority(options: {
     cwd: preparedRealCwd ?? routing.cwd,
     ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
     ...(routing.userTextPreview !== undefined ? { userTextPreview: routing.userTextPreview } : {}),
-    ...(preparedBody ? { body: preparedBody } : {}),
+    intentDetailSha256: h1DetailDigest(input.detail),
+    ...(effectiveBody ? { body: effectiveBody } : {}),
     claimMode,
     ...(dispatchImmediately ? { dispatchImmediately: true } : {}),
     leaseOwner,

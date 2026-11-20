@@ -20,20 +20,21 @@ import {
   type DeleteSessionOutcome
 } from './event-sink-maintenance'
 import {
-  mapEventRow,
-  mapOutboxRow,
-  prepareEventSinkStatements,
-  type EventSinkStatements
-} from './event-sink-statements'
+  listAllEventsRaw,
+  listAllOutboxRaw,
+  listNonTerminalChildRunsBySessionRaw,
+  listNonTerminalChildRunsRaw,
+  readInteractionRaw,
+  readNextTurnOrdinalRaw,
+  readReceiptRaw,
+  readRunRaw,
+  readSessionRaw,
+  readTurnByRunIdRaw,
+  readTurnRaw
+} from './event-sink-queries'
+import { prepareEventSinkStatements, type EventSinkStatements } from './event-sink-statements'
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
-import {
-  applyEventToProjection,
-  mapInteractionRow,
-  mapReceiptRow,
-  mapRunRow,
-  mapSessionRow,
-  mapTurnRow
-} from './projection'
+import { applyEventToProjection } from './projection'
 import {
   ORCHESTRATION_EVENT_TYPES,
   OrchestrationStoreError,
@@ -180,14 +181,14 @@ export class EventSink {
   private createReadView(): OrchestratorReadView {
     return {
       isActorAuthorized: (actor) => actor.startsWith('effect:') || this.#authorizedActors.has(actor),
-      getReceipt: (commandId, actor) => this.readReceiptRaw(commandId, actor),
-      getRun: (runId) => this.readRunRaw(runId),
-      getSession: (sessionKey) => this.readSessionRaw(sessionKey),
-      getTurnByRunId: (runId) => this.readTurnByRunIdRaw(runId),
-      getNextTurnOrdinal: (sessionKey) => this.readNextTurnOrdinalRaw(sessionKey),
-      getInteraction: (runId, questionId) => this.readInteractionRaw(runId, questionId),
-      listNonTerminalChildRuns: (parentRunId) => this.listNonTerminalChildRunsRaw(parentRunId),
-      listNonTerminalChildRunsBySession: (sessionKey) => this.listNonTerminalChildRunsBySessionRaw(sessionKey),
+      getReceipt: (commandId, actor) => readReceiptRaw(this.#stmts, commandId, actor),
+      getRun: (runId) => readRunRaw(this.#stmts, runId),
+      getSession: (sessionKey) => readSessionRaw(this.#stmts, sessionKey),
+      getTurnByRunId: (runId) => readTurnByRunIdRaw(this.#stmts, runId),
+      getNextTurnOrdinal: (sessionKey) => readNextTurnOrdinalRaw(this.#stmts, sessionKey),
+      getInteraction: (runId, questionId) => readInteractionRaw(this.#stmts, runId, questionId),
+      listNonTerminalChildRuns: (parentRunId) => listNonTerminalChildRunsRaw(this.#stmts, parentRunId),
+      listNonTerminalChildRunsBySession: (sessionKey) => listNonTerminalChildRunsBySessionRaw(this.#stmts, sessionKey),
       hasActiveRunForSession: (sessionKey) => Boolean(this.#stmts.hasActiveSessionRun.get(sessionKey)),
       activeRunCount: () => (this.#stmts.activeRunCount.get() as { count: number }).count,
       maxActiveRuns: () => this.#maxActiveRuns,
@@ -448,56 +449,47 @@ export class EventSink {
 
   getReceipt(commandId: string, actor: string): CommandReceiptRow | undefined {
     this.assertDeterminate()
-    return this.readReceiptRaw(commandId, actor)
+    return readReceiptRaw(this.#stmts, commandId, actor)
   }
 
   getRun(runId: string): RunProjectionRow | undefined {
     this.assertDeterminate()
-    return this.readRunRaw(runId)
+    return readRunRaw(this.#stmts, runId)
   }
 
   getSession(sessionKey: string): SessionProjectionRow | undefined {
     this.assertDeterminate()
-    return this.readSessionRaw(sessionKey)
+    return readSessionRaw(this.#stmts, sessionKey)
   }
 
   getTurn(sessionKey: string, ordinal: number): TurnProjectionRow | undefined {
     this.assertDeterminate()
-    const row = this.handle.db
-      .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? AND ordinal = ?')
-      .get(sessionKey, ordinal) as Record<string, unknown> | undefined
-    return row ? mapTurnRow(row) : undefined
+    return readTurnRaw(this.handle.db, sessionKey, ordinal)
   }
 
   getTurnByRunId(runId: string): TurnProjectionRow | undefined {
     this.assertDeterminate()
-    return this.readTurnByRunIdRaw(runId)
+    return readTurnByRunIdRaw(this.#stmts, runId)
   }
 
   getNextTurnOrdinal(sessionKey: string): number {
     this.assertDeterminate()
-    return this.readNextTurnOrdinalRaw(sessionKey)
+    return readNextTurnOrdinalRaw(this.#stmts, sessionKey)
   }
 
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined {
     this.assertDeterminate()
-    return this.readInteractionRaw(runId, questionId)
+    return readInteractionRaw(this.#stmts, runId, questionId)
   }
 
   listEvents(): OrchestrationEventRow[] {
     this.assertDeterminate()
-    const rows = this.handle.db.prepare('SELECT * FROM orch_event ORDER BY seq ASC').all() as Array<
-      Record<string, unknown>
-    >
-    return rows.map(mapEventRow)
+    return listAllEventsRaw(this.handle.db)
   }
 
   listOutbox(): OutboxEffectRow[] {
     this.assertDeterminate()
-    const rows = this.handle.db
-      .prepare('SELECT * FROM orch_outbox ORDER BY causation_seq ASC, effect_id ASC')
-      .all() as Array<Record<string, unknown>>
-    return rows.map(mapOutboxRow)
+    return listAllOutboxRaw(this.handle.db)
   }
 
   close(): void {
@@ -506,45 +498,5 @@ export class EventSink {
       this.#checkpointTimer = null
     }
     this.handle.close({ skipCheckpoint: this.#writeIndeterminate })
-  }
-
-  private readReceiptRaw(commandId: string, actor: string): CommandReceiptRow | undefined {
-    const row = this.#stmts.readReceipt.get(commandId, actor) as Record<string, unknown> | undefined
-    return row ? mapReceiptRow(row) : undefined
-  }
-
-  private readRunRaw(runId: string): RunProjectionRow | undefined {
-    const row = this.#stmts.readRun.get(runId) as Record<string, unknown> | undefined
-    return row ? mapRunRow(row) : undefined
-  }
-
-  private readSessionRaw(sessionKey: string): SessionProjectionRow | undefined {
-    const row = this.#stmts.readSession.get(sessionKey) as Record<string, unknown> | undefined
-    return row ? mapSessionRow(row) : undefined
-  }
-
-  private readTurnByRunIdRaw(runId: string): TurnProjectionRow | undefined {
-    const row = this.#stmts.readTurnByRunId.get(runId) as Record<string, unknown> | undefined
-    return row ? mapTurnRow(row) : undefined
-  }
-
-  private readNextTurnOrdinalRaw(sessionKey: string): number {
-    const row = this.#stmts.nextOrdinal.get(sessionKey) as { next_ordinal: number }
-    return Number(row.next_ordinal)
-  }
-
-  private readInteractionRaw(runId: string, questionId: string): InteractionProjectionRow | undefined {
-    const row = this.#stmts.readInteraction.get(runId, questionId) as Record<string, unknown> | undefined
-    return row ? mapInteractionRow(row) : undefined
-  }
-
-  private listNonTerminalChildRunsRaw(parentRunId: string): RunProjectionRow[] {
-    const rows = this.#stmts.listNonTerminalChildRuns.all(parentRunId) as Array<Record<string, unknown>>
-    return rows.map(mapRunRow)
-  }
-
-  private listNonTerminalChildRunsBySessionRaw(sessionKey: string): RunProjectionRow[] {
-    const rows = this.#stmts.listNonTerminalChildRunsBySession.all(sessionKey) as Array<Record<string, unknown>>
-    return rows.map(mapRunRow)
   }
 }

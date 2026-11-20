@@ -1,77 +1,76 @@
 import type { LedgerEvent, LedgerSnapshot, LedgerStore } from '../../main/remote/session-ledger'
 import type { EventSink } from './event-sink'
+import { buildH1SnapshotFromDb } from './legacy-snapshot-builder'
 
 const DEFAULT_IDLE_DELAY_MS = 250
 const DEFAULT_MAX_PENDING_EVENTS = 2_048
-const DEFAULT_MAX_RETRIES = 5
-const DEFAULT_RETRY_DELAY_MS = 50
 const DEFAULT_MAX_BATCH_EVENTS = 32
 const DEFAULT_MAX_SLICE_MS = 8
 
 export interface LegacyMirrorWorkerOptions {
   sink: EventSink
-  ledgerStore: LedgerStore
-  /** Synthesizes a full contiguous snapshot on queue overflow or write fault so seq never gaps. */
+  ledgerStore?: LedgerStore
+  /** Builds an authoritative H1 snapshot from orchestration.db for atomic rewrite on failure or overflow. */
   createSnapshot?: () => LedgerSnapshot
   /** Debounced idle delay before flushing H1 mirror writes off the pre-first-token path. */
   idleDelayMs?: number
-  /** Upper bound on queued mirror events before collapsing into an atomic snapshot or failing closed. */
+  /** Upper bound on queued mirror events before collapsing into an atomic snapshot rewrite. */
   maxPendingEvents?: number
-  /** Consecutive write failure cap before snapshot fallback or failing closed (never drops a seq). */
-  maxRetries?: number
-  retryDelayMs?: number
   /** Maximum events drained per event-loop turn before yielding via `setImmediate`. */
   maxBatchEvents?: number
   /** Time budget (ms) per `#drain` slice before yielding via `setImmediate`. */
   maxSliceMs?: number
   onError?: (error: unknown) => void
+  onH1FallbackUnavailable?: (error: unknown) => void
 }
 
 /**
- * P4-2 zero-drop, chunk-yielding, idle-flushed H1 mirror (`plan §9`, `data §4.5`).
- * - Never drops individual events: queue overflow collapses into an atomic snapshot via
- *   `createSnapshot` (or fails closed if unavailable), and persistent write errors (e.g. ENOSPC)
- *   fail closed after bounded retries so on-disk H1 stays a contiguous valid prefix (`seq` never gaps).
+ * P4-2 pure downstream H1 mirror (`plan §9`, `data §4.5`, W9 Round-3 B1-B3 fix).
+ * - H1 is NEVER authoritative in `on` mode; `on` mode always rebuilds from `orchestration.db`.
+ * - On ANY `append` failure (e.g. fsync ENOSPC after write, or short write), NEVER retries
+ *   `append` for the same `seq` (avoiding duplicate seq / corrupt partial lines). Instead,
+ *   atomically rewrites H1 from a DB-built snapshot (`tmp + fsync + rename + dir fsync`).
+ * - If atomic snapshot rewrite also fails (e.g. persistent ENOSPC), marks H1 fallback
+ *   unavailable in `orch_meta` + logs and stops mirroring; `on` mode continues unaffected.
  * - Drains in bounded slices (`maxBatchEvents` / `maxSliceMs`) yielding via `setImmediate`.
- * - Runs off the pre-first-token hot path (idle debounce for non-terminal events).
  */
 export class LegacyMirrorWorker {
   readonly #sink: EventSink
-  readonly #ledgerStore: LedgerStore
-  readonly #createSnapshot?: () => LedgerSnapshot
+  readonly #ledgerStore?: LedgerStore
+  readonly #createSnapshot: () => LedgerSnapshot
   readonly #idleDelayMs: number
   readonly #maxPendingEvents: number
-  readonly #maxRetries: number
-  readonly #retryDelayMs: number
   readonly #maxBatchEvents: number
   readonly #maxSliceMs: number
   readonly #onError?: (error: unknown) => void
+  readonly #onH1FallbackUnavailable?: (error: unknown) => void
   readonly #queue: LedgerEvent[] = []
   #pendingCompact: LedgerSnapshot | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
   #drainScheduled = false
   #closed = false
-  #failedClosed = false
+  #h1FallbackUnavailable = false
   #lastMirroredSeq = 0
-  #consecutiveFailures = 0
   #waiters: Array<() => void> = []
 
   constructor(options: LegacyMirrorWorkerOptions) {
     this.#sink = options.sink
     this.#ledgerStore = options.ledgerStore
-    this.#createSnapshot = options.createSnapshot
+    this.#createSnapshot = options.createSnapshot ?? (() => buildH1SnapshotFromDb(options.sink))
     this.#idleDelayMs = Math.max(0, options.idleDelayMs ?? DEFAULT_IDLE_DELAY_MS)
     this.#maxPendingEvents = Math.max(1, options.maxPendingEvents ?? DEFAULT_MAX_PENDING_EVENTS)
-    this.#maxRetries = Math.max(1, options.maxRetries ?? DEFAULT_MAX_RETRIES)
-    this.#retryDelayMs = Math.max(1, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
     this.#maxBatchEvents = Math.max(1, options.maxBatchEvents ?? DEFAULT_MAX_BATCH_EVENTS)
     this.#maxSliceMs = Math.max(1, options.maxSliceMs ?? DEFAULT_MAX_SLICE_MS)
     this.#onError = options.onError
+    this.#onH1FallbackUnavailable = options.onH1FallbackUnavailable
     try {
       const existing = Number(this.#sink.getMeta('legacy_ledger_seq') ?? '0')
       if (Number.isFinite(existing) && existing > 0) this.#lastMirroredSeq = existing
     } catch {
       // Ignore if sink already fenced.
+    }
+    if (!this.#ledgerStore) {
+      this.#markH1FallbackUnavailable(new Error('h1_ledger_store_unavailable'))
     }
   }
 
@@ -79,41 +78,66 @@ export class LegacyMirrorWorker {
     return this.#queue.length + (this.#pendingCompact ? 1 : 0)
   }
 
-  isFailedClosed(): boolean {
-    return this.#failedClosed
+  isH1FallbackUnavailable(): boolean {
+    return this.#h1FallbackUnavailable
   }
 
-  #failClosed(error: unknown): void {
-    if (this.#failedClosed) return
-    this.#failedClosed = true
+  /** Backward-compatible alias for `isH1FallbackUnavailable()`. */
+  isFailedClosed(): boolean {
+    return this.#h1FallbackUnavailable
+  }
+
+  #markH1FallbackUnavailable(error: unknown): void {
+    if (this.#h1FallbackUnavailable) return
+    this.#h1FallbackUnavailable = true
     this.#onError?.(error)
+    this.#onH1FallbackUnavailable?.(error)
     if (this.#timer) {
       clearTimeout(this.#timer)
       this.#timer = null
     }
     this.#drainScheduled = false
-    // Clear pending memory buffers WITHOUT writing any higher seq to disk so the persisted H1 log
-    // stays a valid contiguous prefix up to #lastMirroredSeq and never triggers ledger_log_corrupt.
     this.#pendingCompact = null
     this.#queue.length = 0
+    if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
+      try {
+        this.#sink.setMeta('h1_fallback_unavailable', '1')
+        this.#sink.setMeta('h1_fallback_reason', error instanceof Error ? error.message : String(error))
+      } catch {
+        // Ignore meta update failure if sink fenced.
+      }
+    }
     this.#resolveWaiters()
   }
 
+  #clearH1FallbackUnavailable(): void {
+    if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
+      try {
+        if (this.#sink.getMeta('h1_fallback_unavailable') === '1') {
+          this.#sink.setMeta('h1_fallback_unavailable', '0')
+          this.#sink.setMeta('h1_fallback_reason', '')
+        }
+      } catch {
+        // Ignore if sink fenced.
+      }
+    }
+  }
+
   enqueue(event: LedgerEvent): void {
-    if (this.#closed || this.#failedClosed) return
+    if (this.#closed || this.#h1FallbackUnavailable) return
     this.#queue.push(event)
     if (this.#queue.length > this.#maxPendingEvents) {
-      if (this.#createSnapshot && this.#ledgerStore.compact) {
+      if (this.#ledgerStore?.compact) {
         try {
           const snap = structuredClone(this.#createSnapshot())
           this.#pendingCompact = snap
           this.#queue.length = 0
         } catch (error) {
-          this.#failClosed(error)
+          this.#markH1FallbackUnavailable(error)
           return
         }
       } else {
-        this.#failClosed(new Error('legacy_mirror_queue_overflow'))
+        this.#markH1FallbackUnavailable(new Error('legacy_mirror_queue_overflow'))
         return
       }
     }
@@ -130,9 +154,9 @@ export class LegacyMirrorWorker {
     }
   }
 
-  /** Enqueues a compacted H1 snapshot and drops all queued events superseded by `snapshot.lastSeq`. */
+  /** Enqueues an atomic H1 snapshot rewrite and drops queued events superseded by `snapshot.lastSeq`. */
   enqueueCompact(snapshot: LedgerSnapshot): void {
-    if (this.#closed || this.#failedClosed) return
+    if (this.#closed || this.#h1FallbackUnavailable) return
     this.#pendingCompact = structuredClone(snapshot)
     let drop = 0
     while (drop < this.#queue.length && this.#queue[drop]!.seq <= snapshot.lastSeq) drop += 1
@@ -141,7 +165,7 @@ export class LegacyMirrorWorker {
   }
 
   #schedule(delayMs: number): void {
-    if (this.#closed || this.#failedClosed || this.#timer || this.#drainScheduled) return
+    if (this.#closed || this.#h1FallbackUnavailable || this.#timer || this.#drainScheduled) return
     this.#timer = setTimeout(() => {
       this.#timer = null
       this.#drain(false)
@@ -150,7 +174,7 @@ export class LegacyMirrorWorker {
   }
 
   #scheduleNextSlice(flushAll: boolean): void {
-    if (this.#closed || this.#failedClosed || this.#drainScheduled) return
+    if (this.#closed || this.#h1FallbackUnavailable || this.#drainScheduled) return
     this.#drainScheduled = true
     setImmediate(() => {
       this.#drainScheduled = false
@@ -158,12 +182,32 @@ export class LegacyMirrorWorker {
     })
   }
 
+  #atomicRewriteFromDb(): boolean {
+    if (!this.#ledgerStore?.compact) {
+      this.#markH1FallbackUnavailable(new Error('legacy_mirror_compact_unsupported'))
+      return false
+    }
+    try {
+      const snap = structuredClone(this.#createSnapshot())
+      this.#ledgerStore.compact(snap)
+      this.#pendingCompact = null
+      let drop = 0
+      while (drop < this.#queue.length && this.#queue[drop]!.seq <= snap.lastSeq) drop += 1
+      if (drop > 0) this.#queue.splice(0, drop)
+      this.#lastMirroredSeq = Math.max(this.#lastMirroredSeq, snap.lastSeq)
+      this.#clearH1FallbackUnavailable()
+      return true
+    } catch (rewriteError) {
+      this.#markH1FallbackUnavailable(rewriteError)
+      return false
+    }
+  }
+
   #drain(flushAll: boolean): void {
-    if (this.#closed || this.#failedClosed) {
+    if (this.#closed || this.#h1FallbackUnavailable || !this.#ledgerStore) {
       this.#resolveWaiters()
       return
     }
-    let maxSeq = this.#lastMirroredSeq
     const sliceStart = performance.now()
     let processed = 0
 
@@ -172,19 +216,13 @@ export class LegacyMirrorWorker {
       try {
         this.#ledgerStore.compact?.(snap)
         this.#pendingCompact = null
-        this.#consecutiveFailures = 0
-        maxSeq = Math.max(maxSeq, snap.lastSeq)
-        this.#lastMirroredSeq = maxSeq
+        this.#lastMirroredSeq = Math.max(this.#lastMirroredSeq, snap.lastSeq)
+        this.#clearH1FallbackUnavailable()
         processed += 1
       } catch (error) {
-        this.#consecutiveFailures += 1
         this.#onError?.(error)
-        if (this.#consecutiveFailures >= this.#maxRetries) {
-          this.#failClosed(error)
-          return
-        }
-        if (flushAll) this.#scheduleNextSlice(true)
-        else this.#schedule(this.#retryDelayMs)
+        // Atomic snapshot rewrite failed -> H1 fallback is unavailable; on mode continues unaffected.
+        this.#markH1FallbackUnavailable(error)
         return
       }
     }
@@ -198,40 +236,15 @@ export class LegacyMirrorWorker {
       try {
         this.#ledgerStore.append(event)
         this.#queue.shift()
-        this.#consecutiveFailures = 0
-        maxSeq = Math.max(maxSeq, event.seq)
-        this.#lastMirroredSeq = maxSeq
+        this.#lastMirroredSeq = Math.max(this.#lastMirroredSeq, event.seq)
         processed += 1
       } catch (error) {
-        this.#consecutiveFailures += 1
         this.#onError?.(error)
-        if (this.#consecutiveFailures >= this.#maxRetries) {
-          // Never drop a single event and write a higher seq! Attempt one atomic snapshot
-          // compaction if available; otherwise fail closed preserving a contiguous prefix.
-          if (this.#createSnapshot && this.#ledgerStore.compact) {
-            try {
-              const snap = structuredClone(this.#createSnapshot())
-              this.#ledgerStore.compact(snap)
-              this.#pendingCompact = null
-              let drop = 0
-              while (drop < this.#queue.length && this.#queue[drop]!.seq <= snap.lastSeq) drop += 1
-              if (drop > 0) this.#queue.splice(0, drop)
-              this.#consecutiveFailures = 0
-              maxSeq = Math.max(maxSeq, snap.lastSeq)
-              this.#lastMirroredSeq = maxSeq
-              processed += 1
-              break
-            } catch (compactError) {
-              this.#failClosed(compactError)
-              return
-            }
-          }
-          this.#failClosed(error)
-          return
-        }
-        if (flushAll) this.#scheduleNextSlice(true)
-        else this.#schedule(this.#retryDelayMs)
-        return
+        // B1 fix: NEVER retry `append` for the same seq (write may have succeeded before fsync
+        // failed or written a short line). Atomically rewrite H1 from DB snapshot instead.
+        if (!this.#atomicRewriteFromDb()) return
+        processed += 1
+        break
       }
       if (performance.now() - sliceStart >= this.#maxSliceMs) break
     }
@@ -243,13 +256,12 @@ export class LegacyMirrorWorker {
 
     if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
       try {
-        if (maxSeq > 0) {
+        if (this.#lastMirroredSeq > 0) {
           const current = Number(this.#sink.getMeta('legacy_ledger_seq') ?? '0')
-          if (maxSeq > current) this.#sink.setMeta('legacy_ledger_seq', String(maxSeq))
+          if (this.#lastMirroredSeq > current) {
+            this.#sink.setMeta('legacy_ledger_seq', String(this.#lastMirroredSeq))
+          }
         }
-        this.#sink.handle.db
-          .prepare("UPDATE orch_outbox SET state = 'done', completed_at = ? WHERE kind = 'legacy.mirror' AND state = 'pending'")
-          .run(Date.now())
       } catch (error) {
         this.#onError?.(error)
       }
@@ -258,7 +270,7 @@ export class LegacyMirrorWorker {
   }
 
   #resolveWaiters(): void {
-    if (!this.#failedClosed && (this.pendingCount() > 0 || this.#timer || this.#drainScheduled)) return
+    if (!this.#h1FallbackUnavailable && (this.pendingCount() > 0 || this.#timer || this.#drainScheduled)) return
     const list = this.#waiters.splice(0)
     for (const resolve of list) resolve()
   }
@@ -268,7 +280,7 @@ export class LegacyMirrorWorker {
       clearTimeout(this.#timer)
       this.#timer = null
     }
-    if (this.#failedClosed || this.pendingCount() === 0) return
+    if (this.#h1FallbackUnavailable || this.pendingCount() === 0) return
     await new Promise<void>((resolve) => {
       this.#waiters.push(resolve)
       this.#scheduleNextSlice(true)

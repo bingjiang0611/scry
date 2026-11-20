@@ -173,8 +173,6 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
       createSnapshot: () => ({ version: 1, lastSeq: 100, runs: [], retainedEvents: [] }),
       idleDelayMs: 120,
       maxPendingEvents: 32,
-      maxRetries: 2,
-      retryDelayMs: 5,
       onError: (err) => errors.push(err instanceof Error ? err.message : String(err))
     })
     try {

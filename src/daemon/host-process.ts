@@ -30,6 +30,7 @@ import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
+import { reconcileH1ForOffMode } from './orchestration-off-fallback'
 import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { createDaemonRemoteAssembly } from './host-process-assembly'
@@ -257,6 +258,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       : {})
   })
   const remoteStateDirectory = join(options.userDataDir, 'remote')
+  reconcileH1ForOffMode({ userDataDir: options.userDataDir, remoteStateDirectory, env: process.env, log })
   const hostAdmin = new HostAdminStore({
     stateDirectory: remoteStateDirectory,
     onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })

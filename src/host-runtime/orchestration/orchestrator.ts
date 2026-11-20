@@ -108,6 +108,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             cwd: p.cwd,
             origin: p.origin ?? (cmd.scope === 'local' ? 'local' : cmd.scope === 'remote' ? 'remote' : 'system'),
             ...(promptPreview !== null ? { promptPreview } : {}),
+            ...(p.intentDetailSha256 ? { intentDetailSha256: p.intentDetailSha256 } : {}),
             ...(bodyDescriptor ? { body: bodyDescriptor } : {}),
             ...(p.isConversationRun ? { isConversationRun: true } : {}),
             ...(p.historicalBackfill ? { historicalBackfill: true } : {})
