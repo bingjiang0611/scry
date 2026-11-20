@@ -94,6 +94,7 @@ export interface HostControllerFactoryDependencies {
   // Capability lookup: session open only warms a provider that keeps a pool.
   hasCatalogWarmPool?(providerId: string): boolean
   readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
+  listHostAdminNotices?: HostControllerDependencies['listHostAdminNotices']
 }
 
 // The file stores require a pre-existing private (0700) directory; create it
@@ -223,7 +224,8 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.readHistory ? { readHistory: withPrewarm(deps.readHistory, warmSession) } : {}),
     ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
     ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
-    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})  }
+    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {}),
+    ...(deps.listHostAdminNotices ? { listHostAdminNotices: deps.listHostAdminNotices } : {})  }
 
   let controller: HostController
   try {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DesktopHostReadResult } from '../../shared/desktop-remote'
+import type { HostAdminNotice } from '../../shared/host-admin'
 import type { RemoteProjectRef, RemoteProviderRef, RemoteSessionPage } from './remote-gateway'
 
 // One catalog read instead of four: a device that opens a host asks for info,
@@ -11,6 +12,7 @@ export interface CatalogSnapshotDeps {
   listProjects(peer: string): RemoteProjectRef[]
   listProviders(peer: string): RemoteProviderRef[]
   listSessionsPage(peer: string, input: { includeArchived?: boolean; limit?: number }): RemoteSessionPage
+  listHostAdminNotices?(): HostAdminNotice[]
 }
 
 export interface CatalogSnapshotInput { revision?: string }
@@ -23,6 +25,7 @@ export interface CatalogSnapshot {
   projects: RemoteProjectRef[]
   providers: RemoteProviderRef[]
   sessionsPage: RemoteSessionPage
+  hostAdminNoticeItems?: HostAdminNotice[]
 }
 
 export type CatalogSnapshotReply = { unchanged: true; revision: string } | CatalogSnapshot
@@ -35,9 +38,16 @@ export async function catalogSnapshot(deps: CatalogSnapshotDeps, peer: string, i
   const projects = deps.listProjects(peer)
   const providers = deps.listProviders(peer)
   const sessionsPage = deps.listSessionsPage(peer, { includeArchived: true, limit: SNAPSHOT_SESSION_LIMIT })
+  const hostAdminNoticeItems = deps.listHostAdminNotices?.()
   // Content hash, not a counter: the device compares what it actually holds, so a
   // restart or a second device cannot produce a false "unchanged".
-  const revision = createHash('sha256').update(JSON.stringify([info, projects, providers, sessionsPage.snapshot, sessionsPage.total])).digest('hex').slice(0, 32)
+  const revisionInput = hostAdminNoticeItems && hostAdminNoticeItems.length > 0
+    ? [info, projects, providers, sessionsPage.snapshot, sessionsPage.total, hostAdminNoticeItems]
+    : [info, projects, providers, sessionsPage.snapshot, sessionsPage.total]
+  const revision = createHash('sha256').update(JSON.stringify(revisionInput)).digest('hex').slice(0, 32)
   if (input.revision === revision) return { unchanged: true, revision }
-  return { revision, info, projects, providers, sessionsPage }
+  return {
+    revision, info, projects, providers, sessionsPage,
+    ...(hostAdminNoticeItems && hostAdminNoticeItems.length > 0 ? { hostAdminNoticeItems } : {})
+  }
 }

@@ -1,5 +1,5 @@
 import type { AppShellProps } from './app-shell-types'
-import { lazy, Suspense, type ComponentProps } from 'react'
+import { lazy, Suspense, useEffect, type ComponentProps } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/ConversationView'
 import { PaneSplitter } from './components/PaneSplitter'
@@ -79,6 +79,7 @@ export function AppShell(props: AppShellProps) {
   const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
   useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   useConversationAttention(view === 'conversation' && mainLiveVisible ? logicalConversation?.id : undefined)
+  useEffect(() => window.scry?.onHostAdminOpenDevices?.(() => setSettingsTab('remote')), [setSettingsTab])
   const backgroundNotices = useBackgroundNoticeOpening({
     unreadSessionKeys, unreadRevision, projects, runningRunIds, waitingQuestionRunIds, pickConversation,
     pickSession: (sidebarActions as Pick<ComponentProps<typeof Sidebar>, 'onPick'>).onPick

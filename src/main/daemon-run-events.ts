@@ -1,4 +1,5 @@
 import type { AgentStopState } from '../shared/runtime'
+import type { HostAdminNotice } from '../shared/host-admin'
 import type { ActiveRun } from '../shared/trace'
 import { sessionAttentionKey } from '../shared/session-attention'
 import type { DockBadgeState } from './dock-badge'
@@ -30,6 +31,8 @@ export interface DaemonRunEventsDeps {
   runTraces?: Pick<RunTraceRouter, 'publishStopState'>
   // Whether the window can take terminal output now (P3-terminal.md).
   rendererCanReceive?: () => boolean
+  // P5-7: host CLI admin notice to surface via system notification and open-devices click.
+  onHostAdmin?: (notice: HostAdminNotice) => void
 }
 
 export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): void } {
@@ -75,6 +78,7 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     onResync: () => { runtime.wakeAll(); discovery.resynchronize(); terminals.notice() },
     onTerminal: () => terminals.notice(),
     onOAuth: (url) => deliverDaemonOAuthUrl(url),
+    ...(deps.onHostAdmin ? { onHostAdmin: deps.onHostAdmin } : {}),
     onLive: (live) => runtime.setWakesLive(live),
     onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false),
     // W1: the pipeline's own notices, each after the run text it follows.

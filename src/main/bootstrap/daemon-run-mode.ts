@@ -1,5 +1,7 @@
-import { app, safeStorage } from 'electron'
+import { app, BrowserWindow, safeStorage } from 'electron'
 import { join } from 'node:path'
+import type { HostAdminNotice } from '../../shared/host-admin'
+import { showHostAdminSystemNotification } from './host-admin-notifications'
 import { DaemonClient, DaemonClientError, daemonClientPaths } from '../daemon-client'
 import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
@@ -84,6 +86,8 @@ export interface DaemonRunModeDeps {
   runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
   // W10: App-side desktop client that fulfills phone-originated execution-target calls forwarded by the daemon.
   desktopRemoteClient?: () => DesktopRemoteTargetAPI
+  // P5-7: host CLI admin notice handler (system notification + open devices).
+  onHostAdmin?: (notice: HostAdminNotice) => void
 }
 
 // Answers from the daemon that a launch or a retry cannot change.
@@ -227,7 +231,8 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
     ...(deps.rendererCanReceive ? { rendererCanReceive: deps.rendererCanReceive } : {}),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
-    ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
+    ...(deps.runTraces ? { runTraces: deps.runTraces } : {}),
+    ...(deps.onHostAdmin ? { onHostAdmin: deps.onHostAdmin } : {})
   })
   const targetPump = deps.desktopRemoteClient
     ? new DaemonExecutionTargetPump({
@@ -264,6 +269,8 @@ export function appDaemonModeDeps(input: {
   loginStart?: LoginStartManager
   /** Called whenever a service-manager launch falls back to direct supervisor spawn. */
   onServiceLaunchFallback?: (fallback: ReturnType<ServiceLaunchController['latestFallback']>) => void
+  /** Main window getter for native host-admin notifications (P5-7). */
+  getWindow?: () => BrowserWindow | null
 }): DaemonRunModeDeps {
   const userDataDir = app.getPath('userData')
   const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -330,6 +337,9 @@ export function appDaemonModeDeps(input: {
     ...(input.rendererCanReceive ? { rendererCanReceive: input.rendererCanReceive } : {}),
     ...(input.runTraces ? { runTraces: input.runTraces } : {}),
     ...(input.desktopRemoteClient ? { desktopRemoteClient: input.desktopRemoteClient } : {}),
+    onHostAdmin: (notice) => showHostAdminSystemNotification(notice, {
+      getWindow: () => input.getWindow?.() ?? BrowserWindow.getAllWindows()[0] ?? null
+    }),
     // The pump stops on its own after a failure; without this line the reason would be
     // dropped and the window would just never update.
     onWarn: (message, detail) => {

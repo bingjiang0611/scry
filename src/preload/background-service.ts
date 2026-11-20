@@ -23,5 +23,10 @@ export const backgroundServiceApi = {
     const listener = (_event: Electron.IpcRendererEvent, notice: BackgroundServiceRuntimeNotice | null) => cb(notice)
     ipcRenderer.on('remote:backgroundService:notice', listener)
     return () => ipcRenderer.removeListener('remote:backgroundService:notice', listener)
+  },
+  onHostAdminOpenDevices: (cb: (payload: { deviceId?: string }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { deviceId?: string }) => cb(payload ?? {})
+    ipcRenderer.on('remote:hostAdmin:openDevices', listener)
+    return () => ipcRenderer.removeListener('remote:hostAdmin:openDevices', listener)
   }
 }

@@ -21,6 +21,7 @@ export interface DesktopReadDeps {
   canSessionActions: boolean
   canSessionFork: boolean
   canSessionDelete: boolean
+  hasHostAdminNotices?: boolean
 }
 
 export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string, input: unknown): Promise<DesktopHostReadResult> {
@@ -51,6 +52,7 @@ export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string,
     ...(deps.canSessionActions ? { sessionActions: true as const } : {}),
     ...(deps.canSessionFork ? { sessionFork: true as const } : {}),
     ...(deps.canSessionDelete ? { sessionDelete: true as const } : {}),
+    ...(deps.hasHostAdminNotices ? { hostAdminNotices: 1 as const } : {}),
     ...(deps.attachmentStore ? { attachments: attachmentCapability() } : {})
   }
 }

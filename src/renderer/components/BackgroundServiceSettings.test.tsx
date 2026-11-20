@@ -144,6 +144,28 @@ describe('BackgroundServicePanel', () => {
     expect(withNotices).toContain('远程权限模式覆盖')
     expect(withNotices).toContain('关闭再重新开启「登录时启动」，然后重启后台服务')
   })
+
+  it('hides the CLI approval switch when cliApproval is absent (flag off) and shows toggle + copy path when present (P5-7)', () => {
+    const offHtml = render(daemon())
+    expect(offHtml).not.toContain('允许命令行批准')
+    expect(offHtml).not.toContain('scry-host')
+
+    const onDisabled = render(daemon({
+      cliApproval: {
+        state: 'disabled',
+        updatedAt: null,
+        hostCliPath: '/Applications/Scry.app/Contents/Resources/bin/scry-host'
+      }
+    }), { onToggleCliApproval: () => {} } as Partial<Parameters<typeof BackgroundServicePanel>[0]>)
+    expect(onDisabled).toContain('允许命令行批准')
+    expect(onDisabled).toContain('开启允许命令行批准')
+    expect(onDisabled).toContain('复制 scry-host 路径')
+
+    const onEnabled = render(daemon({
+      cliApproval: { state: 'enabled', updatedAt: NOW }
+    }), { onToggleCliApproval: () => {} } as Partial<Parameters<typeof BackgroundServicePanel>[0]>)
+    expect(onEnabled).toContain('关闭允许命令行批准')
+  })
 })
 
 describe('formatUptime', () => {

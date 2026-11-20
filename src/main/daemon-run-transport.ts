@@ -7,6 +7,7 @@ import { readDaemonTrace } from './daemon-run-trace-read'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import { isHostAdminNotice } from '../shared/host-admin'
 import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
 
 // The App's run surface against its own daemon, over the same frames the phone
@@ -246,6 +247,7 @@ export class DaemonRunTransport {
       if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
       if (raw.kind === 'terminal') return [{ kind: 'terminal' }]
       if (raw.kind === 'oauth' && typeof raw.url === 'string' && raw.url.length <= 8192) return [{ kind: 'oauth', url: raw.url }]
+      if (raw.kind === 'hostAdmin' && isHostAdminNotice(raw.notice)) return [{ kind: 'hostAdmin', notice: raw.notice }]
       // Only the notices the daemon is meant to forward, never a channel it names freely.
       if (raw.kind === 'window' && typeof raw.channel === 'string' && DAEMON_WINDOW_NOTICES.has(raw.channel) && record(raw.payload)) {
         return [{ kind: 'window', channel: raw.channel, payload: raw.payload }]

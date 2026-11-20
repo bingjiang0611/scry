@@ -114,6 +114,7 @@ export interface HostRuntimeInputs {
   onRunActivity?: (runId: string, intentSeq?: number) => void
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
   orchestration?: HostControllerFactoryDependencies['orchestration']
+  listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 

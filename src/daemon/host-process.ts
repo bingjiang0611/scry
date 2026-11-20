@@ -36,6 +36,7 @@ import { createDaemonRemoteAssembly } from './host-process-assembly'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
 import { attachDaemonHostAdmin } from './host-admin-runtime'
+import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 
@@ -277,6 +278,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
     ...(orchestrationShadow ? { onLedgerEvent: orchestrationShadow.onLedgerEvent } : {}),
     ...(orchestrationAuthority ? { orchestration: orchestrationAuthority.hooks } : {}),
+    ...(isHostCliExperimentalEnabled(process.env) ? { listHostAdminNotices: () => hostAdmin.recentNotices() } : {}),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
       runs: () => pipeline.runs,

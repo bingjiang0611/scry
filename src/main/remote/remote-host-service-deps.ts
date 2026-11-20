@@ -61,6 +61,7 @@ export interface RemoteHostServiceDependencies {
   // Capability lookup: session open only warms a provider that keeps a pool.
   hasCatalogWarmPool?(providerId: string): boolean
   readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
+  listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
@@ -122,6 +123,7 @@ export function hostControllerDependencies(
     ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
     ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
     ...(deps.hasCatalogWarmPool ? { hasCatalogWarmPool: deps.hasCatalogWarmPool } : {}),
-    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})
+    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {}),
+    ...(deps.listHostAdminNotices ? { listHostAdminNotices: deps.listHostAdminNotices } : {})
   }
 }
