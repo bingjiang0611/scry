@@ -24,3 +24,5 @@
 **不在队列里（维护者已定的顺序）**：P5 第 2 步（命令行配对）、S3（删除进程内路径）、P4-2 起的各段、P6（含 P6-0 探针，排在 P4 之后，见 [P6-multi-agent-plan](../P6-multi-agent-plan.md) §D）。W1 通过后由核验方补任务单。
 
 **MCP 参数与凭据**：W6 对应的修复已推送；`src/main/providers/private-mcp-config.ts` 与各 Provider 构造 MCP 参数、历史检索凭据的代码，改动前先读该修复的提交说明，不要把密钥重新放回命令行参数。
+
+**执行方报告的缺陷（2026-11-20）**：`src/daemon/host-process.ts` 的 `dispose()` 未调用 `providerRegistry.dispose()`（见 [reports/W6-review.md](reports/W6-review.md)），由执行方 C 随 W5 下一轮修复（该文件需先拆分）。
