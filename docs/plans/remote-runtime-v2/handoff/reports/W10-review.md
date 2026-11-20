@@ -1,4 +1,4 @@
-结论：通过（无阻塞；应修 1 须在合入 main 前完成）
+结论：通过（第二轮，应修 1–5 全部完成）
 
 # W10 核验（核验方，2026-11-20，提交 `20211a33`、`c8706755`、`c44c929d`、`c30a291f`）
 
@@ -47,3 +47,25 @@
 ## 待维护者决定
 
 中继修复是否部署到线上 `scry-relay-pages`。核验方推荐：先在本地用 workerd 跑一次冒烟测试，再由维护者部署。部署属于对外操作，执行方不得自行部署。
+
+## 复核（第二轮，2026-11-20，提交 `269227f0`）
+
+结论：**通过**。
+
+**应修项核对：**
+1. 发现请求遇到 `gateway_offline`、`timeout`、`bridge_busy` 时返回 `[]`（`app-execution-target-bridge.ts:121-133`）；target 请求仍然显式报错。
+2. 超时改为默认 45 s，`mobileSubmit` 65 s，理由已写进报告。
+3. 每条连接都有 `AbortController`，连接关闭就中止对应的挂起 poll；新 poll 到来时，旧的挂起 poll 作废。补充的测试在修复前失败、修复后通过。
+4. 三个已超限的 Swift 文件净增为零或负（ConnectionCopy 25,236 → 25,236，Coordinator 24,150 → 24,079，RemoteRunStore 286,211 → 286,101），新增的 `ExecutionTargetErrorPolicy.swift` 为 1,794 B。
+5. 补上了 `ownerPeer` 绑定的测试；结果超出上限时立即拒绝；`unknown_op` 的映射只对两个新操作生效。
+
+**中继**：本地 workerd 上 `smoke:cf` 13/13 通过（执行方实测），`cf-relay-worker.test.mjs` 4/4 通过（核验方复跑）。
+
+**Linux 复跑：**
+- `tsc` 通过。
+- W10 相关的 12 个测试文件、76 个用例全部通过。
+- `src/daemon` 与 `src/main/remote` 共 869 个用例，868 个通过；唯一的失败是以 root 运行导致的已知用例 `desktop-directory-picker`。
+
+**还剩：**
+- 中继修复是否部署，由维护者决定。
+- 真机上的「其他主机」转发（需要第二台已保存的主机）随 P5-8 一起验证。
