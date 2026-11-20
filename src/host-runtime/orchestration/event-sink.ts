@@ -82,6 +82,7 @@ export class EventSink {
   #checkpointIntervalMs: number
   #checkpointTimer: ReturnType<typeof setTimeout> | null = null
   #checkpointCount = 0
+  #workerCheckpointActive = false
   #onCheckpoint?: (sample: WalCheckpointSample) => void
   #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
@@ -106,8 +107,22 @@ export class EventSink {
 
   walFileBytes(): number { return this.handle.db.open ? this.handle.walFileBytes() : 0 }
 
+  setLockingMode(mode: 'normal' | 'exclusive'): void {
+    this.#workerCheckpointActive = mode === 'normal'
+    if (mode === 'normal' && this.#checkpointTimer) {
+      clearTimeout(this.#checkpointTimer)
+      this.#checkpointTimer = null
+    }
+    this.handle.setLockingMode(mode)
+  }
+
+  recordExternalCheckpoint(sample: WalCheckpointSample): void {
+    this.#checkpointCount += 1
+    this.#onCheckpoint?.(sample)
+  }
+
   private scheduleIdleCheckpoint(): void {
-    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#checkpointTimer) return
+    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#workerCheckpointActive || this.#checkpointTimer) return
     const timer = setTimeout(() => {
       this.#checkpointTimer = null
       this.checkpointPassive()

@@ -35,6 +35,7 @@ const samples = Number(option('samples', '30'))
 const mode = option('mode', 'daemon')
 const multiTurn = args.includes('--multi-turn')
 const largeBody = args.includes('--large-body')
+const withMcp = args.includes('--with-mcp')
 if (!['daemon', 'in-process'].includes(mode)) throw new Error(`unknown mode: ${mode}`)
 
 // 20 deltas 150 ms apart: a stream whose steady state is observable in both modes,
@@ -68,6 +69,14 @@ const workspace = join(home, 'workspace')
 mkdirSync(workspace, { recursive: true })
 mkdirSync(userDataDir, { recursive: true })
 writeFileSync(join(workspace, 'README.md'), '# workspace\n')
+if (withMcp) {
+  // Real MCP config referencing the local Node/Electron executable so S1 measures trust gate with a real binary.
+  mkdirSync(join(workspace, '.codex'), { recursive: true })
+  writeFileSync(
+    join(workspace, '.codex', 'config.toml'),
+    `[mcp_servers.bench_node]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ["-e", "setTimeout(() => {}, 1000)"]\n`
+  )
+}
 // The App only starts in a directory its own picker recorded.
 writeFileSync(join(userDataDir, 'projects.json'), JSON.stringify([{ cwd: workspace, lastOpenedAt: 1 }]))
 
@@ -125,6 +134,7 @@ const results = {
   perInstance,
   multiTurn,
   largeBody,
+  withMcp,
   prompt: PROMPT,
   orchestration: {
     mode: process.env.SCRY_ORCHESTRATION ?? 'off',

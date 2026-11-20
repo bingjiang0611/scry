@@ -45,11 +45,12 @@ function loadOrchestrationModules(): Promise<LoadedOrchestrationModules | null> 
 export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scenario {
   let seq = 0
   let engine: InstanceType<LoadedOrchestrationModules['AuthorityEngine']> | undefined
+  let measuredCommits = 0
   const canonicalWorkspace = realpathSync(fixture.workspace)
 
   return {
     lane: 'disk',
-    workload: 'orchestration-pre-first-token=real-hooks+1-commit;fullfsync=true',
+    workload: 'orchestration-pre-first-token=real-hooks+1-commit;pragma-fullfsync=on(darwin-F_FULLFSYNC)',
     iterations: 2,
     warmups: 1,
     samples: 20,
@@ -69,9 +70,17 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
         engine = new mods.AuthorityEngine({
           sink,
           leaseOwner: 'bench',
-          pendingTtlMs: 30_000
+          pendingTtlMs: 30_000,
+          onCommitTiming: (sample) => {
+            if (sample.preFirstToken) measuredCommits += 1
+          }
         })
       }
+
+      const db = engine.sink.handle.db
+      const commitsBefore = measuredCommits
+      const eventsBefore = (db.prepare('SELECT COUNT(*) AS c FROM orch_event').get() as { c: number }).c
+      const outboxBefore = (db.prepare('SELECT COUNT(*) AS c FROM orch_outbox').get() as { c: number }).c
 
       const id = ++seq
       const detail = JSON.stringify({
@@ -114,7 +123,11 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
         verifyTrustGate: () => true
       })
       expect(gate.ok).toBe(true)
-      return { commits: 1, events: 3, outboxRows: 1 }
+
+      const commits = measuredCommits - commitsBefore
+      const events = (db.prepare('SELECT COUNT(*) AS c FROM orch_event').get() as { c: number }).c - eventsBefore
+      const outboxRows = (db.prepare('SELECT COUNT(*) AS c FROM orch_outbox').get() as { c: number }).c - outboxBefore
+      return { commits, events, outboxRows }
     }
   }
 }

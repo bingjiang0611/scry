@@ -248,6 +248,41 @@ async function runDataset(mod, spec) {
     const walSampler = setInterval(() => {
       recordWal(sink.walFileBytes())
     }, 10)
+    // Plan §8.2 / W9 Must-Fix 1: measure real concurrent live commits every 50 ms during backfill + checkpoints.
+    const liveCommitTotalMs = []
+    const liveCommitSinkMs = []
+    let liveSeq = 0
+    let expectedNextTick = performance.now() + 50
+    const liveCommitTimer = setInterval(() => {
+      const nowMs = performance.now()
+      const lagMs = Math.max(0, nowMs - expectedNextTick)
+      expectedNextTick = nowMs + 50
+      const id = ++liveSeq
+      const runId = randomUUID()
+      const tCommitStart = performance.now()
+      sink.execute({
+        type: 'run.submit',
+        commandId: `live-probe-${spec.key}-${id}`,
+        actor: 'system',
+        scope: 'system',
+        at: Date.now(),
+        payload: {
+          runId,
+          sessionKey: null,
+          provider: 'codex',
+          profile: null,
+          cwd: '/tmp/ws-bench',
+          promptPreview: `live commit probe ${id}`,
+          claimMode: 'immediate',
+          dispatchImmediately: true,
+          leaseOwner: 'bench'
+        },
+        payloadSha256: 'a'.repeat(64)
+      })
+      const sinkMs = performance.now() - tCommitStart
+      liveCommitSinkMs.push(Number(sinkMs.toFixed(2)))
+      liveCommitTotalMs.push(Number((lagMs + sinkMs).toFixed(2)))
+    }, 50)
     const backfillMonitor = monitorEventLoopDelay({ resolution: 1 })
     backfillMonitor.enable()
     const postStart = performance.now()
@@ -263,6 +298,7 @@ async function runDataset(mod, spec) {
     await new Promise((r) => setImmediate(r))
     const postEnd = performance.now()
     backfillMonitor.disable()
+    clearInterval(liveCommitTimer)
     clearInterval(walSampler)
     recordWal(sink.walFileBytes())
     sink.setCheckpointObserver(undefined)
@@ -270,10 +306,13 @@ async function runDataset(mod, spec) {
     const noopStart = performance.now()
     const noopPlan = await mod.loadLegacyLedgerPlanAsync(sink, root)
     const noopEnd = performance.now()
+    const finalLockingMode = String(sink.handle.db.pragma('locking_mode', { simple: true })).toLowerCase()
     sink.close()
 
     const nsToMs = (ns) => Number((Math.max(0, ns) / 1e6).toFixed(2))
     const sortedCkpt = [...checkpointDurations].sort((a, b) => a - b)
+    const sortedLiveTotal = [...liveCommitTotalMs].sort((a, b) => a - b)
+    const sortedLiveSink = [...liveCommitSinkMs].sort((a, b) => a - b)
     const ckptTotalMs = Number(checkpointDurations.reduce((acc, v) => acc + v, 0).toFixed(2))
     return {
       case: spec.name,
@@ -287,6 +326,7 @@ async function runDataset(mod, spec) {
       loadBefore,
       loadAfter: Number(loadavg()[0].toFixed(2)),
       expectedLastSeq: seq,
+      finalLockingMode,
       preSocket: {
         openDbMs: Number((afterOpen - preStart).toFixed(2)),
         parsePlanOnceMs: Number((afterPlan - afterOpen).toFixed(2)),
@@ -305,11 +345,26 @@ async function runDataset(mod, spec) {
         walPeakMiB: Number((walPeakBytes / (1024 * 1024)).toFixed(2)),
         checkpoints: {
           count: checkpointDurations.length,
-          pauseMs: {
+          offThreadWorkerMs: {
             p50: pct(sortedCkpt, 0.5),
             p95: pct(sortedCkpt, 0.95),
             max: sortedCkpt.length > 0 ? Number(sortedCkpt[sortedCkpt.length - 1].toFixed(2)) : 0,
             total: ckptTotalMs
+          }
+        },
+        concurrentLiveCommits: {
+          samples: sortedLiveSink.length,
+          totalDelayMs: {
+            p50: pct(sortedLiveTotal, 0.5),
+            p95: pct(sortedLiveTotal, 0.95),
+            p99: pct(sortedLiveTotal, 0.99),
+            max: sortedLiveTotal.length > 0 ? sortedLiveTotal[sortedLiveTotal.length - 1] : 0
+          },
+          commitOnlyMs: {
+            p50: pct(sortedLiveSink, 0.5),
+            p95: pct(sortedLiveSink, 0.95),
+            p99: pct(sortedLiveSink, 0.99),
+            max: sortedLiveSink.length > 0 ? sortedLiveSink[sortedLiveSink.length - 1] : 0
           }
         },
         eventLoopPauseMs: {

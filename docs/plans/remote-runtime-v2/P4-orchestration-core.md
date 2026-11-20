@@ -40,21 +40,20 @@
 
 ## 2.4 派发与重启（决定 B，维护者 2026-11-18）
 
-**立即路径。** 一个事务提交 `run.intent_recorded`、`turn.began`（会话 run）、回执与 outbox 行，outbox 行在同一事务里**已领取**（`state='running'`、`lease_owner`、`claimed_at`）。「已记录、未领取」的窗口基本消失。
+**立即路径与派发栅栏（2026-11-20 `fullfsync=ON` 决定后修订）。** 当全部 §2.3 派发前复核与准入检查在提交前同步通过时，一个事务原子提交 `run.intent_recorded`、`turn.began`（会话 run）、`run.admitted`、`run.dispatched`、回执与已领取的 outbox 行（`state='running'`、`lease_owner`、`claimed_at`），**然后**才调用 Provider。首 token 前因此只需 **1 次** `F_FULLFSYNC` 提交（满足 plan §8 的 8 ms 门禁）；持久转移依然严格先于执行。若提交后、Provider 启动前进程崩溃，重启恢复按「已派发、无终态」处理：先查 recorder 证据，无证据则记 `run.interrupted`、投递状态 `unknown`（不再记 `not_sent`），绝不静默重发。
 
-**派发栅栏。** 复核通过、`RunRegistry` 准入之后，一个事务提交 `run.admitted` + `run.dispatched`，**然后**才调用 Provider。它取代 `markDispatched`（`remote-dispatcher.ts:68-80`）：持久转移先于执行。首 token 前因此共 2 次提交（plan §8 门禁）。
-
-**排队。** 准入当时拿不到（操作闸门被认证占用、容量满）时，outbox 行留在 `pending`，带 `expires_at = intent 时刻 + TTL`。TTL 暂定 60 s：覆盖一次受托管的重启（launchd `ThrottleInterval` 10 s 加启动恢复），又远低于「几小时前的提示」。测试用 `SCRY_ORCHESTRATION_PENDING_TTL_MS` 调小，不改默认值。
+**排队与两步回退。** 准入当时拿不到（操作闸门被认证占用、容量满）或复核失败时，先在事务 1 提交 `run.intent_recorded`（认证占用时 outbox 留在 `pending`，带 `expires_at = intent 时刻 + TTL`，上限 60 s）；待闸门释放后，再经 §2.3 完整复核并提交第 2 次事务 `run.admitted` + `run.dispatched`（或拒绝/过期取消）。测试用 `SCRY_ORCHESTRATION_PENDING_TTL_MS` 调小，不改默认值。
 
 **重启。** 在 `runStartupRecovery` 之后（`host-process.ts:218-226`）、开放 `local.sock` 之前，用一个恢复事务处理：
 
 | 重启前 | 处理 | 结局 |
 |---|---|---|
-| `pending`，未过期 | 复核（§2.3）后派发一次 | 正常 |
+| `pending`（本库新提交），未过期 | 复核（§2.3）后派发一次 | 正常 |
+| `pending`（从旧 H1 账本导入，`ownerActor='system'`） | 缺少持久化 peer 指纹，**不派发**：`run.cancelled(legacy_owner_unavailable)`；turn `not_sent` | fail closed，不绕过授权 |
 | `pending`，已过期，或时钟回拨（现在早于 intent 时刻） | `run.cancelled(pending_expired)`；会话 run 的 turn 记 `not_sent` | 可证明未发送 |
 | `pending` 的会话 run（交接在内存，H6） | `run.cancelled(conversation_start_unavailable)`；turn `not_sent` | 同 [P3-conversation-send](P3-conversation-send.md) |
-| 已领取，没有 `run.dispatched` | `effect.voided` + `run.cancelled(host_restarted_before_dispatch)`；turn `not_sent` | Provider 从未被调用，可证明 |
-| 已派发，没有终态 | 先查 recorder 证据（§2.6）；能证明就按证据收尾，否则 `run.interrupted`，结局 `unavailable(host_restarted)` | 不是 `failed` |
+| 已领取，没有 `run.dispatched`（两步路径） | `effect.voided` + `run.cancelled(host_restarted_before_dispatch)`；turn `not_sent` | Provider 从未被调用，可证明 |
+| 已派发，没有终态（含合并提交后、Provider 启动前崩溃） | 先查 recorder 证据（§2.6）；能证明就按证据收尾，否则 `run.interrupted`，结局 `unavailable(host_restarted)`，turn 送达 `unknown` | 不是 `failed`，不静默重发 |
 | 开着的提问 | 同一事务 `run.question_closed(host_restarted)` | |
 
 **为什么改。** 今天重启后会把「已记录、未派发」的 intent 派发一次（`host-controller-surface.ts:107-117`）。P5 的登录时启动与无人值守重启会让重启更频繁，旧规则可能在几小时后派发旧提示，且可能带 `full_access`。新规则让已领取的进程绑定副作用一律作废（与 t3code 一致），只给排队中的 pending 留一个有界、经复核的例外。

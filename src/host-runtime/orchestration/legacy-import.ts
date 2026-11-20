@@ -11,6 +11,7 @@ import {
 } from './legacy-ledger-reader'
 import { parseLedgerIntentRouting } from './shadow-routing'
 import { DEFAULT_PENDING_TTL_MS } from './types'
+import { WalCheckpointWorker } from './wal-checkpoint-worker'
 
 export {
   loadLegacyLedgerPlan,
@@ -352,10 +353,10 @@ export function startDeferredLegacyImport(
   const reconcileOpenRuns = options.reconcileOpenRuns ?? false
   const shadowOnly = options.shadowOnly ?? !reconcileOpenRuns
   const batchSize = Math.max(1, options.batchSize ?? 100)
-  const maxSliceMs = Math.max(1, options.maxSliceMs ?? 8)
+  const maxSliceMs = Math.max(1, options.maxSliceMs ?? 4)
   const walCheckpointRuns = Math.max(50, options.walCheckpointRuns ?? 200)
-  const walCheckpointBytes = Math.max(256 * 1024, options.walCheckpointBytes ?? 16 * 1024 * 1024)
-  const walHardCapBytes = Math.max(walCheckpointBytes * 2, options.walHardCapBytes ?? 64 * 1024 * 1024)
+  const walCheckpointBytes = Math.max(256 * 1024, options.walCheckpointBytes ?? 12 * 1024 * 1024)
+  const walHardCapBytes = Math.max(walCheckpointBytes * 2, options.walHardCapBytes ?? 28 * 1024 * 1024)
   const resolveTurnOrdinal = options.resolveTurnOrdinal ?? createConversationOrdinalResolver(userDataDir)
 
   const promise = new Promise<LegacyImportSummary>((resolve, reject) => {
@@ -363,14 +364,18 @@ export function startDeferredLegacyImport(
     let currentLedgerSeq = plan.currentLedgerSeq
     const sortedRuns = plan.unimportedRuns
     const stmtLegacyMapping = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
+    const ckptWorker = sortedRuns.length > 0 ? WalCheckpointWorker.start(sink) : null
 
     let offset = 0
     let importedRuns = 0
     let rejectedCommands = 0
     let runsSinceCheckpoint = 0
     let walBytesAtLastCheckpoint = sink.walFileBytes()
-    let pendingCheckpointMode: 'passive' | 'truncate' | null = null
     let settled = false
+
+    const cleanupWorker = async (): Promise<void> => {
+      if (ckptWorker) await ckptWorker.close()
+    }
 
     const finish = (summary: LegacyImportSummary): void => {
       if (settled) return
@@ -379,7 +384,7 @@ export function startDeferredLegacyImport(
         clearImmediate(pendingTimer)
         pendingTimer = null
       }
-      resolve(summary)
+      void cleanupWorker().finally(() => resolve(summary))
     }
 
     settleOnCancel = () => {
@@ -410,23 +415,6 @@ export function startDeferredLegacyImport(
         return
       }
       try {
-        // Run scheduled bounded WAL checkpoint in its own yielded turn between backfill slices (N2).
-        if (pendingCheckpointMode) {
-          const mode = pendingCheckpointMode
-          pendingCheckpointMode = null
-          runsSinceCheckpoint = 0
-          if (mode === 'truncate') {
-            sink.checkpointTruncate()
-          } else {
-            const res = sink.checkpointPassive()
-            if (res.busy > 0 || sink.walFileBytes() >= walHardCapBytes) {
-              sink.checkpointTruncate()
-            }
-          }
-          walBytesAtLastCheckpoint = sink.walFileBytes()
-          scheduleNext()
-          return
-        }
         if (offset < sortedRuns.length) {
           const sliceStart = performance.now()
           let processed = 0
@@ -450,15 +438,37 @@ export function startDeferredLegacyImport(
           runsSinceCheckpoint += processed
           if (offset >= sortedRuns.length) currentLedgerSeq = plan.lastSeq
           const walSize = sink.walFileBytes()
-          // PASSIVE checkpoint reuses the WAL file without shrinking stat().size, so check
-          // runsSinceCheckpoint + growth above last checkpoint size, and TRUNCATE at hard cap.
-          if (walSize >= walHardCapBytes) {
-            pendingCheckpointMode = 'truncate'
-          } else if (
-            runsSinceCheckpoint >= walCheckpointRuns ||
-            walSize >= Math.max(walCheckpointBytes, walBytesAtLastCheckpoint + walCheckpointBytes)
+          // Off-main-thread WAL checkpointing (W9 Must-Fix 1): fire non-blocking PASSIVE
+          // checkpoints on the worker connection so main-thread event loop & live commits never stall.
+          // Apply async backpressure to backfill slicing (not live commits) when WAL reaches soft/hard caps.
+          if (ckptWorker && walSize >= walHardCapBytes) {
+            runsSinceCheckpoint = 0
+            void ckptWorker
+              .waitInFlight()
+              .then(() => ckptWorker.request('truncate'))
+              .then(() => {
+                walBytesAtLastCheckpoint = sink.walFileBytes()
+                scheduleNext()
+              })
+            return
+          }
+          if (ckptWorker && walSize >= walCheckpointBytes && ckptWorker.isBusy()) {
+            void ckptWorker.waitInFlight().then(() => {
+              walBytesAtLastCheckpoint = sink.walFileBytes()
+              scheduleNext()
+            })
+            return
+          }
+          if (
+            ckptWorker &&
+            !ckptWorker.isBusy() &&
+            (runsSinceCheckpoint >= walCheckpointRuns ||
+              walSize >= Math.max(walCheckpointBytes, walBytesAtLastCheckpoint + walCheckpointBytes))
           ) {
-            pendingCheckpointMode = 'passive'
+            runsSinceCheckpoint = 0
+            void ckptWorker.request('passive').then(() => {
+              walBytesAtLastCheckpoint = sink.walFileBytes()
+            })
           }
           scheduleNext()
           return
@@ -468,20 +478,25 @@ export function startDeferredLegacyImport(
           currentLedgerSeq = plan.lastSeq
         }
         const catalog = importCatalogEntries(sink, userDataDir, now, batchSize)
-        if (sink.walFileBytes() >= walCheckpointBytes) {
-          sink.checkpointPassive()
-        }
-        finish({
+        const finalSummary: LegacyImportSummary = {
           importedRuns,
           importedSessions: catalog.importedSessions,
           rejectedCommands: rejectedCommands + catalog.rejectedCommands,
           legacyLedgerSeq: currentLedgerSeq,
           catalogSha256: catalog.catalogSha256
-        })
+        }
+        if (ckptWorker) {
+          void ckptWorker
+            .waitInFlight()
+            .then(() => (sink.walFileBytes() >= walCheckpointBytes ? ckptWorker.request('passive') : null))
+            .then(() => finish(finalSummary))
+          return
+        }
+        finish(finalSummary)
       } catch (error) {
         if (!settled) {
           settled = true
-          reject(error)
+          void cleanupWorker().finally(() => reject(error))
         }
       }
     }

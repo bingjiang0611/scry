@@ -218,7 +218,7 @@
     },
     "orchestration.pre-first-token": {
       "lane": "disk",
-      "workload": "orchestration-pre-first-token=real-hooks+1-commit;fullfsync=true",
+      "workload": "orchestration-pre-first-token=real-hooks+1-commit;pragma-fullfsync=on(darwin-F_FULLFSYNC)",
       "iterations": 2,
       "warmups": 1,
       "samples": 20,

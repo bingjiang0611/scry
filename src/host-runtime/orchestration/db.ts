@@ -81,7 +81,10 @@ export interface OrchestrationDbHandle {
   readonly db: Database.Database
   readonly dbPath: string
   readonly orchestrationDir: string
+  readonly checkpointFullfsync: boolean
   enforceModes(): void
+  /** Switches locking_mode temporarily to NORMAL for same-process worker checkpoints and back to EXCLUSIVE. */
+  setLockingMode(mode: 'normal' | 'exclusive'): void
   /** Current `-wal` file size in bytes (0 when absent). */
   walFileBytes(): number
   /** Runs a non-blocking PASSIVE WAL checkpoint off the commit critical path. */
@@ -158,7 +161,24 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
       db: liveDb,
       dbPath,
       orchestrationDir,
+      checkpointFullfsync,
       enforceModes: () => enforceOrchestrationFileModes(dbPath),
+      setLockingMode: (mode) => {
+        if (!liveDb.open) return
+        if (mode === 'normal') {
+          // SQLite exclusive-mode WAL only releases the exclusive lock after cycling through DELETE.
+          liveDb.pragma('journal_mode = DELETE')
+          liveDb.pragma('locking_mode = NORMAL')
+          liveDb.prepare('SELECT value FROM orch_meta LIMIT 1').get()
+          liveDb.pragma('journal_mode = WAL')
+          liveDb.pragma('wal_autocheckpoint = 0')
+          liveDb.prepare('SELECT value FROM orch_meta LIMIT 1').get()
+        } else {
+          liveDb.pragma('locking_mode = EXCLUSIVE')
+          liveDb.prepare("INSERT OR REPLACE INTO orch_meta (key, value) VALUES ('wal_lock_mode', 'exclusive')").run()
+        }
+        enforceOrchestrationFileModes(dbPath)
+      },
       walFileBytes: () => {
         const walPath = `${dbPath}-wal`
         try {

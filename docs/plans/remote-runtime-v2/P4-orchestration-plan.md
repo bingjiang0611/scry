@@ -27,7 +27,7 @@
 | 指标 | 目标 | 怎么测 |
 |---|---|---|
 | 打开已缓存会话的首屏 | 一次请求（超过 512 KiB 时加分块续读）；daemon 模式 P50 不高于当前 daemon 模式 | `scripts/session-open-bench.mjs <场景> --daemon`，四个场景；记录往返次数与字节 |
-| **首 token 前的提交** | **次数 2**（intent+领取；admitted+dispatched，core §2.4）；**合计 P95 ≤ 8 ms（门禁）** | daemon 内计时，记录次数与合计。理由：[P3-s1-absolute-cap](P3-s1-absolute-cap.md) 的 P50 余量只有 16–22 ms（该文 :82），提交只能占一半 |
+| **首 token 前的提交** | **立即路径 1 次**（复核后原子提交 intent+admitted+dispatched；提交后 Provider 启动前崩溃记 `interrupted`/送达 `unknown`，core §2.4），排队/回退路径 2 次；**合计 P95 ≤ 8 ms（门禁，macOS `fullfsync=ON` 下亦成立）** | daemon 内计时，记录次数与合计。理由：[P3-s1-absolute-cap](P3-s1-absolute-cap.md) 的 P50 余量只有 16–22 ms（该文 :82），提交只能占一半 |
 | 单次提交（决策 + 事务 + fsync） | P50 ≤ 2 ms、P95 ≤ 10 ms（记录，非门禁） | 同上，macOS 与 Linux 各两轮 |
 | 首 token | 不放宽 S1：热启动两轮 P95 ≤ 200 ms、P50 ≤ 150 ms；预分配 canonical id 省掉绑定等待（core §2.7） | `scripts/daemon-mode-timing.mjs`，计时锁下串行 |
 | 空闲 RPC | 每客户端空闲 60 s 内个位数 | 远程请求计时（`remote-request-timing.ts`） |
