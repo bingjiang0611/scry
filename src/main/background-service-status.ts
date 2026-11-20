@@ -133,13 +133,17 @@ export function parseSelfReport(value: unknown): BackgroundServiceSelfReport | u
   let orchestration: BackgroundServiceSelfReport['orchestration']
   if (report.orchestration !== undefined) {
     const raw = report.orchestration as Partial<NonNullable<BackgroundServiceSelfReport['orchestration']>> | null
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.mode !== 'on' || typeof raw.h1FallbackUnavailable !== 'boolean') return undefined
-    if (raw.h1FallbackReason !== undefined && typeof raw.h1FallbackReason !== 'string') return undefined
-    orchestration = {
-      mode: 'on',
-      h1FallbackUnavailable: raw.h1FallbackUnavailable,
-      ...(raw.h1FallbackReason !== undefined ? { h1FallbackReason: raw.h1FallbackReason } : {})
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+    if (raw.mode === 'on') {
+      if (typeof raw.h1FallbackUnavailable !== 'boolean') return undefined
+      if (raw.h1FallbackReason !== undefined && typeof raw.h1FallbackReason !== 'string') return undefined
+      orchestration = {
+        mode: 'on',
+        h1FallbackUnavailable: raw.h1FallbackUnavailable,
+        ...(raw.h1FallbackReason !== undefined ? { h1FallbackReason: raw.h1FallbackReason } : {})
+      }
     }
+    // Unknown orchestration.mode values are ignored rather than discarding the entire self-report.
   }
   return {
     version: report.version, pid: report.pid as number, startedAt: report.startedAt, devices, activeRuns: report.activeRuns,

@@ -91,6 +91,10 @@ export class LegacyMirrorWorker {
     return this.#queue.length + (this.#pendingCompact ? 1 : 0)
   }
 
+  hasPendingCompact(): boolean {
+    return this.#pendingCompact !== null
+  }
+
   isH1FallbackUnavailable(): boolean {
     return this.#h1FallbackUnavailable
   }

@@ -1,4 +1,6 @@
+import type Database from 'better-sqlite3'
 import { chmodSync, existsSync, mkdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { recoverDeadRemoteLease } from '../main/remote/recover-dead-lease'
 import { SessionLedger } from '../main/remote/session-ledger'
@@ -9,15 +11,37 @@ import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { recoverOrchestrationOnStartup } from '../host-runtime/orchestration/recovery'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 
+const require = createRequire(import.meta.url)
+
+function probeOrchestrationOnActiveReadOnly(dbPath: string): { active: boolean; error?: unknown } {
+  const DatabaseCtor = require('better-sqlite3') as typeof import('better-sqlite3')
+  let db: Database.Database | undefined
+  try {
+    db = new DatabaseCtor(dbPath, { readonly: true, fileMustExist: true, timeout: 0 })
+    const row = db
+      .prepare("SELECT value FROM orch_meta WHERE key = 'orchestration_on_active'")
+      .get() as { value?: string } | undefined
+    return { active: row?.value === '1' }
+  } catch (error) {
+    return { active: false, error }
+  } finally {
+    try {
+      db?.close()
+    } catch {
+      // Preserve fail-open semantics.
+    }
+  }
+}
+
 /**
  * Decision H §14.4 (`off` / unset / `shadow` default-path-safe reconciliation):
- * - Runs ONLY when `orch_meta.orchestration_on_active === '1'` (previous run was authoritative `on`).
- *   Shadow-only or never-`on` data dirs return immediately without touching H1 byte-for-byte.
- * - Strictly fail-open: if `orchestration.db` cannot be opened or is corrupt, logs and returns
- *   without touching H1 so daemon startup is never blocked.
- * - Uses `h1.describe().lastSeq` (NEVER `since(0).cursor` which caps at page size 256) to check
- *   whether H1 lags behind DB / reserved seq ceiling `R`.
- * - Rebuilt H1 snapshot always has `lastSeq >= R` (`h1_seq_reserved_until`).
+ * - Fast-paths with a read-only SQLite probe (`readonly: true, fileMustExist: true, timeout: 0`)
+ *   so shadow-only / never-`on` / 0-byte / corrupt DBs return in <1 ms without running
+ *   `integrity_check`, migrations, `EXCLUSIVE` lock, or initializing a 0-byte file (W9-review-2 B1).
+ * - Opens full `EventSink` and reconciles H1 ONLY when `orch_meta.orchestration_on_active === '1'`.
+ * - Strictly fail-open: any probe or reconcile error logs and returns without touching H1.
+ * - Uses `h1.describe().lastSeq` to check whether H1 lags behind DB / reserved seq ceiling `R`
+ *   (rebuilt H1 snapshot always has `lastSeq >= R`).
  */
 export function reconcileH1ForOffMode(options: {
   userDataDir: string
@@ -29,6 +53,14 @@ export function reconcileH1ForOffMode(options: {
   const dbPath = join(options.userDataDir, 'orchestration', 'orchestration.db')
   if (!existsSync(dbPath)) return
 
+  const probe = probeOrchestrationOnActiveReadOnly(dbPath)
+  if (probe.error) {
+    const msg = probe.error instanceof Error ? probe.error.message : String(probe.error)
+    options.log(`daemon.orchestration-off-reconcile-failed ${msg}`)
+    return
+  }
+  if (!probe.active) return
+
   let sink: EventSink | undefined
   try {
     sink = EventSink.open({
@@ -36,7 +68,7 @@ export function reconcileH1ForOffMode(options: {
       checkpointIntervalMs: 0
     })
 
-    // Default path safety (N1): NEVER touch H1 unless `on` mode was previously authoritative.
+    // Re-check under full open in case state changed concurrently.
     if (sink.getMeta('orchestration_on_active') !== '1') return
 
     const fallbackUnavailable = sink.getMeta('h1_fallback_unavailable') === '1'
