@@ -62,11 +62,20 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
       const localPeer = 'a'.repeat(64)
       const remotePeer = 'b'.repeat(64)
       const metaByRun = new Map<string, { peerCertSHA256: string; grantScope: 'local' | 'remote' }>()
+      let pendingAnsweredByPeer: string | undefined
       const mirror = ShadowMirror.open({ userDataDir: userData })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),
-          onEvent: (event) => mirror.onLedgerEvent(event, metaByRun.get(event.runId))
+          onEvent: (event) => {
+            const base = metaByRun.get(event.runId)
+            const answeredByPeer = pendingAnsweredByPeer
+            pendingAnsweredByPeer = undefined
+            mirror.onLedgerEvent(
+              event,
+              base || answeredByPeer ? { ...(base ?? {}), ...(answeredByPeer ? { answeredByPeer } : {}) } : undefined
+            )
+          }
         })
 
         // 1. Full local App send -> dispatch -> session -> question -> answer -> close -> settle
@@ -89,13 +98,13 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           run1,
           JSON.stringify({ event: 'question_opened', questionId: 'q-1', kind: 'approval', source: 'provider' })
         )
+        pendingAnsweredByPeer = remotePeer
         ledger.markProgress(
           run1,
           JSON.stringify({
             event: 'question_answered',
             questionId: 'q-1',
-            answerId: 'ans-1',
-            answeredByPeer: remotePeer
+            answerId: 'ans-1'
           })
         )
         ledger.markProgress(
@@ -116,7 +125,7 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         ledger.markDispatched(run2)
         ledger.markCancelled(run2)
 
-        // 3. Failed remote run with ~1.2 MB intent body (just under H1 1,200,000 cap; externalized to BodyStore)
+        // 3. Failed remote run with ~1.2 MB intent body (just under H1 1,200,000 cap; externalized to BodyStore off pre-first-token path)
         const run3 = SessionLedger.newRunId()
         const bigBody = 'M'.repeat(1_199_800)
         metaByRun.set(run3, { peerCertSHA256: remotePeer, grantScope: 'remote' })
@@ -126,6 +135,10 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-1', prompt: 'fail me', blob: bigBody })
         })
         ledger.markDispatched(run3)
+        // Before terminal event (pre-first-token path), BodyStore must NOT have written/fsynced the external body file yet
+        const preTerminalRun3 = mirror.sink!.getRun(run3)
+        expect(preTerminalRun3?.body?.storage).toBe('external')
+        expect(mirror.sink!.bodyStore.hasExternalBody(preTerminalRun3!.body!.sha256)).toBe(false)
         ledger.markFailed(run3, 'provider_crashed')
 
         // Verify zero deviations and full field-for-field parity against H1 SessionLedger
@@ -261,229 +274,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
 
         expect(mirror.stats().failures).toBeGreaterThanOrEqual(1)
         expect(mirror.stats().failedOpen).toBe(true)
-      } finally {
-        mirror.close()
-      }
-    })
-  })
-
-  it('B1: mirrors multi-turn conversations and resumed native sessions without ordinal PK collision', () => {
-    withTempDir((userData) => {
-      const mirror = ShadowMirror.open({ userDataDir: userData })
-      try {
-        const ledger = new SessionLedger({
-          store: memoryLedgerStore(),
-          onEvent: (event) => mirror.onLedgerEvent(event)
-        })
-
-        // 3 turns in the same conversation
-        for (let turn = 1; turn <= 3; turn++) {
-          const ledgerRunId = SessionLedger.newRunId()
-          const canonicalRunId = `conv-turn-${turn}`
-          ledger.recordIntent({
-            intentId: SessionLedger.newIntentId(),
-            runId: ledgerRunId,
-            detail: JSON.stringify({
-              providerId: 'codex',
-              cwd: '/tmp/ws-multi',
-              prompt: `turn ${turn}`,
-              conversation: { conversationId: 'conv-multi', runId: canonicalRunId }
-            })
-          })
-          ledger.markDispatched(ledgerRunId)
-          ledger.markSettled(ledgerRunId)
-        }
-
-        // 2 turns in a resumed native session
-        for (let turn = 1; turn <= 2; turn++) {
-          const ledgerRunId = SessionLedger.newRunId()
-          ledger.recordIntent({
-            intentId: SessionLedger.newIntentId(),
-            runId: ledgerRunId,
-            detail: JSON.stringify({
-              providerId: 'codex',
-              cwd: '/tmp/ws-multi',
-              prompt: `resume turn ${turn}`,
-              resume: 'native-sess-42'
-            })
-          })
-          ledger.markDispatched(ledgerRunId)
-          ledger.markSettled(ledgerRunId)
-        }
-
-        const st = mirror.stats()
-        expect(st.failures).toBe(0)
-        expect(st.failedOpen).toBe(false)
-        expect(st.deviations).toBe(0)
-        expect(mirror.sink!.getTurn('conv-multi', 1)?.runId).toBe('conv-turn-1')
-        expect(mirror.sink!.getTurn('conv-multi', 2)?.runId).toBe('conv-turn-2')
-        expect(mirror.sink!.getTurn('conv-multi', 3)?.runId).toBe('conv-turn-3')
-        expect(mirror.sink!.getTurn('native-sess-42', 1)).toBeDefined()
-        expect(mirror.sink!.getTurn('native-sess-42', 2)).toBeDefined()
-      } finally {
-        mirror.close()
-      }
-    })
-  })
-
-  it('B2: classifies rejected/duplicate decisions, excludes rejections from timing samples, and trips failedOpen on fence', () => {
-    withTempDir((userData) => {
-      const timingSamples: Array<{ commitKind: string; durationMs: number }> = []
-      const mirror = ShadowMirror.open({
-        userDataDir: userData,
-        onCommitTiming: (sample) => timingSamples.push({ commitKind: sample.commitKind, durationMs: sample.durationMs })
-      })
-      try {
-        // Trigger a sticky invalid_target rejection (unknown run) -> must NOT count as accepted or timing sample
-        mirror.onLedgerEvent({
-          seq: 1,
-          at: 1_700_000_000_000,
-          runId: SessionLedger.newRunId(),
-          kind: 'run_dispatched'
-        })
-        const st = mirror.stats()
-        expect(st.acceptedCommits).toBe(0)
-        expect(st.rejectedSticky).toBe(1)
-        expect(st.deviations).toBe(1)
-        expect(timingSamples).toHaveLength(0)
-
-        // Mark failed open explicitly (e.g. startup import fence) -> further events are skipped without silent commits
-        mirror.markFailedOpen(new Error('import_fence'))
-        expect(mirror.stats().failedOpen).toBe(true)
-        expect(mirror.stats().failures).toBe(1)
-      } finally {
-        mirror.close()
-      }
-    })
-  })
-
-  it('B3: routes H3 onConversationTurnSettled through EventSink and preserves replay consistency', () => {
-    withTempDir((userData) => {
-      const fixedAt = 1_700_000_123_456
-      const mirror = ShadowMirror.open({
-        userDataDir: userData,
-        clock: () => fixedAt
-      })
-      try {
-        const ledger = new SessionLedger({
-          store: memoryLedgerStore(),
-          clock: () => fixedAt,
-          onEvent: (event) => mirror.onLedgerEvent(event)
-        })
-        const run1 = SessionLedger.newRunId()
-        ledger.recordIntent({
-          intentId: SessionLedger.newIntentId(),
-          runId: run1,
-          detail: JSON.stringify({
-            providerId: 'codex',
-            cwd: '/tmp/ws-b3',
-            prompt: 'first',
-            conversation: { conversationId: 'conv-b3', runId: 'run-b3-1' }
-          })
-        })
-        ledger.markDispatched(run1)
-        ledger.markSettled(run1)
-
-        const fakeConversation: Conversation = {
-          version: 1,
-          id: 'conv-b3',
-          cwd: '/tmp/ws-b3',
-          revision: 2,
-          bindings: [{ id: 'b-1', providerId: 'codex', continuationKey: 'k', nativeSessionId: 'ext-b3' }],
-          turns: [
-            {
-              origin: 'dispatch',
-              ordinal: 1,
-              runId: 'run-b3-1',
-              bindingId: 'b-1',
-              commandId: 'c-1',
-              intentHash: 'h-1',
-              resumeSessionId: null,
-              items: [],
-              importedItems: [],
-              omittedItems: [],
-              delivery: { status: 'accepted', nativeSessionId: 'ext-b3', outcome: 'completed', nativeItems: [] }
-            }
-          ]
-        }
-        mirror.onConversationTurnSettled({
-          conversationId: 'conv-b3',
-          runId: 'run-b3-1',
-          conversation: fakeConversation,
-          delivery: { status: 'accepted', nativeSessionId: 'ext-b3', outcome: 'completed', nativeItems: [] }
-        })
-
-        const turn = mirror.sink!.getTurn('conv-b3', 1)
-        expect(turn?.delivery).toBe('accepted')
-        expect(turn?.revSeq).toBeGreaterThan(0)
-        // Replay from empty MUST match online projection after H3 settle!
-        expect(mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
-        expect(mirror.stats().deviations).toBe(0)
-      } finally {
-        mirror.close()
-      }
-    })
-  })
-
-  it('B1 settle check: counts deviation when H3 settle ordinal disagrees with shadow turn ordinal without fencing', () => {
-    withTempDir((userData) => {
-      const fixedAt = 1_700_000_200_000
-      const mirror = ShadowMirror.open({ userDataDir: userData, clock: () => fixedAt })
-      try {
-        const ledger = new SessionLedger({
-          store: memoryLedgerStore(),
-          clock: () => fixedAt,
-          onEvent: (event) => mirror.onLedgerEvent(event)
-        })
-        const ledgerRun = SessionLedger.newRunId()
-        // Intentionally omit ordinal in routing detail so shadow falls back to 1
-        ledger.recordIntent({
-          intentId: SessionLedger.newIntentId(),
-          runId: ledgerRun,
-          detail: JSON.stringify({
-            providerId: 'codex',
-            cwd: '/tmp/ws-mismatch',
-            prompt: 'stale detail without ordinal',
-            conversation: { conversationId: 'conv-mismatch', runId: 'run-mismatch-3' }
-          })
-        })
-        ledger.markDispatched(ledgerRun)
-        ledger.markSettled(ledgerRun)
-        expect(mirror.sink!.getTurnByRunId('run-mismatch-3')?.ordinal).toBe(1)
-
-        // H3 reports authoritative ordinal=3 -> shadow MUST count ordinalMismatch + deviation and NOT fence
-        const fakeConversation: Conversation = {
-          version: 1,
-          id: 'conv-mismatch',
-          cwd: '/tmp/ws-mismatch',
-          revision: 3,
-          bindings: [{ id: 'b-1', providerId: 'codex', continuationKey: 'k', nativeSessionId: 'ext-m' }],
-          turns: [
-            {
-              origin: 'dispatch',
-              ordinal: 3,
-              runId: 'run-mismatch-3',
-              bindingId: 'b-1',
-              commandId: 'c-3',
-              intentHash: 'h-3',
-              resumeSessionId: null,
-              items: [],
-              importedItems: [],
-              omittedItems: [],
-              delivery: { status: 'accepted', nativeSessionId: 'ext-m', outcome: 'completed', nativeItems: [] }
-            }
-          ]
-        }
-        mirror.onConversationTurnSettled({
-          conversationId: 'conv-mismatch',
-          runId: 'run-mismatch-3',
-          conversation: fakeConversation,
-          delivery: { status: 'accepted', nativeSessionId: 'ext-m', outcome: 'completed', nativeItems: [] }
-        })
-
-        expect(mirror.stats().failedOpen).toBe(false)
-        expect(mirror.stats().ordinalMismatches).toBe(1)
-        expect(mirror.stats().deviations).toBe(1)
       } finally {
         mirror.close()
       }

@@ -106,7 +106,11 @@ export interface ProgressCommandBuild {
   authorizePeer?: string
 }
 
-export function buildProgressMarkerCommand(event: LedgerEvent, runId: string): ProgressCommandBuild | null {
+export function buildProgressMarkerCommand(
+  event: LedgerEvent,
+  runId: string,
+  meta?: { answeredByPeer?: string }
+): ProgressCommandBuild | null {
   if (!event.detail) return null
   let marker: Record<string, unknown>
   try {
@@ -156,8 +160,8 @@ export function buildProgressMarkerCommand(event: LedgerEvent, runId: string): P
     const answerSha256 =
       typeof marker.digest === 'string' && PEER_SHA_RE.test(marker.digest) ? marker.digest : sha256Hex(answerId)
     const answeredByPeer =
-      typeof marker.answeredByPeer === 'string' && PEER_SHA_RE.test(marker.answeredByPeer)
-        ? `peer:${marker.answeredByPeer}`
+      typeof meta?.answeredByPeer === 'string' && PEER_SHA_RE.test(meta.answeredByPeer)
+        ? `peer:${meta.answeredByPeer}`
         : 'system'
     const scope = answeredByPeer.startsWith('peer:') ? ('remote' as const) : ('system' as const)
     const payload = { runId, questionId: marker.questionId, answerId, answerSha256, shadowOnly: true }

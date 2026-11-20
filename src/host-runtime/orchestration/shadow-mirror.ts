@@ -1,5 +1,6 @@
 import type { LedgerEvent } from '../../main/remote/session-ledger'
 import { canonicalJson, sha256Hex } from './canonical-json'
+import { createConversationOrdinalResolver } from './conversation-ordinal-lookup'
 import { EventSink, type EventSinkOptions } from './event-sink'
 import type { OrchestrationCommand } from './orchestrator-commands'
 import {
@@ -19,6 +20,12 @@ export {
   type ShadowMirrorStats
 } from './shadow-routing'
 
+export interface ShadowLedgerEventMeta {
+  peerCertSHA256?: string
+  grantScope?: 'local' | 'remote'
+  answeredByPeer?: string
+}
+
 export interface ShadowMirrorOptions extends EventSinkOptions {
   leaseOwner?: string
   clock?: () => number
@@ -31,6 +38,7 @@ export interface ShadowMirrorOptions extends EventSinkOptions {
 }
 
 const PEER_SHA_RE = /^[0-9a-f]{64}$/
+const MAX_PENDING_SHADOW_BODIES = 16
 
 /**
  * P4-1 fail-open shadow mirror (plan §9 P4-1).
@@ -42,12 +50,13 @@ export class ShadowMirror {
   readonly #leaseOwner: string
   readonly #clock: () => number
   readonly #resolveRunMeta?: ShadowMirrorOptions['resolveRunMeta']
-  readonly #resolveTurnOrdinal?: ShadowMirrorOptions['resolveTurnOrdinal']
+  readonly #resolveTurnOrdinal: (sessionKey: string, runId: string) => number | undefined
   readonly #onCommitTiming?: (sample: ShadowCommitSample) => void
   readonly #onError?: (error: unknown) => void
   readonly #ledgerToCanonical = new Map<string, string>()
   readonly #preFirstTokenCommits = new Map<string, number>()
   readonly #preFirstTokenMs = new Map<string, number>()
+  readonly #pendingBodies = new Map<string, { sha256: string; content: string }>()
   #acceptedCommits = 0
   #duplicates = 0
   #rejectedSticky = 0
@@ -64,7 +73,8 @@ export class ShadowMirror {
     this.#leaseOwner = options.leaseOwner ?? `daemon:${process.pid}`
     this.#clock = options.clock ?? (() => Date.now())
     this.#resolveRunMeta = options.resolveRunMeta
-    this.#resolveTurnOrdinal = options.resolveTurnOrdinal
+    this.#resolveTurnOrdinal =
+      options.resolveTurnOrdinal ?? createConversationOrdinalResolver(options.userDataDir)
     this.#onCommitTiming = options.onCommitTiming
     this.#onError = options.onError
     if (!sink) {
@@ -227,11 +237,29 @@ export class ShadowMirror {
     })
   }
 
+  /** Flushes deferred >16 KiB shadow bodies to `BodyStore` off the pre-first-token hot path. */
+  flushPendingBodies(runId?: string): void {
+    if (!this.sink || this.#failedOpen || this.sink.isWriteIndeterminate()) {
+      if (runId) this.#pendingBodies.delete(runId)
+      else this.#pendingBodies.clear()
+      return
+    }
+    const keys = runId !== undefined ? (this.#pendingBodies.has(runId) ? [runId] : []) : [...this.#pendingBodies.keys()]
+    for (const key of keys) {
+      const entry = this.#pendingBodies.get(key)
+      this.#pendingBodies.delete(key)
+      if (!entry) continue
+      try {
+        this.sink.bodyStore.prepareBody(entry.content)
+      } catch (error) {
+        this.failOpen(error)
+        return
+      }
+    }
+  }
+
   /** H1 `#emit` shadow hook: mirrors ledger lifecycle transitions into `orchestration.db`. */
-  onLedgerEvent(
-    event: LedgerEvent,
-    meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote' }
-  ): void {
+  onLedgerEvent(event: LedgerEvent, meta?: ShadowLedgerEventMeta): void {
     if (!this.sink || this.#failedOpen) return
     const hookStarted = performance.now()
     try {
@@ -248,14 +276,27 @@ export class ShadowMirror {
         const scope: 'local' | 'remote' = runMeta?.grantScope === 'local' ? 'local' : 'remote'
         const ordinal = routing.sessionKey
           ? (routing.ordinal ??
-            this.#resolveTurnOrdinal?.(routing.sessionKey, routing.canonicalRunId) ??
+            (routing.isConversationRun
+              ? this.#resolveTurnOrdinal(routing.sessionKey, routing.canonicalRunId)
+              : undefined) ??
             this.sink.getNextTurnOrdinal(routing.sessionKey))
           : undefined
         const detailBytes = event.detail ? Buffer.byteLength(event.detail, 'utf8') : 0
-        const body =
-          event.detail && detailBytes > INLINE_BODY_MAX_BYTES
-            ? this.sink.bodyStore.prepareBody(event.detail)
-            : undefined
+        // Defer >16 KiB external body file write + fsync off the pre-first-token path (shadow never
+        // dispatches from BodyStore; content is hashed in memory now and persisted on terminal/close).
+        let body: { storage: 'external'; sha256: string; bytes: number } | undefined
+        if (event.detail && detailBytes > INLINE_BODY_MAX_BYTES) {
+          const sha256 = sha256Hex(event.detail)
+          body = { storage: 'external', sha256, bytes: detailBytes }
+          this.#pendingBodies.delete(routing.canonicalRunId)
+          this.#pendingBodies.set(routing.canonicalRunId, { sha256, content: event.detail })
+          if (this.#pendingBodies.size > MAX_PENDING_SHADOW_BODIES) {
+            const oldestKey = this.#pendingBodies.keys().next().value
+            if (oldestKey && oldestKey !== routing.canonicalRunId) {
+              setImmediate(() => this.flushPendingBodies(oldestKey))
+            }
+          }
+        }
         const payload = {
           runId: routing.canonicalRunId,
           sessionKey: routing.sessionKey,
@@ -322,7 +363,7 @@ export class ShadowMirror {
       }
 
       if (event.kind === 'run_progress') {
-        this.handleProgressMarker(event, runId, hookStarted)
+        this.handleProgressMarker(event, runId, hookStarted, meta)
         return
       }
 
@@ -359,13 +400,19 @@ export class ShadowMirror {
           legacyLedgerSeq: event.seq
         }
       )
+      this.flushPendingBodies(runId)
     } catch (error) {
       this.failOpen(error)
     }
   }
 
-  private handleProgressMarker(event: LedgerEvent, runId: string, hookStarted: number): void {
-    const built = buildProgressMarkerCommand(event, runId)
+  private handleProgressMarker(
+    event: LedgerEvent,
+    runId: string,
+    hookStarted: number,
+    meta?: ShadowLedgerEventMeta
+  ): void {
+    const built = buildProgressMarkerCommand(event, runId, meta)
     if (!built) return
     if (built.authorizePeer) this.sink!.authorizeActor(built.authorizePeer)
     this.executeTimed(built.command, {
@@ -458,6 +505,7 @@ export class ShadowMirror {
 
   close(): void {
     try {
+      this.flushPendingBodies()
       this.sink?.close()
     } catch {
       // Ignore close errors in shadow mode.

@@ -1,10 +1,18 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalJson, sha256Hex } from './canonical-json'
+import { createConversationOrdinalResolver, type TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
 import { readLegacyLedgerReadOnly, type LegacyRunState } from './legacy-ledger-reader'
 import { parseLedgerIntentRouting } from './shadow-routing'
 import { DEFAULT_PENDING_TTL_MS } from './types'
+
+export interface LegacyLedgerPlan {
+  readonly currentLedgerSeq: number
+  readonly lastSeq: number
+  readonly unimportedRuns: readonly LegacyRunState[]
+  readonly openRuns: readonly LegacyRunState[]
+}
 
 export interface LegacyImportOptions {
   sink: EventSink
@@ -28,6 +36,10 @@ export interface LegacyImportOptions {
    * `openLocalChannel` without blocking daemon startup.
    */
   openOnly?: boolean
+  /** Pre-parsed ledger plan from `loadLegacyLedgerPlan` to avoid redundant full-ledger parses. */
+  plan?: LegacyLedgerPlan
+  /** Authoritative H3 ordinal lookup for pre-fix ledger intents lacking `conversation.ordinal`. */
+  resolveTurnOrdinal?: TurnOrdinalResolver
 }
 
 export interface LegacyImportSummary {
@@ -38,25 +50,44 @@ export interface LegacyImportSummary {
   catalogSha256: string
 }
 
+/**
+ * Parses H1 `session-ledger.snapshot.json` + `session-ledger.log` ONCE and partitions runs
+ * with `lastSeq > legacy_ledger_seq` into `unimportedRuns` (sorted by `intentSeq`) and `openRuns`.
+ * Reuse the returned plan across threshold check, open-run sync import, and deferred backfill.
+ */
+export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): LegacyLedgerPlan {
+  const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
+  const ledgerDir = join(userDataDir, 'remote', 'ledger')
+  if (!existsSync(ledgerDir)) {
+    return { currentLedgerSeq, lastSeq: currentLedgerSeq, unimportedRuns: [], openRuns: [] }
+  }
+  const legacy = readLegacyLedgerReadOnly(ledgerDir)
+  if (legacy.lastSeq <= currentLedgerSeq) {
+    return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns: [], openRuns: [] }
+  }
+  const unimportedRuns = [...legacy.runs.values()]
+    .filter((run) => run.lastSeq > currentLedgerSeq)
+    .sort((a, b) => a.intentSeq - b.intentSeq)
+  const openRuns = unimportedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
+  return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns, openRuns }
+}
+
 /** Counts legacy runs with `lastSeq > legacy_ledger_seq` to decide sync vs deferred post-socket import. */
 export function peekUnimportedLegacyRunCount(sink: EventSink, userDataDir: string): number {
-  const ledgerDir = join(userDataDir, 'remote', 'ledger')
-  if (!existsSync(ledgerDir)) return 0
-  const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
-  const legacy = readLegacyLedgerReadOnly(ledgerDir)
-  if (legacy.lastSeq <= currentLedgerSeq) return 0
-  let count = 0
-  for (const run of legacy.runs.values()) {
-    if (run.lastSeq > currentLedgerSeq) count += 1
-  }
-  return count
+  return loadLegacyLedgerPlan(sink, userDataDir).unimportedRuns.length
 }
 
 function importSingleRun(
   sink: EventSink,
   stmtLegacyMapping: { get(id: string): unknown },
   run: LegacyRunState,
-  cfg: { now: number; pendingTtlMs: number; reconcileOpenRuns: boolean; shadowOnly: boolean }
+  cfg: {
+    now: number
+    pendingTtlMs: number
+    reconcileOpenRuns: boolean
+    shadowOnly: boolean
+    resolveTurnOrdinal: TurnOrdinalResolver
+  }
 ): { imported: number; rejected: number } {
   let imported = 0
   let rejected = 0
@@ -71,10 +102,16 @@ function importSingleRun(
 
   if (!existingMapping && !existingReceipt && !sink.getRun(canonicalRunId)) {
     const expired = cfg.now < run.intentAt || cfg.now > run.intentAt + cfg.pendingTtlMs
+    const resolvedOrdinal =
+      routing.ordinal ??
+      (routing.isConversationRun && routing.sessionKey
+        ? cfg.resolveTurnOrdinal(routing.sessionKey, canonicalRunId)
+        : undefined)
+    const isHistoricalTerminal = run.lifecycle !== 'recorded' && run.lifecycle !== 'dispatched'
     const submitPayload = {
       runId: canonicalRunId,
       sessionKey: routing.sessionKey,
-      ...(routing.ordinal !== undefined ? { ordinal: routing.ordinal } : {}),
+      ...(resolvedOrdinal !== undefined ? { ordinal: resolvedOrdinal } : {}),
       provider: routing.provider,
       profile: routing.profile,
       cwd: routing.cwd,
@@ -83,7 +120,8 @@ function importSingleRun(
       pendingTtlMs: cfg.pendingTtlMs,
       origin: 'remote' as const,
       isConversationRun: routing.isConversationRun,
-      ...(cfg.shadowOnly ? { shadowOnly: true } : {})
+      ...(cfg.shadowOnly ? { shadowOnly: true } : {}),
+      ...(isHistoricalTerminal ? { historicalBackfill: true } : {})
     }
     const res = sink.execute(
       {
@@ -325,35 +363,36 @@ export function importLegacyStateIncrementally(options: LegacyImportOptions): Le
   const shadowOnly = options.shadowOnly ?? !reconcileOpenRuns
   const batchSize = Math.max(1, options.batchSize ?? 500)
   const openOnly = options.openOnly ?? false
+  const resolveTurnOrdinal = options.resolveTurnOrdinal ?? createConversationOrdinalResolver(userDataDir)
   const stmtLegacyMapping = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
 
   let importedRuns = 0
   let rejectedCommands = 0
-  let currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
-  const ledgerDir = join(userDataDir, 'remote', 'ledger')
+  const plan = options.plan ?? loadLegacyLedgerPlan(sink, userDataDir)
+  let currentLedgerSeq = plan.currentLedgerSeq
 
-  if (existsSync(ledgerDir)) {
-    const legacy = readLegacyLedgerReadOnly(ledgerDir)
-    if (legacy.lastSeq > currentLedgerSeq) {
-      const sortedRuns = [...legacy.runs.values()]
-        .filter((run) => run.lastSeq > currentLedgerSeq && (!openOnly || run.lifecycle === 'recorded' || run.lifecycle === 'dispatched'))
-        .sort((a, b) => a.intentSeq - b.intentSeq)
-
-      for (let offset = 0; offset < sortedRuns.length; offset += batchSize) {
-        const chunk = sortedRuns.slice(offset, offset + batchSize)
-        const isLastChunk = offset + batchSize >= sortedRuns.length
-        sink.runInBatchTransaction(() => {
-          for (const run of chunk) {
-            const delta = importSingleRun(sink, stmtLegacyMapping, run, { now, pendingTtlMs, reconcileOpenRuns, shadowOnly })
-            importedRuns += delta.imported
-            rejectedCommands += delta.rejected
-          }
-          if (isLastChunk && !openOnly) sink.setMeta('legacy_ledger_seq', String(legacy.lastSeq))
-        })
-      }
-      if (sortedRuns.length === 0 && !openOnly) sink.setMeta('legacy_ledger_seq', String(legacy.lastSeq))
-      if (!openOnly) currentLedgerSeq = legacy.lastSeq
+  if (plan.lastSeq > currentLedgerSeq) {
+    const sortedRuns = openOnly ? plan.openRuns : plan.unimportedRuns
+    for (let offset = 0; offset < sortedRuns.length; offset += batchSize) {
+      const chunk = sortedRuns.slice(offset, offset + batchSize)
+      const isLastChunk = offset + batchSize >= sortedRuns.length
+      sink.runInBatchTransaction(() => {
+        for (const run of chunk) {
+          const delta = importSingleRun(sink, stmtLegacyMapping, run, {
+            now,
+            pendingTtlMs,
+            reconcileOpenRuns,
+            shadowOnly,
+            resolveTurnOrdinal
+          })
+          importedRuns += delta.imported
+          rejectedCommands += delta.rejected
+        }
+        if (isLastChunk && !openOnly) sink.setMeta('legacy_ledger_seq', String(plan.lastSeq))
+      })
     }
+    if (sortedRuns.length === 0 && !openOnly) sink.setMeta('legacy_ledger_seq', String(plan.lastSeq))
+    if (!openOnly) currentLedgerSeq = plan.lastSeq
   }
 
   if (openOnly) {
@@ -390,15 +429,12 @@ export function startDeferredLegacyImport(
   const reconcileOpenRuns = options.reconcileOpenRuns ?? false
   const shadowOnly = options.shadowOnly ?? !reconcileOpenRuns
   const batchSize = Math.max(1, options.batchSize ?? 500)
+  const resolveTurnOrdinal = options.resolveTurnOrdinal ?? createConversationOrdinalResolver(userDataDir)
 
   const promise = new Promise<LegacyImportSummary>((resolve, reject) => {
-    const ledgerDir = join(userDataDir, 'remote', 'ledger')
-    let currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
-    const legacy = existsSync(ledgerDir) ? readLegacyLedgerReadOnly(ledgerDir) : { lastSeq: currentLedgerSeq, runs: new Map<string, LegacyRunState>() }
-    const sortedRuns =
-      legacy.lastSeq > currentLedgerSeq
-        ? [...legacy.runs.values()].filter((run) => run.lastSeq > currentLedgerSeq).sort((a, b) => a.intentSeq - b.intentSeq)
-        : []
+    const plan = options.plan ?? loadLegacyLedgerPlan(sink, userDataDir)
+    let currentLedgerSeq = plan.currentLedgerSeq
+    const sortedRuns = plan.unimportedRuns
     const stmtLegacyMapping = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
 
     let offset = 0
@@ -423,19 +459,25 @@ export function startDeferredLegacyImport(
           const isLastChunk = offset >= sortedRuns.length
           sink.runInBatchTransaction(() => {
             for (const run of chunk) {
-              const delta = importSingleRun(sink, stmtLegacyMapping, run, { now, pendingTtlMs, reconcileOpenRuns, shadowOnly })
+              const delta = importSingleRun(sink, stmtLegacyMapping, run, {
+                now,
+                pendingTtlMs,
+                reconcileOpenRuns,
+                shadowOnly,
+                resolveTurnOrdinal
+              })
               importedRuns += delta.imported
               rejectedCommands += delta.rejected
             }
-            if (isLastChunk) sink.setMeta('legacy_ledger_seq', String(legacy.lastSeq))
+            if (isLastChunk) sink.setMeta('legacy_ledger_seq', String(plan.lastSeq))
           })
-          if (isLastChunk) currentLedgerSeq = legacy.lastSeq
+          if (isLastChunk) currentLedgerSeq = plan.lastSeq
           setImmediate(step)
           return
         }
-        if (legacy.lastSeq > currentLedgerSeq) {
-          sink.setMeta('legacy_ledger_seq', String(legacy.lastSeq))
-          currentLedgerSeq = legacy.lastSeq
+        if (plan.lastSeq > currentLedgerSeq) {
+          sink.setMeta('legacy_ledger_seq', String(plan.lastSeq))
+          currentLedgerSeq = plan.lastSeq
         }
         const catalog = importCatalogEntries(sink, userDataDir, now, batchSize)
         resolve({

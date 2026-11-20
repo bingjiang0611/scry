@@ -166,7 +166,10 @@ export interface HostControllerDependencies {
   // `intentSeq` is where the run's ledger evidence starts (E3).
   onRunActivity?(runId: string, intentSeq?: number): void
   // Optional shadow observer invoked after each durable H1 ledger append (P4-1 fail-open).
-  onLedgerEvent?(event: LedgerEvent, meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote' }): void
+  onLedgerEvent?(
+    event: LedgerEvent,
+    meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote'; answeredByPeer?: string }
+  ): void
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]

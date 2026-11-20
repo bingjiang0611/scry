@@ -1,10 +1,12 @@
 import type { ConversationStore } from '../main/conversation-store'
 import type { LedgerEvent } from '../main/remote/session-ledger'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
+import { createConversationOrdinalResolver } from '../host-runtime/orchestration/conversation-ordinal-lookup'
 import {
   importLegacyStateIncrementally,
-  peekUnimportedLegacyRunCount,
-  startDeferredLegacyImport
+  loadLegacyLedgerPlan,
+  startDeferredLegacyImport,
+  type LegacyLedgerPlan
 } from '../host-runtime/orchestration/legacy-import'
 import {
   parseOrchestrationFullfsync,
@@ -12,7 +14,7 @@ import {
   parsePendingTtlMs,
   type OrchestrationModeResolution
 } from '../host-runtime/orchestration/mode'
-import { ShadowMirror } from '../host-runtime/orchestration/shadow-mirror'
+import { ShadowMirror, type ShadowLedgerEventMeta } from '../host-runtime/orchestration/shadow-mirror'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
 
@@ -25,7 +27,7 @@ export interface DaemonOrchestrationShadow {
   readonly importComplete: Promise<void>
   /** Starts deferred historical backfill after `openLocalChannel` when ledger exceeds sync threshold. */
   startImport(): void
-  onLedgerEvent(event: LedgerEvent, meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote' }): void
+  onLedgerEvent(event: LedgerEvent, meta?: ShadowLedgerEventMeta): void
   close(): void
 }
 
@@ -63,10 +65,12 @@ export function attachDaemonOrchestrationShadow(
   const pendingTtlMs = parsePendingTtlMs(options.env)
   const deferredThreshold = options.deferredImportThreshold ?? DEFAULT_DEFERRED_IMPORT_THRESHOLD
 
+  const resolveTurnOrdinal = createConversationOrdinalResolver(options.userDataDir)
   const mirror = ShadowMirror.open({
     userDataDir: options.userDataDir,
     fullfsync,
     checkpointFullfsync,
+    resolveTurnOrdinal,
     ...(options.beforeCommitHook ? { beforeCommitHook: options.beforeCommitHook } : {}),
     onCommitTiming: (sample) => {
       recordOrchestrationCommitTiming({ ...sample, fullfsync })
@@ -77,7 +81,7 @@ export function attachDaemonOrchestrationShadow(
     }
   })
 
-  let needsDeferredBackfill = false
+  let deferredPlan: LegacyLedgerPlan | undefined
   let deferredStarted = false
   let cancelDeferred: (() => void) | undefined
   let resolveImportComplete: (() => void) | undefined
@@ -85,7 +89,10 @@ export function attachDaemonOrchestrationShadow(
 
   if (mirror.sink && !mirror.stats().failedOpen) {
     try {
-      const pendingCount = peekUnimportedLegacyRunCount(mirror.sink, options.userDataDir)
+      // Parse H1 snapshot+log ONCE and reuse the plan across threshold check, open-run sync import,
+      // and post-socket deferred backfill (no redundant parses).
+      const plan = loadLegacyLedgerPlan(mirror.sink, options.userDataDir)
+      const pendingCount = plan.unimportedRuns.length
       if (pendingCount > deferredThreshold) {
         // Large ledger (> 2,000 unimported runs): synchronously import only open runs before
         // `service.start()` so H1 `recover()` has zero invalid_target deviations, then backfill
@@ -96,14 +103,16 @@ export function attachDaemonOrchestrationShadow(
           pendingTtlMs,
           reconcileOpenRuns: false,
           shadowOnly: true,
-          openOnly: true
+          openOnly: true,
+          plan,
+          resolveTurnOrdinal
         })
         mirror.recordImportRejections(openImported.rejectedCommands)
         if (mirror.sink.isWriteIndeterminate()) {
           mirror.markFailedOpen(new Error('orchestration_write_indeterminate'))
         } else {
           mirror.setDeferringLegacyWatermark(true)
-          needsDeferredBackfill = true
+          deferredPlan = plan
           importComplete = new Promise<void>((resolve) => {
             resolveImportComplete = resolve
           })
@@ -117,7 +126,9 @@ export function attachDaemonOrchestrationShadow(
           userDataDir: options.userDataDir,
           pendingTtlMs,
           reconcileOpenRuns: false,
-          shadowOnly: true
+          shadowOnly: true,
+          plan,
+          resolveTurnOrdinal
         })
         mirror.recordImportRejections(imported.rejectedCommands)
         if (mirror.sink.isWriteIndeterminate()) {
@@ -136,17 +147,21 @@ export function attachDaemonOrchestrationShadow(
   }
 
   const startImport = (): void => {
-    if (!needsDeferredBackfill || deferredStarted || !mirror.sink || mirror.stats().failedOpen) {
+    if (!deferredPlan || deferredStarted || !mirror.sink || mirror.stats().failedOpen) {
       resolveImportComplete?.()
       return
     }
     deferredStarted = true
+    const plan = deferredPlan
+    deferredPlan = undefined
     const handle = startDeferredLegacyImport({
       sink: mirror.sink,
       userDataDir: options.userDataDir,
       pendingTtlMs,
       reconcileOpenRuns: false,
-      shadowOnly: true
+      shadowOnly: true,
+      plan,
+      resolveTurnOrdinal
     })
     cancelDeferred = handle.cancel
     handle.promise

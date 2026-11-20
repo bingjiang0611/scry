@@ -40,6 +40,8 @@ export interface RunSubmitPayload {
   isConversationRun?: boolean
   /** P4-1 shadow writes mark outbox rows done + shadowOnly so P4-2 recovery never dispatches them. */
   shadowOnly?: boolean
+  /** Historical terminal backfill: never claims or clobbers a session's active live run slot. */
+  historicalBackfill?: boolean
 }
 
 export interface RunResolveIntentPayload {

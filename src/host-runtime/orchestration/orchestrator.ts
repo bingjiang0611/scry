@@ -80,9 +80,15 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
   switch (cmd.type) {
     case 'run.submit': {
       const p = cmd.payload
-      if (p.sessionKey && view.hasActiveRunForSession(p.sessionKey)) return retryableReject('session_run_active')
-      if (view.activeRunCount() >= view.maxActiveRuns()) return retryableReject('capacity_exceeded')
-      if (view.isProviderAuthenticating(p.provider, p.profile)) return retryableReject('provider_authenticating')
+      if (p.sessionKey && !p.historicalBackfill && view.hasActiveRunForSession(p.sessionKey)) {
+        return retryableReject('session_run_active')
+      }
+      if (!p.historicalBackfill && view.activeRunCount() >= view.maxActiveRuns()) {
+        return retryableReject('capacity_exceeded')
+      }
+      if (!p.historicalBackfill && view.isProviderAuthenticating(p.provider, p.profile)) {
+        return retryableReject('provider_authenticating')
+      }
       if (view.getRun(p.runId)) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
 
       const promptPreview = truncatePreview(p.promptPreview, PROMPT_PREVIEW_MAX_CHARS)
@@ -103,7 +109,8 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             origin: p.origin ?? (cmd.scope === 'local' ? 'local' : cmd.scope === 'remote' ? 'remote' : 'system'),
             ...(promptPreview !== null ? { promptPreview } : {}),
             ...(bodyDescriptor ? { body: bodyDescriptor } : {}),
-            ...(p.isConversationRun ? { isConversationRun: true } : {})
+            ...(p.isConversationRun ? { isConversationRun: true } : {}),
+            ...(p.historicalBackfill ? { historicalBackfill: true } : {})
           }
         })
       ]

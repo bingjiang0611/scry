@@ -124,6 +124,7 @@ export function mapReceiptRow(row: Record<string, unknown>): CommandReceiptRow {
 
 function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow, p: Record<string, unknown>): void {
   if (!event.sessionKey) return
+  const isHistorical = p.historicalBackfill === true
   db.prepare(
     `INSERT INTO orch_p_session (
       session_key, provider, profile, cwd, ts, last_run_id, active_run_id, rev_seq, created_by
@@ -133,8 +134,8 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
       profile = COALESCE(excluded.profile, orch_p_session.profile),
       cwd = COALESCE(excluded.cwd, orch_p_session.cwd),
       ts = MAX(orch_p_session.ts, excluded.ts),
-      last_run_id = excluded.last_run_id,
-      active_run_id = excluded.active_run_id,
+      last_run_id = CASE WHEN ? = 1 AND excluded.ts < orch_p_session.ts THEN orch_p_session.last_run_id ELSE excluded.last_run_id END,
+      active_run_id = CASE WHEN ? = 1 THEN orch_p_session.active_run_id ELSE excluded.active_run_id END,
       rev_seq = excluded.rev_seq`
   ).run(
     event.sessionKey,
@@ -143,9 +144,11 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
     event.cwd,
     event.at,
     event.runId,
-    event.runId,
+    isHistorical ? null : event.runId,
     event.seq,
-    event.actor
+    event.actor,
+    isHistorical ? 1 : 0,
+    isHistorical ? 1 : 0
   )
 }
 

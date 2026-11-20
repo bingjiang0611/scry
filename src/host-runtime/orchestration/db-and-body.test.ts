@@ -142,7 +142,9 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           );
           INSERT INTO orch_p_run (
             run_id, owner_actor, scope, origin, lifecycle, output_seq, intent_seq, rev_seq
-          ) VALUES ('old-v1-run', 'system', 'remote', 'remote', 'settled', 5, 1, 2);
+          ) VALUES
+            ('old-v1-run', 'system', 'remote', 'remote', 'settled', 5, 1, 2),
+            ('old-v1-zero-run', 'system', 'remote', 'remote', 'settled', 0, 2, 3);
         `)
       } finally {
         legacy.close()
@@ -151,11 +153,15 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
       const upgraded = openOrchestrationDatabase({ userDataDir: userData })
       try {
         expect(upgraded.db.pragma('user_version', { simple: true })).toBe(2)
-        // Old row preserved
+        // Old non-zero output_seq preserved; legacy V1 default 0 converted to honest NULL
         const oldRow = upgraded.db
           .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
           .get('old-v1-run') as { output_seq: number | null }
         expect(oldRow.output_seq).toBe(5)
+        const zeroRow = upgraded.db
+          .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
+          .get('old-v1-zero-run') as { output_seq: number | null }
+        expect(zeroRow.output_seq).toBeNull()
         // New row with NULL output_seq is now accepted cleanly
         expect(() =>
           upgraded.db

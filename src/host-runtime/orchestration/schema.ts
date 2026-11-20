@@ -182,7 +182,9 @@ export const ORCH_DDL_V2: readonly string[] = [
     settled_at, recovered_at, outcome, rev_seq, parent_run_id
   ) SELECT
     run_id, session_key, owner_actor, scope, origin, provider, profile, cwd,
-    prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body,
+    prompt_preview, lifecycle, stop_state,
+    CASE WHEN output_seq = 0 THEN NULL ELSE output_seq END,
+    intent_seq, body,
     settled_at, recovered_at, outcome, rev_seq, parent_run_id
   FROM orch_p_run`,
   `DROP TABLE orch_p_run`,

@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { ConversationStore } from '../../main/conversation-store'
 import { SessionLedger } from '../../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../../main/remote/session-ledger-file'
 import { EventSink } from './event-sink'
-import { importLegacyStateIncrementally } from './legacy-import'
+import { importLegacyStateIncrementally, startDeferredLegacyImport } from './legacy-import'
+import { ShadowMirror } from './shadow-mirror'
 
 function withTempDir(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'scry-legacy-import-test-'))
@@ -323,5 +325,129 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         sink.close()
       }
     })
+  })
+
+  it('reproduces and prevents PK collision when live turn 4 interleaves before deferred backfill of pre-fix turns 1-3', async () => {
+    const userData = mkdtempSync(join(tmpdir(), 'scry-legacy-interleave-test-'))
+    try {
+      const wsDir = join(userData, 'ws-interleave')
+      mkdirSync(wsDir, { recursive: true })
+      const store = new ConversationStore(userData)
+      let conv = await store.create(wsDir)
+      const oldRunIds: string[] = []
+      for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+        const rId = SessionLedger.newRunId()
+        oldRunIds.push(rId)
+        await store.begin(conv.id, {
+          runId: rId,
+          commandId: SessionLedger.newIntentId(),
+          payloadHash: String(ordinal).repeat(64).slice(0, 64),
+          expectedRevision: conv.revision,
+          target: { providerId: 'codex', continuationKey: 'codex:default' },
+          items: [],
+          selectedItems: []
+        })
+        conv = await store.settle(
+          conv.id,
+          rId,
+          { status: 'accepted', nativeSessionId: 'native-interleave', outcome: 'completed', nativeItems: [] },
+          []
+        )
+      }
+
+      const ledgerDir = makeLedgerDir(userData)
+      const t0 = 1_700_000_000_000
+      const lines: string[] = []
+      let seq = 0
+      for (let i = 0; i < oldRunIds.length; i += 1) {
+        const ledgerRunId = SessionLedger.newRunId()
+        lines.push(
+          JSON.stringify({
+            seq: ++seq,
+            at: t0 + i * 10,
+            runId: ledgerRunId,
+            kind: 'intent_recorded',
+            intentId: SessionLedger.newIntentId(),
+            detail: JSON.stringify({
+              providerId: 'codex',
+              cwd: '/tmp/ws-interleave',
+              prompt: `pre-fix turn ${i + 1}`,
+              conversation: { conversationId: conv.id, runId: oldRunIds[i] }
+            })
+          }),
+          JSON.stringify({ seq: ++seq, at: t0 + i * 10 + 1, runId: ledgerRunId, kind: 'run_dispatched' }),
+          JSON.stringify({ seq: ++seq, at: t0 + i * 10 + 2, runId: ledgerRunId, kind: 'run_settled' })
+        )
+      }
+      writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`)
+
+      const mirror = ShadowMirror.open({ userDataDir: userData })
+      try {
+        mirror.setDeferringLegacyWatermark(true)
+
+        // 1. Live turn 4 commits BEFORE deferred backfill imports pre-fix turns 1-3
+        const turn4Canonical = SessionLedger.newRunId()
+        const turn4Ledger = SessionLedger.newRunId()
+        mirror.onLedgerEvent({
+          seq: 100,
+          at: t0 + 5_000,
+          runId: turn4Ledger,
+          kind: 'intent_recorded',
+          intentId: SessionLedger.newIntentId(),
+          detail: JSON.stringify({
+            providerId: 'codex',
+            cwd: '/tmp/ws-interleave',
+            prompt: 'live turn 4',
+            conversation: { conversationId: conv.id, runId: turn4Canonical, ordinal: 4 }
+          })
+        })
+        mirror.onLedgerEvent({ seq: 101, at: t0 + 5_001, runId: turn4Ledger, kind: 'run_dispatched' })
+        mirror.onLedgerEvent({ seq: 102, at: t0 + 5_002, runId: turn4Ledger, kind: 'run_settled' })
+
+        // 2. Deferred backfill runs NOW while turn 4 already occupies ordinal 4
+        const deferred = startDeferredLegacyImport({
+          sink: mirror.sink!,
+          userDataDir: userData,
+          now: t0 + 6_000,
+          reconcileOpenRuns: false,
+          shadowOnly: true
+        })
+        const summary = await deferred.promise
+        mirror.recordImportRejections(summary.rejectedCommands)
+        mirror.setDeferringLegacyWatermark(false, summary.legacyLedgerSeq)
+
+        // 3. Live turn 5 arrives at H3 ordinal 5: MUST NOT collide with deferred backfill or fence!
+        const turn5Canonical = SessionLedger.newRunId()
+        const turn5Ledger = SessionLedger.newRunId()
+        mirror.onLedgerEvent({
+          seq: 103,
+          at: t0 + 7_000,
+          runId: turn5Ledger,
+          kind: 'intent_recorded',
+          intentId: SessionLedger.newIntentId(),
+          detail: JSON.stringify({
+            providerId: 'codex',
+            cwd: '/tmp/ws-interleave',
+            prompt: 'live turn 5',
+            conversation: { conversationId: conv.id, runId: turn5Canonical, ordinal: 5 }
+          })
+        })
+        mirror.onLedgerEvent({ seq: 104, at: t0 + 7_001, runId: turn5Ledger, kind: 'run_dispatched' })
+        mirror.onLedgerEvent({ seq: 105, at: t0 + 7_002, runId: turn5Ledger, kind: 'run_settled' })
+
+        expect(mirror.stats().failedOpen).toBe(false)
+        expect(mirror.stats().deviations).toBe(0)
+        expect(mirror.sink!.getTurn(conv.id, 1)?.runId).toBe(oldRunIds[0])
+        expect(mirror.sink!.getTurn(conv.id, 2)?.runId).toBe(oldRunIds[1])
+        expect(mirror.sink!.getTurn(conv.id, 3)?.runId).toBe(oldRunIds[2])
+        expect(mirror.sink!.getTurn(conv.id, 4)?.runId).toBe(turn4Canonical)
+        expect(mirror.sink!.getTurn(conv.id, 5)?.runId).toBe(turn5Canonical)
+        expect(mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+      } finally {
+        mirror.close()
+      }
+    } finally {
+      rmSync(userData, { recursive: true, force: true })
+    }
   })
 })

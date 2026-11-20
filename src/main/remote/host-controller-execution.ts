@@ -46,7 +46,22 @@ export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivit
   try { deps.onRunActivity?.(runId, ledger.intentSeq(runId)) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
 }
 
-const gatewayByDeps = new WeakMap<object, RemoteGateway>()
+const controllerMetaByDeps = new WeakMap<object, { gateway: RemoteGateway; interactions: RemoteInteractionBroker }>()
+
+function resolveAnsweredByPeer(
+  interactions: RemoteInteractionBroker,
+  event: LedgerEvent
+): string | undefined {
+  if (event.kind !== 'run_progress' || !event.detail?.includes('"question_answered"')) return undefined
+  try {
+    const marker = JSON.parse(event.detail) as { event?: unknown; questionId?: unknown; answerId?: unknown }
+    if (marker.event !== 'question_answered') return undefined
+    if (typeof marker.questionId !== 'string' || typeof marker.answerId !== 'string') return undefined
+    return interactions.answeredByPeer(event.runId, marker.questionId, marker.answerId)
+  } catch {
+    return undefined
+  }
+}
 
 /** A ledger event wakes parked watchers and names its run for the App event feed. */
 export function ledgerEventObserver(
@@ -57,7 +72,13 @@ export function ledgerEventObserver(
     notify()
     runActivity(deps, event.runId, { intentSeq: () => intentSeq })
     try {
-      const meta = gatewayByDeps.get(deps)?.runMeta(event.runId)
+      const entry = controllerMetaByDeps.get(deps)
+      const runMeta = entry?.gateway.runMeta(event.runId)
+      const answeredByPeer = entry ? resolveAnsweredByPeer(entry.interactions, event) : undefined
+      const meta =
+        runMeta || answeredByPeer
+          ? { ...(runMeta ?? {}), ...(answeredByPeer ? { answeredByPeer } : {}) }
+          : undefined
       deps.onLedgerEvent?.(event, meta)
     } catch { /* shadow observation must never fail a run */ }
   }
@@ -87,7 +108,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     ...(deps.readHistoryVersion ? { historyVersion: { read: deps.readHistoryVersion } as RemoteHistoryVersionSource } : {}),
     ...(deps.readHistoryTurnsPage ? { historyTurnsPage: { read: deps.readHistoryTurnsPage } as RemoteHistoryTurnsPageSource } : {})
   })
-  gatewayByDeps.set(deps, gateway)
+  controllerMetaByDeps.set(deps, { gateway, interactions })
 
   // Runs that got as far as the run start; any other failure was a refusal by the ledger.
   const reached = new Set<string>()
