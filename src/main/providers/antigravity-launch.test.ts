@@ -1,9 +1,11 @@
+import { spawn } from 'node:child_process'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sanitizeProviderEnv, detectStrippedAntigravityEnvNames } from '../provider-environment'
 import { detectAgentsFast, resolveRuntimeCliBin } from '../claude-locate'
+import { captureProcessIdentity } from '../process-diagnostics'
 import {
   buildAntigravityLaunchEnv,
   describeAntigravity,
@@ -186,5 +188,57 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
     }
     expect(isPidAlive(launched.child.pid!)).toBe(false)
     expect(isPidAlive(childPid)).toBe(false)
+  })
+
+  it('S6: 根进程忽略 SIGTERM 仍存活时，SIGKILL 阶段依然按身份强杀已脱离进程树的独立 PGID 后代', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-agy-s6-'))
+    temps.push(dir)
+    const pidFile = join(dir, 'detached-grandchild.pid')
+    // Root ignores SIGTERM and spawns an intermediate child (which exits on SIGTERM) that spawns a detached grandchild (which ignores SIGTERM).
+    // After SIGTERM: root is STILL alive, intermediate exits -> grandchild is reparented to PID 1 (detached from root tree).
+    const script = `
+      const { spawn } = require('node:child_process');
+      const { writeFileSync } = require('node:fs');
+      process.on('SIGTERM', () => {});
+      const mid = spawn(process.execPath, ['-e', \`
+        const { spawn } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const grand = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setTimeout(() => {}, 30000);"], { detached: true, stdio: 'ignore' });
+        grand.unref();
+        writeFileSync(${JSON.stringify(pidFile)}, String(grand.pid));
+        setTimeout(() => {}, 30000);
+      \`], { stdio: 'ignore' });
+      setTimeout(() => {}, 30000);
+    `
+    const root = spawn(process.execPath, ['-e', script], { detached: true, stdio: 'ignore' })
+    const identityPromise = captureProcessIdentity(root.pid)
+    let childPid = 0
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      try {
+        const parsed = Number(readFileSync(pidFile, 'utf8').trim())
+        if (parsed > 0) {
+          childPid = parsed
+          break
+        }
+      } catch { /* wait */ }
+      await new Promise((r) => setTimeout(r, 40))
+    }
+    expect(childPid).toBeGreaterThan(0)
+    expect(isPidAlive(root.pid!)).toBe(true)
+    expect(isPidAlive(childPid)).toBe(true)
+
+    try {
+      await forceKillAntigravityProcess(identityPromise, { sigkillDelayMs: 250 })
+      const reapDeadline = Date.now() + 3_000
+      while (Date.now() < reapDeadline && (isPidAlive(root.pid!) || isPidAlive(childPid))) {
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      expect(isPidAlive(root.pid!)).toBe(false)
+      expect(isPidAlive(childPid)).toBe(false)
+    } finally {
+      try { process.kill(root.pid!, 'SIGKILL') } catch { /* ignore */ }
+      try { process.kill(childPid, 'SIGKILL') } catch { /* ignore */ }
+    }
   })
 })

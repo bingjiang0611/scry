@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { billingProviderForUpstream, type UsageLedgerObject } from '../shared/billing'
-import { usageLedgerObjectToRow } from './billing-ledger'
+import { usageLedgerObjectToRow } from './billing-ledger-rows'
 import { USAGE_LEDGER_COLS } from './span-ledger'
 
 interface RetainedUsage {
@@ -54,6 +54,7 @@ export function repairMissingUsageLedger(db: Database.Database): void {
       ((row.runtimeProvider === 'pi_rpc' || row.runtimeProvider === 'antigravity_acp') && row.cost === 0)
       ? null
       : row.cost
+    const isAntigravityMissingCost = (provider === 'antigravity' || row.runtimeProvider === 'antigravity_acp') && cost == null
     const usage: UsageLedgerObject = {
       id: `${provider}:${row.spanId}${row.hasModel ? `:${row.model}` : ''}`,
       provider, source: 'scry_persisted_usage', sourceKind: 'analytics_report',
@@ -62,10 +63,19 @@ export function repairMissingUsageLedger(db: Database.Database): void {
       usageKind: row.hasModel ? 'model' : 'result',
       inputTokens: row.input, outputTokens: row.output,
       cacheReadTokens: row.cacheRead, cacheWriteTokens: row.cacheWrite,
-      cost, currency: 'USD', costUnit: 'usd', costSource: 'sdk_estimate', confidence: 'inferred',
+      cost,
+      currency: isAntigravityMissingCost ? null : 'USD',
+      costUnit: isAntigravityMissingCost ? 'token' : 'usd',
+      costSource: isAntigravityMissingCost ? 'provider_reported' : 'sdk_estimate',
+      confidence: isAntigravityMissingCost ? 'provider_reported' : 'inferred',
       attributionMethod: 'direct', createdTs: row.ts,
-      metadata: { reconstructedFrom: 'scry_result_and_model_usage', runtimeProvider: row.runtimeProvider,
-        upstreamProvider: row.upstreamProvider, omissionReason: 'Original cost provenance and per-model reasoning were not retained in SQLite.' }
+      metadata: {
+        reconstructedFrom: 'scry_result_and_model_usage',
+        runtimeProvider: row.runtimeProvider,
+        upstreamProvider: row.upstreamProvider,
+        ...(isAntigravityMissingCost ? { costStatus: 'unavailable' } : {}),
+        omissionReason: 'Original cost provenance and per-model reasoning were not retained in SQLite.'
+      }
     }
     insert.run(...usageLedgerObjectToRow(usage))
   }

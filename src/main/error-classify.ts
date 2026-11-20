@@ -15,8 +15,14 @@ export function classifyError(message: string, providerId?: ProviderId): Classif
     m.includes('not logged in') ||
     m.includes('please run /login') ||
     m.includes('unauthorized') ||
-    m.includes('authentication required') ||
-    (providerId === 'antigravity' && (m.includes('-32000') || m.includes('agy --login') || m.includes('no browser')))
+    (providerId === 'antigravity' && (
+      m.includes('authentication required') ||
+      m.includes('-32000') ||
+      m.includes('agy --login') ||
+      m.includes('agy acp --login') ||
+      m.includes('antigravity 未登录') ||
+      m.includes('no browser')
+    ))
   ) {
     if (providerId === 'antigravity') {
       return { category: 'auth', hint: '未登录：在终端运行 `agy` 登录（或 `agy --login`），完成后重试' }

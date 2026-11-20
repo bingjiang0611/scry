@@ -110,6 +110,18 @@ describe('A1: Antigravity Provider 枚举、实验门控、MCP 路径与停止�
     expect(resolved.map((item) => item.name).sort()).toEqual(['globalSrv', 'pluginSrv', 'rootSrv'])
   })
 
+  it('S11: providerMcpConfigPaths 对 pi 返回空列表，不误扫 opencode.json', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-pi-mcp-'))
+    temps.push(root)
+    const home = join(root, 'home')
+    const ws = join(root, 'ws')
+    mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+    mkdirSync(ws, { recursive: true })
+    writeFileSync(join(ws, 'opencode.json'), JSON.stringify({ mcp: { oc: { type: 'remote', url: 'http://127.0.0.1:9/mcp' } } }))
+    expect(providerMcpConfigPaths('pi', ws, home, {})).toEqual([])
+    expect(resolveProviderMcpConfigs('pi', ws, home, {})).toEqual([])
+  })
+
   it('RunStopLifecycle 为 antigravity_acp 配置 5s/4s 停止窗口', () => {
     expect(stopEscalationWindow('antigravity_acp')).toEqual({ gracefulMs: 5000, forceKillMs: 4000 })
   })

@@ -12,7 +12,7 @@ import { isSupportedImageMimeType } from './runtime.js'
 import { isCreditUsageEvidence, creditSourcesMatchProvider } from './credit-usage.js'
 import { normalizeTurnDiffSnapshot } from './trace.js'
 import { isIntervention } from './turn-intervention-validation.js'
-import { canonicalCostUsd } from './turn-record.js'
+import { canonicalCostUsd } from './turn-record-contracts.js'
 
 function isTurnTermination(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
