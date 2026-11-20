@@ -151,6 +151,7 @@ export type RetryableRejectionReason =
   | 'grant_revoked'
   | 'orchestration_write_indeterminate'
   | 'agent_commands_unsupported'
+  | 'session_deleted_during_prepare'
 
 export type RejectionReason = StickyRejectionReason | RetryableRejectionReason
 

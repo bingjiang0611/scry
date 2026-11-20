@@ -2,11 +2,18 @@ import { existsSync } from 'node:fs'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
 import { BodyStore } from './body-store'
 import { assertBoundedPayload, assertNoUsageNumbersInEvent, canonicalJson } from './canonical-json'
-import { openOrchestrationDatabase, type OpenOrchestrationDbOptions, type OrchestrationDbHandle } from './db'
+import {
+  openOrchestrationDatabase,
+  type OpenOrchestrationDbOptions,
+  type OrchestrationDbHandle,
+  type WalCheckpointResult
+} from './db'
 import { getEffectPolicy } from './effect-policy'
 import {
   deleteSessionInDb,
   pruneEventsInDb,
+  stopRunBypassingFenceInRegistry,
+  unlinkUnreferencedExternalBodyInDb,
   verifyReplayConsistencyInDb,
   type DeleteSessionInput,
   type DeleteSessionOutcome
@@ -44,8 +51,19 @@ export interface EventSinkOptions extends OpenOrchestrationDbOptions {
   authorizedActors?: Iterable<string>
   maxActiveRuns?: number
   isProviderAuthenticating?: (provider: string, profile: string | null) => boolean
+  /** Idle delay (ms) for off-commit PASSIVE WAL checkpoints (default 500; 0 disables timer). */
+  checkpointIntervalMs?: number
   /** Test seam invoked inside the commit transaction immediately before SQLite commits. */
   beforeCommitHook?: () => void
+}
+
+export interface EventSinkTxExtras {
+  legacyLedgerSeq?: number
+  legacyRunMapping?: { ledgerRunId: string; runId: string }
+  /** P4-2: assert any referenced external body already exists on disk before commit. */
+  requireExternalBodyDurable?: boolean
+  /** P4-2: coordinate async body prepare with concurrent `deleteSession`. */
+  expectedSessionDeleteEpoch?: number
 }
 
 /**
@@ -64,6 +82,9 @@ export class EventSink {
   #writeIndeterminate = false
   #walModeEnforced = false
   #inBatchTransaction = false
+  #checkpointIntervalMs: number
+  #checkpointTimer: ReturnType<typeof setTimeout> | null = null
+  #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
 
   private constructor(handle: OrchestrationDbHandle, options: EventSinkOptions) {
@@ -72,9 +93,35 @@ export class EventSink {
     this.#authorizedActors = new Set(['system', ...(options.authorizedActors ?? [])])
     this.#maxActiveRuns = options.maxActiveRuns ?? 8
     this.#isProviderAuthenticating = options.isProviderAuthenticating ?? (() => false)
+    this.#checkpointIntervalMs = options.checkpointIntervalMs ?? 500
     this.#beforeCommitHook = options.beforeCommitHook
     this.#stmts = prepareEventSinkStatements(handle.db)
     this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
+  }
+
+  private scheduleIdleCheckpoint(): void {
+    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#checkpointTimer) return
+    const timer = setTimeout(() => {
+      this.#checkpointTimer = null
+      this.checkpointPassive()
+    }, this.#checkpointIntervalMs)
+    timer.unref?.()
+    this.#checkpointTimer = timer
+  }
+
+  checkpointPassive(): WalCheckpointResult {
+    if (this.#writeIndeterminate || !this.handle.db.open) {
+      return { busy: 0, log: 0, checkpointed: 0 }
+    }
+    try {
+      return this.handle.checkpointPassive()
+    } catch {
+      return { busy: 1, log: 0, checkpointed: 0 }
+    }
+  }
+
+  getSessionDeleteEpoch(sessionKey: string): number {
+    return this.#sessionDeleteEpoch.get(sessionKey) ?? 0
   }
 
   private enforceModesOnceForWal(): void {
@@ -129,16 +176,39 @@ export class EventSink {
     }
   }
 
-  execute(
-    command: OrchestrationCommand,
-    txExtras?: { legacyLedgerSeq?: number; legacyRunMapping?: { ledgerRunId: string; runId: string } }
-  ): DecisionResult {
+  execute(command: OrchestrationCommand, txExtras?: EventSinkTxExtras): DecisionResult {
     if (this.#writeIndeterminate) {
       return {
         kind: 'rejected',
         reason: 'orchestration_write_indeterminate',
         sticky: false,
         writeReceipt: false
+      }
+    }
+    if (command.type === 'run.submit') {
+      const body = command.payload.body
+      if (
+        txExtras?.expectedSessionDeleteEpoch !== undefined &&
+        command.payload.sessionKey &&
+        this.getSessionDeleteEpoch(command.payload.sessionKey) !== txExtras.expectedSessionDeleteEpoch
+      ) {
+        if (body?.storage === 'external') {
+          unlinkUnreferencedExternalBodyInDb(this.handle.db, this.bodyStore, body.sha256)
+        }
+        return {
+          kind: 'rejected',
+          reason: 'session_deleted_during_prepare',
+          sticky: false,
+          writeReceipt: false
+        }
+      }
+      if (txExtras?.requireExternalBodyDurable && body?.storage === 'external') {
+        if (!this.bodyStore.hasExternalBody(body.sha256)) {
+          throw new OrchestrationStoreError(
+            'orchestration_body_corrupt',
+            `External body ${body.sha256} must be durable before commit`
+          )
+        }
       }
     }
     const decision = decide(command, this.createReadView())
@@ -179,6 +249,7 @@ export class EventSink {
       })
       const result = tx()
       this.enforceModesOnceForWal()
+      this.scheduleIdleCheckpoint()
       return result
     } catch (error) {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
@@ -282,6 +353,7 @@ export class EventSink {
     try {
       db.transaction(writeRows)()
       this.enforceModesOnceForWal()
+      this.scheduleIdleCheckpoint()
       return decision
     } catch (error) {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
@@ -291,34 +363,12 @@ export class EventSink {
     }
   }
 
-  /**
-   * core §2.5 + R5: tightening-only stop bypasses the storage fence without touching SQLite
-   * and cascades along in-memory `RunRegistryState.parentRunId` edges.
-   */
   stopRunBypassingFence<State extends RunRegistryState, Control extends RunRegistryControl>(
     runId: string,
     registry: RunRegistry<State, Control>,
     stopControl: (control: Control) => void
   ): string[] {
-    const visited = new Set<string>()
-    const queue = [runId]
-    const stopped: string[] = []
-    while (queue.length > 0) {
-      const current = queue.shift()!
-      if (visited.has(current)) continue
-      visited.add(current)
-      const entry = registry.get(current)
-      if (entry && !entry.state.done) {
-        stopControl(entry.control)
-        stopped.push(current)
-      }
-      for (const active of registry.activeStates()) {
-        if (active.parentRunId === current && !visited.has(active.runId)) {
-          queue.push(active.runId)
-        }
-      }
-    }
-    return stopped
+    return stopRunBypassingFenceInRegistry(runId, registry, stopControl)
   }
 
   deleteSession(input: DeleteSessionInput): DeleteSessionOutcome {
@@ -332,8 +382,10 @@ export class EventSink {
         this.#beforeCommitHook
       )
       if (!existed) return { status: 'not_present' }
+      this.#sessionDeleteEpoch.set(input.sessionKey, (this.#sessionDeleteEpoch.get(input.sessionKey) ?? 0) + 1)
       for (const sha of unreferencedShas) this.bodyStore.unlinkBody(sha)
       this.handle.enforceModes()
+      this.scheduleIdleCheckpoint()
       return { status: 'deleted', deletedBodies: unreferencedShas.length, redactedEvents }
     } catch (error) {
       this.#writeIndeterminate = true
@@ -430,7 +482,11 @@ export class EventSink {
   }
 
   close(): void {
-    this.handle.close()
+    if (this.#checkpointTimer) {
+      clearTimeout(this.#checkpointTimer)
+      this.#checkpointTimer = null
+    }
+    this.handle.close({ skipCheckpoint: this.#writeIndeterminate })
   }
 
   private readReceiptRaw(commandId: string, actor: string): CommandReceiptRow | undefined {
