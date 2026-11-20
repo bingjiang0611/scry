@@ -30,6 +30,7 @@ import {
   ANTIGRAVITY_CONFIG_DIR_ALIASES,
   antigravityEffectiveGeminiRoot,
   antigravityGeminiRoot,
+  AntigravityInvalidGeminiHomeError,
   antigravityScanRoots
 } from './antigravity-mcp-paths'
 import { ANTIGRAVITY_PERMISSION_OPTIONS } from './antigravity-permissions'
@@ -241,6 +242,8 @@ export function createAntigravityCatalog(deps: {
     const rawEnv: Record<string, string | undefined> = { ...shellEnv(), ...process.env }
     const baseEnv: Record<string, string> = {}
     for (const [k, v] of Object.entries(rawEnv)) if (v !== undefined) baseEnv[k] = v
+    // Reject relative GEMINI_HOME from the exact sanitized launch env before spawning agy.
+    antigravityGeminiRoot(deps.homeDir, buildAntigravityLaunchEnv(baseEnv))
 
     const probeDir = mkdtempSync(join(tmpdir(), 'scry-agy-probe-'))
     chmodSync(probeDir, 0o700)
@@ -361,7 +364,10 @@ export function createAntigravityCatalog(deps: {
   }
 
   const readCached = async (context: ProviderContext): Promise<CachedAntigravityCatalog> => {
-    const key = await deps.continuationKey(context).catch(() => `fallback:${antigravityExecutable() ?? 'missing'}`)
+    const key = await deps.continuationKey(context).catch((err) => {
+      if (err instanceof AntigravityInvalidGeminiHomeError) throw err
+      return `fallback:${antigravityExecutable() ?? 'missing'}`
+    })
     const existing = cache.get(key)
     if (existing && now() - existing.observedAt < CATALOG_TTL_MS) return existing
     // N4: when runs are active (e.g. waiting on approval) and stale cache exists, return stale cache

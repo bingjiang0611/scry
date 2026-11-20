@@ -20,6 +20,7 @@ import {
   antigravityNativeModeFor,
   assertUserSettingsWithinRequestedMode,
   buildAntigravityQuestionRequest,
+  isAntigravityAllowAlwaysOption,
   resolveAntigravityPermissionOutcome,
   type AcpPermissionRequestParams
 } from './antigravity-permissions'
@@ -284,7 +285,11 @@ export function runAntigravity(
             })
             void Promise.resolve(request.requestUserInput!(qReq, abort.signal))
               .then((response: AgentQuestionResponse) => {
-                finish(resolveAntigravityPermissionOutcome(qReq, response, optionIdByAnswer))
+                const resolved = resolveAntigravityPermissionOutcome(qReq, response, optionIdByAnswer)
+                if (resolved.outcome.outcome === 'selected' && isAntigravityAllowAlwaysOption(permParams.options, resolved.outcome.optionId)) {
+                  translator.markAllowAlwaysSelected()
+                }
+                finish(resolved)
               })
               .catch(() => {
                 finish({ outcome: { outcome: 'cancelled' } })

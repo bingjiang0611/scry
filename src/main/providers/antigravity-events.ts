@@ -20,15 +20,53 @@ export interface AntigravityEventTranslatorOptions {
   hasUserAllowRules?: boolean
 }
 
-function matchesPreToolUseMatcher(toolName: string, matchers: readonly string[] | undefined): boolean {
+export const MAX_PRE_TOOL_USE_MATCHER_LENGTH = 128
+const MAX_PRE_TOOL_USE_ALTERNATIVES = 16
+const UNSAFE_MATCHER_META = /[()[\]{}+?^$\\]/
+
+/** Linear-time two-pointer wildcard match (`*` matches 0+ chars, case-insensitive) — immune to ReDoS. */
+function wildcardMatchCaseInsensitive(pattern: string, text: string): boolean {
+  const p = pattern.toLowerCase()
+  const t = text.toLowerCase()
+  let pi = 0
+  let ti = 0
+  let starPi = -1
+  let starTi = 0
+  while (ti < t.length) {
+    if (pi < p.length && p[pi] === t[ti]) {
+      pi += 1
+      ti += 1
+    } else if (pi < p.length && p[pi] === '*') {
+      starPi = pi
+      starTi = ti
+      pi += 1
+    } else if (starPi !== -1) {
+      pi = starPi + 1
+      starTi += 1
+      ti = starTi
+    } else {
+      return false
+    }
+  }
+  while (pi < p.length && p[pi] === '*') pi += 1
+  return pi === p.length
+}
+
+export function matchesPreToolUseMatcher(toolName: string, matchers: readonly string[] | undefined): boolean {
   if (!matchers || matchers.length === 0) return false
   for (const raw of matchers) {
+    if (typeof raw !== 'string') continue
     const m = raw.trim()
-    if (!m || m === '*') return true
-    try {
-      if (new RegExp(`^(?:${m})$`, 'i').test(toolName)) return true
-    } catch {
-      if (m.toLowerCase() === toolName.toLowerCase()) return true
+    if (m.length > MAX_PRE_TOOL_USE_MATCHER_LENGTH) continue
+    if (!m || m === '*' || m === '.*') return true
+    const alts = m.split(/\\?\|/)
+    if (alts.length > MAX_PRE_TOOL_USE_ALTERNATIVES) continue
+    for (const rawAlt of alts) {
+      const alt = rawAlt.trim()
+      if (!alt || alt === '*' || alt === '.*') return true
+      const glob = alt.replace(/\.\*/g, '*')
+      if (UNSAFE_MATCHER_META.test(glob)) continue
+      if (wildcardMatchCaseInsensitive(glob, toolName)) return true
     }
   }
   return false
@@ -109,6 +147,7 @@ export class AntigravityEventTranslator {
   private seq = 0
   private readonly tools = new Map<string, ToolCallState>()
   private readonly askedPermissionToolIds = new Set<string>()
+  private allowAlwaysSelected = false
   private _hasSubagentTool = false
   private _contextUsage: AcpContextUsage | null = null
   private _availableCommands: ProviderCommand[] = []
@@ -124,6 +163,11 @@ export class AntigravityEventTranslator {
 
   markPermissionAsked(toolCallId: string | undefined): void {
     if (toolCallId) this.askedPermissionToolIds.add(toolCallId)
+  }
+
+  /** Once `allow_always` is chosen in this run, stop inferring「由 hook 放行」for later tool calls. */
+  markAllowAlwaysSelected(): void {
+    this.allowAlwaysSelected = true
   }
 
   get hasSubagentTool(): boolean {
@@ -280,6 +324,7 @@ export class AntigravityEventTranslator {
     const inferredHookAllow =
       !isError &&
       status === 'completed' &&
+      !this.allowAlwaysSelected &&
       this.options.hasUserAllowRules !== true &&
       !this.askedPermissionToolIds.has(toolCallId) &&
       isApprovalGatedKind(state.kind ?? (typeof data.kind === 'string' ? data.kind : undefined), this.options.permissionMode) &&

@@ -323,3 +323,11 @@ export function resolveAntigravityPermissionOutcome(
   if (!optionId) return { outcome: { outcome: 'cancelled' } }
   return { outcome: { outcome: 'selected', optionId } }
 }
+
+export function isAntigravityAllowAlwaysOption(
+  options: readonly AcpPermissionOption[] | undefined,
+  optionId: string
+): boolean {
+  const picked = options?.find((o) => o.optionId === optionId)
+  return picked?.kind?.toLowerCase() === 'allow_always' || optionId.toLowerCase() === 'allow_always'
+}
