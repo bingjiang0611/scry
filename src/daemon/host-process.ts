@@ -32,6 +32,7 @@ import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } 
 import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
 import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
 import { createDaemonRemoteAssembly } from './host-process-assembly'
+import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 
@@ -202,6 +203,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   await startupManagedRecovery
 
+  const targetBridge = createAppExecutionTargetBridge({
+    isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
+    ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})
+  })
   const { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations: forks } =
     createDaemonRemoteAssembly({
       userDataDir: options.userDataDir,
@@ -219,6 +224,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       getCurrentCwd: () => currentCwd,
       getStartupManagedRecovery: () => startupManagedRecovery,
       isShuttingDown: () => isShuttingDown,
+      desktopRemoteClient: () => targetBridge.client,
       log
     })
   forkOperations = forks
@@ -270,7 +276,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       appVersion: options.appVersion,
       isPackaged: options.isPackaged,
       sourceControl,
-      providerDiscovery
+      providerDiscovery,
+      executionTargetBridge: targetBridge.localHandlers
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
@@ -285,7 +292,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // The App's own endpoint: same controller and TLS materials, marked as the local
   // transport so a locally enrolled grant cannot be replayed over the network.
   const identity = buildIdentity(options.appVersion)
-  const localHost = service.createLocalHost(identity)
+  const localHost = service.createLocalHost(identity, {
+    onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint)
+  })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
@@ -318,6 +327,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       startupManagedRecovery = Promise.resolve()
       // A parked App long poll answers now instead of holding the channel open.
       events.close()
+      targetBridge.close()
       // Shells end with the daemon too; their recordings are finished on the way.
       await terminal.dispose()
       await enrollSocket.close()

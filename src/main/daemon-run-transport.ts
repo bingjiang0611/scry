@@ -81,9 +81,9 @@ export function isDaemonRunId(value: unknown): value is string {
 function failure(reply: Record<string, unknown>): DaemonRunError | undefined {
   const code = reply.error
   if (code === undefined) return undefined
-  if (code === 'device_not_authorized') return new DaemonRunError('daemon_device_not_authorized')
+  if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
-  if (code === 'unsupported_op') return new DaemonRunError('daemon_run_control_unavailable')
+  if (code === 'unsupported_op' || code === 'unknown_op') return new DaemonRunError('daemon_run_control_unavailable')
   return new DaemonRunError('invalid_daemon_response')
 }
 
@@ -255,6 +255,38 @@ export class DaemonRunTransport {
   async attentionViewed(sessionKey: string): Promise<void> {
     const reply = await this.#call({ op: 'attentionViewed', sessionKey }, { replayable: true })
     if (reply.viewed !== true) throw new DaemonRunError('invalid_daemon_response')
+  }
+
+  /** Primary App pull for forwarded execution-target calls (W10); runs on its own lane. */
+  async executionTargetWork(
+    input: { waitMs: number },
+    signal?: AbortSignal
+  ): Promise<{ calls: import('./daemon-execution-target-pump').ExecutionTargetWorkCall[] }> {
+    const reply = await this.#call(
+      { op: 'executionTargetWork', waitMs: input.waitMs },
+      { replayable: true, ...(signal ? { signal } : {}) }
+    )
+    if (!Array.isArray(reply.calls)) throw new DaemonRunError('invalid_daemon_response')
+    return { calls: reply.calls as import('./daemon-execution-target-pump').ExecutionTargetWorkCall[] }
+  }
+
+  /** Primary App reply to a forwarded execution-target call (W10). */
+  async executionTargetResult(
+    input: { callId: string; ok: boolean; result?: unknown; error?: string },
+    signal?: AbortSignal
+  ): Promise<{ accepted: boolean }> {
+    const reply = await this.#call(
+      {
+        op: 'executionTargetResult',
+        callId: input.callId,
+        ok: input.ok,
+        ...(input.result !== undefined ? { result: input.result } : {}),
+        ...(input.error !== undefined ? { error: input.error } : {})
+      },
+      { replayable: false, ...(signal ? { signal } : {}) }
+    )
+    if (typeof reply.accepted !== 'boolean') throw new DaemonRunError('invalid_daemon_response')
+    return { accepted: reply.accepted }
   }
 
   /** A full run snapshot, used to resynchronise after a gap. */

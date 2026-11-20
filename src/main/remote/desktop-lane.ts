@@ -38,7 +38,7 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
-export type DesktopLaneName = 'control' | 'workbench' | 'terminal' | 'long' | 'status' | 'watch' | 'bulk' | 'events'
+export type DesktopLaneName = 'control' | 'workbench' | 'terminal' | 'long' | 'status' | 'watch' | 'bulk' | 'events' | 'targetWork'
 // Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
@@ -86,6 +86,7 @@ const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnC
   watch: { responseTimeoutMs: 40_000, abortOnCancel: true },
   status: { responseTimeoutMs: 40_000, abortOnCancel: true },
   events: { responseTimeoutMs: 40_000, abortOnCancel: true },
+  targetWork: { responseTimeoutMs: 40_000, abortOnCancel: true },
   bulk: { responseTimeoutMs: 30_000, abortOnCancel: true }
 }
 

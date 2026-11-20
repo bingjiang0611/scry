@@ -6,7 +6,7 @@ import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { SourceControlService } from '../main/source-control/service'
 import type { ProviderRegistry } from '../main/providers/registry'
 import type { ProviderOperationGate } from '../main/provider-operation-gate'
-import type { DesktopRemoteClient } from '../main/remote/desktop-client'
+import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import type { DesktopRemoteForkSessionRequest } from '../shared/desktop-remote'
 import type { UserQuestionBroker } from '../main/user-question'
 import type { RemoteRunCompletion } from '../main/remote/remote-run-binding'
@@ -79,7 +79,7 @@ export type RemoteHostRuntime = {
   openLocalPath: (path: string) => Promise<void>
   // Outbound desktop-to-desktop execution is an App capability. A headless daemon
   // that only hosts this machine omits it instead of advertising a throwing target.
-  desktopRemoteClient?: () => DesktopRemoteClient
+  desktopRemoteClient?: () => DesktopRemoteTargetAPI
   isShuttingDown: boolean
 }
 

@@ -8,11 +8,12 @@ import { DESKTOP_WORKBENCH_READ_METHODS } from '../../shared/desktop-workbench'
 // in-flight write, and a write is never replayed after its bytes were written.
 const writeOperations = new Set([
   'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
-  'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit'
+  'executionTargetResult', 'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit'
 ])
 const watchOperations = new Set(['watch'])
 const statusOperations = new Set(['liveRuns'])
 const eventOperations = new Set(['appEvents'])
+const targetWorkOperations = new Set(['executionTargetWork'])
 // Short and idempotent: on the control lane, and replayable because it changes nothing twice.
 const idempotentControlOperations = new Set(['attentionViewed'])
 // `desktop` carries its own kind; history/trace/image reads are the large ones.
@@ -57,6 +58,7 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   if (watchOperations.has(op)) return 'watch'
   if (statusOperations.has(op)) return 'status'
   if (eventOperations.has(op)) return 'events'
+  if (targetWorkOperations.has(op)) return 'targetWork'
   if (op === 'desktop') {
     const kind = (request as { query?: { kind?: unknown } }).query?.kind
     return typeof kind === 'string' && bulkDesktopKinds.has(kind) ? 'bulk' : 'control'

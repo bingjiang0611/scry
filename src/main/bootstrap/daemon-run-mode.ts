@@ -10,6 +10,8 @@ import type { LoginStartManager } from '../../daemon/login-start'
 import { DaemonRunRuntime, type DaemonRunRuntimeDeps } from '../daemon-run-runtime'
 import type { RunTraceRouter } from '../run-trace-router'
 import { startDaemonRunEvents } from '../daemon-run-events'
+import { DaemonExecutionTargetPump } from '../daemon-execution-target-pump'
+import type { DesktopRemoteTargetAPI } from '../../shared/desktop-remote'
 import type { DockBadgeState } from '../dock-badge'
 import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
@@ -80,6 +82,8 @@ export interface DaemonRunModeDeps {
   rendererCanReceive?: () => boolean
   // P3f W2: this window's run-level subscriptions also see the runs it follows here.
   runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
+  // W10: App-side desktop client that fulfills phone-originated execution-target calls forwarded by the daemon.
+  desktopRemoteClient?: () => DesktopRemoteTargetAPI
 }
 
 // Answers from the daemon that a launch or a retry cannot change.
@@ -225,11 +229,20 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
     ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
   })
+  const targetPump = deps.desktopRemoteClient
+    ? new DaemonExecutionTargetPump({
+      source: transport,
+      client: deps.desktopRemoteClient,
+      ...(deps.waitMs !== undefined ? { waitMs: deps.waitMs } : {}),
+      ...(deps.onWarn ? { onWarn: deps.onWarn } : {})
+    })
+    : undefined
+  targetPump?.start()
   return {
     status: 'ready',
     version,
     surface,
-    dispose: () => { events.dispose(); detachRuns?.(); runtime.dispose(); client.close() }
+    dispose: () => { targetPump?.dispose(); events.dispose(); detachRuns?.(); runtime.dispose(); client.close() }
   }
 }
 
@@ -245,6 +258,7 @@ export function appDaemonModeDeps(input: {
   isWindowFocused?: () => boolean
   rendererCanReceive?: () => boolean
   runTraces?: DaemonRunModeDeps['runTraces']
+  desktopRemoteClient?: DaemonRunModeDeps['desktopRemoteClient']
   env?: NodeJS.ProcessEnv
   /** Shared login-start manager so App launches via launchd/systemd when installed (P5 §2.4). */
   loginStart?: LoginStartManager
@@ -315,6 +329,7 @@ export function appDaemonModeDeps(input: {
     ...(input.isWindowFocused ? { isWindowFocused: input.isWindowFocused } : {}),
     ...(input.rendererCanReceive ? { rendererCanReceive: input.rendererCanReceive } : {}),
     ...(input.runTraces ? { runTraces: input.runTraces } : {}),
+    ...(input.desktopRemoteClient ? { desktopRemoteClient: input.desktopRemoteClient } : {}),
     // The pump stops on its own after a failure; without this line the reason would be
     // dropped and the window would just never update.
     onWarn: (message, detail) => {

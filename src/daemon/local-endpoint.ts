@@ -45,6 +45,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
     }),
     events: deps.events,
     terminal: deps.terminal.feed,
+    ...(deps.executionTargetBridge ? { executionTargetBridge: deps.executionTargetBridge } : {}),
     // This daemon cannot see the App's window; the App says what the user viewed (E1b).
     attention: { viewed: (sessionKey) => deps.session.dockBadge.remove(sessionKey) }
   }

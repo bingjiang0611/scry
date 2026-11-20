@@ -49,6 +49,8 @@ export interface DaemonLocalEndpointDeps {
   sourceControl: SourceControlService
   // The metadata paired devices see; Provider context and Pi profile changes invalidate it.
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
+  // Primary-App forwarding bridge for ExecutionTargetRouter (W10).
+  executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
 }
 
 /**

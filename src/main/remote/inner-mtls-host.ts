@@ -55,6 +55,8 @@ export interface InnerMtlsHostOptions {
   // daemon answers (local ops). Supplied on the local endpoint only; on the network
   // endpoint the ops are absent, not merely refused.
   localEndpoint?: LocalEndpointHandlers
+  // Fired when the last live TLS socket for a verified peer closes (used by local-endpoint bridges).
+  onPeerDisconnected?: (fingerprint: string) => void
 }
 
 function digest(bytes: Uint8Array): string {
@@ -74,11 +76,13 @@ export class InnerMtlsHost {
   // tunnels it holds open instead of waiting for their idle timeout.
   #peers = new Map<string, Set<TLSSocket>>()
   #lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
+  #onPeerDisconnected?: (fingerprint: string) => void
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
     this.#transport = options.transport ?? 'network'
     this.#info = options.info
+    this.#onPeerDisconnected = options.onPeerDisconnected
     this.#server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
@@ -132,7 +136,10 @@ export class InnerMtlsHost {
     socket.once('close', () => {
       this.#connections.delete(socket)
       peerSockets.delete(socket)
-      if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) this.#peers.delete(fingerprint)
+      if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) {
+        this.#peers.delete(fingerprint)
+        this.#onPeerDisconnected?.(fingerprint)
+      }
     })
     serveInnerConnection(socket, {
       controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,

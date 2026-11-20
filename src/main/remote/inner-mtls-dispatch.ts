@@ -1,5 +1,5 @@
 import { handleRunControl } from './host-run-control'
-import { handleAppEvents, handleAttentionViewed, handleLocalOp, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
+import { handleAppEvents, handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
@@ -179,6 +179,14 @@ export async function dispatchRemoteRequest(
     if (request.op === 'terminalFeed') {
       // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.
       return await handleTerminalFeed(localEndpoint?.terminal, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'executionTargetWork') {
+      // The primary App's long poll for forwarded execution-target calls (W10); absent on the network endpoint.
+      return await handleExecutionTargetWork(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint)
+    }
+    if (request.op === 'executionTargetResult') {
+      // The primary App's reply to a forwarded execution-target call (W10); absent on the network endpoint.
+      return handleExecutionTargetResult(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (isLocalOp(request.op)) {
       // App channels the daemon answers for its own App; absent on the network endpoint.

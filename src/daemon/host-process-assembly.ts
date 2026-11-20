@@ -11,6 +11,7 @@ import type { createProviderRuntime } from '../main/bootstrap/provider-runtime'
 import type { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService } from '../main/remote/remote-host-service'
+import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import type { SourceControlService } from '../main/source-control/service'
 
 const unavailable = (capability: string): never => {
@@ -33,6 +34,7 @@ export interface DaemonRemoteAssemblyDeps {
   getCurrentCwd: () => string | undefined
   getStartupManagedRecovery: () => Promise<void>
   isShuttingDown: () => boolean
+  desktopRemoteClient?: () => DesktopRemoteTargetAPI
   log: (line: string) => void
 }
 
@@ -93,6 +95,7 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     getCurrentCwd: deps.getCurrentCwd,
     homeDir: workspace.homeDir,
     openLocalPath: async () => unavailable('open-path'),
+    ...(deps.desktopRemoteClient ? { desktopRemoteClient: deps.desktopRemoteClient } : {}),
     get isShuttingDown() { return deps.isShuttingDown() }
   }
 

@@ -25,6 +25,11 @@ export interface LocalEndpointHandlers {
     detachRenderer(): void
     shutdown(): Promise<void>
   }
+  // Daemon-to-App pull/reply bridge for ExecutionTargetRouter (W10).
+  executionTargetBridge?: {
+    poll(peer: string, waitMs: number): Promise<{ calls: unknown[] }>
+    submitResult(peer: string, input: { callId: string; ok: boolean; result?: unknown; error?: string }): { accepted: boolean }
+  }
 }
 
 const TERMINAL_FEED_KEYS = ['op', 'keepAlive', 'protocol', 'method', 'cursor']
@@ -66,6 +71,44 @@ export async function handleAppEvents(events: LocalEndpointHandlers['events'], r
     !Number.isSafeInteger(cursor) || (cursor as number) < 0 || !Number.isSafeInteger(waitMs) || (waitMs as number) < 0 ||
     (epoch !== undefined && (typeof epoch !== 'string' || epoch.length === 0 || epoch.length > 64))) return { error: 'invalid_request' }
   return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
+}
+
+const TARGET_WORK_KEYS = ['op', 'keepAlive', 'protocol', 'waitMs']
+const TARGET_RESULT_KEYS = ['op', 'keepAlive', 'protocol', 'callId', 'ok', 'result', 'error']
+
+/** The primary App's long poll for forwarded execution-target calls; absent on the network endpoint. */
+export async function handleExecutionTargetWork(
+  bridge: LocalEndpointHandlers['executionTargetBridge'],
+  request: Record<string, unknown>,
+  peer: string
+): Promise<Record<string, unknown>> {
+  if (!bridge) return { error: 'unsupported_op' }
+  const { waitMs } = request
+  if (Object.keys(request).some((key) => !TARGET_WORK_KEYS.includes(key)) ||
+    !Number.isSafeInteger(waitMs) || (waitMs as number) < 0) return { error: 'invalid_request' }
+  return await bridge.poll(peer, waitMs as number)
+}
+
+/** The primary App's reply to a forwarded execution-target call; absent on the network endpoint. */
+export function handleExecutionTargetResult(
+  bridge: LocalEndpointHandlers['executionTargetBridge'],
+  request: Record<string, unknown>,
+  peer: string
+): Record<string, unknown> {
+  if (!bridge) return { error: 'unsupported_op' }
+  const { callId, ok, result, error } = request
+  if (Object.keys(request).some((key) => !TARGET_RESULT_KEYS.includes(key)) ||
+    typeof callId !== 'string' || callId.length === 0 || callId.length > 128 ||
+    typeof ok !== 'boolean' ||
+    (error !== undefined && (typeof error !== 'string' || error.length === 0 || error.length > 256))) {
+    return { error: 'invalid_request' }
+  }
+  return bridge.submitResult(peer, {
+    callId,
+    ok,
+    ...(result !== undefined ? { result } : {}),
+    ...(error !== undefined ? { error } : {})
+  })
 }
 
 const MAX_ARGS = 4

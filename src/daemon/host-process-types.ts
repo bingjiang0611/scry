@@ -23,6 +23,8 @@ export interface DaemonHostProcessOptions {
   orchestrationShadowPauseBackfill?: Promise<void>
   /** Tests: override graceful providerRegistry.dispose() timeout (default 5,000 ms). */
   providerDisposeTimeoutMs?: number
+  /** Tests: override per-call timeout for App-forwarded execution-target calls (default 35,000 ms). */
+  executionTargetCallTimeoutMs?: number
 }
 
 export interface DaemonHostProcess {

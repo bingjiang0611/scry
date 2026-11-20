@@ -166,10 +166,12 @@ export class PairingAuthority {
 
   // Self-reported display metadata, not hardware attestation or a new authorization.
   // Only the verified peer certificate may select the existing grant to update.
+  // Local grants keep their enrollment-time identity so a CLI cannot rename itself to App.
   updateDeviceLabel(certificateSHA256: string, deviceLabel: unknown): Promise<void> {
     return this.serial(async () => {
       const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256)
       if (!grant || !this.authorizesCertificate(certificateSHA256)) fail('device_not_authorized')
+      if (grant.scope === 'local') fail('invalid_device_label')
       if (!validDeviceLabel(deviceLabel)) fail('invalid_device_label')
       if (grant.deviceLabel === deviceLabel) return
       this.persist({ ...this.data, grants: this.data.grants.map(g => g.deviceId === grant.deviceId ? { ...g, deviceLabel } : g) })
@@ -249,6 +251,22 @@ export class PairingAuthority {
     const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
       !this.deniedDevices.has(g.deviceId) && g.expiresAt > now)
     return grant?.scope
+  }
+
+  /**
+   * True only for an active local_socket grant enrolled by the primary Scry App.
+   * Non-App local clients (e.g. scry CLI) enroll with distinct labels and cannot
+   * mutate their label via updateDeviceLabel.
+   */
+  isPrimaryAppLocalGrant(certificateSHA256: string): boolean {
+    if (typeof certificateSHA256 !== 'string' || !HASH.test(certificateSHA256)) return false
+    try { this.available() } catch { return false }
+    const now = this.clock()
+    if (!isTime(now)) return false
+    const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
+      !this.deniedDevices.has(g.deviceId) && g.expiresAt > now)
+    return !!grant && grant.scope === 'local' && grant.source === 'local_socket' &&
+      (grant.deviceLabel === 'Scry App' || grant.deviceLabel.startsWith('Scry App '))
   }
 
   close(): void { this.unavailable ??= 'pairing_authority_closed' }
