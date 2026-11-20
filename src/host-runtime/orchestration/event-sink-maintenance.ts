@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import type Database from 'better-sqlite3'
+import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
+import type { BodyStore } from './body-store'
 import { canonicalJson } from './canonical-json'
 import { migrateOrchestrationDatabase } from './migrations'
 import { applyEventToProjection } from './projection'
@@ -180,4 +182,52 @@ export function verifyReplayConsistencyInDb(
   } finally {
     mem.close()
   }
+}
+
+/**
+ * core §2.5 + R5: tightening-only stop bypasses the storage fence without touching SQLite
+ * and cascades along in-memory `RunRegistryState.parentRunId` edges.
+ */
+export function stopRunBypassingFenceInRegistry<
+  State extends RunRegistryState,
+  Control extends RunRegistryControl
+>(
+  runId: string,
+  registry: RunRegistry<State, Control>,
+  stopControl: (control: Control) => void
+): string[] {
+  const visited = new Set<string>()
+  const queue = [runId]
+  const stopped: string[] = []
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
+    const entry = registry.get(current)
+    if (entry && !entry.state.done) {
+      stopControl(entry.control)
+      stopped.push(current)
+    }
+    for (const active of registry.activeStates()) {
+      if (active.parentRunId === current && !visited.has(active.runId)) {
+        queue.push(active.runId)
+      }
+    }
+  }
+  return stopped
+}
+
+export function unlinkUnreferencedExternalBodyInDb(
+  db: Database.Database,
+  bodyStore: BodyStore,
+  sha256: string
+): void {
+  const surviving = db
+    .prepare('SELECT body FROM orch_p_run WHERE body IS NOT NULL')
+    .all() as Array<{ body: string }>
+  for (const row of surviving) {
+    const parsed = JSON.parse(row.body) as { storage?: string; sha256?: string }
+    if (parsed.storage === 'external' && parsed.sha256 === sha256) return
+  }
+  bodyStore.unlinkBody(sha256)
 }

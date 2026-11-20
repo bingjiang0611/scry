@@ -63,12 +63,20 @@ export interface OpenOrchestrationDbOptions {
   logId?: string
 }
 
+export interface WalCheckpointResult {
+  busy: number
+  log: number
+  checkpointed: number
+}
+
 export interface OrchestrationDbHandle {
   readonly db: Database.Database
   readonly dbPath: string
   readonly orchestrationDir: string
   enforceModes(): void
-  close(): void
+  /** Runs a non-blocking PASSIVE WAL checkpoint off the commit critical path. */
+  checkpointPassive(): WalCheckpointResult
+  close(options?: { skipCheckpoint?: boolean }): void
 }
 
 function classifyOpenError(error: unknown): OrchestrationStoreError {
@@ -109,6 +117,8 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
     // Layer 2 single-writer lock (core §2.9): acquire EXCLUSIVE before WAL/migration.
     db.pragma('locking_mode = EXCLUSIVE')
     db.pragma('journal_mode = WAL')
+    // Move WAL checkpoints off the commit critical path (W9 P4-2); explicit PASSIVE checkpoints run idle.
+    db.pragma('wal_autocheckpoint = 0')
     db.pragma('synchronous = FULL')
     db.pragma('foreign_keys = ON')
     db.pragma('secure_delete = ON')
@@ -137,8 +147,30 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
       dbPath,
       orchestrationDir,
       enforceModes: () => enforceOrchestrationFileModes(dbPath),
-      close: () => {
-        if (liveDb.open) liveDb.close()
+      checkpointPassive: () => {
+        if (!liveDb.open) return { busy: 0, log: 0, checkpointed: 0 }
+        const rows = liveDb.pragma('wal_checkpoint(PASSIVE)') as Array<{
+          busy?: number
+          log?: number
+          checkpointed?: number
+        }>
+        const row = rows[0]
+        return {
+          busy: Number(row?.busy ?? 0),
+          log: Number(row?.log ?? 0),
+          checkpointed: Number(row?.checkpointed ?? 0)
+        }
+      },
+      close: (closeOptions) => {
+        if (!liveDb.open) return
+        if (!closeOptions?.skipCheckpoint) {
+          try {
+            liveDb.pragma('wal_checkpoint(TRUNCATE)')
+          } catch {
+            // Preserve clean close semantics even if checkpoint cannot run.
+          }
+        }
+        liveDb.close()
       }
     }
   } catch (error) {

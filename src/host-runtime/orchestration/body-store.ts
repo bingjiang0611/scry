@@ -11,6 +11,7 @@ import {
   rmSync,
   writeSync
 } from 'node:fs'
+import { access, chmod, mkdir, open, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { sha256Hex } from './canonical-json'
 import { INLINE_BODY_MAX_BYTES, OrchestrationStoreError, type PreparedBody } from './types'
@@ -29,6 +30,19 @@ function fsyncDirectory(dir: string): void {
     if (!IGNORABLE_DIR_FSYNC_CODES.has(code)) throw error
   } finally {
     if (fd !== null) closeSync(fd)
+  }
+}
+
+async function fsyncDirectoryAsync(dir: string): Promise<void> {
+  let fh: Awaited<ReturnType<typeof open>> | null = null
+  try {
+    fh = await open(dir, 'r')
+    await fh.sync()
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code ?? ''
+    if (!IGNORABLE_DIR_FSYNC_CODES.has(code)) throw error
+  } finally {
+    if (fh !== null) await fh.close()
   }
 }
 
@@ -98,6 +112,50 @@ export class BodyStore {
     chmodSync(targetPath, 0o600)
     fsyncDirectory(this.bodiesDir)
 
+    return { storage: 'external', sha256, bytes }
+  }
+
+  /**
+   * Async durable external body write (data §4.7) for P4-2 authoritative submit:
+   * persists and fsyncs >16 KiB bodies BEFORE the event transaction references them.
+   */
+  async prepareBodyAsync(content: string | Buffer): Promise<PreparedBody> {
+    const buffer = typeof content === 'string' ? Buffer.from(content, 'utf8') : content
+    const bytes = buffer.byteLength
+    const sha256 = sha256Hex(buffer)
+
+    if (bytes <= INLINE_BODY_MAX_BYTES) {
+      return {
+        storage: 'inline',
+        sha256,
+        bytes,
+        inline: typeof content === 'string' ? content : buffer.toString('utf8')
+      }
+    }
+
+    await mkdir(this.bodiesDir, { recursive: true, mode: 0o700 })
+    await chmod(this.bodiesDir, 0o700)
+    const targetPath = this.externalPath(sha256)
+    try {
+      await access(targetPath)
+      await chmod(targetPath, 0o600)
+      return { storage: 'external', sha256, bytes }
+    } catch {
+      // Not yet present; write atomically below.
+    }
+
+    const tmpPath = join(this.bodiesDir, `.tmp-${sha256}-${randomUUID()}`)
+    const fh = await open(tmpPath, 'wx', 0o600)
+    try {
+      await fh.writeFile(buffer)
+      await fh.sync()
+    } finally {
+      await fh.close()
+    }
+    await chmod(tmpPath, 0o600)
+    await rename(tmpPath, targetPath)
+    await chmod(targetPath, 0o600)
+    await fsyncDirectoryAsync(this.bodiesDir)
     return { storage: 'external', sha256, bytes }
   }
 

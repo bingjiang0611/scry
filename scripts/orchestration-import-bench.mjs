@@ -54,7 +54,7 @@ async function loadOrchestrationModules() {
     entry,
     [
       `export { EventSink } from ${JSON.stringify(join(repoRoot, 'src/host-runtime/orchestration/event-sink.ts'))}`,
-      `export { importLegacyStateIncrementally, loadLegacyLedgerPlan, startDeferredLegacyImport } from ${JSON.stringify(join(repoRoot, 'src/host-runtime/orchestration/legacy-import.ts'))}`
+      `export { importLegacyStateIncrementally, loadLegacyLedgerPlan, loadLegacyLedgerPlanAsync, startDeferredLegacyImport } from ${JSON.stringify(join(repoRoot, 'src/host-runtime/orchestration/legacy-import.ts'))}`
     ].join('\n')
   )
   await build({
@@ -215,7 +215,15 @@ async function runDataset(mod, spec) {
     const preStart = performance.now()
     const sink = mod.EventSink.open({ userDataDir: root, fullfsync: false, checkpointFullfsync: true })
     const afterOpen = performance.now()
-    const plan = mod.loadLegacyLedgerPlan(sink, root)
+    const parseLoopLagSamples = []
+    let parseLastTick = performance.now()
+    const parseProbe = setInterval(() => {
+      const now = performance.now()
+      parseLoopLagSamples.push(Math.max(0, now - parseLastTick - 5))
+      parseLastTick = now
+    }, 5)
+    const plan = await mod.loadLegacyLedgerPlanAsync(sink, root)
+    clearInterval(parseProbe)
     const afterPlan = performance.now()
     const openSummary = mod.importLegacyStateIncrementally({
       sink,
@@ -250,10 +258,11 @@ async function runDataset(mod, spec) {
     clearInterval(probe)
 
     const noopStart = performance.now()
-    const noopPlan = mod.loadLegacyLedgerPlan(sink, root)
+    const noopPlan = await mod.loadLegacyLedgerPlanAsync(sink, root)
     const noopEnd = performance.now()
     sink.close()
 
+    const sortedParseLag = [...parseLoopLagSamples].sort((a, b) => a - b)
     const sortedLag = [...loopLagSamples].sort((a, b) => a - b)
     return {
       case: spec.name,
@@ -270,6 +279,7 @@ async function runDataset(mod, spec) {
       preSocket: {
         openDbMs: Number((afterOpen - preStart).toFixed(2)),
         parsePlanOnceMs: Number((afterPlan - afterOpen).toFixed(2)),
+        parseMainThreadMaxLagMs: sortedParseLag.length > 0 ? Number(sortedParseLag[sortedParseLag.length - 1].toFixed(2)) : 0,
         importOpenRunsMs: Number((afterOpenImport - afterPlan).toFixed(2)),
         totalPreSocketBlockMs: Number((afterOpenImport - preStart).toFixed(2)),
         importedOpenRuns: openSummary.importedRuns

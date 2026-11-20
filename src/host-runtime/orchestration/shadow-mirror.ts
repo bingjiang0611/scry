@@ -258,6 +258,8 @@ export class ShadowMirror {
       const entry = this.#pendingBodies.get(key)
       this.#pendingBodies.delete(key)
       if (!entry) continue
+      // Never resurrect an external body file after its run/session was deleted.
+      if (!this.sink.getRun(key)) continue
       try {
         this.sink.bodyStore.prepareBody(entry.content)
       } catch (error) {
