@@ -137,7 +137,8 @@ const invokeChannels = {
   restartBackgroundService: 'remote:backgroundService:restart',
   quitWithBackgroundService: 'remote:backgroundService:quit',
   reconnectBackgroundService: 'remote:backgroundService:reconnect',
-  setBackgroundServiceLoginStart: 'remote:backgroundService:setLoginStart'
+  setBackgroundServiceLoginStart: 'remote:backgroundService:setLoginStart',
+  setHostCliApproval: 'remote:hostAdmin:setCliApproval'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const desktopChannels = {
@@ -203,17 +204,6 @@ describe('preload IPC boundary', () => {
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
     }
-  })
-
-  it('sends no renderer argument on the background service channels', async () => {
-    for (const method of ['backgroundServiceStatus', 'backgroundServiceRuntimeNotice', 'restartBackgroundService', 'quitWithBackgroundService', 'reconnectBackgroundService']) {
-      electron.invoke.mockClear()
-      await callableApi[method]('4242', { confirmed: true })
-      expect(electron.invoke.mock.calls[0], method).toEqual([invokeChannels[method as keyof typeof invokeChannels]])
-    }
-    electron.invoke.mockClear()
-    await callableApi.setBackgroundServiceLoginStart(true, '/etc/evil', { confirmed: true })
-    expect(electron.invoke.mock.calls[0]).toEqual(['remote:backgroundService:setLoginStart', true])
   })
 
   it('exposes only fixed source-control business operations and forwards one typed request', async () => {

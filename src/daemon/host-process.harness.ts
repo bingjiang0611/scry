@@ -31,7 +31,7 @@ const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1',
 const DEBUG_PORT = '--remote-debugging-port=0'
 
 /** `root`: start again on the userData a disposed test daemon left, as a restart would. */
-export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal'> & { root?: string } = {}): Promise<TestDaemon> {
+export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log'> & { root?: string } = {}): Promise<TestDaemon> {
   const { root: previous, ...hostOptions } = options
   const root = previous ?? tempDir()
   const userDataDir = join(root, 'userData')

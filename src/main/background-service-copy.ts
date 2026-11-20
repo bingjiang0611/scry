@@ -75,7 +75,8 @@ const REASONS: Readonly<Record<string, string>> = {
   daemon_device_not_authorized: '后台服务拒绝了本 App 的连接（本机连接已被撤销、已在另一实例入网，或本 App 保存的连接凭据已丢失）。',
   daemon_stopping: '后台服务正在停止，暂不启动新的后台服务。',
   daemon_ready_timeout: '后台服务在限定时间内没有就绪。',
-  action_in_progress: '另一个后台服务操作正在进行，请等它结束。'
+  action_in_progress: '另一个后台服务操作正在进行，请等它结束。',
+  host_cli_experimental_disabled: '命令行批准功能处于实验阶段，当前未开启（需设置 SCRY_EXPERIMENTAL_HOST_CLI=1）。'
 }
 
 /** One readable sentence for a machine reason; unknown reasons keep their code visible. */
@@ -157,6 +158,23 @@ export function confirmLoginStartPrompt(policyEnvKeys: readonly string[]): Backg
     message: '安装随系统登录常驻的后台服务',
     detail: details.join('\n\n'),
     buttons: ['开启登录时启动', '取消'],
+    defaultId: CANCEL_BUTTON,
+    cancelId: CANCEL_BUTTON
+  }
+}
+
+/** Native confirmation shown before enabling host CLI pairing approval (P5-host-security §4.1, §4.3). */
+export function confirmHostCliApprovalPrompt(): BackgroundServicePrompt {
+  return {
+    type: 'warning',
+    title: '开启允许命令行批准',
+    message: '允许在本机命令行（scry-host）生成配对邀请并批准新设备',
+    detail: [
+      '开启后，本机上能够以当前用户身份运行命令的终端或 SSH 会话可以通过 scry-host 邀请并批准新的 owner 设备。',
+      '请注意：已配对设备可以通过 Provider 或远程终端在本机执行命令，因此在打开此开关期间，已配对设备理论上也能绕道经命令行批准新设备；不可信仓库里的 Agent 或 Hook 同样可能尝试调用它。',
+      '作为缓解措施：Scry 会向 Provider 与 Scry 终端写入运行标记以拦截照做的 Agent，命令行批准每小时限制 3 次（邀请 6 次），且每次开启或命令行批准都会通知本 App 与全部已配对设备。不需要时请随时关闭。'
+    ].join('\n\n'),
+    buttons: ['开启允许命令行批准', '取消'],
     defaultId: CANCEL_BUTTON,
     cancelId: CANCEL_BUTTON
   }

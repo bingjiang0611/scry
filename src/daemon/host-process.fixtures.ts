@@ -15,7 +15,9 @@ import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
 const dirs: string[] = []
 export function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'scry-daemon-host-'))
+  // Use /tmp on macOS so `<root>/userData/daemon/host-admin/host-admin.sock` stays well below sun_path's 104-byte limit.
+  const base = process.platform === 'darwin' ? '/tmp' : tmpdir()
+  const dir = mkdtempSync(join(base, 'scry-d-'))
   dirs.push(dir)
   return dir
 }

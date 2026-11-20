@@ -114,7 +114,9 @@ const FORWARDED_ENV = [
   // P4 orchestration switch & measurement controls (read only by the daemon).
   'SCRY_ORCHESTRATION',
   'SCRY_ORCHESTRATION_FULLFSYNC',
-  'SCRY_ORCHESTRATION_PENDING_TTL_MS'
+  'SCRY_ORCHESTRATION_PENDING_TTL_MS',
+  // P5 Step 2 host CLI experimental switch (default off; forwards only when explicitly set).
+  'SCRY_EXPERIMENTAL_HOST_CLI'
 ] as const
 
 export function daemonLaunchEnvironment(input: {

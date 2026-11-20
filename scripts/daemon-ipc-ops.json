@@ -51,6 +51,16 @@
         "local"
       ]
     },
+    "localHostAdmin": {
+      "path": "remote",
+      "request": "{ op:'localHostAdmin', method:'setCliApproval', args:[boolean] }；仅接受单个布尔值",
+      "response": "{ enabled: boolean, updatedAt: number | null }；默认关闭，开启前须由 main 弹原生确认框，且仅在 SCRY_EXPERIMENTAL_HOST_CLI=1 时开放",
+      "authorize": "只在 unix socket 上、且调用方持有 scope: local grant；admin socket 与远程设备均无法触达（P5-5b）",
+      "why": "「允许命令行批准」开关由 daemon 持久化到 <userData>/remote/host-admin.json（0600），且只能在 App 里打开",
+      "scopes": [
+        "local"
+      ]
+    },
     "localHostStatus": {
       "path": "remote",
       "request": "{ op:'localHostStatus', method:'status', args: [] }",

@@ -17,6 +17,8 @@ export const backgroundServiceApi = {
   reconnectBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:reconnect'),
   setBackgroundServiceLoginStart: (enabled: boolean): Promise<BackgroundServiceActionResult> =>
     ipcRenderer.invoke('remote:backgroundService:setLoginStart', enabled),
+  setHostCliApproval: (enabled: boolean): Promise<BackgroundServiceActionResult> =>
+    ipcRenderer.invoke('remote:hostAdmin:setCliApproval', enabled),
   onBackgroundServiceNotice: (cb: (notice: BackgroundServiceRuntimeNotice | null) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, notice: BackgroundServiceRuntimeNotice | null) => cb(notice)
     ipcRenderer.on('remote:backgroundService:notice', listener)
