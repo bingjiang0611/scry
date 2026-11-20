@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import { join } from 'node:path'
 import { generateDesktopDeviceIdentity } from './remote/desktop-transport'
 import { DesktopLanes, type DesktopLaneName } from './remote/desktop-lane'
-import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import { DESKTOP_HISTORY_MAX_BYTES, REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 import { buildIdOf, sameBuild, type BuildIdentity } from '../shared/build-identity'
 
 // Every run-channel frame declares the protocol it speaks; the daemon refuses one that
@@ -220,8 +220,13 @@ export class DaemonClient {
   request(lane: DesktopLaneName, request: unknown, options: { replayable: boolean; signal?: AbortSignal } = { replayable: false }): Promise<unknown> {
     const grant = this.#grant
     if (!grant) return Promise.reject(new DaemonClientError('daemon_not_running'))
-    return this.#lanes.request(lane, grant.deviceId, {
-      endpoint: { path: this.#options.paths.socketPath, caPEM: grant.caPEM, certPEM: grant.certificatePEM, keyPEM: grant.keyPEM },
+    // Only the authenticated local history path can return a full IPC page.
+    const isHistory = request && typeof request === 'object' && 'op' in request && request.op === 'sessionHistory'
+    return this.#lanes.request(isHistory ? 'localHistory' : lane, grant.deviceId, {
+      endpoint: {
+        path: this.#options.paths.socketPath, caPEM: grant.caPEM, certPEM: grant.certificatePEM, keyPEM: grant.keyPEM,
+        ...(isHistory ? { maxResponseBytes: DESKTOP_HISTORY_MAX_BYTES } : {})
+      },
       request: framedRequest(request), replayable: options.replayable, ...(options.signal ? { signal: options.signal } : {})
     })
   }
