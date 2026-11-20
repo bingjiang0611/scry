@@ -93,6 +93,19 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     expect(samples.filter(sample => sample.name === 'remote.client.request').map(sample => sample.counters?.reused)).toEqual([0, 1, 1])
   })
 
+  it('enforces the reply budget per channel', async () => {
+    const { endpoint } = await pairedLane()
+    const lanes = new DesktopLanes()
+    cleanups.push(() => lanes.closeAll())
+    const request = { op: 'providers' }
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request, replayable: true })).resolves.toHaveProperty('providers')
+    // A changed budget must open a new channel, not reuse the previous one's limit.
+    const limited = { ...endpoint, maxResponseBytes: 16 }
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint: limited, request, replayable: false }))
+      .rejects.toThrow('desktop_lane_response_too_large')
+    await expect(requestOn(lanes, 'control', 'c1', { endpoint, request, replayable: true })).resolves.toHaveProperty('providers')
+  })
+
   it('closes a revoked device\u2019s kept-alive tunnel', async () => {
     const { service, endpoint, deviceId } = await pairedLane()
     const channel = await connectDesktopLane(endpoint)

@@ -38,6 +38,7 @@ import { stopFixtureDaemon } from './b4v/fixture.mjs'
 import { readIdentity, signalVerified, verifyHolder } from './b4v/process-identity.mjs'
 import { devTarget, parseSmokeArguments, privateCliEvidence, resolvePackagedApp } from './daemon-mode-smoke/packaged.mjs'
 import { daemonProcessEvidence } from './daemon-mode-smoke/processes.mjs'
+import { checkPiHistory, seedPiHistory } from './daemon-mode-smoke/history.mjs'
 import { recordingFiles, runOutputFiles, terminalFinishExpression, terminalStartExpression } from './daemon-mode-smoke/workers.mjs'
 
 const root = process.cwd()
@@ -60,6 +61,7 @@ writeFileSync(join(workspace, 'README.md'), '# fixture\n')
 // The App only accepts a working directory it can prove is the user's own; in an
 // isolated userData the project list is the only place that proof can come from.
 writeFileSync(join(userDataDir, 'projects.json'), JSON.stringify([{ cwd: workspace, lastOpenedAt: 1 }]))
+seedPiHistory({ home, workspace, userDataDir })
 
 const log = []
 const appendLog = (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }
@@ -125,6 +127,9 @@ try {
   results.steps.daemonProcesses = processes
 
   await evaluate(`window.scry.setCwd(${JSON.stringify(workspace)})`)
+  const history = await checkPiHistory(evaluate, workspace)
+  if (!history.ok || history.firstBytes <= 4 * 1024 * 1024) fail('piHistory', JSON.stringify(history))
+  results.steps.piHistory = history
 
   // 1. send -> streaming text -> settled
   const started = await evaluate(`window.scry.start({ prompt: 'native composer complete daemon mode fixture', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
