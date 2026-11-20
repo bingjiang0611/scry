@@ -16,8 +16,26 @@ final class WireTests: XCTestCase {
   func testOnlyAFullTunnelIsARetryableHostRefusal() {
     // mux_busy: the host ran nothing because the tunnel was at its cap.
     XCTAssertTrue(G0Transport.RunError.host(code: "mux_busy").isCapacityRefusal)
-    for code in ["device_revoked", "unknown_run", "watch_stream_unavailable", "unknown_op"] {
+    for code in ["device_revoked", "unknown_run", "watch_stream_unavailable", "unknown_op",
+                 "execution_targets_unavailable", "execution_target_gateway_offline"] {
       XCTAssertFalse(G0Transport.RunError.host(code: code).isCapacityRefusal, code)
+      XCTAssertFalse(RelayTransportError.permitsReadRecovery(G0Transport.RunError.host(code: code)), code)
+    }
+  }
+
+  func testExecutionTargetGatewayOfflineAndUnavailableDecodeCleanly() async throws {
+    for code in ["execution_targets_unavailable", "execution_target_gateway_offline"] {
+      var calls = 0
+      do {
+        _ = try await G0Transport.executionTargetDiscovery(expectedGatewayId: "mac1", pooled: true) { _ in
+          calls += 1
+          return Data("{\"error\":\"\(code)\"}".utf8)
+        }
+        XCTFail("Expected host error \(code)")
+      } catch let G0Transport.RunError.host(received) {
+        XCTAssertEqual(received, code)
+        XCTAssertEqual(calls, 1)
+      }
     }
   }
 

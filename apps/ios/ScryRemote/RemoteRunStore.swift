@@ -4826,6 +4826,8 @@ final class RemoteRunStore {
     if let runError = error as? G0Transport.RunError, case let .host(code) = runError {
       if code == "history_profile_unavailable" { return ConnectionCopy.historyProfileUnavailable }
       if code == "history_profile_required" { return ConnectionCopy.historyProfileUnverified }
+      if code == "execution_target_gateway_offline" { return ConnectionCopy.targetGatewayOffline }
+      if code == "execution_targets_unavailable" { return ConnectionCopy.targetsUnavailable }
       if code == "unknown_op" {
         return "Mac 端不支持当前读取协议（unknown_op）。请更新 Scry，并完全退出后重新打开 Mac 端；仅覆盖安装不会更新正在运行的进程。"
       }

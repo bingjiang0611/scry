@@ -37,14 +37,38 @@ struct CatalogRefreshChecks {
       ]
       let tlsChecks = [
         ("tls.outerLayerVisible", RemoteRunStore.describe(RelayTransportError.tlsHandshake(layer: .relay, detail: "fixture EOF")) == ConnectionCopy.relayTLSHandshakeFailure("fixture EOF")),
-        ("tls.innerLayerVisible", RemoteRunStore.describe(RelayTransportError.tlsHandshake(layer: .host, detail: "fixture EOF")) == ConnectionCopy.hostTLSHandshakeFailure("fixture EOF"))
+        ("tls.innerLayerVisible", RemoteRunStore.describe(RelayTransportError.tlsHandshake(layer: .host, detail: "fixture EOF")) == ConnectionCopy.hostTLSHandshakeFailure("fixture EOF")),
+        ("targets.gatewayOfflineCopy", RemoteRunStore.describe(G0Transport.RunError.host(code: "execution_target_gateway_offline")) == ConnectionCopy.targetGatewayOffline),
+        ("targets.unavailableCopyNotMisleading",
+          RemoteRunStore.describe(G0Transport.RunError.host(code: "execution_targets_unavailable")) == ConnectionCopy.targetsUnavailable &&
+          !RemoteRunStore.describe(G0Transport.RunError.host(code: "execution_targets_unavailable")).contains("请更新 Scry"))
+      ]
+      let suite = "ScryTargetsUnavailable.\(UUID().uuidString)"
+      let defaults = UserDefaults(suiteName: suite)!
+      defer { defaults.removePersistentDomain(forName: suite) }
+      let connections = RemoteConnectionStore(defaults: defaults)
+      let conn = RemoteConnection(relayHost: "fixture.invalid", relayPort: 443, relayTLS: "system",
+        hostId: "gateway", anchorPEM: "fixture-anchor", deviceId: "phone")
+      connections.save(conn)
+      let legacyCoordinator = ExecutionTargetCoordinator(connections: connections,
+        historyDisk: RemoteHistoryCache(directory: directory.appendingPathComponent("legacy")), defaults: defaults,
+        stateDirectory: directory.appendingPathComponent("legacy-state"))
+      let localSession = G0Transport.RunSessionRef(sessionId: "s1", externalSessionId: "s1", providerId: "codex", cwd: "/repo", label: "s1", ts: 1)
+      legacyCoordinator.localStore.catalogFixture = RemoteRunStore.CatalogFixture(connection: conn, fetch: { _ in [localSession] })
+      legacyCoordinator.targetCatalogFixture = { throw G0Transport.RunError.host(code: "execution_targets_unavailable") }
+      let legacyOk = await legacyCoordinator.refreshHome()
+      let targetErrorChecks = [
+        ("targets.unavailableNoSidebarBanner",
+          legacyOk && legacyCoordinator.discoveryIssue == nil && legacyCoordinator.homeFailure == nil &&
+          !legacyCoordinator.forwardingSupported && legacyCoordinator.lastFullRefresh != nil &&
+          legacyCoordinator.homeSessions.count == 1)
       ]
       let checks = try await RemoteRunStore.selfTestCatalogRefreshFlow(directory: directory)
         + RemoteRunStore.selfTestExecutionTargets(directory: directory.appendingPathComponent("targets"))
         + RemoteRunStore.selfTestHomeRecovery(directory: directory.appendingPathComponent("recovery"))
         + RemoteRunStore.selfTestInteractionState()
         + RemoteRunStore.selfTestModelSelection()
-        + snapshotChecks + tlsChecks
+        + snapshotChecks + tlsChecks + targetErrorChecks
       for (name, passed) in checks {
         print("\(passed ? "PASS" : "FAIL") catalog.\(name)")
         if !passed { failures += 1 }
