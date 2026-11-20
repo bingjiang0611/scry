@@ -25,6 +25,7 @@ import {
   resetMcpExecutableFingerprintCacheForTest,
   resolveMcpExecutableFingerprintAsync,
   resolveMcpExecutableFingerprintSync,
+  setMcpExecutableFingerprintAfterChunkForTest,
   setMcpExecutableFingerprintClockForTest
 } from './mcp-executable-fingerprint'
 
@@ -47,6 +48,7 @@ beforeAll(() => warmShellEnv())
 
 afterEach(() => {
   setMcpExecutableFingerprintClockForTest(null)
+  setMcpExecutableFingerprintAfterChunkForTest(null)
   resetMcpExecutableFingerprintCacheForTest()
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
@@ -252,27 +254,28 @@ describe('MCP executable fingerprint cache & security invariants (W13)', () => {
     expect(() => authorizedMcpExecution(snapshot2)).toThrow('MCP 可执行文件或配置在启动边界发生变化，已拒绝执行')
   })
 
-  it('detects and rejects 1-byte mid-hash modification on a 64 MiB file ~5 ms into async hashing', async () => {
+  it('deterministically detects and rejects 1-byte mid-hash modification right after reading chunk 1', async () => {
     const root = makeTempDir()
-    const bigBin = join(root, 'big-64m')
-    writeFileSync(bigBin, Buffer.alloc(64 * 1024 * 1024, 0x41))
+    const bigBin = join(root, 'multi-chunk-bin')
+    writeFileSync(bigBin, Buffer.alloc(2 * 1024 * 1024, 0x41))
     chmodSync(bigBin, 0o755)
     setupCodexMcpProject(root, bigBin)
 
-    const tamperTimer = setTimeout(() => {
-      const fd = openSync(bigBin, 'r+')
-      try {
-        writeSync(fd, Buffer.from([0x42]), 0, 1, 0)
-      } finally {
-        closeSync(fd)
+    let tampered = false
+    setMcpExecutableFingerprintAfterChunkForTest((_canonical, chunkIndex) => {
+      if (chunkIndex === 1 && !tampered) {
+        tampered = true
+        const fd = openSync(bigBin, 'r+')
+        try {
+          writeSync(fd, Buffer.from([0x42]), 0, 1, 0)
+        } finally {
+          closeSync(fd)
+        }
       }
-    }, 5)
-    try {
-      await expect(ensureMcpExecutionAuthorized({ providerId: 'codex', cwd: root }, 'run'))
-        .rejects.toThrow('无法稳定校验')
-    } finally {
-      clearTimeout(tamperTimer)
-    }
+    })
+    await expect(ensureMcpExecutionAuthorized({ providerId: 'codex', cwd: root }, 'run'))
+      .rejects.toThrow('无法稳定校验')
+    expect(tampered).toBe(true)
   })
 
   it('hashes uncached large executables asynchronously in chunks without starving event-loop timers', async () => {

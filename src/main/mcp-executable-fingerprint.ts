@@ -63,6 +63,7 @@ const linkCache = new Map<string, LinkCacheEntry>()
 const inFlightTargetAsync = new Map<string, Promise<TargetHashResult>>()
 
 let clockMs: (() => number) | null = null
+let afterAsyncChunkForTest: ((canonical: string, chunkIndex: number) => void | Promise<void>) | null = null
 let hashCount = 0
 let hitCount = 0
 
@@ -236,6 +237,7 @@ async function hashTargetAsync(canonical: string, expectedBeforeStamp: FileStamp
     const digest = createHash('sha256')
     const buffer = Buffer.allocUnsafe(ASYNC_CHUNK_BYTES)
     let position = 0
+    let chunkIndex = 0
     let reusedDigest: string | null = null
     while (position < expectedSize) {
       // If a concurrent sync call already hashed this exact stamp, reuse its digest and still run post-checks.
@@ -253,6 +255,8 @@ async function hashTargetAsync(canonical: string, expectedBeforeStamp: FileStamp
       if (bytesRead === 0) break
       digest.update(buffer.subarray(0, bytesRead))
       position += bytesRead
+      chunkIndex += 1
+      if (afterAsyncChunkForTest) await afterAsyncChunkForTest(canonical, chunkIndex)
     }
     const after = await handle.stat({ bigint: true })
     const afterStamp = toStamp(after)
@@ -418,12 +422,19 @@ export function resetMcpExecutableFingerprintCacheForTest(): void {
   targetCache.clear()
   linkCache.clear()
   inFlightTargetAsync.clear()
+  afterAsyncChunkForTest = null
   hashCount = 0
   hitCount = 0
 }
 
 export function setMcpExecutableFingerprintClockForTest(fn: (() => number) | null): void {
   clockMs = fn
+}
+
+export function setMcpExecutableFingerprintAfterChunkForTest(
+  fn: ((canonical: string, chunkIndex: number) => void | Promise<void>) | null
+): void {
+  afterAsyncChunkForTest = fn
 }
 
 export function mcpExecutableFingerprintStatsForTest(): {
