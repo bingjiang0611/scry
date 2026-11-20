@@ -3,7 +3,7 @@
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
 - 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；W12 中继部署已通过；W13 返修中（见 W13-review）；之后做 P5-8（B 修完 W11 的 N1 后开始）。W2b 的注销与 FileVault 两项按维护者 2026-11-21 的决定，挪到最后，与 S3 前的整体复验合并成一次停机。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
-- 执行方 B：P5（W3、W2 代码已通过）；Antigravity（W7、W8 已通过）；W11 已通过（附 7 项应修，P5-8 前完成）。
+- 执行方 B：P5（W2、W3、W11 已通过）；Antigravity（W7、W8 已通过）。当前无排队任务。
 - 执行方 C：P4（W4、W5 已通过），现做 W9。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
@@ -22,6 +22,7 @@
 | W11 | P5 第 2 步：命令行批准新设备（P5-5b、P5-5、P5-6、P5-7） | B | W8 通过 | 批准入口与 `approvedVia` 写入放在实验开关后，含 W3 的版本发布后再打开；P5-8 真机验收另由 A 做 | [tasks/W11-p5-step2-host-cli.md](tasks/W11-p5-step2-host-cli.md) |
 | W12 | 部署 W10 的中继修复到线上（维护者已授权） | A | W10 通过 | 失败按任务单回滚 | [tasks/W12-relay-deploy.md](tasks/W12-relay-deploy.md) |
 | W13 | 默认路径：MCP 可执行文件指纹按文件状态缓存（每次运行少算 3 次 SHA-256） | A | — | 安全语义不变，有测试证明 | [tasks/W13-mcp-fingerprint-cache.md](tasks/W13-mcp-fingerprint-cache.md) |
+| W14 | P5-8：命令行批准新设备的真机验收 | A | W11 通过、W13 推送 | P5 第 2 步合并前必须完成 | [tasks/W14-p5-8-real-machine.md](tasks/W14-p5-8-real-machine.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛（2026-11-20 已通过，附条件：W10），但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
