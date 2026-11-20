@@ -53,9 +53,28 @@ async function fsyncDirectoryAsync(dir: string): Promise<void> {
  */
 export class BodyStore {
   readonly bodiesDir: string
+  readonly #pinned = new Map<string, number>()
 
   constructor(orchestrationDir: string) {
     this.bodiesDir = join(orchestrationDir, 'bodies')
+  }
+
+  /** Pins an external body sha256 in memory while a submit is preparing/committing so deleteSession cannot unlink it. */
+  pin(sha256: string): () => void {
+    if (!SHA256_RE.test(sha256)) return () => undefined
+    this.#pinned.set(sha256, (this.#pinned.get(sha256) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const next = (this.#pinned.get(sha256) ?? 1) - 1
+      if (next <= 0) this.#pinned.delete(sha256)
+      else this.#pinned.set(sha256, next)
+    }
+  }
+
+  isPinned(sha256: string): boolean {
+    return (this.#pinned.get(sha256) ?? 0) > 0
   }
 
   private ensureDir(): void {
@@ -175,7 +194,7 @@ export class BodyStore {
   }
 
   unlinkBody(sha256: string): void {
-    if (!SHA256_RE.test(sha256)) return
+    if (!SHA256_RE.test(sha256) || this.isPinned(sha256)) return
     rmSync(this.externalPath(sha256), { force: true })
   }
 }

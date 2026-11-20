@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import type { MacRunSource, MacRunView } from './host-controller-types'
 import type { OrchestrationAuthorityHooks } from './orchestration-seam'
@@ -38,24 +38,26 @@ export function answerRunQuestion(deps: RunControlDeps, peerCertSHA256: string, 
       if (!deps.macRuns!.answer(input.response)) throw new RemoteInteractionError('question_not_pending')
       return { status: 'answered' }
     }
-    if (deps.orchestration) {
-      const response = input.response as { questionId?: unknown } | null
-      if (typeof response?.questionId === 'string') {
-        deps.orchestration.onQuestionAnswer({
-          peerCertSHA256,
-          grantScope: deps.gateway?.grantScope(peerCertSHA256) ?? 'remote',
-          runId: input.runId,
-          questionId: response.questionId,
-          answerId: input.answerId,
-          answerSha256: createHash('sha256').update(JSON.stringify(input.response)).digest('hex')
-        })
-      }
-    }
-    return deps.interactions.answer(input.runId, {
-      answerId: input.answerId,
-      response: input.response,
-      answeredByPeer: peerCertSHA256
-    })
+    return deps.interactions.answer(
+      input.runId,
+      {
+        answerId: input.answerId,
+        response: input.response,
+        answeredByPeer: peerCertSHA256
+      },
+      deps.orchestration
+        ? (validated) => {
+            deps.orchestration!.onQuestionAnswer({
+              peerCertSHA256,
+              grantScope: deps.gateway?.grantScope(peerCertSHA256) ?? 'remote',
+              runId: input.runId,
+              questionId: validated.questionId,
+              answerId: validated.answerId,
+              answerSha256: validated.answerSha256
+            })
+          }
+        : undefined
+    )
 }
 
 export function answerOwnerRunQuestion(deps: RunControlDeps, runId: string, response: AgentQuestionResponse): boolean {

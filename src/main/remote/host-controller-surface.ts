@@ -3,7 +3,7 @@ import type { DesktopDirectoryResult, DesktopHostReadResult, RemoteProviderQuery
 import type { RemoteIntentRouting, MacRunSource, LiveRunRef, HostControllerDependencies } from './host-controller-types'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import { DesktopAttachmentStore, type DesktopAttachmentReference } from './desktop-attachments'
-import { HOST_RESTARTED_DETAIL, REMOTE_RUN_ID } from './host-controller-routing'
+import { REMOTE_RUN_ID } from './host-controller-routing'
 import { LiveWatchers, type WatchInput, type WatchLifecycle, type WatchResult } from './host-controller-watch'
 import { PairingAuthority } from './pairing'
 import { RemoteDispatcher } from './remote-dispatcher'
@@ -16,7 +16,7 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { answerOwnerRunQuestion, answerRunQuestion, stopRun, type AnswerInput, type RunControlDeps } from './host-controller-run-controls'
 import { authorizedCwd, isRemoteRun, macRun } from './host-controller-runs'
 import { chunkAttachment, commitAttachment, releaseIntentAttachments, resolveIntentAttachments, startAttachment, type AttachmentDeps } from './host-controller-attachments'
-import { createExecution, ledgerEventObserver } from './host-controller-execution'
+import { createExecution, ledgerEventObserver, recoverDispatchedLedgerRuns } from './host-controller-execution'
 import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopReadDeps } from './host-controller-desktop-reads'
 import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
@@ -107,9 +107,9 @@ export class HostController {
     })
   }
 
-  // Startup only: fail orphaned dispatched runs and pump undispatched intents.
+  // Startup only: reconcile orphaned dispatched runs and pump undispatched intents.
   recover(): void {
-    for (const runId of this.#ledger.dispatchedRuns()) this.#ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
+    recoverDispatchedLedgerRuns(this.#ledger, this.#orchestration)
     this.#dispatcher.pump()
   }
 

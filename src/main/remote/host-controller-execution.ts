@@ -10,8 +10,33 @@ import type { LedgerEvent, SessionLedger } from './session-ledger'
 import type { RunOutputLog } from './run-output-log'
 import type { PairingAuthority } from './pairing'
 import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
-import { parseRouting } from './host-controller-routing'
+import { parseRouting, HOST_RESTARTED_DETAIL } from './host-controller-routing'
 import type { HostControllerDependencies, RemoteIntentRouting } from './host-controller-types'
+import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+
+/** Startup reconciliation for orphaned dispatched runs (core §2.4: interrupted != failed). */
+export function recoverDispatchedLedgerRuns(
+  ledger: SessionLedger,
+  orchestration?: OrchestrationAuthorityHooks
+): void {
+  for (const runId of ledger.dispatchedRuns()) {
+    if (orchestration?.recoveredRunLifecycle) {
+      const recovered = orchestration.recoveredRunLifecycle(runId)
+      if (recovered === 'settled') {
+        ledger.markSettled(runId)
+        continue
+      }
+      if (recovered === 'failed') {
+        ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
+        continue
+      }
+      ledger.markProgress(runId, JSON.stringify({ event: 'interrupted', reason: 'host_restarted' }))
+      ledger.markCancelled(runId)
+      continue
+    }
+    ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
+  }
+}
 
 // Wires the device gateway and the exactly-once dispatcher: which reader serves
 // each gateway face, and how one submitted intent becomes exactly one Provider

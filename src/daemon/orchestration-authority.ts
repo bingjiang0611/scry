@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import type { ConversationStore } from '../main/conversation-store'
+import { buildMcpExecutionSnapshot } from '../main/mcp-execution-trust'
+import type { ProviderId } from '../shared/provider'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
 import {
   SessionLedgerError,
@@ -37,6 +40,8 @@ import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/reco
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
+const MAX_LEDGER_CANONICAL_MAP = 4_096
+const TRUST_GATE_PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
@@ -201,6 +206,16 @@ function buildAuthorityRuntime<
   let progressCounter = 0
 
   const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
+  const trackCanonical = (ledgerRunId: string, canonicalRunId: string): void => {
+    if (ledgerRunId === canonicalRunId) return
+    ledgerToCanonical.delete(ledgerRunId)
+    ledgerToCanonical.set(ledgerRunId, canonicalRunId)
+    while (ledgerToCanonical.size > MAX_LEDGER_CANONICAL_MAP) {
+      const oldest = ledgerToCanonical.keys().next().value
+      if (oldest === undefined) break
+      ledgerToCanonical.delete(oldest)
+    }
+  }
 
   const hooks: OrchestrationAuthorityHooks = {
     createLedgerStore: (ledgerDirectory) => {
@@ -270,7 +285,7 @@ function buildAuthorityRuntime<
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
       const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
-      if (ledgerRunId !== res.runId) ledgerToCanonical.set(ledgerRunId, res.runId)
+      trackCanonical(ledgerRunId, res.runId)
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
@@ -283,8 +298,23 @@ function buildAuthorityRuntime<
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
       const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
-      if (ledgerRunId !== res.runId) ledgerToCanonical.set(ledgerRunId, res.runId)
+      trackCanonical(ledgerRunId, res.runId)
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
+    },
+
+    compensateSubmitFailure: (runId, reason) => {
+      const canonicalRunId = resolveCanonical(runId)
+      engine.compensateSubmitFailure(canonicalRunId, reason)
+      ledgerToCanonical.delete(runId)
+    },
+
+    recoveredRunLifecycle: (runId) => {
+      const run = sink.getRun(resolveCanonical(runId))
+      if (!run) return undefined
+      if (run.lifecycle === 'settled' || run.lifecycle === 'failed' || run.lifecycle === 'cancelled' || run.lifecycle === 'interrupted') {
+        return run.lifecycle
+      }
+      return undefined
     },
 
     resolveIntent: (input) =>
@@ -298,7 +328,7 @@ function buildAuthorityRuntime<
       const canonicalRunId = resolveCanonical(input.runId)
       const routing = parseLedgerIntentRouting(canonicalRunId, input.detail)
       const actor = input.peerCertSHA256 ? `peer:${input.peerCertSHA256}` : 'system'
-      return engine.beforeDispatch({
+      const res = engine.beforeDispatch({
         runId: canonicalRunId,
         cwd: routing.cwd,
         provider: routing.provider,
@@ -306,8 +336,28 @@ function buildAuthorityRuntime<
         actor,
         authorizeWorkspace: input.authorizeWorkspace,
         isPeerAuthorized: input.isPeerAuthorized,
-        isProviderAuthenticating: input.isProviderAuthenticating
+        isProviderAuthenticating: input.isProviderAuthenticating,
+        verifyTrustGate: () => {
+          const targetCwd = routing.cwd || sink.getRun(canonicalRunId)?.cwd
+          const targetProvider = (routing.provider || sink.getRun(canonicalRunId)?.provider || '') as ProviderId
+          if (!targetCwd || !TRUST_GATE_PROVIDERS.has(targetProvider)) return true
+          try {
+            const snapshot = buildMcpExecutionSnapshot({
+              providerId: targetProvider,
+              cwd: targetCwd,
+              homeDir: homedir(),
+              settingSources: targetProvider === 'claude' ? options.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
+              env: options.env
+            })
+            return snapshot.errors.length === 0
+          } catch {
+            // Trust gate MUST fail closed on inspection errors.
+            return false
+          }
+        }
       })
+      if (!res.ok && res.action === 'fail') ledgerToCanonical.delete(input.runId)
+      return res
     },
 
     onRunProgress: (runId, detail) => {

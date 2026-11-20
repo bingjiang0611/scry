@@ -2,8 +2,11 @@ import { randomUUID } from 'node:crypto'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
 import {
   buildSubmitCommandForAuthority,
+  getRunStartExpiryInfo,
+  requeueRunStartOutbox,
   runAuthorityPreDispatchRecheck,
   tryRealpath,
+  updateRunStartOutbox,
   type AuthorityBeforeDispatchInput,
   type AuthoritySubmitInput
 } from './authority-dispatch'
@@ -14,7 +17,6 @@ import {
   DEFAULT_PENDING_TTL_MS,
   INLINE_BODY_MAX_BYTES,
   OrchestrationStoreError,
-  type OutboxState,
   type PreparedBody
 } from './types'
 
@@ -125,20 +127,27 @@ export class AuthorityEngine {
     const preview = parseLedgerIntentRouting(input.runId ?? 'probe', input.detail)
     const epochBeforePrepare = preview.sessionKey ? this.sink.getSessionDeleteEpoch(preview.sessionKey) : undefined
     let preparedBody: PreparedBody | undefined
-    if (input.detail && Buffer.byteLength(input.detail, 'utf8') > INLINE_BODY_MAX_BYTES) {
-      preparedBody = await this.sink.bodyStore.prepareBodyAsync(input.detail)
+    let unpinBody: (() => void) | undefined
+    try {
+      if (input.detail && Buffer.byteLength(input.detail, 'utf8') > INLINE_BODY_MAX_BYTES) {
+        const expectedSha = sha256Hex(Buffer.from(input.detail, 'utf8'))
+        unpinBody = this.sink.bodyStore.pin(expectedSha)
+        preparedBody = await this.sink.bodyStore.prepareBodyAsync(input.detail)
+      }
+      const built = buildSubmitCommandForAuthority({
+        sink: this.sink,
+        actor,
+        leaseOwner: this.#leaseOwner,
+        pendingTtlMs: this.#pendingTtlMs,
+        now: this.#clock(),
+        resolveTurnOrdinal: this.#resolveTurnOrdinal,
+        input,
+        preparedBody
+      })
+      return this.finishSubmit(built, hookStarted, epochBeforePrepare)
+    } finally {
+      unpinBody?.()
     }
-    const built = buildSubmitCommandForAuthority({
-      sink: this.sink,
-      actor,
-      leaseOwner: this.#leaseOwner,
-      pendingTtlMs: this.#pendingTtlMs,
-      now: this.#clock(),
-      resolveTurnOrdinal: this.#resolveTurnOrdinal,
-      input,
-      preparedBody
-    })
-    return this.finishSubmit(built, hookStarted, epochBeforePrepare)
   }
 
   /** Synchronous authoritative submit for non-attachment local/conversation submit path. */
@@ -154,20 +163,27 @@ export class AuthorityEngine {
     const preview = parseLedgerIntentRouting(input.runId ?? 'probe', input.detail)
     const epochBeforePrepare = preview.sessionKey ? this.sink.getSessionDeleteEpoch(preview.sessionKey) : undefined
     let preparedBody: PreparedBody | undefined
-    if (input.detail && Buffer.byteLength(input.detail, 'utf8') > INLINE_BODY_MAX_BYTES) {
-      preparedBody = this.sink.bodyStore.prepareBody(input.detail)
+    let unpinBody: (() => void) | undefined
+    try {
+      if (input.detail && Buffer.byteLength(input.detail, 'utf8') > INLINE_BODY_MAX_BYTES) {
+        const expectedSha = sha256Hex(Buffer.from(input.detail, 'utf8'))
+        unpinBody = this.sink.bodyStore.pin(expectedSha)
+        preparedBody = this.sink.bodyStore.prepareBody(input.detail)
+      }
+      const built = buildSubmitCommandForAuthority({
+        sink: this.sink,
+        actor,
+        leaseOwner: this.#leaseOwner,
+        pendingTtlMs: this.#pendingTtlMs,
+        now: this.#clock(),
+        resolveTurnOrdinal: this.#resolveTurnOrdinal,
+        input,
+        preparedBody
+      })
+      return this.finishSubmit(built, hookStarted, epochBeforePrepare)
+    } finally {
+      unpinBody?.()
     }
-    const built = buildSubmitCommandForAuthority({
-      sink: this.sink,
-      actor,
-      leaseOwner: this.#leaseOwner,
-      pendingTtlMs: this.#pendingTtlMs,
-      now: this.#clock(),
-      resolveTurnOrdinal: this.#resolveTurnOrdinal,
-      input,
-      preparedBody
-    })
-    return this.finishSubmit(built, hookStarted, epochBeforePrepare)
   }
 
   /**
@@ -189,13 +205,13 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: ['host.stop_before_dispatch']
       })
-      this.updateRunStartOutbox(input.runId, 'done')
+      updateRunStartOutbox(this.sink, this.#clock(), input.runId, 'done')
       return { ok: false, action: 'fail', reason: 'stop_requested' }
     }
     if (run.lifecycle !== 'recorded') return { ok: false, action: 'fail', reason: 'illegal_transition' }
 
     const now = this.#clock()
-    const { intentAt, expiresAt } = this.getRunStartExpiryInfo(input.runId, run.intentSeq)
+    const { intentAt, expiresAt } = getRunStartExpiryInfo(this.sink, input.runId, run.intentSeq)
     const effectiveExpiresAt = expiresAt ?? (intentAt !== null ? intentAt + this.#pendingTtlMs : null)
     if ((intentAt !== null && now < intentAt) || (effectiveExpiresAt !== null && now > effectiveExpiresAt)) {
       this.recordTerminal({
@@ -205,7 +221,7 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: ['pre_dispatch_recheck:pending_expired']
       })
-      this.updateRunStartOutbox(input.runId, 'voided', 'pending_expired')
+      updateRunStartOutbox(this.sink, now, input.runId, 'voided', 'pending_expired')
       return { ok: false, action: 'fail', reason: 'pending_expired' }
     }
 
@@ -214,7 +230,7 @@ export class AuthorityEngine {
     const recheck = runAuthorityPreDispatchRecheck({ ...input, actor: effectiveActor }, preparedRealCwd, run.cwd)
     if (!recheck.ok) {
       if (recheck.action === 'requeue') {
-        this.requeueRunStartOutbox(input.runId)
+        requeueRunStartOutbox(this.sink, now, this.#pendingTtlMs, input.runId)
         const retryAfterMs =
           effectiveExpiresAt !== null ? Math.max(10, effectiveExpiresAt - now + 5) : this.#pendingTtlMs
         return { ok: false, action: 'requeue', reason: recheck.reason, retryAfterMs }
@@ -226,7 +242,7 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: [`pre_dispatch_recheck:${recheck.reason}`]
       })
-      this.updateRunStartOutbox(input.runId, 'failed', recheck.reason)
+      updateRunStartOutbox(this.sink, now, input.runId, 'failed', recheck.reason)
       return recheck
     }
 
@@ -271,7 +287,7 @@ export class AuthorityEngine {
       const run = this.sink.getRun(legacy.runId)
       const state =
         run?.lifecycle === 'interrupted'
-          ? 'failed'
+          ? 'cancelled'
           : run?.lifecycle === 'admitted'
             ? 'dispatched'
             : (run?.lifecycle ?? 'cancelled')
@@ -296,7 +312,7 @@ export class AuthorityEngine {
       const run = this.sink.getRun(runId)
       const state =
         run?.lifecycle === 'interrupted'
-          ? 'failed'
+          ? 'cancelled'
           : run?.lifecycle === 'admitted'
             ? 'dispatched'
             : (run?.lifecycle ?? 'cancelled')
@@ -329,7 +345,7 @@ export class AuthorityEngine {
     const payload = { runId: input.runId, ...(input.reason ? { reason: input.reason } : {}) }
     const res = this.sink.execute({
       type: 'run.stop',
-      commandId: `stop:${input.runId}:${this.#clock()}`,
+      commandId: `stop:${input.runId}`,
       actor,
       scope: input.grantScope,
       at: this.#clock(),
@@ -410,6 +426,21 @@ export class AuthorityEngine {
     })
   }
 
+  /** Compensates an already-committed submit if a subsequent non-atomic H1 side-effect fails. */
+  compensateSubmitFailure(runId: string, reason: string): void {
+    if (this.sink.isWriteIndeterminate()) return
+    const run = this.sink.getRun(runId)
+    if (!run || run.lifecycle !== 'recorded') return
+    this.recordTerminal({
+      runId,
+      step: 'cancelled',
+      reason,
+      delivery: 'not_sent',
+      evidence: ['host.submit_compensation']
+    })
+    updateRunStartOutbox(this.sink, this.#clock(), runId, 'voided', reason)
+  }
+
   recordTerminal(input: {
     runId: string
     step: 'settled' | 'failed' | 'cancelled' | 'interrupted'
@@ -453,40 +484,6 @@ export class AuthorityEngine {
       payload,
       payloadSha256: sha256Hex(canonicalJson(payload))
     })
-    this.updateRunStartOutbox(input.runId, input.step === 'failed' ? 'failed' : 'done')
-  }
-
-  private getRunStartExpiryInfo(runId: string, intentSeq: number): { intentAt: number | null; expiresAt: number | null } {
-    const outboxRow = this.sink.handle.db
-      .prepare(
-        "SELECT expires_at FROM orch_outbox WHERE run_id = ? AND kind = 'provider.run.start' ORDER BY causation_seq DESC LIMIT 1"
-      )
-      .get(runId) as { expires_at: number | null } | undefined
-    const eventRow = this.sink.handle.db
-      .prepare('SELECT at FROM orch_event WHERE seq = ?')
-      .get(intentSeq) as { at: number } | undefined
-    return {
-      intentAt: eventRow ? Number(eventRow.at) : null,
-      expiresAt: outboxRow && outboxRow.expires_at !== null ? Number(outboxRow.expires_at) : null
-    }
-  }
-
-  private updateRunStartOutbox(runId: string, state: OutboxState, lastError?: string): void {
-    if (this.sink.isWriteIndeterminate()) return
-    this.sink.handle.db
-      .prepare(
-        "UPDATE orch_outbox SET state = ?, completed_at = ?, last_error = COALESCE(?, last_error) WHERE run_id = ? AND kind = 'provider.run.start' AND state IN ('pending', 'running')"
-      )
-      .run(state, this.#clock(), lastError ?? null, runId)
-  }
-
-  private requeueRunStartOutbox(runId: string): void {
-    if (this.sink.isWriteIndeterminate()) return
-    const now = this.#clock()
-    this.sink.handle.db
-      .prepare(
-        "UPDATE orch_outbox SET state = 'pending', lease_owner = NULL, claimed_at = NULL, expires_at = COALESCE(expires_at, ?) WHERE run_id = ? AND kind = 'provider.run.start' AND state = 'running'"
-      )
-      .run(now + this.#pendingTtlMs, runId)
+    updateRunStartOutbox(this.sink, at, input.runId, input.step === 'failed' ? 'failed' : 'done')
   }
 }

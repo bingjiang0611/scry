@@ -114,6 +114,14 @@ export function deleteSessionInDb(
         const parsed = JSON.parse(row.body) as { storage?: string; sha256?: string }
         if (parsed.storage === 'external' && parsed.sha256) stillReferenced.add(parsed.sha256)
       }
+      const activeOutbox = db
+        .prepare("SELECT payload FROM orch_outbox WHERE state IN ('pending', 'running')")
+        .all() as Array<{ payload: string }>
+      for (const row of activeOutbox) {
+        for (const sha of candidateShas) {
+          if (row.payload.includes(sha)) stillReferenced.add(sha)
+        }
+      }
     }
     unreferencedShas = [...candidateShas].filter((sha) => !stillReferenced.has(sha))
     beforeCommitHook?.()
@@ -222,12 +230,19 @@ export function unlinkUnreferencedExternalBodyInDb(
   bodyStore: BodyStore,
   sha256: string
 ): void {
+  if (bodyStore.isPinned(sha256)) return
   const surviving = db
     .prepare('SELECT body FROM orch_p_run WHERE body IS NOT NULL')
     .all() as Array<{ body: string }>
   for (const row of surviving) {
     const parsed = JSON.parse(row.body) as { storage?: string; sha256?: string }
     if (parsed.storage === 'external' && parsed.sha256 === sha256) return
+  }
+  const activeOutbox = db
+    .prepare("SELECT payload FROM orch_outbox WHERE state IN ('pending', 'running')")
+    .all() as Array<{ payload: string }>
+  for (const row of activeOutbox) {
+    if (row.payload.includes(sha256)) return
   }
   bodyStore.unlinkBody(sha256)
 }

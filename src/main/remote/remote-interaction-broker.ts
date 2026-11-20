@@ -81,7 +81,11 @@ export class RemoteInteractionBroker {
     return this.#broker.list(runId)
   }
 
-  answer(runId: string, value: RemoteQuestionAnswer): RemoteQuestionAnswerReceipt {
+  answer(
+    runId: string,
+    value: RemoteQuestionAnswer,
+    beforeCommit?: (validated: { questionId: string; answerId: string; answerSha256: string }) => void
+  ): RemoteQuestionAnswerReceipt {
     if (!UUID.test(value?.answerId ?? '')) throw new RemoteInteractionError('invalid_answer_id')
     if (!value?.response || typeof value.response !== 'object') throw new RemoteInteractionError('invalid_question_response')
     const questionId = (value.response as { questionId?: unknown }).questionId
@@ -102,6 +106,7 @@ export class RemoteInteractionBroker {
     const normalized = normalizeAgentQuestionResponse(request, { ...value.response, runId })
     if (!normalized) throw new RemoteInteractionError('invalid_question_response')
     const answerDigest = digest(normalized)
+    beforeCommit?.({ questionId, answerId: value.answerId, answerSha256: answerDigest })
     const peerKey = `${runId}\0${questionId}\0${value.answerId}`
     if (value.answeredByPeer) {
       this.#answeredBy.delete(peerKey)

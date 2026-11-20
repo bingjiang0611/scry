@@ -25,6 +25,10 @@ export interface OrchestrationAuthorityHooks {
     scopedIntentId: string
     detail?: string
   }): { runId: string; status: 'recorded' | 'duplicate'; seq: number }
+  /** Compensates a committed orchestration submit when the subsequent H1 mirror side-effect throws. */
+  compensateSubmitFailure(runId: string, reason: string): void
+  /** Startup recovery outcome for a previously dispatched run so H1 matches orchestration.db. */
+  recoveredRunLifecycle?(runId: string): 'settled' | 'failed' | 'cancelled' | 'interrupted' | undefined
   /** Writes a permanent `resolved_absent` tombstone or returns existing intent state. */
   resolveIntent(input: {
     peerCertSHA256: string

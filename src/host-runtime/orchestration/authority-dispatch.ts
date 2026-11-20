@@ -4,7 +4,7 @@ import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import { evaluatePreDispatchRecheck, type OrchestrationCommand } from './orchestrator-commands'
 import { parseLedgerIntentRouting } from './shadow-routing'
-import type { PreparedBody } from './types'
+import type { OutboxState, PreparedBody } from './types'
 
 export function tryRealpath(cwd: string | null | undefined): string | null {
   if (!cwd) return null
@@ -132,4 +132,52 @@ export function runAuthorityPreDispatchRecheck(
     operationGateAcquired: !input.isProviderAuthenticating(input.provider, input.profile),
     trustGatePassed: input.verifyTrustGate ? input.verifyTrustGate() : true
   })
+}
+
+export function getRunStartExpiryInfo(
+  sink: EventSink,
+  runId: string,
+  intentSeq: number
+): { intentAt: number | null; expiresAt: number | null } {
+  const outboxRow = sink.handle.db
+    .prepare(
+      "SELECT expires_at FROM orch_outbox WHERE run_id = ? AND kind = 'provider.run.start' ORDER BY causation_seq DESC LIMIT 1"
+    )
+    .get(runId) as { expires_at: number | null } | undefined
+  const eventRow = sink.handle.db
+    .prepare('SELECT at FROM orch_event WHERE seq = ?')
+    .get(intentSeq) as { at: number } | undefined
+  return {
+    intentAt: eventRow ? Number(eventRow.at) : null,
+    expiresAt: outboxRow && outboxRow.expires_at !== null ? Number(outboxRow.expires_at) : null
+  }
+}
+
+export function updateRunStartOutbox(
+  sink: EventSink,
+  now: number,
+  runId: string,
+  state: OutboxState,
+  lastError?: string
+): void {
+  if (sink.isWriteIndeterminate()) return
+  sink.handle.db
+    .prepare(
+      "UPDATE orch_outbox SET state = ?, completed_at = ?, last_error = COALESCE(?, last_error) WHERE run_id = ? AND kind = 'provider.run.start' AND state IN ('pending', 'running')"
+    )
+    .run(state, now, lastError ?? null, runId)
+}
+
+export function requeueRunStartOutbox(
+  sink: EventSink,
+  now: number,
+  pendingTtlMs: number,
+  runId: string
+): void {
+  if (sink.isWriteIndeterminate()) return
+  sink.handle.db
+    .prepare(
+      "UPDATE orch_outbox SET state = 'pending', lease_owner = NULL, claimed_at = NULL, expires_at = COALESCE(expires_at, ?) WHERE run_id = ? AND kind = 'provider.run.start' AND state = 'running'"
+    )
+    .run(now + pendingTtlMs, runId)
 }

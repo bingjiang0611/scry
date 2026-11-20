@@ -33,7 +33,15 @@ export function submitIntent(deps: SubmitDeps, peerCertSHA256: string, input: { 
       scopedIntentId: scoped,
       detail: input.detail
     })
-    const result = deps.gateway.submitIntent(peerCertSHA256, { ...input, runId: auth.runId })
+    let result: SubmitResult
+    try {
+      result = deps.gateway.submitIntent(peerCertSHA256, { ...input, runId: auth.runId })
+    } catch (error) {
+      if (auth.status === 'recorded') {
+        try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
+      }
+      throw error
+    }
     if (auth.status === 'recorded') deps.dispatcher.pump()
     return { runId: result.runId, status: auth.status, seq: result.seq }
   }
@@ -60,7 +68,15 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
       scopedIntentId: scoped,
       detail
     })
-    const result = deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
+    let result: SubmitResult
+    try {
+      result = deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
+    } catch (error) {
+      if (auth.status === 'recorded') {
+        try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
+      }
+      throw error
+    }
     if (auth.status === 'recorded') deps.dispatcher.pump()
     return { runId: result.runId, status: auth.status, seq: result.seq }
   }

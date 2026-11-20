@@ -100,7 +100,7 @@ export class SessionLedgerError extends Error {
 }
 
 export const RUN_LIFECYCLE_NEXT: Readonly<Record<RunLifecycle, readonly RunLifecycle[]>> = {
-  recorded: ['dispatched', 'cancelled'],
+  recorded: ['dispatched', 'failed', 'cancelled'],
   dispatched: ['settled', 'failed', 'cancelled'],
   settled: [],
   failed: [],
