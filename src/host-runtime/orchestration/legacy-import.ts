@@ -416,7 +416,7 @@ export function importLegacyStateIncrementally(options: LegacyImportOptions): Le
 }
 
 /**
- * Yields between 500-run batches via `setImmediate` so large historical backfills (up to H1's
+ * Yields between 100-run batches via `setImmediate` so large historical backfills (up to H1's
  * 100k snapshot cap) never block `openLocalChannel` or starve incoming daemon socket requests.
  */
 export function startDeferredLegacyImport(
@@ -428,7 +428,7 @@ export function startDeferredLegacyImport(
   const pendingTtlMs = Math.min(options.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS, DEFAULT_PENDING_TTL_MS)
   const reconcileOpenRuns = options.reconcileOpenRuns ?? false
   const shadowOnly = options.shadowOnly ?? !reconcileOpenRuns
-  const batchSize = Math.max(1, options.batchSize ?? 500)
+  const batchSize = Math.max(1, options.batchSize ?? 100)
   const resolveTurnOrdinal = options.resolveTurnOrdinal ?? createConversationOrdinalResolver(userDataDir)
 
   const promise = new Promise<LegacyImportSummary>((resolve, reject) => {
