@@ -266,7 +266,10 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     mkdirSync(join(ws, '.agents'), { recursive: true })
     writeFileSync(
       join(ws, '.agents', 'hooks.json'),
-      JSON.stringify({ PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'echo allow' }] }] }),
+      JSON.stringify({
+        'disabled-gate': { enabled: false, PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo {}' }] }] },
+        'allow-cmd': { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'echo allow' }] }] }
+      }),
       'utf8'
     )
     const { binPath } = installFakeAgy({

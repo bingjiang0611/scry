@@ -149,6 +149,30 @@ describe('CapabilitiesModal 精简能力页', () => {
     )
     expect(toolHtml).toContain('由 hook 放行')
     expect(toolHtml).not.toContain('权限确认')
+
+    // tool_result 上的 approvalSource=hook 合并到 tool_use 卡片时也必须保留
+    const mergedHookTurn: shared.Turn = {
+      runId: 'run-agy-ui-hook-merge',
+      userText: 'run',
+      done: true,
+      items: [
+        ev({ id: 'agy-t-u', kind: 'tool', stage: 'tool:run_command', tool: 'run_command', toolUseId: 'tc-h1', runtimeProvider: 'antigravity_acp' }),
+        ev({
+          id: 'agy-t-r',
+          kind: 'tool',
+          stage: 'tool_result',
+          tool: 'run_command',
+          toolUseId: 'tc-h1',
+          runtimeProvider: 'antigravity_acp',
+          runtimeMetadata: { approvalSource: 'hook', approvalLabel: '由 hook 放行' }
+        })
+      ]
+    }
+    const mergedHtml = renderToStaticMarkup(
+      <AssistantTurn turn={mergedHookTurn} selectedId="agy-t-u" onSelect={() => {}} />
+    )
+    expect(mergedHtml).toContain('由 hook 放行')
+    expect(mergedHtml).not.toContain('权限确认')
   })
 
   it('Skills 默认显示全部来源，只保留名称和描述', () => {

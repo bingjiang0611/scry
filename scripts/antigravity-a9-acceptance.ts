@@ -1,111 +1,16 @@
 import 'reflect-metadata'
 import { execFileSync } from 'node:child_process'
-import { randomUUID, webcrypto } from 'node:crypto'
+import { webcrypto } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { cryptoProvider } from '@peculiar/x509'
 import { createAntigravityAdapter } from '../src/main/providers/antigravity'
-import type { AgentQuestionRequest, AgentQuestionResponse } from '../src/shared/runtime'
-import type { TraceEvent } from '../src/shared/trace'
+import { answerQuestion, pickAllow, pickReject, psCommandLines, runOne, saveEvidence } from './antigravity-a9-helpers'
 import { enrollAndCallLaunchdDaemon } from './antigravity-a9-launchd'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
-
-const EVIDENCE_DIR = join(homedir(), '.local/state/scry-handoff-evidence/W8')
-mkdirSync(EVIDENCE_DIR, { recursive: true })
-
-function saveEvidence(name: string, data: unknown): void {
-  writeFileSync(join(EVIDENCE_DIR, name), `${JSON.stringify(data, null, 2)}\n`, 'utf8')
-}
-
-function psCommandLines(matchSubstr: string): string[] {
-  try {
-    const out = execFileSync('ps', ['-axo', 'pid,ppid,pgid,command'], { encoding: 'utf8' })
-    return out.split('\n').filter((line) => line.includes(matchSubstr))
-  } catch {
-    return []
-  }
-}
-
-function answerQuestion(
-  req: AgentQuestionRequest,
-  pick: (options: AgentQuestionRequest['questions'][number]['options']) => string | undefined
-): AgentQuestionResponse {
-  const q = req.questions[0]
-  if (!q) return { behavior: 'cancelled' }
-  const chosen = pick(q.options) ?? q.options[0]?.answerValue ?? q.options[0]?.label
-  if (!chosen) return { behavior: 'cancelled' }
-  return { behavior: 'answered', answers: { [q.question]: chosen } }
-}
-
-async function runOne(
-  adapter: ReturnType<typeof createAntigravityAdapter>,
-  opts: {
-    cwd: string
-    prompt: string
-    permissionMode?: 'default' | 'auto_accept_edits' | 'full_access'
-    resume?: string
-    model?: { id: string }
-    effort?: string
-    historyReader?: { url: string; token: string; serverName: string }
-    onEvent?: (event: TraceEvent, handle: ReturnType<ReturnType<typeof createAntigravityAdapter>['run']>) => void
-    onQuestion?: (req: AgentQuestionRequest) => AgentQuestionResponse
-  }
-) {
-  const events: TraceEvent[] = []
-  const nativeEvents: Array<{ type: string; payload: unknown }> = []
-  const questions: AgentQuestionRequest[] = []
-  let externalSessionId: string | undefined
-  const handle = adapter.run({
-    runId: `a9-${randomUUID().slice(0, 8)}`,
-    prompt: opts.prompt,
-    cwd: opts.cwd,
-    attachments: [],
-    permissionMode: opts.permissionMode ?? 'default',
-    resume: opts.resume,
-    model: opts.model,
-    effort: opts.effort,
-    historyReader: opts.historyReader,
-    emit: (event) => {
-      events.push(event)
-      opts.onEvent?.(event, handle)
-    },
-    recordNative: (type, payload) => {
-      nativeEvents.push({ type, payload })
-    },
-    onExternalSessionId: (sid) => {
-      externalSessionId = sid
-    },
-    requestUserInput: async (req) => {
-      questions.push(req)
-      if (opts.onQuestion) return opts.onQuestion(req)
-      return answerQuestion(req, (options) =>
-        options.find((o) => /reject|deny|拒绝/i.test(o.answerValue ?? '') || /reject|deny|拒绝/i.test(o.label))?.answerValue
-      )
-    }
-  })
-  const result = await handle.promise
-  const text = events.filter((e) => e.kind === 'model' && e.stage === 'text_delta').map((e) => e.text ?? '').join('')
-  const thinking = events.filter((e) => e.kind === 'model' && e.stage === 'thinking').map((e) => e.text ?? '').join('')
-  const tools = events.filter((e) => e.kind === 'tool' && e.stage === 'tool_use').map((e) => ({ id: e.toolUseId, name: e.tool ?? e.name }))
-  const resultEvent = [...events].reverse().find((e) => e.kind === 'harness' && e.stage === 'result')
-  return {
-    result,
-    externalSessionId: externalSessionId ?? handle.getExternalSessionId(),
-    text,
-    thinkingLen: thinking.length,
-    tools,
-    questions,
-    usage: resultEvent?.usage,
-    costUsd: resultEvent?.costUsd ?? null,
-    modelStatus: resultEvent?.modelStatus,
-    usageCoverage: resultEvent?.usageCoverage,
-    nativeCount: nativeEvents.length,
-    eventsCount: events.length
-  }
-}
 
 async function main() {
   const repoRoot = resolve(process.cwd())
@@ -143,13 +48,16 @@ async function main() {
     summary.catalog = { state: controls.state, modelCount: models.length, distinctEffortSetsCount: effortSets.size }
     console.log('[A9 1/11] catalog:', JSON.stringify(summary.catalog))
 
-    // 2. D3 user-level settings.json refusal (real ~/.gemini + isolated elevated settings.json)
-    let realDefaultErr: string | null = null
-    try {
-      await runOne(realAdapter, { cwd: ws, prompt: 'say ok', permissionMode: 'default' })
-    } catch (err) {
-      realDefaultErr = err instanceof Error ? err.message : String(err)
-    }
+    const fastModel = models.find((m) => /flash/i.test(m.model.id))?.model ?? models[0]?.model
+
+    // 2. D11 real ~/.gemini (2 permissions.allow rules -> start normally in default & auto_accept_edits with notice)
+    //    + D3 broad elevation refusal (isolated toolPermission: "auto" -> refuse default & auto_accept_edits)
+    const realDefault = await runOne(realAdapter, {
+      cwd: ws, model: fastModel, permissionMode: 'default', prompt: 'Reply with ONLY: D11_DEF_OK'
+    })
+    const realEdits = await runOne(realAdapter, {
+      cwd: ws, model: fastModel, permissionMode: 'auto_accept_edits', prompt: 'Reply with ONLY: D11_EDITS_OK'
+    })
     const elevatedGemini = join(tmpRoot, 'elevated-gemini')
     mkdirSync(join(elevatedGemini, 'antigravity-cli'), { recursive: true, mode: 0o700 })
     writeFileSync(join(elevatedGemini, 'antigravity-cli', 'settings.json'), JSON.stringify({ toolPermission: 'auto' }), 'utf8')
@@ -161,27 +69,24 @@ async function main() {
     } catch (err) {
       elevatedErr = err instanceof Error ? err.message : String(err)
     }
-    saveEvidence('a9-02-d3-refusal.json', { realDefaultErr, elevatedErr })
-    summary.d3Refusal = {
-      realDefaultRefused: Boolean(realDefaultErr?.includes('已拒绝启动 Antigravity')),
+    saveEvidence('a9-02-d11-and-d3.json', {
+      realDefault: { status: realDefault.result.status, effectivePermissionMode: realDefault.effectivePermissionMode, userAllowNotice: realDefault.userAllowNotice, text: realDefault.text.slice(0, 80) },
+      realEdits: { status: realEdits.result.status, effectivePermissionMode: realEdits.effectivePermissionMode, userAllowNotice: realEdits.userAllowNotice, text: realEdits.text.slice(0, 80) },
+      elevatedErr
+    })
+    summary.d11AndD3 = {
+      realDefaultOk: realDefault.result.status === 'completed' && realDefault.effectivePermissionMode === 'default + 用户规则' && String(realDefault.userAllowNotice ?? '').includes('agy 用户级规则会自动放行：'),
+      realEditsOk: realEdits.result.status === 'completed' && realEdits.effectivePermissionMode === 'auto_accept_edits + 用户规则' && String(realEdits.userAllowNotice ?? '').includes('agy 用户级规则会自动放行：'),
       elevatedRefused: Boolean(elevatedErr?.includes('已拒绝启动 Antigravity'))
     }
-    console.log('[A9 2/11] d3Refusal:', JSON.stringify(summary.d3Refusal))
+    console.log('[A9 2/12] d11AndD3:', JSON.stringify(summary.d11AndD3))
 
     // Switch to clean isolated GEMINI_HOME (real ~/.gemini untouched; Keychain auth still active)
     process.env.GEMINI_HOME = cleanGemini
     process.env.SCRY_PROVIDER_ENV_ALLOW = 'antigravity:GEMINI_HOME'
     const cleanAdapter = createAntigravityAdapter(homedir(), { userDataDir })
-    const fastModel = models.find((m) => /flash/i.test(m.model.id))?.model ?? models[0]?.model
 
     // 3. Send + streaming + tools + usage
-    const pickAllow = (req: AgentQuestionRequest) => answerQuestion(req, (opts) =>
-      opts.find((o) => /allow|允许/i.test(o.answerValue ?? '') || /allow|允许/i.test(o.label))?.answerValue
-    )
-    const pickReject = (req: AgentQuestionRequest) => answerQuestion(req, (opts) =>
-      opts.find((o) => /reject|deny|拒绝/i.test(o.answerValue ?? '') || /reject|deny|拒绝/i.test(o.label))?.answerValue
-    )
-
     const run3 = await runOne(cleanAdapter, {
       cwd: ws,
       model: fastModel,
@@ -420,13 +325,53 @@ async function main() {
       else process.env.LANG = savedLang
     }
 
-    // 11. Real Scry daemon started by macOS launchd LaunchAgent
+    // 11. D12 real PreToolUse decision:"allow" hook in temp workspace (must not refuse startup; record real agy behavior)
+    const hookWs = join(tmpRoot, 'hook-ws')
+    mkdirSync(join(hookWs, '.agents'), { recursive: true, mode: 0o700 })
+    const hookMarker = join(tmpRoot, 'd12-hook-fired.log')
+    const hookScript = join(tmpRoot, 'd12-allow.sh')
+    writeFileSync(hookScript, `#!/bin/sh\ncat > ${JSON.stringify(hookMarker)}\nprintf '{"decision":"allow"}\\n'\n`, { mode: 0o755 })
+    writeFileSync(join(hookWs, '.agents', 'hooks.json'), JSON.stringify({
+      'a9-allow-cmd': {
+        PreToolUse: [{
+          matcher: '*',
+          hooks: [{ type: 'command', command: hookScript, timeout: 5 }]
+        }]
+      }
+    }), 'utf8')
+    const run11Hook = await runOne(cleanAdapter, {
+      cwd: hookWs,
+      model: fastModel,
+      permissionMode: 'default',
+      prompt: 'Run the shell command `echo D12_HOOK_ALLOW_VERIFIED` using your shell/command tool and reply with its stdout.',
+      onQuestion: pickReject
+    })
+    const hookLabeled = run11Hook.tools.some((t) => t.approvalSource === 'hook' && t.approvalLabel === '由 hook 放行')
+    const hookFired = existsSync(hookMarker)
+    saveEvidence('a9-11-d12-hook-allow.json', {
+      status: run11Hook.result.status,
+      hookFired,
+      questionsCount: run11Hook.questions.length,
+      tools: run11Hook.tools,
+      hookLabeled,
+      text: run11Hook.text.slice(0, 200)
+    })
+    summary.d12HookAllow = {
+      status: run11Hook.result.status,
+      hookFired,
+      questionsCount: run11Hook.questions.length,
+      cmdRan: run11Hook.text.includes('D12_HOOK_ALLOW_VERIFIED'),
+      hookLabeled
+    }
+    console.log('[A9 11/12] d12HookAllow:', JSON.stringify(summary.d12HookAllow))
+
+    // 12. Real Scry daemon started by macOS launchd LaunchAgent
     delete process.env.GEMINI_HOME
     delete process.env.SCRY_PROVIDER_ENV_ALLOW
     const launchdEvidence = await enrollAndCallLaunchdDaemon(repoRoot)
-    saveEvidence('a9-11-launchd-daemon.json', launchdEvidence)
+    saveEvidence('a9-12-launchd-daemon.json', launchdEvidence)
     summary.launchdDaemon = launchdEvidence
-    console.log('[A9 11/11] launchdDaemon:', JSON.stringify(launchdEvidence))
+    console.log('[A9 12/12] launchdDaemon:', JSON.stringify(launchdEvidence))
 
     summary.finishedAt = new Date().toISOString()
     saveEvidence('a9-summary.json', summary)
