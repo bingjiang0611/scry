@@ -3,6 +3,8 @@ import { open, readFile, realpath, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { ProviderContext } from '../../shared/provider'
 import { runtimeCliEnv } from '../claude-locate'
+import { ANTIGRAVITY_DEFAULT_STRIPPED_VARS } from '../provider-environment'
+import { antigravityGeminiRoot } from './antigravity-mcp-paths'
 
 /**
  * Native resume identity for the CLI-hosted Providers (Qoder / OpenCode).
@@ -268,5 +270,30 @@ export async function openCodeContinuationKey(
     await executableIdentity(executable), dataHome, sessionDatabase,
     options.privateMcpAuthDirectory ? resolve(options.privateMcpAuthDirectory) : 'no-private-mcp-auth',
     ...auth.sort()
+  ])}`
+}
+
+const antigravityLaunchEnv = (): RuntimeEnv => runtimeCliEnv(undefined, { providerId: 'antigravity' })
+
+/**
+ * Antigravity native continuation identity (P7 D4 option a):
+ * hashes executable identity, canonical `~/.gemini` (or allowed `GEMINI_HOME`), allowed env vars,
+ * and file-storage token file hash when present (Keychain mode records `keychain_or_absent`).
+ */
+export async function antigravityContinuationKey(
+  context: ProviderContext,
+  homeDir: string,
+  executable: string | undefined,
+  runtimeEnv: RuntimeEnv = antigravityLaunchEnv()
+): Promise<string> {
+  const cwd = await canonicalWorkspace(context.cwd)
+  const rawGeminiRoot = antigravityGeminiRoot(homeDir, runtimeEnv as NodeJS.ProcessEnv)
+  const geminiRoot = await realpath(rawGeminiRoot).catch(() => resolve(rawGeminiRoot))
+  const tokenFile = join(geminiRoot, 'antigravity-cli', 'antigravity-oauth-token')
+  const tokenIdentity = (await authFileIdentity(tokenFile, 'Antigravity OAuth token')) ?? 'oauth-token\0keychain_or_absent'
+  return `antigravity:${digest([
+    'scry-continuation-v2', 'antigravity', cwd, context.agentProfileId ?? '',
+    await executableIdentity(executable), geminiRoot, tokenIdentity,
+    ...secretIdentity(runtimeEnv, ANTIGRAVITY_DEFAULT_STRIPPED_VARS)
   ])}`
 }

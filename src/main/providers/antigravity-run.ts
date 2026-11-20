@@ -30,6 +30,8 @@ const NATURAL_EXIT_GRACE_MS = 3_000
 export interface AntigravityRunDeps {
   homeDir?: string
   clientVersion?: string
+  /** Serialize active runs with catalog probes on the same profile (P7 D5). */
+  acquireRunSlot?: () => Promise<() => void>
   /** Optional A6 workspace config trust gate executed before spawn (fail closed). */
   checkWorkspaceTrust?: (cwd: string) => void | Promise<void>
   /** Optional extra ACP `mcpServers` entries (e.g. A6 run-scoped history reader) + extra env & cleanup. */
@@ -142,6 +144,7 @@ export function runAntigravity(
     let client: AcpClient | undefined
     let exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined
     let idleTimer: ReturnType<typeof setTimeout> | undefined
+    const releaseRunSlot = deps.acquireRunSlot ? await deps.acquireRunSlot() : undefined
 
     const clearIdle = (): void => {
       if (idleTimer) {
@@ -412,6 +415,7 @@ export function runAntigravity(
         }
       }
       await mcpPrepared.dispose?.()
+      releaseRunSlot?.()
     }
   })()
 
