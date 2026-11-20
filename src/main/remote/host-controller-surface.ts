@@ -61,6 +61,7 @@ export class HostController {
   #attachmentStore?: DesktopAttachmentStore
   #orchestration?: OrchestrationAuthorityHooks
   #watchers: LiveWatchers
+  #disposeExecution: () => void
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
@@ -93,6 +94,7 @@ export class HostController {
     })
     this.#gateway = wiring.gateway
     this.#dispatcher = wiring.dispatcher
+    this.#disposeExecution = wiring.dispose
     this.#watchers = new LiveWatchers({
       authorizeDevice: (peer) => this.authorizeDevice(peer),
       authorizedCwd: (cwd) => authorizedCwd(this.#workspace, cwd),
@@ -298,6 +300,7 @@ export class HostController {
   }
 
   closeReadResources(): void {
+    this.#disposeExecution()
     this.#watchers.close()
     this.#fileDownloads.dispose()
   }

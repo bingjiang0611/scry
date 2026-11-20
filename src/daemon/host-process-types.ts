@@ -1,3 +1,4 @@
+import type { ProviderOperationGate } from '../main/provider-operation-gate'
 import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
 import type { LocalChannel } from './local-channel'
 import type { LocalEnrollSocket } from './local-enrollment'
@@ -31,6 +32,7 @@ export interface DaemonHostProcess {
   service: RemoteHostService
   channel: LocalChannel
   enrollSocket: LocalEnrollSocket
+  providerOperationGate: ProviderOperationGate
   orchestrationShadow?: DaemonOrchestrationShadow
   orchestrationAuthority?: DaemonOrchestrationAuthority
   dispose(): Promise<void>

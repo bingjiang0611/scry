@@ -43,7 +43,7 @@ export interface OrchestrationAuthorityHooks {
     isPeerAuthorized: (peerCertSHA256: string) => boolean
     authorizeWorkspace: (cwd: string) => string
     isProviderAuthenticating: (provider: string, profile: string | null) => boolean
-  }): { ok: true } | { ok: false; action: 'fail' | 'requeue'; reason: string }
+  }): { ok: true } | { ok: false; action: 'fail'; reason: string } | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
   onRunProgress(runId: string, detail?: string): void
   onRunTerminal(runId: string, step: 'settled' | 'failed' | 'cancelled', detail?: string): void
   onQuestionAnswer(input: {
