@@ -42,6 +42,8 @@ export interface RunSubmitPayload {
   shadowOnly?: boolean
   /** Historical terminal backfill: never claims or clobbers a session's active live run slot. */
   historicalBackfill?: boolean
+  /** Historical backfill when H3 ordinal is missing: skip `turn.began` rather than fabricating MAX+1. */
+  skipTurnProjection?: boolean
 }
 
 export interface RunResolveIntentPayload {
@@ -95,6 +97,8 @@ export interface RunEffectResultPayload {
   gapReason?: 'output_capture_failed' | 'history_capture_failed'
   settledAt?: number | null
   recoveredAt?: number | null
+  /** Historical terminal backfill: preserves newer live session `last_run_id` / `last_run_outcome`. */
+  historicalBackfill?: boolean
   /** Present only for test negative-control assertions; forbidden in provider_settled. */
   extra?: Record<string, unknown>
 }
@@ -105,6 +109,8 @@ export interface QuestionAnswerPayload {
   answerId: string
   answerSha256: string
   answerPayload?: Record<string, unknown>
+  /** R3 explicit attribution; defaults to peer actor or `'unavailable'` when peer is unknown. */
+  answeredBy?: string
   shadowOnly?: boolean
 }
 

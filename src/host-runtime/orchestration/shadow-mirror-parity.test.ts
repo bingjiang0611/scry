@@ -301,4 +301,46 @@ describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verifi
       rmSync(userData, { recursive: true, force: true })
     }
   })
+
+  it('R3: records answered_by as unavailable (never system) when answering peer is unknown, and skips orphan body writes on rejected submit', () => {
+    withTempDir((userData) => {
+      const mirror = ShadowMirror.open({ userDataDir: userData })
+      try {
+        const ledger = new SessionLedger({
+          store: memoryLedgerStore(),
+          onEvent: (event) => mirror.onLedgerEvent(event)
+        })
+        const runId = SessionLedger.newRunId()
+        ledger.recordIntent({
+          intentId: SessionLedger.newIntentId(),
+          runId,
+          detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-r3', prompt: 'ask without peer' })
+        })
+        ledger.markDispatched(runId)
+        ledger.markProgress(runId, JSON.stringify({ event: 'question_opened', questionId: 'q-u', kind: 'approval', source: 'provider' }))
+        // No meta.answeredByPeer passed (simulating unknown peer after restart)
+        ledger.markProgress(runId, JSON.stringify({ event: 'question_answered', questionId: 'q-u', answerId: 'ans-u' }))
+
+        const interaction = mirror.sink!.getInteraction(runId, 'q-u')
+        expect(interaction?.answeredBy).toBe('unavailable')
+
+        // Rejected submit with >16 KiB body (duplicate runId collision -> invalid_target) must NOT leave an orphan file
+        const rejectedDetail = JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-r3', prompt: 'dup', blob: 'Z'.repeat(24_000) })
+        mirror.onLedgerEvent({
+          seq: 99,
+          at: Date.now(),
+          runId,
+          kind: 'intent_recorded',
+          intentId: SessionLedger.newIntentId(),
+          detail: rejectedDetail
+        })
+        mirror.flushPendingBodies()
+        const bodyDir = join(userData, 'orchestration', 'bodies')
+        expect(mirror.sink!.bodyStore.hasExternalBody(require('node:crypto').createHash('sha256').update(rejectedDetail).digest('hex'))).toBe(false)
+        expect(bodyDir).toBeTruthy()
+      } finally {
+        mirror.close()
+      }
+    })
+  })
 })

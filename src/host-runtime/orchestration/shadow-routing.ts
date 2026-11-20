@@ -27,8 +27,9 @@ export interface ShadowMirrorStats {
   rejectedRetryable: number
   ordinalMismatches: number
   importRejections: number
+  missingBodies: number
   failures: number
-  /** Total shadow parity anomalies: sticky + retryable + ordinalMismatches + importRejections + failures. */
+  /** Total shadow parity anomalies: sticky + retryable + ordinalMismatches + importRejections + missingBodies + failures. */
   deviations: number
   failedOpen: boolean
   preFirstTokenCommitsByRun: ReadonlyMap<string, number>
@@ -164,7 +165,8 @@ export function buildProgressMarkerCommand(
         ? `peer:${meta.answeredByPeer}`
         : 'system'
     const scope = answeredByPeer.startsWith('peer:') ? ('remote' as const) : ('system' as const)
-    const payload = { runId, questionId: marker.questionId, answerId, answerSha256, shadowOnly: true }
+    const answeredBy = answeredByPeer.startsWith('peer:') ? answeredByPeer : 'unavailable'
+    const payload = { runId, questionId: marker.questionId, answerId, answerSha256, answeredBy, shadowOnly: true }
     return {
       commitKind: 'question_answered',
       ...(answeredByPeer.startsWith('peer:') ? { authorizePeer: answeredByPeer } : {}),

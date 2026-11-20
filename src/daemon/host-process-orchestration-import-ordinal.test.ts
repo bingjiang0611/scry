@@ -269,6 +269,10 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
     await withSmokeEnv('shadow', async () => {
+      let releaseBackfill: (() => void) | undefined
+      const pauseBackfill = new Promise<void>((resolve) => {
+        releaseBackfill = resolve
+      })
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -277,15 +281,27 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
         appVersion: 'test',
         isPackaged: false,
         createOutputStore: () => new MemoryOutputStore(),
+        orchestrationShadowPauseBackfill: pauseBackfill,
         log: () => undefined
       })
       try {
         const shadow = host.orchestrationShadow!
         const device = await enrollLocal(host.service)
 
+        // Live turn 4 commits and settles BEFORE deferred backfill runs (deterministically paused)
         const turn4 = await sendConversationTurn(host, device, conv.id, 'live turn 4 during backfill', true)
         expect(turn4.state).toBe('settled')
+        expect(shadow.mirror.sink!.getTurn(conv.id, 1)).toBeUndefined()
+        expect(shadow.mirror.sink!.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
+
+        // Release deferred backfill while turn 4 already occupies ordinal 4
+        releaseBackfill?.()
         await shadow.importComplete
+
+        // S1: historical backfill MUST NOT overwrite live turn 4 as session.lastRunId
+        expect(shadow.mirror.sink!.getSession(conv.id)?.lastRunId).toBe(turn4.canonicalRunId)
+
+        // Live turn 5 MUST NOT collide with deferred backfill or fence
         const turn5 = await sendConversationTurn(host, device, conv.id, 'live turn 5 after backfill', false)
         expect(turn5.state).toBe('settled')
 
@@ -296,8 +312,10 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
         expect(shadow.mirror.sink!.getTurn(conv.id, 3)?.runId).toBe(oldRunIds[2])
         expect(shadow.mirror.sink!.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
         expect(shadow.mirror.sink!.getTurn(conv.id, 5)?.runId).toBe(turn5.canonicalRunId)
+        expect(shadow.mirror.sink!.getSession(conv.id)?.lastRunId).toBe(turn5.canonicalRunId)
         expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
+        releaseBackfill?.()
         await host.dispose()
       }
     })

@@ -36,6 +36,7 @@ vi.mock('../main/claude-locate', async () => {
 })
 
 import { createRecentFoldersStore } from '../main/app-store'
+import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
 
@@ -126,6 +127,73 @@ describe('daemon graceful dispose cleans up pooled provider private env director
       else process.env.SCRY_REMOTE_RELAY_ENABLED = savedRelay
       if (savedSmoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
       else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = savedSmoke
+    }
+  })
+
+  it('closes orchestrationShadow before providerRegistry.dispose() and bounds a hanging provider shutdown', async () => {
+    const root = tempDir()
+    const userDataDir = join(root, 'userData')
+    const daemonStateDirectory = join(userDataDir, 'daemon')
+    const workspace = join(root, 'ws-hanging-provider')
+    mkdirSync(join(workspace, '.codex'), { recursive: true, mode: 0o700 })
+    const canonicalWs = realpathSync(workspace)
+    createRecentFoldersStore(userDataDir).push(canonicalWs)
+    writeFileSync(
+      join(canonicalWs, '.codex', 'config.toml'),
+      '[mcp_servers.hang_test]\ncommand = "/bin/echo"\nargs = ["ok"]\n'
+    )
+
+    appServer.request.mockReset().mockResolvedValue({ data: [] })
+    // Simulate a wedged provider process whose shutdown never resolves
+    appServer.shutdown.mockReset().mockReturnValue(new Promise<void>(() => {}))
+
+    const savedRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
+    const savedSmoke = process.env.SCRY_ELECTRON_SMOKE_PROVIDER
+    const savedOrch = process.env.SCRY_ORCHESTRATION
+    process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
+    delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
+    process.env.SCRY_ORCHESTRATION = 'shadow'
+
+    const logs: string[] = []
+    let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
+    try {
+      host = await createDaemonHostProcess({
+        userDataDir,
+        daemonStateDirectory,
+        appPath: process.cwd(),
+        resourcesPath: join(process.cwd(), 'resources'),
+        appVersion: 'test',
+        isPackaged: false,
+        providerDisposeTimeoutMs: 60,
+        createOutputStore: () => new MemoryOutputStore(),
+        log: (line) => logs.push(line)
+      })
+
+      const device = await enrollLocal(host.service)
+      await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'mcp',
+        method: 'mcpSnapshot',
+        args: [{ context: { providerId: 'codex', cwd: canonicalWs }, refresh: true }]
+      })
+
+      const started = performance.now()
+      await host.dispose()
+      const elapsedMs = performance.now() - started
+      host = undefined
+
+      expect(elapsedMs).toBeLessThan(2_000)
+      expect(logs.some((line) => line.includes('daemon.provider-dispose-timeout'))).toBe(true)
+      // Shadow DB EXCLUSIVE lock MUST already be released even though provider shutdown timed out
+      const reopened = EventSink.open({ userDataDir })
+      reopened.close()
+    } finally {
+      if (host) await host.dispose()
+      if (savedRelay === undefined) delete process.env.SCRY_REMOTE_RELAY_ENABLED
+      else process.env.SCRY_REMOTE_RELAY_ENABLED = savedRelay
+      if (savedSmoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
+      else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = savedSmoke
+      if (savedOrch === undefined) delete process.env.SCRY_ORCHESTRATION
+      else process.env.SCRY_ORCHESTRATION = savedOrch
     }
   })
 })

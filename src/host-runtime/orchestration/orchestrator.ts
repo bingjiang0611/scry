@@ -114,7 +114,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           }
         })
       ]
-      if (p.sessionKey) {
+      if (p.sessionKey && !p.skipTurnProjection) {
         const ordinal = p.ordinal ?? view.getNextTurnOrdinal?.(p.sessionKey) ?? 1
         const ordinalOrigin =
           p.ordinalOrigin ?? (view.getSession(p.sessionKey)?.legacy ? 'since_import' : 'native')
@@ -332,7 +332,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             questionId: p.questionId,
             answerId: p.answerId,
             answerSha256: p.answerSha256,
-            answeredBy: cmd.actor
+            answeredBy: p.answeredBy ?? (isPeerActor(cmd.actor) ? cmd.actor : 'unavailable')
           }
         })
       ]

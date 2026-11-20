@@ -343,7 +343,8 @@ export function decideRunEffectResult(
             ...(p.reason ? { reason: p.reason } : {}),
             settledAt,
             recoveredAt,
-            outcome
+            outcome,
+            ...(p.historicalBackfill ? { historicalBackfill: true } : {})
           }
         })
       )

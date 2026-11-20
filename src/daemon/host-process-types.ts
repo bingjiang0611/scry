@@ -18,6 +18,10 @@ export interface DaemonHostProcessOptions {
   terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
   /** Tests: inject commit fault into P4-1 orchestration shadow sink. */
   orchestrationShadowBeforeCommitHook?: () => void
+  /** Tests: pause deferred shadow backfill until resolved to verify live/backfill interleaving. */
+  orchestrationShadowPauseBackfill?: Promise<void>
+  /** Tests: override graceful providerRegistry.dispose() timeout (default 5,000 ms). */
+  providerDisposeTimeoutMs?: number
 }
 
 export interface DaemonHostProcess {

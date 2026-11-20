@@ -63,6 +63,7 @@
 | 事件循环阻塞 | better-sqlite3 同步；`recordTurn` 与编排在同一线程 | 测两者的 P99（§8.2）；统计写入已有文件 outbox（`db-outbox.ts`），必要时按批让出 |
 | WAL 检查点停顿 | 长读事务会拖住检查点 | 快照读是短同步读；测停顿与 WAL 大小 |
 | 侧栏规模 | 今天每次 `sessionsPage` 对每个 cwd 做一次 realpath（`host-runtime.ts:176-181`） | canonical cwd 在写入时固定，读取只走索引（protocol §5.5） |
+| 大正文延迟落盘窗口（仅 P4-1） | P4-1 为压低首 token 前提交耗时，将 >16 KiB 外部正文文件写盘移到终态/`close()`；若进程在 `intent_recorded` 与终态间崩溃，已提交事件引用的正文文件暂未落盘，属于相对 data §4.7 的 **P4-1 专属缺口**（P4-1 影子不据此派发且 H1 持有完整正文，无运行危害） | P4-1 启动时按已解析的 H1 台账明细自动补写缺失文件（校验 SHA-256），无法补齐则计入 `missingBodies` 偏差；**P4-2 成为权威前必须关闭此缺口**（落盘先于事件引用，并与 `deleteSession` 协调延迟写回） |
 
 ## 9. 迁移与工期
 
@@ -70,7 +71,7 @@
 |---|---|---|---|
 | P4-0 | 纯决策器（抽出 H1 转移表）、拒绝分类、表结构、独立迁移执行器（拒绝更高版本）、EventSink 与 fail closed、策略表、正文存储、单写者三层、Recorder Core 导入测试、多 Agent 预留列（core §2.10）；临时库单测 | 1.5 | — |
 | P4-1 | 影子写：daemon 在 H1 `#emit`、H3 `settle` 处同时提交事件与 projection，测试比对；影子写失败只让影子 fail open，不影响 run，并计数；off↔on 增量导入与 `orch_legacy_run`；daemon 模式 CI 作业；首轮测量（含 fullfsync、ext4/btrfs） | 1.5 | P4-0 |
-| P4-2 | 日志成为 run 与 turn 投递的权威：submit、send、stop、answer、`resolveIntent` 进命令；intent 与领取同事务、派发栅栏、复核、pending TTL；恢复查 recorder 证据；两本账对账；旧台账异步镜像；重测 | 3 | P4-1、macOS 真机基线 |
+| P4-2 | 日志成为 run 与 turn 投递的权威：submit、send、stop、answer、`resolveIntent` 进命令；intent 与领取同事务、派发栅栏、复核、pending TTL；关闭 P4-1 大正文延迟落盘缺口（恢复 data §4.7 正文先于事件引用落盘，含 `deleteSession` 协调）；恢复查 recorder 证据；两本账对账；旧台账异步镜像；重测 | 3 | P4-1、macOS 真机基线 |
 | P4-3 | 本机订阅：App 切换（§6 第 1 行）；`AppEventFeed` 缩小并接 P5 通知；重测 | 1.25 | P4-2 |
 | P4-4 | 会话目录与详情 projection；导入 `app-sessions.json` 元数据（决定 E，增量）；`catalog.scan` 触发；transcript 区间引用；首屏快照；renderer 读 projection；删除会话的清除与墓碑 | 2 | P4-3 |
 | P4-5a | `subscribe` 作为 v2 能力：Desktop、iOS、执行目标转发、keyset 分页、逐行授权；真机验证 | 2 | P4-4 |

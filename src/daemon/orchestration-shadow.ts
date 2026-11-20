@@ -5,6 +5,7 @@ import { createConversationOrdinalResolver } from '../host-runtime/orchestration
 import {
   importLegacyStateIncrementally,
   loadLegacyLedgerPlan,
+  repairMissingShadowBodies,
   startDeferredLegacyImport,
   type LegacyLedgerPlan
 } from '../host-runtime/orchestration/legacy-import'
@@ -40,6 +41,8 @@ export interface AttachDaemonOrchestrationShadowOptions {
   beforeCommitHook?: () => void
   /** Unimported run threshold above which historical backfill defers until after `openLocalChannel`. */
   deferredImportThreshold?: number
+  /** Test seam: pause deferred backfill after `openLocalChannel` until this promise resolves. */
+  pauseDeferredBackfill?: Promise<void>
 }
 
 /**
@@ -89,9 +92,16 @@ export function attachDaemonOrchestrationShadow(
 
   if (mirror.sink && !mirror.stats().failedOpen) {
     try {
-      // Parse H1 snapshot+log ONCE and reuse the plan across threshold check, open-run sync import,
-      // and post-socket deferred backfill (no redundant parses).
+      // Parse H1 snapshot+log ONCE and reuse the plan across missing-body repair, threshold check,
+      // open-run sync import, and post-socket deferred backfill (no redundant parses).
       const plan = loadLegacyLedgerPlan(mirror.sink, options.userDataDir)
+      const bodyRepair = repairMissingShadowBodies(mirror.sink, plan)
+      if (bodyRepair.repaired > 0 || bodyRepair.stillMissing > 0) {
+        mirror.recordMissingBodies(bodyRepair.stillMissing)
+        options.log(
+          `daemon.orchestration-shadow-body-repair repaired=${bodyRepair.repaired} missing=${bodyRepair.stillMissing}`
+        )
+      }
       const pendingCount = plan.unimportedRuns.length
       if (pendingCount > deferredThreshold) {
         // Large ledger (> 2,000 unimported runs): synchronously import only open runs before
@@ -146,6 +156,7 @@ export function attachDaemonOrchestrationShadow(
     }
   }
 
+  let closed = false
   const startImport = (): void => {
     if (!deferredPlan || deferredStarted || !mirror.sink || mirror.stats().failedOpen) {
       resolveImportComplete?.()
@@ -154,36 +165,47 @@ export function attachDaemonOrchestrationShadow(
     deferredStarted = true
     const plan = deferredPlan
     deferredPlan = undefined
-    const handle = startDeferredLegacyImport({
-      sink: mirror.sink,
-      userDataDir: options.userDataDir,
-      pendingTtlMs,
-      reconcileOpenRuns: false,
-      shadowOnly: true,
-      plan,
-      resolveTurnOrdinal
-    })
-    cancelDeferred = handle.cancel
-    handle.promise
-      .then((summary) => {
-        mirror.recordImportRejections(summary.rejectedCommands)
-        if (mirror.sink?.isWriteIndeterminate()) {
-          mirror.markFailedOpen(new Error('orchestration_write_indeterminate'))
-        } else {
-          mirror.setDeferringLegacyWatermark(false, summary.legacyLedgerSeq)
-          options.log(
-            `daemon.orchestration-shadow-ready mode=${mode.requested}/${mode.effective} fullfsync=${String(fullfsync)} checkpointFullfsync=${String(checkpointFullfsync)} importedRuns=${summary.importedRuns} importedSessions=${summary.importedSessions}`
-          )
-        }
-      })
-      .catch((error) => {
-        mirror.markFailedOpen(error)
-        const msg = error instanceof Error ? error.message : String(error)
-        options.log(`daemon.orchestration-shadow-import-failed ${msg}`)
-      })
-      .finally(() => {
+    const launch = (): void => {
+      if (closed || !mirror.sink || mirror.stats().failedOpen) {
         resolveImportComplete?.()
+        return
+      }
+      const handle = startDeferredLegacyImport({
+        sink: mirror.sink,
+        userDataDir: options.userDataDir,
+        pendingTtlMs,
+        reconcileOpenRuns: false,
+        shadowOnly: true,
+        plan,
+        resolveTurnOrdinal
       })
+      cancelDeferred = handle.cancel
+      handle.promise
+        .then((summary) => {
+          mirror.recordImportRejections(summary.rejectedCommands)
+          if (mirror.sink?.isWriteIndeterminate()) {
+            mirror.markFailedOpen(new Error('orchestration_write_indeterminate'))
+          } else {
+            mirror.setDeferringLegacyWatermark(false, summary.legacyLedgerSeq)
+            options.log(
+              `daemon.orchestration-shadow-ready mode=${mode.requested}/${mode.effective} fullfsync=${String(fullfsync)} checkpointFullfsync=${String(checkpointFullfsync)} importedRuns=${summary.importedRuns} importedSessions=${summary.importedSessions}`
+            )
+          }
+        })
+        .catch((error) => {
+          mirror.markFailedOpen(error)
+          const msg = error instanceof Error ? error.message : String(error)
+          options.log(`daemon.orchestration-shadow-import-failed ${msg}`)
+        })
+        .finally(() => {
+          resolveImportComplete?.()
+        })
+    }
+    if (options.pauseDeferredBackfill) {
+      void options.pauseDeferredBackfill.then(launch, launch)
+    } else {
+      launch()
+    }
   }
 
   options.conversationStore().setTurnSettledObserver((info) => {
@@ -199,6 +221,7 @@ export function attachDaemonOrchestrationShadow(
     startImport,
     onLedgerEvent: (event, meta) => mirror.onLedgerEvent(event, meta),
     close: () => {
+      closed = true
       cancelDeferred?.()
       resolveImportComplete?.()
       options.conversationStore().setTurnSettledObserver(undefined)

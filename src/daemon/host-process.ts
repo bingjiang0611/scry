@@ -228,7 +228,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     env: process.env,
     conversationStore: catalog.conversationStore,
     log,
-    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {})
+    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
+    ...(options.orchestrationShadowPauseBackfill ? { pauseDeferredBackfill: options.orchestrationShadowPauseBackfill } : {})
   })
   const remoteStateDirectory = join(options.userDataDir, 'remote')
   const relay = await resolveRemoteRelay(remoteStateDirectory)
@@ -310,11 +311,28 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       await channel.close()
       await localHost.close()
       await service.dispose()
-      try {
-        await providers.providerRegistry.dispose()
-      } finally {
-        orchestrationShadow?.close()
-      }
+      // Close shadow first so pending bodies flush and the EXCLUSIVE SQLite lock releases
+      // immediately even if a pooled provider process is slow to exit; bound provider dispose.
+      orchestrationShadow?.close()
+      const disposeTimeoutMs = Math.max(1, options.providerDisposeTimeoutMs ?? 5_000)
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const done = (): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve()
+        }
+        const timer = setTimeout(() => {
+          log(`daemon.provider-dispose-timeout timeoutMs=${disposeTimeoutMs}`)
+          done()
+        }, disposeTimeoutMs)
+        timer.unref()
+        void providers.providerRegistry.dispose().then(done, (error) => {
+          log(`daemon.provider-dispose-failed ${(error as Error)?.message ?? String(error)}`)
+          done()
+        })
+      })
     }
   }
 }

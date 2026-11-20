@@ -1,17 +1,22 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { createConversationOrdinalResolver, type TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
+import { importCatalogEntries, repairMissingShadowBodies } from './legacy-catalog-and-repair'
 import { readLegacyLedgerReadOnly, type LegacyRunState } from './legacy-ledger-reader'
 import { parseLedgerIntentRouting } from './shadow-routing'
 import { DEFAULT_PENDING_TTL_MS } from './types'
+
+export { repairMissingShadowBodies }
 
 export interface LegacyLedgerPlan {
   readonly currentLedgerSeq: number
   readonly lastSeq: number
   readonly unimportedRuns: readonly LegacyRunState[]
   readonly openRuns: readonly LegacyRunState[]
+  /** All parsed H1 runs indexed by ledgerRunId (reused for startup missing-body repair without re-reading disk). */
+  readonly runsByLedgerId: ReadonlyMap<string, LegacyRunState>
 }
 
 export interface LegacyImportOptions {
@@ -59,17 +64,29 @@ export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): Lega
   const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
   const ledgerDir = join(userDataDir, 'remote', 'ledger')
   if (!existsSync(ledgerDir)) {
-    return { currentLedgerSeq, lastSeq: currentLedgerSeq, unimportedRuns: [], openRuns: [] }
+    return {
+      currentLedgerSeq,
+      lastSeq: currentLedgerSeq,
+      unimportedRuns: [],
+      openRuns: [],
+      runsByLedgerId: new Map()
+    }
   }
   const legacy = readLegacyLedgerReadOnly(ledgerDir)
   if (legacy.lastSeq <= currentLedgerSeq) {
-    return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns: [], openRuns: [] }
+    return {
+      currentLedgerSeq,
+      lastSeq: legacy.lastSeq,
+      unimportedRuns: [],
+      openRuns: [],
+      runsByLedgerId: legacy.runs
+    }
   }
   const unimportedRuns = [...legacy.runs.values()]
     .filter((run) => run.lastSeq > currentLedgerSeq)
     .sort((a, b) => a.intentSeq - b.intentSeq)
   const openRuns = unimportedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
-  return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns, openRuns }
+  return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns, openRuns, runsByLedgerId: legacy.runs }
 }
 
 /** Counts legacy runs with `lastSeq > legacy_ledger_seq` to decide sync vs deferred post-socket import. */
@@ -108,6 +125,9 @@ function importSingleRun(
         ? cfg.resolveTurnOrdinal(routing.sessionKey, canonicalRunId)
         : undefined)
     const isHistoricalTerminal = run.lifecycle !== 'recorded' && run.lifecycle !== 'dispatched'
+    // Never fall back to shadow's MAX+1 when a conversation run's H3 ordinal cannot be found.
+    const missingConvOrdinal = routing.isConversationRun && Boolean(routing.sessionKey) && resolvedOrdinal === undefined
+    if (missingConvOrdinal) rejected += 1
     const submitPayload = {
       runId: canonicalRunId,
       sessionKey: routing.sessionKey,
@@ -121,7 +141,8 @@ function importSingleRun(
       origin: 'remote' as const,
       isConversationRun: routing.isConversationRun,
       ...(cfg.shadowOnly ? { shadowOnly: true } : {}),
-      ...(isHistoricalTerminal ? { historicalBackfill: true } : {})
+      ...(isHistoricalTerminal ? { historicalBackfill: true } : {}),
+      ...(missingConvOrdinal ? { skipTurnProjection: true } : {})
     }
     const res = sink.execute(
       {
@@ -239,6 +260,7 @@ function importSingleRun(
     ...(run.terminalDetail ? { reason: run.terminalDetail } : {}),
     settledAt: hasTerminalAt ? run.terminalAt! : null,
     outcome,
+    historicalBackfill: true,
     evidence: [`legacy-ledger:${run.lastSeq}`]
   }
   track(
@@ -247,107 +269,12 @@ function importSingleRun(
       commandId: `effect:legacy-${run.ledgerRunId}:${step}`,
       actor: `effect:legacy-${run.ledgerRunId}`,
       scope: 'system',
-      at: hasTerminalAt ? run.terminalAt! : cfg.now,
+      at: hasTerminalAt ? run.terminalAt! : run.intentAt,
       payload,
       payloadSha256: sha256Hex(canonicalJson(payload))
     })
   )
   return { imported, rejected }
-}
-
-function importCatalogEntries(
-  sink: EventSink,
-  userDataDir: string,
-  now: number,
-  batchSize: number
-): { importedSessions: number; rejectedCommands: number; catalogSha256: string } {
-  let importedSessions = 0
-  let rejectedCommands = 0
-  let catalogSha256 = sink.getMeta('legacy_catalog_sha256') ?? ''
-  const catalogPath = join(userDataDir, 'app-sessions.json')
-  if (!existsSync(catalogPath)) return { importedSessions, rejectedCommands, catalogSha256 }
-
-  const rawBytes = readFileSync(catalogPath)
-  const nextSha = sha256Hex(rawBytes)
-  if (nextSha === catalogSha256) return { importedSessions, rejectedCommands, catalogSha256 }
-
-  let entries: Array<Record<string, unknown>> = []
-  try {
-    const parsed = JSON.parse(rawBytes.toString('utf8'))
-    if (Array.isArray(parsed)) entries = parsed as Array<Record<string, unknown>>
-  } catch {
-    entries = []
-  }
-  for (let offset = 0; offset < entries.length; offset += batchSize) {
-    const chunk = entries.slice(offset, offset + batchSize)
-    const isLastChunk = offset + batchSize >= entries.length
-    sink.runInBatchTransaction(() => {
-      for (const entry of chunk) {
-        const sessionKey =
-          (typeof entry.sessionId === 'string' && entry.sessionId) ||
-          (typeof entry.externalSessionId === 'string' && entry.externalSessionId) ||
-          (typeof entry.runId === 'string' && entry.runId) ||
-          ''
-        if (!sessionKey) continue
-        const existing = sink.getSession(sessionKey)
-        const title =
-          typeof entry.title === 'string'
-            ? entry.title
-            : typeof entry.preview === 'string'
-              ? entry.preview.slice(0, 200)
-              : null
-        const ts = typeof entry.ts === 'number' && Number.isFinite(entry.ts) ? entry.ts : now
-        const pinnedAt = typeof entry.pinnedAt === 'number' ? entry.pinnedAt : null
-        const archivedAt = typeof entry.archivedAt === 'number' ? entry.archivedAt : null
-        if (
-          existing &&
-          existing.title === title &&
-          existing.ts === ts &&
-          existing.pinnedAt === pinnedAt &&
-          existing.archivedAt === archivedAt
-        ) {
-          continue
-        }
-        const lastRunOutcome =
-          typeof entry.lastRunOutcome === 'string'
-            ? {
-                status: 'available' as const,
-                quality: 'inferred' as const,
-                source: [`app-sessions:${nextSha}`],
-                value: entry.lastRunOutcome
-              }
-            : null
-        const payload = {
-          sessionKey,
-          provider: typeof entry.providerId === 'string' ? entry.providerId : null,
-          profile: typeof entry.agentProfileId === 'string' ? entry.agentProfileId : null,
-          cwd: typeof entry.cwd === 'string' ? entry.cwd : null,
-          title,
-          ts,
-          pinnedAt,
-          archivedAt,
-          lastRunId: typeof entry.runId === 'string' ? entry.runId : null,
-          lastRunOutcome,
-          evidence: [`app-sessions:${nextSha}`]
-        }
-        const payloadSha = sha256Hex(canonicalJson(payload))
-        const res = sink.execute({
-          type: 'session.import',
-          commandId: `legacy-session:${sessionKey}:${payloadSha.slice(0, 16)}`,
-          actor: 'system',
-          scope: 'system',
-          at: now,
-          payload,
-          payloadSha256: payloadSha
-        })
-        if (res.kind === 'accepted') importedSessions += 1
-        else if (res.kind === 'rejected') rejectedCommands += 1
-      }
-      if (isLastChunk) sink.setMeta('legacy_catalog_sha256', nextSha)
-    })
-  }
-  if (entries.length === 0) sink.setMeta('legacy_catalog_sha256', nextSha)
-  return { importedSessions, rejectedCommands, catalogSha256: nextSha }
 }
 
 /**

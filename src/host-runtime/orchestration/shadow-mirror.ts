@@ -63,6 +63,7 @@ export class ShadowMirror {
   #rejectedRetryable = 0
   #ordinalMismatches = 0
   #importRejections = 0
+  #missingBodies = 0
   #failures = 0
   #failedOpen = false
   #deferringLegacyWatermark = false
@@ -105,12 +106,14 @@ export class ShadowMirror {
       rejectedRetryable: this.#rejectedRetryable,
       ordinalMismatches: this.#ordinalMismatches,
       importRejections: this.#importRejections,
+      missingBodies: this.#missingBodies,
       failures: this.#failures,
       deviations:
         this.#rejectedSticky +
         this.#rejectedRetryable +
         this.#ordinalMismatches +
         this.#importRejections +
+        this.#missingBodies +
         this.#failures,
       failedOpen: this.#failedOpen,
       preFirstTokenCommitsByRun: this.#preFirstTokenCommits,
@@ -126,6 +129,11 @@ export class ShadowMirror {
   /** Records rejections observed during incremental startup import so deviations stay honest. */
   recordImportRejections(count: number): void {
     if (count > 0) this.#importRejections += count
+  }
+
+  /** Records dangling external body references that could not be repaired from H1 on startup. */
+  recordMissingBodies(count: number): void {
+    if (count > 0) this.#missingBodies += count
   }
 
   /**
@@ -177,11 +185,11 @@ export class ShadowMirror {
       legacyLedgerSeq?: number
       legacyRunMapping?: { ledgerRunId: string; runId: string }
     }
-  ): void {
-    if (!this.sink || this.#failedOpen) return
+  ): boolean {
+    if (!this.sink || this.#failedOpen) return false
     if (this.sink.isWriteIndeterminate()) {
       this.failOpen(new Error('orchestration_write_indeterminate'))
-      return
+      return false
     }
     let effectiveSeq = meta.legacyLedgerSeq
     if (this.#deferringLegacyWatermark && effectiveSeq !== undefined) {
@@ -202,22 +210,22 @@ export class ShadowMirror {
       (result.kind === 'rejected' && result.reason === 'orchestration_write_indeterminate')
     ) {
       this.failOpen(new Error('orchestration_write_indeterminate'))
-      return
+      return false
     }
 
     if (result.kind === 'duplicate') {
       this.#duplicates += 1
-      return
+      return false
     }
 
     if (result.kind === 'rejected') {
       if (result.sticky) this.#rejectedSticky += 1
       else this.#rejectedRetryable += 1
-      return
+      return false
     }
 
     // Only accepted commits enter commit counts and timing samples (B2).
-    // durationMs covers the entire shadow hook (parse, ordinal, body fsync, hash, EventSink).
+    // durationMs covers the entire shadow hook (parse, ordinal, hash, EventSink).
     this.#acceptedCommits += 1
     if (meta.preFirstToken) {
       this.#preFirstTokenCommits.set(meta.runId, (this.#preFirstTokenCommits.get(meta.runId) ?? 0) + 1)
@@ -235,6 +243,7 @@ export class ShadowMirror {
       preFirstToken: meta.preFirstToken,
       ...(meta.bodyBytes !== undefined ? { bodyBytes: meta.bodyBytes } : {})
     })
+    return true
   }
 
   /** Flushes deferred >16 KiB shadow bodies to `BodyStore` off the pre-first-token hot path. */
@@ -284,19 +293,11 @@ export class ShadowMirror {
         const detailBytes = event.detail ? Buffer.byteLength(event.detail, 'utf8') : 0
         // Defer >16 KiB external body file write + fsync off the pre-first-token path (shadow never
         // dispatches from BodyStore; content is hashed in memory now and persisted on terminal/close).
-        let body: { storage: 'external'; sha256: string; bytes: number } | undefined
-        if (event.detail && detailBytes > INLINE_BODY_MAX_BYTES) {
-          const sha256 = sha256Hex(event.detail)
-          body = { storage: 'external', sha256, bytes: detailBytes }
-          this.#pendingBodies.delete(routing.canonicalRunId)
-          this.#pendingBodies.set(routing.canonicalRunId, { sha256, content: event.detail })
-          if (this.#pendingBodies.size > MAX_PENDING_SHADOW_BODIES) {
-            const oldestKey = this.#pendingBodies.keys().next().value
-            if (oldestKey && oldestKey !== routing.canonicalRunId) {
-              setImmediate(() => this.flushPendingBodies(oldestKey))
-            }
-          }
-        }
+        // Only queue after the commit is accepted so rejected submits never leave orphan body files.
+        const body =
+          event.detail && detailBytes > INLINE_BODY_MAX_BYTES
+            ? { storage: 'external' as const, sha256: sha256Hex(event.detail), bytes: detailBytes }
+            : undefined
         const payload = {
           runId: routing.canonicalRunId,
           sessionKey: routing.sessionKey,
@@ -313,7 +314,7 @@ export class ShadowMirror {
           isConversationRun: routing.isConversationRun,
           shadowOnly: true
         }
-        this.executeTimed(
+        const accepted = this.executeTimed(
           {
             type: 'run.submit',
             commandId,
@@ -334,6 +335,16 @@ export class ShadowMirror {
             legacyRunMapping: { ledgerRunId: event.runId, runId: routing.canonicalRunId }
           }
         )
+        if (accepted && body && event.detail) {
+          this.#pendingBodies.delete(routing.canonicalRunId)
+          this.#pendingBodies.set(routing.canonicalRunId, { sha256: body.sha256, content: event.detail })
+          if (this.#pendingBodies.size > MAX_PENDING_SHADOW_BODIES) {
+            const oldestKey = this.#pendingBodies.keys().next().value
+            if (oldestKey && oldestKey !== routing.canonicalRunId) {
+              setImmediate(() => this.flushPendingBodies(oldestKey))
+            }
+          }
+        }
         return
       }
 

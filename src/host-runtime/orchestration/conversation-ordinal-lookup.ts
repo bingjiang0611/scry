@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const SAFE_CONVERSATION_ID_RE = /^[A-Za-z0-9._-]{1,128}$/
-const MAX_CACHED_CONVERSATIONS = 256
+const MAX_CACHED_CONVERSATIONS = 2048
 
 interface CachedConversationTurns {
   mtimeMs: number

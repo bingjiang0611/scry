@@ -1,140 +1,29 @@
 import type Database from 'better-sqlite3'
 import { canonicalJson } from './canonical-json'
-import type {
-  BodyDescriptor,
-  CommandReceiptRow,
-  InteractionProjectionRow,
-  OrchestrationEventRow,
-  OrchestrationOrigin,
-  OrchestrationScope,
-  OrdinalOrigin,
-  RunLifecycleState,
-  RunProjectionRow,
-  SessionLineage,
-  SessionProjectionRow,
-  TurnAuthor,
-  TurnDeliveryState,
-  TurnProjectionRow
-} from './types'
-import type { Evidence } from '../../shared/turn-record-contracts'
+import type { OrchestrationEventRow } from './types'
 
-function parseJson<T>(raw: string | null): T | null {
-  if (!raw) return null
-  return JSON.parse(raw) as T
-}
-
-export function mapSessionRow(row: Record<string, unknown>): SessionProjectionRow {
-  return {
-    sessionKey: String(row.session_key),
-    conversationId: (row.conversation_id as string | null) ?? null,
-    provider: (row.provider as string | null) ?? null,
-    profile: (row.profile as string | null) ?? null,
-    cwd: (row.cwd as string | null) ?? null,
-    title: (row.title as string | null) ?? null,
-    ts: Number(row.ts),
-    pinnedAt: row.pinned_at === null ? null : Number(row.pinned_at),
-    archivedAt: row.archived_at === null ? null : Number(row.archived_at),
-    lastRunId: (row.last_run_id as string | null) ?? null,
-    lastRunOutcome: parseJson<Evidence<string>>(row.last_run_outcome as string | null),
-    activeRunId: (row.active_run_id as string | null) ?? null,
-    pendingQuestions: Number(row.pending_questions ?? 0),
-    legacy: Number(row.legacy ?? 0) === 1,
-    revSeq: Number(row.rev_seq),
-    parentSessionKey: (row.parent_session_key as string | null) ?? null,
-    rootSessionKey: (row.root_session_key as string | null) ?? null,
-    lineage: parseJson<SessionLineage>(row.lineage as string | null),
-    createdBy: (row.created_by as string | null) ?? null
-  }
-}
-
-export function mapTurnRow(row: Record<string, unknown>): TurnProjectionRow {
-  return {
-    sessionKey: String(row.session_key),
-    ordinal: Number(row.ordinal),
-    runId: String(row.run_id),
-    ordinalOrigin: String(row.ordinal_origin) as OrdinalOrigin,
-    userTextPreview: (row.user_text_preview as string | null) ?? null,
-    delivery: String(row.delivery) as TurnDeliveryState,
-    outcome: parseJson<Evidence<string>>(row.outcome as string | null),
-    startedAt: row.started_at === null ? null : Number(row.started_at),
-    settledAt: row.settled_at === null ? null : Number(row.settled_at),
-    recoveredAt: row.recovered_at === null ? null : Number(row.recovered_at),
-    contentRef: (row.content_ref as string | null) ?? null,
-    evidence: parseJson<string[]>(row.evidence as string | null),
-    revSeq: Number(row.rev_seq),
-    author: String(row.author) as TurnAuthor
-  }
-}
-
-export function mapRunRow(row: Record<string, unknown>): RunProjectionRow {
-  return {
-    runId: String(row.run_id),
-    sessionKey: (row.session_key as string | null) ?? null,
-    ownerActor: String(row.owner_actor),
-    scope: String(row.scope) as OrchestrationScope,
-    origin: String(row.origin) as OrchestrationOrigin,
-    provider: (row.provider as string | null) ?? null,
-    profile: (row.profile as string | null) ?? null,
-    cwd: (row.cwd as string | null) ?? null,
-    promptPreview: (row.prompt_preview as string | null) ?? null,
-    lifecycle: String(row.lifecycle) as RunLifecycleState,
-    stopState: (row.stop_state as string | null) ?? null,
-    outputSeq: row.output_seq === null || row.output_seq === undefined ? null : Number(row.output_seq),
-    intentSeq: Number(row.intent_seq),
-    body: parseJson<BodyDescriptor>(row.body as string | null),
-    settledAt: row.settled_at === null ? null : Number(row.settled_at),
-    recoveredAt: row.recovered_at === null ? null : Number(row.recovered_at),
-    outcome: parseJson<Evidence<string>>(row.outcome as string | null),
-    revSeq: Number(row.rev_seq),
-    parentRunId: (row.parent_run_id as string | null) ?? null
-  }
-}
-
-export function mapInteractionRow(row: Record<string, unknown>): InteractionProjectionRow {
-  return {
-    runId: String(row.run_id),
-    questionId: String(row.question_id),
-    kind: String(row.kind),
-    source: String(row.source),
-    state: String(row.state) as 'open' | 'answered' | 'closed',
-    answerId: (row.answer_id as string | null) ?? null,
-    answerSha256: (row.answer_sha256 as string | null) ?? null,
-    openedSeq: Number(row.opened_seq),
-    closedSeq: row.closed_seq === null ? null : Number(row.closed_seq),
-    answeredBy: (row.answered_by as string | null) ?? null
-  }
-}
-
-export function mapReceiptRow(row: Record<string, unknown>): CommandReceiptRow {
-  return {
-    commandId: String(row.command_id),
-    actor: String(row.actor),
-    type: String(row.type),
-    payloadSha256: String(row.payload_sha256),
-    acceptedAt: Number(row.accepted_at),
-    status: String(row.status) as 'accepted' | 'rejected',
-    reason: (row.reason as string | null) ?? null,
-    result: parseJson<Record<string, unknown>>(row.result as string | null),
-    resultSeq: row.result_seq === null ? null : Number(row.result_seq),
-    principal: String(row.principal),
-    via: (row.via as string | null) ?? null,
-    actorRunId: (row.actor_run_id as string | null) ?? null
-  }
-}
+export {
+  mapInteractionRow,
+  mapReceiptRow,
+  mapRunRow,
+  mapSessionRow,
+  mapTurnRow
+} from './projection-mappers'
 
 function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow, p: Record<string, unknown>): void {
   if (!event.sessionKey) return
   const isHistorical = p.historicalBackfill === true
+  const histFlag = isHistorical ? 1 : 0
   db.prepare(
     `INSERT INTO orch_p_session (
       session_key, provider, profile, cwd, ts, last_run_id, active_run_id, rev_seq, created_by
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_key) DO UPDATE SET
-      provider = COALESCE(excluded.provider, orch_p_session.provider),
-      profile = COALESCE(excluded.profile, orch_p_session.profile),
-      cwd = COALESCE(excluded.cwd, orch_p_session.cwd),
+      provider = CASE WHEN ? = 1 THEN COALESCE(orch_p_session.provider, excluded.provider) ELSE COALESCE(excluded.provider, orch_p_session.provider) END,
+      profile = CASE WHEN ? = 1 THEN COALESCE(orch_p_session.profile, excluded.profile) ELSE COALESCE(excluded.profile, orch_p_session.profile) END,
+      cwd = CASE WHEN ? = 1 THEN COALESCE(orch_p_session.cwd, excluded.cwd) ELSE COALESCE(excluded.cwd, orch_p_session.cwd) END,
       ts = MAX(orch_p_session.ts, excluded.ts),
-      last_run_id = CASE WHEN ? = 1 AND excluded.ts < orch_p_session.ts THEN orch_p_session.last_run_id ELSE excluded.last_run_id END,
+      last_run_id = CASE WHEN ? = 1 AND orch_p_session.last_run_id IS NOT NULL AND excluded.ts <= orch_p_session.ts THEN orch_p_session.last_run_id ELSE excluded.last_run_id END,
       active_run_id = CASE WHEN ? = 1 THEN orch_p_session.active_run_id ELSE excluded.active_run_id END,
       rev_seq = excluded.rev_seq`
   ).run(
@@ -147,8 +36,11 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
     isHistorical ? null : event.runId,
     event.seq,
     event.actor,
-    isHistorical ? 1 : 0,
-    isHistorical ? 1 : 0
+    histFlag,
+    histFlag,
+    histFlag,
+    histFlag,
+    histFlag
   )
 }
 
@@ -291,12 +183,26 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
          WHERE run_id = ?`
       ).run(lifecycle, settledAt, recoveredAt, outcomeJson, event.seq, event.runId)
       if (event.sessionKey) {
+        const histFlag = p.historicalBackfill === true ? 1 : 0
         db.prepare(
           `UPDATE orch_p_session
            SET active_run_id = CASE WHEN active_run_id = ? THEN NULL ELSE active_run_id END,
-               last_run_id = ?, last_run_outcome = ?, ts = MAX(ts, ?), rev_seq = ?
+               last_run_id = CASE WHEN ? = 1 AND last_run_id IS NOT NULL AND ? <= ts THEN last_run_id ELSE ? END,
+               last_run_outcome = CASE WHEN ? = 1 AND last_run_id IS NOT NULL AND ? <= ts THEN last_run_outcome ELSE ? END,
+               ts = MAX(ts, ?), rev_seq = ?
            WHERE session_key = ?`
-        ).run(event.runId, event.runId, outcomeJson, event.at, event.seq, event.sessionKey)
+        ).run(
+          event.runId,
+          histFlag,
+          event.at,
+          event.runId,
+          histFlag,
+          event.at,
+          outcomeJson,
+          event.at,
+          event.seq,
+          event.sessionKey
+        )
       }
       if (event.runId) {
         db.prepare(
