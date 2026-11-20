@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, statfsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, statSync, statfsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { migrateOrchestrationDatabase } from './migrations'
@@ -69,13 +69,25 @@ export interface WalCheckpointResult {
   checkpointed: number
 }
 
+export interface WalCheckpointSample {
+  mode: 'passive' | 'truncate'
+  durationMs: number
+  walBytesBefore: number
+  walBytesAfter: number
+  result: WalCheckpointResult
+}
+
 export interface OrchestrationDbHandle {
   readonly db: Database.Database
   readonly dbPath: string
   readonly orchestrationDir: string
   enforceModes(): void
+  /** Current `-wal` file size in bytes (0 when absent). */
+  walFileBytes(): number
   /** Runs a non-blocking PASSIVE WAL checkpoint off the commit critical path. */
   checkpointPassive(): WalCheckpointResult
+  /** Runs a TRUNCATE WAL checkpoint to reclaim `-wal` file size under EXCLUSIVE lock. */
+  checkpointTruncate(): WalCheckpointResult
   close(options?: { skipCheckpoint?: boolean }): void
 }
 
@@ -147,9 +159,31 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
       dbPath,
       orchestrationDir,
       enforceModes: () => enforceOrchestrationFileModes(dbPath),
+      walFileBytes: () => {
+        const walPath = `${dbPath}-wal`
+        try {
+          return existsSync(walPath) ? statSync(walPath).size : 0
+        } catch {
+          return 0
+        }
+      },
       checkpointPassive: () => {
         if (!liveDb.open) return { busy: 0, log: 0, checkpointed: 0 }
         const rows = liveDb.pragma('wal_checkpoint(PASSIVE)') as Array<{
+          busy?: number
+          log?: number
+          checkpointed?: number
+        }>
+        const row = rows[0]
+        return {
+          busy: Number(row?.busy ?? 0),
+          log: Number(row?.log ?? 0),
+          checkpointed: Number(row?.checkpointed ?? 0)
+        }
+      },
+      checkpointTruncate: () => {
+        if (!liveDb.open) return { busy: 0, log: 0, checkpointed: 0 }
+        const rows = liveDb.pragma('wal_checkpoint(TRUNCATE)') as Array<{
           busy?: number
           log?: number
           checkpointed?: number

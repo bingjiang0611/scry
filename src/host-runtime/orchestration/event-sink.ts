@@ -6,7 +6,8 @@ import {
   openOrchestrationDatabase,
   type OpenOrchestrationDbOptions,
   type OrchestrationDbHandle,
-  type WalCheckpointResult
+  type WalCheckpointResult,
+  type WalCheckpointSample
 } from './db'
 import { getEffectPolicy } from './effect-policy'
 import {
@@ -66,12 +67,7 @@ export interface EventSinkTxExtras {
   expectedSessionDeleteEpoch?: number
 }
 
-/**
- * Single-writer atomic persistence sink for P4 orchestration (core §2.5, data §4).
- * Commits events, projection updates, sticky command receipts, and outbox rows in one
- * SQLite transaction; any write/fsync failure trips a fail-closed fence that can only be
- * cleared by reopening, while still permitting tightening-only run stops.
- */
+/** Single-writer atomic persistence sink for P4 orchestration (core §2.5, data §4). */
 export class EventSink {
   readonly handle: OrchestrationDbHandle
   readonly bodyStore: BodyStore
@@ -84,7 +80,8 @@ export class EventSink {
   #inBatchTransaction = false
   #checkpointIntervalMs: number
   #checkpointTimer: ReturnType<typeof setTimeout> | null = null
-  #idleCheckpointPaused = false
+  #checkpointCount = 0
+  #onCheckpoint?: (sample: WalCheckpointSample) => void
   #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
 
@@ -100,24 +97,16 @@ export class EventSink {
     this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
   }
 
-  /**
-   * Pauses/resumes the idle WAL PASSIVE checkpoint timer during bulk deferred backfill
-   * so a multi-megabyte WAL checkpoint never fires synchronously mid-backfill on the main thread.
-   */
-  setIdleCheckpointPaused(paused: boolean): void {
-    this.#idleCheckpointPaused = paused
-    if (paused && this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    } else if (!paused) {
-      this.scheduleIdleCheckpoint()
-    }
+  setCheckpointObserver(observer: ((sample: WalCheckpointSample) => void) | undefined): void {
+    this.#onCheckpoint = observer
   }
 
+  checkpointCount(): number { return this.#checkpointCount }
+
+  walFileBytes(): number { return this.handle.db.open ? this.handle.walFileBytes() : 0 }
+
   private scheduleIdleCheckpoint(): void {
-    if (this.#idleCheckpointPaused || this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#checkpointTimer) {
-      return
-    }
+    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#checkpointTimer) return
     const timer = setTimeout(() => {
       this.#checkpointTimer = null
       this.checkpointPassive()
@@ -126,12 +115,25 @@ export class EventSink {
     this.#checkpointTimer = timer
   }
 
-  checkpointPassive(): WalCheckpointResult {
+  checkpointPassive(): WalCheckpointResult { return this.runCheckpoint('passive') }
+  checkpointTruncate(): WalCheckpointResult { return this.runCheckpoint('truncate') }
+
+  private runCheckpoint(mode: 'passive' | 'truncate'): WalCheckpointResult {
     if (this.#writeIndeterminate || !this.handle.db.open) {
       return { busy: 0, log: 0, checkpointed: 0 }
     }
+    if (this.#checkpointTimer) {
+      clearTimeout(this.#checkpointTimer)
+      this.#checkpointTimer = null
+    }
+    const walBytesBefore = this.handle.walFileBytes()
+    const started = performance.now()
     try {
-      return this.handle.checkpointPassive()
+      const result = mode === 'truncate' ? this.handle.checkpointTruncate() : this.handle.checkpointPassive()
+      const durationMs = Number((performance.now() - started).toFixed(2))
+      this.#checkpointCount += 1
+      this.#onCheckpoint?.({ mode, durationMs, walBytesBefore, walBytesAfter: this.handle.walFileBytes(), result })
+      return result
     } catch {
       return { busy: 1, log: 0, checkpointed: 0 }
     }

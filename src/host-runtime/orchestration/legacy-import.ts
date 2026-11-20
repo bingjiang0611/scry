@@ -47,6 +47,12 @@ export interface LegacyImportOptions {
   resolveTurnOrdinal?: TurnOrdinalResolver
   /** Time budget (ms) per yielding slice in `startDeferredLegacyImport` (default 8 ms). */
   maxSliceMs?: number
+  /** Runs between periodic PASSIVE checkpoints during deferred backfill (default 500). */
+  walCheckpointRuns?: number
+  /** WAL size threshold (bytes) to trigger an early PASSIVE checkpoint when `-wal` grows past it (default 16 MiB). */
+  walCheckpointBytes?: number
+  /** Hard WAL size cap (bytes) to trigger a TRUNCATE checkpoint reclaiming `-wal` disk space (default 64 MiB). */
+  walHardCapBytes?: number
 }
 
 export interface LegacyImportSummary {
@@ -57,24 +63,15 @@ export interface LegacyImportSummary {
   catalogSha256: string
 }
 
-/**
- * Parses H1 `session-ledger.snapshot.json` + `session-ledger.log` ONCE and partitions runs
- * with `lastSeq > legacy_ledger_seq` into `unimportedRuns` (sorted by `intentSeq`) and `openRuns`.
- * Reuse the returned plan across threshold check, open-run sync import, and deferred backfill.
- */
+function emptyPlan(currentLedgerSeq: number, lastSeq = currentLedgerSeq, runs = new Map<string, LegacyRunState>()): LegacyLedgerPlan {
+  return { currentLedgerSeq, lastSeq, unimportedRuns: [], openRuns: [], runsByLedgerId: runs }
+}
+
 function buildLegacyLedgerPlan(
   currentLedgerSeq: number,
   legacy: { lastSeq: number; runs: Map<string, LegacyRunState> }
 ): LegacyLedgerPlan {
-  if (legacy.lastSeq <= currentLedgerSeq) {
-    return {
-      currentLedgerSeq,
-      lastSeq: legacy.lastSeq,
-      unimportedRuns: [],
-      openRuns: [],
-      runsByLedgerId: legacy.runs
-    }
-  }
+  if (legacy.lastSeq <= currentLedgerSeq) return emptyPlan(currentLedgerSeq, legacy.lastSeq, legacy.runs)
   const unimportedRuns = [...legacy.runs.values()]
     .filter((run) => run.lastSeq > currentLedgerSeq)
     .sort((a, b) => a.intentSeq - b.intentSeq)
@@ -85,15 +82,7 @@ function buildLegacyLedgerPlan(
 export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): LegacyLedgerPlan {
   const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
   const ledgerDir = join(userDataDir, 'remote', 'ledger')
-  if (!existsSync(ledgerDir)) {
-    return {
-      currentLedgerSeq,
-      lastSeq: currentLedgerSeq,
-      unimportedRuns: [],
-      openRuns: [],
-      runsByLedgerId: new Map()
-    }
-  }
+  if (!existsSync(ledgerDir)) return emptyPlan(currentLedgerSeq)
   return buildLegacyLedgerPlan(currentLedgerSeq, readLegacyLedgerReadOnly(ledgerDir))
 }
 
@@ -101,25 +90,9 @@ export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): Lega
 export async function loadLegacyLedgerPlanAsync(sink: EventSink, userDataDir: string): Promise<LegacyLedgerPlan> {
   const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
   const ledgerDir = join(userDataDir, 'remote', 'ledger')
-  if (!existsSync(ledgerDir)) {
-    return {
-      currentLedgerSeq,
-      lastSeq: currentLedgerSeq,
-      unimportedRuns: [],
-      openRuns: [],
-      runsByLedgerId: new Map()
-    }
-  }
+  if (!existsSync(ledgerDir)) return emptyPlan(currentLedgerSeq)
   const streamed = await readLegacyLedgerStreamedAsync(ledgerDir, { minSeqExclusive: currentLedgerSeq })
-  if (streamed.lastSeq <= currentLedgerSeq) {
-    return {
-      currentLedgerSeq,
-      lastSeq: streamed.lastSeq,
-      unimportedRuns: [],
-      openRuns: [],
-      runsByLedgerId: streamed.runs
-    }
-  }
+  if (streamed.lastSeq <= currentLedgerSeq) return emptyPlan(currentLedgerSeq, streamed.lastSeq, streamed.runs)
   const openRuns = streamed.sortedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
   return {
     currentLedgerSeq,
@@ -398,6 +371,9 @@ export function startDeferredLegacyImport(
   const shadowOnly = options.shadowOnly ?? !reconcileOpenRuns
   const batchSize = Math.max(1, options.batchSize ?? 100)
   const maxSliceMs = Math.max(1, options.maxSliceMs ?? 8)
+  const walCheckpointRuns = Math.max(50, options.walCheckpointRuns ?? 200)
+  const walCheckpointBytes = Math.max(256 * 1024, options.walCheckpointBytes ?? 16 * 1024 * 1024)
+  const walHardCapBytes = Math.max(walCheckpointBytes * 2, options.walHardCapBytes ?? 64 * 1024 * 1024)
   const resolveTurnOrdinal = options.resolveTurnOrdinal ?? createConversationOrdinalResolver(userDataDir)
 
   const promise = new Promise<LegacyImportSummary>((resolve, reject) => {
@@ -409,19 +385,13 @@ export function startDeferredLegacyImport(
     let offset = 0
     let importedRuns = 0
     let rejectedCommands = 0
-    sink.setIdleCheckpointPaused(true)
-    const finishResolve = (summary: LegacyImportSummary): void => {
-      sink.setIdleCheckpointPaused(false)
-      resolve(summary)
-    }
-    const finishReject = (error: unknown): void => {
-      sink.setIdleCheckpointPaused(false)
-      reject(error)
-    }
+    let runsSinceCheckpoint = 0
+    let walBytesAtLastCheckpoint = sink.walFileBytes()
+    let pendingCheckpointMode: 'passive' | 'truncate' | null = null
 
     const step = (): void => {
       if (cancelled || sink.isWriteIndeterminate()) {
-        finishResolve({
+        resolve({
           importedRuns,
           importedSessions: 0,
           rejectedCommands,
@@ -431,6 +401,23 @@ export function startDeferredLegacyImport(
         return
       }
       try {
+        // Run scheduled bounded WAL checkpoint in its own yielded turn between backfill slices (N2).
+        if (pendingCheckpointMode) {
+          const mode = pendingCheckpointMode
+          pendingCheckpointMode = null
+          runsSinceCheckpoint = 0
+          if (mode === 'truncate') {
+            sink.checkpointTruncate()
+          } else {
+            const res = sink.checkpointPassive()
+            if (res.busy > 0 || sink.walFileBytes() >= walHardCapBytes) {
+              sink.checkpointTruncate()
+            }
+          }
+          walBytesAtLastCheckpoint = sink.walFileBytes()
+          setImmediate(step)
+          return
+        }
         if (offset < sortedRuns.length) {
           const sliceStart = performance.now()
           let processed = 0
@@ -451,7 +438,19 @@ export function startDeferredLegacyImport(
             }
             if (offset >= sortedRuns.length) sink.setMeta('legacy_ledger_seq', String(plan.lastSeq))
           })
+          runsSinceCheckpoint += processed
           if (offset >= sortedRuns.length) currentLedgerSeq = plan.lastSeq
+          const walSize = sink.walFileBytes()
+          // PASSIVE checkpoint reuses the WAL file without shrinking stat().size, so check
+          // runsSinceCheckpoint + growth above last checkpoint size, and TRUNCATE at hard cap.
+          if (walSize >= walHardCapBytes) {
+            pendingCheckpointMode = 'truncate'
+          } else if (
+            runsSinceCheckpoint >= walCheckpointRuns ||
+            walSize >= Math.max(walCheckpointBytes, walBytesAtLastCheckpoint + walCheckpointBytes)
+          ) {
+            pendingCheckpointMode = 'passive'
+          }
           setImmediate(step)
           return
         }
@@ -460,7 +459,10 @@ export function startDeferredLegacyImport(
           currentLedgerSeq = plan.lastSeq
         }
         const catalog = importCatalogEntries(sink, userDataDir, now, batchSize)
-        finishResolve({
+        if (sink.walFileBytes() >= walCheckpointBytes) {
+          sink.checkpointPassive()
+        }
+        resolve({
           importedRuns,
           importedSessions: catalog.importedSessions,
           rejectedCommands: rejectedCommands + catalog.rejectedCommands,
@@ -468,7 +470,7 @@ export function startDeferredLegacyImport(
           catalogSha256: catalog.catalogSha256
         })
       } catch (error) {
-        finishReject(error)
+        reject(error)
       }
     }
 

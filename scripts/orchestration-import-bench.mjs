@@ -235,6 +235,19 @@ async function runDataset(mod, spec) {
     })
     const afterOpenImport = performance.now()
 
+    const checkpointDurations = []
+    let walPeakBytes = sink.walFileBytes()
+    const recordWal = (bytes) => {
+      if (bytes > walPeakBytes) walPeakBytes = bytes
+    }
+    sink.setCheckpointObserver((sample) => {
+      checkpointDurations.push(sample.durationMs)
+      recordWal(sample.walBytesBefore)
+      recordWal(sample.walBytesAfter)
+    })
+    const walSampler = setInterval(() => {
+      recordWal(sink.walFileBytes())
+    }, 10)
     const backfillMonitor = monitorEventLoopDelay({ resolution: 1 })
     backfillMonitor.enable()
     const postStart = performance.now()
@@ -250,6 +263,9 @@ async function runDataset(mod, spec) {
     await new Promise((r) => setImmediate(r))
     const postEnd = performance.now()
     backfillMonitor.disable()
+    clearInterval(walSampler)
+    recordWal(sink.walFileBytes())
+    sink.setCheckpointObserver(undefined)
 
     const noopStart = performance.now()
     const noopPlan = await mod.loadLegacyLedgerPlanAsync(sink, root)
@@ -257,6 +273,8 @@ async function runDataset(mod, spec) {
     sink.close()
 
     const nsToMs = (ns) => Number((Math.max(0, ns) / 1e6).toFixed(2))
+    const sortedCkpt = [...checkpointDurations].sort((a, b) => a - b)
+    const ckptTotalMs = Number(checkpointDurations.reduce((acc, v) => acc + v, 0).toFixed(2))
     return {
       case: spec.name,
       shape: {
@@ -283,6 +301,17 @@ async function runDataset(mod, spec) {
         importedRuns: deferredSummary.importedRuns,
         rejectedCommands: deferredSummary.rejectedCommands,
         finalLegacyLedgerSeq: deferredSummary.legacyLedgerSeq,
+        walPeakBytes,
+        walPeakMiB: Number((walPeakBytes / (1024 * 1024)).toFixed(2)),
+        checkpoints: {
+          count: checkpointDurations.length,
+          pauseMs: {
+            p50: pct(sortedCkpt, 0.5),
+            p95: pct(sortedCkpt, 0.95),
+            max: sortedCkpt.length > 0 ? Number(sortedCkpt[sortedCkpt.length - 1].toFixed(2)) : 0,
+            total: ckptTotalMs
+          }
+        },
         eventLoopPauseMs: {
           p50: nsToMs(backfillMonitor.percentile(50)),
           p95: nsToMs(backfillMonitor.percentile(95)),
