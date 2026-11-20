@@ -188,15 +188,21 @@ function artifact(): Record<string, unknown> {
     const measured = batches.get(scenario) ?? []
     const successful = measured.length === expectedBatches && measured.every(batch => Number.isFinite(batch.durationMs))
     const last = measured.at(-1)
+    const unavailable =
+      side === 'baseline' &&
+      measured.length === expectedBatches &&
+      last?.counters &&
+      Object.keys(last.counters).length === 1 &&
+      last.counters.__baselineUnavailable === 1
     results[scenario] = {
       lane: definition.lane,
       workload: definition.workload,
       iterations: definition.iterations,
       warmups: definition.warmups ?? 1,
       samples: measured.length,
-      counters: last?.counters ?? {},
+      counters: unavailable ? {} : (last?.counters ?? {}),
       durationMs: measured.map(batch => batch.durationMs),
-      outcome: successful ? 'completed' : 'failed'
+      outcome: unavailable ? 'unavailable' : successful ? 'completed' : 'failed'
     }
   }
   return {

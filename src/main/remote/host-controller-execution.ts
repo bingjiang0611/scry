@@ -241,9 +241,11 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       flush: (runId) => output.flush(runId)
     }
   })
-  const unsubscribeGate = gate.onAuthenticationReleased(() => {
-    dispatcher.pump()
-  })
+  const unsubscribeGate = deps.orchestration
+    ? gate.onAuthenticationReleased(() => {
+        dispatcher.pump()
+      })
+    : () => undefined
   return {
     gateway,
     dispatcher,

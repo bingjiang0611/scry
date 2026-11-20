@@ -2,7 +2,7 @@
 
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
-- 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；W2b 两项等维护者约停机窗口。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
+- 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；现做 W12（中继部署）；W2b 两项等维护者约停机窗口。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
 - 执行方 B：P5（W3、W2 代码已通过）；Antigravity（W7、W8 已通过）；现做 W11（P5 第 2 步）。
 - 执行方 C：P4（W4、W5 已通过），现做 W9。
 
@@ -20,6 +20,7 @@
 | W9 | P4-2 实现（`on` 开关后）与 S3 准备（不删代码） | C | W5 通过 | P4-2：W1 通过；S3 删除另补任务单 | [tasks/W9-p4-2-and-s3-prep.md](tasks/W9-p4-2-and-s3-prep.md) |
 | W10 | 默认 daemon 下恢复 iPhone 的「其他主机」路由、修正误导文案；中继僵死 leg 只分析 | A | — | **下一次合入 main 的门槛**（`main` 已含默认 daemon） | [tasks/W10-daemon-execution-targets.md](tasks/W10-daemon-execution-targets.md) |
 | W11 | P5 第 2 步：命令行批准新设备（P5-5b、P5-5、P5-6、P5-7） | B | W8 通过 | 批准入口与 `approvedVia` 写入放在实验开关后，含 W3 的版本发布后再打开；P5-8 真机验收另由 A 做 | [tasks/W11-p5-step2-host-cli.md](tasks/W11-p5-step2-host-cli.md) |
+| W12 | 部署 W10 的中继修复到线上（维护者已授权） | A | W10 通过 | 失败按任务单回滚 | [tasks/W12-relay-deploy.md](tasks/W12-relay-deploy.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛（2026-11-20 已通过，附条件：W10），但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 

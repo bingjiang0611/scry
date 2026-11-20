@@ -17,10 +17,11 @@ export function batchPlan(scenarios, batches = ABAB_BATCHES) {
   })))
 }
 
-export function validateBatchSamples(results, scenarios, batches = ABAB_BATCHES) {
+export function validateBatchSamples(results, scenarios, batches = ABAB_BATCHES, options = {}) {
   if (!results || typeof results !== 'object') throw new Error('ABAB results are missing')
   for (const scenario of scenarios) {
     const result = results[scenario]
+    if (options.allowUnavailable && result?.outcome === 'unavailable') continue
     if (!result || result.outcome !== 'completed') throw new Error(`ABAB scenario did not complete: ${scenario}`)
     if (!Array.isArray(result.durationMs) || result.durationMs.length !== batches) throw new Error(`ABAB sample count is not ${batches}: ${scenario}`)
     if (!result.durationMs.every(value => Number.isFinite(value) && value >= 0)) throw new Error(`ABAB samples are invalid: ${scenario}`)

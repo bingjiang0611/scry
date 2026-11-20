@@ -31,6 +31,7 @@ import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
 import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
+import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { createDaemonRemoteAssembly } from './host-process-assembly'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
@@ -201,7 +202,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
     deferMs: 0,
-    skipConversationRecovery: process.env.SCRY_ORCHESTRATION === 'on'
+    skipConversationRecovery: parseOrchestrationMode(process.env).effective === 'on'
   })
   await startupManagedRecovery
 
