@@ -74,10 +74,25 @@ export function createAuthorityLedgerStore(options: {
 
   const mirrorTargetStore = openWrappedFileStore()
 
-  // Decision H §14.1–2: build single state snapshot at R (never read H1, no retainedEvents, no renumbering).
+  // Decision H §14.1–2 + W9-review-2 MF4: build single state snapshot at max(R, legacyLedgerSeq, H1 lastSeq)
+  // (corrupt/partial H1 is ignored inside try/catch so it never blocks on-mode startup; closes fail-open off residual).
+  let h1DiskLastSeq = 0
+  if (fileStore) {
+    try {
+      const recovery = fileStore.loadRecovery()
+      h1DiskLastSeq = recovery.snapshot?.lastSeq ?? 0
+      for (const ev of recovery.events) {
+        if (Number.isSafeInteger(ev.seq) && ev.seq > h1DiskLastSeq) h1DiskLastSeq = ev.seq
+      }
+    } catch {
+      h1DiskLastSeq = 0
+    }
+  }
   const prevReserved = readReservedSeqUntil(sink)
   const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
-  const initialSnapshot = buildH1SnapshotFromDb(sink, { lastSeq: Math.max(prevReserved, legacyLedgerSeq) })
+  const initialSnapshot = buildH1SnapshotFromDb(sink, {
+    lastSeq: Math.max(prevReserved, legacyLedgerSeq, h1DiskLastSeq)
+  })
   const startSeq = initialSnapshot.lastSeq
 
   // Reserve the next block `[startSeq + 1, startSeq + blockSize]` once at startup (off pre-first-token path).
@@ -134,7 +149,7 @@ export function createAuthorityLedgerStore(options: {
     }),
     shouldCompact: (nextEvent) => {
       if (currentSnapshot.retainedEvents.length + memoryEvents.length >= 8192) return true
-      if (!fileStore || mirror.isH1FallbackUnavailable()) return false
+      if (!fileStore || mirror.isH1FallbackUnavailable() || mirror.hasPendingCompact()) return false
       try {
         return fileStore.shouldCompact(nextEvent)
       } catch {
@@ -144,19 +159,28 @@ export function createAuthorityLedgerStore(options: {
     compact: (snapshot) => {
       if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
       const frozen = structuredClone(snapshot)
+      if (frozen.lastSeq > reservedUntil) {
+        persistReservedUntil(frozen.lastSeq + blockSize)
+        if (frozen.lastSeq > reservedUntil) {
+          throw new SessionLedgerError('orchestration_write_indeterminate')
+        }
+      }
       currentSnapshot = frozen
       memoryEvents = []
       currentLastSeq = Math.max(currentLastSeq, frozen.lastSeq)
-      if (currentLastSeq > reservedUntil) {
-        persistReservedUntil(currentLastSeq + blockSize)
-      }
-      mirror.enqueueCompact(buildH1SnapshotFromDb(sink, { lastSeq: currentLastSeq }))
+      // W9-review-2 B2: routine compaction mirrors the ledger's own pre-emit snapshot directly
+      // (consistent with the immediately following append, ZERO sync buildH1SnapshotFromDb on emit).
+      mirror.enqueueCompact(frozen)
     },
     append: (event) => {
       if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
-      // Block reservation invariant: emitted seq MUST NEVER exceed persisted `h1_seq_reserved_until`.
+      // Block reservation invariant (Decision H + W9-review-2 B3):
+      // NEVER emit a seq beyond persisted `h1_seq_reserved_until`.
       if (event.seq > reservedUntil) {
         persistReservedUntil(Math.max(reservedUntil + blockSize, event.seq))
+        if (event.seq > reservedUntil) {
+          throw new SessionLedgerError('orchestration_write_indeterminate')
+        }
       }
       memoryEvents.push(event)
       currentLastSeq = Math.max(currentLastSeq, event.seq)

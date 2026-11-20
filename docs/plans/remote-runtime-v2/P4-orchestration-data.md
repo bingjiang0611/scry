@@ -55,7 +55,7 @@
 - 文件：`userData/orchestration/orchestration.db`，文件 0600、目录 0700。
 - 连接：WAL；`synchronous=FULL`；`locking_mode=EXCLUSIVE`（core §2.9）；`foreign_keys=ON`；`secure_delete=ON`（同 `scry.db`，`db-connection.ts:49`）；macOS P4-2 默认 `fullfsync=ON`、`checkpoint_fullfsync=ON`（plan §8.3）。
 - **NORMAL 窗口（决定 H §14.6）**：延迟历史补导入期间，为让同进程 worker 独立连接后台跑 `wal_checkpoint(PASSIVE)`，主连接短暂切 `locking_mode=NORMAL` + `busy_timeout=500`，结束或取消立即恢复 `EXCLUSIVE`（写 `wal_lock_mode='exclusive'`、`busy_timeout=0`）；窗口内第 1 层 `daemon.lock` 仍独占宿主。
-- **不支持的回退路径（决定 H §14.5）**：不支持从 `on` 直接切回进程内模式（`SCRY_HOST_DAEMON=0`）或降级到 P4-2 之前版本；须先用当前 daemon 以 `off` 启动一次。`off`/未设置/`shadow` 启动时仅在 `orch_meta.orchestration_on_active='1'` 时 fail-open 校正 H1（按 H1 `lastSeq`，结果 `>= R`）并清 `'0'`；非 `'1'` 或 DB 打不开/损坏时只记日志、不动 H1。
+- **不支持的回退路径（决定 H §14.5）**：不支持从 `on` 直接切回进程内模式（`SCRY_HOST_DAEMON=0`）或降级到 P4-2 之前版本；须先用当前 daemon 以 `off` 启动一次。`off`/未设置/`shadow` 启动时先用只读连接（`readonly: true, fileMustExist: true, timeout: 0`）快查 `orch_meta.orchestration_on_active`（0 字节/损坏/未置 `'1'` 时直接返回，不跑 `integrity_check` 也不改写文件）；仅在值为 `'1'` 时完整打开库 fail-open 校正 H1（用 `h1.describe().lastSeq`，结果 `>= R`；因 `on` 模式块预留恒使退出时 `h1LastSeq < R`，`since(0).cursor` 受 256 分页上限约束与 `h1LastSeq < R` 判定在 `on_active='1'` 下行为等价，但代码仍以 `lastSeq` 为准）并清 `'0'`。为兜底 `off` 期间 DB 不可用导致 fail-open 跳过校正的残余，`on` 启动时在 `try/catch` 内取 `max(R, legacy_ledger_seq, H1 lastSeq)`。
 - 迁移用**独立执行器**，不复用 `migrateDatabase`（`db-migrations.ts:46` 硬编码 `repairMissingUsageLedger`，且遇更高 `user_version` 静默返回，而权威库必须拒开 `orchestration_schema_newer`，core §2.5）。
 
 ### 4.1 `orch_meta`
