@@ -15,6 +15,7 @@ import {
 import {
   verifyMcpExecutableAsync,
   verifyMcpExecutableSync,
+  type McpExecutableRunMemo,
   type McpExecutableVerification
 } from './mcp-executable-fingerprint'
 
@@ -284,10 +285,11 @@ function finalizeSnapshot(
 
 export function buildMcpExecutionSnapshot(args: BuildMcpExecutionSnapshotArgs): McpExecutionSnapshot {
   const { providerId, cwd, executionEnv, errors, preparedTargets } = prepareSnapshotContext(args)
+  const memo: McpExecutableRunMemo = new Map()
   const targets = preparedTargets.map((p) =>
     p.immediate || !p.absolute
       ? p.immediate!
-      : applyVerification(p, verifyMcpExecutableSync(p.target.name, p.absolute), errors)
+      : applyVerification(p, verifyMcpExecutableSync(p.target.name, p.absolute, memo), errors)
   )
   return finalizeSnapshot(args, providerId, cwd, executionEnv, errors, targets)
 }
@@ -296,12 +298,13 @@ export async function buildMcpExecutionSnapshotAsync(
   args: BuildMcpExecutionSnapshotArgs
 ): Promise<McpExecutionSnapshot> {
   const { providerId, cwd, executionEnv, errors, preparedTargets } = prepareSnapshotContext(args)
+  const memo: McpExecutableRunMemo = new Map()
   const targets: ResolvedMcpConfig[] = []
   for (const p of preparedTargets) {
     targets.push(
       p.immediate || !p.absolute
         ? p.immediate!
-        : applyVerification(p, await verifyMcpExecutableAsync(p.target.name, p.absolute), errors)
+        : applyVerification(p, await verifyMcpExecutableAsync(p.target.name, p.absolute, memo), errors)
     )
   }
   return finalizeSnapshot(args, providerId, cwd, executionEnv, errors, targets)

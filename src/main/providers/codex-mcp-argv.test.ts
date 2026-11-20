@@ -43,7 +43,8 @@ vi.mock('../claude-locate', () => ({
   resolveRuntimeCliBin: () => '/bin/codex',
   resolveTrustRecorderCliPath: () => undefined,
   runtimeCliEnv: () => ({ PATH: '/usr/bin:/bin' }),
-  shellEnv: () => ({})
+  shellEnv: () => ({}),
+  warmShellEnv: async () => ({})
 }))
 
 import { codexMcpConfig, createCodexAdapter } from './codex'
