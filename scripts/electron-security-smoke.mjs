@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { stopFixtureDaemon } from './b4v/fixture.mjs'
 import { exerciseUnified } from './electron-security-unified.mjs'
 import { exerciseTerminalSteer } from './terminal-steer-queue-smoke.mjs'
 import { exerciseOwnership } from './electron-security-ownership.mjs'
@@ -41,7 +42,8 @@ const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 if (!dev) assertArtifactMatchesSource(appPath)
 const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
-const temp = mkdtempSync(join(tmpdir(), 'scry-electron-smoke-'))
+// Keep unix socket paths under macOS's 104-byte sun_path limit in default daemon mode.
+const temp = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-es-')))
 let child
 let stderr = ''
 let smokeIdentity = 'default'
@@ -128,6 +130,7 @@ async function main() {
     writeFileSync(questionEntry, `
       import { app } from 'electron'
       import { writeFileSync } from 'node:fs'
+      app.setAppPath(${JSON.stringify(resolve('.'))})
       app.whenReady().then(async () => {
         const initial = { success: app.setBadgeCount(1), nativeCount: app.getBadgeCount() }
         const requests = []
@@ -157,6 +160,9 @@ async function main() {
   const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
     workspace: canonicalWorkspace, userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls,
     identity: smokeIdentity, largeHistory: largeHistoryOnly })
+  // Sub-modes that rely on in-process-only fixture env hooks (SCRY_ELECTRON_SMOKE_{CONVERSATIONS,INPUTS,CALLS},
+  // not in daemon FORWARDED_ENV) keep explicit in-process mode unless caller overrides SCRY_HOST_DAEMON.
+  const inProcessOnlyFixture = steerOnly || conversationOwnershipOnly || unifiedConversationOnly || sideChatOnly || largeHistoryOnly
   const launchApp = () => {
     child = spawn(executable, [
       ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
@@ -175,6 +181,9 @@ async function main() {
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
         SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
+        ...(inProcessOnlyFixture
+          ? { SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0' }
+          : { SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }),
         ...(steerOnly ? { SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs } : {}),
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
@@ -292,6 +301,7 @@ try {
   throw error
 } finally {
   await stopOwnedApp(child)
+  await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') }).catch(() => {})
   // A failed run keeps its fixture as evidence; only clean runs delete it.
   if (failed) console.warn(`[scry] smoke fixture kept for diagnosis: ${temp}`)
   else try {

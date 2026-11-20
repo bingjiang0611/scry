@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process'
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { stopFixtureDaemon } from './b4v/fixture.mjs'
 
 // 真实 Provider 的会话级恢复验收：run after `npm run build`.
 // 与 renderer-crash-recovery-smoke 的差别是这里跑一轮真实 Agent（默认 Provider + 默认模型），
@@ -13,7 +14,8 @@ import { stopOwnedApp } from './owned-app-processes.mjs'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const entry = join(root, 'out/main/index.js')
 await access(entry)
-const temp = await mkdtemp(join(tmpdir(), 'scry-session-restore-'))
+// Keep unix socket paths under macOS's 104-byte sun_path limit in default daemon mode.
+const temp = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-restore-')))
 
 async function exercise(window, workspace, agentPattern) {
   const assert = require('node:assert/strict')
@@ -167,8 +169,13 @@ try {
   // 恢复要经过已有的工作目录授权：先登记成已知项目，测到的是恢复行为而不是授权边界。
   await writeFile(join(temp, 'userData', 'recent-folders.json'), JSON.stringify([workspace]))
   await writeFile(join(temp, 'userData', 'projects.json'), JSON.stringify([{ cwd: workspace, lastOpenedAt: Date.now() }]))
-  await writeFile(join(temp, 'main.cjs'), `
+  const metadata = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const bootstrap = join(temp, 'app')
+  await mkdir(bootstrap)
+  await writeFile(join(bootstrap, 'package.json'), JSON.stringify({ name: metadata.name, version: metadata.version, main: 'main.cjs' }))
+  await writeFile(join(bootstrap, 'main.cjs'), `
     const { app } = require('electron')
+    app.setAppPath(${JSON.stringify(root)})
     require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
     app.once('browser-window-created', (_event, window) => {
@@ -183,8 +190,14 @@ try {
   `)
   await new Promise((resolve, reject) => {
     // HOME 必须保留真实值：Provider CLI 的登录态在用户主目录里，换成临时目录就不是真实轮次了。
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu'], {
-      env: { ...process.env, TMPDIR: tmpdir(), SCRY_TEST_APP: '1' },
+    const child = spawn(electron, [bootstrap, '--disable-gpu'], {
+      env: {
+        ...process.env,
+        TMPDIR: tmpdir(),
+        SCRY_TEST_APP: '1',
+        SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
+        SCRY_REMOTE_HOST: '0'
+      },
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
@@ -211,7 +224,9 @@ try {
     })
   })
 } catch (error) {
+  await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') }).catch(() => {})
   console.error(`Session restore fixture retained: ${temp}`)
   throw error
 }
+await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') })
 await rm(temp, { recursive: true, force: true })
