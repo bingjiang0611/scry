@@ -215,6 +215,19 @@
         "turns": 1
       },
       "p95Ms": 20
+    },
+    "orchestration.pre-first-token": {
+      "lane": "disk",
+      "workload": "orchestration-pre-first-token=2-commits;fullfsync=false",
+      "iterations": 2,
+      "warmups": 1,
+      "samples": 20,
+      "counters": {
+        "commits": 2,
+        "events": 3,
+        "outboxRows": 1
+      },
+      "p95Ms": 8
     }
   }
 }

@@ -23,6 +23,7 @@ import { CodexAppServerClient } from '../src/main/providers/codex-app-server'
 import { RunStopLifecycle } from '../src/main/run-stop-lifecycle'
 import { createRelayConnect } from '../src/main/remote/relay-connect'
 import { execFileOutcome } from '../src/main/claude-locate'
+import { createOrchestrationPreFirstTokenScenario } from './performance-orchestration-scenario'
 import { activeTurn, assertCompleteProjection, deliverTrace, events, history, terminalChunks, timestamp, type Fixture, type Scenario } from './performance-baseline-fixture'
 
 export function scenariosFor(fixture: Fixture): Record<string, Scenario> {
@@ -299,7 +300,8 @@ export function scenariosFor(fixture: Fixture): Record<string, Scenario> {
         expect(usage.userCPUTime).toBeGreaterThanOrEqual(0)
         return { childExit: 1, outputBytes: Buffer.byteLength(output), resourceUsageObserved: 1 }
       }
-    }
+    },
+    'orchestration.pre-first-token': createOrchestrationPreFirstTokenScenario(fixture)
   }
 }
 
