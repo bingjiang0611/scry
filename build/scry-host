@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+# 解析软链接，拿到 Resources/bin/scry-host 的真实位置（P5-host-cli §3.1）。
+self=$0
+while [ -L "$self" ]; do
+  base=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
+  target=$(readlink "$self")
+  case "$target" in
+    /*) self=$target ;;
+    *) self=$base/$target ;;
+  esac
+done
+
+bin_dir=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
+resources_dir=$(dirname "$bin_dir")
+root_dir=$(dirname "$resources_dir")
+
+# 只接受随 App 分发的 Electron 布局，不查 PATH。
+if [ -x "$root_dir/MacOS/Scry" ]; then
+  electron="$root_dir/MacOS/Scry"
+elif [ -x "$root_dir/scry" ]; then
+  electron="$root_dir/scry"
+else
+  echo "scry-host: 找不到随 App 分发的 Electron 可执行文件（已检查 $root_dir/MacOS/Scry 与 $root_dir/scry）" >&2
+  exit 1
+fi
+
+# 清掉 P5-headless-host §2.1 那组动态加载与 Node 注入环境变量。
+unset NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED
+unset NODE_REDIRECT_WARNINGS NODE_V8_COVERAGE
+unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_FALLBACK_LIBRARY_PATH
+unset LD_PRELOAD LD_LIBRARY_PATH
+
+ELECTRON_RUN_AS_NODE=1 exec "$electron" "$resources_dir/app.asar/out/main/host-cli.js" "$@"
