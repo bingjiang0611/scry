@@ -99,6 +99,8 @@ Ubuntu CI 跑 §6.1。真机有装 `agy` 的 Linux 桌面则跑 §6.2 对应项�
 | D8 | 可见性与门控 | 新建 `SCRY_EXPERIMENTAL_PROVIDERS=antigravity` 管控注册/探测/远程 discovery，并入 `LOGIN_START_POLICY_ENV_KEYS`；未验证版本仅实验开关可用 |
 | D9 | 原生 `auto` 模式 | 采纳方案 (a)：首版只提供语义严格对应的 `default`、`auto_accept_edits`（`accept-edits`）、`full_access`（`--dangerously-skip-permissions`），不把 `auto` 映射为 `auto_review` |
 | D10 | `SSH_*` 与双存储迁移 | 采纳方案 (a)：启动 `agy acp` 固定剥离 `SSH_CLIENT`/`SSH_CONNECTION`/`SSH_TTY`（除非用户显式放行 `AGY_ACP_FORCE_FILE_STORAGE`），并在文档写明 SSH 登录后首次桌面运行会触发 `agy` 迁入钥匙串 |
+| D11 | 用户级 `permissions.allow`（2026-11-20 补定） | 整体放行类设置（`toolPermission` 等）比所选档位宽时仍拒绝启动；针对具体命令的放行规则照常启动，界面与记录如实写明「`agy` 用户级规则会自动放行：…」，有效权限记为「所选档位 + 用户规则」（全局设置与所选档位取较高者） |
+| D12 | Hook `PreToolUse` 放行（2026-11-20 补定） | 不因存在 hook 拒绝启动；由工作区或用户级 `hooks.json`（`PreToolUse` `decision:"allow"`）放行的工具调用，在界面与记录中标明「由 hook 放行」，绝不显示为用户批准 |
 | M1–M4 | 缺失决策 | 工作区设置含权限键拒绝启动并说明；一 run 一进程终止后台子 Agent/`/goal` 写明；缺失费用记 `null`（未知）不记 0；Windows 明确不支持 |
 
 ### 9.2 仍需维护者决定

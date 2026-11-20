@@ -22,11 +22,13 @@ import { AntigravityEventTranslator } from './antigravity-events'
 import {
   antigravityExecutable,
   AntigravityStderrTail,
+  buildAntigravityLaunchEnv,
   forceKillAntigravityProcess,
   spawnAntigravityAcp
 } from './antigravity-launch'
 import {
   ANTIGRAVITY_CONFIG_DIR_ALIASES,
+  antigravityEffectiveGeminiRoot,
   antigravityGeminiRoot,
   antigravityScanRoots
 } from './antigravity-mcp-paths'
@@ -111,10 +113,12 @@ function parseFrontmatter(content: string): { name?: string; description?: strin
 export function listAntigravitySkills(
   cwd: string | undefined,
   homeDir: string,
-  env: NodeJS.ProcessEnv = process.env
+  env?: NodeJS.ProcessEnv
 ): SkillMeta[] {
+  // B1: derive user-level skill directory from the same sanitized launch env `agy` receives.
+  const geminiRoot = env ? antigravityEffectiveGeminiRoot(homeDir, env) : antigravityGeminiRoot(homeDir, buildAntigravityLaunchEnv())
   const roots: Array<{ dir: string; scope: string }> = [
-    { dir: join(antigravityGeminiRoot(homeDir, env), 'config', 'skills'), scope: 'user' }
+    { dir: join(geminiRoot, 'config', 'skills'), scope: 'user' }
   ]
   if (cwd) {
     for (const scanRoot of antigravityScanRoots(cwd)) {
@@ -166,18 +170,41 @@ export function createAntigravityCatalog(deps: {
   const now = deps.now ?? Date.now
   const cache = new Map<string, CachedAntigravityCatalog>()
   const inFlight = new Map<string, Promise<CachedAntigravityCatalog>>()
-  // Per-profile mutex serializing catalog probes with active runs on the same adapter (P7 D5).
-  let mutexTail: Promise<void> = Promise.resolve()
+  // B2/D5: Reader-writer gate — concurrent runs NEVER serialize each other, while catalog probes
+  // remain mutually exclusive with active runs on the same profile. Queued runs abort immediately.
+  let activeRuns = 0
+  let probeActive = false
+  const probeWaiters: Array<() => void> = []
+  const runWaiters = new Set<{ grant: () => void; cancel: () => void }>()
+
+  const pumpGate = (): void => {
+    if (!probeActive && runWaiters.size > 0) {
+      const pending = [...runWaiters]
+      runWaiters.clear()
+      for (const waiter of pending) {
+        activeRuns += 1
+        waiter.grant()
+      }
+      return
+    }
+    if (!probeActive && activeRuns === 0 && probeWaiters.length > 0) {
+      probeActive = true
+      const next = probeWaiters.shift()!
+      next()
+    }
+  }
 
   const runExclusive = async <T>(fn: () => Promise<T>): Promise<T> => {
-    let release!: () => void
-    const prev = mutexTail
-    mutexTail = new Promise<void>((resolve) => { release = resolve })
-    await prev
+    if (probeActive || activeRuns > 0) {
+      await new Promise<void>((resolve) => { probeWaiters.push(resolve) })
+    } else {
+      probeActive = true
+    }
     try {
       return await fn()
     } finally {
-      release()
+      probeActive = false
+      pumpGate()
     }
   }
 
@@ -327,11 +354,38 @@ export function createAntigravityCatalog(deps: {
     return task
   }
 
-  const enterRun = async (): Promise<() => void> => {
-    let release!: () => void
-    const prev = mutexTail
-    mutexTail = new Promise<void>((resolve) => { release = resolve })
-    await prev
+  const enterRun = async (signal?: AbortSignal): Promise<() => void> => {
+    if (signal?.aborted) throw new Error('antigravity_run_cancelled_before_start')
+    let released = false
+    const release = (): void => {
+      if (released) return
+      released = true
+      activeRuns = Math.max(0, activeRuns - 1)
+      pumpGate()
+    }
+    if (!probeActive) {
+      activeRuns += 1
+      return release
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        runWaiters.delete(waiter)
+        reject(new Error('antigravity_run_cancelled_before_start'))
+      }
+      const waiter = {
+        grant: () => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve()
+        },
+        cancel: onAbort
+      }
+      runWaiters.add(waiter)
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
+    if (signal?.aborted) {
+      release()
+      throw new Error('antigravity_run_cancelled_before_start')
+    }
     return release
   }
 

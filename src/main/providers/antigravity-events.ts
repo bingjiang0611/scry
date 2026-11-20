@@ -5,15 +5,37 @@ import type { AcpContextUsage } from './antigravity-usage'
 interface ToolCallState {
   id: string
   name: string
+  kind?: string
   title?: string
   emittedStart: boolean
   emittedEnd: boolean
+  hookAllowed: boolean
+}
+
+export interface AntigravityEventTranslatorOptions {
+  permissionMode?: 'default' | 'auto_accept_edits' | 'full_access'
+  hasPreToolUseHooks?: boolean
 }
 
 const SUBAGENT_TOOL_NAMES = new Set(['invoke_subagent', 'start_subagent'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function explicitHookAllow(data: Record<string, unknown>): boolean {
+  const meta = isRecord(data._meta) ? data._meta : undefined
+  if (meta?.['agy.hook.decision'] === 'allow' || meta?.hookDecision === 'allow' || meta?.approvalSource === 'hook') return true
+  if (data.hookDecision === 'allow' || data.approvalSource === 'hook') return true
+  return false
+}
+
+function isApprovalGatedKind(kind: string | undefined, permissionMode: AntigravityEventTranslatorOptions['permissionMode']): boolean {
+  if (permissionMode === 'full_access') return false
+  const k = (kind ?? '').toLowerCase()
+  if (k === 'execute' || k === 'command' || k === 'shell') return true
+  if (permissionMode === 'default' && (k === 'edit' || k === 'write' || k === 'delete')) return true
+  return false
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -69,6 +91,7 @@ function inferFileOp(
 export class AntigravityEventTranslator {
   private seq = 0
   private readonly tools = new Map<string, ToolCallState>()
+  private readonly askedPermissionToolIds = new Set<string>()
   private _hasSubagentTool = false
   private _contextUsage: AcpContextUsage | null = null
   private _availableCommands: ProviderCommand[] = []
@@ -78,8 +101,13 @@ export class AntigravityEventTranslator {
 
   constructor(
     private readonly runId: string,
-    private readonly emit: (event: TraceEvent) => void
+    private readonly emit: (event: TraceEvent) => void,
+    private readonly options: AntigravityEventTranslatorOptions = {}
   ) {}
+
+  markPermissionAsked(toolCallId: string | undefined): void {
+    if (toolCallId) this.askedPermissionToolIds.add(toolCallId)
+  }
 
   get hasSubagentTool(): boolean {
     return this._hasSubagentTool
@@ -203,9 +231,11 @@ export class AntigravityEventTranslator {
     const state: ToolCallState = {
       id: toolCallId,
       name,
+      kind: typeof data.kind === 'string' ? data.kind : existing?.kind,
       title: typeof data.title === 'string' ? data.title : undefined,
       emittedStart: true,
-      emittedEnd: existing?.emittedEnd ?? false
+      emittedEnd: existing?.emittedEnd ?? false,
+      hookAllowed: existing?.hookAllowed === true || explicitHookAllow(data)
     }
     this.tools.set(toolCallId, state)
     const fileInfo = inferFileOp(name, data.kind, data.rawInput, data.locations)
@@ -219,7 +249,8 @@ export class AntigravityEventTranslator {
       tool: name,
       name: state.title ?? name,
       ...(isRecord(data.rawInput) ? { input: data.rawInput } : {}),
-      ...(fileInfo.fileOp ? { fileOp: fileInfo.fileOp, filePath: fileInfo.filePath } : {})
+      ...(fileInfo.fileOp ? { fileOp: fileInfo.fileOp, filePath: fileInfo.filePath } : {}),
+      ...(state.hookAllowed ? { runtimeMetadata: { approvalSource: 'hook', approvalLabel: '由 hook 放行' } } : {})
     })
   }
 
@@ -229,6 +260,13 @@ export class AntigravityEventTranslator {
     state.emittedEnd = true
     const text = extractTextFromContent(data.content ?? data.rawOutput)
     const isError = status === 'failed' || status === 'error'
+    const inferredHookAllow =
+      !isError &&
+      status === 'completed' &&
+      this.options.hasPreToolUseHooks === true &&
+      !this.askedPermissionToolIds.has(toolCallId) &&
+      isApprovalGatedKind(state.kind ?? (typeof data.kind === 'string' ? data.kind : undefined), this.options.permissionMode)
+    const hookAllowed = state.hookAllowed || explicitHookAllow(data) || inferredHookAllow
     this.emit({
       id: this.nextId('tool_result'),
       runId: this.runId,
@@ -238,7 +276,18 @@ export class AntigravityEventTranslator {
       toolUseId: toolCallId,
       tool: state.name,
       isError,
-      ...(text ? { text } : {})
+      ...(text ? { text } : {}),
+      ...(hookAllowed
+        ? {
+            runtimeMetadata: {
+              approvalSource: 'hook',
+              approvalLabel: '由 hook 放行',
+              ...(inferredHookAllow && !state.hookAllowed && !explicitHookAllow(data)
+                ? { approvalEvidence: 'inferred_from_pre_tool_use_hook' }
+                : {})
+            }
+          }
+        : {})
     })
   }
 }
