@@ -10,6 +10,7 @@ import type {
   LoginStartStatus
 } from '../shared/background-service'
 import type { ProviderId } from '../shared/provider'
+import type { CliApprovalStatus, HostCliApprovalSelfReport } from '../shared/host-admin'
 import { isAgentPermissionMode } from '../shared/runtime-types'
 import { diffRemoteConfigs } from '../daemon/login-start/policy-env'
 import type { DaemonRunModeResult } from './bootstrap/daemon-run-mode'
@@ -34,6 +35,10 @@ export interface BackgroundServiceStatusDeps {
   expectedRemoteConfig?: () => BackgroundServiceRemoteConfig
   /** Latest service-launch fallback warning, if any (P5 §2.4). */
   serviceLaunchFallback?: () => BackgroundServiceRuntimeNotice['serviceLaunchFallback']
+  /** When true (SCRY_EXPERIMENTAL_HOST_CLI=1), expose CLI approval state in status (P5-5b). */
+  hostCliExperimental?: boolean
+  /** Absolute packaged `<resources>/bin/scry-host` path for copy-command helper. */
+  hostCliPath?: string
   platform?: NodeJS.Platform
   now?: () => number
 }
@@ -118,11 +123,19 @@ export function parseSelfReport(value: unknown): BackgroundServiceSelfReport | u
     remoteConfig = remoteConfigOf(report.remoteConfig)
     if (!remoteConfig) return undefined
   }
+  let cliApproval: HostCliApprovalSelfReport | undefined
+  if (report.cliApproval !== undefined) {
+    const raw = report.cliApproval as Partial<HostCliApprovalSelfReport> | null
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.enabled !== 'boolean') return undefined
+    if (raw.updatedAt !== null && !count(raw.updatedAt)) return undefined
+    cliApproval = { enabled: raw.enabled, updatedAt: raw.updatedAt as number | null }
+  }
   return {
     version: report.version, pid: report.pid as number, startedAt: report.startedAt, devices, activeRuns: report.activeRuns,
     ...(launchedBy ? { launchedBy } : {}),
     ...(supervisorPid !== undefined ? { supervisorPid } : {}),
-    ...(remoteConfig ? { remoteConfig } : {})
+    ...(remoteConfig ? { remoteConfig } : {}),
+    ...(cliApproval ? { cliApproval } : {})
   }
 }
 
@@ -158,6 +171,15 @@ export async function readBackgroundServiceStatus(deps: BackgroundServiceStatusD
       ? loginStart?.state === 'enabled' && loginStart.linuxMainPid !== undefined && loginStart.linuxMainPid !== null &&
         report.supervisorPid !== undefined && loginStart.linuxMainPid === report.supervisorPid
       : false
+    const cliApproval: CliApprovalStatus | undefined = deps.hostCliExperimental
+      ? (report.cliApproval
+        ? {
+          state: report.cliApproval.enabled ? 'enabled' : 'disabled',
+          updatedAt: report.cliApproval.updatedAt,
+          ...(deps.hostCliPath ? { hostCliPath: deps.hostCliPath } : {})
+        }
+        : { state: 'unavailable', reason: 'daemon_host_cli_unavailable' })
+      : undefined
     return {
       mode: 'daemon', userDataDir: deps.userDataDir, connection, checkedAt,
       version: report.version, pid: report.pid, startedAt: report.startedAt, devices: report.devices, activeRuns: report.activeRuns,
@@ -165,6 +187,7 @@ export async function readBackgroundServiceStatus(deps: BackgroundServiceStatusD
       ...(report.launchedBy === 'service' ? { launchedByVerified } : {}),
       ...(report.remoteConfig ? { remoteConfig: report.remoteConfig } : {}),
       ...(loginStart ? { loginStart } : {}),
+      ...(cliApproval ? { cliApproval } : {}),
       ...(runtimeNotice ? { runtimeNotice } : {})
     }
   }
@@ -172,11 +195,15 @@ export async function readBackgroundServiceStatus(deps: BackgroundServiceStatusD
   // daemon may have said its version while refusing; nothing else is guessed.
   let pid: number | null = null
   try { pid = (await deps.lockHolder())?.pid ?? null } catch { pid = null }
+  const cliApprovalUnavailable: CliApprovalStatus | undefined = deps.hostCliExperimental
+    ? { state: 'unavailable', reason: connection.state === 'unavailable' ? connection.reason : `daemon_${connection.state.replaceAll('-', '_')}` }
+    : undefined
   return {
     mode: 'daemon', userDataDir: deps.userDataDir, connection, checkedAt,
     version: connection.state === 'version-mismatch' ? connection.running : null,
     pid, startedAt: null, devices: null, activeRuns: null,
     ...(loginStart ? { loginStart } : {}),
+    ...(cliApprovalUnavailable ? { cliApproval: cliApprovalUnavailable } : {}),
     ...(fallback ? { runtimeNotice: { serviceLaunchFallback: fallback } } : {})
   }
 }

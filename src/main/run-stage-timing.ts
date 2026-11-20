@@ -66,6 +66,7 @@ export function recordOrchestrationCommitTiming(input: {
   commitKind: string
   durationMs: number
   sinkDurationMs?: number
+  bodyWriteMs?: number
   preFirstToken: boolean
   bodyBytes?: number
   fullfsync?: boolean
@@ -79,6 +80,7 @@ export function recordOrchestrationCommitTiming(input: {
       commitKind: input.commitKind,
       durationMs: input.durationMs,
       ...(input.sinkDurationMs !== undefined ? { sinkDurationMs: input.sinkDurationMs } : {}),
+      ...(input.bodyWriteMs !== undefined ? { bodyWriteMs: input.bodyWriteMs } : {}),
       preFirstToken: input.preFirstToken,
       ...(input.bodyBytes !== undefined ? { bodyBytes: input.bodyBytes } : {}),
       ...(input.fullfsync !== undefined ? { fullfsync: input.fullfsync } : {}),

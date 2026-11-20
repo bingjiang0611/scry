@@ -5,5 +5,6 @@ import type { DaemonLocalOpTable } from './types'
 // daemon knows, asked here. Local endpoint only (scope: local); the op name is not a
 // device op. The three actions stay in main (dialogs, signals, app.quit).
 export const BACKGROUND_SERVICE_LOCAL_OPS: DaemonLocalOpTable = {
-  'remote:backgroundService:status': { op: 'localBackgroundService', method: 'status', read: true }
+  'remote:backgroundService:status': { op: 'localBackgroundService', method: 'status', read: true },
+  'remote:hostAdmin:setCliApproval': { op: 'localHostAdmin', method: 'setCliApproval', read: false }
 }

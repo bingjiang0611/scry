@@ -1,22 +1,23 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { createConversationOrdinalResolver, type TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
 import { importCatalogEntries, repairMissingShadowBodies } from './legacy-catalog-and-repair'
-import { readLegacyLedgerReadOnly, readLegacyLedgerStreamedAsync, type LegacyRunState } from './legacy-ledger-reader'
+import {
+  loadLegacyLedgerPlan,
+  loadLegacyLedgerPlanAsync,
+  peekUnimportedLegacyRunCount,
+  type LegacyLedgerPlan,
+  type LegacyRunState
+} from './legacy-ledger-reader'
 import { parseLedgerIntentRouting } from './shadow-routing'
 import { DEFAULT_PENDING_TTL_MS } from './types'
 
-export { repairMissingShadowBodies }
-
-export interface LegacyLedgerPlan {
-  readonly currentLedgerSeq: number
-  readonly lastSeq: number
-  readonly unimportedRuns: readonly LegacyRunState[]
-  readonly openRuns: readonly LegacyRunState[]
-  /** All parsed H1 runs indexed by ledgerRunId (reused for startup missing-body repair without re-reading disk). */
-  readonly runsByLedgerId: ReadonlyMap<string, LegacyRunState>
+export {
+  loadLegacyLedgerPlan,
+  loadLegacyLedgerPlanAsync,
+  peekUnimportedLegacyRunCount,
+  repairMissingShadowBodies,
+  type LegacyLedgerPlan
 }
 
 export interface LegacyImportOptions {
@@ -41,6 +42,8 @@ export interface LegacyImportOptions {
    * `openLocalChannel` without blocking daemon startup.
    */
   openOnly?: boolean
+  /** Extra runIds (e.g. pending conversation turns) to import synchronously alongside `openOnly`. */
+  extraRunIds?: ReadonlySet<string>
   /** Pre-parsed ledger plan from `loadLegacyLedgerPlan` to avoid redundant full-ledger parses. */
   plan?: LegacyLedgerPlan
   /** Authoritative H3 ordinal lookup for pre-fix ledger intents lacking `conversation.ordinal`. */
@@ -61,51 +64,6 @@ export interface LegacyImportSummary {
   rejectedCommands: number
   legacyLedgerSeq: number
   catalogSha256: string
-}
-
-function emptyPlan(currentLedgerSeq: number, lastSeq = currentLedgerSeq, runs = new Map<string, LegacyRunState>()): LegacyLedgerPlan {
-  return { currentLedgerSeq, lastSeq, unimportedRuns: [], openRuns: [], runsByLedgerId: runs }
-}
-
-function buildLegacyLedgerPlan(
-  currentLedgerSeq: number,
-  legacy: { lastSeq: number; runs: Map<string, LegacyRunState> }
-): LegacyLedgerPlan {
-  if (legacy.lastSeq <= currentLedgerSeq) return emptyPlan(currentLedgerSeq, legacy.lastSeq, legacy.runs)
-  const unimportedRuns = [...legacy.runs.values()]
-    .filter((run) => run.lastSeq > currentLedgerSeq)
-    .sort((a, b) => a.intentSeq - b.intentSeq)
-  const openRuns = unimportedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
-  return { currentLedgerSeq, lastSeq: legacy.lastSeq, unimportedRuns, openRuns, runsByLedgerId: legacy.runs }
-}
-
-export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): LegacyLedgerPlan {
-  const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
-  const ledgerDir = join(userDataDir, 'remote', 'ledger')
-  if (!existsSync(ledgerDir)) return emptyPlan(currentLedgerSeq)
-  return buildLegacyLedgerPlan(currentLedgerSeq, readLegacyLedgerReadOnly(ledgerDir))
-}
-
-/** Off-main-thread variant of `loadLegacyLedgerPlan` using streamed `worker_threads` chunks (W9 P4-2). */
-export async function loadLegacyLedgerPlanAsync(sink: EventSink, userDataDir: string): Promise<LegacyLedgerPlan> {
-  const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
-  const ledgerDir = join(userDataDir, 'remote', 'ledger')
-  if (!existsSync(ledgerDir)) return emptyPlan(currentLedgerSeq)
-  const streamed = await readLegacyLedgerStreamedAsync(ledgerDir, { minSeqExclusive: currentLedgerSeq })
-  if (streamed.lastSeq <= currentLedgerSeq) return emptyPlan(currentLedgerSeq, streamed.lastSeq, streamed.runs)
-  const openRuns = streamed.sortedRuns.filter((run) => run.lifecycle === 'recorded' || run.lifecycle === 'dispatched')
-  return {
-    currentLedgerSeq,
-    lastSeq: streamed.lastSeq,
-    unimportedRuns: streamed.sortedRuns,
-    openRuns,
-    runsByLedgerId: streamed.runs
-  }
-}
-
-/** Counts legacy runs with `lastSeq > legacy_ledger_seq` to decide sync vs deferred post-socket import. */
-export function peekUnimportedLegacyRunCount(sink: EventSink, userDataDir: string): number {
-  return loadLegacyLedgerPlan(sink, userDataDir).unimportedRuns.length
 }
 
 function importSingleRun(
@@ -181,8 +139,15 @@ function importSingleRun(
   if (run.lifecycle === 'recorded') {
     if (!cfg.reconcileOpenRuns) return { imported, rejected }
     const expired = cfg.now < run.intentAt || cfg.now > run.intentAt + cfg.pendingTtlMs
-    if (currentRun.lifecycle === 'recorded' && (expired || routing.isConversationRun)) {
-      const reason = routing.isConversationRun ? 'conversation_start_unavailable' : 'pending_expired'
+    // H1 legacy logs persist only scopedIntentId (not raw peerCertSHA256), so imported runs have
+    // ownerActor='system'. Under authoritative `on` mode (`reconcileOpenRuns: true`), fail closed
+    // rather than dispatching an unverified legacy remote intent without peer grant provenance.
+    if (currentRun.lifecycle === 'recorded') {
+      const reason = routing.isConversationRun
+        ? 'conversation_start_unavailable'
+        : expired
+          ? 'pending_expired'
+          : 'legacy_owner_unavailable'
       const payload = {
         runId: canonicalRunId,
         step: 'cancelled' as const,
@@ -313,7 +278,22 @@ export function importLegacyStateIncrementally(options: LegacyImportOptions): Le
   let currentLedgerSeq = plan.currentLedgerSeq
 
   if (plan.lastSeq > currentLedgerSeq) {
-    const sortedRuns = openOnly ? plan.openRuns : plan.unimportedRuns
+    let sortedRuns = openOnly ? plan.openRuns : plan.unimportedRuns
+    if (openOnly && options.extraRunIds && options.extraRunIds.size > 0) {
+      const included = new Set(sortedRuns.map((r) => r.ledgerRunId))
+      const extra: LegacyRunState[] = []
+      for (const run of plan.unimportedRuns) {
+        if (included.has(run.ledgerRunId)) continue
+        const routing = parseLedgerIntentRouting(run.ledgerRunId, run.detail)
+        if (options.extraRunIds.has(run.ledgerRunId) || options.extraRunIds.has(routing.canonicalRunId)) {
+          extra.push(run)
+          included.add(run.ledgerRunId)
+        }
+      }
+      if (extra.length > 0) {
+        sortedRuns = [...sortedRuns, ...extra].sort((a, b) => a.intentSeq - b.intentSeq)
+      }
+    }
     for (let offset = 0; offset < sortedRuns.length; offset += batchSize) {
       const chunk = sortedRuns.slice(offset, offset + batchSize)
       const isLastChunk = offset + batchSize >= sortedRuns.length
@@ -364,6 +344,8 @@ export function startDeferredLegacyImport(
   options: Omit<LegacyImportOptions, 'openOnly'>
 ): { promise: Promise<LegacyImportSummary>; cancel(): void } {
   let cancelled = false
+  let pendingTimer: NodeJS.Immediate | null = null
+  let settleOnCancel: (() => void) | null = null
   const { sink, userDataDir } = options
   const now = options.now ?? Date.now()
   const pendingTtlMs = Math.min(options.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS, DEFAULT_PENDING_TTL_MS)
@@ -388,15 +370,42 @@ export function startDeferredLegacyImport(
     let runsSinceCheckpoint = 0
     let walBytesAtLastCheckpoint = sink.walFileBytes()
     let pendingCheckpointMode: 'passive' | 'truncate' | null = null
+    let settled = false
+
+    const finish = (summary: LegacyImportSummary): void => {
+      if (settled) return
+      settled = true
+      if (pendingTimer) {
+        clearImmediate(pendingTimer)
+        pendingTimer = null
+      }
+      resolve(summary)
+    }
+
+    settleOnCancel = () => {
+      finish({
+        importedRuns,
+        importedSessions: 0,
+        rejectedCommands,
+        legacyLedgerSeq: currentLedgerSeq,
+        catalogSha256: ''
+      })
+    }
+
+    const scheduleNext = (): void => {
+      if (cancelled || settled) return
+      pendingTimer = setImmediate(step)
+    }
 
     const step = (): void => {
-      if (cancelled || sink.isWriteIndeterminate()) {
-        resolve({
+      pendingTimer = null
+      if (cancelled || sink.isWriteIndeterminate() || !sink.handle.db.open) {
+        finish({
           importedRuns,
           importedSessions: 0,
           rejectedCommands,
           legacyLedgerSeq: currentLedgerSeq,
-          catalogSha256: sink.isWriteIndeterminate() ? '' : (sink.getMeta('legacy_catalog_sha256') ?? '')
+          catalogSha256: ''
         })
         return
       }
@@ -415,7 +424,7 @@ export function startDeferredLegacyImport(
             }
           }
           walBytesAtLastCheckpoint = sink.walFileBytes()
-          setImmediate(step)
+          scheduleNext()
           return
         }
         if (offset < sortedRuns.length) {
@@ -451,7 +460,7 @@ export function startDeferredLegacyImport(
           ) {
             pendingCheckpointMode = 'passive'
           }
-          setImmediate(step)
+          scheduleNext()
           return
         }
         if (plan.lastSeq > currentLedgerSeq) {
@@ -462,7 +471,7 @@ export function startDeferredLegacyImport(
         if (sink.walFileBytes() >= walCheckpointBytes) {
           sink.checkpointPassive()
         }
-        resolve({
+        finish({
           importedRuns,
           importedSessions: catalog.importedSessions,
           rejectedCommands: rejectedCommands + catalog.rejectedCommands,
@@ -470,17 +479,21 @@ export function startDeferredLegacyImport(
           catalogSha256: catalog.catalogSha256
         })
       } catch (error) {
-        reject(error)
+        if (!settled) {
+          settled = true
+          reject(error)
+        }
       }
     }
 
-    setImmediate(step)
+    scheduleNext()
   })
 
   return {
     promise,
     cancel: () => {
       cancelled = true
+      settleOnCancel?.()
     }
   }
 }

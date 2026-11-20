@@ -218,12 +218,12 @@
     },
     "orchestration.pre-first-token": {
       "lane": "disk",
-      "workload": "orchestration-pre-first-token=2-commits;fullfsync=false",
+      "workload": "orchestration-pre-first-token=real-hooks+1-commit;fullfsync=true",
       "iterations": 2,
       "warmups": 1,
       "samples": 20,
       "counters": {
-        "commits": 2,
+        "commits": 1,
         "events": 3,
         "outboxRows": 1
       },

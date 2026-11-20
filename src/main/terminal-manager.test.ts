@@ -247,7 +247,8 @@ describe('TerminalManager', () => {
           PATH: '/test/bin',
           SECRET: 'main-owned',
           TERM: 'xterm-256color',
-          COLORTERM: 'truecolor'
+          COLORTERM: 'truecolor',
+          SCRY_HOST_CHILD: 'terminal'
         }
       }
     })

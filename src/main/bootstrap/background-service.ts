@@ -22,16 +22,19 @@ import {
   reconnectBackgroundService,
   restartBackgroundService,
   setBackgroundServiceLoginStart,
+  setHostCliApproval,
   type BackgroundServiceActionDeps
 } from '../background-service-actions'
 import {
   CONFIRM_BUTTON,
+  confirmHostCliApprovalPrompt,
   confirmLoginStartPrompt,
   confirmPrompt,
   leftoverNotice,
   reasonMessage,
   type BackgroundServicePrompt
 } from '../background-service-copy'
+import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli'
 import { createVersionMismatchPrompt } from '../background-service-mismatch-prompt'
 import type { LazyDaemonRunSurface } from './daemon-run-lazy'
 
@@ -144,6 +147,8 @@ export function registerBackgroundServiceHandlers(input: {
   // The daemon's own report, asked without the channel's guard (which is this status).
   const selfReport = (): Promise<unknown> => callDaemonChannel('remote:backgroundService:status', [])
   const expectedRemoteConfig = () => computeEffectiveRemoteConfig(env, isPackaged)
+  const hostCliExperimental = isHostCliExperimentalEnabled(env)
+  const hostCliPath = isPackaged && process.resourcesPath ? join(process.resourcesPath, 'bin', 'scry-host') : undefined
   const status = () => readBackgroundServiceStatus({
     daemonMode: daemon !== undefined,
     userDataDir,
@@ -155,7 +160,9 @@ export function registerBackgroundServiceHandlers(input: {
     },
     loginStart: () => loginStart.status(),
     expectedRemoteConfig,
-    serviceLaunchFallback: () => input.serviceLaunchFallback ? input.serviceLaunchFallback() : latestFallback
+    serviceLaunchFallback: () => input.serviceLaunchFallback ? input.serviceLaunchFallback() : latestFallback,
+    hostCliExperimental,
+    ...(hostCliPath ? { hostCliPath } : {})
   })
   const show = async (prompt: BackgroundServicePrompt): Promise<number> => {
     const win = input.getWindow()
@@ -206,6 +213,14 @@ export function registerBackgroundServiceHandlers(input: {
     disable: (options) => loginStart.disable(options)
   }))()
 
+  const setCliApproval = (enabled: boolean) => exclusive(() => setHostCliApproval(enabled, {
+    experimentalEnabled: hostCliExperimental,
+    daemonMode: daemon !== undefined,
+    connection,
+    confirmEnable: async () => await show(confirmHostCliApprovalPrompt()) === CONFIRM_BUTTON,
+    apply: async (value) => { await callDaemonChannel('remote:hostAdmin:setCliApproval', [value]) }
+  }))()
+
   register('remote:backgroundService:status', status)
   register('remote:backgroundService:runtimeNotice', async () => buildRuntimeNotice())
   register('remote:backgroundService:restart', restart)
@@ -214,6 +229,10 @@ export function registerBackgroundServiceHandlers(input: {
   input.handleTrusted('remote:backgroundService:setLoginStart', async (_event, ...args: unknown[]) => {
     const enabled = requireBooleanArgument(args)
     return await setLoginStart(enabled)
+  })
+  input.handleTrusted('remote:hostAdmin:setCliApproval', async (_event, ...args: unknown[]) => {
+    const enabled = requireBooleanArgument(args)
+    return await setCliApproval(enabled)
   })
 
   // Switch on: the gate routes the status channel to the daemon; the App's part comes
@@ -224,6 +243,10 @@ export function registerBackgroundServiceHandlers(input: {
     installDaemonChannelGuard('remote:backgroundService:status', async (args) => {
       refuseArguments(args)
       return { result: await status() }
+    })
+    installDaemonChannelGuard('remote:hostAdmin:setCliApproval', async (args) => {
+      const enabled = requireBooleanArgument(args)
+      return { result: await setCliApproval(enabled) }
     })
     // The one startup prompt for a daemon of another version (approved 2026-11-12): told
     // by the lazy surface when it connects on its own, so no probe is added and nothing

@@ -36,9 +36,10 @@ function loadOrchestrationModules(): Promise<LoadedOrchestrationModules | null> 
 }
 
 /**
- * P4-2 pre-first-token orchestration commit budget scenario (P95 <= 8 ms absolute).
- * Exercises the REAL `AuthorityEngine.submitAsync` + `AuthorityEngine.beforeDispatch` hook path
- * (`realpathSync`, workspace authorization, peer authorization, MCP trust gate, body check, 2 SQLite commits).
+ * P4-2 pre-first-token orchestration commit budget scenario (P95 <= 8 ms absolute, fullfsync=ON).
+ * Exercises the REAL `AuthorityEngine.submitAsync` (with §2.3 pre-dispatch checks + single-commit
+ * immediate dispatch) + `AuthorityEngine.beforeDispatch` hook path (`realpathSync`, workspace
+ * authorization, peer authorization, MCP trust gate, body check, 1 fullfsync SQLite commit).
  * Loads orchestration modules dynamically so ABAB baselines (e.g. `main`) lacking P4-2 modules never crash.
  */
 export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scenario {
@@ -48,19 +49,19 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
 
   return {
     lane: 'disk',
-    workload: 'orchestration-pre-first-token=real-hooks+2-commits;fullfsync=false',
+    workload: 'orchestration-pre-first-token=real-hooks+1-commit;fullfsync=true',
     iterations: 2,
     warmups: 1,
     samples: 20,
     run: async () => {
       const mods = await loadOrchestrationModules()
       if (!mods) {
-        return { skipped: 1, commits: 0 }
+        return { __baselineUnavailable: 1 }
       }
       if (!engine) {
         const sink = mods.EventSink.open({
           userDataDir: join(fixture.root, 'orch-bench'),
-          fullfsync: false,
+          fullfsync: true,
           checkpointFullfsync: true,
           checkpointIntervalMs: 0,
           maxActiveRuns: 10_000
@@ -82,7 +83,21 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
         peerCertSHA256: PEER_SHA,
         grantScope: 'remote',
         commandId: `bench-cmd-${id}`,
-        detail
+        detail,
+        immediateDispatch: {
+          authorizeWorkspace: (cwd) => realpathSync(cwd),
+          isPeerAuthorized: (peer) => peer === PEER_SHA,
+          isProviderAuthenticating: () => false,
+          verifyTrustGate: () => {
+            const snapshot = buildMcpExecutionSnapshot({
+              providerId: 'codex',
+              cwd: canonicalWorkspace,
+              homeDir: fixture.home,
+              env: process.env
+            })
+            return snapshot.errors.length === 0
+          }
+        }
       })
       expect(submitted.kind).toBe('accepted')
       if (submitted.kind !== 'accepted') throw new Error(`unexpected submit result: ${submitted.kind}`)
@@ -96,18 +111,10 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
         authorizeWorkspace: (cwd) => realpathSync(cwd),
         isPeerAuthorized: (peer) => peer === PEER_SHA,
         isProviderAuthenticating: () => false,
-        verifyTrustGate: () => {
-          const snapshot = buildMcpExecutionSnapshot({
-            providerId: 'codex',
-            cwd: canonicalWorkspace,
-            homeDir: fixture.home,
-            env: process.env
-          })
-          return snapshot.errors.length === 0
-        }
+        verifyTrustGate: () => true
       })
       expect(gate.ok).toBe(true)
-      return { commits: 2, events: 3, outboxRows: 1 }
+      return { commits: 1, events: 3, outboxRows: 1 }
     }
   }
 }

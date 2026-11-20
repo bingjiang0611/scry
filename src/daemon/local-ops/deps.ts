@@ -51,6 +51,9 @@ export interface DaemonLocalEndpointDeps {
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
   // Primary-App forwarding bridge for ExecutionTargetRouter (W10).
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
+  // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
+  hostAdmin?: import('../host-admin-store').HostAdminStore
+  log?: (line: string) => void
 }
 
 /**

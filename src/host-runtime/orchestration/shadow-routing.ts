@@ -14,6 +14,8 @@ export interface ShadowCommitSample {
   durationMs: number
   /** EventSink.execute (decide + SQLite tx + fsync) duration alone. */
   sinkDurationMs: number
+  /** External >16 KiB body file + directory fsync duration, tracked separately per 2026-11-20 decision. */
+  bodyWriteMs?: number
   preFirstToken: boolean
   bodyBytes?: number
 }

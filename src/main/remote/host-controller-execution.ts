@@ -12,7 +12,7 @@ import type { PairingAuthority } from './pairing'
 import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
 import { parseRouting, HOST_RESTARTED_DETAIL } from './host-controller-routing'
 import type { HostControllerDependencies, RemoteIntentRouting } from './host-controller-types'
-import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import type { OrchestrationAuthorityHooks, OrchestrationImmediateDispatchChecks } from './orchestration-seam'
 
 /** Startup reconciliation for orphaned dispatched runs (core §2.4: interrupted != failed). */
 export function recoverDispatchedLedgerRuns(
@@ -112,7 +112,12 @@ export function ledgerEventObserver(
   }
 }
 
-export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher; dispose(): void } {
+export function createExecution(input: ExecutionDeps): {
+  gateway: RemoteGateway
+  dispatcher: RemoteDispatcher
+  immediateDispatch: OrchestrationImmediateDispatchChecks
+  dispose(): void
+} {
   const { deps, ledger, output, fileDownloads, interactions, stops, live, notify } = input
   const gateway = new RemoteGateway({
     authority: input.authority,
@@ -186,6 +191,18 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     }),
     base
   })
+  const immediateDispatch: OrchestrationImmediateDispatchChecks = {
+    isPeerAuthorized: (peer) => input.authority.authorizesCertificate(peer),
+    authorizeWorkspace: (cwd) => deps.workspace.authorize(cwd),
+    isProviderAuthenticating: (provider, profile) => {
+      const lease = gate.acquireOperation(providerOperationKey(provider, profile ?? undefined))
+      if (lease.ok) {
+        lease.release()
+        return false
+      }
+      return true
+    }
+  }
   const dispatcher = new RemoteDispatcher({
     ledger,
     ...(deps.orchestration ? {
@@ -196,16 +213,7 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
           detail,
           peerCertSHA256: meta?.peerCertSHA256,
           grantScope: meta?.grantScope ?? gateway.runScope(runId),
-          isPeerAuthorized: (peer) => input.authority.authorizesCertificate(peer),
-          authorizeWorkspace: (cwd) => deps.workspace.authorize(cwd),
-          isProviderAuthenticating: (provider, profile) => {
-            const lease = gate.acquireOperation(providerOperationKey(provider, profile ?? undefined))
-            if (lease.ok) {
-              lease.release()
-              return false
-            }
-            return true
-          }
+          ...immediateDispatch
         })
         if (!check.ok && check.action === 'fail') {
           try { deps.onDispatchRefused?.({ detail, grantScope: gateway.runScope(runId), error: new Error(check.detail ?? check.reason) }) }
@@ -241,12 +249,15 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       flush: (runId) => output.flush(runId)
     }
   })
-  const unsubscribeGate = gate.onAuthenticationReleased(() => {
-    dispatcher.pump()
-  })
+  const unsubscribeGate = deps.orchestration
+    ? gate.onAuthenticationReleased(() => {
+        dispatcher.pump()
+      })
+    : () => undefined
   return {
     gateway,
     dispatcher,
+    immediateDispatch,
     dispose: () => {
       unsubscribeGate()
       dispatcher.dispose()

@@ -44,6 +44,8 @@ export interface RunSubmitPayload {
   historicalBackfill?: boolean
   /** Historical backfill when H3 ordinal is missing: skip `turn.began` rather than fabricating MAX+1. */
   skipTurnProjection?: boolean
+  /** Single-commit immediate dispatch: atomically emit run.admitted + run.dispatched after §2.3 recheck. */
+  dispatchImmediately?: boolean
 }
 
 export interface RunResolveIntentPayload {

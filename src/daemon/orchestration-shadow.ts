@@ -64,7 +64,7 @@ export function attachDaemonOrchestrationShadow(
   // Maintainer decision (2026-11-19): P4-1 explicitly fixes fullfsync=OFF + checkpoint_fullfsync=ON
   // even when env vars are unset; final fullfsync decision is deferred to P4-2.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? false
-  const checkpointFullfsync = !fullfsync
+  const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
   const deferredThreshold = options.deferredImportThreshold ?? DEFAULT_DEFERRED_IMPORT_THRESHOLD
 

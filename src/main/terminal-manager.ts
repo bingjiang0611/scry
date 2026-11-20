@@ -210,7 +210,7 @@ export class TerminalManager {
       cols: request.cols,
       rows: request.rows,
       cwd,
-      env: { ...this.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+      env: { ...this.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', SCRY_HOST_CHILD: 'terminal' }
     })
     const info: TerminalSessionDescriptor = { id, pid: pty.pid, cwd, cols: request.cols, rows: request.rows,
       ...(request.scopeId === undefined ? {} : { scopeId: request.scopeId }) }

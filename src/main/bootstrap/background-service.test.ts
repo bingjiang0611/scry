@@ -233,4 +233,59 @@ describe('background service channels', () => {
     expect(electron.showMessageBox).not.toHaveBeenCalled()
     expect(loginStart.disable).toHaveBeenCalledWith({ daemonRunning: false })
   })
+
+  it('setCliApproval enforces sender/boolean args, hides & refuses when SCRY_EXPERIMENTAL_HOST_CLI is off, and confirms natively when on (P5-5b)', async () => {
+    const daemon = fakeDaemon({ status: 'ready' })
+    const report = { version: '2.0.0', pid: 4242, startedAt: 5, devices: { state: 'remote-disabled' }, activeRuns: 0 }
+    const forwarded = vi.fn(async (call: { op: string; method: string; args: unknown[] }) =>
+      call.op === 'localBackgroundService' ? report : { enabled: call.args[0], updatedAt: 100 }
+    )
+    const uninstall = installDaemonChannelForwarder(forwarded)
+    try {
+      // 1. Default OFF: status omits cliApproval, setCliApproval fails without dialog or daemon call.
+      const off = register(daemon, true, { env: {} })
+      await expect(Promise.resolve().then(() =>
+        off.handlers.get('remote:hostAdmin:setCliApproval')!({ ...off.event, sender: {} } as unknown as IpcMainInvokeEvent, true)
+      )).rejects.toThrow('非可信 renderer')
+      for (const bad of [[], ['true'], [1], [true, false]]) {
+        await expect(off.invoke('remote:hostAdmin:setCliApproval', ...bad)).rejects.toThrow('invalid_request')
+      }
+      const offStatus = await off.invoke('remote:backgroundService:status') as Record<string, unknown>
+      expect('cliApproval' in offStatus).toBe(false)
+      await expect(off.invoke('remote:hostAdmin:setCliApproval', true)).resolves.toMatchObject({
+        status: 'failed', reason: 'host_cli_experimental_disabled'
+      })
+      expect(electron.showMessageBox).not.toHaveBeenCalled()
+      expect(forwarded).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'localHostAdmin' }))
+
+      // 2. Experimental ON: status exposes cliApproval, enable confirms natively, cancel skips daemon, disable skips dialog.
+      forwarded.mockClear()
+      const reportWithCli = { ...report, cliApproval: { enabled: false, updatedAt: null } }
+      forwarded.mockImplementation(async (call: { op: string; method: string; args: unknown[] }) =>
+        call.op === 'localBackgroundService' ? reportWithCli : { enabled: call.args[0], updatedAt: 200 }
+      )
+      const on = register(daemon, true, { env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' } })
+      const onStatus = await on.invoke('remote:backgroundService:status') as Record<string, unknown>
+      expect(onStatus.cliApproval).toMatchObject({ state: 'disabled', updatedAt: null })
+
+      electron.showMessageBox.mockResolvedValueOnce({ response: 1 })
+      await expect(on.invoke('remote:hostAdmin:setCliApproval', true)).resolves.toEqual({ status: 'cancelled' })
+      expect(electron.showMessageBox).toHaveBeenCalledTimes(1)
+      expect(forwarded).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'localHostAdmin' }))
+
+      electron.showMessageBox.mockClear()
+      electron.showMessageBox.mockResolvedValueOnce({ response: CONFIRM_BUTTON })
+      await expect(on.invoke('remote:hostAdmin:setCliApproval', true)).resolves.toEqual({ status: 'done' })
+      expect(electron.showMessageBox).toHaveBeenCalledTimes(1)
+      expect(forwarded).toHaveBeenCalledWith({ op: 'localHostAdmin', method: 'setCliApproval', args: [true], read: false })
+
+      electron.showMessageBox.mockClear()
+      forwarded.mockClear()
+      await expect(on.invoke('remote:hostAdmin:setCliApproval', false)).resolves.toEqual({ status: 'done' })
+      expect(electron.showMessageBox).not.toHaveBeenCalled()
+      expect(forwarded).toHaveBeenCalledWith({ op: 'localHostAdmin', method: 'setCliApproval', args: [false], read: false })
+    } finally {
+      uninstall()
+    }
+  })
 })

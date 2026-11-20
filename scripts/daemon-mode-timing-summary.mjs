@@ -37,6 +37,7 @@ export const selectTimeline = (marks, submittedWall, until, expectedRunId) => {
       commitKind: mark.commitKind,
       durationMs: mark.durationMs,
       ...(typeof mark.sinkDurationMs === 'number' ? { sinkDurationMs: mark.sinkDurationMs } : {}),
+      ...(typeof mark.bodyWriteMs === 'number' ? { bodyWriteMs: mark.bodyWriteMs } : {}),
       ...(typeof mark.bodyBytes === 'number' ? { bodyBytes: mark.bodyBytes } : {}),
       preFirstToken: Boolean(mark.preFirstToken)
     }))
@@ -65,6 +66,8 @@ const summarizeOrchCommits = (runs) => {
   const preCounts = []
   const preSums = []
   const preSinkSums = []
+  const preBodyWrites = []
+  const preHookWithoutBody = []
   const singles = []
   const singleSinks = []
   let maxBodyBytes = 0
@@ -73,7 +76,11 @@ const summarizeOrchCommits = (runs) => {
     if (commits.length === 0) continue
     const pre = commits.filter((c) => c.preFirstToken)
     preCounts.push(pre.length)
-    preSums.push(Number(pre.reduce((acc, c) => acc + c.durationMs, 0).toFixed(3)))
+    const preSum = Number(pre.reduce((acc, c) => acc + c.durationMs, 0).toFixed(3))
+    const bodySum = Number(pre.reduce((acc, c) => acc + (typeof c.bodyWriteMs === 'number' ? c.bodyWriteMs : 0), 0).toFixed(3))
+    preSums.push(preSum)
+    if (pre.some((c) => typeof c.bodyWriteMs === 'number')) preBodyWrites.push(bodySum)
+    preHookWithoutBody.push(Number(Math.max(0, preSum - bodySum).toFixed(3)))
     if (pre.every((c) => typeof c.sinkDurationMs === 'number')) {
       preSinkSums.push(Number(pre.reduce((acc, c) => acc + c.sinkDurationMs, 0).toFixed(3)))
     }
@@ -89,8 +96,12 @@ const summarizeOrchCommits = (runs) => {
     preFirstTokenCountP95: percentile(preCounts, 0.95),
     preFirstTokenSumP50Ms: percentile(preSums, 0.5),
     preFirstTokenSumP95Ms: percentile(preSums, 0.95),
+    preFirstTokenHookWithoutBodyP50Ms: percentile(preHookWithoutBody, 0.5),
+    preFirstTokenHookWithoutBodyP95Ms: percentile(preHookWithoutBody, 0.95),
     preFirstTokenSinkSumP50Ms: percentile(preSinkSums, 0.5),
     preFirstTokenSinkSumP95Ms: percentile(preSinkSums, 0.95),
+    preFirstTokenBodyWriteP50Ms: percentile(preBodyWrites, 0.5),
+    preFirstTokenBodyWriteP95Ms: percentile(preBodyWrites, 0.95),
     singleCommitSamples: singles.length,
     singleCommitP50Ms: percentile(singles, 0.5),
     singleCommitP95Ms: percentile(singles, 0.95),

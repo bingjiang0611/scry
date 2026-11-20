@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
 import type { ConversationStore } from '../main/conversation-store'
-import { buildMcpExecutionSnapshot } from '../main/mcp-execution-trust'
-import type { ProviderId } from '../shared/provider'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
+import { RemoteInteractionError } from '../main/remote/remote-interaction-broker'
 import type { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
@@ -19,6 +17,7 @@ import {
 } from '../host-runtime/orchestration/legacy-import'
 import type { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
+import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import {
   parseOrchestrationFullfsync,
   parseOrchestrationMode,
@@ -35,7 +34,6 @@ import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-r
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
 const MAX_LEDGER_CANONICAL_MAP = 4_096
-const TRUST_GATE_PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
@@ -82,8 +80,9 @@ export async function attachDaemonOrchestrationAuthority<
   const mode = parseOrchestrationMode(options.env)
   if (mode.effective !== 'on') return undefined
 
-  const fullfsync = parseOrchestrationFullfsync(options.env) ?? false
-  const checkpointFullfsync = !fullfsync
+  // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
+  const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
+  const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
   const deferredThreshold = options.deferredImportThreshold ?? DEFAULT_DEFERRED_IMPORT_THRESHOLD
   const leaseOwner = `daemon:${process.pid}`
@@ -106,9 +105,26 @@ export async function attachDaemonOrchestrationAuthority<
 
     const plan = await loadLegacyLedgerPlanAsync(sink, options.userDataDir)
     if (plan.unimportedRuns.length > deferredThreshold) {
+      // Must-Fix 5c: collect pending conversation turn runIds so deferred import never leaves a
+      // settled H1 conversation turn unimported before reconcileTwoLedgersOnStartup checks it.
+      const pendingConvRunIds = new Set<string>()
+      try {
+        const ownership = await options.conversationStore().loadOwnership()
+        for (const conv of ownership.values()) {
+          for (const turn of conv.turns) {
+            if (turn.origin === 'dispatch' && turn.delivery.status === 'pending') {
+              pendingConvRunIds.add(turn.runId)
+            }
+          }
+        }
+      } catch {
+        // Corrupt ownership is surfaced by reconcileTwoLedgersOnStartup below.
+      }
       importLegacyStateIncrementally({
         sink, userDataDir: options.userDataDir, pendingTtlMs,
-        reconcileOpenRuns: true, shadowOnly: false, openOnly: true, plan, resolveTurnOrdinal
+        reconcileOpenRuns: true, shadowOnly: false, openOnly: true,
+        ...(pendingConvRunIds.size > 0 ? { extraRunIds: pendingConvRunIds } : {}),
+        plan, resolveTurnOrdinal
       })
       deferredPlan = plan
       importComplete = new Promise<void>((resolve) => { resolveImportComplete = resolve })
@@ -118,6 +134,32 @@ export async function attachDaemonOrchestrationAuthority<
         reconcileOpenRuns: true, shadowOnly: false, plan, resolveTurnOrdinal
       })
     }
+
+    // Must-Fix 5b (Decision G): install before-turn-settled observer BEFORE reconcileTwoLedgersOnStartup
+    // so reconciled turns also commit `turn.record_delivery` prior to persisting conversations/<id>.json.
+    options.conversationStore().setBeforeTurnSettledObserver((info) => {
+      if (sink.isWriteIndeterminate()) return
+      const at = Date.now()
+      const delivery = info.delivery.status
+      const payload = {
+        sessionKey: info.conversationId,
+        runId: info.runId,
+        ordinal: info.ordinal,
+        delivery,
+        ...(info.delivery.status !== 'accepted' ? { reason: info.delivery.reason } : {}),
+        settledAt: at,
+        evidence: [`conversation:${info.conversationId}`]
+      }
+      sink.execute({
+        type: 'turn.record_delivery',
+        commandId: `effect:p4-conv-${info.conversationId}-${info.runId}:${delivery}`,
+        actor: `effect:p4-conv-${info.conversationId}`,
+        scope: 'system',
+        at,
+        payload,
+        payloadSha256: sha256Hex(canonicalJson(payload))
+      })
+    })
 
     // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
     const recovery = recoverOrchestrationOnStartup({
@@ -144,6 +186,7 @@ export async function attachDaemonOrchestrationAuthority<
       getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
   } catch (error) {
+    try { options.conversationStore().setBeforeTurnSettledObserver(undefined) } catch { /* ignore */ }
     sink.close()
     throw error
   }
@@ -184,6 +227,7 @@ function buildAuthorityRuntime<
 
   // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
+  const trustGate = new AuthorityMcpTrustGate()
   let legacyMirror: LegacyMirrorWorker | undefined
   let backingFileStore: SessionLedgerFileStore | undefined
   let progressCounter = 0
@@ -217,26 +261,50 @@ function buildAuthorityRuntime<
     },
 
     submitAsync: async (input) => {
+      const immediateDispatch = input.immediateDispatch
+        ? {
+            ...input.immediateDispatch,
+            verifyTrustGate: (provider: string, cwd: string | null, runId: string) =>
+              trustGate.prepareAndVerify(runId, provider, cwd).ok
+          }
+        : undefined
       const res = await engine.submitAsync({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
         commandId: input.scopedIntentId,
-        detail: input.detail
+        detail: input.detail,
+        ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
+      if (!immediateDispatch) {
+        const routing = parseLedgerIntentRouting(res.runId, input.detail)
+        trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
+      }
       const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
       trackCanonical(ledgerRunId, res.runId)
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
     submitSync: (input) => {
+      const immediateDispatch = input.immediateDispatch
+        ? {
+            ...input.immediateDispatch,
+            verifyTrustGate: (provider: string, cwd: string | null, runId: string) =>
+              trustGate.prepareAndVerify(runId, provider, cwd).ok
+          }
+        : undefined
       const res = engine.submitSync({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
         commandId: input.scopedIntentId,
-        detail: input.detail
+        detail: input.detail,
+        ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
+      if (!immediateDispatch) {
+        const routing = parseLedgerIntentRouting(res.runId, input.detail)
+        trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
+      }
       const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
       trackCanonical(ledgerRunId, res.runId)
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
@@ -245,6 +313,7 @@ function buildAuthorityRuntime<
     compensateSubmitFailure: (runId, reason) => {
       const canonicalRunId = resolveCanonical(runId)
       engine.compensateSubmitFailure(canonicalRunId, reason)
+      trustGate.delete(canonicalRunId)
       ledgerToCanonical.delete(runId)
     },
 
@@ -280,29 +349,17 @@ function buildAuthorityRuntime<
         isProviderAuthenticating: input.isProviderAuthenticating,
         verifyTrustGate: () => {
           const targetCwd = routing.cwd || sink.getRun(canonicalRunId)?.cwd
-          const targetProvider = (routing.provider || sink.getRun(canonicalRunId)?.provider || '') as ProviderId
-          if (!targetCwd || !TRUST_GATE_PROVIDERS.has(targetProvider)) return true
-          try {
-            const snapshot = buildMcpExecutionSnapshot({
-              providerId: targetProvider,
-              cwd: targetCwd,
-              homeDir: homedir(),
-              settingSources: targetProvider === 'claude' ? options.env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
-              env: options.env
-            })
-            if (snapshot.errors.length > 0) {
-              trustGateDetail = `MCP 配置无法安全执行：${snapshot.errors.join('；')}`
-              return false
-            }
-            return true
-          } catch (error) {
-            // Trust gate MUST fail closed on inspection errors.
-            trustGateDetail = error instanceof Error ? error.message : String(error)
+          const targetProvider = routing.provider || sink.getRun(canonicalRunId)?.provider
+          const checked = trustGate.verify(canonicalRunId, targetProvider, targetCwd)
+          if (!checked.ok) {
+            trustGateDetail = checked.detail
             return false
           }
+          return true
         }
       })
       if (!res.ok && res.action === 'fail') {
+        trustGate.delete(canonicalRunId)
         ledgerToCanonical.delete(input.runId)
         return trustGateDetail ? { ...res, detail: trustGateDetail } : res
       }
@@ -349,8 +406,8 @@ function buildAuthorityRuntime<
     },
 
     onQuestionAnswer: (input) => {
-      if (sink.isWriteIndeterminate()) throw new Error('orchestration_write_indeterminate')
-      engine.answerQuestion({
+      if (sink.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
+      const res = engine.answerQuestion({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
         runId: resolveCanonical(input.runId),
@@ -358,6 +415,9 @@ function buildAuthorityRuntime<
         answerId: input.answerId,
         answerSha256: input.answerSha256
       })
+      if (res.kind === 'rejected') {
+        throw new RemoteInteractionError(res.reason)
+      }
     },
 
     onRunStop: (input) =>
@@ -380,36 +440,12 @@ function buildAuthorityRuntime<
         ...(detail ? { reason: detail } : {}),
         evidence: ['provider']
       })
+      trustGate.delete(canonicalRunId)
       ledgerToCanonical.delete(runId)
     },
 
     isWriteIndeterminate: () => sink.isWriteIndeterminate()
   }
-
-  // Decision G: commit `turn.record_delivery` before `ConversationStore.persist`.
-  options.conversationStore().setBeforeTurnSettledObserver((info) => {
-    if (sink.isWriteIndeterminate()) return
-    const at = Date.now()
-    const delivery = info.delivery.status
-    const payload = {
-      sessionKey: info.conversationId,
-      runId: info.runId,
-      ordinal: info.ordinal,
-      delivery,
-      ...(info.delivery.status !== 'accepted' ? { reason: info.delivery.reason } : {}),
-      settledAt: at,
-      evidence: [`conversation:${info.conversationId}`]
-    }
-    sink.execute({
-      type: 'turn.record_delivery',
-      commandId: `effect:p4-conv-${info.conversationId}-${info.runId}:${delivery}`,
-      actor: `effect:p4-conv-${info.conversationId}`,
-      scope: 'system',
-      at,
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
-    })
-  })
 
   let closed = false
   const startImport = (): void => {

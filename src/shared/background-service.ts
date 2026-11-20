@@ -1,5 +1,6 @@
 import type { ProviderId } from './provider'
 import type { AgentPermissionMode } from './runtime-types'
+import type { CliApprovalStatus, HostCliApprovalSelfReport } from './host-admin'
 
 // The settings section «后台服务» (B4-S S0-1): what the App knows about its local daemon,
 // and what each of the four actions did. Every field the App could not establish is
@@ -90,6 +91,8 @@ export interface BackgroundServiceSelfReport {
   supervisorPid?: number
   /** Effective non-secret remote policy running in the daemon (P5 §2.2). */
   remoteConfig?: BackgroundServiceRemoteConfig
+  /** CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
+  cliApproval?: HostCliApprovalSelfReport
 }
 
 export type BackgroundServiceStatus =
@@ -113,6 +116,8 @@ export type BackgroundServiceStatus =
     remoteConfig?: BackgroundServiceRemoteConfig | null
     /** Login-start service state for this App and userDataDir (P5 §2.3). */
     loginStart?: LoginStartStatus
+    /** Host CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
+    cliApproval?: CliApprovalStatus
     /** Non-silent warnings from service-launch fallback or adopted-daemon policy drift. */
     runtimeNotice?: BackgroundServiceRuntimeNotice
     /** When the App read this, so the section can say how fresh it is. */

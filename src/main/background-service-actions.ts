@@ -180,3 +180,29 @@ export async function setBackgroundServiceLoginStart(
   }
   return done
 }
+
+export interface HostCliApprovalActionDeps {
+  experimentalEnabled: boolean
+  daemonMode: boolean
+  connection(): Promise<BackgroundServiceConnection>
+  confirmEnable(): Promise<boolean>
+  apply(enabled: boolean): Promise<void>
+}
+
+export async function setHostCliApproval(
+  enabled: boolean,
+  deps: HostCliApprovalActionDeps
+): Promise<BackgroundServiceActionResult> {
+  if (!deps.experimentalEnabled) return failed('host_cli_experimental_disabled')
+  if (!deps.daemonMode) return failed('daemon_mode_disabled')
+  const conn = await deps.connection()
+  if (conn.state !== 'ready') return connectionResult(conn)
+  if (enabled && !await deps.confirmEnable()) return cancelled
+  try {
+    await deps.apply(enabled)
+    return done
+  } catch (error) {
+    const reason = error instanceof Error && /^[a-z0-9_:]+$/.test(error.message) ? error.message : 'host_admin_failed'
+    return failed(reason)
+  }
+}
