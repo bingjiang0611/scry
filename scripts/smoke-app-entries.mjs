@@ -1,9 +1,12 @@
 import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // Temporary main-process entries for the isolated smoke app. Each one surrounds the
 // production main module instead of replacing it, so the shipped handlers stay in the
 // measured path and the fixture only adds the observation or the injected fault.
+
+const repoRoot = resolve('.')
 
 function productionMain() {
   return JSON.stringify(pathToFileURL('out/main/index.js').href)
@@ -13,8 +16,9 @@ function productionMain() {
 // The receipt records the exact OS handoff after resolution and authorization.
 export function writeFileOpenEntry(entryPath, receiptPath) {
   writeFileSync(entryPath, `
-    import { shell } from 'electron'
+    import { app, shell } from 'electron'
     import { writeFileSync } from 'node:fs'
+    app.setAppPath(${JSON.stringify(repoRoot)})
     const opened = []
     shell.openPath = async (path) => {
       opened.push(path)
@@ -62,8 +66,9 @@ export function writeConversationFaultEntry(entryPath, markerPath) {
  */
 export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sideChatRequestsPath) {
   writeFileSync(entryPath, `
-    import { ipcMain } from 'electron'
+    import { app, ipcMain } from 'electron'
     import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, watchFile, writeFileSync } from 'node:fs'
+    app.setAppPath(${JSON.stringify(repoRoot)})
     const counts = {}
     const lostReply = ${JSON.stringify(lostReplyPath(countsPath))}
     const lostSendReply = ${JSON.stringify(lostSendReplyPath(countsPath))}

@@ -83,7 +83,7 @@ export async function exerciseProviderHistory(smokeContext) {
         reject(new Error(event.message))
       })
     })
-    const started = await window.scry.start({ providerId: 'codex', cwd, expectedSessionId: externalSessionId, prompt: 'latest second-turn history' })
+    const started = await window.scry.start({ providerId: 'codex', cwd, expectedExternalSessionId: externalSessionId, prompt: 'latest second-turn history' })
     const ended = await terminal
     const context = { providerId: 'codex', cwd, externalSessionId }
     const first = await window.scry.loadSession(context)
