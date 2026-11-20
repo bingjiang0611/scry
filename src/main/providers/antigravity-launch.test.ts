@@ -242,4 +242,59 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
       try { process.kill(childPid, 'SIGKILL') } catch { /* ignore */ }
     }
   })
+
+  it('N3 (M6a/M6b): 绝不对独立 PGID 后代发 kill(-pgid)，且 SIGKILL 阶段必须重新核验 (startedAt, command) 拒绝 PID 复用', async () => {
+    const signals: Array<{ pid: number; signal: NodeJS.Signals | 0 }> = []
+    let fullSnapshotCalls = 0
+    const ps = async (args: string[]): Promise<string> => {
+      if (args.includes('pid=,pgid=')) {
+        return [
+          '2050 3050',
+          '2051 3051',
+          '2052 3052'
+        ].join('\n')
+      }
+      fullSnapshotCalls += 1
+      if (fullSnapshotCalls === 1) {
+        // SIGTERM stage: root 2000 + 3 independent-PGID descendants + unrelated peer 3059 in PGID 3050.
+        return [
+          '2000 1 S Thu Nov 20 10:00:00 2026 /usr/local/bin/agy acp',
+          '2050 2000 S Thu Nov 20 10:00:01 2026 sleep 27',
+          '2051 2000 S Thu Nov 20 10:00:01 2026 /bin/sh -c sleep 28',
+          '2052 2000 S Thu Nov 20 10:00:01 2026 sleep 29',
+          '3059 1 S Thu Nov 20 09:50:00 2026 /usr/bin/unrelated-in-pgid-3050'
+        ].join('\n')
+      }
+      // SIGKILL stage: root 2000 exited; PID 2050 reused (different startedAt), PID 2051 command changed,
+      // only PID 2052 still matches original (startedAt, command).
+      return [
+        '2050 1 S Thu Nov 20 10:00:09 2026 /usr/bin/unrelated-reused-pid',
+        '2051 1 S Thu Nov 20 10:00:01 2026 /usr/bin/different-command',
+        '2052 1 S Thu Nov 20 10:00:01 2026 sleep 29',
+        '3059 1 S Thu Nov 20 09:50:00 2026 /usr/bin/unrelated-in-pgid-3050'
+      ].join('\n')
+    }
+    const kill = (pid: number, signal: NodeJS.Signals | 0): void => {
+      signals.push({ pid, signal })
+    }
+
+    await forceKillAntigravityProcess(
+      Promise.resolve({ pid: 2000, startedAt: 'Thu Nov 20 10:00:00 2026', command: '/usr/local/bin/agy acp' }),
+      { sigkillDelayMs: 25, ps, kill }
+    )
+
+    // Root PGID (-2000) is verified; descendant independent PGIDs (-3050/-3051/-3052) MUST NEVER be signalled (kills M6a).
+    expect(signals).toContainEqual({ pid: -2000, signal: 'SIGTERM' })
+    expect(signals.some((s) => s.pid === -3050 || s.pid === -3051 || s.pid === -3052)).toBe(false)
+
+    // SIGTERM signalled all 3 verified descendants individually.
+    expect(signals).toContainEqual({ pid: 2050, signal: 'SIGTERM' })
+    expect(signals).toContainEqual({ pid: 2051, signal: 'SIGTERM' })
+    expect(signals).toContainEqual({ pid: 2052, signal: 'SIGTERM' })
+
+    // SIGKILL stage MUST skip reused PID 2050 and command-changed PID 2051 (kills M6b), and only SIGKILL verified PID 2052.
+    expect(signals).not.toContainEqual({ pid: 2050, signal: 'SIGKILL' })
+    expect(signals).not.toContainEqual({ pid: 2051, signal: 'SIGKILL' })
+    expect(signals).toContainEqual({ pid: 2052, signal: 'SIGKILL' })
+  })
 })

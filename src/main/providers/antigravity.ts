@@ -8,7 +8,7 @@ import {
   inspectAntigravityWorkspaceConfig
 } from './antigravity-config-trust'
 import { prepareAntigravityHistoryMcp } from './antigravity-history-mcp'
-import { antigravityExecutable, describeAntigravity } from './antigravity-launch'
+import { antigravityExecutable, buildAntigravityLaunchEnv, describeAntigravity } from './antigravity-launch'
 import { runAntigravity, type AntigravityRunDeps } from './antigravity-run'
 import { antigravityContinuationKey } from './host-continuation-identity'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
@@ -17,13 +17,21 @@ export interface AntigravityAdapterOptions extends Omit<AntigravityRunDeps, 'hom
   userDataDir?: string
 }
 
+function mergedProcessEnv(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries({ ...shellEnv(), ...process.env })) {
+    if (v !== undefined) out[k] = v
+  }
+  return out
+}
+
 export function createAntigravityAdapter(
   homeDir = homedir(),
   options: AntigravityAdapterOptions = {}
 ): ProviderAdapter {
   const { userDataDir, ...runDeps } = options
   const continuationKey = (context: ProviderContext) =>
-    antigravityContinuationKey(context, homeDir, antigravityExecutable())
+    antigravityContinuationKey(context, homeDir, antigravityExecutable(), buildAntigravityLaunchEnv(mergedProcessEnv()))
   const catalog = createAntigravityCatalog({
     homeDir,
     continuationKey,

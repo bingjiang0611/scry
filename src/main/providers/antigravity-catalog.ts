@@ -37,6 +37,7 @@ import { formatAntigravityUnauthenticatedError } from './antigravity-run'
 
 const CATALOG_TTL_MS = 5 * 60_000
 const PROBE_EXIT_GRACE_MS = 2_000
+const DEFAULT_PROBE_WAIT_TIMEOUT_MS = 5_000
 
 interface AcpConfigOptionValue {
   value?: string
@@ -166,15 +167,19 @@ export function createAntigravityCatalog(deps: {
   continuationKey: (context: ProviderContext) => Promise<string>
   clientVersion?: string
   now?: () => number
+  /** Upper bound for a catalog probe waiting on active runs when no stale cache exists (N4). */
+  probeWaitTimeoutMs?: number
 }) {
   const now = deps.now ?? Date.now
+  const probeWaitTimeoutMs = deps.probeWaitTimeoutMs ?? DEFAULT_PROBE_WAIT_TIMEOUT_MS
   const cache = new Map<string, CachedAntigravityCatalog>()
   const inFlight = new Map<string, Promise<CachedAntigravityCatalog>>()
-  // B2/D5: Reader-writer gate — concurrent runs NEVER serialize each other, while catalog probes
-  // remain mutually exclusive with active runs on the same profile. Queued runs abort immediately.
+  // B2/D5/N4: Reader-writer gate — concurrent runs NEVER serialize each other, while catalog probes
+  // remain mutually exclusive with active runs on the same profile. Queued runs abort immediately,
+  // and catalog probes wait at most `probeWaitTimeoutMs` instead of hanging indefinitely.
   let activeRuns = 0
   let probeActive = false
-  const probeWaiters: Array<() => void> = []
+  const probeWaiters: Array<{ grant: () => void }> = []
   const runWaiters = new Set<{ grant: () => void; cancel: () => void }>()
 
   const pumpGate = (): void => {
@@ -190,13 +195,33 @@ export function createAntigravityCatalog(deps: {
     if (!probeActive && activeRuns === 0 && probeWaiters.length > 0) {
       probeActive = true
       const next = probeWaiters.shift()!
-      next()
+      next.grant()
     }
   }
 
-  const runExclusive = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const runExclusive = async <T>(fn: () => Promise<T>, waitTimeoutMs = probeWaitTimeoutMs): Promise<T> => {
     if (probeActive || activeRuns > 0) {
-      await new Promise<void>((resolve) => { probeWaiters.push(resolve) })
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const entry = {
+          grant: () => {
+            if (settled) return
+            settled = true
+            if (timer) clearTimeout(timer)
+            resolve()
+          }
+        }
+        const timer = waitTimeoutMs > 0
+          ? setTimeout(() => {
+              if (settled) return
+              settled = true
+              const idx = probeWaiters.indexOf(entry)
+              if (idx >= 0) probeWaiters.splice(idx, 1)
+              reject(new Error('Antigravity 正在执行对话，目录探测等待超时；将在当前运行结束后重试'))
+            }, waitTimeoutMs)
+          : undefined
+        probeWaiters.push(entry)
+      })
     } else {
       probeActive = true
     }
@@ -339,6 +364,9 @@ export function createAntigravityCatalog(deps: {
     const key = await deps.continuationKey(context).catch(() => `fallback:${antigravityExecutable() ?? 'missing'}`)
     const existing = cache.get(key)
     if (existing && now() - existing.observedAt < CATALOG_TTL_MS) return existing
+    // N4: when runs are active (e.g. waiting on approval) and stale cache exists, return stale cache
+    // immediately so model/command lists never stall indefinitely after the 5-minute TTL expires.
+    if (existing && activeRuns > 0) return existing
     const pending = inFlight.get(key)
     if (pending) return pending
     const task = runExclusive(async () => {
@@ -420,7 +448,7 @@ export function createAntigravityCatalog(deps: {
       }
     },
     async skills(context: ProviderContext): Promise<CapabilityEnvelope<SkillMeta[]>> {
-      return capabilityReady(context, 'read', listAntigravitySkills(context.cwd, deps.homeDir), now())
+      return capabilityReady(context, 'read', listAntigravitySkills(context.cwd, deps.homeDir, { ...shellEnv(), ...process.env }), now())
     },
     invalidate(): void {
       cache.clear()

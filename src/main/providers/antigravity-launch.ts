@@ -232,6 +232,15 @@ export function spawnAntigravityAcp(args: {
   return { child, executable, argv, identityPromise, stderrTail }
 }
 
+export interface AntigravitySignalDeps {
+  ps?: (args: string[]) => Promise<string>
+  kill?: (pid: number, signal: NodeJS.Signals | 0) => void
+}
+
+const defaultKill = (pid: number, signal: NodeJS.Signals | 0): void => {
+  process.kill(pid, signal)
+}
+
 function execPsAsync(args: string[], maxBuffer = 8 * 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -246,11 +255,14 @@ function execPsAsync(args: string[], maxBuffer = 8 * 1024 * 1024): Promise<strin
   })
 }
 
-async function readProcessGroupsAsync(pids: number[]): Promise<Map<number, number>> {
+async function readProcessGroupsAsync(
+  pids: number[],
+  ps: (args: string[]) => Promise<string> = execPsAsync
+): Promise<Map<number, number>> {
   const result = new Map<number, number>()
   if (pids.length === 0 || process.platform === 'win32') return result
   try {
-    const out = await execPsAsync(['-o', 'pid=,pgid=', '-p', pids.join(',')], 64 * 1024)
+    const out = await ps(['-o', 'pid=,pgid=', '-p', pids.join(',')])
     for (const line of out.split('\n')) {
       const match = line.trim().match(/^(\d+)\s+(\d+)$/)
       if (match) result.set(Number(match[1]), Number(match[2]))
@@ -270,13 +282,16 @@ interface IndependentDescendant {
 async function signalIndependentPgidDescendantsAsync(
   rootPid: number,
   nodes: readonly ProcessTreeNode[],
-  signal: NodeJS.Signals
+  signal: NodeJS.Signals,
+  deps: AntigravitySignalDeps = {}
 ): Promise<IndependentDescendant[]> {
+  const ps = deps.ps ?? execPsAsync
+  const kill = deps.kill ?? defaultKill
   const descendants = nodes.filter(
     (node) => node.pid !== rootPid && node.pid > 1 && node.pid !== process.pid && canSignalCategory(node.category)
   )
   if (descendants.length === 0) return []
-  const pgids = await readProcessGroupsAsync(descendants.map((node) => node.pid))
+  const pgids = await readProcessGroupsAsync(descendants.map((node) => node.pid), ps)
   const tracked: IndependentDescendant[] = []
   for (const node of descendants) {
     const pgid = pgids.get(node.pid)
@@ -284,7 +299,7 @@ async function signalIndependentPgidDescendantsAsync(
     // because unverified processes could share a descendant's process group (S6).
     if (!pgid || pgid !== rootPid) {
       tracked.push({ pid: node.pid, startedAt: node.startedAt, command: node.command })
-      try { process.kill(node.pid, signal) } catch { /* ESRCH / EPERM */ }
+      try { kill(node.pid, signal) } catch { /* ESRCH / EPERM */ }
     }
   }
   return tracked
@@ -292,12 +307,15 @@ async function signalIndependentPgidDescendantsAsync(
 
 async function killVerifiedDescendantsAsync(
   descendants: readonly IndependentDescendant[],
-  signal: NodeJS.Signals
+  signal: NodeJS.Signals,
+  deps: AntigravitySignalDeps = {}
 ): Promise<void> {
   if (descendants.length === 0 || process.platform === 'win32') return
+  const ps = deps.ps ?? execPsAsync
+  const kill = deps.kill ?? defaultKill
   let snapshot: ReturnType<typeof parseProcessSnapshot>
   try {
-    snapshot = parseProcessSnapshot(await execPsAsync(['-axo', 'pid=,ppid=,stat=,lstart=,command=']))
+    snapshot = parseProcessSnapshot(await ps(['-axo', 'pid=,ppid=,stat=,lstart=,command=']))
   } catch {
     return
   }
@@ -305,7 +323,7 @@ async function killVerifiedDescendantsAsync(
     const live = snapshot.get(target.pid)
     if (!live || live.status.startsWith('Z')) continue
     if (live.startedAt !== target.startedAt || live.command !== target.command) continue
-    try { process.kill(target.pid, signal) } catch { /* ESRCH / EPERM */ }
+    try { kill(target.pid, signal) } catch { /* ESRCH / EPERM */ }
   }
 }
 
@@ -316,11 +334,14 @@ async function killVerifiedDescendantsAsync(
  */
 export async function signalAntigravityProcess(
   identityPromise: Promise<ProcessIdentity | undefined> | undefined,
-  signal: NodeJS.Signals
+  signal: NodeJS.Signals,
+  deps: AntigravitySignalDeps = {}
 ): Promise<{ status: 'signalled' | 'already_gone' | 'refused'; independentDescendants: IndependentDescendant[] }> {
   if (!identityPromise || process.platform === 'win32') {
     return { status: 'refused', independentDescendants: [] }
   }
+  const ps = deps.ps ?? execPsAsync
+  const kill = deps.kill ?? defaultKill
   let identity: ProcessIdentity | undefined
   try {
     identity = await identityPromise
@@ -329,10 +350,15 @@ export async function signalAntigravityProcess(
   }
   if (!identity?.startedAt) return { status: 'refused', independentDescendants: [] }
   try {
-    const rawSnapshot = await execPsAsync(['-axo', 'pid=,ppid=,stat=,lstart=,command='])
-    const outcome = signalProcessTreeWithIdentity({ identity, signal, lister: () => rawSnapshot })
+    const rawSnapshot = await ps(['-axo', 'pid=,ppid=,stat=,lstart=,command='])
+    const outcome = signalProcessTreeWithIdentity({
+      identity,
+      signal,
+      lister: () => rawSnapshot,
+      kill: (pid, sig) => kill(pid, sig)
+    })
     if (outcome.status === 'signalled') {
-      const independentDescendants = await signalIndependentPgidDescendantsAsync(identity.pid, outcome.nodes, signal)
+      const independentDescendants = await signalIndependentPgidDescendantsAsync(identity.pid, outcome.nodes, signal, deps)
       return { status: 'signalled', independentDescendants }
     }
     return { status: outcome.status, independentDescendants: [] }
@@ -347,9 +373,10 @@ export async function signalAntigravityProcess(
  */
 export async function forceKillAntigravityProcess(
   identityPromise: Promise<ProcessIdentity | undefined> | undefined,
-  options: { sigkillDelayMs?: number } = {}
+  options: { sigkillDelayMs?: number } & AntigravitySignalDeps = {}
 ): Promise<void> {
-  const first = await signalAntigravityProcess(identityPromise, 'SIGTERM')
+  const kill = options.kill ?? defaultKill
+  const first = await signalAntigravityProcess(identityPromise, 'SIGTERM', options)
   if (first.status !== 'signalled') return
   const delayMs = options.sigkillDelayMs ?? 2_000
   const deadline = Date.now() + delayMs
@@ -358,19 +385,19 @@ export async function forceKillAntigravityProcess(
     let anyAlive = false
     if (identity?.pid) {
       try {
-        process.kill(identity.pid, 0)
+        kill(identity.pid, 0)
         anyAlive = true
       } catch { /* exited */ }
     }
     for (const child of first.independentDescendants) {
       try {
-        process.kill(child.pid, 0)
+        kill(child.pid, 0)
         anyAlive = true
       } catch { /* exited */ }
     }
     if (!anyAlive) return
     await new Promise((resolve) => setTimeout(resolve, 40))
   }
-  await signalAntigravityProcess(identityPromise, 'SIGKILL')
-  await killVerifiedDescendantsAsync(first.independentDescendants, 'SIGKILL')
+  await signalAntigravityProcess(identityPromise, 'SIGKILL', options)
+  await killVerifiedDescendantsAsync(first.independentDescendants, 'SIGKILL', options)
 }

@@ -1,14 +1,21 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as locate from '../claude-locate'
+import { createAntigravityCatalog } from './antigravity-catalog'
 import { antigravityContinuationKey } from './host-continuation-identity'
 import { createAntigravityAdapter } from './antigravity'
 
 const FIXTURE = join(process.cwd(), 'src', 'main', 'providers', 'fixtures', 'fake-agy-acp.mjs')
 const temps: string[] = []
 
+beforeEach(() => {
+  vi.spyOn(locate, 'shellEnv').mockReturnValue({ PATH: process.env.PATH ?? '/usr/bin:/bin' })
+})
+
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.unstubAllEnvs()
   while (temps.length) rmSync(temps.pop()!, { recursive: true, force: true })
 })
@@ -109,5 +116,85 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
     writeFileSync(tokenFile, 'token-B', { mode: 0o600 })
     const keyWithTokenB = await antigravityContinuationKey({ providerId: 'antigravity', cwd }, home, bin, { PATH: '/usr/bin' })
     expect(keyWithTokenB).not.toBe(keyWithTokenA)
+  })
+
+  it('N2: 有 run 正在运行时，目录探测必须等待该 run 结束才开始（不与活动 run 重叠）', async () => {
+    const { home } = setupFake()
+    const catalog = createAntigravityCatalog({
+      homeDir: home,
+      continuationKey: async () => 'key-n2',
+      probeWaitTimeoutMs: 5_000
+    })
+
+    const releaseRun = await catalog.enterRun()
+    let probeStarted = false
+    let probeStartedAt = 0
+    const probePromise = catalog.runExclusive(async () => {
+      probeStarted = true
+      probeStartedAt = Date.now()
+      return 'probed'
+    })
+
+    // While run is active, probe MUST NOT start (mutation deleting `|| activeRuns > 0` fails here).
+    await new Promise((r) => setTimeout(r, 120))
+    expect(probeStarted).toBe(false)
+
+    const runReleasedAt = Date.now()
+    releaseRun()
+    expect(await probePromise).toBe('probed')
+    expect(probeStartedAt).toBeGreaterThanOrEqual(runReleasedAt)
+  })
+
+  it('N4: 有 run 占用时，过期缓存直接回退旧缓存不卡死；冷缓存等待达上限后有界返回 unknown', async () => {
+    const { home, cwd, recordPath } = setupFake({
+      models: [{ value: 'gemini-3-pro', name: 'Gemini 3 Pro', thoughts: ['low', 'high'] }],
+      availableCommands: [{ name: 'plan', description: 'Plan' }]
+    })
+    let fakeNow = 1_000_000
+    const catalog = createAntigravityCatalog({
+      homeDir: home,
+      continuationKey: async () => 'key-n4-stale',
+      now: () => fakeNow,
+      probeWaitTimeoutMs: 120
+    })
+
+    // 1. Populate cache while idle.
+    const initial = await catalog.runControls({ providerId: 'antigravity', cwd })
+    expect(initial.state).toBe('ready')
+    expect(initial.data?.models[0].model.id).toBe('gemini-3-pro')
+    const recAfterFirst = readFileSync(recordPath, 'utf8')
+
+    // 2. Expire the 5-minute TTL and hold an active run (simulating a run waiting on user approval).
+    fakeNow += 6 * 60_000
+    const releaseLongRun = await catalog.enterRun()
+    try {
+      const t0 = Date.now()
+      const staleHit = await catalog.runControls({ providerId: 'antigravity', cwd })
+      expect(Date.now() - t0).toBeLessThan(200)
+      expect(staleHit.state).toBe('ready')
+      expect(staleHit.data?.models[0].model.id).toBe('gemini-3-pro')
+      // Returned stale cache without spawning a second agy process.
+      expect(readFileSync(recordPath, 'utf8')).toBe(recAfterFirst)
+    } finally {
+      releaseLongRun()
+    }
+
+    // 3. Cold cache (after invalidate) while an active run is held: bounded timeout returns unknown instead of hanging.
+    catalog.invalidate()
+    const releaseColdRun = await catalog.enterRun()
+    try {
+      const t0 = Date.now()
+      const timedOut = await catalog.runControls({ providerId: 'antigravity', cwd })
+      expect(Date.now() - t0).toBeLessThan(600)
+      expect(timedOut.state).toBe('unknown')
+      expect(timedOut.reason).toContain('目录探测等待超时')
+    } finally {
+      releaseColdRun()
+    }
+
+    // 4. Once the active run ends, catalog probe recovers cleanly.
+    const recovered = await catalog.runControls({ providerId: 'antigravity', cwd })
+    expect(recovered.state).toBe('ready')
+    expect(recovered.data?.models[0].model.id).toBe('gemini-3-pro')
   })
 })
