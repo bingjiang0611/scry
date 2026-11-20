@@ -424,6 +424,7 @@
         "src/host-runtime/orchestration/recovery.ts",
         "src/host-runtime/orchestration/legacy-mirror.ts",
         "src/daemon/orchestration-shadow.ts",
+        "src/daemon/orchestration-authority.ts",
         "src/renderer/components/RemoteChat.tsx",
         "src/renderer/components/RemoteChatFoundation.tsx",
         "src/renderer/components/RemoteChatControls.tsx",

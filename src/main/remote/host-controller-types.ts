@@ -15,6 +15,7 @@ import { type RemoteSessionStatus, type RemoteSessionStatusQuery } from './remot
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { DesktopAttachmentStore } from './desktop-attachments'
+import type { OrchestrationAuthorityHooks } from './orchestration-seam'
 
 // The structured routing a device intent must resolve to before any Provider
 // run. Carried in the intent detail as JSON; malformed detail is denied.
@@ -170,6 +171,8 @@ export interface HostControllerDependencies {
     event: LedgerEvent,
     meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote'; answeredByPeer?: string }
   ): void
+  // Optional P4-2 authoritative orchestration seam (`SCRY_ORCHESTRATION=on`).
+  orchestration?: OrchestrationAuthorityHooks
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]

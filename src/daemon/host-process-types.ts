@@ -1,6 +1,7 @@
 import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
 import type { LocalChannel } from './local-channel'
 import type { LocalEnrollSocket } from './local-enrollment'
+import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import type { DaemonOrchestrationShadow } from './orchestration-shadow'
 import type { DaemonTerminalServiceDeps } from './terminal-service'
 
@@ -29,5 +30,6 @@ export interface DaemonHostProcess {
   channel: LocalChannel
   enrollSocket: LocalEnrollSocket
   orchestrationShadow?: DaemonOrchestrationShadow
+  orchestrationAuthority?: DaemonOrchestrationAuthority
   dispose(): Promise<void>
 }

@@ -13,6 +13,8 @@ import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 import type { DesktopAttachmentStore } from './desktop-attachments'
 import { createProviderPrewarmer } from './remote-provider-prewarm'
+import type { LedgerStore } from './session-ledger'
+import type { OrchestrationAuthorityHooks } from './orchestration-seam'
 
 // Production binding for the remote subsystem. It gives HostController the real
 // durable persistence (exclusive-lease JSONL ledger + fsynced pairing state) and
@@ -64,6 +66,7 @@ export interface HostControllerFactoryDependencies {
   onDispatchRefused?: HostControllerDependencies['onDispatchRefused']
   onRunActivity?: HostControllerDependencies['onRunActivity']
   onLedgerEvent?: HostControllerDependencies['onLedgerEvent']
+  orchestration?: OrchestrationAuthorityHooks
   gate: ProviderOperationGate
   // Tests and embedded hosts may inject an equivalent store. Production omits this
   // and always owns the file store inside the dedicated worker.
@@ -138,12 +141,21 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   const pairingDirectory = privateDir(join(deps.stateDirectory, 'pairing'))
   recoverDeadRemoteLease(pairingDirectory, 'pairing-state.lock')
   const pairingStore = new PairingFileStore(pairingDirectory)
-  let ledgerStore: SessionLedgerFileStore
+  let ledgerStore: LedgerStore
+  let closeLedgerStore: () => void | Promise<void>
   let outputStore: RunOutputStore
   try {
     const ledgerDirectory = privateDir(join(deps.stateDirectory, 'ledger'))
     recoverDeadRemoteLease(ledgerDirectory, 'session-ledger.lock')
-    ledgerStore = new SessionLedgerFileStore(ledgerDirectory)
+    if (deps.orchestration) {
+      const created = deps.orchestration.createLedgerStore(ledgerDirectory)
+      ledgerStore = created.store
+      closeLedgerStore = created.close
+    } else {
+      const fileStore = new SessionLedgerFileStore(ledgerDirectory)
+      ledgerStore = fileStore
+      closeLedgerStore = () => fileStore.close()
+    }
   } catch (error) {
     // Never leak the pairing lease if the ledger lease cannot be taken.
     pairingStore.close()
@@ -154,7 +166,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     recoverDeadRemoteLease(outputDirectory, 'run-output.lock')
     outputStore = await (deps.createOutputStore?.(outputDirectory) ?? RunOutputWorkerStore.create(outputDirectory))
   } catch (error) {
-    ledgerStore.close()
+    await closeLedgerStore()
     pairingStore.close()
     throw error
   }
@@ -193,6 +205,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
     ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
     ...(deps.onLedgerEvent ? { onLedgerEvent: deps.onLedgerEvent } : {}),
+    ...(deps.orchestration ? { orchestration: deps.orchestration } : {}),
     ...(deps.listProjects ? { listProjects: deps.listProjects } : {}),
     ...(deps.listDirectories ? { listDirectories: deps.listDirectories } : {}),
     ...(deps.listProviders ? { listProviders: deps.listProviders } : {}),
@@ -221,7 +234,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     await controller.cleanupAttachments()
   } catch (error) {
     try { await outputStore.close() } finally {
-      try { ledgerStore.close() } finally { pairingStore.close() }
+      try { await closeLedgerStore() } finally { pairingStore.close() }
     }
     throw error
   }
@@ -236,7 +249,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
       controller.closeReadResources()
       try { await deps.desktopWorkbench?.dispose() } finally {
         try { await outputStore.close() } finally {
-          try { ledgerStore.close() } finally { pairingStore.close() }
+          try { await closeLedgerStore() } finally { pairingStore.close() }
         }
       }
     }

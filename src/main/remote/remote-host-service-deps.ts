@@ -33,6 +33,7 @@ export interface RemoteHostServiceDependencies {
   onDispatchRefused?: HostControllerFactoryDependencies['onDispatchRefused']
   onRunActivity?: HostControllerFactoryDependencies['onRunActivity']
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
+  orchestration?: HostControllerFactoryDependencies['orchestration']
   // Snapshot of the host's already directory-picker-authorized project dirs, so
   // the phone's new-session picker chooses only among real authorized targets.
   // Absent => the device sees an honest empty list.
@@ -99,6 +100,7 @@ export function hostControllerDependencies(
     ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
     ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
     ...(deps.onLedgerEvent ? { onLedgerEvent: deps.onLedgerEvent } : {}),
+    ...(deps.orchestration ? { orchestration: deps.orchestration } : {}),
     gate: deps.gate,
     attachmentDirectory: join(deps.stateDirectory, 'attachments'),
     ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),

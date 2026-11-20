@@ -113,6 +113,7 @@ export interface HostRuntimeInputs {
   // The App event feed's run notices (P3f E2): which ledger run changed.
   onRunActivity?: (runId: string, intentSeq?: number) => void
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
+  orchestration?: HostControllerFactoryDependencies['orchestration']
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 
