@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import {
   HASH, SECRET, TTL, UUID, base, digest, fail, isTime, text, validatePairingState, validDeviceLabel,
-  type DeviceGrant, type GrantScope, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
+  type DeviceGrant, type GrantApprovedVia, type GrantScope, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
 } from './pairing-state'
 import { pruneStalePairings } from './pairing-retention'
 
@@ -105,7 +105,7 @@ export class PairingAuthority {
     })
   }
 
-  confirmLocal(pairingId: string, expectedPublicKeySHA256: string): Promise<DeviceGrant> {
+  confirmLocal(pairingId: string, expectedPublicKeySHA256: string, options?: { approvedVia?: GrantApprovedVia }): Promise<DeviceGrant> {
     return this.serial(async () => {
       let pairing = this.find(pairingId)
       if (pairing.state === 'paired') {
@@ -125,8 +125,10 @@ export class PairingAuthority {
           !HASH.test(certificate.certificateSHA256) || !text(certificate.certificatePEM, 16_384) ||
           !isTime(certificate.expiresAt) || certificate.expiresAt <= this.now()) fail('invalid_issued_identity')
       const confirmedAt = this.now()
+      const approvedVia = options?.approvedVia
       const grant: DeviceGrant = { ...certificate, pairingId, deviceLabel: proof.deviceLabel, authority: 'owner-device',
-        source: 'local_confirmation', scope: 'remote', confirmedAt, revokedAt: null }
+        source: 'local_confirmation', scope: 'remote', confirmedAt, revokedAt: null,
+        ...(approvedVia ? { approvedVia } : {}) }
       // Retire an expired grant for this same key in the SAME transaction. State
       // validation intentionally forbids two unrevoked grants for one key; an
       // expired certificate must be renewable without weakening that invariant.

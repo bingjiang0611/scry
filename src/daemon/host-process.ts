@@ -35,6 +35,7 @@ import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { createDaemonRemoteAssembly } from './host-process-assembly'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
+import { attachDaemonHostAdmin } from './host-admin-runtime'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 
@@ -324,13 +325,24 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
     }, service.caCertificatePEM, identity)
   })
-  log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}`)
+  const adminSocket = await attachDaemonHostAdmin({
+    daemonStateDirectory: options.daemonStateDirectory,
+    identity,
+    appVersion: options.appVersion,
+    isPackaged: options.isPackaged,
+    hostAdmin,
+    remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
+    activeRuns: () => pipeline.runs.unsettledStates().length,
+    log
+  })
+  log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}${adminSocket ? ` admin=${adminSocket.socketPath}` : ''}`)
 
   let disposed = false
   return {
     service,
     channel,
     enrollSocket,
+    ...(adminSocket ? { adminSocket } : {}),
     hostAdmin,
     providerOperationGate: session.providerOperationGate,
     ...(orchestrationShadow ? { orchestrationShadow } : {}),
@@ -345,6 +357,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       targetBridge.close()
       // Shells end with the daemon too; their recordings are finished on the way.
       await terminal.dispose()
+      await adminSocket?.close()
       await enrollSocket.close()
       await channel.close()
       await localHost.close()
