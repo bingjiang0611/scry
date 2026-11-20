@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ProviderHealth } from '../shared/provider.js'
+import { isExperimentalProviderEnabled } from '../shared/experimental-providers.js'
 import { CODEX_APP_BIN, selectClaudeBinCandidate, selectCodexBinCandidate, selectQoderBinCandidate } from './agent-cli-selection'
 import { resolveCommandOnPath } from './command-path'
 import {
@@ -66,6 +67,10 @@ function fastAgentPath(id: string, bin: string): string | undefined {
       '/opt/homebrew/bin/opencode',
       '/usr/local/bin/opencode'
     ])
+  }
+  if (id === 'antigravity') {
+    const configured = process.env.SCRY_AGY_PATH?.trim()
+    return firstExisting([configured, onProcessPath, `${homedir()}/.local/bin/agy`])
   }
   // Pi launchers are commonly installed by nvm or under ~/.local/bin. Finder/Dock apps
   // inherit launchd's minimal PATH, so process PATH alone disagrees with the full async
@@ -184,8 +189,13 @@ const KNOWN_AGENTS: Array<{ id: string; name: string; bin: string }> = [
   { id: 'qoder', name: 'Qoder', bin: 'qodercli' },
   { id: 'opencode', name: 'OpenCode', bin: 'opencode' },
   { id: 'pi:default', name: 'Pi', bin: 'pi' },
-  { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom' }
+  { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom' },
+  { id: 'antigravity', name: 'Antigravity', bin: 'agy' }
 ]
+
+function activeKnownAgents(): Array<{ id: string; name: string; bin: string }> {
+  return KNOWN_AGENTS.filter((agent) => agent.id !== 'antigravity' || isExperimentalProviderEnabled('antigravity'))
+}
 
 function qoderPathFromEnv(): string {
   const configured = process.env.SCRY_QODERCLI_PATH?.trim()
@@ -231,7 +241,7 @@ export async function detectAgents(options: {
   ) => NodeJS.ProcessEnv | undefined | Promise<NodeJS.ProcessEnv | undefined>
 } = {}): Promise<DetectedAgent[]> {
   const found = await Promise.all(
-    KNOWN_AGENTS.map(async (a): Promise<DetectedAgent | null> => {
+    activeKnownAgents().map(async (a): Promise<DetectedAgent | null> => {
       const path =
         fastAgentPath(a.id, a.bin) ??
         (a.id === 'qoder'
@@ -253,7 +263,7 @@ export async function detectAgents(options: {
 // 冷启动首屏只需要知道“可执行文件是否存在”。版本命令可能各耗时数秒，不能让四个
 // Provider 互相等待后才一起变绿；完整 detectAgents() 会在后台继续补齐版本和 descriptor。
 export function detectAgentsFast(): DetectedAgent[] {
-  return KNOWN_AGENTS.flatMap((agent) => {
+  return activeKnownAgents().flatMap((agent) => {
     const path = fastAgentPath(agent.id, agent.bin)
     return path ? [{ ...agent, path }] : []
   })
@@ -288,9 +298,15 @@ async function resolveClaudeBinAsync(): Promise<string | undefined> {
   return selected ?? ((await whichAsync('claude')) || undefined)
 }
 
-export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode'): string | undefined {
+export function resolveRuntimeCliBin(agentId: 'codex' | 'qoder' | 'opencode' | 'antigravity'): string | undefined {
   if (agentId === 'qoder') return resolveQoderBin()
   if (agentId === 'codex') return resolveCodexBin()
+  if (agentId === 'antigravity') {
+    const configured = process.env.SCRY_AGY_PATH?.trim()
+    if (configured && existsSync(configured)) return configured
+    const onPath = which('agy')
+    return onPath || firstExisting([`${homedir()}/.local/bin/agy`, '/opt/homebrew/bin/agy', '/usr/local/bin/agy'])
+  }
   const configured = process.env.SCRY_OPENCODE_PATH?.trim()
   if (configured && existsSync(configured)) return configured
   const onPath = which(agentId)
