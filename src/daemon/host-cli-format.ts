@@ -25,6 +25,11 @@ export function formatApprovedVia(approvedVia: RemoteDevice['approvedVia']): str
   return '未记录'
 }
 
+/** Strip C0, DEL, and C1 control characters before printing untrusted labels to a terminal. */
+export function sanitizeTerminalText(raw: string): string {
+  return raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 export function resolveIdQuery<T>(
   items: readonly T[],
   getId: (item: T) => string,
@@ -52,8 +57,9 @@ export function formatPendingList(pending: readonly RemotePendingPairing[], now:
     if (item.state === 'created') {
       lines.push(`- ${item.pairingId.slice(0, 8)}  等待设备  剩余 ${rem}`)
     } else {
+      const label = sanitizeTerminalText(item.deviceLabel ?? '') || '未命名设备'
       lines.push(
-        `- ${item.pairingId.slice(0, 8)}  ${item.deviceLabel ?? '未命名设备'}  待确认  剩余 ${rem}\n` +
+        `- ${item.pairingId.slice(0, 8)}  ${label}  待确认  剩余 ${rem}\n` +
         `  指纹前 16 位: ${item.publicKeySHA256 ? shortFingerprint16(item.publicKeySHA256) : '未知'}\n` +
         `  完整指纹:     ${item.publicKeySHA256 ? groupFingerprint64(item.publicKeySHA256) : '未知'}`
       )
@@ -65,9 +71,10 @@ export function formatPendingList(pending: readonly RemotePendingPairing[], now:
 export function formatDeviceList(devices: readonly RemoteDevice[]): string {
   const active = devices.filter((d) => !d.revoked)
   if (active.length === 0) return '当前没有已配对设备。\n'
-  const lines = active.map((d) =>
-    `- ${d.deviceId}  ${d.deviceLabel}  批准方式（记录为）：${formatApprovedVia(d.approvedVia)}`
-  )
+  const lines = active.map((d) => {
+    const label = sanitizeTerminalText(d.deviceLabel ?? '') || '未命名设备'
+    return `- ${d.deviceId}  ${label}  批准方式（记录为）：${formatApprovedVia(d.approvedVia)}`
+  })
   return `${lines.join('\n')}\n`
 }
 

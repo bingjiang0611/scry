@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, constants, fchmodSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { join } from 'node:path'
 import { sameBuild, type BuildIdentity } from '../shared/build-identity'
@@ -76,11 +76,11 @@ function createChallengeFile(adminDir: string): { fileName: string; filePath: st
   const token = randomBytes(32).toString('hex')
   const fd = openSync(filePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)
   try {
+    fchmodSync(fd, 0o600)
     writeSync(fd, token, 0, 'utf8')
   } finally {
     closeSync(fd)
   }
-  chmodSync(filePath, 0o600)
   return { fileName, filePath, token }
 }
 
@@ -102,6 +102,9 @@ export async function openHostAdminSocket(options: HostAdminSocketOptions): Prom
     throw new Error('host_admin_dir_invalid')
   }
   chmodSync(adminDir, 0o700)
+  for (const entry of readdirSync(adminDir)) {
+    if (CHALLENGE_FILE_PATTERN.test(entry)) rmSync(join(adminDir, entry), { force: true })
+  }
 
   const socketPath = join(adminDir, HOST_ADMIN_SOCKET_NAME)
   if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH) {
@@ -216,16 +219,17 @@ export async function openHostAdminSocket(options: HostAdminSocketOptions): Prom
   })
 
   const tracked = trackConnections(server)
-  // P5-host-cli §3.3: tighten umask to 0177 BEFORE listen so the socket is born 0600 (no chmod race).
-  const previousUmask = process.umask(0o177)
-  try {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
+  // P5-host-cli §3.3: tighten umask to 0177 around the synchronous bind in server.listen()
+  // and restore immediately before awaiting so process umask is never held across an await.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    const previousUmask = process.umask(0o177)
+    try {
       server.listen(socketPath, () => { server.off('error', reject); resolve() })
-    })
-  } finally {
-    process.umask(previousUmask)
-  }
+    } finally {
+      process.umask(previousUmask)
+    }
+  })
 
   const sockStat = lstatSync(socketPath)
   const mode = sockStat.mode & 0o777

@@ -46,9 +46,24 @@ describe('login-start policy env validation and effective remote config (B1)', (
       'SCRY_REMOTE_RELAY_ENABLED',
       'SCRY_DISABLED_PROVIDERS',
       'SCRY_EXPERIMENTAL_PROVIDERS',
+      'SCRY_EXPERIMENTAL_HOST_CLI',
       'SCRY_RUN_CONTROLS',
       'SCRY_PROVIDER_MANIFEST_URL'
     ])
+
+    // W11 review #6: experimental host CLI flag is captured verbatim when set in App env, and validated strictly.
+    expect(collectLoginStartPolicyEnv({ SCRY_EXPERIMENTAL_HOST_CLI: '1' })).toEqual({
+      ok: true,
+      entries: [['SCRY_EXPERIMENTAL_HOST_CLI', '1']]
+    })
+    expect(collectLoginStartPolicyEnv({ SCRY_EXPERIMENTAL_HOST_CLI: ' 1' })).toEqual({
+      ok: false,
+      reason: 'login_start_invalid_env:SCRY_EXPERIMENTAL_HOST_CLI'
+    })
+    expect(collectLoginStartPolicyEnv({ SCRY_EXPERIMENTAL_HOST_CLI: 'yes' })).toEqual({
+      ok: false,
+      reason: 'login_start_invalid_env:SCRY_EXPERIMENTAL_HOST_CLI'
+    })
   })
 
   it('refuses enabling when SCRY_REMOTE_RELAY_WS is present (contains token)', () => {
@@ -183,7 +198,8 @@ describe('login-start bundle layout parity, strict re-render parsing (S5), XDG &
     }, {
       policyEnv: [
         ['SCRY_REMOTE_HOST', '1'],
-        ['SCRY_REMOTE_PERMISSION_MODE', 'auto_accept_edits']
+        ['SCRY_REMOTE_PERMISSION_MODE', 'auto_accept_edits'],
+        ['SCRY_EXPERIMENTAL_HOST_CLI', '1']
       ]
     })
 
@@ -199,7 +215,8 @@ describe('login-start bundle layout parity, strict re-render parsing (S5), XDG &
       userDataDir: input.userDataDir,
       policyEnv: [
         { key: 'SCRY_REMOTE_HOST', value: '1' },
-        { key: 'SCRY_REMOTE_PERMISSION_MODE', value: 'auto_accept_edits' }
+        { key: 'SCRY_REMOTE_PERMISSION_MODE', value: 'auto_accept_edits' },
+        { key: 'SCRY_EXPERIMENTAL_HOST_CLI', value: '1' }
       ]
     })
     expect(parseLaunchdPlist(plist, 'com.scry.daemon.other')).toEqual({ kind: 'foreign' })
@@ -220,7 +237,8 @@ describe('login-start bundle layout parity, strict re-render parsing (S5), XDG &
       userDataDir: input.userDataDir,
       policyEnv: [
         { key: 'SCRY_REMOTE_HOST', value: '1' },
-        { key: 'SCRY_REMOTE_PERMISSION_MODE', value: 'auto_accept_edits' }
+        { key: 'SCRY_REMOTE_PERMISSION_MODE', value: 'auto_accept_edits' },
+        { key: 'SCRY_EXPERIMENTAL_HOST_CLI', value: '1' }
       ]
     })
     // S5 tampered systemd unit cases: ExecStartPre, extra Environment, comment, altered Restart
