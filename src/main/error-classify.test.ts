@@ -35,4 +35,20 @@ describe('classifyError', () => {
     expect(r.category).toBe('unknown')
     expect(r.hint).toBe('')
   })
+
+  it('antigravity 未登录 / 缺 CLI / 配额受限给出专属提示，不串台到 claude', () => {
+    const auth = classifyError('unauthorized (-32000): authentication required', 'antigravity')
+    expect(auth.category).toBe('auth')
+    expect(auth.hint).toContain('agy')
+    expect(auth.hint).not.toContain('claude')
+
+    const cli = classifyError('spawn agy ENOENT', 'antigravity')
+    expect(cli.category).toBe('cli')
+    expect(cli.hint).toContain('SCRY_AGY_PATH')
+    expect(cli.hint).not.toContain('claude')
+
+    const quota = classifyError('RESOURCE_EXHAUSTED: quota exceeded', 'antigravity')
+    expect(quota.category).toBe('rate')
+    expect(quota.hint).toContain('Antigravity')
+  })
 })

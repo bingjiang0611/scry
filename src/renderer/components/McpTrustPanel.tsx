@@ -209,7 +209,9 @@ export function McpTrustPanel({
           ? 'OpenCode'
           : runtimeProvider === 'pi_rpc'
             ? 'Pi'
-            : 'Claude Code'
+            : runtimeProvider === 'antigravity_acp'
+              ? 'Antigravity'
+              : 'Claude Code'
   const configuredButSilent =
     runtimeProvider === 'claude_sdk' ? mcps.filter((mcp) => mcp.enabled && !liveByName.has(mcp.name)) : []
   const labels = useMemo(() => (report ? buildReportLabels(report) : []), [report])
@@ -301,6 +303,11 @@ export function McpTrustPanel({
           <div className="dim pad2">当前捕获的 MCP live 状态无授权缺口。</div>
         )}
         {mcpLive.length === 0 && <div className="dim pad2">{runtimeName} 暂无逐项 MCP live 状态；可发起会话或刷新后重试。</div>}
+        {runtimeProvider === 'antigravity_acp' && (
+          <div className="psrc">
+            用户级来源：~/.gemini/config/mcp_config.json 与 ~/.gemini/config/hooks.json；启动前会校验工作区配置指纹。
+          </div>
+        )}
         {configuredButSilent.length > 0 && (
           <div className="psrc">配置中启用但未被当前运行时 live 捕获：{configuredButSilent.slice(0, 4).map((m) => m.name).join(' · ')}</div>
         )}

@@ -77,9 +77,18 @@ function pluginsJsonMcpPaths(aliasDir: string): string[] {
   return paths
 }
 
+function isEmptyUserPlaceholder(filePath: string): boolean {
+  try {
+    const stat = lstatSync(filePath)
+    return stat.isFile() && !stat.isSymbolicLink() && stat.size === 0
+  } catch {
+    return false
+  }
+}
+
 /**
  * Explicit MCP config paths for Antigravity (`agy acp`), covering:
- * - User-level `~/.gemini/config/mcp_config.json`
+ * - User-level `~/.gemini/config/mcp_config.json` (0-byte placeholder created by `agy` is skipped; non-empty files still fail closed)
  * - `cwd` up to `.git` root across all four alias dirs `{.agents,.agent,_agents,_agent}/mcp_config.json`
  * - Inline plugins under `{alias}/plugins/<name>/mcp_config.json` and `plugins.json` targets
  */
@@ -88,7 +97,8 @@ export function antigravityMcpConfigPaths(
   homeDir: string,
   env: NodeJS.ProcessEnv = process.env
 ): string[] {
-  const paths = [join(antigravityGeminiRoot(homeDir, env), 'config', 'mcp_config.json')]
+  const userMcpPath = join(antigravityGeminiRoot(homeDir, env), 'config', 'mcp_config.json')
+  const paths = isEmptyUserPlaceholder(userMcpPath) ? [] : [userMcpPath]
   if (!cwd) return paths
   for (const root of antigravityScanRoots(cwd)) {
     for (const alias of ANTIGRAVITY_CONFIG_DIR_ALIASES) {

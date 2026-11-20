@@ -37,6 +37,15 @@ describe('内置兼容性策略', () => {
     expect(store.advisory('claude', '1.0.0').status).toBe('unknown')
     expect(store.advisory('codex', 'codex-cli 0.160.1').status).toBe('supported')
   })
+
+  it('antigravity 在 1.5.12 区间已声明策略，未验证版本标 unsupported', () => {
+    const store = new ProviderCompatibilityStore({ scryVersion: '0.2.250' })
+    const pinned = store.advisory('antigravity', '1.5.12')
+    expect(['graceful', 'supported']).toContain(pinned.status)
+    expect(pinned.recommendedRange).toBe('>=1.5.12 <1.6.0')
+    expect(store.advisory('antigravity', '1.6.0').status).toBe('unsupported')
+    expect(store.advisory('antigravity', '1.5.1').status).toBe('unsupported')
+  })
 })
 
 describe('remote > 磁盘缓存 > 内置', () => {

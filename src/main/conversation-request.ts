@@ -24,7 +24,7 @@ function optionalControl(value: unknown): string | undefined {
 
 function parseTarget(value: Record<string, unknown>): ConversationTargetRequest {
   if (value.providerId !== 'claude' && value.providerId !== 'codex' && value.providerId !== 'pi' &&
-    value.providerId !== 'qoder' && value.providerId !== 'opencode') throw new Error('统一对话 Provider 不受支持')
+    value.providerId !== 'qoder' && value.providerId !== 'opencode' && value.providerId !== 'antigravity') throw new Error('统一对话 Provider 不受支持')
   if (value.providerId === 'pi') {
     if (!isPiAgentProfileId(value.agentProfileId)) {
       throw new Error('统一对话 Pi 必须选择已登记的 Agent Profile')

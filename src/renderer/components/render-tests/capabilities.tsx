@@ -1,5 +1,7 @@
 import type { ComponentProps } from 'react'
 import * as shared from './shared'
+import { McpTrustPanel } from '../McpTrustPanel'
+import { PROVIDER_BRAND_MARKS } from '../../provider-brand-marks'
 const { describe, it, expect, renderToStaticMarkup, CapabilitiesModal } = shared
 
 describe('CapabilitiesModal 精简能力页', () => {
@@ -26,14 +28,22 @@ describe('CapabilitiesModal 精简能力页', () => {
   }
 
   it('MCP 检测只为能真正停止的 Provider 提供取消，其余不显示取消按钮', () => {
-    const during = (providerId: 'claude' | 'qoder' | 'codex' | 'opencode' | 'pi') => renderToStaticMarkup(
+    const during = (providerId: 'claude' | 'qoder' | 'codex' | 'opencode' | 'pi' | 'antigravity') => renderToStaticMarkup(
       <CapabilitiesModal {...sharedProps} view="mcp" mcpRefreshing mcpProviderId={providerId} onCancelMcp={async () => true} />
     )
     expect(during('claude')).toContain('取消检测')
     expect(during('qoder')).toContain('取消检测')
-    for (const providerId of ['codex', 'opencode', 'pi'] as const) expect(during(providerId)).not.toContain('取消检测')
+    for (const providerId of ['codex', 'opencode', 'pi', 'antigravity'] as const) expect(during(providerId)).not.toContain('取消检测')
     const idle = renderToStaticMarkup(<CapabilitiesModal {...sharedProps} view="mcp" mcpProviderId="claude" onCancelMcp={async () => true} />)
     expect(idle).not.toContain('取消检测')
+  })
+
+  it('Antigravity 中性字母图标与 MCP 面板用户级来源展示', () => {
+    expect(PROVIDER_BRAND_MARKS.antigravity.paths.length).toBeGreaterThan(0)
+    const html = renderToStaticMarkup(<McpTrustPanel runtimeProvider="antigravity_acp" />)
+    expect(html).toContain('Antigravity')
+    expect(html).toContain('~/.gemini/config/mcp_config.json')
+    expect(html).toContain('~/.gemini/config/hooks.json')
   })
 
   it('Skills 默认显示全部来源，只保留名称和描述', () => {

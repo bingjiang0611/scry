@@ -64,6 +64,15 @@ export const BUNDLED_PROVIDER_COMPATIBILITY: ProviderCompatibilityManifest = {
         { range: '>=1.18.31 <1.19.0', status: 'unsupported', note: 'opencode 1.18.31：仅验证过版本探测，未验证完整轮次证据' },
         { range: '>=1.19.0', status: 'unsupported', note: '高于已探测版本线；未验证证据完整性' }
       ]
+    },
+    {
+      provider: 'antigravity',
+      recommendedRange: '>=1.5.12 <1.6.0',
+      rules: [
+        { range: '>=1.5.12 <1.6.0', status: 'graceful', note: 'agy 1.5.12：实验阶段（A9 真机验收前）；未验证完整端到端证据（仅实验开关可用）' },
+        { range: '>=1.6.0', status: 'unsupported', note: '高于已验证版本线；未验证配置面与 ACP 证据完整性（仅实验开关可用）' },
+        { range: '<1.5.12', status: 'unsupported', note: '低于已验证版本线；未验证配置面与 ACP 证据完整性（仅实验开关可用）' }
+      ]
     }
   ]
 }
