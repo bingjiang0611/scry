@@ -74,7 +74,7 @@ function devicesOf(value: unknown): BackgroundServiceDevices | undefined {
 }
 
 const RELAY_MODES: ReadonlySet<string> = new Set<BackgroundServiceRelayMode>(['public', 'custom_ws', 'custom_tcp', 'disabled'])
-const PROVIDERS: ReadonlySet<string> = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+const PROVIDERS: ReadonlySet<string> = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 
 function remoteConfigOf(value: unknown): BackgroundServiceRemoteConfig | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined

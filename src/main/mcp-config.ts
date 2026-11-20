@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { mcpConfigTargetId, parseTomlDocument } from '../cli/mcpguard-core'
 import type { ProviderId } from '../shared/provider'
+import { antigravityMcpConfigPaths } from './providers/antigravity-mcp-paths'
 import type { AuthorizedMcpExecution } from './providers/types'
 
 export interface McpConfigItem {
@@ -131,6 +132,10 @@ export function providerMcpConfigPaths(
       : join(absoluteConfigRoot(env.QODER_CLI_HOME, homeDir, cwd), '.qoder')
     return [join(qoderRoot, 'mcp.json'), ...(cwd ? [join(cwd, '.mcp.json'), join(cwd, '.qoder', 'mcp.json')] : [])]
   }
+  if (providerId === 'antigravity') {
+    return antigravityMcpConfigPaths(cwd, homeDir, env)
+  }
+  if (providerId === 'pi') return []
   const configured = env.OPENCODE_CONFIG?.trim()
   const configHome = absoluteConfigRoot(env.XDG_CONFIG_HOME, join(homeDir, '.config'), cwd)
   return [
@@ -198,7 +203,7 @@ export function resolveProviderMcpConfigs(
     if (!parsed) continue
     const scope = cwd && sourcePath.startsWith(`${cwd}/`) ? 'project' : 'user'
     if (providerId === 'codex') addGroup(record(parsed.mcp_servers), scope, sourcePath, '/mcp_servers')
-    if (providerId === 'qoder') addGroup(record(parsed.mcpServers), scope, sourcePath, '/mcpServers')
+    if (providerId === 'qoder' || providerId === 'antigravity') addGroup(record(parsed.mcpServers), scope, sourcePath, '/mcpServers')
     if (providerId === 'opencode') addGroup(record(parsed.mcp), scope, sourcePath, '/mcp')
   }
   return result

@@ -17,3 +17,7 @@ A0 在 `agy 1.5.12` 上回答了评审的 6 个阻塞项，证据齐全，设计
 **待补测**（执行方 A 的长跑锁已释放，可以跑）：第 12 项中文路径与中文 locale；路径矩阵细化（真实 `hooks.json` 结构、`_agents`、插件、用户级设置）；`accept-edits`/`auto`/`plan` 下写文件审批与 `allow_always` 的范围；`GEMINI_API_KEY` 免 `authenticate`；子 Agent 的工具名与用量。
 
 **待维护者决定**：D4、D9、D10，见 `P7-antigravity-plan.md` §9.2。
+
+## 复核（第二轮，2026-11-20，提交 `e36b21c0`、`d6914cfe`）
+
+结论：**通过**。D4、D9、D10 已写入 §9.1；5 项补测全部完成并有证据：中文路径与 zh_CN 正常；23 个加载标记全部触发（cwd 至 `.git` 根的 4 个别名目录、插件、用户级 `~/.gemini/config`）；工作区 `.gemini/settings.json` 的权限键**不**绕过审批，但用户级 `~/.gemini/antigravity-cli/settings.json` 的 `toolPermission`/`permissions.allow` **会**绕过审批——D3 实现时必须读用户级设置，有效权限高于所选档位或远程上限时拒绝启动；`accept-edits` 只放行写文件、命令仍审批，与 `auto_accept_edits` 一致；`auto` 放行安全命令，不映射到自动审查；1.5.12 从不提供 `allow_always`；`GEMINI_API_KEY` 只有在用户显式放行且收到 `-32000` 时才调用非浏览器的 `authenticate`；子 Agent 以 `invoke_subagent` 出现，用量不单列，覆盖标 partial。可以进入 A0.5 起的实现（任务单 W8）。

@@ -87,7 +87,7 @@ export async function markedSessions(dataRoot: string): Promise<MarkedSession[]>
     if (separator < 0) continue
     const provider = name.slice(0, separator) as ProviderId
     const sessionKey = name.slice(separator + 2)
-    if (!ATTENTION_PROVIDERS.includes(provider) || !sessionKey) continue
+    if (!(ATTENTION_PROVIDERS as readonly string[]).includes(provider) || !sessionKey) continue
     result.push({ provider, sessionKey, sessionDir: join(dataRoot, 'runtime', provider, sessionKey) })
   }
   return result

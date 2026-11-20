@@ -9,7 +9,7 @@ import { MOTION } from '../motion'
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 const providerNames = {
-  claude: 'Claude Code', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi', legacy_unknown: '历史 Provider 未知'
+  claude: 'Claude Code', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi', antigravity: 'Antigravity', legacy_unknown: '历史 Provider 未知'
 }
 
 // Focus and pointer hover may belong to different rows. Ownership is shared so

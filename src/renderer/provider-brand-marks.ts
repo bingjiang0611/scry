@@ -42,4 +42,11 @@ export const PROVIDER_BRAND_MARKS: Record<ProviderId, ProviderBrandMark> = {
       'M17.5 12H23v11h-5.5V12z',
     ]
   },
+  // 中性几何字母标「A」（非 Google 品牌商标），遵循 24×24 viewBox 实心路径契约（P7 D7）。
+  antigravity: {
+    fillRule: 'evenodd',
+    paths: [
+      'M10.4 3h3.2L20.5 21h-3.6l-1.5-4.2H8.6L7.1 21H3.5L10.4 3zm-.7 10.9h4.6L12 7.4l-2.3 6.5z',
+    ]
+  },
 }

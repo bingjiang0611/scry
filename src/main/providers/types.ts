@@ -56,6 +56,7 @@ export type ProviderInputReceipt = { contextHash: string | null } & (
         | 'pi_persisted_session_entry'
         | 'qoder_transcript_user_uuid'
         | 'opencode_prompt_user_message'
+        | 'antigravity_prompt_response'
     }
 )
 

@@ -24,7 +24,7 @@ function isQuestionRequest(value: unknown): value is Record<string, unknown> & {
   const raw = value as Record<string, unknown>
   return typeof raw.runId === 'string' && raw.runId.length > 0 &&
     typeof raw.questionId === 'string' && raw.questionId.length > 0 &&
-    (raw.providerId === undefined || ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(raw.providerId))) &&
+    (raw.providerId === undefined || ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(String(raw.providerId))) &&
     isOptionalString(raw.agentId) && isOptionalString(raw.source) &&
     (raw.questionKind === undefined || ['clarification', 'permission'].includes(String(raw.questionKind))) &&
     Array.isArray(raw.questions) && raw.questions.length > 0 && raw.questions.length <= 4 && raw.questions.every(isQuestionPrompt) &&

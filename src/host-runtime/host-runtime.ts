@@ -108,7 +108,8 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     listProviderControls: (query) => runtime.getRemoteProviderDiscovery().selected(query),
     listProvidersFull: () => runtime.getRemoteProviderDiscovery().legacy(),
     listCommands: async ({ providerId, cwd, agentProfileId }) => {
-      if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(providerId)) {
+      if (!['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(providerId) ||
+          !runtime.providerRegistry.isRegistered(providerId as ProviderId)) {
         return { commands: [], reason: 'unsupported_provider' }
       }
       const canonical = runtime.resolveRemoteProjectDirectory(cwd)
