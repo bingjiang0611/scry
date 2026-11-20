@@ -36,7 +36,7 @@ if (process.env.SCRY_ABAB_WORKER !== '1') describe('fixed production-path perfor
     }> = []
     try {
       const scenarios = scenariosFor(fixture)
-      expect(Object.keys(scenarios)).toHaveLength(17)
+      expect(Object.keys(scenarios)).toHaveLength(18)
       const results: Record<string, { counters: Counters; durationMs: number[]; iterations: number; warmups: number; samples: number; lane: Scenario['lane']; workload: string; outcome: 'completed' }> = {}
       for (const [name, scenario] of Object.entries(scenarios)) {
         const warmups = scenario.warmups ?? 1

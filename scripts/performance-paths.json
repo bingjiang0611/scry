@@ -434,7 +434,8 @@
         "apps/ios/ScryRemote"
       ],
       "benchmarks": [
-        "remote.loopback"
+        "remote.loopback",
+        "orchestration.pre-first-token"
       ],
       "gap": "桌面发起的 handler 可测；手机直连请求、网络各跳与设备绘制尚未计时，必须 iCTRL 真机验收，不用模拟器替代。"
     },
