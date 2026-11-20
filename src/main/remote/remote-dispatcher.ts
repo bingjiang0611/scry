@@ -47,7 +47,10 @@ export interface RemoteDispatcherDependencies {
   // Absent => the output callback is a no-op and only the lifecycle is observable.
   outputSink?: RemoteOutputSink
   /** P4-2 authoritative pre-dispatch recheck + fence commit before executor runs. */
-  beforeDispatch?(runId: string, detail?: string): { ok: true } | { ok: false; action: 'fail' | 'requeue'; reason: string }
+  beforeDispatch?(
+    runId: string,
+    detail?: string
+  ): { ok: true } | { ok: false; action: 'fail'; reason: string } | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
   /** P4-2 authoritative terminal settlement hook after executor finishes. */
   onSettled?(runId: string, ok: boolean, detail?: string): void
 }
@@ -59,6 +62,8 @@ export class RemoteDispatcher {
   #beforeDispatch?: RemoteDispatcherDependencies['beforeDispatch']
   #onSettled?: RemoteDispatcherDependencies['onSettled']
   #inflight = new Set<string>()
+  #retryTimer: ReturnType<typeof setTimeout> | null = null
+  #disposed = false
 
   constructor(deps: RemoteDispatcherDependencies) {
     this.#ledger = deps.ledger
@@ -68,18 +73,50 @@ export class RemoteDispatcher {
     this.#onSettled = deps.onSettled
   }
 
+  dispose(): void {
+    this.#disposed = true
+    if (this.#retryTimer) {
+      clearTimeout(this.#retryTimer)
+      this.#retryTimer = null
+    }
+  }
+
+  #scheduleRetry(delayMs: number): void {
+    if (this.#disposed) return
+    if (this.#retryTimer) {
+      clearTimeout(this.#retryTimer)
+      this.#retryTimer = null
+    }
+    const timer = setTimeout(() => {
+      this.#retryTimer = null
+      if (!this.#disposed) this.pump()
+    }, Math.max(10, delayMs))
+    timer.unref?.()
+    this.#retryTimer = timer
+  }
+
   // Dispatch every intent still awaiting its first dispatch, exactly once.
   // Returns the runIds newly dispatched by this call. Safe to call repeatedly
   // (e.g. after each recordIntent and once at startup for crash recovery).
   pump(): string[] {
+    if (this.#disposed) return []
     const started: string[] = []
+    let nextRetryMs: number | undefined
     for (const intent of this.#ledger.recordedIntents()) {
       if (this.#inflight.has(intent.runId)) continue
       if (this.#beforeDispatch) {
         const gate = this.#beforeDispatch(intent.runId, intent.detail)
         if (!gate.ok) {
           if (gate.action === 'fail') {
-            try { this.#ledger.markCancelled(intent.runId) } catch { /* already terminal */ }
+            try {
+              if (gate.reason === 'pending_expired' || gate.reason === 'stop_requested') {
+                this.#ledger.markCancelled(intent.runId)
+              } else {
+                this.#ledger.markFailed(intent.runId, gate.reason)
+              }
+            } catch { /* already terminal */ }
+          } else if (gate.retryAfterMs !== undefined) {
+            nextRetryMs = nextRetryMs === undefined ? gate.retryAfterMs : Math.min(nextRetryMs, gate.retryAfterMs)
           }
           continue
         }
@@ -95,6 +132,7 @@ export class RemoteDispatcher {
       started.push(intent.runId)
       this.#run(intent.runId, intent.detail)
     }
+    if (nextRetryMs !== undefined) this.#scheduleRetry(nextRetryMs)
     return started
   }
 

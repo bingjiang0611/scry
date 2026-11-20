@@ -87,7 +87,7 @@ export function ledgerEventObserver(
   }
 }
 
-export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher } {
+export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher; dispose(): void } {
   const { deps, ledger, output, fileDownloads, interactions, stops, live, notify } = input
   const gateway = new RemoteGateway({
     authority: input.authority,
@@ -115,7 +115,8 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
 
   // Runs that got as far as the run start; any other failure was a refusal by the ledger.
   const reached = new Set<string>()
-  const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
+  const gate = deps.gate ?? new ProviderOperationGate()
+  const policy = new RemoteRunPolicy({ gate, workspace: deps.workspace })
   const base: RemoteExecutor = {
     execute: async (executorInput: RemoteExecutorInput) => {
       const stop = new AbortController()
@@ -165,7 +166,6 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     ...(deps.orchestration ? {
       beforeDispatch: (runId, detail) => {
         const meta = gateway.runMeta(runId)
-        const gate = deps.gate ?? new ProviderOperationGate()
         const check = deps.orchestration!.beforeDispatch({
           runId,
           detail,
@@ -216,5 +216,15 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       flush: (runId) => output.flush(runId)
     }
   })
-  return { gateway, dispatcher }
+  const unsubscribeGate = gate.onAuthenticationReleased(() => {
+    dispatcher.pump()
+  })
+  return {
+    gateway,
+    dispatcher,
+    dispose: () => {
+      unsubscribeGate()
+      dispatcher.dispose()
+    }
+  }
 }

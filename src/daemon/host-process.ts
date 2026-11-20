@@ -199,7 +199,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     startupPerf: { mark: () => undefined, finish: () => null },
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
-    deferMs: 0
+    deferMs: 0,
+    skipConversationRecovery: process.env.SCRY_ORCHESTRATION === 'on'
   })
   await startupManagedRecovery
 
@@ -318,6 +319,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     service,
     channel,
     enrollSocket,
+    providerOperationGate: session.providerOperationGate,
     ...(orchestrationShadow ? { orchestrationShadow } : {}),
     ...(orchestrationAuthority ? { orchestrationAuthority } : {}),
     dispose: async () => {

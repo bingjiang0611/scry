@@ -38,7 +38,8 @@ export type AuthoritySubmitResult =
 
 export type AuthorityBeforeDispatchResult =
   | { ok: true }
-  | { ok: false; action: 'fail' | 'requeue'; reason: string }
+  | { ok: false; action: 'fail'; reason: string }
+  | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
 
 /**
  * P4-2 authoritative orchestration engine (`SCRY_ORCHESTRATION=on`).
@@ -193,12 +194,30 @@ export class AuthorityEngine {
     }
     if (run.lifecycle !== 'recorded') return { ok: false, action: 'fail', reason: 'illegal_transition' }
 
+    const now = this.#clock()
+    const { intentAt, expiresAt } = this.getRunStartExpiryInfo(input.runId, run.intentSeq)
+    const effectiveExpiresAt = expiresAt ?? (intentAt !== null ? intentAt + this.#pendingTtlMs : null)
+    if ((intentAt !== null && now < intentAt) || (effectiveExpiresAt !== null && now > effectiveExpiresAt)) {
+      this.recordTerminal({
+        runId: input.runId,
+        step: 'cancelled',
+        reason: 'pending_expired',
+        delivery: 'not_sent',
+        evidence: ['pre_dispatch_recheck:pending_expired']
+      })
+      this.updateRunStartOutbox(input.runId, 'voided', 'pending_expired')
+      return { ok: false, action: 'fail', reason: 'pending_expired' }
+    }
+
+    const effectiveActor = run.ownerActor.startsWith('peer:') ? run.ownerActor : input.actor
     const preparedRealCwd = this.#preparedRealCwdByRun.get(input.runId) ?? tryRealpath(run.cwd)
-    const recheck = runAuthorityPreDispatchRecheck(input, preparedRealCwd, run.cwd)
+    const recheck = runAuthorityPreDispatchRecheck({ ...input, actor: effectiveActor }, preparedRealCwd, run.cwd)
     if (!recheck.ok) {
       if (recheck.action === 'requeue') {
         this.requeueRunStartOutbox(input.runId)
-        return recheck
+        const retryAfterMs =
+          effectiveExpiresAt !== null ? Math.max(10, effectiveExpiresAt - now + 5) : this.#pendingTtlMs
+        return { ok: false, action: 'requeue', reason: recheck.reason, retryAfterMs }
       }
       this.recordTerminal({
         runId: input.runId,
@@ -207,7 +226,7 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: [`pre_dispatch_recheck:${recheck.reason}`]
       })
-      this.updateRunStartOutbox(input.runId, 'failed')
+      this.updateRunStartOutbox(input.runId, 'failed', recheck.reason)
       return recheck
     }
 
@@ -437,11 +456,28 @@ export class AuthorityEngine {
     this.updateRunStartOutbox(input.runId, input.step === 'failed' ? 'failed' : 'done')
   }
 
-  private updateRunStartOutbox(runId: string, state: OutboxState): void {
+  private getRunStartExpiryInfo(runId: string, intentSeq: number): { intentAt: number | null; expiresAt: number | null } {
+    const outboxRow = this.sink.handle.db
+      .prepare(
+        "SELECT expires_at FROM orch_outbox WHERE run_id = ? AND kind = 'provider.run.start' ORDER BY causation_seq DESC LIMIT 1"
+      )
+      .get(runId) as { expires_at: number | null } | undefined
+    const eventRow = this.sink.handle.db
+      .prepare('SELECT at FROM orch_event WHERE seq = ?')
+      .get(intentSeq) as { at: number } | undefined
+    return {
+      intentAt: eventRow ? Number(eventRow.at) : null,
+      expiresAt: outboxRow && outboxRow.expires_at !== null ? Number(outboxRow.expires_at) : null
+    }
+  }
+
+  private updateRunStartOutbox(runId: string, state: OutboxState, lastError?: string): void {
     if (this.sink.isWriteIndeterminate()) return
     this.sink.handle.db
-      .prepare("UPDATE orch_outbox SET state = ?, completed_at = ? WHERE run_id = ? AND kind = 'provider.run.start' AND state IN ('pending', 'running')")
-      .run(state, this.#clock(), runId)
+      .prepare(
+        "UPDATE orch_outbox SET state = ?, completed_at = ?, last_error = COALESCE(?, last_error) WHERE run_id = ? AND kind = 'provider.run.start' AND state IN ('pending', 'running')"
+      )
+      .run(state, this.#clock(), lastError ?? null, runId)
   }
 
   private requeueRunStartOutbox(runId: string): void {

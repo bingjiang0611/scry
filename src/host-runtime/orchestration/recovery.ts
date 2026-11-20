@@ -365,17 +365,28 @@ export async function reconcileTwoLedgersOnStartup(options: {
       }
 
       if (orchRun.lifecycle === 'settled') {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          {
-            status: 'accepted',
-            nativeSessionId: boundNative ?? binding?.nativeSessionId ?? `orch:${orchRun.runId}`,
-            outcome: 'completed',
-            nativeItems: []
-          },
-          []
-        )
+        const resolvedNative = boundNative ?? binding?.nativeSessionId
+        if (resolvedNative) {
+          await conversationStore.settle(
+            conv.id,
+            turn.runId,
+            {
+              status: 'accepted',
+              nativeSessionId: resolvedNative,
+              outcome: 'completed',
+              nativeItems: []
+            },
+            []
+          )
+        } else {
+          // Decision G / evidence honesty: never fabricate a synthetic nativeSessionId (`orch:<runId>`).
+          await conversationStore.settle(
+            conv.id,
+            turn.runId,
+            { status: 'unknown', reason: 'native_session_id_unavailable' },
+            []
+          )
+        }
         summary.writtenBack += 1
       } else if (orchRun.lifecycle === 'cancelled' && orchTurn?.delivery === 'not_sent') {
         await conversationStore.settle(
@@ -395,6 +406,12 @@ export async function reconcileTwoLedgersOnStartup(options: {
         summary.writtenBack += 1
       }
     }
+  }
+  // Finish generic recovery for any remaining non-orchestration pending turns or pending forks.
+  try {
+    await conversationStore.recoverAll(new Set())
+  } catch (error) {
+    console.warn('[scry] conversation post-reconciliation recovery failed:', error)
   }
   return summary
 }
