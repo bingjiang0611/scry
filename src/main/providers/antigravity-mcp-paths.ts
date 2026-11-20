@@ -51,62 +51,104 @@ export function antigravityEffectiveGeminiRoot(homeDir: string, env: NodeJS.Proc
   return join(homeDir, '.gemini')
 }
 
-function hasNonEmptyPreToolUse(obj: Record<string, unknown>): boolean {
-  const pre = obj.PreToolUse
-  if (Array.isArray(pre) && pre.length > 0) return true
-  if (pre && typeof pre === 'object' && Object.keys(pre).length > 0) return true
+const HOOK_ALLOW_DECISION_PATTERN = /decision["']?\s*[:=]\s*["']?allow\b/i
+const MAX_HOOK_SCRIPT_INSPECT_BYTES = 64 * 1024
+
+function commandCanReturnAllowDecision(command: string, hookFileDir: string, cwd: string | undefined): boolean {
+  if (HOOK_ALLOW_DECISION_PATTERN.test(command)) return true
+  const tokens = command.trim().split(/\s+/).filter(Boolean)
+  for (const rawToken of tokens.slice(0, 3)) {
+    const cleaned = rawToken.replace(/^["']|["']$/g, '')
+    if (!cleaned || cleaned.startsWith('-')) continue
+    const candidates = isAbsolute(cleaned)
+      ? [cleaned]
+      : [resolve(hookFileDir, cleaned), ...(cwd ? [resolve(cwd, cleaned)] : [])]
+    for (const candidate of candidates) {
+      try {
+        const stat = lstatSync(candidate)
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > MAX_HOOK_SCRIPT_INSPECT_BYTES) continue
+        if (HOOK_ALLOW_DECISION_PATTERN.test(readFileSync(candidate, 'utf8'))) return true
+      } catch { /* ignore unreadable/non-file token */ }
+    }
+  }
   return false
 }
 
-function fileHasPreToolUseHook(hooksPath: string): boolean {
-  if (!existsSync(hooksPath)) return false
+function extractAllowMatchersFromPreToolUse(
+  pre: unknown,
+  hookFileDir: string,
+  cwd: string | undefined
+): string[] {
+  if (!Array.isArray(pre)) return []
+  const matchers: string[] = []
+  for (const group of pre) {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) continue
+    const g = group as Record<string, unknown>
+    const hooks = Array.isArray(g.hooks) ? g.hooks : []
+    const allowCapable = hooks.some((h) => {
+      if (!h || typeof h !== 'object' || Array.isArray(h)) return false
+      const cmd = (h as Record<string, unknown>).command
+      return typeof cmd === 'string' && cmd.trim().length > 0 && commandCanReturnAllowDecision(cmd, hookFileDir, cwd)
+    })
+    if (!allowCapable) continue
+    const matcher = typeof g.matcher === 'string' ? g.matcher.trim() : '*'
+    matchers.push(matcher || '*')
+  }
+  return matchers
+}
+
+function allowMatchersInHooksFile(hooksPath: string, cwd: string | undefined): string[] {
+  if (!existsSync(hooksPath)) return []
   try {
     const stat = lstatSync(hooksPath)
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) return false
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) return []
     const parsed = JSON.parse(readFileSync(hooksPath, 'utf8')) as Record<string, unknown>
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
-    if (hasNonEmptyPreToolUse(parsed)) return true
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+    const hookFileDir = dirname(hooksPath)
+    const out = extractAllowMatchersFromPreToolUse(parsed.PreToolUse, hookFileDir, cwd)
     // Real agy hooks.json schema: top-level keys are hook names mapping to { enabled?, PreToolUse?, ... }.
     for (const entry of Object.values(parsed)) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
       const named = entry as Record<string, unknown>
       if (named.enabled === false) continue
-      if (hasNonEmptyPreToolUse(named)) return true
+      out.push(...extractAllowMatchersFromPreToolUse(named.PreToolUse, hookFileDir, cwd))
     }
+    return out
   } catch {
-    return false
+    return []
   }
-  return false
 }
 
 /**
- * Detect whether workspace (`cwd..gitRoot` 4 alias dirs + inline plugins) or user-level
- * `~/.gemini/config/hooks.json` declares any `PreToolUse` hook (D12).
+ * Collect matchers for `PreToolUse` hooks that can plausibly return `decision: "allow"` (D12 / N5).
+ * Log-only hooks (no `decision: allow` in inline command or script) are excluded so they never
+ * trigger false「由 hook 放行」labels.
  */
-export function hasAntigravityPreToolUseHooks(
+export function collectAllowCapablePreToolUseMatchers(
   cwd: string | undefined,
   homeDir: string,
   sanitizedEnv: NodeJS.ProcessEnv = {}
-): boolean {
+): string[] {
+  const matchers: string[] = []
   const userHooks = join(antigravityGeminiRoot(homeDir, sanitizedEnv), 'config', 'hooks.json')
-  if (fileHasPreToolUseHook(userHooks)) return true
-  if (!cwd) return false
+  matchers.push(...allowMatchersInHooksFile(userHooks, cwd))
+  if (!cwd) return [...new Set(matchers)]
   for (const root of antigravityScanRoots(cwd)) {
     for (const alias of ANTIGRAVITY_CONFIG_DIR_ALIASES) {
       const aliasDir = join(root, alias)
-      if (fileHasPreToolUseHook(join(aliasDir, 'hooks.json'))) return true
+      matchers.push(...allowMatchersInHooksFile(join(aliasDir, 'hooks.json'), cwd))
       const pluginsDir = join(aliasDir, 'plugins')
       try {
         const stat = lstatSync(pluginsDir)
         if (!stat.isDirectory() || stat.isSymbolicLink()) continue
         for (const entry of readdirSync(pluginsDir, { withFileTypes: true })) {
           if (entry.isSymbolicLink() || !entry.isDirectory()) continue
-          if (fileHasPreToolUseHook(join(pluginsDir, entry.name, 'hooks.json'))) return true
+          matchers.push(...allowMatchersInHooksFile(join(pluginsDir, entry.name, 'hooks.json'), cwd))
         }
       } catch { /* ignore */ }
     }
   }
-  return false
+  return [...new Set(matchers)]
 }
 
 function inlinePluginMcpPaths(aliasDir: string): string[] {

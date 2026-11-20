@@ -14,7 +14,24 @@ interface ToolCallState {
 
 export interface AntigravityEventTranslatorOptions {
   permissionMode?: 'default' | 'auto_accept_edits' | 'full_access'
-  hasPreToolUseHooks?: boolean
+  /** Matchers of allow-capable PreToolUse hooks (excluding log-only hooks, N5). */
+  allowCapablePreToolUseMatchers?: readonly string[]
+  /** True when D11 user `permissions.allow` rules are present; suppresses ambiguous hook inference (N5). */
+  hasUserAllowRules?: boolean
+}
+
+function matchesPreToolUseMatcher(toolName: string, matchers: readonly string[] | undefined): boolean {
+  if (!matchers || matchers.length === 0) return false
+  for (const raw of matchers) {
+    const m = raw.trim()
+    if (!m || m === '*') return true
+    try {
+      if (new RegExp(`^(?:${m})$`, 'i').test(toolName)) return true
+    } catch {
+      if (m.toLowerCase() === toolName.toLowerCase()) return true
+    }
+  }
+  return false
 }
 
 const SUBAGENT_TOOL_NAMES = new Set(['invoke_subagent', 'start_subagent'])
@@ -263,9 +280,10 @@ export class AntigravityEventTranslator {
     const inferredHookAllow =
       !isError &&
       status === 'completed' &&
-      this.options.hasPreToolUseHooks === true &&
+      this.options.hasUserAllowRules !== true &&
       !this.askedPermissionToolIds.has(toolCallId) &&
-      isApprovalGatedKind(state.kind ?? (typeof data.kind === 'string' ? data.kind : undefined), this.options.permissionMode)
+      isApprovalGatedKind(state.kind ?? (typeof data.kind === 'string' ? data.kind : undefined), this.options.permissionMode) &&
+      matchesPreToolUseMatcher(state.name, this.options.allowCapablePreToolUseMatchers)
     const hookAllowed = state.hookAllowed || explicitHookAllow(data) || inferredHookAllow
     this.emit({
       id: this.nextId('tool_result'),
