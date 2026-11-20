@@ -4,6 +4,7 @@ import type {
   BackgroundServiceRemoteConfig
 } from '../../shared/background-service'
 import type { ProviderId } from '../../shared/provider'
+import { EXPERIMENTAL_PROVIDERS } from '../../shared/experimental-providers'
 import { remoteHostEnabled } from '../../shared/remote-host-policy'
 import { isAgentPermissionMode } from '../../shared/runtime-types'
 
@@ -15,6 +16,7 @@ export const LOGIN_START_POLICY_ENV_KEYS = [
   'SCRY_REMOTE_PERMISSION_MODE',
   'SCRY_REMOTE_RELAY_ENABLED',
   'SCRY_DISABLED_PROVIDERS',
+  'SCRY_EXPERIMENTAL_PROVIDERS',
   'SCRY_RUN_CONTROLS',
   'SCRY_PROVIDER_MANIFEST_URL'
 ] as const
@@ -22,7 +24,7 @@ export const LOGIN_START_POLICY_ENV_KEYS = [
 export type LoginStartPolicyEnvKey = (typeof LOGIN_START_POLICY_ENV_KEYS)[number]
 
 const POLICY_KEY_SET: ReadonlySet<string> = new Set(LOGIN_START_POLICY_ENV_KEYS)
-const KNOWN_PROVIDERS: ReadonlySet<ProviderId> = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+const KNOWN_PROVIDERS: ReadonlySet<ProviderId> = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
 
 export function isLoginStartPolicyEnvKey(key: string): key is LoginStartPolicyEnvKey {
@@ -54,6 +56,13 @@ function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string |
         return undefined
       }
       // Preserve raw spelling/case verbatim so the service file matches the App's env.
+      return raw
+    }
+    case 'SCRY_EXPERIMENTAL_PROVIDERS': {
+      const tokens = raw.split(',').map((item) => item.trim())
+      if (tokens.length === 0 || tokens.some((item) => item.length === 0 || !EXPERIMENTAL_PROVIDERS.has(item.toLowerCase() as ProviderId))) {
+        return undefined
+      }
       return raw
     }
     case 'SCRY_PROVIDER_MANIFEST_URL': {

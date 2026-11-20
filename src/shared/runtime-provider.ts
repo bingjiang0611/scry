@@ -10,6 +10,7 @@ export function runtimeProviderForAgentId(agentId: string | undefined): RuntimeP
   if (agentId === 'qoder') return 'qoder_cli'
   if (agentId === 'opencode') return 'opencode_server'
   if (agentId === 'pi' || agentId.startsWith('pi:')) return 'pi_rpc'
+  if (agentId === 'antigravity') return 'antigravity_acp'
   return undefined
 }
 
@@ -24,7 +25,7 @@ export function isPiAgentProfileId(agentId: unknown): agentId is string {
 export function providerIdForAgentId(agentId: string | undefined): ProviderId | undefined {
   if (!agentId) return undefined
   if (agentId === 'claude') return 'claude'
-  if (agentId === 'codex' || agentId === 'qoder' || agentId === 'opencode') return agentId
+  if (agentId === 'codex' || agentId === 'qoder' || agentId === 'opencode' || agentId === 'antigravity') return agentId
   if (agentId === 'pi' || agentId.startsWith('pi:')) return 'pi'
   return undefined
 }
@@ -34,6 +35,7 @@ export function providerIdForRuntime(runtimeProvider: RuntimeProvider): Provider
   if (runtimeProvider === 'qoder_cli') return 'qoder'
   if (runtimeProvider === 'opencode_server') return 'opencode'
   if (runtimeProvider === 'pi_rpc') return 'pi'
+  if (runtimeProvider === 'antigravity_acp') return 'antigravity'
   return 'claude'
 }
 
@@ -42,6 +44,7 @@ export function runtimeProviderForProviderId(providerId: ProviderId): RuntimePro
   if (providerId === 'qoder') return 'qoder_cli'
   if (providerId === 'opencode') return 'opencode_server'
   if (providerId === 'pi') return 'pi_rpc'
+  if (providerId === 'antigravity') return 'antigravity_acp'
   return 'claude_sdk'
 }
 

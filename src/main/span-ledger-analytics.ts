@@ -58,7 +58,7 @@ export interface AnalyticsToolRow { tsStart: number }
 export interface AnalyticsDangerRow { tsStart: number; level: string }
 export interface AnalyticsMcpRow { server: string; durationMs: number; isError: number }
 
-const PROVIDERS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity']
 export const localDay = (ms: number): string => {
   const date = new Date(ms)
   const y = date.getFullYear()
@@ -169,20 +169,20 @@ export function buildAnalyticsStats(args: {
   })
   const cacheReuse = PROVIDERS.map((providerId) => {
     const rows = currentResultsByProvider.get(providerId) ?? []
-    const denominator: NonNullable<DbStats['cacheReuse']>[number]['denominator'] = providerId === 'claude'
+    const denominator: NonNullable<DbStats['cacheReuse']>[number]['denominator'] = providerId === 'claude' || providerId === 'antigravity'
       ? 'separate_input'
       : providerId === 'codex'
         ? 'input_includes_cache'
         : providerId === 'opencode'
           ? 'upstream_dependent'
           : 'unknown'
-    const comparable = providerId === 'claude'
+    const comparable = providerId === 'claude' || providerId === 'antigravity'
       ? rows.filter((row) => row.inputTokens != null && row.cacheReadTokens != null && row.cacheWriteTokens != null)
       : providerId === 'codex'
         ? rows.filter((row) => row.inputTokens != null && row.cacheReadTokens != null)
         : []
     const numerator = comparable.reduce((sum, row) => sum + (row.cacheReadTokens ?? 0), 0)
-    const divisor = providerId === 'claude'
+    const divisor = providerId === 'claude' || providerId === 'antigravity'
       ? comparable.reduce((sum, row) => sum + (row.inputTokens ?? 0) + (row.cacheReadTokens ?? 0) + (row.cacheWriteTokens ?? 0), 0)
       : providerId === 'codex'
         ? comparable.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0)

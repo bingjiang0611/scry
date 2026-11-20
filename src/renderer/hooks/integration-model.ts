@@ -12,7 +12,7 @@ export const capabilityMatchesContext = <T>(
 export const capabilityRows = <T>(capability: CapabilityEnvelope<T[]>): T[] => capability.data ?? []
 export const modelKey = (model: AgentModelRef): string => `${model.providerId ?? ''}\0${model.id}`
 export const RUN_CONTROL_PREFERENCES_KEY = 'scry:run-control-preferences:v1'
-export const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
+export const PROVIDER_IDS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity']
 
 export function shouldResetRunControlCatalog(currentAgentId: string, nextAgentId: string): boolean {
   return currentAgentId !== nextAgentId

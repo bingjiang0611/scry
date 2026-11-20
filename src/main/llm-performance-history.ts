@@ -10,7 +10,7 @@ function isSample(value: unknown): value is LlmPerformanceHistoryRow {
   if (!value || typeof value !== 'object') return false
   const row = value as Record<string, unknown>
   if (typeof row.runId !== 'string' || typeof row.ts !== 'string' || !Number.isFinite(Date.parse(row.ts)) ||
-    !['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(row.providerId)) ||
+    !['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(String(row.providerId)) ||
     typeof row.model !== 'string' || typeof row.networkLabel !== 'string' || typeof row.failed !== 'boolean' ||
     (row.agentProfileId !== undefined && typeof row.agentProfileId !== 'string') ||
     (row.upstreamProvider !== undefined && typeof row.upstreamProvider !== 'string')) return false

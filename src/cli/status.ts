@@ -79,6 +79,7 @@ async function configuredOf(
   provider: ProviderId,
   env: NodeJS.ProcessEnv
 ): Promise<ProviderStatusRow['configured']> {
+  if (provider === 'antigravity') return 'no'
   if (provider === 'pi') {
     // Pi is a user-global lifecycle extension, never a workspace hook.
     const status = await piIntegrationStatus({ home: env.HOME }).catch(() => null)

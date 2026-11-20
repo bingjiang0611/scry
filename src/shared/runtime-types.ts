@@ -11,7 +11,7 @@ export type AgentDataUpdated =
   | { kind: 'resynchronize' }
 
 export type RuntimeBackend = 'local' | 'api'
-export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc'
+export type RuntimeProvider = 'claude_sdk' | 'codex_cli' | 'qoder_cli' | 'opencode_server' | 'pi_rpc' | 'antigravity_acp'
 
 export type RuntimeFailureStage =
   | 'discovery'

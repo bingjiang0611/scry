@@ -53,7 +53,7 @@ function traceArchiveCatalogIndexDirtyPath(userDataDir: string): string {
 }
 
 function validIndexRelativePath(path: string): boolean {
-  return /^(claude|codex|qoder|opencode|pi)\/(?:unbound|cwd-[a-f0-9]{64})\/sid-[a-f0-9]{64}\/turn-[a-f0-9]{64}\.json$/.test(path)
+  return /^(claude|codex|qoder|opencode|pi|antigravity)\/(?:unbound|cwd-[a-f0-9]{64})\/sid-[a-f0-9]{64}\/turn-[a-f0-9]{64}\.json$/.test(path)
 }
 
 function indexSummaries(entries: TraceArchiveCatalogIndexEntry[]): TraceArchiveSessionSummary[] {

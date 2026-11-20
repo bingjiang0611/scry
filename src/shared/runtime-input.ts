@@ -10,7 +10,7 @@ export function normalizeAgentSteerRequest(payload: unknown): AgentSteerRequest 
   if (!runId || !messageId || !/^[A-Za-z0-9_-]{1,80}$/.test(messageId) || !sessionId) {
     throw new Error('Steer 缺少可信 run、消息或会话身份')
   }
-  if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(value.providerId ?? '')) {
+  if (!['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(value.providerId ?? '')) {
     throw new Error('Steer Provider 无效')
   }
   if (value.agentProfileId !== undefined && !boundedControlValue(value.agentProfileId)) throw new Error('Steer profile 无效')

@@ -11,7 +11,8 @@ const providerLabels = {
   codex: 'Codex',
   qoder: 'Qoder',
   opencode: 'OpenCode',
-  pi: 'Pi'
+  pi: 'Pi',
+  antigravity: 'Antigravity'
 } satisfies Record<ProviderId, string>
 
 const GENERIC_OPTION_DESCRIPTIONS = new Set(['选择此项'])

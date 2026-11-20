@@ -9,7 +9,7 @@ export const MAX_SIDE_CHAT_SNAPSHOT_BYTES = 4 * 1024 * 1024
 export const MAX_SIDE_CHAT_SNAPSHOT_ITEMS = 4000
 /** Longest title a source may contribute; also bounds the frozen title copy. */
 export const MAX_SIDE_CHAT_TITLE_LENGTH = 200
-export const conversationProviderIds = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+export const conversationProviderIds = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 export const hashPattern = /^[a-f0-9]{64}$/
 
 function requireValue(condition: unknown, message: string): asserts condition {

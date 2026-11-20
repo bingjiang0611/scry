@@ -154,7 +154,7 @@ export function satisfiesRange(version: string, range: string): boolean | null {
 }
 
 const STATUSES: ReadonlySet<string> = new Set(['supported', 'graceful', 'unsupported', 'broken'])
-const PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+const PROVIDERS: ReadonlySet<string> = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

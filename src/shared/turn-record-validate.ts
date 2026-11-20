@@ -179,7 +179,7 @@ export function validateAgentTurnRecord(value: unknown): TurnRecordValidationRes
   const workspace = raw.workspace as Record<string, unknown> | undefined
   require(!!workspace && typeof workspace.id === 'string' && workspace.id.length > 0 && typeof workspace.root === 'string' && workspace.root.length > 0, '$.workspace', 'invalid workspace identity')
   const provider = raw.provider as Record<string, unknown> | undefined
-  require(!!provider && ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(provider.id)) && isOptionalString(provider.version) && isOptionalString(provider.model) && isOptionalString(provider.modelTier), '$.provider', 'invalid provider identity')
+  require(!!provider && ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(String(provider.id)) && isOptionalString(provider.version) && isOptionalString(provider.model) && isOptionalString(provider.modelTier), '$.provider', 'invalid provider identity')
   if (provider?.modelStatus !== undefined) require(
     (provider.modelStatus === 'observed' && (typeof provider.model === 'string' && provider.model.length > 0 || typeof provider.modelTier === 'string' && provider.modelTier.length > 0) &&
       ['provider_model_event', 'usage_event'].includes(String(provider.modelSource)) &&

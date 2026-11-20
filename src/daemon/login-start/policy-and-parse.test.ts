@@ -45,6 +45,7 @@ describe('login-start policy env validation and effective remote config (B1)', (
       'SCRY_REMOTE_PERMISSION_MODE',
       'SCRY_REMOTE_RELAY_ENABLED',
       'SCRY_DISABLED_PROVIDERS',
+      'SCRY_EXPERIMENTAL_PROVIDERS',
       'SCRY_RUN_CONTROLS',
       'SCRY_PROVIDER_MANIFEST_URL'
     ])

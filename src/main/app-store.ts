@@ -42,8 +42,8 @@ export function cleanupAppStoreAtomicTemps(userDataDir: string): void {
   }
 }
 
-const SESSION_PROVIDERS = new Set<SessionProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'legacy_unknown'])
-const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
+const SESSION_PROVIDERS = new Set<SessionProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity', 'legacy_unknown'])
+const RUNTIME_PROVIDERS = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc', 'antigravity_acp'])
 
 export function isSessionProviderId(value: unknown): value is SessionProviderId {
   return typeof value === 'string' && SESSION_PROVIDERS.has(value as SessionProviderId)

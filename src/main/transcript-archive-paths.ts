@@ -101,7 +101,7 @@ export interface TraceArchiveSessionSummary {
   ts: number
 }
 
-export const DISCOVERABLE_PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+export const DISCOVERABLE_PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 export const TRACE_DISCOVERY_MAX_FILES = 10_000
 export const TRACE_DISCOVERY_MAX_FILE_BYTES = 32 * 1024 * 1024
 /**

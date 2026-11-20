@@ -1,4 +1,5 @@
 import type { CapabilityEnvelope, ProviderContext, ProviderDescriptor, ProviderId } from '../../shared/provider'
+import { isExperimentalProviderEnabled } from '../../shared/experimental-providers'
 import type { AgentPermissionMode, AgentRunControlCatalog } from '../../shared/runtime'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { createCachedAsyncLoader } from '../provider-detection'
@@ -29,7 +30,7 @@ export function createProviderDiscovery(options: {
   const forkSession = (providerId: ProviderId): boolean => options.supportsForkSession?.(providerId) === true
 
   const contexts = async () => {
-    const descriptors = await options.descriptors()
+    const descriptors = (await options.descriptors()).filter((descriptor) => isExperimentalProviderEnabled(descriptor.id))
     const profiles = descriptors.some((descriptor) => descriptor.id === 'pi' && descriptor.available)
       ? await options.profiles() : []
     return descriptors.flatMap<{ descriptor: ProviderDescriptor; profile?: PiAgentProfile }>((descriptor) => descriptor.id === 'pi' && descriptor.available && profiles.length
@@ -55,7 +56,9 @@ export function createProviderDiscovery(options: {
   const selected = async (query: SelectedQuery): Promise<RemoteProviderRef> => {
     // Revalidate authorization even when another request already owns this runtime read.
     const cwd = options.authorizeWorkspace(query.cwd)
-    const descriptor = (await options.descriptors()).find((entry) => entry.id === query.providerId && entry.available)
+    const descriptor = (await options.descriptors()).find((entry) =>
+      entry.id === query.providerId && entry.available && isExperimentalProviderEnabled(entry.id)
+    )
     if (!descriptor) throw new Error('invalid_provider_context')
     const profile = descriptor.id === 'pi' && query.agentProfileId ? await options.resolveProfile(query.agentProfileId) : undefined
     if ((descriptor.id === 'pi' && (!profile || profile.id !== query.agentProfileId)) ||
