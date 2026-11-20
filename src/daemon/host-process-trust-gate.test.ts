@@ -99,6 +99,7 @@ describe('daemon trust gate (B4-V trust-gate)', () => {
       const safeView = await settledView(surface, safe.runId)
       expect(safeView).toMatchObject({ done: true })
       expect(safeView?.error).toBeUndefined()
+      await daemon.host.orchestrationAuthority?.flushLegacyMirror()
       expect(markers(runFor(daemon, 'trust-safe'))).toContain('admitted')
 
       writeConfig(daemon, UNSAFE)
@@ -111,6 +112,7 @@ describe('daemon trust gate (B4-V trust-gate)', () => {
       expect(refusal).toBe(inProcess)
       // The ledger is honest about it: the intent ended failed with the same reason, no
       // run was admitted, and the Provider never started or produced anything.
+      await daemon.host.orchestrationAuthority?.flushLegacyMirror()
       const refused = runFor(daemon, 'trust-unsafe')
       expect(refused.find((event) => event.kind === 'run_failed')?.detail).toBe(inProcess)
       expect(refused.some((event) => event.kind === 'run_settled')).toBe(false)
@@ -123,6 +125,7 @@ describe('daemon trust gate (B4-V trust-gate)', () => {
       const changedView = await settledView(surface, changed.runId)
       expect(changedView).toMatchObject({ done: true })
       expect(changedView?.error).toBeUndefined()
+      await daemon.host.orchestrationAuthority?.flushLegacyMirror()
       expect(markers(runFor(daemon, 'trust-changed'))).toContain('admitted')
     } finally {
       surface.dispose()
