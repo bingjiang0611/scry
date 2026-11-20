@@ -10,6 +10,15 @@ import { Pkcs10CertificateRequestGenerator } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../src/main/app-store'
 import { REMOTE_PROTOCOL_VERSION } from '../src/shared/desktop-remote'
 
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
 export async function enrollAndCallLaunchdDaemon(repoRoot: string) {
   const uid = String(process.getuid?.() ?? execFileSync('id', ['-u'], { encoding: 'utf8' }).trim())
   const label = 'com.scry.daemon.w8-test'
@@ -31,7 +40,7 @@ export async function enrollAndCallLaunchdDaemon(repoRoot: string) {
 
   const proxyEntries = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY']
     .filter((k) => process.env[k]?.trim())
-    .map((k) => `    <key>${k}</key><string>${process.env[k]}</string>`)
+    .map((k) => `    <key>${k}</key><string>${escapeXml(process.env[k]!.trim())}</string>`)
     .join('\n')
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -167,28 +176,31 @@ ${proxyEntries}
       }
     }
 
-    const d3Submitted = await callSock({
+    // D11: with real ~/.gemini specific permissions.allow rules, default mode must succeed (not refuse).
+    const d11Submitted = await callSock({
       op: 'submit',
       intentId: randomUUID(),
       detail: JSON.stringify({
         cwd: canonicalWorkspace,
         providerId: 'antigravity',
         permissionMode: 'default',
-        prompt: 'Reply OK'
+        prompt: 'Reply with exactly: LAUNCHD_DEFAULT_D11_OK'
       })
     })
-    let d3State = 'dispatched'
-    const d3Events: Array<{ kind: string; detail?: string }> = []
-    if (d3Submitted.runId) {
+    let d11State = 'dispatched'
+    const d11Events: Array<{ kind: string; detail?: string }> = []
+    const d11Chunks: unknown[] = []
+    if (d11Submitted.runId) {
       let c = 0
       let oc = 0
-      const d3Deadline = Date.now() + 20_000
-      while (Date.now() < d3Deadline && d3State === 'dispatched') {
-        const watched = await callSock({ op: 'watch', runId: d3Submitted.runId, cursor: c, outputCursor: oc, waitMs: 3_000 })
-        d3State = watched.watch.state
+      const d11Deadline = Date.now() + 60_000
+      while (Date.now() < d11Deadline && d11State === 'dispatched') {
+        const watched = await callSock({ op: 'watch', runId: d11Submitted.runId, cursor: c, outputCursor: oc, waitMs: 5_000 })
+        d11State = watched.watch.state
         c = watched.watch.poll.cursor
         oc = watched.watch.output.cursor
-        d3Events.push(...watched.watch.poll.events)
+        d11Events.push(...watched.watch.poll.events)
+        d11Chunks.push(...watched.watch.output.chunks)
       }
     }
 
@@ -200,7 +212,7 @@ ${proxyEntries}
       modelCount: controls.result?.data?.models?.length ?? 0,
       nonGeminiTagged: (controls.result?.data?.models ?? []).some((m: { description?: string }) => m.description?.includes('经 Antigravity 提供')),
       fullAccessRun: { status: submitted.status, runState, chunks, eventsCount: events.length },
-      d3DefaultRefusal: { status: d3Submitted.status, state: d3State, failedDetail: d3Events.find((e) => e.kind === 'run_failed')?.detail }
+      d11DefaultWithUserRules: { status: d11Submitted.status, state: d11State, chunks: d11Chunks, failedDetail: d11Events.find((e) => e.kind === 'run_failed')?.detail }
     }
   } finally {
     try { execFileSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }) } catch { /* ignore */ }

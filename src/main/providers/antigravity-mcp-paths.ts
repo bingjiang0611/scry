@@ -43,6 +43,13 @@ export function antigravityEffectiveGeminiRoot(homeDir: string, env: NodeJS.Proc
   return join(homeDir, '.gemini')
 }
 
+function hasNonEmptyPreToolUse(obj: Record<string, unknown>): boolean {
+  const pre = obj.PreToolUse
+  if (Array.isArray(pre) && pre.length > 0) return true
+  if (pre && typeof pre === 'object' && Object.keys(pre).length > 0) return true
+  return false
+}
+
 function fileHasPreToolUseHook(hooksPath: string): boolean {
   if (!existsSync(hooksPath)) return false
   try {
@@ -50,9 +57,14 @@ function fileHasPreToolUseHook(hooksPath: string): boolean {
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) return false
     const parsed = JSON.parse(readFileSync(hooksPath, 'utf8')) as Record<string, unknown>
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
-    const pre = parsed.PreToolUse
-    if (Array.isArray(pre) && pre.length > 0) return true
-    if (pre && typeof pre === 'object' && Object.keys(pre).length > 0) return true
+    if (hasNonEmptyPreToolUse(parsed)) return true
+    // Real agy hooks.json schema: top-level keys are hook names mapping to { enabled?, PreToolUse?, ... }.
+    for (const entry of Object.values(parsed)) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      const named = entry as Record<string, unknown>
+      if (named.enabled === false) continue
+      if (hasNonEmptyPreToolUse(named)) return true
+    }
   } catch {
     return false
   }
