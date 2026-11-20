@@ -122,6 +122,33 @@ export function literalArgument(value: string): Record<string, unknown> {
   return { raw: value }
 }
 
+type BashLiteral = string | number | boolean | null
+
+/** Parse the whole flat argument or none of it: a trailing spread could override cmd. */
+function staticBashArgument(raw: string): Record<string, BashLiteral> | undefined {
+  if (!raw.startsWith('{') || !raw.endsWith('}')) return
+  const body = raw.slice(1, -1).trim()
+  const field = /\s*([A-Za-z_$][\w$]*)\s*:\s*("(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*'|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)\s*(,|$)/y
+  const result: Record<string, BashLiteral> = Object.create(null)
+  while (field.lastIndex < body.length) {
+    const match = field.exec(body)
+    if (!match || match[1] === '__proto__' || Object.hasOwn(result, match[1])) return
+    const token = match[2]
+    // Convert quote delimiters only; let JSON.parse reject unsupported escapes.
+    const json = token.startsWith("'")
+      ? '"' + token.slice(1, -1).replace(/\\.|"/g, part => part === "\\'" ? "'" : part === '"' ? '\\"' : part) + '"'
+      : token
+    try {
+      const value: BashLiteral = JSON.parse(json)
+      if (typeof value === 'number' && !Number.isFinite(value)) return
+      result[match[1]] = value
+    } catch {
+      return
+    }
+  }
+  return result
+}
+
 export function isCodexSpawnTool(name: string): boolean {
   // Only the native namespace is an alias; MCP and unknown namespaces retain their identity.
   return name === 'spawn_agent' || name === 'multi_agent_v1__spawn_agent' || name === 'collaboration__spawn_agent'
@@ -234,7 +261,14 @@ export function nestedCodexCalls(source: string): NormalizedCodexCall[] {
     }
     const argument = balancedCallArgument(source, openIndex)
     if (argument == null) continue
-    const normalized = codexToolName(match[1], literalArgument(argument))
+    let input = literalArgument(argument)
+    if (match[1] === 'exec_command' && typeof input.raw === 'string' && input.raw === argument) {
+      const literal = staticBashArgument(argument)
+      input = literal && (typeof literal.cmd === 'string' || typeof literal.command === 'string')
+        ? { ...input, ...literal }
+        : { ...input, commandUnresolved: true }
+    }
+    const normalized = codexToolName(match[1], input)
     if (normalized) calls.push({
       ...normalized,
       input: { ...normalized.input, execSource: source },
