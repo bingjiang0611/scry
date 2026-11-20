@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import { isInsideHostChild } from '../shared/host-admin'
 import type { BuildIdentity } from '../shared/build-identity'
 import {
@@ -8,6 +9,7 @@ import {
 } from '../main/background-service-stop'
 import { daemonModeEnabled } from '../main/daemon-channel-gate'
 import { applyDaemonModeDefault } from '../main/daemon-mode-default'
+import { daemonLogPath } from './daemon-log'
 import { createLoginStartManager, type LoginStartManager } from './login-start'
 import { callHostAdmin } from './host-admin-client'
 import { resolveHostCliTarget } from './host-cli-paths'
@@ -63,14 +65,19 @@ export async function reportUnavailableAdminSocket(
 ): Promise<number> {
   const prepared = await prepareBackgroundServiceStop(getStopDeps(ctx))
   if (prepared.status === 'running') {
+    const logPath = daemonLogPath(ctx.userDataDir)
+    const flagOn = isHostCliExperimentalEnabled(ctx.env)
     if (options.jsonStatus) {
       ctx.stdout(`${JSON.stringify({
         daemon: { running: true, pid: prepared.holder.pid },
         hostCliEnabled: false,
-        error: 'host_cli_experimental_disabled'
+        error: flagOn ? 'host_admin_socket_unavailable' : 'host_cli_experimental_disabled',
+        ...(flagOn ? { daemonLogPath: logPath } : {})
       }, null, 2)}\n`)
+    } else if (flagOn) {
+      ctx.stderr(`后台服务正在运行（pid ${prepared.holder.pid}），但 host-admin.sock 不可用（可能是后台服务未带 SCRY_EXPERIMENTAL_HOST_CLI=1 启动，或 admin socket 创建失败；请查看 ${logPath} 中的 host-admin.disabled 原因）。\n`)
     } else {
-      ctx.stderr(`后台服务正在运行（pid ${prepared.holder.pid}），但命令行管理功能未开启（host-admin.sock 不可用；请确认后台服务已启用 SCRY_EXPERIMENTAL_HOST_CLI=1）。\n`)
+      ctx.stderr(`后台服务正在运行（pid ${prepared.holder.pid}），但命令行管理功能未开启（host-admin.sock 不可用；如已为后台服务启用 SCRY_EXPERIMENTAL_HOST_CLI=1，请查看 ${logPath} 中的 host-admin.disabled 原因）。\n`)
     }
     return EXIT_APPROVAL_DISABLED
   }

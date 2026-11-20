@@ -183,15 +183,18 @@ export async function readBackgroundServiceStatus(deps: BackgroundServiceStatusD
       ? loginStart?.state === 'enabled' && loginStart.linuxMainPid !== undefined && loginStart.linuxMainPid !== null &&
         report.supervisorPid !== undefined && loginStart.linuxMainPid === report.supervisorPid
       : false
-    const cliApproval: CliApprovalStatus | undefined = deps.hostCliExperimental
-      ? (report.cliApproval
-        ? {
-          state: report.cliApproval.enabled ? 'enabled' : 'disabled',
-          updatedAt: report.cliApproval.updatedAt,
-          ...(deps.hostCliPath ? { hostCliPath: deps.hostCliPath } : {})
-        }
-        : { state: 'unavailable', reason: 'daemon_host_cli_unavailable' })
-      : undefined
+    // N1: whenever the daemon reports cliApproval (e.g. a login-start daemon launched with
+    // SCRY_EXPERIMENTAL_HOST_CLI=1 while this App started without it), always surface the row
+    // so the user can inspect it and turn CLI approval off.
+    const cliApproval: CliApprovalStatus | undefined = report.cliApproval
+      ? {
+        state: report.cliApproval.enabled ? 'enabled' : 'disabled',
+        updatedAt: report.cliApproval.updatedAt,
+        ...(deps.hostCliPath ? { hostCliPath: deps.hostCliPath } : {})
+      }
+      : deps.hostCliExperimental
+        ? { state: 'unavailable', reason: 'daemon_host_cli_unavailable' }
+        : undefined
     return {
       mode: 'daemon', userDataDir: deps.userDataDir, connection, checkedAt,
       version: report.version, pid: report.pid, startedAt: report.startedAt, devices: report.devices, activeRuns: report.activeRuns,

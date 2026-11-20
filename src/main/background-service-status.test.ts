@@ -78,6 +78,26 @@ describe('background service status', () => {
     expect(connectionFromMode({ status: 'version-mismatch', running: '0.2.236', runningBuild: old, expected: '0.2.237', expectedBuild: current }, '0.2.237'))
       .toEqual({ state: 'version-mismatch', running: '0.2.236', expected: '0.2.237' })
   })
+
+  it('surfaces daemon-reported cliApproval even when the App itself lacks SCRY_EXPERIMENTAL_HOST_CLI (W11 N1)', async () => {
+    const mixed = await readBackgroundServiceStatus(deps({
+      hostCliExperimental: false,
+      hostCliPath: '/Applications/Scry.app/Contents/Resources/bin/scry-host',
+      selfReport: async () => ({ ...report, cliApproval: { enabled: true, updatedAt: 500 } })
+    }))
+    expect(mixed).toMatchObject({
+      mode: 'daemon',
+      cliApproval: {
+        state: 'enabled',
+        updatedAt: 500,
+        hostCliPath: '/Applications/Scry.app/Contents/Resources/bin/scry-host'
+      }
+    })
+
+    // Control: both App and daemon lack the flag -> cliApproval remains omitted.
+    const bothOff = await readBackgroundServiceStatus(deps({ hostCliExperimental: false }))
+    expect('cliApproval' in bothOff).toBe(false)
+  })
 })
 
 describe('readProcessIdentity', () => {

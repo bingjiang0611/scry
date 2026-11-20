@@ -303,6 +303,23 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       error: 'host_cli_experimental_disabled'
     })
 
+    // 2b. When flag IS enabled in caller env but admin socket is missing (e.g. socket bind failed),
+    // point to daemon.log for the host-admin.disabled reason instead of only asking to enable the flag.
+    const stFlagOn = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' }, stopDeps })
+    expect(await runHostCli(['status'], stFlagOn.io)).toBe(4)
+    expect(stFlagOn.err()).toContain('daemon.log')
+    expect(stFlagOn.err()).toContain('host-admin.disabled')
+    expect(stFlagOn.err()).not.toContain('后台服务未运行')
+
+    const stFlagOnJson = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' }, stopDeps })
+    expect(await runHostCli(['status', '--json'], stFlagOnJson.io)).toBe(4)
+    expect(JSON.parse(stFlagOnJson.out())).toMatchObject({
+      daemon: { running: true, pid: 65432 },
+      hostCliEnabled: false,
+      error: 'host_admin_socket_unavailable',
+      daemonLogPath: join(userDataDir, 'logs', 'daemon.log')
+    })
+
     // 3. CLI login-start respects SCRY_HOST_DAEMON=0 (does not hardcode daemonMode: true)
     const lsOff = makeIo({
       userDataDir,

@@ -284,6 +284,28 @@ describe('background service channels', () => {
       await expect(on.invoke('remote:hostAdmin:setCliApproval', false)).resolves.toEqual({ status: 'done' })
       expect(electron.showMessageBox).not.toHaveBeenCalled()
       expect(forwarded).toHaveBeenCalledWith({ op: 'localHostAdmin', method: 'setCliApproval', args: [false], read: false })
+
+      // 3. Mixed state (W11 N1): daemon reports cliApproval (enabled), App launched WITHOUT SCRY_EXPERIMENTAL_HOST_CLI.
+      // Settings must still show cliApproval and allow turning it OFF, while turning it ON remains refused.
+      electron.showMessageBox.mockClear()
+      forwarded.mockClear()
+      const reportEnabled = { ...report, cliApproval: { enabled: true, updatedAt: 300 } }
+      forwarded.mockImplementation(async (call: { op: string; method: string; args: unknown[] }) =>
+        call.op === 'localBackgroundService' ? reportEnabled : { enabled: call.args[0], updatedAt: 400 }
+      )
+      const mixed = register(daemon, true, { env: {} })
+      const mixedStatus = await mixed.invoke('remote:backgroundService:status') as Record<string, unknown>
+      expect(mixedStatus.cliApproval).toMatchObject({ state: 'enabled', updatedAt: 300 })
+
+      await expect(mixed.invoke('remote:hostAdmin:setCliApproval', true)).resolves.toMatchObject({
+        status: 'failed', reason: 'host_cli_experimental_disabled'
+      })
+      expect(electron.showMessageBox).not.toHaveBeenCalled()
+      expect(forwarded).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'localHostAdmin' }))
+
+      await expect(mixed.invoke('remote:hostAdmin:setCliApproval', false)).resolves.toEqual({ status: 'done' })
+      expect(electron.showMessageBox).not.toHaveBeenCalled()
+      expect(forwarded).toHaveBeenCalledWith({ op: 'localHostAdmin', method: 'setCliApproval', args: [false], read: false })
     } finally {
       uninstall()
     }

@@ -193,7 +193,9 @@ export async function setHostCliApproval(
   enabled: boolean,
   deps: HostCliApprovalActionDeps
 ): Promise<BackgroundServiceActionResult> {
-  if (!deps.experimentalEnabled) return failed('host_cli_experimental_disabled')
+  // N1: enabling requires App to carry SCRY_EXPERIMENTAL_HOST_CLI=1 (and native confirmation),
+  // whereas disabling is always allowed so a user can turn off a daemon that carries the flag.
+  if (enabled && !deps.experimentalEnabled) return failed('host_cli_experimental_disabled')
   if (!deps.daemonMode) return failed('daemon_mode_disabled')
   const conn = await deps.connection()
   if (conn.state !== 'ready') return connectionResult(conn)
