@@ -78,12 +78,16 @@ export function isDaemonRunId(value: unknown): value is string {
   )
 }
 
-function failure(reply: Record<string, unknown>): DaemonRunError | undefined {
+function failure(reply: Record<string, unknown>, op?: string): DaemonRunError | undefined {
   const code = reply.error
   if (code === undefined) return undefined
   if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
-  if (code === 'unsupported_op' || code === 'unknown_op') return new DaemonRunError('daemon_run_control_unavailable')
+  // Scope unknown_op mapping strictly to the W10 execution-target bridge ops so older-daemon
+  // behavior for existing ops (such as DaemonEventPump's appEvents) stays unchanged.
+  if (code === 'unsupported_op' || (code === 'unknown_op' && (op === 'executionTargetWork' || op === 'executionTargetResult'))) {
+    return new DaemonRunError('daemon_run_control_unavailable')
+  }
   return new DaemonRunError('invalid_daemon_response')
 }
 
@@ -342,7 +346,7 @@ export class DaemonRunTransport {
       throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
     }
     if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
-    const error = failure(reply)
+    const error = failure(reply, typeof request.op === 'string' ? request.op : undefined)
     if (error) throw error
     return reply
   }

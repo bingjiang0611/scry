@@ -2,8 +2,8 @@
 
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
-- 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），现做 W10。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
-- 执行方 B：P5（W3、W2 代码已通过）；Antigravity（W7 已通过，现做 W8）。
+- 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；W2b 两项等维护者约停机窗口。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
+- 执行方 B：P5（W3、W2 代码已通过）；Antigravity（W7、W8 已通过）；现做 W11（P5 第 2 步）。
 - 执行方 C：P4（W4、W5 已通过），现做 W9。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
@@ -19,12 +19,13 @@
 | W8 | Antigravity 实现（A0.5–A7）与 macOS 真机验收（A9） | B | W7 通过 | 真机验收通过前默认隐藏（实验开关） | [tasks/W8-antigravity-impl.md](tasks/W8-antigravity-impl.md) |
 | W9 | P4-2 实现（`on` 开关后）与 S3 准备（不删代码） | C | W5 通过 | P4-2：W1 通过；S3 删除另补任务单 | [tasks/W9-p4-2-and-s3-prep.md](tasks/W9-p4-2-and-s3-prep.md) |
 | W10 | 默认 daemon 下恢复 iPhone 的「其他主机」路由、修正误导文案；中继僵死 leg 只分析 | A | — | **下一次合入 main 的门槛**（`main` 已含默认 daemon） | [tasks/W10-daemon-execution-targets.md](tasks/W10-daemon-execution-targets.md) |
+| W11 | P5 第 2 步：命令行批准新设备（P5-5b、P5-5、P5-6、P5-7） | B | W8 通过 | 批准入口与 `approvedVia` 写入放在实验开关后，含 W3 的版本发布后再打开；P5-8 真机验收另由 A 做 | [tasks/W11-p5-step2-host-cli.md](tasks/W11-p5-step2-host-cli.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛（2026-11-20 已通过，附条件：W10），但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
 **B 与 C 的交界**：两边都可能改 `src/daemon/host-process.ts` 的启动顺序（B：daemon 自报配置与 `launchedBy`；C：W5 的影子写挂点）。改动尽量小、各自加在独立函数里，推送前先合并对方的最新提交。
 
-**不在队列里（维护者已定的顺序）**：P5 第 2 步（命令行配对）、S3（删除进程内路径）、P4-2 起的各段、P6（含 P6-0 探针，排在 P4 之后，见 [P6-multi-agent-plan](../P6-multi-agent-plan.md) §D）。W1 通过后由核验方补任务单。
+**不在队列里（维护者已定的顺序）**：S3（删除进程内路径）、P4-2 起的各段、P6（含 P6-0 探针，排在 P4 之后，见 [P6-multi-agent-plan](../P6-multi-agent-plan.md) §D）。W1 通过后由核验方补任务单。
 
 **MCP 参数与凭据**：W6 对应的修复已推送；`src/main/providers/private-mcp-config.ts` 与各 Provider 构造 MCP 参数、历史检索凭据的代码，改动前先读该修复的提交说明，不要把密钥重新放回命令行参数。
 

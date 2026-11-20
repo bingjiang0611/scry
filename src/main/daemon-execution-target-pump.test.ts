@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DaemonExecutionTargetPump, type ExecutionTargetWorkCall, type ExecutionTargetWorkSource } from './daemon-execution-target-pump'
-import { DaemonRunError } from './daemon-run-transport'
+import { DaemonRunError, DaemonRunTransport } from './daemon-run-transport'
 import { DEFAULT_MAX_FRAME } from './remote/inner-mtls-protocol'
 
 describe('DaemonExecutionTargetPump', () => {
@@ -119,5 +119,13 @@ describe('DaemonExecutionTargetPump', () => {
     await vi.waitFor(() => expect(onWarn).toHaveBeenCalledTimes(1))
     expect(source.executionTargetWork).toHaveBeenCalledTimes(1)
     pump.dispose()
+  })
+
+  it('scopes unknown_op -> daemon_run_control_unavailable strictly to execution-target ops', async () => {
+    const transport = new DaemonRunTransport(async () => ({ error: 'unknown_op' }))
+    await expect(transport.executionTargetWork({ waitMs: 0 })).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
+    await expect(transport.executionTargetResult({ callId: 'c1', ok: true })).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
+    // Existing ops (e.g. appEvents for DaemonEventPump) keep invalid_daemon_response on unknown_op.
+    await expect(transport.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
   })
 })
