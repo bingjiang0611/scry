@@ -53,7 +53,8 @@ export function createProviderRuntime(deps: {
     {
       listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
       historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs')
-    }
+    },
+    userDataDir
   )
   /**
    * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；

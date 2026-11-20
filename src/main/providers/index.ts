@@ -19,7 +19,8 @@ export function createBuiltInProviderAdapters(
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
     historyExtensionPath?: string
     diagnostics?: PiRunDiagnostics
-  }
+  },
+  userDataDir?: string
 ): ProviderAdapter[] {
   return [
     createClaudeAdapter(homeDir),
@@ -27,6 +28,6 @@ export function createBuiltInProviderAdapters(
     createQoderAdapter(homeDir),
     createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : []),
-    ...(isExperimentalProviderEnabled('antigravity') ? [createAntigravityAdapter(homeDir)] : [])
+    ...(isExperimentalProviderEnabled('antigravity') ? [createAntigravityAdapter(homeDir, { userDataDir })] : [])
   ]
 }
