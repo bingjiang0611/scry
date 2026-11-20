@@ -94,6 +94,8 @@ export class RelayRoom {
     this.limits = { freshMs: LEG_FRESH_MS, waitMs: LEG_WAIT_MS, offlineGraceMs: OFFLINE_GRACE_MS, recentHostMs: RECENT_HOST_MS }
     // Last time a host leg opened, authenticated or closed (in-memory only).
     this.hostActivityAt = 0
+    // True once any authenticated leg in this room has proved ping support.
+    this.hostPings = false
     try {
       state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HOST_PING, HOST_PONG))
     } catch { /* older runtime: hosts fall back to the manual reply below */ }
@@ -160,21 +162,44 @@ export class RelayRoom {
     return { pinging: pinged > 0, last: Math.max(pinged, att.openedAt ?? 0) }
   }
 
+  #roomPings(hosts) {
+    if (this.hostPings) return true
+    for (const ws of hosts) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      const att = ws.deserializeAttachment()
+      if (!att || !att.authed) continue
+      if (this.#liveness(ws, att).pinging) {
+        this.hostPings = true
+        return true
+      }
+    }
+    return false
+  }
+
   // Freshest open, authenticated, unpaired leg for the mode. Pinging legs that
-  // went silent are closed here so their host notices. DO execution is
-  // serialized, so this pop is race-free.
+  // went silent — and unpinged legs in a room known to ping — are closed here
+  // so their host notices and devices are not glued to stale sockets.
   #popWarmHost(mode) {
     const now = Date.now()
+    const hosts = this.state.getWebSockets('host')
+    const roomPings = this.#roomPings(hosts)
     let best = null
     let bestRank = -Infinity
-    for (const ws of this.state.getWebSockets('host')) {
+    for (const ws of hosts) {
       // Hibernatable sockets remain listed while their close handshake runs.
       // Their old admission attachment is not proof they can accept a device.
       if (ws.readyState !== WebSocket.OPEN) continue
       const att = ws.deserializeAttachment()
-      if (!att || att.mode !== mode || !att.authed || att.deviceId) continue
+      if (!att) continue
+      if (!att.authed) {
+        if (now - (att.openedAt ?? 0) > this.limits.freshMs) {
+          try { ws.close(1008, 'auth_timeout') } catch { /* closing */ }
+        }
+        continue
+      }
+      if (att.mode !== mode || att.deviceId) continue
       const { pinging, last } = this.#liveness(ws, att)
-      if (pinging && now - last > this.limits.freshMs) {
+      if ((pinging || roomPings) && now - last > this.limits.freshMs) {
         try { ws.close(1011, 'stale_leg') } catch { /* closing */ }
         continue
       }
@@ -187,16 +212,18 @@ export class RelayRoom {
   }
 
   // Any open, authenticated leg (of either mode, busy or not) with recent
-  // evidence means the host process is reachable. Legacy legs count as alive:
-  // without pings their state is unknown, never proof of absence.
+  // evidence means the host process is reachable. Legacy rooms that have never
+  // pinged count as alive: without pings their state is unknown, never proof of absence.
   #hostAlive() {
     const now = Date.now()
-    for (const ws of this.state.getWebSockets('host')) {
+    const hosts = this.state.getWebSockets('host')
+    const roomPings = this.#roomPings(hosts)
+    for (const ws of hosts) {
       if (ws.readyState !== WebSocket.OPEN) continue
       const att = ws.deserializeAttachment()
       if (!att || !att.authed) continue
       const { pinging, last } = this.#liveness(ws, att)
-      if (!pinging || now - last <= this.limits.freshMs) return true
+      if ((!pinging && !roomPings) || now - last <= this.limits.freshMs) return true
     }
     return false
   }
@@ -219,9 +246,12 @@ export class RelayRoom {
     if (!att) { try { ws.close(1011, 'no_state') } catch { /* closing */ } return }
     if (att.role === 'host') {
       // Runtimes without auto-response deliver the ping here. Never forward
-      // it: the device side carries only inner-TLS bytes.
+      // it: the device side carries only inner-TLS bytes. Record pingedAt even
+      // while async auth is in flight so a back-to-back first ping is not lost.
       if (typeof message === 'string' && message === HOST_PING) {
-        if (att.authed) { att.pingedAt = Date.now(); ws.serializeAttachment(att) }
+        att.pingedAt = Date.now()
+        ws.serializeAttachment(att)
+        if (att.authed) this.hostPings = true
         try { ws.send(HOST_PONG) } catch { /* closing */ }
         return
       }
@@ -234,26 +264,41 @@ export class RelayRoom {
             await this.#tokenOk(creds.token, creds.enroll === true)
         } catch { ok = false }
         if (!ok) { try { ws.close(1008, 'host_unauthorized') } catch { /* closing */ } return }
-        att.authed = true
-        ws.serializeAttachment(att)
+        if (ws.readyState !== WebSocket.OPEN) return
+        // Re-read attachment after await so a ping arriving mid-auth is preserved.
+        const latest = ws.deserializeAttachment() ?? att
+        latest.authed = true
+        ws.serializeAttachment(latest)
+        if (typeof latest.pingedAt === 'number') this.hostPings = true
         this.hostActivityAt = Date.now()
-        console.log(`[relay] host leg authed mode=${att.mode}`)
+        console.log(`[relay] host leg authed mode=${latest.mode}`)
         return
       }
       // Post-pairing: forward inner-TLS bytes to the glued device.
-      const device = this.#find(att.deviceId)
-      if (device) { try { device.send(message) } catch { /* closing */ } }
+      if (att.deviceId) this.#forward(ws, att.deviceId, message)
       return
     }
     // Device -> host leg.
-    const host = this.#find(att.hostId)
-    if (host) { try { host.send(message) } catch { /* closing */ } }
+    this.#forward(ws, att.hostId, message)
+  }
+
+  #forward(ws, peerId, message) {
+    const peer = this.#find(peerId)
+    if (!peer || peer.readyState !== WebSocket.OPEN) {
+      this.#teardown(ws, 1000, 'peer_closed')
+      return
+    }
+    try {
+      peer.send(message)
+    } catch {
+      this.#teardown(ws, 1000, 'peer_closed')
+    }
   }
 
   webSocketClose(ws) { this.#teardown(ws) }
   webSocketError(ws) { this.#teardown(ws) }
 
-  #teardown(ws) {
+  #teardown(ws, closeCode, closeReason) {
     const att = ws.deserializeAttachment()
     if (att) {
       this.byId.delete(att.id)
@@ -262,7 +307,10 @@ export class RelayRoom {
       const peer = this.#find(peerId)
       if (peer) { try { peer.close(1000, 'peer_closed') } catch { /* closing */ } }
     }
-    try { ws.close() } catch { /* closing */ }
+    try {
+      if (closeCode !== undefined) ws.close(closeCode, closeReason)
+      else ws.close()
+    } catch { /* closing */ }
   }
 
   async #tokenOk(candidate, enroll) {
