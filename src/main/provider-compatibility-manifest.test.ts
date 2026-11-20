@@ -41,8 +41,9 @@ describe('内置兼容性策略', () => {
   it('antigravity 在 1.5.12 区间已声明策略，未验证版本标 unsupported', () => {
     const store = new ProviderCompatibilityStore({ scryVersion: '0.2.250' })
     const pinned = store.advisory('antigravity', '1.5.12')
-    expect(['graceful', 'supported']).toContain(pinned.status)
+    expect(pinned.status).toBe('supported')
     expect(pinned.recommendedRange).toBe('>=1.5.12 <1.6.0')
+    expect(store.advisory('antigravity', '1.5.13').status).toBe('supported')
     expect(store.advisory('antigravity', '1.6.0').status).toBe('unsupported')
     expect(store.advisory('antigravity', '1.5.1').status).toBe('unsupported')
   })
