@@ -4,7 +4,7 @@
 
 - 执行方 A：真机验证（W1、W6，以及 W2b：W2 剩余真机项）。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
 - 执行方 B：P5（W3、W2 代码已通过）；Antigravity（W7 已通过，现做 W8）。
-- 执行方 C：P4（先 W4，再 W5）。
+- 执行方 C：P4（W4、W5 已通过），现做 W9。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
 |---|---|---|---|---|---|
@@ -17,6 +17,7 @@
 | W6 | MCP 密钥不进 Provider 命令行：macOS 真机核对 | A | 修复已推送（`d29a6cf3`…`0bda19ec`），已开放 | W1 通过 | [tasks/W6-argv-secrets.md](tasks/W6-argv-secrets.md) |
 | W7 | Antigravity：真机探测（A0）与设计定稿 | B | — | 不含产品代码；A1 起另补任务单 | [tasks/W7-antigravity-a0.md](tasks/W7-antigravity-a0.md) |
 | W8 | Antigravity 实现（A0.5–A7）与 macOS 真机验收（A9） | B | W7 通过 | 真机验收通过前默认隐藏（实验开关） | [tasks/W8-antigravity-impl.md](tasks/W8-antigravity-impl.md) |
+| W9 | P4-2 实现（`on` 开关后）与 S3 准备（不删代码） | C | W5 通过 | P4-2：W1 通过；S3 删除另补任务单 | [tasks/W9-p4-2-and-s3-prep.md](tasks/W9-p4-2-and-s3-prep.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛，但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
