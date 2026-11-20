@@ -284,15 +284,15 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     expect(String(fullResult?.runtimeMetadata?.effectivePermissionMode)).toMatch(/^full_access/)
   }, 15_000)
 
-  it('工作区或用户级 PreToolUse hooks.json 不拒绝启动，且未经审批执行的工具调用标为「由 hook 放行」', async () => {
+  it('工作区或用户级可返回 allow 的 PreToolUse hooks.json 不拒绝启动，且未经审批执行的匹配工具标为「由 hook 放行」；N5 排除日志型 hook、matcher 不匹配及 D11 用户规则歧义', async () => {
     const fakeHome = makeTempDir('scry-home-d12-')
     const ws = makeTempDir('scry-ws-d12-')
     mkdirSync(join(ws, '.agents'), { recursive: true })
     writeFileSync(
       join(ws, '.agents', 'hooks.json'),
       JSON.stringify({
-        'disabled-gate': { enabled: false, PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo {}' }] }] },
-        'allow-cmd': { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'echo allow' }] }] }
+        'disabled-gate': { enabled: false, PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'printf \'{"decision":"allow"}\\n\'' }] }] },
+        'allow-cmd': { PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'printf \'{"decision":"allow"}\\n\'' }] }] }
       }),
       'utf8'
     )
@@ -306,6 +306,7 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     process.env.SCRY_AGY_PATH = binPath
     const adapter = createAntigravityAdapter(fakeHome)
 
+    // 1. 可返回 decision:"allow" 且 matcher 匹配、无用户级规则 -> 标「由 hook 放行」
     const events: TraceEvent[] = []
     const res = await adapter.run({
       runId: 'd12-hook',
@@ -319,5 +320,68 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     const toolResult = events.find((e) => e.kind === 'tool' && e.stage === 'tool_result' && e.toolUseId === 'tc-hook-1')
     expect(toolResult?.runtimeMetadata?.approvalSource).toBe('hook')
     expect(toolResult?.runtimeMetadata?.approvalLabel).toBe('由 hook 放行')
+
+    // 2. N5 日志型 PreToolUse hook（不含 decision:allow）-> 绝不误标「由 hook 放行」
+    const logOnlyWs = makeTempDir('scry-ws-d12-log-')
+    mkdirSync(join(logOnlyWs, '.agents'), { recursive: true })
+    writeFileSync(
+      join(logOnlyWs, '.agents', 'hooks.json'),
+      JSON.stringify({
+        'audit-logger': { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'cat >> /tmp/audit.log' }] }] }
+      }),
+      'utf8'
+    )
+    const logEvents: TraceEvent[] = []
+    await adapter.run({
+      runId: 'd12-log-only',
+      prompt: 'run cmd',
+      cwd: logOnlyWs,
+      attachments: [],
+      permissionMode: 'default',
+      emit: (ev) => logEvents.push(ev)
+    }).promise
+    const logResult = logEvents.find((e) => e.kind === 'tool' && e.stage === 'tool_result' && e.toolUseId === 'tc-hook-1')
+    expect(logResult?.runtimeMetadata?.approvalSource).toBeUndefined()
+
+    // 3. N5 matcher 不匹配（只匹配 write_file，实际运行 run_command）-> 不误标
+    const mismatchWs = makeTempDir('scry-ws-d12-mismatch-')
+    mkdirSync(join(mismatchWs, '.agents'), { recursive: true })
+    writeFileSync(
+      join(mismatchWs, '.agents', 'hooks.json'),
+      JSON.stringify({
+        'allow-write': { PreToolUse: [{ matcher: 'write_file', hooks: [{ type: 'command', command: 'printf \'{"decision":"allow"}\\n\'' }] }] }
+      }),
+      'utf8'
+    )
+    const mismatchEvents: TraceEvent[] = []
+    await adapter.run({
+      runId: 'd12-mismatch',
+      prompt: 'run cmd',
+      cwd: mismatchWs,
+      attachments: [],
+      permissionMode: 'default',
+      emit: (ev) => mismatchEvents.push(ev)
+    }).promise
+    const mismatchResult = mismatchEvents.find((e) => e.kind === 'tool' && e.stage === 'tool_result' && e.toolUseId === 'tc-hook-1')
+    expect(mismatchResult?.runtimeMetadata?.approvalSource).toBeUndefined()
+
+    // 4. N5 同时存在 D11 用户级 permissions.allow 规则与可放行 hook -> 无法区分，宁可不打推断标签
+    mkdirSync(join(fakeHome, '.gemini', 'antigravity-cli'), { recursive: true })
+    writeFileSync(
+      join(fakeHome, '.gemini', 'antigravity-cli', 'settings.json'),
+      JSON.stringify({ permissions: { allow: ['command(echo hi)'] } }),
+      'utf8'
+    )
+    const ambiguousEvents: TraceEvent[] = []
+    await adapter.run({
+      runId: 'd12-d11-ambiguous',
+      prompt: 'run cmd',
+      cwd: ws,
+      attachments: [],
+      permissionMode: 'default',
+      emit: (ev) => ambiguousEvents.push(ev)
+    }).promise
+    const ambiguousResult = ambiguousEvents.find((e) => e.kind === 'tool' && e.stage === 'tool_result' && e.toolUseId === 'tc-hook-1')
+    expect(ambiguousResult?.runtimeMetadata?.approvalSource).toBeUndefined()
   }, 15_000)
 })

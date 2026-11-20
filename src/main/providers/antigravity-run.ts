@@ -15,7 +15,7 @@ import {
   signalAntigravityProcess,
   spawnAntigravityAcp
 } from './antigravity-launch'
-import { hasAntigravityPreToolUseHooks } from './antigravity-mcp-paths'
+import { collectAllowCapablePreToolUseMatchers } from './antigravity-mcp-paths'
 import {
   antigravityNativeModeFor,
   assertUserSettingsWithinRequestedMode,
@@ -209,7 +209,7 @@ export function runAntigravity(
       if (deps.prepareMcp) mcpPrepared = await deps.prepareMcp(request, baseEnv)
       if (cancelRequested) return emitPreSpawnCancelled()
 
-      const hasPreToolUseHooks = hasAntigravityPreToolUseHooks(cwd, homeDir, sanitizedEnv)
+      const allowCapablePreToolUseMatchers = collectAllowCapablePreToolUseMatchers(cwd, homeDir, sanitizedEnv)
 
       spawned = spawnAntigravityAcp({
         cwd,
@@ -228,7 +228,8 @@ export function runAntigravity(
         permissionMode: permissionMode === 'default' || permissionMode === 'auto_accept_edits' || permissionMode === 'full_access'
           ? permissionMode
           : 'default',
-        hasPreToolUseHooks
+        allowCapablePreToolUseMatchers,
+        hasUserAllowRules: userPermCheck.allowRules.length > 0
       })
       let inPrompt = false
       let idleTimedOut = false
