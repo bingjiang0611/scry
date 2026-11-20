@@ -15,10 +15,18 @@ import { MISMATCH_RESTART_BUTTON, reasonMessage, restartFailedNotice, versionMis
 
 export interface VersionMismatchPromptDeps {
   daemonMode: boolean
+  /**
+   * Development builds only (`!app.isPackaged`): when true and the mismatched daemon
+   * proves `activeRuns === 0`, restart automatically without a blocking dialog (W15).
+   * Packaged builds always keep this false.
+   */
+  autoRestartIdle?: boolean
   /** The native dialog; resolves with the index of the button the user chose. */
   ask(prompt: BackgroundServicePrompt): Promise<number>
   /** The «后台服务» restart action, with the same exclusivity as its channel. */
   restart(): Promise<BackgroundServiceActionResult>
+  /** Restart path used only when `autoRestartIdle` sees proven `activeRuns === 0`. */
+  restartIdle?(): Promise<BackgroundServiceActionResult>
   reportFailure(prompt: BackgroundServicePrompt): Promise<void>
   /** A «后台服务» action is already running; the user is dealing with the service. */
   actionInProgress(): boolean
@@ -31,9 +39,11 @@ export type VersionMismatchPromptOutcome =
 
 const RESTART_ERROR = 'background_service_restart_error'
 
-export function createVersionMismatchPrompt(deps: VersionMismatchPromptDeps): (connection: BackgroundServiceConnection) => Promise<VersionMismatchPromptOutcome> {
+export function createVersionMismatchPrompt(
+  deps: VersionMismatchPromptDeps
+): (connection: BackgroundServiceConnection, meta?: { activeRuns?: number }) => Promise<VersionMismatchPromptOutcome> {
   let spent = false
-  return async (connection) => {
+  return async (connection, meta) => {
     if (!deps.daemonMode) return { status: 'not-shown', reason: 'daemon-mode-disabled' }
     if (connection.state !== 'version-mismatch') return { status: 'not-shown', reason: 'not-mismatch' }
     if (spent) return { status: 'not-shown', reason: 'already-shown' }
@@ -41,12 +51,13 @@ export function createVersionMismatchPrompt(deps: VersionMismatchPromptDeps): (c
     // after any answer, never shows another one.
     spent = true
     if (deps.actionInProgress()) return { status: 'not-shown', reason: 'action-in-progress' }
-    if (await deps.ask(versionMismatchPrompt(connection.running, connection.expected)) !== MISMATCH_RESTART_BUTTON) {
+    const idleAutoRestart = Boolean(deps.autoRestartIdle && meta?.activeRuns === 0 && deps.restartIdle)
+    if (!idleAutoRestart && await deps.ask(versionMismatchPrompt(connection.running, connection.expected)) !== MISMATCH_RESTART_BUTTON) {
       return { status: 'later' }
     }
     let result: BackgroundServiceActionResult
     try {
-      result = await deps.restart()
+      result = idleAutoRestart ? await deps.restartIdle!() : await deps.restart()
     } catch {
       // The settings channel would surface a throw to its caller; here nobody else
       // would see it, so it is reported like any other failure.

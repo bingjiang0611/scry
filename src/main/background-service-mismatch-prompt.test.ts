@@ -11,6 +11,7 @@ const mismatch: BackgroundServiceConnection = { state: 'version-mismatch', runni
 
 interface Script {
   daemonMode?: boolean
+  autoRestartIdle?: boolean
   answers?: number[]
   restart?: BackgroundServiceActionResult | 'throws'
   busy?: boolean
@@ -20,19 +21,22 @@ function harness(script: Script = {}) {
   const asked: BackgroundServicePrompt[] = []
   const failures: BackgroundServicePrompt[] = []
   let restarts = 0
+  let idleRestarts = 0
   const answers = [...(script.answers ?? [MISMATCH_RESTART_BUTTON])]
+  const runRestart = async () => {
+    if (script.restart === 'throws') throw new Error('boom')
+    return script.restart ?? { status: 'done' }
+  }
   const deps: VersionMismatchPromptDeps = {
     daemonMode: script.daemonMode ?? true,
+    ...(script.autoRestartIdle ? { autoRestartIdle: true } : {}),
     ask: async (prompt) => { asked.push(prompt); return answers.shift() ?? MISMATCH_LATER_BUTTON },
-    restart: async () => {
-      restarts += 1
-      if (script.restart === 'throws') throw new Error('boom')
-      return script.restart ?? { status: 'done' }
-    },
+    restart: async () => { restarts += 1; return await runRestart() },
+    restartIdle: async () => { idleRestarts += 1; return await runRestart() },
     reportFailure: async (prompt) => { failures.push(prompt) },
     actionInProgress: () => script.busy ?? false
   }
-  return { prompt: createVersionMismatchPrompt(deps), asked, failures, restarts: () => restarts }
+  return { prompt: createVersionMismatchPrompt(deps), asked, failures, restarts: () => restarts, idleRestarts: () => idleRestarts }
 }
 
 describe('version mismatch prompt', () => {
@@ -109,6 +113,33 @@ describe('version mismatch prompt', () => {
     await expect(busy.prompt(mismatch)).resolves.toEqual({ status: 'not-shown', reason: 'already-shown' })
     expect(busy.asked).toEqual([])
     expect(busy.restarts()).toBe(0)
+  })
+
+  it('auto-restarts without blocking dialog ONLY in dev builds with proven 0 active runs; packaged builds and busy/unknown runs still prompt (W15)', async () => {
+    // Dev build + proven 0 active runs -> auto-restarts silently via restartIdle without popping a dialog.
+    const devIdle = harness({ autoRestartIdle: true })
+    await expect(devIdle.prompt(mismatch, { activeRuns: 0 })).resolves.toEqual({ status: 'restart', result: { status: 'done' } })
+    expect(devIdle.asked).toEqual([])
+    expect(devIdle.idleRestarts()).toBe(1)
+    expect(devIdle.restarts()).toBe(0)
+
+    // Dev build + active runs > 0 -> must still prompt, never kill active runs silently.
+    const devBusy = harness({ autoRestartIdle: true, answers: [MISMATCH_LATER_BUTTON] })
+    await expect(devBusy.prompt(mismatch, { activeRuns: 2 })).resolves.toEqual({ status: 'later' })
+    expect(devBusy.asked).toHaveLength(1)
+    expect(devBusy.idleRestarts()).toBe(0)
+
+    // Dev build + unknown activeRuns (older daemon) -> fail closed, still prompt.
+    const devUnknown = harness({ autoRestartIdle: true, answers: [MISMATCH_LATER_BUTTON] })
+    await expect(devUnknown.prompt(mismatch)).resolves.toEqual({ status: 'later' })
+    expect(devUnknown.asked).toHaveLength(1)
+    expect(devUnknown.idleRestarts()).toBe(0)
+
+    // Packaged build (autoRestartIdle false/omitted) + 0 active runs -> NEVER auto-restarts silently.
+    const packagedIdle = harness({ autoRestartIdle: false, answers: [MISMATCH_LATER_BUTTON] })
+    await expect(packagedIdle.prompt(mismatch, { activeRuns: 0 })).resolves.toEqual({ status: 'later' })
+    expect(packagedIdle.asked).toHaveLength(1)
+    expect(packagedIdle.idleRestarts()).toBe(0)
   })
 })
 
