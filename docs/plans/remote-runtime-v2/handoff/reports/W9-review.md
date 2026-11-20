@@ -1,4 +1,4 @@
-结论：需修改（4 项阻塞、10 项应修；默认路径安全）
+结论：第二轮需修改（原 4 项阻塞已修复；新增 2 项阻塞）
 
 # W9 核验（核验方，2026-11-20，提交 `86709fbc`…`1bd2192b`）
 
@@ -73,3 +73,43 @@ macOS 上 S1、fullfsync 的数据和预算 P95 0.574 ms，Linux 无法复现，
 - fullfsync 保持「关 + checkpoint_fullfsync 开」。
 - 大正文的 8 ms 门禁只算 SQLite 提交，外部正文的 fsync 单列记录。
 - S3：开发构建和测试实例先改为默认走 daemon；逃生开关再保留一个发布版本，删除放到下一版。
+
+
+## 复核（第二轮，2026-11-20，提交 `1db3ae9a`…`89560972`）
+
+**原 4 项阻塞都已修复**，并且都由真实 daemon 装配路径上的测试覆盖。核验方逐项做了变异：去掉压缩、去掉 TTL 检查、去掉 gate 释放后的 re-pump、去掉重试计时器、去掉证据接线、去掉跳过 `recoverAll`，测试都会失败。
+
+**默认路径不受影响**：`off` 模式和进程内模式没有行为变化。唯一的例外是 `host-controller-execution.ts:244` 释放 gate 后无条件 re-pump，这个操作本身是幂等的，无害，但应该只在开启编排时执行。
+
+**应修项进展**：
+- 应修 2、3、5、8 和 10a–e 已修复。
+- 应修 8 的 Linux 复测：解析时主线程最大停顿 4.2–8.3 ms，满足 ≤ 50 ms。
+
+### 新阻塞
+
+1. **N1：旧台账镜像会丢事件，丢失后下次重启起不来（已复现）。**
+   - 队列满 2,048 时丢掉最旧的事件（`legacy-mirror.ts:68-70`）；写入连续失败 5 次时丢掉队头（`:150-153`）。
+   - 没有从 outbox 重放。重启时，`SessionLedger` 要求 seq 连续，于是抛出 `ledger_log_corrupt`，`on` 模式无法启动。
+   - 修法：不能丢事件。写不出时要么封住（fail closed），要么立即用内存台账做一次压缩，写出完整快照。
+   - `#drain` 同步执行，不让出线程，2,048 条约占 600 ms 主线程，要分段让出。
+2. **N2：补导入期间暂停 WAL 检查点，导致 WAL 无限增长（`on` 与 `shadow` 都受影响）。**
+   - 原因：`legacy-import.ts:412` 暂停了检查点，同时 `wal_autocheckpoint=0`。
+   - Linux 实测（2 万个 run）：暂停时 WAL 涨到 2.58 GB，之后一次检查点卡住主线程 379 ms；不暂停时 WAL 只有 107 MB。
+   - 10 万个 run 的数据集会把磁盘写满，触发封住（`orchestration_write_indeterminate`）。
+   - 报告里「补导入最大停顿 ≤ 34 ms」靠的就是这个暂停，必须改：可以按 WAL 大小或批次数在批次之间做 PASSIVE 检查点，或者把检查点放进 worker，并给 WAL 设上限。
+
+### 应修
+
+1. **trust gate**：派发前的复核与现有门禁的核心检查相同（`buildMcpExecutionSnapshot` 对应 `ensureMcpExecutionAuthorized`），但有三处偏差，要对齐，或者复用现有的准入函数：
+   - 包含了 `pi`，而现有门禁跳过 `pi`。
+   - 环境取自 `options.env`，而不是 `shellEnv()`。
+   - 不比对准备阶段的指纹，而且每次派发都在首 token 之前同步计算一次可执行文件的 SHA-256。
+2. **性能场景口径不一致**：场景标注的是 `real-hooks+2-commits`（`performance-orchestration-scenario.ts:51`），预算里写的是 `2-commits`（`performance-budgets.json:221`），比对时会报 methodology 不一致；在 main 基线上，跳过时会报 counter coverage 不一致。
+3. **`performance-abab.test.ts` 的 2 个失败由 `a74fe125` 引入**：`p95Ms: 8` 比测试夹具的 10 ms 样本还小。要修好测试或夹具，**不得放宽 8 ms 门限**。
+4. **回答被拒后仍然送达**：`engine.answerQuestion` 返回 `rejected` 时被忽略，回答照样投递（fail-open），应改为 fail-closed。
+5. **两本账对账的小缺口**：
+   - `host-process.ts:203` 用 `=== 'on'` 判断，但 `mode.ts` 会先去空格、转小写，所以 ` ON` 这样的值会接上权威模式，却不会跳过 `recoverAll`。要统一使用 `parseOrchestrationMode`。
+   - 对账在决定 G 的观察者安装之前就运行了，被对账的轮次不会写 `turn.record_delivery`。
+   - 「pending 轮次没有对应的 orch run，就记为 `not_sent`」：延后导入还没完成时，可能误判（未复现，请确认）。
+6. 导入的旧 run，`ownerActor` 为 `'system'`，仍会退回使用 `input.actor`，需要写明或处理。
+7. 释放 gate 后的 re-pump 改为只在开启编排时执行。
