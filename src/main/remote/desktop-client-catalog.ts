@@ -62,12 +62,10 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
       if (page === MAX_PAGES - 1) fail('catalog_too_large')
     }
     let hostAdminNoticeItems: HostAdminNotice[] | undefined
-    if (snapshot.hostAdminNoticeItems !== undefined) {
-      if (!Array.isArray(snapshot.hostAdminNoticeItems) || snapshot.hostAdminNoticeItems.length > 32 ||
-          !snapshot.hostAdminNoticeItems.every((entry) => isHostAdminNotice(entry))) {
-        fail('invalid_catalog_response')
-      }
-      hostAdminNoticeItems = snapshot.hostAdminNoticeItems
+    if (Array.isArray(snapshot.hostAdminNoticeItems)) {
+      // Forward-compatible: drop unknown/malformed notice items and cap to 32 rather than failing the whole catalog read.
+      const valid = snapshot.hostAdminNoticeItems.filter((entry): entry is HostAdminNotice => isHostAdminNotice(entry)).slice(0, 32)
+      if (valid.length > 0) hostAdminNoticeItems = valid
     }
     const catalog: DesktopRemoteCatalog = {
       projects: rawProjects.map((project) => validateProject(project)),

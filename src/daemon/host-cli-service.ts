@@ -6,6 +6,8 @@ import {
   stopBackgroundService,
   type BackgroundServiceStopDeps
 } from '../main/background-service-stop'
+import { daemonModeEnabled } from '../main/daemon-channel-gate'
+import { applyDaemonModeDefault } from '../main/daemon-mode-default'
 import { createLoginStartManager, type LoginStartManager } from './login-start'
 import { callHostAdmin } from './host-admin-client'
 import { resolveHostCliTarget } from './host-cli-paths'
@@ -44,13 +46,41 @@ export function getLoginStartManager(ctx: HostCliServiceContext): LoginStartMana
     homeDir: ctx.homeDir,
     env: ctx.env
   })
+  const resolvedEnv: NodeJS.ProcessEnv = { ...ctx.env }
+  applyDaemonModeDefault(resolvedEnv, { isPackaged: target.isPackaged })
   return createLoginStartManager({
-    daemonMode: true,
+    daemonMode: daemonModeEnabled(resolvedEnv),
     target,
     platform: ctx.platform,
     homeDir: ctx.homeDir,
     env: ctx.env
   })
+}
+
+export async function reportUnavailableAdminSocket(
+  ctx: HostCliServiceContext,
+  options: { jsonStatus?: boolean } = {}
+): Promise<number> {
+  const prepared = await prepareBackgroundServiceStop(getStopDeps(ctx))
+  if (prepared.status === 'running') {
+    if (options.jsonStatus) {
+      ctx.stdout(`${JSON.stringify({
+        daemon: { running: true, pid: prepared.holder.pid },
+        hostCliEnabled: false,
+        error: 'host_cli_experimental_disabled'
+      }, null, 2)}\n`)
+    } else {
+      ctx.stderr(`后台服务正在运行（pid ${prepared.holder.pid}），但命令行管理功能未开启（host-admin.sock 不可用；请确认后台服务已启用 SCRY_EXPERIMENTAL_HOST_CLI=1）。\n`)
+    }
+    return EXIT_APPROVAL_DISABLED
+  }
+  if (prepared.status === 'refused') {
+    ctx.stderr(`无法确认后台服务状态（${prepared.reason}）。\n`)
+    return EXIT_USAGE_OR_REFUSED
+  }
+  const installed = getLoginStartManager(ctx).canLaunchViaService()
+  ctx.stderr(daemonNotRunningHint(ctx, installed))
+  return EXIT_DAEMON_NOT_RUNNING
 }
 
 export function getStopDeps(ctx: HostCliServiceContext): BackgroundServiceStopDeps {

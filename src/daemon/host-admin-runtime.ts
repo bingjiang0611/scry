@@ -31,6 +31,10 @@ function hasOnlyKeys(args: Record<string, unknown>, allowed: readonly string[]):
   return Object.keys(args).every((k) => allowed.includes(k))
 }
 
+function sanitizeLogToken(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.:-]/g, (ch) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`)
+}
+
 function readLaunchedBy(env: NodeJS.ProcessEnv): BackgroundServiceLaunchedBy | undefined {
   const raw = env.SCRY_DAEMON_LAUNCHED_BY
   return raw === 'app' || raw === 'service' ? raw : undefined
@@ -51,13 +55,14 @@ export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): P
   const handlers = pairingChannelHandlers({ host: deps.remoteHost })
 
   const handle = async (method: string, args: Record<string, unknown>): Promise<HostAdminReply> => {
+    const safeMethod = sanitizeLogToken(method)
     if (!READ_METHODS.has(method) && !TIGHTEN_METHODS.has(method) && !APPROVAL_METHODS.has(method)) {
-      deps.log(`host-admin method=${method} result=unsupported_method`)
+      deps.log(`host-admin method=${safeMethod} result=unsupported_method`)
       return { ok: false, error: 'unsupported_method' }
     }
 
     if (APPROVAL_METHODS.has(method) && !deps.hostAdmin.isCliApprovalEnabled()) {
-      deps.log(`host-admin method=${method} result=host_cli_approval_disabled`)
+      deps.log(`host-admin method=${safeMethod} result=host_cli_approval_disabled`)
       return { ok: false, error: 'host_cli_approval_disabled' }
     }
 
@@ -211,14 +216,19 @@ export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): P
       return { ok: true, result: { disabled: true } }
     } catch (error) {
       const code = mapHostAdminError(error)
-      deps.log(`host-admin method=${method} result=${code}`)
+      deps.log(`host-admin method=${safeMethod} result=${code}`)
       return { ok: false, error: code }
     }
   }
 
-  return await openHostAdminSocket({
-    daemonStateDirectory: deps.daemonStateDirectory,
-    daemonIdentity: deps.identity,
-    handle
-  })
+  try {
+    return await openHostAdminSocket({
+      daemonStateDirectory: deps.daemonStateDirectory,
+      daemonIdentity: deps.identity,
+      handle
+    })
+  } catch (error) {
+    deps.log(`host-admin.disabled reason=${mapHostAdminError(error)}`)
+    return undefined
+  }
 }

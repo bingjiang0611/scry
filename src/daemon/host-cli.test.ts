@@ -264,4 +264,80 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       expect(wrapper).toContain(v)
     }
   })
+
+  it('reports feature disabled (not daemon_not_running) when daemon holds daemon.lock with flag off, strips C0/C1 control chars in deviceLabel, and respects SCRY_HOST_DAEMON=0 in login-start (W11 review #7 + small items)', async () => {
+    const root = makeShortRoot()
+    const userDataDir = join(root, 'userData')
+    const stateDir = join(userDataDir, 'daemon')
+    mkdirSync(stateDir, { recursive: true })
+    const row: ProcessRow = {
+      pid: 65432,
+      ppid: 1,
+      status: 'S',
+      startedAt: 'Fri Nov 20 11:00:00 2026',
+      command: '/Applications/Scry.app/Contents/MacOS/Scry out/main/daemon.js'
+    }
+    writeFileSync(join(stateDir, 'daemon.lock'), JSON.stringify({
+      pid: row.pid,
+      startedAt: row.startedAt,
+      identityKey: processIdentityKey(row)
+    }))
+
+    const stopDeps = {
+      paths: { stateDirectory: stateDir, userDataDir },
+      readIdentity: async (pid: number) => (pid === 65432 ? row : undefined)
+    }
+
+    // 1. status text mode: daemon running without admin socket -> exit 4 + clear feature-disabled hint, NOT daemon_not_running
+    const stText = makeIo({ userDataDir, env: {}, stopDeps })
+    expect(await runHostCli(['status'], stText.io)).toBe(4)
+    expect(stText.err()).toContain('功能未开启')
+    expect(stText.err()).not.toContain('后台服务未运行')
+
+    // 2. status --json mode: honest running=true & hostCliEnabled=false
+    const stJson = makeIo({ userDataDir, env: {}, stopDeps })
+    expect(await runHostCli(['status', '--json'], stJson.io)).toBe(4)
+    expect(JSON.parse(stJson.out())).toMatchObject({
+      daemon: { running: true, pid: 65432 },
+      hostCliEnabled: false,
+      error: 'host_cli_experimental_disabled'
+    })
+
+    // 3. CLI login-start respects SCRY_HOST_DAEMON=0 (does not hardcode daemonMode: true)
+    const lsOff = makeIo({
+      userDataDir,
+      executable: '/Applications/Scry.app/Contents/MacOS/Scry',
+      platform: 'darwin',
+      homeDir: root,
+      env: { SCRY_HOST_DAEMON: '0' }
+    })
+    expect(await runHostCli(['login-start', 'status'], lsOff.io)).toBe(0)
+    expect(JSON.parse(lsOff.out())).toEqual({ state: 'unavailable', reason: 'daemon_mode_disabled' })
+
+    // 4. C0 & C1 control characters are stripped when printing deviceLabel
+    const { formatDeviceList, formatPendingList } = await import('./host-cli-format')
+    const dirtyLabel = 'Phone\x1b[31mRed\u009b2J\r\nFake'
+    const devText = formatDeviceList([{
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      deviceLabel: dirtyLabel,
+      confirmedAt: 1,
+      expiresAt: 2,
+      revoked: false,
+      approvedVia: 'host_cli'
+    }])
+    expect(devText).not.toMatch(/[\u0000-\u001f\u007f-\u009f](?!$)/)
+    expect(devText).not.toContain('\x1b')
+    expect(devText).not.toContain('\u009b')
+    expect(devText.trim().split('\n')).toHaveLength(1)
+
+    const pendText = formatPendingList([{
+      pairingId: '22222222-2222-4222-8222-222222222222',
+      state: 'awaiting_local_confirmation',
+      expiresAt: Date.now() + 60_000,
+      deviceLabel: dirtyLabel,
+      publicKeySHA256: 'a'.repeat(64)
+    }], Date.now())
+    expect(pendText).not.toContain('\x1b')
+    expect(pendText).not.toContain('\u009b')
+  })
 })

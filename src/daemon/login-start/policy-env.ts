@@ -17,6 +17,7 @@ export const LOGIN_START_POLICY_ENV_KEYS = [
   'SCRY_REMOTE_RELAY_ENABLED',
   'SCRY_DISABLED_PROVIDERS',
   'SCRY_EXPERIMENTAL_PROVIDERS',
+  'SCRY_EXPERIMENTAL_HOST_CLI',
   'SCRY_RUN_CONTROLS',
   'SCRY_PROVIDER_MANIFEST_URL'
 ] as const
@@ -46,6 +47,7 @@ function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string |
   switch (key) {
     case 'SCRY_REMOTE_HOST':
     case 'SCRY_REMOTE_RELAY_ENABLED':
+    case 'SCRY_EXPERIMENTAL_HOST_CLI':
     case 'SCRY_RUN_CONTROLS':
       return raw === '0' || raw === '1' ? raw : undefined
     case 'SCRY_REMOTE_PERMISSION_MODE':

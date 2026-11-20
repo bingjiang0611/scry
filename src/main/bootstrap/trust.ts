@@ -6,7 +6,13 @@ import { createOpenCodePluginGrantStore, type OpenCodeProjectPluginAuthorization
 import { readOpenCodeProjectProjection } from '../providers/opencode-server'
 import { inspectCommitHookBundle, resolveGrantedCommitHookCapability, createCommitHookTrustStore } from '../commit-hook-trust'
 import { resolveRecorderEnablement } from '../../core/turn-recorder/config'
-import { buildMcpExecutionSnapshot, type McpExecutionOperation, type McpExecutionSnapshot, McpExecutionTrust } from '../mcp-execution-trust'
+import {
+  buildMcpExecutionSnapshot,
+  buildMcpExecutionSnapshotAsync,
+  type McpExecutionOperation,
+  type McpExecutionSnapshot,
+  McpExecutionTrust
+} from '../mcp-execution-trust'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderContext } from '../../shared/provider'
 import type { AuthorizedMcpExecution } from '../providers/types'
@@ -195,7 +201,7 @@ export async function ensureMcpExecutionAuthorized(
   operation: McpExecutionOperation,
   targetId?: string
 ): Promise<McpExecutionSnapshot | null> {
-  const build = (): McpExecutionSnapshot => buildMcpExecutionSnapshot({
+  const snapshot = await buildMcpExecutionSnapshotAsync({
     providerId: context.providerId,
     cwd: context.cwd,
     homeDir: homeDir,
@@ -203,7 +209,6 @@ export async function ensureMcpExecutionAuthorized(
     env: shellEnv(),
     selectedTargetId: targetId
   })
-  const snapshot = build()
   if (snapshot.errors.length > 0) {
     throw new Error(`MCP 配置无法安全执行：${snapshot.errors.join('；')}`)
   }
@@ -213,16 +218,9 @@ export async function ensureMcpExecutionAuthorized(
   if (targetId && selected.length !== 1) throw new Error(`找不到精确 MCP 配置目标：${targetId}`)
   if (selected.length === 0) return operation === 'run' ? null : snapshot
 
-  // 仓库 MCP 默认自动授权全部选中目标；旧的部分授权不会继续限制当前配置。
-  // 配置、可执行文件或指纹变化仍会在启动边界重新校验。
-  const executionTargetIds = undefined
-
-  const verified = build()
-  if (verified.errors.length > 0 || verified.fingerprint !== snapshot.fingerprint) {
-    throw new Error('MCP 配置在授权后发生变化，已拒绝执行')
-  }
-  mcpExecutionTrust.grant(operation, verified, executionTargetIds)
-  return executionTargetIds === undefined ? verified : { ...verified, executionTargetIds }
+  // 仓库 MCP 默认自动授权全部选中目标；配置、可执行文件或指纹变化会在启动边界重新校验。
+  mcpExecutionTrust.grant(operation, snapshot, undefined)
+  return snapshot
 }
 
 export function authorizedMcpExecution(snapshot: McpExecutionSnapshot | null): AuthorizedMcpExecution | undefined {
