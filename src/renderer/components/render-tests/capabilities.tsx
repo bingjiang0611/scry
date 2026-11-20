@@ -1,8 +1,10 @@
 import type { ComponentProps } from 'react'
 import * as shared from './shared'
 import { McpTrustPanel } from '../McpTrustPanel'
+import { CliPicker } from '../CliPicker'
+import { ToolItem } from '../ChatTurnToolItem'
 import { PROVIDER_BRAND_MARKS } from '../../provider-brand-marks'
-const { describe, it, expect, renderToStaticMarkup, CapabilitiesModal } = shared
+const { describe, it, expect, renderToStaticMarkup, CapabilitiesModal, AssistantTurn, ev } = shared
 
 describe('CapabilitiesModal 精简能力页', () => {
   const sharedProps: ComponentProps<typeof CapabilitiesModal> = {
@@ -38,12 +40,115 @@ describe('CapabilitiesModal 精简能力页', () => {
     expect(idle).not.toContain('取消检测')
   })
 
-  it('Antigravity 中性字母图标与 MCP 面板用户级来源展示', () => {
+  it('Antigravity 中性字母图标、D4 账号未验证、S5 设计文案与 MCP 残余风险展示', () => {
     expect(PROVIDER_BRAND_MARKS.antigravity.paths.length).toBeGreaterThan(0)
     const html = renderToStaticMarkup(<McpTrustPanel runtimeProvider="antigravity_acp" />)
     expect(html).toContain('Antigravity')
     expect(html).toContain('~/.gemini/config/mcp_config.json')
     expect(html).toContain('~/.gemini/config/hooks.json')
+    expect(html).toContain('账号未验证')
+    expect(html).toContain('TOCTOU')
+    expect(html).toContain('Google')
+    expect(html).toContain('/goal')
+
+    const pickerHtml = renderToStaticMarkup(
+      <CliPicker
+        open
+        agents={[{
+          id: 'antigravity',
+          name: 'Antigravity',
+          bin: 'agy',
+          path: '/usr/local/bin/agy',
+          version: '1.5.13',
+          accountNote: '账号未验证'
+        }]}
+        selectedId="antigravity"
+        onSelect={() => {}}
+      />
+    )
+    expect(pickerHtml).toContain('账号未验证')
+    expect(pickerHtml).toContain('Google')
+    expect(pickerHtml).toContain('/goal')
+  })
+
+  it('Antigravity S10 用量覆盖/模型未观测、D11 用户规则提示与 D12 由 hook 放行展示', () => {
+    const partialTurn: shared.Turn = {
+      runId: 'run-agy-ui-1',
+      userText: 'check',
+      done: true,
+      items: [
+        ev({
+          id: 'agy-tool-1',
+          kind: 'tool',
+          stage: 'tool:run_command',
+          tool: 'run_command',
+          runtimeProvider: 'antigravity_acp',
+          runtimeMetadata: { approvalSource: 'hook', approvalLabel: '由 hook 放行' }
+        }),
+        ev({
+          id: 'agy-result-1',
+          kind: 'harness',
+          stage: 'result',
+          providerId: 'antigravity',
+          runtimeProvider: 'antigravity_acp',
+          tokensIn: 120,
+          tokensOut: 40,
+          runtimeMetadata: {
+            usageCoverage: 'partial',
+            usageCoverageReason: '本轮包含 invoke_subagent 子 Agent 调用，Antigravity ACP 不单列子 Agent 用量',
+            modelStatus: 'unobserved',
+            modelOmissionReason: 'Antigravity ACP PromptResponse 不上报实际应答模型',
+            userAllowNotice: 'agy 用户级规则会自动放行：Bash(git status)'
+          }
+        })
+      ]
+    }
+    const turnHtml = renderToStaticMarkup(
+      <AssistantTurn turn={partialTurn} selectedId={null} onSelect={() => {}} />
+    )
+    expect(turnHtml).toContain('Antigravity')
+    expect(turnHtml).not.toContain('Antigravity_acp')
+    expect(turnHtml).toContain('部分用量')
+    expect(turnHtml).toContain('模型未观测')
+    expect(turnHtml).toContain('agy 用户级规则会自动放行：Bash(git status)')
+
+    const unavailableTurn: shared.Turn = {
+      runId: 'run-agy-ui-2',
+      userText: 'check2',
+      done: true,
+      items: [
+        ev({
+          id: 'agy-result-2',
+          kind: 'harness',
+          stage: 'result',
+          providerId: 'antigravity',
+          runtimeProvider: 'antigravity_acp',
+          runtimeMetadata: {
+            usageCoverage: 'unavailable',
+            usageCoverageReason: 'Antigravity ACP PromptResponse 未返回 usage 字段',
+            modelStatus: 'unobserved',
+            modelOmissionReason: 'Antigravity ACP PromptResponse 不上报实际应答模型'
+          }
+        })
+      ]
+    }
+    const unavailableHtml = renderToStaticMarkup(
+      <AssistantTurn turn={unavailableTurn} selectedId={null} onSelect={() => {}} />
+    )
+    expect(unavailableHtml).toContain('用量不可用')
+    expect(unavailableHtml).toContain('模型未观测')
+
+    const toolHtml = renderToStaticMarkup(
+      <ToolItem
+        ev={partialTurn.items[0]}
+        selected={false}
+        onSelect={() => {}}
+        maxDur={100}
+        turnDone
+      />
+    )
+    expect(toolHtml).toContain('由 hook 放行')
+    expect(toolHtml).not.toContain('权限确认')
   })
 
   it('Skills 默认显示全部来源，只保留名称和描述', () => {

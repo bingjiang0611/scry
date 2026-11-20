@@ -186,6 +186,8 @@ export async function describeAntigravity(options: {
     path,
     version: probe.version,
     capabilities: { skills: 'read', mcp: 'read', commands: 'read', account: 'none' },
+    // D4: macOS keychain mode exposes no non-secret account identity, so surface "账号未验证".
+    accountNote: '账号未验证',
     // Login status is verified on first catalog read or send, never claimed ready from binary alone.
     health: { state: 'unknown', transport: ANTIGRAVITY_TRANSPORT }
   }

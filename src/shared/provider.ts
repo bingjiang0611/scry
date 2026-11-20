@@ -129,6 +129,8 @@ export interface ProviderDescriptor {
    */
   unavailableReason?: string
   capabilities: Record<ProviderCapability, CapabilityMode>
+  /** 账号验证状态说明（如 Antigravity 钥匙串模式标「账号未验证」）。 */
+  accountNote?: string
   health?: ProviderHealth
   /** CLI 版本兼容性建议（声明性策略，非实测）；缺省表示未评估。 */
   compatibility?: ProviderCompatibilityAdvisory

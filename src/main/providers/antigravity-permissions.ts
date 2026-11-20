@@ -18,7 +18,7 @@ export const ANTIGRAVITY_PERMISSION_OPTIONS: readonly AgentPermissionOption[] = 
   {
     id: 'default',
     label: '默认审批',
-    description: '由 Antigravity 对文件写入和命令执行逐次询问；若用户全局 settings.json 抬高了权限，将拒绝启动'
+    description: '由 Antigravity 对文件写入和命令执行逐次询问；全局整体提权将拒绝启动，用户级具体命令放行规则会在记录与界面标明。每轮结束时后台子 Agent 与 /goal 会随进程终止。'
   },
   {
     id: 'auto_accept_edits',

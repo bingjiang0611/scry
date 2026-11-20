@@ -13,7 +13,8 @@ import { Icon } from './primitives/Icon'
 import { FilesSummary } from './ChatTurnTools'
 import { HooksSummary } from './ChatTurnHooks'
 import { ThinkingBlock } from './ChatTurnShared'
-import { TurnFooter, TerminationNotice, ToolTerminationNotice } from './ChatTurnFooter'
+import { TurnFooter, TerminationNotice, ToolTerminationNotice, UserAllowRulesNotice } from './ChatTurnFooter'
+import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { resultTokenTotal, fmtTok } from '../format'
 import type { TurnHookPhase } from './ChatTurnHookData'
 import { Button } from './primitives/Button'
@@ -65,6 +66,14 @@ export function AssistantTurnView({
     && classifyRunTermination({ message: turn.error }) !== 'input_context_overflow'
     ? piRuntimeCopy.qoderAccountChangedHint(turn.errorHint)
     : turn.errorHint
+  const resultMeta = result?.runtimeMetadata as Record<string, unknown> | undefined
+  const usageCoverage = resultMeta?.usageCoverage === 'partial' || resultMeta?.usageCoverage === 'unavailable'
+    ? resultMeta.usageCoverage
+    : undefined
+  const usageCoverageReason = typeof resultMeta?.usageCoverageReason === 'string' ? resultMeta.usageCoverageReason : undefined
+  const userAllowNotice = typeof resultMeta?.userAllowNotice === 'string' && resultMeta.userAllowNotice
+    ? resultMeta.userAllowNotice
+    : undefined
   return (
     <div className="turn-assistant">
       <div className="who">
@@ -77,8 +86,9 @@ export function AssistantTurnView({
           </span>
         ) : (
           <span className="mini">
-            <span className="m cost">
-              tok <b>{result ? fmtTok(resultTokenTotal(result)) : '—'}</b>
+            <span className="m cost" title={usageCoverageReason}>
+              tok <b>{usageCoverage === 'unavailable' ? '—' : result ? fmtTok(resultTokenTotal(result)) : '—'}</b>
+              {usageCoverage === 'partial' ? ` · ${ANTIGRAVITY_COPY.usagePartial}` : ''}
             </span>
             <span className="m">
               tools <b>{toolN}</b>
@@ -152,6 +162,9 @@ export function AssistantTurnView({
       )}
       {turn.done && result?.terminationReason && (
         <TerminationNotice reason={result.terminationReason} />
+      )}
+      {turn.done && userAllowNotice && (
+        <UserAllowRulesNotice notice={userAllowNotice} />
       )}
       {turn.error && (
         <div className="errline">

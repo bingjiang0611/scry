@@ -135,6 +135,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
     expect(okDesc.available).toBe(true)
     expect(okDesc.version).toBe('1.5.12')
     expect(okDesc.health?.state).toBe('unknown')
+    expect(okDesc.accountNote).toBe('账号未验证')
   })
 
   it('forceKillAntigravityProcess 按身份清理根进程与独立 PGID 后代进程', async () => {

@@ -4,6 +4,7 @@ import type { RuntimeProvider } from '@shared/runtime'
 import type { McpMeta } from '../env'
 import type { Finding, InventoryTarget, ScanReport, Severity } from '../../cli/mcpguard-core'
 import { isMcpGuardReport } from '@shared/mcpguard-report'
+import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { Icon } from './primitives/Icon'
 import { Notice } from './primitives/Notice'
 
@@ -304,9 +305,12 @@ export function McpTrustPanel({
         )}
         {mcpLive.length === 0 && <div className="dim pad2">{runtimeName} 暂无逐项 MCP live 状态；可发起会话或刷新后重试。</div>}
         {runtimeProvider === 'antigravity_acp' && (
-          <div className="psrc">
-            用户级来源：~/.gemini/config/mcp_config.json 与 ~/.gemini/config/hooks.json；启动前会校验工作区配置指纹。
-          </div>
+          <>
+            <div className="psrc">{ANTIGRAVITY_COPY.residualRiskNotice}</div>
+            <div className="psrc">{ANTIGRAVITY_COPY.accountUnverifiedDetail}</div>
+            <div className="psrc">{ANTIGRAVITY_COPY.tosNotice}</div>
+            <div className="psrc">{ANTIGRAVITY_COPY.processScopeNotice}</div>
+          </>
         )}
         {configuredButSilent.length > 0 && (
           <div className="psrc">配置中启用但未被当前运行时 live 捕获：{configuredButSilent.slice(0, 4).map((m) => m.name).join(' · ')}</div>
