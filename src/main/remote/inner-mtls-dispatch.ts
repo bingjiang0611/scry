@@ -67,7 +67,8 @@ export async function dispatchRemoteRequest(
   parsed: unknown,
   executionTargets?: ExecutionTargetRouter,
   localEndpoint?: LocalEndpointHandlers,
-  lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
+  lanAdvertisement: () => LanAdvertisement | undefined = () => undefined,
+  connectionSignal?: AbortSignal
 ): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
@@ -182,7 +183,7 @@ export async function dispatchRemoteRequest(
     }
     if (request.op === 'executionTargetWork') {
       // The primary App's long poll for forwarded execution-target calls (W10); absent on the network endpoint.
-      return await handleExecutionTargetWork(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint)
+      return await handleExecutionTargetWork(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint, connectionSignal)
     }
     if (request.op === 'executionTargetResult') {
       // The primary App's reply to a forwarded execution-target call (W10); absent on the network endpoint.

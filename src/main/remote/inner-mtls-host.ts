@@ -133,7 +133,9 @@ export class InnerMtlsHost {
     const peerSockets = this.#peers.get(fingerprint) ?? new Set<TLSSocket>()
     peerSockets.add(socket)
     this.#peers.set(fingerprint, peerSockets)
+    const connAbort = new AbortController()
     socket.once('close', () => {
+      connAbort.abort()
       this.#connections.delete(socket)
       peerSockets.delete(socket)
       if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) {
@@ -144,7 +146,7 @@ export class InnerMtlsHost {
     serveInnerConnection(socket, {
       controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,
       preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
-      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement()),
+      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal),
       timing: (parsed) => requestTiming(parsed)
     })
   }

@@ -273,40 +273,15 @@ final class ExecutionTargetCoordinator {
       discoveryIssue = recoveryUnavailable ? .transport(ConnectionCopy.targetMetadataUnavailable) : nil
     } catch {
       guard !Task.isCancelled, connections.load() == connection else { return }
-      if case G0Transport.RunError.host(code: "execution_targets_unavailable") = error {
-        // Older daemon hosts omit ExecutionTargetRouter and answer this code on
-        // discovery. Local sessions still work normally: mark forwarding unsupported
-        // without pinning a misleading yellow warning banner in the sidebar.
-        let retained = discoveredTargets.filter { old in
-          store(for: old).hasUnsentMessages || store(for: old).hasUnresolvedRun
-        }
+      switch ExecutionTargetErrorPolicy.classifyDiscoveryError(error) {
+      case .unavailable:
+        let retained = discoveredTargets.filter { store(for: $0).hasUnsentMessages || store(for: $0).hasUnresolvedRun }
         discoveredTargets = retained
         forwardingSupported = false
-        for scope in retained {
-          let store = store(for: scope)
-          store.updateTargetAvailability(false)
-          store.stopLiveRuns()
-        }
+        for scope in retained { let s = store(for: scope); s.updateTargetAvailability(false); s.stopLiveRuns() }
         discoveryIssue = recoveryUnavailable ? .transport(ConnectionCopy.targetMetadataUnavailable) : nil
-        return
-      }
-      let detail: String
-      if case G0Transport.RunError.host(code: "unknown_op") = error {
-        detail = ConnectionCopy.forwardingUnsupported
-      } else {
-        detail = RemoteRunStore.describe(error)
-      }
-      let diagnostic = ConnectionCopy.targetDiscoveryDiagnostic(detail)
-      if case let G0Transport.RunError.host(code) = error {
-        if ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code) {
-          discoveryIssue = .authorization(diagnostic)
-        } else if code == "execution_target_gateway_offline" {
-          discoveryIssue = .transport(diagnostic, retryable: false)
-        } else {
-          discoveryIssue = .protocolMismatch(diagnostic)
-        }
-      } else {
-        discoveryIssue = .transport(diagnostic, retryable: RelayTransportError.permitsReadRecovery(error))
+      case let .issue(failure):
+        discoveryIssue = failure
       }
       // A failed discovery cannot redirect an existing conversation/new draft.
     }
