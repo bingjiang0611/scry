@@ -80,8 +80,9 @@ export async function attachDaemonOrchestrationAuthority<
   const mode = parseOrchestrationMode(options.env)
   if (mode.effective !== 'on') return undefined
 
-  const fullfsync = parseOrchestrationFullfsync(options.env) ?? false
-  const checkpointFullfsync = !fullfsync
+  // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
+  const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
+  const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
   const deferredThreshold = options.deferredImportThreshold ?? DEFAULT_DEFERRED_IMPORT_THRESHOLD
   const leaseOwner = `daemon:${process.pid}`
@@ -260,30 +261,50 @@ function buildAuthorityRuntime<
     },
 
     submitAsync: async (input) => {
+      const immediateDispatch = input.immediateDispatch
+        ? {
+            ...input.immediateDispatch,
+            verifyTrustGate: (provider: string, cwd: string | null, runId: string) =>
+              trustGate.prepareAndVerify(runId, provider, cwd).ok
+          }
+        : undefined
       const res = await engine.submitAsync({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
         commandId: input.scopedIntentId,
-        detail: input.detail
+        detail: input.detail,
+        ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      const routing = parseLedgerIntentRouting(res.runId, input.detail)
-      trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
+      if (!immediateDispatch) {
+        const routing = parseLedgerIntentRouting(res.runId, input.detail)
+        trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
+      }
       const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
       trackCanonical(ledgerRunId, res.runId)
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
     submitSync: (input) => {
+      const immediateDispatch = input.immediateDispatch
+        ? {
+            ...input.immediateDispatch,
+            verifyTrustGate: (provider: string, cwd: string | null, runId: string) =>
+              trustGate.prepareAndVerify(runId, provider, cwd).ok
+          }
+        : undefined
       const res = engine.submitSync({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
         commandId: input.scopedIntentId,
-        detail: input.detail
+        detail: input.detail,
+        ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      const routing = parseLedgerIntentRouting(res.runId, input.detail)
-      trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
+      if (!immediateDispatch) {
+        const routing = parseLedgerIntentRouting(res.runId, input.detail)
+        trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
+      }
       const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
       trackCanonical(ledgerRunId, res.runId)
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }

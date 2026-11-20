@@ -148,6 +148,22 @@ export class AuthorityMcpTrustGate {
     }
   }
 
+  prepareAndVerify(
+    runId: string,
+    provider: string | null | undefined,
+    cwd: string | null | undefined
+  ): { ok: true } | { ok: false; detail: string } {
+    const providerId = (provider ?? '') as ProviderId
+    if (!cwd || !TRUST_GATE_PROVIDERS.has(providerId)) return { ok: true }
+    this.prepare(runId, provider, cwd)
+    const prepared = this.#prepared.get(runId)
+    if (!prepared) return { ok: false, detail: 'MCP 配置无法安全执行' }
+    if (prepared.errors.length > 0) {
+      return { ok: false, detail: `MCP 配置无法安全执行：${prepared.errors.join('；')}` }
+    }
+    return { ok: true }
+  }
+
   delete(runId: string): void {
     this.#prepared.delete(runId)
   }

@@ -45,8 +45,6 @@ export type AuthorityBeforeDispatchResult =
 
 /**
  * P4-2 authoritative orchestration engine (`SCRY_ORCHESTRATION=on`).
- * Drives run submit (durable >16 KiB body before commit), pre-dispatch recheck + dispatch fence
- * (2 commits pre-first-token), resolveIntent tombstones, fence-bypassing stops, and terminals.
  */
 export class AuthorityEngine {
   readonly sink: EventSink
@@ -56,6 +54,7 @@ export class AuthorityEngine {
   readonly #resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
   readonly #onCommitTiming?: (sample: ShadowCommitSample) => void
   readonly #preparedRealCwdByRun = new Map<string, string>()
+  readonly #preDispatchedRuns = new Set<string>()
 
   constructor(options: AuthorityEngineOptions) {
     this.sink = options.sink
@@ -86,7 +85,8 @@ export class AuthorityEngine {
   private finishSubmit(
     built: ReturnType<typeof buildSubmitCommandForAuthority>,
     hookStarted: number,
-    expectedSessionDeleteEpoch: number | undefined
+    expectedSessionDeleteEpoch: number | undefined,
+    bodyWriteMs?: number
   ): AuthoritySubmitResult {
     const sinkStarted = performance.now()
     const result = this.sink.execute(built.cmd, {
@@ -102,49 +102,72 @@ export class AuthorityEngine {
       return { kind: 'rejected', reason: result.reason, sticky: result.sticky }
     }
     if (built.preparedRealCwd) this.#preparedRealCwdByRun.set(built.runId, built.preparedRealCwd)
+    const merged = built.cmd.payload.dispatchImmediately === true
+    if (merged) this.#preDispatchedRuns.add(built.runId)
     this.#onCommitTiming?.({
       runId: built.runId,
       ledgerRunId: built.runId,
-      commitKind: 'intent_recorded',
+      commitKind: merged ? 'intent_and_dispatched' : 'intent_recorded',
       durationMs: Number((ended - hookStarted).toFixed(3)),
       sinkDurationMs: Number((ended - sinkStarted).toFixed(3)),
+      ...(bodyWriteMs !== undefined ? { bodyWriteMs: Number(bodyWriteMs.toFixed(3)) } : {}),
       preFirstToken: true,
       bodyBytes: built.detailBytes
     })
     return { kind: 'accepted', runId: built.runId, seq: result.receipt.resultSeq ?? 0 }
   }
 
-  /** Async authoritative submit: writes and fsyncs >16 KiB body BEFORE EventSink commit (data §4.7). */
-  async submitAsync(input: AuthoritySubmitInput): Promise<AuthoritySubmitResult> {
+  private submitBuilt(
+    input: AuthoritySubmitInput,
+    actor: string,
+    hookStarted: number,
+    epochBeforePrepare: number | undefined,
+    preparedBody: PreparedBody | undefined,
+    bodyWriteMs: number | undefined
+  ): AuthoritySubmitResult {
+    const built = buildSubmitCommandForAuthority({
+      sink: this.sink,
+      actor,
+      leaseOwner: this.#leaseOwner,
+      pendingTtlMs: this.#pendingTtlMs,
+      now: this.#clock(),
+      resolveTurnOrdinal: this.#resolveTurnOrdinal,
+      input,
+      preparedBody
+    })
+    return this.finishSubmit(built, hookStarted, epochBeforePrepare, bodyWriteMs)
+  }
+
+  private beginSubmit(input: AuthoritySubmitInput):
+    | { early: AuthoritySubmitResult }
+    | { actor: string; hookStarted: number; epochBeforePrepare: number | undefined } {
     if (this.sink.isWriteIndeterminate()) {
-      return { kind: 'rejected', reason: 'orchestration_write_indeterminate', sticky: false }
+      return { early: { kind: 'rejected', reason: 'orchestration_write_indeterminate', sticky: false } }
     }
     const hookStarted = performance.now()
     const actor = this.actorForPeer(input.peerCertSHA256)
     const legacyDup = this.checkLegacySystemReceipt(input.commandId, actor)
-    if (legacyDup) return { kind: 'duplicate', ...legacyDup }
-
+    if (legacyDup) return { early: { kind: 'duplicate', ...legacyDup } }
     const preview = parseLedgerIntentRouting(input.runId ?? 'probe', input.detail)
     const epochBeforePrepare = preview.sessionKey ? this.sink.getSessionDeleteEpoch(preview.sessionKey) : undefined
+    return { actor, hookStarted, epochBeforePrepare }
+  }
+
+  /** Async authoritative submit: writes and fsyncs >16 KiB body BEFORE EventSink commit (data §4.7). */
+  async submitAsync(input: AuthoritySubmitInput): Promise<AuthoritySubmitResult> {
+    const start = this.beginSubmit(input)
+    if ('early' in start) return start.early
     let preparedBody: PreparedBody | undefined
+    let bodyWriteMs: number | undefined
     let unpinBody: (() => void) | undefined
     try {
       if (input.detail && Buffer.byteLength(input.detail, 'utf8') > INLINE_BODY_MAX_BYTES) {
-        const expectedSha = sha256Hex(Buffer.from(input.detail, 'utf8'))
-        unpinBody = this.sink.bodyStore.pin(expectedSha)
+        unpinBody = this.sink.bodyStore.pin(sha256Hex(Buffer.from(input.detail, 'utf8')))
+        const bodyStart = performance.now()
         preparedBody = await this.sink.bodyStore.prepareBodyAsync(input.detail)
+        bodyWriteMs = performance.now() - bodyStart
       }
-      const built = buildSubmitCommandForAuthority({
-        sink: this.sink,
-        actor,
-        leaseOwner: this.#leaseOwner,
-        pendingTtlMs: this.#pendingTtlMs,
-        now: this.#clock(),
-        resolveTurnOrdinal: this.#resolveTurnOrdinal,
-        input,
-        preparedBody
-      })
-      return this.finishSubmit(built, hookStarted, epochBeforePrepare)
+      return this.submitBuilt(input, start.actor, start.hookStarted, start.epochBeforePrepare, preparedBody, bodyWriteMs)
     } finally {
       unpinBody?.()
     }
@@ -152,44 +175,24 @@ export class AuthorityEngine {
 
   /** Synchronous authoritative submit for non-attachment local/conversation submit path. */
   submitSync(input: AuthoritySubmitInput): AuthoritySubmitResult {
-    if (this.sink.isWriteIndeterminate()) {
-      return { kind: 'rejected', reason: 'orchestration_write_indeterminate', sticky: false }
-    }
-    const hookStarted = performance.now()
-    const actor = this.actorForPeer(input.peerCertSHA256)
-    const legacyDup = this.checkLegacySystemReceipt(input.commandId, actor)
-    if (legacyDup) return { kind: 'duplicate', ...legacyDup }
-
-    const preview = parseLedgerIntentRouting(input.runId ?? 'probe', input.detail)
-    const epochBeforePrepare = preview.sessionKey ? this.sink.getSessionDeleteEpoch(preview.sessionKey) : undefined
+    const start = this.beginSubmit(input)
+    if ('early' in start) return start.early
     let preparedBody: PreparedBody | undefined
+    let bodyWriteMs: number | undefined
     let unpinBody: (() => void) | undefined
     try {
       if (input.detail && Buffer.byteLength(input.detail, 'utf8') > INLINE_BODY_MAX_BYTES) {
-        const expectedSha = sha256Hex(Buffer.from(input.detail, 'utf8'))
-        unpinBody = this.sink.bodyStore.pin(expectedSha)
+        unpinBody = this.sink.bodyStore.pin(sha256Hex(Buffer.from(input.detail, 'utf8')))
+        const bodyStart = performance.now()
         preparedBody = this.sink.bodyStore.prepareBody(input.detail)
+        bodyWriteMs = performance.now() - bodyStart
       }
-      const built = buildSubmitCommandForAuthority({
-        sink: this.sink,
-        actor,
-        leaseOwner: this.#leaseOwner,
-        pendingTtlMs: this.#pendingTtlMs,
-        now: this.#clock(),
-        resolveTurnOrdinal: this.#resolveTurnOrdinal,
-        input,
-        preparedBody
-      })
-      return this.finishSubmit(built, hookStarted, epochBeforePrepare)
+      return this.submitBuilt(input, start.actor, start.hookStarted, start.epochBeforePrepare, preparedBody, bodyWriteMs)
     } finally {
       unpinBody?.()
     }
   }
 
-  /**
-   * core §2.3 + §2.4: Pre-dispatch recheck on EVERY dispatch (even immediate path), followed by
-   * single-transaction `admitted_and_dispatched` fence commit BEFORE invoking the Provider.
-   */
   beforeDispatch(input: AuthorityBeforeDispatchInput): AuthorityBeforeDispatchResult {
     if (this.sink.isWriteIndeterminate()) {
       throw new OrchestrationStoreError('orchestration_write_indeterminate')
@@ -197,6 +200,7 @@ export class AuthorityEngine {
     const hookStarted = performance.now()
     const run = this.sink.getRun(input.runId)
     if (!run) return { ok: false, action: 'fail', reason: 'invalid_target' }
+    const preDispatched = this.#preDispatchedRuns.delete(input.runId)
     if (run.stopState === 'requested') {
       this.recordTerminal({
         runId: input.runId,
@@ -208,6 +212,7 @@ export class AuthorityEngine {
       updateRunStartOutbox(this.sink, this.#clock(), input.runId, 'done')
       return { ok: false, action: 'fail', reason: 'stop_requested' }
     }
+    if (preDispatched && run.lifecycle === 'dispatched') return { ok: true }
     if (run.lifecycle !== 'recorded') return { ok: false, action: 'fail', reason: 'illegal_transition' }
 
     const now = this.#clock()
@@ -426,11 +431,11 @@ export class AuthorityEngine {
     })
   }
 
-  /** Compensates an already-committed submit if a subsequent non-atomic H1 side-effect fails. */
   compensateSubmitFailure(runId: string, reason: string): void {
+    this.#preDispatchedRuns.delete(runId)
     if (this.sink.isWriteIndeterminate()) return
     const run = this.sink.getRun(runId)
-    if (!run || run.lifecycle !== 'recorded') return
+    if (!run || (run.lifecycle !== 'recorded' && run.lifecycle !== 'dispatched')) return
     this.recordTerminal({
       runId,
       step: 'cancelled',
@@ -448,6 +453,7 @@ export class AuthorityEngine {
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
   }): void {
+    this.#preDispatchedRuns.delete(input.runId)
     if (this.sink.isWriteIndeterminate()) return
     this.#preparedRealCwdByRun.delete(input.runId)
     const at = this.#clock()
