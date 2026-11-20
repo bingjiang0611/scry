@@ -170,6 +170,7 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
     const mirror = new LegacyMirrorWorker({
       sink,
       ledgerStore: fakeStore,
+      createSnapshot: () => ({ version: 1, lastSeq: 100, runs: [], retainedEvents: [] }),
       idleDelayMs: 120,
       maxPendingEvents: 32,
       maxRetries: 2,
@@ -185,22 +186,29 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
       await new Promise((resolve) => setTimeout(resolve, 15))
       expect(appendCalls).toBe(0)
 
-      // Bounded queue: enqueuing 100 events under maxPendingEvents=32 must cap pending size
+      // Bounded queue: enqueuing 100 events under maxPendingEvents=32 collapses into atomic snapshot without dropping seqs
       for (let i = 2; i <= 100; i += 1) {
         mirror.enqueue({ seq: i, at: Date.now(), runId, kind: 'run_progress', detail: String(i) })
       }
       expect(mirror.pendingCount()).toBeLessThanOrEqual(32)
 
-      // Head-of-line failure must not stall forever; after maxRetries it drops/advances and reports error
-      await mirror.flush()
-      expect(errors.length).toBeGreaterThan(0)
-      expect(mirror.pendingCount()).toBe(0)
-
-      // Compaction snapshot enqueue works cleanly when writes recover
+      // Flush writes the atomic snapshot without leaving any seq gap
       failWrites = false
-      mirror.enqueueCompact({ version: 1, lastSeq: 100, runs: [], retainedEvents: [] })
       await mirror.flush()
       expect(compactCalls).toBe(1)
+      expect(mirror.pendingCount()).toBe(0)
+      expect(mirror.isFailedClosed()).toBe(false)
+
+      // Persistent ENOSPC on both append and compact fails closed without dropping seqs or hanging
+      failWrites = true
+      fakeStore.compact = () => {
+        throw new Error('ENOSPC simulated compact')
+      }
+      mirror.enqueue({ seq: 101, at: Date.now(), runId, kind: 'run_progress', detail: '101' })
+      await mirror.flush()
+      expect(errors.length).toBeGreaterThan(0)
+      expect(mirror.isFailedClosed()).toBe(true)
+      expect(mirror.pendingCount()).toBe(0)
     } finally {
       await mirror.close()
       sink.close()
