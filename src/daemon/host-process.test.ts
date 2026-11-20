@@ -75,7 +75,11 @@ describe('daemon host process', () => {
       expect(host.service.relayConfigured).toBe(false)
       if (host.orchestrationAuthority) {
         await host.orchestrationAuthority.flushLegacyMirror()
-        const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
+        const snapPath = join(ledgerDirectory, 'session-ledger.snapshot.json')
+        const logPath = join(ledgerDirectory, 'session-ledger.log')
+        const recovered =
+          (existsSync(snapPath) ? readFileSync(snapPath, 'utf8') : '') +
+          (existsSync(logPath) ? readFileSync(logPath, 'utf8') : '')
         expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
         expect(recovered).toContain('run_cancelled')
         expect(recovered).toContain('host_restarted')

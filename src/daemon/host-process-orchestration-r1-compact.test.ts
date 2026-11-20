@@ -119,7 +119,8 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
       })
       expect(await waitRunTerminal(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
 
-      // Flush mirror & gracefully dispose host1; verify compacted snapshot landed on disk.
+      // Wait for deferred import of the 2,048 seeded runs + flush mirror, then dispose host1.
+      await host1.orchestrationAuthority!.importComplete
       await host1.dispose()
       host1 = undefined
       expect(existsSync(join(ledgerDir, 'session-ledger.snapshot.json'))).toBe(true)

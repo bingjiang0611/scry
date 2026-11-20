@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
-import { shellEnv } from '../main/claude-locate'
+import { shellEnv, warmShellEnv } from '../main/claude-locate'
 import { providerMcpConfigPaths } from '../main/mcp-config'
 import { buildMcpExecutionSnapshot, type McpExecutionSnapshot } from '../main/mcp-execution-trust'
 import type { ProviderId } from '../shared/provider'
@@ -16,6 +16,8 @@ interface CachedTrustSnapshot {
   cwd: string
   fingerprint: string
   errors: string[]
+  /** Set only when a target used bare PATH lookup; absolute commands do not invalidate on PATH warm-up. */
+  pathUsed: string | null
   /** Candidate config paths & resolved executables + dual link/target stat stamps. */
   stamps: Map<string, string>
 }
@@ -122,6 +124,8 @@ export class AuthorityMcpTrustGate {
 
   constructor(options?: { buildSnapshot?: typeof buildMcpExecutionSnapshot }) {
     this.#buildSnapshot = options?.buildSnapshot ?? buildMcpExecutionSnapshot
+    // Eagerly warm login-shell PATH so PATH-resolved MCP commands don't miss cache on run #2.
+    void warmShellEnv()
   }
 
   /** Test/diagnostic counter: how many times full SHA-256 snapshot hashing actually ran. */
@@ -137,9 +141,13 @@ export class AuthorityMcpTrustGate {
     const env = shellEnv()
     const homeDir = homedir()
     const settingSources = providerId === 'claude' ? (env.SCRY_CLAUDE_SETTING_SOURCES ?? '') : ''
-    const cacheKey = `${providerId}\0${cwd}\0${settingSources}\0${env.PATH ?? ''}`
+    const cacheKey = `${providerId}\0${cwd}\0${settingSources}`
     const cached = this.#contextCache.get(cacheKey)
-    if (cached && stampsMatchCurrent(cached.stamps, providerId, cwd, homeDir, env)) {
+    if (
+      cached &&
+      (cached.pathUsed === null || cached.pathUsed === (env.PATH ?? '')) &&
+      stampsMatchCurrent(cached.stamps, providerId, cwd, homeDir, env)
+    ) {
       return { ok: true, entry: cached }
     }
 
@@ -153,11 +161,16 @@ export class AuthorityMcpTrustGate {
         env
       })
       const stamps = collectStamps(providerId, cwd, homeDir, env, extractExecutablePaths(snapshot, cwd))
+      const hasUnverifiedBareCmd = snapshot.targets.some((t) => {
+        const id = t.executableIdentity ?? ''
+        return id.startsWith('unverified:') && !id.slice('unverified:'.length).includes('/')
+      })
       const entry: CachedTrustSnapshot = {
         providerId,
         cwd,
         fingerprint: snapshot.fingerprint,
         errors: snapshot.errors,
+        pathUsed: hasUnverifiedBareCmd ? (env.PATH ?? '') : null,
         stamps
       }
       this.#contextCache.delete(cacheKey)

@@ -445,7 +445,7 @@ export function startDeferredLegacyImport(
             runsSinceCheckpoint = 0
             void ckptWorker
               .waitInFlight()
-              .then(() => ckptWorker.request('truncate'))
+              .then(() => ckptWorker.request('passive'))
               .then(() => {
                 walBytesAtLastCheckpoint = sink.walFileBytes()
                 scheduleNext()

@@ -167,6 +167,7 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
         if (!liveDb.open) return
         if (mode === 'normal') {
           // SQLite exclusive-mode WAL only releases the exclusive lock after cycling through DELETE.
+          liveDb.pragma('busy_timeout = 500')
           liveDb.pragma('journal_mode = DELETE')
           liveDb.pragma('locking_mode = NORMAL')
           liveDb.prepare('SELECT value FROM orch_meta LIMIT 1').get()
@@ -176,6 +177,7 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
         } else {
           liveDb.pragma('locking_mode = EXCLUSIVE')
           liveDb.prepare("INSERT OR REPLACE INTO orch_meta (key, value) VALUES ('wal_lock_mode', 'exclusive')").run()
+          liveDb.pragma('busy_timeout = 0')
         }
         enforceOrchestrationFileModes(dbPath)
       },
