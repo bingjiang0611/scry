@@ -4,24 +4,23 @@ import type {
   BillingCostSource,
   BillingProvider,
   BillingSourceKind,
-  ProviderRawUsageObject,
   UsageLedgerObject
 } from '../shared/billing'
 import type { TraceEvent } from '../shared/trace'
 import { providerUsageResultEvents } from '../shared/result-timing'
 import { isCreditUsageEvidence } from '../shared/credit-usage'
 import type { RuntimeProvider } from '../shared/runtime'
+import {
+  usageLedgerObjectToRow,
+  type BillingLedgerRows
+} from './billing-ledger-rows'
 
 export {
   billingRowsFromAdminPayload,
   billingRowsFromAnthropicGatewayPayload,
   reconcileUsageLedger
 } from './billing-ledger-admin'
-
-export interface BillingLedgerRows {
-  providerRawUsage: unknown[][]
-  usageLedger: unknown[][]
-}
+export { providerRawUsageObjectToRow, usageLedgerObjectToRow, type BillingLedgerRows } from './billing-ledger-rows'
 
 export interface LocalModelPriceVersion {
   id: string
@@ -36,8 +35,6 @@ export interface LocalModelPriceVersion {
   effectiveFrom: number
   effectiveTo?: number | null
 }
-
-const toJson = (v: unknown): string => JSON.stringify(v ?? {})
 
 function runtimeLedgerMetadata(args: {
   runtimeProvider?: RuntimeProvider
@@ -57,62 +54,6 @@ function runtimeLedgerMetadata(args: {
     failureBrief: args.result.runtimeMetadata?.brief ?? null
   }
 }
-
-export const usageLedgerObjectToRow = (o: UsageLedgerObject): unknown[] => [
-  o.id,
-  o.provider,
-  o.source,
-  o.sourceKind,
-  o.sessionId ?? null,
-  o.runId ?? null,
-  o.spanId ?? null,
-  o.projectKey ?? null,
-  o.accountLabel ?? null,
-  o.bucketStart ?? null,
-  o.bucketEnd ?? null,
-  o.model ?? null,
-  o.usageKind,
-  o.inputTokens ?? null,
-  o.outputTokens ?? null,
-  o.cacheReadTokens ?? null,
-  o.cacheWriteTokens ?? null,
-  o.reasoningTokens ?? null,
-  o.toolTokens ?? null,
-  o.requestCount ?? null,
-  o.cost ?? null,
-  o.currency ?? null,
-  o.costUnit,
-  o.costSource,
-  o.confidence,
-  o.attributionMethod,
-  o.rawUsageId ?? null,
-  toJson(o.metadata),
-  o.priceVersionId ?? null,
-  o.createdTs ?? Date.now()
-]
-
-export const providerRawUsageObjectToRow = (o: ProviderRawUsageObject): unknown[] => [
-  o.id,
-  o.provider,
-  o.source,
-  o.sourceKind,
-  o.accountLabel ?? null,
-  o.fetchedAt,
-  o.startingAt ?? null,
-  o.endingAt ?? null,
-  o.bucketStart ?? null,
-  o.bucketEnd ?? null,
-  o.providerRequestId ?? null,
-  o.traceId ?? null,
-  o.otelSpanId ?? null,
-  o.parentSpanId ?? null,
-  o.otelSignal ?? null,
-  o.eventName ?? null,
-  toJson(o.resourceAttributes),
-  toJson(o.spanAttributes),
-  toJson(o.payload),
-  o.storageMode
-]
 
 export function sdkUsageLedgerRowsFromItems(args: {
   runId: string
@@ -147,14 +88,12 @@ export function sdkUsageLedgerRowsFromItems(args: {
   const isAntigravityMissingCost = (provider: BillingProvider, cost: number | null | undefined, usageSource?: string): boolean =>
     (provider === 'antigravity' || usageSource === 'antigravity_acp' || args.runtimeProvider === 'antigravity_acp' || result.runtimeProvider === 'antigravity_acp') &&
     cost == null
-  const sourceKindFor = (provider: BillingProvider, usageSource?: string, cost?: number | null): BillingSourceKind =>
-    isClaudeSdkEstimate(provider, usageSource) || isAntigravityMissingCost(provider, cost, usageSource)
-      ? 'sdk_estimate'
-      : 'provider_reported'
-  const costSourceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingCostSource, cost?: number | null): BillingCostSource =>
-    value ?? (isClaudeSdkEstimate(provider, usageSource) || isAntigravityMissingCost(provider, cost, usageSource) ? 'sdk_estimate' : 'provider_reported')
-  const confidenceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingConfidence, cost?: number | null): BillingConfidence =>
-    value ?? (isAntigravityMissingCost(provider, cost, usageSource) ? 'inferred' : isClaudeSdkEstimate(provider, usageSource) ? 'estimated' : 'provider_reported')
+  const sourceKindFor = (provider: BillingProvider, usageSource?: string): BillingSourceKind =>
+    isClaudeSdkEstimate(provider, usageSource) ? 'sdk_estimate' : 'provider_reported'
+  const costSourceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingCostSource): BillingCostSource =>
+    value ?? (isClaudeSdkEstimate(provider, usageSource) ? 'sdk_estimate' : 'provider_reported')
+  const confidenceFor = (provider: BillingProvider, usageSource: string | undefined, value?: BillingConfidence): BillingConfidence =>
+    value ?? (isClaudeSdkEstimate(provider, usageSource) ? 'estimated' : 'provider_reported')
   const ts = Date.parse(result.ts)
   const bucket = Number.isNaN(ts) ? args.nowMs : ts
   const rows: UsageLedgerObject[] = []
@@ -164,12 +103,13 @@ export function sdkUsageLedgerRowsFromItems(args: {
       const piRuntime = (args.runtimeProvider ?? result.runtimeProvider) === 'pi_rpc' || result.usageSource === 'pi_rpc'
       const provider = mu.billingProvider ?? (piRuntime ? billingProviderForUpstream(mu.upstreamProvider) : undefined) ?? fallbackProvider
       const usageSource = mu.usageSource ?? result.usageSource
-      const costUnit = mu.costUnit ?? result.costUnit ?? 'usd'
+      const missingAgyCost = isAntigravityMissingCost(provider, mu.costUsd ?? null, usageSource)
+      const costUnit = missingAgyCost ? 'token' : (mu.costUnit ?? result.costUnit ?? 'usd')
       rows.push({
         id: `${provider}:${result.id}:${mu.model}`,
         provider,
         source: sourceFor(provider, usageSource),
-        sourceKind: sourceKindFor(provider, usageSource, mu.costUsd ?? null),
+        sourceKind: sourceKindFor(provider, usageSource),
         sessionId: args.sessionId ?? null,
         runId: args.runId,
         spanId: result.id,
@@ -187,8 +127,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
         cost: mu.costUsd ?? null,
         currency: costUnit === 'usd' ? 'USD' : null,
         costUnit,
-        costSource: costSourceFor(provider, usageSource, mu.costSource ?? result.costSource, mu.costUsd ?? null),
-        confidence: confidenceFor(provider, usageSource, mu.costConfidence ?? result.costConfidence, mu.costUsd ?? null),
+        costSource: costSourceFor(provider, usageSource, mu.costSource ?? result.costSource),
+        confidence: confidenceFor(provider, usageSource, mu.costConfidence ?? result.costConfidence),
         attributionMethod: 'direct',
         metadata: runtimeLedgerMetadata({
           runtimeProvider: args.runtimeProvider,
@@ -197,7 +137,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
           extra: {
             contextWindow: mu.contextWindow ?? null,
             upstreamProvider: mu.upstreamProvider ?? result.upstreamProvider ?? null,
-            usageSource: mu.usageSource ?? result.usageSource ?? null
+            usageSource: mu.usageSource ?? result.usageSource ?? null,
+            ...(missingAgyCost ? { costStatus: 'unavailable' } : {})
           }
         }),
         createdTs: args.nowMs
@@ -206,12 +147,13 @@ export function sdkUsageLedgerRowsFromItems(args: {
     return estimateRows(rows, args.priceVersions)
   }
   const provider = fallbackProvider
-  const costUnit = result.costUnit ?? 'usd'
+  const missingAgyCost = isAntigravityMissingCost(provider, result.costUsd ?? null, result.usageSource)
+  const costUnit = missingAgyCost ? 'token' : (result.costUnit ?? 'usd')
   rows.push({
     id: `${provider}:${result.id}`,
     provider,
     source: sourceFor(provider, result.usageSource),
-    sourceKind: sourceKindFor(provider, result.usageSource, result.costUsd ?? null),
+    sourceKind: sourceKindFor(provider, result.usageSource),
     sessionId: args.sessionId ?? null,
     runId: args.runId,
     spanId: result.id,
@@ -228,8 +170,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
     cost: result.costUsd ?? null,
     currency: costUnit === 'usd' ? 'USD' : null,
     costUnit,
-    costSource: costSourceFor(provider, result.usageSource, result.costSource, result.costUsd ?? null),
-    confidence: confidenceFor(provider, result.usageSource, result.costConfidence, result.costUsd ?? null),
+    costSource: costSourceFor(provider, result.usageSource, result.costSource),
+    confidence: confidenceFor(provider, result.usageSource, result.costConfidence),
     attributionMethod: 'direct',
     metadata: runtimeLedgerMetadata({
       runtimeProvider: args.runtimeProvider,
@@ -238,7 +180,8 @@ export function sdkUsageLedgerRowsFromItems(args: {
       extra: {
         source: 'result_without_model_usage',
         upstreamProvider: result.upstreamProvider ?? null,
-        usageSource: result.usageSource ?? null
+        usageSource: result.usageSource ?? null,
+        ...(missingAgyCost ? { costStatus: 'unavailable' } : {})
       }
     }),
     createdTs: args.nowMs

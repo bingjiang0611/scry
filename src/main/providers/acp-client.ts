@@ -89,7 +89,7 @@ interface PendingRequest {
 interface AcpTransportStreams {
   stdin: Writable | null
   stdout: Readable | null
-  once?: (event: 'exit' | 'error', listener: (...args: unknown[]) => void) => unknown
+  once?: (event: 'close' | 'exit' | 'error', listener: (...args: unknown[]) => void) => unknown
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,7 +121,9 @@ const LOGIN_PROMPT_PATTERNS: readonly RegExp[] = [
   /accounts\.google\.com/i,
   /https?:\/\/[^\s]*oauth/i,
   /https?:\/\/[^\s]*[?&](?:state|code)=/i,
-  /\b(?:please visit|open this url|sign in|authenticate at|login url)\b/i
+  /\b(?:please visit|open this url|authenticate at|login url)\b/i,
+  /\bplease sign in (?:at|via|with)\b/i,
+  /\bsign in\b[^\n]*https?:\/\//i
 ]
 
 export function isAcpLoginPromptLine(line: string): boolean {
@@ -164,10 +166,10 @@ export class AcpClient {
     transport.once?.('error', (error: unknown) => {
       this.handleClose(error instanceof Error ? error : new Error(String(error)))
     })
-    transport.once?.('exit', (code: unknown, signal: unknown) => {
+    transport.once?.('close', (code: unknown, signal: unknown) => {
       const detail = signal ? `signal ${String(signal)}` : `code ${String(code ?? 'unknown')}`
       this.handleClose(new AcpTransportClosedError(
-        `ACP process exited (${detail})`,
+        `ACP process closed (${detail})`,
         this._nonJsonLineCount,
         this._loginPromptDetected
       ))
@@ -256,14 +258,14 @@ export class AcpClient {
     }
   }
 
-  destroy(): void {
+  destroy(options: { closeStdin?: boolean } = {}): void {
     this.handleClose(new AcpTransportClosedError(
       'ACP client destroyed',
       this._nonJsonLineCount,
       this._loginPromptDetected
     ))
     this.stdout.off('data', this.handleData)
-    this.closeStdin()
+    if (options.closeStdin !== false) this.closeStdin()
   }
 
   private writeMessage(message: Record<string, unknown>, onError?: (error: Error) => void): void {

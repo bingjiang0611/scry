@@ -95,9 +95,12 @@ describe('A4: Antigravity 一轮状态机、事件、审批/提问、用量与�
       runtimeProvider: 'antigravity_acp'
     })
     expect(ledger.usageLedger).toHaveLength(1)
-    // cost column is index 20 in USAGE_LEDGER_COLS — must stay null, never 0, and confidence not provider_reported.
+    // cost column is index 20 in USAGE_LEDGER_COLS — must stay null (never 0) and costUnit='token' without fake sdk_estimate/inferred (S9).
     expect(ledger.usageLedger[0][20]).toBeNull()
-    expect(ledger.usageLedger[0][24]).not.toBe('provider_reported')
+    expect(ledger.usageLedger[0][21]).toBeNull()
+    expect(ledger.usageLedger[0][22]).toBe('token')
+    expect(ledger.usageLedger[0][23]).toBe('provider_reported')
+    expect(ledger.usageLedger[0][24]).toBe('provider_reported')
     expect(nativeLines.length).toBeGreaterThan(0)
   })
 

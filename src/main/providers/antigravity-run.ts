@@ -103,8 +103,15 @@ export function runAntigravity(
   let forceKillRequested = false
   let activeClient: AcpClient | undefined
   let activeIdentityPromise: ReturnType<typeof spawnAntigravityAcp>['identityPromise'] | undefined
+  let forceKillPromise: Promise<void> | undefined
   const pendingPermissions = new Map<string, PendingPermission>()
   const queueAbort = new AbortController()
+
+  const runForceKillOnce = (): Promise<void> | undefined => {
+    if (!activeIdentityPromise) return undefined
+    if (!forceKillPromise) forceKillPromise = forceKillAntigravityProcess(activeIdentityPromise)
+    return forceKillPromise
+  }
 
   const cancelAllPendingPermissions = (): void => {
     for (const pending of pendingPermissions.values()) {
@@ -130,8 +137,10 @@ export function runAntigravity(
     forceKillRequested = true
     queueAbort.abort()
     cancelAllPendingPermissions()
-    activeClient?.destroy()
-    if (activeIdentityPromise) void forceKillAntigravityProcess(activeIdentityPromise)
+    // Snapshot and signal the process tree BEFORE closing stdin so root does not exit on EOF
+    // and reparent independent-PGID descendants before ps can observe them (S6).
+    void runForceKillOnce()
+    activeClient?.destroy({ closeStdin: false })
   }
 
   const promise = (async (): Promise<ProviderRunResult> => {
@@ -459,17 +468,20 @@ export function runAntigravity(
     } finally {
       clearIdle()
       cancelAllPendingPermissions()
-      if (client) client.closeStdin()
       if (exitPromise && activeIdentityPromise) {
         if (forceKillRequested) {
-          await forceKillAntigravityProcess(activeIdentityPromise)
+          await runForceKillOnce()
+          if (client) client.closeStdin()
         } else {
+          if (client) client.closeStdin()
           const exited = await Promise.race([
             exitPromise.then(() => true),
             new Promise<boolean>((resolve) => setTimeout(() => resolve(false), NATURAL_EXIT_GRACE_MS))
           ])
-          if (!exited) await forceKillAntigravityProcess(activeIdentityPromise)
+          if (!exited) await runForceKillOnce()
         }
+      } else if (client) {
+        client.closeStdin()
       }
       await mcpPrepared.dispose?.()
       releaseRunSlot?.()

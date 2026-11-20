@@ -1,5 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, realpathSync, writeFileSync } from 'node:fs'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { chmodSync, existsSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProviderDescriptor } from '../../shared/provider'
@@ -10,7 +10,7 @@ import { probeCliVersion, resolveRuntimeCliBin, runtimeCliEnv } from '../claude-
 import {
   canSignalCategory,
   captureProcessIdentity,
-  readProcessSnapshot,
+  parseProcessSnapshot,
   signalProcessTreeWithIdentity,
   type ProcessIdentity,
   type ProcessTreeNode
@@ -60,11 +60,11 @@ export function noopBrowserCommand(): string {
   if (cachedNoopBrowser && existsSync(cachedNoopBrowser)) return cachedNoopBrowser
   if (existsSync('/usr/bin/true')) return (cachedNoopBrowser = '/usr/bin/true')
   if (existsSync('/bin/true')) return (cachedNoopBrowser = '/bin/true')
-  const script = join(tmpdir(), `scry-noop-browser-${process.getuid?.() ?? 'user'}.sh`)
-  if (!existsSync(script)) {
-    writeFileSync(script, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
-    chmodSync(script, 0o700)
-  }
+  const dir = mkdtempSync(join(tmpdir(), 'scry-noop-browser-'))
+  chmodSync(dir, 0o700)
+  const script = join(dir, 'noop-browser.sh')
+  writeFileSync(script, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+  chmodSync(script, 0o700)
   return (cachedNoopBrowser = script)
 }
 
@@ -230,15 +230,25 @@ export function spawnAntigravityAcp(args: {
   return { child, executable, argv, identityPromise, stderrTail }
 }
 
-function readProcessGroups(pids: number[]): Map<number, number> {
+function execPsAsync(args: string[], maxBuffer = 8 * 1024 * 1024): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      '/bin/ps',
+      args,
+      { encoding: 'utf8', maxBuffer, timeout: 3_000, env: { ...process.env, LC_ALL: 'C' } },
+      (error, stdout) => {
+        if (error) reject(error)
+        else resolve(stdout)
+      }
+    )
+  })
+}
+
+async function readProcessGroupsAsync(pids: number[]): Promise<Map<number, number>> {
   const result = new Map<number, number>()
   if (pids.length === 0 || process.platform === 'win32') return result
   try {
-    const out = execFileSync(
-      '/bin/ps',
-      ['-o', 'pid=,pgid=', '-p', pids.join(',')],
-      { encoding: 'utf8', maxBuffer: 64 * 1024, env: { ...process.env, LC_ALL: 'C' } }
-    )
+    const out = await execPsAsync(['-o', 'pid=,pgid=', '-p', pids.join(',')], 64 * 1024)
     for (const line of out.split('\n')) {
       const match = line.trim().match(/^(\d+)\s+(\d+)$/)
       if (match) result.set(Number(match[1]), Number(match[2]))
@@ -251,62 +261,56 @@ function readProcessGroups(pids: number[]): Map<number, number> {
 
 interface IndependentDescendant {
   pid: number
-  pgid?: number
   startedAt: string
   command: string
 }
 
-function signalIndependentPgidDescendants(
+async function signalIndependentPgidDescendantsAsync(
   rootPid: number,
   nodes: readonly ProcessTreeNode[],
   signal: NodeJS.Signals
-): IndependentDescendant[] {
+): Promise<IndependentDescendant[]> {
   const descendants = nodes.filter(
     (node) => node.pid !== rootPid && node.pid > 1 && node.pid !== process.pid && canSignalCategory(node.category)
   )
   if (descendants.length === 0) return []
-  const pgids = readProcessGroups(descendants.map((node) => node.pid))
-  const signalledGroups = new Set<number>([rootPid, process.pid])
+  const pgids = await readProcessGroupsAsync(descendants.map((node) => node.pid))
   const tracked: IndependentDescendant[] = []
   for (const node of descendants) {
     const pgid = pgids.get(node.pid)
-    if (pgid && pgid > 1 && !signalledGroups.has(pgid)) {
-      signalledGroups.add(pgid)
-      try { process.kill(-pgid, signal) } catch { /* ESRCH / EPERM */ }
-    }
+    // Only signal individually identity-verified descendant PIDs — never `-pgid` for independent groups
+    // because unverified processes could share a descendant's process group (S6).
     if (!pgid || pgid !== rootPid) {
-      tracked.push({ pid: node.pid, pgid, startedAt: node.startedAt, command: node.command })
+      tracked.push({ pid: node.pid, startedAt: node.startedAt, command: node.command })
       try { process.kill(node.pid, signal) } catch { /* ESRCH / EPERM */ }
     }
   }
   return tracked
 }
 
-function killVerifiedDescendants(descendants: readonly IndependentDescendant[], signal: NodeJS.Signals): void {
+async function killVerifiedDescendantsAsync(
+  descendants: readonly IndependentDescendant[],
+  signal: NodeJS.Signals
+): Promise<void> {
   if (descendants.length === 0 || process.platform === 'win32') return
-  let snapshot: ReturnType<typeof readProcessSnapshot>
+  let snapshot: ReturnType<typeof parseProcessSnapshot>
   try {
-    snapshot = readProcessSnapshot()
+    snapshot = parseProcessSnapshot(await execPsAsync(['-axo', 'pid=,ppid=,stat=,lstart=,command=']))
   } catch {
     return
   }
-  const signalledGroups = new Set<number>([process.pid])
   for (const target of descendants) {
     const live = snapshot.get(target.pid)
     if (!live || live.status.startsWith('Z')) continue
     if (live.startedAt !== target.startedAt || live.command !== target.command) continue
-    if (target.pgid && target.pgid > 1 && !signalledGroups.has(target.pgid)) {
-      signalledGroups.add(target.pgid)
-      try { process.kill(-target.pgid, signal) } catch { /* ESRCH / EPERM */ }
-    }
     try { process.kill(target.pid, signal) } catch { /* ESRCH / EPERM */ }
   }
 }
 
 /**
- * Identity-verified signal to `agy acp` root PGID plus any verified descendants
- * that moved into an independent PGID (P7 §5.1 A0 empirical finding).
- * Fails closed when identity is missing or changed; never uses `pkill`.
+ * Identity-verified signal to `agy acp` root PGID plus any individually verified descendants
+ * that moved into an independent PGID (P7 §5.1 / S6).
+ * Uses async `/bin/ps` (never blocks main thread with execFileSync) and fails closed on identity mismatch.
  */
 export async function signalAntigravityProcess(
   identityPromise: Promise<ProcessIdentity | undefined> | undefined,
@@ -323,9 +327,10 @@ export async function signalAntigravityProcess(
   }
   if (!identity?.startedAt) return { status: 'refused', independentDescendants: [] }
   try {
-    const outcome = signalProcessTreeWithIdentity({ identity, signal })
+    const rawSnapshot = await execPsAsync(['-axo', 'pid=,ppid=,stat=,lstart=,command='])
+    const outcome = signalProcessTreeWithIdentity({ identity, signal, lister: () => rawSnapshot })
     if (outcome.status === 'signalled') {
-      const independentDescendants = signalIndependentPgidDescendants(identity.pid, outcome.nodes, signal)
+      const independentDescendants = await signalIndependentPgidDescendantsAsync(identity.pid, outcome.nodes, signal)
       return { status: 'signalled', independentDescendants }
     }
     return { status: outcome.status, independentDescendants: [] }
@@ -335,8 +340,8 @@ export async function signalAntigravityProcess(
 }
 
 /**
- * Run-scoped forceKill (P7 §5.1): identity-verified SIGTERM -> wait up to 2s -> SIGKILL,
- * signalling independent-PGID descendants on both stages (even if root exited after SIGTERM).
+ * Run-scoped forceKill (P7 §5.1 / S6): identity-verified SIGTERM -> wait up to 2s -> SIGKILL,
+ * always cleaning up verified independent-PGID descendants even when the root stays alive.
  */
 export async function forceKillAntigravityProcess(
   identityPromise: Promise<ProcessIdentity | undefined> | undefined,
@@ -364,8 +369,6 @@ export async function forceKillAntigravityProcess(
     if (!anyAlive) return
     await new Promise((resolve) => setTimeout(resolve, 40))
   }
-  const second = await signalAntigravityProcess(identityPromise, 'SIGKILL')
-  if (second.status !== 'signalled') {
-    killVerifiedDescendants(first.independentDescendants, 'SIGKILL')
-  }
+  await signalAntigravityProcess(identityPromise, 'SIGKILL')
+  await killVerifiedDescendantsAsync(first.independentDescendants, 'SIGKILL')
 }

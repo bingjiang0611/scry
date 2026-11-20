@@ -11,10 +11,6 @@ import { buildRuntimeCliEnv } from './recorder-cli-runtime'
 // 完全一致（优先用户日常那个版本）。sentinel 包裹，过滤 shell 启动打印的 banner 等杂项。缓存一次。
 let shellPathCache: string | null = null
 
-export function cachedShellPath(): string {
-  return shellPathCache ?? ''
-}
-
 export function shellPath(): string {
   if (shellPathCache === null) void warmShellEnv()
   return shellPathCache ?? ''

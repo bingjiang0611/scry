@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AcpClient, AcpRpcError, validateAcpInitializeResult } from './acp-client'
+import { AcpClient, AcpRpcError, isAcpLoginPromptLine, validateAcpInitializeResult } from './acp-client'
 
 const FIXTURE = join(process.cwd(), 'src', 'main', 'providers', 'fixtures', 'fake-agy-acp.mjs')
 const temps: string[] = []
@@ -124,5 +124,11 @@ describe('A2: AcpClient JSON-RPC 2.0 over stdio', () => {
     const client = new AcpClient(child)
     await expect(client.request('initialize', {}, { timeoutMs: 80 })).rejects.toThrow(/timed out/i)
     child.kill('SIGKILL')
+  })
+
+  it('登录提示匹配收紧：普通含 sign in 的输出不误判，OAuth URL 或明确登录提示才触发', () => {
+    expect(isAcpLoginPromptLine('info: user can sign in later if needed')).toBe(false)
+    expect(isAcpLoginPromptLine('Please sign in at https://accounts.google.com/o/oauth2/auth?state=xyz')).toBe(true)
+    expect(isAcpLoginPromptLine('Open this URL to continue')).toBe(true)
   })
 })

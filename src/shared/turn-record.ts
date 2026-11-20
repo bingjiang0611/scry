@@ -1,6 +1,7 @@
 import type { AgentTurnRecord, DiffOmissionCode, Evidence, EvidenceQuality } from './turn-record-contracts.js'
 
 export { validateAgentTurnRecord, isAgentTurnRecord } from './turn-record-validate.js'
+export { canonicalCostUsd } from './turn-record-contracts.js'
 export type {
   EvidenceQuality,
   EvidenceStatus,
@@ -34,15 +35,6 @@ export type {
   TurnRecordValidationIssue,
   TurnRecordValidationResult
 } from './turn-record-contracts.js'
-
-const DECIMAL_20_8_LIMIT = 1_000_000_000_000
-
-export function canonicalCostUsd(value: number | null | undefined): number | undefined {
-  if (value == null || !Number.isFinite(value) || value < 0 || value >= DECIMAL_20_8_LIMIT) return undefined
-  const rounded = Number(value.toFixed(8))
-  if (!Number.isFinite(rounded) || rounded >= DECIMAL_20_8_LIMIT) return undefined
-  return Object.is(rounded, -0) ? 0 : rounded
-}
 
 /** Sections every record must carry, followed by the optional ones. Single source of truth for
  * validation and for any surface that reports per-section evidence status. */
