@@ -9,6 +9,14 @@ export type ProviderOperationLease =
 export class ProviderOperationGate {
   private readonly authentications = new Set<string>()
   private readonly operations = new Map<string, number>()
+  private readonly authReleasedListeners = new Set<(key: string) => void>()
+
+  onAuthenticationReleased(listener: (key: string) => void): () => void {
+    this.authReleasedListeners.add(listener)
+    return () => {
+      this.authReleasedListeners.delete(listener)
+    }
+  }
 
   acquireAuthentication(key: string): ProviderOperationLease {
     if (this.authentications.has(key)) return { ok: false, blockedBy: 'authentication' }
@@ -21,6 +29,9 @@ export class ProviderOperationGate {
         if (released) return
         released = true
         this.authentications.delete(key)
+        for (const listener of [...this.authReleasedListeners]) {
+          try { listener(key) } catch { /* listener failure must not break lease release */ }
+        }
       }
     }
   }

@@ -318,6 +318,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     service,
     channel,
     enrollSocket,
+    providerOperationGate: session.providerOperationGate,
     ...(orchestrationShadow ? { orchestrationShadow } : {}),
     ...(orchestrationAuthority ? { orchestrationAuthority } : {}),
     dispose: async () => {
