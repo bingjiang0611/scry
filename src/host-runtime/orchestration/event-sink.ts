@@ -148,7 +148,15 @@ export class EventSink {
       const result = mode === 'truncate' ? this.handle.checkpointTruncate() : this.handle.checkpointPassive()
       const durationMs = Number((performance.now() - started).toFixed(2))
       this.#checkpointCount += 1
-      this.#onCheckpoint?.({ mode, durationMs, walBytesBefore, walBytesAfter: this.handle.walFileBytes(), result })
+      this.#onCheckpoint?.({
+        mode,
+        durationMs,
+        walBytesBefore,
+        walBytesAfter: this.handle.walFileBytes(),
+        result,
+        executor: 'main',
+        threadId: 0
+      })
       return result
     } catch {
       return { busy: 1, log: 0, checkpointed: 0 }

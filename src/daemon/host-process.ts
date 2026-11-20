@@ -236,6 +236,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   forkOperations = forks
 
   await refreshRemoteProviderSnapshot()
+  const remoteStateDirectory = join(options.userDataDir, 'remote')
+  reconcileH1ForOffMode({ userDataDir: options.userDataDir, remoteStateDirectory, env: process.env, log })
   const orchestrationShadow = attachDaemonOrchestrationShadow({
     userDataDir: options.userDataDir,
     env: process.env,
@@ -255,10 +257,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     ...(options.orchestrationMirrorWriteHook ? { mirrorWriteHook: options.orchestrationMirrorWriteHook } : {}),
     ...(options.orchestrationMirrorMaxPendingEvents !== undefined
       ? { mirrorMaxPendingEvents: options.orchestrationMirrorMaxPendingEvents }
+      : {}),
+    ...(options.orchestrationMirrorRetryIntervalMs !== undefined
+      ? { mirrorRetryIntervalMs: options.orchestrationMirrorRetryIntervalMs }
       : {})
   })
-  const remoteStateDirectory = join(options.userDataDir, 'remote')
-  reconcileH1ForOffMode({ userDataDir: options.userDataDir, remoteStateDirectory, env: process.env, log })
   const hostAdmin = new HostAdminStore({
     stateDirectory: remoteStateDirectory,
     onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })
@@ -295,6 +298,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       providerDiscovery,
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
+      ...(orchestrationAuthority ? { orchestrationStatus: () => orchestrationAuthority.status() } : {}),
       log
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
@@ -337,6 +341,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     hostAdmin,
     remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
     activeRuns: () => pipeline.runs.unsettledStates().length,
+    ...(orchestrationAuthority ? { orchestrationStatus: () => orchestrationAuthority.status() } : {}),
     log
   })
   log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}${adminSocket ? ` admin=${adminSocket.socketPath}` : ''}`)

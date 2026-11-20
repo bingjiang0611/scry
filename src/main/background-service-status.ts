@@ -130,12 +130,24 @@ export function parseSelfReport(value: unknown): BackgroundServiceSelfReport | u
     if (raw.updatedAt !== null && !count(raw.updatedAt)) return undefined
     cliApproval = { enabled: raw.enabled, updatedAt: raw.updatedAt as number | null }
   }
+  let orchestration: BackgroundServiceSelfReport['orchestration']
+  if (report.orchestration !== undefined) {
+    const raw = report.orchestration as Partial<NonNullable<BackgroundServiceSelfReport['orchestration']>> | null
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.mode !== 'on' || typeof raw.h1FallbackUnavailable !== 'boolean') return undefined
+    if (raw.h1FallbackReason !== undefined && typeof raw.h1FallbackReason !== 'string') return undefined
+    orchestration = {
+      mode: 'on',
+      h1FallbackUnavailable: raw.h1FallbackUnavailable,
+      ...(raw.h1FallbackReason !== undefined ? { h1FallbackReason: raw.h1FallbackReason } : {})
+    }
+  }
   return {
     version: report.version, pid: report.pid as number, startedAt: report.startedAt, devices, activeRuns: report.activeRuns,
     ...(launchedBy ? { launchedBy } : {}),
     ...(supervisorPid !== undefined ? { supervisorPid } : {}),
     ...(remoteConfig ? { remoteConfig } : {}),
-    ...(cliApproval ? { cliApproval } : {})
+    ...(cliApproval ? { cliApproval } : {}),
+    ...(orchestration ? { orchestration } : {})
   }
 }
 
@@ -188,6 +200,7 @@ export async function readBackgroundServiceStatus(deps: BackgroundServiceStatusD
       ...(report.remoteConfig ? { remoteConfig: report.remoteConfig } : {}),
       ...(loginStart ? { loginStart } : {}),
       ...(cliApproval ? { cliApproval } : {}),
+      ...(report.orchestration ? { orchestration: report.orchestration } : {}),
       ...(runtimeNotice ? { runtimeNotice } : {})
     }
   }

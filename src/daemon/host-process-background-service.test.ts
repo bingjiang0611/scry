@@ -30,7 +30,10 @@ describe('daemon background service status (local op)', () => {
           disabledProviders: [],
           runControlsEnabled: true,
           providerManifestUrl: null
-        }
+        },
+        ...(process.env.SCRY_ORCHESTRATION === 'on'
+          ? { orchestration: { mode: 'on', h1FallbackUnavailable: false } }
+          : {})
       })
     } finally {
       await daemon.dispose()

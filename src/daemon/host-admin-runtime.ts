@@ -1,6 +1,6 @@
 import type { BuildIdentity } from '../shared/build-identity'
 import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
-import type { BackgroundServiceLaunchedBy } from '../shared/background-service'
+import type { BackgroundServiceLaunchedBy, BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import { pairingChannelHandlers, type PairingHost } from '../main/bootstrap/pairing-channels'
 import { HASH, UUID } from '../main/remote/pairing-state'
 import { computeEffectiveRemoteConfig } from './login-start/policy-env'
@@ -18,6 +18,7 @@ export interface DaemonHostAdminRuntimeDeps {
   hostAdmin: HostAdminStore
   remoteHost: () => PairingHost | null
   activeRuns: () => number
+  orchestrationStatus?: () => BackgroundServiceOrchestrationStatus
   log: (line: string) => void
   env?: NodeJS.ProcessEnv
 }
@@ -84,6 +85,7 @@ export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): P
           remoteConfig: computeEffectiveRemoteConfig(env, deps.isPackaged),
           desktopAccess,
           cliApproval: deps.hostAdmin.snapshot(),
+          ...(deps.orchestrationStatus ? { orchestration: deps.orchestrationStatus() } : {}),
           pairingCapacity: state
             ? { pairings: state.pairings.length, grants: state.grants.length, limit: 64 }
             : null

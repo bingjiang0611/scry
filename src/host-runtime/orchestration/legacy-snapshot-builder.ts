@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type {
-  LedgerEvent,
   LedgerSnapshot,
   LedgerSnapshotRun,
   RunLifecycle
@@ -11,8 +10,6 @@ import type { EventSink } from './event-sink'
 
 const UUID_V4_LOWER = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const SHA256_LOWER = /^[0-9a-f]{64}$/
-const RETAIN_TAIL_EVENTS = 512
-const MAX_H1_EVENT_DETAIL = 4_096
 
 function toDeterministicUuidV4(seed: string): string {
   const bytes = Buffer.from(createHash('sha256').update(seed).digest().subarray(0, 16))
@@ -49,15 +46,6 @@ interface RawRunRow {
   body: string | null
 }
 
-interface RawEventRow {
-  seq: number
-  at: number
-  type: string
-  run_id: string | null
-  command_id: string | null
-  payload: string
-}
-
 function readRecordedIntentDetail(sink: EventSink, row: RawRunRow): string | undefined {
   if (row.body) {
     try {
@@ -78,30 +66,26 @@ function readRecordedIntentDetail(sink: EventSink, row: RawRunRow): string | und
   })
 }
 
-export function getMaxOrchEventSeq(sink: EventSink): number {
-  const row = sink.handle.db.prepare('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM orch_event').get() as {
-    max_seq: number
-  }
-  return Number(row.max_seq ?? 0)
+export function readReservedSeqUntil(sink: EventSink): number {
+  const raw = Number(sink.getMeta('h1_seq_reserved_until') ?? '0')
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : 0
 }
 
 /**
- * Rebuilds a complete, valid H1 `LedgerSnapshot` strictly from authoritative `orchestration.db`
- * (never reading potentially corrupt or lagging H1 files). Guarantees:
- * - Every `runId` / `intentId` is a valid unique UUID v4 matching `SessionLedger.#recoverSnapshot`.
- * - Monotonic `lastSeq` never regresses across restarts or immediate SIGKILL.
- * - `run.interrupted` projects to H1 `run_progress(interrupted)` + `run_cancelled` (never `failed`).
+ * Rebuilds an authoritative H1 `LedgerSnapshot` strictly from `orchestration.db` (Decision H):
+ * - Single state snapshot with `retainedEvents: []` (no old events, no renumbering).
+ * - `SessionLedger` sets both `lastSeq` and `minCursor` to `snapshot.lastSeq` (`R`), so any
+ *   stale device cursor receives the standard `reset` response and resyncs via `runState`.
+ * - Every `runId` / `intentId` is a valid unique UUID v4 and every `intentSeq` satisfies
+ *   `1 <= intentSeq <= snapshot.lastSeq`.
  */
 export function buildH1SnapshotFromDb(
   sink: EventSink,
-  options?: { minLastSeq?: number }
+  options?: { lastSeq?: number }
 ): LedgerSnapshot {
   const db = sink.handle.db
-  const maxOrchSeq = getMaxOrchEventSeq(sink)
-  const legacyLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
-  const h1SeqFloor = Number(sink.getMeta('h1_seq_floor') ?? '0')
-  const h1SeqOffset = Number(sink.getMeta('h1_seq_offset') ?? '0')
-  const baseOffset = Number.isFinite(h1SeqOffset) && h1SeqOffset > 0 ? Math.floor(h1SeqOffset) : 0
+  const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
+  const reservedUntil = readReservedSeqUntil(sink)
 
   // Map canonical run_id -> H1 UUID ledger_run_id when an explicit alias exists.
   const aliasRows = db
@@ -147,12 +131,15 @@ export function buildH1SnapshotFromDb(
     )
     .all() as RawRunRow[]
 
+  const requestedLastSeq =
+    options?.lastSeq !== undefined
+      ? Math.max(0, Math.floor(options.lastSeq))
+      : Math.max(reservedUntil, legacyLedgerSeq)
+  const lastSeq = Math.max(runRows.length > 0 ? 1 : 0, requestedLastSeq)
+
   const usedRunIds = new Set<string>()
   const usedIntentIds = new Set<string>()
-  const h1RunIdByCanonical = new Map<string, string>()
-  const h1IntentIdByCanonical = new Map<string, string>()
   const runs: LedgerSnapshotRun[] = []
-  let maxAssignedSeq = 0
 
   for (const row of runRows) {
     let h1RunId = canonicalToLedgerRunId.get(row.run_id) ?? normalizeUuid(row.run_id, `run:${row.run_id}`)
@@ -160,7 +147,6 @@ export function buildH1SnapshotFromDb(
       h1RunId = toDeterministicUuidV4(`run-dedup:${row.run_id}:${row.intent_seq}`)
     }
     usedRunIds.add(h1RunId)
-    h1RunIdByCanonical.set(row.run_id, h1RunId)
 
     const meta = intentMetaByRun.get(row.run_id)
     let h1IntentId = normalizeUuid(meta?.commandId, `intent:${row.run_id}:${row.intent_seq}`)
@@ -168,11 +154,9 @@ export function buildH1SnapshotFromDb(
       h1IntentId = toDeterministicUuidV4(`intent-dedup:${row.run_id}:${row.intent_seq}`)
     }
     usedIntentIds.add(h1IntentId)
-    h1IntentIdByCanonical.set(row.run_id, h1IntentId)
 
     const lifecycle = mapOrchLifecycleToH1(row.lifecycle)
-    const intentSeq = Math.max(1, Number(row.intent_seq))
-    if (intentSeq > maxAssignedSeq) maxAssignedSeq = intentSeq
+    const intentSeq = Math.min(Math.max(1, Number(row.intent_seq)), lastSeq)
     const intentAt = meta?.at ?? Date.now()
 
     if (lifecycle === 'recorded') {
@@ -199,112 +183,10 @@ export function buildH1SnapshotFromDb(
     }
   }
 
-  // Build retained tail events (<= 512) with strictly increasing seqs <= lastSeq.
-  const tailRows = (
-    db
-      .prepare(
-        `SELECT seq, at, type, run_id, command_id, payload FROM orch_event
-         WHERE type IN (
-           'run.intent_recorded', 'run.dispatched', 'run.session_bound',
-           'run.question_opened', 'run.question_closed', 'run.content_gap',
-           'run.settled', 'run.failed', 'run.cancelled', 'run.interrupted'
-         )
-         ORDER BY seq DESC LIMIT ?`
-      )
-      .all(RETAIN_TAIL_EVENTS) as RawEventRow[]
-  ).reverse()
-
-  const retainedEvents: LedgerEvent[] = []
-  let prevSeq = 0
-  const pushEvent = (rawSeq: number, ev: Omit<LedgerEvent, 'seq'>): void => {
-    const seq = Math.max(prevSeq + 1, rawSeq)
-    prevSeq = seq
-    if (seq > maxAssignedSeq) maxAssignedSeq = seq
-    retainedEvents.push({ seq, ...ev })
-  }
-
-  for (const row of tailRows) {
-    if (!row.run_id) continue
-    const h1RunId = h1RunIdByCanonical.get(row.run_id)
-    if (!h1RunId) continue
-    const at = Number(row.at)
-    const seq = Math.max(1, Number(row.seq))
-    let payload: Record<string, unknown> = {}
-    try {
-      payload = JSON.parse(row.payload) as Record<string, unknown>
-    } catch {
-      payload = {}
-    }
-
-    if (row.type === 'run.intent_recorded') {
-      const h1IntentId = h1IntentIdByCanonical.get(row.run_id)
-      pushEvent(seq, {
-        at,
-        runId: h1RunId,
-        kind: 'intent_recorded',
-        ...(h1IntentId ? { intentId: h1IntentId } : {})
-      })
-    } else if (row.type === 'run.dispatched') {
-      pushEvent(seq, { at, runId: h1RunId, kind: 'run_dispatched' })
-    } else if (row.type === 'run.session_bound' && typeof payload.nativeSessionId === 'string') {
-      pushEvent(seq, {
-        at,
-        runId: h1RunId,
-        kind: 'run_progress',
-        detail: JSON.stringify({ event: 'session', externalSessionId: payload.nativeSessionId }).slice(0, MAX_H1_EVENT_DETAIL)
-      })
-    } else if (row.type === 'run.question_opened' && typeof payload.questionId === 'string') {
-      pushEvent(seq, {
-        at,
-        runId: h1RunId,
-        kind: 'run_progress',
-        detail: JSON.stringify({ event: 'question_opened', questionId: payload.questionId }).slice(0, MAX_H1_EVENT_DETAIL)
-      })
-    } else if (row.type === 'run.question_closed' && typeof payload.questionId === 'string') {
-      pushEvent(seq, {
-        at,
-        runId: h1RunId,
-        kind: 'run_progress',
-        detail: JSON.stringify({ event: 'question_closed', questionId: payload.questionId }).slice(0, MAX_H1_EVENT_DETAIL)
-      })
-    } else if (row.type === 'run.content_gap') {
-      const reason = typeof payload.reason === 'string' ? payload.reason : 'output_capture_failed'
-      pushEvent(seq, { at, runId: h1RunId, kind: 'run_progress', detail: reason.slice(0, MAX_H1_EVENT_DETAIL) })
-    } else if (row.type === 'run.settled') {
-      pushEvent(seq, { at, runId: h1RunId, kind: 'run_settled' })
-    } else if (row.type === 'run.failed') {
-      const reason = typeof payload.reason === 'string' ? payload.reason.slice(0, MAX_H1_EVENT_DETAIL) : undefined
-      pushEvent(seq, { at, runId: h1RunId, kind: 'run_failed', ...(reason ? { detail: reason } : {}) })
-    } else if (row.type === 'run.cancelled') {
-      pushEvent(seq, { at, runId: h1RunId, kind: 'run_cancelled' })
-    } else if (row.type === 'run.interrupted') {
-      const reason = typeof payload.reason === 'string' ? payload.reason : 'host_restarted'
-      pushEvent(seq, {
-        at,
-        runId: h1RunId,
-        kind: 'run_progress',
-        detail: JSON.stringify({ event: 'interrupted', reason }).slice(0, MAX_H1_EVENT_DETAIL)
-      })
-      pushEvent(seq + 1, { at, runId: h1RunId, kind: 'run_cancelled' })
-    }
-  }
-
-  const trimmedEvents =
-    retainedEvents.length > RETAIN_TAIL_EVENTS ? retainedEvents.slice(-RETAIN_TAIL_EVENTS) : retainedEvents
-
-  const lastSeq = Math.max(
-    0,
-    Number.isFinite(legacyLedgerSeq) ? Math.floor(legacyLedgerSeq) : 0,
-    Number.isFinite(h1SeqFloor) ? Math.floor(h1SeqFloor) : 0,
-    maxOrchSeq + baseOffset,
-    maxAssignedSeq,
-    options?.minLastSeq ?? 0
-  )
-
   return {
     version: 1,
     lastSeq,
     runs,
-    retainedEvents: trimmedEvents
+    retainedEvents: []
   }
 }

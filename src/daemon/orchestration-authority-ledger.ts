@@ -8,25 +8,29 @@ import {
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
-import { buildH1SnapshotFromDb, getMaxOrchEventSeq } from '../host-runtime/orchestration/legacy-snapshot-builder'
+import { buildH1SnapshotFromDb, readReservedSeqUntil } from '../host-runtime/orchestration/legacy-snapshot-builder'
+
+export const H1_SEQ_RESERVATION_BLOCK = 1_024
 
 export interface AuthorityLedgerStoreHandle {
   readonly store: LedgerStore
   readonly mirror: LegacyMirrorWorker
   readonly fileStore?: SessionLedgerFileStore
   syncSnapshotFromDb(): void
+  h1FallbackStatus(): { unavailable: boolean; reason?: string }
   close(): Promise<void>
 }
 
 /**
  * Builds the DB-authoritative in-memory `LedgerStore` + pure downstream async `LegacyMirrorWorker`
- * used by `SCRY_ORCHESTRATION=on` (W9 Round-3 B1-B3 fix).
- * - Startup ALWAYS rebuilds device-facing `SessionLedger` strictly from `orchestration.db` (never
- *   reads H1 files), so partial writes, duplicate seqs, or SIGKILL mirror lag can never corrupt
- *   or roll back `on`-mode restarts.
- * - H1 file store is strictly downstream: on any write failure, `LegacyMirrorWorker` atomically
- *   rewrites H1 from a DB-built snapshot; if rewrite also fails, H1 fallback is marked unavailable
- *   while `on` mode continues uninterrupted.
+ * used by `SCRY_ORCHESTRATION=on` (Decision H):
+ * - Startup ALWAYS builds one state-only snapshot (`retainedEvents: []`) from `orchestration.db`
+ *   with `lastSeq = minCursor = R` (never reading H1, never renumbering old events); stale device
+ *   cursors receive the standard `reset` response.
+ * - Sequence ceilings are reserved in blocks (`h1_seq_reserved_until`, default 1,024 per block),
+ *   eliminating per-event `h1_seq_floor` commits (0 extra commits pre-first-token).
+ * - Writes a valid H1 snapshot immediately upon entering `on` mode (even with 0 runs).
+ * - If H1 writes/rewrites fail, marks `h1_fallback_unavailable` and retries periodically in-process.
  */
 export function createAuthorityLedgerStore(options: {
   ledgerDirectory: string
@@ -34,58 +38,63 @@ export function createAuthorityLedgerStore(options: {
   log: (line: string) => void
   mirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
   mirrorMaxPendingEvents?: number
+  mirrorRetryIntervalMs?: number
+  seqReservationBlockSize?: number
 }): AuthorityLedgerStoreHandle {
-  const { ledgerDirectory, sink, log, mirrorWriteHook, mirrorMaxPendingEvents } = options
+  const { ledgerDirectory, sink, log, mirrorWriteHook, mirrorMaxPendingEvents, mirrorRetryIntervalMs } = options
+  const blockSize = Math.max(16, Math.floor(options.seqReservationBlockSize ?? H1_SEQ_RESERVATION_BLOCK))
+  const proactiveMargin = Math.min(128, Math.floor(blockSize / 4))
 
   let fileStore: SessionLedgerFileStore | undefined
-  try {
-    fileStore = new SessionLedgerFileStore(ledgerDirectory)
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    log(`daemon.orchestration-h1-fallback-unavailable ${msg}`)
+  const openWrappedFileStore = (): LedgerStore | undefined => {
+    try {
+      fileStore = new SessionLedgerFileStore(ledgerDirectory)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      log(`daemon.orchestration-h1-fallback-unavailable ${msg}`)
+      return undefined
+    }
+    const target = fileStore
+    if (!mirrorWriteHook) return target
+    return {
+      assertAvailable: () => target.assertAvailable(),
+      loadAll: () => target.loadAll(),
+      loadRecovery: () => target.loadRecovery(),
+      shouldCompact: (event) => target.shouldCompact(event),
+      compact: (snapshot) => {
+        mirrorWriteHook('compact', snapshot.lastSeq)
+        target.compact(snapshot)
+      },
+      append: (event) => {
+        mirrorWriteHook('append', event.seq)
+        target.append(event)
+      }
+    }
   }
 
-  const mirrorTargetStore: LedgerStore | undefined = !fileStore
-    ? undefined
-    : mirrorWriteHook
-      ? {
-          assertAvailable: () => fileStore!.assertAvailable(),
-          loadAll: () => fileStore!.loadAll(),
-          loadRecovery: () => fileStore!.loadRecovery(),
-          shouldCompact: (event) => fileStore!.shouldCompact(event),
-          compact: (snapshot) => {
-            mirrorWriteHook('compact', snapshot.lastSeq)
-            fileStore!.compact(snapshot)
-          },
-          append: (event) => {
-            mirrorWriteHook('append', event.seq)
-            fileStore!.append(event)
-          }
-        }
-      : fileStore
+  const mirrorTargetStore = openWrappedFileStore()
 
-  // B1-B3: ALWAYS rebuild initial device-facing ledger state strictly from orchestration.db.
-  const initialSnapshot = buildH1SnapshotFromDb(sink)
-  const maxOrchSeq = getMaxOrchEventSeq(sink)
-  const desiredOffset = Math.max(0, initialSnapshot.lastSeq - maxOrchSeq)
-  const existingOffset = Number(sink.getMeta('h1_seq_offset') ?? '0')
-  if (!sink.isWriteIndeterminate() && desiredOffset > (Number.isFinite(existingOffset) ? existingOffset : 0)) {
-    sink.setMeta('h1_seq_offset', String(desiredOffset))
+  // Decision H §14.1–2: build single state snapshot at R (never read H1, no retainedEvents, no renumbering).
+  const prevReserved = readReservedSeqUntil(sink)
+  const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
+  const initialSnapshot = buildH1SnapshotFromDb(sink, { lastSeq: Math.max(prevReserved, legacyLedgerSeq) })
+  const startSeq = initialSnapshot.lastSeq
+
+  // Reserve the next block `[startSeq + 1, startSeq + blockSize]` once at startup (off pre-first-token path).
+  let reservedUntil = startSeq + blockSize
+  if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
+    sink.setMeta('h1_seq_reserved_until', String(reservedUntil))
   }
 
   let currentSnapshot: LedgerSnapshot = initialSnapshot
   let memoryEvents: LedgerEvent[] = []
-  let currentLastSeq = initialSnapshot.lastSeq
-  let persistedSeqFloor = Math.max(
-    initialSnapshot.lastSeq,
-    Number(sink.getMeta('h1_seq_floor') ?? '0') || 0
-  )
+  let currentLastSeq = startSeq
 
-  const persistSeqFloor = (seq: number): void => {
-    if (seq <= persistedSeqFloor || sink.isWriteIndeterminate() || !sink.handle.db.open) return
+  const persistReservedUntil = (nextCeiling: number): void => {
+    if (nextCeiling <= reservedUntil || sink.isWriteIndeterminate() || !sink.handle.db.open) return
     try {
-      sink.setMeta('h1_seq_floor', String(seq))
-      persistedSeqFloor = seq
+      sink.setMeta('h1_seq_reserved_until', String(nextCeiling))
+      reservedUntil = nextCeiling
     } catch {
       // Ignore if sink fenced.
     }
@@ -94,8 +103,10 @@ export function createAuthorityLedgerStore(options: {
   const mirror = new LegacyMirrorWorker({
     sink,
     ...(mirrorTargetStore ? { ledgerStore: mirrorTargetStore } : {}),
-    createSnapshot: () => buildH1SnapshotFromDb(sink, { minLastSeq: currentLastSeq }),
+    reopenLedgerStore: openWrappedFileStore,
+    createSnapshot: () => buildH1SnapshotFromDb(sink, { lastSeq: currentLastSeq }),
     ...(mirrorMaxPendingEvents !== undefined ? { maxPendingEvents: mirrorMaxPendingEvents } : {}),
+    ...(mirrorRetryIntervalMs !== undefined ? { fallbackRetryIntervalMs: mirrorRetryIntervalMs } : {}),
     onError: (error) => {
       const msg = error instanceof Error ? error.message : String(error)
       log(`daemon.orchestration-legacy-mirror-error ${msg}`)
@@ -103,13 +114,14 @@ export function createAuthorityLedgerStore(options: {
     onH1FallbackUnavailable: (error) => {
       const msg = error instanceof Error ? error.message : String(error)
       log(`daemon.orchestration-h1-fallback-unavailable reason=${msg}`)
+    },
+    onH1FallbackRecovered: (lastSeq) => {
+      log(`daemon.orchestration-h1-fallback-recovered lastSeq=${lastSeq}`)
     }
   })
 
-  // Self-heal degraded/lagging H1 downstream mirror asynchronously after restart if needed.
-  if (fileStore && (sink.getMeta('h1_fallback_unavailable') === '1' || initialSnapshot.runs.length > 0)) {
-    mirror.enqueueCompact(initialSnapshot)
-  }
+  // Decision H §14.3: H1 must be a valid file immediately upon entering `on` mode (even with 0 runs).
+  mirror.writeInitialSnapshot(initialSnapshot)
 
   const store: LedgerStore = {
     assertAvailable: () => {
@@ -135,19 +147,26 @@ export function createAuthorityLedgerStore(options: {
       currentSnapshot = frozen
       memoryEvents = []
       currentLastSeq = Math.max(currentLastSeq, frozen.lastSeq)
-      persistSeqFloor(currentLastSeq)
-      mirror.enqueueCompact(buildH1SnapshotFromDb(sink, { minLastSeq: currentLastSeq }))
+      if (currentLastSeq > reservedUntil) {
+        persistReservedUntil(currentLastSeq + blockSize)
+      }
+      mirror.enqueueCompact(buildH1SnapshotFromDb(sink, { lastSeq: currentLastSeq }))
     },
     append: (event) => {
       if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
+      // Block reservation invariant: emitted seq MUST NEVER exceed persisted `h1_seq_reserved_until`.
+      if (event.seq > reservedUntil) {
+        persistReservedUntil(Math.max(reservedUntil + blockSize, event.seq))
+      }
       memoryEvents.push(event)
       currentLastSeq = Math.max(currentLastSeq, event.seq)
-      // Persist H1 seq floor off the pre-first-token hot path so opaque progress/terminal events
-      // never allow seq to regress across restarts even when H1 mirror is degraded (B2).
-      if (event.kind !== 'intent_recorded' && event.kind !== 'run_dispatched') {
-        persistSeqFloor(currentLastSeq)
+      // Proactively top up block AFTER terminal events when approaching exhaustion so pre-first-token stays 0 commits.
+      const isTerminal =
+        event.kind === 'run_settled' || event.kind === 'run_failed' || event.kind === 'run_cancelled'
+      if (isTerminal && currentLastSeq >= reservedUntil - proactiveMargin) {
+        persistReservedUntil(reservedUntil + blockSize)
       }
-      // Downstream pure mirror (plan §9): ZERO sync file fsync pre-first-token.
+      // Downstream pure mirror (Decision H): ZERO sync file fsync pre-first-token.
       mirror.enqueue(event)
     }
   }
@@ -158,13 +177,15 @@ export function createAuthorityLedgerStore(options: {
     fileStore,
     syncSnapshotFromDb: () => {
       if (!fileStore || sink.isWriteIndeterminate() || !sink.handle.db.open) return
-      const snap = buildH1SnapshotFromDb(sink, { minLastSeq: currentLastSeq })
-      currentLastSeq = Math.max(currentLastSeq, snap.lastSeq)
-      persistSeqFloor(currentLastSeq)
+      const snap = buildH1SnapshotFromDb(sink, { lastSeq: currentLastSeq })
       mirror.enqueueCompact(snap)
     },
+    h1FallbackStatus: () => {
+      const unavailable = mirror.isH1FallbackUnavailable()
+      const reason = mirror.h1FallbackReason()
+      return { unavailable, ...(unavailable && reason ? { reason } : {}) }
+    },
     close: async () => {
-      persistSeqFloor(currentLastSeq)
       await mirror.close()
       try {
         fileStore?.close()

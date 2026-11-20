@@ -229,13 +229,17 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       const runState = host2.service.controller.runState(peerSha, { runId })
       expect(runState).toBe('cancelled')
 
+      // Decision H: on restart, device ledger is a single state snapshot at R with retainedEvents=[];
+      // stale cursor 0 receives reset (no run_failed, no renumbered old events), while runState/resolveIntent
+      // report 'cancelled' and orchestration.db preserves run.interrupted(host_restarted).
       const polled = host2.service.controller.poll(peerSha, { cursor: 0 })
-      expect(polled.events.some((e) => e.runId === runId && e.kind === 'run_failed')).toBe(false)
-      expect(polled.events.some((e) => e.runId === runId && e.kind === 'run_cancelled')).toBe(true)
+      expect(polled.events).toEqual([])
+      expect(polled.reset).toEqual({ requested: 0, availableFrom: polled.cursor })
+      expect(polled.cursor).toBeGreaterThanOrEqual(1024)
       expect(
-        polled.events.some(
-          (e) => e.runId === runId && e.kind === 'run_progress' && e.detail?.includes('"interrupted"')
-        )
+        host2.orchestrationAuthority!.sink
+          .listEvents()
+          .some((e) => e.runId === runId && e.type === 'run.interrupted' && e.payload.reason === 'host_restarted')
       ).toBe(true)
     } finally {
       await host1?.dispose()

@@ -76,14 +76,15 @@ describe('daemon host process', () => {
       if (host.orchestrationAuthority) {
         await host.orchestrationAuthority.flushLegacyMirror()
         const snapPath = join(ledgerDirectory, 'session-ledger.snapshot.json')
-        const logPath = join(ledgerDirectory, 'session-ledger.log')
-        const recovered =
-          (existsSync(snapPath) ? readFileSync(snapPath, 'utf8') : '') +
-          (existsSync(logPath) ? readFileSync(logPath, 'utf8') : '')
-        expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
-        expect(recovered).toContain('run_cancelled')
-        expect(recovered).toContain('host_restarted')
+        const recovered = existsSync(snapPath) ? readFileSync(snapPath, 'utf8') : ''
+        expect(recovered).toContain(`"runId":"${orphan}"`)
+        expect(recovered).toContain('"lifecycle":"cancelled"')
         expect(host.orchestrationAuthority.sink.getRun(orphan)?.lifecycle).toBe('interrupted')
+        expect(
+          host.orchestrationAuthority.sink
+            .listEvents()
+            .some((e) => e.runId === orphan && e.type === 'run.interrupted' && e.payload.reason === 'host_restarted')
+        ).toBe(true)
       } else {
         const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
         expect(recovered).toContain(`\"runId\":\"${orphan}\"`)

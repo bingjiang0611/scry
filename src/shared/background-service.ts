@@ -76,6 +76,13 @@ export type BackgroundServiceDevices =
   | { state: 'remote-disabled' }
   | { state: 'known'; paired: number }
 
+/** Authoritative orchestration status exposed by daemon status endpoints (P4-2 Decision H). */
+export interface BackgroundServiceOrchestrationStatus {
+  mode: 'on'
+  h1FallbackUnavailable: boolean
+  h1FallbackReason?: string
+}
+
 /** What the daemon reports about itself (local op `localBackgroundService:status`). */
 export interface BackgroundServiceSelfReport {
   version: string
@@ -93,6 +100,8 @@ export interface BackgroundServiceSelfReport {
   remoteConfig?: BackgroundServiceRemoteConfig
   /** CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
   cliApproval?: HostCliApprovalSelfReport
+  /** Authoritative orchestration status; omitted unless SCRY_ORCHESTRATION=on (P4-2 Decision H). */
+  orchestration?: BackgroundServiceOrchestrationStatus
 }
 
 export type BackgroundServiceStatus =
@@ -118,6 +127,8 @@ export type BackgroundServiceStatus =
     loginStart?: LoginStartStatus
     /** Host CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
     cliApproval?: CliApprovalStatus
+    /** Authoritative orchestration status; omitted unless SCRY_ORCHESTRATION=on (P4-2 Decision H). */
+    orchestration?: BackgroundServiceOrchestrationStatus
     /** Non-silent warnings from service-launch fallback or adopted-daemon policy drift. */
     runtimeNotice?: BackgroundServiceRuntimeNotice
     /** When the App read this, so the section can say how fresh it is. */

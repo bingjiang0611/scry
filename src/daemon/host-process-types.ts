@@ -26,6 +26,8 @@ export interface DaemonHostProcessOptions {
   orchestrationMirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
   /** Tests: override P4-2 H1 legacy mirror max pending queue size. */
   orchestrationMirrorMaxPendingEvents?: number
+  /** Tests: override P4-2 H1 fallback periodic retry interval (ms). */
+  orchestrationMirrorRetryIntervalMs?: number
   /** Tests: pause deferred shadow backfill until resolved to verify live/backfill interleaving. */
   orchestrationShadowPauseBackfill?: Promise<void>
   /** Tests: override graceful providerRegistry.dispose() timeout (default 5,000 ms). */

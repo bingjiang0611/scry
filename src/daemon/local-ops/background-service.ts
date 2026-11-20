@@ -44,7 +44,8 @@ export const backgroundServiceLocalOps: DaemonLocalOpGroup = (deps) => {
         remoteConfig: computeEffectiveRemoteConfig(process.env, deps.isPackaged),
         ...(isHostCliExperimentalEnabled(process.env) && deps.hostAdmin
           ? { cliApproval: deps.hostAdmin.snapshot() }
-          : {})
+          : {}),
+        ...(deps.orchestrationStatus ? { orchestration: deps.orchestrationStatus() } : {})
       }
     },
     'remote:hostAdmin:setCliApproval': (...args: unknown[]) => {

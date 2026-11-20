@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
-import { shellEnv, warmShellEnv } from '../main/claude-locate'
+import { resolveCommandOnPath, shellEnv, warmShellEnv } from '../main/claude-locate'
 import { providerMcpConfigPaths } from '../main/mcp-config'
 import { buildMcpExecutionSnapshot, type McpExecutionSnapshot } from '../main/mcp-execution-trust'
 import type { ProviderId } from '../shared/provider'
@@ -48,13 +48,17 @@ export function fileStatStamp(filePath: string): string {
   }
 }
 
-function extractExecutablePaths(snapshot: McpExecutionSnapshot, cwd: string): string[] {
+function extractExecutablePaths(snapshot: McpExecutionSnapshot, cwd: string, env: NodeJS.ProcessEnv): string[] {
   const paths: string[] = []
   for (const target of snapshot.targets) {
     const cmd = typeof target.config.command === 'string' ? target.config.command.trim() : ''
     if (cmd) {
       if (isAbsolute(cmd)) paths.push(cmd)
       else if (cmd.includes('/') || cmd.includes('\\')) paths.push(resolve(cwd, cmd))
+      else {
+        const resolved = resolveCommandOnPath(cmd, env.PATH ?? '')
+        if (resolved) paths.push(resolved)
+      }
     }
     const id = target.executableIdentity ?? ''
     if (id.startsWith('unverified:') || id.startsWith('blocked:')) {
@@ -120,12 +124,14 @@ export class AuthorityMcpTrustGate {
   readonly #contextCache = new Map<string, CachedTrustSnapshot>()
   readonly #prepared = new Map<string, PreparedTrustEntry>()
   readonly #buildSnapshot: typeof buildMcpExecutionSnapshot
+  readonly #getEnv: () => NodeJS.ProcessEnv
   #rehashCount = 0
 
-  constructor(options?: { buildSnapshot?: typeof buildMcpExecutionSnapshot }) {
+  constructor(options?: { buildSnapshot?: typeof buildMcpExecutionSnapshot; getEnv?: () => NodeJS.ProcessEnv }) {
     this.#buildSnapshot = options?.buildSnapshot ?? buildMcpExecutionSnapshot
+    this.#getEnv = options?.getEnv ?? shellEnv
     // Eagerly warm login-shell PATH so PATH-resolved MCP commands don't miss cache on run #2.
-    void warmShellEnv()
+    if (!options?.getEnv) void warmShellEnv()
   }
 
   /** Test/diagnostic counter: how many times full SHA-256 snapshot hashing actually ran. */
@@ -138,7 +144,7 @@ export class AuthorityMcpTrustGate {
     rawCwd: string
   ): { ok: true; entry: CachedTrustSnapshot } | { ok: false; detail: string } {
     const cwd = canonicalizeCwd(rawCwd)
-    const env = shellEnv()
+    const env = this.#getEnv()
     const homeDir = homedir()
     const settingSources = providerId === 'claude' ? (env.SCRY_CLAUDE_SETTING_SOURCES ?? '') : ''
     const cacheKey = `${providerId}\0${cwd}\0${settingSources}`
@@ -160,17 +166,18 @@ export class AuthorityMcpTrustGate {
         settingSources: providerId === 'claude' ? env.SCRY_CLAUDE_SETTING_SOURCES : undefined,
         env
       })
-      const stamps = collectStamps(providerId, cwd, homeDir, env, extractExecutablePaths(snapshot, cwd))
-      const hasUnverifiedBareCmd = snapshot.targets.some((t) => {
-        const id = t.executableIdentity ?? ''
-        return id.startsWith('unverified:') && !id.slice('unverified:'.length).includes('/')
+      const stamps = collectStamps(providerId, cwd, homeDir, env, extractExecutablePaths(snapshot, cwd, env))
+      const hasBareCmd = snapshot.targets.some((t) => {
+        if (t.transport !== 'stdio') return false
+        const orig = typeof t.detail === 'string' ? t.detail.trim() : ''
+        return orig.length > 0 && !isAbsolute(orig) && !orig.includes('/') && !orig.includes('\\')
       })
       const entry: CachedTrustSnapshot = {
         providerId,
         cwd,
         fingerprint: snapshot.fingerprint,
         errors: snapshot.errors,
-        pathUsed: hasUnverifiedBareCmd ? (env.PATH ?? '') : null,
+        pathUsed: hasBareCmd ? (env.PATH ?? '') : null,
         stamps
       }
       this.#contextCache.delete(cacheKey)

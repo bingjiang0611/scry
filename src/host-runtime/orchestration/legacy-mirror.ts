@@ -6,11 +6,14 @@ const DEFAULT_IDLE_DELAY_MS = 250
 const DEFAULT_MAX_PENDING_EVENTS = 2_048
 const DEFAULT_MAX_BATCH_EVENTS = 32
 const DEFAULT_MAX_SLICE_MS = 8
+const DEFAULT_FALLBACK_RETRY_MS = 30_000
 
 export interface LegacyMirrorWorkerOptions {
   sink: EventSink
   ledgerStore?: LedgerStore
-  /** Builds an authoritative H1 snapshot from orchestration.db for atomic rewrite on failure or overflow. */
+  /** Re-opens the H1 file store during periodic recovery if initial startup open failed. */
+  reopenLedgerStore?: () => LedgerStore | undefined
+  /** Builds an authoritative H1 snapshot from orchestration.db for atomic rewrite on failure or retry. */
   createSnapshot?: () => LedgerSnapshot
   /** Debounced idle delay before flushing H1 mirror writes off the pre-first-token path. */
   idleDelayMs?: number
@@ -20,49 +23,59 @@ export interface LegacyMirrorWorkerOptions {
   maxBatchEvents?: number
   /** Time budget (ms) per `#drain` slice before yielding via `setImmediate`. */
   maxSliceMs?: number
+  /** Periodic retry interval (ms) while `h1_fallback_unavailable` is active (default 30,000 ms). */
+  fallbackRetryIntervalMs?: number
   onError?: (error: unknown) => void
   onH1FallbackUnavailable?: (error: unknown) => void
+  onH1FallbackRecovered?: (lastSeq: number) => void
 }
 
 /**
- * P4-2 pure downstream H1 mirror (`plan §9`, `data §4.5`, W9 Round-3 B1-B3 fix).
+ * P4-2 pure downstream H1 mirror (Decision H, `data §4.5`).
  * - H1 is NEVER authoritative in `on` mode; `on` mode always rebuilds from `orchestration.db`.
- * - On ANY `append` failure (e.g. fsync ENOSPC after write, or short write), NEVER retries
- *   `append` for the same `seq` (avoiding duplicate seq / corrupt partial lines). Instead,
- *   atomically rewrites H1 from a DB-built snapshot (`tmp + fsync + rename + dir fsync`).
- * - If atomic snapshot rewrite also fails (e.g. persistent ENOSPC), marks H1 fallback
- *   unavailable in `orch_meta` + logs and stops mirroring; `on` mode continues unaffected.
- * - Drains in bounded slices (`maxBatchEvents` / `maxSliceMs`) yielding via `setImmediate`.
+ * - First entry into `on` writes a valid initial snapshot immediately (even with 0 runs).
+ * - On ANY `append` failure (e.g. fsync ENOSPC, short write), NEVER retries `append` for the same
+ *   `seq`; instead atomically rewrites H1 from a DB snapshot (`tmp + fsync + rename + dir fsync`).
+ * - If atomic snapshot rewrite also fails, sets `orch_meta.h1_fallback_unavailable='1'`, logs, and
+ *   retries periodically in-process; clears the flag once a snapshot rewrite succeeds.
  */
 export class LegacyMirrorWorker {
   readonly #sink: EventSink
-  readonly #ledgerStore?: LedgerStore
+  #ledgerStore?: LedgerStore
+  readonly #reopenLedgerStore?: () => LedgerStore | undefined
   readonly #createSnapshot: () => LedgerSnapshot
   readonly #idleDelayMs: number
   readonly #maxPendingEvents: number
   readonly #maxBatchEvents: number
   readonly #maxSliceMs: number
+  readonly #fallbackRetryIntervalMs: number
   readonly #onError?: (error: unknown) => void
   readonly #onH1FallbackUnavailable?: (error: unknown) => void
+  readonly #onH1FallbackRecovered?: (lastSeq: number) => void
   readonly #queue: LedgerEvent[] = []
   #pendingCompact: LedgerSnapshot | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
+  #retryTimer: ReturnType<typeof setTimeout> | null = null
   #drainScheduled = false
   #closed = false
   #h1FallbackUnavailable = false
+  #h1FallbackReason: string | null = null
   #lastMirroredSeq = 0
   #waiters: Array<() => void> = []
 
   constructor(options: LegacyMirrorWorkerOptions) {
     this.#sink = options.sink
     this.#ledgerStore = options.ledgerStore
+    this.#reopenLedgerStore = options.reopenLedgerStore
     this.#createSnapshot = options.createSnapshot ?? (() => buildH1SnapshotFromDb(options.sink))
     this.#idleDelayMs = Math.max(0, options.idleDelayMs ?? DEFAULT_IDLE_DELAY_MS)
     this.#maxPendingEvents = Math.max(1, options.maxPendingEvents ?? DEFAULT_MAX_PENDING_EVENTS)
     this.#maxBatchEvents = Math.max(1, options.maxBatchEvents ?? DEFAULT_MAX_BATCH_EVENTS)
     this.#maxSliceMs = Math.max(1, options.maxSliceMs ?? DEFAULT_MAX_SLICE_MS)
+    this.#fallbackRetryIntervalMs = Math.max(10, options.fallbackRetryIntervalMs ?? DEFAULT_FALLBACK_RETRY_MS)
     this.#onError = options.onError
     this.#onH1FallbackUnavailable = options.onH1FallbackUnavailable
+    this.#onH1FallbackRecovered = options.onH1FallbackRecovered
     try {
       const existing = Number(this.#sink.getMeta('legacy_ledger_seq') ?? '0')
       if (Number.isFinite(existing) && existing > 0) this.#lastMirroredSeq = existing
@@ -82,16 +95,117 @@ export class LegacyMirrorWorker {
     return this.#h1FallbackUnavailable
   }
 
+  h1FallbackReason(): string | null {
+    return this.#h1FallbackReason
+  }
+
   /** Backward-compatible alias for `isH1FallbackUnavailable()`. */
   isFailedClosed(): boolean {
     return this.#h1FallbackUnavailable
   }
 
+  /**
+   * Synchronously writes the startup H1 snapshot (Decision H: H1 must be a valid file immediately
+   * upon entering `on` mode, even with 0 runs). If the write fails, degrades to
+   * `h1_fallback_unavailable` with periodic retry while allowing `on` mode to continue.
+   */
+  writeInitialSnapshot(snapshot: LedgerSnapshot): boolean {
+    if (this.#closed) return false
+    if (!this.#ledgerStore?.compact) {
+      this.#markH1FallbackUnavailable(new Error('h1_ledger_store_unavailable'))
+      return false
+    }
+    try {
+      const frozen = structuredClone(snapshot)
+      this.#ledgerStore.compact(frozen)
+      this.#lastMirroredSeq = Math.max(this.#lastMirroredSeq, frozen.lastSeq)
+      this.#advanceLegacyMeta(frozen.lastSeq)
+      this.#clearH1FallbackUnavailable()
+      return true
+    } catch (error) {
+      this.#markH1FallbackUnavailable(error)
+      return false
+    }
+  }
+
+  #advanceLegacyMeta(seq: number): void {
+    if (seq <= 0 || this.#sink.isWriteIndeterminate() || !this.#sink.handle.db.open) return
+    try {
+      const current = Number(this.#sink.getMeta('legacy_ledger_seq') ?? '0')
+      if (seq > (Number.isFinite(current) ? current : 0)) {
+        this.#sink.setMeta('legacy_ledger_seq', String(seq))
+      }
+    } catch {
+      // Ignore if sink fenced.
+    }
+  }
+
+  #scheduleFallbackRetry(): void {
+    if (this.#closed || !this.#h1FallbackUnavailable || this.#retryTimer) return
+    this.#retryTimer = setTimeout(() => {
+      this.#retryTimer = null
+      this.#tryRecoverFallback()
+    }, this.#fallbackRetryIntervalMs)
+    this.#retryTimer.unref?.()
+  }
+
+  #tryRecoverFallback(): boolean {
+    if (this.#closed || !this.#h1FallbackUnavailable) return false
+    if (this.#sink.isWriteIndeterminate() || !this.#sink.handle.db.open) {
+      this.#scheduleFallbackRetry()
+      return false
+    }
+    if (!this.#ledgerStore && this.#reopenLedgerStore) {
+      try {
+        this.#ledgerStore = this.#reopenLedgerStore()
+      } catch (error) {
+        this.#updateFallbackReason(error)
+        this.#scheduleFallbackRetry()
+        return false
+      }
+    }
+    if (!this.#ledgerStore?.compact) {
+      this.#scheduleFallbackRetry()
+      return false
+    }
+    try {
+      const snap = structuredClone(this.#createSnapshot())
+      this.#ledgerStore.compact(snap)
+      this.#h1FallbackUnavailable = false
+      this.#h1FallbackReason = null
+      this.#lastMirroredSeq = Math.max(this.#lastMirroredSeq, snap.lastSeq)
+      this.#advanceLegacyMeta(snap.lastSeq)
+      this.#clearH1FallbackUnavailable()
+      this.#onH1FallbackRecovered?.(snap.lastSeq)
+      return true
+    } catch (error) {
+      this.#updateFallbackReason(error)
+      this.#scheduleFallbackRetry()
+      return false
+    }
+  }
+
+  #updateFallbackReason(error: unknown): void {
+    const reason = error instanceof Error ? error.message : String(error)
+    this.#h1FallbackReason = reason
+    if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
+      try {
+        this.#sink.setMeta('h1_fallback_unavailable', '1')
+        this.#sink.setMeta('h1_fallback_reason', reason)
+      } catch {
+        // Ignore if sink fenced.
+      }
+    }
+  }
+
   #markH1FallbackUnavailable(error: unknown): void {
-    if (this.#h1FallbackUnavailable) return
+    const wasUnavailable = this.#h1FallbackUnavailable
     this.#h1FallbackUnavailable = true
-    this.#onError?.(error)
-    this.#onH1FallbackUnavailable?.(error)
+    this.#h1FallbackReason = error instanceof Error ? error.message : String(error)
+    if (!wasUnavailable) {
+      this.#onError?.(error)
+      this.#onH1FallbackUnavailable?.(error)
+    }
     if (this.#timer) {
       clearTimeout(this.#timer)
       this.#timer = null
@@ -99,18 +213,18 @@ export class LegacyMirrorWorker {
     this.#drainScheduled = false
     this.#pendingCompact = null
     this.#queue.length = 0
-    if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
-      try {
-        this.#sink.setMeta('h1_fallback_unavailable', '1')
-        this.#sink.setMeta('h1_fallback_reason', error instanceof Error ? error.message : String(error))
-      } catch {
-        // Ignore meta update failure if sink fenced.
-      }
-    }
+    this.#updateFallbackReason(error)
+    this.#scheduleFallbackRetry()
     this.#resolveWaiters()
   }
 
   #clearH1FallbackUnavailable(): void {
+    this.#h1FallbackUnavailable = false
+    this.#h1FallbackReason = null
+    if (this.#retryTimer) {
+      clearTimeout(this.#retryTimer)
+      this.#retryTimer = null
+    }
     if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
       try {
         if (this.#sink.getMeta('h1_fallback_unavailable') === '1') {
@@ -195,6 +309,7 @@ export class LegacyMirrorWorker {
       while (drop < this.#queue.length && this.#queue[drop]!.seq <= snap.lastSeq) drop += 1
       if (drop > 0) this.#queue.splice(0, drop)
       this.#lastMirroredSeq = Math.max(this.#lastMirroredSeq, snap.lastSeq)
+      this.#advanceLegacyMeta(this.#lastMirroredSeq)
       this.#clearH1FallbackUnavailable()
       return true
     } catch (rewriteError) {
@@ -221,7 +336,6 @@ export class LegacyMirrorWorker {
         processed += 1
       } catch (error) {
         this.#onError?.(error)
-        // Atomic snapshot rewrite failed -> H1 fallback is unavailable; on mode continues unaffected.
         this.#markH1FallbackUnavailable(error)
         return
       }
@@ -240,8 +354,6 @@ export class LegacyMirrorWorker {
         processed += 1
       } catch (error) {
         this.#onError?.(error)
-        // B1 fix: NEVER retry `append` for the same seq (write may have succeeded before fsync
-        // failed or written a short line). Atomically rewrite H1 from DB snapshot instead.
         if (!this.#atomicRewriteFromDb()) return
         processed += 1
         break
@@ -254,18 +366,7 @@ export class LegacyMirrorWorker {
       return
     }
 
-    if (!this.#sink.isWriteIndeterminate() && this.#sink.handle.db.open) {
-      try {
-        if (this.#lastMirroredSeq > 0) {
-          const current = Number(this.#sink.getMeta('legacy_ledger_seq') ?? '0')
-          if (this.#lastMirroredSeq > current) {
-            this.#sink.setMeta('legacy_ledger_seq', String(this.#lastMirroredSeq))
-          }
-        }
-      } catch (error) {
-        this.#onError?.(error)
-      }
-    }
+    this.#advanceLegacyMeta(this.#lastMirroredSeq)
     this.#resolveWaiters()
   }
 
@@ -293,6 +394,10 @@ export class LegacyMirrorWorker {
     if (this.#timer) {
       clearTimeout(this.#timer)
       this.#timer = null
+    }
+    if (this.#retryTimer) {
+      clearTimeout(this.#retryTimer)
+      this.#retryTimer = null
     }
     this.#drainScheduled = false
     this.#pendingCompact = null

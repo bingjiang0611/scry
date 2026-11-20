@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import type { ConversationStore } from '../main/conversation-store'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
 import { RemoteInteractionError } from '../main/remote/remote-interaction-broker'
@@ -36,6 +37,7 @@ export interface DaemonOrchestrationAuthority {
   readonly recovery: RecoverOrchestrationSummary
   readonly importComplete: Promise<void>
   startImport(): void
+  status(): BackgroundServiceOrchestrationStatus
   flushLegacyMirror(): Promise<void>
   close(): Promise<void>
 }
@@ -53,6 +55,7 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   beforeCommitHook?: () => void
   mirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
   mirrorMaxPendingEvents?: number
+  mirrorRetryIntervalMs?: number
   deferredImportThreshold?: number
 }
 
@@ -162,6 +165,7 @@ function buildAuthorityRuntime<
   let legacyMirror: LegacyMirrorWorker | undefined
   let backingFileStore: SessionLedgerFileStore | undefined
   let syncMirrorSnapshot: (() => void) | undefined
+  let readH1FallbackStatus: (() => { unavailable: boolean; reason?: string }) | undefined
   let progressCounter = 0
 
   const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
@@ -194,11 +198,15 @@ function buildAuthorityRuntime<
         ...(options.mirrorWriteHook ? { mirrorWriteHook: options.mirrorWriteHook } : {}),
         ...(options.mirrorMaxPendingEvents !== undefined
           ? { mirrorMaxPendingEvents: options.mirrorMaxPendingEvents }
+          : {}),
+        ...(options.mirrorRetryIntervalMs !== undefined
+          ? { mirrorRetryIntervalMs: options.mirrorRetryIntervalMs }
           : {})
       })
       backingFileStore = created.fileStore
       legacyMirror = created.mirror
       syncMirrorSnapshot = created.syncSnapshotFromDb
+      readH1FallbackStatus = created.h1FallbackStatus
       return { store: created.store, close: created.close }
     },
 
@@ -415,8 +423,26 @@ function buildAuthorityRuntime<
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
+  const status = (): BackgroundServiceOrchestrationStatus => {
+    const live = readH1FallbackStatus?.()
+    if (live) {
+      return {
+        mode: 'on',
+        h1FallbackUnavailable: live.unavailable,
+        ...(live.unavailable && live.reason ? { h1FallbackReason: live.reason } : {})
+      }
+    }
+    const unavailable = !sink.isWriteIndeterminate() && sink.handle.db.open && sink.getMeta('h1_fallback_unavailable') === '1'
+    const reason = unavailable ? sink.getMeta('h1_fallback_reason') : undefined
+    return {
+      mode: 'on',
+      h1FallbackUnavailable: unavailable,
+      ...(unavailable && reason ? { h1FallbackReason: reason } : {})
+    }
+  }
+
   return {
-    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, startImport,
+    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, startImport, status,
     flushLegacyMirror: async () => { await legacyMirror?.flush() },
     close: async () => {
       if (closed) return

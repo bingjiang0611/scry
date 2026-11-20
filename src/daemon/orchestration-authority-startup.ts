@@ -57,9 +57,9 @@ export async function runAuthorityStartupSequence(options: {
     }
     if (plan) {
       if (plan.lastSeq > 0) {
-        const prevFloor = Number(sink.getMeta('h1_seq_floor') ?? '0')
-        if (plan.lastSeq > (Number.isFinite(prevFloor) ? prevFloor : 0)) {
-          sink.setMeta('h1_seq_floor', String(plan.lastSeq))
+        const prevReserved = Number(sink.getMeta('h1_seq_reserved_until') ?? '0')
+        if (plan.lastSeq > (Number.isFinite(prevReserved) ? prevReserved : 0)) {
+          sink.setMeta('h1_seq_reserved_until', String(plan.lastSeq))
         }
       }
       if (plan.unimportedRuns.length > deferredThreshold) {

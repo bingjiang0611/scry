@@ -50,7 +50,7 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
 
   return {
     lane: 'disk',
-    workload: 'orchestration-pre-first-token=real-hooks+1-commit;pragma-fullfsync=on(darwin-F_FULLFSYNC)',
+    workload: 'orchestration-pre-first-token=real-hooks+1-commit;synchronous=FULL;pragma-fullfsync=on',
     iterations: 2,
     warmups: 1,
     samples: 20,

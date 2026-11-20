@@ -53,6 +53,8 @@ export interface DaemonLocalEndpointDeps {
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
   hostAdmin?: import('../host-admin-store').HostAdminStore
+  // P4-2 authoritative orchestration status (Decision H): omitted unless SCRY_ORCHESTRATION=on.
+  orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   log?: (line: string) => void
 }
 

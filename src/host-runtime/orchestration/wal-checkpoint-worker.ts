@@ -6,7 +6,7 @@ import type { EventSink } from './event-sink'
 const require = createRequire(import.meta.url)
 
 const CHECKPOINT_WORKER_CODE = `
-const { parentPort, workerData } = require('node:worker_threads');
+const { parentPort, threadId, workerData } = require('node:worker_threads');
 const { existsSync, statSync } = require('node:fs');
 const { performance } = require('node:perf_hooks');
 const Database = require(workerData.betterSqlite3Path);
@@ -56,7 +56,9 @@ parentPort.on('message', (msg) => {
             busy: Number((row && row.busy) || 0),
             log: Number((row && row.log) || 0),
             checkpointed: Number((row && row.checkpointed) || 0)
-          }
+          },
+          executor: 'worker',
+          threadId
         }
       });
     } catch (err) {
@@ -70,7 +72,9 @@ parentPort.on('message', (msg) => {
           durationMs,
           walBytesBefore,
           walBytesAfter: walBytes(),
-          result: { busy: 1, log: 0, checkpointed: 0 }
+          result: { busy: 1, log: 0, checkpointed: 0 },
+          executor: 'worker',
+          threadId
         }
       });
     }

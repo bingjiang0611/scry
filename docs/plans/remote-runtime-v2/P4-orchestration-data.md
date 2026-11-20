@@ -53,8 +53,10 @@
 ### 4.0 库、连接与迁移（决定 A）
 
 - 文件：`userData/orchestration/orchestration.db`，文件 0600、目录 0700。
-- 连接：WAL；`synchronous=FULL`；`locking_mode=EXCLUSIVE`（core §2.9）；`foreign_keys=ON`；`secure_delete=ON`（同 `scry.db`，`db-connection.ts:49`）；`fullfsync` 按 plan §8.3 的测量规则定。
-- 迁移用**独立的执行器**，不复用 `migrateDatabase`。原因有二：它在 `db-migrations.ts:46` 硬编码 `nextVersion === 16 → repairMissingUsageLedger`，不能在编排库上跑；它遇到更高的 `user_version` 时静默返回（`:41-42` 的循环不执行），而权威库必须拒绝打开（`orchestration_schema_newer`，core §2.5）。执行器只有逐版本事务与版本检查，十几行；不给统计库加参数化钩子，免得统计库的改动波及权威库。
+- 连接：WAL；`synchronous=FULL`；`locking_mode=EXCLUSIVE`（core §2.9）；`foreign_keys=ON`；`secure_delete=ON`（同 `scry.db`，`db-connection.ts:49`）；macOS P4-2 默认 `fullfsync=ON`、`checkpoint_fullfsync=ON`（plan §8.3）。
+- **NORMAL 窗口（决定 H §14.6）**：延迟历史补导入期间，为让同进程 worker 独立连接后台跑 `wal_checkpoint(PASSIVE)`，主连接短暂切 `locking_mode=NORMAL` + `busy_timeout=500`，结束或取消立即恢复 `EXCLUSIVE`（写 `wal_lock_mode='exclusive'`、`busy_timeout=0`）；窗口内第 1 层 `daemon.lock` 仍独占宿主。
+- **不支持的回退路径（决定 H §14.5）**：不支持从 `on` 直接切回进程内模式（`SCRY_HOST_DAEMON=0`）或降级到 P4-2 之前版本；须先用当前 daemon 以 `off` 启动一次。`off`/未设置/`shadow` 启动时仅在 `orch_meta.orchestration_on_active='1'` 时 fail-open 校正 H1（按 H1 `lastSeq`，结果 `>= R`）并清 `'0'`；非 `'1'` 或 DB 打不开/损坏时只记日志、不动 H1。
+- 迁移用**独立执行器**，不复用 `migrateDatabase`（`db-migrations.ts:46` 硬编码 `repairMissingUsageLedger`，且遇更高 `user_version` 静默返回，而权威库必须拒开 `orchestration_schema_newer`，core §2.5）。
 
 ### 4.1 `orch_meta`
 
@@ -64,9 +66,14 @@
 |---|---|
 | `log_id` | 建库时随机 UUID，客户端 cursor 的命名空间 |
 | `pruned_through` | 已删除事件的最高 seq |
-| `projection_schema_version` | projection 的形状版本；改形状是数据迁移（§4.4） |
-| `legacy_ledger_seq` | 旧台账中已反映到日志的最高 seq（导入或镜像），off↔on 增量导入的位置（plan §9） |
+| `projection_schema_version` | projection 形状版本；改形状是数据迁移（§4.4） |
+| `legacy_ledger_seq` | 旧台账已反映到日志的最高 seq（导入或镜像，plan §9） |
 | `legacy_catalog_sha256` | 上次导入的 `app-sessions.json` 哈希；不同就增量导入 |
+| `orchestration_on_active` | `'1'` 表示上次以 `on` 权威运行过；`off`/未设置/`shadow` 仅在该键为 `'1'` 时 fail-open 校正 H1 并清 `'0'`（决定 H §14.4） |
+| `h1_seq_reserved_until` | 设备台账编号块预留上限 `R`（1,024/块）；重启与 `off` 校正均 `>= R`，首 token 前不新增提交（决定 H §14.2） |
+| `h1_fallback_unavailable` | `'1'` 表示 H1 下游镜像写/重写失败；进程内定期重试快照重写，成功后清 `'0'`，状态从 daemon 状态接口可读（决定 H §14.3） |
+| `h1_fallback_reason` | 最近一次 H1 镜像失败原因；重试恢复后清空 |
+| `wal_lock_mode` | NORMAL 窗口结束恢复 `EXCLUSIVE` 时写入 `'exclusive'` 强制重获独占锁 |
 
 ### 4.2 `orch_event`（只追加）
 
@@ -131,9 +138,11 @@
 | `provider.run.stop`、`question.respond` | 进程绑定 | 一律 `voided`（进程已不在） |
 | `catalog.writeback`、`conversation.writeback` | 可重放 | 重新排队 |
 | `catalog.scan` | 可重放 | 重新排队；触发见 core §2.9 |
-| `legacy.mirror`（旧台账镜像） | 可重放，按 seq 幂等 | 重新排队；不是严格的回退保证（plan §9） |
+| `legacy.mirror`（**不再是可重放的 outbox effect**） | 进程内纯下游镜像（不进 `orch_outbox`） | 不经 outbox 重放；按决定 H 由 DB 状态重建 |
 
-策略表集中在一个模块，测试断言每个 `kind` 都已登记。会话删除、分支已有自己的持久化两阶段状态（`conversation-lifecycle` 的 `beginDeletion`/`finishFork`），第一批不进 outbox。
+**从 DB 重建设备台账与 H1 镜像（决定 H §14.1–§14.3）：** `on` 启动时设备台账只由 DB 状态生成单份快照（`lastSeq = minCursor = R`，`retainedEvents = []`，不读 H1、不重编号），旧游标收到 `reset` 后经 `runState`/trace 重同步。首次进入 `on`（0 run 也写）即同步写合法 H1 快照；追加失败不重试同一 `seq`，改用 DB 快照原子重写；重写再失败则记 `h1_fallback_unavailable='1'` 并定期重试至清除，状态由 daemon 状态接口暴露。
+
+策略表集中在一个模块，测试断言每个 `kind` 都已登记（`legacy.mirror` 仅保留枚举兼容）。会话删除、分支走 `conversation-lifecycle` 持久化两阶段状态，不进 outbox。
 
 ### 4.6 第一批事件类型
 

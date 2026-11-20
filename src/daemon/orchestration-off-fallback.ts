@@ -4,16 +4,20 @@ import { recoverDeadRemoteLease } from '../main/remote/recover-dead-lease'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
-import { buildH1SnapshotFromDb } from '../host-runtime/orchestration/legacy-snapshot-builder'
+import { buildH1SnapshotFromDb, readReservedSeqUntil } from '../host-runtime/orchestration/legacy-snapshot-builder'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { recoverOrchestrationOnStartup } from '../host-runtime/orchestration/recovery'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 
 /**
- * When switching back to `SCRY_ORCHESTRATION=off` after `on` mode ran (W9 Round-3 B1-B3 fix):
- * checks whether the downstream H1 ledger on disk is lagging or corrupt relative to `orchestration.db`.
- * If so, atomically regenerates H1 from `orchestration.db` (`tmp + fsync + rename + dir fsync`)
- * before `off` mode opens `SessionLedgerFileStore`.
+ * Decision H §14.4 (`off` / unset / `shadow` default-path-safe reconciliation):
+ * - Runs ONLY when `orch_meta.orchestration_on_active === '1'` (previous run was authoritative `on`).
+ *   Shadow-only or never-`on` data dirs return immediately without touching H1 byte-for-byte.
+ * - Strictly fail-open: if `orchestration.db` cannot be opened or is corrupt, logs and returns
+ *   without touching H1 so daemon startup is never blocked.
+ * - Uses `h1.describe().lastSeq` (NEVER `since(0).cursor` which caps at page size 256) to check
+ *   whether H1 lags behind DB / reserved seq ceiling `R`.
+ * - Rebuilt H1 snapshot always has `lastSeq >= R` (`h1_seq_reserved_until`).
  */
 export function reconcileH1ForOffMode(options: {
   userDataDir: string
@@ -21,16 +25,20 @@ export function reconcileH1ForOffMode(options: {
   env: NodeJS.ProcessEnv
   log: (line: string) => void
 }): void {
-  if (parseOrchestrationMode(options.env).effective !== 'off') return
+  if (parseOrchestrationMode(options.env).effective === 'on') return
   const dbPath = join(options.userDataDir, 'orchestration', 'orchestration.db')
   if (!existsSync(dbPath)) return
 
-  const sink = EventSink.open({
-    userDataDir: options.userDataDir,
-    checkpointIntervalMs: 0
-  })
+  let sink: EventSink | undefined
   try {
-    const onActive = sink.getMeta('orchestration_on_active') === '1'
+    sink = EventSink.open({
+      userDataDir: options.userDataDir,
+      checkpointIntervalMs: 0
+    })
+
+    // Default path safety (N1): NEVER touch H1 unless `on` mode was previously authoritative.
+    if (sink.getMeta('orchestration_on_active') !== '1') return
+
     const fallbackUnavailable = sink.getMeta('h1_fallback_unavailable') === '1'
 
     const ledgerDirectory = join(options.remoteStateDirectory, 'ledger')
@@ -39,15 +47,15 @@ export function reconcileH1ForOffMode(options: {
     recoverDeadRemoteLease(ledgerDirectory, 'session-ledger.lock')
 
     // Recover any open dispatched runs left by a crash in `on` mode before exporting to H1.
-    if (onActive) {
-      recoverOrchestrationOnStartup({
-        sink,
-        leaseOwner: `daemon-off-fallback:${process.pid}`,
-        findRecorderEvidence: createRecorderEvidenceFinder(options.userDataDir, sink)
-      })
-    }
+    recoverOrchestrationOnStartup({
+      sink,
+      leaseOwner: `daemon-off-fallback:${process.pid}`,
+      findRecorderEvidence: createRecorderEvidenceFinder(options.userDataDir, sink)
+    })
 
-    const dbSnapshot = buildH1SnapshotFromDb(sink)
+    const reservedUntil = readReservedSeqUntil(sink)
+    const legacySeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
+    const dbSnapshot = buildH1SnapshotFromDb(sink, { lastSeq: Math.max(reservedUntil, legacySeq) })
     let needsRebuild = fallbackUnavailable
 
     const fileStore = new SessionLedgerFileStore(ledgerDirectory)
@@ -55,9 +63,9 @@ export function reconcileH1ForOffMode(options: {
       if (!needsRebuild) {
         try {
           const h1 = new SessionLedger({ store: fileStore })
-          const h1Cursor = h1.since(0).cursor
+          const h1LastSeq = h1.describe().lastSeq
           const missingRun = dbSnapshot.runs.some((r) => h1.runState(r.runId) === undefined)
-          if (h1Cursor < dbSnapshot.lastSeq || missingRun) {
+          if (h1LastSeq < dbSnapshot.lastSeq || missingRun) {
             needsRebuild = true
           }
         } catch {
@@ -74,13 +82,19 @@ export function reconcileH1ForOffMode(options: {
           `daemon.orchestration-off-rebuilt-h1 runs=${dbSnapshot.runs.length} lastSeq=${dbSnapshot.lastSeq}`
         )
       }
-      if (onActive) {
-        sink.setMeta('orchestration_on_active', '0')
-      }
+      sink.setMeta('orchestration_on_active', '0')
     } finally {
       fileStore.close()
     }
+  } catch (error) {
+    // Default path safety (N2): strictly fail-open; never block off/unset/shadow startup or touch H1.
+    const msg = error instanceof Error ? error.message : String(error)
+    options.log(`daemon.orchestration-off-reconcile-failed ${msg}`)
   } finally {
-    sink.close()
+    try {
+      sink?.close()
+    } catch {
+      // Preserve fail-open semantics.
+    }
   }
 }

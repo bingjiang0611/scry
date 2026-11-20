@@ -75,6 +75,8 @@ export interface WalCheckpointSample {
   walBytesBefore: number
   walBytesAfter: number
   result: WalCheckpointResult
+  executor?: 'main' | 'worker'
+  threadId?: number
 }
 
 export interface OrchestrationDbHandle {
