@@ -63,9 +63,32 @@ const MODE_RANK: Record<AgentPermissionMode, PermissionRank> = {
 
 export interface UserSettingsPermissionCheck {
   settingsPath: string
+  /** Broad/global elevation rank (e.g. `toolPermission` or wildcard-all allow rule). */
+  broadRank: PermissionRank
+  broadLabel: string
+  /** Back-compat alias equal to `broadRank`. */
   effectiveRank: PermissionRank
   effectiveLabel: string
+  /** Specific command/tool `permissions.allow` rules that do NOT block startup (D11). */
+  allowRules: string[]
   elevatedBy?: string
+}
+
+export interface EffectiveAntigravityPermissions extends UserSettingsPermissionCheck {
+  /** Higher of requested mode and broad global setting, annotated `+ 用户规则` when specific rules apply (S8/D11). */
+  effectivePermissionMode: string
+  userAllowNotice?: string
+}
+
+function isWildcardAllowRule(rule: string): boolean {
+  const normalized = rule.trim().toLowerCase()
+  return normalized === '*' ||
+    normalized === 'all' ||
+    normalized === 'command(*)' ||
+    normalized === 'tool(*)' ||
+    normalized === 'shell(*)' ||
+    normalized === 'bash(*)' ||
+    normalized === 'write(*)'
 }
 
 function classifyToolPermissionSetting(raw: unknown): { rank: PermissionRank; label: string; detail?: string } {
@@ -88,17 +111,18 @@ function classifyToolPermissionSetting(raw: unknown): { rank: PermissionRank; la
 }
 
 /**
- * Inspect `~/.gemini/antigravity-cli/settings.json` (P7 D3).
- * Empirical A0 testing proved user-level `toolPermission` / `permissions.allow` bypass ACP approvals;
- * fail closed if the file grants higher effective permissions than the requested mode (or remote cap).
+ * Inspect `~/.gemini/antigravity-cli/settings.json` using the **sanitized** launch env (B1, D3, D11).
+ * - Broad elevation (`toolPermission` or wildcard allow rules) wider than requested mode refuses startup.
+ * - Specific `permissions.allow` command rules allow startup normally, and are surfaced honestly as
+ *   `agy 用户级规则会自动放行：…` with effective permission `<mode> + 用户规则`.
  */
 export function inspectUserSettingsPermissionElevation(
   homeDir: string,
-  env: NodeJS.ProcessEnv = process.env
+  sanitizedEnv: NodeJS.ProcessEnv = {}
 ): UserSettingsPermissionCheck {
-  const settingsPath = join(antigravityGeminiRoot(homeDir, env), 'antigravity-cli', 'settings.json')
+  const settingsPath = join(antigravityGeminiRoot(homeDir, sanitizedEnv), 'antigravity-cli', 'settings.json')
   if (!existsSync(settingsPath)) {
-    return { settingsPath, effectiveRank: 0, effectiveLabel: 'default' }
+    return { settingsPath, broadRank: 0, broadLabel: 'default', effectiveRank: 0, effectiveLabel: 'default', allowRules: [] }
   }
   let parsed: Record<string, unknown>
   try {
@@ -113,15 +137,16 @@ export function inspectUserSettingsPermissionElevation(
     )
   }
 
-  let effectiveRank: PermissionRank = 0
-  let effectiveLabel = 'default'
+  let broadRank: PermissionRank = 0
+  let broadLabel = 'default'
   const reasons: string[] = []
+  const allowRules: string[] = []
 
   if (parsed.toolPermission !== undefined) {
     const tp = classifyToolPermissionSetting(parsed.toolPermission)
-    if (tp.rank > effectiveRank) {
-      effectiveRank = tp.rank
-      effectiveLabel = tp.label
+    if (tp.rank > broadRank) {
+      broadRank = tp.rank
+      broadLabel = tp.label
     }
     if (tp.detail) reasons.push(tp.detail)
   }
@@ -129,36 +154,65 @@ export function inspectUserSettingsPermissionElevation(
   const perms = parsed.permissions
   if (perms && typeof perms === 'object' && !Array.isArray(perms)) {
     const allow = (perms as Record<string, unknown>).allow
-    if (Array.isArray(allow) && allow.length > 0) {
-      if (effectiveRank < 2) {
-        effectiveRank = 2
-        effectiveLabel = 'permissions.allow'
+    if (Array.isArray(allow)) {
+      const wildcardRules: string[] = []
+      for (const entry of allow) {
+        if (typeof entry !== 'string') continue
+        const trimmed = entry.trim()
+        if (!trimmed) continue
+        if (isWildcardAllowRule(trimmed)) wildcardRules.push(trimmed)
+        else allowRules.push(trimmed)
       }
-      reasons.push(`permissions.allow (${allow.length} rules)`)
+      if (wildcardRules.length > 0) {
+        if (broadRank < 3) {
+          broadRank = 3
+          broadLabel = 'full_access'
+        }
+        reasons.push(`permissions.allow wildcard (${wildcardRules.join(', ')})`)
+      }
     }
   }
 
   return {
     settingsPath,
-    effectiveRank,
-    effectiveLabel,
+    broadRank,
+    broadLabel,
+    effectiveRank: broadRank,
+    effectiveLabel: broadLabel,
+    allowRules,
     ...(reasons.length ? { elevatedBy: reasons.join(', ') } : {})
   }
+}
+
+export function formatUserAllowNotice(allowRules: readonly string[]): string | undefined {
+  if (allowRules.length === 0) return undefined
+  const preview = allowRules.slice(0, 6).join('、')
+  const suffix = allowRules.length > 6 ? ` 等 ${allowRules.length} 条` : ''
+  return `agy 用户级规则会自动放行：${preview}${suffix}`
 }
 
 export function assertUserSettingsWithinRequestedMode(
   requested: AgentPermissionMode,
   homeDir: string,
-  env: NodeJS.ProcessEnv = process.env
-): UserSettingsPermissionCheck {
+  sanitizedEnv: NodeJS.ProcessEnv = {}
+): EffectiveAntigravityPermissions {
   assertAntigravityPermissionMode(requested)
-  const check = inspectUserSettingsPermissionElevation(homeDir, env)
-  if (check.effectiveRank > MODE_RANK[requested]) {
+  const check = inspectUserSettingsPermissionElevation(homeDir, sanitizedEnv)
+  const requestedRank = MODE_RANK[requested]
+  if (check.broadRank > requestedRank) {
     throw new Error(
-      `已拒绝启动 Antigravity：用户配置 ${check.settingsPath} 中的权限设置（${check.elevatedBy ?? check.effectiveLabel}）高于当前所选或远程上限档位 "${requested}"。请调整该文件或切换到匹配的权限档位后重试。`
+      `已拒绝启动 Antigravity：用户配置 ${check.settingsPath} 中的整体权限设置（${check.elevatedBy ?? check.broadLabel}）高于当前所选或远程上限档位 "${requested}"。请调整该文件或切换到匹配的权限档位后重试。`
     )
   }
-  return check
+  // S8: take the higher of requested mode and broad setting; D11: annotate specific user allow rules.
+  const baseMode = check.broadRank > requestedRank ? check.broadLabel : requested
+  const effectivePermissionMode = check.allowRules.length > 0 ? `${baseMode} + 用户规则` : baseMode
+  const userAllowNotice = formatUserAllowNotice(check.allowRules)
+  return {
+    ...check,
+    effectivePermissionMode,
+    ...(userAllowNotice ? { userAllowNotice } : {})
+  }
 }
 
 export interface AcpPermissionOption {
@@ -205,7 +259,6 @@ export function buildAntigravityQuestionRequest(args: {
 
   const options: AgentQuestionOption[] = rawOptions
     .filter((opt): opt is AcpPermissionOption => Boolean(opt && typeof opt.optionId === 'string' && opt.optionId))
-    .slice(0, 4) // `isQuestionPrompt` validates at most 4 options per prompt
     .map((opt, index) => {
       const baseLabel = (typeof opt.name === 'string' && opt.name.trim() ? opt.name.trim() : opt.optionId).slice(0, 220)
       let label = baseLabel

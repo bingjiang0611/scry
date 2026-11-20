@@ -225,6 +225,11 @@ async function handlePrompt(msg) {
     }
   }
   send({ jsonrpc: '2.0', id: msg.id, result })
+  if (Array.isArray(scenario.trailingUpdatesAfterResult)) {
+    for (const trailing of scenario.trailingUpdatesAfterResult) {
+      send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId, update: trailing } })
+    }
+  }
   saveRecord()
 }
 
@@ -286,6 +291,9 @@ rl.on('line', async (line) => {
   }
 
   if (msg.method === 'session/new' || msg.method === 'session/resume' || msg.method === 'session/load') {
+    if (scenario.sessionNewDelayMs && msg.method === 'session/new') {
+      await new Promise((r) => setTimeout(r, scenario.sessionNewDelayMs))
+    }
     if (scenario.authMode === 'login_prompt_line') {
       process.stdout.write('Please visit https://accounts.google.com/o/oauth2/auth?state=SECRET_OAUTH_STATE_12345 to sign in\n')
     }

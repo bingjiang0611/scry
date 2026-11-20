@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { capabilityReady, type ProviderContext } from '../../shared/provider'
+import { shellEnv } from '../claude-locate'
 import { listProviderMcp } from '../mcp-config'
 import { createAntigravityCatalog } from './antigravity-catalog'
 import {
@@ -44,7 +45,7 @@ export function createAntigravityAdapter(
     run: (request: ProviderRunRequest) => runAntigravity(request, {
       ...runDeps,
       homeDir,
-      acquireRunSlot: () => catalog.enterRun(),
+      acquireRunSlot: (signal) => catalog.enterRun(signal),
       checkWorkspaceTrust,
       prepareMcp
     }),
@@ -53,7 +54,8 @@ export function createAntigravityAdapter(
     skills: { list: (context) => catalog.skills(context) },
     mcp: {
       snapshot: async (context: ProviderContext) => capabilityReady(context, 'read', {
-        configured: listProviderMcp('antigravity', context.cwd, homeDir),
+        // B1: pass merged shell+process env; antigravityMcpConfigPaths honors GEMINI_HOME only when allowlisted.
+        configured: listProviderMcp('antigravity', context.cwd, homeDir, { ...shellEnv(), ...process.env }),
         runtime: null
       })
     },

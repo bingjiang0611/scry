@@ -113,6 +113,8 @@ export function buildAntigravityResultEvent(args: {
   stopReason?: string
   cancelRequestedBeforeEndTurn?: boolean
   effectivePermissionMode?: string
+  userAllowRules?: readonly string[]
+  userAllowNotice?: string
   usage?: AcpPromptUsage | null
   contextUsage?: AcpContextUsage | null
   cancelled: boolean
@@ -153,6 +155,8 @@ export function buildAntigravityResultEvent(args: {
       ...(args.stopReason ? { stopReason: args.stopReason } : {}),
       ...(args.cancelRequestedBeforeEndTurn ? { cancelRequestedBeforeEndTurn: true } : {}),
       ...(args.effectivePermissionMode ? { effectivePermissionMode: args.effectivePermissionMode } : {}),
+      ...(args.userAllowRules && args.userAllowRules.length > 0 ? { userAllowRules: [...args.userAllowRules] } : {}),
+      ...(args.userAllowNotice ? { userAllowNotice: args.userAllowNotice } : {}),
       ...(args.contextUsage?.size !== undefined ? { contextWindow: args.contextUsage.size } : {}),
       usageCoverage: u.usageCoverage,
       ...(u.usageCoverageReason ? { usageCoverageReason: u.usageCoverageReason } : {}),

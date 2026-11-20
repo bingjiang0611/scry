@@ -10,10 +10,12 @@ import { AcpClient, AcpRpcError, type AcpInitializeResult, type AcpJsonRpcId } f
 import { AntigravityEventTranslator } from './antigravity-events'
 import {
   AntigravityStderrTail,
+  buildAntigravityLaunchEnv,
   forceKillAntigravityProcess,
   signalAntigravityProcess,
   spawnAntigravityAcp
 } from './antigravity-launch'
+import { hasAntigravityPreToolUseHooks } from './antigravity-mcp-paths'
 import {
   antigravityNativeModeFor,
   assertUserSettingsWithinRequestedMode,
@@ -30,12 +32,12 @@ const NATURAL_EXIT_GRACE_MS = 3_000
 export interface AntigravityRunDeps {
   homeDir?: string
   clientVersion?: string
-  /** Serialize active runs with catalog probes on the same profile (P7 D5). */
-  acquireRunSlot?: () => Promise<() => void>
-  /** Optional A6 workspace config trust gate executed before spawn (fail closed). */
+  /** Acquire a shared run slot (concurrent runs allowed; never overlaps catalog probes, B2/D5). */
+  acquireRunSlot?: (signal?: AbortSignal) => Promise<() => void>
+  /** Optional A6 workspace config trust gate executed after slot acquisition (fail closed). */
   checkWorkspaceTrust?: (cwd: string) => void | Promise<void>
   /** Optional extra ACP `mcpServers` entries (e.g. A6 run-scoped history reader) + extra env & cleanup. */
-  prepareMcp?: (request: ProviderRunRequest) => Promise<{
+  prepareMcp?: (request: ProviderRunRequest, baseEnv?: Record<string, string>) => Promise<{
     mcpServers: Array<Record<string, unknown>>
     extraEnv?: Record<string, string>
     dispose?: () => Promise<void> | void
@@ -102,6 +104,7 @@ export function runAntigravity(
   let activeClient: AcpClient | undefined
   let activeIdentityPromise: ReturnType<typeof spawnAntigravityAcp>['identityPromise'] | undefined
   const pendingPermissions = new Map<string, PendingPermission>()
+  const queueAbort = new AbortController()
 
   const cancelAllPendingPermissions = (): void => {
     for (const pending of pendingPermissions.values()) {
@@ -113,6 +116,7 @@ export function runAntigravity(
 
   const interrupt = (): void => {
     cancelRequested = true
+    queueAbort.abort()
     cancelAllPendingPermissions()
     if (sessionEstablished && externalSessionId && activeClient && !activeClient.isClosed) {
       activeClient.notify('session/cancel', { sessionId: externalSessionId })
@@ -124,6 +128,7 @@ export function runAntigravity(
   const forceKill = (): void => {
     cancelRequested = true
     forceKillRequested = true
+    queueAbort.abort()
     cancelAllPendingPermissions()
     activeClient?.destroy()
     if (activeIdentityPromise) void forceKillAntigravityProcess(activeIdentityPromise)
@@ -132,19 +137,49 @@ export function runAntigravity(
   const promise = (async (): Promise<ProviderRunResult> => {
     const startedAt = Date.now()
     const rawEnv: Record<string, string | undefined> = { ...shellEnv(), ...process.env }
-    const userPermCheck = assertUserSettingsWithinRequestedMode(permissionMode, homeDir, rawEnv)
-    if (deps.checkWorkspaceTrust) await deps.checkWorkspaceTrust(cwd)
+    const baseEnv: Record<string, string> = {}
+    for (const [k, v] of Object.entries(rawEnv)) if (v !== undefined) baseEnv[k] = v
 
-    const mcpPrepared = deps.prepareMcp
-      ? await deps.prepareMcp(request)
-      : { mcpServers: [] as Array<Record<string, unknown>> }
+    const emitPreSpawnCancelled = (): ProviderRunResult => {
+      request.emit(buildAntigravityResultEvent({
+        runId: request.runId,
+        durationMs: Date.now() - startedAt,
+        isError: false,
+        stopReason: 'cancelled',
+        effectivePermissionMode: permissionMode,
+        usage: null,
+        contextUsage: null,
+        cancelled: true,
+        failed: false,
+        hasSubagentTool: false,
+        nonJsonLineCount: 0
+      }))
+      return { externalSessionId, stopped: true, status: 'cancelled' }
+    }
+
+    if (cancelRequested) return emitPreSpawnCancelled()
+
+    let releaseRunSlot: (() => void) | undefined
+    try {
+      releaseRunSlot = deps.acquireRunSlot ? await deps.acquireRunSlot(queueAbort.signal) : undefined
+    } catch (slotErr) {
+      if (cancelRequested || (slotErr instanceof Error && slotErr.message === 'antigravity_run_cancelled_before_start')) {
+        return emitPreSpawnCancelled()
+      }
+      throw slotErr
+    }
+
+    let mcpPrepared: {
+      mcpServers: Array<Record<string, unknown>>
+      extraEnv?: Record<string, string>
+      dispose?: () => Promise<void> | void
+    } = { mcpServers: [] }
 
     const stderrTail = new AntigravityStderrTail()
     let spawned: ReturnType<typeof spawnAntigravityAcp> | undefined
     let client: AcpClient | undefined
     let exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined
     let idleTimer: ReturnType<typeof setTimeout> | undefined
-    const releaseRunSlot = deps.acquireRunSlot ? await deps.acquireRunSlot() : undefined
 
     const clearIdle = (): void => {
       if (idleTimer) {
@@ -154,8 +189,18 @@ export function runAntigravity(
     }
 
     try {
-      const baseEnv: Record<string, string> = {}
-      for (const [k, v] of Object.entries(rawEnv)) if (v !== undefined) baseEnv[k] = v
+      if (cancelRequested) return emitPreSpawnCancelled()
+
+      // B1: derive `.gemini` root from the exact sanitized launch env that `agy acp` receives.
+      const sanitizedEnv = buildAntigravityLaunchEnv(baseEnv)
+      const userPermCheck = assertUserSettingsWithinRequestedMode(permissionMode, homeDir, sanitizedEnv)
+      if (deps.checkWorkspaceTrust) await deps.checkWorkspaceTrust(cwd)
+      if (cancelRequested) return emitPreSpawnCancelled()
+
+      if (deps.prepareMcp) mcpPrepared = await deps.prepareMcp(request, baseEnv)
+      if (cancelRequested) return emitPreSpawnCancelled()
+
+      const hasPreToolUseHooks = hasAntigravityPreToolUseHooks(cwd, homeDir, sanitizedEnv)
 
       spawned = spawnAntigravityAcp({
         cwd,
@@ -170,7 +215,12 @@ export function runAntigravity(
         child.once('exit', (code, signal) => resolve({ code, signal }))
       })
 
-      const translator = new AntigravityEventTranslator(request.runId, request.emit)
+      const translator = new AntigravityEventTranslator(request.runId, request.emit, {
+        permissionMode: permissionMode === 'default' || permissionMode === 'auto_accept_edits' || permissionMode === 'full_access'
+          ? permissionMode
+          : 'default',
+        hasPreToolUseHooks
+      })
       let inPrompt = false
       let idleTimedOut = false
 
@@ -196,6 +246,7 @@ export function runAntigravity(
         onRequest: async (method, params, _id: AcpJsonRpcId) => {
           if (method !== 'session/request_permission') return undefined
           const permParams = (params && typeof params === 'object' ? params : {}) as AcpPermissionRequestParams
+          translator.markPermissionAsked(permParams.toolCall?.toolCallId)
           translator.ensureToolCall(permParams.toolCall as Record<string, unknown> | undefined)
           if (cancelRequested || !request.requestUserInput) {
             return { outcome: { outcome: 'cancelled' } }
@@ -320,7 +371,9 @@ export function runAntigravity(
           durationMs: Date.now() - startedAt,
           isError: false,
           stopReason: 'cancelled',
-          effectivePermissionMode: userPermCheck.effectiveRank > 0 ? userPermCheck.effectiveLabel : permissionMode,
+          effectivePermissionMode: userPermCheck.effectivePermissionMode,
+          userAllowRules: userPermCheck.allowRules,
+          userAllowNotice: userPermCheck.userAllowNotice,
           usage: null,
           contextUsage: translator.contextUsage,
           cancelled: true,
@@ -353,7 +406,9 @@ export function runAntigravity(
             durationMs: Date.now() - startedAt,
             isError: false,
             stopReason: rpcCode !== undefined ? `cancelled_rpc_${rpcCode}` : 'cancelled',
-            effectivePermissionMode: userPermCheck.effectiveRank > 0 ? userPermCheck.effectiveLabel : permissionMode,
+            effectivePermissionMode: userPermCheck.effectivePermissionMode,
+            userAllowRules: userPermCheck.allowRules,
+            userAllowNotice: userPermCheck.userAllowNotice,
             usage: null,
             contextUsage: translator.contextUsage,
             cancelled: true,
@@ -378,7 +433,9 @@ export function runAntigravity(
         isError: false,
         stopReason,
         cancelRequestedBeforeEndTurn,
-        effectivePermissionMode: userPermCheck.effectiveRank > 0 ? userPermCheck.effectiveLabel : permissionMode,
+        effectivePermissionMode: userPermCheck.effectivePermissionMode,
+        userAllowRules: userPermCheck.allowRules,
+        userAllowNotice: userPermCheck.userAllowNotice,
         usage: promptResult?.usage ?? null,
         contextUsage: translator.contextUsage,
         cancelled,
