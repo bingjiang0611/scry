@@ -13,6 +13,7 @@ const agents: DetectedAgent[] = [
   { id: 'codex', name: 'Codex', bin: 'codex', path: '/synthetic/codex', version: '0.51.0' },
   { id: 'qoder', name: 'Qoder', bin: 'qoder', path: '/synthetic/qoder', version: '1.0.0' },
   { id: 'opencode', name: 'OpenCode', bin: 'opencode', path: '/synthetic/opencode', version: '0.9.0' },
+  { id: 'antigravity', name: 'Antigravity', bin: 'agy', path: '/synthetic/agy', version: '1.5.13', accountNote: '账号未验证' },
   { id: 'pi:default', name: 'Pi', bin: 'pi', path: '/synthetic/pi', version: '0.52.0' },
   { id: 'pi:rotom', name: 'Pi · Rotom', bin: 'rotom', path: '/synthetic/rotom', version: '0.1.27' }
 ]

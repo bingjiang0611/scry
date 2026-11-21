@@ -307,9 +307,6 @@ export function McpTrustPanel({
         {runtimeProvider === 'antigravity_acp' && (
           <>
             <div className="psrc">{ANTIGRAVITY_COPY.residualRiskNotice}</div>
-            <div className="psrc">{ANTIGRAVITY_COPY.accountUnverifiedDetail}</div>
-            <div className="psrc">{ANTIGRAVITY_COPY.tosNotice}</div>
-            <div className="psrc">{ANTIGRAVITY_COPY.processScopeNotice}</div>
           </>
         )}
         {configuredButSilent.length > 0 && (

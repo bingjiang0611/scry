@@ -40,16 +40,14 @@ describe('CapabilitiesModal 精简能力页', () => {
     expect(idle).not.toContain('取消检测')
   })
 
-  it('Antigravity 中性字母图标、D4 账号未验证、S5 设计文案与 MCP 残余风险展示', () => {
+  it('Antigravity 菜单只显示名称，MCP 保留信任风险但不显示额外说明', () => {
     expect(PROVIDER_BRAND_MARKS.antigravity.paths.length).toBeGreaterThan(0)
     const html = renderToStaticMarkup(<McpTrustPanel runtimeProvider="antigravity_acp" />)
     expect(html).toContain('Antigravity')
     expect(html).toContain('~/.gemini/config/mcp_config.json')
     expect(html).toContain('~/.gemini/config/hooks.json')
-    expect(html).toContain('账号未验证')
     expect(html).toContain('TOCTOU')
-    expect(html).toContain('Google')
-    expect(html).toContain('/goal')
+    expect(html).not.toMatch(/账号未验证|条款提示|运行边界/)
 
     const pickerHtml = renderToStaticMarkup(
       <CliPicker
@@ -66,12 +64,11 @@ describe('CapabilitiesModal 精简能力页', () => {
         onSelect={() => {}}
       />
     )
-    expect(pickerHtml).toContain('账号未验证')
-    expect(pickerHtml).toContain('Google')
-    expect(pickerHtml).toContain('/goal')
+    expect(pickerHtml).toContain('<span class="agent-option-name">Antigravity</span>')
+    expect(pickerHtml).not.toMatch(/账号未验证|条款提示|运行边界/)
   })
 
-  it('Antigravity S10 用量覆盖/模型未观测、D11 用户规则提示与 D12 由 hook 放行展示', () => {
+  it('Antigravity 保留用量、模型与工具审批证据，但不展示整轮用户规则清单', () => {
     const partialTurn: shared.Turn = {
       runId: 'run-agy-ui-1',
       userText: 'check',
@@ -110,7 +107,8 @@ describe('CapabilitiesModal 精简能力页', () => {
     expect(turnHtml).not.toContain('Antigravity_acp')
     expect(turnHtml).toContain('部分用量')
     expect(turnHtml).toContain('模型未观测')
-    expect(turnHtml).toContain('agy 用户级规则会自动放行：Bash(git status)')
+    expect(turnHtml).not.toContain('agy 用户级规则会自动放行')
+    expect(turnHtml).not.toContain('Bash(git status)')
 
     const unavailableTurn: shared.Turn = {
       runId: 'run-agy-ui-2',
