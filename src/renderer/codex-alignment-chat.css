@@ -388,7 +388,7 @@
 
 .runtime-composer .permission-mode-option {
   width: 100%;
-  min-height: 62px;
+  min-height: 40px;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 20px;
   align-items: center;
@@ -424,23 +424,11 @@
   color: var(--dim2);
 }
 
-.runtime-composer .permission-mode-copy {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.runtime-composer .permission-mode-copy strong {
+.runtime-composer .permission-mode-label {
   color: inherit;
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   line-height: 1.2;
-}
-
-.runtime-composer .permission-mode-copy > span {
-  color: var(--dim2);
-  font-size: var(--text-sm);
-  line-height: 1.35;
 }
 
 .runtime-composer .permission-mode-check {
