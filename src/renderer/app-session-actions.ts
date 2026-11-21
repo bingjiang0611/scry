@@ -30,7 +30,7 @@ const SAVED_STATUS_MS = 1200
 export function createSessionActions({
   workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
   resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
-  draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
+  draftContextRef, setSessionEvidenceGap, setMissingWorkspaceSessionId, setSessionPromptQueues, setComposerError,
   confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
   setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
   queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
@@ -48,6 +48,7 @@ export function createSessionActions({
   taRef: RefObject<HTMLTextAreaElement>
   draftContextRef: MutableRefObject<{ providerId: ProviderId; agentProfileId: string | undefined; cwd: string | null }>
   setSessionEvidenceGap: Dispatch<SetStateAction<SessionEvidenceGap | null>>
+  setMissingWorkspaceSessionId: (sessionId: string | null) => void
   setSessionPromptQueues: Dispatch<SetStateAction<SessionPromptQueues>>
   setComposerError: Dispatch<SetStateAction<string | null>>
   confirmWorkspaceTransition: () => boolean
@@ -236,11 +237,13 @@ export function createSessionActions({
     try {
       // Sidebar activity is a display cache, not proof that no live run exists.
       const activeRunsRequest = window.scry.activeRuns()
-      const [, activeRuns] = await Promise.all([
-        window.scry.setCwd(projectCwd || null),
+      const [selectedCwd, activeRuns] = await Promise.all([
+        window.scry.setCwd(projectCwd || null, true),
         activeRunsRequest
       ])
       if (!isCurrent()) return
+      const workspaceMissing = Boolean(projectCwd) && selectedCwd === null
+      setMissingWorkspaceSessionId(workspaceMissing ? sessionId : null)
       const runId = activeRunForSession(
         activeRuns,
         projectCwd,
@@ -249,7 +252,7 @@ export function createSessionActions({
         agentProfileId
       )?.runId ?? knownRunId
       if (
-        await restoreActiveSessionSelection(
+        !workspaceMissing && await restoreActiveSessionSelection(
           { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
           {
             prepareRunFocus: session.prepareRunFocus,
@@ -258,6 +261,7 @@ export function createSessionActions({
             replaceWithParsedSession: session.replaceWithParsedSession,
             onHistoryLoaded: (page, activeRun) => {
               if (!isCurrent()) return
+              if (page?.workspaceMissing) setMissingWorkspaceSessionId(sessionId)
               setSessionCacheVisible(false)
               if (page && activeRun?.done !== false) sessionSnapshots.put(historyContext, page, cacheRevision)
               else sessionSnapshots.delete(historyContext)
@@ -281,6 +285,7 @@ export function createSessionActions({
         focusRequest
       ])
       if (!isCurrent()) return
+      if (loadedPage?.workspaceMissing) setMissingWorkspaceSessionId(sessionId)
       setSessionCacheVisible(false)
       const page = loadedPage ? sessionSnapshots.put(historyContext, loadedPage, cacheRevision) : null
       if (!page) sessionSnapshots.delete(historyContext)

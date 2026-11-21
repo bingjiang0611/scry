@@ -44,7 +44,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     setWorkspaceOpenRequests, workspaceOpenSequenceRef, confirmWorkspaceTransition, draftContextRef, draftAttachments,
     sessionPromptQueues, setSessionPromptQueues, queuedPrompts, setQueuedPrompts, editingQueuedPromptId, setEditingQueuedPromptId,
     movedQueuedPromptId, setMovedQueuedPromptId, releaseDraft, setInput, setDraftAttachments, providerSendBlockedReason,
-    sendBlockedReason, providerCompatibilityIssue } = state
+    sendBlockedReason, sessionWorkspaceMissing, setMissingWorkspaceSessionId, providerCompatibilityIssue } = state
   const sessionRuntime = useAppSessionRuntime({
     activeSessionIdRef, localDraftOwnersRef, integrations, setSessionDrafts, setSessionPromptQueues, migrateRightSurface,
     markRunFinished, setWorkspaceRefreshKey, selectSessionId, loadProjects, sessionLoading, activeSessionId, draftKey
@@ -157,7 +157,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     openWorkspaceRun: (target, sessionId, runId) => openWorkspaceRun(target, sessionId, runId),
     view, cwd, setCwd, loadProjects, sessionSelectionSeqRef, viewRef, setView, switchingAgentRef, movedQueuedPromptId, EMPTY_DRAFT_ATTACHMENTS,
     draftStore, draftKey, session, integrations, chatNavigation, scrollRef, taRef,
-    selectedProviderSessionId, sessionLoading, sendBlockedReason, setComposerError, setComposerSubmitting,
+    selectedProviderSessionId, sessionLoading, sendBlockedReason, sessionWorkspaceMissing, setComposerError, setComposerSubmitting,
     setInput, setDraftAttachments, clearDraftAttachments, setSlashHidden, setSlashSel,
     slash: { slashCmds, slashReason, slashLoading, slashSel, setSlashSel, slashHidden, setSlashHidden, slashToken, slashOpen, retrySlash, refreshSlashCatalog },
     draftStartPendingRef, activeSessionIdRef, cwdRef, draftContextRef, localDraftOwnersRef, localRunIdsRef, localStartsRef,
@@ -177,7 +177,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   } = createSessionActions({
     workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
     resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
-    draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
+    draftContextRef, setSessionEvidenceGap, setMissingWorkspaceSessionId, setSessionPromptQueues, setComposerError,
     confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
     setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
     queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
@@ -191,7 +191,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
     loadProjects, projects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, setConversationError, setConversationAgent, setLogicalConversation,
     remoteWorkspaceDirty, setRemoteWorkspaceDirty, remoteTarget, setRemoteTarget, setRemoteAdoptedSession,
-    remoteSurfaces, remoteSurfaceKey, remotePanelVisible, remoteSurface, rightSurface, hasSurfaceContext, terminalOpen, surfacePane,
+    remoteSurfaces, remoteSurfaceKey, remotePanelVisible, remoteSurface, rightSurface, hasSurfaceContext, terminalOpen, sessionWorkspaceMissing, surfacePane,
     sidebarPane, rightSurfaces, currentSurface, dispatchRightSurface, setTurnDiffSelection, setWorkspaceDirty, turnDiffSelection, taRef, setSlashHidden,
     viewRef, conversationProjection, sessionEvidenceGap, workspaceRefreshKey,
     setSettingsTab, newConversation, unbindProject, pickRecent, setSessionLoading
@@ -211,7 +211,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const chatProps = createAppChatProps({
     workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
-    sessionLoading, activeSessionId, sendBlockedReason, composerError, providerSendBlockedReason, providerCompatibilityIssue,
+    sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
     sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
     steerInFlightRef: steerInFlightRef.current, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,

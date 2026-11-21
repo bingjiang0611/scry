@@ -31,6 +31,7 @@ export function useAppState() {
   useEffect(() => () => sessionSnapshots.clear(), [sessionSnapshots])
   // 选中的历史会话读不到证据时保留原因；新会话、切会话与新轮次都会清空它。
   const [sessionEvidenceGap, setSessionEvidenceGap] = useState<SessionEvidenceGap | null>(null)
+  const [missingWorkspaceSessionId, setMissingWorkspaceSessionId] = useState<string | null>(null)
   const draftStartPendingRef = useRef(false)
   const [activeRunHydrated, setActiveRunHydrated] = useState(false)
   const workspace = useWorkspaceState()
@@ -276,7 +277,8 @@ export function useAppState() {
           integrations.runControlsLoading,
           integrations.runControls
         )
-  const sendBlockedReason = providerSendBlockedReason
+  const sessionWorkspaceMissing = view === 'chat' && missingWorkspaceSessionId !== null && missingWorkspaceSessionId === activeSessionId
+  const sendBlockedReason = sessionWorkspaceMissing ? COMPOSER_BLOCKED_COPY.missingWorkspace : providerSendBlockedReason
   // 版本兼容性是提示而不是阻断：只有在没有真正阻断原因时才占用状态行。
   const providerCompatibilityIssue = providerCompatibilityNotice(integrations.selectedAgent)
   return {
@@ -293,6 +295,8 @@ export function useAppState() {
     sessionSnapshots,
     sessionEvidenceGap,
     setSessionEvidenceGap,
+    setMissingWorkspaceSessionId,
+    sessionWorkspaceMissing,
     draftStartPendingRef,
     activeRunHydrated,
     setActiveRunHydrated,

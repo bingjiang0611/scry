@@ -39,6 +39,7 @@ export interface AppComposerContext {
   selectedProviderSessionId: string | null
   sessionLoading: boolean
   sendBlockedReason: string | null | undefined
+  sessionWorkspaceMissing: boolean
   setComposerError: Dispatch<SetStateAction<string | null>>
   setComposerSubmitting: Dispatch<SetStateAction<boolean>>
   setInput: Dispatch<SetStateAction<string>>
@@ -78,7 +79,7 @@ export function useAppComposer(context: AppComposerContext) {
   const { slashCmds, slashReason, slashLoading, slashSel, setSlashSel, slashHidden, setSlashHidden, slashToken, slashOpen, retrySlash, refreshSlashCatalog } = context.slash
 
   const { view, cwd, viewRef, setView, switchingAgentRef, movedQueuedPromptId, EMPTY_DRAFT_ATTACHMENTS, draftStore, draftKey, session, integrations, chatNavigation, scrollRef, taRef, selectedProviderSessionId,
-    sessionLoading, sendBlockedReason, setComposerError, setComposerSubmitting, setInput, setDraftAttachments,
+    sessionLoading, sendBlockedReason, sessionWorkspaceMissing, setComposerError, setComposerSubmitting, setInput, setDraftAttachments,
     clearDraftAttachments, draftStartPendingRef, activeSessionIdRef, cwdRef,
     shouldStickToBottomRef, openingSessionBottomRef,
     queuedStartPendingRef, queuedStartInFlightRef, queuedDrainGenerationRef, queueKeyRef, pausedQueuedPromptsRef,
@@ -175,7 +176,7 @@ export function useAppComposer(context: AppComposerContext) {
 
   useEffect(() => {
     // 历史页尚未恢复完成时不能启动队列，否则会用上一会话残留的 busy/身份状态发送。
-    if (sessionLoading || session.busy) return
+    if (sessionLoading || session.busy || sessionWorkspaceMissing) return
     const queueKey = draftKey
     if (queuedStartPendingRef.current) return
     const queued = nextDrainableQueuedPrompt(queuedPrompts, editingQueuedPromptId)
@@ -210,7 +211,7 @@ export function useAppComposer(context: AppComposerContext) {
         queuedStartPendingRef.current = true
         setComposerError(`${ipcErrorMessage(error)}；这条消息仍保留在队列，队列已暂停`)
       })
-  }, [draftKey, editingQueuedPromptId, integrations.agents, queuedPrompts, session.busy, sessionLoading, startPrompt, steerEvidenceByMessageId])
+  }, [draftKey, editingQueuedPromptId, integrations.agents, queuedPrompts, session.busy, sessionLoading, sessionWorkspaceMissing, startPrompt, steerEvidenceByMessageId])
 
   // 队列项离开队列（移除、Steer 被接受、被自动出队）后，编辑态必须跟着结束，
   // 否则输入框会停在一个已经不存在的队列条目上。

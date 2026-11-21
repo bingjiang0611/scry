@@ -18,6 +18,7 @@ export const PI_PICKER_COPY = {
 } as const
 
 export const COMPOSER_BLOCKED_COPY = {
+  missingWorkspace: '原工作目录已不存在。仍可查看历史；恢复目录并重新打开会话后才能继续发送。',
   scanning: '正在检测本机 Provider，暂不能发送',
   // App 不能替用户装 CLI；这里只给出可执行的下一步，不假装能自动修好。
   missingCli: (label: string) => `未检测到 ${label}：先在终端安装并登录该 CLI，再重新检测。草稿与附件已保留。`,
