@@ -142,7 +142,6 @@ export function createSessionActions({
       await applyNewConversationEffects({
         clearTurns: session.clearTurns,
         newSession: () => window.scry.newSession(integrations.providerContext),
-        refreshProviderCatalogs,
         setActiveSessionId: selectSessionId,
         setView,
         focusComposer: () => focusComposerUnlessFocusMoved(taRef, focusBefore),
@@ -150,12 +149,15 @@ export function createSessionActions({
       })
     } catch (error) {
       if (isCurrent()) setComposerError(`无法新建会话：${error instanceof Error ? error.message : String(error)}`)
+      return
     } finally {
       if (isCurrent()) {
         setSessionLoading(false)
         focusComposerUnlessFocusMoved(taRef, focusBefore)
       }
     }
+    // Reset is authoritative; refreshing commands and skills is not a send prerequisite.
+    if (isCurrent()) void refreshProviderCatalogs()
   }
 
   const newConversationInProject = async (projectCwd: string): Promise<void> => {

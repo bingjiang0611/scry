@@ -15,6 +15,8 @@ document.getElementById('cache-state')!.parentElement!.style.display = 'none'
 let delay = 60
 let fail = false
 let remoteVisible = false
+let releaseCatalog: (() => void) | undefined
+let holdCatalog = false
 const records: Array<{ kind: string; start: number; end?: number; failed?: boolean }> = []
 function request<T>(kind: string, value: () => T): Promise<T> {
   const record = { kind, start: performance.now() } as (typeof records)[number]
@@ -37,6 +39,10 @@ const catalog: DesktopRemoteCatalog = {
   providerEvidence: 'host_snapshot', directorySelection: true
 }
 Object.assign(window.scry, {
+  invalidateProviderContext: async () => {
+    if (holdCatalog) await new Promise<void>((resolve) => { releaseCatalog = resolve })
+    return true
+  },
   loadSession: (context: { externalSessionId?: string }) => request('session', () => page(context.externalSessionId!)),
   listSkills: () => request('skills', () => ({ state: 'ready', mode: 'read', data: [], providerId: 'claude', cwd: '/fixture/cache' })),
   mcpSnapshot: () => request('mcp', () => ({ state: 'ready', mode: 'read', data: { configured: [], runtime: [], operations: { authenticate: [] } }, providerId: 'claude', cwd: '/fixture/cache' })),
@@ -83,6 +89,9 @@ function InventoryRead({ kind, legacy }: { kind: 'skills' | 'mcp'; legacy: boole
 }
 Object.assign(window, { loadingFixture: {
   records,
+  holdCatalog: () => { holdCatalog = true },
+  catalogPending: () => releaseCatalog !== undefined,
+  releaseCatalog: () => { holdCatalog = false; releaseCatalog?.(); releaseCatalog = undefined },
   inventory: (kind: 'skills' | 'mcp', legacy: boolean) => extraRoot.render(<InventoryRead key={++inventoryKey} kind={kind} legacy={legacy} />),
   startInventory: () => startInventory(),
   closeInventory: () => extraRoot.render(null),
