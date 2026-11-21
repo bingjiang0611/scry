@@ -315,7 +315,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // transport so a locally enrolled grant cannot be replayed over the network.
   const identity = buildIdentity(options.appVersion)
   const localHost = service.createLocalHost(identity, {
-    onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint)
+    onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
+    activeRuns: () => pipeline.runs.unsettledStates().length
   })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,

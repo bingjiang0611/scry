@@ -32,7 +32,7 @@ describe('daemon background service status (local op)', () => {
           providerManifestUrl: null
         },
         ...(process.env.SCRY_ORCHESTRATION === 'on'
-          ? { orchestration: { mode: 'on', h1FallbackUnavailable: false } }
+          ? { orchestration: { mode: 'on', writeIndeterminate: false, h1FallbackUnavailable: false } }
           : {})
       })
     } finally {

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { stopFixtureDaemon } from './b4v/fixture.mjs'
 import { buildTransportClient, connectCdp, createEvaluate, freePort, launch, waitForTarget } from './desktop-remote-host-smoke/harness.mjs'
 import { pairDevice } from './desktop-remote-host-smoke/pairing.mjs'
 import { verifyWorkbench } from './desktop-remote-host-smoke/workbench.mjs'
@@ -25,7 +26,8 @@ const appPath = resolve(devApp
   : join('dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app'))
 const executable = join(appPath, 'Contents', 'MacOS', devApp ? 'Electron' : 'Scry')
 const root = resolve('.')
-const temp = mkdtempSync(join(tmpdir(), 'scry-desktop-remote-smoke-'))
+// Keep unix socket paths under macOS's 104-byte sun_path limit in default daemon mode.
+const temp = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-drh-')))
 let child
 let cdp
 let appLog = ''
@@ -66,7 +68,14 @@ async function main() {
     preview: 'desktop remote host smoke', ts: Date.now()
   }]))
 
-  child = launch({ spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog })
+  // Daemon desktop info currently omits sessionActions/sessionFork/sessionDelete and reports
+  // workbenchOps:{openPath:false,trashItem:false} (see src/daemon/host-process.test.ts), while
+  // this smoke asserts the full in-process remote host surface. Keep explicit in-process mode
+  // until daemon remote-host parity covers sessionActions/fork/delete.
+  child = launch({
+    spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog,
+    env: { SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0' }
+  })
   const page = await waitForTarget(cdpPort)
   assert.match(page.url, /^file:/, 'production renderer must load from a file URL')
   cdp = connectCdp(page.webSocketDebuggerUrl)
@@ -108,6 +117,7 @@ try {
   if (cdp) cdp.close()
   try {
     if (child && child.exitCode === null && child.signalCode === null) await stopOwnedApp(child)
+    await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') }).catch(() => {})
   } finally {
     if (failure || (child && child.exitCode === null && child.signalCode === null)) {
       writeFileSync(join(temp, 'failure.log'), `${failure?.stack ?? failure ?? 'child exit unproven'}\n${appLog}`, { mode: 0o600 })

@@ -2,7 +2,7 @@ import { app, BrowserWindow, safeStorage } from 'electron'
 import { join } from 'node:path'
 import type { HostAdminNotice } from '../../shared/host-admin'
 import { showHostAdminSystemNotification } from './host-admin-notifications'
-import { DaemonClient, DaemonClientError, daemonClientPaths } from '../daemon-client'
+import { DaemonClient, DaemonClientError, daemonClientPaths, type DaemonProbeInfo } from '../daemon-client'
 import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
 import { unsafeCredentialStorageReason } from './remote-connections'
 import { ensureDaemon, type DaemonLaunch, type DaemonProbe } from '../daemon-supervisor'
@@ -18,7 +18,7 @@ import type { DockBadgeState } from '../dock-badge'
 import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
 import { createDaemonRunSurface, type DaemonRunSurface } from './daemon-run-surface'
-import { scryBuildId, type BuildIdentity } from '../../shared/build-identity'
+import { scryBuildId } from '../../shared/build-identity'
 
 // Daemon mode for the App's own run surface. One switch, one decision: either the
 // App talks to the daemon that owns the ledger and the runs, or it does not start
@@ -52,6 +52,8 @@ export interface DaemonRunModeResult {
   expected?: string
   /** version-mismatch: the build ids behind `running` and `expected`, when each side has one (A5). */
   runningBuild?: string
+  /** version-mismatch: active runs reported by the running daemon over daemonInfo, when known (W15). */
+  runningActiveRuns?: number
   expectedBuild?: string
   action?: 'restart_daemon'
   reason?: string
@@ -69,7 +71,7 @@ export interface DaemonRunModeDeps {
   send: (channel: string, payload: unknown) => void
   currentCwd: () => string | undefined
   /** Client-level probe: a thrown DaemonClientError is a refusal, `undefined` is absence. */
-  probe?: () => Promise<BuildIdentity | undefined>
+  probe?: () => Promise<DaemonProbeInfo | undefined>
   launch?: DaemonLaunch
   /** Fallback direct launch when a service-manager launch timed out waiting for ready (P5 §2.4). */
   launchFallback?: DaemonLaunch
@@ -97,9 +99,10 @@ const REFUSALS: ReadonlySet<string> = new Set([
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
   if (!daemonModeEnabled()) return { status: 'disabled' }
-  const mismatch = (running: string, runningBuild: string | undefined): DaemonRunModeResult => ({
+  const mismatch = (running: string, runningBuild: string | undefined, runningActiveRuns?: number): DaemonRunModeResult => ({
     status: 'version-mismatch', running, expected: deps.appVersion, action: 'restart_daemon',
     ...(runningBuild === undefined ? {} : { runningBuild }),
+    ...(runningActiveRuns === undefined ? {} : { runningActiveRuns }),
     ...(deps.appBuild === undefined ? {} : { expectedBuild: deps.appBuild })
   })
 
@@ -116,7 +119,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   // The probe answers "is one there, and may we use it?" without spending the grant:
   // `connect()` discards a credential when the daemon does not answer, which would
   // make a daemon that is merely stopped look like a revoked device.
-  const connect = async (): Promise<BuildIdentity | undefined> =>
+  const connect = async (): Promise<DaemonProbeInfo | undefined> =>
     // Before the first grant the only way to learn the daemon is ready is to enroll;
     // afterwards a stopped daemon must not cost the credential its restart needs.
     client.hasGrant ? await client.daemonInfo() : await client.connect()
@@ -164,7 +167,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   }
   if (refused) return refusal(refused)
   if (supervised.status === 'version-mismatch') {
-    return { ...mismatch(supervised.running, supervised.runningBuild), dispose: () => client.close() }
+    return { ...mismatch(supervised.running, supervised.runningBuild, supervised.runningActiveRuns), dispose: () => client.close() }
   }
   if (supervised.status === 'unavailable') {
     client.close()

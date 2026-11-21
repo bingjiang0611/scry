@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
-import { createBoundarySampler, createOutputCapture, freePort, openRendererSession, openSnapshotChannel,
+import { createBoundarySampler, createOutputCapture, freePort, inProcessBenchEnv, openRendererSession, openSnapshotChannel,
   readRendererMount, readSettlement, watchChildClose, writeBootstrap } from './session-concurrency-electron.mjs'
 import { performHistorySwitches, prepareHistoryTargets, waitForAdmittedTasks } from './session-concurrency-ui.mjs'
 import { driveConcurrencyRun, installConcurrencyProbe } from './session-concurrency-page.mjs'
@@ -130,8 +130,7 @@ try {
   const launchStarted = performance.now()
   ownedChild = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
-    env: { ...process.env, HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
-      SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi', SCRY_REMOTE_HOST: '0' },
+    env: inProcessBenchEnv(home),
     // The extra 'ipc' entry is the fixture's private snapshot channel: fixed request/reply only.
     stdio: ['ignore', 'pipe', 'pipe', 'ipc']
   })

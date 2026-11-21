@@ -2,9 +2,9 @@
 
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
-- 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；W12 中继部署已通过；W13 返修中（见 W13-review）；之后做 P5-8（B 修完 W11 的 N1 后开始）。W2b 的注销与 FileVault 两项按维护者 2026-11-21 的决定，挪到最后，与 S3 前的整体复验合并成一次停机。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
-- 执行方 B：P5（W2、W3、W11 已通过）；Antigravity（W7、W8 已通过）；现做 W15（S3 第一步）。
-- 执行方 C：P4（W4、W5 已通过），现做 W9。
+- 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；W12 中继部署已通过；W13 已通过；现做 W14（P5-8）。W2b 的注销与 FileVault 两项按维护者 2026-11-21 的决定，挪到最后，与 S3 前的整体复验合并成一次停机。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
+- 执行方 B：P5（W2、W3、W11 已通过）；Antigravity（W7、W8 已通过）；W15 返修中（见 W15-review），之后做 W17。
+- 执行方 C：P4（W4、W5、W9 已通过），现做 W16（P4-3）。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
 |---|---|---|---|---|---|
@@ -24,12 +24,14 @@
 | W13 | 默认路径：MCP 可执行文件指纹按文件状态缓存（每次运行少算 3 次 SHA-256） | A | — | 安全语义不变，有测试证明 | [tasks/W13-mcp-fingerprint-cache.md](tasks/W13-mcp-fingerprint-cache.md) |
 | W14 | P5-8：命令行批准新设备的真机验收 | A | W11 通过、W13 推送 | P5 第 2 步合并前必须完成 | [tasks/W14-p5-8-real-machine.md](tasks/W14-p5-8-real-machine.md) |
 | W15 | S3 第一步：开发构建与测试实例默认走后台服务（不删代码） | B | — | `SCRY_HOST_DAEMON=0` 保留一个发布版本 | [tasks/W15-s3-step1-default-daemon.md](tasks/W15-s3-step1-default-daemon.md) |
+| W16 | P4-2 收尾两项 + P4-3 本机订阅（只在 on 下生效） | C | W9 通过 | 默认路径零行为变化 | [tasks/W16-p4-3-local-subscribe.md](tasks/W16-p4-3-local-subscribe.md) |
+| W17 | 默认 daemon 下恢复远程桌面的会话操作与工作区操作（线上回归） | B | W15 返修 | 下一次合入 main 的门槛 | [tasks/W17-daemon-remote-session-actions.md](tasks/W17-daemon-remote-session-actions.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛（2026-11-20 已通过，附条件：W10），但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
 **B 与 C 的交界**：两边都可能改 `src/daemon/host-process.ts` 的启动顺序（B：daemon 自报配置与 `launchedBy`；C：W5 的影子写挂点）。改动尽量小、各自加在独立函数里，推送前先合并对方的最新提交。
 
-**不在队列里（维护者已定的顺序）**：S3 第 2–5 步（删除进程内路径，下一个发布版本）、P4-2 起的各段、P6（含 P6-0 探针，排在 P4 之后，见 [P6-multi-agent-plan](../P6-multi-agent-plan.md) §D）。W1 通过后由核验方补任务单。
+**不在队列里（维护者已定的顺序）**：S3 第 2–5 步（删除进程内路径，下一个发布版本）、P4-4 起的各段、P6（含 P6-0 探针，排在 P4 之后，见 [P6-multi-agent-plan](../P6-multi-agent-plan.md) §D）。W1 通过后由核验方补任务单。
 
 **MCP 参数与凭据**：W6 对应的修复已推送；`src/main/providers/private-mcp-config.ts` 与各 Provider 构造 MCP 参数、历史检索凭据的代码，改动前先读该修复的提交说明，不要把密钥重新放回命令行参数。
 

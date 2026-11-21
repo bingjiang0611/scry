@@ -204,6 +204,7 @@ export function registerBackgroundServiceHandlers(input: {
     })
   }
   const restart = exclusive(() => restartBackgroundService(actionDeps))
+  const restartIdle = exclusive(() => restartBackgroundService({ ...actionDeps, activeRuns: async () => 0 }))
   const setLoginStart = (enabled: boolean) => exclusive(() => setBackgroundServiceLoginStart(enabled, {
     daemonMode: daemon !== undefined,
     precheckEnable: () => loginStart.precheckEnable(),
@@ -253,13 +254,18 @@ export function registerBackgroundServiceHandlers(input: {
     // waits on the answer. 重启后台服务 is the restart channel's own action.
     const promptMismatch = createVersionMismatchPrompt({
       daemonMode: true,
+      autoRestartIdle: !isPackaged,
       ask: show,
       restart,
+      restartIdle,
       reportFailure: async (prompt) => { await show(prompt) },
       actionInProgress: () => busy
     })
     daemon.onOutcome((result) => {
-      void promptMismatch(connectionFromMode(result, appVersion)).catch((error: unknown) => {
+      void promptMismatch(
+        connectionFromMode(result, appVersion),
+        result.runningActiveRuns !== undefined ? { activeRuns: result.runningActiveRuns } : undefined
+      ).catch((error: unknown) => {
         console.warn('[background-service] version mismatch prompt failed', error)
       })
       if (result.status === 'ready') {

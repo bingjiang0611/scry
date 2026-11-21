@@ -6,7 +6,7 @@
 
 | 关系 | 现状 | 结论（2026-11-18） |
 |---|---|---|
-| S3（删除进程内路径） | 打包构建自 main `c35d0191` 默认走 daemon；开发构建与测试实例仍默认进程内，`SCRY_HOST_DAEMON=0` 可切回（`daemon-mode-default.ts:1-9`）。S3 未做 | **S3 只需先于删除 `off` 路径**，即 P4-5b 与 P4-6（决定 D）。进程内路径就是今天的 `off` 实现，P4 不给它加功能，所以不存在「第二份实现」。P4-0 到 P4-4 可与 S3 并行，两个条件：off↔on 增量导入已做（§9，P4-1）；CI 有 daemon 模式作业（下一行） |
+| S3（删除进程内路径） | 打包、开发构建与测试实例均已默认走 daemon（W15，`daemon-mode-default.ts`），仅保留 `SCRY_HOST_DAEMON=0` 逃生开关；S3 尚未删除进程内路径 | **S3 只需先于删除 `off` 路径**，即 P4-5b 与 P4-6（决定 D）。进程内路径就是今天的 `off` 实现，P4 不给它加功能，所以不存在「第二份实现」。P4-0 到 P4-4 可与 S3 并行，两个条件：off↔on 增量导入已做（§9，P4-1）；CI 有 daemon 模式作业（下一行） |
 | daemon 模式 CI 作业 | CI 只有 daemon 模式的 smoke（`.github/workflows/ci.yml:374`）；单元与集成测试走进程内，`shadow`/`on` 平时不会被执行 | P4-1 加一个作业：相关测试在 `SCRY_HOST_DAEMON=1` 下各跑 `SCRY_ORCHESTRATION=shadow` 与 `on` |
 | 两本账合并 | STATUS-BATCH4：「B4-S 之后再议」 | P4-2 合并 run 与 turn 投递生命周期；边界见 core §2.8（决定 G） |
 | P5（无界面执行端） | 第 1 步登录时启动、第 2 步命令行批准，与 P4 分开做（[P5-headless-host](P5-headless-host.md) §10.1）；不改协议版本，加一个可协商宿主能力（[P5-host-cli](P5-host-cli.md) §5） | 配对与 grant 不进日志权威。批准方式写在 grant 的 `approvedVia` 里（P5 §10.1 第 4 条），不另设审计文件，所以首稿设想的 `pairing-audit:<offset>` 引用作废。并行时的三处冲突见下表 |
@@ -38,7 +38,7 @@
 
 - **每段重测**：P4-1（影子写：提交延迟，以及叠加在 H1 之上的成本）、P4-2（成为权威：首 token 与提交合计）、P4-3（本机订阅：到达延迟）各按 S1 的流程测一次：同一构建、paced fixture、计时锁、记录负载，负载/核 > 0.5 作废重测。
 - **持久性成本**：`synchronous=FULL` 相对 `scry.db` 是新成本。`scry.db` 没有设 `synchronous`（`db-connection.ts:48-49`），better-sqlite3 编译时设了 `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`（依赖的 `deps/defines.gypi:16`），即 NORMAL。相对今天的 run 路径，FULL 取代 H1 每条的 fsync（`session-ledger-file.ts:139`）；只有 P4-1 影子写期间是纯叠加。
-- **旧台账镜像**（P4-2 到删除 `off` 之间）在提交**之后**由可重放 effect 异步写出，不在首 token 路径上，也不是严格的回退保证（§9）。
+- **旧台账镜像**（P4-2 到删除 `off` 之间）在提交**之后**由进程内纯下游镜像（`LegacyMirrorWorker`，不再写入 `orch_outbox` 作为可重放 effect）异步写出，不在首 token 路径上，也不是严格的回退保证（§9、决定 H §14）。
 - 另测：WAL 大小与检查点停顿（检查点期间提交的 P99）；大正文的提交（1.2 MB，data §4.7）；同一线程上 `scry.db` 的 `recordTurn` 与编排提交的 P99；远程 scope 逐行授权的成本（会话快照，行数分档）；启动恢复的耗时。
 
 ### 8.3 macOS fullfsync 与文件系统
@@ -81,11 +81,11 @@
 
 **合计约 12 周（11–13），不含 S3**；等维护者安装真机客户端的时间不计入。首稿 8.5 周；增加的部分：P4-2 +1 周（复核、TTL、证据恢复、两本账对账、放行停止）；P4-4 +0.5 周（扫描触发、清除与墓碑）；协议拆成 5a/5b 并加转发与真机轮 +1 周；P4-0/P4-1 各 +0.5 周（迁移执行器、正文、增量导入、CI 作业、首轮测量）；P4-3 +0.25 周。落在评审 10–12 周的上沿，主要因为协议拆两段要多一轮真机验证。
 
-**开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。开发构建与测试实例默认进程内（`daemon-mode-default.ts:6-9`），所以同一份 userData 在进程内与 daemon 之间来回是开发者的日常，不是罕见回退。规则：
+**开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。W15 之后打包、开发构建与测试实例均默认走 daemon（`daemon-mode-default.ts`），仅在显式设 `SCRY_HOST_DAEMON=0` 时回退进程内；S3 删除进程内路径前保留经由当前 daemon 的 off↔on 往返规则：
 
 1. 每次以 `shadow` 或 `on` 启动，都读旧台账中 seq 大于 `orch_meta.legacy_ledger_seq` 的条目，幂等导入：按 scoped intent id 查回执，按台账 run id 查 `orch_legacy_run`，已有就跳过。`off` 期间派发了却没有终态的 run 在 P4-2 权威模式记 `unavailable`（P4-1 影子模式保留 `dispatched` 交由 H1 `recover()` 同步驱动以保持一致）；只记录未派发的在 P4-2 按 core §2.4 的 pending 规则处理（多半已过期，记 `not_sent`）。**历史导入 actor 说明**：H1 落盘台账只保存已绑定 peer 的 `scopedIntentId`，未落盘原始 `peerCertSHA256`，因此历史导入的回执以 `actor='system'` 落库（实时影子与 P4-2 实时命令均写 `peer:<certSHA256>`）；P4-2 对客户端重传查询回执时按 `(command_id = scopedIntentId, actor IN (peerActor, 'system'))` 兜底历史导入项，因 `scopedIntentId` 已与 `peerCertSHA256` 密码学绑定，不会发生跨设备串号。`app-sessions.json` 的哈希与 `legacy_catalog_sha256` 不同就做同样的增量导入。当未导入历史条目超过 2,000 条时，启动前仅同步导入未终态 run，其余历史终态在 `openLocalChannel` 之后分批让出导入，避免大台账阻塞守护进程就绪。
-2. `on` 期间旧台账由 `legacy.mirror` 在提交后异步写出，并推进 `legacy_ledger_seq`。崩溃后下次启动补写；补写之前切到 `off` 会少最近的 run，所以它**不是**严格的回退保证。
-3. 不选「on → off 单向」：那会让 S3 之前保留的逃生开关（`SCRY_HOST_DAEMON=0`）要么拒绝启动，要么静默分叉历史。
+2. `on` 期间旧台账降级为进程内纯下游镜像（`LegacyMirrorWorker`，不再是可重放 outbox effect；决定 H §14.3）：首次进入 `on`（即使 0 run）即同步写出合法快照，运行期异步追加并推进 `legacy_ledger_seq`；例行压缩直接使用台账自身快照，仅在写入失败或重试恢复时从 DB 重建并原子重写；重写亦失败则标记 `h1_fallback_unavailable='1'` 并在进程内定期重试。切回 `off` 时由当前版本 daemon 的 `reconcileH1ForOffMode`（仅在 `orchestration_on_active='1'` 时 fail-open 执行）用 DB 校正 H1 至 `lastSeq >= R` 后再启动。
+3. **支持与不支持的回退（决定 H §14.5）**：支持经由当前版本 daemon 的 `off↔on` 往返（先用当前 daemon 以 `SCRY_ORCHESTRATION=off` 启动一次校正 H1，再切回 `on` 增量导入），但**不支持**从 `on` 直接切到进程内模式（`SCRY_HOST_DAEMON=0`）或降级到 P4-2 之前的版本（S3 将删除进程内路径，且 P4-2 的 `on` 非默认值）。
 
 P4-5b 之后不再有开关，回退只能回到之前的构建：旧构建不认识 `orchestration.db`，H1 文件在 P4-6 之前仍可用。
 

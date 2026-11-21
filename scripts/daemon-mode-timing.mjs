@@ -4,8 +4,8 @@
 //   node scripts/daemon-mode-timing.mjs --samples 30 --mode daemon
 //
 // Same App build, same packaged Provider fixture, same workspace, one mode per run:
-// `in-process` uses the App's own pipeline (no SCRY_HOST_DAEMON), `daemon` sets the
-// switch so the daemon executes the run. Both are measured from the renderer, through
+// `in-process` explicitly sets SCRY_HOST_DAEMON=0 (App's own pipeline), `daemon` sets
+// SCRY_HOST_DAEMON=1 so the daemon executes the run. Both are measured from the renderer, through
 // the shipped preload API, so a difference is the transport and ownership change and
 // not a second instrument.
 //
@@ -157,8 +157,11 @@ const measure = async (count, chunkIndex) => {
     child = launch({
       spawn, executable: electron, devApp: true, root, port, userDataDir, home,
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
-        // An isolated instance for either mode; the daemon switch is the only difference.
-        ...(mode === 'daemon' ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' } : {}),
+        // An isolated instance for either mode; spell out the daemon switch in both modes so
+        // the default-daemon flip cannot turn the `in-process` control into daemon mode.
+        ...(mode === 'daemon'
+          ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }
+          : { SCRY_HOST_DAEMON: '0' }),
         ...(process.env.SCRY_ORCHESTRATION !== undefined ? { SCRY_ORCHESTRATION: process.env.SCRY_ORCHESTRATION } : {}),
         ...(process.env.SCRY_ORCHESTRATION_FULLFSYNC !== undefined ? { SCRY_ORCHESTRATION_FULLFSYNC: process.env.SCRY_ORCHESTRATION_FULLFSYNC } : {}),
         SCRY_REMOTE_HOST: '0',

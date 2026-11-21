@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { freePort } from './electron-security-cdp.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 
 const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
@@ -40,15 +40,6 @@ function captureOutput(chunk) {
       if (target.length > 1_000) target.splice(0, target.length - 1_000)
     } catch { /* Keep the diagnostic tail; malformed logging is reported by missing samples. */ }
   }
-}
-
-async function freePort() {
-  const server = createServer()
-  await new Promise((resolveReady, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolveReady))
-  const address = server.address()
-  const port = typeof address === 'object' && address ? address.port : 0
-  await new Promise((resolveClose) => server.close(resolveClose))
-  return port
 }
 
 async function waitForTarget(port, timeoutMs = 30_000) {
@@ -131,6 +122,9 @@ async function main() {
     env: {
       ...process.env,
       HOME: home,
+      // Soak benchmark: measures Electron main [scry:perf]/[scry:resource] samples against the
+      // in-process smoke provider; keep explicit mode so flipping the default does not shift baseline.
+      SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0',
       ELECTRON_ENABLE_LOGGING: '1',
       SCRY_TEST_APP: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1',

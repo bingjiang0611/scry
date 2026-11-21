@@ -1,17 +1,19 @@
 import { spawn } from 'node:child_process'
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import electron from 'electron'
 import { stopOwnedApp } from './owned-app-processes.mjs'
+import { stopFixtureDaemon } from './b4v/fixture.mjs'
 
 // Run after `npm run build`. Use the real main/preload/renderer with isolated data;
 // intercept only OS browser launch/dialogs so this test never visits a live service.
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const entry = join(root, 'out/main/index.js')
 await access(entry)
-const temp = await mkdtemp(join(tmpdir(), 'scry-external-links-'))
+// Keep unix socket paths under macOS's 104-byte sun_path limit in default daemon mode.
+const temp = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-ext-link-')))
 
 async function exercise(window, shell, dialog) {
   const assert = require('node:assert/strict')
@@ -98,8 +100,13 @@ async function exercise(window, shell, dialog) {
 
 try {
   await mkdir(join(temp, 'home'))
-  await writeFile(join(temp, 'main.cjs'), `
+  const metadata = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const bootstrap = join(temp, 'app')
+  await mkdir(bootstrap)
+  await writeFile(join(bootstrap, 'package.json'), JSON.stringify({ name: metadata.name, version: metadata.version, main: 'main.cjs' }))
+  await writeFile(join(bootstrap, 'main.cjs'), `
     const { app, shell, dialog, safeStorage } = require('electron')
+    app.setAppPath(${JSON.stringify(root)})
     require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app)
     safeStorage.isEncryptionAvailable = () => { throw new Error('Fresh-profile startup unexpectedly accessed Keychain') }
     app.setPath('userData', ${JSON.stringify(join(temp, 'userData'))})
@@ -116,8 +123,15 @@ try {
     import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error => { console.error(error); app.exit(1) })
   `)
   await new Promise((resolve, reject) => {
-    const child = spawn(electron, [join(temp, 'main.cjs'), '--disable-gpu'], {
-      env: { PATH: process.env.PATH, TMPDIR: tmpdir(), HOME: join(temp, 'home'), SCRY_TEST_APP: '1' },
+    const child = spawn(electron, [bootstrap, '--disable-gpu'], {
+      env: {
+        PATH: process.env.PATH,
+        TMPDIR: tmpdir(),
+        HOME: join(temp, 'home'),
+        SCRY_TEST_APP: '1',
+        SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
+        SCRY_REMOTE_HOST: '0'
+      },
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
@@ -146,7 +160,9 @@ try {
     })
   })
 } catch (error) {
+  await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') }).catch(() => {})
   console.error(`External links fixture retained: ${temp}`)
   throw error
 }
+await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') })
 await rm(temp, { recursive: true, force: true })

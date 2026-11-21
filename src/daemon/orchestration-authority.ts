@@ -116,6 +116,7 @@ export async function attachDaemonOrchestrationAuthority<
       deferredPlan: startup.deferredPlan,
       importComplete: startup.importComplete,
       resolveImportComplete: startup.resolveImportComplete,
+      h1DiskLastSeq: startup.h1DiskLastSeq,
       setDeferredControl: (cancel) => { cancelDeferred = cancel },
       getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
@@ -142,6 +143,7 @@ function buildAuthorityRuntime<
   deferredPlan: LegacyLedgerPlan | undefined
   importComplete: Promise<void>
   resolveImportComplete: (() => void) | undefined
+  h1DiskLastSeq: number
   setDeferredControl: (cancel: (() => void) | undefined) => void
   getDeferredControl: () => { deferredStarted: boolean; cancelDeferred: (() => void) | undefined; setStarted: () => void }
 }): DaemonOrchestrationAuthority {
@@ -201,7 +203,8 @@ function buildAuthorityRuntime<
           : {}),
         ...(options.mirrorRetryIntervalMs !== undefined
           ? { mirrorRetryIntervalMs: options.mirrorRetryIntervalMs }
-          : {})
+          : {}),
+        h1DiskLastSeq: ctx.h1DiskLastSeq
       })
       backingFileStore = created.fileStore
       legacyMirror = created.mirror
@@ -424,18 +427,30 @@ function buildAuthorityRuntime<
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
   const status = (): BackgroundServiceOrchestrationStatus => {
+    const fenced = sink.isWriteIndeterminate()
     const live = readH1FallbackStatus?.()
+    if (fenced) {
+      const reason = live?.unavailable && live.reason ? live.reason : 'orchestration_write_indeterminate'
+      return {
+        mode: 'on',
+        writeIndeterminate: true,
+        h1FallbackUnavailable: true,
+        h1FallbackReason: reason
+      }
+    }
     if (live) {
       return {
         mode: 'on',
+        writeIndeterminate: false,
         h1FallbackUnavailable: live.unavailable,
         ...(live.unavailable && live.reason ? { h1FallbackReason: live.reason } : {})
       }
     }
-    const unavailable = !sink.isWriteIndeterminate() && sink.handle.db.open && sink.getMeta('h1_fallback_unavailable') === '1'
+    const unavailable = sink.handle.db.open && sink.getMeta('h1_fallback_unavailable') === '1'
     const reason = unavailable ? sink.getMeta('h1_fallback_reason') : undefined
     return {
       mode: 'on',
+      writeIndeterminate: false,
       h1FallbackUnavailable: unavailable,
       ...(unavailable && reason ? { h1FallbackReason: reason } : {})
     }

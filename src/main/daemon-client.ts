@@ -142,11 +142,18 @@ function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyP
   })
 }
 
+export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number }
+
 // What the daemon said about itself; a build field that is not a build id is dropped,
 // which the comparison then treats as "no build id" (a mismatch for an App that has one).
-function reported(version: string, build: unknown): BuildIdentity {
+function reported(version: string, build: unknown, activeRuns?: unknown): DaemonProbeInfo {
   const id = buildIdOf(build)
-  return id === undefined ? { version } : { version, build: id }
+  const runs = typeof activeRuns === 'number' && Number.isSafeInteger(activeRuns) && activeRuns >= 0 ? activeRuns : undefined
+  return {
+    version,
+    ...(id !== undefined ? { build: id } : {}),
+    ...(runs !== undefined ? { activeRuns: runs } : {})
+  }
 }
 
 export class DaemonClient {
@@ -192,7 +199,7 @@ export class DaemonClient {
       this.#requireVersion(version)
       this.#grant = existing
       this.#version = version.version
-      return { ...version, enrolled: false }
+      return { version: version.version, ...(version.build ? { build: version.build } : {}), enrolled: false }
     }
     const grant = await this.#enroll()
     const version = await this.#probe(grant)
@@ -201,7 +208,7 @@ export class DaemonClient {
     this.#save(grant)
     this.#grant = grant
     this.#version = version.version
-    return { ...version, enrolled: true }
+    return { version: version.version, ...(version.build ? { build: version.build } : {}), enrolled: true }
   }
 
   /**
@@ -210,7 +217,7 @@ export class DaemonClient {
    * was killed is restarted and re-adopted with the same credential, because its
    * enrollment secret is already spent.
    */
-  async daemonInfo(): Promise<BuildIdentity | undefined> {
+  async daemonInfo(): Promise<DaemonProbeInfo | undefined> {
     const grant = this.#load()
     if (!grant) return undefined
     return await this.#probe(grant)
@@ -229,7 +236,7 @@ export class DaemonClient {
   /** Closing the App's side leaves the daemon running for devices and runs. */
   close(): void { this.#lanes.closeAll() }
 
-  async #probe(grant: StoredLocalGrant): Promise<BuildIdentity | undefined> {
+  async #probe(grant: StoredLocalGrant): Promise<DaemonProbeInfo | undefined> {
     let socket: LocalSocket
     try {
       socket = await (this.#options.connectLocal ?? ((options) => oneShot(options.path, options)))({
@@ -238,10 +245,10 @@ export class DaemonClient {
     } catch { return undefined }
     try {
       const line = await socket.exchange(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'daemonInfo' })}\n`, ENROLL_TIMEOUT_MS)
-      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; error?: unknown }
+      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; error?: unknown }
       if (reply.error === 'device_not_authorized') throw new DaemonClientError('daemon_device_not_authorized')
       if (reply.op !== 'daemonInfo' || typeof reply.version !== 'string') return undefined
-      return reported(reply.version, reply.build)
+      return reported(reply.version, reply.build, reply.activeRuns)
     } catch (error) {
       if (error instanceof DaemonClientError) throw error
       return undefined

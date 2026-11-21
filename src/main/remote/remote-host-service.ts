@@ -150,14 +150,17 @@ export class RemoteHostService {
    * grant enrolled over that socket is refused here if it ever arrives over a network
    * transport instead.
    */
-  createLocalHost(info: { version: string; build?: string }, options: { onPeerDisconnected?: (fingerprint: string) => void } = {}): InnerMtlsHost {
+  createLocalHost(
+    info: { version: string; build?: string },
+    options: { onPeerDisconnected?: (fingerprint: string) => void; activeRuns?: () => number } = {}
+  ): InnerMtlsHost {
     return new InnerMtlsHost({
       controller: this.#binding.controller,
       serverCertPEM: this.#serverCredentials.certificatePEM,
       serverKeyPEM: this.#serverCredentials.privateKeyPEM,
       caPEM: this.caCertificatePEM,
       transport: 'local',
-      info,
+      info: options.activeRuns ? { ...info, activeRuns: options.activeRuns } : info,
       ...(this.#localEndpoint ? { localEndpoint: this.#localEndpoint } : {}),
       ...(options.onPeerDisconnected ? { onPeerDisconnected: options.onPeerDisconnected } : {})
     })
