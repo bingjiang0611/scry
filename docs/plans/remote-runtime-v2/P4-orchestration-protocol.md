@@ -27,7 +27,7 @@ Hint     = { kind: 'run', runId, outputSeq } | { kind: 'terminal' }
          | { kind: 'oauth', url } | { kind: 'hostNotice' }
 ```
 
-- `sessions` 快照分页用 keyset cursor：`(archived_at, ts, session_key)`，编码为不透明字符串，与 data §4.4 的索引一致。不用偏移量，所以翻页期间插入新行不会重复或漏行。
+- `sessions` 快照分页用 keyset cursor：`(archived_at, ts, session_key)`，编码为不透明字符串，与 data §4.4 的索引一致。不用偏移量，所以翻页期间插入新行不会重复或漏行。不过，每一页都是一次新的快照，带的 `seq` 也更新。客户端翻页时要保留**第一页**的 `seq`，翻完后再从那里订阅增量；如果直接采用最后一页的 `seq`，会漏掉翻页期间插到游标之前的会话，以及 `ts` 改变的会话（W16 核验，2026-11-21）。
 - `total` 是本 grant 可见行的数目，算不出就 `'unavailable'`（data §3.2 第 8 条）。
 
 | lane | 谁 | views |

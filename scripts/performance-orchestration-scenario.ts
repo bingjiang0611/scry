@@ -67,6 +67,9 @@ export function createOrchestrationPreFirstTokenScenario(fixture: Fixture): Scen
           checkpointIntervalMs: 0,
           maxActiveRuns: 10_000
         })
+        // On mode always has a subscribe commit observer (W16): keep its per-commit
+        // MAX(seq) read inside the measured pre-first-token path.
+        sink.setCommitObserver?.(() => undefined)
         engine = new mods.AuthorityEngine({
           sink,
           leaseOwner: 'bench',
