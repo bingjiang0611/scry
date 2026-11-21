@@ -305,4 +305,56 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       sink.close()
     }
   })
+
+  it('always includes every live run in the snapshot, however many runs ended recently', async () => {
+    const dir = makeDir()
+    const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 64 })
+    const hub = new SubscribeHub({})
+    const engine = new SubscribeEngine({ sink, hub, hostId: 'host-cap', authorizePeer: () => undefined, grantScope: () => 'local' })
+    try {
+      submitRun(sink, { commandId: 'c-live', runId: 'run-live', sessionKey: 'sess-live', cwd: '/tmp/ws', dispatchImmediately: true })
+      for (let i = 0; i < 300; i++) {
+        submitRun(sink, { commandId: `c-${i}`, runId: `run-${i}`, sessionKey: `sess-${i}`, cwd: '/tmp/ws', dispatchImmediately: true })
+        settleRun(sink, `run-${i}`)
+      }
+      const reply = await engine.subscribe('e'.repeat(64), { views: ['activeRuns'], waitMs: 0 })
+      if (reply.mode !== 'snapshot') throw new Error('expected snapshot')
+      const rows = reply.snapshot.activeRuns?.rows ?? []
+      expect(rows.some((row) => row.runId === 'run-live')).toBe(true)
+      expect(rows.filter((row) => row.runId !== 'run-live')).toHaveLength(256)
+    } finally {
+      hub.close()
+      sink.close()
+    }
+  })
+
+  it('gives a fresh subscriber the current state only, never a replay of old volatile hints', async () => {
+    const dir = makeDir()
+    const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 64 })
+    const hub = new SubscribeHub({
+      stateHints: () => [{ kind: 'attention', snapshot: { revision: 1, unreadSessionKeys: [] } }]
+    })
+    const engine = new SubscribeEngine({ sink, hub, hostId: 'host-fresh', authorizePeer: () => undefined, grantScope: () => 'local' })
+    try {
+      const peer = 'f'.repeat(64)
+      hub.emitHostNotice({ id: 'old-1', kind: 'cli_approval_enabled', ts: 1 })
+      const fresh = await engine.subscribe(peer, { views: ['activeRuns'], waitMs: 0 })
+      expect(fresh.hints?.some((h) => h.kind === 'hostNotice') ?? false).toBe(false)
+      expect(fresh.hints?.some((h) => h.kind === 'attention')).toBe(true)
+      // After that first reply, new hints are delivered normally.
+      hub.emitHostNotice({ id: 'new-1', kind: 'device_approved_via_cli', ts: 2, deviceLabel: 'Phone' })
+      const next = await engine.subscribe(peer, {
+        views: ['activeRuns'], known: { hostId: fresh.hostId, logId: fresh.logId, seq: fresh.seq }, waitMs: 0
+      })
+      const notices = next.hints?.filter((h) => h.kind === 'hostNotice') ?? []
+      expect(notices).toHaveLength(1)
+      // An App restart is a fresh subscriber again: the delivered notice is not replayed.
+      hub.emitHostNotice({ id: 'missed-1', kind: 'cli_approval_enabled', ts: 3 })
+      const restarted = await engine.subscribe(peer, { views: ['activeRuns'], waitMs: 0 })
+      expect(restarted.hints?.some((h) => h.kind === 'hostNotice') ?? false).toBe(false)
+    } finally {
+      hub.close()
+      sink.close()
+    }
+  })
 })

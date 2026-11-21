@@ -218,8 +218,11 @@ export class SubscribeHub {
   }
 
   /** Drains undelivered hints for `peer`; when `includeState` is true (snapshot), prepends state hints. */
-  drainHints(peer: string, includeState: boolean): SubscribeHint[] {
-    const last = this.#peerHintSeq.get(peer) ?? 0
+  drainHints(peer: string, includeState: boolean, fresh = false): SubscribeHint[] {
+    // A client with no cursor (first connect, or an App restart) gets the current
+    // state only, never a replay of volatile hints it never saw: the legacy appEvents
+    // feed behaves the same, and replaying would re-show old notices and errors.
+    const last = fresh ? this.#hintSeq : (this.#peerHintSeq.get(peer) ?? 0)
     const drained = this.#entries.filter((entry) => entry.seq > last).map((entry) => entry.hint)
     this.#peerHintSeq.set(peer, this.#hintSeq)
     if (!includeState) return drained

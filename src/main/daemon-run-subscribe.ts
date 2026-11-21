@@ -23,6 +23,8 @@ export interface SubscribeRuntimeContext {
   flushBridge: () => void
   scheduleTraceRead: (runId: string, options?: { terminal?: boolean }) => Promise<void>
   syncQuestions: (cursor: RunCursor) => Promise<void>
+  /** One-shot lifecycle probe for a run a snapshot no longer lists; null = unknown run. */
+  probeRunState?: (runId: string) => Promise<string | null>
 }
 
 function makeCursor(runId: string, init: {
@@ -197,6 +199,36 @@ export async function applySubscribeSnapshotToRuntime(
       if (typeof row.outputSeq === 'number') cursor.output = Math.max(cursor.output, row.outputSeq)
       void ctx.scheduleTraceRead(cursor.runId)
     }
+  }
+  await reconcileVanishedCursors(ctx, rows)
+}
+
+/**
+ * A snapshot lists every non-terminal run, so a cursor the App still treats as live
+ * but the snapshot omits either ended long ago or belongs to a replaced log (logId
+ * change). Probe it once instead of guessing: a terminal or unknown answer finalizes
+ * the cursor; a still-live answer means the snapshot was taken just before that run
+ * was recorded, so the cursor is left alone.
+ */
+async function reconcileVanishedCursors(ctx: SubscribeRuntimeContext, rows: SubscribeActiveRunRow[]): Promise<void> {
+  if (!ctx.probeRunState) return
+  const listed = new Set<string>()
+  for (const row of rows) {
+    listed.add(row.runId)
+    if (row.scryRunId) listed.add(row.scryRunId)
+  }
+  const vanished = [...ctx.runs.values()].filter((cursor) =>
+    !cursor.stopped && !listed.has(cursor.runId) && !(cursor.scryRunId && listed.has(cursor.scryRunId)))
+  for (const cursor of vanished) {
+    let state: string | null
+    try {
+      state = await ctx.probeRunState(cursor.runId)
+    } catch {
+      continue
+    }
+    if (cursor.stopped) continue
+    if (state === null) await finalizeTerminalCursor(ctx, cursor, 'interrupted')
+    else if (TERMINAL_LIFECYCLES.has(state)) await finalizeTerminalCursor(ctx, cursor, state)
   }
 }
 

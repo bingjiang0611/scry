@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonEventPump } from './daemon-event-pump'
-import { readSubscribeTraceOnce } from './daemon-run-subscribe'
+import { applySubscribeSnapshotToRuntime, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
 import type { RunCursor } from './daemon-run-cursor'
 
 describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
@@ -163,5 +163,75 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     })
     expect(archivedRunTrace).not.toHaveBeenCalled()
     expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('still delivers the hints of a reply whose events include an unknown type', async () => {
+    const notice = { id: 'n-u', kind: 'device_approved_via_cli' as const, ts: 1, deviceLabel: 'Phone' }
+    const replies: SubscribeReply[] = [
+      { hostId: 'h1', logId: 'l1', seq: 5, mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } },
+      {
+        hostId: 'h1', logId: 'l1', seq: 6, mode: 'events',
+        events: [{ seq: 6, type: 'task.requested', stream: 'task:1', at: 100, payload: {} }],
+        hints: [{ kind: 'hostNotice', notice }]
+      }
+    ]
+    let idx = 0
+    const onHostAdmin = vi.fn()
+    const requests: SubscribeRequest[] = []
+    const pump = new DaemonEventPump({
+      subscribeMode: true,
+      source: {
+        appEvents: vi.fn(),
+        subscribe: async (req) => {
+          requests.push(req)
+          const next = replies[idx++]
+          if (!next) { pump.dispose(); return { hostId: 'h1', logId: 'l1', seq: 6, mode: 'idle' } }
+          return next
+        }
+      },
+      send: vi.fn(),
+      onHostAdmin,
+      waitMs: 50
+    })
+    pump.start()
+    await vi.waitFor(() => expect(requests.length).toBeGreaterThanOrEqual(3))
+    pump.dispose()
+    expect(onHostAdmin).toHaveBeenCalledWith(notice)
+    expect(requests[2]?.known).toBeUndefined()
+    expect(requests[0]?.views).toEqual(['activeRuns'])
+  })
+
+  it('probes cursors a snapshot no longer lists and finalizes only those that ended', async () => {
+    const cursor = (runId: string): RunCursor => ({
+      runId, lifecycle: 'dispatched', watch: 0, output: 0, pushed: [], askedQuestions: new Set(),
+      answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
+    } as unknown as RunCursor)
+    const runs = new Map<string, RunCursor>([
+      ['gone', cursor('gone')], ['ended', cursor('ended')], ['racing', cursor('racing')], ['listed', cursor('listed')]
+    ])
+    const probed: string[] = []
+    const answers: Record<string, string | null> = { gone: null, ended: 'settled', racing: 'dispatched' }
+    const ctx: SubscribeRuntimeContext = {
+      runs,
+      wakes: { wake: vi.fn() } as unknown as SubscribeRuntimeContext['wakes'],
+      cursorFor: (id) => runs.get(id),
+      send: vi.fn(),
+      flushBridge: vi.fn(),
+      scheduleTraceRead: vi.fn(async () => undefined),
+      syncQuestions: vi.fn(async () => undefined),
+      probeRunState: async (id) => { probed.push(id); return answers[id] ?? null }
+    }
+    await applySubscribeSnapshotToRuntime(ctx, [{
+      runId: 'listed', sessionKey: 's', scope: 'local', origin: 'local', provider: 'codex', profile: null, cwd: '/w',
+      promptPreview: null, lifecycle: 'dispatched', stopState: null, outputSeq: 0, intentSeq: 1,
+      settledAt: null, recoveredAt: null, outcome: null, revSeq: 1
+    } as never])
+    expect(probed.sort()).toEqual(['ended', 'gone', 'racing'])
+    expect(runs.get('gone')?.stopped).toBe(true)
+    expect(runs.get('gone')?.lifecycle).toBe('interrupted')
+    expect(runs.get('ended')?.stopped).toBe(true)
+    expect(runs.get('ended')?.lifecycle).toBe('settled')
+    expect(runs.get('racing')?.stopped).toBe(false)
+    expect(runs.get('listed')?.stopped).toBe(false)
   })
 })

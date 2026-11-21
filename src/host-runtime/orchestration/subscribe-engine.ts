@@ -18,6 +18,7 @@ export const SUBSCRIBE_MAX_SCAN_GAP = 4_096
 export const SUBSCRIBE_MAX_EVENTS = 128
 export const SUBSCRIBE_MAX_EVENT_BYTES = 256 * 1024
 export const SUBSCRIBE_ACTIVE_RUN_RETENTION_MS = 24 * 60 * 60 * 1000
+export const SUBSCRIBE_TERMINAL_RUN_SNAPSHOT_LIMIT = 256
 const DEFAULT_SESSIONS_PAGE_SIZE = 200
 
 const SESSION_VIEW_EVENTS = new Set([
@@ -270,7 +271,7 @@ export class SubscribeEngine {
     if (views.has('detail') && request.session) {
       snapshot.detail = this.#readDetailSnapshot(scope, request.session.sessionKey)
     }
-    const hints = this.#hub.drainHints(peer, true)
+    const hints = this.#hub.drainHints(peer, true, !request.known)
     return {
       hostId,
       logId,
@@ -306,9 +307,13 @@ export class SubscribeEngine {
                  ORDER BY archived_at ASC, ts DESC, session_key ASC`
               )
               .all(cursor.archivedAt, cursor.archivedAt, cursor.ts, cursor.ts, cursor.sessionKey)
-        : db
-            .prepare('SELECT * FROM orch_p_session ORDER BY archived_at ASC, ts DESC, session_key ASC')
-            .all()
+        : scope === 'local'
+          ? db
+              .prepare('SELECT * FROM orch_p_session ORDER BY archived_at ASC, ts DESC, session_key ASC LIMIT ?')
+              .all(this.#sessionsPageSize + 1)
+          : db
+              .prepare('SELECT * FROM orch_p_session ORDER BY archived_at ASC, ts DESC, session_key ASC')
+              .all()
     ) as Array<Record<string, unknown>>
 
     const visible: SubscribeSessionRow[] = []
@@ -358,15 +363,25 @@ export class SubscribeEngine {
   #readActiveRunsSnapshot(scope: 'local' | 'remote'): SubscribeActiveRunRow[] {
     const db = this.#sink.handle.db
     const cutoff = this.#clock() - SUBSCRIBE_ACTIVE_RUN_RETENTION_MS
-    const rows = db
+    // Every non-terminal run is always included (a live run must never be pushed out
+    // of the snapshot by recent terminal ones); only the 24 h terminal tail is capped.
+    const live = db
       .prepare(
         `SELECT * FROM orch_p_run
          WHERE lifecycle IN ('recorded', 'admitted', 'dispatched')
-            OR COALESCE(settled_at, recovered_at, 0) >= ?
-         ORDER BY intent_seq DESC
-         LIMIT 256`
+         ORDER BY intent_seq DESC`
       )
-      .all(cutoff) as Array<Record<string, unknown>>
+      .all() as Array<Record<string, unknown>>
+    const recentTerminal = db
+      .prepare(
+        `SELECT * FROM orch_p_run
+         WHERE lifecycle NOT IN ('recorded', 'admitted', 'dispatched')
+           AND COALESCE(settled_at, recovered_at, 0) >= ?
+         ORDER BY intent_seq DESC
+         LIMIT ?`
+      )
+      .all(cutoff, SUBSCRIBE_TERMINAL_RUN_SNAPSHOT_LIMIT) as Array<Record<string, unknown>>
+    const rows = [...live, ...recentTerminal]
 
     const result: SubscribeActiveRunRow[] = []
     for (const raw of rows) {

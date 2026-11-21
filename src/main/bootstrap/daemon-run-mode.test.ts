@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DaemonClientError } from '../daemon-client'
 import { DaemonRunError } from '../daemon-run-transport'
-import { createDaemonRunMode, daemonModeEnabled, retryAfterReconnect } from './daemon-run-mode'
+import { connectForRunMode, createDaemonRunMode, daemonModeEnabled, retryAfterReconnect } from './daemon-run-mode'
 
 // The switch has to be boring: absent, the App keeps its in-process pipeline; present,
 // either the daemon is usable and owns the runs, or the reason it is not is returned.
@@ -144,5 +144,12 @@ describe('daemon run mode', () => {
     expect(launch).toHaveBeenCalledTimes(1)
     expect(launchFallback).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ status: 'unavailable', reason: 'direct_spawn_refused' })
+  })
+
+  it('uses the subscribe path only when the daemon advertises it', async () => {
+    const withCapability = { connect: async () => ({ version: '1.0.0' }), subscribeSupported: true }
+    const without = { connect: async () => ({ version: '1.0.0' }), subscribeSupported: false }
+    expect(await connectForRunMode(withCapability)).toEqual({ version: '1.0.0', subscribeMode: true })
+    expect(await connectForRunMode(without)).toEqual({ version: '1.0.0', subscribeMode: false })
   })
 })

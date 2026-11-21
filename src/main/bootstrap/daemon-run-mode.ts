@@ -101,6 +101,18 @@ const REFUSALS: ReadonlySet<string> = new Set([
   'daemon_version_mismatch', 'daemon_device_not_authorized', 'daemon_local_grant_corrupt', 'daemon_enrollment_unavailable'
 ])
 
+/**
+ * The App picks its run path once, at connect: the P4-3 subscribe path only when the
+ * daemon it reached advertises `subscribe: 1` (SCRY_ORCHESTRATION=on); every other
+ * daemon keeps the watch / liveRuns path unchanged.
+ */
+export async function connectForRunMode(
+  client: { connect(): Promise<{ version: string }>; readonly subscribeSupported: boolean }
+): Promise<{ version: string; subscribeMode: boolean }> {
+  const { version } = await client.connect()
+  return { version, subscribeMode: client.subscribeSupported === true }
+}
+
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
   const env = deps.env ?? process.env
   if (!daemonModeEnabled(env)) return { status: 'disabled' }
@@ -197,8 +209,9 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   let version: string
   let subscribeMode = false
   try {
-    version = (await client.connect()).version
-    subscribeMode = client.subscribeSupported
+    const connected = await connectForRunMode(client)
+    version = connected.version
+    subscribeMode = connected.subscribeMode
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {

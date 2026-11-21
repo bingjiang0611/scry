@@ -51,7 +51,9 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     try {
       reply = await deps.subscribe(
         {
-          views: ['sessions', 'activeRuns'],
+          // The App reads only activeRuns until the P4-4 renderer projection; asking
+          // for sessions would make every snapshot scan the whole session table.
+          views: ['activeRuns'],
           ...(known ? { known } : {}),
           waitMs: deps.waitMs,
           eventSet: 1
@@ -61,7 +63,9 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     } catch (error) {
       if (deps.signal.aborted) return
       if (error instanceof DaemonRunError && error.reason === 'daemon_run_control_unavailable') {
-        deps.onWarn?.('daemon subscribe unavailable', error)
+        // The daemon restarted without SCRY_ORCHESTRATION=on. The App chose its run
+        // mode at connect, so it must be restarted to return to the watch path.
+        deps.onWarn?.('daemon subscribe unavailable (orchestration mode changed; restart Scry)', error)
         deps.setLive(false)
         return
       }
@@ -73,6 +77,7 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     }
 
     if (deps.signal.aborted) return
+    let unknownEvents = false
     pause = deps.retry.initialMs
     deps.setLive(true)
 
@@ -94,11 +99,10 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
       const hasUnknown = reply.events.some((ev) => !KNOWN_SUBSCRIBE_EVENT_TYPES.has(ev.type))
       if (hasUnknown) {
         // protocol §5.2: unknown event type drops local cursor so next request pulls a full snapshot.
-        known = undefined
+        // The reply's volatile hints (host notices, attention) are still delivered below.
+        unknownEvents = true
         missed = true
-        continue
-      }
-      if (missed) {
+      } else if (missed) {
         deps.send('agent:dataUpdated', RESYNCHRONIZE)
         deps.onResync?.()
         missed = false
@@ -106,13 +110,15 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
       // Apply volatile `run` binding/admission hints BEFORE events in the same reply so
       // a fast run that bound, admitted, and settled within one batch has its scryRunId
       // and admitted state populated before its terminal event finalizes the cursor.
-      if (reply.hints) {
-        for (const hint of reply.hints) {
-          if (hint.kind === 'run') deps.onRunHint?.(hint)
+      if (!unknownEvents) {
+        if (reply.hints) {
+          for (const hint of reply.hints) {
+            if (hint.kind === 'run') deps.onRunHint?.(hint)
+          }
         }
-      }
-      for (const ev of reply.events) {
-        await deps.onSubscribeEvent?.(ev)
+        for (const ev of reply.events) {
+          await deps.onSubscribeEvent?.(ev)
+        }
       }
     } else if (missed) {
       deps.send('agent:dataUpdated', RESYNCHRONIZE)
@@ -121,7 +127,7 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     }
 
     if (reply.hints) {
-      const skipRunHints = reply.mode === 'events'
+      const skipRunHints = reply.mode === 'events' || unknownEvents
       for (const hint of reply.hints) {
         if (hint.kind === 'run') {
           if (!skipRunHints) deps.onRunHint?.(hint)
@@ -137,6 +143,6 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
       }
     }
 
-    known = { hostId: reply.hostId, logId: reply.logId, seq: reply.seq }
+    known = unknownEvents ? undefined : { hostId: reply.hostId, logId: reply.logId, seq: reply.seq }
   }
 }

@@ -75,7 +75,8 @@ export class DaemonRunRuntime {
       onSessionBound: (payload) => this.#onSessionBound?.(payload),
       publishStopState: (state: AgentStopState) => this.#deps.runTraces?.publishStopState?.(state),
       settleRunTrace: (id) => this.#deps.runTraces?.settle(id), flushBridge: () => this.#bridge.flushAll(),
-      scheduleTraceRead: (id, opts) => this.#readTraceSerialized(id, opts), syncQuestions: (cursor) => this.#publishQuestions(cursor)
+      scheduleTraceRead: (id, opts) => this.#readTraceSerialized(id, opts), syncQuestions: (cursor) => this.#publishQuestions(cursor),
+      probeRunState: (id) => this.#deps.transport.runState(id)
     }
   }
 

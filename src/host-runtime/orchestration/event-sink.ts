@@ -108,10 +108,13 @@ export class EventSink {
     this.#onCommit = observer
   }
 
+  #maxSeqStatement: { get(): unknown } | undefined
+
   #notifyCommitted(): void {
     if (!this.#onCommit || !this.handle.db.open) return
     try {
-      const row = this.handle.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM orch_event').get() as { seq: number }
+      this.#maxSeqStatement ??= this.handle.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM orch_event')
+      const row = this.#maxSeqStatement.get() as { seq: number }
       this.#onCommit(Number(row.seq))
     } catch {
       // Observer notification must never break commit semantics.
