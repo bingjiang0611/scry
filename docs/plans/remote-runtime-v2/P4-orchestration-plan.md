@@ -76,10 +76,15 @@
 | P4-3 | 本机订阅：App 切换（§6 第 1 行）；`AppEventFeed` 缩小并接 P5 通知；重测 | 1.25 | P4-2 |
 | P4-4 | 会话目录与详情 projection；导入 `app-sessions.json` 元数据（决定 E，增量）；`catalog.scan` 触发；transcript 区间引用；首屏快照；renderer 读 projection；删除会话的清除与墓碑 | 2 | P4-3 |
 | P4-5a | `subscribe` 作为 v2 能力：Desktop、iOS、执行目标转发、keyset 分页、逐行授权；真机验证 | 2 | P4-4 |
-| P4-5b | 升 v3，只删旧 op（宿主、Desktop、iOS、转发白名单）；删除开关 | 0.5 | P4-5a 真机通过、S3 |
+| P4-5b | 升 v3，只删旧 op（宿主、Desktop、iOS、转发白名单）；删除开关 | 0.5 | P4-5a 真机通过、S3、本机运行不再依赖待删查询 |
 | P4-6 | 清理：删除 H1 文件与镜像、`CommandReceipts`、`AppEventFeed` 的持久类、`result` 标记里的数字，改正 `run-output-log.ts:7-9` 注释 | 0.5 | P4-5b |
 
 **合计约 12 周（11–13），不含 S3**；等维护者安装真机客户端的时间不计入。首稿 8.5 周；增加的部分：P4-2 +1 周（复核、TTL、证据恢复、两本账对账、放行停止）；P4-4 +0.5 周（扫描触发、清除与墓碑）；协议拆成 5a/5b 并加转发与真机轮 +1 周；P4-0/P4-1 各 +0.5 周（迁移执行器、正文、增量导入、CI 作业、首轮测量）；P4-3 +0.25 周。落在评审 10–12 周的上沿，主要因为协议拆两段要多一轮真机验证。
+
+**P4-5b 开工条件：本机运行不再依赖待删查询。** 升 v3 之前，在禁用旧查询的测试中验证：
+
+- 不依赖 `runState`：订阅重置后，确实已结束的运行只标记一次终态；快照生成后才启动的运行继续跟踪。单凭快照未列出不能判定终态。
+- 不依赖 `intentStatus`：分块图片暂存前能只读查询既有回执，未找到不能阻断首次提交；提交响应丢失后能核对原回执，不重新提交，也不会在缺少绑定或准入证据时聚焦窗口。`resolveIntent` 在找不到意图时会写墓碑，不可直接替换上传前的只读查询。见 [protocol §5.7](P4-orchestration-protocol.md#57-协议版本与能力决定-f维护者-2026-11-18)。
 
 **开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。W15 之后打包、开发构建与测试实例均默认走 daemon（`daemon-mode-default.ts`），仅在显式设 `SCRY_HOST_DAEMON=0` 时回退进程内；S3 删除进程内路径前保留经由当前 daemon 的 off↔on 往返规则：
 
