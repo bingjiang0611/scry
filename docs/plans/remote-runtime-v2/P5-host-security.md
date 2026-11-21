@@ -113,7 +113,7 @@
 - 系统级 LaunchDaemon、root、登录前运行；自动开启 linger；改 Hyprland 或任何全局配置。
 - 非交互批准；终端里画二维码。
 - macOS `SMAppService`：plist 静态打包，带不了 userData 路径，而 daemon 必须由调用方给 userData（`src/daemon/main.ts:13-14`）。登录项带参数开 App、`ensureDaemon` 后退出也可行，但没有停止语义、与 Linux 不对称、难在临时目录测；所以用 LaunchAgent plist。
-- `daemon.log` 轮转。
+- ~~`daemon.log` 轮转~~：2026-11-21 已做。启动方打开日志前，超过 10 MiB 就轮转为 `daemon.log.1`…`.3`（`src/daemon/daemon-log.ts`）。
 - 现有 `local.sock`、`enroll.sock` 也改为 listen 前收 umask（与本设计无关，单独提）。
 
 ## 9. 建议的术语（未改 GLOSSARY）

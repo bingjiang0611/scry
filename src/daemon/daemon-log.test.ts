@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { daemonLogPath, precreateDaemonLog } from './daemon-log'
+import { daemonLogPath, precreateDaemonLog, rotateDaemonLog } from './daemon-log'
 
 const roots: string[] = []
 const root = (): string => { const value = mkdtempSync(join(tmpdir(), 'scry-daemon-log-')); roots.push(value); return value }
@@ -24,5 +24,29 @@ describe('daemon log', () => {
     writeFileSync(daemonLogPath(userData), 'earlier line\n', { flag: 'a' })
     precreateDaemonLog(userData)
     expect(readFileSync(daemonLogPath(userData), 'utf8')).toBe('earlier line\n')
+  })
+
+  it('rotates an oversized log into numbered copies and keeps at most three', () => {
+    const userData = root()
+    const path = precreateDaemonLog(userData)
+    for (let round = 1; round <= 5; round++) {
+      writeFileSync(path, `round ${round}\n`.repeat(4))
+      expect(rotateDaemonLog(userData, 10, 3)).toBe(true)
+      precreateDaemonLog(userData)
+    }
+    expect(readFileSync(path, 'utf8')).toBe('')
+    expect(readFileSync(`${path}.1`, 'utf8')).toContain('round 5')
+    expect(readFileSync(`${path}.2`, 'utf8')).toContain('round 4')
+    expect(readFileSync(`${path}.3`, 'utf8')).toContain('round 3')
+    expect(existsSync(`${path}.4`)).toBe(false)
+  })
+
+  it('leaves a log under the limit alone', () => {
+    const userData = root()
+    const path = precreateDaemonLog(userData)
+    writeFileSync(path, 'small\n')
+    expect(rotateDaemonLog(userData, 1024, 3)).toBe(false)
+    expect(readFileSync(path, 'utf8')).toBe('small\n')
+    expect(existsSync(`${path}.1`)).toBe(false)
   })
 })
