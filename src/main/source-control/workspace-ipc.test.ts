@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { expect, it, vi } from 'vitest'
-import { registerTrustedIpcHandler } from '../ipc-trust'
+import { registerTrustCheckedListener } from '../ipc-trust'
 import { SourceControlService } from './service'
 import { registerWorkspaceSelectionIpc } from './workspace-ipc'
 
@@ -21,7 +21,7 @@ it('rejects untrusted senders and malformed selection payloads before privileged
     const win = { webContents: contents, isDestroyed: () => false } as unknown as BrowserWindow
     const handlers = new Map<string, (event: IpcMainInvokeEvent, request: unknown) => unknown>()
     registerWorkspaceSelectionIpc((channel, listener) => {
-      registerTrustedIpcHandler({ handle: (name, wrapped) => { handlers.set(name, wrapped) } },
+      registerTrustCheckedListener({ handle: (name, wrapped) => { handlers.set(name, wrapped) } },
         channel, () => win, frame.url, listener)
     }, service)
     const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent

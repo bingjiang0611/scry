@@ -7,7 +7,7 @@ import { electronDependents } from './value-import-graph'
 // the `electron` runtime. Type-only imports are erased before the module runs, so
 // they do not count; a value import that grows out of a type import would.
 const ENTRY = resolve(__dirname, 'host-runtime.ts')
-const MAIN_ENTRY = resolve(__dirname, '../main/bootstrap/remote-host.ts')
+const MAIN_ENTRY = resolve(__dirname, '../main/bootstrap/app-lifecycle.ts')
 describe('host runtime has no Electron dependency', () => {
   it('never needs the electron runtime through a value import', () => {
     const { files, electron } = electronDependents(ENTRY)

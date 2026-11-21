@@ -1,6 +1,6 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { registerTrustedIpcHandler } from './ipc-trust'
+import { registerTrustCheckedListener, registerTrustedIpcHandler } from './ipc-trust'
 import { setPerformanceRecordingSink, type PerformanceSample } from './performance-timing'
 
 afterEach(() => setPerformanceRecordingSink(null))
@@ -19,7 +19,7 @@ describe('trusted main IPC registration', () => {
     let reject: (reason: Error) => void = () => {}
     const pending = new Promise((_resolve, rejectPromise) => { reject = rejectPromise })
     const privileged = vi.fn(() => pending)
-    registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'workspace:read', () => win, mainFrame.url, privileged)
+    registerTrustCheckedListener({ handle: (_channel, listener) => { handler = listener } }, 'workspace:read', () => win, mainFrame.url, privileged)
     expect(() => handler({ ...event, sender: {} } as IpcMainInvokeEvent)).toThrow('非可信 renderer')
     expect(privileged).not.toHaveBeenCalled()
     expect(samples).toEqual([])
@@ -32,10 +32,10 @@ describe('trusted main IPC registration', () => {
     expect(JSON.stringify(samples)).not.toContain('SECRET')
     expect(JSON.stringify(samples)).not.toContain('/secret/path')
 
-    registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'workspace:write', () => win, mainFrame.url, () => ({ ok: false }))
+    registerTrustCheckedListener({ handle: (_channel, listener) => { handler = listener } }, 'workspace:write', () => win, mainFrame.url, () => ({ ok: false }))
     expect(handler(event)).toEqual({ ok: false })
     expect(samples[1].outcome).toBe('completed') // handler settled, not business success
-    registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'workspace:write', () => win, mainFrame.url, () => { throw error })
+    registerTrustCheckedListener({ handle: (_channel, listener) => { handler = listener } }, 'workspace:write', () => win, mainFrame.url, () => { throw error })
     expect(() => handler(event)).toThrow(error)
     expect(samples[2].outcome).toBe('error')
   })
@@ -56,7 +56,7 @@ describe('trusted main IPC registration', () => {
     }
     const listener = vi.fn(() => 'privileged result')
 
-    registerTrustedIpcHandler(
+    registerTrustCheckedListener(
       ipcMain,
       channel,
       () => trustedWindow as unknown as BrowserWindow,
@@ -78,10 +78,8 @@ describe('trusted main IPC registration', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
-  it('refuses an unmigrated channel in daemon mode through the production wrapper, after the trust gate', () => {
-    const previous = process.env.SCRY_HOST_DAEMON
-    process.env.SCRY_HOST_DAEMON = '1'
-    try {
+  it('refuses an unclassified channel through the production wrapper, after the trust gate', () => {
+    {
       const mainFrame = { url: 'file:///app/renderer/index.html' }
       const sender = { mainFrame }
       const win = { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
@@ -92,9 +90,18 @@ describe('trusted main IPC registration', () => {
       expect(() => handler({ ...event, sender: {} } as IpcMainInvokeEvent)).toThrow('非可信 renderer')
       expect(() => handler(event)).toThrow('daemon_capability_unavailable:test:unclassified')
       expect(privileged).not.toHaveBeenCalled()
-    } finally {
-      if (previous === undefined) delete process.env.SCRY_HOST_DAEMON
-      else process.env.SCRY_HOST_DAEMON = previous
     }
+  })
+
+  it('forwards a channel the daemon answers instead of running the listener it was registered with', async () => {
+    const mainFrame = { url: 'file:///app/renderer/index.html' }
+    const sender = { mainFrame }
+    const win = { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
+    const event = { sender, senderFrame: mainFrame } as unknown as IpcMainInvokeEvent
+    let handler: Handler = () => { throw new Error('unregistered') }
+    const privileged = vi.fn(() => 'in-process answer')
+    registerTrustedIpcHandler({ handle: (_channel, listener) => { handler = listener } }, 'agent:listProjects', () => win, mainFrame.url, privileged)
+    await expect(handler(event)).rejects.toThrow('daemon_capability_unavailable:agent:listProjects')
+    expect(privileged).not.toHaveBeenCalled()
   })
 })
