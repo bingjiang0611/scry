@@ -57,6 +57,8 @@ export interface DaemonLocalEndpointDeps {
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
+  // P4-3 local orchestration subscribe handler: omitted unless SCRY_ORCHESTRATION=on.
+  subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
   log?: (line: string) => void
 }
 

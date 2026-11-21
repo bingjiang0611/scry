@@ -13,7 +13,19 @@ import { startDeferredLegacyImport, type LegacyLedgerPlan } from '../host-runtim
 import type { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
 import { runAuthorityStartupSequence } from './orchestration-authority-startup'
+import {
+  buildAuthorityStatus,
+  createAuthoritySubscribeHandler,
+  createAuthoritySubscribeHub,
+  forwardAppEventToSubscribeHub,
+  handleAuthorityRunProgress,
+  type AuthoritySubscribeRuntimeDeps
+} from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
+import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
+import type { AppEvent } from '../main/remote/app-event-feed'
+import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import {
   parseOrchestrationFullfsync,
   parseOrchestrationMode,
@@ -36,6 +48,9 @@ export interface DaemonOrchestrationAuthority {
   readonly hooks: OrchestrationAuthorityHooks
   readonly recovery: RecoverOrchestrationSummary
   readonly importComplete: Promise<void>
+  readonly subscribeHub: SubscribeHub
+  createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply>
+  forwardAppEvent(event: AppEvent): void
   startImport(): void
   status(): BackgroundServiceOrchestrationStatus
   flushLegacyMirror(): Promise<void>
@@ -57,6 +72,7 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   mirrorMaxPendingEvents?: number
   mirrorRetryIntervalMs?: number
   deferredImportThreshold?: number
+  attentionSnapshot?: () => SessionAttentionSnapshot
 }
 
 /**
@@ -164,6 +180,10 @@ function buildAuthorityRuntime<
   // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
   const trustGate = new AuthorityMcpTrustGate()
+  const subscribeHub = createAuthoritySubscribeHub(
+    sink,
+    options.attentionSnapshot ? () => [{ kind: 'attention', snapshot: options.attentionSnapshot!() }] : undefined
+  )
   let legacyMirror: LegacyMirrorWorker | undefined
   let backingFileStore: SessionLedgerFileStore | undefined
   let syncMirrorSnapshot: (() => void) | undefined
@@ -321,41 +341,7 @@ function buildAuthorityRuntime<
 
     onRunProgress: (runId, detail) => {
       if (!detail || sink.isWriteIndeterminate()) return
-      const canonicalRunId = resolveCanonical(runId)
-      const suffix = String(++progressCounter)
-      if (detail === 'output_capture_failed' || detail === 'history_capture_failed') {
-        engine.recordProgress({ runId: canonicalRunId, step: 'content_gap', commandSuffix: suffix, reason: detail })
-        return
-      }
-      try {
-        const marker = JSON.parse(detail) as Record<string, unknown>
-        if (marker.event === 'session' && typeof marker.externalSessionId === 'string') {
-          engine.recordProgress({
-            runId: canonicalRunId,
-            step: 'session_bound',
-            commandSuffix: suffix,
-            nativeSessionId: marker.externalSessionId
-          })
-        } else if (marker.event === 'question_opened' && typeof marker.questionId === 'string') {
-          engine.recordProgress({
-            runId: canonicalRunId,
-            step: 'question_opened',
-            commandSuffix: `${marker.questionId}-${suffix}`,
-            questionId: marker.questionId,
-            questionKind: typeof marker.kind === 'string' ? marker.kind : 'question'
-          })
-        } else if (marker.event === 'question_closed' && typeof marker.questionId === 'string') {
-          engine.recordProgress({
-            runId: canonicalRunId,
-            step: 'question_closed',
-            commandSuffix: `${marker.questionId}-${suffix}`,
-            questionId: marker.questionId,
-            ...(typeof marker.reason === 'string' ? { reason: marker.reason } : {})
-          })
-        }
-      } catch {
-        // Opaque non-JSON progress marker; no orchestration state change needed.
-      }
+      handleAuthorityRunProgress(engine, subscribeHub, resolveCanonical(runId), detail, String(++progressCounter))
     },
 
     onQuestionAnswer: (input) => {
@@ -393,6 +379,7 @@ function buildAuthorityRuntime<
         ...(detail ? { reason: detail } : {}),
         evidence: ['provider']
       })
+      subscribeHub.noteRunTerminal(canonicalRunId)
       trustGate.delete(canonicalRunId)
       ledgerToCanonical.delete(runId)
     },
@@ -426,42 +413,19 @@ function buildAuthorityRuntime<
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
-  const status = (): BackgroundServiceOrchestrationStatus => {
-    const fenced = sink.isWriteIndeterminate()
-    const live = readH1FallbackStatus?.()
-    if (fenced) {
-      const reason = live?.unavailable && live.reason ? live.reason : 'orchestration_write_indeterminate'
-      return {
-        mode: 'on',
-        writeIndeterminate: true,
-        h1FallbackUnavailable: true,
-        h1FallbackReason: reason
-      }
-    }
-    if (live) {
-      return {
-        mode: 'on',
-        writeIndeterminate: false,
-        h1FallbackUnavailable: live.unavailable,
-        ...(live.unavailable && live.reason ? { h1FallbackReason: live.reason } : {})
-      }
-    }
-    const unavailable = sink.handle.db.open && sink.getMeta('h1_fallback_unavailable') === '1'
-    const reason = unavailable ? sink.getMeta('h1_fallback_reason') : undefined
-    return {
-      mode: 'on',
-      writeIndeterminate: false,
-      h1FallbackUnavailable: unavailable,
-      ...(unavailable && reason ? { h1FallbackReason: reason } : {})
-    }
-  }
+  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink, readH1FallbackStatus)
 
   return {
-    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, startImport, status,
+    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
+    createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
+    forwardAppEvent: (event) => forwardAppEventToSubscribeHub(subscribeHub, event, resolveCanonical),
+    startImport, status,
     flushLegacyMirror: async () => { await legacyMirror?.flush() },
     close: async () => {
       if (closed) return
       closed = true
+      subscribeHub.close()
+      sink.setCommitObserver(undefined)
       ctx.getDeferredControl().cancelDeferred?.()
       resolveImportComplete?.()
       options.conversationStore().setBeforeTurnSettledObserver(undefined)

@@ -84,6 +84,7 @@ export class EventSink {
   #checkpointCount = 0
   #workerCheckpointActive = false
   #onCheckpoint?: (sample: WalCheckpointSample) => void
+  #onCommit?: (seq: number) => void
   #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
 
@@ -101,6 +102,20 @@ export class EventSink {
 
   setCheckpointObserver(observer: ((sample: WalCheckpointSample) => void) | undefined): void {
     this.#onCheckpoint = observer
+  }
+
+  setCommitObserver(observer: ((seq: number) => void) | undefined): void {
+    this.#onCommit = observer
+  }
+
+  #notifyCommitted(): void {
+    if (!this.#onCommit || !this.handle.db.open) return
+    try {
+      const row = this.handle.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM orch_event').get() as { seq: number }
+      this.#onCommit(Number(row.seq))
+    } catch {
+      // Observer notification must never break commit semantics.
+    }
   }
 
   checkpointCount(): number { return this.#checkpointCount }
@@ -293,6 +308,7 @@ export class EventSink {
       const result = tx()
       this.enforceModesOnceForWal()
       this.scheduleIdleCheckpoint()
+      this.#notifyCommitted()
       return result
     } catch (error) {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
@@ -397,6 +413,7 @@ export class EventSink {
       db.transaction(writeRows)()
       this.enforceModesOnceForWal()
       this.scheduleIdleCheckpoint()
+      this.#notifyCommitted()
       return decision
     } catch (error) {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
@@ -429,6 +446,7 @@ export class EventSink {
       for (const sha of unreferencedShas) this.bodyStore.unlinkBody(sha)
       this.handle.enforceModes()
       this.scheduleIdleCheckpoint()
+      this.#notifyCommitted()
       return { status: 'deleted', deletedBodies: unreferencedShas.length, redactedEvents }
     } catch (error) {
       this.#writeIndeterminate = true

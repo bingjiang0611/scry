@@ -29,11 +29,10 @@ import type { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
-import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
-import { reconcileH1ForOffMode } from './orchestration-off-fallback'
-import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
+import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
-import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly, disposeProviderRegistryWithTimeout } from './host-process-assembly'
+import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
+import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
 import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
@@ -83,13 +82,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   // The App's terminals (P3-terminal.md). The recording worker sits beside this entry in
   // out/main, like the run output worker below.
+  let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
     homeDir: workspace.homeDir,
     recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     notify: () => events.append({ kind: 'terminal' }),
-    idleMs: () => events.idleMs(),
+    idleMs: () => orchestrationAuthority ? Math.min(events.idleMs(), orchestrationAuthority.subscribeHub.idleMs()) : events.idleMs(),
     log,
     ...options.terminal
   })
@@ -226,31 +226,18 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
 
   await refreshRemoteProviderSnapshot()
   const remoteStateDirectory = join(options.userDataDir, 'remote')
-  reconcileH1ForOffMode({ userDataDir: options.userDataDir, remoteStateDirectory, env: process.env, log })
-  const orchestrationShadow = attachDaemonOrchestrationShadow({
-    userDataDir: options.userDataDir,
-    env: process.env,
-    conversationStore: catalog.conversationStore,
-    log,
-    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
-    ...(options.orchestrationShadowPauseBackfill ? { pauseDeferredBackfill: options.orchestrationShadowPauseBackfill } : {})
-  })
-  const orchestrationAuthority = await attachDaemonOrchestrationAuthority({
-    userDataDir: options.userDataDir,
-    env: process.env,
+  const attachedOrchestration = await attachHostProcessOrchestration({
+    options,
+    remoteStateDirectory,
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
     requestRunStop,
-    log,
-    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
-    ...(options.orchestrationMirrorWriteHook ? { mirrorWriteHook: options.orchestrationMirrorWriteHook } : {}),
-    ...(options.orchestrationMirrorMaxPendingEvents !== undefined
-      ? { mirrorMaxPendingEvents: options.orchestrationMirrorMaxPendingEvents }
-      : {}),
-    ...(options.orchestrationMirrorRetryIntervalMs !== undefined
-      ? { mirrorRetryIntervalMs: options.orchestrationMirrorRetryIntervalMs }
-      : {})
+    attentionSnapshot: () => session.dockBadge.snapshot(),
+    events,
+    log
   })
+  const orchestrationShadow = attachedOrchestration.orchestrationShadow
+  orchestrationAuthority = attachedOrchestration.orchestrationAuthority
   const hostAdmin = new HostAdminStore({
     stateDirectory: remoteStateDirectory,
     onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })
@@ -289,7 +276,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
       links: sessionLinks,
-      ...(orchestrationAuthority ? { orchestrationStatus: () => orchestrationAuthority.status() } : {}),
+      ...(orchestrationAuthority ? {
+        orchestrationStatus: () => orchestrationAuthority!.status(),
+        subscribe: orchestrationAuthority.createSubscribeHandler({
+          hostId: () => remoteHostService?.hostId ?? '',
+          authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
+          grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote'
+        })
+      } : {}),
       log
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
@@ -308,7 +302,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const localHost = service.createLocalHost(identity, {
     onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
     activeRuns: () => pipeline.runs.unsettledStates().length,
-    isPackaged: options.isPackaged
+    isPackaged: options.isPackaged,
+    ...(orchestrationAuthority ? { subscribe: 1 as const } : {})
   })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
@@ -356,6 +351,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       startupManagedRecovery = Promise.resolve()
       // A parked App long poll answers now instead of holding the channel open.
       events.close()
+      orchestrationAuthority?.subscribeHub.close()
       targetBridge.close()
       // Shells end with the daemon too; their recordings are finished on the way.
       await terminal.dispose()
@@ -368,11 +364,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       // immediately even if a pooled provider process is slow to exit; bound provider dispose.
       orchestrationShadow?.close()
       await orchestrationAuthority?.close()
-      await disposeProviderRegistryWithTimeout(
-        () => providers.providerRegistry.dispose(),
-        options.providerDisposeTimeoutMs ?? 5_000,
-        log
-      )
+      await disposeProviderRegistryBounded(providers.providerRegistry, options.providerDisposeTimeoutMs ?? 5_000, log)
     }
   }
 }

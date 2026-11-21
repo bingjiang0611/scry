@@ -162,29 +162,3 @@ export function bridgedWorkbenchShellInputs(shellOps: BridgedShellOps) {
     hasTrashItem: shellOps.isAvailable
   }
 }
-
-export function disposeProviderRegistryWithTimeout(
-  dispose: () => Promise<void>,
-  timeoutMs: number,
-  log: (line: string) => void
-): Promise<void> {
-  const boundedTimeoutMs = Math.max(1, timeoutMs)
-  return new Promise<void>((resolve) => {
-    let settled = false
-    const done = (): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve()
-    }
-    const timer = setTimeout(() => {
-      log(`daemon.provider-dispose-timeout timeoutMs=${boundedTimeoutMs}`)
-      done()
-    }, boundedTimeoutMs)
-    timer.unref()
-    void dispose().then(done, (error) => {
-      log(`daemon.provider-dispose-failed ${(error as Error)?.message ?? String(error)}`)
-      done()
-    })
-  })
-}
