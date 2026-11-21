@@ -72,6 +72,7 @@ export class DaemonRunRuntime {
   #subCtx(): SubscribeRuntimeContext {
     return {
       runs: this.#runs, wakes: this.#wakes, cursorFor: (id) => this.#cursorFor(id), send: this.#deps.send,
+      isDisposed: () => this.#disposed, onWarn: this.#deps.onWarn,
       onSessionBound: (payload) => this.#onSessionBound?.(payload),
       publishStopState: (state: AgentStopState) => this.#deps.runTraces?.publishStopState?.(state),
       settleRunTrace: (id) => this.#deps.runTraces?.settle(id), flushBridge: () => this.#bridge.flushAll(),
