@@ -1,0 +1,62 @@
+import 'reflect-metadata'
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
+import { cleanupTempDirs } from './host-process.fixtures'
+import { startTestDaemon } from './host-process.harness'
+import { DaemonRunTransport } from '../main/daemon-run-transport'
+import type { DaemonRunRuntime } from '../main/daemon-run-runtime'
+import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
+import { DEFAULT_MAX_FRAME } from '../main/remote/inner-mtls-protocol'
+import type { AgentInputAttachment } from '../shared/runtime'
+
+afterEach(cleanupTempDirs)
+
+it('sends a large local image through the daemon socket without putting base64 in the intent', async () => {
+  const daemon = await startTestDaemon()
+  const inputs = join(daemon.root, 'smoke-inputs.jsonl')
+  vi.stubEnv('SCRY_ELECTRON_SMOKE_INPUTS', inputs)
+  try {
+    const seen: Record<string, unknown>[] = []
+    const transport = new DaemonRunTransport(async (request) => {
+      seen.push(request)
+      return daemon.request(request)
+    })
+    const runtime = {
+      async start(input: { intentId: string; detail: string }) {
+        const recorded = await transport.submit(input)
+        return { runId: recorded.runId, bound: true }
+      }
+    } as unknown as DaemonRunRuntime
+    // The transport checks the PNG signature; the test provider does not decode pixels.
+    const bytes = Buffer.alloc(1024 * 1024, 0x8b)
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes)
+    const image: AgentInputAttachment = { kind: 'image', mimeType: 'image/png', name: 'screen.png', size: bytes.length, dataBase64: bytes.toString('base64') }
+    expect(image.dataBase64.length).toBeGreaterThan(DEFAULT_MAX_FRAME)
+    const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
+    const payload = { prompt: 'describe this image', providerId: 'codex' as const, commandId: 'cmd-local-attachment', attachments: [image] }
+    const result = await surface.start(payload)
+    expect(seen.filter((request) => request.op === 'submit')).toHaveLength(1)
+    const submit = seen.find((request) => request.op === 'submit')!
+    expect(JSON.parse(String(submit.detail)).attachments).toEqual([
+      expect.objectContaining({ kind: 'image', name: image.name, size: bytes.length, dataBase64: '', attachmentId: expect.any(String) })
+    ])
+    await vi.waitFor(async () => {
+      const state = await transport.intentState(String(submit.intentId))
+      expect(state).toMatchObject({ runId: result.runId, state: 'settled' })
+    }, { timeout: 7_000 })
+    expect(JSON.parse((await readFile(inputs, 'utf8')).trim()).attachments).toMatchObject([
+      { kind: 'image', contentHash: createHash('sha256').update(bytes).digest('hex') }
+    ])
+
+    seen.length = 0
+    await expect(surface.start(payload)).resolves.toEqual(result)
+    expect(seen.map((request) => request.op)).toEqual(['intentStatus', 'submit'])
+    expect(seen[1]).toEqual(submit)
+    expect((await readFile(inputs, 'utf8')).trim().split('\n')).toHaveLength(1)
+  } finally {
+    vi.unstubAllEnvs()
+    await daemon.dispose()
+  }
+}, 20_000)

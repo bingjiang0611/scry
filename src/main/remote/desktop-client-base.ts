@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel, type DesktopDeviceIdentity, type DesktopSshTunnel } from './desktop-transport'
 import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneConnector } from './desktop-lane'
 import { framedRequest, protocolFailure } from './remote-protocol'
-import { DESKTOP_ATTACHMENT_CHUNK_BYTES, attachmentSha256, newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
+import { newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
+import { desktopImageReference, stageDesktopImage } from './stage-desktop-image'
 import { context, fail, record, text, uuid, hash, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
 import type { DesktopCapabilities } from './desktop-client-capabilities'
 import { isUnknownFailure, targetBinding } from './desktop-client-intent-rules'
@@ -248,20 +249,10 @@ export abstract class DesktopRemoteClientBase {
   protected async uploadAttachments(connectionIdValue: string, intentId: string, attachments: ReturnType<typeof normalizeDesktopAttachment>[]): Promise<unknown[]> {
     const entries: unknown[] = []
     for (const [index, attachment] of attachments.entries()) {
-      const attachmentId = newAttachmentId()
-      const metadata = { attachmentId, intentId, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size ?? 0, sha256: attachmentSha256(attachment), index, totalCount: attachments.length }
+      const reference = desktopImageReference(attachment, { attachmentId: newAttachmentId(), intentId, index, totalCount: attachments.length })
       try {
-        const started = await this.write(connectionIdValue, { op: 'attachmentStart', ...metadata })
-        if (!record(started) || started.status !== 'ready') fail('attachment_transfer_failed')
-        const bytes = Buffer.from(attachment.dataBase64, 'base64')
-        for (let offset = 0; offset < bytes.length; offset += DESKTOP_ATTACHMENT_CHUNK_BYTES) {
-          const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + DESKTOP_ATTACHMENT_CHUNK_BYTES))
-          const uploaded = await this.write(connectionIdValue, { op: 'attachmentChunk', attachmentId, offset, dataBase64: chunk.toString('base64') })
-          if (!record(uploaded) || uploaded.offset !== offset + chunk.length) fail('attachment_transfer_failed')
-        }
-        const response = await this.write(connectionIdValue, { op: 'attachmentCommit', attachmentId })
-        if (!record(response) || !record(response.attachment) || Object.entries(metadata).some(([key, value]) => (response.attachment as Record<string, unknown>)[key] !== value)) fail('attachment_transfer_failed')
-        entries.push({ kind: 'image', dataBase64: '', ...metadata })
+        await stageDesktopImage((request) => this.write(connectionIdValue, request), reference, attachment)
+        entries.push(reference)
       } catch (error) {
         if (error instanceof Error && error.message === 'desktop_remote_unknown_op') fail('desktop_remote_attachments_unsupported')
         if (error instanceof Error && /desktop_remote_attachment_|attachment_/.test(error.message)) throw error
