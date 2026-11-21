@@ -119,13 +119,9 @@ installSessionLifecycleDialogs({
 })
 
 // The daemon loads every history page and reports which session the window now shows.
-const sessionByContext = new Map<string, string>()
-const sessionAliasesByContext = new Map<string, Map<string, string>>()
-const sessionRevisionByContext = new Map<string, number>()
+// The session mirror lives in the daemon; the App only points its window at the session.
 installDaemonSessionSelection((selection) => applySessionSelection({
-  dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), setCurrentCwd, providerContextKey, providerSessionKey,
-  bumpSessionRevision: (key) => { sessionRevisionByContext.set(key, (sessionRevisionByContext.get(key) ?? 0) + 1) },
-  sessionAliasesByContext, sessionByContext
+  dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), setCurrentCwd, providerContextKey, providerSessionKey
 }, selection))
 
 // The daemon's conversation handlers announce their writes through its event feed; a

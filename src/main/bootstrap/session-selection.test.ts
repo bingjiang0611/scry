@@ -33,6 +33,16 @@ describe('session selection', () => {
     expect(t.sessionByContext.get('codex\0/w')).toBe('native-1')
   })
 
+  it('points a window without a session mirror (the App) at the session alone', () => {
+    const dockBadge = { view: vi.fn() }
+    const setCurrentCwd = vi.fn()
+    applySessionSelection({ dockBadge, isWindowFocused: () => false, setCurrentCwd,
+      providerContextKey: (providerId, cwd) => `${providerId}\0${cwd}`,
+      providerSessionKey: (providerId, cwd, sessionId) => `${providerId}\0${cwd}\0${sessionId}` }, selection)
+    expect(dockBadge.view).toHaveBeenCalledWith('codex\0/w\0native-1', false)
+    expect(setCurrentCwd).toHaveBeenCalledWith('/w')
+  })
+
   it('keeps revision and aliases while a run for the session settles, and forgets a session it cannot resume', () => {
     const t = target()
     applySessionSelection(t, { ...selection, cwd: '', loadingUnsettledRun: true, canResume: false })
