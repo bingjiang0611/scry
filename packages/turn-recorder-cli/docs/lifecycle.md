@@ -2,6 +2,16 @@
 
 [返回 CLI README](../README.md)
 
+## 0.2.81 按会话采集：直写收件箱合同（Inbox Contract v1）
+
+- `recorder capture start`（同步与 `--defer`）的 `transport` 新增 `inbox` 字段（`schemaVersion: 1`），显式公布本会话收件箱目录、序号提示文件、attention 索引标记与 attention 目录锁路径，以及允许随条目保存的 `uploadEnvKeys` 白名单。
+- 宿主门卫可直接按该合同原子落盘 `QueuedHook`（`schemaVersion: 1`、`kind: 'hook'`、`captureMode: true`、原始宿主 `payload` 与 ISO-8601 `arrivedAt`），无需在每个活跃事件上冷启动 Node CLI：
+  1. 校验 `transport.inbox` 中所有路径位于工作区 `dataRoot` 内且不经过符号链接；
+  2. 获取 `attentionLockPath` 目录锁（`owner.json` 写 `{pid, createdAt, token}`，按既有死进程规则移入 `recovered/` 恢复）；
+  3. 持锁期间先创建 `attentionMarkerPath`（索引优先，首次创建 fsync 父目录），递增 `sequencePath`（最佳努力，不要求 fsync），再以 `O_CREAT|O_EXCL` 临时文件 + `fsync` + `rename` + 目录 `fsync` 原子写入 `<15位毫秒>-<9位序号>-<uuid>.json`；
+  4. 落盘后非阻塞唤醒守护进程（对 `transport.socketPath` 发 `POST /v1/wake`，守护进程未启动时后台拉起 `recorder start`，钩子不等待其结果）。
+- `replayQueuedHooks` 对外写 `captureMode: true` 条目补齐与实时钩子一致的预处理：遵守 `stopRequestedAt` 停止栅栏、忽略 synthetic / Codex 内部标题提示、识别 Codex subagent transcript 标记，并在 `PreToolUse` 重放时调用 `recordCaptureRepositories` 发现嵌套仓库。
+
 ## 按会话采集：初始化中断与重复 start
 
 - 新 claim 只在基线初始化和控制状态持久化完成后返回 `started`。遇到未完成初始化的旧 open，拒绝认领，不重新制作历史基线。

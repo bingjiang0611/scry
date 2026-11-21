@@ -38,7 +38,8 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
-export type DesktopLaneName = 'control' | 'workbench' | 'terminal' | 'long' | 'status' | 'watch' | 'bulk' | 'events' | 'targetWork'
+export type { DesktopLaneName } from './desktop-lane-policy'
+import { LANE_POLICY, type DesktopLaneName } from './desktop-lane-policy'
 // Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
@@ -49,6 +50,8 @@ export interface DesktopLaneEndpoint {
   caPEM: string
   certPEM: string
   keyPEM: string
+  /** Full-page replies on the App's authenticated local history lane only. */
+  maxResponseBytes?: number
 }
 
 // The minimal duplex the lane needs. Tests supply a fake channel instead of TLS;
@@ -74,21 +77,6 @@ const KEEP_ALIVE_PREFIX = '{"keepAlive":true'
 const IDLE_CLOSE_MS = 20_000
 const MAX_NOT_SENT_RETRIES = 2
 const MAX_LOST_REPLAYS = 1
-const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnCancel: boolean }> = {
-  control: { responseTimeoutMs: 30_000, abortOnCancel: false },
-  // A write: cancelling the caller must not tear down a write whose bytes may have landed.
-  workbench: { responseTimeoutMs: 30_000, abortOnCancel: false },
-  // Input is a write: cancelling must not tear down a keystroke that may have landed.
-  terminal: { responseTimeoutMs: 30_000, abortOnCancel: false },
-  // The OAuth loopback waits 2 minutes for the browser; a test may install a server first;
-  // a billing sync reads pages of 20 s each.
-  long: { responseTimeoutMs: 5 * 60_000, abortOnCancel: false },
-  watch: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  status: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  events: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  targetWork: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  bulk: { responseTimeoutMs: 30_000, abortOnCancel: true }
-}
 
 // Only a host that keeps the tunnel open marks its reply with `keepAlive` first.
 // The key may be alone (`{"keepAlive":true}`) when a reply carries no other field.
@@ -131,7 +119,12 @@ export function connectDesktopLane(
       reject(error instanceof Error ? error : laneError('desktop_lane_connect_failed'))
       return
     }
-    let buffer = Buffer.alloc(0)
+    const maxResponseBytes = endpoint.maxResponseBytes ?? MAX_RESPONSE_BYTES
+    // TLS can split a long UTF-8 reply across thousands of chunks. Scan each chunk
+    // once and join only when a complete reply is ready, not on every data event.
+    let parts: Buffer[] = []
+    let bufferedBytes = 0
+    let lineEnd = -1
     let waiter: { resolve(line: string): void; reject(error: Error): void } | undefined
     let closed: Error | undefined
     const closeListeners = new Set<(reason: Error) => void>()
@@ -145,16 +138,20 @@ export function connectDesktopLane(
       if (!resolved) { resolved = true; reject(error) }
       const pending = waiter
       waiter = undefined
+      parts = []
       socket.destroy()
       pending?.reject(error)
       for (const listener of closeListeners) listener(error)
       closeListeners.clear()
     }
     const settleLine = (): void => {
-      const end = buffer.indexOf(10)
-      if (end < 0 || !waiter) return
-      const line = buffer.subarray(0, end).toString('utf8')
-      buffer = buffer.subarray(end + 1)
+      if (lineEnd < 0 || !waiter) return
+      const buffer = parts.length === 1 ? parts[0] : Buffer.concat(parts, bufferedBytes)
+      const line = buffer.toString('utf8', 0, lineEnd)
+      const rest = buffer.subarray(lineEnd + 1)
+      parts = rest.length ? [rest] : []
+      bufferedBytes = rest.length
+      lineEnd = rest.indexOf(10)
       const pending = waiter
       waiter = undefined
       pending.resolve(line)
@@ -190,8 +187,13 @@ export function connectDesktopLane(
     })
     socket.on('data', (chunk: Buffer) => {
       if (closed) return
-      if (buffer.length + chunk.length > MAX_RESPONSE_BYTES) { fail(laneError('desktop_lane_response_too_large')); return }
-      buffer = Buffer.concat([buffer, chunk])
+      if (bufferedBytes + chunk.length > maxResponseBytes) { fail(laneError('desktop_lane_response_too_large')); return }
+      if (lineEnd < 0) {
+        const end = chunk.indexOf(10)
+        if (end >= 0) lineEnd = bufferedBytes + end
+      }
+      parts.push(chunk)
+      bufferedBytes += chunk.length
       settleLine()
     })
     socket.once('error', error => fail(error instanceof Error ? error : laneError('desktop_lane_socket')))
@@ -202,7 +204,7 @@ export function connectDesktopLane(
 
 // A channel belongs to one tunnel path and one device certificate.
 function endpointIdentity(endpoint: DesktopLaneEndpoint): string {
-  return JSON.stringify([endpoint.path ?? '', endpoint.host ?? '', endpoint.port ?? 0, endpoint.certPEM])
+  return JSON.stringify([endpoint.path ?? '', endpoint.host ?? '', endpoint.port ?? 0, endpoint.certPEM, endpoint.maxResponseBytes ?? MAX_RESPONSE_BYTES])
 }
 
 interface LaneState {

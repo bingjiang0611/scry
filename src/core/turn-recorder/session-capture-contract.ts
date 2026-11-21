@@ -1,5 +1,7 @@
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
+import { attentionLockPath, attentionMarkerPath } from './attention.js'
+import { UPLOAD_ENV_KEYS } from './commit-environment.js'
 import { readJson } from './io.js'
 import { safeKey } from './store.js'
 
@@ -9,6 +11,24 @@ import { safeKey } from './store.js'
  * idempotency evidence — claim identity, turn boundary, stop intent — never a second switch.
  */
 export const SESSION_CAPTURE_PROTOCOL = 'codelens.session-capture.v1'
+
+/**
+ * Versioned file contract that lets a host guard write a captured session's hook events directly
+ * to the recorder's durable inbox without spawning Node per event. The recorder owns the layout
+ * and replay semantics; external writers only touch the advertised paths inside `dataRoot` under
+ * `attentionLockPath`, mark `attentionMarkerPath` before publishing the atomic JSON entry, and
+ * notify the daemon via `POST /v1/wake` (or start it detached).
+ */
+export const RECORDER_INBOX_CONTRACT_VERSION = 1
+
+export interface CaptureInboxContract {
+  schemaVersion: typeof RECORDER_INBOX_CONTRACT_VERSION
+  directory: string
+  sequencePath: string
+  attentionMarkerPath: string
+  attentionLockPath: string
+  uploadEnvKeys: readonly string[]
+}
 
 export interface SessionCaptureContext {
   protocol: string
@@ -239,6 +259,24 @@ export function captureContextPath(dataRoot: string, provider: ProviderId, sessi
 
 export function captureReceiverPath(dataRoot: string): string {
   return join(dataRoot, 'capture', 'receiver.sh')
+}
+
+/** Handed to CodeLens in `transport.inbox` so external writers never reconstruct inbox paths. */
+export function captureInboxContract(
+  dataRoot: string,
+  provider: ProviderId,
+  sessionId: string
+): CaptureInboxContract {
+  const sessionKey = safeKey(sessionId)
+  const sessionRoot = join(dataRoot, 'runtime', provider, sessionKey)
+  return {
+    schemaVersion: RECORDER_INBOX_CONTRACT_VERSION,
+    directory: join(sessionRoot, 'inbox'),
+    sequencePath: join(sessionRoot, 'inbox-sequence'),
+    attentionMarkerPath: attentionMarkerPath(dataRoot, provider, sessionKey),
+    attentionLockPath: attentionLockPath(dataRoot, provider, sessionKey),
+    uploadEnvKeys: [...UPLOAD_ENV_KEYS]
+  }
 }
 
 export async function readCaptureState(

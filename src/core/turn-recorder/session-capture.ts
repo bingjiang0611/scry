@@ -20,6 +20,7 @@ import {
   START_EVENT_NAMES,
   captureAck,
   captureContextPath,
+  captureInboxContract,
   captureReceiverPath,
   captureStateContext,
   captureStatePath,
@@ -45,7 +46,8 @@ function captureTransport(
     socketPath: recorderSocketPath(workspaceRoot, env),
     eventPath: HOOK_EVENT_PATH,
     receiverPath: captureReceiverPath(enablement.dataRoot),
-    contextPath: captureContextPath(enablement.dataRoot, provider, sessionId)
+    contextPath: captureContextPath(enablement.dataRoot, provider, sessionId),
+    inbox: captureInboxContract(enablement.dataRoot, provider, sessionId)
   }
 }
 

@@ -6,13 +6,14 @@ import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { describeErrorForLog, findRecordById, recordError, safeKey } from './store.js'
 import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInboxFailure, readInboxJson } from './inbox.js'
 import { validQueuedCapture, queueHook } from './recorder-hook-queue.js'
-import { captureStateContext, parseSessionCaptureContext, readCaptureState } from './session-capture-contract.js'
+import { captureStateContext, parseSessionCaptureContext, readCaptureState, START_EVENT_NAMES } from './session-capture-contract.js'
+import { recordCaptureRepositories } from './session-capture-discovery.js'
 import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedCaptureCommand, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
+import { BACKGROUND_WAKE_PROVIDERS, CODEX_SUBAGENT_MARKER, END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedCaptureCommand, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
-import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
+import { codexSubagentTranscript, isCodexInternalPrompt, isSynthetic, isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, markCodexInternalTurn, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn, trustedManagedIdentityPayload } from './recorder-hook-support.js'
 import { holdSeal, refreshSealWindow } from './recorder-segment.js'
 import { resumeAfterStorage } from './git.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
@@ -444,15 +445,46 @@ export async function replayQueuedHooks(
         if (queued.captureMode && !capture) {
           throw new Error(`queued capture event has no open capture: ${entry.name}`)
         }
-        await hookArrival.run(queued.arrivedAt, () => applyHookLocked(enablement, {
-          provider,
-          event: queued.event,
-          workspace: enablement.workspaceRoot,
-          payload: queued.payload,
-          managed: queued.managed,
-          uploadEnvironment: queued.uploadEnvironment,
-          ...(capture ? { capture } : {})
-        }, queued.sessionId))
+        // Mirror `applySessionCaptureHook` and `handleRecorderHook` pre-filters so an external
+        // writer that publishes raw host payloads directly to the inbox cannot bypass stop fences,
+        // synthetic/title filters or Codex subagent tagging.
+        if (state?.stopRequestedAt && START_EVENT_NAMES.has(queued.event)) {
+          // A new prompt arriving after `capture stop` is intentionally not recorded.
+        } else {
+          let payload = queued.managed
+            ? queued.payload
+            : trustedManagedIdentityPayload(queued.payload, false, {})
+          const taskNotification = START_EVENTS.has(queued.event) &&
+            (provider === 'claude' || BACKGROUND_WAKE_PROVIDERS.has(provider)) &&
+            isTaskNotificationPrompt(payload)
+          if (isSynthetic(payload) && !taskNotification) {
+            // Synthetic/meta prompts are ignored identically to live hooks.
+          } else if (provider === 'codex' && START_EVENTS.has(queued.event) && isCodexInternalPrompt(payload)) {
+            const turnId = providerTurnIdOf(payload, provider)
+            if (turnId) {
+              await hookArrival.run(queued.arrivedAt, () =>
+                markCodexInternalTurn(enablement.dataRoot, provider, queued.sessionId, turnId))
+            }
+          } else {
+            if (provider === 'codex' && await codexSubagentTranscript(payload, queued.sessionId)) {
+              payload = { ...payload, [CODEX_SUBAGENT_MARKER]: true }
+            }
+            await hookArrival.run(queued.arrivedAt, async () => {
+              await applyHookLocked(enablement, {
+                provider,
+                event: queued.event,
+                workspace: enablement.workspaceRoot,
+                payload,
+                managed: queued.managed,
+                uploadEnvironment: queued.uploadEnvironment,
+                ...(capture ? { capture } : {})
+              }, queued.sessionId)
+              if (queued.captureMode && queued.event === 'PreToolUse' && capture) {
+                await recordCaptureRepositories(enablement, provider, queued.sessionId, payload)
+              }
+            })
+          }
+        }
       }
     } catch (error) {
       if (expectedSessionId !== undefined && error instanceof Error && error.message.startsWith('scoped recorder inbox identity')) {
