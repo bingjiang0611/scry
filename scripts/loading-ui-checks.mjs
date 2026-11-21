@@ -145,9 +145,13 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
     ] })
   }
-  // A blank session may send as soon as its reset is acknowledged, independently of catalogs.
-  await read('window.loadingFixture.holdCatalog()')
+  // Start a blank session while a previous selection still shows an unverified preview.
+  // Neither the abandoned history read nor the catalog refresh may lock the new draft.
+  await read('window.loadingFixture.configure(60); window.loadingFixture.holdSession(); window.loadingFixture.holdCatalog()')
   try {
+    const previousReads = await read("window.loadingFixture.records.filter(r => r.kind === 'session').length")
+    await select('cache-b')
+    await wait(`document.querySelector('.chat-transcript[data-history-source=preview] .loading-status[data-status=loading]') && window.loadingFixture.records.filter(r => r.kind === 'session').length > ${previousReads}`)
     await click('.sb-new')
     await wait('window.loadingFixture.catalogPending()')
     await read(`(() => {
@@ -155,10 +159,22 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(composer, 'fresh draft')
       composer.dispatchEvent(new Event('input', { bubbles: true }))
     })()`)
-    await wait("window.loadingFixture.catalogPending() && !document.querySelector('button.send')?.disabled && document.querySelector('textarea')?.value === 'fresh draft'")
-    check(!await read("!!document.querySelector('.chat-transcript .loading-status[data-status=loading]')"), 'blank chat showed history loading during catalog refresh')
+    if (screenshotPrefix) {
+      await wait("document.querySelector('button.send:enabled, .chat-transcript[data-history-source=preview] .loading-status[data-status=loading]')")
+      await screenshot('new-chat-after-history-preview')
+    }
+    await wait("window.loadingFixture.catalogPending() && document.querySelector('button.send:enabled') && document.querySelector('textarea')?.value === 'fresh draft'")
+    await read('window.loadingFixture.releaseSession()')
+    await wait("window.loadingFixture.records.filter(r => r.kind === 'session').at(-1)?.end != null")
+    await settle()
+    check(await read(`(() => {
+      const chat = document.querySelector('.chat-transcript')
+      return chat?.getAttribute('data-history-source') === 'authoritative' &&
+        !chat.querySelector('.loading-status[data-status=loading], [data-run-id]') &&
+        !document.querySelector('button.send').disabled
+    })()`), 'abandoned history preview returned or locked the new draft')
   } finally {
-    await read('window.loadingFixture.releaseCatalog()')
+    await read('window.loadingFixture.releaseSession(); window.loadingFixture.releaseCatalog()')
   }
   // Other read surfaces use the same primitive; controls/evidence stay synchronous.
   const surfaces = []
