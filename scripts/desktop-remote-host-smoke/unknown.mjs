@@ -35,7 +35,7 @@ export async function verifyUnknownReceipt({ transport, evaluate, submit, invita
   assert.equal(fenced.intent.state, 'cancelled')
   const fencedAgain = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'resolveIntent', intentId: absentIntentId })
   assert.deepEqual(fencedAgain, fenced)
-  assert.deepEqual(await submit(absentIntentId, 'must never execute a delayed submission'), { error: 'intent_payload_conflict' })
+  assert.deepEqual(await submit(absentIntentId, 'must never execute a delayed submission'), { error: 'command_payload_conflict' })
   const bridgeRejection = await evaluate(`window.scry.desktopRemote.resolveIntent('missing-connection', ${JSON.stringify(absentIntentId)}).then(() => 'unexpected success', error => error.message)`)
   assert.match(bridgeRejection, /unknown_connection/, 'production preload/IPC recovery must reach main validation')
 }
