@@ -29,11 +29,15 @@ async function exerciseProviderMenus() {
   const filter = must(document.querySelector('#filter-fixture'), 'filter fixture')
   const rows = await go('rows', () => picker.querySelectorAll('[role="menuitemradio"]'))
   const checked = [...rows].filter((row) => row.getAttribute('aria-checked') === 'true')
-  if (rows.length !== 6) throw new Error('expected 6 provider rows, got ' + rows.length)
+  if (rows.length !== 7) throw new Error('expected 7 provider rows, got ' + rows.length)
   if (checked.length !== 1 || checked[0].dataset.agentId !== 'pi:rotom') {
     throw new Error('single checked row expected on pi:rotom, got ' + checked.map((row) => row.dataset.agentId))
   }
   if (picker.textContent.includes('当前')) throw new Error('trailing 当前 chip still rendered')
+  const antigravity = must(picker.querySelector('[data-agent-id="antigravity"]'), 'Antigravity row')
+  if (antigravity.textContent.trim() !== 'Antigravity' || /账号未验证|条款提示|运行边界/.test(picker.textContent + antigravity.title)) {
+    throw new Error('Antigravity must show only the provider name, without account or implementation notices')
+  }
 
   const glyphs = [...picker.querySelectorAll('[role="menuitemradio"] .agicon .provider-glyph')]
   if (glyphs.length !== rows.length) throw new Error('every row needs a brand glyph, got ' + glyphs.length + '/' + rows.length)
@@ -51,7 +55,7 @@ async function exerciseProviderMenus() {
       pathLength: [...(svg?.querySelectorAll('path') ?? [])].reduce((total, node) => total + (node.getAttribute('d')?.length ?? 0), 0)
     }
   })
-  const expected = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'pi']
+  const expected = ['claude', 'codex', 'qoder', 'opencode', 'antigravity', 'pi', 'pi']
   brands.forEach((brand, index) => {
     if (brand.provider !== expected[index]) throw new Error('row ' + index + ' glyph provider ' + brand.provider + ', expected ' + expected[index])
     // 真实品牌图形：有 viewBox 与真实路径，尺寸来自样式表而不是默认 300x150。
@@ -62,7 +66,8 @@ async function exerciseProviderMenus() {
   const claude = brands[0]
   if (claude.color !== 'rgb(217, 119, 87)') throw new Error('claude brand color ' + claude.color)
   for (const brand of brands.slice(1)) {
-    if (brand.color !== 'rgb(244, 246, 250)') throw new Error(brand.provider + ' brand color ' + brand.color)
+    const expectedColor = brand.provider === 'antigravity' ? 'rgb(156, 156, 150)' : 'rgb(244, 246, 250)'
+    if (brand.color !== expectedColor) throw new Error(brand.provider + ' brand color ' + brand.color)
   }
 
   const firstRow = rows[0]

@@ -13,7 +13,7 @@ import { Icon } from './primitives/Icon'
 import { FilesSummary } from './ChatTurnTools'
 import { HooksSummary } from './ChatTurnHooks'
 import { ThinkingBlock } from './ChatTurnShared'
-import { TurnFooter, TerminationNotice, ToolTerminationNotice, UserAllowRulesNotice } from './ChatTurnFooter'
+import { TurnFooter, TerminationNotice, ToolTerminationNotice } from './ChatTurnFooter'
 import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { resultTokenTotal, fmtTok } from '../format'
 import type { TurnHookPhase } from './ChatTurnHookData'
@@ -71,9 +71,6 @@ export function AssistantTurnView({
     ? resultMeta.usageCoverage
     : undefined
   const usageCoverageReason = typeof resultMeta?.usageCoverageReason === 'string' ? resultMeta.usageCoverageReason : undefined
-  const userAllowNotice = typeof resultMeta?.userAllowNotice === 'string' && resultMeta.userAllowNotice
-    ? resultMeta.userAllowNotice
-    : undefined
   return (
     <div className="turn-assistant">
       <div className="who">
@@ -162,9 +159,6 @@ export function AssistantTurnView({
       )}
       {turn.done && result?.terminationReason && (
         <TerminationNotice reason={result.terminationReason} />
-      )}
-      {turn.done && userAllowNotice && (
-        <UserAllowRulesNotice notice={userAllowNotice} />
       )}
       {turn.error && (
         <div className="errline">
