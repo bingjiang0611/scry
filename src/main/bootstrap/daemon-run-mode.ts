@@ -262,7 +262,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const detachRuns = deps.runTraces?.attachRuns({
     get: (runId) => { const run = runtime.runView(runId); return run ? { state: run } : undefined }
   })
-  const surface = createDaemonRunSurface({ transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), currentCwd: deps.currentCwd })
+  const surface = createDaemonRunSurface({ transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), currentCwd: deps.currentCwd, send: deps.send })
   const events = startDaemonRunEvents({
     transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),

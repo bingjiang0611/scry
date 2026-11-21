@@ -128,4 +128,31 @@ describe('daemon run surface controls', () => {
     const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => undefined })
     await expect(value.steer({ runId: 'run-abc-1' })).rejects.toThrow('daemon_run_control_unavailable')
   })
+
+  it('announces a started run to the window as agent:focusedRun, like the in-process App', async () => {
+    const transport = {} as unknown as DaemonRunTransport
+    const runtime = {
+      start: vi.fn(async (input: { intentId: string }) => ({ intentId: input.intentId, runId: 'run-focus-1', bound: true })),
+      runView: (runId: string) => run(runId),
+      adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
+    } as unknown as DaemonRunRuntime
+    const send = vi.fn()
+    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w', send })
+    await value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'intent-focus-1')
+    expect(send).toHaveBeenCalledWith('agent:focusedRun', expect.objectContaining({ runId: 'run-focus-1', cwd: '/w' }))
+  })
+
+  it('announces from the start context when the window has not read the run yet', async () => {
+    const runtime = {
+      start: vi.fn(async (input: { intentId: string }) => ({ intentId: input.intentId, runId: 'run-focus-2', bound: true })),
+      runView: () => null,
+      adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
+    } as unknown as DaemonRunRuntime
+    const send = vi.fn()
+    const value = createDaemonRunSurface({ transport: {} as unknown as DaemonRunTransport, runtime, currentCwd: () => '/w', send })
+    await value.start({ prompt: 'hello', providerId: 'codex', cwd: '/w' }, 'intent-focus-2')
+    expect(send).toHaveBeenCalledWith('agent:focusedRun', {
+      runId: 'run-focus-2', cwd: '/w', providerId: 'codex', userText: 'hello', items: [], done: false
+    })
+  })
 })

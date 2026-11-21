@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult, AgentSteerResult } from '../../shared/runtime'
 import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { ActiveRun } from '../../shared/trace'
+import type { ProviderId } from '../../shared/provider'
 import type { DesktopRemoteContext } from '../../shared/desktop-remote'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
 import { DaemonRunError, type DaemonRunTransport } from '../daemon-run-transport'
@@ -20,6 +21,10 @@ export interface DaemonRunSurfaceDeps {
   // The workspace the App currently shows. A run started without a directory uses
   // it, exactly like the in-process App does.
   currentCwd: () => string | undefined
+  // The window channel. In process, a started run is announced as `agent:focusedRun`
+  // (run-startup.ts) so the window selects its project and session; a daemon run is
+  // announced the same way from here.
+  send?: (channel: string, payload: unknown) => void
 }
 
 export interface DaemonRunSurface {
@@ -86,6 +91,22 @@ function record(value: unknown): value is Record<string, unknown> {
 export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSurface {
   let focusedRunId: string | null = null
   const { runtime } = deps
+  // Right after the submit the window has read no trace yet, so the announcement is the
+  // run's own context, the same fields in-process run-startup.ts sends before any output.
+  const announceFocusedRun = (runId: string, context: DesktopRemoteContext, userText: string): void => {
+    if (!deps.send) return
+    const view: ActiveRun = runtime.runView(runId) ?? {
+      runId, cwd: context.cwd, providerId: context.providerId as ProviderId,
+      ...(context.agentProfileId ? { agentProfileId: context.agentProfileId } : {}),
+      ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}),
+      userText, items: [], done: false
+    }
+    try {
+      deps.send('agent:focusedRun', view)
+    } catch (error) {
+      console.warn('[scry] focused run renderer notification failed:', runId, error)
+    }
+  }
   return {
     async start(payload, intentId) {
       const context = runContext(payload, deps.currentCwd())
@@ -109,12 +130,14 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
         }
         await runtime.adopt(recorded.runId)
         focusedRunId = recorded.runId
+        announceFocusedRun(recorded.runId, context, payload.prompt)
         return { runId: recorded.runId, ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}) }
       }
       // `bound: false` means the trace will not carry this id yet. Say so instead
       // of handing the view an id it cannot match.
       if (!receipt.bound) throw new Error('daemon_run_not_bound')
       focusedRunId = receipt.runId
+      announceFocusedRun(receipt.runId, context, payload.prompt)
       return { runId: receipt.runId, ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}) }
     },
     async activeRun() {
