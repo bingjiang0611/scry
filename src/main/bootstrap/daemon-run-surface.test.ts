@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DaemonRunTransport } from '../daemon-run-transport'
-import type { DaemonRunRuntime } from '../daemon-run-runtime'
+import { DaemonRunTransport, type DaemonRequest } from '../daemon-run-transport'
+import { DaemonRunRuntime } from '../daemon-run-runtime'
 import { createDaemonRunSurface } from './daemon-run-surface'
-import { DaemonRunError } from '../daemon-run-transport'
 import type { ActiveRun } from '../../shared/trace'
+import type { AgentStartRequest } from '../../shared/runtime'
 
 // The App's run controls in daemon mode. The registry is in the daemon, so these must
 // become frames - and an answer the App cannot read must be reported, never shown as
@@ -33,48 +33,106 @@ function surface(overrides: Partial<DaemonRunTransport> & { live?: ActiveRun[] }
 }
 
 describe('daemon run surface start reconciliation', () => {
-  it('reconciles a start whose reply was lost by intent id, without a second submit', async () => {
-    // The submit was written and the reply never arrived. Submitting again would create
-    // a second run; the daemon is asked what it recorded for THIS intent instead.
-    const transport = {
-      intentState: vi.fn(async () => ({ runId: 'run-abc-1', state: 'dispatched' }))
-    } as unknown as DaemonRunTransport
-    const runtime = {
-      start: vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') }),
-      adopt: vi.fn(async () => null), activeRuns: () => [], isTracking: () => true
-    } as unknown as DaemonRunRuntime
-    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
-    await expect(value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'intent-fixed-1'))
-      .resolves.toEqual({ runId: 'run-abc-1' })
-    expect(runtime.start).toHaveBeenCalledTimes(1)
-    expect(transport.intentState).toHaveBeenCalledWith('intent-fixed-1')
-    expect(runtime.adopt).toHaveBeenCalledWith('run-abc-1')
+  const ledgerId = 'run-ledger-1'
+  const canonicalId = 'remote-run-start-1'
+  const payload: AgentStartRequest = { prompt: 'go', providerId: 'claude', cwd: '/w' }
+  const bound = { runId: ledgerId, kind: 'run_progress', detail: JSON.stringify({
+    event: 'bound', ledgerRunId: ledgerId, scryRunId: canonicalId, cwd: '/w', providerId: 'claude'
+  }) }
+  const admitted = { runId: ledgerId, kind: 'run_progress', detail: JSON.stringify({ event: 'admitted' }) }
+  const refused = { runId: ledgerId, kind: 'run_failed', detail: 'workspace refused by the daemon' }
+
+  function lostReply(outcome: 'admitted' | 'refused' | 'unbound' | 'unknown', subscribeMode = false) {
+    let watches = 0
+    const request = vi.fn<DaemonRequest>(async (frame) => {
+      if (frame.op === 'submit') throw new Error('lane_lost')
+      if (frame.op === 'intentStatus') {
+        if (outcome === 'unknown') return { error: 'unknown_intent' }
+        return { intent: { runId: ledgerId, state: outcome === 'refused' ? 'failed' : 'dispatched' } }
+      }
+      if (frame.op === 'watch') {
+        const cursor = ++watches
+        const events = outcome === 'admitted' && cursor === 1 ? [bound, admitted]
+          : outcome === 'refused' && cursor === 1 ? [bound, refused] : []
+        const state = outcome === 'refused' ? 'failed' : outcome === 'unbound' || cursor > 1 ? 'settled' : 'dispatched'
+        return { watch: { state, poll: { cursor, events } } }
+      }
+      if (frame.op === 'desktop') return { desktop: { kind: 'trace', run: null } }
+      if (frame.op === 'questions') return { questions: [] }
+      throw new Error(`unexpected frame: ${frame.op}`)
+    })
+    const transport = new DaemonRunTransport(request)
+    const send = vi.fn()
+    const runtime = new DaemonRunRuntime({ transport, send, subscribeMode, waitMs: 100, bindBudgetMs: subscribeMode ? 2_000 : 50 })
+    const value = createDaemonRunSurface({ transport, runtime, send, currentCwd: () => '/w' })
+    return { value, runtime, request, send }
+  }
+
+  it('recovers a lost submit reply without resubmitting and only focuses the canonical Run', async () => {
+    const { value, runtime, request, send } = lostReply('admitted')
+    try {
+      await expect(value.start(payload, 'intent-fixed-1')).resolves.toEqual({ runId: canonicalId })
+      expect(request.mock.calls.filter(([frame]) => frame.op === 'submit')).toHaveLength(1)
+      const submit = request.mock.calls.find(([frame]) => frame.op === 'submit')?.[0]
+      expect(request).toHaveBeenCalledWith({ op: 'intentStatus', intentId: submit?.intentId }, undefined)
+      expect(send.mock.calls.filter(([channel]) => channel === 'agent:focusedRun'))
+        .toEqual([['agent:focusedRun', expect.objectContaining({ runId: canonicalId })]])
+      // Legacy recovery starts the same pump as a fresh start rather than adopting once.
+      await vi.waitFor(() => expect(request.mock.calls.some(([frame]) =>
+        frame.op === 'watch' && Number(frame.cursor) > 0
+      )).toBe(true))
+    } finally {
+      runtime.dispose()
+    }
   })
 
-  it('reports an unprovable start as unknown instead of starting a second run', async () => {
-    const transport = {
-      intentState: vi.fn(async () => { throw new DaemonRunError('daemon_run_unknown') })
-    } as unknown as DaemonRunTransport
-    const runtime = {
-      start: vi.fn(async () => { throw new DaemonRunError('daemon_outcome_unknown') }),
-      adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
-    } as unknown as DaemonRunRuntime
-    const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
-    await expect(value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'intent-fixed-2'))
-      .rejects.toMatchObject({ reason: 'daemon_submit_unknown' })
-    // Never a second submit: an unprovable start stays unknown.
-    expect(runtime.start).toHaveBeenCalledTimes(1)
+  it('waits for subscription binding and admission after recovering a receipt', async () => {
+    const { value, runtime, request, send } = lostReply('admitted', true)
+    try {
+      const start = value.start(payload, 'intent-subscribe')
+      await vi.waitFor(() => expect(runtime.isTracking(ledgerId)).toBe(true))
+      expect(send).not.toHaveBeenCalledWith('agent:focusedRun', expect.anything())
+      await runtime.applySubscribeSnapshot([
+        {
+          runId: ledgerId, scryRunId: canonicalId, lifecycle: 'dispatched', admitted: true,
+          cwd: '/w', provider: 'claude', scope: 'local', origin: 'desktop', sessionKey: null, profile: null,
+          promptPreview: null, stopState: null, outputSeq: null, intentSeq: 1, settledAt: null,
+          recoveredAt: null, outcome: null, revSeq: 2
+        }
+      ])
+      await expect(start).resolves.toEqual({ runId: canonicalId })
+      expect(send).toHaveBeenCalledWith('agent:focusedRun', expect.objectContaining({ runId: canonicalId }))
+      expect(request.mock.calls.map(([frame]) => frame.op)).toEqual(['submit', 'intentStatus', 'desktop'])
+    } finally {
+      runtime.dispose()
+    }
   })
 
-  it('keeps the caller-provided intent id instead of minting a new one on retry', async () => {
-    const transport = { submit: vi.fn(async () => ({ intentId: 'fixed', runId: 'run-abc-1', status: 'recorded' as const })) } as unknown as DaemonRunTransport
-    const runtime = {
-      start: vi.fn(async (input: { intentId: string }) => ({ intentId: input.intentId, runId: 'run-abc-1', bound: true })),
-      adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
-    } as unknown as DaemonRunRuntime
+  it.each([
+    ['refused', { message: refused.detail }],
+    ['unbound', { message: 'daemon_run_not_bound' }],
+    ['unknown', { reason: 'daemon_submit_unknown' }]
+  ] as const)('does not focus or resubmit a %s recovered start', async (outcome, error) => {
+    const { value, runtime, request, send } = lostReply(outcome)
+    try {
+      await expect(value.start(payload, 'intent-fixed-2')).rejects.toMatchObject(error)
+      expect(request.mock.calls.filter(([frame]) => frame.op === 'submit')).toHaveLength(1)
+      expect(send).not.toHaveBeenCalledWith('agent:focusedRun', expect.anything())
+    } finally {
+      runtime.dispose()
+    }
+  })
+
+  it('derives the same intent from the caller key on retry', async () => {
+    const transport = new DaemonRunTransport(async () => { throw new Error('unexpected request') })
+    const start = vi.fn(async (input: { intentId: string }) => ({ intentId: input.intentId, runId: 'run-abc-1', bound: true }))
+    const runtime = { start } as unknown as DaemonRunRuntime
     const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
-    await value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'fixed-intent')
-    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({ intentId: 'fixed-intent' }))
+    await value.start(payload, 'fixed-intent')
+    await value.start(payload, 'fixed-intent')
+    await value.start(payload, 'other-intent')
+    expect(start.mock.calls[0]?.[0].intentId).toBe(start.mock.calls[1]?.[0].intentId)
+    expect(start.mock.calls[0]?.[0].intentId).not.toBe(start.mock.calls[2]?.[0].intentId)
   })
 })
 

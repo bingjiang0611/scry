@@ -91,7 +91,10 @@ function attachmentKey(domain: string, ...parts: Array<string | number>): string
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`
 }
 
-async function prepareSubmit(transport: DaemonRunTransport, payload: AgentStartRequest, cwd: string | undefined, intentId: string) {
+async function prepareSubmit(transport: DaemonRunTransport, payload: AgentStartRequest, cwd: string | undefined, commandId: string) {
+  // Use the existing staged ID for both representations. The daemon must compare
+  // the payload against the same receipt even when a retry crosses the frame limit.
+  const intentId = attachmentKey('scry-local-image-intent', commandId)
   const inline = routingDetail(payload, cwd)
   if (fitsSubmitFrame(intentId, inline)) return { intentId, detail: inline }
 
@@ -104,18 +107,17 @@ async function prepareSubmit(transport: DaemonRunTransport, payload: AgentStartR
   if (normalized.reduce((total, item) => total + (item.size ?? 0), 0) > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES) {
     throw new DaemonRunError('daemon_attachment_limit_exceeded')
   }
-  const chunkedIntent = attachmentKey('scry-local-image-intent', intentId)
   const references = normalized.map((item, index) => desktopImageReference(item, {
-    attachmentId: attachmentKey('scry-local-image', chunkedIntent, index),
-    intentId: chunkedIntent, index, totalCount: images.length
+    attachmentId: attachmentKey('scry-local-image', intentId, index),
+    intentId, index, totalCount: images.length
   }))
   const detail = routingDetail(payload, cwd, references)
-  if (!fitsSubmitFrame(chunkedIntent, detail)) throw new DaemonRunError('daemon_submit_payload_too_large')
+  if (!fitsSubmitFrame(intentId, detail)) throw new DaemonRunError('daemon_submit_payload_too_large')
 
   // An existing receipt remains authoritative even after the blobs were cleaned
   // up. Still submit the same reference digest to check for a conflicting retry.
   try {
-    await transport.intentState(chunkedIntent)
+    await transport.intentState(intentId)
   } catch (error) {
     if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_run_unknown') throw error
     try {
@@ -126,7 +128,7 @@ async function prepareSubmit(transport: DaemonRunTransport, payload: AgentStartR
       throw Object.assign(failure, { cause })
     }
   }
-  return { intentId: chunkedIntent, detail }
+  return { intentId, detail }
 }
 
 export function runContext(payload: AgentStartRequest, currentCwd: string | undefined): DesktopRemoteContext | undefined {
@@ -166,29 +168,9 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     async start(payload, intentId) {
       const context = runContext(payload, deps.currentCwd())
       if (!context) throw new Error('daemon_run_workspace_required')
-      // The intent id is fixed by the caller BEFORE the first attempt, so a retry after
-      // a connection failure records one intent, not two. The App's commandId is its
-      // own idempotency key and wins when present.
+      // The App's commandId wins over the fallback key kept across a daemon reconnect.
       const prepared = await prepareSubmit(deps.transport, payload, context.cwd, payload.commandId?.trim() || intentId || randomUUID())
-      const intent = prepared.intentId
-      let receipt: { runId: string; bound: boolean }
-      try {
-        receipt = await runtime.start({ intentId: intent, detail: prepared.detail, context, userText: payload.prompt })
-      } catch (error) {
-        if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_outcome_unknown') throw error
-        // The submit was written and the reply never arrived. Re-submitting would be a
-        // second run, so the daemon is asked what it recorded for THIS intent.
-        let recorded: { runId: string }
-        try {
-          recorded = await deps.transport.intentState(intent)
-        } catch {
-          throw new DaemonRunError('daemon_submit_unknown')
-        }
-        await runtime.adopt(recorded.runId)
-        focusedRunId = recorded.runId
-        announceFocusedRun(recorded.runId, context, payload.prompt)
-        return { runId: recorded.runId, ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}) }
-      }
+      const receipt = await runtime.start({ ...prepared, context, userText: payload.prompt })
       // `bound: false` means the trace will not carry this id yet. Say so instead
       // of handing the view an id it cannot match.
       if (!receipt.bound) throw new Error('daemon_run_not_bound')
