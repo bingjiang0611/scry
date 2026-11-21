@@ -5,7 +5,8 @@ export const LLM_PERFORMANCE_COPY = {
   metricLabel: '时间图指标',
   metrics: {
     speed: { label: 'TPS', unit: 'token/s' },
-    firstToken: { label: 'TTFT', unit: '秒' }
+    firstToken: { label: 'TTFT', unit: '秒' },
+    firstOutput: { label: '首段回复等待', unit: '秒' }
   },
   reading: '读取中',
   summaryError: (detail: string) => `运行中数据读取失败：${detail}`,
@@ -16,15 +17,19 @@ export const LLM_PERFORMANCE_COPY = {
   empty: '还没有数据',
   missing: '—',
   comparison: '模型对比',
-  columns: { model: '模型', distribution: 'TPS 分布', speed: 'TPS 中位数', firstToken: 'TTFT 中位数' },
+  columns: { model: '模型与 Agent', distribution: 'TPS 分布', speed: 'TPS 中位数', firstToken: 'TTFT 中位数', firstOutput: '首段回复等待中位数' },
+  unknownModel: '未知模型',
+  unknownProvider: '未知 Agent',
+  metricUnavailable: '— 表示没有实测值',
+  firstOutputBasis: '从发送到收到首段可见回复，包含启动、上下文处理和可能的工具等待，不等同于 TTFT。',
   sparseDistribution: (values: string) => `TPS 实测值：${values} token/s`,
   distributionLabel: (min: string, q1: string, median: string, q3: string, max: string) => `TPS 分布：最小 ${min}，P25 ${q1}，中位数 ${median}，P75 ${q3}，最大 ${max} token/s`,
   valueList: (values: string[]) => values.join('、'),
   intervals: { 1: '每 10 分钟', 24: '每 2 小时', 168: '每天' },
   intervalHelp: '每个区间显示中位数、中间 50% 和完整测量范围；少于 3 轮时保留实际测量点。没有测量的时间留空，不补零或连线。',
   rounds: (complete: number, running: number) => running ? `${complete} 轮 · ${running} 暂计` : `${complete} 轮`,
-  roundsLabel: (metric: string, complete: number, running: number) => `${metric}：已完成 ${complete} 轮，运行中暂计 ${running} 轮`,
-  waitRounds: (rounds: string) => `TTFT ${rounds}`,
+  failedRounds: (count: number) => `${count} 轮未成功`,
+  measuredRounds: (label: string, count: number) => `${label}（${count} 轮实测）`,
   chartLabel: (model: string, metric: string) => `${model} 的${metric}时间区间图。左右方向键查看测量，Home 和 End 跳到两端，Escape 关闭提示。`,
   intervalLabel: (stamp: string, count: number, median: string, min: string, max: string, unit: string, provisional: number) =>
     `${stamp}，${count} 轮，中位数 ${median} ${unit}，范围 ${min}–${max} ${unit}${provisional ? `，含 ${provisional} 轮暂计数据` : ''}`,

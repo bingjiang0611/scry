@@ -48,12 +48,14 @@ extension G0Transport {
       public let byModel: [ModelRow]; public let byModelTruncated: Bool; public let byProviderTruncated: Bool
     }
     public struct RunningModel: Decodable, Sendable, Equatable {
-      public let key: String; public let model: String?; public let sessions: Int
-      public let tokensPerSecond: Double?; public let firstTokenMs: Double?; public let states: [String]
+      public let key: String; public let model: String?; public let providerId: String?; public let sessions: Int
+      public let tokensPerSecond: Double?; public let firstTokenMs: Double?; public let firstOutputWaitMs: Double?
+      public let states: [String]
     }
     public struct HistoryRow: Decodable, Sendable, Equatable {
       public let ts: String; public let model: String; public let providerId: String
-      public let speed: Double?; public let firstTokenMs: Double?; public let failed: Bool
+      public let speed: Double?; public let firstTokenMs: Double?; public let firstOutputWaitMs: Double?
+      public let failed: Bool
     }
     public struct Llm: Decodable, Sendable, Equatable {
       public let running: Running; public let history: History

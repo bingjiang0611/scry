@@ -113,6 +113,7 @@ enum ProviderSymbol {
     case "qoder": return "q.circle"
     case "opencode": return "terminal"
     case "pi": return "p.circle"
+    case "antigravity": return "a.circle"
     default: return "cpu"
     }
   }

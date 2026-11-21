@@ -1,13 +1,14 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import type { LlmMetric, LlmMetricSample, LlmPerformanceHistory, LlmPerformanceSummary } from '@shared/llm-performance'
-import { llmMetricSamples } from '@shared/llm-performance'
+import type { LlmMetric, LlmPerformanceHistory, LlmPerformanceSummary } from '@shared/llm-performance'
+import { LLM_METRICS, llmComparisonRounds } from '@shared/llm-performance'
+import { PROVIDER_LABELS } from '@shared/provider'
 import { ModalFrame, requestModalClose } from './Modals'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
 import { MetricChart, MetricHelp, ModelComparison } from './LlmPerformanceCharts'
-import { compareModels, type RangeHours } from './llm-performance-data'
+import { compareModels, llmComparisonKey, type RangeHours } from './llm-performance-data'
 import { Notice } from './primitives/Notice'
 import './llm-performance.css'
 
@@ -62,25 +63,28 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
     return () => { current = false; window.clearTimeout(timer); unsubscribe?.() }
   }, [open, visible])
 
-  const speedSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'speed', summary?.sessions), [history, summary])
-  const firstTokenSamples = useMemo(() => llmMetricSamples(history?.rows ?? [], 'firstToken', summary?.sessions), [history, summary])
-  // Stable across range/metric changes; keep the existing model-colour mapping.
+  const rounds = useMemo(() => llmComparisonRounds(history?.rows ?? [], summary?.sessions), [history, summary])
   const colorOf = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const sample of speedSamples) counts.set(sample.model, (counts.get(sample.model) ?? 0) + 1)
-    for (const sample of firstTokenSamples) counts.set(sample.model, counts.get(sample.model) ?? 0)
-    const order = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!)
-    return (model: string): string => `var(--llm-model-${Math.max(0, order.indexOf(model)) % PALETTE})`
-  }, [speedSamples, firstTokenSamples])
+    const keys = new Set(rounds.map(round => llmComparisonKey(round.providerId, round.model)))
+    const colors = new Map([...keys].map((key, index) => [key, index % PALETTE]))
+    return (key: string): string => `var(--llm-model-${colors.get(key) ?? 0})`
+  }, [rounds])
   const to = Math.floor(Date.now() / 60_000) * 60_000 + 60_000
   const from = to - hours * 3_600_000
-  const groups = useMemo(() => {
-    const within = (list: LlmMetricSample[]): LlmMetricSample[] => list.filter(sample => sample.ts >= from && sample.ts <= to)
-    return compareModels(within(speedSamples), within(firstTokenSamples))
-  }, [speedSamples, firstTokenSamples, from, to])
-  const current = groups.find(group => group.model === selected) ??
-    [...groups].sort((a, b) => Math.max(b.speed.length, b.firstToken.length) - Math.max(a.speed.length, a.firstToken.length))[0]
-  const currentSamples = current?.[metric] ?? []
+  const groups = useMemo(() => compareModels(rounds.filter(round => round.ts >= from && round.ts <= to)), [rounds, from, to])
+  const current = groups.find(group => group.key === selected) ??
+    groups.reduce<(typeof groups)[number] | undefined>((best, group) =>
+      !best || group.samples[metric].length > best.samples[metric].length ? group : best, undefined)
+  const currentModel = current?.model ?? copy.unknownModel
+  const activeMetric = current && !selected && !current.samples[metric].length
+    ? LLM_METRICS.find(item => current.samples[item].length) ?? metric : metric
+  const currentSamples = current?.samples[activeMetric] ?? []
+  const selectGroup = (key: string): void => {
+    setSelected(key)
+    const group = groups.find(candidate => candidate.key === key)
+    if (group) setMetric(group.samples[activeMetric].length ? activeMetric
+      : LLM_METRICS.find(item => group.samples[item].length) ?? activeMetric)
+  }
   const oldestKept = history?.truncated && history.rows.length ? Date.parse(history.rows.at(-1)!.ts) : undefined
   if (!open) return null
   return (
@@ -100,23 +104,26 @@ export function LlmPerformancePanel({ open, onClose }: { open: boolean; onClose:
           </div>
           {historyError ? <Notice tone="bad" className="llm-perf-alert" role="alert">{copy.historyError(historyError)}</Notice>
             : !history ? <div className="llm-perf-loading" aria-busy="true"><DelayedSkeletonRows loading rows={4} meta rowHeight={48} label={copy.reading} /></div>
-              : !current ? <div className="llm-perf-empty">{speedSamples.length || firstTokenSamples.length ? copy.emptyRange : copy.empty}</div>
-                : <ModelComparison groups={groups} selected={current.model} colorOf={colorOf} onSelect={setSelected} />}
+              : !current ? <div className="llm-perf-empty">{rounds.length ? copy.emptyRange : copy.empty}</div>
+                : <><ModelComparison groups={groups} selected={current.key} colorOf={colorOf} onSelect={selectGroup} />
+                  <p className="llm-perf-truncated">{copy.metricUnavailable}</p></>}
           {oldestKept != null && oldestKept > from && <p className="llm-perf-truncated">{copy.truncated(history!.rows.length)}</p>}
         </section>
         {!historyError && history && current && <section className="llm-perf-detail" aria-labelledby={`${titleId}-detail`}>
           <div className="llm-perf-detail-head">
             <div>
-              <h3 id={`${titleId}-detail`} className="llm-perf-detail-title"><i aria-hidden="true" style={{ background: colorOf(current.model) }} />{current.model}</h3>
+              <h3 id={`${titleId}-detail`} className="llm-perf-detail-title"><i aria-hidden="true" style={{ background: colorOf(current.key) }} />{currentModel}</h3>
+              <span className="llm-perf-provider">{current.providerId ? PROVIDER_LABELS[current.providerId] : copy.unknownProvider}</span>
             </div>
             <div className="llm-perf-metric" role="group" aria-label={copy.metricLabel}>
-              {(['speed', 'firstToken'] as const).map(item => <button key={item} type="button" aria-pressed={metric === item} onClick={() => setMetric(item)}>{copy.metrics[item].label}</button>)}
+              {LLM_METRICS.map(item => <button key={item} type="button" aria-pressed={activeMetric === item} onClick={() => { setSelected(current.key); setMetric(item) }}>{copy.metrics[item].label}</button>)}
             </div>
           </div>
           <div className="llm-perf-chart-meta"><MetricHelp label={copy.intervals[hours]} text={copy.intervalHelp} /></div>
-          {currentSamples.length ? <MetricChart key={`${current.model}:${metric}:${hours}`} samples={currentSamples} model={current.model} metric={metric}
-            from={from} to={to} hours={hours} color={colorOf(current.model)} />
-            : <div className="llm-perf-empty">{copy.selectedEmpty(current.model, copy.metrics[metric].label)}</div>}
+          {activeMetric === 'firstOutput' && <p className="llm-perf-truncated">{copy.firstOutputBasis}</p>}
+          {currentSamples.length ? <MetricChart key={`${current.key}:${activeMetric}:${hours}`} samples={currentSamples} model={currentModel} metric={activeMetric}
+            from={from} to={to} hours={hours} color={colorOf(current.key)} />
+            : <div className="llm-perf-empty">{copy.selectedEmpty(currentModel, copy.metrics[activeMetric].label)}</div>}
         </section>}
       </div>
     </ModalFrame>

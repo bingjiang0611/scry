@@ -16,6 +16,7 @@ export interface LlmRunningSession {
   /** Completed main-agent calls of this turn only; absent until a Provider gives per-call evidence. */
   tokensPerSecond?: number
   firstTokenMs?: number
+  firstOutputWaitMs?: number
 }
 
 /** A bounded, read-only snapshot of currently registered sessions for the global modal. */
@@ -27,19 +28,21 @@ export interface LlmPerformanceSummary {
 export interface LlmRunningModel {
   key: string
   model?: string
+  providerId?: ProviderId
   sessions: LlmRunningSession[]
   tokensPerSecond?: number
   firstTokenMs?: number
+  firstOutputWaitMs?: number
 }
 
-/** One row per known model across projects/Providers; unknown models stay separate.
+/** One row per Agent and known model across projects; unknown models stay separate.
  * Metrics are arithmetic session means, each with its own measured-session denominator.
  * This is not combined throughput or a call-weighted mean.
  */
 export function groupRunningLlmSessions(sessions: readonly LlmRunningSession[]): LlmRunningModel[] {
   const groups = new Map<string, LlmRunningSession[]>()
   for (const session of sessions) {
-    const key = session.model ? `model:${session.model}` : `session:${session.key}`
+    const key = session.model ? `model:${JSON.stringify([session.providerId, session.model])}` : `session:${session.key}`
     const group = groups.get(key)
     if (group) group.push(session)
     else groups.set(key, [session])
@@ -47,10 +50,12 @@ export function groupRunningLlmSessions(sessions: readonly LlmRunningSession[]):
   return [...groups].map(([key, members]) => {
     const speeds = members.flatMap(session => session.tokensPerSecond != null ? [session.tokensPerSecond] : [])
     const waits = members.flatMap(session => session.firstTokenMs != null ? [session.firstTokenMs] : [])
+    const outputWaits = members.flatMap(session => session.firstOutputWaitMs != null ? [session.firstOutputWaitMs] : [])
     return {
-      key, model: members[0].model, sessions: members,
+      key, model: members[0].model, providerId: members[0].providerId, sessions: members,
       ...(speeds.length ? { tokensPerSecond: speeds.reduce((sum, value) => sum + value, 0) / speeds.length } : {}),
-      ...(waits.length ? { firstTokenMs: waits.reduce((sum, value) => sum + value, 0) / waits.length } : {})
+      ...(waits.length ? { firstTokenMs: waits.reduce((sum, value) => sum + value, 0) / waits.length } : {}),
+      ...(outputWaits.length ? { firstOutputWaitMs: outputWaits.reduce((sum, value) => sum + value, 0) / outputWaits.length } : {})
     }
   })
 }
@@ -74,7 +79,8 @@ export function summarizeRunningLlmSessions(activeRuns: readonly ActiveRun[], no
         state: sample?.state ?? 'waiting',
         outputStarted: sample?.firstOutputWaitMs != null,
         ...(sample?.apiTokensPerSecond != null ? { tokensPerSecond: sample.apiTokensPerSecond } : {}),
-        ...(sample?.firstTokenMs != null ? { firstTokenMs: sample.firstTokenMs } : {})
+        ...(sample?.firstTokenMs != null ? { firstTokenMs: sample.firstTokenMs } : {}),
+        ...(sample?.firstOutputWaitMs != null ? { firstOutputWaitMs: sample.firstOutputWaitMs } : {})
       }
     })
   }
@@ -135,40 +141,54 @@ export interface LlmPerformanceHistory {
   truncated: boolean
 }
 
-export type LlmMetric = 'speed' | 'firstToken'
+export const LLM_METRICS = ['speed', 'firstToken', 'firstOutput'] as const
+export type LlmMetric = typeof LLM_METRICS[number]
 
 export interface LlmMetricSample {
   ts: number
-  model: string
-  /** speed: token/s. firstToken: seconds from request start to the first content block. */
+  /** Token/s for speed; seconds for both latency metrics. */
   value: number
   /** Running turn's completed calls; replaced by the persisted round on completion. */
   provisional?: boolean
 }
 
-/** Successful rounds and provisional completed-call evidence. Missing evidence is omitted, never 0. */
-export function llmMetricSamples(rows: readonly LlmPerformanceHistoryRow[], metric: LlmMetric, sessions: readonly LlmRunningSession[] = []): LlmMetricSample[] {
-  const samples: LlmMetricSample[] = rows.flatMap(row => {
-    const ts = Date.parse(row.ts)
-    const value = metric === 'speed'
-      ? row.performance.apiTokensPerSecond
-      : row.performance.firstTokenMs != null ? row.performance.firstTokenMs / 1000 : undefined
-    return !row.failed && value != null && value > 0 && Number.isFinite(ts)
-      ? [{ ts, model: row.model, value }] : []
-  })
-  // History wins even when the final round failed or has no metric. A stale summary must not
-  // double count a completed round or bring stopped/failed evidence back into statistics.
+export interface LlmComparisonRound {
+  ts: number
+  providerId?: ProviderId
+  model?: string
+  state: 'completed' | 'failed' | 'running'
+  metrics: Partial<Record<LlmMetric, number>>
+}
+
+function comparisonMetrics(speed?: number, firstTokenMs?: number, firstOutputWaitMs?: number): LlmComparisonRound['metrics'] {
+  const metrics: LlmComparisonRound['metrics'] = {}
+  if (speed != null && speed > 0 && Number.isFinite(speed)) metrics.speed = speed
+  if (firstTokenMs != null && firstTokenMs > 0 && Number.isFinite(firstTokenMs)) metrics.firstToken = firstTokenMs / 1000
+  if (firstOutputWaitMs != null && firstOutputWaitMs >= 0 && Number.isFinite(firstOutputWaitMs)) metrics.firstOutput = firstOutputWaitMs / 1000
+  return metrics
+}
+
+/** Keep coverage even without timing. Stopped/failed rounds never contribute to metric distributions. */
+export function llmComparisonRounds(rows: readonly LlmPerformanceHistoryRow[], sessions: readonly LlmRunningSession[] = []): LlmComparisonRound[] {
+  const rounds: LlmComparisonRound[] = []
   const persisted = new Set(rows.map(row => row.runId))
-  for (const session of sessions) {
-    if (persisted.has(session.runId) || session.state === 'complete' || !session.model || !session.observedAt) continue
-    const ts = Date.parse(session.observedAt)
-    const value = metric === 'speed' ? session.tokensPerSecond
-      : session.firstTokenMs != null ? session.firstTokenMs / 1000 : undefined
-    if (value != null && value > 0 && Number.isFinite(ts)) {
-      samples.push({ ts, model: session.model, value, provisional: true })
-    }
+  for (const row of rows) {
+    const ts = Date.parse(row.ts)
+    if (!Number.isFinite(ts)) continue
+    const performance = row.performance
+    rounds.push({
+      ts, providerId: row.providerId, model: row.model, state: row.failed ? 'failed' : 'completed',
+      metrics: row.failed ? {} : comparisonMetrics(performance.apiTokensPerSecond, performance.firstTokenMs, performance.firstOutputWaitMs)
+    })
   }
-  return samples
+  for (const session of sessions) {
+    if (persisted.has(session.runId) || session.state === 'complete' || !session.observedAt) continue
+    const ts = Date.parse(session.observedAt)
+    if (!Number.isFinite(ts)) continue
+    const metrics = comparisonMetrics(session.tokensPerSecond, session.firstTokenMs, session.firstOutputWaitMs)
+    if (Object.keys(metrics).length) rounds.push({ ts, providerId: session.providerId, model: session.model, state: 'running', metrics })
+  }
+  return rounds
 }
 
 export function quantile(values: readonly number[], p: number): number {

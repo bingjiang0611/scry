@@ -51,7 +51,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await wait(`${liveRow}?.textContent.includes('0 轮 · 3 暂计') && ${liveRow}.querySelectorAll('.llm-perf-reading')[0].textContent === '40.0' && ${liveRow}.querySelectorAll('.llm-perf-reading')[1].textContent === '1.5'`)
   if (await read(`${modal}.querySelector('.llm-perf-run') != null`)) throw new Error('Running cards reappeared')
   if (await read(`${modal}.querySelector('.llm-perf-notices') != null || /如何读图|含运行中数据/.test(${modal}.textContent)`)) throw new Error('Removed comparison help entries returned with live data')
-  if (!await read(`${liveRow}.querySelector('small').getAttribute('aria-label').includes('运行中暂计 3 轮')`)) throw new Error('Live sample evidence was removed with help entries')
+  if (!await read(`${liveRow}.querySelector('.llm-perf-reading').getAttribute('title').includes('3 轮')`)) throw new Error('Live metric coverage is missing')
   const contrastByTheme = {}
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
@@ -91,12 +91,12 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   if (!await read(`${liveRow}?.textContent.includes('40.0')`)) throw new Error('Focus changed global measurements')
   await click('#performance-complete')
   await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('fixture-model') && node.textContent.includes('20.0'))`)
-  // Select the live model through its actual row before it disappears.
+  // A stopped run must replace provisional readings with a coverage-only row.
   const liveIndex = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).findIndex(node => node.textContent.includes('pi-live-model')) + 1`)
   await click('.llm-perf-mrow:nth-of-type(' + liveIndex + ')')
   await wait(`${modal}.querySelector('.llm-perf-detail-title').textContent === 'pi-live-model'`)
   await click('#performance-stop')
-  await wait(`!${liveRow} && ${modal}.querySelector('.llm-perf-detail-title').textContent === 'fast-model'`)
+  await wait(`${liveRow}?.textContent.includes('1 轮未成功') && [...${liveRow}.querySelectorAll('.llm-perf-reading')].every(node => node.textContent === '—') && !${modal}.querySelector('.llm-perf-chart svg')`)
   const fixtureState = "JSON.parse(document.querySelector('#performance-fixture-state').textContent)"
   // Exercise the visibility subscription without showing or stealing focus from the user's window.
   await read("Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'))")
@@ -132,5 +132,5 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await wait(`${modal}?.textContent.includes('fixture history unavailable')`)
   if (await read(`${modal}.querySelector('.llm-perf-mrow, .llm-perf-chart') != null`)) throw new Error('History error retained apparently successful measurements')
   await click('.modal-x')
-  return { assertions: ['four-column distribution-first layout', 'running cards and smoothed curves removed', 'independent real medians and missing evidence', 'failed rounds excluded', 'full distribution accessible', 'model selection and disappearance fallback', 'metric and range switches', 'measured interval tooltip and keyboard navigation', 'provisional completed-call samples retained', 'cross-provider model pooling omits missing evidence', 'focus-independent source', 'completion/stop refresh', 'read errors clear stale evidence', 'visibility subscription and close stop polling', 'close restores focus', 'dark/light AA contrast', 'local narrow scroll and removed comparison help entries'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)', contrastByTheme }
+  return { assertions: ['distribution-first layout with separate first-visible-output latency', 'running cards and smoothed curves removed', 'independent real medians and missing evidence', 'failed rounds retained as coverage, not timing', 'full distribution accessible', 'model selection and retained unmeasured history', 'metric and range switches', 'measured interval tooltip and keyboard navigation', 'provisional completed-call samples retained', 'same-Agent pooling omits missing evidence', 'focus-independent source', 'completion/stop refresh', 'read errors clear stale evidence', 'visibility subscription and close stop polling', 'close restores focus', 'Antigravity output-only row; dark/light AA contrast', 'local narrow scroll and removed comparison help entries'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)', contrastByTheme }
 }

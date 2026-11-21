@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupRunningLlmSessions, llmMetricSamples, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow, type LlmRunningSession } from './llm-performance'
+import { groupRunningLlmSessions, llmComparisonRounds, summarizeRunningLlmSessions, type LlmPerformance, type LlmPerformanceHistoryRow, type LlmRunningSession } from './llm-performance'
 import type { ActiveRun } from './trace'
 import { RunRegistry } from '../main/run-registry'
 
@@ -40,21 +40,23 @@ describe('running LLM models', () => {
     key, runId: key, model: 'astra', state: 'waiting', outputStarted: true, ...partial
   })
 
-  it('merges matching models across projects and Providers and averages each session equally', () => {
+  it('merges matching models across projects only within an Agent', () => {
     const sessions = [
       session('a', { cwd: '/scry', providerId: 'codex', tokensPerSecond: 28.9, firstTokenMs: 3000, state: 'tool' }),
       session('b', { model: 'sol', tokensPerSecond: 36.9, firstTokenMs: 2500 }),
-      session('c', { cwd: '/scry', tokensPerSecond: 24.4, firstTokenMs: 3400 }),
+      session('c', { cwd: '/etch', providerId: 'codex', tokensPerSecond: 24.4, firstTokenMs: 3400 }),
       session('d', { cwd: '/etch', providerId: 'pi', tokensPerSecond: 22.5, firstTokenMs: 2900 }),
       session('e', { model: 'sol', tokensPerSecond: 33.3, firstTokenMs: 2400 })
     ]
     const groups = groupRunningLlmSessions(sessions)
-    expect(groups.map(group => [group.model, group.sessions.length])).toEqual([['astra', 3], ['sol', 2]])
-    expect(groups[0].tokensPerSecond).toBeCloseTo(25.2666667)
-    expect(groups[0].firstTokenMs).toBeCloseTo(3100)
+    expect(groups.map(group => [group.providerId, group.model, group.sessions.length])).toEqual([
+      ['codex', 'astra', 2], [undefined, 'sol', 2], ['pi', 'astra', 1]
+    ])
+    expect(groups[0].tokensPerSecond).toBeCloseTo(26.65)
+    expect(groups[0].firstTokenMs).toBe(3200)
     expect(groups[1].tokensPerSecond).toBeCloseTo(35.1)
     expect(groups[1].firstTokenMs).toBe(2450)
-    expect(groups[0].sessions.map(member => member.key)).toEqual(['a', 'c', 'd'])
+    expect(groups[0].sessions.map(member => member.key)).toEqual(['a', 'c'])
     expect(sessions).toHaveLength(5)
   })
 
@@ -78,59 +80,38 @@ describe('running LLM models', () => {
   })
 })
 
-describe('LLM speed history', () => {
-  const row = (ts: number, partial: Partial<LlmPerformanceHistoryRow> & { speed?: number } = {}): LlmPerformanceHistoryRow => ({
+describe('LLM comparison rounds', () => {
+  const row = (ts: number, partial: Partial<LlmPerformanceHistoryRow> = {}): LlmPerformanceHistoryRow => ({
     runId: String(ts), ts: new Date(ts).toISOString(), providerId: 'pi', model: 'm', networkLabel: '', failed: false,
-    performance: performance({ state: 'complete', apiTokensPerSecond: partial.speed ?? 20 }), ...partial
+    performance: performance({ state: 'complete', apiTokensPerSecond: 20, firstTokenMs: 2500 }), ...partial
   })
 
-  it('omits failed rounds and rounds without token timing instead of treating them as 0 token/s', () => {
-    const missing = row(2000)
-    delete missing.performance.apiTokensPerSecond
-    expect(llmMetricSamples([row(1000), missing, row(3000, { failed: true })], 'speed')).toEqual([{ ts: 1000, model: 'm', value: 20 }])
-  })
-
-  it('reads first-token wait in seconds and omits rounds without a first-block signal', () => {
-    const timed = row(1000)
-    timed.performance.firstTokenMs = 2500
+  it('retains coverage without timing and never substitutes first visible output for TTFT', () => {
+    const agy = row(1000, { providerId: 'antigravity', performance: performance({ firstOutputWaitMs: 14_000, outputTokens: 40, averageCharactersPerSecond: 25 }) })
+    const missing = row(2000, { performance: performance() })
     const failed = row(3000, { failed: true })
-    failed.performance.firstTokenMs = 100
-    // Speed evidence alone (e.g. Claude provider_api) never becomes a 0 s first-token wait.
-    expect(llmMetricSamples([timed, row(2000), failed], 'firstToken')).toEqual([{ ts: 1000, model: 'm', value: 2.5 }])
-  })
-
-  it('includes one provisional sample per running Sol turn, using observation time rather than poll time', () => {
-    const active = { ...run('sol', { model: 'gpt-6.1-sol', apiTokensPerSecond: 23.1, firstTokenMs: 3400,
-      observedAt: new Date(5000).toISOString(), state: 'tool' }), providerId: 'codex' as const }
-    const sessions = summarizeRunningLlmSessions([active], 9000).sessions
-    expect(llmMetricSamples([], 'speed', sessions)).toEqual([
-      { ts: 5000, model: 'gpt-6.1-sol', value: 23.1, provisional: true }
+    expect(llmComparisonRounds([agy, missing, failed, row(4000)]).map(({ providerId, state, metrics }) => ({ providerId, state, metrics }))).toEqual([
+      { providerId: 'antigravity', state: 'completed', metrics: { firstOutput: 14 } },
+      { providerId: 'pi', state: 'completed', metrics: {} },
+      { providerId: 'pi', state: 'failed', metrics: {} },
+      { providerId: 'pi', state: 'completed', metrics: { speed: 20, firstToken: 2.5 } }
     ])
-    expect(llmMetricSamples([], 'firstToken', sessions)).toEqual([
-      { ts: 5000, model: 'gpt-6.1-sol', value: 3.4, provisional: true }
-    ])
-    active.llmPerformance!.apiTokensPerSecond = 30
-    const updated = summarizeRunningLlmSessions([active], 10_000).sessions
-    expect(llmMetricSamples([], 'speed', updated)).toHaveLength(1)
-    expect(llmMetricSamples([], 'speed', updated)[0].value).toBe(30)
   })
 
-  it('lets persisted completion or failure replace a stale running snapshot without double counting', () => {
-    const sessions = summarizeRunningLlmSessions([run('1000', { model: 'm', apiTokensPerSecond: 40 })]).sessions
-    expect(llmMetricSamples([row(1000)], 'speed', sessions)).toEqual([{ ts: 1000, model: 'm', value: 20 }])
-    expect(llmMetricSamples([row(1000, { failed: true })], 'speed', sessions)).toEqual([])
-  })
-
-  it('omits missing live evidence, unknown models and terminal observations instead of inventing data', () => {
+  it('keeps provisional local waiting with unknown model, but persisted failure wins', () => {
     const sessions = summarizeRunningLlmSessions([
+      { ...run('1000', { firstOutputWaitMs: 900 }), providerId: 'antigravity' },
       run('missing', { model: 'm' }),
-      run('unknown-model', { apiTokensPerSecond: 50 }),
       run('terminal', { state: 'complete', model: 'm', apiTokensPerSecond: 60, firstTokenMs: 900 }),
-      run('speed-only', { model: 'm', apiTokensPerSecond: 40 })
+      run('call', { model: 'm', apiTokensPerSecond: 40, firstTokenMs: 1200 })
     ]).sessions
-    expect(llmMetricSamples([], 'speed', sessions)).toEqual([{ ts: 0, model: 'm', value: 40, provisional: true }])
-    expect(llmMetricSamples([], 'firstToken', sessions)).toEqual([])
-    expect(llmMetricSamples([], 'speed', [])).toEqual([])
+    expect(llmComparisonRounds([], sessions)).toEqual([
+      { ts: 0, providerId: 'antigravity', state: 'running', metrics: { firstOutput: .9 } },
+      { ts: 0, model: 'm', state: 'running', metrics: { speed: 40, firstToken: 1.2 } }
+    ])
+    expect(llmComparisonRounds([row(1000, { providerId: 'antigravity', failed: true })], sessions)).toEqual([
+      { ts: 1000, providerId: 'antigravity', model: 'm', state: 'failed', metrics: {} },
+      { ts: 0, model: 'm', state: 'running', metrics: { speed: 40, firstToken: 1.2 } }
+    ])
   })
-
 })

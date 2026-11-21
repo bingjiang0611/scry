@@ -36,6 +36,7 @@ enum Palette {
   static let providerQoder = adaptive(dark: 0xEFA84F, light: 0x9B6206)
   static let providerOpenCode = adaptive(dark: 0x70CA93, light: 0x28744A)
   static let providerPi = adaptive(dark: 0xAB9CF2, light: 0x6A5FAE)
+  static let providerAntigravity = adaptive(dark: 0x6FD3D8, light: 0x24777B)
 
   static func provider(_ id: String) -> Color {
     switch id {
@@ -44,6 +45,7 @@ enum Palette {
     case "qoder": return providerQoder
     case "opencode": return providerOpenCode
     case "pi": return providerPi
+    case "antigravity": return providerAntigravity
     default: return dim2
     }
   }

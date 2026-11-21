@@ -60,14 +60,19 @@ export interface ToolPanelLlm {
     models: Array<{
       key: string
       model?: string
+      providerId?: string
       sessions: number
       tokensPerSecond?: number
       firstTokenMs?: number
+      firstOutputWaitMs?: number
       states: string[]
     }>
   }
   history: {
-    rows: Array<{ ts: string; model: string; providerId: string; speed: number | null; firstTokenMs: number | null; failed: boolean }>
+    rows: Array<{
+      ts: string; model: string; providerId: string; speed: number | null
+      firstTokenMs: number | null; firstOutputWaitMs?: number; failed: boolean
+    }>
     truncated: boolean
     invalidLines: number
     /** Host-side cap; the phone shows this instead of pretending the list is complete. */
@@ -204,9 +209,11 @@ export function shapeLlmPanel(history: LlmPerformanceHistory, running: LlmPerfor
         models: models.slice(0, TOOL_PANEL_RUNNING_ROWS).map(group => ({
           key: group.key,
           ...(group.model ? { model: group.model } : {}),
+          ...(group.providerId ? { providerId: group.providerId } : {}),
           sessions: group.sessions.length,
           ...(group.tokensPerSecond != null ? { tokensPerSecond: group.tokensPerSecond } : {}),
           ...(group.firstTokenMs != null ? { firstTokenMs: group.firstTokenMs } : {}),
+          ...(group.firstOutputWaitMs != null ? { firstOutputWaitMs: group.firstOutputWaitMs } : {}),
           states: [...new Set(group.sessions.map(session => session.state))]
         }))
       },
@@ -217,6 +224,7 @@ export function shapeLlmPanel(history: LlmPerformanceHistory, running: LlmPerfor
           providerId: String(row.providerId),
           speed: row.performance?.apiTokensPerSecond ?? null,
           firstTokenMs: row.performance?.firstTokenMs ?? null,
+          ...(row.performance?.firstOutputWaitMs != null ? { firstOutputWaitMs: row.performance.firstOutputWaitMs } : {}),
           failed: row.failed === true
         })),
         truncated: history.truncated === true || rows.length > TOOL_PANEL_HISTORY_ROWS,
