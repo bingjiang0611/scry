@@ -6,8 +6,8 @@
 
 ## 来源与覆盖
 
-- 源版本：`0.2.7`；源任务分支 revision：`77d45ecccae8b1a9cc927ed6e4a9380efdbdaf72`。
-- 包含该 revision 的 **58 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
+- 源版本：`0.2.8`；源任务分支 revision：`271ab07d8d34d664fd983d78df5a8c598e793075`。
+- 包含该 revision 的 **64 个 Git 跟踪文件**：源码、测试、合成 fixture、包元数据、锁文件、TypeScript 配置、上游说明及许可证。
 - 源仓库只做本地提交，未推送其远端。公开仓库不包含源 Git 历史或私有名称映射。
 - 保留 MIT 许可证及原有公开版权署名。
 - 不包含 `node_modules`、`dist`、tarball、本机配置、真实 records、身份、凭据或数据库。
@@ -27,6 +27,7 @@
 | 多仓恢复 | 仅恢复显式登记路径；逐仓校验和错误隔离；保留退避与会话上下文，但不从旧队列恢复 executable、安装身份或状态目录 authority | `src/scheduler.ts`、`src/queue.ts` |
 | 数据保留 | export 先接管 canonical 字节再推进游标；旧无 receipt outbox 先托管再发送；缺少 custody 禁止完成终态；legacy ACK 保留实际提交副本。只有 ACK 满 30 天的副本可清理，保留去重 receipt，不删除 canonical、held、未确认或死信正文 | `src/custody/receipts.ts`、`src/custody/index.ts` |
 | 协议与身份 | 等待进程 close 并读取完整协议 stdout；认证文件原子替换使缓存失效；仓库身份保留 host/namespace，不带 URL 凭据、query 或 fragment | `src/util.ts`、`src/transport.ts` |
+| 正文保管 | `recorder-content-v1` 引用先接管正文并写入 `contentSha256`；能力未声明时 fail closed，成功 ACK 必须回报精确摘要 | `src/content.ts`、`src/custody/receipts.ts`、`src/uploader-worker.ts` |
 
 `0.2.3` 补齐原 P2 健康状态遗漏：同一 held receipt 不再因是否另有 outbox 副本而在 `healthy` / `held_disabled` 之间变化。状态依据 receipt，held 索引只在升级时扫描一次历史，后续读到首条 held 即停止，不读取 held 正文；索引清理在单记录锁内重验，保留并发状态变更。见 `src/custody/receipts.ts`、`src/uploader.ts` 和 `test/held-health.test.mjs`。
 
@@ -62,6 +63,14 @@
 - 同轮收紧三条新回归自身的有效性：`Promise.withResolvers` 是 Node 22+ API，而包声明支持 Node ≥20，改为本地 deferred；held-gate 测试不再用固定 400ms 判断“仍在等待”，由 fixture 在真正驻留前先写 `gate-wait` 信号，并对子进程退出加 30 秒上限；hook 断言改为比较调用前后的任务 `generation` 并要求 hook 退出码为 0——`init` 自己就会排队一个 recovery wakeup，且 wrapper 用 `|| true`，旧的“存在 wakeup 任务”断言在 hook 根本没调用时也会通过（移除该调用的对照现在会以 `bounded wait expired` 失败）。
 
 
+第五轮补充（`0.2.8`）：并入经校验的正文保管
+
+- 新记录不再只有 canonical JSON：`recorder-content-v1` 引用指向 recorder 的 CAS 正文（diff patch、被截断的工具输出）。`0.2.7` 及更早实现把引用原样上传，远端拿到的是一个指向从未上传过的正文的引用——记录结构完整，正文永久缺失，而且两端都不会报错。现在发送前先接管正文并写入 receipt 的 `contentSha256`，`queryAgentTurnUploadCapabilities` 确认接收端声明同名协议后才发送；成功 item 必须回报精确的 `contentSha256` 才能标记 uploaded，缺失、损坏或尺寸不符一律保持 pending。
+- 接收端未提供该能力时 **fail closed**：整轮不发送，记录保持 pending，不降级成“只传预览”。正文最多 512 个唯一 blob、解码信封最多 16 MiB、编码后单条最多 9 MiB；超限明确阻断，不截断后冒充完整。
+- 传输阶段失败的消息之前只有 `contentCapabilities failed (Error)`，看不出是能力缺失、鉴权还是网络故障。现在附加脱敏后的原因文本（上限 200 字符），`stage`/`statusCode`/`exitCode`/`stderr` 等结构化字段不变。
+- 合并时按语义解冲突：一个 `callUploadTool` 同时承载结构化失败字段与脱敏诊断；custody 侧保留 receipt/held 索引与终态守卫，并接上正文接管；worker 在分支移出的循环里用**实际发送的 wire 字节**做能力探测与正文 ACK 校验。
+- 一条既有回归断言“丢失响应会抛错”。未知结果现在落到记录级冷却而不是整轮失败，因此该回归改为等待 receipt 记录的冷却截止时间，再断言重放字节完全一致。
+
 发现游标不是远端 ACK，也不是关闭权限边界。旧 `enqueuedThrough` 较大不能使未确认的 custody 消失。内核锁、持久状态和指纹检查也不构成安全沙箱。
 
 ## 脱敏改变了什么
@@ -83,16 +92,11 @@
 ## 验证
 
 - 环境：macOS arm64、Node `24.18.0`、recorder `0.2.53`。
-- 原版与脱敏副本各自运行 `npm run check`：构建、**118/118 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
-- 同步后逐文件核对冻结源 revision 的确定性替换结果；源码/测试不使用旧单体文件大小豁免。
-- 关键回归：60 条记录首轮完成 35 条后保留进度；追加通知与 10 个并发唤醒；三个独立 CLI 的全局并发限制；坏 exporter/不可访问仓库隔离；完整 wire 大小；跨进程关闭与重复 enable；清理中断及重放；队列环境权限隔离。
-- 四个独立破坏对照按预期失败：并发槽改为 3、恢复旧环境覆盖、移除旧关闭标记的 enable 保护、用 exit 代替 close。最后一个对照只取得 6 字节，而不是预期的 70,006 字节。
-- 真实恢复发现 `0.2.1` 的 export 路径没有持久化 custody/ACK receipt。远端查询确认该记录已保存，未重发。`0.2.2` 修复此路径及旧无 receipt outbox、legacy 提交副本；原先静默完成终态改为明确拒绝。对应旧实现失败对照已复现，原文件保留断言未删除。
-- 首轮失败保留记录：曾修正 cutoff、baseline、service 转义与 fixture 假设；升级后还有旧版本字符串/静默终态预期未同步、2 秒子进程 fixture 失败及外层命令超时。最终将独立测试文件串行化，未扩大单项超时，完整检查重新通过。验收脚本也修正了 commitHook 配置和持久锁文件的判断，不把这些脚本错误当产品成功。
-- 追问逐项核对时复现 receipt-only held 被误标 `healthy`。旧实现运行新回归按预期失败；补修后的 3 项回归覆盖 outbox 有无、显式释放、旧索引迁移、不再扫描归档 receipt 及并发清理。本地初次交付漏掉此项，不能把之前 84 项通过称为原清单全部完成。
-- 私有安装版 `0.2.7` 已部署：tarball 共 75 个文件，其中 74 个与两处全局前缀逐字节一致（`package.json` 只核对版本号），无缺失、无差异、无多余文件。真实 launchd 服务保持 `loaded`；合成 hook 记录经真实 recorder 与真实传输提交，取得 `inserted` ACK，远端结构化内容与 canonical 记录一致，`uploaderVersion` 为 `scry-uploader/0.2.7`。`redrive` 在无死信的工作区返回空结果，在 2210 条真实死信的工作区带不存在的 `--record-id` 时为 no-op，死信数量不变；主工作区保持开启，历史高水位未变。`0.2.6` 及更早的部署证据保留为历史，不混入本轮计数。
-- 破坏对照覆盖到每一处修复：`0.2.5` 的三轮回归在旧实现下分别重新死信、重新发出请求、把逃逸路径与伪造摘要当成可回放；`0.2.6` 的十条新回归在旧实现下全部失败（首次开启后的 pending 记录变 held、终态 receipt 被写上 held 事件、custom `dataDir` 下 init 报 `ENOENT` 且 hook 入口不迁移、hook 命令字里的 `$()` 真的执行并创建 `PWNED`、通知在锁竞争下丢失、锁超时没有错误码、gate 竞态崩溃、`Bearer` 与 JSON token 未被脱敏），同时“明确关闭仍保持 held”“外部 commitHook 仍被拒绝”“默认 `.scry` 位置不变”“gate 保持关闭时请求继续等待”四条对照仍然通过。
-- 私有安装版 `0.2.3` 已部署：72 个包文件与 tarball 一致，99 个 recorder 运行文件与测试依赖一致。真实 launchd 在无通知、无队列任务时恢复 **1 条新记录**，获得 `inserted` ACK；远端查询确认完整结构化内容一致。另 **1 条关闭期间记录**保留 held custody，远端查询不存在；没有 outbox 副本时健康状态仍正确为 `held_disabled`。6 条 canonical 原始字节未变，新记录 custody 字节一致；主工作区保持开启，升级未改变原高水位。此前 `0.2.2` 的两条关闭历史验证保留为历史证据，不混入本轮计数。
+- 更早轮次（`0.2.1`–`0.2.6`）的验证记录移到 [HISTORY.md](HISTORY.md)，不再混入当前版本结论。
+- 原版与脱敏副本各自运行 `npm run check`：构建、**128/128 测试，0 skipped**、`npm pack --dry-run` 均通过。原版额外的 TypeScript unused 检查通过。
+- 同步后逐文件核对冻结源 revision 的确定性替换结果；源码/测试不使用旧单体文件大小豁免。合并把 `test/reliability.test.mjs` 推到 24 KB 后按主题拆成三个文件并抽出共享 fixture（`test/fixtures/reliability-helpers.mjs`），只移动 import，断言未改。
+- 私有安装版 `0.2.7` 已部署：tarball 共 75 个文件，其中 74 个与两处全局前缀逐字节一致（`package.json` 只核对版本号），无缺失、无差异、无多余文件。真实 launchd 服务保持 `loaded`；合成 hook 记录经真实 recorder 与真实传输提交，取得 `inserted` ACK，远端结构化内容与 canonical 记录一致，`uploaderVersion` 为 `scry-uploader/0.2.7`。（事后核对：该记录含 1 个 `recorder-content-v1` 引用，`0.2.7` 并未上传对应正文，即“远端结构化内容一致”成立于记录层，正文实际缺失；这是 `0.2.8` 修正的问题。）`redrive` 在无死信的工作区返回空结果，在 2210 条真实死信的工作区带不存在的 `--record-id` 时为 no-op，死信数量不变；主工作区保持开启，历史高水位未变。`0.2.6` 及更早的部署证据保留为历史，不混入本轮计数。
+- 私有安装版 `0.2.8` 已部署：tarball 共 78 个文件，其中 77 个与两处全局前缀逐字节一致（`package.json` 只核对版本号），无缺失、无差异、无多余文件。真实 launchd 服务保持 `loaded`；合成 hook 记录经真实 recorder 与真实传输提交，取得 `inserted` ACK，`uploaderVersion` 为 `scry-uploader/0.2.8`，远端结构化内容与 canonical 记录一致；该记录**不含正文引用**，走的是旧格式路径。另建一条带 diff patch 的记录（1 个引用、正文 215 字节）验证新路径：接收端尚未声明正文协议，上传按设计 fail closed——receipt 保持 `pending` 且带 `contentSha256`，远端查询该会话不存在，运行以非零退出并给出 `unknown tool` 原因，没有死信、没有截断上传。因此“带正文档的记录端到端送达”在本版本**尚未验证**，取决于接收端补齐能力；主工作区仍开启，2210 条真实死信与历史高水位不变。
 - 上述部署与远端结论（`inserted` ACK、远端查询一致、死信数量等）均为**维护者在私有环境中自报的验收结果，本仓库没有留存可复核的证据**。验收使用合成 hook 记录、真实 recorder 与真实传输，不是实际 Provider 会话验收。公开占位版未连接真实服务；不附部署路径、正文、身份、凭据或原始响应。
 
 ## 可运行性与未验证边界

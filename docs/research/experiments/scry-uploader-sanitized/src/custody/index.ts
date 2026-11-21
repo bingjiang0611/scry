@@ -1,6 +1,7 @@
 import { open, readFile, readdir, realpath, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { validateEnvelope } from '../envelope.js'
+import { captureContent, contentReferences, custodyContentPath, validateContent } from '../content.js'
 import { UploadError } from '../errors.js'
 import { recordUploadDisabled } from '../scry.js'
 import {
@@ -37,6 +38,32 @@ export async function readCustody(base: string, receipt: CustodyReceipt): Promis
   if (digest(raw) !== checked.sha256)
     throw new UploadError('custody_digest_mismatch', 'custody bytes do not match receipt', true)
   return raw
+}
+
+export async function readCustodyContent(base: string, receipt: CustodyReceipt, recordJson: string): Promise<string | undefined> {
+  if (!receipt.contentSha256) {
+    if (contentReferences(recordJson).size) throw custodyError('content_custody_missing', 'canonical content has not been taken into custody')
+    return undefined
+  }
+  const contentJson = await readFile(custodyContentPath(base, receipt.sequence, receipt.recordId), 'utf8')
+  if (digest(contentJson) !== receipt.contentSha256) throw custodyError('content_custody_corrupt', 'content differs from custody receipt')
+  validateContent(recordJson, contentJson)
+  return contentJson
+}
+
+async function retainContent(data: string, base: string, receipt: CustodyReceipt, recordJson: string): Promise<CustodyReceipt> {
+  // Uploaded historical receipts are not a request to backfill or rewrite remote records.
+  if (receipt.contentSha256) {
+    await readCustodyContent(base, receipt, recordJson)
+    return receipt
+  }
+  if (receipt.status === 'uploaded' || receipt.status === 'dead_letter') return receipt
+  const contentJson = await captureContent(data, recordJson)
+  if (contentJson === undefined) return receipt
+  await writeFileAtomic(custodyContentPath(base, receipt.sequence, receipt.recordId), contentJson)
+  const updated = { ...receipt, contentSha256: digest(contentJson) }
+  await saveReceipt(base, updated)
+  return updated
 }
 
 async function markDisabled(base: string, receipt: CustodyReceipt): Promise<CustodyReceipt> {
@@ -115,9 +142,10 @@ export async function takeCustody(
         throw new UploadError('notification_digest_mismatch', 'notification digest mismatch')
       await syncDirectory(dirname(committedPath(base, existing.sequence, existing.recordId)))
       await syncDirectory(dirname(receiptPath(base, existing.recordId)))
+      const retained = await retainContent(data, base, existing, raw.toString('utf8'))
       return explicitlyDisabled || (beforeEnable && !existing.releasedAt)
-        ? await markDisabled(base, existing)
-        : existing
+        ? await markDisabled(base, retained)
+        : retained
     }
 
     const source = join(data, recordPath)
@@ -152,8 +180,9 @@ export async function takeCustody(
         ? 'skipped_disabled' : 'pending',
       takenAt: now()
     }
-    await saveReceipt(base, receipt)
-    return receipt.status === 'skipped_disabled' ? await markDisabled(base, receipt) : receipt
+    const retained = await retainContent(data, base, receipt, raw.toString('utf8'))
+    await saveReceipt(base, retained)
+    return retained.status === 'skipped_disabled' ? await markDisabled(base, retained) : retained
   })
 }
 
@@ -207,7 +236,9 @@ export async function retainEnvelope(
         // evidence. Preserve both before any terminal outbox deletion.
         await retainLegacyVariant(base, envelope)
       }
-      return disabled ? await markDisabled(base, existing) : existing
+      const retained = envelope.redactionVersion === 'none'
+        ? await retainContent(dataRoot(workspace), base, existing, envelope.record) : existing
+      return disabled ? await markDisabled(base, retained) : retained
     }
     const raw = Buffer.from(envelope.record, 'utf8')
     const target = committedPath(base, envelope.sequence, envelope.recordId)
@@ -228,8 +259,10 @@ export async function retainEnvelope(
       status: 'pending',
       takenAt: now()
     }
-    await saveReceipt(base, receipt)
-    return disabled ? await markDisabled(base, receipt) : receipt
+    const retained = envelope.redactionVersion === 'none'
+      ? await retainContent(dataRoot(workspace), base, receipt, envelope.record) : receipt
+    await saveReceipt(base, retained)
+    return disabled ? await markDisabled(base, retained) : retained
   })
 }
 

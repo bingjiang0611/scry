@@ -79,9 +79,28 @@ systemctl --user status scry-uploader.timer
 
 ## 上传内容与可靠性
 
-通知兼容 v1/v2，严格校验身份与字段。可选 `recordPath`、`sha256` 存在时必须与 `dataDir/records/<sequence>-<recordId>.json` 匹配。ACK 前先原子写入原始字节、SHA-256 receipt 和目录 fsync。重复通知即使源记录已归档也能重放。
+通知兼容 v1/v2，严格校验身份与字段。可选 `recordPath`、`sha256` 存在时必须与 `dataDir/records/<sequence>-<recordId>.json` 匹配。ACK 前先原子写入原始字节、被引用的 CAS 正文、SHA-256 receipt 并完成目录 fsync。重复通知即使源记录及源 CAS 已归档也能重放。正文缺失、损坏或路径逃逸时拒绝 ACK，不把预览当全文接管。
 
 export 发现同样先接管 canonical 原始字节并持久化 receipt，再推进游标；不能只把导出 JSON 放入 outbox。旧版本遗留的无 receipt outbox 在发送前接管其现有字节，保留原来的传输内容。缺少 custody 时禁止静默完成终态；legacy ACK 也保留与 canonical 不同的实际提交副本。
+
+### 完整正文协议
+
+含 `recorder-content-v1` 引用的新记录先调用 `queryAgentTurnUploadCapabilities`，确认接收端声明同名正文协议后才发送。缺少能力时保留 pending，不试发不受支持的信封。
+
+正文仍走唯一的 `submitTurns` 实现；`records[]` 的字符串可为以下信封，再透明 gzip-base64 压缩：
+
+```json
+{"scryEncoding":"recorder-content-v1","recordJson":"<原 canonical 字符串>","contentJson":"[{\"sha256\":\"...\",\"bytes\":123,\"dataBase64\":\"...\"}]"}
+```
+
+- canonical 原文、receipt 的 `sha256` 和接收端记录身份不改变。`contentSha256` 单独校验原始 `contentJson` 字节。
+- 每个引用的正文必须尺寸、SHA-256、UTF-8 与编码匹配；相同摘要只传一次。成功 item 必须同时返回精确的 `contentSha256`，否则不得标记 uploaded。
+- 接收端须先完成数据库迁移再部署新代码。旧接收端仍可接收无 CAS 引用的旧格式记录；不支持正文时不得静默降级成预览上传。
+- 正文最多 512 个唯一 blob，整个解码信封最多 16 MiB，编码后单条最多 9 MiB。超限明确阻断，不截断后冒充完整；超过这些界限需要版本化的分块持久化协议，不直接扩大无界内存/请求。
+- 完整正文通过 `queryAgentTurnContent(recordId, sha256, offset, limit)` 分页读取，单页最多 256 KiB；session 列表仍保持预览。历史 uploaded 记录不会自动补传，已有 held 状态也不会自动释放。
+- 旧 pending receipt 尚未接管正文时，需要在源 CAS 仍存在的情况下重新接管；源正文已丢失时无法凭预览恢复。
+
+关闭上传（`SCRY_TURN_UPLOAD_ENABLED=0`）仍接管并标记 `skipped_disabled`；重新开启不会自动发送，必须显式 `--release-disabled <record-id>`。释放只修改本地状态，不联网、不启动 worker；随后由 `flush` 或新的唤醒上传。
 
 新记录使用 `redactionVersion=none`，保留原始内容；已有 `agent-turn-v1` 脱敏 outbox 保持可重放，不会被静默丢弃。上传成功只接受 `inserted`/`duplicated`，明确的 `conflicted`/`rejected` 先保留 payload custody，再写入仅含元数据的失败诊断；损坏的本地队列文件会原样隔离，可能包含原始内容。传输超时、deadline、429 和网络/5xx 故障保留未知远端结果，按指数冷却、jitter 和 Retry-After 重试，不消耗 job 的永久失败次数；Retry-After（秒数或 HTTP-date）也会限制同一用户其他工作区的新请求。确定性 400/413 请求错误才拆批，单条连续三次确定性失败后保留为死信。无法识别的失败（例如 `success:false` 且没有状态码的“服务繁忙”）不会让整轮失败，也不会把正常记录送进死信。是否归因到具体记录要看证据：本轮确实上传成功过（或拆出的另一半成功、或该记录首次失败之后本工作区有过真实 ACK），才会按记录计数、拆批，并在单条连续三次失败后进死信；没有任何成功证据时按服务故障处理，只累加工作区熔断，不消耗记录预算、不拆批。首次无法识别时最多把另一批拆半探测一次，每轮请求数另有上限，避免故障期连续轰炸。服务端若返回结构化 `code`（如 `INVALID_ARGUMENT`），分类按 code 判定，不依赖错误文案。完整编码参数 JSON 在发送前限制为 512 KiB；单条超限不发送并保留正文。这是客户端限额，不代表已确认网关的实际限额。
 
@@ -111,8 +130,8 @@ enable、首次初始化和无 state 的注册使用 recorder 的 `--after 90071
 <dataDir>/upload/
 ├── state.json
 ├── outbox/                 # none 信封；legacy agent-turn-v1 信封保持可重放
-│   └── committed/          # ACK 前的原始字节 custody；legacy/ 保留不同的历史提交字节
-├── receipts/               # sha256、provider/session 和状态
+│   └── committed/          # ACK 前的原始字节；legacy/ 保留历史提交字节，content/ 保管正文 manifest
+├── receipts/               # sha256、可选 contentSha256、provider/session 和状态
 ├── pending-receipts/       # 待发送 receipt 索引，避免每次通知遍历全部历史
 ├── held-receipts/          # held receipt 索引，供健康状态判定；不授权释放历史
 ├── dead-letter/            # 失败元数据；损坏文件的原样隔离副本；redriven/ 是已回放的审计副本

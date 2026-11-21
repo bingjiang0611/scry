@@ -277,16 +277,19 @@ export function reportArguments(
   return Object.fromEntries(ARGUMENT_ORDER.map((key, index) => [`arg${index}`, values[key]]))
 }
 
-export async function callSubmitTurns(
-  serializedArguments: string,
-  env: NodeJS.ProcessEnv = process.env,
-  timeoutMs = (TRANSPORT_TIMEOUT_SECONDS + 5) * 1_000
+// One transport wrapper for every uploader tool call. Arguments may already be
+// serialized (the upload path measures their UTF-8 bytes before sending).
+async function callUploadTool(
+  tool: string,
+  argumentsValue: Record<string, unknown> | string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number
 ): Promise<unknown> {
   const stdout = await runTransport(
     [
       'mcp',
       'call-tool',
-      `${MCP_SERVER}::${MCP_TOOL}`,
+      `${MCP_SERVER}::${tool}`,
       '-',
       '--skill-name',
       MCP_SKILL,
@@ -296,17 +299,17 @@ export async function callSubmitTurns(
       'json'
     ],
     {
-      input: serializedArguments,
+      input: typeof argumentsValue === 'string' ? argumentsValue : `${JSON.stringify(argumentsValue)}\n`,
       timeoutMs,
       env
     }
   )
   const response = JSON.parse(stdout) as unknown
   const root = object(response)
-  if (!root) throw new Error('submitTurns 返回格式无效')
+  if (!root) throw new Error(`${tool} 返回格式无效`)
   if (root.success === false) {
     const message = String(root.error ?? root.message ?? 'unknown')
-    const failure = new Error(`submitTurns 失败：${message}`) as Error & {
+    const failure = new Error(`${tool} 失败：${message}`) as Error & {
       statusCode?: number
       retryAfterMs?: number
       businessCode?: string
@@ -330,6 +333,18 @@ export async function callSubmitTurns(
     throw failure
   }
   return root.success === true && 'data' in root ? root.data : response
+}
+
+export function callSubmitTurns(
+  argumentsValue: Record<string, unknown> | string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs = (TRANSPORT_TIMEOUT_SECONDS + 5) * 1_000
+): Promise<unknown> {
+  return callUploadTool(MCP_TOOL, argumentsValue, env, timeoutMs)
+}
+
+export function uploadCapabilities(env: NodeJS.ProcessEnv, timeoutMs: number): Promise<unknown> {
+  return callUploadTool('queryAgentTurnUploadCapabilities', {}, env, timeoutMs)
 }
 
 function boundedRepositoryIdentity(value: string): string {
