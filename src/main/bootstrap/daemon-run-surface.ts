@@ -1,9 +1,13 @@
-import { randomUUID } from 'node:crypto'
-import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult, AgentSteerResult } from '../../shared/runtime'
+import { createHash, randomUUID } from 'node:crypto'
+import type { AgentInputAttachment, AgentQuestionResponse, AgentStartRequest, AgentStartResult, AgentSteerResult } from '../../shared/runtime'
 import type { BackgroundTaskStopResult } from '../../shared/background-work'
 import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
-import type { DesktopRemoteContext } from '../../shared/desktop-remote'
+import { REMOTE_PROTOCOL_VERSION, type DesktopRemoteContext } from '../../shared/desktop-remote'
+import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, normalizeDesktopAttachment } from '../remote/desktop-attachments'
+import { MAX_REMOTE_DETAIL_CHARS } from '../remote/host-controller-routing'
+import { DEFAULT_MAX_FRAME } from '../remote/inner-mtls-protocol'
+import { desktopImageReference } from '../remote/stage-desktop-image'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
 import { DaemonRunError, type DaemonRunTransport } from '../daemon-run-transport'
 import type { TraceBatchReceipt } from '../trace-output'
@@ -58,7 +62,7 @@ export interface DaemonRunSurface {
 // The intent detail is the daemon's routing contract, so only fields the App
 // actually has are sent. An unknown or absent cwd stays absent: the daemon decides
 // what that means for this grant scope.
-export function routingDetail(payload: AgentStartRequest, currentCwd: string | undefined): string {
+export function routingDetail(payload: AgentStartRequest, currentCwd: string | undefined, attachments = payload.attachments): string {
   const cwd = payload.cwd ?? currentCwd
   return JSON.stringify({
     ...(cwd ? { cwd } : {}),
@@ -70,8 +74,59 @@ export function routingDetail(payload: AgentStartRequest, currentCwd: string | u
     ...(payload.effort ? { effort: payload.effort } : {}),
     ...(payload.permissionMode ? { permissionMode: payload.permissionMode } : {}),
     ...(payload.expectedExternalSessionId ? { resume: payload.expectedExternalSessionId } : {}),
-    ...(payload.attachments && payload.attachments.length > 0 ? { attachments: payload.attachments } : {})
+    ...(attachments?.length ? { attachments } : {})
   })
+}
+
+function fitsSubmitFrame(intentId: string, detail: string): boolean {
+  if (detail.length > MAX_REMOTE_DETAIL_CHARS) return false
+  const envelope = { keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, op: 'submit', intentId, detail }
+  return Buffer.byteLength(JSON.stringify(envelope)) <= DEFAULT_MAX_FRAME
+}
+
+// The desktop upload store uses UUID-shaped keys. Keep the derived IDs stable for
+// a repeated command so the daemon can still check its existing intent digest.
+function attachmentKey(domain: string, ...parts: Array<string | number>): string {
+  const hash = createHash('sha256').update(JSON.stringify([domain, ...parts])).digest('hex')
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`
+}
+
+async function prepareSubmit(transport: DaemonRunTransport, payload: AgentStartRequest, cwd: string | undefined, intentId: string) {
+  const inline = routingDetail(payload, cwd)
+  if (fitsSubmitFrame(intentId, inline)) return { intentId, detail: inline }
+
+  const images = payload.attachments ?? []
+  if (images.length === 0) throw new DaemonRunError('daemon_submit_payload_too_large')
+  if (images.length > DESKTOP_ATTACHMENT_MAX_COUNT) throw new DaemonRunError('daemon_attachment_limit_exceeded')
+  let normalized: AgentInputAttachment[]
+  try { normalized = images.map(normalizeDesktopAttachment) }
+  catch { throw new DaemonRunError('daemon_attachment_limit_exceeded') }
+  if (normalized.reduce((total, item) => total + (item.size ?? 0), 0) > DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES) {
+    throw new DaemonRunError('daemon_attachment_limit_exceeded')
+  }
+  const chunkedIntent = attachmentKey('scry-local-image-intent', intentId)
+  const references = normalized.map((item, index) => desktopImageReference(item, {
+    attachmentId: attachmentKey('scry-local-image', chunkedIntent, index),
+    intentId: chunkedIntent, index, totalCount: images.length
+  }))
+  const detail = routingDetail(payload, cwd, references)
+  if (!fitsSubmitFrame(chunkedIntent, detail)) throw new DaemonRunError('daemon_submit_payload_too_large')
+
+  // An existing receipt remains authoritative even after the blobs were cleaned
+  // up. Still submit the same reference digest to check for a conflicting retry.
+  try {
+    await transport.intentState(chunkedIntent)
+  } catch (error) {
+    if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_run_unknown') throw error
+    try {
+      for (const [index, reference] of references.entries()) await transport.stageImage(reference, normalized[index]!)
+    } catch (cause) {
+      // No run submit has occurred. Do not replay a potentially partial upload.
+      const failure = new DaemonRunError('daemon_attachment_transfer_failed')
+      throw Object.assign(failure, { cause })
+    }
+  }
+  return { intentId: chunkedIntent, detail }
 }
 
 export function runContext(payload: AgentStartRequest, currentCwd: string | undefined): DesktopRemoteContext | undefined {
@@ -114,10 +169,11 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       // The intent id is fixed by the caller BEFORE the first attempt, so a retry after
       // a connection failure records one intent, not two. The App's commandId is its
       // own idempotency key and wins when present.
-      const intent = payload.commandId?.trim() || intentId || randomUUID()
+      const prepared = await prepareSubmit(deps.transport, payload, context.cwd, payload.commandId?.trim() || intentId || randomUUID())
+      const intent = prepared.intentId
       let receipt: { runId: string; bound: boolean }
       try {
-        receipt = await runtime.start({ intentId: intent, detail: routingDetail(payload, deps.currentCwd()), context, userText: payload.prompt })
+        receipt = await runtime.start({ intentId: intent, detail: prepared.detail, context, userText: payload.prompt })
       } catch (error) {
         if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_outcome_unknown') throw error
         // The submit was written and the reply never arrived. Re-submitting would be a

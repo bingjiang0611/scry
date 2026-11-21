@@ -1,4 +1,4 @@
-import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
@@ -9,6 +9,7 @@ import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
 import { isHostAdminNotice } from '../shared/host-admin'
 import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
+import { stageDesktopImage, type desktopImageReference } from './remote/stage-desktop-image'
 import { isAttentionSnapshot, isDataUpdated, parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
 
 // The App's run surface against its own daemon, over the same frames the phone
@@ -83,6 +84,7 @@ export function isDaemonRunId(value: unknown): value is string {
 function failure(reply: Record<string, unknown>, op?: string): DaemonRunError | undefined {
   const code = reply.error
   if (code === undefined) return undefined
+  if (code === 'unknown_intent' && op === 'intentStatus') return new DaemonRunError('daemon_run_unknown')
   if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
   // Scope unknown_op mapping strictly to the W10 execution-target bridge ops so older-daemon
@@ -110,6 +112,10 @@ export class DaemonRunTransport {
     // to the newest cursor this connection has seen.
     const seq = Number.isSafeInteger(reply.seq) && (reply.seq as number) > 0 ? reply.seq as number : undefined
     return { intentId: input.intentId, runId, status: reply.status, ...(seq !== undefined ? { seq } : {}) }
+  }
+
+  stageImage(reference: ReturnType<typeof desktopImageReference>, attachment: AgentInputAttachment): Promise<void> {
+    return stageDesktopImage((request) => this.#call(request), reference, attachment)
   }
 
   // A recorded intent is not a dispatched run. Recovery asks this after a
