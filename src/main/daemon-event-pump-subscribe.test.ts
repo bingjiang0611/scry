@@ -1,10 +1,54 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonEventPump } from './daemon-event-pump'
-import { applySubscribeSnapshotToRuntime, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
+import { applyRunHintToRuntime, applySubscribeEventToRuntime, applySubscribeSnapshotToRuntime, awaitSubscribeAdmission, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
+import { RunWakes } from './daemon-run-wakes'
 import type { RunCursor } from './daemon-run-cursor'
 
 describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
+  it('binds a new run while the previous run is still reading its final trace', async () => {
+    const wakes = new RunWakes()
+    let releaseTrace!: () => void
+    let releaseFeed!: () => void
+    const trace = new Promise<void>((resolve) => { releaseTrace = resolve })
+    const end = new Promise<void>((resolve) => { releaseFeed = resolve })
+    const send = vi.fn()
+    const ctx: SubscribeRuntimeContext = {
+      runs: new Map(), wakes, cursorFor: (id) => ctx.runs.get(id), send,
+      flushBridge: vi.fn(), scheduleTraceRead: vi.fn((_id, options) => options?.terminal ? trace : Promise.resolve()),
+      syncQuestions: async () => {}
+    }
+    applyRunHintToRuntime(ctx, { kind: 'run', runId: 'old', scryRunId: 'run-old-1', cwd: '/fixture', providerId: 'codex', admitted: true, outputSeq: 0 })
+    const terminal = { seq: 1, type: 'run.settled', stream: 'run:old', runId: 'old', at: 100, payload: {} }
+    const replies: SubscribeReply[] = [
+      { hostId: 'h', logId: 'l', seq: 1, mode: 'events', events: [terminal] },
+      { hostId: 'h', logId: 'l', seq: 2, mode: 'events', events: [{ ...terminal, seq: 2 }],
+        hints: [{ kind: 'run', runId: 'new', scryRunId: 'run-new-1', admitted: true, outputSeq: 0 }] }
+    ]
+    const pump = new DaemonEventPump({
+      subscribeMode: true, send,
+      source: { appEvents: vi.fn(), subscribe: async () => replies.shift() ?? end.then(() => ({ hostId: 'h', logId: 'l', seq: 2, mode: 'idle' as const })) },
+      onSubscribeEvent: (event) => applySubscribeEventToRuntime(ctx, event),
+      onRunHint: (hint) => applyRunHintToRuntime(ctx, hint)
+    })
+    pump.start()
+    try {
+      await vi.waitFor(() => expect(ctx.runs.get('new')).toBeDefined(), { timeout: 500 })
+      await expect(awaitSubscribeAdmission({ runId: 'new', cursor: () => ctx.runs.get('new'), wakes, bindBudgetMs: 20, admitBudgetMs: 20 }))
+        .resolves.toBe('run-new-1')
+      expect(ctx.runs.get('old')?.stopped).toBe(false)
+      expect(send).not.toHaveBeenCalledWith('agent:turnDone', expect.anything())
+      releaseTrace()
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+      expect(ctx.flushBridge).toHaveBeenCalledTimes(1)
+      expect(send).toHaveBeenCalledWith('agent:turnDone', expect.objectContaining({ runId: 'run-old-1' }))
+    } finally {
+      pump.dispose()
+      releaseTrace()
+      releaseFeed()
+    }
+  })
+
   it('drops known cursor and pulls a fresh snapshot on an unknown event type', async () => {
     const requests: SubscribeRequest[] = []
     const replies: SubscribeReply[] = [
