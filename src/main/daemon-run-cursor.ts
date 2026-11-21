@@ -51,6 +51,10 @@ export interface RunCursor {
   userText?: string
   // Whether start() gave this run's id to the renderer.
   handedOut?: boolean
+  // P4-3 subscribe-mode dedupe flags so snapshot resets never emit duplicate notices.
+  settledNotified?: boolean
+  notifiedSessionId?: string
+  stopNotified?: boolean
 }
 
 /**
@@ -104,6 +108,6 @@ export function resume(cursor: RunCursor): boolean {
 export function view(cursor: RunCursor): ActiveRun | null {
   // A run refused before the daemon registered it has no snapshot; its ledger failure is the view.
   if (!cursor.latest) return refusedView(cursor)
-  const terminal = cursor.lifecycle === 'settled' || cursor.lifecycle === 'failed' || cursor.lifecycle === 'cancelled'
+  const terminal = cursor.lifecycle === 'settled' || cursor.lifecycle === 'failed' || cursor.lifecycle === 'cancelled' || cursor.lifecycle === 'interrupted'
   return terminal && !cursor.latest.done ? { ...cursor.latest, done: true } : cursor.latest
 }
