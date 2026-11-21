@@ -96,9 +96,11 @@ describe('daemon host process', () => {
       const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'desktop', query: { kind: 'info' }
       })
-      expect(desktop.desktop).not.toHaveProperty('sessionActions')
-      expect(desktop.desktop).not.toHaveProperty('sessionFork')
-      expect(desktop.desktop).not.toHaveProperty('sessionDelete')
+      // W17: daemon owns session lifecycle/fork, so sessionActions/Fork/Delete are advertised;
+      // without a live primary App polling the bridge, shell workbenchOps stay false/false.
+      expect(desktop.desktop.sessionActions).toBe(true)
+      expect(desktop.desktop.sessionFork).toBe(true)
+      expect(desktop.desktop.sessionDelete).toBe(true)
       expect(desktop.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
       // The App's run controls are served on the local endpoint only. The daemon used to
       // build them and then drop them before the host, so every steer, background-task stop

@@ -33,7 +33,8 @@ import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
 import { reconcileH1ForOffMode } from './orchestration-off-fallback'
 import { attachDaemonOrchestrationShadow } from './orchestration-shadow'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
-import { createDaemonRemoteAssembly } from './host-process-assembly'
+import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly, disposeProviderRegistryWithTimeout } from './host-process-assembly'
+import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
 import { attachDaemonHostAdmin } from './host-admin-runtime'
@@ -209,29 +210,17 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   await startupManagedRecovery
 
+  const sessionLinks: DaemonSessionLinks = {}
   const targetBridge = createAppExecutionTargetBridge({
     isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
     ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})
   })
   const { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations: forks } =
     createDaemonRemoteAssembly({
-      userDataDir: options.userDataDir,
-      workspace,
-      pi,
-      providers,
-      session,
-      catalog,
-      pipeline,
-      sourceControl,
-      remoteRunIds,
-      requestRunStop,
-      getRemoteHostService: () => remoteHostService,
-      setRemoteHostService: (value) => { remoteHostService = value },
-      getCurrentCwd: () => currentCwd,
-      getStartupManagedRecovery: () => startupManagedRecovery,
-      isShuttingDown: () => isShuttingDown,
-      desktopRemoteClient: () => targetBridge.client,
-      log
+      userDataDir: options.userDataDir, workspace, pi, providers, session, catalog, pipeline, sourceControl, remoteRunIds, requestRunStop,
+      getRemoteHostService: () => remoteHostService, setRemoteHostService: (value) => { remoteHostService = value },
+      getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery, isShuttingDown: () => isShuttingDown,
+      desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log
     })
   forkOperations = forks
 
@@ -275,6 +264,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
     ...remoteLanConfig(process.env),
     shellEnvironment: warmShellEnv,
+    ...bridgedWorkbenchShellInputs(targetBridge.shellOps),
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
@@ -298,6 +288,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       providerDiscovery,
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
+      links: sessionLinks,
       ...(orchestrationAuthority ? { orchestrationStatus: () => orchestrationAuthority.status() } : {}),
       log
     }),
@@ -377,25 +368,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       // immediately even if a pooled provider process is slow to exit; bound provider dispose.
       orchestrationShadow?.close()
       await orchestrationAuthority?.close()
-      const disposeTimeoutMs = Math.max(1, options.providerDisposeTimeoutMs ?? 5_000)
-      await new Promise<void>((resolve) => {
-        let settled = false
-        const done = (): void => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          resolve()
-        }
-        const timer = setTimeout(() => {
-          log(`daemon.provider-dispose-timeout timeoutMs=${disposeTimeoutMs}`)
-          done()
-        }, disposeTimeoutMs)
-        timer.unref()
-        void providers.providerRegistry.dispose().then(done, (error) => {
-          log(`daemon.provider-dispose-failed ${(error as Error)?.message ?? String(error)}`)
-          done()
-        })
-      })
+      await disposeProviderRegistryWithTimeout(
+        () => providers.providerRegistry.dispose(),
+        options.providerDisposeTimeoutMs ?? 5_000,
+        log
+      )
     }
   }
 }

@@ -100,6 +100,8 @@ export interface HostRuntimeInputs {
   shellEnvironment: () => Promise<Record<string, string | undefined>>
   openPath?: (path: string) => Promise<void>
   trashItem?: (path: string) => Promise<void>
+  hasOpenPath?: () => boolean
+  hasTrashItem?: () => boolean
   // History readers over the app's transcript archive and SQLite projections.
   historyHandlers: Pick<RemoteHostServiceDependencies, 'readHistory' | 'readHistoryPreview' | 'readHistoryVersion' | 'readHistoryTurnsPage'>
   // Analytics / LLM performance / MCP trust panels.

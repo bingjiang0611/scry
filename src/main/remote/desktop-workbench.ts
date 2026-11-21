@@ -66,6 +66,8 @@ export function createDesktopWorkbench(deps: {
   environment(): Promise<Record<string, string | undefined>>
   openPath?(path: string): Promise<void>
   trashItem?(path: string): Promise<void>
+  hasOpenPath?(): boolean
+  hasTrashItem?(): boolean
   pty?: TerminalPtyFactory
 }): DesktopWorkbenchHost {
   const scopes = new Map<string, Map<string, Promise<TerminalScope>>>()
@@ -122,8 +124,11 @@ export function createDesktopWorkbench(deps: {
     }))
   }
 
+  const canOpenPath = (): boolean => Boolean(deps.openPath && (deps.hasOpenPath ? deps.hasOpenPath() : true))
+  const canTrashItem = (): boolean => Boolean(deps.trashItem && (deps.hasTrashItem ? deps.hasTrashItem() : true))
+
   return {
-    operations: { openPath: !!deps.openPath, trashItem: !!deps.trashItem },
+    get operations() { return { openPath: canOpenPath(), trashItem: canTrashItem() } },
     async request(peer, query, authorizePeer) {
       const authorizeRequest = (): void => { authorizePeer(); authorize(query.cwd) }
       authorizeRequest()
@@ -155,7 +160,7 @@ export function createDesktopWorkbench(deps: {
           }
           case 'workspaceOpenExternal':
           case 'workspaceOpenKnownExternal': {
-            if (!deps.openPath) throw new Error('desktop_workbench_operation_unavailable:openPath')
+            if (!canOpenPath()) throw new Error('desktop_workbench_operation_unavailable:openPath')
             result = await openWorkspaceFileExternally(request, async (path) => { authorizeRequest(); await deps.openPath!(path) }); break
           }
           case 'workspaceWrite':
@@ -167,7 +172,7 @@ export function createDesktopWorkbench(deps: {
           case 'workspaceRename': result = await renameWorkspaceEntry({ ...request, name: text(input.name, 512) }, authorizeRequest); break
           case 'workspaceMove': result = await moveWorkspaceEntry({ ...request, parentPath: optionalText(input.parentPath) }, authorizeRequest); break
           case 'workspaceTrash': {
-            if (!deps.trashItem) throw new Error('desktop_workbench_operation_unavailable:trashItem')
+            if (!canTrashItem()) throw new Error('desktop_workbench_operation_unavailable:trashItem')
             result = await trashWorkspaceEntry(request, async (path) => { authorizeRequest(); await deps.trashItem!(path) }); break
           }
           default: throw new Error('invalid_workbench_method')

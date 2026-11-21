@@ -21,7 +21,7 @@ export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 // network endpoint reaches none of it. Each group of channels lives in local-ops/.
 
 export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): LocalEndpointHandlers {
-  const deps = { ...endpointDeps, links: {} }
+  const deps = { ...endpointDeps, links: endpointDeps.links ?? {} }
   return {
     // Steering and background-task stops are bound to the live run, so they answer from
     // this process's registry and cannot be replayed from another process.

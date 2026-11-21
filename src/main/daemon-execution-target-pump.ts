@@ -8,6 +8,13 @@ export type ExecutionTargetWorkCall =
   | { callId: string; method: 'mobileRequest'; input: { target: { id: string; binding: string }; request: Record<string, unknown> } }
   | { callId: string; method: 'mobileSubmit'; input: DesktopMobileTargetSubmit }
   | { callId: string; method: 'mobileIntentStatus'; input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string } }
+  | { callId: string; method: 'shellOpenPath'; input: { path: string } }
+  | { callId: string; method: 'shellTrashItem'; input: { path: string } }
+
+export interface AppShellOps {
+  openPath(path: string): Promise<void>
+  trashItem(path: string): Promise<void>
+}
 
 export interface ExecutionTargetWorkSource {
   executionTargetWork(input: { waitMs: number }, signal?: AbortSignal): Promise<{ calls: ExecutionTargetWorkCall[] }>
@@ -16,7 +23,8 @@ export interface ExecutionTargetWorkSource {
 
 export interface DaemonExecutionTargetPumpDeps {
   source: ExecutionTargetWorkSource
-  client: () => DesktopRemoteTargetAPI
+  client?: () => DesktopRemoteTargetAPI
+  shellOps?: AppShellOps
   waitMs?: number
   retry?: { initialMs: number; maxMs: number }
   sleep?: (ms: number) => Promise<void>
@@ -88,25 +96,42 @@ export class DaemonExecutionTargetPump {
   async #runCall(work: ExecutionTargetWorkCall): Promise<void> {
     let payload: { callId: string; ok: boolean; result?: unknown; error?: string }
     try {
-      const api = this.#deps.client()
       let result: unknown
-      if (work.method === 'executionTargets') {
-        result = await api.executionTargets()
-      } else if (work.method === 'mobileRequest') {
-        result = await api.mobileRequest(work.input.target, work.input.request)
-      } else if (work.method === 'mobileSubmit') {
-        result = await api.mobileSubmit(work.input)
-      } else if (work.method === 'mobileIntentStatus') {
-        result = await api.mobileIntentStatus(work.input)
+      if (work.method === 'shellOpenPath' || work.method === 'shellTrashItem') {
+        const opName = work.method === 'shellOpenPath' ? 'openPath' : 'trashItem'
+        const targetPath = work.input?.path
+        if (typeof targetPath !== 'string' || targetPath.length === 0 || targetPath.includes('\0')) {
+          throw new Error('invalid_workbench_request')
+        }
+        const handler = this.#deps.shellOps?.[opName]
+        if (!handler) throw new Error(`desktop_workbench_operation_unavailable:${opName}`)
+        await handler(targetPath)
+        result = null
       } else {
-        throw new Error('invalid_target_request')
+        const api = this.#deps.client?.()
+        if (!api) throw new Error('execution_target_gateway_offline')
+        if (work.method === 'executionTargets') {
+          result = await api.executionTargets()
+        } else if (work.method === 'mobileRequest') {
+          result = await api.mobileRequest(work.input.target, work.input.request)
+        } else if (work.method === 'mobileSubmit') {
+          result = await api.mobileSubmit(work.input)
+        } else if (work.method === 'mobileIntentStatus') {
+          result = await api.mobileIntentStatus(work.input)
+        } else {
+          throw new Error('invalid_target_request')
+        }
       }
       const bytes = Buffer.byteLength(JSON.stringify(result ?? null))
       payload = bytes > MAX_RESULT_PAYLOAD_BYTES
         ? { callId: work.callId, ok: false, error: 'execution_target_response_too_large' }
         : { callId: work.callId, ok: true, result }
     } catch (error) {
-      payload = { callId: work.callId, ok: false, error: executionTargetError(error).error }
+      const msg = error instanceof Error ? error.message : ''
+      const code = msg.startsWith('desktop_workbench_operation_unavailable:') || msg === 'invalid_workbench_request'
+        ? msg
+        : executionTargetError(error).error
+      payload = { callId: work.callId, ok: false, error: code }
     }
     if (this.#abort.signal.aborted) return
     try {

@@ -51,4 +51,15 @@ describe('工作区能力来自宿主的 catalog', () => {
     )
     expect(open).not.toContain('此工作区不支持')
   })
+
+  it('远程主机未打开桌面端时如实提示打开 Scry 桌面端，不误导「请更新」(W17)', () => {
+    const resolved = resolveWorkspaceOps({ openPath: false, trashItem: false }, 'Mac1')
+    expect(resolved.notice).toBe('需要在 Mac1 上打开 Scry 桌面端以启用：在系统应用中打开、移入废纸篓')
+    expect(resolved.notice).not.toContain('请更新')
+    const html = renderToStaticMarkup(
+      <WorkspacePanel cwd="/tmp/project" onClose={() => {}} onAddReference={() => {}} ops={{ openPath: false, trashItem: false }} hostLabel="Mac1" />
+    )
+    expect(html).toContain('需要在 Mac1 上打开 Scry 桌面端以启用：在系统应用中打开、移入废纸篓')
+    expect(html).not.toContain('请更新')
+  })
 })

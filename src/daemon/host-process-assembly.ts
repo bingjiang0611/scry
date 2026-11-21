@@ -13,6 +13,8 @@ import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import type { SourceControlService } from '../main/source-control/service'
+import type { DaemonSessionLinks } from './local-ops/deps'
+import type { BridgedShellOps } from './app-execution-target-bridge'
 
 const unavailable = (capability: string): never => {
   throw new Error(`daemon_capability_unavailable:${capability}`)
@@ -35,6 +37,8 @@ export interface DaemonRemoteAssemblyDeps {
   getStartupManagedRecovery: () => Promise<void>
   isShuttingDown: () => boolean
   desktopRemoteClient?: () => DesktopRemoteTargetAPI
+  sessionLinks: DaemonSessionLinks
+  shellOps?: BridgedShellOps
   log: (line: string) => void
 }
 
@@ -60,44 +64,10 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     ),
     defaultWorkspace: () => workspace.remoteProjectRoots()[0],
     permissionOverride: configuredRemotePermissionMode,
-    // The daemon does not yet own the App's session-mutation control plane, so
-    // discovery must not advertise a fork operation that the host cannot execute.
-    supportsForkSession: () => false,
+    supportsForkSession: (providerId) => providers.providerRegistry.get(providerId).forkSession !== undefined,
     onError: (error) => deps.log(`daemon.provider-discovery-failed ${(error as Error)?.message ?? String(error)}`)
   })
   const refreshRemoteProviderSnapshot = () => providerDiscovery.refreshMetadata()
-
-  const runtime: RemoteHostRuntime = {
-    get remoteHostService() { return deps.getRemoteHostService() },
-    set remoteHostService(value) { deps.setRemoteHostService(value) },
-    getRemoteProviderDiscovery: () => providerDiscovery,
-    refreshRemoteProviderSnapshot,
-    configuredRemotePermissionMode,
-    remoteStartReceipts: pipeline.remoteStartReceipts,
-    startAppRun: (payload: AgentStartRequest, startOptions) => pipeline.startAppRun(payload, startOptions),
-    sourceControl,
-    providerOperationGate: session.providerOperationGate,
-    providerRegistry: providers.providerRegistry,
-    runs: pipeline.runs,
-    requestRunStop: deps.requestRunStop,
-    appSessionStore: catalog.appSessionStore,
-    knownProjectDirectories: workspace.knownProjectDirectories,
-    remoteProjectRoots: workspace.remoteProjectRoots,
-    resolveRemoteProjectDirectory: workspace.resolveRemoteProjectDirectory,
-    resolveCanonicalRemoteProjectDirectory,
-    listRemoteDirectories,
-    rememberProject: workspace.rememberProject,
-    remoteRunIds: deps.remoteRunIds,
-    userQuestionBroker: pipeline.userQuestionBroker,
-    withProviderOperation: session.withProviderOperation,
-    providerContextKey: session.providerContextKey,
-    boundedLiveRun: pipeline.boundedLiveRun,
-    getCurrentCwd: deps.getCurrentCwd,
-    homeDir: workspace.homeDir,
-    openLocalPath: async () => unavailable('open-path'),
-    ...(deps.desktopRemoteClient ? { desktopRemoteClient: deps.desktopRemoteClient } : {}),
-    get isShuttingDown() { return deps.isShuttingDown() }
-  }
 
   // Session history pages, loaded and cached in this process (the cache backs older-page
   // reads). The window's session selection is reported with the page for the App to apply.
@@ -138,5 +108,83 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     rememberProject: workspace.rememberProject
   })
 
+  const runtime: RemoteHostRuntime = {
+    get remoteHostService() { return deps.getRemoteHostService() },
+    set remoteHostService(value) { deps.setRemoteHostService(value) },
+    getRemoteProviderDiscovery: () => providerDiscovery,
+    refreshRemoteProviderSnapshot,
+    configuredRemotePermissionMode,
+    remoteStartReceipts: pipeline.remoteStartReceipts,
+    startAppRun: (payload: AgentStartRequest, startOptions) => pipeline.startAppRun(payload, startOptions),
+    sourceControl,
+    providerOperationGate: session.providerOperationGate,
+    providerRegistry: providers.providerRegistry,
+    runs: pipeline.runs,
+    requestRunStop: deps.requestRunStop,
+    // W17: reuse daemon's local-ops session lifecycle & native fork with identical remote authority.
+    sessionRefFromRequest: (value) => deps.sessionLinks.sessionRefFromRequest ? deps.sessionLinks.sessionRefFromRequest(value) : null,
+    changeLegacySessionMetadata: (ref, change) => {
+      if (!deps.sessionLinks.changeLegacySessionMetadata) throw new Error('daemon_capability_unavailable:session-metadata')
+      return deps.sessionLinks.changeLegacySessionMetadata(ref, change)
+    },
+    deleteOneSession: (request, options) => {
+      if (!deps.sessionLinks.deleteOneSession) throw new Error('daemon_capability_unavailable:session-delete')
+      return deps.sessionLinks.deleteOneSession(request as unknown as Record<string, unknown>, options as unknown as Record<string, unknown>)
+    },
+    forkSessionWithAuthority: (request, authorize) => forkOperations.forkSessionWithAuthority(request, authorize),
+    appSessionStore: catalog.appSessionStore,
+    knownProjectDirectories: workspace.knownProjectDirectories,
+    remoteProjectRoots: workspace.remoteProjectRoots,
+    resolveRemoteProjectDirectory: workspace.resolveRemoteProjectDirectory,
+    resolveCanonicalRemoteProjectDirectory,
+    listRemoteDirectories,
+    rememberProject: workspace.rememberProject,
+    remoteRunIds: deps.remoteRunIds,
+    userQuestionBroker: pipeline.userQuestionBroker,
+    withProviderOperation: session.withProviderOperation,
+    providerContextKey: session.providerContextKey,
+    boundedLiveRun: pipeline.boundedLiveRun,
+    getCurrentCwd: deps.getCurrentCwd,
+    homeDir: workspace.homeDir,
+    openLocalPath: deps.shellOps ? (path) => deps.shellOps!.openPath(path) : async () => unavailable('open-path'),
+    ...(deps.desktopRemoteClient ? { desktopRemoteClient: deps.desktopRemoteClient } : {}),
+    get isShuttingDown() { return deps.isShuttingDown() }
+  }
+
   return { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations }
+}
+
+export function bridgedWorkbenchShellInputs(shellOps: BridgedShellOps) {
+  return {
+    openPath: shellOps.openPath,
+    trashItem: shellOps.trashItem,
+    hasOpenPath: shellOps.isAvailable,
+    hasTrashItem: shellOps.isAvailable
+  }
+}
+
+export function disposeProviderRegistryWithTimeout(
+  dispose: () => Promise<void>,
+  timeoutMs: number,
+  log: (line: string) => void
+): Promise<void> {
+  const boundedTimeoutMs = Math.max(1, timeoutMs)
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const done = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      log(`daemon.provider-dispose-timeout timeoutMs=${boundedTimeoutMs}`)
+      done()
+    }, boundedTimeoutMs)
+    timer.unref()
+    void dispose().then(done, (error) => {
+      log(`daemon.provider-dispose-failed ${(error as Error)?.message ?? String(error)}`)
+      done()
+    })
+  })
 }

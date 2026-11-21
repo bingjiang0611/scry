@@ -128,4 +128,40 @@ describe('DaemonExecutionTargetPump', () => {
     // Existing ops (e.g. appEvents for DaemonEventPump) keep invalid_daemon_response on unknown_op.
     await expect(transport.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
   })
+
+  it('dispatches bridged shellOpenPath and shellTrashItem to App shellOps and rejects invalid paths (W17)', async () => {
+    const batches: ExecutionTargetWorkCall[][] = [[
+      { callId: 's1', method: 'shellOpenPath', input: { path: '/workspace/a.txt' } },
+      { callId: 's2', method: 'shellTrashItem', input: { path: '/workspace/b.txt' } },
+      { callId: 's3', method: 'shellOpenPath', input: { path: '/workspace/bad\0path' } }
+    ]]
+    const results: Array<Record<string, unknown>> = []
+    let done!: () => void
+    const finished = new Promise<void>((resolve) => { done = resolve })
+    const source: ExecutionTargetWorkSource = {
+      executionTargetWork: vi.fn(async (_input, signal) => {
+        if (batches.length > 0) return { calls: batches.shift()! }
+        return await new Promise<{ calls: ExecutionTargetWorkCall[] }>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        })
+      }),
+      executionTargetResult: vi.fn(async (input) => {
+        results.push(input as unknown as Record<string, unknown>)
+        if (results.length === 3) done()
+        return { accepted: true }
+      })
+    }
+    const openPath = vi.fn(async () => undefined)
+    const trashItem = vi.fn(async () => undefined)
+    const pump = new DaemonExecutionTargetPump({ source, shellOps: { openPath, trashItem }, waitMs: 1_000 })
+    pump.start()
+    await finished
+    pump.dispose()
+
+    expect(openPath).toHaveBeenCalledExactlyOnceWith('/workspace/a.txt')
+    expect(trashItem).toHaveBeenCalledExactlyOnceWith('/workspace/b.txt')
+    expect(results).toContainEqual({ callId: 's1', ok: true, result: null })
+    expect(results).toContainEqual({ callId: 's2', ok: true, result: null })
+    expect(results).toContainEqual({ callId: 's3', ok: false, error: 'invalid_workbench_request' })
+  })
 })
