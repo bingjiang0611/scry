@@ -135,9 +135,11 @@ installDaemonConversationSend((event) => { win?.webContents.send('agent:dataUpda
 // The managed conversation on screen is dock-badge view state, which this window renders.
 // Its ledger file is read only; whether its directory is known is the daemon's answer.
 const conversationLedgers = join(app.getPath('userData'), 'conversations')
+// A view the daemon could not confirm is applied again once it is ready (daemonRun below).
+const daemonReadyListeners: Array<() => void> = []
 const resetConversationAttention = registerConversationAttention({
   handleTrusted, readConversation: (id) => readConversationLedger(conversationLedgers, id), resolveKnownProjectDirectory: daemonKnownProjectDirectory,
-  getWindow, clearLegacyFocus: () => { runs.focus(null) }, dockBadge
+  getWindow, clearLegacyFocus: () => { runs.focus(null) }, dockBadge, onDaemonReady: (listener) => { daemonReadyListeners.push(listener) }
 })
 
 // The App's client to other hosts; the hosts it saves are the App's own state.
@@ -151,6 +153,7 @@ const daemonRun = createLazyDaemonRunSurface(appDaemonModeDeps({
   getWindow, dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces,
   desktopRemoteClient: () => requireDesktopRemoteClient(), ...loginStartBridge.daemonModeOptions
 }))
+daemonRun.onOutcome((result) => { if (result.status === 'ready') for (const listener of daemonReadyListeners) listener() })
 registerAgentRuntimeHandlers({ handleTrusted, runs, dockBadge, activeRunSessionKey, getWindow, getCurrentCwd, runTraces, daemon: daemonRun })
 registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow, ...loginStartBridge.handlerOptions })
 
