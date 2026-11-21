@@ -14,7 +14,6 @@ import { loginStartFailureMessage, reasonMessage } from './background-service-co
 // (holdLaunches), so a retried read cannot bring the old one back mid-stop.
 
 export interface BackgroundServiceActionDeps {
-  daemonMode: boolean
   connection(): Promise<BackgroundServiceConnection>
   /** Unsettled runs the daemon reports; undefined when it could not be asked. */
   activeRuns(): Promise<number | undefined>
@@ -55,7 +54,6 @@ async function knownRuns(deps: BackgroundServiceActionDeps): Promise<number | nu
 }
 
 export async function restartBackgroundService(deps: BackgroundServiceActionDeps): Promise<BackgroundServiceActionResult> {
-  if (!deps.daemonMode) return failed('daemon_mode_disabled')
   const prepared = await deps.prepareStop()
   if (prepared.status === 'refused') return failed(prepared.reason)
   if (prepared.status === 'running') {
@@ -86,7 +84,6 @@ async function requestIfNoCredential(deps: BackgroundServiceActionDeps): Promise
 }
 
 export async function quitWithBackgroundService(deps: BackgroundServiceActionDeps): Promise<BackgroundServiceActionResult> {
-  if (!deps.daemonMode) return failed('daemon_mode_disabled')
   const prepared = await deps.prepareStop()
   if (prepared.status === 'refused') return failed(prepared.reason)
   if (prepared.status === 'running') {
@@ -110,7 +107,6 @@ export async function quitWithBackgroundService(deps: BackgroundServiceActionDep
 }
 
 export async function reconnectBackgroundService(deps: BackgroundServiceActionDeps): Promise<BackgroundServiceActionResult> {
-  if (!deps.daemonMode) return failed('daemon_mode_disabled')
   // Offered only for a revoked local grant, and never started on the App's own.
   const connection = await deps.connection()
   if (connection.state !== 'device-not-authorized') return failed('daemon_device_authorized')
@@ -143,7 +139,6 @@ export type LoginStartPrecheck =
   | { ok: false; reason: string; otherUserDataDir?: string; otherExecutable?: string }
 
 export interface LoginStartActionDeps {
-  daemonMode: boolean
   precheckEnable(): LoginStartPrecheck
   confirmEnable(policyEnvKeys: readonly string[]): Promise<boolean>
   isDaemonRunning(): Promise<boolean>
@@ -155,7 +150,6 @@ export async function setBackgroundServiceLoginStart(
   enabled: boolean,
   deps: LoginStartActionDeps
 ): Promise<BackgroundServiceActionResult> {
-  if (!deps.daemonMode) return failed('daemon_mode_disabled')
   if (enabled) {
     const precheck = deps.precheckEnable()
     if (!precheck.ok) {
@@ -183,7 +177,6 @@ export async function setBackgroundServiceLoginStart(
 
 export interface HostCliApprovalActionDeps {
   experimentalEnabled: boolean
-  daemonMode: boolean
   connection(): Promise<BackgroundServiceConnection>
   confirmEnable(): Promise<boolean>
   apply(enabled: boolean): Promise<void>
@@ -196,7 +189,6 @@ export async function setHostCliApproval(
   // N1: enabling requires App to carry SCRY_EXPERIMENTAL_HOST_CLI=1 (and native confirmation),
   // whereas disabling is always allowed so a user can turn off a daemon that carries the flag.
   if (enabled && !deps.experimentalEnabled) return failed('host_cli_experimental_disabled')
-  if (!deps.daemonMode) return failed('daemon_mode_disabled')
   const conn = await deps.connection()
   if (conn.state !== 'ready') return connectionResult(conn)
   if (enabled && !await deps.confirmEnable()) return cancelled

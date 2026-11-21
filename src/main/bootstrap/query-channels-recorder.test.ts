@@ -17,12 +17,12 @@ const { writeRecorderContentCopies } = await import('../../core/turn-recorder/co
 const { appTraceContentRoot } = await import('../trace-tool-content')
 const { providerCommandChannelHandlers, recorderContentChannelHandlers } = await import('./query-channels')
 const { registerAgentRuntimeHandlers } = await import('./agent-runtime-ipc')
-const { registerProviderHandlers } = await import('./provider-handlers')
+const { registerDaemonOwnedChannels } = await import('./daemon-owned-channels')
 const { gateDaemonChannel, installDaemonChannelForwarder } = await import('../daemon-channel-gate')
 
-// Recorder content pages and the Provider command catalog, which main registers and the
-// daemon serves as local ops (B4-L4). Recorder content is read for the window's workspace:
-// main takes it from its own selection, never from a renderer argument.
+// Recorder content pages and the Provider command catalog, which the daemon serves as
+// local ops (B4-L4). Recorder content is read for the window's workspace: the App takes it
+// from its own selection, never from a renderer argument.
 
 type Table = Record<string, (...args: unknown[]) => Promise<unknown>>
 const dirs: string[] = []
@@ -103,50 +103,17 @@ describe('provider command channel table', () => {
   })
 })
 
-describe('main registers the recorder and command tables', () => {
-  it('reads for its own selection and ignores a workspace the renderer names', async () => {
-    const { root, ref } = await recordedWorkspace()
-    state.userData = tempDir()
-    let selection: string | undefined
-    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>()
-    const handleTrusted = ((channel: string, listener: (event: unknown, ...args: unknown[]) => Promise<unknown>) => { handlers.set(channel, listener) }) as never
-    registerAgentRuntimeHandlers({
-      handleTrusted, startAppRun: vi.fn(), runs: { activeStates: () => [] } as never, boundedLiveRun: (run) => run,
-      dockBadge: {} as never, activeRunSessionKey: () => null, getWindow: () => null,
-      getRemoteRunLedgerId: () => undefined, getRemoteHostService: () => null, userQuestionBroker: {} as never,
-      resolveKnownProjectDirectory: (cwd) => cwd, getCurrentCwd: () => selection,
-      traceOutput: {} as never, requestRunStop: () => true, runTraces: {} as never
-    })
-    const read = handlers.get('agent:recorderContentPage')!
-    await expect(read({}, { ref }, root)).rejects.toThrow('recorder_workspace_unavailable')
-    selection = root
-    expect(text(await read({}, { ref }, '/elsewhere'))).toBe('recorded body')
-
-    const envelope = { providerId: 'codex', mode: 'read', state: 'unsupported', data: null, reason: 'none' }
-    const listCommands = vi.fn(async () => envelope)
-    registerProviderHandlers({
-      handleTrusted, providerRegistry: { listSkills: vi.fn(), listCommands } as never,
-      withProviderOperation: async (_providerId, operation) => await operation(),
-      getRemoteProviderDiscovery: () => ({ invalidate: () => undefined }), refreshInvalidatedRemoteProviderMetadata: () => undefined,
-      ensureMcpExecutionAuthorized: async () => null, authorizedMcpExecution: () => undefined,
-      homeDir: '/home', getCurrentCwd: () => '/w', getRuns: () => ({ activeStates: () => [] }), canonicalProviderCwd: (cwd) => cwd ?? '/w',
-      providerOperationKey: () => 'k', providerOperationGate: {} as never
-    })
-    await expect(handlers.get('agent:listCommands')!({}, { providerId: 'codex' })).resolves.toBe(envelope)
-  })
-
-  it('appends the window selection in daemon mode, where the daemon reads', async () => {
+describe('the App asks the daemon for recorder content', () => {
+  it('appends the window selection, where the daemon reads', async () => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>()
     const handleTrusted = ((channel: string, listener: (event: unknown, ...args: unknown[]) => Promise<unknown>) => {
-      handlers.set(channel, gateDaemonChannel(channel, listener, { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv))
+      handlers.set(channel, gateDaemonChannel(channel, listener))
     }) as never
     registerAgentRuntimeHandlers({
-      handleTrusted, startAppRun: vi.fn(), runs: { activeStates: () => [] } as never, boundedLiveRun: (run) => run,
-      dockBadge: {} as never, activeRunSessionKey: () => null, getWindow: () => null,
-      getRemoteRunLedgerId: () => undefined, getRemoteHostService: () => null, userQuestionBroker: {} as never,
-      resolveKnownProjectDirectory: (cwd) => cwd, getCurrentCwd: () => '/projects/app',
-      traceOutput: {} as never, requestRunStop: () => true, runTraces: {} as never, daemon: {} as never
+      handleTrusted, runs: { isViewed: () => false } as never, dockBadge: {} as never, activeRunSessionKey: () => null,
+      getWindow: () => null, getCurrentCwd: () => '/projects/app', runTraces: {} as never, daemon: {} as never
     })
+    registerDaemonOwnedChannels(handleTrusted, new Set(handlers.keys()))
     const forwarded = vi.fn(async () => ({ page: true }))
     const uninstall = installDaemonChannelForwarder(forwarded)
     try {

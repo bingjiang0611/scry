@@ -29,8 +29,6 @@ async function fixture() {
   const setCount = vi.fn()
   const badge = new DockBadgeState(setCount)
   const clearLegacyFocus = vi.fn()
-  const historyController = new AbortController()
-  const invalidateHistory = vi.fn((reason: string) => historyController.abort(new Error(reason)))
   const authorize = vi.fn((path: string) => {
     if (path !== first.cwd) throw new Error('unknown project')
     return path
@@ -40,11 +38,10 @@ async function fixture() {
       { handle: (name, handler) => { handlers.set(name, handler) } }, channel,
       () => window, mainFrame.url, listener
     ),
-    conversationStore: () => store,
+    readConversation: (id) => store.read(id),
     resolveKnownProjectDirectory: authorize,
     getWindow: () => window,
     clearLegacyFocus,
-    invalidateSessionHistoryLoad: invalidateHistory,
     dockBadge: badge
   })
   const invoke = async (id: unknown, sender = event) => handlers.get('conversation:setViewed')!(sender, id)
@@ -52,7 +49,7 @@ async function fixture() {
     windowFocused: false, sessionViewed: false, needsAttention: true
   })
   return { store, first, second, badge, invoke, mark, event, mainFrame, authorize, clearLegacyFocus,
-    reset, historyController, invalidateHistory,
+    reset,
     setFocused: (value: boolean) => { focused = value } }
 }
 
@@ -99,22 +96,6 @@ describe('managed conversation attention IPC', () => {
     expect(f.badge.isViewed(conversationAttentionKey(f.second.id))).toBe(true)
     await f.invoke(null)
     expect(f.badge.isViewed(conversationAttentionKey(f.second.id))).toBe(false)
-  })
-
-  it('cancels an older native history load before it can replace the managed viewed identity', async () => {
-    const f = await fixture()
-    let finishNativeRead!: () => void
-    const gate = new Promise<void>(resolve => { finishNativeRead = resolve })
-    const nativeLoad = (async () => {
-      await gate
-      // The production history loader checks this signal before publishing its view.
-      f.historyController.signal.throwIfAborted()
-      f.badge.view('native-session', true)
-    })()
-    await f.invoke(f.first.id)
-    const rejected = expect(nativeLoad).rejects.toThrow('managed conversation selected')
-    finishNativeRead(); await rejected
-    expect(f.badge.isViewed(conversationAttentionKey(f.first.id))).toBe(true)
   })
 
   it('renderer loss revokes the view and late requests without deleting unread keys', async () => {

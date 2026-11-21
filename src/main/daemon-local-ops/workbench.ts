@@ -1,7 +1,7 @@
 import type { DaemonForwardEntry, DaemonForwardTable, DaemonLocalOpTable } from './types'
 import { DESKTOP_WORKBENCH_METHODS, DESKTOP_WORKBENCH_READ_METHODS, type DesktopWorkbenchRequest } from '../../shared/desktop-workbench'
 import { validateDesktopWorkbenchResponse } from '../remote/desktop-workbench-response'
-import { object, text } from '../source-control/ipc'
+import { object, text } from '../source-control/request-values'
 
 // Workbench: workspace files and source control, forwarded to the `desktopWorkbench` op
 // the daemon's host already serves paired devices. The daemon authorizes the workspace on

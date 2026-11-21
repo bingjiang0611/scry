@@ -10,7 +10,6 @@ import { MISMATCH_LATER_BUTTON, MISMATCH_RESTART_BUTTON, reasonMessage, versionM
 const mismatch: BackgroundServiceConnection = { state: 'version-mismatch', running: '1.0.0', expected: '2.0.0' }
 
 interface Script {
-  daemonMode?: boolean
   autoRestartIdle?: boolean
   canAutoRestartTarget?: boolean | 'throws' | 'omit'
   recheckActiveRuns?: number | undefined | 'throws' | 'omit'
@@ -32,7 +31,6 @@ function harness(script: Script = {}) {
     return script.restart ?? { status: 'done' }
   }
   const deps: VersionMismatchPromptDeps = {
-    daemonMode: script.daemonMode ?? true,
     ...(script.autoRestartIdle ? { autoRestartIdle: true } : {}),
     ...(script.canAutoRestartTarget === 'omit' ? {} : {
       canAutoRestartTarget: async () => {
@@ -128,9 +126,6 @@ describe('version mismatch prompt', () => {
     expect(asked).toEqual([])
     await expect(prompt(mismatch)).resolves.toEqual({ status: 'later' })
 
-    const off = harness({ daemonMode: false })
-    await expect(off.prompt(mismatch)).resolves.toEqual({ status: 'not-shown', reason: 'daemon-mode-disabled' })
-    expect(off.asked).toEqual([])
   })
 
   it('does not interrupt a background-service action already in progress, and spends its one prompt', async () => {

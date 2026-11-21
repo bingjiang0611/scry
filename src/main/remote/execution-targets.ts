@@ -3,6 +3,7 @@ import type { DesktopMobileTargetSubmit, ExecutionTargetRef } from '../../shared
 import { parseRemoteWorkspaceQuery } from './remote-workspace'
 import { parseRemoteFileDownloadQuery } from './remote-file-download'
 import { historyProfileSelection, historyScopeSelection } from './remote-gateway'
+export { executionTargetError } from './execution-target-error'
 
 const HASH = /^[a-f0-9]{64}$/
 const MAX_TARGET_ID = 300
@@ -160,9 +161,4 @@ export class ExecutionTargetRouter {
     const { executionTarget: _existing, ...body } = response
     return { ...body, executionTarget: target }
   }
-}
-
-export function executionTargetError(error: unknown): { error: string } {
-  const raw = String((error as { code?: string })?.code ?? (error as Error)?.message ?? 'error')
-  return { error: raw.startsWith('desktop_remote_') ? raw.slice('desktop_remote_'.length) : raw.slice(0, 128) }
 }

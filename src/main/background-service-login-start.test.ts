@@ -5,7 +5,7 @@ import type { BackgroundServiceRemoteConfig } from '../shared/background-service
 
 function loginStartDeps(overrides: Partial<LoginStartActionDeps> = {}): LoginStartActionDeps {
   return {
-    daemonMode: true,
+    
     precheckEnable: () => ({ ok: true, policyEnvKeys: ['SCRY_REMOTE_HOST'] }),
     confirmEnable: vi.fn(async () => true),
     isDaemonRunning: async () => true,
@@ -76,7 +76,7 @@ describe('readBackgroundServiceStatus with loginStart, policy mismatch, and Linu
 
   it('reports remoteConfigMismatch when adopting a service-launched daemon with different policy', async () => {
     const status = await readBackgroundServiceStatus({
-      daemonMode: true,
+      
       userDataDir: '/u',
       connection: async () => ({ state: 'ready' }),
       selfReport: async () => ({
@@ -100,7 +100,7 @@ describe('readBackgroundServiceStatus with loginStart, policy mismatch, and Linu
 
   it('marks launchedByVerified true on Linux only when systemd MainPID matches self-reported supervisorPid', async () => {
     const matched = await readBackgroundServiceStatus({
-      daemonMode: true,
+      
       userDataDir: '/u',
       connection: async () => ({ state: 'ready' }),
       selfReport: async () => ({
@@ -116,7 +116,7 @@ describe('readBackgroundServiceStatus with loginStart, policy mismatch, and Linu
     expect(matched.mode === 'daemon' && matched.launchedByVerified).toBe(true)
 
     const mismatched = await readBackgroundServiceStatus({
-      daemonMode: true,
+      
       userDataDir: '/u',
       connection: async () => ({ state: 'ready' }),
       selfReport: async () => ({

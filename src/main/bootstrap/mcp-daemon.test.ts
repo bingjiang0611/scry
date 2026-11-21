@@ -6,7 +6,6 @@ import { deliverDaemonOAuthUrl, installMcpDaemonWindow } from './mcp-daemon'
 // item alone must never open a browser: only during this window's own re-auth, and only
 // a URL main would have opened in process.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const SAFE = 'https://auth.example.com/authorize?state=x'
 
 describe('MCP OAuth pages in daemon mode', () => {
@@ -18,7 +17,7 @@ describe('MCP OAuth pages in daemon mode', () => {
     undo.push(installMcpDaemonWindow({ openExternal }))
     undo.push(installDaemonChannelForwarder(async () => await reply()))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const reauth = gateDaemonChannel('agent:reauthenticateMcp', vi.fn(), ON) as unknown as (event: unknown, payload: unknown) => Promise<unknown>
+    const reauth = gateDaemonChannel('agent:reauthenticateMcp', vi.fn()) as unknown as (event: unknown, payload: unknown) => Promise<unknown>
     return { openExternal, reauth }
   }
 

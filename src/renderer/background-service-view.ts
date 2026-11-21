@@ -69,14 +69,6 @@ export function projectBackgroundService(
   now: number,
   platform: RendererPlatform = detectRendererPlatform()
 ): BackgroundServiceView {
-  if (status.mode === 'in-process') {
-    return {
-      rows: [row('数据目录', status.userDataDir)],
-      notice: { tone: 'info', text: '后台服务模式未启用（SCRY_HOST_DAEMON）：Agent 运行在 App 进程内，没有后台服务可以查看或操作。' },
-      runtimeNotices: [],
-      actions: { restart: false, restartPrimary: false, reconnect: false, quit: false }
-    }
-  }
   const { connection } = status
   let state: string
   let notice: BackgroundServiceNotice | undefined

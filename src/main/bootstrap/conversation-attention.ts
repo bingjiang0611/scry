@@ -1,17 +1,18 @@
 import type { BrowserWindow } from 'electron'
 import { conversationAttentionKey } from '../../shared/session-attention'
-import type { ConversationStore } from '../conversation-store'
+import type { Conversation } from '../../shared/conversation'
 import type { DockBadgeState } from '../dock-badge'
 import type { TrustedRegistrar } from './agent-runtime-ipc'
 
 /** Reading history is not proof of viewing it: previews and refreshes read it too. */
 export function registerConversationAttention(deps: {
   handleTrusted: TrustedRegistrar
-  conversationStore: () => ConversationStore
-  resolveKnownProjectDirectory: (cwd: string) => string
+  /** The conversation's published ledger, read only (ConversationStore.read). */
+  readConversation: (id: string) => Promise<Conversation | null>
+  /** The daemon's known-project answer for the conversation's directory. */
+  resolveKnownProjectDirectory: (cwd: string) => unknown
   getWindow: () => Pick<BrowserWindow, 'isFocused'> | null
   clearLegacyFocus: () => void
-  invalidateSessionHistoryLoad: (reason: string) => void
   dockBadge: DockBadgeState
 }): () => void {
   let revision = 0
@@ -26,20 +27,18 @@ export function registerConversationAttention(deps: {
     release()
     const requestRevision = revision
     if (id === null) return
-    const conversation = await deps.conversationStore().read(id as string)
+    const conversation = await deps.readConversation(id as string)
     if (!conversation || conversation.deletion) throw new Error('统一对话不存在或已删除')
-    deps.resolveKnownProjectDirectory(conversation.cwd)
+    await deps.resolveKnownProjectDirectory(conversation.cwd)
     // A slow read for the previous view must not acknowledge the newly selected view.
     if (requestRevision !== revision) return
-    deps.invalidateSessionHistoryLoad('managed conversation selected')
     deps.clearLegacyFocus()
     viewedKey = conversationAttentionKey(conversation.id)
     deps.dockBadge.view(viewedKey, Boolean(deps.getWindow()?.isFocused()))
   })
   return () => {
     release()
-    // Renderer loss revokes viewing, not unread evidence, including pending native reads.
-    deps.invalidateSessionHistoryLoad('renderer attention owner lost')
+    // Renderer loss revokes viewing, not unread evidence.
     deps.dockBadge.view(null, false)
   }
 }

@@ -1,6 +1,5 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ProviderContext } from '../../shared/provider'
-import { installDaemonChannelResultHandler } from '../daemon-channel-gate'
 import { canonicalizePiAgentPaths, type PiAgentProfile } from '../pi-agent-profiles'
 import { detectAgentsFast, probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS, type DetectedAgent } from '../claude-locate'
 import { piRpcEnvironment } from '../providers/pi'
@@ -111,12 +110,4 @@ export async function resetProviderSession(deps: {
     await deps.providerRegistry.invalidateContext({ ...context, cwd })
   }
   return true
-}
-
-/** Daemon mode: once the daemon reset the context, this window views no session. */
-export function viewNothingAfterDaemonNewSession(dockBadge: { view: (key: string | null, focused: boolean) => void }, isFocused: () => boolean): () => void {
-  return installDaemonChannelResultHandler('agent:newSession', (value) => {
-    dockBadge.view(null, isFocused())
-    return value
-  })
 }
