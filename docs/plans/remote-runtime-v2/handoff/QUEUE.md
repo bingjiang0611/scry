@@ -3,7 +3,7 @@
 协议见 [README.md](README.md)，并发规则见其 §1a。每个执行方只做「执行方」列分给自己的任务，按表内顺序做；某项受阻就写清证据并跳到自己的下一项。状态写在各自报告的第一行（取值：进行中 / 待核验 / 需修改 / 受阻 / 通过），不改本表。
 
 - 执行方 A：真机验证（W1 已通过附条件、W6 已通过；W2b 只剩注销与 FileVault，等维护者约时间），W10 已通过；W12 中继部署已通过；W13 已通过；现做 W14（P5-8）。W2b 的注销与 FileVault 两项按维护者 2026-11-21 的决定，挪到最后，与 S3 前的整体复验合并成一次停机。独占 `/Applications` 安装、日常 App、iPhone，以及会中断全机的注销与重启。
-- 执行方 B：P5（W2、W3、W11 已通过）；Antigravity（W7、W8 已通过）；现做 W15（S3 第一步）。
+- 执行方 B：P5（W2、W3、W11 已通过）；Antigravity（W7、W8 已通过）；W15 返修中（见 W15-review），之后做 W17。
 - 执行方 C：P4（W4、W5、W9 已通过），现做 W16（P4-3）。
 
 | # | 任务 | 执行方 | 依赖 | 合并门槛（合入 main 之前） | 说明 |
@@ -25,6 +25,7 @@
 | W14 | P5-8：命令行批准新设备的真机验收 | A | W11 通过、W13 推送 | P5 第 2 步合并前必须完成 | [tasks/W14-p5-8-real-machine.md](tasks/W14-p5-8-real-machine.md) |
 | W15 | S3 第一步：开发构建与测试实例默认走后台服务（不删代码） | B | — | `SCRY_HOST_DAEMON=0` 保留一个发布版本 | [tasks/W15-s3-step1-default-daemon.md](tasks/W15-s3-step1-default-daemon.md) |
 | W16 | P4-2 收尾两项 + P4-3 本机订阅（只在 on 下生效） | C | W9 通过 | 默认路径零行为变化 | [tasks/W16-p4-3-local-subscribe.md](tasks/W16-p4-3-local-subscribe.md) |
+| W17 | 默认 daemon 下恢复远程桌面的会话操作与工作区操作（线上回归） | B | W15 返修 | 下一次合入 main 的门槛 | [tasks/W17-daemon-remote-session-actions.md](tasks/W17-daemon-remote-session-actions.md) |
 
 三个执行方可同时开工。W1 是所有合并的门槛（2026-11-20 已通过，附条件：W10），但不阻止 B、C 开发；B、C 的真机测量与长跑按 README §1a 的测量互斥规则错开 A。
 
