@@ -79,6 +79,7 @@ export type BackgroundServiceDevices =
 /** Authoritative orchestration status exposed by daemon status endpoints (P4-2 Decision H). */
 export interface BackgroundServiceOrchestrationStatus {
   mode: 'on'
+  writeIndeterminate?: boolean
   h1FallbackUnavailable: boolean
   h1FallbackReason?: string
 }

@@ -131,14 +131,15 @@ export function parseSelfReport(value: unknown): BackgroundServiceSelfReport | u
     cliApproval = { enabled: raw.enabled, updatedAt: raw.updatedAt as number | null }
   }
   let orchestration: BackgroundServiceSelfReport['orchestration']
-  if (report.orchestration !== undefined) {
-    const raw = report.orchestration as Partial<NonNullable<BackgroundServiceSelfReport['orchestration']>> | null
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  if (report.orchestration !== undefined && report.orchestration !== null && typeof report.orchestration === 'object' && !Array.isArray(report.orchestration)) {
+    const raw = report.orchestration as Partial<NonNullable<BackgroundServiceSelfReport['orchestration']>>
     if (raw.mode === 'on') {
       if (typeof raw.h1FallbackUnavailable !== 'boolean') return undefined
+      if (raw.writeIndeterminate !== undefined && typeof raw.writeIndeterminate !== 'boolean') return undefined
       if (raw.h1FallbackReason !== undefined && typeof raw.h1FallbackReason !== 'string') return undefined
       orchestration = {
         mode: 'on',
+        ...(raw.writeIndeterminate !== undefined ? { writeIndeterminate: raw.writeIndeterminate } : {}),
         h1FallbackUnavailable: raw.h1FallbackUnavailable,
         ...(raw.h1FallbackReason !== undefined ? { h1FallbackReason: raw.h1FallbackReason } : {})
       }

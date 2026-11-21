@@ -40,6 +40,8 @@ export function createAuthorityLedgerStore(options: {
   mirrorMaxPendingEvents?: number
   mirrorRetryIntervalMs?: number
   seqReservationBlockSize?: number
+  /** Pre-peeked H1 disk `lastSeq` (computed async during startup when `on_active='1'`). */
+  h1DiskLastSeq?: number
 }): AuthorityLedgerStoreHandle {
   const { ledgerDirectory, sink, log, mirrorWriteHook, mirrorMaxPendingEvents, mirrorRetryIntervalMs } = options
   const blockSize = Math.max(16, Math.floor(options.seqReservationBlockSize ?? H1_SEQ_RESERVATION_BLOCK))
@@ -74,20 +76,9 @@ export function createAuthorityLedgerStore(options: {
 
   const mirrorTargetStore = openWrappedFileStore()
 
-  // Decision H §14.1–2 + W9-review-2 MF4: build single state snapshot at max(R, legacyLedgerSeq, H1 lastSeq)
-  // (corrupt/partial H1 is ignored inside try/catch so it never blocks on-mode startup; closes fail-open off residual).
-  let h1DiskLastSeq = 0
-  if (fileStore) {
-    try {
-      const recovery = fileStore.loadRecovery()
-      h1DiskLastSeq = recovery.snapshot?.lastSeq ?? 0
-      for (const ev of recovery.events) {
-        if (Number.isSafeInteger(ev.seq) && ev.seq > h1DiskLastSeq) h1DiskLastSeq = ev.seq
-      }
-    } catch {
-      h1DiskLastSeq = 0
-    }
-  }
+  // Decision H §14.1–2 + W16 Part 1: build single state snapshot at max(R, legacyLedgerSeq, h1DiskLastSeq)
+  // without synchronous main-thread H1 parsing (peeked asynchronously in startup only when `on_active='1'`).
+  const h1DiskLastSeq = Math.max(0, Math.floor(options.h1DiskLastSeq ?? 0))
   const prevReserved = readReservedSeqUntil(sink)
   const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
   const initialSnapshot = buildH1SnapshotFromDb(sink, {

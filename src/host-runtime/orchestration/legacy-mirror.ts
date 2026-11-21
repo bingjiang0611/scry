@@ -54,6 +54,7 @@ export class LegacyMirrorWorker {
   readonly #onH1FallbackRecovered?: (lastSeq: number) => void
   readonly #queue: LedgerEvent[] = []
   #pendingCompact: LedgerSnapshot | null = null
+  #needsDbSnapshotRebuild = false
   #timer: ReturnType<typeof setTimeout> | null = null
   #retryTimer: ReturnType<typeof setTimeout> | null = null
   #drainScheduled = false
@@ -88,11 +89,11 @@ export class LegacyMirrorWorker {
   }
 
   pendingCount(): number {
-    return this.#queue.length + (this.#pendingCompact ? 1 : 0)
+    return this.#queue.length + (this.#pendingCompact || this.#needsDbSnapshotRebuild ? 1 : 0)
   }
 
   hasPendingCompact(): boolean {
-    return this.#pendingCompact !== null
+    return this.#pendingCompact !== null || this.#needsDbSnapshotRebuild
   }
 
   isH1FallbackUnavailable(): boolean {
@@ -216,6 +217,7 @@ export class LegacyMirrorWorker {
     }
     this.#drainScheduled = false
     this.#pendingCompact = null
+    this.#needsDbSnapshotRebuild = false
     this.#queue.length = 0
     this.#updateFallbackReason(error)
     this.#scheduleFallbackRetry()
@@ -243,24 +245,22 @@ export class LegacyMirrorWorker {
 
   enqueue(event: LedgerEvent): void {
     if (this.#closed || this.#h1FallbackUnavailable) return
-    this.#queue.push(event)
-    if (this.#queue.length > this.#maxPendingEvents) {
-      if (this.#ledgerStore?.compact) {
-        try {
-          const snap = structuredClone(this.#createSnapshot())
-          this.#pendingCompact = snap
-          this.#queue.length = 0
-        } catch (error) {
-          this.#markH1FallbackUnavailable(error)
-          return
-        }
-      } else {
-        this.#markH1FallbackUnavailable(new Error('legacy_mirror_queue_overflow'))
-        return
-      }
-    }
     const isTerminal =
       event.kind === 'run_settled' || event.kind === 'run_failed' || event.kind === 'run_cancelled'
+    if (!this.#needsDbSnapshotRebuild) {
+      this.#queue.push(event)
+      if (this.#queue.length > this.#maxPendingEvents) {
+        if (this.#ledgerStore?.compact) {
+          // W16 Part 1: defer DB snapshot rebuild to `#drain` so emit NEVER queries orchestration.db synchronously.
+          this.#needsDbSnapshotRebuild = true
+          this.#pendingCompact = null
+          this.#queue.length = 0
+        } else {
+          this.#markH1FallbackUnavailable(new Error('legacy_mirror_queue_overflow'))
+          return
+        }
+      }
+    }
     if (isTerminal) {
       if (this.#timer) {
         clearTimeout(this.#timer)
@@ -275,6 +275,7 @@ export class LegacyMirrorWorker {
   /** Enqueues an atomic H1 snapshot rewrite and drops queued events superseded by `snapshot.lastSeq`. */
   enqueueCompact(snapshot: LedgerSnapshot): void {
     if (this.#closed || this.#h1FallbackUnavailable) return
+    this.#needsDbSnapshotRebuild = false
     this.#pendingCompact = structuredClone(snapshot)
     let drop = 0
     while (drop < this.#queue.length && this.#queue[drop]!.seq <= snapshot.lastSeq) drop += 1
@@ -329,6 +330,12 @@ export class LegacyMirrorWorker {
     }
     const sliceStart = performance.now()
     let processed = 0
+
+    if (this.#needsDbSnapshotRebuild) {
+      this.#needsDbSnapshotRebuild = false
+      if (!this.#atomicRewriteFromDb()) return
+      processed += 1
+    }
 
     if (this.#pendingCompact) {
       const snap = this.#pendingCompact
@@ -405,6 +412,7 @@ export class LegacyMirrorWorker {
     }
     this.#drainScheduled = false
     this.#pendingCompact = null
+    this.#needsDbSnapshotRebuild = false
     this.#queue.length = 0
     this.#resolveWaiters()
   }
