@@ -45,11 +45,17 @@ export async function exerciseProductionPerformance(smokeContext) {
       const deadline = Date.now() + 5000
       while (Date.now() < deadline) {
         const dialog = document.querySelector('.llm-perf-modal[role="dialog"]')
-        if (dialog?.contains(document.activeElement) && dialog.querySelector('.llm-perf-comparison h3')?.textContent === '模型对比' && !dialog.querySelector('.llm-perf-running, .llm-perf-run') && dialog.querySelector('.llm-perf-empty')?.textContent === '还没有数据')
+        const rows = [...(dialog?.querySelectorAll('.llm-perf-mrow') ?? [])]
+        const live = rows.find(row => row.textContent.includes('Codex') && row.textContent.includes('2 暂计'))
+        const firstOutput = live?.querySelectorAll('.llm-perf-reading')[2]?.textContent
+        if (dialog?.contains(document.activeElement) && dialog.querySelector('.llm-perf-comparison h3')?.textContent === '模型对比' && !dialog.querySelector('.llm-perf-running, .llm-perf-run') && firstOutput && firstOutput !== '—')
           return { focused: true, labelled: !!dialog.getAttribute('aria-labelledby') }
         await new Promise(requestAnimationFrame)
       }
-      throw new Error('Production modal did not load real IPC history or focus')
+      throw new Error('Production modal did not show the two live Codex measurements: ' + JSON.stringify({
+        dialog: document.querySelector('.llm-perf-modal')?.textContent,
+        focus: document.activeElement?.className
+      }))
     })()`)
     assert.deepEqual(modal, { focused: true, labelled: true })
     const terminal = await evaluate(`(async () => {
@@ -75,7 +81,15 @@ export async function exerciseProductionPerformance(smokeContext) {
 
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-    assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(!document.querySelector('.llm-perf-modal') && document.activeElement?.title === 'LLM 性能'))))`), true)
+    const closed = await evaluate(`(async () => {
+      const deadline = Date.now() + 2000
+      while (Date.now() < deadline) {
+        if (!document.querySelector('.llm-perf-modal') && document.activeElement?.title === 'LLM 性能') return true
+        await new Promise(resolve => setTimeout(resolve, 30))
+      }
+      return { dialog: !!document.querySelector('.llm-perf-modal'), focusTitle: document.activeElement?.title }
+    })()`)
+    assert.equal(closed, true, JSON.stringify(closed))
     console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal }))
     cdp.close()
     return
