@@ -129,6 +129,26 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     expect(routing.cwd).toBe(AUTHORIZED)
   })
 
+  it('accepts a desktop screenshot above the remote inline cap only from the verified local grant', async () => {
+    const refused = vi.fn()
+    const { identity, controller, startRun } = await harness(refused)
+    const local = await enrollLocal(identity, controller)
+    const phone = await pairDevice(identity, controller)
+    const size = 659_404
+    const attachment = { kind: 'image', name: 'screenshot.png', mimeType: 'image/png', size, dataBase64: Buffer.alloc(size).toString('base64') }
+    const screenshotDetail = JSON.stringify({ providerId: 'pi', cwd: AUTHORIZED, prompt: 'inspect', attachments: [attachment] })
+
+    await controller.submitReceivedIntent(local, { intentId: 'local-screenshot', detail: screenshotDetail })
+    await controller.submitReceivedIntent(phone, { intentId: 'phone-screenshot', detail: screenshotDetail })
+
+    await vi.waitFor(() => {
+      expect(startRun).toHaveBeenCalledTimes(1)
+      expect(refused).toHaveBeenCalledTimes(1)
+    })
+    expect(startRun.mock.calls[0]![0]).toMatchObject({ grantScope: 'local', routing: { attachments: [attachment] } })
+    expect(refused.mock.calls[0]![0]).toMatchObject({ grantScope: 'remote', error: { message: 'invalid_target' } })
+  })
+
   it('lets the App submit without naming a directory, and refuses a device that does', async () => {
     // The App has a current workspace; a phone does not. An unnamed submit from the
     // App keeps the App's own fallback, while the same request from a device has no
