@@ -37,7 +37,9 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       directory: join(inputs.userDataDir, 'desktop-terminal-recordings'),
       authorizeWorkspace: runtime.resolveRemoteProjectDirectory,
       sourceControl: runtime.sourceControl, environment: inputs.shellEnvironment, openPath: inputs.openPath,
-      trashItem: inputs.trashItem
+      trashItem: inputs.trashItem,
+      ...(inputs.hasOpenPath ? { hasOpenPath: inputs.hasOpenPath } : {}),
+      ...(inputs.hasTrashItem ? { hasTrashItem: inputs.hasTrashItem } : {})
     }),
     readDesktop: createDesktopHostReader({
       userDataDir: inputs.userDataDir,

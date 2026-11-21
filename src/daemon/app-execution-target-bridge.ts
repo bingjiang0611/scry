@@ -23,6 +23,14 @@ export type ExecutionTargetWorkCall =
   | { callId: string; method: 'mobileRequest'; input: { target: { id: string; binding: string }; request: Record<string, unknown> } }
   | { callId: string; method: 'mobileSubmit'; input: DesktopMobileTargetSubmit }
   | { callId: string; method: 'mobileIntentStatus'; input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string } }
+  | { callId: string; method: 'shellOpenPath'; input: { path: string } }
+  | { callId: string; method: 'shellTrashItem'; input: { path: string } }
+
+export interface BridgedShellOps {
+  isAvailable(): boolean
+  openPath(path: string): Promise<void>
+  trashItem(path: string): Promise<void>
+}
 
 export interface ExecutionTargetResultInput {
   callId: string
@@ -107,6 +115,7 @@ export class AppExecutionTargetBridge {
   #waiters = new Set<() => void>()
 
   readonly client: DesktopRemoteTargetAPI
+  readonly shellOps: BridgedShellOps
   readonly localHandlers: ExecutionTargetBridgeHandlers
 
   constructor(options: AppExecutionTargetBridgeOptions) {
@@ -160,6 +169,24 @@ export class AppExecutionTargetBridge {
         authorizePeer?.()
         return result
       }
+    }
+
+    const invokeShell = async (method: 'shellOpenPath' | 'shellTrashItem', opName: 'openPath' | 'trashItem', path: string): Promise<void> => {
+      if (typeof path !== 'string' || path.length === 0 || path.includes('\0')) throw new Error('invalid_workbench_request')
+      if (!this.#hasLiveApp()) throw new Error(`desktop_workbench_operation_unavailable:${opName}`)
+      try {
+        await this.#enqueue({ callId: randomUUID(), method, input: { path } })
+      } catch (error) {
+        if ((error as Error)?.message === 'execution_target_gateway_offline') {
+          throw new Error(`desktop_workbench_operation_unavailable:${opName}`)
+        }
+        throw error
+      }
+    }
+    this.shellOps = {
+      isAvailable: () => this.#hasLiveApp(),
+      openPath: (path) => invokeShell('shellOpenPath', 'openPath', path),
+      trashItem: (path) => invokeShell('shellTrashItem', 'trashItem', path)
     }
 
     this.localHandlers = {

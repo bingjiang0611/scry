@@ -31,8 +31,9 @@ import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
-import { createDaemonRemoteAssembly } from './host-process-assembly'
+import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
 import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
+import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
 import { attachDaemonHostAdmin } from './host-admin-runtime'
@@ -209,29 +210,17 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   await startupManagedRecovery
 
+  const sessionLinks: DaemonSessionLinks = {}
   const targetBridge = createAppExecutionTargetBridge({
     isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
     ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})
   })
   const { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations: forks } =
     createDaemonRemoteAssembly({
-      userDataDir: options.userDataDir,
-      workspace,
-      pi,
-      providers,
-      session,
-      catalog,
-      pipeline,
-      sourceControl,
-      remoteRunIds,
-      requestRunStop,
-      getRemoteHostService: () => remoteHostService,
-      setRemoteHostService: (value) => { remoteHostService = value },
-      getCurrentCwd: () => currentCwd,
-      getStartupManagedRecovery: () => startupManagedRecovery,
-      isShuttingDown: () => isShuttingDown,
-      desktopRemoteClient: () => targetBridge.client,
-      log
+      userDataDir: options.userDataDir, workspace, pi, providers, session, catalog, pipeline, sourceControl, remoteRunIds, requestRunStop,
+      getRemoteHostService: () => remoteHostService, setRemoteHostService: (value) => { remoteHostService = value },
+      getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery, isShuttingDown: () => isShuttingDown,
+      desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log
     })
   forkOperations = forks
 
@@ -262,6 +251,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
     ...remoteLanConfig(process.env),
     shellEnvironment: warmShellEnv,
+    ...bridgedWorkbenchShellInputs(targetBridge.shellOps),
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
@@ -285,6 +275,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       providerDiscovery,
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
+      links: sessionLinks,
       ...(orchestrationAuthority ? {
         orchestrationStatus: () => orchestrationAuthority!.status(),
         subscribe: orchestrationAuthority.createSubscribeHandler({

@@ -68,14 +68,9 @@ async function main() {
     preview: 'desktop remote host smoke', ts: Date.now()
   }]))
 
-  // Daemon desktop info currently omits sessionActions/sessionFork/sessionDelete and reports
-  // workbenchOps:{openPath:false,trashItem:false} (see src/daemon/host-process.test.ts), while
-  // this smoke asserts the full in-process remote host surface. Keep explicit in-process mode
-  // until daemon remote-host parity covers sessionActions/fork/delete.
-  child = launch({
-    spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog,
-    env: { SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0' }
-  })
+  // W17: daemon mode now provides full remote sessionActions/fork/delete and bridges
+  // workbench openPath/trashItem via the primary Scry App, so run in default daemon mode.
+  child = launch({ spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog })
   const page = await waitForTarget(cdpPort)
   assert.match(page.url, /^file:/, 'production renderer must load from a file URL')
   cdp = connectCdp(page.webSocketDebuggerUrl)
