@@ -124,6 +124,8 @@ export function createSessionActions({
     // Queued send intents are still reset below; restoring a draft never sends it.
     runStructuralTransition('session', () => {
       setSessionLoading(true)
+      // The previous selection no longer owns cleanup once this draft takes over.
+      setSessionCacheVisible(false)
       setSessionEvidenceGap(null)
       selectSessionId(null)
       setSessionPromptQueues((current) => {

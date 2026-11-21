@@ -15,7 +15,7 @@ function fixture(fail: boolean) {
   const records: Array<{ kind: string; end?: number; failed?: boolean }> = []
   const window = new EventTarget()
   const request = runInNewContext(`${code}\nrequest`, {
-    records, window, Event, fail, delay: 60, performance: { now: Date.now }, setTimeout, queueMicrotask
+    records, window, Event, fail, delay: 60, pendingSession: undefined, performance: { now: Date.now }, setTimeout, queueMicrotask
   }) as (kind: string, value: () => number) => Promise<number>
   return { records, window, request }
 }
