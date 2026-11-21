@@ -35,7 +35,7 @@ export type DaemonSupervisorResult =
   // The daemon answers but was built from different sources (another version, or the
   // same version from another build). The App must not talk to it: the user decides
   // whether to restart it. A build field is absent when that side has no build id.
-  | { status: 'version-mismatch'; running: string; runningBuild?: string; runningActiveRuns?: number; expected: string; expectedBuild?: string; action: 'restart_daemon' }
+  | { status: 'version-mismatch'; running: string; runningBuild?: string; runningActiveRuns?: number; runningIsPackaged?: boolean; expected: string; expectedBuild?: string; action: 'restart_daemon' }
   | { status: 'unavailable'; reason: string }
 
 export const DAEMON_READY_TIMEOUT_MS = 10_000
@@ -76,6 +76,7 @@ function adopt(probed: DaemonProbeInfo, options: Pick<DaemonSupervisorOptions, '
       status: 'version-mismatch',
       running: probed.version, ...(probed.build ? { runningBuild: probed.build } : {}),
       ...(probed.activeRuns !== undefined ? { runningActiveRuns: probed.activeRuns } : {}),
+      ...(probed.isPackaged !== undefined ? { runningIsPackaged: probed.isPackaged } : {}),
       expected: expected.version, ...(expected.build ? { expectedBuild: expected.build } : {}),
       action: 'restart_daemon'
     }

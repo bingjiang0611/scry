@@ -19,6 +19,7 @@ import { DaemonRunTransport } from '../daemon-run-transport'
 import { laneForRequest } from '../remote/desktop-lane'
 import { createDaemonRunSurface, type DaemonRunSurface } from './daemon-run-surface'
 import { scryBuildId } from '../../shared/build-identity'
+import { isDefaultAppUserDataDir } from '../daemon-mode-default'
 
 // Daemon mode for the App's own run surface. One switch, one decision: either the
 // App talks to the daemon that owns the ledger and the runs, or it does not start
@@ -54,6 +55,10 @@ export interface DaemonRunModeResult {
   runningBuild?: string
   /** version-mismatch: active runs reported by the running daemon over daemonInfo, when known (W15). */
   runningActiveRuns?: number
+  /** version-mismatch: whether the running daemon reported itself as packaged, when known (W15 S2). */
+  runningIsPackaged?: boolean
+  /** version-mismatch: live daemonInfo activeRuns probe over the existing client before signalling (W15 S1). */
+  probeActiveRuns?: () => Promise<number | undefined>
   expectedBuild?: string
   action?: 'restart_daemon'
   reason?: string
@@ -64,6 +69,10 @@ export interface DaemonRunModeDeps {
   userDataDir: string
   daemonStateDirectory: string
   appVersion: string
+  /** Optional appData + appName for S3 fail-closed test-instance isolation check. */
+  appDataDir?: string
+  appName?: string
+  env?: NodeJS.ProcessEnv
   /** This bundle's build id (shared/build-identity.ts); absent when unbundled. */
   appBuild?: string
   /** Returns the credential cipher, or the reason it must not be used. */
@@ -98,11 +107,22 @@ const REFUSALS: ReadonlySet<string> = new Set([
 ])
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
-  if (!daemonModeEnabled()) return { status: 'disabled' }
-  const mismatch = (running: string, runningBuild: string | undefined, runningActiveRuns?: number): DaemonRunModeResult => ({
+  const env = deps.env ?? process.env
+  if (!daemonModeEnabled(env)) return { status: 'disabled' }
+  if (env.SCRY_TEST_APP === '1' && deps.appDataDir && deps.appName &&
+      isDefaultAppUserDataDir({ userDataDir: deps.userDataDir, appDataDir: deps.appDataDir, appName: deps.appName })) {
+    return { status: 'unavailable', reason: 'test_app_requires_isolated_user_data' }
+  }
+  const mismatch = (
+    running: string,
+    runningBuild: string | undefined,
+    runningActiveRuns?: number,
+    runningIsPackaged?: boolean
+  ): DaemonRunModeResult => ({
     status: 'version-mismatch', running, expected: deps.appVersion, action: 'restart_daemon',
     ...(runningBuild === undefined ? {} : { runningBuild }),
     ...(runningActiveRuns === undefined ? {} : { runningActiveRuns }),
+    ...(runningIsPackaged === undefined ? {} : { runningIsPackaged }),
     ...(deps.appBuild === undefined ? {} : { expectedBuild: deps.appBuild })
   })
 
@@ -167,7 +187,11 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   }
   if (refused) return refusal(refused)
   if (supervised.status === 'version-mismatch') {
-    return { ...mismatch(supervised.running, supervised.runningBuild, supervised.runningActiveRuns), dispose: () => client.close() }
+    return {
+      ...mismatch(supervised.running, supervised.runningBuild, supervised.runningActiveRuns, supervised.runningIsPackaged),
+      probeActiveRuns: () => client.daemonInfo().then((info) => info?.activeRuns, () => undefined),
+      dispose: () => client.close()
+    }
   }
   if (supervised.status === 'unavailable') {
     client.close()
@@ -308,6 +332,9 @@ export function appDaemonModeDeps(input: {
     userDataDir,
     daemonStateDirectory,
     appVersion,
+    appDataDir: app.getPath('appData'),
+    appName: app.getName(),
+    ...(input.env ? { env: input.env } : {}),
     ...(appBuild === undefined ? {} : { appBuild }),
     credentialCipher: () => {
       // Acceptance only. A dev Electron cannot answer the macOS "Safe Storage" Keychain

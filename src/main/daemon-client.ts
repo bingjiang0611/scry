@@ -142,17 +142,18 @@ function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyP
   })
 }
 
-export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number; subscribe?: 1 }
+export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number; isPackaged?: boolean; subscribe?: 1 }
 
 // What the daemon said about itself; a build field that is not a build id is dropped,
 // which the comparison then treats as "no build id" (a mismatch for an App that has one).
-function reported(version: string, build: unknown, activeRuns?: unknown, subscribe?: unknown): DaemonProbeInfo {
+function reported(version: string, build: unknown, activeRuns?: unknown, isPackaged?: unknown, subscribe?: unknown): DaemonProbeInfo {
   const id = buildIdOf(build)
   const runs = typeof activeRuns === 'number' && Number.isSafeInteger(activeRuns) && activeRuns >= 0 ? activeRuns : undefined
   return {
     version,
     ...(id !== undefined ? { build: id } : {}),
     ...(runs !== undefined ? { activeRuns: runs } : {}),
+    ...(typeof isPackaged === 'boolean' ? { isPackaged } : {}),
     ...(subscribe === 1 ? { subscribe: 1 as const } : {})
   }
 }
@@ -256,10 +257,10 @@ export class DaemonClient {
     } catch { return undefined }
     try {
       const line = await socket.exchange(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'daemonInfo' })}\n`, ENROLL_TIMEOUT_MS)
-      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; subscribe?: unknown; error?: unknown }
+      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; isPackaged?: unknown; subscribe?: unknown; error?: unknown }
       if (reply.error === 'device_not_authorized') throw new DaemonClientError('daemon_device_not_authorized')
       if (reply.op !== 'daemonInfo' || typeof reply.version !== 'string') return undefined
-      return reported(reply.version, reply.build, reply.activeRuns, reply.subscribe)
+      return reported(reply.version, reply.build, reply.activeRuns, reply.isPackaged, reply.subscribe)
     } catch (error) {
       if (error instanceof DaemonClientError) throw error
       return undefined

@@ -311,6 +311,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const localHost = service.createLocalHost(identity, {
     onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
     activeRuns: () => pipeline.runs.unsettledStates().length,
+    isPackaged: options.isPackaged,
     ...(orchestrationAuthority ? { subscribe: 1 as const } : {})
   })
   const channel = await openLocalChannel({

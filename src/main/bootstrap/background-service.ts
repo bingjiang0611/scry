@@ -35,7 +35,8 @@ import {
   type BackgroundServicePrompt
 } from '../background-service-copy'
 import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli'
-import { createVersionMismatchPrompt } from '../background-service-mismatch-prompt'
+import { createVersionMismatchPrompt, daemonCommandBelongsToCheckout } from '../background-service-mismatch-prompt'
+import { readProcessIdentity, type ProcessRow } from '../process-diagnostics'
 import type { LazyDaemonRunSurface } from './daemon-run-lazy'
 
 // Electron edge of the «后台服务» settings section (B4-S S0-1, P5-2). The decisions live
@@ -110,13 +111,23 @@ export function registerBackgroundServiceHandlers(input: {
   /** Subscribes to service-launch fallback changes so the run path gets notified immediately. */
   onServiceLaunchFallback?: (listener: (fallback: BackgroundServiceRuntimeNotice['serviceLaunchFallback']) => void) => void
   env?: NodeJS.ProcessEnv
+  /** Optional process-identity reader override for tests (W15 S2). */
+  readProcessIdentity?: (pid: number) => Promise<ProcessRow | undefined>
+  /** Optional stop-deps override for tests (W15 S1/S2). */
+  stopDepsOverride?: Partial<BackgroundServiceStopDeps>
 }): void {
   const { daemon } = input
   const env = input.env ?? process.env
   const userDataDir = app.getPath('userData')
+  const appPath = typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd()
   const appVersion = app.getVersion()
   const isPackaged = Boolean(app.isPackaged)
-  const stopDeps: BackgroundServiceStopDeps = { paths: { stateDirectory: join(userDataDir, 'daemon'), userDataDir } }
+  const readIdentity = input.readProcessIdentity ?? readProcessIdentity
+  const stopDeps: BackgroundServiceStopDeps = {
+    paths: { stateDirectory: join(userDataDir, 'daemon'), userDataDir },
+    readIdentity,
+    ...input.stopDepsOverride
+  }
   const loginStart = input.loginStart ?? createAppLoginStartManager({ daemonMode: daemon !== undefined, env })
 
   let latestConfigMismatch: BackgroundServiceRuntimeNotice['remoteConfigMismatch']
@@ -204,7 +215,24 @@ export function registerBackgroundServiceHandlers(input: {
     })
   }
   const restart = exclusive(() => restartBackgroundService(actionDeps))
-  const restartIdle = exclusive(() => restartBackgroundService({ ...actionDeps, activeRuns: async () => 0 }))
+  // S1: re-verify live activeRuns immediately before signalling; any non-zero or unknown
+  // answer falls back to restartBackgroundService's native confirmation dialog.
+  const restartIdle = (probeActiveRuns?: () => Promise<number | undefined>) =>
+    exclusive(() => restartBackgroundService({
+      ...actionDeps,
+      activeRuns: async () => probeActiveRuns ? await probeActiveRuns() : undefined
+    }))()
+  // S2: dev builds share userData with the daily packaged App; only auto-restart when the
+  // daemon explicitly reports isPackaged: false, or when the lock holder's command proves
+  // it belongs to this checkout. Packaged or unknown daemons always prompt.
+  const canAutoRestartTarget = async (meta?: { isPackaged?: boolean }): Promise<boolean> => {
+    if (meta?.isPackaged === true) return false
+    if (meta?.isPackaged === false) return true
+    const prepared = await prepareBackgroundServiceStop(stopDeps)
+    if (prepared.status !== 'running') return false
+    const row = await readIdentity(prepared.holder.pid).catch(() => undefined)
+    return Boolean(row && daemonCommandBelongsToCheckout(row.command, appPath))
+  }
   const setLoginStart = (enabled: boolean) => exclusive(() => setBackgroundServiceLoginStart(enabled, {
     daemonMode: daemon !== undefined,
     precheckEnable: () => loginStart.precheckEnable(),
@@ -255,6 +283,7 @@ export function registerBackgroundServiceHandlers(input: {
     const promptMismatch = createVersionMismatchPrompt({
       daemonMode: true,
       autoRestartIdle: !isPackaged,
+      canAutoRestartTarget,
       ask: show,
       restart,
       restartIdle,
@@ -264,7 +293,11 @@ export function registerBackgroundServiceHandlers(input: {
     daemon.onOutcome((result) => {
       void promptMismatch(
         connectionFromMode(result, appVersion),
-        result.runningActiveRuns !== undefined ? { activeRuns: result.runningActiveRuns } : undefined
+        {
+          ...(result.runningActiveRuns !== undefined ? { activeRuns: result.runningActiveRuns } : {}),
+          ...(result.runningIsPackaged !== undefined ? { isPackaged: result.runningIsPackaged } : {}),
+          ...(result.probeActiveRuns ? { probeActiveRuns: result.probeActiveRuns } : {})
+        }
       ).catch((error: unknown) => {
         console.warn('[background-service] version mismatch prompt failed', error)
       })
