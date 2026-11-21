@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // Temporary main-process entries for the isolated smoke app. Each one surrounds the
@@ -12,9 +12,23 @@ function productionMain() {
   return JSON.stringify(pathToFileURL('out/main/index.js').href)
 }
 
+// Electron takes app.getVersion() from the package.json of the app directory it was
+// launched with; a bare script has none, so the App would announce Electron's own
+// version and the daemon supervisor (which carries the build's version) refuses it with
+// daemon_config_version_conflict. A temp entry therefore lives in its own app directory
+// with the repo's name and version, and the smoke launches that directory.
+function writeEntryPackage(entryPath) {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+  mkdirSync(dirname(entryPath), { recursive: true })
+  writeFileSync(join(dirname(entryPath), 'package.json'), JSON.stringify({
+    name: pkg.name, version: pkg.version, private: true, type: 'module', main: basename(entryPath)
+  }))
+}
+
 // Run production handlers without launching viewers or executing fixture programs.
 // The receipt records the exact OS handoff after resolution and authorization.
 export function writeFileOpenEntry(entryPath, receiptPath) {
+  writeEntryPackage(entryPath)
   writeFileSync(entryPath, `
     import { app, shell } from 'electron'
     import { writeFileSync } from 'node:fs'

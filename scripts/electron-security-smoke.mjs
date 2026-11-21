@@ -120,7 +120,8 @@ async function main() {
     userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace)
   }) : undefined
   const openReceipt = join(temp, 'opened-paths.json')
-  const filesEntry = join(temp, 'files-main.mjs')
+  // Its own app directory (smoke-app-entries.mjs): Electron reads the App version there.
+  const filesEntry = join(temp, 'files-app', 'files-main.mjs')
   if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')
   const questionEntry = join(temp, 'question-main.mjs')
@@ -165,7 +166,7 @@ async function main() {
   const inProcessOnlyFixture = steerOnly || conversationOwnershipOnly || unifiedConversationOnly || sideChatOnly || largeHistoryOnly
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? filesEntry : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',
