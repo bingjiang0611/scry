@@ -13,7 +13,7 @@ import { shellEnv } from '../claude-locate'
 import { isRemoteMcpConfig, listProviderMcp } from '../mcp-config'
 import { isSafeOAuthAuthorizationUrl } from '../oauth-loopback'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
-import { heldPrompt, qoderOptions } from './qoder-launch'
+import { heldPrompt, qoderMcpLaunch, qoderOptions, type QoderMcpLaunch } from './qoder-launch'
 import type { AuthorizedMcpExecution, McpAuthInteraction } from './types'
 
 const QODER_MCP_AUTH_TIMEOUT_MS = 120_000
@@ -77,8 +77,15 @@ export async function readQoderMcpSnapshot(
     return capabilityUnknown<McpSnapshot>(context, 'read', '缺少已确认的 Qoder MCP 执行快照')
   }
   if (signal?.aborted) return capabilityUnknown<McpSnapshot>(context, 'read', MCP_CHECK_CANCELLED)
+  const mcpLaunch = qoderMcpLaunch(execution)
   const prompt = heldPrompt()
-  const q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, execution) as never })
+  let q: ReturnType<typeof query>
+  try {
+    q = query({ prompt: prompt.stream, options: qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, mcpLaunch.options) as never })
+  } catch (error) {
+    mcpLaunch.dispose()
+    throw error
+  }
   // A person's cancel stops waiting and finally closes the SDK query, which owns
   // and stops its own Qoder child; the runtime state stays unknown.
   let onAbort: (() => void) | undefined
@@ -98,6 +105,7 @@ export async function readQoderMcpSnapshot(
     if (onAbort) signal?.removeEventListener('abort', onAbort)
     prompt.release()
     await Promise.resolve(q.close()).catch(() => {})
+    mcpLaunch.dispose()
   }
 }
 
@@ -122,24 +130,34 @@ export async function reauthenticateQoderMcp(
     return failed(`Qoder 存在多个同名 MCP ${target.name}，无法安全绑定认证目标`)
   }
 
+  let mcpLaunch: QoderMcpLaunch
+  try {
+    mcpLaunch = qoderMcpLaunch({ ...execution, targets: [target] })
+  } catch (error) {
+    return failed(error)
+  }
   let loopback: Awaited<ReturnType<McpAuthInteraction['prepareLoopbackCallback']>>
   try {
     loopback = await interaction.prepareLoopbackCallback()
   } catch (error) {
+    mcpLaunch.dispose()
     return failed(error)
   }
 
   const prompt = heldPrompt()
-  const q = query({
-    prompt: prompt.stream,
-    options: {
-      ...qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, {
-        ...execution,
-        targets: [target]
-      }),
-      persistSession: false
-    } as never
-  })
+  let q: ReturnType<typeof query>
+  try {
+    q = query({
+      prompt: prompt.stream,
+      options: {
+        ...qoderOptions(context.cwd, undefined, undefined, undefined, 'default', false, mcpLaunch.options),
+        persistSession: false
+      } as never
+    })
+  } catch (error) {
+    mcpLaunch.dispose()
+    throw error
+  }
   let authenticated = false
   let timedOut = false
   let timer: NodeJS.Timeout | undefined
@@ -186,8 +204,11 @@ export async function reauthenticateQoderMcp(
     } finally {
       prompt.release()
       const close = Promise.resolve(q.close()).catch(() => {})
-      if (timedOut) void close
-      else await close
+      if (timedOut) void close.finally(mcpLaunch.dispose)
+      else {
+        await close
+        mcpLaunch.dispose()
+      }
     }
   }
 }

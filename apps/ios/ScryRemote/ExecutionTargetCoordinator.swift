@@ -273,18 +273,15 @@ final class ExecutionTargetCoordinator {
       discoveryIssue = recoveryUnavailable ? .transport(ConnectionCopy.targetMetadataUnavailable) : nil
     } catch {
       guard !Task.isCancelled, connections.load() == connection else { return }
-      let detail: String
-      if case G0Transport.RunError.host(code: "unknown_op") = error {
-        detail = ConnectionCopy.forwardingUnsupported
-      } else {
-        detail = RemoteRunStore.describe(error)
-      }
-      let diagnostic = ConnectionCopy.targetDiscoveryDiagnostic(detail)
-      if case let G0Transport.RunError.host(code) = error {
-        discoveryIssue = ["device_not_authorized", "grant_expired", "grant_revoked"].contains(code)
-          ? .authorization(diagnostic) : .protocolMismatch(diagnostic)
-      } else {
-        discoveryIssue = .transport(diagnostic, retryable: RelayTransportError.permitsReadRecovery(error))
+      switch ExecutionTargetErrorPolicy.classifyDiscoveryError(error) {
+      case .unavailable:
+        let retained = discoveredTargets.filter { store(for: $0).hasUnsentMessages || store(for: $0).hasUnresolvedRun }
+        discoveredTargets = retained
+        forwardingSupported = false
+        for scope in retained { let s = store(for: scope); s.updateTargetAvailability(false); s.stopLiveRuns() }
+        discoveryIssue = recoveryUnavailable ? .transport(ConnectionCopy.targetMetadataUnavailable) : nil
+      case let .issue(failure):
+        discoveryIssue = failure
       }
       // A failed discovery cannot redirect an existing conversation/new draft.
     }

@@ -29,7 +29,7 @@ _Avoid_: 不加限定的 Session、原生会话、运行
 _Avoid_: Scry 会话、进程、完整可见历史
 
 **Provider**：
-Scry 接入的 Agent 执行系统，如 Claude Code、Codex、Qoder、OpenCode 或 Pi。Provider 不等于所选模型或模型服务商，其能力与权限语义也不必相同。
+Scry 接入的 Agent 执行系统，如 Claude Code、Codex、Qoder、OpenCode、Pi 或 Antigravity。Provider 不等于所选模型或模型服务商，其能力与权限语义也不必相同。
 _Avoid_: 模型、模型服务商、账号
 
 **会话绑定（Conversation Binding）**：

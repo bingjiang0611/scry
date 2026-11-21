@@ -1,5 +1,5 @@
 export const SIDEBAR_SESSION_COPY = {
-  providers: { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi' },
+  providers: { claude: 'Claude', codex: 'Codex', qoder: 'Qoder', opencode: 'OpenCode', pi: 'Pi', antigravity: 'Antigravity' },
   legacy: '历史?',
   noPreview: '(无预览)',
   unread: '有新结果，未查看',

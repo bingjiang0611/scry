@@ -99,13 +99,14 @@ export class SessionLedgerError extends Error {
   }
 }
 
-const NEXT: Record<RunLifecycle, RunLifecycle[]> = {
-  recorded: ['dispatched', 'cancelled'],
+export const RUN_LIFECYCLE_NEXT: Readonly<Record<RunLifecycle, readonly RunLifecycle[]>> = {
+  recorded: ['dispatched', 'failed', 'cancelled'],
   dispatched: ['settled', 'failed', 'cancelled'],
   settled: [],
   failed: [],
   cancelled: []
 }
+const NEXT = RUN_LIFECYCLE_NEXT
 const KIND_FOR: Record<Exclude<RunLifecycle, 'recorded'> | 'progress', LedgerEventKind> = {
   dispatched: 'run_dispatched',
   progress: 'run_progress',

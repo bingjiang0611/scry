@@ -54,6 +54,24 @@ export async function freePort() {
   return port
 }
 
+/**
+ * Timing benchmark env: observes main-process [scry:perf]/[scry:resource] and the private main
+ * IPC snapshot channel with SCRY_ELECTRON_SMOKE_PROVIDER=1; keep explicit in-process mode.
+ */
+export function inProcessBenchEnv(home, base = process.env) {
+  return {
+    ...base,
+    HOME: home,
+    SCRY_HOST_DAEMON: '0',
+    SCRY_TEST_APP: '1',
+    SCRY_PERF_LOG: '1',
+    ELECTRON_ENABLE_LOGGING: '1',
+    SCRY_ELECTRON_SMOKE_PROVIDER: '1',
+    SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',
+    SCRY_REMOTE_HOST: '0'
+  }
+}
+
 export async function openRendererSession(port, startupProbe) {
   const deadline = Date.now() + 30_000
   let page

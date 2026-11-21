@@ -22,6 +22,7 @@ import { editActionLineCounts } from '../turn-diff'
 
 
 
+import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { RecorderContentPager } from './ChatTurnPager'
 import { fmtDur } from './ChatTurnShared'
 export function ToolItem({
@@ -83,6 +84,12 @@ export function ToolItem({
   const kind = ev.isError ? 'err' : ev.isMcp ? 'mcp' : ev.kind
   const displayName = toolDisplayName(ev)
   const rowDisplayName = waitingForAnswer ? '需要你的选择' : displayName
+  const approvalMeta = ev.runtimeMetadata as { approvalSource?: unknown; approvalLabel?: unknown } | undefined
+  const hookAllowedLabel = approvalMeta?.approvalSource === 'hook'
+    ? (typeof approvalMeta.approvalLabel === 'string' && approvalMeta.approvalLabel
+        ? approvalMeta.approvalLabel
+        : ANTIGRAVITY_COPY.hookAllowed)
+    : null
   const durPct = ev.durationMs != null ? Math.max(3, Math.round((ev.durationMs / maxDur) * 100)) : 0
   return (
     <div
@@ -125,6 +132,9 @@ export function ToolItem({
             </span>
           )}
           {meta && <span className="tok">{meta}</span>}
+          {hookAllowedLabel && (
+            <span className="tok" title={ANTIGRAVITY_COPY.hookAllowedTitle}>{hookAllowedLabel}</span>
+          )}
           {ev.isMcp && <span className="tok" title={ev.mcpServer}>mcp:{ev.mcpServer}</span>}
           {waitingForAnswer && questionRequest && (
             <span className="question-count">{questionRequest.questions.length} 个问题</span>

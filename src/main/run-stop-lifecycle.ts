@@ -17,7 +17,8 @@ const STOP_ESCALATION_WINDOWS: Record<RuntimeProvider, AgentStopEscalationWindow
   codex_cli: { gracefulMs: 4000, forceKillMs: 4000 },
   qoder_cli: { gracefulMs: 4000, forceKillMs: 3000 },
   opencode_server: { gracefulMs: 5000, forceKillMs: 4000 },
-  pi_rpc: { gracefulMs: 4000, forceKillMs: 3000 }
+  pi_rpc: { gracefulMs: 4000, forceKillMs: 3000 },
+  antigravity_acp: { gracefulMs: 5000, forceKillMs: 4000 }
 }
 
 export function stopEscalationWindow(runtimeProvider: RuntimeProvider): AgentStopEscalationWindow {

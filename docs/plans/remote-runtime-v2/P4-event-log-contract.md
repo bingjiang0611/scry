@@ -1,3 +1,5 @@
+> 已被取代：现行设计见 [P4-orchestration-design](P4-orchestration-design.md)（按 daemon 之后的代码重写）；本文仅留作 Batch 1 记录。
+
 # P4 · 编排事件日志契约（只设计，不含实现）
 
 状态：设计稿。P4 尚未实现；本文定义表结构、事务边界、projection、订阅协议与迁移，并列出需要维护者决定的点。

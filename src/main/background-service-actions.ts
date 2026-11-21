@@ -1,7 +1,8 @@
 import type { BackgroundServiceAction, BackgroundServiceActionResult, BackgroundServiceConnection } from '../shared/background-service'
 import type { DaemonLockRecord } from '../daemon/ledger-lock'
+import type { LoginStartMutationResult } from '../daemon/login-start'
 import type { PreparedStop, StopOutcome } from './background-service-stop'
-import { reasonMessage } from './background-service-copy'
+import { loginStartFailureMessage, reasonMessage } from './background-service-copy'
 
 // The three «后台服务» actions (B4-S S0-1): restart, quit with the service, and reconnect
 // after the local grant was revoked. Decisions only; Electron (dialogs, app.quit) and the
@@ -135,4 +136,75 @@ export async function reconnectBackgroundService(deps: BackgroundServiceActionDe
     release()
   }
   return connectionResult(await deps.reconnect())
+}
+
+export type LoginStartPrecheck =
+  | { ok: true; policyEnvKeys: string[] }
+  | { ok: false; reason: string; otherUserDataDir?: string; otherExecutable?: string }
+
+export interface LoginStartActionDeps {
+  daemonMode: boolean
+  precheckEnable(): LoginStartPrecheck
+  confirmEnable(policyEnvKeys: readonly string[]): Promise<boolean>
+  isDaemonRunning(): Promise<boolean>
+  enable(options: { daemonRunning: boolean }): Promise<LoginStartMutationResult>
+  disable(options: { daemonRunning: boolean }): Promise<LoginStartMutationResult>
+}
+
+export async function setBackgroundServiceLoginStart(
+  enabled: boolean,
+  deps: LoginStartActionDeps
+): Promise<BackgroundServiceActionResult> {
+  if (!deps.daemonMode) return failed('daemon_mode_disabled')
+  if (enabled) {
+    const precheck = deps.precheckEnable()
+    if (!precheck.ok) {
+      return {
+        status: 'failed',
+        reason: precheck.reason,
+        message: loginStartFailureMessage(precheck)
+      }
+    }
+    if (!await deps.confirmEnable(precheck.policyEnvKeys)) return cancelled
+    const daemonRunning = await deps.isDaemonRunning()
+    const outcome = await deps.enable({ daemonRunning })
+    if (!outcome.ok) {
+      return { status: 'failed', reason: outcome.reason, message: loginStartFailureMessage(outcome) }
+    }
+    return done
+  }
+  const daemonRunning = await deps.isDaemonRunning()
+  const outcome = await deps.disable({ daemonRunning })
+  if (!outcome.ok) {
+    return { status: 'failed', reason: outcome.reason, message: loginStartFailureMessage(outcome) }
+  }
+  return done
+}
+
+export interface HostCliApprovalActionDeps {
+  experimentalEnabled: boolean
+  daemonMode: boolean
+  connection(): Promise<BackgroundServiceConnection>
+  confirmEnable(): Promise<boolean>
+  apply(enabled: boolean): Promise<void>
+}
+
+export async function setHostCliApproval(
+  enabled: boolean,
+  deps: HostCliApprovalActionDeps
+): Promise<BackgroundServiceActionResult> {
+  // N1: enabling requires App to carry SCRY_EXPERIMENTAL_HOST_CLI=1 (and native confirmation),
+  // whereas disabling is always allowed so a user can turn off a daemon that carries the flag.
+  if (enabled && !deps.experimentalEnabled) return failed('host_cli_experimental_disabled')
+  if (!deps.daemonMode) return failed('daemon_mode_disabled')
+  const conn = await deps.connection()
+  if (conn.state !== 'ready') return connectionResult(conn)
+  if (enabled && !await deps.confirmEnable()) return cancelled
+  try {
+    await deps.apply(enabled)
+    return done
+  } catch (error) {
+    const reason = error instanceof Error && /^[a-z0-9_:]+$/.test(error.message) ? error.message : 'host_admin_failed'
+    return failed(reason)
+  }
 }

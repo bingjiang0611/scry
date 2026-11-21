@@ -38,6 +38,9 @@ export function hostEnv({ home, tmp }) {
     LANG: 'en_US.UTF-8',
     ELECTRON_ENABLE_LOGGING: '1',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
+    // Concurrency trace benchmark: measures main-process snapshot boundaries and loopback
+    // remote host in-process with SCRY_ELECTRON_SMOKE_PROVIDER=1; keep explicit in-process mode.
+    SCRY_HOST_DAEMON: '0',
     SCRY_TEST_APP: '1',
     SCRY_ELECTRON_SMOKE_PROVIDER: '1',
     SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',

@@ -17,7 +17,7 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024 - 1024
 const MAX_CACHED_BYTES = DESKTOP_HISTORY_MAX_BYTES
 const MAX_CACHED_PAGES = 4
 const CHUNK_IDLE_MS = 60_000
-const PROVIDERS: readonly string[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
+const PROVIDERS: readonly string[] = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity']
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_request')

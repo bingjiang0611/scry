@@ -4,6 +4,7 @@ import type { TraceEvent } from '@shared/trace'
 export type TokenCacheAccounting = 'separate' | 'input_includes_cache'
 
 export function tokenCacheAccounting(e: Pick<TraceEvent, 'providerId' | 'runtimeProvider' | 'billingProvider'> | undefined): TokenCacheAccounting {
+  if (e?.providerId === 'antigravity' || e?.runtimeProvider === 'antigravity_acp') return 'separate'
   if (e?.providerId === 'opencode' || e?.runtimeProvider === 'opencode_server') return 'separate'
   if (
     e?.providerId === 'codex' ||

@@ -167,6 +167,7 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
                 <li key={device.deviceId}>
                   <span className="remote-access-icon"><Icon name="laptop" /></span>
                   <span className="remote-pairing__label">{device.label}</span>
+                  <span className="remote-pairing__approved-via">{device.approvedViaText}</span>
                   <button type="button" onClick={() => revoke(device.deviceId)} disabled={busy}>{copy.revoke}</button>
                 </li>
               ))}

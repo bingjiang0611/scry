@@ -23,7 +23,10 @@ export function workspaceReferenceToken(entry: Pick<WorkspaceEntry, 'kind' | 'pa
  * notice is the reason shown in the panel, so a removed action is explained instead
  * of silently absent.
  */
-export function resolveWorkspaceOps(ops: { openPath: boolean; trashItem: boolean } | undefined): {
+export function resolveWorkspaceOps(
+  ops: { openPath: boolean; trashItem: boolean } | undefined,
+  hostLabel?: string
+): {
   openPath: boolean
   trashItem: boolean
   notice: string | null
@@ -34,15 +37,38 @@ export function resolveWorkspaceOps(ops: { openPath: boolean; trashItem: boolean
     ...(openPath ? [] : ['在系统应用中打开']),
     ...(trashItem ? [] : ['移入废纸篓'])
   ]
-  return { openPath, trashItem, notice: missing.length === 0 ? null : `此工作区不支持：${missing.join('、')}` }
+  if (missing.length === 0) return { openPath, trashItem, notice: null }
+  const notice = hostLabel
+    ? `需要在 ${hostLabel} 上打开 Scry 桌面端以启用：${missing.join('、')}`
+    : `此工作区不支持：${missing.join('、')}`
+  return { openPath, trashItem, notice }
+}
+
+/**
+ * The App-offline workbench copy is only accurate for hosts new enough to bridge
+ * openPath/trashItem through their App (they also publish session actions). An older
+ * daemon host reports the same missing ops for a different reason, so it keeps the
+ * generic copy instead of being told to open the desktop App.
+ */
+export function workspaceOpsHostLabel(
+  catalog: { sessionActions?: boolean } | null | undefined,
+  hostLabel: string | undefined
+): string | undefined {
+  return catalog?.sessionActions === true ? hostLabel : undefined
 }
 
 export function pathContains(parent: string, child: string): boolean {
   return child === parent || child.startsWith(`${parent}/`)
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function errorMessage(error: unknown, hostLabel?: string): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  if (raw.includes('desktop_workbench_operation_unavailable:')) {
+    return hostLabel
+      ? `需要在 ${hostLabel} 上打开 Scry 桌面端后才能执行此操作`
+      : '需要在远端主机上打开 Scry 桌面端后才能执行此操作'
+  }
+  return raw
 }
 
 function parentPath(path: string): string {
@@ -68,6 +94,8 @@ interface WorkspacePanelProps {
   api?: WorkspaceApi
   /** Operations the host reports it can perform; absent keeps every action. */
   ops?: { openPath: boolean; trashItem: boolean }
+  /** Remote host display label used for accurate App-offline workbench copy (W17). */
+  hostLabel?: string
 }
 
 type ItemDialog =
@@ -79,9 +107,9 @@ type ItemDialog =
 // previous listing until a later refresh reaches them.
 const MAX_REFRESHED_DIRECTORIES = 16
 
-export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi, ops }: WorkspacePanelProps) {
+export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest, onClose, onAddReference, onDirtyChange, readOnlySource, api: injectedApi, ops, hostLabel }: WorkspacePanelProps) {
   const api = useMemo<WorkspaceApi>(() => injectedApi ?? defaultWorkspaceApi, [injectedApi])
-  const capabilities = useMemo(() => resolveWorkspaceOps(ops), [ops])
+  const capabilities = useMemo(() => resolveWorkspaceOps(ops, hostLabel), [ops, hostLabel])
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
@@ -203,7 +231,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
     setContext(null)
     if (!readOnlySource && capabilities.openPath && canOpenWorkspaceFileExternally(entry.path)) {
       setError(null)
-      void api.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError)))
+      void api.workspaceOpenExternal({ cwd, path: entry.path }).catch((openError) => setError(errorMessage(openError, hostLabel)))
       return
     }
     if (selected?.path !== entry.path && !confirmLeave()) return
@@ -265,7 +293,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       }
       setItemDialog(null)
     } catch (mutationError) {
-      setError(errorMessage(mutationError))
+      setError(errorMessage(mutationError, hostLabel))
     } finally {
       setMutating(false)
     }
@@ -282,7 +310,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
       await loadDirectory(parentPath(deleteTarget.path))
       setDeleteTarget(null)
     } catch (mutationError) {
-      setError(errorMessage(mutationError))
+      setError(errorMessage(mutationError, hostLabel))
     } finally {
       setMutating(false)
     }

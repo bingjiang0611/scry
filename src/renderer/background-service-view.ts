@@ -1,7 +1,16 @@
 import {
   daemonCredentialUnavailableMessage, isDaemonCredentialUnavailable,
-  type BackgroundServiceAction, type BackgroundServiceActionResult, type BackgroundServiceStatus
+  type BackgroundServiceAction, type BackgroundServiceActionResult,
+  type BackgroundServiceStatus, type LoginStartPolicyEntry
 } from '../shared/background-service'
+import {
+  CLI_APPROVAL_COPY,
+  LOGIN_START_COPY,
+  formatLoginStartConflictDetail,
+  formatLoginStartStatus,
+  formatRemoteConfigSummary,
+  runtimeNoticeMessages
+} from './constants/background-service-copy'
 import { detectRendererPlatform, type RendererPlatform } from './platform'
 
 // What the «后台服务» section shows for one status read. Values main could not establish
@@ -13,9 +22,28 @@ export interface BackgroundServiceRow { label: string; value: string; unknown: b
 export type NoticeTone = 'info' | 'warn' | 'bad'
 export interface BackgroundServiceNotice { tone: NoticeTone; text: string }
 
+export interface BackgroundServiceLoginStartView {
+  stateText: string
+  enabled: boolean
+  canToggle: boolean
+  policyEnv: LoginStartPolicyEntry[]
+  notices: BackgroundServiceNotice[]
+}
+
+export interface BackgroundServiceCliApprovalView {
+  stateText: string
+  enabled: boolean
+  canToggle: boolean
+  hostCliPath?: string
+  hint: string
+}
+
 export interface BackgroundServiceView {
   rows: BackgroundServiceRow[]
   notice?: BackgroundServiceNotice
+  runtimeNotices: BackgroundServiceNotice[]
+  loginStart?: BackgroundServiceLoginStartView
+  cliApproval?: BackgroundServiceCliApprovalView
   /** Which actions this state offers; `restartPrimary` when restarting is the fix. */
   actions: { restart: boolean; restartPrimary: boolean; reconnect: boolean; quit: boolean }
 }
@@ -45,6 +73,7 @@ export function projectBackgroundService(
     return {
       rows: [row('数据目录', status.userDataDir)],
       notice: { tone: 'info', text: '后台服务模式未启用（SCRY_HOST_DAEMON）：Agent 运行在 App 进程内，没有后台服务可以查看或操作。' },
+      runtimeNotices: [],
       actions: { restart: false, restartPrimary: false, reconnect: false, quit: false }
     }
   }
@@ -78,17 +107,75 @@ export function projectBackgroundService(
   const devices = status.devices === null ? null
     : status.devices.state === 'remote-disabled' ? '远程访问未启用'
       : `${status.devices.paired} 台`
+  const rows: BackgroundServiceRow[] = [
+    row('连接', state),
+    row('版本', status.version),
+    row('进程', status.pid === null ? null : `pid ${status.pid}`),
+    row('运行时长', formatUptime(status.startedAt, now)),
+    row('数据目录', status.userDataDir),
+    row('已配对设备', devices),
+    row('运行中的任务', status.activeRuns === null ? null : `${status.activeRuns} 个`)
+  ]
+  if (status.launchedBy !== undefined) {
+    const launcherText = status.launchedBy === null ? null
+      : status.launchedBy === 'app' ? LOGIN_START_COPY.launchedByApp
+        : status.launchedByVerified ? LOGIN_START_COPY.launchedByServiceVerified : LOGIN_START_COPY.launchedByServiceSelfReported
+    rows.push(row('启动方式', launcherText))
+  }
+  if (status.remoteConfig !== undefined) {
+    rows.push(row('生效配置', status.remoteConfig ? formatRemoteConfigSummary(status.remoteConfig) : null))
+  }
+
+  let loginStartView: BackgroundServiceLoginStartView | undefined
+  if (status.loginStart) {
+    const ls = status.loginStart
+    const lsNotices: BackgroundServiceNotice[] = []
+    if (ls.state === 'enabled' && status.launchedBy === 'app') {
+      lsNotices.push({ tone: 'info', text: LOGIN_START_COPY.appRunningWillSwitchAtNextLogin })
+    }
+    if (ls.state === 'enabled' && ls.rewrittenFromExecutable) {
+      lsNotices.push({ tone: 'info', text: `检测到 Scry 已移动，已自动更新系统服务指向当前程序（原路径：${ls.rewrittenFromExecutable}）。` })
+    }
+    if ((ls.state === 'enabled' || ls.state === 'disabled') && ls.linuxLinger === 'no') {
+      lsNotices.push({ tone: 'info', text: LOGIN_START_COPY.linuxLingerNo })
+    }
+    if (ls.state === 'conflict') {
+      lsNotices.push({ tone: 'warn', text: formatLoginStartConflictDetail(ls) })
+    }
+    loginStartView = {
+      stateText: formatLoginStartStatus(ls),
+      enabled: ls.state === 'enabled',
+      canToggle: ls.state === 'enabled' || ls.state === 'disabled',
+      policyEnv: ls.state === 'enabled' ? ls.policyEnv : [],
+      notices: lsNotices
+    }
+  }
+
+  let cliApprovalView: BackgroundServiceCliApprovalView | undefined
+  if (status.cliApproval) {
+    const cli = status.cliApproval
+    cliApprovalView = {
+      stateText: cli.state === 'enabled'
+        ? CLI_APPROVAL_COPY.stateEnabled
+        : cli.state === 'disabled'
+          ? CLI_APPROVAL_COPY.stateDisabled
+          : CLI_APPROVAL_COPY.stateUnavailable(cli.reason),
+      enabled: cli.state === 'enabled',
+      canToggle: cli.state === 'enabled' || cli.state === 'disabled',
+      ...(cli.state !== 'unavailable' && cli.hostCliPath ? { hostCliPath: cli.hostCliPath } : {}),
+      hint: CLI_APPROVAL_COPY.riskHint
+    }
+  }
+
+  const runtimeNotices: BackgroundServiceNotice[] = runtimeNoticeMessages(status.runtimeNotice)
+    .map((text) => ({ tone: 'warn', text }))
+
   return {
-    rows: [
-      row('连接', state),
-      row('版本', status.version),
-      row('进程', status.pid === null ? null : `pid ${status.pid}`),
-      row('运行时长', formatUptime(status.startedAt, now)),
-      row('数据目录', status.userDataDir),
-      row('已配对设备', devices),
-      row('运行中的任务', status.activeRuns === null ? null : `${status.activeRuns} 个`)
-    ],
+    rows,
     ...(notice ? { notice } : {}),
+    runtimeNotices,
+    ...(loginStartView ? { loginStart: loginStartView } : {}),
+    ...(cliApprovalView ? { cliApproval: cliApprovalView } : {}),
     actions: {
       restart: true,
       restartPrimary: connection.state === 'version-mismatch' || (connection.state === 'unavailable' && !credentialRefused),
@@ -108,5 +195,17 @@ const DONE: Record<BackgroundServiceAction, string> = {
 export function describeActionResult(action: BackgroundServiceAction, result: BackgroundServiceActionResult): BackgroundServiceNotice {
   if (result.status === 'done') return { tone: 'info', text: DONE[action] }
   if (result.status === 'cancelled') return { tone: 'info', text: '已取消，后台服务没有被停止。' }
+  return { tone: 'bad', text: result.message }
+}
+
+export function describeLoginStartResult(enabled: boolean, result: BackgroundServiceActionResult): BackgroundServiceNotice {
+  if (result.status === 'done') return { tone: 'info', text: enabled ? LOGIN_START_COPY.enabledDone : LOGIN_START_COPY.disabledDone }
+  if (result.status === 'cancelled') return { tone: 'info', text: LOGIN_START_COPY.cancelled }
+  return { tone: 'bad', text: result.message }
+}
+
+export function describeCliApprovalResult(enabled: boolean, result: BackgroundServiceActionResult): BackgroundServiceNotice {
+  if (result.status === 'done') return { tone: 'info', text: enabled ? CLI_APPROVAL_COPY.enabledDone : CLI_APPROVAL_COPY.disabledDone }
+  if (result.status === 'cancelled') return { tone: 'info', text: CLI_APPROVAL_COPY.cancelled }
   return { tone: 'bad', text: result.message }
 }

@@ -52,7 +52,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
     ? { category: terminalReason, hint: runTerminationHint(terminalReason) }
     : runtimeErr
       ? { category: runtimeErr.brief.stage, hint: runtimeErr.brief.nextAction }
-      : classifyError(message)
+      : classifyError(message, providerId)
   const { category, hint } = classified
   let providerTurnId: string | undefined
   try {

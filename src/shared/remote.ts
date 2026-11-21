@@ -40,6 +40,8 @@ export interface RemoteDevice {
   expiresAt: number
   confirmedAt: number
   revoked: boolean
+  /** Recorded approval path (P5-host-cli §3.7); absent on legacy grants or while flag off. */
+  approvedVia?: 'app' | 'host_cli'
 }
 
 // Host-observed relay pool state. The counts describe only outer legs owned by

@@ -36,7 +36,7 @@ import {
   isAgentTerminalStatus,
   observedAgentStatus
 } from './qoder-hooks'
-import { livePrompt, QoderStderrTail, qoderExecutable, qoderOptions, signalProcessTree } from './qoder-launch'
+import { livePrompt, QoderStderrTail, qoderExecutable, qoderMcpLaunch, qoderOptions, signalProcessTree, type QoderMcpLaunch } from './qoder-launch'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
@@ -139,7 +139,9 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       }, false)
     }
   }
-  const promise: Promise<ProviderRunResult> = (async () => {
+  // Owns the private MCP config file for this launch; removed when the run settles.
+  let mcpLaunch: QoderMcpLaunch | undefined
+  const promise: Promise<ProviderRunResult> = (async (): Promise<ProviderRunResult> => {
     if (request.expectedContinuationKey) {
       // Settings can change between the consumer's decision and the dispatch, so the
       // identity is re-derived here from the same inputs the adapter reports.
@@ -173,6 +175,8 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     const outgoingText = history.text(providerPrompt)
     const prompt = livePrompt(outgoingText, submittedUserUuid)
     releaseProviderPrompt = prompt.release
+    // Written before the attempt is recorded: a failed write sends nothing.
+    mcpLaunch = qoderMcpLaunch(request.mcpExecution)
     // The CLI consumes this stream as soon as the transport starts, so the
     // attempt observation must precede query(), not the transcript read.
     history.attempting(outgoingText)
@@ -199,7 +203,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           },
           request.permissionMode,
           request.managedRecorder === true,
-          request.mcpExecution,
+          mcpLaunch.options,
           request.managedRecorderIdentity,
           stderrTail
         ),
@@ -387,7 +391,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       status: stopped ? 'interrupted' : providerStatus,
       mcp: statuses ? qoderMcpSnapshot(statuses) : undefined
     }
-  })()
+  })().finally(() => mcpLaunch?.dispose())
   const interrupt = (): void => {
     stopped = true
     backgroundMonitor.pause()

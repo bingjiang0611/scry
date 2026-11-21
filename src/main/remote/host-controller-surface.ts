@@ -1,9 +1,9 @@
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { DesktopDirectoryResult, DesktopHostReadResult, RemoteProviderQuery } from '../../shared/desktop-remote'
-import type { RemoteIntentRouting, MacRunSource, LiveRunRef, HostControllerDependencies } from './host-controller-types'
+import type { RemoteIntentRouting, LiveRunRef, HostControllerDependencies } from './host-controller-types'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import { DesktopAttachmentStore, type DesktopAttachmentReference } from './desktop-attachments'
-import { HOST_RESTARTED_DETAIL, REMOTE_RUN_ID } from './host-controller-routing'
+import { REMOTE_RUN_ID } from './host-controller-routing'
 import { LiveWatchers, type WatchInput, type WatchLifecycle, type WatchResult } from './host-controller-watch'
 import { PairingAuthority } from './pairing'
 import { RemoteDispatcher } from './remote-dispatcher'
@@ -16,12 +16,13 @@ import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { answerOwnerRunQuestion, answerRunQuestion, stopRun, type AnswerInput, type RunControlDeps } from './host-controller-run-controls'
 import { authorizedCwd, isRemoteRun, macRun } from './host-controller-runs'
 import { chunkAttachment, commitAttachment, releaseIntentAttachments, resolveIntentAttachments, startAttachment, type AttachmentDeps } from './host-controller-attachments'
-import { createExecution, ledgerEventObserver } from './host-controller-execution'
+import { createExecution, ledgerEventObserver, recoverDispatchedLedgerRuns } from './host-controller-execution'
 import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopReadDeps } from './host-controller-desktop-reads'
 import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-catalog-snapshot'
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
-import { submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
+import type { OrchestrationImmediateDispatchChecks } from './orchestration-seam'
+import { resolveIntentCommand, submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
 import { type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
@@ -48,33 +49,17 @@ export class HostController {
   #live = new Map<string, { routing: RemoteIntentRouting; externalSessionId?: string }>()
   #workspace: WorkspaceAuthorizer
   #fileDownloads: RemoteFileDownloads
-  #macRuns?: MacRunSource
-  #readDesktop?: HostControllerDependencies['readDesktop']
-  #desktopWorkbench?: HostControllerDependencies['desktopWorkbench']
-  #desktopDirectories?: HostControllerDependencies['desktopDirectories']
-  #providerControls?: HostControllerDependencies['listProviderControls']
-  #sessionAction?: HostControllerDependencies['sessionAction']
-  #sessionFork?: HostControllerDependencies['sessionFork']
-  #sessionDelete?: HostControllerDependencies['sessionDelete']
-  #toolPanels?: HostControllerDependencies['toolPanels']
+  #injected: HostControllerDependencies
   #attachmentStore?: DesktopAttachmentStore
-  // Wake-up signal for long-poll watchers. Ledger events and output appends bump
-  // it; a watcher always re-reads through the normal authorized readers.
+  #immediateDispatch: OrchestrationImmediateDispatchChecks
   #watchers: LiveWatchers
+  #disposeExecution: () => void
 
   constructor(deps: HostControllerDependencies) {
     this.authority = new PairingAuthority(deps.pairing)
     this.#workspace = deps.workspace
     this.#fileDownloads = new RemoteFileDownloads(deps.workspace)
-    this.#macRuns = deps.macRuns
-    this.#readDesktop = deps.readDesktop
-    this.#desktopWorkbench = deps.desktopWorkbench
-    this.#desktopDirectories = deps.desktopDirectories
-    this.#providerControls = deps.listProviderControls
-    this.#sessionAction = deps.sessionAction
-    this.#sessionFork = deps.sessionFork
-    this.#sessionDelete = deps.sessionDelete
-    this.#toolPanels = deps.toolPanels
+    this.#injected = deps
     this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: ledgerEventObserver(deps, () => this.#watchers.notify()) })
     this.#attachmentStore = deps.attachmentStore ?? (deps.attachmentDirectory
       ? new DesktopAttachmentStore(deps.attachmentDirectory, (peer, id) => this.#ledger.intentRun(scopedIntentId(peer, id))?.lifecycle)
@@ -92,11 +77,13 @@ export class HostController {
     })
     this.#gateway = wiring.gateway
     this.#dispatcher = wiring.dispatcher
+    this.#immediateDispatch = wiring.immediateDispatch
+    this.#disposeExecution = wiring.dispose
     this.#watchers = new LiveWatchers({
       authorizeDevice: (peer) => this.authorizeDevice(peer),
       authorizedCwd: (cwd) => authorizedCwd(this.#workspace, cwd),
       ledger: this.#ledger, gateway: this.#gateway, interactions: this.#interactions,
-      stops: this.#stops, live: this.#live, ...(this.#macRuns ? { macRuns: this.#macRuns } : {}),
+      stops: this.#stops, live: this.#live, ...(deps.macRuns ? { macRuns: deps.macRuns } : {}),
       poll: (peer, input) => this.poll(peer, input),
       pendingQuestions: (peer, input) => this.pendingQuestions(peer, input),
       runOutput: (peer, input) => this.runOutput(peer, input),
@@ -104,15 +91,9 @@ export class HostController {
     })
   }
 
-  // Startup only, before any executor exists in this process.
-  //   - A run still `dispatched` lost its executor with the previous process, so
-  //     nothing can ever report its terminal result. Close it as failed with that
-  //     reason instead of leaving the device showing it as running forever. Its
-  //     Provider outcome stays unknown, and it is never re-run.
-  //   - Dispatch any intent that was durably recorded but never dispatched,
-  //     exactly once.
+  // Startup only: reconcile orphaned dispatched runs and pump undispatched intents.
   recover(): void {
-    for (const runId of this.#ledger.dispatchedRuns()) this.#ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
+    recoverDispatchedLedgerRuns(this.#ledger, this.#injected.orchestration)
     this.#dispatcher.pump()
   }
 
@@ -146,15 +127,16 @@ export class HostController {
   }
 
   resolveIntent(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
-    // Do not pump a recovery fence through the submission path.
-    return this.#gateway.resolveIntent(peerCertSHA256, input)
+    return resolveIntentCommand(this.#deps(), peerCertSHA256, input)
   }
 
   poll(peerCertSHA256: string, input: { cursor: number }): ReturnType<SessionLedger['since']> {
+    if (this.#injected.orchestration?.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
     return this.#gateway.poll(peerCertSHA256, input)
   }
 
   runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {
+    if (this.#injected.orchestration?.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
     return this.#gateway.runState(peerCertSHA256, input)
   }
 
@@ -182,7 +164,7 @@ export class HostController {
     return await readDesktop(this.#deps(), peerCertSHA256, input)
   }
 
-  releaseDesktopPeer(peer: string): Promise<void> { return this.#desktopWorkbench?.release(peer) ?? Promise.resolve() }
+  releaseDesktopPeer(peer: string): Promise<void> { return this.#injected.desktopWorkbench?.release(peer) ?? Promise.resolve() }
 
   async desktopWorkbench(peer: string, input: unknown): Promise<unknown> {
     return await readDesktopWorkbench(this.#deps(), peer, input)
@@ -238,18 +220,20 @@ export class HostController {
   // One object satisfies every device-facing deps interface; each helper reads
   // only its own fields, and `authorizeDevice` re-checks the peer every time.
   #deps(): SubmitDeps & DesktopReadDeps & ToolPanelDeps & RunControlDeps & SessionActionDeps & AttachmentDeps {
+    const d = this.#injected
     return {
-      authorizeDevice: (value) => this.authorizeDevice(value), toolPanels: this.#toolPanels,
+      authorizeDevice: (value) => this.authorizeDevice(value), toolPanels: d.toolPanels,
       ledger: this.#ledger, gateway: this.#gateway, dispatcher: this.#dispatcher, scopedIntentId,
       attachmentStore: this.#attachmentStore, store: this.#attachmentStore,
-      readDesktop: this.#readDesktop, desktopWorkbench: this.#desktopWorkbench, desktopDirectories: this.#desktopDirectories,
-      providerControls: this.#providerControls !== undefined,
-      canSessionActions: this.#sessionAction !== undefined,
-      canSessionFork: this.#sessionFork !== undefined,
-      canSessionDelete: this.#sessionDelete !== undefined,
-      workspace: this.#workspace, sessionAction: this.#sessionAction, sessionFork: this.#sessionFork, sessionDelete: this.#sessionDelete,
-      isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(this.#macRuns ? { macRuns: this.#macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: this.#macRuns,
-      interactions: this.#interactions, stops: this.#stops
+      readDesktop: d.readDesktop, desktopWorkbench: d.desktopWorkbench, desktopDirectories: d.desktopDirectories,
+      providerControls: d.listProviderControls !== undefined,
+      canSessionActions: d.sessionAction !== undefined,
+      canSessionFork: d.sessionFork !== undefined,
+      canSessionDelete: d.sessionDelete !== undefined,
+      hasHostAdminNotices: d.listHostAdminNotices !== undefined,
+      workspace: this.#workspace, sessionAction: d.sessionAction, sessionFork: d.sessionFork, sessionDelete: d.sessionDelete,
+      isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(d.macRuns ? { macRuns: d.macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: d.macRuns,
+      interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch
     }
   }
 
@@ -287,7 +271,8 @@ export class HostController {
       readDesktop: (peer, query) => this.readDesktop(peer, query),
       listProjects: (peer) => this.#gateway.listProjects(peer),
       listProviders: (peer) => this.#gateway.listProviders(peer),
-      listSessionsPage: (peer, query) => this.#gateway.listSessionsPage(peer, query)
+      listSessionsPage: (peer, query) => this.#gateway.listSessionsPage(peer, query),
+      ...(this.#injected.listHostAdminNotices ? { listHostAdminNotices: this.#injected.listHostAdminNotices } : {})
     }, peerCertSHA256, input)
   }
 
@@ -302,6 +287,7 @@ export class HostController {
   }
 
   closeReadResources(): void {
+    this.#disposeExecution()
     this.#watchers.close()
     this.#fileDownloads.dispose()
   }
@@ -366,11 +352,6 @@ export class HostController {
     await releaseIntentAttachments(this.#attachmentStore, routing)
   }
 
-
-
-  // A Mac run the device may control: listed now and inside an authorized project.
-
-  // Test/shutdown aid: wait for in-flight executor work to settle.
   async idle(): Promise<void> {
     await this.#dispatcher.idle()
   }

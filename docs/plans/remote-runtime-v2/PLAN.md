@@ -74,8 +74,8 @@ P0–P4 约 11–14 周，每个阶段单独上线、单独测收益；P1 与 P2
 | P1 Provider 热池 | 1–1.5 周 | `ProviderWarmPool`、聚焦预热、宿主单飞 | 活跃会话 Pi catalog 与 Provider controls p50 < 100 ms；trust 失败仍拒绝 |
 | P2 传输层 | 1.5–2 周 | Desktop 4 lane、长轮询、catalog 合批、版本硬校验、删 one-shot | 活跃会话握手数 = lane 数；空闲 RPC 降到每分钟个位数；断线写请求仍为 unknown |
 | P3 宿主 daemon | 3–4 周 | 独立进程 + 系统托管、Electron main 改为本机客户端、打包与安装流程 | 退出/重启 App 时运行中的 run 与 iOS 连接不中断；发布验证与安全边界检查通过 |
-| P4 编排事件日志 | 5–6 周 | Orchestrator、EventSink、effect worker、四个 projection、快照 + cursor 订阅；客户端去掉剩余轮询 | 幂等重放测试通过；事件可追溯到原始证据；打开已缓存会话的首屏由快照一次返回 |
-| P5 按测量决定 | — | 只读本地 replica、二进制大块流、worker 解析 | 各自立项，需 P0 指标证明瓶颈在此 |
+| P4 编排事件日志 | 5–6 周（2026-11-18 改估约 12 周，见下） | Orchestrator、EventSink、effect worker、四个 projection、快照 + cursor 订阅；客户端去掉剩余轮询 | 幂等重放测试通过；事件可追溯到原始证据；打开已缓存会话的首屏由快照一次返回 |
+| P5 按测量决定（编号见下） | — | 只读本地 replica、二进制大块流、worker 解析 | 各自立项，需 P0 指标证明瓶颈在此 |
 
 ## 不做的事与已定决策
 
@@ -84,7 +84,14 @@ P0–P4 约 11–14 周，每个阶段单独上线、单独测收益；P1 与 P2
 已定（2026-11-03，bob 确认）：
 - **纯本机使用也走 daemon。** 本机与远程只维护一套数据流；关闭 App 窗口后 daemon 继续运行。
 - **默认不随登录自启。** 打开 App 时拉起 daemon，关闭 App 后继续运行；设置里提供「登录时启动」开关，开启时才安装 launchd/systemd 服务。
-- **事件日志放进现有 App SQLite。** 新增表，沿用 `db-migrations`。
-- **已有本机会话先不迁移。** P4 只对新会话生效，老会话保留原只读路径；新路径稳定后再决定是否写导入器。
+- **事件日志放进现有 App SQLite。** 新增表，沿用 `db-migrations`。（2026-11-18 已改，见下）
+- **已有本机会话先不迁移。** P4 只对新会话生效，老会话保留原只读路径；新路径稳定后再决定是否写导入器。（2026-11-18 已改，见下）
+
+变更（2026-11-18，维护者在 P4 设计评审后裁定，见 [P4 决定](P4-orchestration-decisions.md)）。上面两条原文保留作记录：
+- **事件日志改放单独的 `orchestration.db`**，不进现有 `scry.db`，迁移用独立的执行器。原因：`scry.db` 打开失败时整体降级为不写不查（`src/main/db-connection.ts:55-61`），其迁移函数还带统计库专用的修复步骤；编排权威必须 fail closed。
+- **旧会话导入元数据**：P4-4 导入 `app-sessions.json` 的会话元数据，不导入 turn 正文；侧栏只读 projection。
+- **不变量 7 的裁定**：`subscribe` 先作为协议 v2 下的可协商能力上线，真机验证后一次升 v3，只删旧 op。并存在升 v3 时结束，不是长期兼容层。
+- **P4 工期**改估约 12 周，不含 S3（[P4 计划](P4-orchestration-plan.md) §9）。
+- **「P5」的编号**：阶段表里的「P5 按测量决定」沿用 2026-11-03 的编号；现在 P5 指无界面执行端（[P5-headless-host](P5-headless-host.md)）。原 P5 的事项不变，改称「按测量决定」。
 
 主要风险是 P3 的打包与安全边界（私有 CLI 路径、启动环境清洗、进程身份）和 P4 的证据溯源合同；两者都要在动代码前先写清楚。

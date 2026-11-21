@@ -32,6 +32,8 @@ export interface RemoteHostServiceDependencies {
   }): Promise<void>
   onDispatchRefused?: HostControllerFactoryDependencies['onDispatchRefused']
   onRunActivity?: HostControllerFactoryDependencies['onRunActivity']
+  onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
+  orchestration?: HostControllerFactoryDependencies['orchestration']
   // Snapshot of the host's already directory-picker-authorized project dirs, so
   // the phone's new-session picker chooses only among real authorized targets.
   // Absent => the device sees an honest empty list.
@@ -59,6 +61,7 @@ export interface RemoteHostServiceDependencies {
   // Capability lookup: session open only warms a provider that keeps a pool.
   hasCatalogWarmPool?(providerId: string): boolean
   readHistoryTurnsPage?(query: import('./remote-gateway').RemoteHistoryTurnsPageQuery): Promise<import('./remote-gateway').RemoteHistoryTurnsPage>
+  listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
   // The app-wide gate, so remote runs share auth-vs-run mutual exclusion.
   gate: ProviderOperationGate
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
@@ -97,6 +100,8 @@ export function hostControllerDependencies(
     startRun: deps.startRun,
     ...(deps.onDispatchRefused ? { onDispatchRefused: deps.onDispatchRefused } : {}),
     ...(deps.onRunActivity ? { onRunActivity: deps.onRunActivity } : {}),
+    ...(deps.onLedgerEvent ? { onLedgerEvent: deps.onLedgerEvent } : {}),
+    ...(deps.orchestration ? { orchestration: deps.orchestration } : {}),
     gate: deps.gate,
     attachmentDirectory: join(deps.stateDirectory, 'attachments'),
     ...(deps.createOutputStore ? { createOutputStore: deps.createOutputStore } : {}),
@@ -118,6 +123,7 @@ export function hostControllerDependencies(
     ...(deps.readHistoryPreview ? { readHistoryPreview: deps.readHistoryPreview } : {}),
     ...(deps.readHistoryVersion ? { readHistoryVersion: deps.readHistoryVersion } : {}),
     ...(deps.hasCatalogWarmPool ? { hasCatalogWarmPool: deps.hasCatalogWarmPool } : {}),
-    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {})
+    ...(deps.readHistoryTurnsPage ? { readHistoryTurnsPage: deps.readHistoryTurnsPage } : {}),
+    ...(deps.listHostAdminNotices ? { listHostAdminNotices: deps.listHostAdminNotices } : {})
   }
 }

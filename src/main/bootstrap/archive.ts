@@ -169,7 +169,7 @@ export async function persistTerminalProgress(args: ArchiveTraceTurnArgs): Promi
   // canonical `.scry` turn；但 session id 已足够作为 Scry 本地 archive key。若仍强制
   // providerTurnId，会同时丢掉输入与真实启动错误，只在 catalog 留下一个空壳会话。
   const useManagedPersistence = shouldUseManagedTerminalPersistence(Boolean(managedPolicy), turn)
-  if (useManagedPersistence) {
+  if (useManagedPersistence && isManagedRecorderProvider(args.providerId)) {
     const permitsMissingProviderTurnId = managedRecorderAllowsMissingProviderTurnId(args.providerId, args.status)
     if (!args.providerTurnId && !permitsMissingProviderTurnId) {
       throw new Error('managed recorder requires an authoritative Provider turn id')
@@ -214,7 +214,7 @@ export async function archiveTraceTurn(args: ArchiveTraceTurnArgs): Promise<void
   }
   const { turn, timing } = buildTraceArchiveTurn(args)
   const useManagedPersistence = shouldUseManagedTerminalPersistence(Boolean(managedPolicy), turn)
-  if (useManagedPersistence) {
+  if (useManagedPersistence && isManagedRecorderProvider(args.providerId)) {
     if (!timing) {
       throw new Error('managed recorder requires canonical Provider or observed interruption timing')
     }

@@ -64,6 +64,15 @@ export const BUNDLED_PROVIDER_COMPATIBILITY: ProviderCompatibilityManifest = {
         { range: '>=1.18.31 <1.19.0', status: 'unsupported', note: 'opencode 1.18.31：仅验证过版本探测，未验证完整轮次证据' },
         { range: '>=1.19.0', status: 'unsupported', note: '高于已探测版本线；未验证证据完整性' }
       ]
+    },
+    {
+      provider: 'antigravity',
+      recommendedRange: '>=1.5.12 <1.6.0',
+      rules: [
+        { range: '>=1.5.12 <1.6.0', status: 'supported', note: 'agy 1.5.12–1.5.13：已在本机 macOS 与 launchd 后台服务真机验收中验证 ACP 证据采集、权限/用户规则与停止边界（不含 Recorder，仅实验开关可用）' },
+        { range: '>=1.6.0', status: 'unsupported', note: '高于已验证版本线；未验证配置面与 ACP 证据完整性（仅实验开关可用）' },
+        { range: '<1.5.12', status: 'unsupported', note: '低于已验证版本线；未验证配置面与 ACP 证据完整性（仅实验开关可用）' }
+      ]
     }
   ]
 }

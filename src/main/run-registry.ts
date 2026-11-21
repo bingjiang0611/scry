@@ -4,6 +4,8 @@ export interface RunRegistryState {
   providerSettled?: boolean
   /** Provider settled but local finalization is still open; see `unsettledStates`. */
   localFinalizing?: boolean
+  /** R5 reservation: parent run id for in-memory stop cascade when orchestration storage is fenced. */
+  parentRunId?: string
 }
 
 export interface RunRegistryControl {

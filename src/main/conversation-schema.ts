@@ -30,7 +30,7 @@ export {
 
 export const conversationIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i
 export const hashPattern = /^[a-f0-9]{64}$/
-export const conversationProviderIds = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+export const conversationProviderIds = new Set(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 const outcomes = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
 export function requireValue(condition: unknown, message: string): asserts condition {

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { daemonLaunchTarget, spawnDaemonSupervisor } from './daemon-launch'
@@ -54,5 +54,22 @@ describe('daemon launch', () => {
     expect(result.status).toBe('started')
     expect(statSync(join(root, 'user-data', 'logs', 'daemon.log')).mode & 0o777).toBe(0o600)
     expect(statSync(join(root, 'user-data', 'logs')).mode & 0o777).toBe(0o700)
+  })
+
+  it('tells the supervisor it was launched by the App, whatever the App inherited', async () => {
+    const root = tempDir()
+    const entry = join(root, 'entry.sh')
+    const seen = join(root, 'seen')
+    writeFileSync(entry, `printf '%s' "$SCRY_DAEMON_LAUNCHED_BY" > '${seen}.tmp' && mv '${seen}.tmp' '${seen}'\n`)
+    const result = spawnDaemonSupervisor({
+      target: { executable: '/bin/sh', supervisorEntry: entry },
+      stateDirectory: join(root, 'state'), userDataDir: join(root, 'user-data'),
+      appPath: root, resourcesPath: root, appVersion: '1.0.0', isPackaged: false,
+      env: { PATH: '/usr/bin:/bin', SCRY_DAEMON_LAUNCHED_BY: 'service' }
+    })
+    expect(result.status).toBe('started')
+    const deadline = Date.now() + 5_000
+    while (!existsSync(seen) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(readFileSync(seen, 'utf8')).toBe('app')
   })
 })

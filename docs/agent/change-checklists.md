@@ -71,6 +71,7 @@ Claude 是主要路径；Codex、Qoder、OpenCode、Pi 仍是实验性路径。�
 - Pi 没有 MCP 状态 API，就不要探测或推断。
 - OpenCode 不支持某种审批模式时，不要把另一个 Provider 的选项硬塞进去。
 - 切换 Provider、模型、权限模式或恢复 session 后，不能沿用不属于当前 runtime 的陈旧能力/审批状态。
+- MCP 配置值与 App 自己的凭据不进 Provider 命令行参数（`ps` 对本机其他用户可见）：Claude、Qoder 用 `private-mcp-config.ts` 的 0600 私有文件传 `--mcp-config`；Codex 的静态 header 走 app-server 环境变量与 `env_http_headers`。新增传参路径或升级 SDK 时用 `*-mcp-argv.test.ts` 的参数记录器核对；做不到的逐 Provider 记为已知问题，不静默删减服务。
 
 - Claude、Codex、Qoder、OpenCode、Pi 分别支持什么？不支持时 UI/Envelope 如何表示？
 - new/resume/fork/stop/permission/question/error 是否保持 provider-specific identity？

@@ -71,4 +71,21 @@ describe('remote-pairing projection (honest states)', () => {
     expect(shortFingerprint(HASH_A)).toBe('AAAA AAAA AAAA AAAA')
     expect(shortFingerprint('not-a-hash')).toBe('not-a-hash')
   })
+
+  it('projects approvedVia truthfully as App / 命令行 / 未记录 (P5-7)', () => {
+    const vm = projectRemote({
+      enabled: true, hostId: 'h', anchorSHA256: HASH_A, relayConfigured: true, pending: [],
+      devices: [
+        { deviceId: 'd-app', deviceLabel: 'Phone A', expiresAt: 9, confirmedAt: 1, revoked: false, approvedVia: 'app' },
+        { deviceId: 'd-cli', deviceLabel: 'Phone B', expiresAt: 9, confirmedAt: 1, revoked: false, approvedVia: 'host_cli' },
+        { deviceId: 'd-old', deviceLabel: 'Phone C', expiresAt: 9, confirmedAt: 1, revoked: false }
+      ]
+    })
+    if (vm.kind !== 'enabled') throw new Error('expected enabled')
+    expect(vm.devices.map((d) => [d.deviceId, (d as { approvedViaText?: string }).approvedViaText])).toEqual([
+      ['d-app', '批准方式（记录为）：App'],
+      ['d-cli', '批准方式（记录为）：命令行'],
+      ['d-old', '批准方式（记录为）：未记录']
+    ])
+  })
 })

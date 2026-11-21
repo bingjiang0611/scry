@@ -2,7 +2,7 @@ import type { ProviderCompatibilityAdvisory } from './provider-compatibility.js'
 import { runtimeProviderForProviderId, type RuntimeProvider } from './runtime.js'
 import type { McpLiveStatus } from './trace.js'
 
-export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
+export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi' | 'antigravity'
 export type SessionProviderId = ProviderId | 'legacy_unknown'
 export type ProviderCapability = 'skills' | 'mcp' | 'commands' | 'account'
 
@@ -18,7 +18,8 @@ export const MCP_LIVE_CHECK_CANCEL: Record<ProviderId, { cancellable: true } | {
   qoder: { cancellable: true },
   codex: { cancellable: false, reason: 'Codex 的 MCP 检测在共享的 app-server 里运行，不能单独取消' },
   opencode: { cancellable: false, reason: 'OpenCode 的 MCP 检测在共享的 OpenCode server 里运行，不能单独取消' },
-  pi: { cancellable: false, reason: 'Pi 没有 MCP 运行状态接口，只读取快照' }
+  pi: { cancellable: false, reason: 'Pi 没有 MCP 运行状态接口，只读取快照' },
+  antigravity: { cancellable: false, reason: 'Antigravity 的 MCP 运行状态仅读取配置快照，不单独发起探活' }
 }
 
 /** The reason a cancelled MCP check reports; the runtime state stays unknown. */
@@ -42,7 +43,9 @@ export function providerDangerCoverage(
             ? 'opencode'
             : runtimeProvider === 'pi_rpc'
               ? 'pi'
-              : undefined
+              : runtimeProvider === 'antigravity_acp'
+                ? 'antigravity'
+                : undefined
   )
   if (!resolved) return undefined
   return resolved === 'claude' || resolved === 'qoder' ? 'classified' : 'unsupported'
@@ -126,6 +129,8 @@ export interface ProviderDescriptor {
    */
   unavailableReason?: string
   capabilities: Record<ProviderCapability, CapabilityMode>
+  /** 账号验证状态说明（如 Antigravity 钥匙串模式标「账号未验证」）。 */
+  accountNote?: string
   health?: ProviderHealth
   /** CLI 版本兼容性建议（声明性策略，非实测）；缺省表示未评估。 */
   compatibility?: ProviderCompatibilityAdvisory
@@ -136,7 +141,8 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   codex: 'Codex',
   qoder: 'Qoder',
   opencode: 'OpenCode',
-  pi: 'Pi'
+  pi: 'Pi',
+  antigravity: 'Antigravity'
 }
 
 export const PROVIDER_TRANSPORTS: Record<ProviderId, string> = {
@@ -144,7 +150,8 @@ export const PROVIDER_TRANSPORTS: Record<ProviderId, string> = {
   codex: 'Codex CLI',
   qoder: 'Qoder Agent SDK',
   opencode: 'OpenCode server',
-  pi: 'JSONL RPC subprocess'
+  pi: 'JSONL RPC subprocess',
+  antigravity: 'ACP (stdio)'
 }
 
 /**

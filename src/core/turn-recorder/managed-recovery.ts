@@ -1,10 +1,11 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { ProviderId } from '../../shared/provider.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { type RecorderOpenTurnState, type RecorderSessionState, recorderStatePath, recorderOpenPath, recorderTurnRoot, recorderQuarantinedOpenTurns, withRecorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { listRecords, stableHash, clearRuntimeTurn, safeKey, type CommitNotificationScope } from './store.js'
 import { canonicalPath, type CommitNotificationDelivery, managedRecorderMode, handoffs, commitHandoff, deliverCommitNotifications } from './managed.js'
-import { type PrepareManagedTurnInput, rawTextHash, type ManagedTurnHandoff, type ManagedRecorderProviderId } from './managed-evidence.js'
+import { isManagedRecorderProvider, type PrepareManagedTurnInput, rawTextHash, type ManagedTurnHandoff, type ManagedRecorderProviderId } from './managed-evidence.js'
 
 
 export async function reserveCanonicalJournalRecovery(
@@ -93,7 +94,7 @@ export async function recoverManagedRecorderTurns(
   env: NodeJS.ProcessEnv = process.env,
   options: {
     sessionId?: string
-    provider?: ManagedRecorderProviderId
+    provider?: ProviderId
     // 默认保守：不知道哪些 run 还活着时，不弃掉任何 open 状态（否则可能删掉正在跑的轮次）。
     // 调用方（main）知道 run 存活情况时传入 abandonProvisional，才会清理不可恢复的 provisional 轮次。
     abandonProvisional?: boolean
@@ -110,7 +111,7 @@ export async function recoverManagedRecorderTurns(
   let recovered = 0
   let pending = 0
   const providers: ManagedRecorderProviderId[] = options.provider
-    ? [options.provider]
+    ? (isManagedRecorderProvider(options.provider) ? [options.provider] : [])
     : ['claude', 'codex', 'qoder', 'opencode', 'pi']
   for (const provider of providers) {
     const providerRoot = join(enablement.dataRoot, 'runtime', provider)

@@ -1,15 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import {
-  accessSync,
-  closeSync,
-  constants,
-  existsSync,
-  fstatSync,
-  openSync,
-  readSync,
-  realpathSync,
-  statSync
-} from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import type { MessageBoxOptions } from 'electron'
 import { scanMcp, type ScanReport, type Severity } from '../cli/mcpguard-core'
@@ -22,6 +12,12 @@ import {
   resolveProviderMcpConfigs,
   type ResolvedMcpConfig
 } from './mcp-config'
+import {
+  verifyMcpExecutableAsync,
+  verifyMcpExecutableSync,
+  type McpExecutableRunMemo,
+  type McpExecutableVerification
+} from './mcp-executable-fingerprint'
 
 export type McpExecutionOperation = 'run' | 'live' | `test:${string}` | `auth:${string}`
 
@@ -99,15 +95,22 @@ function interpolationReferences(value: unknown, path: string, result: string[])
   }
 }
 
-function normalizedExecutionTarget(
+interface PreparedExecutionTarget {
+  target: ResolvedMcpConfig
+  config: Record<string, unknown>
+  absolute?: string
+  immediate?: ResolvedMcpConfig
+}
+
+function prepareExecutionTarget(
   target: ResolvedMcpConfig,
   cwd: string,
   inheritedEnv: NodeJS.ProcessEnv,
   errors: string[],
   executable: boolean
-): ResolvedMcpConfig {
+): PreparedExecutionTarget {
   const config = { ...target.config }
-  if (!executable) return { ...target, config }
+  if (!executable) return { target, config, immediate: { ...target, config } }
   const interpolations: string[] = []
   for (const key of ['command', 'args', 'env', 'url', 'headers'] as const) {
     interpolationReferences(config[key], key, interpolations)
@@ -137,76 +140,56 @@ function normalizedExecutionTarget(
       : command.includes('/') || command.includes('\\')
         ? resolve(cwd, command)
         : resolveCommandOnPath(command, inheritedEnv.PATH ?? '')
-    // executable 缺失/不可执行是可用性问题而非安全边界：Provider 启动该 MCP 时会自行失败并报告，
-    // 不应因此拦截整个会话。保持 config.command 原值，用 unverified 标记绑定指纹——
-    // 文件日后出现或变为可执行时 identity 变为真实值，指纹变化会触发重新授权。
+    // executable 缺失/不可执行是可用性问题而非安全边界，保持 config.command 原值并标记 unverified。
     if (!absolute) {
       return {
-        ...target,
+        target,
         config,
-        executableIdentity: `unverified:${command}`,
-        executableError: `executable 无法在登录 shell PATH 中解析：${command}`
-      }
-    }
-    try {
-      const canonical = realpathSync(absolute)
-      if (process.platform !== 'win32') accessSync(canonical, constants.X_OK)
-      const fd = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW)
-      try {
-        const before = fstatSync(fd)
-        if (!before.isFile()) throw new Error('not a regular file')
-        const digest = createHash('sha256')
-        const buffer = Buffer.allocUnsafe(64 * 1024)
-        let position = 0
-        while (position < before.size) {
-          const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, before.size - position), position)
-          if (bytesRead === 0) break
-          digest.update(buffer.subarray(0, bytesRead))
-          position += bytesRead
-        }
-        const after = fstatSync(fd)
-        const pathAfter = statSync(canonical)
-        if (position !== before.size || before.dev !== after.dev || before.ino !== after.ino ||
-          before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs ||
-          pathAfter.dev !== before.dev || pathAfter.ino !== before.ino) {
-          throw new Error('executable changed while hashing')
-        }
-        config.command = canonical
-        const executableDigest = digest.digest('hex')
-        return {
+        immediate: {
           ...target,
           config,
-          executableDigest,
-          executableIdentity: `${canonical}:${before.dev}:${before.ino}:${before.size}:sha256:${executableDigest}`
+          executableIdentity: `unverified:${command}`,
+          executableError: `executable 无法在登录 shell PATH 中解析：${command}`
         }
-      } finally {
-        closeSync(fd)
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (/changed while hashing|changed during|EIO|EBUSY/i.test(message)) {
-        errors.push(`MCP server ${target.name} 的 executable 无法稳定校验：${absolute}`)
-        return { ...target, config, executableIdentity: `blocked:${absolute}` }
-      }
-      return {
-        ...target,
-        config,
-        executableIdentity: `unverified:${absolute}`,
-        executableError: `executable 不存在或不是可执行文件：${absolute}`
       }
     }
+    return { target, config, absolute }
   }
-  return { ...target, config }
+  return { target, config, immediate: { ...target, config } }
 }
 
-export function buildMcpExecutionSnapshot(args: {
+function applyVerification(
+  prepared: PreparedExecutionTarget,
+  result: McpExecutableVerification,
+  errors: string[]
+): ResolvedMcpConfig {
+  if (result.ok) {
+    return {
+      ...prepared.target,
+      config: { ...prepared.config, command: result.fingerprint.canonical },
+      executableDigest: result.fingerprint.digest,
+      executableIdentity: result.fingerprint.identity
+    }
+  }
+  if (result.fatalError) errors.push(result.fatalError)
+  return {
+    ...prepared.target,
+    config: prepared.config,
+    executableIdentity: result.identity,
+    ...(result.executableError ? { executableError: result.executableError } : {})
+  }
+}
+
+export interface BuildMcpExecutionSnapshotArgs {
   providerId?: ProviderId
   cwd?: string
   homeDir: string
   settingSources?: string
   env?: NodeJS.ProcessEnv
   selectedTargetId?: string
-}): McpExecutionSnapshot {
+}
+
+function prepareSnapshotContext(args: BuildMcpExecutionSnapshotArgs) {
   const providerId = args.providerId ?? 'claude'
   const errors: string[] = []
   const requestedCwd = args.cwd ?? process.cwd()
@@ -220,10 +203,8 @@ export function buildMcpExecutionSnapshot(args: {
     ...minimalMcpEnv(args.env),
     ...(providerId === 'claude' ? { CLAUDE_CODE_MCP_ALLOWLIST_ENV: '1' } : {})
   }
-  // 配置解析与 Guard 扫描必须使用同一 canonical cwd：macOS 上 /var、/tmp 等符号链接路径
-  // 若一侧 realpath 另一侧不 realpath，同一文件会算出不同 targetId，误报「MCP Guard 未识别配置目标」。
-  const targets = resolveProviderMcpConfigs(providerId, cwd, args.homeDir, args.env).map((target) =>
-    normalizedExecutionTarget(
+  const preparedTargets = resolveProviderMcpConfigs(providerId, cwd, args.homeDir, args.env).map((target) =>
+    prepareExecutionTarget(
       target,
       cwd,
       executionEnv,
@@ -231,6 +212,17 @@ export function buildMcpExecutionSnapshot(args: {
       target.enabled || target.targetId === args.selectedTargetId
     )
   )
+  return { providerId, cwd, executionEnv, errors, preparedTargets }
+}
+
+function finalizeSnapshot(
+  args: BuildMcpExecutionSnapshotArgs,
+  providerId: ProviderId,
+  cwd: string,
+  executionEnv: NodeJS.ProcessEnv,
+  errors: string[],
+  targets: ResolvedMcpConfig[]
+): McpExecutionSnapshot {
   const warnings = targets
     .filter((target) => target.executableError)
     .map((target) => `MCP server ${target.name} 的 ${target.executableError}；不拦截会话，连接结果由 Provider 自行报告`)
@@ -289,6 +281,33 @@ export function buildMcpExecutionSnapshot(args: {
     ...(args.selectedTargetId ? { selectedTargetId: args.selectedTargetId } : {}),
     fingerprint: `sha256:${createHash('sha256').update(stableJson(canonical)).digest('hex')}`
   }
+}
+
+export function buildMcpExecutionSnapshot(args: BuildMcpExecutionSnapshotArgs): McpExecutionSnapshot {
+  const { providerId, cwd, executionEnv, errors, preparedTargets } = prepareSnapshotContext(args)
+  const memo: McpExecutableRunMemo = new Map()
+  const targets = preparedTargets.map((p) =>
+    p.immediate || !p.absolute
+      ? p.immediate!
+      : applyVerification(p, verifyMcpExecutableSync(p.target.name, p.absolute, memo), errors)
+  )
+  return finalizeSnapshot(args, providerId, cwd, executionEnv, errors, targets)
+}
+
+export async function buildMcpExecutionSnapshotAsync(
+  args: BuildMcpExecutionSnapshotArgs
+): Promise<McpExecutionSnapshot> {
+  const { providerId, cwd, executionEnv, errors, preparedTargets } = prepareSnapshotContext(args)
+  const memo: McpExecutableRunMemo = new Map()
+  const targets: ResolvedMcpConfig[] = []
+  for (const p of preparedTargets) {
+    targets.push(
+      p.immediate || !p.absolute
+        ? p.immediate!
+        : applyVerification(p, await verifyMcpExecutableAsync(p.target.name, p.absolute, memo), errors)
+    )
+  }
+  return finalizeSnapshot(args, providerId, cwd, executionEnv, errors, targets)
 }
 
 export class McpExecutionTrust {

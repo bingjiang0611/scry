@@ -73,18 +73,34 @@ describe('daemon host process', () => {
       expect(existsSync(staleAtomicTemp)).toBe(false)
       expect(existsSync(host.channel.socketPath)).toBe(true)
       expect(host.service.relayConfigured).toBe(false)
-      const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
-      expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
-      expect(recovered).toContain('run_failed')
-      expect(recovered).toContain('host_restarted')
+      if (host.orchestrationAuthority) {
+        await host.orchestrationAuthority.flushLegacyMirror()
+        const snapPath = join(ledgerDirectory, 'session-ledger.snapshot.json')
+        const recovered = existsSync(snapPath) ? readFileSync(snapPath, 'utf8') : ''
+        expect(recovered).toContain(`"runId":"${orphan}"`)
+        expect(recovered).toContain('"lifecycle":"cancelled"')
+        expect(host.orchestrationAuthority.sink.getRun(orphan)?.lifecycle).toBe('interrupted')
+        expect(
+          host.orchestrationAuthority.sink
+            .listEvents()
+            .some((e) => e.runId === orphan && e.type === 'run.interrupted' && e.payload.reason === 'host_restarted')
+        ).toBe(true)
+      } else {
+        const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
+        expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
+        expect(recovered).toContain('run_failed')
+        expect(recovered).toContain('host_restarted')
+      }
 
       const device = await enrollLocal(host.service)
       const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'desktop', query: { kind: 'info' }
       })
-      expect(desktop.desktop).not.toHaveProperty('sessionActions')
-      expect(desktop.desktop).not.toHaveProperty('sessionFork')
-      expect(desktop.desktop).not.toHaveProperty('sessionDelete')
+      // W17: daemon owns session lifecycle/fork, so sessionActions/Fork/Delete are advertised;
+      // without a live primary App polling the bridge, shell workbenchOps stay false/false.
+      expect(desktop.desktop.sessionActions).toBe(true)
+      expect(desktop.desktop.sessionFork).toBe(true)
+      expect(desktop.desktop.sessionDelete).toBe(true)
       expect(desktop.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
       // The App's run controls are served on the local endpoint only. The daemon used to
       // build them and then drop them before the host, so every steer, background-task stop

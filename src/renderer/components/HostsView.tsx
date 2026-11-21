@@ -2,6 +2,7 @@
 // in RemotePairing so the two directions remain separate while sharing one tab.
 import { useId, useRef, useState, type FormEvent } from 'react'
 import type { DesktopRemoteConnection, DesktopSshTarget } from '@shared/desktop-remote'
+import { formatHostAdminNoticeText } from '../../shared/host-admin'
 import { REMOTE_ACCESS_COPY as copy, REMOTE_SESSION_COPY } from '../constants/copy'
 import { desktopConnectionLabel, refreshDesktopConnections, useDesktopConnections } from '../hooks/useDesktopConnections'
 import { forgetRemoteCatalog, refreshRemoteCatalog, useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
@@ -150,6 +151,11 @@ function HostRow({
           {action.error.text}
         </Notice>
       )}
+      {entry?.catalog?.hostAdminNoticeItems?.map((notice) => (
+        <Notice key={notice.id} tone="warn" className="hosts-alert" role="status">
+          {formatHostAdminNoticeText(notice)}
+        </Notice>
+      ))}
       {expanded && (
         <div className="hosts-row-details" id={detailsId}>
           <div className="hosts-address-summary">

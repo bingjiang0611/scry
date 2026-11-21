@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RunControlHandlers } from './host-run-control'
 import type { AppEventFeed } from './app-event-feed'
 import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_LOCAL_OP_NAMES } from '../daemon-channel-gate'
+import { SUBSCRIBE_VIEWS, type SubscribeReply, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
 
 // One App channel handler, called with the renderer's arguments as main would have.
 export type LocalOpHandler = (...args: unknown[]) => unknown
@@ -17,6 +18,8 @@ export interface LocalEndpointHandlers {
   localOps?: LocalOpHandlers
   // What the daemon tells its App that no run read carries (P3f).
   events?: Pick<AppEventFeed, 'read'>
+  // P4-3 authoritative orchestration subscribe handler (local endpoint only; omitted unless SCRY_ORCHESTRATION=on).
+  subscribe?: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply>
   // The App viewed one of the daemon's unread sessions (E1b).
   attention?: { viewed(sessionKey: string): void }
   // The App's terminal output and lifetime (P3-terminal.md).
@@ -24,6 +27,11 @@ export interface LocalEndpointHandlers {
     read(cursor?: string): unknown
     detachRenderer(): void
     shutdown(): Promise<void>
+  }
+  // Daemon-to-App pull/reply bridge for ExecutionTargetRouter (W10).
+  executionTargetBridge?: {
+    poll(peer: string, waitMs: number, signal?: AbortSignal): Promise<{ calls: unknown[] }>
+    submitResult(peer: string, input: { callId: string; ok: boolean; result?: unknown; error?: string }): { accepted: boolean }
   }
 }
 
@@ -66,6 +74,102 @@ export async function handleAppEvents(events: LocalEndpointHandlers['events'], r
     !Number.isSafeInteger(cursor) || (cursor as number) < 0 || !Number.isSafeInteger(waitMs) || (waitMs as number) < 0 ||
     (epoch !== undefined && (typeof epoch !== 'string' || epoch.length === 0 || epoch.length > 64))) return { error: 'invalid_request' }
   return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
+}
+
+const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet']
+
+/** P4-3 local orchestration subscribe; absent on network endpoint and in off/shadow modes. */
+export async function handleSubscribe(
+  subscribe: LocalEndpointHandlers['subscribe'],
+  request: Record<string, unknown>,
+  peer: string,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+  if (!subscribe) return { error: 'unsupported_op' }
+  if (Object.keys(request).some((key) => !SUBSCRIBE_KEYS.includes(key))) return { error: 'invalid_request' }
+  const { views, session, known, sessionsCursor, waitMs, eventSet } = request
+  if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
+      !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
+    return { error: 'invalid_request' }
+  }
+  if (!Number.isSafeInteger(waitMs) || (waitMs as number) < 0) return { error: 'invalid_request' }
+  if (eventSet !== undefined && (!Number.isSafeInteger(eventSet) || (eventSet as number) < 1)) return { error: 'invalid_request' }
+  if (sessionsCursor !== undefined && (typeof sessionsCursor !== 'string' || sessionsCursor.length === 0 || sessionsCursor.length > 512)) {
+    return { error: 'invalid_request' }
+  }
+  let parsedSession: SubscribeRequest['session']
+  if (session !== undefined) {
+    if (!session || typeof session !== 'object' || Array.isArray(session)) return { error: 'invalid_request' }
+    const s = session as Record<string, unknown>
+    if (typeof s.sessionKey !== 'string' || s.sessionKey.length === 0 || s.sessionKey.length > 4096) return { error: 'invalid_request' }
+    parsedSession = {
+      sessionKey: s.sessionKey,
+      ...(typeof s.providerId === 'string' ? { providerId: s.providerId } : {}),
+      ...(typeof s.agentProfileId === 'string' ? { agentProfileId: s.agentProfileId } : {}),
+      ...(typeof s.cwd === 'string' ? { cwd: s.cwd } : {}),
+      ...(typeof s.externalSessionId === 'string' ? { externalSessionId: s.externalSessionId } : {})
+    }
+  }
+  if (views.includes('detail') && !parsedSession) return { error: 'invalid_request' }
+  let parsedKnown: SubscribeRequest['known']
+  if (known !== undefined) {
+    if (!known || typeof known !== 'object' || Array.isArray(known)) return { error: 'invalid_request' }
+    const k = known as Record<string, unknown>
+    if (typeof k.hostId !== 'string' || k.hostId.length === 0 || k.hostId.length > 128 ||
+        typeof k.logId !== 'string' || k.logId.length === 0 || k.logId.length > 128 ||
+        !Number.isSafeInteger(k.seq) || (k.seq as number) < 0) {
+      return { error: 'invalid_request' }
+    }
+    parsedKnown = { hostId: k.hostId, logId: k.logId, seq: k.seq as number }
+  }
+  const reply = await subscribe(peer, {
+    views,
+    waitMs: waitMs as number,
+    ...(parsedSession ? { session: parsedSession } : {}),
+    ...(parsedKnown ? { known: parsedKnown } : {}),
+    ...(sessionsCursor !== undefined ? { sessionsCursor: sessionsCursor as string } : {}),
+    ...(eventSet !== undefined ? { eventSet: eventSet as number } : {})
+  }, signal)
+  return { subscribe: reply }
+}
+
+const TARGET_WORK_KEYS = ['op', 'keepAlive', 'protocol', 'waitMs']
+const TARGET_RESULT_KEYS = ['op', 'keepAlive', 'protocol', 'callId', 'ok', 'result', 'error']
+
+/** The primary App's long poll for forwarded execution-target calls; absent on the network endpoint. */
+export async function handleExecutionTargetWork(
+  bridge: LocalEndpointHandlers['executionTargetBridge'],
+  request: Record<string, unknown>,
+  peer: string,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+  if (!bridge) return { error: 'unsupported_op' }
+  const { waitMs } = request
+  if (Object.keys(request).some((key) => !TARGET_WORK_KEYS.includes(key)) ||
+    !Number.isSafeInteger(waitMs) || (waitMs as number) < 0) return { error: 'invalid_request' }
+  return await bridge.poll(peer, waitMs as number, signal)
+}
+
+/** The primary App's reply to a forwarded execution-target call; absent on the network endpoint. */
+export function handleExecutionTargetResult(
+  bridge: LocalEndpointHandlers['executionTargetBridge'],
+  request: Record<string, unknown>,
+  peer: string
+): Record<string, unknown> {
+  if (!bridge) return { error: 'unsupported_op' }
+  const { callId, ok, result, error } = request
+  if (Object.keys(request).some((key) => !TARGET_RESULT_KEYS.includes(key)) ||
+    typeof callId !== 'string' || callId.length === 0 || callId.length > 128 ||
+    typeof ok !== 'boolean' ||
+    (error !== undefined && (typeof error !== 'string' || error.length === 0 || error.length > 256))) {
+    return { error: 'invalid_request' }
+  }
+  return bridge.submitResult(peer, {
+    callId,
+    ok,
+    ...(result !== undefined ? { result } : {}),
+    ...(error !== undefined ? { error } : {})
+  })
 }
 
 const MAX_ARGS = 4

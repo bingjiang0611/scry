@@ -1,13 +1,15 @@
-import type { AgentDataUpdated, AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
-import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
+import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
+import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonClientError } from './daemon-client'
 import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
 import { readDaemonTrace } from './daemon-run-trace-read'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
-import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import { isHostAdminNotice } from '../shared/host-admin'
 import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
+import { isAttentionSnapshot, isDataUpdated, parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -78,12 +80,16 @@ export function isDaemonRunId(value: unknown): value is string {
   )
 }
 
-function failure(reply: Record<string, unknown>): DaemonRunError | undefined {
+function failure(reply: Record<string, unknown>, op?: string): DaemonRunError | undefined {
   const code = reply.error
   if (code === undefined) return undefined
-  if (code === 'device_not_authorized') return new DaemonRunError('daemon_device_not_authorized')
+  if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
-  if (code === 'unsupported_op') return new DaemonRunError('daemon_run_control_unavailable')
+  // Scope unknown_op mapping strictly to the W10 execution-target bridge ops so older-daemon
+  // behavior for existing ops (such as DaemonEventPump's appEvents) stays unchanged.
+  if (code === 'unsupported_op' || (code === 'unknown_op' && (op === 'executionTargetWork' || op === 'executionTargetResult'))) {
+    return new DaemonRunError('daemon_run_control_unavailable')
+  }
   return new DaemonRunError('invalid_daemon_response')
 }
 
@@ -149,8 +155,22 @@ export class DaemonRunTransport {
    * One canonical trace read for a live run; the delta cursor is the caller's.
    * `settledTail`: the read after `run_settled` still gets the run's final trace.
    */
-  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor }): Promise<DesktopRemoteTraceRead> {
+  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor; settledTail?: boolean }): Promise<DesktopRemoteTraceRead> {
     return await readDaemonTrace((request, options) => this.#call(request, options), input)
+  }
+
+  /** P4-3 archive read for a settled run that already left the live registry (replaces settledTail). */
+  async archivedRunTrace(input: { context: DesktopRemoteContext; runId: string }): Promise<ActiveRun | null> {
+    return await readDaemonArchivedRunTrace((request, options) => this.#call(request, options), input)
+  }
+
+  /** P4-3 local orchestration subscribe on the events lane (active only when daemon reports subscribe=1). */
+  async subscribe(input: SubscribeRequest, signal?: AbortSignal): Promise<SubscribeReply> {
+    const reply = await this.#call(
+      { op: 'subscribe', ...input },
+      { replayable: true, ...(signal ? { signal } : {}) }
+    )
+    return parseSubscribeReply(reply)
   }
 
   async output(input: { runId: string; cursor: number }): Promise<DaemonOutputStream> {
@@ -242,6 +262,7 @@ export class DaemonRunTransport {
       if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
       if (raw.kind === 'terminal') return [{ kind: 'terminal' }]
       if (raw.kind === 'oauth' && typeof raw.url === 'string' && raw.url.length <= 8192) return [{ kind: 'oauth', url: raw.url }]
+      if (raw.kind === 'hostAdmin' && isHostAdminNotice(raw.notice)) return [{ kind: 'hostAdmin', notice: raw.notice }]
       // Only the notices the daemon is meant to forward, never a channel it names freely.
       if (raw.kind === 'window' && typeof raw.channel === 'string' && DAEMON_WINDOW_NOTICES.has(raw.channel) && record(raw.payload)) {
         return [{ kind: 'window', channel: raw.channel, payload: raw.payload }]
@@ -255,6 +276,38 @@ export class DaemonRunTransport {
   async attentionViewed(sessionKey: string): Promise<void> {
     const reply = await this.#call({ op: 'attentionViewed', sessionKey }, { replayable: true })
     if (reply.viewed !== true) throw new DaemonRunError('invalid_daemon_response')
+  }
+
+  /** Primary App pull for forwarded execution-target calls (W10); runs on its own lane. */
+  async executionTargetWork(
+    input: { waitMs: number },
+    signal?: AbortSignal
+  ): Promise<{ calls: import('./daemon-execution-target-pump').ExecutionTargetWorkCall[] }> {
+    const reply = await this.#call(
+      { op: 'executionTargetWork', waitMs: input.waitMs },
+      { replayable: true, ...(signal ? { signal } : {}) }
+    )
+    if (!Array.isArray(reply.calls)) throw new DaemonRunError('invalid_daemon_response')
+    return { calls: reply.calls as import('./daemon-execution-target-pump').ExecutionTargetWorkCall[] }
+  }
+
+  /** Primary App reply to a forwarded execution-target call (W10). */
+  async executionTargetResult(
+    input: { callId: string; ok: boolean; result?: unknown; error?: string },
+    signal?: AbortSignal
+  ): Promise<{ accepted: boolean }> {
+    const reply = await this.#call(
+      {
+        op: 'executionTargetResult',
+        callId: input.callId,
+        ok: input.ok,
+        ...(input.result !== undefined ? { result: input.result } : {}),
+        ...(input.error !== undefined ? { error: input.error } : {})
+      },
+      { replayable: false, ...(signal ? { signal } : {}) }
+    )
+    if (typeof reply.accepted !== 'boolean') throw new DaemonRunError('invalid_daemon_response')
+    return { accepted: reply.accepted }
   }
 
   /** A full run snapshot, used to resynchronise after a gap. */
@@ -310,24 +363,8 @@ export class DaemonRunTransport {
       throw error instanceof DaemonRunError ? error : new DaemonRunError(transportFailure(error))
     }
     if (!record(reply)) throw new DaemonRunError('invalid_daemon_response')
-    const error = failure(reply)
+    const error = failure(reply, typeof request.op === 'string' ? request.op : undefined)
     if (error) throw error
     return reply
   }
-}
-
-// The notices this App renders. Anything else (a newer daemon's kind) is skipped by the
-// caller rather than passed to the window as a shape it does not know.
-function isDataUpdated(value: unknown): value is AgentDataUpdated {
-  if (!record(value)) return false
-  if (value.kind === 'conversation_changed') return typeof value.conversationId === 'string'
-  if (value.kind === 'catalog_recovered' || value.kind === 'resynchronize') return true
-  return typeof value.runId === 'string' && (value.kind === undefined || value.kind === 'turn_recorded' || value.kind === 'session_deleted')
-}
-
-const MAX_UNREAD_SESSIONS = 10_000
-
-function isAttentionSnapshot(value: unknown): value is SessionAttentionSnapshot {
-  return record(value) && Number.isSafeInteger(value.revision) && Array.isArray(value.unreadSessionKeys) &&
-    value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
 }

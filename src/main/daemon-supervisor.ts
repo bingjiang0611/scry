@@ -5,8 +5,9 @@
 // step is injected, because the interesting behaviour is the ordering (never launch a
 // second daemon, never treat "still starting" as ready) and the version rule.
 import { sameBuild, type BuildIdentity } from '../shared/build-identity'
+import type { DaemonProbeInfo } from './daemon-client'
 
-export type DaemonProbe = () => Promise<BuildIdentity | undefined>
+export type DaemonProbe = () => Promise<DaemonProbeInfo | undefined>
 export type DaemonLaunch = () => Promise<{ status: 'started' | 'already-running' | 'failed'; reason?: string }>
 
 export interface DaemonSupervisorOptions {
@@ -34,7 +35,7 @@ export type DaemonSupervisorResult =
   // The daemon answers but was built from different sources (another version, or the
   // same version from another build). The App must not talk to it: the user decides
   // whether to restart it. A build field is absent when that side has no build id.
-  | { status: 'version-mismatch'; running: string; runningBuild?: string; expected: string; expectedBuild?: string; action: 'restart_daemon' }
+  | { status: 'version-mismatch'; running: string; runningBuild?: string; runningActiveRuns?: number; runningIsPackaged?: boolean; expected: string; expectedBuild?: string; action: 'restart_daemon' }
   | { status: 'unavailable'; reason: string }
 
 export const DAEMON_READY_TIMEOUT_MS = 10_000
@@ -68,12 +69,14 @@ export async function ensureDaemon(options: DaemonSupervisorOptions): Promise<Da
   return { status: 'unavailable', reason: 'daemon_ready_timeout' }
 }
 
-function adopt(probed: BuildIdentity, options: Pick<DaemonSupervisorOptions, 'appVersion' | 'appBuild'>): DaemonSupervisorResult {
+function adopt(probed: DaemonProbeInfo, options: Pick<DaemonSupervisorOptions, 'appVersion' | 'appBuild'>): DaemonSupervisorResult {
   const expected: BuildIdentity = options.appBuild === undefined ? { version: options.appVersion } : { version: options.appVersion, build: options.appBuild }
   if (!sameBuild(expected, probed)) {
     return {
       status: 'version-mismatch',
       running: probed.version, ...(probed.build ? { runningBuild: probed.build } : {}),
+      ...(probed.activeRuns !== undefined ? { runningActiveRuns: probed.activeRuns } : {}),
+      ...(probed.isPackaged !== undefined ? { runningIsPackaged: probed.isPackaged } : {}),
       expected: expected.version, ...(expected.build ? { expectedBuild: expected.build } : {}),
       action: 'restart_daemon'
     }
@@ -83,6 +86,6 @@ function adopt(probed: BuildIdentity, options: Pick<DaemonSupervisorOptions, 'ap
 
 // A daemon that is starting, restarting or being replaced is "not there yet", not an
 // error to surface: the caller's next step is to launch or wait.
-async function probeQuietly(probe: DaemonProbe): Promise<BuildIdentity | undefined> {
+async function probeQuietly(probe: DaemonProbe): Promise<DaemonProbeInfo | undefined> {
   try { return await probe() } catch { return undefined }
 }

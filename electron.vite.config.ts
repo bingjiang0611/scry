@@ -1,13 +1,21 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { performanceBuildId } from './src/main/performance-build-id'
 
+// The App's version as app.getVersion() reports it (package.json), baked into the main
+// bundle so the supervisor can take it from its own build (build-identity.ts).
+const appVersion = (JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }).version
+
 // externalizeDepsPlugin：把 dependencies（尤其 @anthropic-ai/claude-agent-sdk）排除出 main bundle，
 // 保留在 node_modules 里——SDK 的 query() 底层要 spawn 它自带的 cli.js，被 bundle 进去就 spawn 不了。
 export default defineConfig({
   main: {
-    define: { __SCRY_BUILD_ID__: JSON.stringify(performanceBuildId(process.cwd())) },
+    define: {
+      __SCRY_BUILD_ID__: JSON.stringify(performanceBuildId(process.cwd())),
+      __SCRY_APP_VERSION__: JSON.stringify(appVersion)
+    },
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: { input: {
@@ -16,6 +24,7 @@ export default defineConfig({
         // so it is a main-process entry: same bundle format, no renderer/preload.
         daemon: resolve('src/daemon/main.ts'),
         'daemon-supervisor': resolve('src/daemon/supervisor-main.ts'),
+        'host-cli': resolve('src/daemon/host-cli-main.ts'),
         'terminal-recording-worker': resolve('src/main/terminal-recording-worker.ts'),
         'run-output-file-worker': resolve('src/main/remote/run-output-file-worker.ts'),
         'transcript-parser-worker': resolve('src/main/transcript-parser-worker.ts')

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import type { AgentDataUpdated } from '../../shared/runtime'
 import type { SessionAttentionSnapshot } from '../../shared/session-attention'
+import type { HostAdminNotice } from '../../shared/host-admin'
 
 // P3f: what the daemon tells its own App that no run read carries. Notices only, never
 // bodies: the App re-reads through the authorized readers it already uses. Bounded and
@@ -23,6 +24,8 @@ export type AppEvent =
   // An MCP OAuth page for the App to open in a browser, already checked as safe here. Each
   // one matters, so it is never coalesced; the App opens it only for its own re-auth.
   | { kind: 'oauth'; url: string }
+  // P5-5b/P5-7: host CLI approval switch enabled or CLI approve/cancel/revoke/desktop-off notice.
+  | { kind: 'hostAdmin'; notice: HostAdminNotice }
 
 export interface AppEventsReply {
   epoch: string
@@ -54,6 +57,7 @@ function coalesceKey(event: AppEvent): string | undefined {
   if (event.kind === 'attention') return 'attention'
   if (event.kind === 'terminal') return 'terminal'
   if (event.kind === 'oauth') return undefined
+  if (event.kind === 'hostAdmin') return undefined
   if (event.kind === 'window') return undefined
   const data = event.event
   if ('kind' in data && data.kind === 'conversation_changed') return `conversation:${data.conversationId}`
@@ -80,6 +84,7 @@ export class AppEventFeed {
   readonly #now: () => number
   #lastRead: number
   #reading = 0
+  #observer?: (event: AppEvent) => void
 
   constructor(options: { epoch?: string; maxItems?: number; maxBytes?: number; state?: () => AppEvent[]; now?: () => number } = {}) {
     this.epoch = options.epoch ?? randomUUID()
@@ -90,8 +95,15 @@ export class AppEventFeed {
     this.#maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
   }
 
+  setObserver(observer: ((event: AppEvent) => void) | undefined): void {
+    this.#observer = observer
+  }
+
   append(event: AppEvent): void {
     if (this.#closed) return
+    if (this.#observer) {
+      try { this.#observer(event) } catch { /* observer must not break event feed */ }
+    }
     const key = coalesceKey(event)
     if (key !== undefined) {
       const index = this.#entries.findIndex((entry) => entry.key === key)

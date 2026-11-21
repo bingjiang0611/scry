@@ -4,7 +4,7 @@ import type { AgentModelRef, AgentPermissionMode } from '@shared/runtime'
 import { createPortal } from 'react-dom'
 import { RightSurfacePanel } from './RightSurfacePanel'
 import { OverviewPanel } from './OverviewPanel'
-import { WorkspacePanel, workspaceReferenceToken } from './WorkspacePanel'
+import { WorkspacePanel, workspaceOpsHostLabel, workspaceReferenceToken } from './WorkspacePanel'
 import { SourceControlPanel } from './SourceControlPanel'
 import { AgentsSurface } from './AgentsSurface'
 import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
@@ -209,7 +209,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
             files: workspaceAvailable
               ? catalog?.workbench === 1
                 ? <WorkspacePanel cwd={cwd} api={workbench.workspace} openRequest={fileRequest}
-                    ops={catalog?.workbenchOps}
+                    ops={catalog?.workbenchOps} hostLabel={workspaceOpsHostLabel(catalog, host)}
                     onClose={() => dispatchSurface({ type: 'close', kind: 'files' })}
                     onDirtyChange={(dirty) => { setWorkspaceDirty(dirty); surface.onDirtyChange?.(dirty) }}
                     onAddReference={(entry) => onDraftInput(draftKey, `${input}${input && !input.endsWith(' ') ? ' ' : ''}${workspaceReferenceToken(entry)} `)} />

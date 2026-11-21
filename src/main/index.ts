@@ -36,7 +36,7 @@ import { initializeAppEnvironment, registerAppLifecycle } from './bootstrap/app-
 import { registerAgentRuntimeHandlers } from './bootstrap/agent-runtime-ipc'
 import { appDaemonModeDeps, daemonModeEnabled } from './bootstrap/daemon-run-mode'
 import { createLazyDaemonRunSurface } from './bootstrap/daemon-run-lazy'
-import { registerBackgroundServiceHandlers } from './bootstrap/background-service'
+import { createDaemonLoginStartBridge, registerBackgroundServiceHandlers } from './bootstrap/background-service'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { deleteConversationHistory } from './conversation-history'
 import { createWindow as createBootstrapWindow } from './bootstrap/window'
@@ -297,9 +297,11 @@ const {
   startAppRun, remoteStartReceipts
 } = pipeline
 // 开发开关：daemon 持有台账与 run 时，这些通道由 daemon 的帧回答；未开时保持进程内管线。
+const loginStartBridge = createDaemonLoginStartBridge(daemonModeEnabled())
 const daemonRun = daemonModeEnabled()
   ? createLazyDaemonRunSurface(appDaemonModeDeps({ send: (channel, payload) => { win?.webContents.send(channel, payload) }, currentCwd: () => currentCwd,
-    dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces }))
+    getWindow: () => win, dockBadge, isWindowFocused: () => Boolean(win?.isFocused()), rendererCanReceive, runTraces,
+    desktopRemoteClient: () => requireDesktopRemoteClient(), ...loginStartBridge.daemonModeOptions }))
   : undefined
 registerAgentRuntimeHandlers({
   handleTrusted, startAppRun, runs, boundedLiveRun, dockBadge, activeRunSessionKey,
@@ -310,7 +312,7 @@ registerAgentRuntimeHandlers({
   getRemoteRunLedgerId: (runId) => remoteRunLedgerIds.get(runId),
   getRemoteHostService: () => remoteHostService
 })
-registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow: () => win })
+registerBackgroundServiceHandlers({ handleTrusted, daemon: daemonRun, getWindow: () => win, ...loginStartBridge.handlerOptions })
 
 function requestRunStop(runId: string): boolean {
   return pipeline.requestRunStop(runId)

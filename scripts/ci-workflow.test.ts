@@ -90,7 +90,7 @@ describe('required PR checks', () => {
   // The fourth entry is the changes output that gates the macOS App jobs: CI keys them on desktop,
   // Performance keys native on native_performance, which implies desktop.
   for (const [file, dependencies, desktopJobs, desktopOutput] of [
-    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
+    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'daemon-orchestration', 'unit-in-process', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
     ['performance.yml', ['changes', 'compare', 'native'], ['native'], 'native_performance']
   ] as const) {
     const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop, node_performance: required, native_performance: desktop } })
@@ -302,5 +302,14 @@ describe('required PR checks', () => {
     expect(scripts['check:cli-runtime']).toContain('vitest run src/cli src/core/turn-recorder')
     expect(scripts['check:cli-runtime']).toContain('&& npm run build:cli && npm run smoke:cli-package')
     expect(source(workflow('ci.yml').jobs['cli-compat'], 'CLI tests and clean tarball smoke').run).toBe('npm run check:cli-runtime')
+  })
+
+  it('retains an explicit SCRY_HOST_DAEMON=0 job for the in-process escape hatch', () => {
+    const job = workflow('ci.yml').jobs['unit-in-process']
+    expect(job['runs-on']).toBe('ubuntu-latest')
+    expect(job.env?.ELECTRON_SKIP_BINARY_DOWNLOAD).toBe('1')
+    const step = source(job, 'In-process escape-hatch tests (SCRY_HOST_DAEMON=0)') as Step & { env?: Record<string, string> }
+    expect(step.env?.SCRY_HOST_DAEMON).toBe('0')
+    expect(step.run).toBe('npm run test:in-process')
   })
 })

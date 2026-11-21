@@ -8,6 +8,8 @@ const MAX_CLOSED = 512
 export interface RemoteQuestionAnswer {
   answerId: string
   response: AgentQuestionResponse
+  /** Verified peer certificate SHA-256 that answered this question, when invoked via a peer op. */
+  answeredByPeer?: string
 }
 
 export type RemoteQuestionAnswerReceipt = { status: 'answered' | 'duplicate' }
@@ -45,6 +47,7 @@ export class RemoteInteractionError extends Error {
 export class RemoteInteractionBroker {
   readonly #broker: UserQuestionBroker
   readonly #closed = new Map<string, ClosedAnswer>()
+  readonly #answeredBy = new Map<string, string>()
 
   constructor(private readonly recordLifecycle: (runId: string, detail: string) => void) {
     this.#broker = new UserQuestionBroker((change) => {
@@ -78,7 +81,11 @@ export class RemoteInteractionBroker {
     return this.#broker.list(runId)
   }
 
-  answer(runId: string, value: RemoteQuestionAnswer): RemoteQuestionAnswerReceipt {
+  answer(
+    runId: string,
+    value: RemoteQuestionAnswer,
+    beforeCommit?: (validated: { questionId: string; answerId: string; answerSha256: string }) => void
+  ): RemoteQuestionAnswerReceipt {
     if (!UUID.test(value?.answerId ?? '')) throw new RemoteInteractionError('invalid_answer_id')
     if (!value?.response || typeof value.response !== 'object') throw new RemoteInteractionError('invalid_question_response')
     const questionId = (value.response as { questionId?: unknown }).questionId
@@ -99,18 +106,35 @@ export class RemoteInteractionBroker {
     const normalized = normalizeAgentQuestionResponse(request, { ...value.response, runId })
     if (!normalized) throw new RemoteInteractionError('invalid_question_response')
     const answerDigest = digest(normalized)
-    this.recordLifecycle(runId, JSON.stringify({
-      event: 'question_answered',
-      questionId,
-      answerId: value.answerId,
-      digest: answerDigest,
-      behavior: normalized.behavior
-    }))
+    beforeCommit?.({ questionId, answerId: value.answerId, answerSha256: answerDigest })
+    const peerKey = `${runId}\0${questionId}\0${value.answerId}`
+    if (value.answeredByPeer) {
+      this.#answeredBy.delete(peerKey)
+      this.#answeredBy.set(peerKey, value.answeredByPeer)
+      while (this.#answeredBy.size > MAX_CLOSED) this.#answeredBy.delete(this.#answeredBy.keys().next().value!)
+    }
+    try {
+      this.recordLifecycle(runId, JSON.stringify({
+        event: 'question_answered',
+        questionId,
+        answerId: value.answerId,
+        digest: answerDigest,
+        behavior: normalized.behavior
+      }))
+    } catch (error) {
+      if (value.answeredByPeer) this.#answeredBy.delete(peerKey)
+      throw error
+    }
     if (!this.#broker.answer(normalized)) throw new RemoteInteractionError('question_not_pending')
     this.#closed.delete(answerKey)
     this.#closed.set(answerKey, { answerId: value.answerId, digest: answerDigest })
     while (this.#closed.size > MAX_CLOSED) this.#closed.delete(this.#closed.keys().next().value!)
     return { status: 'answered' }
+  }
+
+  /** In-memory side-channel returning the verified peer SHA-256 that answered a question (never written to H1 ledger). */
+  answeredByPeer(runId: string, questionId: string, answerId: string): string | undefined {
+    return this.#answeredBy.get(`${runId}\0${questionId}\0${answerId}`)
   }
 
   cancelRun(runId: string): void {

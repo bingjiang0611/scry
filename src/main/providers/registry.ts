@@ -254,7 +254,7 @@ export class ProviderRegistry {
 }
 
 export function parseDisabledProviders(value: string | undefined): ReadonlySet<ProviderId> {
-  const known = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
+  const known = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
   return new Set(
     (value?.split(',') ?? [])
       .map((item) => item.trim().toLowerCase())

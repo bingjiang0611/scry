@@ -10,7 +10,8 @@ const PACED_PROMPT = 'performance paced stream'
 const CHUNKS = 20
 const INTERVAL_MS = 150
 
-export const isPacedStreamPrompt = (prompt: string): boolean => prompt === PACED_PROMPT
+export const isPacedStreamPrompt = (prompt: string): boolean =>
+  prompt === PACED_PROMPT || prompt.startsWith(`${PACED_PROMPT}\n\n`)
 
 // The soak-only pressure path: batching, renderer ACK and the large-stream lightweight
 // Markdown transition, without any external Provider or user content.

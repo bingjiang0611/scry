@@ -43,10 +43,23 @@ export interface DaemonLocalEndpointDeps {
   userDataDir: string
   // What this daemon reports as its version (the «后台服务» section, B4-S S0-1).
   appVersion: string
+  /** Packaged flag used to compute the daemon's effective remote policy self-report. */
+  isPackaged: boolean
   // Worktree selection reads, and the repository ids they hand out, live in this one service.
   sourceControl: SourceControlService
   // The metadata paired devices see; Provider context and Pi profile changes invalidate it.
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
+  // Primary-App forwarding bridge for ExecutionTargetRouter (W10).
+  executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
+  // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
+  hostAdmin?: import('../host-admin-store').HostAdminStore
+  // P4-2 authoritative orchestration status (Decision H): omitted unless SCRY_ORCHESTRATION=on.
+  orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
+  // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
+  links?: DaemonSessionLinks
+  // P4-3 local orchestration subscribe handler: omitted unless SCRY_ORCHESTRATION=on.
+  subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
+  log?: (line: string) => void
 }
 
 /**
@@ -56,6 +69,8 @@ export interface DaemonLocalEndpointDeps {
  */
 export interface DaemonSessionLinks {
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
+  sessionRefFromRequest?: (value: unknown) => import('../../main/app-store').AppSessionRef | null
+  changeLegacySessionMetadata?: (ref: import('../../main/app-store').AppSessionRef, change: () => boolean) => Promise<boolean>
   prepareConversationDeletion?: (conversation: Conversation) => Promise<ConversationDeletionPreview>
   // Session deletion takes the session's side chats along (conversation-delete.ts).
   sideChatCascade?: SideChatCascade

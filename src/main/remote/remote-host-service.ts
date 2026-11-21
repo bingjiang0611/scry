@@ -9,11 +9,13 @@ import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
 import { PairingTransport } from './pairing-transport'
 import type { LocalEndpointHandlers } from './host-local-ops'
-import { RelayClient, type RelayDiagnostics } from './relay-client'
+import { RelayClient } from './relay-client'
 import { hostControllerDependencies, type RemoteHostServiceDependencies } from './remote-host-service-deps'
 import { RemoteLanListener, type LanAdvertisement } from './remote-lan-listener'
-import type { PairingAuthority } from './pairing'
-import type { RemotePairingCode, RemotePendingPairing, RemoteDevice, RemoteRelayDiagnostics, RemoteStatus } from '../../shared/remote'
+import type { PairingAuthority, GrantApprovedVia } from './pairing'
+import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli'
+import type { RemotePairingCode, RemoteDevice, RemoteStatus } from '../../shared/remote'
+import { encodePairingDeviceCode, projectRemoteDevice, projectRemoteStatus } from './remote-host-status'
 
 // The single object Electron main owns for the remote-access subsystem. It
 // composes the already-proven pieces (persisted host identity + inner CA,
@@ -148,15 +150,24 @@ export class RemoteHostService {
    * grant enrolled over that socket is refused here if it ever arrives over a network
    * transport instead.
    */
-  createLocalHost(info: { version: string; build?: string }): InnerMtlsHost {
+  createLocalHost(
+    info: { version: string; build?: string },
+    options: { onPeerDisconnected?: (fingerprint: string) => void; activeRuns?: () => number; isPackaged?: boolean; subscribe?: 1 } = {}
+  ): InnerMtlsHost {
     return new InnerMtlsHost({
       controller: this.#binding.controller,
       serverCertPEM: this.#serverCredentials.certificatePEM,
       serverKeyPEM: this.#serverCredentials.privateKeyPEM,
       caPEM: this.caCertificatePEM,
       transport: 'local',
-      info,
-      ...(this.#localEndpoint ? { localEndpoint: this.#localEndpoint } : {})
+      info: {
+        ...info,
+        ...(options.activeRuns ? { activeRuns: options.activeRuns } : {}),
+        ...(typeof options.isPackaged === 'boolean' ? { isPackaged: options.isPackaged } : {}),
+        ...(options.subscribe === 1 ? { subscribe: 1 as const } : {})
+      },
+      ...(this.#localEndpoint ? { localEndpoint: this.#localEndpoint } : {}),
+      ...(options.onPeerDisconnected ? { onPeerDisconnected: options.onPeerDisconnected } : {})
     })
   }
 
@@ -244,39 +255,35 @@ export class RemoteHostService {
 
   async beginPairing(): Promise<RemotePairingCode> {
     const code = await this.authority.begin()
-    return { ...code, deviceCode: this.#encodeDeviceCode(code) }
-  }
-
-  // Build the scannable `scry1:` code the phone consumes. It embeds the relay
-  // coordinates + the full host anchor PEM so the device can reach this host and
-  // pin its inner CA. Only emitted when a relay is advertised; the anchor PEM is
-  // a public certificate, and the secret is the same single-use value already in
-  // the code, so nothing extra is leaked.
-  #encodeDeviceCode(code: { pairingId: string; secret: string }): string | null {
-    const relay = this.#relayAdvertisement
-    // Only emit a scannable code when the host is actually dialing a relay; a
-    // code the device could never reach would be a dishonest 'ready' signal.
-    if (!relay || !this.relayConfigured) return null
-    const payload = {
-      relayHost: relay.host,
-      relayPort: relay.port,
-      relayTLS: relay.tls,
-      hostId: this.hostId,
-      pairingId: code.pairingId,
-      secret: code.secret,
-      anchorPEM: this.caCertificatePEM
+    return {
+      ...code,
+      deviceCode: encodePairingDeviceCode({
+        relay: this.#relayAdvertisement,
+        relayConfigured: this.relayConfigured,
+        hostId: this.hostId,
+        caCertificatePEM: this.caCertificatePEM,
+        code
+      })
     }
-    const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-    return `scry1:${b64}`
   }
 
   // Confirm a proved pairing. The operator passes back the exact key fingerprint
   // shown on the Mac (and compared against the device), so a racing device that
   // proved a different key cannot be confirmed by accident - confirmLocal fails
   // closed unless the pairing's proven key matches.
-  async confirmPairing(pairingId: string, expectedPublicKeySHA256: string): Promise<RemoteDevice> {
-    const grant = await this.authority.confirmLocal(pairingId, expectedPublicKeySHA256)
-    return { deviceId: grant.deviceId, deviceLabel: grant.deviceLabel, expiresAt: grant.expiresAt, confirmedAt: grant.confirmedAt, revoked: grant.revokedAt !== null }
+  async confirmPairing(
+    pairingId: string,
+    expectedPublicKeySHA256: string,
+    options?: { approvedVia?: GrantApprovedVia }
+  ): Promise<RemoteDevice> {
+    // Release-order isolation: write approvedVia ONLY when SCRY_EXPERIMENTAL_HOST_CLI=1.
+    const approvedVia = isHostCliExperimentalEnabled() ? options?.approvedVia : undefined
+    const grant = await this.authority.confirmLocal(
+      pairingId,
+      expectedPublicKeySHA256,
+      approvedVia ? { approvedVia } : undefined
+    )
+    return projectRemoteDevice(grant)
   }
 
   cancelPairing(pairingId: string): Promise<void> {
@@ -305,24 +312,13 @@ export class RemoteHostService {
 
   // Display-safe snapshot for the pairing screen.
   status(): RemoteStatus {
-    const state = this.authority.inspectLocal()
-    const pending: RemotePendingPairing[] = state.pairings
-      .filter((p): p is typeof p & { state: 'created' | 'awaiting_local_confirmation' } => p.state === 'created' || p.state === 'awaiting_local_confirmation')
-      .map((p) => p.state === 'awaiting_local_confirmation'
-        ? { pairingId: p.pairingId, state: p.state, expiresAt: p.expiresAt, deviceLabel: p.proof.deviceLabel, publicKeySHA256: p.proof.publicKeySHA256 }
-        : { pairingId: p.pairingId, state: p.state, expiresAt: p.expiresAt })
-    const devices: RemoteDevice[] = state.grants.map((g) => ({ deviceId: g.deviceId, deviceLabel: g.deviceLabel, expiresAt: g.expiresAt, confirmedAt: g.confirmedAt, revoked: g.revokedAt !== null }))
-    const relayStates = this.#clients.map((client) => client.diagnostics()).filter((value): value is RelayDiagnostics => value !== undefined)
-    const relay: RemoteRelayDiagnostics | undefined = relayStates.length === 0 ? undefined : relayStates.reduce((total, value) => ({
-      waiting: total.waiting + value.waiting,
-      active: total.active + value.active,
-      opening: total.opening + value.opening,
-      limit: total.limit + value.limit
-    }), { waiting: 0, active: 0, opening: 0, limit: 0 })
-    return {
-      enabled: true, hostId: this.hostId, anchorSHA256: this.anchorSHA256, relayConfigured: this.relayConfigured,
-      ...(relay ? { relay } : {}), pending, devices
-    }
+    return projectRemoteStatus({
+      state: this.authority.inspectLocal(),
+      hostId: this.hostId,
+      anchorSHA256: this.anchorSHA256,
+      relayConfigured: this.relayConfigured,
+      relayDiagnostics: this.#clients.map((client) => client.diagnostics())
+    })
   }
 
   // Open the outbound relay leg(s), if a transport was configured. Idempotent;

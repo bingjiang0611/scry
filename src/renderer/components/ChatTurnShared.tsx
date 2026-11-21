@@ -26,9 +26,29 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 
 export function runtimeTitleForTurn(turn: Turn): { avatar: string; label: string } {
   const event = turn.items.find((item) => item.providerId || item.runtimeProvider)
-  const raw = event?.providerId ?? event?.runtimeProvider?.replace(/_(sdk|cli|server)$/, '') ?? 'agent'
+  const raw = event?.providerId ?? event?.runtimeProvider?.replace(/_(sdk|cli|server|rpc|acp)$/, '') ?? 'agent'
   const label = raw.charAt(0).toUpperCase() + raw.slice(1)
   return { avatar: label.charAt(0), label }
+}
+
+export function mergeToolResults(structuralItems: readonly TraceEvent[]): TraceEvent[] {
+  const results = new Map<string, TraceEvent>()
+  for (const e of structuralItems) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
+  return structuralItems
+    .filter((e) => e.stage !== 'tool_result')
+    .map((e) => {
+      const r = e.toolUseId && (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
+        ? results.get(e.toolUseId)
+        : undefined
+      if (!r) return e
+      return {
+        ...e,
+        output: r.text,
+        isError: r.isError ?? e.isError,
+        durationMs: r.durationMs ?? e.durationMs,
+        ...(r.runtimeMetadata ? { runtimeMetadata: { ...e.runtimeMetadata, ...r.runtimeMetadata } } : {})
+      }
+    })
 }
 
 export function coalesceAdjacentThinking(items: readonly TraceEvent[]): TraceEvent[] {

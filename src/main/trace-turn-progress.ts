@@ -39,8 +39,8 @@ interface UnresolvedTraceTurnProgress {
   }
 }
 
-const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
-const RUNTIMES = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc'])
+const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
+const RUNTIMES = new Set<RuntimeProvider>(['claude_sdk', 'codex_cli', 'qoder_cli', 'opencode_server', 'pi_rpc', 'antigravity_acp'])
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'interrupted'])
 
 export interface TraceTurnProgressRecovery {

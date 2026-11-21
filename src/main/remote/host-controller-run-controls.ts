@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import type { MacRunSource, MacRunView } from './host-controller-types'
+import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import type { RemoteGateway } from './remote-gateway'
 import type { RemoteInteractionBroker, RemoteQuestionAnswerReceipt } from './remote-interaction-broker'
 import { RemoteInteractionError } from './remote-interaction-broker'
 import type { SessionLedger } from './session-ledger'
@@ -16,6 +18,8 @@ export interface RunControlDeps {
   interactions: RemoteInteractionBroker
   stops: Map<string, AbortController>
   ledger: SessionLedger
+  gateway?: RemoteGateway
+  orchestration?: OrchestrationAuthorityHooks
 }
 
 export interface AnswerInput { runId: string; answerId: string; response: AgentQuestionResponse }
@@ -34,7 +38,26 @@ export function answerRunQuestion(deps: RunControlDeps, peerCertSHA256: string, 
       if (!deps.macRuns!.answer(input.response)) throw new RemoteInteractionError('question_not_pending')
       return { status: 'answered' }
     }
-    return deps.interactions.answer(input.runId, { answerId: input.answerId, response: input.response })
+    return deps.interactions.answer(
+      input.runId,
+      {
+        answerId: input.answerId,
+        response: input.response,
+        answeredByPeer: peerCertSHA256
+      },
+      deps.orchestration
+        ? (validated) => {
+            deps.orchestration!.onQuestionAnswer({
+              peerCertSHA256,
+              grantScope: deps.gateway?.grantScope(peerCertSHA256) ?? 'remote',
+              runId: input.runId,
+              questionId: validated.questionId,
+              answerId: validated.answerId,
+              answerSha256: validated.answerSha256
+            })
+          }
+        : undefined
+    )
 }
 
 export function answerOwnerRunQuestion(deps: RunControlDeps, runId: string, response: AgentQuestionResponse): boolean {
@@ -52,6 +75,23 @@ export function stopRun(deps: RunControlDeps, peerCertSHA256: string, input: { r
       const run = deps.macRun(input.runId)
       if (run.stopping) return { status: 'already_requested' }
       return { status: deps.macRuns!.stop(input.runId) ? 'requested' : 'not_running' }
+    }
+    if (deps.orchestration) {
+      const stop = deps.stops.get(input.runId)
+      const res = deps.orchestration.onRunStop({
+        peerCertSHA256,
+        grantScope: deps.gateway?.grantScope(peerCertSHA256) ?? 'remote',
+        runId: input.runId,
+        abortLive: () => {
+          if (!stop || stop.signal.aborted) return false
+          stop.abort()
+          return true
+        }
+      })
+      if (res.status === 'requested' && !deps.orchestration.isWriteIndeterminate()) {
+        try { deps.ledger.markProgress(input.runId, JSON.stringify({ event: 'stop_requested' })) } catch { /* terminal */ }
+      }
+      return res
     }
     const stop = deps.stops.get(input.runId)
     if (!stop) return { status: 'not_running' }

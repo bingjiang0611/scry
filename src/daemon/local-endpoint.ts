@@ -21,7 +21,7 @@ export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 // network endpoint reaches none of it. Each group of channels lives in local-ops/.
 
 export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): LocalEndpointHandlers {
-  const deps = { ...endpointDeps, links: {} }
+  const deps = { ...endpointDeps, links: endpointDeps.links ?? {} }
   return {
     // Steering and background-task stops are bound to the live run, so they answer from
     // this process's registry and cannot be replayed from another process.
@@ -44,7 +44,9 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...deps.terminal.localOps
     }),
     events: deps.events,
+    ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),
     terminal: deps.terminal.feed,
+    ...(deps.executionTargetBridge ? { executionTargetBridge: deps.executionTargetBridge } : {}),
     // This daemon cannot see the App's window; the App says what the user viewed (E1b).
     attention: { viewed: (sessionKey) => deps.session.dockBadge.remove(sessionKey) }
   }

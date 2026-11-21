@@ -20,6 +20,7 @@ import {
 } from '../shared/runtime'
 import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
 import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
+import { writePrivateMcpConfig } from './providers/private-mcp-config'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from './process-diagnostics'
 
 let counter = 0
@@ -338,7 +339,17 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     return child
   }
   options.strictMcpConfig = true
-  options.mcpServers = opts.mcpServers ?? {}
+  // The SDK would put these configs (headers, stdio env, history-reader token) on the
+  // CLI argv; pass them as a private file instead, removed when this run ends.
+  options.mcpServers = {}
+  let mcpConfig: ReturnType<typeof writePrivateMcpConfig>
+  try {
+    mcpConfig = writePrivateMcpConfig(opts.mcpServers ?? {})
+  } catch (error) {
+    // Nothing spawned and no input attempted: a failed handle keeps that evidence.
+    return { promise: Promise.reject(error), interrupt: () => {}, forceKill: () => {}, getSessionId: () => undefined }
+  }
+  if (mcpConfig) options.extraArgs = { ...options.extraArgs as Record<string, string | null> | undefined, ...mcpConfig.extraArgs }
   if (opts.requestUserInput) {
     options.canUseTool = async (
       toolName: string,
@@ -425,7 +436,13 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     return true
   } : undefined
   if (!admission) opts.onInputAttempt?.()
-  const q = query({ prompt: sdkPrompt(prompt, opts.attachments ?? [], beforeInput), options: options as never })
+  let q: ReturnType<typeof query>
+  try {
+    q = query({ prompt: sdkPrompt(prompt, opts.attachments ?? [], beforeInput), options: options as never })
+  } catch (error) {
+    mcpConfig?.dispose()
+    throw error
+  }
 
   const interrupt = (): void => {
     stopped = true
@@ -545,7 +562,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       status: stopped ? ('interrupted' as const) : providerStatus,
       mcpStatus
     }
-  })()
+  })().finally(() => mcpConfig?.dispose())
 
   return {
     promise,

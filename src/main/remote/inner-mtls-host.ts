@@ -49,12 +49,14 @@ export interface InnerMtlsHostOptions {
   // it cannot be replayed from another machine even if its certificate leaks.
   transport?: 'local' | 'network'
   // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
-  // check the daemon's version and build (shared/build-identity.ts) before it uses a grant.
-  info?: { version: string; build?: string }
+  // check the daemon's version, build, packaging, and idle state before it uses a grant.
+  info?: { version: string; build?: string; activeRuns?: () => number; isPackaged?: boolean; subscribe?: 1 }
   // App-only work: run controls over the daemon's own registry and the App channels the
   // daemon answers (local ops). Supplied on the local endpoint only; on the network
   // endpoint the ops are absent, not merely refused.
   localEndpoint?: LocalEndpointHandlers
+  // Fired when the last live TLS socket for a verified peer closes (used by local-endpoint bridges).
+  onPeerDisconnected?: (fingerprint: string) => void
 }
 
 function digest(bytes: Uint8Array): string {
@@ -74,11 +76,13 @@ export class InnerMtlsHost {
   // tunnels it holds open instead of waiting for their idle timeout.
   #peers = new Map<string, Set<TLSSocket>>()
   #lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
+  #onPeerDisconnected?: (fingerprint: string) => void
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
     this.#transport = options.transport ?? 'network'
     this.#info = options.info
+    this.#onPeerDisconnected = options.onPeerDisconnected
     this.#server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
@@ -129,15 +133,20 @@ export class InnerMtlsHost {
     const peerSockets = this.#peers.get(fingerprint) ?? new Set<TLSSocket>()
     peerSockets.add(socket)
     this.#peers.set(fingerprint, peerSockets)
+    const connAbort = new AbortController()
     socket.once('close', () => {
+      connAbort.abort()
       this.#connections.delete(socket)
       peerSockets.delete(socket)
-      if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) this.#peers.delete(fingerprint)
+      if (peerSockets.size === 0 && this.#peers.get(fingerprint) === peerSockets) {
+        this.#peers.delete(fingerprint)
+        this.#onPeerDisconnected?.(fingerprint)
+      }
     })
     serveInnerConnection(socket, {
       controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,
       preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
-      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement()),
+      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal),
       timing: (parsed) => requestTiming(parsed)
     })
   }
@@ -155,8 +164,16 @@ export class InnerMtlsHost {
     // Version handshake: answered here because it describes this endpoint's process,
     // and it must be reachable before the App owns a run or a catalog.
     if (this.#info && parsed?.op === 'daemonInfo') {
-      const { version, build } = this.#info
-      return { op: 'daemonInfo', version, ...(build ? { build } : {}), protocol: REMOTE_PROTOCOL_VERSION }
+      const { version, build, activeRuns, isPackaged, subscribe } = this.#info
+      const runs = activeRuns?.()
+      return {
+        op: 'daemonInfo', version,
+        ...(build ? { build } : {}),
+        ...(typeof runs === 'number' && Number.isSafeInteger(runs) && runs >= 0 ? { activeRuns: runs } : {}),
+        ...(typeof isPackaged === 'boolean' ? { isPackaged } : {}),
+        ...(subscribe === 1 ? { subscribe: 1 as const } : {}),
+        protocol: REMOTE_PROTOCOL_VERSION
+      }
     }
     // Pushed-stream ops never reach request dispatch, so its version gate runs here.
     if (parsed && typeof parsed.op === 'string' && LANE_OPS.has(parsed.op)) {

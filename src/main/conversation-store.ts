@@ -90,6 +90,42 @@ export class ConversationStore implements ConversationLedger {
   private ownershipScan: { generation: number; promise: Promise<Map<string, Conversation>> } | undefined
   private ownershipGeneration = 0
   private recoveryFailure: Error | undefined
+  private beforeTurnSettled?: (info: {
+    conversationId: string
+    runId: string
+    ordinal: number
+    conversation: Conversation
+    delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+  }) => void
+  private onTurnSettled?: (info: {
+    conversationId: string
+    runId: string
+    conversation: Conversation
+    delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+  }) => void
+
+  setBeforeTurnSettledObserver(
+    observer: ((info: {
+      conversationId: string
+      runId: string
+      ordinal: number
+      conversation: Conversation
+      delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+    }) => void) | undefined
+  ): void {
+    this.beforeTurnSettled = observer
+  }
+
+  setTurnSettledObserver(
+    observer: ((info: {
+      conversationId: string
+      runId: string
+      conversation: Conversation
+      delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+    }) => void) | undefined
+  ): void {
+    this.onTurnSettled = observer
+  }
 
   constructor(readonly userData: string) {
     requireValue(isAbsolute(userData), 'userData 必须是绝对路径')
@@ -304,8 +340,14 @@ export class ConversationStore implements ConversationLedger {
     return beginConversationTurn(this, id, input)
   }
 
-  settle(id: string, runId: string, result: Exclude<ConversationDelivery, { status: 'pending' }>, finalItems: ConversationItemRef[], archive?: ConversationArchiveRef): Promise<Conversation> {
-    return settleConversationTurn(this, id, runId, result, finalItems, archive)
+  async settle(id: string, runId: string, result: Exclude<ConversationDelivery, { status: 'pending' }>, finalItems: ConversationItemRef[], archive?: ConversationArchiveRef): Promise<Conversation> {
+    const settled = await settleConversationTurn(this, id, runId, result, finalItems, archive, this.beforeTurnSettled)
+    try {
+      this.onTurnSettled?.({ conversationId: id, runId, conversation: settled, delivery: result })
+    } catch {
+      // Shadow observation must never change conversation settle behavior.
+    }
+    return settled
   }
 
   findFork(sourceId: string, commandId: string): Promise<Conversation | undefined> {

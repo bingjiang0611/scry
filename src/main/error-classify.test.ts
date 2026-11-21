@@ -35,4 +35,28 @@ describe('classifyError', () => {
     expect(r.category).toBe('unknown')
     expect(r.hint).toBe('')
   })
+
+  it('antigravity 未登录 / 缺 CLI / 配额受限给出专属提示，不串台到 claude', () => {
+    const auth = classifyError('unauthorized (-32000): authentication required', 'antigravity')
+    expect(auth.category).toBe('auth')
+    expect(auth.hint).toContain('agy')
+    expect(auth.hint).not.toContain('claude')
+
+    const cli = classifyError('spawn agy ENOENT', 'antigravity')
+    expect(cli.category).toBe('cli')
+    expect(cli.hint).toContain('SCRY_AGY_PATH')
+    expect(cli.hint).not.toContain('claude')
+
+    const quota = classifyError('RESOURCE_EXHAUSTED: quota exceeded', 'antigravity')
+    expect(quota.category).toBe('rate')
+    expect(quota.hint).toContain('Antigravity')
+
+    // S1: authentication required 限定到 antigravity，不影响其他 Provider 的 MCP 归类
+    expect(classifyError('MCP server x: authentication required').category).toBe('mcp')
+    expect(classifyError('MCP server x: authentication required', 'claude').category).toBe('mcp')
+    // S1: Antigravity 自身的 agy acp --login 提示正确归类为 auth
+    const agyAcpHint = classifyError('Antigravity 未登录：在终端运行 agy 完成登录（或 agy acp --login），再回到 Scry 刷新', 'antigravity')
+    expect(agyAcpHint.category).toBe('auth')
+    expect(agyAcpHint.hint).toContain('agy')
+  })
 })

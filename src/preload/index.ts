@@ -126,6 +126,7 @@ export type DetectedAgent = LocatedAgent & {
   runtimeProvider?: RuntimeProvider
   transport?: string
   capabilities?: ProviderDescriptor['capabilities']
+  accountNote?: string
   health?: ProviderDescriptor['health']
   /** Provider 已装但 adapter 不可用时的原因。 */
   unavailableReason?: string

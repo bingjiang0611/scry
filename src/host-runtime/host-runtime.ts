@@ -37,7 +37,9 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       directory: join(inputs.userDataDir, 'desktop-terminal-recordings'),
       authorizeWorkspace: runtime.resolveRemoteProjectDirectory,
       sourceControl: runtime.sourceControl, environment: inputs.shellEnvironment, openPath: inputs.openPath,
-      trashItem: inputs.trashItem
+      trashItem: inputs.trashItem,
+      ...(inputs.hasOpenPath ? { hasOpenPath: inputs.hasOpenPath } : {}),
+      ...(inputs.hasTrashItem ? { hasTrashItem: inputs.hasTrashItem } : {})
     }),
     readDesktop: createDesktopHostReader({
       userDataDir: inputs.userDataDir,
@@ -70,6 +72,8 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     ...(runtime.desktopRemoteClient ? { desktopRemoteClient: runtime.desktopRemoteClient } : {}),
     gatewayLabel,
     ...(inputs.onRunActivity ? { onRunActivity: inputs.onRunActivity } : {}),
+    ...(inputs.onLedgerEvent ? { onLedgerEvent: inputs.onLedgerEvent } : {}),
+    ...(inputs.orchestration ? { orchestration: inputs.orchestration } : {}),
     ...(inputs.managedLaunches ? { onDispatchRefused: (refused) => abandonRefusedLaunch(inputs.managedLaunches!, refused) } : {}),
     startRun: createRemoteRunBinding<ManagedConversationStart>({
       permissionModeOverride: remotePermissionMode,
@@ -107,7 +111,8 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     listProviderControls: (query) => runtime.getRemoteProviderDiscovery().selected(query),
     listProvidersFull: () => runtime.getRemoteProviderDiscovery().legacy(),
     listCommands: async ({ providerId, cwd, agentProfileId }) => {
-      if (!['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(providerId)) {
+      if (!['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(providerId) ||
+          !runtime.providerRegistry.isRegistered(providerId as ProviderId)) {
         return { commands: [], reason: 'unsupported_provider' }
       }
       const canonical = runtime.resolveRemoteProjectDirectory(cwd)
@@ -220,6 +225,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       answer: (response) => runtime.userQuestionBroker.answer(response)
     },
     ...inputs.historyHandlers,
+    ...(inputs.listHostAdminNotices ? { listHostAdminNotices: inputs.listHostAdminNotices } : {}),
     ...(inputs.localEndpoint ? { localEndpoint: inputs.localEndpoint } : {})
   })
 }

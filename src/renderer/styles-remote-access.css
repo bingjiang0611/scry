@@ -35,5 +35,5 @@
   background: var(--panel3); color: var(--fg); cursor: pointer; font-size: var(--text-sm);
 }
 .remote-pairing__label { font-weight: var(--weight-semibold); }
-.remote-pairing__status, .remote-pairing__fp { color: var(--dim); font-size: var(--text-sm); }
+.remote-pairing__status, .remote-pairing__fp, .remote-pairing__approved-via { color: var(--dim); font-size: var(--text-sm); }
 .remote-pairing__devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }

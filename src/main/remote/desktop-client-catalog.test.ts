@@ -87,4 +87,54 @@ describe('DesktopRemoteClient catalog snapshot', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
+  it('drops invalid or unknown hostAdminNoticeItems and truncates above cap without failing catalog read (W11 review #2)', async () => {
+    const fixture = await setup()
+    try {
+      const pending = await fixture.client.pair({ label: 'Notices', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+
+      const validNotice = (n: number) => ({
+        id: `n-${n}`,
+        kind: 'device_approved_via_cli',
+        ts: 1_700_000_000_000 + n,
+        deviceLabel: `Phone ${n}`
+      })
+      const mixed = [
+        validNotice(1),
+        { id: 'future-1', kind: 'future_notice_kind_v9', ts: 1_700_000_000_999 },
+        null,
+        { id: '', kind: 'cli_approval_enabled', ts: -1 },
+        ...Array.from({ length: 40 }, (_, i) => validNotice(i + 2))
+      ]
+      fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: {
+        revision: 'r-notices-mixed',
+        info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2, hostAdminNotices: 1 },
+        projects: [{ path: '/repo', label: 'repo' }],
+        providers: [{ id: 'claude', label: 'Claude', available: true }],
+        sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture' },
+        hostAdminNoticeItems: mixed
+      } })
+      const cat = await fixture.client.catalog(id)
+      expect(cat.projects).toEqual([{ path: '/repo', label: 'repo' }])
+      expect(cat.hostAdminNoticeItems?.length).toBe(32)
+      expect(cat.hostAdminNoticeItems?.[0]?.id).toBe('n-1')
+      expect(cat.hostAdminNoticeItems?.some((n) => (n as { id: string }).id === 'future-1')).toBe(false)
+
+      // Non-array hostAdminNoticeItems also degrades safely without breaking the catalog.
+      fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: {
+        revision: 'r-notices-non-array',
+        info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2, hostAdminNotices: 1 },
+        projects: [{ path: '/repo', label: 'repo' }],
+        providers: [],
+        sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture' },
+        hostAdminNoticeItems: 'unexpected-future-envelope'
+      } })
+      const cat2 = await fixture.client.catalog(id)
+      expect(cat2.projects).toEqual([{ path: '/repo', label: 'repo' }])
+      expect(cat2.hostAdminNoticeItems).toBeUndefined()
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
 })

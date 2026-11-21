@@ -33,7 +33,7 @@ export function pairingChannelHandlers(deps: { host: () => PairingHost | null })
     'remote:pairing:begin': () => requireHost().beginPairing(),
     'remote:pairing:confirm': (pairingId: unknown, expectedPublicKeySHA256: unknown) => {
       if (typeof pairingId !== 'string' || typeof expectedPublicKeySHA256 !== 'string') throw new Error('无效的配对确认参数')
-      return requireHost().confirmPairing(pairingId, expectedPublicKeySHA256)
+      return requireHost().confirmPairing(pairingId, expectedPublicKeySHA256, { approvedVia: 'app' })
     },
     'remote:pairing:cancel': (pairingId: unknown) => {
       if (typeof pairingId !== 'string') throw new Error('无效的配对标识')

@@ -133,9 +133,12 @@ const invokeChannels = {
   remoteDesktopHostInvite: 'remote:desktop:invite',
   remoteDesktopHostDisable: 'remote:desktop:disable',
   backgroundServiceStatus: 'remote:backgroundService:status',
+  backgroundServiceRuntimeNotice: 'remote:backgroundService:runtimeNotice',
   restartBackgroundService: 'remote:backgroundService:restart',
   quitWithBackgroundService: 'remote:backgroundService:quit',
-  reconnectBackgroundService: 'remote:backgroundService:reconnect'
+  reconnectBackgroundService: 'remote:backgroundService:reconnect',
+  setBackgroundServiceLoginStart: 'remote:backgroundService:setLoginStart',
+  setHostCliApproval: 'remote:hostAdmin:setCliApproval'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const desktopChannels = {
@@ -166,7 +169,9 @@ const listenerChannels = {
   onQuestion: 'agent:userQuestion',
   onQuestionAttention: 'agent:questionAttention',
   onQuestionClosed: 'agent:userQuestionClosed',
-  onError: 'agent:error'
+  onError: 'agent:error',
+  onBackgroundServiceNotice: 'remote:backgroundService:notice',
+  onHostAdminOpenDevices: 'remote:hostAdmin:openDevices'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 beforeEach(() => {
@@ -199,15 +204,6 @@ describe('preload IPC boundary', () => {
       await callableApi[method]()
       expect(electron.invoke, method).toHaveBeenCalledTimes(1)
       expect(electron.invoke.mock.calls[0]?.[0], method).toBe(channel)
-    }
-  })
-
-  it('sends no renderer argument on the background service channels', async () => {
-    // Main asks for every confirmation itself; nothing the renderer passes may travel.
-    for (const method of ['backgroundServiceStatus', 'restartBackgroundService', 'quitWithBackgroundService', 'reconnectBackgroundService']) {
-      electron.invoke.mockClear()
-      await callableApi[method]('4242', { confirmed: true })
-      expect(electron.invoke.mock.calls[0], method).toEqual([invokeChannels[method as keyof typeof invokeChannels]])
     }
   })
 

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { isAgentPermissionMode, type AgentDataUpdated, type AgentStartRequest } from '../shared/runtime'
+import type { AgentDataUpdated } from '../shared/runtime'
 import { configureStorage, initDb } from '../main/db'
 import { createSessionState, createMirrorSessionTranscript } from '../main/bootstrap/session-state'
 import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
@@ -14,51 +14,34 @@ import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
 import { SourceControlService } from '../main/source-control/service'
-import { createProviderDiscovery } from '../main/remote/provider-discovery'
-import { listRemoteDirectories, resolveCanonicalRemoteProjectDirectory } from '../main/remote/remote-directory-browser'
 import { createRemoteHistoryHandlers } from '../main/bootstrap/remote-history'
 import { resolveRemoteRelay } from '../main/bootstrap/remote-relay'
 import { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import { createHostRuntime } from '../host-runtime/host-runtime'
 import { remoteLanConfig } from '../main/remote/remote-lan-config'
-import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
-import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/remote/remote-host-service'
+import type { RemoteHostService } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
-import { openLocalChannel, type LocalChannel } from './local-channel'
+import { openLocalChannel } from './local-channel'
 import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
 import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
-import { createHistoryRuntime } from '../main/bootstrap/history-runtime'
-import { createForkOperations } from '../main/bootstrap/run-fork'
+import type { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
-import { createDaemonTerminalService, type DaemonTerminalServiceDeps } from './terminal-service'
-import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore, type LocalEnrollSocket } from './local-enrollment'
+import { createDaemonTerminalService } from './terminal-service'
+import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
+import type { DaemonOrchestrationAuthority } from './orchestration-authority'
+import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
+import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
+import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
+import type { DaemonSessionLinks } from './local-ops/deps'
+import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
+import { HostAdminStore } from './host-admin-store'
+import { attachDaemonHostAdmin } from './host-admin-runtime'
+import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
+import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 
-export interface DaemonHostProcessOptions {
-  userDataDir: string
-  daemonStateDirectory: string
-  appPath: string
-  resourcesPath: string
-  appVersion: string
-  isPackaged: boolean
-  gatewayLabel?: string
-  createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
-  log?: (line: string) => void
-  /** Tests: a fake PTY, recordings in this process, a fixed shell environment, a short reclaim. */
-  terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
-}
-
-export interface DaemonHostProcess {
-  service: RemoteHostService
-  channel: LocalChannel
-  enrollSocket: LocalEnrollSocket
-  dispose(): Promise<void>
-}
-
-const unavailable = (capability: string): never => {
-  throw new Error(`daemon_capability_unavailable:${capability}`)
-}
+export type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 
 /**
  * Build the same run and host assemblies in a plain Node process. Native UI
@@ -99,13 +82,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   // The App's terminals (P3-terminal.md). The recording worker sits beside this entry in
   // out/main, like the run output worker below.
+  let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
     homeDir: workspace.homeDir,
     recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     notify: () => events.append({ kind: 'terminal' }),
-    idleMs: () => events.idleMs(),
+    idleMs: () => orchestrationAuthority ? Math.min(events.idleMs(), orchestrationAuthority.subscribeHub.idleMs()) : events.idleMs(),
     log,
     ...options.terminal
   })
@@ -221,107 +205,43 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     startupPerf: { mark: () => undefined, finish: () => null },
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
-    deferMs: 0
+    deferMs: 0,
+    skipConversationRecovery: parseOrchestrationMode(process.env).effective === 'on'
   })
   await startupManagedRecovery
 
-  const configuredRemotePermissionMode = () => {
-    const raw = process.env.SCRY_REMOTE_PERMISSION_MODE
-    return isAgentPermissionMode(raw) ? raw : undefined
-  }
-  const providerDiscovery = createProviderDiscovery({
-    descriptors: () => providers.providerRegistry.describe(),
-    profiles: pi.listPiProfiles,
-    resolveProfile: pi.resolvePiProfile,
-    authorizeWorkspace: workspace.resolveRemoteProjectDirectory,
-    controls: (context) => session.withProviderOperation(
-      context.providerId,
-      () => providers.providerRegistry.runControls(context),
-      context.agentProfileId
-    ),
-    defaultWorkspace: () => workspace.remoteProjectRoots()[0],
-    permissionOverride: configuredRemotePermissionMode,
-    // The daemon does not yet own the App's session-mutation control plane, so
-    // discovery must not advertise a fork operation that the host cannot execute.
-    supportsForkSession: () => false,
-    onError: (error) => log(`daemon.provider-discovery-failed ${(error as Error)?.message ?? String(error)}`)
+  const sessionLinks: DaemonSessionLinks = {}
+  const targetBridge = createAppExecutionTargetBridge({
+    isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
+    ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})
   })
-  const refreshRemoteProviderSnapshot = () => providerDiscovery.refreshMetadata()
-
-  const runtime: RemoteHostRuntime = {
-    get remoteHostService() { return remoteHostService },
-    set remoteHostService(value) { remoteHostService = value },
-    getRemoteProviderDiscovery: () => providerDiscovery,
-    refreshRemoteProviderSnapshot,
-    configuredRemotePermissionMode,
-    remoteStartReceipts: pipeline.remoteStartReceipts,
-    startAppRun: (payload: AgentStartRequest, startOptions) => pipeline.startAppRun(payload, startOptions),
-    sourceControl,
-    providerOperationGate: session.providerOperationGate,
-    providerRegistry: providers.providerRegistry,
-    runs: pipeline.runs,
-    requestRunStop,
-    appSessionStore: catalog.appSessionStore,
-    knownProjectDirectories: workspace.knownProjectDirectories,
-    remoteProjectRoots: workspace.remoteProjectRoots,
-    resolveRemoteProjectDirectory: workspace.resolveRemoteProjectDirectory,
-    resolveCanonicalRemoteProjectDirectory,
-    listRemoteDirectories,
-    rememberProject: workspace.rememberProject,
-    remoteRunIds,
-    userQuestionBroker: pipeline.userQuestionBroker,
-    withProviderOperation: session.withProviderOperation,
-    providerContextKey: session.providerContextKey,
-    boundedLiveRun: pipeline.boundedLiveRun,
-    getCurrentCwd: () => currentCwd,
-    homeDir: workspace.homeDir,
-    openLocalPath: async () => unavailable('open-path'),
-    get isShuttingDown() { return isShuttingDown }
-  }
-
-  // The conversation ledger table main registers, built over this process's stores.
-  // Only the channels DAEMON_LOCAL_OP_CHANNELS lists are served; the rest of the table
-  // (writes that need App-side deletion and run tracking) stays refused until migrated.
-  // Session history pages, loaded and cached in this process (the cache backs older-page
-  // reads). The window's session selection is reported with the page for the App to apply.
-  const historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown> = {}
-  const history = createHistoryRuntime()
-  history.register({
-    handleTrusted: (channel, listener) => { historyChannels[channel] = listener as unknown as (event: unknown, ...args: never[]) => unknown },
-    appSessionStore: catalog.appSessionStore,
-    providerContextKey: session.providerContextKey,
-    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
-    providerRegistry: providers.providerRegistry,
-    getRuns: () => pipeline.runs,
-    rememberProject: workspace.rememberProject,
-    homeDir: workspace.homeDir,
-    userDataDir: options.userDataDir,
-    isShuttingDown: () => isShuttingDown,
-    applySelection: () => undefined,
-    reportSelection: true
-  })
-  // Native fork, as main builds it (index.ts). The daemon has no window selection: a
-  // request without a cwd is filled by the App with the window's (session-lifecycle-
-  // daemon.ts) and re-resolved here, so getCurrentCwd stays empty on purpose.
-  forkOperations = createForkOperations({
-    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
-    providerRegistry: providers.providerRegistry,
-    providerOperationGate: session.providerOperationGate,
-    contextAdmission: session.contextAdmission,
-    providerContextKey: session.providerContextKey,
-    unsettledRuns: () => pipeline.runs.unsettledStates(),
-    getCurrentCwd: () => undefined,
-    getStartupManagedRecovery: () => startupManagedRecovery,
-    assertLegacyConversationWriteAllowed: catalog.assertLegacyConversationWriteAllowed,
-    resetSessionContext: session.resetSessionContext,
-    sessionByContext: session.sessionByContext,
-    invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
-    appSessionStore: catalog.appSessionStore,
-    rememberProject: workspace.rememberProject
-  })
+  const { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations: forks } =
+    createDaemonRemoteAssembly({
+      userDataDir: options.userDataDir, workspace, pi, providers, session, catalog, pipeline, sourceControl, remoteRunIds, requestRunStop,
+      getRemoteHostService: () => remoteHostService, setRemoteHostService: (value) => { remoteHostService = value },
+      getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery, isShuttingDown: () => isShuttingDown,
+      desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log
+    })
+  forkOperations = forks
 
   await refreshRemoteProviderSnapshot()
   const remoteStateDirectory = join(options.userDataDir, 'remote')
+  const attachedOrchestration = await attachHostProcessOrchestration({
+    options,
+    remoteStateDirectory,
+    conversationStore: catalog.conversationStore,
+    runs: pipeline.runs,
+    requestRunStop,
+    attentionSnapshot: () => session.dockBadge.snapshot(),
+    events,
+    log
+  })
+  const orchestrationShadow = attachedOrchestration.orchestrationShadow
+  orchestrationAuthority = attachedOrchestration.orchestrationAuthority
+  const hostAdmin = new HostAdminStore({
+    stateDirectory: remoteStateDirectory,
+    onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })
+  })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
   const service = await createHostRuntime({
     runtime,
@@ -331,12 +251,16 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     gatewayLabel: options.gatewayLabel ?? 'Scry daemon',
     ...remoteLanConfig(process.env),
     shellEnvironment: warmShellEnv,
+    ...bridgedWorkbenchShellInputs(targetBridge.shellOps),
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
     // Omit every source. HostController returns explicit unavailable envelopes with
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
     managedLaunches: conversationSend.launches,
     onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
+    ...(orchestrationShadow ? { onLedgerEvent: orchestrationShadow.onLedgerEvent } : {}),
+    ...(orchestrationAuthority ? { orchestration: orchestrationAuthority.hooks } : {}),
+    ...(isHostCliExperimentalEnabled(process.env) ? { listHostAdminNotices: () => hostAdmin.recentNotices() } : {}),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
       runs: () => pipeline.runs,
@@ -346,8 +270,21 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir,
       appVersion: options.appVersion,
+      isPackaged: options.isPackaged,
       sourceControl,
-      providerDiscovery
+      providerDiscovery,
+      executionTargetBridge: targetBridge.localHandlers,
+      hostAdmin,
+      links: sessionLinks,
+      ...(orchestrationAuthority ? {
+        orchestrationStatus: () => orchestrationAuthority!.status(),
+        subscribe: orchestrationAuthority.createSubscribeHandler({
+          hostId: () => remoteHostService?.hostId ?? '',
+          authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
+          grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote'
+        })
+      } : {}),
+      log
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
@@ -362,11 +299,18 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // The App's own endpoint: same controller and TLS materials, marked as the local
   // transport so a locally enrolled grant cannot be replayed over the network.
   const identity = buildIdentity(options.appVersion)
-  const localHost = service.createLocalHost(identity)
+  const localHost = service.createLocalHost(identity, {
+    onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
+    activeRuns: () => pipeline.runs.unsettledStates().length,
+    isPackaged: options.isPackaged,
+    ...(orchestrationAuthority ? { subscribe: 1 as const } : {})
+  })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
   })
+  orchestrationShadow?.startImport()
+  orchestrationAuthority?.startImport()
   // Enrollment bootstraps the App's grant before it owns any certificate. The secret
   // exists only while no local grant is live and is consumed by a single enrollment.
   const enrollment = openLocalEnrollmentStore(options.daemonStateDirectory)
@@ -377,13 +321,29 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
     }, service.caCertificatePEM, identity)
   })
-  log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}`)
+  const adminSocket = await attachDaemonHostAdmin({
+    daemonStateDirectory: options.daemonStateDirectory,
+    identity,
+    appVersion: options.appVersion,
+    isPackaged: options.isPackaged,
+    hostAdmin,
+    remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
+    activeRuns: () => pipeline.runs.unsettledStates().length,
+    ...(orchestrationAuthority ? { orchestrationStatus: () => orchestrationAuthority.status() } : {}),
+    log
+  })
+  log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}${adminSocket ? ` admin=${adminSocket.socketPath}` : ''}`)
 
   let disposed = false
   return {
     service,
     channel,
     enrollSocket,
+    ...(adminSocket ? { adminSocket } : {}),
+    hostAdmin,
+    providerOperationGate: session.providerOperationGate,
+    ...(orchestrationShadow ? { orchestrationShadow } : {}),
+    ...(orchestrationAuthority ? { orchestrationAuthority } : {}),
     dispose: async () => {
       if (disposed) return
       disposed = true
@@ -391,12 +351,20 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       startupManagedRecovery = Promise.resolve()
       // A parked App long poll answers now instead of holding the channel open.
       events.close()
+      orchestrationAuthority?.subscribeHub.close()
+      targetBridge.close()
       // Shells end with the daemon too; their recordings are finished on the way.
       await terminal.dispose()
+      await adminSocket?.close()
       await enrollSocket.close()
       await channel.close()
       await localHost.close()
       await service.dispose()
+      // Close shadow first so pending bodies flush and the EXCLUSIVE SQLite lock releases
+      // immediately even if a pooled provider process is slow to exit; bound provider dispose.
+      orchestrationShadow?.close()
+      await orchestrationAuthority?.close()
+      await disposeProviderRegistryBounded(providers.providerRegistry, options.providerDisposeTimeoutMs ?? 5_000, log)
     }
   }
 }

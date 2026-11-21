@@ -7,7 +7,7 @@ import type { UsageAnalytics, UsageAnalyticsRangeDays } from '../../shared/trace
 import type { AgentForkLastTurn, AgentRestartLastTurn } from '../../shared/runtime-types'
 import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
 import { type PairingDependencies } from './pairing'
-import { type LedgerStore } from './session-ledger'
+import { type LedgerEvent, type LedgerStore } from './session-ledger'
 import { type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview, type RemoteHistoryVersion, type RemoteHistoryTurnsPage, type RemoteHistoryTurnsPageQuery } from './remote-gateway'
 import { type RunOutputStore } from './run-output-log'
 import { type WorkspaceAuthorizer, type RemoteRunTarget } from './remote-run-policy'
@@ -15,6 +15,8 @@ import { type RemoteSessionStatus, type RemoteSessionStatusQuery } from './remot
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { DesktopAttachmentStore } from './desktop-attachments'
+import type { OrchestrationAuthorityHooks } from './orchestration-seam'
+import type { HostAdminNotice } from '../../shared/host-admin'
 
 // The structured routing a device intent must resolve to before any Provider
 // run. Carried in the intent detail as JSON; malformed detail is denied.
@@ -59,7 +61,7 @@ export interface RemoteIntentRouting extends RemoteRunTarget {
   expectedExternalSessionId?: string
   // App submits only: a conversation run whose launch the daemon holds in memory
   // (managed-launches.ts). The run id is the conversation turn's own.
-  conversation?: { conversationId: string; runId: string }
+  conversation?: { conversationId: string; runId: string; ordinal?: number }
 }
 
 // A run the owner started in the Mac UI (RunRegistry), as the host proves it
@@ -165,6 +167,13 @@ export interface HostControllerDependencies {
   // run so only that run re-reads. Observation only; it never fails the run.
   // `intentSeq` is where the run's ledger evidence starts (E3).
   onRunActivity?(runId: string, intentSeq?: number): void
+  // Optional shadow observer invoked after each durable H1 ledger append (P4-1 fail-open).
+  onLedgerEvent?(
+    event: LedgerEvent,
+    meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote'; answeredByPeer?: string }
+  ): void
+  // Optional P4-2 authoritative orchestration seam (`SCRY_ORCHESTRATION=on`).
+  orchestration?: OrchestrationAuthorityHooks
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).
   listProjects?(): RemoteProjectRef[]
@@ -201,4 +210,6 @@ export interface HostControllerDependencies {
   gate?: ProviderOperationGate
   attachmentStore?: DesktopAttachmentStore
   attachmentDirectory?: string
+  // P5-7: recent sanitized host CLI admin notices (present only when SCRY_EXPERIMENTAL_HOST_CLI=1).
+  listHostAdminNotices?(): HostAdminNotice[]
 }

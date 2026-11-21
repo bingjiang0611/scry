@@ -8,6 +8,14 @@ export default defineConfig({
     // 尤其 node:test、SwiftPM checkout 与旧 Electron fixture 不能再执行一遍。
     exclude: ['src/core/turn-recorder/recorder-tests/**', 'src/main/managed-turn-tests/**', '**/node_modules/**', '**/dist/**', '**/out/**', '**/designs/**', '**/experiments/**', '**/.{idea,git,cache,output,temp,claude,agents,pi,scry,local}/**'],
     maxWorkers: 2,
+    // The branch defaults these three features on (2026-11-21). Unit tests keep running
+    // against the explicit off values unless a test or a CI matrix sets its own value;
+    // the default-on behaviour itself is covered by dedicated tests.
+    env: {
+      SCRY_ORCHESTRATION: process.env.SCRY_ORCHESTRATION ?? 'off',
+      SCRY_EXPERIMENTAL_HOST_CLI: process.env.SCRY_EXPERIMENTAL_HOST_CLI ?? '0',
+      SCRY_EXPERIMENTAL_PROVIDERS: process.env.SCRY_EXPERIMENTAL_PROVIDERS ?? ''
+    },
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],

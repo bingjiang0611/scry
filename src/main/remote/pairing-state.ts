@@ -39,9 +39,13 @@ export interface DeviceGrant extends IssuedPairingCertificate {
   // grant is only honored on that socket: the network host rejects it outright.
   source: 'local_confirmation' | 'local_socket'
   scope: GrantScope
+  // Recorded approval path for remote grants (P5-host-cli §3.7). Release 1
+  // (P5-5a) accepts and preserves this field on read without writing it yet.
+  approvedVia?: GrantApprovedVia
   confirmedAt: number
   revokedAt: number | null
 }
+export type GrantApprovedVia = 'app' | 'host_cli'
 export type GrantScope = 'local' | 'remote'
 // Which channel accepted the connection. `network` covers TCP listeners, the relay
 // tunnel and SSH; `local` is the 0700/0600 unix socket inside the daemon state dir.
@@ -103,15 +107,25 @@ export function validatePairingState(value: unknown): PairingState {
     // State written before scopes existed only ever held owner-confirmed phone
     // grants, so a missing scope means 'remote' rather than invalid.
     const g = raw.scope === undefined ? { ...raw, scope: 'remote' } : raw
-    keys(g, ['certificatePEM', 'certificateSHA256', 'publicKeySHA256', 'deviceId', 'expiresAt', 'pairingId', 'deviceLabel', 'authority', 'source', 'scope', 'confirmedAt', 'revokedAt'])
+    const hasApprovedVia = Object.prototype.hasOwnProperty.call(g, 'approvedVia')
+    keys(g, [
+      'certificatePEM', 'certificateSHA256', 'publicKeySHA256', 'deviceId', 'expiresAt', 'pairingId',
+      'deviceLabel', 'authority', 'source', 'scope', 'confirmedAt', 'revokedAt',
+      ...(hasApprovedVia ? ['approvedVia'] : [])
+    ])
+    const approvedVia: GrantApprovedVia | undefined = hasApprovedVia
+      ? (g.approvedVia === 'app' || g.approvedVia === 'host_cli' ? g.approvedVia : fail('invalid_pairing_state'))
+      : undefined
     if (g.authority !== 'owner-device' || (g.source !== 'local_confirmation' && g.source !== 'local_socket') ||
         (g.scope !== 'local' && g.scope !== 'remote') || (g.scope === 'local') !== (g.source === 'local_socket') ||
+        (approvedVia !== undefined && g.scope !== 'remote') ||
         !text(g.certificatePEM, 16_384) || !validDeviceLabel(g.deviceLabel) ||
         typeof g.deviceId !== 'string' || !UUID.test(g.deviceId) || typeof g.pairingId !== 'string' || !UUID.test(g.pairingId) ||
         typeof g.certificateSHA256 !== 'string' || !HASH.test(g.certificateSHA256) || typeof g.publicKeySHA256 !== 'string' || !HASH.test(g.publicKeySHA256) ||
         !isTime(g.expiresAt) || !isTime(g.confirmedAt) || g.expiresAt <= g.confirmedAt || (g.revokedAt !== null && !isTime(g.revokedAt))) return fail('invalid_pairing_state')
     return { certificatePEM: g.certificatePEM, certificateSHA256: g.certificateSHA256, publicKeySHA256: g.publicKeySHA256, deviceId: g.deviceId,
-      expiresAt: g.expiresAt, pairingId: g.pairingId, deviceLabel: g.deviceLabel, authority: g.authority, source: g.source, scope: g.scope, confirmedAt: g.confirmedAt, revokedAt: g.revokedAt }
+      expiresAt: g.expiresAt, pairingId: g.pairingId, deviceLabel: g.deviceLabel, authority: g.authority, source: g.source, scope: g.scope,
+      confirmedAt: g.confirmedAt, revokedAt: g.revokedAt, ...(approvedVia !== undefined ? { approvedVia } : {}) }
   })
   const pairings: PairingRecord[] = value.pairings.map((p: unknown) => {
     if (!record(p)) return fail('invalid_pairing_state')
@@ -132,9 +146,10 @@ export function validatePairingState(value: unknown): PairingState {
     return fail('invalid_pairing_state')
   })
   // publicKeySHA256 uniqueness applies only to ACTIVE grants: a revoked grant is
-  // retained for audit history and may share a device key with a new active grant
-  // issued after the same device re-pairs. deviceId and certificateSHA256 stay
-  // globally unique (each issuance mints a distinct cert).
+  // retained for audit history (the newest 16, pairing-retention.ts) and may share
+  // a device key with a new active grant issued after the same device re-pairs.
+  // deviceId and certificateSHA256 stay globally unique (each issuance mints a
+  // distinct cert).
   const activeKeys = grants.filter(g => g.revokedAt === null).map(g => g.publicKeySHA256)
   if (new Set(pairings.map(p => p.pairingId)).size !== pairings.length || new Set(grants.map(g => g.deviceId)).size !== grants.length ||
       new Set(activeKeys).size !== activeKeys.length || new Set(grants.map(g => g.certificateSHA256)).size !== grants.length ||

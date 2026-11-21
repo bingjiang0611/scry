@@ -113,6 +113,8 @@ export function buildRuntimeCliEnv(
   return sanitizeProviderEnv({
     ...runtimeBase,
     SCRY_CLI_PATH: scryCliPath ?? '',
+    // P5-host-security §4.2: marks Provider child processes so compliant Agents cannot run `scry-host approve`.
+    SCRY_HOST_CHILD: 'run',
     ...(options.managedRecorder ? {
       SCRY_RECORDER_MANAGED: '1',
       SCRY_RECORDER_REQUIRED_VERSION: RECORDER_VERSION,

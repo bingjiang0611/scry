@@ -6,12 +6,37 @@ import { RemoteRunPolicy, GatedExecutor } from './remote-run-policy'
 import { readRemoteWorkspace } from './remote-workspace'
 import type { RemoteFileDownloads } from './remote-file-download'
 import type { RemoteInteractionBroker } from './remote-interaction-broker'
-import type { SessionLedger } from './session-ledger'
+import type { LedgerEvent, SessionLedger } from './session-ledger'
 import type { RunOutputLog } from './run-output-log'
 import type { PairingAuthority } from './pairing'
-import { ProviderOperationGate } from '../provider-operation-gate'
-import { parseRouting } from './host-controller-routing'
+import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
+import { parseRouting, HOST_RESTARTED_DETAIL } from './host-controller-routing'
 import type { HostControllerDependencies, RemoteIntentRouting } from './host-controller-types'
+import type { OrchestrationAuthorityHooks, OrchestrationImmediateDispatchChecks } from './orchestration-seam'
+
+/** Startup reconciliation for orphaned dispatched runs (core §2.4: interrupted != failed). */
+export function recoverDispatchedLedgerRuns(
+  ledger: SessionLedger,
+  orchestration?: OrchestrationAuthorityHooks
+): void {
+  for (const runId of ledger.dispatchedRuns()) {
+    if (orchestration?.recoveredRunLifecycle) {
+      const recovered = orchestration.recoveredRunLifecycle(runId)
+      if (recovered === 'settled') {
+        ledger.markSettled(runId)
+        continue
+      }
+      if (recovered === 'failed') {
+        ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
+        continue
+      }
+      ledger.markProgress(runId, JSON.stringify({ event: 'interrupted', reason: 'host_restarted' }))
+      ledger.markCancelled(runId)
+      continue
+    }
+    ledger.markFailed(runId, HOST_RESTARTED_DETAIL)
+  }
+}
 
 // Wires the device gateway and the exactly-once dispatcher: which reader serves
 // each gateway face, and how one submitted intent becomes exactly one Provider
@@ -46,12 +71,53 @@ export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivit
   try { deps.onRunActivity?.(runId, ledger.intentSeq(runId)) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
 }
 
-/** A ledger event wakes parked watchers and names its run for the App event feed. */
-export function ledgerEventObserver(deps: Pick<HostControllerDependencies, 'onRunActivity'>, notify: () => void): (event: { runId: string }, intentSeq?: number) => void {
-  return (event, intentSeq) => { notify(); runActivity(deps, event.runId, { intentSeq: () => intentSeq }) }
+const controllerMetaByDeps = new WeakMap<object, { gateway: RemoteGateway; interactions: RemoteInteractionBroker }>()
+
+function resolveAnsweredByPeer(
+  interactions: RemoteInteractionBroker,
+  event: LedgerEvent
+): string | undefined {
+  if (event.kind !== 'run_progress' || !event.detail?.includes('"question_answered"')) return undefined
+  try {
+    const marker = JSON.parse(event.detail) as { event?: unknown; questionId?: unknown; answerId?: unknown }
+    if (marker.event !== 'question_answered') return undefined
+    if (typeof marker.questionId !== 'string' || typeof marker.answerId !== 'string') return undefined
+    return interactions.answeredByPeer(event.runId, marker.questionId, marker.answerId)
+  } catch {
+    return undefined
+  }
 }
 
-export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway; dispatcher: RemoteDispatcher } {
+/** A ledger event wakes parked watchers and names its run for the App event feed. */
+export function ledgerEventObserver(
+  deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent' | 'orchestration'>,
+  notify: () => void
+): (event: LedgerEvent, intentSeq?: number) => void {
+  return (event, intentSeq) => {
+    notify()
+    runActivity(deps, event.runId, { intentSeq: () => intentSeq })
+    if (deps.orchestration && event.kind === 'run_progress') {
+      try { deps.orchestration.onRunProgress(event.runId, event.detail) } catch { /* ignore */ }
+    }
+    try {
+      const entry = controllerMetaByDeps.get(deps)
+      const runMeta = entry?.gateway.runMeta(event.runId)
+      const answeredByPeer = entry ? resolveAnsweredByPeer(entry.interactions, event) : undefined
+      const meta =
+        runMeta || answeredByPeer
+          ? { ...(runMeta ?? {}), ...(answeredByPeer ? { answeredByPeer } : {}) }
+          : undefined
+      deps.onLedgerEvent?.(event, meta)
+    } catch { /* shadow observation must never fail a run */ }
+  }
+}
+
+export function createExecution(input: ExecutionDeps): {
+  gateway: RemoteGateway
+  dispatcher: RemoteDispatcher
+  immediateDispatch: OrchestrationImmediateDispatchChecks
+  dispose(): void
+} {
   const { deps, ledger, output, fileDownloads, interactions, stops, live, notify } = input
   const gateway = new RemoteGateway({
     authority: input.authority,
@@ -75,10 +141,12 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     ...(deps.readHistoryVersion ? { historyVersion: { read: deps.readHistoryVersion } as RemoteHistoryVersionSource } : {}),
     ...(deps.readHistoryTurnsPage ? { historyTurnsPage: { read: deps.readHistoryTurnsPage } as RemoteHistoryTurnsPageSource } : {})
   })
+  controllerMetaByDeps.set(deps, { gateway, interactions })
 
   // Runs that got as far as the run start; any other failure was a refusal by the ledger.
   const reached = new Set<string>()
-  const policy = new RemoteRunPolicy({ gate: deps.gate ?? new ProviderOperationGate(), workspace: deps.workspace })
+  const gate = deps.gate ?? new ProviderOperationGate()
+  const policy = new RemoteRunPolicy({ gate, workspace: deps.workspace })
   const base: RemoteExecutor = {
     execute: async (executorInput: RemoteExecutorInput) => {
       const stop = new AbortController()
@@ -123,8 +191,40 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
     }),
     base
   })
+  const immediateDispatch: OrchestrationImmediateDispatchChecks = {
+    isPeerAuthorized: (peer) => input.authority.authorizesCertificate(peer),
+    authorizeWorkspace: (cwd) => deps.workspace.authorize(cwd),
+    isProviderAuthenticating: (provider, profile) => {
+      const lease = gate.acquireOperation(providerOperationKey(provider, profile ?? undefined))
+      if (lease.ok) {
+        lease.release()
+        return false
+      }
+      return true
+    }
+  }
   const dispatcher = new RemoteDispatcher({
     ledger,
+    ...(deps.orchestration ? {
+      beforeDispatch: (runId, detail) => {
+        const meta = gateway.runMeta(runId)
+        const check = deps.orchestration!.beforeDispatch({
+          runId,
+          detail,
+          peerCertSHA256: meta?.peerCertSHA256,
+          grantScope: meta?.grantScope ?? gateway.runScope(runId),
+          ...immediateDispatch
+        })
+        if (!check.ok && check.action === 'fail') {
+          try { deps.onDispatchRefused?.({ detail, grantScope: gateway.runScope(runId), error: new Error(check.detail ?? check.reason) }) }
+          catch { /* ignore refusal hook error */ }
+        }
+        return check
+      },
+      onSettled: (runId, ok, detail) => {
+        deps.orchestration!.onRunTerminal(runId, ok ? 'settled' : 'failed', detail)
+      }
+    } : {}),
     executor: { execute: async (executorInput) => {
       try {
         const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })
@@ -149,5 +249,18 @@ export function createExecution(input: ExecutionDeps): { gateway: RemoteGateway;
       flush: (runId) => output.flush(runId)
     }
   })
-  return { gateway, dispatcher }
+  const unsubscribeGate = deps.orchestration
+    ? gate.onAuthenticationReleased(() => {
+        dispatcher.pump()
+      })
+    : () => undefined
+  return {
+    gateway,
+    dispatcher,
+    immediateDispatch,
+    dispose: () => {
+      unsubscribeGate()
+      dispatcher.dispose()
+    }
+  }
 }

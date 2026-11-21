@@ -2,13 +2,14 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import {
   HASH, SECRET, TTL, UUID, base, digest, fail, isTime, text, validatePairingState, validDeviceLabel,
-  type DeviceGrant, type GrantScope, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
+  type DeviceGrant, type GrantApprovedVia, type GrantScope, type GrantTransport, type PairingDependencies, type PairingRecord, type PairingReceipt, type PairingState
 } from './pairing-state'
+import { pruneStalePairings } from './pairing-retention'
 
 // Re-exported so the persisted-shape names keep one owner (pairing-state) while
 // callers keep importing them from the authority module they already use.
 export type {
-  DeviceGrant, GrantScope, GrantTransport, IssuedPairingCertificate, PairingDependencies,
+  DeviceGrant, GrantApprovedVia, GrantScope, GrantTransport, IssuedPairingCertificate, PairingDependencies,
   PairingPersistence, PairingReceipt, PairingRecord, PairingState, VerifiedPairingCSR
 } from './pairing-state'
 export { validatePairingState } from './pairing-state'
@@ -41,22 +42,29 @@ export class PairingAuthority {
     // Pending exchanges do not survive host restart. Completed transactions do,
     // so a lost receipt can be reconciled without creating another device.
     const pending = this.data.pairings.some(p => p.state === 'created' || p.state === 'awaiting_local_confirmation')
-    if (pending) this.persist({ ...this.data, pairings: this.data.pairings.map(p =>
-      p.state === 'created' || p.state === 'awaiting_local_confirmation' ? { ...base(p), state: 'expired' } : p) })
+    let next: PairingState = pending ? { ...this.data, pairings: this.data.pairings.map(p =>
+      p.state === 'created' || p.state === 'awaiting_local_confirmation' ? { ...base(p), state: 'expired' } : p) } : this.data
+    // Start-up also trims finished history (§4.5), in the same single commit.
+    const now = this.clock()
+    if (isTime(now)) next = pruneStalePairings(next, now)
+    if (next !== this.data) this.persist(next)
   }
 
   begin(): Promise<{ pairingId: string; secret: string; hostId: string; anchorSHA256: string; expiresAt: number }> {
     return this.serial(async () => {
-      if (this.data.pairings.length >= 64 || this.data.grants.length >= 64) fail('pairing_capacity_exceeded')
       const now = this.now()
+      // Finished history is trimmed before the capacity check and committed with
+      // the new invitation, so it can never fill the table for good.
+      const kept = pruneStalePairings(this.data, now)
+      if (kept.pairings.length >= 64 || kept.grants.length >= 64) fail('pairing_capacity_exceeded')
       const monotonic = this.monotonic()
       if (!Number.isFinite(monotonic) || monotonic < 0) fail('invalid_clock')
       const secret = randomBytes(32).toString('base64url')
       const pairingId = randomUUID()
       const pairing: PairingRecord = { pairingId, secretVerifier: digest(secret), createdAt: now, expiresAt: now + TTL, attempts: 0, state: 'created' }
-      const pairings = this.data.pairings.map(p => p.state === 'created' || p.state === 'awaiting_local_confirmation'
+      const pairings = kept.pairings.map(p => p.state === 'created' || p.state === 'awaiting_local_confirmation'
         ? { ...base(p), state: 'cancelled' as const } : p)
-      this.persist({ ...this.data, pairings: [...pairings, pairing] })
+      this.persist({ ...kept, pairings: [...pairings, pairing] })
       this.deadlines.set(pairingId, monotonic + TTL)
       return { pairingId, secret, hostId: this.data.hostId, anchorSHA256: this.data.anchorSHA256, expiresAt: pairing.expiresAt }
     })
@@ -97,7 +105,7 @@ export class PairingAuthority {
     })
   }
 
-  confirmLocal(pairingId: string, expectedPublicKeySHA256: string): Promise<DeviceGrant> {
+  confirmLocal(pairingId: string, expectedPublicKeySHA256: string, options?: { approvedVia?: GrantApprovedVia }): Promise<DeviceGrant> {
     return this.serial(async () => {
       let pairing = this.find(pairingId)
       if (pairing.state === 'paired') {
@@ -117,8 +125,10 @@ export class PairingAuthority {
           !HASH.test(certificate.certificateSHA256) || !text(certificate.certificatePEM, 16_384) ||
           !isTime(certificate.expiresAt) || certificate.expiresAt <= this.now()) fail('invalid_issued_identity')
       const confirmedAt = this.now()
+      const approvedVia = options?.approvedVia
       const grant: DeviceGrant = { ...certificate, pairingId, deviceLabel: proof.deviceLabel, authority: 'owner-device',
-        source: 'local_confirmation', scope: 'remote', confirmedAt, revokedAt: null }
+        source: 'local_confirmation', scope: 'remote', confirmedAt, revokedAt: null,
+        ...(approvedVia ? { approvedVia } : {}) }
       // Retire an expired grant for this same key in the SAME transaction. State
       // validation intentionally forbids two unrevoked grants for one key; an
       // expired certificate must be renewable without weakening that invariant.
@@ -158,10 +168,12 @@ export class PairingAuthority {
 
   // Self-reported display metadata, not hardware attestation or a new authorization.
   // Only the verified peer certificate may select the existing grant to update.
+  // Local grants keep their enrollment-time identity so a CLI cannot rename itself to App.
   updateDeviceLabel(certificateSHA256: string, deviceLabel: unknown): Promise<void> {
     return this.serial(async () => {
       const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256)
       if (!grant || !this.authorizesCertificate(certificateSHA256)) fail('device_not_authorized')
+      if (grant.scope === 'local') fail('invalid_device_label')
       if (!validDeviceLabel(deviceLabel)) fail('invalid_device_label')
       if (grant.deviceLabel === deviceLabel) return
       this.persist({ ...this.data, grants: this.data.grants.map(g => g.deviceId === grant.deviceId ? { ...g, deviceLabel } : g) })
@@ -188,7 +200,10 @@ export class PairingAuthority {
       if (!consumeSecret()) fail('local_enrollment_secret_invalid')
       this.available()
       const now = this.now()
-      if (this.data.pairings.length >= 64 || this.data.grants.length >= 64) fail('pairing_capacity_exceeded')
+      // As in begin: trim, check, and commit the trimmed state with the new grant.
+      // `serial` keeps this.data unchanged while the certificate is issued.
+      const kept = pruneStalePairings(this.data, now)
+      if (kept.pairings.length >= 64 || kept.grants.length >= 64) fail('pairing_capacity_exceeded')
       const deviceId = randomUUID()
       const certificate = await this.dependencies.issue({ ...proof, deviceId })
       this.available()
@@ -200,11 +215,11 @@ export class PairingAuthority {
       const grant: DeviceGrant = { ...certificate, pairingId, deviceLabel: input.deviceLabel, authority: 'owner-device',
         source: 'local_socket', scope: 'local', confirmedAt, revokedAt: null }
       // One local caller at a time: a new enrollment replaces the previous grant.
-      const grants = this.data.grants.map(g =>
+      const grants = kept.grants.map(g =>
         g.scope === 'local' && g.revokedAt === null ? { ...g, revokedAt: confirmedAt } : g)
       const pairing: PairingRecord = { pairingId, secretVerifier: digest(`local-enrollment:${deviceId}`), createdAt: now,
         expiresAt: now + TTL, attempts: 0, state: 'paired', deviceId }
-      this.persist({ ...this.data, grants: [...grants, grant], pairings: [...this.data.pairings, pairing] })
+      this.persist({ ...kept, grants: [...grants, grant], pairings: [...kept.pairings, pairing] })
       return structuredClone(grant)
     })
   }
@@ -238,6 +253,22 @@ export class PairingAuthority {
     const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
       !this.deniedDevices.has(g.deviceId) && g.expiresAt > now)
     return grant?.scope
+  }
+
+  /**
+   * True only for an active local_socket grant enrolled by the primary Scry App.
+   * Non-App local clients (e.g. scry CLI) enroll with distinct labels and cannot
+   * mutate their label via updateDeviceLabel.
+   */
+  isPrimaryAppLocalGrant(certificateSHA256: string): boolean {
+    if (typeof certificateSHA256 !== 'string' || !HASH.test(certificateSHA256)) return false
+    try { this.available() } catch { return false }
+    const now = this.clock()
+    if (!isTime(now)) return false
+    const grant = this.data.grants.find(g => g.certificateSHA256 === certificateSHA256 && g.revokedAt === null &&
+      !this.deniedDevices.has(g.deviceId) && g.expiresAt > now)
+    return !!grant && grant.scope === 'local' && grant.source === 'local_socket' &&
+      (grant.deviceLabel === 'Scry App' || grant.deviceLabel.startsWith('Scry App '))
   }
 
   close(): void { this.unavailable ??= 'pairing_authority_closed' }

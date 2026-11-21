@@ -394,3 +394,12 @@ export interface TurnRecordValidationIssue {
 export type TurnRecordValidationResult =
   | { ok: true; record: AgentTurnRecord }
   | { ok: false; issues: TurnRecordValidationIssue[] }
+
+const DECIMAL_20_8_LIMIT = 1_000_000_000_000
+
+export function canonicalCostUsd(value: number | null | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value) || value < 0 || value >= DECIMAL_20_8_LIMIT) return undefined
+  const rounded = Number(value.toFixed(8))
+  if (!Number.isFinite(rounded) || rounded >= DECIMAL_20_8_LIMIT) return undefined
+  return Object.is(rounded, -0) ? 0 : rounded
+}

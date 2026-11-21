@@ -7,6 +7,7 @@ import type { LoadedSessionTurn } from './session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from './workspace'
 import type { ScRead } from './source-control'
 import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceStartSelection } from './workspace-selection'
+import type { HostAdminNotice } from './host-admin'
 
 export interface RemoteProjectRef { path: string; label: string }
 export interface DesktopDirectoryPage {
@@ -155,6 +156,9 @@ export interface DesktopRemoteCatalog {
   sessionDelete?: true
   // Absent on older hosts: the client keeps reading full trace snapshots.
   traceDelta?: 1
+  // Absent on older hosts or when experimental host CLI approval is disabled (P5-7).
+  hostAdminNotices?: 1
+  hostAdminNoticeItems?: HostAdminNotice[]
   // Client-local attention projection from the connection baseline and host
   // catalogs. These keys are not host evidence and are never sent to the host.
   unreadSessionKeys?: string[]
@@ -189,7 +193,7 @@ export type DesktopHostRead =
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number }; settledTail?: true }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'workspaceChoices'; value: ScRead<WorkspaceChoices> }
   | { kind: 'validateWorkspaceBranch'; value: ScRead<{ name: string }> }
   | { kind: 'history'; history: DesktopRemoteHistory }

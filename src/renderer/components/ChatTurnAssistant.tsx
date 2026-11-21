@@ -1,35 +1,24 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
-
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
 import { useCompletedTurnFlow } from '../completed-turn-flow'
 import { TURN_FLOW_COPY } from '../constants/copy'
 import { providerHasEnded } from '../run-stop-status'
-
-
 import { useLiveArrivalKeys } from '../hooks/useLiveArrivalKeys'
 import Markdown from './MarkdownImpl'
-
 import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
-
 import { isOverviewToolErrorEvent } from '@shared/logical-calls'
 import { type AgentQuestionRequest, type AgentQuestionResponse } from '@shared/runtime'
-
-
-
 import { aggregateCalls, aggregateHooks, aggregateFiles, logicalCallEventsForTurn, resultOf } from '../format'
 import type { Turn } from '../format'
 import { turnDiffViewOf } from '../turn-diff'
 import { TurnStreamProjectionCache, isStreamTextFragment } from '../turn-stream-projection'
 import { SteerEvidenceMessage } from './ChatTurnUser'
-
-
-import { runtimeTitleForTurn, coalesceAdjacentThinking, ThinkingBlock } from './ChatTurnShared'
+import { runtimeTitleForTurn, coalesceAdjacentThinking, mergeToolResults, ThinkingBlock } from './ChatTurnShared'
 import { ToolGroup, SubagentBlock } from './ChatTurnTools'
 import { ToolItem } from './ChatTurnToolItem'
 import { aggregateTurnHookPhases } from './ChatTurnHookData'
-
 import { AssistantTurnView } from './ChatTurnAssistantView'
 import { CompletedModelText } from './CompletedModelText'
 
@@ -71,19 +60,8 @@ function AssistantTurnImpl({
   const terminal = turn.done || !!turn.error || finalizing || backgroundStatus?.waiting === true
   const projection = projectionCache.current.project(turn.items)
   const structuralItems = projection.structuralItems as TraceEvent[]
-  // 把 tool_result 合并进对应 tool_use（加 output），并从流里过滤掉单独的 tool_result 事件
-  const items = useMemo(() => {
-    const results = new Map<string, TraceEvent>()
-    for (const e of structuralItems) if (e.stage === 'tool_result' && e.toolUseId) results.set(e.toolUseId, e)
-    return structuralItems
-      .filter((e) => e.stage !== 'tool_result')
-      .map((e) => {
-        const r = e.toolUseId && (e.kind === 'tool' || e.kind === 'skill' || e.kind === 'agent')
-          ? results.get(e.toolUseId)
-          : undefined
-        return r ? { ...e, output: r.text, isError: r.isError ?? e.isError, durationMs: r.durationMs ?? e.durationMs } : e
-      })
-  }, [structuralItems])
+  // 把 tool_result 合并进对应 tool_use（含 runtimeMetadata），并过滤单独的 tool_result
+  const items = useMemo(() => mergeToolResults(structuralItems), [structuralItems])
   const visibleItems = useMemo(
     () => coalesceAdjacentThinking(logicalCallEventsForTurn(items)),
     [items]

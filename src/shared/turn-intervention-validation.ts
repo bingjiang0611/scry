@@ -9,12 +9,12 @@ function isQuestionOption(value: unknown): boolean {
     (raw.preview === undefined || (typeof raw.preview === 'string' && raw.preview.length > 0 && raw.preview.length <= 20_000))
 }
 
-function isQuestionPrompt(value: unknown): boolean {
+function isQuestionPrompt(value: unknown, maxOptions = 4): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   if (typeof raw.question !== 'string' || raw.question.length === 0 || raw.question.length > 2_000) return false
   if (typeof raw.header !== 'string' || raw.header.length === 0 || raw.header.length > 120) return false
-  if (!Array.isArray(raw.options) || raw.options.length > 4 || !raw.options.every(isQuestionOption) || typeof raw.multiSelect !== 'boolean') return false
+  if (!Array.isArray(raw.options) || raw.options.length > maxOptions || !raw.options.every(isQuestionOption) || typeof raw.multiSelect !== 'boolean') return false
   const labels = raw.options.map((option) => (option as Record<string, unknown>).label)
   return new Set(labels).size === labels.length
 }
@@ -22,12 +22,14 @@ function isQuestionPrompt(value: unknown): boolean {
 function isQuestionRequest(value: unknown): value is Record<string, unknown> & { questions: Array<Record<string, unknown>> } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
+  const maxOptions = raw.providerId === 'antigravity' ? 32 : 4
   return typeof raw.runId === 'string' && raw.runId.length > 0 &&
     typeof raw.questionId === 'string' && raw.questionId.length > 0 &&
-    (raw.providerId === undefined || ['claude', 'codex', 'qoder', 'opencode', 'pi'].includes(String(raw.providerId))) &&
+    (raw.providerId === undefined || ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(String(raw.providerId))) &&
     isOptionalString(raw.agentId) && isOptionalString(raw.source) &&
     (raw.questionKind === undefined || ['clarification', 'permission'].includes(String(raw.questionKind))) &&
-    Array.isArray(raw.questions) && raw.questions.length > 0 && raw.questions.length <= 4 && raw.questions.every(isQuestionPrompt) &&
+    Array.isArray(raw.questions) && raw.questions.length > 0 && raw.questions.length <= 4 &&
+    raw.questions.every((question) => isQuestionPrompt(question, maxOptions)) &&
     new Set(raw.questions.map((question) => (question as Record<string, unknown>).question)).size === raw.questions.length
 }
 

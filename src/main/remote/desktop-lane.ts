@@ -38,7 +38,8 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
-export type DesktopLaneName = 'control' | 'workbench' | 'terminal' | 'long' | 'status' | 'watch' | 'bulk' | 'events' | 'localHistory'
+export type { DesktopLaneName } from './desktop-lane-policy'
+import { LANE_POLICY, type DesktopLaneName } from './desktop-lane-policy'
 // Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
@@ -76,21 +77,6 @@ const KEEP_ALIVE_PREFIX = '{"keepAlive":true'
 const IDLE_CLOSE_MS = 20_000
 const MAX_NOT_SENT_RETRIES = 2
 const MAX_LOST_REPLAYS = 1
-const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnCancel: boolean }> = {
-  control: { responseTimeoutMs: 30_000, abortOnCancel: false },
-  // A write: cancelling the caller must not tear down a write whose bytes may have landed.
-  workbench: { responseTimeoutMs: 30_000, abortOnCancel: false },
-  // Input is a write: cancelling must not tear down a keystroke that may have landed.
-  terminal: { responseTimeoutMs: 30_000, abortOnCancel: false },
-  // The OAuth loopback waits 2 minutes for the browser; a test may install a server first;
-  // a billing sync reads pages of 20 s each.
-  long: { responseTimeoutMs: 5 * 60_000, abortOnCancel: false },
-  watch: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  status: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  events: { responseTimeoutMs: 40_000, abortOnCancel: true },
-  bulk: { responseTimeoutMs: 30_000, abortOnCancel: true },
-  localHistory: { responseTimeoutMs: 30_000, abortOnCancel: false }
-}
 
 // Only a host that keeps the tunnel open marks its reply with `keepAlive` first.
 // The key may be alone (`{"keepAlive":true}`) when a reply carries no other field.

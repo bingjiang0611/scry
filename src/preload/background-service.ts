@@ -1,12 +1,32 @@
 import { ipcRenderer } from 'electron'
-import type { BackgroundServiceActionResult, BackgroundServiceStatus } from '../shared/background-service'
+import type {
+  BackgroundServiceActionResult,
+  BackgroundServiceRuntimeNotice,
+  BackgroundServiceStatus
+} from '../shared/background-service'
 
-// The «后台服务» settings section (B4-S S0-1). None of these takes an argument: the
-// renderer cannot name a process, a path or a confirmation answer; main asks the user in
-// its own dialogs and signals only the verified daemon.lock holder.
+// The «后台服务» settings section (B4-S S0-1, P5-2). Action channels take no argument
+// except setBackgroundServiceLoginStart, which forwards a single boolean; paths, service
+// definitions, and native confirmations are all owned by main.
 export const backgroundServiceApi = {
   backgroundServiceStatus: (): Promise<BackgroundServiceStatus> => ipcRenderer.invoke('remote:backgroundService:status'),
+  backgroundServiceRuntimeNotice: (): Promise<BackgroundServiceRuntimeNotice | null> =>
+    ipcRenderer.invoke('remote:backgroundService:runtimeNotice'),
   restartBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:restart'),
   quitWithBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:quit'),
-  reconnectBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:reconnect')
+  reconnectBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:reconnect'),
+  setBackgroundServiceLoginStart: (enabled: boolean): Promise<BackgroundServiceActionResult> =>
+    ipcRenderer.invoke('remote:backgroundService:setLoginStart', enabled),
+  setHostCliApproval: (enabled: boolean): Promise<BackgroundServiceActionResult> =>
+    ipcRenderer.invoke('remote:hostAdmin:setCliApproval', enabled),
+  onBackgroundServiceNotice: (cb: (notice: BackgroundServiceRuntimeNotice | null) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, notice: BackgroundServiceRuntimeNotice | null) => cb(notice)
+    ipcRenderer.on('remote:backgroundService:notice', listener)
+    return () => ipcRenderer.removeListener('remote:backgroundService:notice', listener)
+  },
+  onHostAdminOpenDevices: (cb: (payload: { deviceId?: string }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { deviceId?: string }) => cb(payload ?? {})
+    ipcRenderer.on('remote:hostAdmin:openDevices', listener)
+    return () => ipcRenderer.removeListener('remote:hostAdmin:openDevices', listener)
+  }
 }

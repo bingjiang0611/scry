@@ -1,4 +1,5 @@
 import type { AgentStopState } from '../shared/runtime'
+import type { HostAdminNotice } from '../shared/host-admin'
 import type { ActiveRun } from '../shared/trace'
 import { sessionAttentionKey } from '../shared/session-attention'
 import type { DockBadgeState } from './dock-badge'
@@ -17,9 +18,13 @@ import type { DaemonRunTransport } from './daemon-run-transport'
 // the daemon's unread set feeds this window's badge, which says what was viewed (E1b).
 
 export interface DaemonRunEventsDeps {
-  transport: Pick<DaemonRunTransport, 'appEvents' | 'liveRuns' | 'attentionViewed' | 'forward'>
-  runtime: Pick<DaemonRunRuntime, 'wake' | 'wakeAll' | 'setWakesLive' | 'isTracking' | 'follow' | 'deliverAfterRead'>
+  transport: Pick<DaemonRunTransport, 'appEvents' | 'liveRuns' | 'attentionViewed' | 'forward'> & Partial<Pick<DaemonRunTransport, 'subscribe'>>
+  runtime: Pick<DaemonRunRuntime, 'wake' | 'wakeAll' | 'setWakesLive' | 'isTracking' | 'follow' | 'deliverAfterRead'> &
+    Partial<Pick<DaemonRunRuntime, 'applySubscribeSnapshot' | 'applySubscribeEvent' | 'applyRunHint' | 'setOnSessionBound'>>
   send: (channel: string, payload: unknown) => void
+  /** P4-3: switch to `subscribe` and omit `DaemonRunDiscovery` ONLY when daemon reports subscribe=1. */
+  subscribeMode?: boolean
+  onLogIdChanged?: (prevLogId: string, nextLogId: string) => void
   dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon' | 'view'>
   // The run this window shows: its session, once known, is the one on screen.
   focusedRun?: () => Promise<ActiveRun | null>
@@ -30,12 +35,15 @@ export interface DaemonRunEventsDeps {
   runTraces?: Pick<RunTraceRouter, 'publishStopState'>
   // Whether the window can take terminal output now (P3-terminal.md).
   rendererCanReceive?: () => boolean
+  // P5-7: host CLI admin notice to surface via system notification and open-devices click.
+  onHostAdmin?: (notice: HostAdminNotice) => void
 }
 
 export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): void } {
   const { transport, runtime, dockBadge } = deps
+  const useSubscribe = deps.subscribeMode === true && typeof transport.subscribe === 'function'
   const warn = deps.onWarn ? { onWarn: deps.onWarn } : {}
-  const discovery = new DaemonRunDiscovery({
+  const discovery = useSubscribe ? undefined : new DaemonRunDiscovery({
     liveRuns: () => transport.liveRuns({ waitMs: 0 }),
     isTracking: (runId) => runtime.isTracking(runId),
     follow: (input) => runtime.follow(input),
@@ -68,13 +76,28 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     canSend: deps.rendererCanReceive ?? (() => true),
     ...warn
   })
+  if (useSubscribe) runtime.setOnSessionBound?.(viewFocusedSession)
   const pump = new DaemonEventPump({
     source: transport, send: deps.send, ...warn, ...(deps.waitMs !== undefined ? { waitMs: deps.waitMs } : {}),
-    onRun: (runId, intentSeq) => { runtime.wake(runId); discovery.notice(runId, intentSeq) },
-    // Lost notices may include a new run's: look at the live list as well.
-    onResync: () => { runtime.wakeAll(); discovery.resynchronize(); terminals.notice() },
+    ...(useSubscribe ? {
+      subscribeMode: true,
+      onSnapshot: async (snapshot) => {
+        if (snapshot.activeRuns) await runtime.applySubscribeSnapshot?.(snapshot.activeRuns.rows)
+      },
+      onSubscribeEvent: async (event) => {
+        await runtime.applySubscribeEvent?.(event)
+      },
+      onRunHint: (hint) => { runtime.applyRunHint?.(hint) },
+      ...(deps.onLogIdChanged ? { onLogIdChanged: deps.onLogIdChanged } : {}),
+      onResync: () => { terminals.notice() }
+    } : {
+      onRun: (runId, intentSeq) => { runtime.wake(runId); discovery!.notice(runId, intentSeq) },
+      // Lost notices may include a new run's: look at the live list as well.
+      onResync: () => { runtime.wakeAll(); discovery!.resynchronize(); terminals.notice() }
+    }),
     onTerminal: () => terminals.notice(),
     onOAuth: (url) => deliverDaemonOAuthUrl(url),
+    ...(deps.onHostAdmin ? { onHostAdmin: deps.onHostAdmin } : {}),
     onLive: (live) => runtime.setWakesLive(live),
     onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false),
     // W1: the pipeline's own notices, each after the run text it follows.
@@ -92,5 +115,5 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     void transport.attentionViewed(sessionKey).catch((error) => deps.onWarn?.('daemon attention viewed failed', error))
   })
   pump.start()
-  return { dispose: () => { pump.dispose(); terminals.dispose(); dockBadge?.forgetDaemon() } }
+  return { dispose: () => { if (useSubscribe) runtime.setOnSessionBound?.(undefined); pump.dispose(); terminals.dispose(); dockBadge?.forgetDaemon() } }
 }

@@ -6,7 +6,7 @@ import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { SourceControlService } from '../main/source-control/service'
 import type { ProviderRegistry } from '../main/providers/registry'
 import type { ProviderOperationGate } from '../main/provider-operation-gate'
-import type { DesktopRemoteClient } from '../main/remote/desktop-client'
+import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import type { DesktopRemoteForkSessionRequest } from '../shared/desktop-remote'
 import type { UserQuestionBroker } from '../main/user-question'
 import type { RemoteRunCompletion } from '../main/remote/remote-run-binding'
@@ -79,7 +79,7 @@ export type RemoteHostRuntime = {
   openLocalPath: (path: string) => Promise<void>
   // Outbound desktop-to-desktop execution is an App capability. A headless daemon
   // that only hosts this machine omits it instead of advertising a throwing target.
-  desktopRemoteClient?: () => DesktopRemoteClient
+  desktopRemoteClient?: () => DesktopRemoteTargetAPI
   isShuttingDown: boolean
 }
 
@@ -100,6 +100,8 @@ export interface HostRuntimeInputs {
   shellEnvironment: () => Promise<Record<string, string | undefined>>
   openPath?: (path: string) => Promise<void>
   trashItem?: (path: string) => Promise<void>
+  hasOpenPath?: () => boolean
+  hasTrashItem?: () => boolean
   // History readers over the app's transcript archive and SQLite projections.
   historyHandlers: Pick<RemoteHostServiceDependencies, 'readHistory' | 'readHistoryPreview' | 'readHistoryVersion' | 'readHistoryTurnsPage'>
   // Analytics / LLM performance / MCP trust panels.
@@ -112,6 +114,9 @@ export interface HostRuntimeInputs {
   // Daemon mode: conversation sends prepared in memory, claimed by their dispatch.
   // The App event feed's run notices (P3f E2): which ledger run changed.
   onRunActivity?: (runId: string, intentSeq?: number) => void
+  onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
+  orchestration?: HostControllerFactoryDependencies['orchestration']
+  listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 

@@ -3,6 +3,7 @@ import { parseDisabledProviders, ProviderRegistry } from '../providers/registry'
 import { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
 import { createBuiltInProviderAdapters } from '../providers'
 import { createSmokeProviderAdapter, type SmokeFixtureProviderId } from '../providers/smoke'
+import { sweepStalePrivateMcpConfigs } from '../providers/private-mcp-config'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
@@ -17,6 +18,13 @@ export function createProviderRuntime(deps: {
   resolvePiProfile: (id: string) => Promise<PiAgentProfile | undefined>
 }) {
   const { homeDir, userDataDir, appPath, resourcesPath, appVersion, isPackaged, listPiProfiles, resolvePiProfile } = deps
+  // Crash recovery for private MCP config files (0600, same user only): an owner that died
+  // mid-run never reached its cleanup. Off the startup path; only dead owners' files go.
+  setTimeout(() => {
+    sweepStalePrivateMcpConfigs().catch((error: NodeJS.ErrnoException) => {
+      console.warn('[scry] private MCP config sweep failed:', error.code ?? 'unknown')
+    })
+  }, 5_000).unref()
   const piRunDiagnostics = new PiRunDiagnostics(join(userDataDir, 'pi-run-diagnostics.json'))
   // Two explicit gates. The App's packaged fixture keeps its original requirements; the
   // daemon is a plain Node process with no debug port, so an acceptance run asks for the
@@ -45,7 +53,8 @@ export function createProviderRuntime(deps: {
     {
       listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
       historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs')
-    }
+    },
+    userDataDir
   )
   /**
    * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；

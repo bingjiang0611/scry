@@ -40,7 +40,7 @@ function defaultSink(): PerformanceSink | null {
 type PerformanceDimensions = Readonly<Partial<Record<'provider' | 'platform', string>>>
 
 const providerDimensions: Record<SessionProviderId, true> = {
-  claude: true, codex: true, qoder: true, opencode: true, pi: true, legacy_unknown: true
+  claude: true, codex: true, qoder: true, opencode: true, pi: true, antigravity: true, legacy_unknown: true
 }
 // The trusted-IPC browser fixture imports this module without Node globals. The Performance
 // API itself is native in both Node and Chromium; only main can enable environment diagnostics.

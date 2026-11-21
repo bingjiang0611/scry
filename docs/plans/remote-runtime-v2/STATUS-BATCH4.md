@@ -77,6 +77,27 @@ B4-L4 迁移完成：168 个特权通道全部有了去处（留在 main、本�
 1. `remote:desktop:*` 交给 daemon：已实现（本机 op `localDesktopHost`）。
 2. 撤销 App 自己的本机连接：暂不提供入口。
 
+## 已决定（维护者 2026-11-18，无界面执行端）
+
+| 决策 | 结论 | 落地 |
+|---|---|---|
+| 分步做，与 P4 分开 | 第 1 步「登录时启动」：设置开关安装/卸载 launchd 或 `systemd --user` 服务，登录或重启后不开 App 也有后台服务；App 仍装在这台机器上 | [P5-headless-host](P5-headless-host.md) |
+| 第 2 步：不靠执行端界面批准新设备 | 方案 a，在执行端上用命令行批准。能以同一 OS 用户登录这台机器的人，已有本机授权模型的权限（上文 2026-11-07 第一行）。方案 b（从已配对设备批准）不采用 | [P5-host-cli](P5-host-cli.md) |
+| 不依赖 App 的独立安装包 | P4 之后再做；本轮只记在「不做/以后」 | [P5-host-security](P5-host-security.md) §8 |
+| P4 设计评审 | 做完整设计（约 12 周，不含 S3）；`subscribe` 先作 v2 能力、真机验证后一次升 v3；立即路径 intent 与领取同事务、pending 有 TTL、派发前复核 grant；`fullfsync` 先测后定；其余按评审建议。无待决定事项 | [P4-orchestration-decisions](P4-orchestration-decisions.md) |
+| P4-2 fullfsync、S3 范围、中继部署（2026-11-20） | macOS `fullfsync` 开启，8 ms 门禁不放宽，压不进去就带数据报回；S3：开发构建与测试实例先改为默认走后台服务，`SCRY_HOST_DAEMON=0` 再保留一个版本；W10 的中继修复部署到线上 | [P4-orchestration-plan](P4-orchestration-plan.md) §8.3、[P3-s3-plan](P3-s3-plan.md) §1 |
+| P5 第 2 步上线方式（2026-11-21） | 命令行批准在实验开关 `SCRY_EXPERIMENTAL_HOST_CLI` 后面；含 W3 的版本发布且 P5-8 通过后，下一个小版本默认开启，并保留用环境变量关闭的口子至少一个版本；iOS 下一版同步显示命令行批准通知（丢弃未知类型，不让整体失败）；只在设置页提供「复制 scry-host 路径」，不自动改全局 PATH | [handoff/reports/W11-review.md](handoff/reports/W11-review.md) |
+| 分支试用默认值（2026-11-21） | 维护者要求本分支默认开启三项：`SCRY_ORCHESTRATION` 未设置即为 `on`（显式 `off`、`shadow` 仍可用，其他值按 `off` 处理）；Antigravity 未设置 `SCRY_EXPERIMENTAL_PROVIDERS` 时可见（设为空或 `none` 则隐藏）；命令行批准入口未设置时可用（`SCRY_EXPERIMENTAL_HOST_CLI=0` 关闭，开关本身仍默认关闭、开启要经原生确认）。单测在 `vitest.config.ts` 里固定为关闭值，默认开启另有专门测试。合入 main 前逐项重新决定 | 本行 |
+| 多 Agent 编排 | P4 只是 t3code Orchestration V2 核心的对应物，多 Agent 是其上的另一层。先在 P4 设计里预留钩子（只改文档，P4 不实现行为，工期不变），再仿 t3code 的编排 MCP 写草案 | [P4-orchestration-core](P4-orchestration-core.md) §2.10、[P6-multi-agent-draft](P6-multi-agent-draft.md) |
+| 「第 1 步」暂不做（2026-11-19） | App 发起的 run 由 daemon 直接写记录、绕过 Hook 与命令行，暂不做；P4–P6 不改 scry 命令行、其命令与记录格式 | [P6-multi-agent-decisions](P6-multi-agent-decisions.md) D27 |
+| 已修，待真机（2026-11-19） | 历史检索给 Claude 的 bearer token 不再进 `--mcp-config` 参数：Claude 的 run 与 MCP 状态检查改把整份 `mcpServers` 写进 0600 私有文件（0700 临时目录，结束即删，崩溃残留由启动清扫删除），参数只带路径（`private-mcp-config.ts`）。真实 SDK + 参数记录器测试通过；随包与本机 Claude Code 实测能从文件路径加载并连上 MCP。未经真实 run 验证 | [P6-multi-agent-security](P6-multi-agent-security.md) §S4 |
+| 部分已修（2026-11-19） | 经授权的仓库/用户 MCP 配置（远程 `headers`、stdio `env`）进 Provider 命令行参数，本机其他用户可经 `ps` 看到。**已修**：Claude、Qoder 走同一私有文件（qodercli 1.1.11/1.1.92 静态核对接受路径）；Codex 的静态 `headers` 改由 app-server 环境变量经 `env_http_headers` 读取；Codex stdio `env` 按维护者方案 (b) 写进同一类私有文件，由固定的 `/bin/sh -c` 启动脚本读入后 exec 原命令（Codex 0.160.1 源码核对：子进程清空环境后只给默认变量与 `env`，脚本不多给），文件随缓存的 app-server client 关闭删除。**未修**：Codex 无法由脚本逐字复现的 `env`（非法变量名、shell 自管变量如 `SHLVL`/`BASH*`、Codex 自行丢弃或改写的名字、非字符串值）整个服务器仍内联在参数里；Qoder 配置含 `tools` 时仍走 SDK 内联参数（SDK 改写无法等价复现）；Codex/Qoder 真机 run 与 macOS bash 3.2 下的启动脚本未验证 | [P6-multi-agent-decisions](P6-multi-agent-decisions.md) §10.3 |
+| Antigravity Provider（2026-11-19） | ① 允许真实 Antigravity run 做验证，费用记维护者 Google 账号；② 范围 (a)：Scry 驱动 `agy` 会话，不做 scry CLI / Recorder 录制终端里的 `agy`（只记录 Hook 机制）；③ 不实现登录，沿用 CLI 已有登录状态，未安装/未登录如实报 unavailable 并指向 CLI 自己的登录。设计稿另列 8 项待决定（含条款风险 D1） | [P7-antigravity-provider](P7-antigravity-provider.md)、[P7-antigravity-plan](P7-antigravity-plan.md) §9 |
+
+评审后（同日）「都按推荐」：supervisor 停止时等 daemon、远程策略随服务写入、命令行批准默认关且只能在 App 里打开、挑战认证、运行标记、通知与速率、批准方式分两次发布写进 grant。随后「都按推荐」：开关关闭时仍放行只收紧的 `cancel`、`revoke`、`desktop-off`（每次通知）；`SCRY_RUN_CONTROLS`、`SCRY_PROVIDER_MANIFEST_URL` 写进服务文件（[P5-headless-host](P5-headless-host.md) §10）。
+
 ## 需要决定
 
-无。B4-S 的决定见 [P3-b4s-plan](P3-b4s-plan.md) 末节。
+P5、P4 均无待决定事项（P4 见上表最后一行）。
+
+B4-S 的决定见 [P3-b4s-plan](P3-b4s-plan.md) 末节。

@@ -1,5 +1,5 @@
 import { handleRunControl } from './host-run-control'
-import { handleAppEvents, handleAttentionViewed, handleLocalOp, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
+import { handleAppEvents, handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleSubscribe, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
@@ -67,7 +67,8 @@ export async function dispatchRemoteRequest(
   parsed: unknown,
   executionTargets?: ExecutionTargetRouter,
   localEndpoint?: LocalEndpointHandlers,
-  lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
+  lanAdvertisement: () => LanAdvertisement | undefined = () => undefined,
+  connectionSignal?: AbortSignal
 ): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
@@ -176,9 +177,21 @@ export async function dispatchRemoteRequest(
       // The App's own event feed (P3f); absent on the network endpoint.
       return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
     }
+    if (request.op === 'subscribe') {
+      // P4-3 local orchestration subscribe; absent on the network endpoint and in off/shadow modes.
+      return await handleSubscribe(localEndpoint?.subscribe, request as unknown as Record<string, unknown>, fingerprint, connectionSignal)
+    }
     if (request.op === 'terminalFeed') {
       // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.
       return await handleTerminalFeed(localEndpoint?.terminal, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'executionTargetWork') {
+      // The primary App's long poll for forwarded execution-target calls (W10); absent on the network endpoint.
+      return await handleExecutionTargetWork(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint, connectionSignal)
+    }
+    if (request.op === 'executionTargetResult') {
+      // The primary App's reply to a forwarded execution-target call (W10); absent on the network endpoint.
+      return handleExecutionTargetResult(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (isLocalOp(request.op)) {
       // App channels the daemon answers for its own App; absent on the network endpoint.

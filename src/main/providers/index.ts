@@ -1,4 +1,6 @@
 import type { ProviderAdapter } from './types'
+import { isExperimentalProviderEnabled } from '../../shared/experimental-providers'
+import { createAntigravityAdapter } from './antigravity'
 import { createClaudeAdapter } from './claude'
 import { createCodexAdapter } from './codex'
 import { createQoderAdapter } from './qoder'
@@ -17,13 +19,15 @@ export function createBuiltInProviderAdapters(
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
     historyExtensionPath?: string
     diagnostics?: PiRunDiagnostics
-  }
+  },
+  userDataDir?: string
 ): ProviderAdapter[] {
   return [
     createClaudeAdapter(homeDir),
     createCodexAdapter(codexHomeDir, homeDir),
     createQoderAdapter(homeDir),
     createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
-    ...(piProfiles ? [createPiAdapter(piProfiles)] : [])
+    ...(piProfiles ? [createPiAdapter(piProfiles)] : []),
+    ...(isExperimentalProviderEnabled('antigravity') ? [createAntigravityAdapter(homeDir, { userDataDir })] : [])
   ]
 }

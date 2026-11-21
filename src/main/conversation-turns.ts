@@ -213,7 +213,14 @@ export async function settleConversationTurn(
   runId: string,
   result: Exclude<ConversationDelivery, { status: 'pending' }>,
   finalItems: ConversationItemRef[],
-  archive?: ConversationArchiveRef
+  archive?: ConversationArchiveRef,
+  beforePersist?: (info: {
+    conversationId: string
+    runId: string
+    ordinal: number
+    conversation: Conversation
+    delivery: Exclude<ConversationDelivery, { status: 'pending' }>
+  }) => void
 ): Promise<Conversation> {
   const delivery = structuredClone(result)
   const final = structuredClone(finalItems)
@@ -249,6 +256,7 @@ export async function settleConversationTurn(
     if (archiveRef) turn.archive = archiveRef
     conversation.revision++
     const checked = ledger.checked(conversation)
+    beforePersist?.({ conversationId: id, runId, ordinal: turn.ordinal, conversation: checked, delivery })
     await ledger.persist(checked)
     return checked
   })
