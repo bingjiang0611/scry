@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonEventPump } from './daemon-event-pump'
+import { readSubscribeTraceOnce } from './daemon-run-subscribe'
+import type { RunCursor } from './daemon-run-cursor'
 
 describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
   it('drops known cursor and pulls a fresh snapshot on an unknown event type', async () => {
@@ -113,5 +115,53 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     expect(onOAuth).toHaveBeenCalledWith('https://example.test/oauth')
     expect(onAttention).toHaveBeenCalledWith({ revision: 2, unreadSessionKeys: ['s1'] })
     expect(onWindow).toHaveBeenCalledWith('agent:error', { runId: 'r1', message: 'boom' })
+  })
+
+  it('readSubscribeTraceOnce preserves cursor.pushed when live trace returns run=null and never re-emits archive result', async () => {
+    const resultEvent = { id: 'r1:result', runId: 'r1', kind: 'harness' as const, stage: 'result' as const, ts: '2026-01-01T00:00:00Z' }
+    const cursor: RunCursor = {
+      runId: 'ledger-1',
+      scryRunId: 'r1',
+      context: { cwd: '/tmp/ws', providerId: 'codex', externalSessionId: 'sess-1' },
+      lifecycle: 'dispatched',
+      watch: 0,
+      output: 1,
+      pushed: [resultEvent as never],
+      askedQuestions: new Set(),
+      answerIds: new Map(),
+      resyncRequired: false,
+      pumping: false,
+      stopped: false,
+      sawText: true
+    }
+    const apply = vi.fn(() => false)
+    const archivedRunTrace = vi.fn(async () => null)
+
+    // Non-terminal trailing hint after RunRegistry deleted the run: must NOT wipe cursor.pushed
+    await readSubscribeTraceOnce({
+      cursor,
+      runId: 'ledger-1',
+      disposed: false,
+      transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
+      apply,
+      syncQuestions: async () => undefined,
+      flush: vi.fn()
+    })
+    expect(apply).not.toHaveBeenCalled()
+    expect(cursor.pushed).toHaveLength(1)
+
+    // Subsequent terminal trace read sees result already delivered: must skip archive read completely
+    await readSubscribeTraceOnce({
+      cursor,
+      runId: 'ledger-1',
+      disposed: false,
+      terminal: true,
+      transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
+      apply,
+      syncQuestions: async () => undefined,
+      flush: vi.fn()
+    })
+    expect(archivedRunTrace).not.toHaveBeenCalled()
+    expect(apply).not.toHaveBeenCalled()
   })
 })

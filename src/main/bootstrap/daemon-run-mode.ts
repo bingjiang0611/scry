@@ -202,9 +202,8 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   let version: string
   let subscribeMode = false
   try {
-    const connected = await client.connect()
-    version = connected.version
-    subscribeMode = connected.subscribe === 1
+    version = (await client.connect()).version
+    subscribeMode = client.subscribeSupported
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {

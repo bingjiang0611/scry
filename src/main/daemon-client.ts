@@ -163,6 +163,7 @@ export class DaemonClient {
   readonly #lanes: DesktopLanes
   #grant: StoredLocalGrant | undefined
   #version: string | undefined
+  #subscribeSupported = false
   readonly #expected: BuildIdentity
 
   constructor(options: DaemonClientOptions) {
@@ -177,11 +178,14 @@ export class DaemonClient {
   /** The daemon version this client verified, or undefined before connect(). */
   get version(): string | undefined { return this.#version }
 
+  /** Whether the connected daemon advertised P4-3 local subscribe (`subscribe: 1`). */
+  get subscribeSupported(): boolean { return this.#subscribeSupported }
+
   /**
    * Probe, enroll if needed, then confirm the version and build. Returns what the daemon
    * reported so a caller can refuse to continue with a daemon built from other sources.
    */
-  async connect(): Promise<BuildIdentity & { enrolled: boolean; subscribe?: 1 }> {
+  async connect(): Promise<BuildIdentity & { enrolled: boolean }> {
     const existing = this.#load()
     if (existing) {
       let version: DaemonProbeInfo | undefined
@@ -201,12 +205,8 @@ export class DaemonClient {
       this.#requireVersion(version)
       this.#grant = existing
       this.#version = version.version
-      return {
-        version: version.version,
-        ...(version.build ? { build: version.build } : {}),
-        ...(version.subscribe === 1 ? { subscribe: 1 as const } : {}),
-        enrolled: false
-      }
+      this.#subscribeSupported = version.subscribe === 1
+      return { version: version.version, ...(version.build ? { build: version.build } : {}), enrolled: false }
     }
     const grant = await this.#enroll()
     const version = await this.#probe(grant)
@@ -215,12 +215,8 @@ export class DaemonClient {
     this.#save(grant)
     this.#grant = grant
     this.#version = version.version
-    return {
-      version: version.version,
-      ...(version.build ? { build: version.build } : {}),
-      ...(version.subscribe === 1 ? { subscribe: 1 as const } : {}),
-      enrolled: true
-    }
+    this.#subscribeSupported = version.subscribe === 1
+    return { version: version.version, ...(version.build ? { build: version.build } : {}), enrolled: true }
   }
 
   /**

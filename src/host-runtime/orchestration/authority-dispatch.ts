@@ -49,7 +49,7 @@ export interface AuthorityBeforeDispatchInput {
   authorizeWorkspace: (cwd: string) => string
   isPeerAuthorized: (peerCertSHA256: string) => boolean
   isProviderAuthenticating: (provider: string, profile: string | null) => boolean
-  verifyTrustGate?: () => boolean
+  verifyTrustGate?: () => boolean | { ok: boolean; detail?: string }
 }
 
 export function buildSubmitCommandForAuthority(options: {
@@ -174,15 +174,22 @@ export function runAuthorityPreDispatchRecheck(
     }
   }
   const peerHex = input.actor.startsWith('peer:') ? input.actor.slice(5) : undefined
-  return evaluatePreDispatchRecheck({
+  const trustChecked = input.verifyTrustGate ? input.verifyTrustGate() : true
+  const trustGatePassed = typeof trustChecked === 'boolean' ? trustChecked : trustChecked.ok
+  const trustGateDetail = typeof trustChecked === 'object' && !trustChecked.ok ? trustChecked.detail : undefined
+  const decision = evaluatePreDispatchRecheck({
     actor: input.actor,
     principal: input.actor,
     cwdMatches,
     workspaceAuthorized,
     grantValid: peerHex ? input.isPeerAuthorized(peerHex) : true,
     operationGateAcquired: !input.isProviderAuthenticating(input.provider, input.profile),
-    trustGatePassed: input.verifyTrustGate ? input.verifyTrustGate() : true
+    trustGatePassed
   })
+  if (!decision.ok && decision.action === 'fail' && trustGateDetail) {
+    return { ...decision, detail: trustGateDetail }
+  }
+  return decision
 }
 
 export function getRunStartExpiryInfo(

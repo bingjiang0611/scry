@@ -250,6 +250,7 @@ export class AuthorityEngine {
         runId: input.runId,
         step: 'failed',
         reason: recheck.reason,
+        ...('detail' in recheck && recheck.detail ? { detail: recheck.detail } : {}),
         delivery: 'not_sent',
         evidence: [`pre_dispatch_recheck:${recheck.reason}`]
       })
@@ -368,6 +369,7 @@ export class AuthorityEngine {
     runId: string
     step: 'settled' | 'failed' | 'cancelled' | 'interrupted'
     reason?: string
+    detail?: string
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
   }): void {

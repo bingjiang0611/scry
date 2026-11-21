@@ -274,7 +274,12 @@ export async function applySubscribeEventToRuntime(
 
   if (event.type === 'run.settled' || event.type === 'run.failed' || event.type === 'run.cancelled' || event.type === 'run.interrupted') {
     const lifecycle = event.type.slice(4)
-    const reason = typeof event.payload.reason === 'string' ? event.payload.reason : undefined
+    const reason =
+      typeof event.payload.detail === 'string' && event.payload.detail.length > 0
+        ? event.payload.detail
+        : typeof event.payload.reason === 'string'
+          ? event.payload.reason
+          : undefined
     await finalizeTerminalCursor(ctx, cursor, lifecycle, reason)
   }
 }
@@ -309,8 +314,9 @@ export function applyRunHintToRuntime(
 
   const shouldReadTrace =
     cursor.context !== undefined &&
+    cursor.admitted === true &&
     !cursor.stopped &&
-    (hint.outputSeq > cursor.output || (cursor.admitted && cursor.latest === undefined))
+    (hint.outputSeq > cursor.output || cursor.latest === undefined)
   if (shouldReadTrace) {
     cursor.output = Math.max(cursor.output, hint.outputSeq)
     void ctx.scheduleTraceRead(cursor.runId)
@@ -365,9 +371,21 @@ export async function readSubscribeTraceOnce(input: {
       context: cursor.context, runId: targetId, settledTail: false,
       ...(cursor.after ? { after: cursor.after } : {})
     })
-    if (read.kind === 'snapshot' && read.run === null && input.terminal && cursor.context.externalSessionId) {
-      const archived = await input.transport.archivedRunTrace({ context: cursor.context, runId: targetId })
-      if (archived) read = { kind: 'snapshot', run: archived }
+    if (read.kind === 'snapshot' && read.run === null) {
+      const alreadyHasResult = cursor.pushed.some((e) => e.kind === 'harness' && e.stage === 'result')
+      if (input.terminal && cursor.context.externalSessionId && !alreadyHasResult) {
+        const archived = await input.transport.archivedRunTrace({ context: cursor.context, runId: targetId })
+        if (archived) {
+          // Deduplicate by event id so archive-formatted turns never re-emit already-pushed events.
+          const pushedIds = new Set(cursor.pushed.map((e) => e.id))
+          const missing = archived.items.filter((item) => !pushedIds.has(item.id))
+          if (missing.length > 0) {
+            read = { kind: 'snapshot', run: { ...archived, items: [...cursor.pushed, ...missing] } }
+          }
+        }
+      }
+      // Never pass `{ kind: 'snapshot', run: null }` to `apply`, which would wipe `cursor.pushed`.
+      if (read.kind === 'snapshot' && read.run === null) return
     }
     if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
     const changed = input.apply(read, cursor)

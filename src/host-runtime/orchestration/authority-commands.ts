@@ -171,6 +171,7 @@ export function recordTerminalWithSink(
     runId: string
     step: 'settled' | 'failed' | 'cancelled' | 'interrupted'
     reason?: string
+    detail?: string
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
   }
@@ -195,6 +196,7 @@ export function recordTerminalWithSink(
     runId: input.runId,
     step: input.step,
     ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.detail ? { detail: input.detail } : {}),
     ...(input.delivery ? { delivery: input.delivery } : {}),
     settledAt: input.step === 'interrupted' ? null : at,
     recoveredAt: input.step === 'interrupted' ? at : null,

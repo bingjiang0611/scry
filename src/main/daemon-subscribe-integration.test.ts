@@ -91,6 +91,10 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
         () => turnDoneEvents.filter((e) => e.runId === started.runId).length,
         { timeout: 3_000 }
       ).toBe(1)
+      // Terminal archive fallback must deliver `harness/result` at most once (never re-emit live items).
+      expect(
+        deliveredTraces.filter((e) => e.runId === started.runId && e.kind === 'harness' && e.stage === 'result')
+      ).toHaveLength(1)
 
       // External run submitted directly on daemon socket is discovered via subscribe without liveRuns
       const extIntent = randomUUID()
@@ -315,8 +319,8 @@ main().catch((err) => { console.error(err); process.exit(1) })
     let events: { dispose(): void } | undefined
     let runtime: DaemonRunRuntime | undefined
     try {
-      const connected = await client.connect()
-      expect(connected.subscribe).toBe(1)
+      await client.connect()
+      expect(client.subscribeSupported).toBe(true)
 
       const transport = new DaemonRunTransport(async (request, options) => {
         return await client.request(laneForRequest(request), request, {
@@ -357,8 +361,8 @@ main().catch((err) => { console.error(err); process.exit(1) })
 
       // Relaunch daemon on same directories and reconnect client
       child = await spawnChildDaemon()
-      const reconnected = await client.connect()
-      expect(reconnected.subscribe).toBe(1)
+      await client.connect()
+      expect(client.subscribeSupported).toBe(true)
 
       // App pump recovers and second run succeeds cleanly
       const r2 = await surface.start({ prompt: 'after sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() })

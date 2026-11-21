@@ -341,6 +341,7 @@ export function decideRunEffectResult(
           payload: {
             runId: run.runId,
             ...(p.reason ? { reason: p.reason } : {}),
+            ...(p.detail ? { detail: p.detail } : {}),
             settledAt,
             recoveredAt,
             outcome,

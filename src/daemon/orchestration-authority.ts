@@ -326,7 +326,7 @@ function buildAuthorityRuntime<
           const checked = trustGate.verify(canonicalRunId, targetProvider, targetCwd)
           if (!checked.ok) {
             trustGateDetail = checked.detail
-            return false
+            return checked
           }
           return true
         }

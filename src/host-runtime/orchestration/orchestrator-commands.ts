@@ -86,6 +86,7 @@ export interface RunEffectResultPayload {
   runId: string
   step: EffectResultStep
   reason?: string
+  detail?: string
   isError?: boolean
   providerResultRef?: string
   nativeSessionId?: string
