@@ -1,6 +1,7 @@
 import { open as openFile, rm, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
+import { isTaskNotificationMessage } from '../../shared/task-notification.js'
 import { captureToolContent, isFullToolContentPolicy } from './tool-content.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { findRecordById, listRecords, updateHealth, safeKey, stableHash } from './store.js'
@@ -10,11 +11,15 @@ import { storeLifecycleEvent } from './recorder-turn-state.js'
 import { refreshSealWindow } from './recorder-segment.js'
 import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, providerTurnIdOf, stringAt, type RecorderHookInput, type RecorderHookResult, transcriptPathOf, observedNow } from './recorder-contracts.js'
 
-/** A `<task-notification>` prompt is a continuation, not a user question, for every Provider. */
+/**
+ * A `<task-notification>` prompt is a continuation, not a user question, for every Provider — but
+ * only when the message *is* the notification. `origin.kind` is the Provider's own marker and needs
+ * no text check.
+ */
 export function isTaskNotificationPrompt(payload: Record<string, unknown>): boolean {
   const origin = nestedRecord(payload, 'origin')
   return stringAt(origin ?? {}, 'kind') === 'task-notification' ||
-    (promptOf(payload)?.trimStart().startsWith('<task-notification>') ?? false)
+    isTaskNotificationMessage(promptOf(payload))
 }
 
 export async function recordTaskNotificationWake(
