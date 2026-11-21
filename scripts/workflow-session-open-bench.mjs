@@ -46,9 +46,9 @@ try {
     cwd: root,
     env: {
       ...process.env,
-      // Timing benchmark: keeps explicit in-process mode so flipping the default does not shift
-      // the measured baseline or move the observed `pi` child process out of inspectOwnedApp(child).
-      SCRY_HOST_DAEMON: '0',
+      // Timing benchmark: the App with its daemon (S3 removed the in-process arm), so the
+      // `pi` child process runs under the daemon tree, not under inspectOwnedApp(child).
+      SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
       SCRY_TEST_APP: '1',
       SCRY_PERF_LOG: '1',
       ELECTRON_ENABLE_LOGGING: '1',

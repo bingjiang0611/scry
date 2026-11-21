@@ -1,5 +1,4 @@
-// Three complete and three stopped runs through the shipped preload API, in either App
-// runtime (in-process main, or the daemon with SCRY_HOST_DAEMON=1).
+// Three complete and three stopped runs through the shipped preload API; the daemon runs them.
 export async function measureLifecycle({ evaluate, cwd }) {
   // Real main/preload/SQLite/archive lifecycle with an explicit offline Provider fixture.
   // These are IPC/terminal/disk boundaries, NOT native send-button or visible-output timings.

@@ -14,7 +14,7 @@ function processes() {
 }
 
 // `exclude` names processes the App started but does not own (the detached daemon tree
-// in SCRY_HOST_DAEMON=1): they and everything below them stay out of the App's set.
+// of every App since S3): they and everything below them stay out of the App's set.
 function descendants(rows, root, exclude = new Set()) {
   const owned = new Map()
   if (!rows.has(root)) return owned

@@ -11,8 +11,8 @@
 // that the private CLI they resolve is inside the packaged resources. A packaged target
 // that cannot be resolved fails before any App is launched.
 //
-// One isolated userData + workspace + HOME, the packaged smoke Provider, and
-// SCRY_HOST_DAEMON=1. Everything is driven through the App's own preload API from the
+// One isolated userData + workspace + HOME and the packaged smoke Provider, which the
+// daemon serves (the App always runs Agents there since S3). Everything is driven through the App's own preload API from the
 // renderer (window.scry), so the path exercised is exactly the shipped one: renderer ->
 // typed preload -> main IPC -> daemon surface -> unix socket -> daemon -> Provider.
 //
@@ -103,7 +103,7 @@ try {
     // off: an App that is itself the lease owner makes the daemon refuse to start
     // (`remote_lease_owner_alive`), which is correct and not what this run tests.
     env: {
-      SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1',
+      SCRY_DAEMON_SMOKE_PROVIDER: '1',
       SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0'
     }
   })

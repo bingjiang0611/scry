@@ -71,9 +71,10 @@ export function validateNative(report) {
   assert.equal(report.errors.length, 0, 'failed native lanes cannot pass')
   assert.deepEqual(Object.keys(report.results).sort(), Object.keys(nativeWorkloads).sort(), 'native lane coverage differs')
   for (const [name, result] of Object.entries(report.results)) {
-    assert.equal(result.measurementVersion, 7)
-    // `session-open-bench.mjs --daemon` reports mode 'daemon'; this gate measures in-process only.
-    assert.equal(result.mode, 'in-process', 'native gate compares in-process measurements only')
+    // Version 8: S3 removed the in-process App, so the bench measures the App with its
+    // daemon (mode 'daemon'); base and candidate run the same frozen harness.
+    assert.equal(result.measurementVersion, 8)
+    assert.equal(result.mode, 'daemon', 'native gate compares daemon-mode measurements only')
     assert.deepEqual([result.turnCount, result.sections], nativeWorkloads[name], 'native workload differs')
     assert.equal(result.scenario, name)
     assert.equal(result.warmups, 2)

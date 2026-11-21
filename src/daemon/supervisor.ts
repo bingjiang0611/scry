@@ -119,6 +119,34 @@ const FORWARDED_ENV = [
   'SCRY_EXPERIMENTAL_HOST_CLI'
 ] as const
 
+/**
+ * Acceptance only: the smoke Provider fixture's own inputs (which fixture set, the files it
+ * reads prompts from and records calls to, the native identity, the history reader). The
+ * in-process App used to read them itself; since S3 the fixture runs in the daemon, so an
+ * isolated test App hands them on. Forwarded only when the daemon's fixture was asked for
+ * (`SCRY_DAEMON_SMOKE_PROVIDER=1`) by a test instance (`SCRY_TEST_APP=1`, the App's hop) or
+ * by a supervisor this function already configured (`SCRY_DAEMON_STATE_DIR`, the
+ * supervisor's hop, whose environment only carries them if the first hop let them through).
+ * A normal launch never carries them.
+ */
+export const SMOKE_FIXTURE_ENV = [
+  'SCRY_ELECTRON_SMOKE_CONVERSATIONS',
+  'SCRY_ELECTRON_SMOKE_SIDE_CHAT',
+  'SCRY_ELECTRON_SMOKE_INPUTS',
+  'SCRY_ELECTRON_SMOKE_CALLS',
+  'SCRY_ELECTRON_SMOKE_IDENTITY',
+  'SCRY_ELECTRON_SMOKE_READER',
+  'SCRY_ELECTRON_SMOKE_READS'
+] as const
+
+export function smokeFixtureEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (source.SCRY_DAEMON_SMOKE_PROVIDER !== '1') return {}
+  if (source.SCRY_TEST_APP !== '1' && source.SCRY_DAEMON_STATE_DIR === undefined) return {}
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of SMOKE_FIXTURE_ENV) if (source[key] !== undefined) env[key] = source[key]
+  return env
+}
+
 export function daemonLaunchEnvironment(input: {
   source?: NodeJS.ProcessEnv
   stateDirectory: string
@@ -139,6 +167,7 @@ export function daemonLaunchEnvironment(input: {
   for (const key of FORWARDED_ENV) if (source[key] !== undefined) env[key] = source[key]
   return {
     ...env,
+    ...smokeFixtureEnvironment(source),
     ELECTRON_RUN_AS_NODE: '1',
     SCRY_DAEMON_STATE_DIR: input.stateDirectory,
     SCRY_DAEMON_USER_DATA_DIR: input.userDataDir,

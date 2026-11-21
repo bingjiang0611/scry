@@ -105,7 +105,7 @@ export async function run(ctx) {
   return runScenario(ctx, { id: 'renderer-isolation', title: 'renderer 隔离', mode: 'daemon', label: 'render', plan: daemonPlan }, async ({ scenario, fixture }) => {
     const observed = await exercise(ctx, scenario, fixture, 'daemon')
     if (!control) {
-      recordNotRun(scenario, { id: 'matches-control', reason: 'switch-off control did not complete (--no-controls or it aborted)' })
+      recordNotRun(scenario, { id: 'matches-control', reason: 'no switch-off control: S3 removed the in-process App (--no-controls is always on)' })
       return
     }
     const difference = surfaceDifference(observed.paths, control.paths)

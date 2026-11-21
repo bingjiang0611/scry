@@ -161,9 +161,10 @@ async function main() {
   const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
     workspace: canonicalWorkspace, userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls,
     identity: smokeIdentity, largeHistory: largeHistoryOnly })
-  // Sub-modes that rely on in-process-only fixture env hooks (SCRY_ELECTRON_SMOKE_{CONVERSATIONS,INPUTS,CALLS},
-  // not in daemon FORWARDED_ENV) keep explicit in-process mode unless caller overrides SCRY_HOST_DAEMON.
-  const inProcessOnlyFixture = steerOnly || conversationOwnershipOnly || unifiedConversationOnly || sideChatOnly || largeHistoryOnly
+  // Every sub-mode runs the App with its daemon (S3). The fixture inputs below
+  // (SCRY_ELECTRON_SMOKE_{CONVERSATIONS,SIDE_CHAT,INPUTS,CALLS,IDENTITY,READER,READS}) reach the
+  // daemon's smoke Provider because this is a test instance that asked for it
+  // (src/daemon/supervisor.ts smokeFixtureEnvironment).
   const launchApp = () => {
     child = spawn(executable, [
       ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
@@ -182,9 +183,7 @@ async function main() {
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
         SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
-        ...(inProcessOnlyFixture
-          ? { SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0' }
-          : { SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }),
+        SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
         ...(steerOnly ? { SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs } : {}),
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),

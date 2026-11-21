@@ -206,6 +206,27 @@ describe('daemon supervisor', () => {
     expect('NODE_OPTIONS' in env).toBe(false)
   })
 
+  it('hands the smoke fixture inputs on only for a test instance that asked for the daemon fixture (S3)', () => {
+    const base = { stateDirectory: '/s', userDataDir: '/u', appPath: '/a', resourcesPath: '/r', appVersion: '1', isPackaged: false, startedBy: 'x' }
+    const fixture = {
+      SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_SIDE_CHAT: '1', SCRY_ELECTRON_SMOKE_INPUTS: '/t/inputs',
+      SCRY_ELECTRON_SMOKE_CALLS: '/t/calls', SCRY_ELECTRON_SMOKE_IDENTITY: 'id', SCRY_ELECTRON_SMOKE_READER: '1', SCRY_ELECTRON_SMOKE_READS: '/t/reads'
+    }
+    const keys = Object.keys(fixture)
+    // A normal launch, or a test instance that did not ask for the daemon fixture: nothing.
+    for (const source of [{ ...fixture }, { ...fixture, SCRY_TEST_APP: '1' }, { ...fixture, SCRY_DAEMON_SMOKE_PROVIDER: '1' }]) {
+      const env = daemonLaunchEnvironment({ ...base, source })
+      for (const key of keys) expect(key in env, key).toBe(false)
+    }
+    // The App's hop: a test instance with the daemon fixture.
+    const supervisorEnv = daemonLaunchEnvironment({ ...base, source: { ...fixture, SCRY_TEST_APP: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1' } })
+    for (const key of keys) expect(supervisorEnv[key], key).toBe(fixture[key as keyof typeof fixture])
+    expect('SCRY_TEST_APP' in supervisorEnv).toBe(false)
+    // The supervisor's hop: its environment came from the first hop, so it passes them on.
+    const daemonEnv = daemonLaunchEnvironment({ ...base, source: supervisorEnv })
+    for (const key of keys) expect(daemonEnv[key], key).toBe(fixture[key as keyof typeof fixture])
+  })
+
   it('resets its restart budget after a stable run', async () => {
     const directory = root()
     const exits = [
