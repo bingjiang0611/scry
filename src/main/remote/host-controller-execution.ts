@@ -151,7 +151,7 @@ export function createExecution(input: ExecutionDeps): {
     execute: async (executorInput: RemoteExecutorInput) => {
       const stop = new AbortController()
       const scope = gateway.runScope(executorInput.runId)
-      const routing = await input.resolveAttachments(parseRouting(executorInput.detail, { cwdOptional: scope === 'local' }))
+      const routing = await input.resolveAttachments(parseRouting(executorInput.detail, scope))
       const current: { routing: RemoteIntentRouting; externalSessionId?: string } = { routing }
       stops.set(executorInput.runId, stop)
       live.set(executorInput.runId, current)
@@ -185,10 +185,10 @@ export function createExecution(input: ExecutionDeps): {
   }
   const gated = new GatedExecutor({
     policy,
-    resolveTarget: (executorInput): RemoteIntentRouting & { grantScope: 'local' | 'remote' } => ({
-      ...parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' }),
-      grantScope: gateway.runScope(executorInput.runId)
-    }),
+    resolveTarget: (executorInput): RemoteIntentRouting & { grantScope: 'local' | 'remote' } => {
+      const grantScope = gateway.runScope(executorInput.runId)
+      return { ...parseRouting(executorInput.detail, grantScope), grantScope }
+    },
     base
   })
   const immediateDispatch: OrchestrationImmediateDispatchChecks = {
@@ -227,7 +227,7 @@ export function createExecution(input: ExecutionDeps): {
     } : {}),
     executor: { execute: async (executorInput) => {
       try {
-        const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })
+        const routing = parseRouting(executorInput.detail, gateway.runScope(executorInput.runId))
         try { await gated.execute(executorInput) }
         finally {
           // Attachments are per-intent scratch: released after the run, whatever it did.
