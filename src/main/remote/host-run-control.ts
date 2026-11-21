@@ -12,7 +12,33 @@ import type { ActiveRun } from '../../shared/trace'
 export interface RunControlHandlers {
   steer(payload: unknown): Promise<AgentSteerResult>
   stopBackgroundTask(payload: unknown): Promise<BackgroundTaskStopResult>
-  adopt(runId: string): ActiveRun | null
+  /**
+   * The run to show, null when the registry no longer has it, or a refusal: a unified
+   * conversation's run belongs to its stable conversation entry and must not be taken
+   * over by the legacy session entry. A refusal is the registry's own reason, which the
+   * App raises to the caller exactly as an in-process adoption did.
+   */
+  adopt(runId: string): ActiveRun | null | RunAdoptionRefusal
+}
+
+export interface RunAdoptionRefusal {
+  refused: string
+}
+
+/**
+ * Adopting a registered run: the run's own control decides whether it may be taken over
+ * (a unified conversation's run refuses), and only then is the run returned to show.
+ */
+export function adoptRegisteredRun(entry: { state: ActiveRun; control: { adoptSession(): void } } | undefined): ActiveRun | null | RunAdoptionRefusal {
+  if (!entry) return null
+  if (!entry.state.done) {
+    try {
+      entry.control.adoptSession()
+    } catch (error) {
+      return { refused: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  return entry.state
 }
 
 export type RunControlMethod = 'steer' | 'stopBackgroundTask' | 'adopt'
@@ -38,7 +64,9 @@ export async function handleRunControl(handlers: RunControlHandlers, request: Ru
     if (typeof request.runId !== 'string' || request.runId.length === 0 || request.runId.length > 256) {
       return { steer: rejected('runId 无效') }
     }
-    return { run: handlers.adopt(request.runId) }
+    const adopted = handlers.adopt(request.runId)
+    if (adopted && 'refused' in adopted) return { run: null, refused: adopted.refused }
+    return { run: adopted }
   }
   return { error: 'invalid_request' }
 }

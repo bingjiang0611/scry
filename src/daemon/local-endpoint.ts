@@ -1,4 +1,5 @@
 import { localOpHandlersFor, type LocalEndpointHandlers } from '../main/remote/host-local-ops'
+import { adoptRegisteredRun } from '../main/remote/host-run-control'
 import { steerObservedRun } from '../main/run-steering'
 import { stopObservedBackgroundTask } from '../main/background-task-control'
 import type { DaemonLocalEndpointDeps } from './local-ops/deps'
@@ -28,7 +29,8 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
     runControl: {
       steer: (payload: unknown) => steerObservedRun(payload, (runId) => deps.runs().get(runId)),
       stopBackgroundTask: (payload: unknown) => stopObservedBackgroundTask(payload, (runId) => deps.runs().get(runId)),
-      adopt: (runId: string) => deps.runs().get(runId)?.state ?? null
+      // The run's own control refuses a unified conversation's run, as it did in process.
+      adopt: (runId: string) => adoptRegisteredRun(deps.runs().get(runId))
     },
     localOps: localOpHandlersFor({
       ...catalogLocalOps(deps),

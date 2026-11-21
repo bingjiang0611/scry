@@ -176,6 +176,8 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     },
     async adopt(runId) {
       const reply = await deps.transport.runControl({ method: 'adopt', runId })
+      // The daemon's registry refused the takeover; the caller gets that reason, not null.
+      if (typeof reply.refused === 'string') throw new Error(reply.refused)
       if (reply.run === null) return null
       if (!record(reply.run) || typeof reply.run.runId !== 'string') throw new Error('daemon_run_control_unavailable')
       // Adopting means this window now shows the run, so the next activeRun() agrees.
