@@ -212,7 +212,7 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).not.toContain('<select')
   })
 
-  it('权限浮层同时说明审批方式、风险和当前选择', () => {
+  it('权限选项只显示名称，风险说明保留在工具提示和无障碍描述中', () => {
     const html = renderToStaticMarkup(
       <RunControlSelect
         ariaLabel="权限"
@@ -230,7 +230,9 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('如何批准 Agent 操作？')
     expect(html).toContain('role="listbox"')
     expect(html).toContain('class="permission-mode-option is-selected is-danger"')
-    expect(html).toContain('跳过审批并允许 Agent 直接执行操作')
+    expect(html).toContain('title="跳过审批并允许 Agent 直接执行操作"')
+    expect(html).toContain('aria-description="跳过审批并允许 Agent 直接执行操作"')
+    expect(html.replace(/<[^>]*>/g, '')).not.toMatch(/危险操作会暂停|原生审查器判断|跳过审批并允许/)
     expect(html).toContain('aria-selected="true"')
   })
 
