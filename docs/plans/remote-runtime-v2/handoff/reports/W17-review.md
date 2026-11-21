@@ -1,4 +1,4 @@
-结论：通过（3 项应修，不阻塞，随下一轮做）
+结论：通过（3 项应修已由核验方在 `aa2cf85b` 完成）
 
 # W17 核验（核验方，2026-11-21，提交 `343b0cd3`、`25c3bc28`）
 
@@ -35,3 +35,16 @@
    要补「删除进行中被撤销」和「未知 pump 方法」两个测试。
 
 真机验收清单见 W17.md §3，交给执行方 A。
+
+## 应修完成（核验方，2026-11-21，`aa2cf85b`）
+
+维护者要求由核验方直接收尾。
+
+1. **越界路径测试**：新增用例，断言 trash 和 open 在 `../escape.txt` 与符号链接逃逸时返回的具体错误，并断言 App 的 poll 是空的。去掉 daemon 侧的工作区检查后，这个用例失败。
+2. **横幅**：`workspaceOpsHostLabel` 只在 `catalog.sessionActions === true` 时传入主机名，旧主机保留「此工作区不支持」；补了渲染测试。
+3. **补充测试**：
+   - 未知的 pump 方法被拒绝（变异为「路由到 openPath」后测试失败）。
+   - 删除进行中设备被撤销：`host-controller-session-delete.test.ts`，去掉内层的 `authorizeDevice` 后有 2 个用例失败。
+   - 入口把 userData 传给隔离守卫：`daemon-mode-default-entry.test.ts`，去掉这一行后测试失败。
+
+**复跑**：`typecheck` 通过；daemon、remote、渲染等 1,222 个用例中 1,221 个通过，唯一失败的是以 root 运行时的已知用例。
