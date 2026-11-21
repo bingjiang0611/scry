@@ -7,7 +7,7 @@ import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
 import { resume, view, type RunCursor } from './daemon-run-cursor'
-import { DaemonRunTransport } from './daemon-run-transport'
+import { DaemonRunError, type DaemonRunTransport, type DaemonSubmitResult } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
 import type { RunTraceRouter } from './run-trace-router'
@@ -124,9 +124,27 @@ export class DaemonRunRuntime {
 
   async start(input: DaemonStartInput): Promise<DaemonStartReceipt> {
     const stamp = new PerformanceTrace('daemon.run.firstText', input.context ? { provider: input.context.providerId } : {})
-    const receipt = await this.#deps.transport.submit({ intentId: input.intentId, detail: input.detail })
+    const { intentId, detail } = input
+    let receipt: DaemonSubmitResult
+    let initialWatch: number
+    try {
+      receipt = await this.#deps.transport.submit({ intentId, detail })
+      initialWatch = this.#initialWatch(receipt.seq)
+    } catch (error) {
+      if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_outcome_unknown') throw error
+      // The submit may have been recorded. Read its receipt; never dispatch it again.
+      try {
+        const recorded = await this.#deps.transport.intentState(intentId)
+        receipt = { intentId, runId: recorded.runId, status: 'recorded' }
+      } catch (cause) {
+        throw Object.assign(new DaemonRunError('daemon_submit_unknown'), { cause })
+      }
+      // intentStatus has no seq. An unrelated watch may have moved #seen past this
+      // Run's bind or refusal while we were reconnecting.
+      initialWatch = 0
+    }
     stamp.mark('submitted')
-    this.#track(receipt.runId, input.context, receipt.seq, stamp, input.userText)
+    this.#track(receipt.runId, input.context, initialWatch, stamp, input.userText)
     // The window identifies a run by the canonical id its trace events carry, not
     // by the ledger id it submitted. Wait for the daemon's bind and admission, and say
     // so when it did not bind instead of handing back an id the trace will never match.
@@ -147,22 +165,23 @@ export class DaemonRunRuntime {
    * from the daemon's bind.
    */
   async follow(input: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }> {
-    this.#track(input.runId, undefined, input.seq)
+    this.#track(input.runId, undefined, this.#initialWatch(input.seq))
     const bound = await this.#awaitBound(input.runId)
     return { runId: bound ?? input.runId, bound: bound !== undefined }
   }
 
-  // Synchronous on purpose: a start answers right after its bind, exactly as before
-  // this was shared, so nothing it awaits moves.
-  #track(runId: string, context: DesktopRemoteContext | undefined, seq: number | undefined, stamp?: PerformanceTrace, userText?: string): void {
+  #initialWatch(seq: number | undefined): number {
+    // A Run's evidence cannot predate its intent.
+    return seq === undefined ? this.#seen : Math.max(0, seq - 1)
+  }
+
+  #track(runId: string, context: DesktopRemoteContext | undefined, initialWatch: number, stamp?: PerformanceTrace, userText?: string): void {
     // A duplicate submit is the same logical run: keep its existing cursor rather
     // than restarting the trace from zero.
     if (!this.#runs.has(runId)) {
       this.#runs.set(runId, {
-        // A run's own evidence cannot predate its intent, so its watch starts there
-        // instead of at the session's first page.
         runId, context, lifecycle: 'recorded',
-        watch: seq !== undefined ? Math.max(0, seq - 1) : this.#seen, output: 0,
+        watch: initialWatch, output: 0,
         pushed: [], askedQuestions: new Set(), answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false,
         ...(stamp ? { stamp } : {}), ...(userText !== undefined ? { userText } : {}), sawText: false
       })

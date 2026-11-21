@@ -15,6 +15,7 @@ export type DaemonRunFailure =
   // A start was submitted, the reply was lost, and the daemon could not confirm what
   // it recorded. Reported as unknown so the App never starts the same prompt twice.
   | 'daemon_submit_unknown'
+  | 'command_payload_conflict'
   | 'daemon_attachment_transfer_failed'
   | 'daemon_attachment_limit_exceeded'
   | 'daemon_submit_payload_too_large'

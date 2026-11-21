@@ -85,6 +85,9 @@ function failure(reply: Record<string, unknown>, op?: string): DaemonRunError | 
   const code = reply.error
   if (code === undefined) return undefined
   if (code === 'unknown_intent' && op === 'intentStatus') return new DaemonRunError('daemon_run_unknown')
+  if (op === 'submit' && (code === 'command_payload_conflict' || code === 'intent_payload_conflict')) {
+    return new DaemonRunError('command_payload_conflict')
+  }
   if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
   // Scope unknown_op mapping strictly to the W10 execution-target bridge ops so older-daemon
