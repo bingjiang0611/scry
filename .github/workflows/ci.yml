@@ -183,7 +183,7 @@ jobs:
         # tests/tarball checks still execute on every supported Node version.
         run: npm run check:cli-runtime
 
-  # P4-2: 覆盖 SCRY_ORCHESTRATION=shadow 与 on 两列（SCRY_HOST_DAEMON=1 保留为历史标记，S3 后不再被读取）。
+  # P4-2: 覆盖 SCRY_ORCHESTRATION=shadow 与 on 两列。
   daemon-orchestration:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
@@ -207,7 +207,6 @@ jobs:
       - run: npm ci
       - name: Daemon orchestration tests (${{ matrix.mode }})
         env:
-          SCRY_HOST_DAEMON: "1"
           SCRY_ORCHESTRATION: ${{ matrix.mode }}
         run: npx vitest run --maxWorkers=1 src/host-runtime/orchestration src/daemon
 

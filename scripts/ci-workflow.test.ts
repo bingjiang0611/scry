@@ -183,6 +183,14 @@ describe('required PR checks', () => {
     })
   })
 
+  it('does not set the retired SCRY_HOST_DAEMON switch on any job or step (S3)', () => {
+    // The daemon is the only runtime; the variable is ignored with a warning, so a job that
+    // sets it only pretends to choose a mode.
+    expect(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')).not.toMatch(/SCRY_HOST_DAEMON/)
+    const job = workflow('ci.yml').jobs['daemon-orchestration']
+    expect(job.steps.find(step => step.run?.includes('vitest'))?.run).toContain('src/host-runtime/orchestration src/daemon')
+  })
+
   it('pins the packaged macOS gate to a supported standard runner image', () => {
     expect(workflow('ci.yml').jobs['packaged-electron']['runs-on']).toBe('macos-15')
   })
