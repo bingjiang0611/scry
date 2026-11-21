@@ -7,7 +7,7 @@ interface ViewChromeProps {
   showPanel: boolean
   // Absent for remote sessions: the pinned summary reads local git/turn evidence.
   onToggleSummary?: () => void
-  onTogglePanel: () => void
+  onTogglePanel?: () => void
   // The machine the Agent executes on. Remote hosts get a distinct pill so the
   // execution location is visible without a separate page or banner.
   machine?: { label: string; remote: boolean; state?: 'connected' | 'disconnected' | 'pairing' | 'unknown' }
@@ -52,7 +52,7 @@ export function ViewChrome({
           <Icon name="summary" />
           <span className="tb-action-label">摘要</span>
         </button>}
-        <button
+        {onTogglePanel && <button
           type="button"
           className={`tb-action panel-pill ${showPanel ? 'on' : ''}`}
           onClick={onTogglePanel}
@@ -62,7 +62,7 @@ export function ViewChrome({
         >
           <Icon name="panel" />
           <span className="tb-action-label">面板</span>
-        </button>
+        </button>}
       </div>
     </header>
   )

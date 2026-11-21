@@ -25,6 +25,7 @@ export type SessionHistoryCache = {
   archiveSourceIssue?: string
   nativeHydrator?: (runIds: readonly string[]) => Promise<LoadedSessionTurn[]>
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
+  missingWorkspaceCwd?: string
 }
 
 export interface OlderHistoryDependencies {
@@ -49,8 +50,13 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
     try {
       const cache = getSessionHistoryCache()
       if (!cache || cache.revision !== getLoadSessionRevision()) return null
-      const cwd = payload.cwd?.trim() ? resolveKnownProjectDirectory(payload.cwd) : ''
+      if (cache.missingWorkspaceCwd !== undefined && payload.cwd !== cache.missingWorkspaceCwd) return null
+      const cwd = cache.missingWorkspaceCwd ?? (payload.cwd?.trim() ? resolveKnownProjectDirectory(payload.cwd) : '')
       if (cache.key !== sessionHistoryCacheKey(payload, cwd)) return null
+      const enrich = (turns: ParsedTurn[]) => cache.missingWorkspaceCwd !== undefined ? turns : providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        turns
+      )
       if (request?.before == null || !Number.isFinite(request.before) || request.before <= 0) return null
       if (cache.archiveSource) {
         const sourcePage = await readTraceArchivePageAsync(cache.archiveSource, {
@@ -66,10 +72,7 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
           if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         }
         const archiveLoaded = mergeSessionTurns([], sourcePage.archive, cache.context, { hydrateAttachments: false })
-        const turns = await providerRegistry.enrichSession(
-          { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-          archiveLoaded
-        )
+        const turns = await enrich(archiveLoaded)
         if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         const page = markIncompleteArchivePage(hydrateSessionHistoryPage({
           turns: turns as LoadedSessionTurn[],
@@ -128,10 +131,7 @@ export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): voi
           ...cachedPage,
           turns: cachedPage.turns.map((turn) => archiveByRunId.get(turn.runId!) ?? hydratedByRunId.get(turn.runId!) ?? turn)
         }
-        const enriched = await providerRegistry.enrichSession(
-          { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-          cachedPage.turns as ParsedTurn[]
-        )
+        const enriched = await enrich(cachedPage.turns as ParsedTurn[])
         if (cache !== getSessionHistoryCache() || cache.revision !== getLoadSessionRevision()) return null
         cachedPage = { ...cachedPage, turns: enriched as LoadedSessionTurn[] }
       }

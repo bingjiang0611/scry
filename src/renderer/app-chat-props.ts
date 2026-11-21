@@ -29,6 +29,7 @@ export interface AppChatPropsContext {
   sessionLoading: boolean
   activeSessionId: string | null
   sendBlockedReason: string | null | undefined
+  sessionWorkspaceMissing: boolean
   composerError: string | null
   providerSendBlockedReason: string | null
   providerCompatibilityIssue: string | null | undefined
@@ -79,7 +80,7 @@ export interface AppChatPropsContext {
 
 export function createAppChatProps(context: AppChatPropsContext): ComponentProps<typeof SessionChatView> {
   const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
-    composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, composerError, providerSendBlockedReason,
+    composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason,
     providerCompatibilityIssue, sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability,
     steerEvidenceByMessageId, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
@@ -108,6 +109,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     runControlsReason: integrations.runControlCapability?.reason,
     workspaceContext, workspaceSendLabel,
     sendBlockedReason: sendBlockedReason ?? workspaceBlockedReason,
+    showSendBlockedReason: sessionWorkspaceMissing,
     composerError,
     detectionIssue: integrations.agentsScanError ?? providerSendBlockedReason ?? providerCompatibilityIssue,
     detectionRetrying: integrations.detectionRetrying,
@@ -142,9 +144,9 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     focusedTurnRunId,
     scrollNavigation: chatNavigation,
     onSelect: session.setSelected,
-    onOpenDiff: openTurnDiffReview,
-    onForkTurn: forkConversationTurn,
-    onOpenFile: openWorkspaceFile,
+    onOpenDiff: sessionWorkspaceMissing ? undefined : openTurnDiffReview,
+    onForkTurn: sessionWorkspaceMissing ? undefined : forkConversationTurn,
+    onOpenFile: sessionWorkspaceMissing ? undefined : openWorkspaceFile,
     onAnswerQuestion: session.answerQuestion,
     onInput: value => {
       setInput(value)

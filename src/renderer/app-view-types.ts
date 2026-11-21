@@ -70,6 +70,7 @@ export interface AppViewContext {
   rightSurface: ReturnType<typeof useSessionRightSurfaces>['current']['state']
   hasSurfaceContext: boolean
   terminalOpen: boolean
+  sessionWorkspaceMissing: boolean
   remoteSurface: ReturnType<typeof useSessionRightSurfaces>['current']['state']
   currentSurface: ReturnType<typeof useSessionRightSurfaces>['current']
   dispatchRightSurface: (action: RightSurfaceAction) => void

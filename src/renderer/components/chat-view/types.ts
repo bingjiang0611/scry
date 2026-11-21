@@ -38,6 +38,7 @@ export interface ChatViewProps {
   input: string
   composerScopeKey?: string
   sendBlockedReason?: string | null
+  showSendBlockedReason?: boolean
   composerError?: string | null
   detectionIssue?: string | null
   detectionRetrying?: boolean
