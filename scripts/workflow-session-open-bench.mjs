@@ -48,7 +48,7 @@ try {
       ...process.env,
       // Timing benchmark: keeps explicit in-process mode so flipping the default does not shift
       // the measured baseline or move the observed `pi` child process out of inspectOwnedApp(child).
-      SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0',
+      SCRY_HOST_DAEMON: '0',
       SCRY_TEST_APP: '1',
       SCRY_PERF_LOG: '1',
       ELECTRON_ENABLE_LOGGING: '1',

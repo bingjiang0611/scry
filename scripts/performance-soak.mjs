@@ -124,7 +124,7 @@ async function main() {
       HOME: home,
       // Soak benchmark: measures Electron main [scry:perf]/[scry:resource] samples against the
       // in-process smoke provider; keep explicit mode so flipping the default does not shift baseline.
-      SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0',
+      SCRY_HOST_DAEMON: '0',
       ELECTRON_ENABLE_LOGGING: '1',
       SCRY_TEST_APP: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1',

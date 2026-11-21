@@ -316,7 +316,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const identity = buildIdentity(options.appVersion)
   const localHost = service.createLocalHost(identity, {
     onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
-    activeRuns: () => pipeline.runs.unsettledStates().length
+    activeRuns: () => pipeline.runs.unsettledStates().length,
+    isPackaged: options.isPackaged
   })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,

@@ -142,17 +142,18 @@ function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyP
   })
 }
 
-export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number }
+export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number; isPackaged?: boolean }
 
 // What the daemon said about itself; a build field that is not a build id is dropped,
 // which the comparison then treats as "no build id" (a mismatch for an App that has one).
-function reported(version: string, build: unknown, activeRuns?: unknown): DaemonProbeInfo {
+function reported(version: string, build: unknown, activeRuns?: unknown, isPackaged?: unknown): DaemonProbeInfo {
   const id = buildIdOf(build)
   const runs = typeof activeRuns === 'number' && Number.isSafeInteger(activeRuns) && activeRuns >= 0 ? activeRuns : undefined
   return {
     version,
     ...(id !== undefined ? { build: id } : {}),
-    ...(runs !== undefined ? { activeRuns: runs } : {})
+    ...(runs !== undefined ? { activeRuns: runs } : {}),
+    ...(typeof isPackaged === 'boolean' ? { isPackaged } : {})
   }
 }
 
@@ -245,10 +246,10 @@ export class DaemonClient {
     } catch { return undefined }
     try {
       const line = await socket.exchange(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'daemonInfo' })}\n`, ENROLL_TIMEOUT_MS)
-      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; error?: unknown }
+      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; isPackaged?: unknown; error?: unknown }
       if (reply.error === 'device_not_authorized') throw new DaemonClientError('daemon_device_not_authorized')
       if (reply.op !== 'daemonInfo' || typeof reply.version !== 'string') return undefined
-      return reported(reply.version, reply.build, reply.activeRuns)
+      return reported(reply.version, reply.build, reply.activeRuns, reply.isPackaged)
     } catch (error) {
       if (error instanceof DaemonClientError) throw error
       return undefined
