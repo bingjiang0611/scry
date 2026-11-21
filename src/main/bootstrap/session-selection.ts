@@ -9,6 +9,7 @@ export interface SessionSelection {
   providerId: ProviderId
   agentProfileId?: string
   cwd: string
+  workspaceMissing?: boolean
   externalSessionId: string
   // Catalog says the session can be resumed: the window's session mirror follows it.
   canResume: boolean
@@ -30,7 +31,7 @@ export interface SessionSelectionTarget {
 export function applySessionSelection(target: SessionSelectionTarget, selection: SessionSelection): void {
   const { providerId, agentProfileId, cwd, externalSessionId } = selection
   target.dockBadge.view(target.providerSessionKey(providerId, cwd, externalSessionId, agentProfileId), target.isWindowFocused())
-  target.setCurrentCwd(cwd || undefined)
+  target.setCurrentCwd(selection.workspaceMissing ? undefined : cwd || undefined)
   const key = target.providerContextKey(providerId, cwd, agentProfileId)
   if (!selection.loadingUnsettledRun) {
     target.bumpSessionRevision(key)

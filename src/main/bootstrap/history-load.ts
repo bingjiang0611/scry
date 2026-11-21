@@ -22,6 +22,7 @@ import { appSessionCanResume } from '../app-store'
 import { historyCopy } from '../../shared/constants/copy'
 import { readSessionArchive } from './history-archive'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
+import { knownProjectDirectoryIfPresent } from '../workspace-authorization'
 import { rememberSessionProjectAfterLoad } from './history-project-recency'
 
 export interface LoadSessionDependencies {
@@ -88,15 +89,22 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
       )
       const requestedCwd = payload.cwd?.trim()
-        ? resolveKnownProjectDirectory(payload.cwd)
+        ? knownProjectDirectoryIfPresent(resolveKnownProjectDirectory, payload.cwd) ?? payload.cwd
         : payload.cwd === '' ? '' : undefined
       const catalogSession = catalogMatches.length === 1
         ? catalogMatches[0]
         : catalogMatches.find((session) => session.cwd === requestedCwd)
       if (!catalogSession) throw new Error('会话不属于当前 Scry catalog 或身份不唯一')
       perf.mark('catalog', { matches: catalogMatches.length })
-      const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
+      const selectedCwd = catalogSession.cwd ? knownProjectDirectoryIfPresent(resolveKnownProjectDirectory, catalogSession.cwd) : ''
+      const workspaceMissing = selectedCwd === null
+      // Only the matched catalog path may identify historical storage. Never grant it as a working directory.
+      const cwd = selectedCwd ?? catalogSession.cwd
       if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
+      const enrich = (turns: ParsedTurn[]) => workspaceMissing ? turns : providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        turns
+      )
       const fp =
         payload.providerId === 'claude' && cwd
           ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
@@ -217,7 +225,8 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         ...(payload.agentProfileId !== undefined ? { agentProfileId: payload.agentProfileId } : {}),
         cwd,
         externalSessionId: payload.externalSessionId,
-        canResume: appSessionCanResume(catalogSession),
+        canResume: !workspaceMissing && appSessionCanResume(catalogSession),
+        workspaceMissing,
         loadingUnsettledRun: getRuns().unsettledStates().some((run) => sessionLoadMatchesRun(run, {
           providerId: payload.providerId,
           agentProfileId: payload.agentProfileId,
@@ -230,10 +239,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       const historyContext = { userDataDir }
       const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
       perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
-      const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
-        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-        mergedHistory
-      )
+      const merged: LoadedSessionTurn[] = nativeTurns ?? await enrich(mergedHistory)
       if (archivePage && !archivePage.sourceComplete && merged.length) {
         const last = merged[merged.length - 1]
         last.errorHint = [last.errorHint, historyCopy.incompleteArchive]
@@ -246,7 +252,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       perf.mark('merge', { mergedTurns: merged.length })
       signal.throwIfAborted()
       const hookConfig =
-        cwd && payload.providerId === 'claude'
+        workspaceMissing ? null : cwd && payload.providerId === 'claude'
           ? loadClaudeHookConfig(cwd, homeDir)
           : payload.providerId === 'codex'
             ? cwd ? loadCodexHookConfig(cwd, homeDir) : null
@@ -266,7 +272,8 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
           archiveSnapshotTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0
         } : {}),
         ...(nativeSnapshot ? { nativeHydrator: (runIds) => nativeSnapshot!.hydrate(runIds) } : {}),
-        hookConfig
+        hookConfig,
+        ...(workspaceMissing ? { missingWorkspaceCwd: cwd } : {})
       })
       const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
         ? {
@@ -355,10 +362,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
             }
           }
         }
-        const enriched = await providerRegistry.enrichSession(
-          { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-          selectedPage.turns as ParsedTurn[]
-        )
+        const enriched = await enrich(selectedPage.turns as ParsedTurn[])
         if (requestRevision !== getLoadSessionRevision()) return null
         selectedPage = { ...selectedPage, turns: enriched as LoadedSessionTurn[] }
       }
@@ -371,9 +375,9 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         historyContext
       )
       perf.mark('page_hydration', { returnedTurns: page.turns.length })
-      const result = pageWithHookCommands(page, hookConfig)
+      const result = pageWithHookCommands(workspaceMissing ? { ...page, workspaceMissing: true } : page, hookConfig)
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
-      if (cwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
+      if (selectedCwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
       return reportSelection ? { page: result, selection } : result
     } catch (error) {
       perf.finish(undefined, signal.aborted ? 'cancelled' : 'error')

@@ -16,7 +16,7 @@ export function Composer({
   turns, textareaRef, cwd, recent, agents, selectedAgentId, agentLocked = false,
   hasSelectedSession = false,
   runControls, runControlCatalog, runControlsLoading = false, runControlsReason = null, input, composerScopeKey,
-  sendBlockedReason = null, composerError = null, detectionIssue = null, detectionRetrying = false, onRetryDetection,
+  sendBlockedReason = null, showSendBlockedReason = false, composerError = null, detectionIssue = null, detectionRetrying = false, onRetryDetection,
   submitting = false, sessionLoading = false, sessionCacheVisible = false, sessionEvidenceGap = null, busy,
   queueWhileBusy = true, draftAttachments, queuedPrompts, steerCapability = null, steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(), onSteerQueuedPrompt, editingQueuedId = null, movedQueuedId = null,
@@ -95,7 +95,7 @@ export function Composer({
   const queueing = busy && queueWhileBusy
   const sendActionLabel = submitting ? workspaceCopy.starting : queueing ? workspaceCopy.queue : workspaceSendLabel ?? workspaceCopy.send
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
-  const composerStatus = composerError ?? detectionIssue ?? (hasDraft ? sendBlockedReason : null)
+  const composerStatus = composerError ?? (showSendBlockedReason ? sendBlockedReason : detectionIssue ?? (hasDraft ? sendBlockedReason : null))
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
@@ -180,7 +180,7 @@ export function Composer({
           onPasteImages={onPasteImages} onPasteClipboardImage={onPasteClipboardImage}
           onRemoveDraftAttachment={onRemoveDraftAttachment} onRetryDetection={onRetryDetection}
           detectionRetrying={detectionRetrying} showWorkdirPicker={showWorkdirPicker}
-          sendBlockedReason={sendBlockedReason} composerError={composerError}
+          sendBlockedReason={sendBlockedReason} composerStatus={composerStatus} composerError={composerError}
           detectionIssue={detectionIssue} sessionLoading={sessionOwnerLoading}
           stopStatus={stopStatus} backgroundStatus={backgroundStatus}
           runStartedAt={runStartedAt} editingQueuedIndex={editingQueuedIndex}

@@ -63,6 +63,7 @@ export interface SessionHistoryPageRequest {
 }
 
 export interface SessionHistoryPage {
+  workspaceMissing?: true
   turns: LoadedSessionTurn[]
   /** 本页首个 turn 在整个会话里的 0-based 序号，保证确定顺序与可拼接。 */
   offset: number

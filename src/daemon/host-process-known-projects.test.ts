@@ -1,10 +1,11 @@
 import 'reflect-metadata'
-import { mkdirSync, realpathSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, readFileSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { createAppSessionStore, createProjectStore } from '../main/app-store'
+import { upsertTraceArchiveTurn } from '../main/transcript-archive'
 
 afterEach(cleanupTempDirs)
 
@@ -64,6 +65,46 @@ describe('daemon known projects', () => {
       expect((await daemon.localOp('projectStore', 'removeProject', [realpathSync(chosen)])).result).toBe(true)
       expect((await daemon.localOp('workspaceSelection', 'setCwd', [chosen])).error).toBe('工作目录尚未通过 Scry 目录选择器授权')
       expect(createProjectStore(daemon.userDataDir).load().find((project) => project.cwd === realpathSync(chosen))?.removedAt).toBeTypeOf('number')
+    } finally {
+      await daemon.dispose()
+    }
+  }, 30_000)
+
+  it('pages archived history for a missing catalog workspace without granting or resuming it', async () => {
+    const daemon = await startTestDaemon()
+    try {
+      const { workspace: cwd, userDataDir } = daemon
+      const externalSessionId = 'archived-workspace-session'
+      const context = { providerId: 'pi', agentProfileId: 'pi:rotom', externalSessionId, cwd } satisfies import('../shared/provider').ProviderContext
+      createAppSessionStore(userDataDir).record({
+        ...context, runtimeProvider: 'pi_rpc', prompt: 'archived prompt'
+      })
+      for (const ts of [1, 2]) {
+        expect(upsertTraceArchiveTurn({
+          cwd, sessionId: externalSessionId, providerId: 'pi', runtimeProvider: 'pi_rpc', userDataDir,
+          turn: { runId: `run-${ts}`, userText: `prompt ${ts}`, ts, done: true, items: [] }
+        })).toBe(true)
+      }
+      rmdirSync(cwd)
+      const select = (...args: unknown[]) => daemon.localOp('workspaceSelection', 'setCwd', args)
+      const load = (options = context) => daemon.localOp('sessionHistory', 'loadSession', [options, { limit: 1 }])
+      expect((await select(cwd)).error).toContain('ENOENT')
+      expect(await select(cwd, true)).toMatchObject({ result: null })
+      expect((await select('relative/path', true)).error).toBe('无效的工作目录')
+      const otherCwd = join(daemon.root, 'other')
+      expect((await load({ ...context, cwd: otherCwd })).error).toContain('与 catalog 不一致')
+      expect((await load({ ...context, agentProfileId: 'pi:wrong' })).error).toContain('catalog')
+      expect(await load()).toMatchObject({ result: {
+        selection: { cwd, canResume: false, workspaceMissing: true },
+        page: { workspaceMissing: true, offset: 1, turns: [{ userText: 'prompt 2' }] }
+      } })
+      const older = (options = context) =>
+        daemon.localOp('sessionHistory', 'loadSessionOlder', [options, { before: 1, limit: 1 }])
+      expect(await older({ ...context, cwd: otherCwd })).toMatchObject({ result: null })
+      expect(await older()).toMatchObject({ result: { turns: [{ userText: 'prompt 1' }] } })
+      mkdirSync(cwd)
+      expect((await select(cwd, true)).result).toBe(cwd)
+      expect((await load()).result?.page.workspaceMissing).toBeUndefined()
     } finally {
       await daemon.dispose()
     }

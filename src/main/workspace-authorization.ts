@@ -8,6 +8,16 @@ export function canonicalExistingDirectory(cwd: string): string {
   return canonical
 }
 
+/** For history and selection only: absence is not a workspace grant. */
+export function knownProjectDirectoryIfPresent(resolveDirectory: (cwd: string) => string, cwd: string): string | null {
+  try {
+    return resolveDirectory(cwd)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
+
 export function knownProjectDirectory(cwd: string, candidates: Iterable<string>): string {
   const canonical = canonicalExistingDirectory(cwd)
   const known = [...candidates].some((candidate) => {

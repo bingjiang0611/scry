@@ -39,6 +39,7 @@ type ComposerInputProps = Pick<ChatViewProps,
   input: string
   draftAttachments: ChatViewProps['draftAttachments']
   sendBlockedReason: string | null
+  composerStatus: string | null
   composerError: string | null
   detectionIssue: string | null
   sessionLoading: boolean
@@ -87,6 +88,7 @@ export function ComposerInput({
   detectionRetrying,
   showWorkdirPicker,
   sendBlockedReason,
+  composerStatus,
   composerError,
   detectionIssue,
   sessionLoading,
@@ -109,7 +111,6 @@ export function ComposerInput({
 }: ComposerInputProps) {
   const compositionActiveRef = useRef(false)
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
-  const composerStatus = composerError ?? detectionIssue ?? (input.trim() || draftAttachments.length > 0 ? sendBlockedReason : null)
   return <>
         {draftAttachments.length > 0 && (
           <div className="draft-attachments" aria-label="已粘贴图片">

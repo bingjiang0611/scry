@@ -10,7 +10,7 @@ import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
 import { terminalChannelHandlers } from './terminal-channels'
 import { installTerminalDaemonWindow } from './terminal-daemon'
 import { daemonKnownProjectDirectory, daemonSetCwdHandler } from './known-project-daemon'
-import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
+import { authorizedWorkspaceRequest, knownProjectDirectory, knownProjectDirectoryIfPresent } from '../workspace-authorization'
 import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
 import type { TerminalManager } from '../terminal-manager'
@@ -120,10 +120,13 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   for (const [channel, listener] of Object.entries(terminal)) handleTrusted(channel, listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown)
 
   // The selection stays this window's; in daemon mode the daemon validates the directory.
-  const setCwd: (event: IpcMainInvokeEvent, dir: string | null) => string | null | Promise<string | null> = daemonKnownProjects
+  const setCwd: (event: IpcMainInvokeEvent, dir: string | null, clearIfMissing?: boolean) => string | null | Promise<string | null> = daemonKnownProjects
     ? daemonSetCwdHandler({ getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad })
-    : (_e, dir) => {
-      const cwd = typeof dir === 'string' && dir.trim() ? resolveKnownProjectDirectory(dir) : undefined
+    : (_e, dir, clearIfMissing) => {
+      const selected = typeof dir === 'string' && dir.trim()
+        ? clearIfMissing === true ? knownProjectDirectoryIfPresent(resolveKnownProjectDirectory, dir) : resolveKnownProjectDirectory(dir)
+        : null
+      const cwd = selected ?? undefined
       if (cwd !== getCurrentCwd()) invalidateSessionHistoryLoad('workspace changed')
       setCurrentCwd(cwd)
       return cwd ?? null

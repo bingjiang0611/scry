@@ -127,7 +127,8 @@ export function AppShell(props: AppShellProps) {
           </> : view === 'analytics' ? <div className="main-content main-content--single"><Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView analytics={integrations.analytics} rangeDays={integrations.analyticsRange} loading={integrations.analyticsLoading} creditsPending={integrations.analyticsCreditsLoading} error={integrations.analyticsError} onRangeChange={integrations.setAnalyticsRange} onRefresh={() => integrations.loadAnalytics()} onBack={() => { changeView('chat') }} />
           </Suspense></div> : view === 'meta-prompts' ? <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div> : <>
-            <ViewChrome cwd={cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
+            <ViewChrome cwd={cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle}
+              onTogglePanel={chatProps.showSendBlockedReason ? undefined : toggleOverviewPanel} />
             <div className="main-content"><SessionChatView {...chatProps} /></div>
           </>}
           <PinnedSummaryHost
