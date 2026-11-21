@@ -284,6 +284,7 @@ struct ToolPanelView: View {
 
   @ViewBuilder private func llmBody(_ payload: G0Transport.ToolPanelPayload) -> some View {
     if let llm = payload.llm {
+      Text(ConnectionCopy.llmFirstOutputBasis).font(.system(size: 11)).foregroundStyle(Palette.dim2)
       VStack(alignment: .leading, spacing: 6) {
         Text(ConnectionCopy.llmRunning).font(.system(size: 11, weight: .bold)).tracking(0.6)
           .foregroundStyle(Palette.dim)
@@ -291,20 +292,18 @@ struct ToolPanelView: View {
           Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.dim2)
         } else {
           ForEach(llm.running.models, id: \.key) { group in
-            HStack(spacing: 8) {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(group.model ?? ConnectionCopy.unavailable).font(.system(size: 13, weight: .medium))
-                  .foregroundStyle(Palette.fg).lineLimit(1)
-                Text(group.states.joined(separator: " · ")).font(.system(size: 10.5)).foregroundStyle(Palette.dim)
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(group.model ?? ConnectionCopy.unavailable).font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.fg).lineLimit(1)
+                  Text(([group.providerId.map(ConnectionCopy.providerLabel)].compactMap { $0 } + group.states).joined(separator: " · "))
+                    .font(.system(size: 10.5)).foregroundStyle(Palette.dim)
+                }
+                Spacer(minLength: 4)
+                Text("\(group.sessions)").font(.system(size: 11)).foregroundStyle(Palette.dim2)
               }
-              Spacer(minLength: 4)
-              Text("\(group.sessions)").font(.system(size: 11)).foregroundStyle(Palette.dim2)
-              Text(group.tokensPerSecond.map { String(format: "%.1f tok/s", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(group.tokensPerSecond == nil ? Palette.dim2 : Palette.fg)
-                .frame(width: 88, alignment: .trailing)
-              Text(group.firstTokenMs.map { String(format: "%.0f ms", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(group.firstTokenMs == nil ? Palette.dim2 : Palette.dim)
-                .frame(width: 68, alignment: .trailing)
+              llmMeasurements(speed: group.tokensPerSecond, firstTokenMs: group.firstTokenMs, firstOutputWaitMs: group.firstOutputWaitMs)
             }
           }
         }
@@ -316,19 +315,21 @@ struct ToolPanelView: View {
           Text(ConnectionCopy.llmEmpty).font(.system(size: 12)).foregroundStyle(Palette.dim2)
         } else {
           ForEach(Array(llm.history.rows.enumerated()), id: \.offset) { _, row in
-            HStack(spacing: 6) {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(row.model).font(.system(size: 12.5)).foregroundStyle(Palette.fg).lineLimit(1)
-                Text("\(ConnectionCopy.providerLabel(row.providerId)) · \(shortTime(row.ts))")
-                  .font(.system(size: 10.5)).foregroundStyle(Palette.dim2)
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(row.model).font(.system(size: 12.5)).foregroundStyle(Palette.fg).lineLimit(1)
+                  Text("\(ConnectionCopy.providerLabel(row.providerId)) · \(shortTime(row.ts))")
+                    .font(.system(size: 10.5)).foregroundStyle(Palette.dim2)
+                }
+                Spacer(minLength: 4)
+                if row.failed {
+                  Text(ConnectionCopy.llmUnsuccessful).font(.system(size: 11)).foregroundStyle(Palette.dim2)
+                }
               }
-              Spacer(minLength: 4)
-              Text(row.speed.map { String(format: "%.1f tok/s", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(row.speed == nil ? Palette.dim2 : Palette.fg)
-                .frame(width: 88, alignment: .trailing)
-              Text(row.firstTokenMs.map { String(format: "%.0f ms", $0) } ?? ConnectionCopy.unavailable)
-                .font(.system(size: 11)).foregroundStyle(row.firstTokenMs == nil ? Palette.dim2 : Palette.dim)
-                .frame(width: 68, alignment: .trailing)
+              if !row.failed {
+                llmMeasurements(speed: row.speed, firstTokenMs: row.firstTokenMs, firstOutputWaitMs: row.firstOutputWaitMs)
+              }
             }
           }
         }
@@ -342,6 +343,25 @@ struct ToolPanelView: View {
     } else {
       Notice(text: ConnectionCopy.unavailable, warning: true)
     }
+  }
+
+  private func llmMeasurements(speed: Double?, firstTokenMs: Double?, firstOutputWaitMs: Double?) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      llmMeasurement(ConnectionCopy.llmSpeed, speed.map { String(format: "%.1f tok/s", $0) })
+      llmMeasurement(ConnectionCopy.llmFirstToken, firstTokenMs.map { String(format: "%.1f s", $0 / 1000) })
+      llmMeasurement(ConnectionCopy.llmFirstOutput, firstOutputWaitMs.map { String(format: "%.1f s", $0 / 1000) })
+    }
+  }
+
+  private func llmMeasurement(_ label: String, _ value: String?) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(label).foregroundStyle(Palette.dim2)
+      Text(value ?? ConnectionCopy.unavailable).monospacedDigit()
+        .foregroundStyle(value == nil ? Palette.dim2 : Palette.fg)
+    }
+    .font(.system(size: 11))
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
   }
 
   // Mac rows are `provider ＋ model`; qoder's credits belong to the provider.

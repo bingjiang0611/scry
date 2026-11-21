@@ -10,6 +10,7 @@
   --usage-series-qoder: #d6a15f;
   --usage-series-opencode: #65b987;
   --usage-series-openrouter: #a58adf;
+  --usage-series-antigravity: #6fd3d8;
   --usage-series-gemini: #6f9ee8;
   --usage-series-local: #969690;
   grid-row: 1 / -1;
@@ -33,6 +34,7 @@
   --usage-series-qoder: #9a681e;
   --usage-series-opencode: #23794a;
   --usage-series-openrouter: #7053a5;
+  --usage-series-antigravity: #24777b;
   --usage-series-gemini: #356cb4;
   --usage-series-local: #777771;
 }
@@ -340,6 +342,9 @@
 }
 .usage-page .is-opencode {
   --usage-series: var(--usage-series-opencode);
+}
+.usage-page .is-antigravity {
+  --usage-series: var(--usage-series-antigravity);
 }
 .usage-page .is-openrouter {
   --usage-series: var(--usage-series-openrouter);

@@ -324,7 +324,7 @@ enum ConnectionCopy {
   private static let providerNames: [String: String] = [
     "anthropic": "Anthropic", "openai": "OpenAI", "openrouter": "OpenRouter", "gemini": "Gemini",
     "claude-code": "Claude Code", "claude": "Claude", "codex": "Codex", "qoder": "Qoder",
-    "opencode": "OpenCode", "local": "Local", "pi": "Pi"
+    "opencode": "OpenCode", "local": "Local", "pi": "Pi", "antigravity": "Antigravity"
   ]
 
   static func providerLabel(_ providerId: String) -> String {
@@ -361,8 +361,11 @@ enum ConnectionCopy {
   static let llmTitle = "LLM 性能"
   static let llmRunning = "正在运行"
   static let llmHistory = "历史"
-  static let llmSpeed = "速度"
-  static let llmFirstToken = "首字延迟"
+  static let llmSpeed = "TPS"
+  static let llmFirstToken = "TTFT"
+  static let llmFirstOutput = "首段回复等待"
+  static let llmFirstOutputBasis = "从发送到收到首段可见回复，不等同于 TTFT。"
+  static let llmUnsuccessful = "未成功"
   static let llmCoverage = "覆盖度"
   static let llmCompare = "模型对比"
   static let llmEmpty = "这段时间没有历史样本"

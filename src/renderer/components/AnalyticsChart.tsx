@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 
 import type { UsageAnalytics, UsageAnalyticsAggregate, UsageAnalyticsBreakdownRow, UsageAnalyticsRangeDays } from '@shared/trace'
 import type { BillingProvider } from '@shared/billing'
-import type { ProviderId } from '@shared/provider'
+import { PROVIDER_LABELS, type ProviderId } from '@shared/provider'
 import { QODER_PRICING_URL, QODER_USD_BASIS } from '@shared/qoder-pricing'
 
 import { ProviderGlyph } from './ProviderGlyph'
@@ -26,6 +26,7 @@ export const providerLabels: Record<BillingProvider, string> = {
   codex: 'Codex',
   qoder: 'Qoder',
   opencode: 'OpenCode',
+  antigravity: PROVIDER_LABELS.antigravity,
   local: 'Local'
 }
 
@@ -168,7 +169,8 @@ export const billingProviderGlyph: Partial<Record<BillingProvider, ProviderId>> 
   openai: 'codex',
   codex: 'codex',
   qoder: 'qoder',
-  opencode: 'opencode'
+  opencode: 'opencode',
+  antigravity: 'antigravity'
 }
 
 export function ProviderMark({ provider }: { provider: BillingProvider }) {

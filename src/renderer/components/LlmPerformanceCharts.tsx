@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { LlmMetric, LlmMetricSample } from '@shared/llm-performance'
+import { LLM_METRICS, type LlmMetric, type LlmMetricSample } from '@shared/llm-performance'
+import { PROVIDER_LABELS } from '@shared/provider'
 import { LLM_PERFORMANCE_COPY as copy } from '../constants/llm-performance-copy'
 import { Icon } from './primitives/Icon'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
@@ -15,39 +16,46 @@ export function ModelComparison({ groups, selected, colorOf, onSelect }: {
   colorOf: (model: string) => string
   onSelect: (model: string) => void
 }) {
-  const max = metricAxisMax(groups.flatMap(group => group.speed.map(sample => sample.value)))
+  const max = metricAxisMax(groups.flatMap(group => group.samples.speed.map(sample => sample.value)))
   const motion = useFirstReadyList(groups.length > 0)
   const x = (value: number): number => 8 + value / max * 384
   return <div className="llm-perf-comparison-scroll"><div className={`llm-perf-models ${motion.className}`}>
     <div className="llm-perf-mhead">
       <span>{copy.columns.model}</span><span>{copy.columns.distribution}</span>
-      <span>{copy.columns.speed}</span>
-      <span>{copy.columns.firstToken}</span>
+      {LLM_METRICS.map(metric => <span key={metric}>{copy.columns[metric]}</span>)}
     </div>
     {groups.map((group, index) => {
-      const speed = group.speedSummary, wait = group.waitSummary
-      const count = speed ?? wait!
-      const rounds = copy.rounds(count.count - count.provisional, count.provisional)
-      return <button key={group.model} type="button" className="llm-perf-mrow motion-stagger-item" style={motion.itemStyle(index)} aria-pressed={selected === group.model}
-        onClick={() => onSelect(group.model)}>
-        <span className="llm-perf-mname"><i aria-hidden="true" style={{ background: colorOf(group.model) }} /><b>{group.model}</b>
-          <small aria-label={copy.roundsLabel(copy.metrics[speed ? 'speed' : 'firstToken'].label, count.count - count.provisional, count.provisional)}>
-            {speed ? rounds : copy.waitRounds(rounds)}</small></span>
+      const { key, speedSummary: speed, waitSummary, outputSummary, samples } = group
+      const summaries = { speed, firstToken: waitSummary, firstOutput: outputSummary }
+      const model = group.model ?? copy.unknownModel
+      return <button key={key} type="button" className="llm-perf-mrow motion-stagger-item" style={motion.itemStyle(index)} aria-pressed={selected === key}
+        onClick={() => onSelect(key)}>
+        <span className="llm-perf-mname"><i aria-hidden="true" style={{ background: colorOf(key) }} />
+          <span className="llm-perf-midentity">
+            <b title={model}>{model}</b>
+            <span className="llm-perf-provider">{group.providerId ? PROVIDER_LABELS[group.providerId] : copy.unknownProvider}</span>
+          </span>
+          <small>{copy.rounds(group.completed, group.running)}{group.failed > 0 && <span>{copy.failedRounds(group.failed)}</span>}</small>
+        </span>
         {speed ? <svg className="llm-perf-distribution" viewBox="0 0 400 50" preserveAspectRatio="none" role="img"
-          aria-label={speed.count < 3 ? copy.sparseDistribution(copy.valueList(group.speed.map(sample => formatMetric(sample.value))))
+          aria-label={speed.count < 3 ? copy.sparseDistribution(copy.valueList(samples.speed.map(sample => formatMetric(sample.value))))
             : copy.distributionLabel(formatMetric(speed.min), formatMetric(speed.q1), formatMetric(speed.median), formatMetric(speed.q3), formatMetric(speed.max))}
-          style={{ color: colorOf(group.model) }}>
-          {speed.count < 3 ? group.speed.map((sample, index) => <line key={index} className="llm-perf-median" x1={x(sample.value)} x2={x(sample.value)} y1={20} y2={30} />) : <>
+          style={{ color: colorOf(key) }}>
+          {speed.count < 3 ? samples.speed.map((sample, index) => <line key={index} className="llm-perf-median" x1={x(sample.value)} x2={x(sample.value)} y1={20} y2={30} />) : <>
             <line className="llm-perf-extent" x1={x(speed.min)} x2={x(speed.max)} y1={25} y2={25} />
             <rect className="llm-perf-middle" x={x(speed.q1)} y={19} width={x(speed.q3) - x(speed.q1)} height={12} rx={3} />
             <line className="llm-perf-median" x1={x(speed.median)} x2={x(speed.median)} y1={16} y2={34} />
           </>}
         </svg> : <span className="llm-perf-missing">{copy.missing}</span>}
-        <span className="llm-perf-reading" aria-label={copy.columns.speed}>{speed ? formatMetric(speed.median) : copy.missing}</span>
-        <span className="llm-perf-reading" aria-label={copy.columns.firstToken}>{wait ? formatMetric(wait.median) : copy.missing}</span>
+        {LLM_METRICS.map(metric => {
+          const stats = summaries[metric]
+          const value = stats ? formatMetric(stats.median) : copy.missing
+          const label = copy.measuredRounds(copy.columns[metric], stats?.count ?? 0)
+          return <span key={metric} className="llm-perf-reading" title={label} aria-label={`${label}：${value}`}>{value}</span>
+        })}
       </button>
     })}
-    <div className="llm-perf-scale" aria-hidden="true"><span /><div>{[0, max / 2, max].map((value, index) => <span key={value} style={{ left: `${2 + index * 48}%` }}>{value}</span>)}</div></div>
+    {groups.some(group => group.speedSummary) && <div className="llm-perf-scale" aria-hidden="true"><span /><div>{[0, max / 2, max].map((value, index) => <span key={value} style={{ left: `${2 + index * 48}%` }}>{value}</span>)}</div></div>}
   </div></div>
 }
 
