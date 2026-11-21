@@ -125,9 +125,10 @@ const FORWARDED_ENV = [
  * in-process App used to read them itself; since S3 the fixture runs in the daemon, so an
  * isolated test App hands them on. Forwarded only when the daemon's fixture was asked for
  * (`SCRY_DAEMON_SMOKE_PROVIDER=1`) by a test instance (`SCRY_TEST_APP=1`, the App's hop) or
- * by a supervisor this function already configured (`SCRY_DAEMON_STATE_DIR`, the
- * supervisor's hop, whose environment only carries them if the first hop let them through).
- * A normal launch never carries them.
+ * by a supervisor whose environment this function built with the fixture handed on
+ * (SMOKE_FIXTURE_HOP, the supervisor's hop). Every daemon environment carries
+ * `SCRY_DAEMON_STATE_DIR`, so that is no proof of a fixture hop; only the marker is, and
+ * only this function sets it. A normal launch never carries them.
  */
 export const SMOKE_FIXTURE_ENV = [
   'SCRY_ELECTRON_SMOKE_CONVERSATIONS',
@@ -139,10 +140,15 @@ export const SMOKE_FIXTURE_ENV = [
   'SCRY_ELECTRON_SMOKE_READS'
 ] as const
 
-export function smokeFixtureEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/** Set by daemonLaunchEnvironment alone, and only on a hop it handed the fixture env to. */
+export const SMOKE_FIXTURE_HOP = 'SCRY_DAEMON_SMOKE_FIXTURE_HOP'
+
+export function smokeFixtureEnvironment(source: NodeJS.ProcessEnv, hop: 'app' | 'supervisor' = 'app'): NodeJS.ProcessEnv {
   if (source.SCRY_DAEMON_SMOKE_PROVIDER !== '1') return {}
-  if (source.SCRY_TEST_APP !== '1' && source.SCRY_DAEMON_STATE_DIR === undefined) return {}
-  const env: NodeJS.ProcessEnv = {}
+  // Each hop has its own proof: the App's is a test instance, the supervisor's is the
+  // marker the App's hop set. Neither stands in for the other.
+  if (hop === 'app' ? source.SCRY_TEST_APP !== '1' : source[SMOKE_FIXTURE_HOP] !== '1') return {}
+  const env: NodeJS.ProcessEnv = { [SMOKE_FIXTURE_HOP]: '1' }
   for (const key of SMOKE_FIXTURE_ENV) if (source[key] !== undefined) env[key] = source[key]
   return env
 }
@@ -161,13 +167,15 @@ export function daemonLaunchEnvironment(input: {
    * FORWARDED_ENV, so a value in the caller's environment cannot leak through.
    */
   launchedBy?: DaemonLaunchedBy
+  /** Which launch this is: the App starting a supervisor, or a supervisor its daemon. */
+  hop?: 'app' | 'supervisor'
 }): NodeJS.ProcessEnv {
   const source = input.source ?? process.env
   const env: NodeJS.ProcessEnv = {}
   for (const key of FORWARDED_ENV) if (source[key] !== undefined) env[key] = source[key]
   return {
     ...env,
-    ...smokeFixtureEnvironment(source),
+    ...smokeFixtureEnvironment(source, input.hop),
     ELECTRON_RUN_AS_NODE: '1',
     SCRY_DAEMON_STATE_DIR: input.stateDirectory,
     SCRY_DAEMON_USER_DATA_DIR: input.userDataDir,

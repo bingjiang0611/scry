@@ -223,8 +223,26 @@ describe('daemon supervisor', () => {
     for (const key of keys) expect(supervisorEnv[key], key).toBe(fixture[key as keyof typeof fixture])
     expect('SCRY_TEST_APP' in supervisorEnv).toBe(false)
     // The supervisor's hop: its environment came from the first hop, so it passes them on.
-    const daemonEnv = daemonLaunchEnvironment({ ...base, source: supervisorEnv })
+    const daemonEnv = daemonLaunchEnvironment({ ...base, source: supervisorEnv, hop: 'supervisor' })
     for (const key of keys) expect(daemonEnv[key], key).toBe(fixture[key as keyof typeof fixture])
+  })
+
+  it('does not take a daemon state directory as proof of a fixture hop', () => {
+    // Every daemon environment carries SCRY_DAEMON_STATE_DIR; only the marker this
+    // function sets on a hop it handed the fixture to lets the next hop pass it on.
+    const base = { stateDirectory: '/s', userDataDir: '/u', appPath: '/a', resourcesPath: '/r', appVersion: '1', isPackaged: false, startedBy: 'x' }
+    const fixture = { SCRY_ELECTRON_SMOKE_INPUTS: '/t/inputs', SCRY_ELECTRON_SMOKE_CALLS: '/t/calls', SCRY_ELECTRON_SMOKE_SIDE_CHAT: '1' }
+    const env = daemonLaunchEnvironment({ ...base, source: { ...fixture, SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_STATE_DIR: '/elsewhere' } })
+    for (const key of Object.keys(fixture)) expect(key in env, key).toBe(false)
+    expect('SCRY_DAEMON_SMOKE_FIXTURE_HOP' in env).toBe(false)
+    // A normal launch's own environment is not a fixture hop either.
+    const normal = daemonLaunchEnvironment({ ...base, source: { SCRY_DAEMON_SMOKE_PROVIDER: '1' } })
+    expect('SCRY_DAEMON_SMOKE_FIXTURE_HOP' in normal).toBe(false)
+    const next = daemonLaunchEnvironment({ ...base, source: { ...normal, ...fixture }, hop: 'supervisor' })
+    for (const key of Object.keys(fixture)) expect(key in next, key).toBe(false)
+    // The marker is the supervisor hop's proof only: at the App's hop it proves nothing.
+    const spoofed = daemonLaunchEnvironment({ ...base, source: { ...fixture, SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_SMOKE_FIXTURE_HOP: '1' } })
+    for (const key of Object.keys(fixture)) expect(key in spoofed, key).toBe(false)
   })
 
   it('resets its restart budget after a stable run', async () => {
