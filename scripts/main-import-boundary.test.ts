@@ -27,7 +27,21 @@ describe('S3: scripts/main-import-boundary strict gate and negative controls', (
       orchestrationImporters: [],
       forbiddenPackages: [],
       forbiddenModules: [],
-      nonWhitelistedChildProcess: []
+      nonWhitelistedChildProcess: [],
+      testOnlySymbols: []
+    })
+  })
+
+  it('negative control: hard-fails when an App module calls the test-only trust registrar', async () => {
+    await withTempDir(async (dir) => {
+      const entry = join(dir, 'inject-trust-checked.ts')
+      const ipcTrust = join(REPO_ROOT, 'src/main/ipc-trust.ts')
+      writeFileSync(entry, `import { registerTrustCheckedListener } from ${JSON.stringify(ipcTrust)}\nexport const register = registerTrustCheckedListener\n`)
+      const report = await scanMainImportBoundary(entry)
+      const baseline = JSON.parse(readFileSync(join(REPO_ROOT, 'scripts/main-import-boundary-baseline.json'), 'utf8'))
+      const evaluation = evaluateBoundaryReport(report, baseline)
+      expect(evaluation.ok).toBe(false)
+      expect(evaluation.newViolations.testOnlySymbols).toEqual([expect.stringContaining('-> registerTrustCheckedListener')])
     })
   })
 

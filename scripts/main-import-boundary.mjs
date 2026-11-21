@@ -8,6 +8,7 @@
  *   2. `forbiddenPackages` — Provider SDKs, `node-pty`, `better-sqlite3`.
  *   3. `forbiddenModules` — In-process runtime modules (run pipeline, remote host, ledgers, terminals, SQLite, Providers).
  *   4. `nonWhitelistedChildProcess` — Reachable `child_process` importers outside the post-S3 allowlist.
+ *   5. `testOnlySymbols` — HARD FAIL: a reachable module other than its own uses a test-only export.
  *
  * `--strict` requires 0 violations across all categories. The ratchet mode (`--baseline <json>`,
  * default scripts/main-import-boundary-baseline.json, now empty) only allows listed violations.
@@ -65,6 +66,14 @@ export const CHILD_PROCESS_ALLOWLIST = new Set([
   'src/main/llm-network-configuration.ts'
 ])
 
+// Exports that exist for tests only. The App reaches their defining module (it uses other
+// exports of it) but no other App module may call them: registerTrustCheckedListener is the
+// trust check without the daemon gate, which the App must only reach through
+// registerTrustedIpcHandler.
+export const TEST_ONLY_SYMBOLS = [
+  { symbol: 'registerTrustCheckedListener', definedIn: 'src/main/ipc-trust.ts' }
+]
+
 const DYNAMIC_SPECIFIER_RE = /\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
 
 function stripComments(source) {
@@ -92,6 +101,7 @@ export async function scanMainImportBoundary(entryPath = resolve(repoRoot, 'src/
   const forbiddenModuleHits = new Set()
   const nonWhitelistedChildProcess = new Set()
   const orchestrationImporters = new Set()
+  const testOnlySymbols = new Set()
   const forbiddenPkgSet = new Set(FORBIDDEN_PACKAGES)
   const forbiddenModSet = new Set(FORBIDDEN_MODULES)
 
@@ -118,6 +128,9 @@ export async function scanMainImportBoundary(entryPath = resolve(repoRoot, 'src/
     } catch {
       continue
     }
+    for (const { symbol, definedIn } of TEST_ONLY_SYMBOLS) {
+      if (file !== definedIn && new RegExp(`\\b${symbol}\\b`).test(source)) testOnlySymbols.add(`${file} -> ${symbol}`)
+    }
     for (const match of source.matchAll(DYNAMIC_SPECIFIER_RE)) {
       const spec = match[1]
       if (forbiddenPkgSet.has(spec)) forbiddenPackageHits.add(`${file} -> ${spec}`)
@@ -136,7 +149,8 @@ export async function scanMainImportBoundary(entryPath = resolve(repoRoot, 'src/
     orchestrationImporters: [...orchestrationImporters].sort(),
     forbiddenPackages: [...forbiddenPackageHits].sort(),
     forbiddenModules: [...forbiddenModuleHits].sort(),
-    nonWhitelistedChildProcess: [...nonWhitelistedChildProcess].sort()
+    nonWhitelistedChildProcess: [...nonWhitelistedChildProcess].sort(),
+    testOnlySymbols: [...testOnlySymbols].sort()
   }
 }
 
@@ -145,7 +159,9 @@ export function evaluateBoundaryReport(report, baseline) {
     orchestrationImporters: [...report.orchestrationImporters],
     forbiddenPackages: [],
     forbiddenModules: [],
-    nonWhitelistedChildProcess: []
+    nonWhitelistedChildProcess: [],
+    // Like orchestration: no baseline can allow it.
+    testOnlySymbols: [...(report.testOnlySymbols ?? [])]
   }
   const categories = ['forbiddenPackages', 'forbiddenModules', 'nonWhitelistedChildProcess']
   for (const key of categories) {
@@ -158,7 +174,8 @@ export function evaluateBoundaryReport(report, baseline) {
     newViolations.orchestrationImporters.length === 0 &&
     newViolations.forbiddenPackages.length === 0 &&
     newViolations.forbiddenModules.length === 0 &&
-    newViolations.nonWhitelistedChildProcess.length === 0
+    newViolations.nonWhitelistedChildProcess.length === 0 &&
+    newViolations.testOnlySymbols.length === 0
   return { ok, newViolations }
 }
 
