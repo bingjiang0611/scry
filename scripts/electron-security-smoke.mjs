@@ -29,7 +29,7 @@ import { exerciseRecording } from './electron-security-recording.mjs'
 import { exerciseRestart } from './electron-security-restart.mjs'
 import { exerciseStructureApp } from './structure-app-checks.mjs'
 import { prepareSideChatMode } from './side-chat-smoke.mjs'
-import { lostReplyPath, writeConversationFaultEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
+import { lostReplyPath, writeConversationFaultEntry, writeEntryPackage, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
@@ -124,8 +124,9 @@ async function main() {
   const filesEntry = join(temp, 'files-app', 'files-main.mjs')
   if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')
-  const questionEntry = join(temp, 'question-main.mjs')
+  const questionEntry = join(temp, 'question-app', 'question-main.mjs')
   if (devQuestionOnly) {
+    writeEntryPackage(questionEntry)
     // Exercise startup and repeated viewing against a stale native Dock badge.
     // Forward every call to Electron; a denied OS permission remains explicit.
     writeFileSync(questionEntry, `
@@ -153,9 +154,11 @@ async function main() {
       })
     `)
   }
-  const conversationEntry = join(temp, 'conversation-main.mjs')
+  // Every temp entry has its own app directory: the daemon supervisor refuses an App that
+  // announces Electron's version instead of the build's (smoke-app-entries.mjs).
+  const conversationEntry = join(temp, 'conversation-app', 'conversation-main.mjs')
   if (unifiedConversationOnly) writeConversationFaultEntry(conversationEntry, join(temp, 'fork-reply-lost'))
-  const structureEntry = join(temp, 'structure-main.mjs')
+  const structureEntry = join(temp, 'structure-app', 'structure-main.mjs')
   const structureIpc = join(temp, 'structure-ipc-counts.json')
   if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc)
   const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
@@ -167,7 +170,7 @@ async function main() {
   // (src/daemon/supervisor.ts smokeFixtureEnvironment).
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? dirname(questionEntry) : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? dirname(conversationEntry) : (structureOnly || sideChatOnly || largeHistoryOnly) ? dirname(structureEntry) : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       '--disable-gpu',

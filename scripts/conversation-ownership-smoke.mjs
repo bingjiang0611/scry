@@ -152,9 +152,19 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   assert.equal(calls().length, 0, 'blocked operations must never enter the adapter')
 
   await open('orphan-candidate', otherCwd)
-  await deny('orphan unknown resume', start('orphan-candidate', otherCwd), /未确认投递/)
+  // The daemon recovers the orphan before any write (S3: there is no in-process App). With
+  // orchestration on (its default) a pending turn without an orchestration intent provably
+  // never reached a Provider and settles not_sent (Decision G), so the candidate session is
+  // not ambiguous and nothing is refused; otherwise it is unknown and the resume is refused.
+  const recovered = json(orphanPath).turns[0].delivery
+  if (recovered.status === 'not_sent') {
+    assert.equal(recovered.reason, 'orchestration_intent_absent', 'only a missing orchestration intent proves not_sent')
+    blocked.push('orphan recovered not_sent')
+  } else {
+    await deny('orphan unknown resume', start('orphan-candidate', otherCwd), /未确认投递/)
+  }
   const orphan = json(orphanPath)
-  assert.equal(orphan.turns[0].delivery.status, 'unknown', 'production startup must recover orphan pending before allowing writes')
+  assert.ok(['unknown', 'not_sent'].includes(orphan.turns[0].delivery.status), 'production startup must recover orphan pending before allowing writes')
   assert.equal(orphan.revision, 2)
   assert.equal(json(ownedPath).revision, 0, 'startup must not rewrite confirmed ownership')
 
@@ -170,18 +180,25 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   await open('control-native')
   const started = await evaluate(start('control-native', cwd, 'desktop remote write one'))
   assert.ok(started.runId)
+  // The daemon owns the run (S3): its focused snapshot keeps a finished run (done) for
+  // live-trace recovery, so "settled" is: no longer active, and no snapshot or a done one.
+  const settled = `(async () => {
+    const runId = ${JSON.stringify(started.runId)}
+    const active = await window.scry.activeRuns()
+    const snapshot = await window.scry.focusedRunSnapshot()
+    return !active.some(run => run.runId === runId) && (snapshot === null || (snapshot.runId === runId && snapshot.done === true))
+  })()`
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (calls().some(call => call.operation === 'run' && call.identity === started.runId) &&
-      await evaluate('window.scry.focusedRunSnapshot()') === null) break
+    if (calls().some(call => call.operation === 'run' && call.identity === started.runId) && await evaluate(settled)) break
     await delay(50)
   }
   assert.deepEqual(calls(), [{ operation: 'fork', identity: 'control-native' }, { operation: 'run', identity: started.runId }])
-  assert.equal(await evaluate('window.scry.focusedRunSnapshot()'), null, 'positive run must settle before fixture shutdown')
+  assert.equal(await evaluate(settled), true, 'positive run must settle before fixture shutdown')
   await verifyCompletedControl(evaluate, fixture, started.runId)
   assert.deepEqual(evidence(), originalEvidence, 'positive controls changed another conversation source')
   return { test: 'conversation ownership production IPC', blocked, providerCalls: calls(),
     completedRunId: started.runId, completedArchiveAndWorkspaceWriteVerified: true,
     positiveControls: ['unowned fork', 'unowned deletion', 'unowned resume'],
-    orphanRecovery: 'pending -> unknown, revision 1 -> 2', ownedEvidenceUnchanged: true }
+    orphanRecovery: 'pending -> unknown or not_sent (orchestration on), revision 1 -> 2', ownedEvidenceUnchanged: true }
 }
