@@ -137,7 +137,14 @@ export const SMOKE_FIXTURE_ENV = [
   'SCRY_ELECTRON_SMOKE_CALLS',
   'SCRY_ELECTRON_SMOKE_IDENTITY',
   'SCRY_ELECTRON_SMOKE_READER',
-  'SCRY_ELECTRON_SMOKE_READS'
+  'SCRY_ELECTRON_SMOKE_READS',
+  // The concurrent-performance fixture's measurement inputs: its hook children load the
+  // probe (`--require`) and log to the bench's file, and the managed hook needs the CLI
+  // the bench built. Without them the daemon's hook children got `--require=undefined`.
+  'SCRY_CONCURRENT_PROBE',
+  'SCRY_CONCURRENT_LOG',
+  'SCRY_CONCURRENT_ROLE',
+  'SCRY_CLI_PATH'
 ] as const
 
 /** Set by daemonLaunchEnvironment alone, and only on a hop it handed the fixture env to. */

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { freePort } from './electron-security-cdp.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
+import { noteDaemonNotSampled } from './daemon-sampling-note.mjs'
 
 const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
 const cycleLimit = requestedCycles !== null && Number.isSafeInteger(requestedCycles) && requestedCycles > 0 ? requestedCycles : null
@@ -392,6 +393,7 @@ async function main() {
     lastResource
   }
   console.log(`SCRY_PERFORMANCE_SOAK_RESULT=${JSON.stringify(report)}`)
+  noteDaemonNotSampled('performance-soak')
   cdp.close()
 }
 

@@ -210,7 +210,9 @@ describe('daemon supervisor', () => {
     const base = { stateDirectory: '/s', userDataDir: '/u', appPath: '/a', resourcesPath: '/r', appVersion: '1', isPackaged: false, startedBy: 'x' }
     const fixture = {
       SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_SIDE_CHAT: '1', SCRY_ELECTRON_SMOKE_INPUTS: '/t/inputs',
-      SCRY_ELECTRON_SMOKE_CALLS: '/t/calls', SCRY_ELECTRON_SMOKE_IDENTITY: 'id', SCRY_ELECTRON_SMOKE_READER: '1', SCRY_ELECTRON_SMOKE_READS: '/t/reads'
+      SCRY_ELECTRON_SMOKE_CALLS: '/t/calls', SCRY_ELECTRON_SMOKE_IDENTITY: 'id', SCRY_ELECTRON_SMOKE_READER: '1', SCRY_ELECTRON_SMOKE_READS: '/t/reads',
+      // The concurrent-performance fixture's probe, log, role and built CLI ride the same gate.
+      SCRY_CONCURRENT_PROBE: '/t/probe.cjs', SCRY_CONCURRENT_LOG: '/t/probe.jsonl', SCRY_CONCURRENT_ROLE: 'main', SCRY_CLI_PATH: '/t/scry'
     }
     const keys = Object.keys(fixture)
     // A normal launch, or a test instance that did not ask for the daemon fixture: nothing.
