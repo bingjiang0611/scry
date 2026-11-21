@@ -7,6 +7,7 @@ import type { DesktopRemoteContext } from '../../shared/desktop-remote'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
 import { DaemonRunError, type DaemonRunTransport } from '../daemon-run-transport'
 import type { TraceBatchReceipt } from '../trace-output'
+import { assertWorkspaceSourceSelected, registeredWorkspace } from './daemon-workspace-start'
 
 // The run half of the daemon-mode App: the renderer keeps sending the same IPC
 // payloads, and this surface turns them into daemon frames. Nothing here decides
@@ -70,7 +71,10 @@ export function routingDetail(payload: AgentStartRequest, currentCwd: string | u
     ...(payload.effort ? { effort: payload.effort } : {}),
     ...(payload.permissionMode ? { permissionMode: payload.permissionMode } : {}),
     ...(payload.expectedExternalSessionId ? { resume: payload.expectedExternalSessionId } : {}),
-    ...(payload.attachments && payload.attachments.length > 0 ? { attachments: payload.attachments } : {})
+    ...(payload.attachments && payload.attachments.length > 0 ? { attachments: payload.attachments } : {}),
+    // The workspace selection is the request: dropping it would run a plain turn in the
+    // source checkout, a request the user did not make. The daemon prepares or refuses it.
+    ...(payload.workspace ? { workspace: payload.workspace } : {})
   })
 }
 
@@ -111,6 +115,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     async start(payload, intentId) {
       const context = runContext(payload, deps.currentCwd())
       if (!context) throw new Error('daemon_run_workspace_required')
+      assertWorkspaceSourceSelected(payload, deps.currentCwd())
       // The intent id is fixed by the caller BEFORE the first attempt, so a retry after
       // a connection failure records one intent, not two. The App's commandId is its
       // own idempotency key and wins when present.
@@ -136,9 +141,15 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       // `bound: false` means the trace will not carry this id yet. Say so instead
       // of handing the view an id it cannot match.
       if (!receipt.bound) throw new Error('daemon_run_not_bound')
+      // A prepared workspace runs where it was prepared; the window follows it there.
+      const workspace = payload.workspace ? await registeredWorkspace(deps.transport.localOp.bind(deps.transport), payload, receipt.runId) : undefined
       focusedRunId = receipt.runId
-      announceFocusedRun(receipt.runId, context, payload.prompt)
-      return { runId: receipt.runId, ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}) }
+      announceFocusedRun(receipt.runId, workspace ? { ...context, cwd: workspace.cwd } : context, payload.prompt)
+      return {
+        runId: receipt.runId,
+        ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}),
+        ...(workspace ? { workspace } : {})
+      }
     },
     async activeRun() {
       const runs = runtime.activeRuns()

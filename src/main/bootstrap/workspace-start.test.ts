@@ -52,4 +52,30 @@ describe('workspace run bootstrap', () => {
     if (!('remoteCompletion' in result)) throw new Error('missing remote completion')
     await expect(result.remoteCompletion).resolves.toEqual({ status: 'completed', recording: 'committed' })
   })
+
+  it('resolves the App own submit against its known projects, not the device project roots', async () => {
+    // In daemon mode the App's first send arrives through the ledger (origin remote) under
+    // a local grant: its source is one of the App's known projects, as for any App run.
+    const start = vi.fn((_request: AgentStartRequest, options: Parameters<typeof startWorkspaceRun>[1]) => {
+      options.onRegistered?.({ runId: options.runId! })
+      return new Promise<RemoteRunCompletion>(() => {})
+    })
+    const startWorkspace = vi.fn(async (_request, launch, requestedRunId?: string) => {
+      const prepared = { operationId: workspace.operationId, repositoryId: workspace.intent.repositoryId,
+        cwd: '/source', worktreeId: 'c'.repeat(24), branchRef: 'refs/heads/topic', head: 'd'.repeat(40) }
+      return { ...(await launch(prepared, requestedRunId!, async (register: () => void) => register())), workspace: prepared }
+    })
+    const resolveKnownProjectDirectory = vi.fn((cwd: string) => cwd)
+    await startWorkspaceRun(request(), { origin: 'remote', grantScope: 'local', runId: 'remote-scry-run' }, {
+      sourceControl: { startWorkspace } as unknown as SourceControlService,
+      providerRegistry: { get: () => ({ runtimeProvider: 'claude_sdk' }) } as unknown as ProviderRegistry,
+      getCurrentCwd: () => undefined,
+      getStartupManagedRecovery: async () => {},
+      resolveKnownProjectDirectory,
+      resolveRemoteProjectDirectory: () => { throw new Error('device project roots must not decide an App submit') },
+      start
+    })
+    expect(resolveKnownProjectDirectory).toHaveBeenCalledWith('/source')
+    expect(startWorkspace).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/source' }), expect.any(Function), 'remote-scry-run')
+  })
 })

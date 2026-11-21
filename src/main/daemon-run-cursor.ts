@@ -84,6 +84,11 @@ export function noteWatchEvents(cursor: RunCursor, events: ReadonlyArray<{ runId
         cwd: bound.cwd, providerId: bound.providerId,
         ...(bound.agentProfileId ? { agentProfileId: bound.agentProfileId } : {})
       }
+    } else if (cursor.context && bound.ledgerRunId === cursor.runId && bound.cwd !== undefined && bound.cwd !== cursor.context.cwd) {
+      // A workspace start runs in the directory it prepared (a switched checkout or a
+      // worktree), and the daemon re-announces this run there once registered. The run
+      // is read where it runs; the submitted directory would be refused as a mismatch.
+      cursor.context = { ...cursor.context, cwd: bound.cwd }
     }
   }
 }
