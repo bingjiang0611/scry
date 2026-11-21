@@ -1,14 +1,15 @@
-import type { AgentDataUpdated, AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
-import type { DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
+import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
+import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonClientError } from './daemon-client'
 import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
 import { readDaemonTrace } from './daemon-run-trace-read'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
-import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { isHostAdminNotice } from '../shared/host-admin'
 import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
+import { isAttentionSnapshot, isDataUpdated, parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -154,8 +155,22 @@ export class DaemonRunTransport {
    * One canonical trace read for a live run; the delta cursor is the caller's.
    * `settledTail`: the read after `run_settled` still gets the run's final trace.
    */
-  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor }): Promise<DesktopRemoteTraceRead> {
+  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor; settledTail?: boolean }): Promise<DesktopRemoteTraceRead> {
     return await readDaemonTrace((request, options) => this.#call(request, options), input)
+  }
+
+  /** P4-3 archive read for a settled run that already left the live registry (replaces settledTail). */
+  async archivedRunTrace(input: { context: DesktopRemoteContext; runId: string }): Promise<ActiveRun | null> {
+    return await readDaemonArchivedRunTrace((request, options) => this.#call(request, options), input)
+  }
+
+  /** P4-3 local orchestration subscribe on the events lane (active only when daemon reports subscribe=1). */
+  async subscribe(input: SubscribeRequest, signal?: AbortSignal): Promise<SubscribeReply> {
+    const reply = await this.#call(
+      { op: 'subscribe', ...input },
+      { replayable: true, ...(signal ? { signal } : {}) }
+    )
+    return parseSubscribeReply(reply)
   }
 
   async output(input: { runId: string; cursor: number }): Promise<DaemonOutputStream> {
@@ -352,20 +367,4 @@ export class DaemonRunTransport {
     if (error) throw error
     return reply
   }
-}
-
-// The notices this App renders. Anything else (a newer daemon's kind) is skipped by the
-// caller rather than passed to the window as a shape it does not know.
-function isDataUpdated(value: unknown): value is AgentDataUpdated {
-  if (!record(value)) return false
-  if (value.kind === 'conversation_changed') return typeof value.conversationId === 'string'
-  if (value.kind === 'catalog_recovered' || value.kind === 'resynchronize') return true
-  return typeof value.runId === 'string' && (value.kind === undefined || value.kind === 'turn_recorded' || value.kind === 'session_deleted')
-}
-
-const MAX_UNREAD_SESSIONS = 10_000
-
-function isAttentionSnapshot(value: unknown): value is SessionAttentionSnapshot {
-  return record(value) && Number.isSafeInteger(value.revision) && Array.isArray(value.unreadSessionKeys) &&
-    value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
 }

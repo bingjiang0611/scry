@@ -2,24 +2,20 @@ import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BU
 import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
-import type { AgentQuestionResponse } from '../shared/runtime'
+import type { AgentQuestionResponse, AgentStopState } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
-import { noteWatchEvents, resume, view, type RunCursor } from './daemon-run-cursor'
+import type { SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
+import { resume, view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
 import type { RunTraceRouter } from './run-trace-router'
+import { applyRunHintToRuntime, applySubscribeEventToRuntime, applySubscribeSnapshotToRuntime, awaitSubscribeAdmission, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
+import { DEFAULT_WATCH_WAIT_MS, stepLegacyWatchRun } from './daemon-run-watch'
 
-// The App's own run view, driven by the daemon instead of by an in-process
-// pipeline. The daemon owns execution, the ledger and the canonical run state;
-// this module owns exactly one thing: turning its frames into the trace, question
-// and lifecycle events this window already renders.
-//
-// It never invents progress. A delta that rewrites earlier items cannot be
-// expressed as an append, so the run is marked for resynchronisation and the
-// renderer re-reads the authoritative snapshot; a run whose lifecycle the daemon
-// no longer knows is reported as unknown, not as finished.
+// The App's run view driven by the daemon: turns daemon frames into renderer trace,
+// question, and lifecycle events without inventing progress.
 
 const DEFAULT_WAIT_MS = 15_000
 // How long a start waits for the daemon to bind a canonical run id. A run that has
@@ -46,6 +42,8 @@ export interface DaemonStartReceipt {
 export interface DaemonRunRuntimeDeps {
   transport: DaemonRunTransport
   send: (channel: string, payload: unknown) => void
+  /** P4-3: event-driven lifecycle from `subscribe` with zero per-run `watch` or `settledTail`. */
+  subscribeMode?: boolean
   // Long-poll window. The daemon answers earlier when something changes.
   waitMs?: number
   bindBudgetMs?: number
@@ -54,7 +52,7 @@ export interface DaemonRunRuntimeDeps {
   onWarn?: (message: string, detail?: unknown) => void
   // P3f W2: the App's run-level subscriptions (RunTraceRouter). A view that subscribes to
   // one run (the conversation view) reads this, not the window-wide trace stream.
-  runTraces?: Pick<RunTraceRouter, 'route' | 'settle'> & NonNullable<QuestionSinks['subscription']>
+  runTraces?: Pick<RunTraceRouter, 'route' | 'settle'> & Partial<Pick<RunTraceRouter, 'publishStopState'>> & NonNullable<QuestionSinks['subscription']>
 }
 
 export class DaemonRunRuntime {
@@ -67,6 +65,34 @@ export class DaemonRunRuntime {
   // starts at its own intent.
   #seen = 0
   #disposed = false
+  #onSessionBound?: (payload: Record<string, unknown>) => void
+
+  setOnSessionBound(listener: ((payload: Record<string, unknown>) => void) | undefined): void { this.#onSessionBound = listener }
+
+  #subCtx(): SubscribeRuntimeContext {
+    return {
+      runs: this.#runs, wakes: this.#wakes, cursorFor: (id) => this.#cursorFor(id), send: this.#deps.send,
+      onSessionBound: (payload) => this.#onSessionBound?.(payload),
+      publishStopState: (state: AgentStopState) => this.#deps.runTraces?.publishStopState?.(state),
+      settleRunTrace: (id) => this.#deps.runTraces?.settle(id), flushBridge: () => this.#bridge.flushAll(),
+      scheduleTraceRead: (id, opts) => this.#readTraceSerialized(id, opts), syncQuestions: (cursor) => this.#publishQuestions(cursor)
+    }
+  }
+
+  async applySubscribeSnapshot(rows: SubscribeActiveRunRow[]): Promise<void> { if (!this.#disposed) await applySubscribeSnapshotToRuntime(this.#subCtx(), rows) }
+  async applySubscribeEvent(event: SubscribeEventItem): Promise<void> { if (!this.#disposed) await applySubscribeEventToRuntime(this.#subCtx(), event) }
+  applyRunHint(hint: Extract<SubscribeHint, { kind: 'run' }>): void { if (!this.#disposed) applyRunHintToRuntime(this.#subCtx(), hint) }
+
+  #readTraceSerialized(runId: string, options?: { terminal?: boolean }): Promise<void> {
+    const previous = this.#locks.get(runId) ?? Promise.resolve()
+    const next = previous.then(() => readSubscribeTraceOnce({
+      cursor: this.#runs.get(runId), runId, disposed: this.#disposed, terminal: options?.terminal,
+      transport: this.#deps.transport, apply: (read, cursor) => this.#apply(read, cursor),
+      syncQuestions: (cursor) => this.#publishQuestions(cursor), flush: () => this.#bridge.flush(), onWarn: this.#deps.onWarn
+    }))
+    this.#locks.set(runId, next.then(() => undefined, () => undefined))
+    return next
+  }
 
   constructor(deps: DaemonRunRuntimeDeps) {
     this.#deps = deps
@@ -139,7 +165,7 @@ export class DaemonRunRuntime {
         ...(stamp ? { stamp } : {}), ...(userText !== undefined ? { userText } : {}), sawText: false
       })
     }
-    void this.pump(runId)
+    if (!this.#deps.subscribeMode) void this.pump(runId)
   }
 
   /**
@@ -151,7 +177,10 @@ export class DaemonRunRuntime {
   async deliverAfterRead(runId: string | undefined, deliver: () => void): Promise<void> {
     const cursor = runId === undefined ? undefined : this.#cursorFor(runId)
     if (cursor && !cursor.stopped && !this.#disposed) {
-      try { await this.step(cursor.runId, { waitMs: 0 }) } catch (error) { this.#deps.onWarn?.('daemon run read before notice failed', error) }
+      if (this.#deps.subscribeMode) await this.#readTraceSerialized(cursor.runId)
+      else {
+        try { await this.step(cursor.runId, { waitMs: 0 }) } catch (error) { this.#deps.onWarn?.('daemon run read before notice failed', error) }
+      }
       this.#bridge.flushAll()
     }
     deliver()
@@ -202,6 +231,10 @@ export class DaemonRunRuntime {
       return created
     })()
     if (cursor.latest) return cursor.latest
+    if (this.#deps.subscribeMode) {
+      await this.#readTraceSerialized(cursor.runId)
+      return cursor.latest ?? null
+    }
     // One bounded read: the caller is answering a UI request, so it must not wait
     // for a long poll to find out whether the run is still there.
     await this.step(cursor.runId, { waitMs: 0 })
@@ -209,6 +242,12 @@ export class DaemonRunRuntime {
   }
 
   #awaitBound(runId: string): Promise<string | undefined> {
+    if (this.#deps.subscribeMode) {
+      return awaitSubscribeAdmission({
+        runId, cursor: () => this.#runs.get(runId), wakes: this.#wakes,
+        bindBudgetMs: this.#deps.bindBudgetMs ?? DEFAULT_BIND_BUDGET_MS, admitBudgetMs: this.#deps.admitBudgetMs ?? DEFAULT_ADMIT_BUDGET_MS
+      })
+    }
     return awaitAdmission({
       runId, cursor: () => this.#runs.get(runId), step: (waitMs) => this.step(runId, { waitMs }), wakes: this.#wakes,
       bindBudgetMs: this.#deps.bindBudgetMs ?? DEFAULT_BIND_BUDGET_MS, admitBudgetMs: this.#deps.admitBudgetMs ?? DEFAULT_ADMIT_BUDGET_MS
@@ -264,46 +303,12 @@ export class DaemonRunRuntime {
   async #stepOnce(runId: string, options: { waitMs?: number } = {}): Promise<{ changed: boolean; lifecycle: string | null }> {
     const cursor = this.#runs.get(runId)
     if (!cursor) return { changed: false, lifecycle: null }
-    const trace = new PerformanceTrace('daemon.run.pump', cursor.context ? { provider: cursor.context.providerId } : {})
-    let changed = false
-    try {
-      // `output: 'wake'` is the wake, not the delivery: the daemon reports that the run
-      // produced something without sending that content, and the text still arrives on
-      // the trace. Without a content wake a fifteen second poll is a fifteen second
-      // freeze between the first chunk and the end of the message; with the page itself
-      // every chunk would cross the socket twice.
-      const watch = await this.#deps.transport.watch({
-        runId, cursor: cursor.watch, outputCursor: cursor.output,
-        waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WAIT_MS, output: 'wake'
-      })
-      cursor.watch = Math.max(cursor.watch, watch.cursor)
-      this.#seen = Math.max(this.#seen, watch.cursor)
-      if (watch.output.count > 0) {
-        cursor.output = Math.max(cursor.output, watch.output.cursor)
-        changed = true
-      }
-      if (watch.state !== cursor.lifecycle) changed = true
-      noteWatchEvents(cursor, watch.events)
-      if (cursor.context === undefined) { cursor.lifecycle = watch.state; return { changed, lifecycle: cursor.lifecycle } }
-      // The trace is addressed by the canonical id its events carry. The ledger id the
-      // watch polls uses is a different id and finds no run there.
-      const read = await this.#deps.transport.trace({
-        context: cursor.context, runId: cursor.scryRunId ?? runId, ...(cursor.after ? { after: cursor.after } : {})
-      })
-      if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
-      if (this.#apply(read, cursor)) changed = true
-      await this.#publishQuestions(cursor)
-      // The step boundary holds the whole read: hand its batch over now, not on the
-      // batching timer. One batch per step; flush() keeps the same high water.
-      if (changed) this.#bridge.flush()
-      // Terminal only once this step's trace reached the window: no `done` before the
-      // last text, including across the questions round trip above.
-      cursor.lifecycle = watch.state
-      if (watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled') cursor.stopped = true
-      return { changed, lifecycle: cursor.lifecycle }
-    } finally {
-      trace.finish({ bufferedEvents: changed ? 1 : 0 })
-    }
+    return await stepLegacyWatchRun({
+      cursor, runId, waitMs: options.waitMs ?? this.#deps.waitMs ?? DEFAULT_WATCH_WAIT_MS,
+      transport: this.#deps.transport, onSeen: (pos) => { this.#seen = Math.max(this.#seen, pos) },
+      apply: (read, cur) => this.#apply(read, cur), publishQuestions: (cur) => this.#publishQuestions(cur),
+      flush: () => this.#bridge.flush()
+    })
   }
 
   async pump(runId: string): Promise<void> {

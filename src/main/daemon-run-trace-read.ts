@@ -23,10 +23,11 @@ export type DaemonTraceCall = (
  */
 export async function readDaemonTrace(
   call: DaemonTraceCall,
-  input: { context: unknown; runId: string; after?: DesktopTraceCursor }
+  input: { context: unknown; runId: string; after?: DesktopTraceCursor; settledTail?: boolean }
 ): Promise<DesktopRemoteTraceRead> {
   const query = {
-    kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true, settledTail: true,
+    kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true,
+    ...(input.settledTail === false ? {} : { settledTail: true }),
     ...(input.after ? { delta: { after: input.after } } : {})
   }
   const page = async (chunk?: { id: string; offset: number }): Promise<Record<string, unknown>> => {

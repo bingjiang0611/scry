@@ -195,8 +195,11 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   // The supervisor only adopted what it probed; this second connect is what loads
   // the stored grant and refuses a daemon built from other sources.
   let version: string
+  let subscribeMode = false
   try {
-    version = (await client.connect()).version
+    const connected = await client.connect()
+    version = connected.version
+    subscribeMode = connected.subscribe === 1
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {
@@ -239,6 +242,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const runtime = new DaemonRunRuntime({
     transport,
     send: deps.send,
+    ...(subscribeMode ? { subscribeMode: true } : {}),
     ...(deps.waitMs === undefined ? {} : { waitMs: deps.waitMs }),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
     ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
@@ -246,9 +250,9 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const detachRuns = deps.runTraces?.attachRuns({
     get: (runId) => { const run = runtime.runView(runId); return run ? { state: run } : undefined }
   })
-  const surface = createDaemonRunSurface({ transport, runtime, currentCwd: deps.currentCwd })
+  const surface = createDaemonRunSurface({ transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), currentCwd: deps.currentCwd })
   const events = startDaemonRunEvents({
-    transport, runtime, send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
+    transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
     ...(deps.rendererCanReceive ? { rendererCanReceive: deps.rendererCanReceive } : {}),
