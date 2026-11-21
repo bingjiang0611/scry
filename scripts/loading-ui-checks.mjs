@@ -145,6 +145,21 @@ export async function exerciseLoading(contents, win, pointerSource, screenshotPr
       { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
     ] })
   }
+  // A blank session may send as soon as its reset is acknowledged, independently of catalogs.
+  await read('window.loadingFixture.holdCatalog()')
+  try {
+    await click('.sb-new')
+    await wait('window.loadingFixture.catalogPending()')
+    await read(`(() => {
+      const composer = document.querySelector('textarea')
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(composer, 'fresh draft')
+      composer.dispatchEvent(new Event('input', { bubbles: true }))
+    })()`)
+    await wait("window.loadingFixture.catalogPending() && !document.querySelector('button.send')?.disabled && document.querySelector('textarea')?.value === 'fresh draft'")
+    check(!await read("!!document.querySelector('.chat-transcript .loading-status[data-status=loading]')"), 'blank chat showed history loading during catalog refresh')
+  } finally {
+    await read('window.loadingFixture.releaseCatalog()')
+  }
   // Other read surfaces use the same primitive; controls/evidence stay synchronous.
   const surfaces = []
   for (const [title, kind] of [['Skills','skills'],['MCP','mcp']]) {

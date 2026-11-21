@@ -146,13 +146,12 @@ it('新建会话只脱离正在运行的会话，不调用 stop', async () => {
         calls.push('newSession')
         return true
       },
-      refreshProviderCatalogs: async () => { calls.push('refreshCatalogs') },
       setActiveSessionId: (sessionId) => calls.push(`active:${String(sessionId)}`),
       setView: (view) => calls.push(`view:${view}`),
       focusComposer: () => calls.push('focus')
     })
 
-    expect(calls).toEqual(['clear:undefined', 'newSession', 'active:null', 'view:chat', 'focus', 'refreshCatalogs'])
+    expect(calls).toEqual(['clear:undefined', 'newSession', 'active:null', 'view:chat', 'focus'])
   })
 it('只采纳本视图发起那一轮新建的原生 session id', () => {
     const starts = new Map([['run-2', 'run-1']])

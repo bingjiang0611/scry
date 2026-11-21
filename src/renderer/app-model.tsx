@@ -489,7 +489,6 @@ export async function applyProviderCatalogRefresh(effects: ProviderCatalogRefres
 interface NewConversationEffects {
   clearTurns: (options?: { preserveRunning?: boolean }) => void
   newSession: () => Promise<boolean>
-  refreshProviderCatalogs?: () => Promise<void> | void
   setActiveSessionId: (sessionId: string | null) => void
   setView: (view: AppView) => void
   focusComposer: () => void
@@ -523,7 +522,6 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
   effects.setActiveSessionId(null)
   effects.setView('chat')
   effects.focusComposer()
-  await effects.refreshProviderCatalogs?.()
 }
 
 export function addRunningRunId(previous: ReadonlySet<string>, runId: string, terminal: ReadonlySet<string>): ReadonlySet<string> {
