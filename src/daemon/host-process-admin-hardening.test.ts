@@ -33,7 +33,7 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
     let daemonOn: Awaited<ReturnType<typeof startTestDaemon>> | undefined
     try {
       // Flag OFF: pair a remote device, record a notice in HostAdminStore, and verify neither desktop info nor catalogSnapshot exposes it.
-      delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
+      process.env.SCRY_EXPERIMENTAL_HOST_CLI = '0'
       daemonOff = await startTestDaemon({ root })
       const begun = await daemonOff.localOp('localPairing', 'begin', [])
       const { pairingId, secret } = begun.result as { pairingId: string; secret: string }

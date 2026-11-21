@@ -97,7 +97,7 @@ describe('daemon background service status (local op)', () => {
 
   it('gates localHostAdmin:setCliApproval behind SCRY_EXPERIMENTAL_HOST_CLI=1 and persists 0600 host-admin.json (P5-5b)', async () => {
     const saved = process.env.SCRY_EXPERIMENTAL_HOST_CLI
-    delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
+    process.env.SCRY_EXPERIMENTAL_HOST_CLI = '0'
     const offDaemon = await startTestDaemon()
     let onDaemon: Awaited<ReturnType<typeof startTestDaemon>> | undefined
     try {

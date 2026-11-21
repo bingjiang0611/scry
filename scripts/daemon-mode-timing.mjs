@@ -137,7 +137,7 @@ const results = {
   withMcp,
   prompt: PROMPT,
   orchestration: {
-    mode: process.env.SCRY_ORCHESTRATION ?? 'off',
+    mode: process.env.SCRY_ORCHESTRATION ?? 'on (default)',
     fullfsync: process.env.SCRY_ORCHESTRATION_FULLFSYNC ?? 'default'
   },
   loadBefore: load(),

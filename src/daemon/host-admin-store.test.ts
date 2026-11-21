@@ -21,10 +21,10 @@ afterEach(() => {
 })
 
 describe('W11 P5-5b: experimental switch & running marker', () => {
-  it('defaults SCRY_EXPERIMENTAL_HOST_CLI to off and enables only on "1"', () => {
-    expect(isHostCliExperimentalEnabled({})).toBe(false)
+  it('defaults SCRY_EXPERIMENTAL_HOST_CLI to on and turns it off only with "0"', () => {
+    expect(isHostCliExperimentalEnabled({})).toBe(true)
     expect(isHostCliExperimentalEnabled({ SCRY_EXPERIMENTAL_HOST_CLI: '0' })).toBe(false)
-    expect(isHostCliExperimentalEnabled({ SCRY_EXPERIMENTAL_HOST_CLI: 'true' })).toBe(false)
+    expect(isHostCliExperimentalEnabled({ SCRY_EXPERIMENTAL_HOST_CLI: ' 0 ' })).toBe(false)
     expect(isHostCliExperimentalEnabled({ SCRY_EXPERIMENTAL_HOST_CLI: '1' })).toBe(true)
   })
 

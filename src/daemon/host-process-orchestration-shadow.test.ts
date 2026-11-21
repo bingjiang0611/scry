@@ -330,7 +330,7 @@ describe('P4-1 daemon orchestration shadow integration', () => {
       orch: process.env.SCRY_ORCHESTRATION
     }
     process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
-    delete process.env.SCRY_ORCHESTRATION
+    process.env.SCRY_ORCHESTRATION = 'off'
 
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {

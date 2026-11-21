@@ -15,10 +15,16 @@ export const ORCHESTRATION_FULLFSYNC_ENV = 'SCRY_ORCHESTRATION_FULLFSYNC'
 export const ORCHESTRATION_PENDING_TTL_ENV = 'SCRY_ORCHESTRATION_PENDING_TTL_MS'
 export const MAX_PENDING_TTL_MS = DEFAULT_PENDING_TTL_MS
 
+/**
+ * Unset (or empty) means `on`: the event log is the authority by default (maintainer
+ * 2026-11-21, trial default on this branch). `off` and `shadow` stay available as
+ * explicit escape hatches; any other value is treated as `off` so a typo never
+ * silently enables a different mode.
+ */
 export function parseOrchestrationMode(env: NodeJS.ProcessEnv): OrchestrationModeResolution {
   const raw = env[ORCHESTRATION_MODE_ENV]?.trim().toLowerCase()
+  if (raw === undefined || raw === '' || raw === 'on') return { requested: 'on', effective: 'on', refused: false }
   if (raw === 'shadow') return { requested: 'shadow', effective: 'shadow', refused: false }
-  if (raw === 'on') return { requested: 'on', effective: 'on', refused: false }
   return { requested: 'off', effective: 'off', refused: false }
 }
 

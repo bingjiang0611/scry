@@ -2,7 +2,9 @@ import type { ProviderId } from './provider.js'
 
 /**
  * Providers gated behind `SCRY_EXPERIMENTAL_PROVIDERS` (comma-separated).
- * Absent from the env var means hidden from registration, CLI detection, and remote discovery.
+ * Unset means every experimental provider is enabled (maintainer 2026-11-21, trial
+ * default on this branch). When set, only the listed ones are enabled, so an empty
+ * value or `none` hides them all from registration, CLI detection and remote discovery.
  */
 export const EXPERIMENTAL_PROVIDER_IDS = ['antigravity'] as const satisfies readonly ProviderId[]
 export const EXPERIMENTAL_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(EXPERIMENTAL_PROVIDER_IDS)
@@ -20,5 +22,6 @@ export function isExperimentalProviderEnabled(
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
   if (!EXPERIMENTAL_PROVIDERS.has(providerId)) return true
+  if (env.SCRY_EXPERIMENTAL_PROVIDERS === undefined) return true
   return parseExperimentalProviders(env.SCRY_EXPERIMENTAL_PROVIDERS).has(providerId)
 }

@@ -67,7 +67,7 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
   it('does NOT listen on host-admin.sock and does NOT write approvedVia when SCRY_EXPERIMENTAL_HOST_CLI is off', async () => {
     const savedExp = process.env.SCRY_EXPERIMENTAL_HOST_CLI
     const savedRemote = process.env.SCRY_REMOTE_HOST
-    delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
+    process.env.SCRY_EXPERIMENTAL_HOST_CLI = '0'
     process.env.SCRY_REMOTE_HOST = '1'
     const daemon = await startTestDaemon({ root: makeShortRoot() })
     try {

@@ -69,11 +69,11 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     mkdirSync(userDataDir, { recursive: true })
 
     // Experimental flag OFF -> exit 4
-    const offInv = makeIo({ userDataDir, env: {} })
+    const offInv = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' } })
     expect(await runHostCli(['invite', 'phone'], offInv.io)).toBe(4)
     expect(offInv.err()).toContain('SCRY_EXPERIMENTAL_HOST_CLI')
 
-    const offApp = makeIo({ userDataDir, env: {} })
+    const offApp = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' } })
     expect(await runHostCli(['approve'], offApp.io)).toBe(4)
 
     // Daemon not running -> exit 2 and NEVER creates daemon.lock
@@ -289,13 +289,13 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     }
 
     // 1. status text mode: daemon running without admin socket -> exit 4 + clear feature-disabled hint, NOT daemon_not_running
-    const stText = makeIo({ userDataDir, env: {}, stopDeps })
+    const stText = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' }, stopDeps })
     expect(await runHostCli(['status'], stText.io)).toBe(4)
     expect(stText.err()).toContain('功能未开启')
     expect(stText.err()).not.toContain('后台服务未运行')
 
     // 2. status --json mode: honest running=true & hostCliEnabled=false
-    const stJson = makeIo({ userDataDir, env: {}, stopDeps })
+    const stJson = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' }, stopDeps })
     expect(await runHostCli(['status', '--json'], stJson.io)).toBe(4)
     expect(JSON.parse(stJson.out())).toMatchObject({
       daemon: { running: true, pid: 65432 },

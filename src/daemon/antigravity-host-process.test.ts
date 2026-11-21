@@ -62,7 +62,7 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
 
     try {
       // 1. 未开启实验开关时，daemon 不暴露 antigravity
-      delete process.env.SCRY_EXPERIMENTAL_PROVIDERS
+      process.env.SCRY_EXPERIMENTAL_PROVIDERS = ''
       const hiddenHost = await createDaemonHostProcess({
         userDataDir: join(root, 'uh'),
         daemonStateDirectory: join(root, 'dh'),

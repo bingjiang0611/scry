@@ -47,12 +47,14 @@ describe('A1: Antigravity Provider 枚举、实验门控、MCP 路径与停止�
     expect(parseDisabledProviders('antigravity').has('antigravity')).toBe(true)
   })
 
-  it('SCRY_EXPERIMENTAL_PROVIDERS 默认隐藏 antigravity，显式列出时开启', () => {
+  it('SCRY_EXPERIMENTAL_PROVIDERS 未设置时默认开启 antigravity；设置后只开启列出的', () => {
     expect(parseExperimentalProviders(undefined).size).toBe(0)
     expect(parseExperimentalProviders('claude,unknown').size).toBe(0)
     expect(parseExperimentalProviders(' antigravity ').has('antigravity')).toBe(true)
     expect(isExperimentalProviderEnabled('claude', {})).toBe(true)
-    expect(isExperimentalProviderEnabled('antigravity', {})).toBe(false)
+    expect(isExperimentalProviderEnabled('antigravity', {})).toBe(true)
+    expect(isExperimentalProviderEnabled('antigravity', { SCRY_EXPERIMENTAL_PROVIDERS: '' })).toBe(false)
+    expect(isExperimentalProviderEnabled('antigravity', { SCRY_EXPERIMENTAL_PROVIDERS: 'none' })).toBe(false)
     expect(isExperimentalProviderEnabled('antigravity', { SCRY_EXPERIMENTAL_PROVIDERS: 'antigravity' })).toBe(true)
   })
 

@@ -243,7 +243,7 @@ describe('background service channels', () => {
     const uninstall = installDaemonChannelForwarder(forwarded)
     try {
       // 1. Default OFF: status omits cliApproval, setCliApproval fails without dialog or daemon call.
-      const off = register(daemon, true, { env: {} })
+      const off = register(daemon, true, { env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' } })
       await expect(Promise.resolve().then(() =>
         off.handlers.get('remote:hostAdmin:setCliApproval')!({ ...off.event, sender: {} } as unknown as IpcMainInvokeEvent, true)
       )).rejects.toThrow('非可信 renderer')
@@ -293,7 +293,7 @@ describe('background service channels', () => {
       forwarded.mockImplementation(async (call: { op: string; method: string; args: unknown[] }) =>
         call.op === 'localBackgroundService' ? reportEnabled : { enabled: call.args[0], updatedAt: 400 }
       )
-      const mixed = register(daemon, true, { env: {} })
+      const mixed = register(daemon, true, { env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' } })
       const mixedStatus = await mixed.invoke('remote:backgroundService:status') as Record<string, unknown>
       expect(mixedStatus.cliApproval).toMatchObject({ state: 'enabled', updatedAt: 300 })
 

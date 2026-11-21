@@ -21,8 +21,8 @@ async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('P4-2 mode activation', () => {
-  it('accepts SCRY_ORCHESTRATION=on as authoritative mode while keeping default off', () => {
-    expect(parseOrchestrationMode({})).toEqual({ requested: 'off', effective: 'off', refused: false })
+  it('accepts SCRY_ORCHESTRATION=on as authoritative mode, which is also the default', () => {
+    expect(parseOrchestrationMode({})).toEqual({ requested: 'on', effective: 'on', refused: false })
     expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'shadow' })).toEqual({
       requested: 'shadow',
       effective: 'shadow',

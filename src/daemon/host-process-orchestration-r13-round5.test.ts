@@ -29,7 +29,7 @@ function withOrchEnv(mode: 'on' | 'off' | undefined) {
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) delete process.env.SCRY_ORCHESTRATION
+  if (mode === undefined) process.env.SCRY_ORCHESTRATION = 'off'
   else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   return () => {
