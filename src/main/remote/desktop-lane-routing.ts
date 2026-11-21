@@ -12,7 +12,7 @@ const writeOperations = new Set([
 ])
 const watchOperations = new Set(['watch'])
 const statusOperations = new Set(['liveRuns'])
-const eventOperations = new Set(['appEvents'])
+const eventOperations = new Set(['appEvents', 'subscribe'])
 const targetWorkOperations = new Set(['executionTargetWork'])
 // Short and idempotent: on the control lane, and replayable because it changes nothing twice.
 const idempotentControlOperations = new Set(['attentionViewed'])

@@ -50,7 +50,7 @@ export interface InnerMtlsHostOptions {
   transport?: 'local' | 'network'
   // Answers `daemonInfo` on this endpoint. The local socket serves it so the App can
   // check the daemon's version, build, and idle state before it uses a grant.
-  info?: { version: string; build?: string; activeRuns?: () => number }
+  info?: { version: string; build?: string; activeRuns?: () => number; subscribe?: 1 }
   // App-only work: run controls over the daemon's own registry and the App channels the
   // daemon answers (local ops). Supplied on the local endpoint only; on the network
   // endpoint the ops are absent, not merely refused.
@@ -164,12 +164,13 @@ export class InnerMtlsHost {
     // Version handshake: answered here because it describes this endpoint's process,
     // and it must be reachable before the App owns a run or a catalog.
     if (this.#info && parsed?.op === 'daemonInfo') {
-      const { version, build, activeRuns } = this.#info
+      const { version, build, activeRuns, subscribe } = this.#info
       const runs = activeRuns?.()
       return {
         op: 'daemonInfo', version,
         ...(build ? { build } : {}),
         ...(typeof runs === 'number' && Number.isSafeInteger(runs) && runs >= 0 ? { activeRuns: runs } : {}),
+        ...(subscribe === 1 ? { subscribe: 1 as const } : {}),
         protocol: REMOTE_PROTOCOL_VERSION
       }
     }

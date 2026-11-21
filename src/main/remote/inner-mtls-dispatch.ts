@@ -1,5 +1,5 @@
 import { handleRunControl } from './host-run-control'
-import { handleAppEvents, handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
+import { handleAppEvents, handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleSubscribe, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { historyProfileSelection } from './remote-gateway'
@@ -176,6 +176,10 @@ export async function dispatchRemoteRequest(
     if (request.op === 'appEvents') {
       // The App's own event feed (P3f); absent on the network endpoint.
       return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
+    }
+    if (request.op === 'subscribe') {
+      // P4-3 local orchestration subscribe; absent on the network endpoint and in off/shadow modes.
+      return await handleSubscribe(localEndpoint?.subscribe, request as unknown as Record<string, unknown>, fingerprint, connectionSignal)
     }
     if (request.op === 'terminalFeed') {
       // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.

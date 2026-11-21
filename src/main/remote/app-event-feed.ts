@@ -84,6 +84,7 @@ export class AppEventFeed {
   readonly #now: () => number
   #lastRead: number
   #reading = 0
+  #observer?: (event: AppEvent) => void
 
   constructor(options: { epoch?: string; maxItems?: number; maxBytes?: number; state?: () => AppEvent[]; now?: () => number } = {}) {
     this.epoch = options.epoch ?? randomUUID()
@@ -94,8 +95,15 @@ export class AppEventFeed {
     this.#maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
   }
 
+  setObserver(observer: ((event: AppEvent) => void) | undefined): void {
+    this.#observer = observer
+  }
+
   append(event: AppEvent): void {
     if (this.#closed) return
+    if (this.#observer) {
+      try { this.#observer(event) } catch { /* observer must not break event feed */ }
+    }
     const key = coalesceKey(event)
     if (key !== undefined) {
       const index = this.#entries.findIndex((entry) => entry.key === key)

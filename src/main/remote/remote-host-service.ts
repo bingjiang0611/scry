@@ -152,7 +152,7 @@ export class RemoteHostService {
    */
   createLocalHost(
     info: { version: string; build?: string },
-    options: { onPeerDisconnected?: (fingerprint: string) => void; activeRuns?: () => number } = {}
+    options: { onPeerDisconnected?: (fingerprint: string) => void; activeRuns?: () => number; subscribe?: 1 } = {}
   ): InnerMtlsHost {
     return new InnerMtlsHost({
       controller: this.#binding.controller,
@@ -160,7 +160,11 @@ export class RemoteHostService {
       serverKeyPEM: this.#serverCredentials.privateKeyPEM,
       caPEM: this.caCertificatePEM,
       transport: 'local',
-      info: options.activeRuns ? { ...info, activeRuns: options.activeRuns } : info,
+      info: {
+        ...info,
+        ...(options.activeRuns ? { activeRuns: options.activeRuns } : {}),
+        ...(options.subscribe === 1 ? { subscribe: 1 as const } : {})
+      },
       ...(this.#localEndpoint ? { localEndpoint: this.#localEndpoint } : {}),
       ...(options.onPeerDisconnected ? { onPeerDisconnected: options.onPeerDisconnected } : {})
     })

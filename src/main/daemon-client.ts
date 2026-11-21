@@ -142,17 +142,18 @@ function oneShot(path: string, options: { caPEM?: string; certPEM?: string; keyP
   })
 }
 
-export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number }
+export type DaemonProbeInfo = BuildIdentity & { activeRuns?: number; subscribe?: 1 }
 
 // What the daemon said about itself; a build field that is not a build id is dropped,
 // which the comparison then treats as "no build id" (a mismatch for an App that has one).
-function reported(version: string, build: unknown, activeRuns?: unknown): DaemonProbeInfo {
+function reported(version: string, build: unknown, activeRuns?: unknown, subscribe?: unknown): DaemonProbeInfo {
   const id = buildIdOf(build)
   const runs = typeof activeRuns === 'number' && Number.isSafeInteger(activeRuns) && activeRuns >= 0 ? activeRuns : undefined
   return {
     version,
     ...(id !== undefined ? { build: id } : {}),
-    ...(runs !== undefined ? { activeRuns: runs } : {})
+    ...(runs !== undefined ? { activeRuns: runs } : {}),
+    ...(subscribe === 1 ? { subscribe: 1 as const } : {})
   }
 }
 
@@ -179,10 +180,10 @@ export class DaemonClient {
    * Probe, enroll if needed, then confirm the version and build. Returns what the daemon
    * reported so a caller can refuse to continue with a daemon built from other sources.
    */
-  async connect(): Promise<BuildIdentity & { enrolled: boolean }> {
+  async connect(): Promise<BuildIdentity & { enrolled: boolean; subscribe?: 1 }> {
     const existing = this.#load()
     if (existing) {
-      let version: BuildIdentity | undefined
+      let version: DaemonProbeInfo | undefined
       try { version = await this.#probe(existing) } catch (error) {
         // A revoked grant is the daemon's answer, not a transient failure: drop the
         // stale credential so the next attempt reports "no grant" instead of looping
@@ -199,7 +200,12 @@ export class DaemonClient {
       this.#requireVersion(version)
       this.#grant = existing
       this.#version = version.version
-      return { version: version.version, ...(version.build ? { build: version.build } : {}), enrolled: false }
+      return {
+        version: version.version,
+        ...(version.build ? { build: version.build } : {}),
+        ...(version.subscribe === 1 ? { subscribe: 1 as const } : {}),
+        enrolled: false
+      }
     }
     const grant = await this.#enroll()
     const version = await this.#probe(grant)
@@ -208,7 +214,12 @@ export class DaemonClient {
     this.#save(grant)
     this.#grant = grant
     this.#version = version.version
-    return { version: version.version, ...(version.build ? { build: version.build } : {}), enrolled: true }
+    return {
+      version: version.version,
+      ...(version.build ? { build: version.build } : {}),
+      ...(version.subscribe === 1 ? { subscribe: 1 as const } : {}),
+      enrolled: true
+    }
   }
 
   /**
@@ -245,10 +256,10 @@ export class DaemonClient {
     } catch { return undefined }
     try {
       const line = await socket.exchange(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'daemonInfo' })}\n`, ENROLL_TIMEOUT_MS)
-      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; error?: unknown }
+      const reply = JSON.parse(line) as { op?: unknown; version?: unknown; build?: unknown; activeRuns?: unknown; subscribe?: unknown; error?: unknown }
       if (reply.error === 'device_not_authorized') throw new DaemonClientError('daemon_device_not_authorized')
       if (reply.op !== 'daemonInfo' || typeof reply.version !== 'string') return undefined
-      return reported(reply.version, reply.build, reply.activeRuns)
+      return reported(reply.version, reply.build, reply.activeRuns, reply.subscribe)
     } catch (error) {
       if (error instanceof DaemonClientError) throw error
       return undefined

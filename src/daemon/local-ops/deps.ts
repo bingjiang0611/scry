@@ -55,6 +55,8 @@ export interface DaemonLocalEndpointDeps {
   hostAdmin?: import('../host-admin-store').HostAdminStore
   // P4-2 authoritative orchestration status (Decision H): omitted unless SCRY_ORCHESTRATION=on.
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
+  // P4-3 local orchestration subscribe handler: omitted unless SCRY_ORCHESTRATION=on.
+  subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
   log?: (line: string) => void
 }
 
