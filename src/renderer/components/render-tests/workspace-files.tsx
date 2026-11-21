@@ -1,5 +1,5 @@
 import * as shared from './shared'
-const { describe, it, expect, renderToStaticMarkup, appendWorkspaceReference, pathContains, WorkspacePanel, workspaceReferenceToken, resolveWorkspaceOps } = shared
+const { describe, it, expect, renderToStaticMarkup, appendWorkspaceReference, pathContains, WorkspacePanel, workspaceReferenceToken, resolveWorkspaceOps, workspaceOpsHostLabel } = shared
 
 describe('工作区文件面板', () => {
   it('提供文件树入口、筛选与可恢复删除语义', () => {
@@ -61,5 +61,15 @@ describe('工作区能力来自宿主的 catalog', () => {
     )
     expect(html).toContain('需要在 Mac1 上打开 Scry 桌面端以启用：在系统应用中打开、移入废纸篓')
     expect(html).not.toContain('请更新')
+  })
+
+  it('只有会话操作齐全的新主机才提示打开桌面端；旧主机保留原文案', () => {
+    expect(workspaceOpsHostLabel({ sessionActions: true }, 'Mac1')).toBe('Mac1')
+    expect(workspaceOpsHostLabel({ sessionActions: false }, 'Mac1')).toBeUndefined()
+    expect(workspaceOpsHostLabel({}, 'Mac1')).toBeUndefined()
+    expect(workspaceOpsHostLabel(null, 'Mac1')).toBeUndefined()
+    const old = resolveWorkspaceOps({ openPath: false, trashItem: false }, workspaceOpsHostLabel({}, 'Mac1'))
+    expect(old.notice).toBe('此工作区不支持：在系统应用中打开、移入废纸篓')
+    expect(old.notice).not.toContain('打开 Scry 桌面端')
   })
 })

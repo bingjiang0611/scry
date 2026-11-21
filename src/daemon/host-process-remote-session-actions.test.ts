@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { connect as netConnect } from 'node:net'
 import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { once } from 'node:events'
-import { existsSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-process.fixtures'
@@ -288,6 +288,41 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
         query: { surface: 'workspace', cwd: workspace, method: 'workspaceOpenExternal', args: [{ cwd: workspace, path: 'note.txt' }] }
       })
       expect(afterDisconnect.error).toBe('desktop_workbench_operation_unavailable:openPath')
+    } finally {
+      appSock?.destroy()
+      await host.dispose()
+    }
+  }, 30_000)
+
+  it('rejects workspace escapes in the daemon before anything reaches the App bridge', async () => {
+    const { host, workspace, unauthorized, runPort, ca } = await startFixture()
+    symlinkSync(join(unauthorized, 'secret.txt'), join(workspace, 'link-out'))
+    let appSock: Awaited<ReturnType<typeof openKeepAliveSocket>> | undefined
+    try {
+      const peer = await pairRemoteDesktop(host.service)
+      const remote = (req: Record<string, unknown>) => callTcp(runPort, ca, peer.certPEM, peer.keyPEM, req)
+      const appPeer = await enrollLocal(host.service, 'Scry App')
+      appSock = await openKeepAliveSocket(host.channel.socketPath, ca, appPeer.certPEM, appPeer.keyPEM)
+      // A live poll that must stay empty: every escape below is refused by the
+      // daemon's workspace check, so no call may be queued for the App.
+      const poll = appSock.request({ op: 'executionTargetWork', waitMs: 1_500 })
+      await new Promise((r) => setTimeout(r, 80))
+      const cases: Array<[string, string, string]> = [
+        ['workspaceTrash', '../escape.txt', '工作区路径不能越过根目录'],
+        ['workspaceOpenExternal', '../escape.txt', '工作区路径不能越过根目录'],
+        ['workspaceTrash', 'link-out', '符号链接目标不能越过工作区'],
+        ['workspaceOpenExternal', 'link-out', '符号链接目标不能越过工作区']
+      ]
+      for (const [method, path, message] of cases) {
+        const reply = await remote({
+          op: 'desktopWorkbench',
+          query: { surface: 'workspace', cwd: workspace, method, args: [{ cwd: workspace, path }] }
+        })
+        expect(String(reply.error), `${method} ${path}`).toContain(message)
+      }
+      const batch = await poll
+      expect(batch.calls ?? []).toEqual([])
+      expect(existsSync(join(unauthorized, 'secret.txt'))).toBe(true)
     } finally {
       appSock?.destroy()
       await host.dispose()

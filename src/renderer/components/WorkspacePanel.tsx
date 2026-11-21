@@ -44,6 +44,19 @@ export function resolveWorkspaceOps(
   return { openPath, trashItem, notice }
 }
 
+/**
+ * The App-offline workbench copy is only accurate for hosts new enough to bridge
+ * openPath/trashItem through their App (they also publish session actions). An older
+ * daemon host reports the same missing ops for a different reason, so it keeps the
+ * generic copy instead of being told to open the desktop App.
+ */
+export function workspaceOpsHostLabel(
+  catalog: { sessionActions?: boolean } | null | undefined,
+  hostLabel: string | undefined
+): string | undefined {
+  return catalog?.sessionActions === true ? hostLabel : undefined
+}
+
 export function pathContains(parent: string, child: string): boolean {
   return child === parent || child.startsWith(`${parent}/`)
 }

@@ -164,4 +164,40 @@ describe('DaemonExecutionTargetPump', () => {
     expect(results).toContainEqual({ callId: 's2', ok: true, result: null })
     expect(results).toContainEqual({ callId: 's3', ok: false, error: 'invalid_workbench_request' })
   })
+
+  it('rejects an unknown work method without touching shell ops or the remote client', async () => {
+    const batches = [[{ callId: 'u1', method: 'shellRunCommand', input: { path: '/workspace/a.txt' } }]] as unknown as ExecutionTargetWorkCall[][]
+    const results: Array<Record<string, unknown>> = []
+    let done!: () => void
+    const finished = new Promise<void>((resolve) => { done = resolve })
+    const source: ExecutionTargetWorkSource = {
+      executionTargetWork: vi.fn(async (_input, signal) => {
+        if (batches.length > 0) return { calls: batches.shift()! }
+        return await new Promise<{ calls: ExecutionTargetWorkCall[] }>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        })
+      }),
+      executionTargetResult: vi.fn(async (input) => {
+        results.push(input as unknown as Record<string, unknown>)
+        done()
+        return { accepted: true }
+      })
+    }
+    const openPath = vi.fn(async () => undefined)
+    const trashItem = vi.fn(async () => undefined)
+    const client = {
+      executionTargets: vi.fn(), mobileRequest: vi.fn(), mobileSubmit: vi.fn(), mobileIntentStatus: vi.fn()
+    }
+    const pump = new DaemonExecutionTargetPump({
+      source, shellOps: { openPath, trashItem }, client: () => client as never, waitMs: 1_000
+    })
+    pump.start()
+    await finished
+    pump.dispose()
+
+    expect(results).toEqual([{ callId: 'u1', ok: false, error: 'invalid_target_request' }])
+    expect(openPath).not.toHaveBeenCalled()
+    expect(trashItem).not.toHaveBeenCalled()
+    for (const fn of Object.values(client)) expect(fn).not.toHaveBeenCalled()
+  })
 })
