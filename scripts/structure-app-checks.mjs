@@ -1,4 +1,5 @@
 import { exerciseSideChatApp } from './structure-side-chat-checks.mjs'
+import { verifyNativeModalExit } from './electron-security-modal-exit.mjs'
 export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   const { mkdtempSync, writeFileSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
@@ -37,41 +38,6 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); return node && [...node.getAnimations(), ...node.closest('.modal-overlay').getAnimations()].every(a => a.playState === 'finished'); })()`)
   }
-  const closeModal = async (selector, trigger) => {
-    await evaluate(`{
-      const node = document.querySelector(${JSON.stringify(selector)}).closest('.modal-overlay');
-      window.structureCloseStart = null; window.structureCloseEnd = null;
-      window.structureCloseAnimationStart = null; window.structureCloseAnimationEnd = null;
-      node.addEventListener('animationstart', event => {
-        if (event.target === node && event.animationName === 'modal-backdrop-out') window.structureCloseAnimationStart = performance.now();
-      });
-      node.addEventListener('animationend', event => {
-        if (event.target === node && event.animationName === 'modal-backdrop-out') window.structureCloseAnimationEnd = performance.now();
-      });
-      document.addEventListener('keydown', () => { window.structureCloseStart = performance.now() }, { once: true, capture: true });
-      const observer = new MutationObserver(() => { if (!node.isConnected) { window.structureCloseEnd = performance.now(); observer.disconnect() } });
-      observer.observe(document.body, { childList: true, subtree: true });
-    }`)
-    await key('Escape')
-    check(await evaluate(`document.querySelector(${JSON.stringify(selector)})?.closest('.modal-overlay').dataset.state === 'exit' && document.activeElement === document.querySelector(${JSON.stringify(trigger)})`), 'Exit did not immediately restore its trigger focus')
-    await cdp.send('Page.captureScreenshot', { format: 'png' })
-    await wait(`document.querySelector(${JSON.stringify(selector)}) == null && window.structureCloseEnd != null`)
-    const exit = await evaluate(`(() => {
-      const start = window.structureCloseStart
-      const elapsed = time => time == null || start == null ? null : time - start
-      return {
-        ms: elapsed(window.structureCloseEnd),
-        animationStartMs: elapsed(window.structureCloseAnimationStart),
-        animationEndMs: elapsed(window.structureCloseAnimationEnd)
-      }
-    })()`)
-    const clock = JSON.stringify({ selector, ...exit })
-    check(Number.isFinite(exit.ms) && exit.ms <= 250, `Modal DOM exit exceeded the Step03 limit: ${clock}`)
-    const complete = Number.isFinite(exit.animationStartMs) && Number.isFinite(exit.animationEndMs) &&
-      exit.animationStartMs >= 0 && exit.animationEndMs > exit.animationStartMs && exit.animationEndMs <= exit.ms
-    check(complete, `Modal DOM exited without a complete native animation: ${clock}`)
-    return { ...exit, nativeAnimationEnd: exit.animationEndMs !== null }
-  }
   const panes = `document.getAnimations().filter(a => a.id === 'scry-pane')`
   const page = `document.getAnimations().find(a => a.id === 'scry-structure')`
   const idle = () => wait(`!${page} && ${panes}.length === 0`)
@@ -96,7 +62,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     check(await evaluate(`!${page} && window.nativeCaptureCalls === 0`), 'Theme was not immediate live DOM')
     await settleEntrance('.settings-modal')
     await capture(`${theme}-settings`)
-    closeTimes.push({ theme, modal: 'settings', ...await closeModal('.settings-modal', '.sb-settings') })
+    closeTimes.push({ theme, modal: 'settings', ...await verifyNativeModalExit(cdp, evaluate, '.settings-modal', '.sb-settings') })
     for (const [title, selector, name] of [
       ['Skills', '.capabilities-modal--skills', 'skills'],
       ['MCP', '.capabilities-modal--mcp', 'mcp'],
@@ -108,7 +74,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
       check(await evaluate(`document.querySelector('${selector}').getAnimations().some(a => a.effect.getTiming().duration === 250)`), 'Modal entrance timing differs in the production App')
       await settleEntrance(selector)
       await capture(`${theme}-${name}`)
-      closeTimes.push({ theme, modal: name, ...await closeModal(selector, trigger) })
+      closeTimes.push({ theme, modal: name, ...await verifyNativeModalExit(cdp, evaluate, selector, trigger) })
     }
 
     if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {

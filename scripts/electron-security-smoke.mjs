@@ -153,8 +153,8 @@ async function main() {
       ...(devApp ? [devQuestionOnly ? dirname(questionEntry) : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? dirname(conversationEntry) : (structureOnly || sideChatOnly || largeHistoryOnly) ? dirname(structureEntry) : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
-      // The structure deadline observes production compositor timing.
-      ...(structureOnly ? [] : ['--disable-gpu']),
+      // Both suites measure native modal exit with the production compositor.
+      ...(structureOnly || performanceOnly ? [] : ['--disable-gpu']),
       // An occluded fixture keeps bounded UI waits immune to Chromium background throttling.
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
