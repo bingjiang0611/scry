@@ -99,6 +99,66 @@ describe('Qoder native sidecar custody and attribution', () => {
       }
     })
 
+  it.each(['null', 'absent'] as const)(
+    'accepts Qoder 1.1.93 child rows whose parent_tool_use_id is %s', async shape => {
+      const f = await fixture()
+      const base = { session_id: 'session', cwd: f.root, transcript_path: f.path }
+      await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'UserPromptSubmit', payload: {
+        ...base, request_set_id: 'R', prompt: 'inspect', timestamp: '2026-09-09T00:00:00.000Z'
+      } })
+      // 真实 1.1.93 子行把 parent_tool_use_id 写成 null（或未写）；归属由父结果 agentId、
+      // 子文件名、sessionId、cwd、agentId、isSidechain 证明，不靠这一列。
+      const childRows = f.childRows.map(row => {
+        if (shape === 'null') return { ...row, parent_tool_use_id: null }
+        const { parent_tool_use_id: _omitted, ...rest } = row
+        return rest
+      })
+      await writeFile(f.childPath, jsonl(childRows))
+      await writeFile(f.path, jsonl(f.parentRows))
+      for (const [event, timestamp, detail] of [
+        ['PreToolUse:Read', '2026-09-09T00:00:00.200Z', { tool_input: { file_path: 'seed.txt' } }],
+        ['PostToolUse:Read', '2026-09-09T00:00:00.300Z', { tool_response: 'seed' }]
+      ] as const) await handleRecorderHook({ provider: 'qoder', workspace: f.root, event, payload: {
+        ...base, parent_request_set_id: 'R', tool_name: 'Read', tool_use_id: 'read', timestamp, ...detail
+      } })
+      await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'Stop', payload: {
+        ...base, parent_request_set_id: 'R', timestamp: '2026-09-09T00:00:01.000Z'
+      } })
+
+      const records = await listRecords(join(f.root, '.scry'))
+      expect(records).toHaveLength(1)
+      const record = records[0]
+      // hook 与子文件描述同一次调用：只留一条，且带父调用 ID。
+      expect(record.tools.value?.filter(tool => tool.id === 'read')).toHaveLength(1)
+      expect(record.tools.value?.find(tool => tool.id === 'read')?.parentId).toBe('spawn')
+      expect(record.modelSegments?.value).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: 'child answer', agentId: 'child', parentId: 'spawn' })
+      ]))
+      expect(record.tools.omissionReason).toBeUndefined()
+      expect(record.tools.status).toBe('available')
+    }
+  )
+
+  it('still rejects a child row that names a different parent call', async () => {
+    const f = await fixture()
+    const base = { session_id: 'session', cwd: f.root, transcript_path: f.path }
+    await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'UserPromptSubmit', payload: {
+      ...base, request_set_id: 'R', prompt: 'inspect', timestamp: '2026-09-09T00:00:00.000Z'
+    } })
+    await writeFile(f.childPath, jsonl(f.childRows.map((row, index) => index === 2
+      ? { ...row, parent_tool_use_id: 'other-call' }
+      : { ...row, parent_tool_use_id: null })))
+    await writeFile(f.path, jsonl(f.parentRows))
+    await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'Stop', payload: {
+      ...base, parent_request_set_id: 'R', timestamp: '2026-09-09T00:00:01.000Z'
+    } })
+
+    const records = await listRecords(join(f.root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].modelSegments?.value?.some(segment => segment.agentId === 'child')).toBe(false)
+    expect(records[0].tools.status).toBe('partial')
+  })
+
   it('does not cache sidecar availability under an unchanged root transcript identity', async () => {
     const f = await fixture()
     await writeFile(f.path, jsonl(f.parentRows))
