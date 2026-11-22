@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -11,7 +12,27 @@ const archiveFile = (userData, cwd, sessionId, providerTurnId, providerId = 'cod
 
 export { archiveFile as conversationFixtureArchivePath }
 
-export function seedConversationOwnership({ userData, cwd, otherCwd }) {
+/** The daemon's orchestration mode for this run, as src/host-runtime/orchestration/mode.ts reads it. */
+export function smokeOrchestrationMode(env = process.env) {
+  const raw = env.SCRY_ORCHESTRATION?.trim().toLowerCase()
+  return raw === undefined || raw === '' || raw === 'on' ? 'on' : raw === 'shadow' ? 'shadow' : 'off'
+}
+
+/** One dispatched run in the event log, written by the production EventSink (see the seed's header). */
+async function seedDispatchedRun({ userData, runId, conversationId, cwd, executable }) {
+  const bundle = join(userData, '..', 'ownership-orchestration-seed.cjs')
+  const esbuild = await import('esbuild')
+  await esbuild.build({ entryPoints: [resolve('scripts/conversation-ownership-orchestration-seed.ts')], bundle: true,
+    platform: 'node', format: 'cjs', external: ['electron', 'better-sqlite3'], outfile: bundle, logLevel: 'silent',
+    // CommonJS so NODE_PATH finds the native SQLite binding; modules that read import.meta.url still get one.
+    define: { 'import.meta.url': '__seedModuleUrl' }, banner: { js: "const __seedModuleUrl = require('node:url').pathToFileURL(__filename).href;" } })
+  const run = spawnSync(executable, [bundle, '--user-data', userData, '--run-id', runId, '--conversation', conversationId, '--cwd', cwd], {
+    encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_PATH: resolve('node_modules') }
+  })
+  if (run.status !== 0) throw new Error(`could not seed the orchestration log: ${run.stderr || run.stdout}`)
+}
+
+export async function seedConversationOwnership({ userData, cwd, otherCwd, executable, orchestration = smokeOrchestrationMode() }) {
   const sessions = [
     { cwd, sessionId: 'owned-native', runId: 'owned-run', providerTurnId: 'owned-turn' },
     { cwd, sessionId: 'owned-archive', runId: 'owned-run', providerTurnId: 'owned-turn' },
@@ -50,7 +71,22 @@ export function seedConversationOwnership({ userData, cwd, otherCwd }) {
       origin: 'dispatch', items: [], commandId: 'orphan-command', intentHash: hash('isolated orphan input'),
       resumeSessionId: null, importedItems: [], omittedItems: [], delivery: { status: 'pending' } }]
   }))
-  return { userData, cwd, otherCwd, ownedPath, orphanPath, protectedPaths: [ownedPath, ...archivePaths.slice(0, 2)],
+  // A second orphan whose run the daemon had dispatched before it went away. Without
+  // orchestration it recovers `unknown` like the first; with orchestration on the event
+  // log proves the first never reached a Provider (`not_sent`), while this one's run may
+  // have, so it is still `unknown` and keeps the legacy resume refused.
+  const dispatchedId = randomUUID()
+  const dispatchedBinding = { id: randomUUID(), providerId: 'codex', continuationKey: 'isolated-smoke-home' }
+  const dispatchedPath = join(directory, `${dispatchedId}.json`)
+  writeFileSync(dispatchedPath, JSON.stringify({ version: 1, id: dispatchedId, cwd: otherCwd, revision: 1,
+    bindings: [dispatchedBinding], turns: [{ ordinal: 1, runId: 'dispatched-orphan-run', bindingId: dispatchedBinding.id,
+      origin: 'dispatch', items: [], commandId: 'dispatched-orphan-command', intentHash: hash('isolated dispatched orphan input'),
+      resumeSessionId: null, importedItems: [], omittedItems: [], delivery: { status: 'pending' } }]
+  }))
+  if (orchestration === 'on') {
+    await seedDispatchedRun({ userData, runId: 'dispatched-orphan-run', conversationId: dispatchedId, cwd: otherCwd, executable })
+  }
+  return { userData, cwd, otherCwd, ownedPath, orphanPath, dispatchedPath, orchestration, protectedPaths: [ownedPath, ...archivePaths.slice(0, 2)],
     callsFile: join(userData, 'smoke-provider-calls.jsonl') }
 }
 
@@ -152,19 +188,18 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   assert.equal(calls().length, 0, 'blocked operations must never enter the adapter')
 
   await open('orphan-candidate', otherCwd)
-  // The daemon recovers the orphan before any write (S3: there is no in-process App). With
-  // orchestration on (its default) a pending turn without an orchestration intent provably
-  // never reached a Provider and settles not_sent (Decision G), so the candidate session is
-  // not ambiguous and nothing is refused; otherwise it is unknown and the resume is refused.
+  // The daemon recovers both orphans before any write (S3: there is no in-process App).
+  // With orchestration on, a pending turn the event log never saw provably reached no
+  // Provider and settles not_sent (Decision G); without it, nothing proves that and it is
+  // unknown. The dispatched orphan is unknown either way, so the resume is refused.
   const recovered = json(orphanPath).turns[0].delivery
-  if (recovered.status === 'not_sent') {
-    assert.equal(recovered.reason, 'orchestration_intent_absent', 'only a missing orchestration intent proves not_sent')
-    blocked.push('orphan recovered not_sent')
-  } else {
-    await deny('orphan unknown resume', start('orphan-candidate', otherCwd), /未确认投递/)
-  }
+  if (fixture.orchestration === 'on') {
+    assert.deepEqual(recovered, { status: 'not_sent', reason: 'orchestration_intent_absent' }, 'only a missing orchestration intent proves not_sent')
+  } else assert.equal(recovered.status, 'unknown', 'without orchestration an orphan pending turn is unknown')
+  assert.equal(json(fixture.dispatchedPath).turns[0].delivery.status, 'unknown', 'a dispatched orphan may have reached its Provider')
+  assert.equal(json(fixture.dispatchedPath).revision, 2)
+  await deny('orphan unknown resume', start('orphan-candidate', otherCwd), /未确认投递/)
   const orphan = json(orphanPath)
-  assert.ok(['unknown', 'not_sent'].includes(orphan.turns[0].delivery.status), 'production startup must recover orphan pending before allowing writes')
   assert.equal(orphan.revision, 2)
   assert.equal(json(ownedPath).revision, 0, 'startup must not rewrite confirmed ownership')
 

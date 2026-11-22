@@ -116,8 +116,8 @@ async function main() {
     }]))
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
   }
-  const ownershipFixture = conversationOwnershipOnly ? seedConversationOwnership({
-    userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace)
+  const ownershipFixture = conversationOwnershipOnly ? await seedConversationOwnership({
+    userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace), executable
   }) : undefined
   const openReceipt = join(temp, 'opened-paths.json')
   // Its own app directory (smoke-app-entries.mjs): Electron reads the App version there.
