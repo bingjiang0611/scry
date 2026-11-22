@@ -44,6 +44,25 @@ export async function exerciseSessionSelection(contents, scenario) {
     if (result.activeListReads !== initialListReads + 1 || result.historyReads !== 1 || result.adoptedRuns.join(',') !== 'hidden-pi-run' || result.activeReads !== baseline || result.starts !== 0) throw new Error(`Stale sidebar selection did not restore a single authoritative read: ${JSON.stringify(result)}`)
     return { scenario, firstClickLiveContent: true, missingArchiveNotEmpty: true, authoritativeRunLookup: true, noRetryOrStart: true }
   }
+  if (scenario === 'adopt-failed') {
+    const transcript = `document.querySelector('.chat-transcript')`
+    const warning = '未能接回正在进行的任务'
+    await click('#start-hidden-pi')
+    await click('.sb-sess[data-provider="pi"]')
+    await wait(`${state}.historyReads === 1`)
+    await click('#resolve-history')
+    await wait(`${transcript}.textContent.includes('History for new-session') && document.body.innerText.includes('${warning}')`)
+    if (await read(`document.querySelector('.chat-session-evidence-gap') || document.body.innerText.includes('daemon_outcome_unknown')`)) {
+      throw new Error('The live read failure must not be presented as a history failure')
+    }
+    await click('.sb-sess[data-provider="pi"]')
+    await wait(`${state}.historyReads === 2`)
+    await click('#resolve-history')
+    await wait(`${transcript}.textContent.includes('Actual live response before archival') && !document.body.innerText.includes('${warning}')`)
+    const result = await read(state)
+    if (result.adoptedRuns.join(',') !== 'hidden-pi-run,hidden-pi-run' || result.starts !== 0) throw new Error(`Retry must only reopen the same run: ${JSON.stringify(result)}`)
+    return { scenario, savedHistoryVisible: true, liveFailureSeparate: true, retryReopened: true, noImplicitStart: true }
+  }
   if (scenario === 'new-draft') {
     const input = 'textarea[aria-label="描述任务"]'
     const newButton = '.sb-new'

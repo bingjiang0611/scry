@@ -6,6 +6,7 @@ import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess, type DaemonHostProcessOptions } from './host-process'
 import { MemoryOutputStore, call, enrollLocal, tempDir } from './host-process.fixtures'
 import { createRecentFoldersStore } from '../main/app-store'
+import type { DesktopLaneEndpoint } from '../main/remote/desktop-lane'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -20,6 +21,7 @@ export interface TestDaemon {
   /** Canonical, and already in the recent folders, as the picker would store it. */
   workspace: string
   host: Awaited<ReturnType<typeof createDaemonHostProcess>>
+  endpoint: DesktopLaneEndpoint
   /** One local-op call on the App's socket; `absent` lists argument positions left out. */
   localOp(op: string, method: string, args: unknown[], absent?: number[]): Promise<Record<string, any>>
   /** Any other request on the same socket and grant. */
@@ -73,6 +75,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
   let disposed = false
   return {
     root, userDataDir, workspace, host, request,
+    endpoint: { path: host.channel.socketPath, caPEM: host.service.caCertificatePEM, ...device },
     localOp: (op, method, args, absent) => request({ op, method, args, ...(absent ? { absent } : {}) }),
     async dispose() {
       if (disposed) return

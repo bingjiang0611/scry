@@ -253,12 +253,22 @@ export function createSessionActions({
         providerId,
         agentProfileId
       )?.runId ?? knownRunId
+      let adoptionFailed = false
       if (
         !workspaceMissing && await restoreActiveSessionSelection(
           { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
           {
             prepareRunFocus: session.prepareRunFocus,
-            adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
+            adoptActiveRun: async (targetRunId) => {
+              try {
+                return await window.scry.adoptActiveRun(targetRunId)
+              } catch (error) {
+                // An unreadable live run is not evidence that saved history is unreadable.
+                console.warn('[Scry] active run adoption failed', error)
+                adoptionFailed = true
+                return null
+              }
+            },
             loadSession: (context) => window.scry.loadSession(context),
             replaceWithParsedSession: session.replaceWithParsedSession,
             onHistoryLoaded: (page, activeRun) => {
@@ -279,7 +289,10 @@ export function createSessionActions({
       const focusRequest = window.scry.focusRun(null)
       if (!externalSessionId) {
         await focusRequest
-        if (isCurrent()) setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
+        if (isCurrent()) {
+          setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
+          if (adoptionFailed) setComposerError(LOADING_COPY.sessionAdoptFailed)
+        }
         return
       }
       const [loadedPage] = await Promise.all([
@@ -299,6 +312,7 @@ export function createSessionActions({
         page
       })
       setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
+      if (adoptionFailed) setComposerError(LOADING_COPY.sessionAdoptFailed)
     } catch (error) {
       if (isCurrent()) {
         setSessionEvidenceGap({
