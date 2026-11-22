@@ -12,6 +12,7 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [008: Verify and repair turn evidence without rewriting history](008-turn-store-verification-and-recovery.md)
 - [009: Keep CLI integration tests isolated and prove delivery](009-cli-integration-fixture-isolation.md)
 - [010: Preserve provider-specific hook delivery contracts](010-provider-hook-contracts.md)
+- [011: Keep trace evidence separate by source and lifecycle](011-shared-trace-evidence.md)
 
 ## Source comment ratchet
 

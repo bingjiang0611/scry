@@ -129,11 +129,6 @@ export interface McpLiveStatus {
   toolNames?: string[]
 }
 
-/**
- * Hook 生命周期投递 stage。Provider 只把 hook 事件投递给外部 hook 进程（Codex 终端会话就是这样），
- * 不暴露被执行脚本的 command / exit code / outcome 时，recorder 只能证明「该 hook 事件确实触发过」。
- * 这类事件不得与 `hook_started` / `hook_response`（带脚本身份的真实 hook 运行）混为一谈。
- */
 export const HOOK_DELIVERY_STAGE = 'hook_delivery'
 
 export type CompactionTrigger = 'auto' | 'manual'
@@ -173,8 +168,6 @@ export interface TraceEvent {
   mcpServer?: string
   mcpAction?: string
   mcpTool?: string
-  // 一个 shell tool_use 可能串行执行多个 mcporter call。首个调用保留在上方兼容字段，
-  // 完整列表供调用统计/MCP 明细使用；runtime tool 本身仍只有一个 lifecycle。
   mcpCalls?: McpCallRef[]
   fileOp?: FileOp
   filePath?: string
@@ -183,31 +176,28 @@ export interface TraceEvent {
   input?: unknown
   messageId?: string // SDK assistant message.id = llm_request 级（一个 run 内多条）；result 事件无
   durationMs?: number
-  durationApiMs?: number // 仅 result：SDK 权威 API 耗时
-  // 一次成功完成的主 Agent 模型请求：本机计时（请求开始→消息结束，含首 token 等待）。只用于速度观测，不是计费用量。
-  // firstTokenMs：请求开始→模型开始输出第一个内容块（含思考）；Provider 没有可对齐的首块信号时缺省。
+  durationApiMs?: number
   llmCall?: { outputTokens: number; durationMs: number; firstTokenMs?: number; model?: string }
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   costUsd?: number
   costSource?: CostSource
   costConfidence?: CostConfidence
   costUnit?: CostUnit
-  // usage_snapshot is run-cumulative live evidence: replace snapshots, never add them to result usage.
-  tokensIn?: number // result：从 modelUsage 聚合（顶层 usage 会少算，见 probe）
+  tokensIn?: number
   tokensOut?: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
   cacheCreation5mTokens?: number
   cacheCreation1hTokens?: number
   reasoningTokens?: number
-  contextTokens?: number // result / context_usage：Provider 当前上下文占用；cache 口径由 adapter 吸收
-  contextModel?: string // contextTokens 所属模型；多模型会话不得按数组顺序猜窗口
-  contextProvider?: string // contextTokens 所属 upstream provider；与 contextModel 共同绑定窗口
+  contextTokens?: number
+  contextModel?: string
+  contextProvider?: string
   contextUsageSource?: string
-  contextUsageQuality?: 'exact' | 'inferred' // 推导窗口必须显式呈现，不能冒充精确证据
-  modelUsage?: ModelUsageRow[] // result：per-model 明细；context_usage：仅模型身份与窗口，不参与累计
+  contextUsageQuality?: 'exact' | 'inferred'
+  modelUsage?: ModelUsageRow[]
   isError?: boolean
-  output?: string // 工具结果文本（tool_result），渲染时合并进对应 tool_use
+  output?: string
   danger?: DangerVerdict // P3 审计：危险工具标记（normalize 时分类，观测不阻塞）
   turnDiff?: TurnDiffSnapshot // 每轮开始/结束 Git 工作树快照的净变化；Provider 无关，旧历史可缺失
   providerId?: ProviderId
@@ -219,9 +209,7 @@ export interface TraceEvent {
   runtimeFailureStage?: RuntimeFailureStage
   terminationReason?: RunTerminationReason
   providerStopReason?: string
-  /** Pi RPC tool result explicitly ended execution; this is not proof of Goal completion. */
   toolTermination?: { tool: string; message: string }
-  /** Pi acknowledged its extension handler without an observed model turn; not an agent_settled result. */
   providerCommand?: { name: string; source: 'extension'; modelTurn: 'unobserved' }
   runtimeMetadata?: Record<string, unknown>
   backgroundWork?: BackgroundWork
@@ -231,7 +219,6 @@ export interface TraceEvent {
   compaction?: ContextCompaction
 }
 
-/** Also reads older Pi archives that retained the raw lifecycle instead of a canonical completion. */
 export function contextCompactionOf(event: TraceEvent): ContextCompaction | null {
   if (event.kind !== 'harness') return null
   if (event.stage === 'context_compaction') return event.compaction ?? {}
@@ -344,9 +331,6 @@ function matchesFor(
 }
 
 function parseMcporterCommand(command: string): ParsedMcp {
-  // Codex app-server 会把 shell 包装后的命令保存成
-  // `/bin/zsh -lc \"mcporter call ...\"`。先还原仅用于包裹命令的转义引号，
-  // 否则 `\"mcporter` 前没有空白，无法识别为 MCP 调用。
   const normalized = command.replace(/\\(["'`])/g, '$1')
   const direct = matchesFor(
     normalized,
@@ -361,9 +345,6 @@ function parseMcporterCommand(command: string): ParsedMcp {
   return parsedMcp([...direct, ...variable].sort((a, b) => a.index - b.index).map((match) => match.call))
 }
 
-// Qoder 原生 MCP 包装器：tool_use.name 固定是 `mcp_call`，真实工具在 input.toolName
-// （`mcp__<server>__<action>`），实际参数在 input.arguments。只有这一种实测形状被识别；
-// 其他包装名没有证据，仍按普通工具记录，不按名字猜测。
 const QODER_MCP_WRAPPER = 'mcp_call'
 
 function parseWrappedMcp(input?: Record<string, unknown>): ParsedMcp {
@@ -371,11 +352,6 @@ function parseWrappedMcp(input?: Record<string, unknown>): ParsedMcp {
   return typeof wrappedTool === 'string' ? parseDirectMcpTool(wrappedTool) : { isMcp: false }
 }
 
-// MCP 工具识别：
-// 1. Claude SDK 原生 MCP tool_use：mcp__<server>__<action>
-// 2. 本地 MCP bridge：Bash 里执行 mcporter call <server>.<action>
-// 3. Qoder 包装器：mcp_call + input.toolName
-// 三条路径共用同一个判定；历史回放也调用这里，不另写一套推断。
 export function parseMcp(
   toolName: string,
   input?: Record<string, unknown>
@@ -393,24 +369,17 @@ export interface ToolInvocation {
   mcp: ParsedMcp
 }
 
-// 一次工具调用的记录形态。Qoder 的 mcp_call 包装把真实工具名和参数藏在 input 里，
-// 在这里统一还原成与直接 MCP 调用相同的 tool/input，避免 hook、transcript、历史回放
-// 三处各写一份推断，也让同一次调用不会同时落进 tools 和 mcps。
 export function toolInvocation(toolName: string, input?: Record<string, unknown>): ToolInvocation {
   const mcp = parseMcp(toolName, input)
   if (toolName !== QODER_MCP_WRAPPER || !mcp.isMcp) return { tool: toolName, input, mcp }
   const args = input?.arguments
   return {
     tool: mcp.mcpTool ?? toolName,
-    // 只有实测过的对象形状才解包；解不开时保留原始载荷，不把证据丢成 undefined。
     input: args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : input,
     mcp
   }
 }
 
-// 旧会话归档只保存了首个 MCP 的兼容字段，但仍保留原始 shell command。
-// 读取时从 command 重新补齐完整调用列表，保证 Claude/Codex/Qoder/OpenCode 的
-// 实时流、历史回放和 turn recorder 使用同一套逻辑调用语义。
 export function mcpCallsForEvent(
   event: Pick<TraceEvent, 'isMcp' | 'tool' | 'input' | 'mcpCalls' | 'mcpServer' | 'mcpAction' | 'mcpTool'>
 ): McpCallRef[] {
@@ -453,8 +422,6 @@ function payloadEnvelopeFailed(value: unknown): boolean {
   })
 }
 
-// mcporter 可能在 shell exit=0 时返回业务失败 JSON。只检查完整 JSON 或逐行 JSON 的
-// 顶层状态字段，避免把任意工具输出正文里的 “error” 单词误判成失败。
 export function mcpPayloadFailed(output: unknown): boolean {
   if (payloadEnvelopeFailed(output)) return true
   if (typeof output !== 'string') return false
@@ -468,7 +435,6 @@ export function mcpPayloadFailed(output: unknown): boolean {
     try {
       if (payloadEnvelopeFailed(JSON.parse(candidate))) return true
     } catch {
-      // 非完整 JSON 行不是权威失败证据。
     }
   }
   return false
