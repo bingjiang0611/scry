@@ -239,7 +239,31 @@ const ORCH_DDL_V6: readonly string[] = [
                AND previous.seq < discovery.seq AND previous.type IN ('session.deleted', 'session.withdrawn')
            ), 0)
        )
+       AND NOT EXISTS (
+         SELECT 1 FROM orch_p_turn AS projected
+         LEFT JOIN orch_p_run AS run ON run.run_id = projected.run_id
+         WHERE projected.session_key = discovery.session_key
+           AND (projected.rev_seq < discovery.seq OR (run.intent_seq < discovery.seq AND NOT EXISTS (
+             SELECT 1 FROM orch_event AS began WHERE began.run_id = projected.run_id AND began.type = 'turn.began'
+           )))
+       )
    )`,
+  // Compaction can erase the discovery event but retains the scanner's verified frontier.
+  // Only use it for a session with no projected turns, where their order cannot be ambiguous.
+  `UPDATE orch_p_session SET legacy = 1
+   WHERE legacy = 0
+     AND NOT EXISTS (SELECT 1 FROM orch_p_turn WHERE session_key = orch_p_session.session_key)
+     AND EXISTS (
+       SELECT 1 FROM orch_meta AS frontier
+       WHERE frontier.key = 'catalog_transcript:' || orch_p_session.session_key
+         AND CASE WHEN json_valid(frontier.value) THEN
+           json_extract(frontier.value, '$.source.provider') = orch_p_session.provider
+           AND json_extract(frontier.value, '$.source.nativeSessionId') =
+             COALESCE(json_extract(orch_p_session.catalog, '$.nativeSessionId'), orch_p_session.session_key)
+           AND json_extract(frontier.value, '$.extent.size') > 0
+           AND json_extract(frontier.value, '$.reference') LIKE 'transcript:%#bytes=%,sha256=%'
+         ELSE FALSE END
+     )`,
   "UPDATE orch_meta SET value = '4' WHERE key = 'projection_schema_version'"
 ]
 

@@ -102,7 +102,7 @@ it('does not recover a deleted native transcript session whose projection used t
   }
 })
 
-it.each(['new projection', 'v5 upgrade'])('counts after recorded transcript history in a %s', async (mode) => {
+it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded transcript history in a %s', async (mode) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-scan-ordinal-')))
   const userDataDir = join(root, 'userData')
   const homeDir = join(root, 'home')
@@ -156,19 +156,33 @@ it.each(['new projection', 'v5 upgrade'])('counts after recorded transcript hist
     })
     expect(sink.getSession(freshId)?.legacy).toBe(false)
 
-    if (mode === 'v5 upgrade') {
+    if (mode === 'v5 pruned') {
+      const payload = { sessionKey, title: '保留标题' }
+      expect(sink.execute({
+        type: 'session.rename', commandId: 'rename', actor: 'system', scope: 'system', at: Date.now(),
+        payload, payloadSha256: sha256Hex(canonicalJson(payload))
+      }).kind).toBe('accepted')
+      expect(sink.pruneEvents({ olderThanAt: Date.now() + 60_000 }).deletedEvents).toBeGreaterThan(0)
+      expect(sink.listEvents()).not.toContainEqual(expect.objectContaining({ type: 'session.discovered', sessionKey }))
+      expect(sink.listEvents()).not.toContainEqual(expect.objectContaining({ type: 'turn.began', sessionKey: freshId }))
+      expect(sink.getTurn(freshId, 1)?.ordinalOrigin).toBe('native')
+    }
+    if (mode !== 'new projection') {
+      const savedRevision = sink.getSession(sessionKey)?.revSeq
       sink.handle.db.prepare('UPDATE orch_p_session SET legacy = 0 WHERE session_key = ?').run(sessionKey)
       sink.handle.db.pragma('user_version = 5')
       sink.close()
       sink = open()
+      expect(sink.getSession(sessionKey)?.revSeq).toBe(savedRevision)
     }
 
+    expect.soft(sink.getSession(freshId)?.legacy).toBe(false)
     submit('existing-run')
     bind('existing-run', nativeSessionId)
     expect(sink.getTurn(sessionKey, 1)).toMatchObject({ runId: 'existing-run', ordinalOrigin: 'since_import' })
     expect(sink.getSession(freshId)?.legacy).toBe(false)
     expect(sink.getTurn(freshId, 1)).toMatchObject({ runId: 'fresh-run', ordinalOrigin: 'native' })
-    expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+    if (mode !== 'v5 pruned') expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   } finally {
     sink.close()
     rmSync(root, { recursive: true, force: true })
