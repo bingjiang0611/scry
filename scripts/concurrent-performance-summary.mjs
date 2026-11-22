@@ -33,6 +33,18 @@ export function assertScopedDelivery(main, runId, startedAt, settledAt) {
   'Selected run needs an accepted post-commit batch receipt')
 }
 
+export function readDaemonHookTrees(probes, daemonPid, runIds) {
+  const receipts = probes.filter(probe => probe.role === 'daemon-hook-trees')
+  assert.deepEqual(receipts.map(receipt => receipt.runId).sort(), [...runIds].sort(), 'Missing or duplicate daemon Hook receipts')
+  for (const receipt of receipts) {
+    assert.equal(receipt.pid, daemonPid, 'Hook receipts must come from the verified daemon')
+    assert.equal(receipt.hookTrees.length, 42, 'Every shell Hook needs a process-tree receipt')
+  }
+  const trees = receipts.flatMap(receipt => receipt.hookTrees)
+  summarizeHookTrees(trees)
+  return trees
+}
+
 export function summarizeConcurrent(report) {
   assert.equal(report.schema, 1)
   const expectedHookStartsPerSession = report.workload?.expectedHookStartsPerSession ?? 42
@@ -40,7 +52,8 @@ export function summarizeConcurrent(report) {
   assert.equal(report.hooks.length, report.count * expectedHookStartsPerSession)
   assert.equal(report.canonicalRecords, report.count)
   const { startedAt, settledAt, main } = report
-  if (main.hookTrees) assert.equal(main.hookTrees.length, report.count * 42, 'Every shell Hook needs a process-tree receipt')
+  const hookTrees = report.daemonHookTrees ?? main.hookTrees
+  if (hookTrees) assert.equal(hookTrees.length, report.count * 42, 'Every shell Hook needs a process-tree receipt')
   const samples = main.samples.filter(sample => sample.at >= startedAt && sample.at <= settledAt)
   assert.ok(samples.length >= 2, 'Not enough overlapping resource samples')
   const before = main.samples.filter(sample => sample.at <= startedAt).at(-1)
@@ -79,7 +92,7 @@ export function summarizeConcurrent(report) {
     count: report.count, elapsedMs, resourceWindowMs, samples: samples.length, animatedTitles: report.result?.ui?.animatedTitles,
     mainCpuMs: processCpuMs('Browser'), rendererCpuMs: processCpuMs('Tab'), gpuCpuMs: processCpuMs('GPU'),
     hookCpuMs, hookCpuMsPerStart: hookCpuMs / report.hooks.length,
-    hookTree: main.hookTrees ? summarizeHookTrees(main.hookTrees) : { status: 'unavailable', reason: 'Whole Hook-tree accounting was not collected' },
+    hookTree: hookTrees ? summarizeHookTrees(hookTrees) : { status: 'unavailable', reason: 'Whole Hook-tree accounting was not collected' },
     measuredCpuMs: processCpuMs('Browser') + processCpuMs('Tab') + processCpuMs('GPU') + hookCpuMs,
     mainCpuOneCorePct: processCpuMs('Browser') / resourceWindowMs * 100,
     peakMainRssMiB: mib(Math.max(...samples.map(sample => sample.rss))),

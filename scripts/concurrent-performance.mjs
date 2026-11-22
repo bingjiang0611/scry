@@ -9,11 +9,11 @@ import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
-import { summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
+import { readDaemonHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
 import { writeConcurrentAppEntry } from './concurrent-performance-launch.mjs'
 import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
-import { daemonSupportFiles } from './session-open-bench-daemon.mjs'
+import { daemonServingEvidence, daemonSupportFiles } from './session-open-bench-daemon.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
@@ -193,6 +193,7 @@ try {
     await Promise.race([cdp.tracingDone, new Promise((_, reject) => { traceTimer = setTimeout(() => reject(new Error('Trace completion deadline')), 30000) })])
   } finally { clearTimeout(traceTimer) }
   await evaluate('new Promise(r => setTimeout(r, 3000))')
+  const daemon = daemonServingEvidence(userData)
   const closing = child
   child = null
   cleanup = await stopOwnedDaemonApp(closing, userData)
@@ -203,8 +204,7 @@ try {
   const main = probes.find(p => p.role === 'main')
   assert.ok(main, 'Missing main probe shutdown receipt')
   assertScopedDelivery(main, result.runs[0].runId, startedAt, settledAt)
-  assert.equal(main.hookTrees.length, count * 42, 'Every shell Hook needs a process-tree receipt')
-  summarizeHookTrees(main.hookTrees)
+  const daemonHookTrees = readDaemonHookTrees(probes, daemon.pid, result.runs.map(run => run.runId))
   const hooks = probes.filter(p => p.role === 'hook')
   assert.equal(hooks.length, count * expectedHookStartsPerSession, 'Missing or extra Hook CLI receipts')
   assert.ok(hooks.every(p => p.argv.includes('--managed')), 'Hooks must use managed CLI')
@@ -255,7 +255,7 @@ try {
     idleBeforeAt,startedAt,terminalAt,settledAt,finishedAt:Date.now(),workload:{toolsPerSession:20,deltasPerSession:400,hookStarts:hooks.length,expectedHookStartsPerSession,sharedRepository:false,sidebar:'activity',activation:'settled-native-pointer'},
     result,cleanup,canonicalRecords:records.length,archiveVerified:true,trace:paintTrace,
     rendererMetrics:Object.fromEntries(['TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration','LayoutCount','RecalcStyleCount'].map(k=>[k,b[k]-a[k]])),
-    main,hooks,
+    main,hooks,daemon,daemonHookTrees,
     limitations:['Isolated hidden window with GPU enabled and backgroundThrottling=false; not visible-window or visual-equivalence acceptance.',
       'CPU/memory of real Provider/MCP excluded by offline adapter.', 'fsync/git counts cover instrumented main and Hook Node processes, not workers or shell internals.',
       'activeRuns bytes are JSON size, not Electron wire bytes; observer serializes each actual response once.',

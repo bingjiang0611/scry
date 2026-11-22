@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { writeFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderAdapter, ProviderRunRequest } from '../../src/main/providers/types'
 import { HistoricalInput } from '../../src/main/providers/historical-input'
@@ -10,19 +10,23 @@ export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'c
   assert.equal(providerId, 'claude')
   assert.ok(request.cwd && request.managedRecorder && request.managedRecorderIdentity)
   const cwd = request.cwd
+  const log = process.env.SCRY_CONCURRENT_LOG
+  assert.ok(log, 'concurrent fixture requires a receipt log')
   const identity = request.managedRecorderIdentity
   const sessionId = `concurrent-${request.runId}`
   const turnId = `${request.runId}:provider-turn`
   let stopped = false
   const emit: ProviderRunRequest['emit'] = event => request.emit(event)
   const event = (id: string) => ({ id: `${request.runId}:${id}`, runId: request.runId, ts: new Date().toISOString() })
+  const hookTrees: Array<{ argv: string[]; code: number; stderr: string }> = []
   const hook = async (name: string, extra: Record<string, unknown> = {}) => {
-    const child = spawn('/bin/sh', [join(cwd, '.scry/provider-hook.sh'), providerId, name], {
+    const argv = ['/bin/sh', join(cwd, '.scry/provider-hook.sh'), providerId, name]
+    const child = spawn('/usr/bin/time', ['-p', ...argv], {
       cwd,
       env: { ...process.env, SCRY_RECORDER_MANAGED: '1', SCRY_MANAGED_RUN_ID: identity.runId,
         SCRY_MANAGED_PROMPT_HASH: identity.promptHash,
         NODE_OPTIONS: `--require=${JSON.stringify(process.env.SCRY_CONCURRENT_PROBE)}`,
-        SCRY_CONCURRENT_ROLE: 'hook' },
+        SCRY_CONCURRENT_ROLE: 'hook', LC_ALL: 'C' },
       stdio: ['pipe', 'pipe', 'pipe']
     })
     let error = ''
@@ -30,10 +34,11 @@ export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'c
     child.stdout.resume()
     child.stdin.end(JSON.stringify({ session_id: sessionId, turn_id: turnId, prompt: request.prompt,
       timestamp: new Date().toISOString(), ...extra }))
-    await new Promise<void>((resolve, reject) => {
+    const code = await new Promise<number>((resolve, reject) => {
       child.once('error', reject)
-      child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Hook ${name} exited ${code}: ${error}`)))
+      child.once('close', code => code === 0 ? resolve(code) : reject(new Error(`Hook ${name} exited ${code}: ${error}`)))
     })
+    hookTrees.push({ argv, code, stderr: error })
   }
   const promise = Promise.resolve().then(async () => {
     const startedAt = Date.now()
@@ -65,6 +70,7 @@ export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'c
       }
     }
     await hook('Stop')
+    await appendFile(log, JSON.stringify({ role: 'daemon-hook-trees', pid: process.pid, runId: request.runId, hookTrees }) + '\n')
     emit({ ...event('final'), kind: 'model', stage: 'text', messageId: `${request.runId}:final`, text: 'CONCURRENT_FIXTURE_COMPLETE' })
     emit({ ...event('result'), kind: 'harness', stage: 'result', text: 'concurrent fixture completed', durationMs: Date.now() - startedAt })
     return { externalSessionId: sessionId, providerTurnId: turnId, stopped, status: stopped ? 'interrupted' as const : 'completed' as const }
