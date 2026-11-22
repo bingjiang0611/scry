@@ -49,7 +49,7 @@ export type RunCompletionContext = {
   finishTurnWallTiming: () => TraceEvent
   finalizeTurnDiff: () => Promise<void>
   finalizeSessionDiff: () => Promise<void>
-  persistLlmPerformance: (failed: boolean, sessionId: string) => Promise<void>
+  persistLlmPerformance: (failed: boolean, sessionId: string, startedAt?: string) => Promise<void>
   observedProviderStartedAt: string | undefined
   getObservedSessionId: () => string | undefined
   getResume: () => string | undefined
@@ -110,7 +110,7 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
   const storageSessionId = nativeSessionId ?? runId
   const completionStatus = r.status ?? (r.stopped ? 'interrupted' : 'completed')
   ctx.state.terminalStatus = completionStatus
-  await persistLlmPerformance(completionStatus !== 'completed', storageSessionId)
+  await persistLlmPerformance(completionStatus !== 'completed', storageSessionId, observedTiming?.startedAt)
   terminalPerf.mark('llm_performance_settled')
   const completionNeedsAttention = completionStatus === 'completed' || completionStatus === 'failed'
   const completionArchiveArgs: ArchiveTraceTurnArgs = {
