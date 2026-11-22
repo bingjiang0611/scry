@@ -8,6 +8,8 @@ Host CLI support and permission to approve via CLI are separate. The feature def
 
 Invite secrets stay on the interactive terminal, not in JSON output. Approval requires a matching fingerprint prefix and explicit confirmation; the terminal test checks both rejection through a pipe and provenance through a real PTY. Strip terminal control characters from untrusted display labels. The CLI does not take over a stopped daemon when asked for status. A restart requires confirmation when run count is nonzero or unknown. A daemon running without its admin endpoint is still running; point the operator to its diagnostics instead of reporting it absent.
 
+App enrollment bootstraps a local grant before the App has a certificate. Only offer the one-time enrollment secret while no local grant is live. The App endpoint reuses the host controller and TLS material but uses the local transport scope; a local grant is not valid over the device network endpoint.
+
 Remote host enablement is one dependency-light rule shared by App, daemon and CLI. An unset value permits remote access in packaged builds, not in development. Report disabled rather than presenting an empty ready host.
 
 See [remote.ts](../../src/shared/remote.ts), [remote-host-policy.ts](../../src/shared/remote-host-policy.ts), [experimental-host-cli.ts](../../src/shared/experimental-host-cli.ts) and [host-admin.ts](../../src/shared/host-admin.ts).

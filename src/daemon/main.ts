@@ -6,15 +6,6 @@ import { createDaemonSignalShutdown } from './signal-shutdown'
 import { classifyDaemonStartupFailure } from './startup-failure'
 import { ensureShellEnv } from '../main/shell'
 
-// Daemon entry. It runs on the App's Electron binary with ELECTRON_RUN_AS_NODE=1,
-// so it gets the same Node, the same ABI for better-sqlite3 and the same signature;
-// the trade-off is that no Electron API may be reached from here (enforced by
-// src/daemon/daemon-imports.test.ts, not by convention).
-//
-// The App passes its own userData directory; a daemon that guesses one would write
-// to the wrong ledger, so a missing value fails loudly instead of defaulting.
-// Started by a service manager or a script, the daemon may have no SHELL; its shell probe
-// and terminals would otherwise fall back to a zsh that Linux may not have.
 ensureShellEnv()
 
 let config: ReturnType<typeof readDaemonProcessConfig>
@@ -29,9 +20,6 @@ process.on('SIGTERM', () => { shutdown.stop() })
 process.on('SIGINT', () => { shutdown.stop() })
 
 const startedBy = process.env.SCRY_DAEMON_STARTED_BY ?? 'unknown'
-// The absolute path of this entry, not a basename: the lock compares it against the
-// command line of a reused pid, and a short marker would match unrelated processes
-// (or miss this one when it is installed somewhere else).
 const daemonEntry = resolve(process.argv[1] ?? '')
 const result = await startDaemon({
   stateDirectory,
@@ -47,9 +35,6 @@ const result = await startDaemon({
     isPackaged
   })
 }).catch((error: unknown) => {
-  // A blocked host (live lease holder, unverifiable owner, missing private CLI) cannot
-  // be fixed by waiting, so it gets its own exit code and the supervisor stops. Only the
-  // machine code is written: stderr may otherwise carry paths or provider detail.
   const failure = classifyDaemonStartupFailure(error)
   process.stderr.write(`${failure.reason ?? (error instanceof Error ? error.message : 'daemon_startup_failed')}\n`)
   process.exit(failure.code)
