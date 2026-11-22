@@ -278,10 +278,8 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
       fileDownloads: { dispose: () => undefined } as never,
       interactions: new RemoteInteractionBroker(() => undefined),
       stops: new Map(),
-      live: new Map(),
       resolveAttachments: async (r) => r,
       releaseAttachments: async () => undefined,
-      notify: () => undefined
     })
     try {
       const lease = gate.acquireAuthentication(providerOperationKey('codex'))

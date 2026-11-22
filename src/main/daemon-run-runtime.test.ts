@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { AgentQuestionRequest } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { TraceBatch } from './trace-output'
 import { TraceOutputBridge } from './trace-output'
 import { DaemonRunRuntime } from './daemon-run-runtime'
 import { DaemonRunTransport } from './daemon-run-transport'
+import { announceRun, runEvent, subscribedRun } from './daemon-run-subscription.fixtures'
 
 const RUN = '7b0b4f2c-1c4d-4a3f-9a2e-2f2c1a4b5d6e'
 const CONTEXT = { cwd: '/w', providerId: 'claude' }
@@ -21,36 +23,19 @@ function run(items: TraceEvent[], done = false): ActiveRun {
  * runtime is exercised through the same parsing the App uses in production.
  */
 function fixture(frames: {
-  watch: Array<{ state: string | null; events?: unknown[] }>
   trace: Array<Record<string, unknown>>
-  questions?: unknown[][]
   answerFails?: boolean[]
-  stickyQuestions?: boolean
 }) {
   const sent: Array<{ channel: string; payload: unknown }> = []
   const traceRequests: Record<string, unknown>[] = []
   const answerRequests: Record<string, unknown>[] = []
   const stopRequests: Record<string, unknown>[] = []
-  const watchRequests: Record<string, unknown>[] = []
-  let watchCall = 0
   let traceCall = 0
-  let questionCall = 0
   const request = async (payload: Record<string, unknown>): Promise<unknown> => {
     if (payload.op === 'submit') return { runId: RUN, status: 'recorded' }
-    if (payload.op === 'watch') {
-      watchRequests.push(payload)
-      const frame = frames.watch[watchCall++] ?? { state: 'settled' }
-      return { watch: { state: frame.state, poll: { cursor: watchCall, events: frame.events ?? [] } } }
-    }
     if (payload.op === 'desktop') {
       traceRequests.push(payload)
       return { desktop: frames.trace[traceCall++] ?? { kind: 'trace', run: null } }
-    }
-    if (payload.op === 'questions') {
-      // `stickyQuestions`: the same question stays pending however often it is read,
-      // which is what a question awaiting its answer looks like over the wire.
-      if (frames.stickyQuestions) return { questions: frames.questions?.[0] ?? [] }
-      return { questions: frames.questions?.[questionCall++] ?? [] }
     }
     if (payload.op === 'stop') { stopRequests.push(payload); return { stop: { status: 'requested' } } }
     // The daemon answers with its ledger receipt; a bare `true` is not a shape it sends.
@@ -60,7 +45,6 @@ function fixture(frames: {
       if (frames.answerFails?.[answerRequests.length - 1]) throw new Error('lane_lost')
       return { answer: { status: 'answered' } }
     }
-    if (payload.op === 'liveRuns') return { liveRuns: { revision: 'v1', runs: [] } }
     return { error: 'unknown_op' }
   }
   const bridge = new TraceOutputBridge({
@@ -71,10 +55,26 @@ function fixture(frames: {
   const runtime = new DaemonRunRuntime({
     transport: new DaemonRunTransport(request),
     send: (channel, payload) => sent.push({ channel, payload }),
-    bridge,
-    waitMs: 0
+    bridge
   })
-  return { runtime, sent, traceRequests, answerRequests, stopRequests, watchRequests, frames }
+  return { runtime, sent, traceRequests, answerRequests, stopRequests }
+}
+
+async function start(runtime: DaemonRunRuntime, canonical = RUN, other?: string) {
+  const receipt = runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+  await vi.waitFor(() => expect(runtime.isTracking(RUN)).toBe(true), { interval: 1 })
+  if (other) await announceRun(runtime, 'another-run', { scryRunId: other })
+  await announceRun(runtime, RUN, { scryRunId: canonical })
+  return await receipt
+}
+
+const read = (runtime: DaemonRunRuntime) => runtime.deliverAfterRead(RUN, () => undefined)
+
+function projectQuestions(runtime: DaemonRunRuntime, questions: AgentQuestionRequest[]) {
+  return runtime.applySubscribeEvent(runEvent(
+    questions.length ? 'run.question_opened' : 'run.question_closed', RUN, {},
+    subscribedRun(RUN, { admitted: true, questions })
+  ))
 }
 
 function deliveredEvents(sent: Array<{ channel: string; payload: unknown }>): TraceEvent[] {
@@ -85,26 +85,22 @@ function deliveredEvents(sent: Array<{ channel: string; payload: unknown }>): Tr
 describe('daemon run runtime (the App view is fed by the daemon, not a local pipeline)', () => {
   it('delivers the daemon snapshot and then only the appended tail', async () => {
     const { runtime, sent } = fixture({
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_dispatched' }] }],
       trace: [
         { kind: 'trace', run: run([event('one')]), cursor: { revision: 'r1', count: 1 } },
         { kind: 'trace_delta', run: run([]), base: 'r1', revision: 'r2', count: 2, changes: [{ index: 0, item: event('one') }, { index: 1, item: event('two') }] }
       ]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime)
+    await read(runtime)
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['one', 'two'])
   })
 
   it('does not deliver the same items again when a poll adopts a run it already follows', async () => {
     const canonical = 'remote-run-mw6osn9o-3'
     const { runtime, sent } = fixture({
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_dispatched' }] }],
       trace: [{ kind: 'trace', run: { ...run([event('hi')]), runId: canonical }, cursor: { revision: 'r1', count: 1 } }]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime, canonical)
     const delivered = deliveredEvents(sent).length
     // The live-run list names the canonical id; adopting it must resolve to the run this
     // window is already following, not start a second cursor over the same items.
@@ -119,17 +115,15 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     // and then nothing until the run ended.
     const growing = (text: string): TraceEvent => ({ id: 'e-text', ts: '2024-01-01T00:00:00.000Z', runId: RUN, kind: 'model', stage: 'text_delta', messageId: 'm1', text })
     const { runtime, sent } = fixture({
-      watch: [{ state: 'dispatched' }, { state: 'dispatched' }, { state: 'dispatched' }],
       trace: [
         { kind: 'trace', run: run([growing('chunk 1\n')]), cursor: { revision: 'r1', count: 1 } },
         { kind: 'trace_delta', run: run([]), base: 'r1', revision: 'r2', count: 1, changes: [{ index: 0, item: growing('chunk 1\nchunk 2\n') }] },
         { kind: 'trace_delta', run: run([]), base: 'r2', revision: 'r3', count: 1, changes: [{ index: 0, item: growing('chunk 1\nchunk 2\nchunk 3\n') }] }
       ]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
-    await runtime.step(RUN, { waitMs: 0 })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime)
+    await read(runtime)
+    await read(runtime)
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['chunk 1\n', 'chunk 2\n', 'chunk 3\n'])
     // An append is not a resynchronisation: the renderer keeps its single message.
     expect(sent.some((entry) => entry.channel === 'agent:traceHealth')).toBe(false)
@@ -137,16 +131,14 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
 
   it('never replays a rewrite as an append', async () => {
     const { runtime, sent } = fixture({
-      watch: [{ state: 'dispatched' }, { state: 'dispatched' }],
       trace: [
         { kind: 'trace', run: run([event('one'), event('two')]), cursor: { revision: 'r1', count: 2 } },
         // Index 0 changed: the renderer's copy is stale, so this is not an append.
         { kind: 'trace_delta', run: run([]), base: 'r1', revision: 'r2', count: 2, changes: [{ index: 0, item: event('rewritten') }] }
       ]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime)
+    await read(runtime)
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['one', 'two'])
     // The gap is reported, so the view knows to re-read the authoritative snapshot.
     expect(sent.some((entry) => entry.channel === 'agent:traceHealth')).toBe(true)
@@ -154,20 +146,18 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
   })
 
   it('asks a pending question once and closes it after the answer', async () => {
-    const question = { runId: RUN, questionId: 'q1', questionKind: 'permission', questions: [] }
+    const question: AgentQuestionRequest = { runId: RUN, questionId: 'q1', providerId: 'codex', questionKind: 'permission', questions: [] }
     const { runtime, sent } = fixture({
-      watch: [{ state: 'dispatched' }, { state: 'dispatched' }, { state: 'dispatched' }],
-      trace: [{ kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } }],
-      questions: [[question], [question], []]
+      trace: [{ kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } }]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime)
+    await projectQuestions(runtime, [question])
+    await projectQuestions(runtime, [question])
     // The channel names are the ones the preload subscribes to ("userQuestion"), not
     // names invented here: a question nobody listens for is a question nobody answers.
     expect(sent.filter((entry) => entry.channel === 'agent:userQuestion')).toHaveLength(1)
     await runtime.answerQuestion({ runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} } as never)
-    await runtime.step(RUN, { waitMs: 0 })
+    await projectQuestions(runtime, [])
     expect(sent.filter((entry) => entry.channel === 'agent:userQuestionClosed')).toEqual([
       { channel: 'agent:userQuestionClosed', payload: { runId: RUN, questionId: 'q1' } }
     ])
@@ -176,10 +166,9 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
   it('answers a start with the canonical run id the trace will carry', async () => {
     const { runtime } = fixture({
       // The daemon binds the ledger run to its own canonical run on dispatch.
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: 'run-abc-7', providerId: 'claude', cwd: '/w' }) }] }],
       trace: [{ kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } }]
     })
-    await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({
+    await expect(start(runtime, 'run-abc-7')).resolves.toMatchObject({
       runId: 'run-abc-7', status: 'recorded', bound: true
     })
   })
@@ -188,10 +177,9 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     // A run the daemon starts for a device - or for the App itself - carries a
     // `remote-run-...` id, which is the same shape the device client accepts.
     const { runtime } = fixture({
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: 'remote-run-mw6osn9o-0', providerId: 'codex', cwd: '/w' }) }] }],
       trace: [{ kind: 'trace', run: { ...run([]), runId: 'remote-run-mw6osn9o-0' }, cursor: { revision: 'r1', count: 0 } }]
     })
-    await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({
+    await expect(start(runtime, 'remote-run-mw6osn9o-0')).resolves.toMatchObject({
       runId: 'remote-run-mw6osn9o-0', bound: true
     })
   })
@@ -199,10 +187,9 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
   it('finds a finished run by the canonical id the window focuses', async () => {
     const canonical = 'remote-run-mw6osn9o-0'
     const { runtime, traceRequests } = fixture({
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: canonical, providerId: 'codex', cwd: '/w' }) }] }],
       trace: [{ kind: 'trace', run: { ...run([event('done')], true), runId: canonical }, cursor: { revision: 'r1', count: 1 } }]
     })
-    await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({ runId: canonical, bound: true })
+    await expect(start(runtime, canonical)).resolves.toMatchObject({ runId: canonical, bound: true })
     // The window holds the canonical id; the map is keyed by the ledger id.
     expect(runtime.runView(canonical)).toMatchObject({ runId: canonical, done: true })
     // The trace read is addressed by that canonical id, not by the ledger id.
@@ -213,14 +200,12 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
 
   it('answers a question asked about the canonical run id on the ledger run', async () => {
     const canonical = 'remote-run-mw6osn9o-0'
-    const question = { runId: canonical, questionId: 'q1', providerId: 'codex', questions: [] }
+    const question: AgentQuestionRequest = { runId: canonical, questionId: 'q1', providerId: 'codex', questions: [] }
     const { runtime, answerRequests } = fixture({
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: canonical, providerId: 'codex', cwd: '/w' }) }] }],
-      trace: [{ kind: 'trace', run: { ...run([event('hi')]), runId: canonical }, cursor: { revision: 'r1', count: 1 } }],
-      questions: [[question]]
+      trace: [{ kind: 'trace', run: { ...run([event('hi')]), runId: canonical }, cursor: { revision: 'r1', count: 1 } }]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime, canonical)
+    await projectQuestions(runtime, [question])
     // The renderer answers with the id it was shown, which is the canonical one; the
     // daemon names pending questions by its ledger run, so the id is translated here.
     await expect(runtime.answerQuestion({ runId: canonical, questionId: 'q1', behavior: 'answered', answers: {} } as never)).resolves.toBe(true)
@@ -235,16 +220,13 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
 
   it('reuses the answer id when the same answer is retried after a lost reply', async () => {
     const { runtime, answerRequests } = fixture({
-      watch: [{ state: 'dispatched' }],
       trace: [{ kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } }],
       // The question is still pending across both reads: an answer that failed to be
       // delivered did not close it.
-      questions: [[{ runId: RUN, questionId: 'q1', providerId: 'codex', questions: [] }]],
-      stickyQuestions: true,
       answerFails: [true, false]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.step(RUN, { waitMs: 0 })
+    await start(runtime)
+    await projectQuestions(runtime, [{ runId: RUN, questionId: 'q1', providerId: 'codex', questions: [] }])
     const answer = { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} } as never
     // A lost reply is reported as unknown, never retried behind the user's back.
     await expect(runtime.answerQuestion(answer)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
@@ -259,16 +241,9 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     const { runtime } = fixture({
       // The watch is per context, not per run: a second run in the same workspace
       // replays the first run's binding before its own.
-      watch: [{
-        state: 'dispatched',
-        events: [
-          { runId: 'ledger-a', kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: 'ledger-a', scryRunId: theirs, providerId: 'codex', cwd: '/w' }) },
-          { runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: mine, providerId: 'codex', cwd: '/w' }) }
-        ]
-      }],
       trace: [{ kind: 'trace', run: null, cursor: { revision: 'r1', count: 0 } }]
     })
-    const receipt = await runtime.start({ intentId: 'i-2', detail: '{}', context: CONTEXT })
+    const receipt = await start(runtime, mine, theirs)
     // Handing back the other run's id would make the window show, answer and stop a run
     // the user did not start.
     expect(receipt.runId).toBe(mine)
@@ -279,10 +254,9 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     const { runtime, stopRequests } = fixture({
       // No trace read yet: the user stops a run that has only just been bound, so the
       // ledger id has to come from the bind, not from a run view.
-      watch: [{ state: 'dispatched', events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: canonical, providerId: 'codex', cwd: '/w' }) }] }],
       trace: [{ kind: 'trace', run: null, cursor: { revision: 'r1', count: 0 } }]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    await start(runtime, canonical)
     await runtime.stop(canonical)
     // The daemon stops runs by the id its own ledger recorded, not the trace's.
     expect(stopRequests[0]).toMatchObject({ runId: RUN })
@@ -290,40 +264,37 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
 
   it('adopts a live run this window did not start, using the bind to find its context', async () => {
     const { runtime, sent } = fixture({
-      watch: [{
-        state: 'dispatched',
-        events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: 'run-abc-9', providerId: 'codex', cwd: '/elsewhere' }) }]
-      }],
       trace: [{ kind: 'trace', run: { ...run([event('adopted')]), runId: 'run-abc-9' }, cursor: { revision: 'r1', count: 1 } }]
     })
     // No context is known up front: only the daemon's bind can address the trace.
+    await announceRun(runtime, RUN, { scryRunId: 'run-abc-9', cwd: '/elsewhere' })
     await expect(runtime.adopt(RUN)).resolves.toMatchObject({ runId: 'run-abc-9' })
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['adopted'])
     expect(runtime.isTracking(RUN)).toBe(true)
   })
 
-  it('stops polling a settled run instead of re-reading it forever', async () => {
-    const watch: Array<{ state: string | null }> = [{ state: 'dispatched' }, { state: 'settled' }]
-    const { runtime } = fixture({
-      watch,
+  it('stops reading trace on new output hints after a settled run', async () => {
+    const { runtime, traceRequests } = fixture({
       trace: [
-        { kind: 'trace', run: run([], true), cursor: { revision: 'r1', count: 0 } },
+        { kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } },
         { kind: 'trace', run: run([], true), cursor: { revision: 'r2', count: 0 } }
       ]
     })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
-    await runtime.pump(RUN)
-    // Two windows is all a settled run gets: no third read, and no invented event.
-    expect(watch.length).toBe(2)
+    await start(runtime)
+    await runtime.applySubscribeEvent(runEvent('run.settled', RUN))
+    const reads = traceRequests.length
+    expect(reads).toBe(2)
+    await announceRun(runtime, RUN, { outputSeq: 3 })
+    expect(traceRequests).toHaveLength(reads)
   })
 
   it('forwards a stop and keeps an unconfirmed stop visible', async () => {
-    const { runtime } = fixture({ watch: [{ state: 'dispatched' }], trace: [] })
-    await runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })
+    const { runtime } = fixture({ trace: [] })
+    await start(runtime)
     await expect(runtime.stop(RUN)).resolves.toBe(true)
   })
 
-  it('surfaces a revoked grant as a stopped pump, not as a finished run', async () => {
+  it('reports a revoked trace read and keeps the run outcome unknown', async () => {
     const sent: Array<{ channel: string; payload: unknown }> = []
     const onWarn = vi.fn()
     const runtime = new DaemonRunRuntime({
@@ -332,16 +303,14 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
         : { error: 'device_not_authorized' }),
       send: (channel, payload) => sent.push({ channel, payload }),
       onWarn,
-      waitMs: 0
+      bindBudgetMs: 10
     })
-    // The intent is recorded before the grant is checked, so the submit itself
-    // succeeds; what must not happen is claiming the run bound or finished.
     await expect(runtime.start({ intentId: 'i-1', detail: '{}', context: CONTEXT })).resolves.toMatchObject({
       runId: RUN, status: 'recorded', bound: false
     })
-    await expect(runtime.step(RUN, { waitMs: 0 })).rejects.toMatchObject({ reason: 'daemon_device_not_authorized' })
-    await runtime.pump(RUN)
-    expect(onWarn).toHaveBeenCalled()
+    await runtime.applyRunHint({ kind: 'run', runId: RUN, outputSeq: 1, scryRunId: RUN, admitted: true })
+    expect(onWarn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ reason: 'daemon_device_not_authorized' }))
+    expect(runtime.runView(RUN)).toBeNull()
     expect(deliveredEvents(sent)).toEqual([])
   })
 })

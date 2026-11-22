@@ -66,15 +66,14 @@ describe('daemon run trace after the run settles', () => {
       await expect.poll(() => mine().map((event) => event.id), { timeout: 2_000 }).toEqual(written)
       expect(mine().find((event) => event.kind === 'harness' && event.stage === 'result')).toMatchObject({ tokensIn: 12, tokensOut: 4 })
 
-      // Only the App's explicit `settledTail` read reaches the departed run. A read without
-      // it - every paired device's read - keeps the device contract
-      // (scripts/desktop-remote-host-smoke/runs.mjs): a settled run is released, `run: null`.
-      const read = async (extra: Record<string, unknown>) => (await daemon.request({ op: 'desktop', query: {
-        kind: 'trace', context: { cwd: daemon.workspace, providerId: 'codex' }, runId: run.runId, ...extra
-      } })).desktop
-      await expect.poll(async () => (await read({})).run, { timeout: 5_000 }).toBeNull()
-      const tail = await read({ settledTail: true })
-      expect(tail.run.items.map((event: TraceEvent) => event.id)).toEqual(written)
+      const context = { cwd: daemon.workspace, providerId: 'codex', externalSessionId: `smoke-session-${run.runId}` }
+      const query = { kind: 'trace', context, runId: run.runId }
+      await expect.poll(async () => (await daemon.request({ op: 'desktop', query })).desktop?.run, { timeout: 5_000 })
+        .toBeNull()
+      await expect(daemon.request({ op: 'desktop', query: { ...query, settledTail: true } }))
+        .resolves.toEqual({ error: 'invalid_request' })
+      const archive = await transport.archivedRunTrace({ context, runId: run.runId })
+      expect(archive?.items.map((event) => event.id)).toEqual(written)
     } finally {
       events.dispose()
       runtime.dispose()

@@ -173,6 +173,7 @@ export function recordTerminalWithSink(
   clock: () => number,
   input: {
     runId: string
+    appRunId?: string
     step: 'settled' | 'failed' | 'cancelled' | 'interrupted'
     reason?: string
     detail?: string
@@ -199,6 +200,7 @@ export function recordTerminalWithSink(
   const payload = {
     runId: input.runId,
     step: input.step,
+    ...(input.appRunId ? { catalogRunId: input.appRunId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.detail ? { detail: input.detail } : {}),
     ...(input.delivery ? { delivery: input.delivery } : {}),

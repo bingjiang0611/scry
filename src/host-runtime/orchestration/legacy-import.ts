@@ -113,6 +113,7 @@ function importSingleRun(
       pendingTtlMs: cfg.pendingTtlMs,
       origin: 'remote' as const,
       isConversationRun: routing.isConversationRun,
+      ...(run.intentDigest ? { intentDetailSha256: run.intentDigest } : {}),
       ...(cfg.shadowOnly ? { shadowOnly: true } : {}),
       ...(isHistoricalTerminal ? { historicalBackfill: true } : {}),
       ...(missingConvOrdinal ? { skipTurnProjection: true } : {})

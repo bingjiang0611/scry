@@ -7,6 +7,10 @@ import { ConversationStore } from '../main/conversation-store'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/legacy-ledger-file.fixtures'
 import { RunRegistry } from '../main/run-registry'
+import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
+import { startDaemonRunEvents } from '../main/daemon-run-events'
+import { DaemonRunRuntime } from '../main/daemon-run-runtime'
+import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
@@ -122,6 +126,76 @@ it('returns the original durable receipt after pruning and restart', async () =>
     expect(recovered.handle.db.prepare('SELECT COUNT(*) AS count FROM orch_p_run').get()).toEqual({ count: 1 })
     expect(recovered.getRun(first.runId)?.lifecycle).toBe('settled')
   } finally {
+    await daemon.dispose()
+  }
+})
+
+it('returns the same canonical App start receipt to a cold window after daemon restart', async () => {
+  let daemon = await startTestDaemon()
+  const wire = (host: typeof daemon) => {
+    const transport = new DaemonRunTransport((frame) => host.request(frame))
+    const runtime = new DaemonRunRuntime({ transport, send: () => undefined, bindBudgetMs: 500 })
+    const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => host.workspace })
+    return { transport, runtime, surface }
+  }
+  const request = { providerId: 'codex' as const, prompt: 'retain the App start receipt', commandId: randomUUID() }
+  const initial = wire(daemon)
+  const events = startDaemonRunEvents({ ...initial, send: () => undefined, waitMs: 250 })
+  let reopened: ReturnType<typeof wire> | undefined
+  try {
+    const first = await initial.surface.start(request)
+    expect(first).toMatchObject({ runId: /^remote-run-/, commandStatus: 'executed', commandSequence: expect.any(Number) })
+    await expect.poll(() => initial.runtime.runView(first.runId)?.done, { timeout: 10_000 }).toBe(true)
+    const sink = daemon.host.orchestrationAuthority!.sink
+    expect(sink.pruneEvents({ olderThanAt: Date.now() + 1 }).deletedEvents).toBeGreaterThan(0)
+    events.dispose()
+    initial.runtime.dispose()
+    await daemon.dispose()
+
+    daemon = await startTestDaemon({ root: daemon.root, device: daemon.device })
+    reopened = wire(daemon)
+    const snapshot = await reopened.transport.subscribe({ views: ['activeRuns'], waitMs: 0 })
+    expect(snapshot.mode).toBe('snapshot')
+    if (snapshot.mode === 'snapshot') await reopened.runtime.applySubscribeSnapshot(snapshot.snapshot.activeRuns?.rows ?? [])
+    await expect(reopened.surface.start(request)).resolves.toEqual({ ...first, commandStatus: 'duplicate' })
+    expect(daemon.host.orchestrationAuthority!.sink.handle.db.prepare('SELECT COUNT(*) AS count FROM orch_p_run').get())
+      .toEqual({ count: 1 })
+  } finally {
+    events.dispose()
+    initial.runtime.dispose()
+    reopened?.runtime.dispose()
+    await daemon.dispose()
+  }
+})
+
+it('still aborts a live run while SQLite commits are fenced', async () => {
+  let fail = false
+  const daemon = await startTestDaemon({ orchestrationBeforeCommitHook: () => {
+    if (fail) throw new Error('SQLITE_IOERR disposable test fence')
+  } })
+  try {
+    const request = { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({
+      cwd: daemon.workspace, providerId: 'codex', prompt: 'llm performance smoke'
+    }) }
+    const started = await daemon.request(request)
+    const sink = daemon.host.orchestrationAuthority!.sink
+    await expect.poll(async () => {
+      const reply = await daemon.request({ op: 'subscribe', views: ['activeRuns'], trackedRunIds: [started.runId], waitMs: 0 })
+      return reply.subscribe?.snapshot?.activeRuns?.rows?.[0]?.questions?.length ?? 0
+    }, { timeout: 10_000 }).toBe(1)
+
+    fail = true
+    expect((await daemon.request({ ...request, intentId: randomUUID() })).error).toBeTruthy()
+    expect(sink.isWriteIndeterminate()).toBe(true)
+    await expect(daemon.request({ op: 'stop', runId: started.runId }))
+      .resolves.toEqual({ stop: { status: 'requested' } })
+    // The Provider actually exited its blocking question even though the durable store
+    // cannot record a terminal transition. No success is synthesized in SQLite.
+    await daemon.host.service.controller.idle()
+    expect(sink.handle.db.prepare('SELECT lifecycle FROM orch_p_run WHERE run_id = ?').get(started.runId))
+      .toEqual({ lifecycle: 'dispatched' })
+  } finally {
+    fail = false
     await daemon.dispose()
   }
 })

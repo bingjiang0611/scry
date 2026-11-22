@@ -1,10 +1,9 @@
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { DesktopDirectoryResult, DesktopHostReadResult, RemoteProviderQuery } from '../../shared/desktop-remote'
-import type { RemoteIntentRouting, LiveRunRef, HostControllerDependencies } from './host-controller-types'
+import type { RemoteIntentRouting, HostControllerDependencies } from './host-controller-types'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import { DesktopAttachmentStore, type DesktopAttachmentReference } from './desktop-attachments'
 import { REMOTE_RUN_ID } from './host-controller-routing'
-import { LiveWatchers, type WatchInput, type WatchLifecycle, type WatchResult } from './host-controller-watch'
 import { PairingAuthority } from './pairing'
 import { RemoteDispatcher } from './remote-dispatcher'
 import { RemoteFileDownloads } from './remote-file-download'
@@ -14,7 +13,7 @@ import { RemoteTerminalOwnership } from './remote-terminal-ownership'
 import { RunOutputLog, type RunOutputPage } from './run-output-log'
 import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { answerOwnerRunQuestion, answerRunQuestion, stopRun, type AnswerInput, type RunControlDeps } from './host-controller-run-controls'
-import { authorizedCwd, isRemoteRun, macRun } from './host-controller-runs'
+import { isRemoteRun, macRun } from './host-controller-runs'
 import { chunkAttachment, commitAttachment, releaseIntentAttachments, resolveIntentAttachments, startAttachment, type AttachmentDeps } from './host-controller-attachments'
 import { createExecution, ledgerEventObserver, recoverDispatchedLedgerRuns } from './host-controller-execution'
 import { readDesktop, readDesktopDirectory, readDesktopWorkbench, type DesktopReadDeps } from './host-controller-desktop-reads'
@@ -28,8 +27,7 @@ import { type ToolPanelPayload } from '../../shared/tool-panel'
 
 // Device-facing API of the remote host: one method per operation the paired
 // device may call, each carrying the VERIFIED peer certificate fingerprint. The
-// wiring lives in host-controller-execution.ts, the long polls in
-// host-controller-watch.ts, the per-domain helpers beside this file. A device
+// wiring lives in host-controller-execution.ts and the per-domain helpers beside this file. A device
 // submission is a durable intent (recorded is not executed); the dispatcher
 // drives exactly-once execution through the gated executor.
 
@@ -44,15 +42,11 @@ export class HostController {
   #output: RunOutputLog
   #interactions: RemoteInteractionBroker
   #stops = new Map<string, AbortController>()
-  // Remote runs whose executor is in flight. In-memory on purpose: after a host
-  // restart no executor exists, and the ledger already reports the run as ended.
-  #live = new Map<string, { routing: RemoteIntentRouting; externalSessionId?: string }>()
   #workspace: WorkspaceAuthorizer
   #fileDownloads: RemoteFileDownloads
   #injected: HostControllerDependencies
   #attachmentStore?: DesktopAttachmentStore
   #immediateDispatch: OrchestrationImmediateDispatchChecks
-  #watchers: LiveWatchers
   #disposeExecution: () => void
 
   constructor(deps: HostControllerDependencies) {
@@ -60,7 +54,7 @@ export class HostController {
     this.#workspace = deps.workspace
     this.#fileDownloads = new RemoteFileDownloads(deps.workspace)
     this.#injected = deps
-    this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: ledgerEventObserver(deps, () => this.#watchers.notify()) })
+    this.#ledger = new SessionLedger({ store: deps.ledgerStore, onEvent: ledgerEventObserver(deps) })
     this.#attachmentStore = deps.attachmentStore ?? (deps.attachmentDirectory
       ? new DesktopAttachmentStore(deps.attachmentDirectory, (peer, id) => this.#ledger.intentRun(scopedIntentId(peer, id))?.lifecycle)
       : undefined)
@@ -70,25 +64,14 @@ export class HostController {
     })
     const wiring = createExecution({
       deps, authority: this.authority, ledger: this.#ledger, output: this.#output, fileDownloads: this.#fileDownloads,
-      interactions: this.#interactions, stops: this.#stops, live: this.#live,
+      interactions: this.#interactions, stops: this.#stops,
       resolveAttachments: (routing) => this.#resolveAttachments(routing),
-      releaseAttachments: (routing) => this.#releaseAttachments(routing),
-      notify: () => this.#watchers.notify()
+      releaseAttachments: (routing) => this.#releaseAttachments(routing)
     })
     this.#gateway = wiring.gateway
     this.#dispatcher = wiring.dispatcher
     this.#immediateDispatch = wiring.immediateDispatch
     this.#disposeExecution = wiring.dispose
-    this.#watchers = new LiveWatchers({
-      authorizeDevice: (peer) => this.authorizeDevice(peer),
-      authorizedCwd: (cwd) => authorizedCwd(this.#workspace, cwd),
-      ledger: this.#ledger, gateway: this.#gateway, interactions: this.#interactions,
-      stops: this.#stops, live: this.#live, ...(deps.macRuns ? { macRuns: deps.macRuns } : {}),
-      poll: (peer, input) => this.poll(peer, input),
-      pendingQuestions: (peer, input) => this.pendingQuestions(peer, input),
-      runOutput: (peer, input) => this.runOutput(peer, input),
-      runOutputWake: (peer, input) => this.runOutputWake(peer, input)
-    })
   }
 
   // Startup only: reconcile orphaned dispatched runs and pump undispatched intents.
@@ -294,7 +277,6 @@ export class HostController {
 
   closeReadResources(): void {
     this.#disposeExecution()
-    this.#watchers.close()
     this.#fileDownloads.dispose()
   }
 
@@ -324,11 +306,6 @@ export class HostController {
     return this.#gateway.pollOutput(peerCertSHA256, input)
   }
 
-  // Count only: the same authorization and the same spool, without its text.
-  runOutputWake(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<{ count: number; cursor: number }> {
-    return this.#gateway.countOutput(peerCertSHA256, input)
-  }
-
   // Device-facing: ask the Provider running this remote intent to stop. This is
   // a request, not a lifecycle: the ledger records `stop_requested` and the run
   // settles only when the Provider adapter reports its real result.
@@ -336,19 +313,6 @@ export class HostController {
     return stopRun(this.#deps(), peerCertSHA256, input)
   }
 
-  async watchRun(peerCertSHA256: string, input: WatchInput): Promise<WatchResult> {
-    return await this.#watchers.watchRun(peerCertSHA256, input)
-  }
-
-  // Same long poll without the shadow output spool; the device reads content
-  // through canonical trace reads, so an output-cache fault cannot stall it.
-  async watchLifecycle(peerCertSHA256: string, input: WatchInput): Promise<WatchLifecycle> {
-    return await this.#watchers.watchLifecycle(peerCertSHA256, input)
-  }
-
-  async liveRuns(peerCertSHA256: string, input: { revision?: string; waitMs: number; history?: { query: RemoteHistoryQuery; known?: string } }): Promise<{ revision: string; runs: LiveRunRef[]; historyVersion?: RemoteHistoryVersion }> {
-    return await this.#watchers.liveRuns(peerCertSHA256, input)
-  }
 
   async #resolveAttachments(routing: RemoteIntentRouting): Promise<RemoteIntentRouting> {
     return await resolveIntentAttachments(this.#attachmentStore, routing)

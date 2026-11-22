@@ -243,6 +243,7 @@ export interface TurnProjectionRow {
 
 export interface RunProjectionRow {
   runId: string
+  appRunId?: string
   sessionKey: string | null
   ownerActor: string
   scope: OrchestrationScope

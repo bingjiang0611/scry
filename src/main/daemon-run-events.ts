@@ -18,7 +18,7 @@ import type { DaemonRunTransport } from './daemon-run-transport'
 
 export interface DaemonRunEventsDeps {
   transport: Pick<DaemonRunTransport, 'subscribe' | 'attentionViewed' | 'forward'>
-  runtime: Pick<DaemonRunRuntime, 'setWakesLive' | 'deliverAfterRead'> &
+  runtime: Pick<DaemonRunRuntime, 'deliverAfterRead'> &
     Partial<Pick<DaemonRunRuntime, 'applySubscribeSnapshot' | 'applySubscribeEvent' | 'applyRunHint' | 'setOnSessionBound'>>
   send: (channel: string, payload: unknown) => void
   onLogIdChanged?: (prevLogId: string, nextLogId: string) => void
@@ -93,7 +93,6 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { watchDetail(k
     onTerminal: () => terminals.notice(),
     onOAuth: (url) => deliverDaemonOAuthUrl(url),
     ...(deps.onHostAdmin ? { onHostAdmin: deps.onHostAdmin } : {}),
-    onLive: (live) => runtime.setWakesLive(live),
     onAttention: (snapshot) => dockBadge?.setDaemon(snapshot, deps.isWindowFocused?.() ?? false),
     // W1: the pipeline's own notices, each after the run text it follows.
     onWindow: (channel, payload) => runtime.deliverAfterRead(

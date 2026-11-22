@@ -39,8 +39,6 @@ export interface RemoteStartOptions {
 export type RemoteRuns = {
   activeStates: () => ActiveRun[]
   get: (runId: string) => { state: ActiveRun } | undefined
-  // The final state of a run that just left the registry (RunRegistry.departedState).
-  departedState?: (runId: string) => ActiveRun | undefined
 }
 export type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
 
@@ -54,7 +52,7 @@ export type RemoteHostRuntime = {
   sourceControl: SourceControlService
   providerOperationGate: ProviderOperationGate
   providerRegistry: ProviderRegistry
-  runs: RemoteRuns & { subscribe?: (listener: () => void) => () => void }
+  runs: RemoteRuns
   requestRunStop: (runId: string) => boolean
   forkSessionWithAuthority?: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
   deleteOneSession?: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>

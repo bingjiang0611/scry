@@ -22,7 +22,6 @@ export interface SubscribePumpDeps {
   sleep: (ms: number) => Promise<void>
   signal: AbortSignal
   detailFocus?: () => { sessionKey: string | null; signal: AbortSignal }
-  setLive: (live: boolean) => void
   onWarn?: (message: string, detail?: unknown) => void
   onSnapshot?: (snapshot: SubscribeSnapshot, meta: { isReset: boolean; logIdChanged: boolean }) => Promise<void> | void
   onSubscribeEvent?: (event: SubscribeEventItem) => Promise<void> | void
@@ -67,10 +66,8 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
       if (focus?.signal.aborted) continue
       if (error instanceof DaemonRunError && error.reason === 'daemon_run_control_unavailable') {
         deps.onWarn?.('daemon subscribe unavailable', error)
-        deps.setLive(false)
         return
       }
-      deps.setLive(false)
       if (known !== undefined) {
         missed = true
         known = undefined
@@ -84,7 +81,6 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     subscribedFocus = focus?.signal
     let unknownEvents = false
     pause = deps.retry.initialMs
-    deps.setLive(true)
 
     const logIdChanged = lastLogId !== undefined && lastLogId !== reply.logId
     if (logIdChanged) {

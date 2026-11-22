@@ -1,31 +1,39 @@
 import { describe, expect, it } from 'vitest'
-import { noteWatchEvents, type RunCursor } from './daemon-run-cursor'
+import { DaemonRunRuntime } from './daemon-run-runtime'
+import { DaemonRunTransport } from './daemon-run-transport'
+import { announceRun } from './daemon-run-subscription.fixtures'
 
-// The bind markers a run's watch reads. A workspace start runs in the directory it
-// prepared, and the daemon re-announces the run there once it is registered; the window
-// must read the run where it runs, while other runs' markers never move this cursor.
+const RUN = 'ledger-run-1'
+const CANONICAL = 'remote-run-abc-1'
 
-const cursor = (): RunCursor => ({
-  runId: 'ledger-run-1', context: { cwd: '/source', providerId: 'claude' }, lifecycle: 'recorded',
-  watch: 0, output: 0, pushed: [], askedQuestions: new Set(), answerIds: new Map(),
-  resyncRequired: false, pumping: false, stopped: false, sawText: false
-} as unknown as RunCursor)
+function fixture() {
+  const reads: unknown[] = []
+  const runtime = new DaemonRunRuntime({
+    transport: new DaemonRunTransport(async (payload) => {
+      reads.push(payload.query)
+      return { desktop: { kind: 'trace', run: null } }
+    }),
+    send: () => undefined
+  })
+  return { runtime, reads }
+}
 
-const bound = (fields: Record<string, unknown>) => ({
-  runId: 'ledger-run-1', kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'remote-run-abc-1', providerId: 'claude', ...fields })
-})
-
-describe('daemon run cursor binds', () => {
-  it('follows the run into the workspace it was re-announced in', () => {
-    const value = cursor()
-    noteWatchEvents(value, [bound({ ledgerRunId: 'ledger-run-1', cwd: '/source' }), bound({ ledgerRunId: 'ledger-run-1', cwd: '/managed/worktree' })])
-    expect(value.scryRunId).toBe('remote-run-abc-1')
-    expect(value.context).toEqual({ cwd: '/managed/worktree', providerId: 'claude' })
+describe('a binding hint names the directory and run to read', () => {
+  it('follows the run into the workspace it was re-announced in', async () => {
+    const { runtime, reads } = fixture()
+    await announceRun(runtime, RUN, { scryRunId: CANONICAL, cwd: '/source' })
+    await announceRun(runtime, RUN, { scryRunId: CANONICAL, cwd: '/managed/worktree', outputSeq: 2 })
+    expect(reads).toEqual([
+      expect.objectContaining({ runId: CANONICAL, context: { cwd: '/source', providerId: 'codex' } }),
+      expect.objectContaining({ runId: CANONICAL, context: { cwd: '/managed/worktree', providerId: 'codex' } })
+    ])
   })
 
-  it('keeps its directory for a marker that does not name this ledger run', () => {
-    const value = cursor()
-    noteWatchEvents(value, [bound({ cwd: '/elsewhere' }), bound({ ledgerRunId: 'ledger-run-2', cwd: '/other' })])
-    expect(value.context?.cwd).toBe('/source')
+  it('keeps one run’s directory when another run binds elsewhere', async () => {
+    const { runtime, reads } = fixture()
+    await announceRun(runtime, RUN, { scryRunId: CANONICAL, cwd: '/source' })
+    await announceRun(runtime, 'ledger-run-2', { scryRunId: 'remote-run-abc-2', cwd: '/other' })
+    await runtime.deliverAfterRead(RUN, () => undefined)
+    expect(reads.at(-1)).toMatchObject({ runId: CANONICAL, context: { cwd: '/source', providerId: 'codex' } })
   })
 })

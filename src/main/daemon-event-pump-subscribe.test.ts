@@ -170,13 +170,11 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       scryRunId: 'r1',
       context: { cwd: '/tmp/ws', providerId: 'codex', externalSessionId: 'sess-1' },
       lifecycle: 'dispatched',
-      watch: 0,
       output: 1,
       pushed: [resultEvent as never],
       askedQuestions: new Set(),
       answerIds: new Map(),
       resyncRequired: false,
-      pumping: false,
       stopped: false,
       sawText: true
     }
@@ -251,8 +249,8 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
 
   it('probes cursors a snapshot no longer lists and finalizes only those that ended', async () => {
     const cursor = (runId: string): RunCursor => ({
-      runId, lifecycle: 'dispatched', watch: 0, output: 0, pushed: [], askedQuestions: new Set(),
-      answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
+      runId, lifecycle: 'dispatched', output: 0, pushed: [], askedQuestions: new Set(),
+      answerIds: new Map(), resyncRequired: false, stopped: false
     } as unknown as RunCursor)
     const runs = new Map<string, RunCursor>([
       ['gone', cursor('gone')], ['ended', cursor('ended')], ['racing', cursor('racing')], ['listed', cursor('listed')]

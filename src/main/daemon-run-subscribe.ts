@@ -41,13 +41,11 @@ function makeCursor(runId: string, init: {
     ...(init.scryRunId ? { scryRunId: init.scryRunId } : {}),
     ...(init.admitted ? { admitted: true } : {}),
     ...(init.userText !== undefined ? { userText: init.userText } : {}),
-    watch: 0,
     output: 0,
     pushed: [],
     askedQuestions: new Set(),
     answerIds: new Map(),
     resyncRequired: false,
-    pumping: false,
     stopped: false,
     sawText: false
   }
@@ -112,7 +110,7 @@ async function finalizeTerminalCursor(
   }
   cursor.settledNotified = true
 
-  // Read any remaining trace items (from live registry or archive fallback, zero settledTail)
+  // Read any remaining trace items (from live registry or archive fallback)
   // BEFORE marking `done` / emitting `agent:turnDone`, matching legacy in-process ordering.
   if (cursor.context && admitted) {
     await ctx.scheduleTraceRead(cursor.runId, { terminal: true })
@@ -325,7 +323,7 @@ export async function applySubscribeEventToRuntime(
 export function applyRunHintToRuntime(
   ctx: SubscribeRuntimeContext,
   hint: Extract<SubscribeHint, { kind: 'run' }>
-): void {
+): Promise<void> | undefined {
   let cursor = ctx.cursorFor(hint.runId) ?? (hint.scryRunId ? ctx.cursorFor(hint.scryRunId) : undefined)
   if (!cursor) {
     cursor = makeCursor(hint.runId, {
@@ -356,11 +354,11 @@ export function applyRunHintToRuntime(
     (hint.outputSeq > cursor.output || cursor.latest === undefined)
   if (shouldReadTrace) {
     cursor.output = Math.max(cursor.output, hint.outputSeq)
-    void ctx.scheduleTraceRead(cursor.runId)
+    return ctx.scheduleTraceRead(cursor.runId)
   }
 }
 
-/** Event-driven admission wait for `subscribeMode`: zero `watch` polls, wakes on hint or terminal event. */
+/** Waits for an admission or terminal event from the subscription. */
 export async function awaitSubscribeAdmission(input: {
   runId: string
   cursor: () => RunCursor | undefined
@@ -388,7 +386,7 @@ export async function awaitSubscribeAdmission(input: {
   }
 }
 
-/** Reads a run's live trace without `settledTail`, falling back to the trace archive once terminal. */
+/** Reads a run's live trace and falls back to the trace archive once terminal. */
 export async function readSubscribeTraceOnce(input: {
   cursor: RunCursor | undefined
   runId: string
@@ -404,7 +402,7 @@ export async function readSubscribeTraceOnce(input: {
   const targetId = cursor.scryRunId ?? runId
   try {
     let read = await input.transport.trace({
-      context: cursor.context, runId: targetId, settledTail: false,
+      context: cursor.context, runId: targetId,
       ...(cursor.after ? { after: cursor.after } : {})
     })
     if (read.run) cursor.scopedDelivery = cursor.scopedDelivery === true || Boolean(read.run.conversationId)

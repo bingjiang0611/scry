@@ -128,18 +128,12 @@ describe('desktop authenticated evidence source', () => {
     }
   })
 
-  it('answers a run that just left the registry only to an explicit settledTail trace read', async () => {
+  it('keeps departed runs out of the live trace and live attachment read', async () => {
     const f = fixture()
     const runId = 'run-departed'
-    f.setDeparted({ runId, cwd: f.context.cwd, providerId: 'codex', externalSessionId: f.context.externalSessionId, userText: 'task', done: true,
-      items: [{ id: 'final', runId, ts: '2026-11-16T00:00:00Z', kind: 'model', stage: 'text', text: 'final' }] })
     // A device's read (no flag) keeps the contract: a settled run is released to the archive.
     expect(await f.read(parseDesktopHostRead({ kind: 'trace', context: f.context, runId }))).toEqual({ kind: 'trace', run: null })
-    expect(await f.read(parseDesktopHostRead({ kind: 'trace', context: f.context, runId, settledTail: true })))
-      .toMatchObject({ kind: 'trace', run: { runId, done: true, items: [{ id: 'final' }] } })
-    // Image reads never use the departed window: the run's attachments come from the live run or its archive turn.
     await expect(f.read(parseDesktopHostRead({ kind: 'image', context: f.context, runId, index: 0 }))).rejects.toThrow()
-    expect(f.runReads).toEqual([{ departed: false }, { departed: true }, undefined])
   })
 
   it('does not invent an empty available history and rejects workspace/profile mismatches', async () => {
@@ -246,10 +240,9 @@ describe('desktop authenticated evidence source', () => {
     }
     const image = { kind: 'image', context, runId: 'run-image', providerTurnId: 'native-turn', index: 0 }
     expect(parseDesktopHostRead(image)).toEqual(image)
-    // settledTail is the App's opt-in, only on a trace read, only literally true.
+    // Reject the retired field on every read kind.
     const tail = { kind: 'trace', context, runId: 'run-live', settledTail: true }
-    expect(parseDesktopHostRead(tail)).toEqual(tail)
-    for (const query of [...['true', 1, null, false, {}].map(settledTail => ({ ...tail, settledTail })),
+    for (const query of [...[true, 'true', 1, null, false, {}].map(settledTail => ({ ...tail, settledTail })),
       { ...image, settledTail: true }, { ...chunked, settledTail: true }]) {
       expect(() => parseDesktopHostRead(query)).toThrow('invalid_request')
     }

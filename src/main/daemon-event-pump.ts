@@ -17,8 +17,6 @@ export interface DaemonEventPumpDeps {
   onLogIdChanged?: (prevLogId: string, nextLogId: string) => void
   // Notices may have been lost; every run re-reads.
   onResync?: () => void
-  // Whether runs can rely on wakes, or must long-poll on their own.
-  onLive?: (live: boolean) => void
   // E1b: the daemon's whole unread set.
   onAttention?: (snapshot: SessionAttentionSnapshot) => void
   // Terminal output is waiting (P3-terminal.md); read it by cursor.
@@ -66,19 +64,10 @@ export class DaemonEventPump {
         waitMs: this.#deps.waitMs ?? DEFAULT_WAIT_MS,
         retry,
         sleep,
-        signal: this.#abort.signal,
-        setLive: (live) => this.#setLive(live)
+        signal: this.#abort.signal
       })
     } finally {
       this.#running = false
-      this.#setLive(false)
     }
-  }
-
-  #live = false
-  #setLive(live: boolean): void {
-    if (this.#live === live) return
-    this.#live = live
-    this.#deps.onLive?.(live)
   }
 }

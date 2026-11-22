@@ -27,7 +27,7 @@ function wire(focusedRunId: string | null, windowFocused: boolean) {
   })
   vi.spyOn(transport, 'attentionViewed')
   const send = vi.fn()
-  const runtime = new DaemonRunRuntime({ transport, send, subscribeMode: true })
+  const runtime = new DaemonRunRuntime({ transport, send })
   const badge = new DockBadgeState(vi.fn())
   badge.setDaemon({ revision: 1, unreadSessionKeys: [] }, false)
   const run = { runId: 'turn-1', providerId: 'codex', cwd: '/w', userText: '', items: [], done: false } as unknown as ActiveRun

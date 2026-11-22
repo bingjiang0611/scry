@@ -22,6 +22,7 @@ function daemon() {
   const statusOpens: number[] = []
   let notify = () => {}
   let submits = 0
+  let isLive = false
   const ids = { hostId: 'fixture-host', logId: 'fixture-log' }
 
   const publish = (update: typeof updates[number]) => { updates.push(update); notify() }
@@ -37,6 +38,7 @@ function daemon() {
       statusOpens.push(Date.now())
       return { ...ids, seq: updates.length, mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } }
     }
+    isLive = true
     if (known.seq === updates.length && !signal?.aborted) {
       await new Promise<void>((resolve) => {
         const done = () => {
@@ -99,19 +101,14 @@ function daemon() {
     send: (channel, payload) => {
       if (channel === 'agent:turnDone') delivered.push(`notice:${channel}:${(payload as { runId: string }).runId}`)
     },
-    subscribeMode: true,
     bridge: new TraceOutputBridge({
       canSend: () => true,
       send: (batch: TraceBatch) => { for (const event of batch.events ?? []) if (event.text) delivered.push(`${event.runId}:${event.text}`) },
       schedule: (fn) => { fn(); return () => {} }
     }),
-    waitMs: 15_000,
     bindBudgetMs: 300
   })
   // The App's event wiring, exactly as daemon mode starts it (daemon-run-mode.ts).
-  let isLive = false
-  const setWakesLive = runtime.setWakesLive.bind(runtime)
-  runtime.setWakesLive = (value: boolean) => { isLive = value; setWakesLive(value) }
   const start = () => startDaemonRunEvents({ transport, waitMs: 5_000, send: () => {}, runtime })
   return {
     runtime, delivered, start, isLive: () => isLive, statusOpens, subscription, settle,

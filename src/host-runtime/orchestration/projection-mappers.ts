@@ -68,6 +68,7 @@ export function mapTurnRow(row: Record<string, unknown>): TurnProjectionRow {
 export function mapRunRow(row: Record<string, unknown>): RunProjectionRow {
   return {
     runId: String(row.run_id),
+    ...(typeof row.app_run_id === 'string' ? { appRunId: row.app_run_id } : {}),
     sessionKey: (row.session_key as string | null) ?? null,
     ownerActor: String(row.owner_actor),
     scope: String(row.scope) as OrchestrationScope,

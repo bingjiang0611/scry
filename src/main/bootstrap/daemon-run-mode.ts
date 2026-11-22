@@ -243,8 +243,6 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const runtime = new DaemonRunRuntime({
     transport,
     send: deps.send,
-    subscribeMode: true,
-    ...(deps.waitMs === undefined ? {} : { waitMs: deps.waitMs }),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
     ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
   })

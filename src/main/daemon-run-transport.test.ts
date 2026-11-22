@@ -42,18 +42,6 @@ describe('daemon run transport', () => {
     await expect(value.intentState('intent-1')).rejects.toMatchObject({ reason: 'daemon_run_unknown' })
   })
 
-  it('returns the lifecycle state and cursor from one watch window', async () => {
-    const { value, calls } = transport(() => ({
-      watch: { state: 'dispatched', poll: { cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }] } }
-    }))
-    await expect(value.watch({ runId: RUN, cursor: 10, outputCursor: 0, waitMs: 15_000, output: false })).resolves.toEqual({
-      state: 'dispatched', cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }],
-      // A daemon that answers without an output page has produced nothing yet.
-      output: { count: 0, cursor: 0 }
-    })
-    expect(calls[0]!.request).toEqual({ op: 'watch', runId: RUN, cursor: 10, outputCursor: 0, waitMs: 15_000, output: false })
-  })
-
   it('reads a canonical run snapshot with a delta cursor', async () => {
     const run = { runId: RUN, items: [], done: false }
     const { value, calls } = transport(() => ({ desktop: { kind: 'trace', run, cursor: { revision: 'r1', count: 3 } } }))
@@ -87,25 +75,6 @@ describe('daemon run transport', () => {
       runId: RUN, answerId: 'q1',
       response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
     })).rejects.toMatchObject({ reason: 'daemon_answer_not_delivered' })
-  })
-
-  it('declares its live-run read replayable so a dead daemon can be retried', async () => {
-    const { value, calls } = transport(() => ({ liveRuns: { revision: 'r1', runs: [] } }))
-    await value.liveRuns({ waitMs: 0 })
-    // A read changes nothing; only a write may never be replayed.
-    expect(calls[0]!.options).toEqual({ replayable: true })
-  })
-
-  it('never reports an empty paged read as complete content', async () => {
-    const { value } = transport(() => ({ output: { chunks: [], cursor: 4 } }))
-    await expect(value.output({ runId: RUN, cursor: 0 })).resolves.toEqual({ chunks: [], cursor: 4 })
-    const broken = transport(() => ({ output: { cursor: 4 } })).value
-    await expect(broken.output({ runId: RUN, cursor: 0 })).rejects.toBeInstanceOf(DaemonRunError)
-  })
-
-  it('passes the live set through with its revision', async () => {
-    const { value } = transport(() => ({ liveRuns: { revision: 'v7', runs: [{ runId: RUN, state: 'running', scryRunId: 'run-abc-1' }] } }))
-    await expect(value.liveRuns({ waitMs: 15_000 })).resolves.toEqual({ revision: 'v7', runs: [{ runId: RUN, state: 'running', scryRunId: 'run-abc-1' }] })
   })
 
   it('turns a provably unsent transport throw into a named failure', async () => {

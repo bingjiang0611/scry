@@ -312,7 +312,7 @@ export class SubscribeEngine {
       const tracked = access.scope === 'local' ? request.trackedRunIds : undefined
       const rows = readSubscribedRuns(this.#sink, this.#clock(), tracked)
         .filter(run => access.canReadCwd(run.cwd))
-        .map(run => this.#projectRun(run, access))
+        .map(run => this.#projectRun(run, access, Boolean(tracked)))
       snapshot.activeRuns = { rows }
     }
     if (views.has('detail') && request.session && !(access.scope === 'local' && request.detailWatch)) {
@@ -329,10 +329,13 @@ export class SubscribeEngine {
     }
   }
 
-  #projectRun(run: RunProjectionRow, access: SubscribeAccess): SubscribeActiveRunRow {
+  #projectRun(run: RunProjectionRow, access: SubscribeAccess, tracked = false): SubscribeActiveRunRow {
     const liveMeta = this.#hub.liveRunMeta(run.runId)
     const localMeta = access.scope === 'local' ? liveMeta : undefined
-    const session = access.scope === 'remote' && run.sessionKey ? this.#sink.getSession(run.sessionKey) : undefined
+    const recoveredAppRunId = tracked && access.scope === 'local' ? run.appRunId : undefined
+    const appRunId = localMeta?.scryRunId ?? recoveredAppRunId
+    const session = run.sessionKey && (access.scope === 'remote' || (recoveredAppRunId && !liveMeta?.externalSessionId))
+      ? this.#sink.getSession(run.sessionKey) : undefined
     const externalSessionId = liveMeta?.externalSessionId ??
       (session && access.canReadCwd(session.cwd) ? session.catalog?.nativeSessionId : undefined)
     const questions = liveMeta?.scryRunId ? this.#runQuestions?.(liveMeta.scryRunId)?.filter(request =>
@@ -344,11 +347,11 @@ export class SubscribeEngine {
         : run.promptPreview
     return {
       runId: run.runId,
-      ...(localMeta?.scryRunId ? { scryRunId: localMeta.scryRunId } : {}),
+      ...(appRunId ? { scryRunId: appRunId } : {}),
       ...(access.scope === 'remote' && liveMeta?.scryRunId ? { traceRunId: liveMeta.scryRunId } : {}),
       ...(questions?.length ? { questions } : {}),
       ...(conversation ? { isConversationRun: true } : {}),
-      ...(localMeta?.admitted ? { admitted: true } : {}),
+      ...(localMeta?.admitted || recoveredAppRunId ? { admitted: true } : {}),
       ...(externalSessionId ? { externalSessionId } : {}),
       sessionKey: run.sessionKey,
       scope: run.scope,

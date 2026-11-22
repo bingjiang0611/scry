@@ -49,7 +49,6 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
 
     const runtime = new DaemonRunRuntime({
       transport,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:trace') deliveredTraces.push(...(payload as TraceBatch).events)
         else if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
@@ -151,7 +150,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       ops.push(String(request.op ?? ''))
       return await daemon.request(request)
     })
-    const runtime = new DaemonRunRuntime({ transport, subscribeMode: true, send: () => undefined })
+    const runtime = new DaemonRunRuntime({ transport, send: () => undefined })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     try {
@@ -182,7 +181,6 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const transport = new DaemonRunTransport(async (request) => await daemon.request(request))
     const runtime = new DaemonRunRuntime({
       transport,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
       }
@@ -335,7 +333,6 @@ main().catch((err) => { console.error(err); process.exit(1) })
       const turnDone: string[] = []
       runtime = new DaemonRunRuntime({
         transport,
-        subscribeMode: true,
         send: (channel, payload) => {
           if (channel === 'agent:turnDone') turnDone.push(String((payload as { runId?: string }).runId ?? ''))
         }

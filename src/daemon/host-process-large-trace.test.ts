@@ -38,8 +38,7 @@ describe('daemon trace past the single-response limit', () => {
     const delivered: TraceEvent[] = []
     const warnings: unknown[] = []
     const runtime = new DaemonRunRuntime({
-      subscribeMode: true,
-      transport, waitMs: 500, onWarn: (_message, error) => { warnings.push(error) },
+      transport,  onWarn: (_message, error) => { warnings.push(error) },
       send: (channel, payload) => { if (channel === 'agent:trace') delivered.push(...(payload as TraceBatch).events) }
     })
     const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })

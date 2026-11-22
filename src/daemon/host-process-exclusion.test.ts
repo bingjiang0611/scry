@@ -45,7 +45,7 @@ describe('daemon same-session exclusion', () => {
     process.env.SCRY_ELECTRON_SMOKE_INPUTS = inputs
     const daemon = await startTestDaemon()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
-    const runtime = new DaemonRunRuntime({ transport, subscribeMode: true, send: () => undefined, waitMs: 500 })
+    const runtime = new DaemonRunRuntime({ transport, send: () => undefined })
     const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     const start = (prompt: string, extra: Record<string, unknown> = {}) => surface.start({

@@ -85,7 +85,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
     process.env.SCRY_ORCHESTRATION = 'on'
     let daemon = await startTestDaemon()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
-    const runtime = new DaemonRunRuntime({ transport, waitMs: 500, subscribeMode: true, send: () => undefined })
+    const runtime = new DaemonRunRuntime({ transport, send: () => undefined })
     const events = startDaemonRunEvents({ transport, runtime, waitMs: 500, send: () => undefined })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     try {

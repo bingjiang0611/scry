@@ -210,11 +210,11 @@ function buildAuthorityRuntime<
   )
   const canonicalForAlias = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
   const ledgerIdForSubmit = (runId: string, duplicate: boolean): string => {
-    if (UUID_V4_RE.test(runId)) return runId
     if (duplicate) {
       const alias = aliasForCanonical.get(runId) as { ledger_run_id: string } | undefined
       return alias?.ledger_run_id ?? runId
     }
+    if (UUID_V4_RE.test(runId)) return runId
     const ledgerRunId = randomUUID()
     trackCanonical(ledgerRunId, runId)
     return ledgerRunId
@@ -370,7 +370,7 @@ function buildAuthorityRuntime<
       engine.stopRun({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
-        runId: resolvePersistedCanonical(input.runId),
+        runId: resolveCanonical(input.runId),
         registry: options.runs,
         stopControl: (control) => {
           options.requestRunStop(control.runId)
@@ -380,9 +380,11 @@ function buildAuthorityRuntime<
 
     onRunTerminal: (runId, step, detail) => {
       const canonicalRunId = resolveCanonical(runId)
+      const binding = subscribeHub.liveRunMeta(canonicalRunId)
       engine.recordTerminal({
         runId: canonicalRunId,
         step,
+        ...(binding?.admitted && binding.scryRunId ? { appRunId: binding.scryRunId } : {}),
         ...(detail ? { reason: detail } : {}),
         evidence: [step === 'cancelled' ? 'host.run_completion' : 'provider']
       })

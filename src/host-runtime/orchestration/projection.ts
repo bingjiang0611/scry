@@ -192,9 +192,9 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       const recoveredAt = p.recoveredAt === undefined ? null : (p.recoveredAt as number | null)
       db.prepare(
         `UPDATE orch_p_run
-         SET lifecycle = ?, settled_at = ?, recovered_at = ?, outcome = ?, rev_seq = ?
+         SET lifecycle = ?, settled_at = ?, recovered_at = ?, outcome = ?, app_run_id = COALESCE(app_run_id, ?), rev_seq = ?
          WHERE run_id = ?`
-      ).run(lifecycle, settledAt, recoveredAt, outcomeJson, event.seq, event.runId)
+      ).run(lifecycle, settledAt, recoveredAt, outcomeJson, typeof p.appRunId === 'string' ? p.appRunId : null, event.seq, event.runId)
       if (event.sessionKey) {
         const histFlag = p.historicalBackfill === true ? 1 : 0
         db.prepare(

@@ -18,7 +18,7 @@ describe('v3 retirement', () => {
   })
 
   it.each([
-    ['src/main/remote/host-controller-watch.ts', /LIVE_RUNS_TICK_MS/],
+    ['src/main/remote/host-controller-surface.ts', /LiveWatchers|watchLifecycle|watchRun\(|liveRuns\(/],
     ['src/renderer/components/RemoteChatControls.tsx', /useVisibilityPolling|createTraceReadScheduler/],
     ['src/renderer/hooks/useRemoteCatalogs.ts', /useVisibilityPolling/],
     ['apps/ios/ScryRemote/RunStore/RemoteRunStoreObservation.swift', /800_000_000/],

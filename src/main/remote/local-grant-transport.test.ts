@@ -155,7 +155,7 @@ describe('local grant scope (L1: enrolled over unix socket, useless over the net
     expect(reply.providers).toBeDefined()
   })
 
-  it('allows only an App grant to request departed or archived run traces', async () => {
+  it('allows only an App grant to request archived run traces', async () => {
     const { identity, controller, caPEM, addr, socketPath, directory, desktopReads } = await harness()
     const app = await enrollLocal(identity, controller, directory)
     const { keyPEM, csrPEM } = await deviceKeyAndCSR()
@@ -165,18 +165,18 @@ describe('local grant scope (L1: enrolled over unix socket, useless over the net
     const phone = { certPEM: (await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)).certificatePEM, keyPEM }
     const query = { kind: 'trace', context: { cwd: AUTHORIZED, providerId: 'codex' }, runId: 'run-1' }
     const archived = { ...query, archive: true, context: { ...query.context, externalSessionId: 'session-1' } }
-    // A device grant cannot opt into the departed window: refused before the reader runs.
+    // The retired field is rejected before reaching the reader.
     expect(await overNetwork(addr, caPEM!, phone, { op: 'desktop', query: { ...query, settledTail: true } }))
-      .toEqual({ error: 'settled_tail_requires_local_grant' })
+      .toEqual({ error: 'invalid_request' })
     expect(await overNetwork(addr, caPEM!, phone, { op: 'desktop', query: archived }))
       .toEqual({ error: 'archive_trace_requires_local_grant' })
     expect(desktopReads).toEqual([])
     expect((await overNetwork(addr, caPEM!, phone, { op: 'desktop', query })).desktop).toEqual({ kind: 'trace', run: null })
-    expect((await overLocalSocket(socketPath, caPEM!, app, { op: 'desktop', query: { ...query, settledTail: true } })).desktop)
-      .toEqual({ kind: 'trace', run: null })
+    expect(await overLocalSocket(socketPath, caPEM!, app, { op: 'desktop', query: { ...query, settledTail: true } }))
+      .toEqual({ error: 'invalid_request' })
     expect((await overLocalSocket(socketPath, caPEM!, app, { op: 'desktop', query: archived })).desktop)
       .toEqual({ kind: 'trace', run: null })
-    expect(desktopReads).toEqual([query, { ...query, settledTail: true }, archived])
+    expect(desktopReads).toEqual([query, archived])
   })
 
   it('refuses a phone grant presented on the local socket', async () => {

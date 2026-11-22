@@ -41,10 +41,8 @@ describe('daemon run questions', () => {
       return daemon.request(request)
     })
     const runtime = new DaemonRunRuntime({
-      subscribeMode: true,
       transport,
       send: (channel, payload) => sent.push({ channel, payload }),
-      waitMs: 200,
       // The conversation view's run subscription (P3f W2) is keyed by the same id.
       runTraces: {
         route: () => undefined,

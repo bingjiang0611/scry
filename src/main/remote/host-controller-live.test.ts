@@ -3,64 +3,36 @@ import { randomUUID } from 'node:crypto'
 import type { MacRunView } from './host-controller'
 import { AUTHORIZED, CERT, grantedController, routing, type RunProvider } from './host-controller-fixtures'
 
-describe('HostController live watch and stop', () => {
+describe('HostController run output and stop', () => {
   type LiveInput = { runId: string; progress(d?: string): void; output(chunk: { kind: 'output'; text: string }): void; stopSignal: AbortSignal }
 
-  it('long-polls until new output arrives instead of returning an empty page', async () => {
-    let emit: ((text: string) => void) | undefined
-    let finish: (() => void) | undefined
-    const runProvider = vi.fn(async (input: LiveInput) => {
+  it('returns only new run output and leaves the lifecycle authoritative', async () => {
+    let emit!: (text: string) => void
+    let finish!: () => void
+    const { controller } = await grantedController((async (input: LiveInput) => {
       emit = (text) => input.output({ kind: 'output', text })
       await new Promise<void>((resolve) => { finish = resolve })
-    })
-    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    }) as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
     await vi.waitFor(() => expect(emit).toBeDefined())
-    const first = await controller.watchRun(CERT, { runId, cursor: 0, outputCursor: 0, waitMs: 0 })
-    expect(first.state).toBe('dispatched')
-
-    const started = Date.now()
-    const waiting = controller.watchRun(CERT, { runId, cursor: first.poll.cursor, outputCursor: first.output.cursor, waitMs: 5_000 })
-    setTimeout(() => emit!('hello'), 50)
-    const woke = await waiting
-    expect(Date.now() - started).toBeLessThan(2_000)
-    expect(woke.output.chunks.map((chunk) => chunk.text)).toEqual(['hello'])
-    expect(woke.poll.events).toEqual([])
-
-    const idle = await controller.watchRun(CERT, { runId, cursor: woke.poll.cursor, outputCursor: woke.output.cursor, waitMs: 30 })
-    expect(idle.output.chunks).toEqual([])
-    finish!()
+    expect(controller.runState(CERT, { runId })).toBe('dispatched')
+    const first = await controller.runOutput(CERT, { runId, cursor: 0 })
+    expect(first.chunks).toEqual([])
+    emit('hello')
+    const next = await controller.runOutput(CERT, { runId, cursor: first.cursor })
+    expect(next.chunks.map((chunk) => chunk.text)).toEqual(['hello'])
+    expect((await controller.runOutput(CERT, { runId, cursor: next.cursor })).chunks).toEqual([])
+    finish()
     await controller.idle()
-    const done = await controller.watchRun(CERT, { runId, cursor: idle.poll.cursor, outputCursor: idle.output.cursor, waitMs: 5_000 })
-    expect(done.state).toBe('settled')
+    expect(controller.runState(CERT, { runId })).toBe('settled')
   })
 
-  it('returns terminal ledger details when a run fails during the awaited output read', async () => {
-    let fail!: (error: Error) => void
-    const { controller } = await grantedController(() => new Promise<void>((_, reject) => { fail = reject }))
-    const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
-    await vi.waitFor(() => expect(fail).toBeDefined())
-    const before = controller.poll(CERT, { cursor: 0 })
-    const readOutput = controller.runOutput.bind(controller)
-    vi.spyOn(controller, 'runOutput').mockImplementationOnce(async (peer, input) => {
-      const output = await readOutput(peer, input)
-      fail(new Error('provider killed during output read'))
-      await controller.idle()
-      return output
-    })
-    const watch = await controller.watchRun(CERT, { runId, cursor: before.cursor, outputCursor: 0, waitMs: 0 })
-    expect(watch.state).toBe('failed')
-    expect(watch.poll.events).toContainEqual(expect.objectContaining({
-      runId, kind: 'run_failed', detail: 'provider killed during output read'
-    }))
-  })
-
-  it('rejects watch and stop for a revoked device', async () => {
+  it('rejects output and stop for a revoked device', async () => {
     const { controller, deviceId } = await grantedController(async () => {})
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
     await controller.idle()
     await controller.authority.revoke(deviceId)
-    await expect(controller.watchRun(CERT, { runId, cursor: 0, outputCursor: 0, waitMs: 0 })).rejects.toThrow()
+    await expect(controller.runOutput(CERT, { runId, cursor: 0 })).rejects.toThrow()
     expect(() => controller.stopRun(CERT, { runId })).toThrow('device_not_authorized')
   })
 
@@ -83,7 +55,7 @@ describe('HostController live watch and stop', () => {
   })
 })
 
-describe('HostController live runs (multi-task and Mac runs)', () => {
+describe('HostController questions and Mac controls', () => {
   type LiveInput = { runId: string; progress(d?: string): void; requestUserInput(request: unknown, signal: AbortSignal): Promise<unknown>; stopSignal: AbortSignal }
 
   const question = (runId: string, questionId = 'q1') => ({
@@ -99,47 +71,14 @@ describe('HostController live runs (multi-task and Mac runs)', () => {
     }
   }
 
-  it('lists concurrent remote runs with their Provider session and settles them out of the list', async () => {
-    const finishes: Array<() => void> = []
-    const runProvider = vi.fn(async (input: LiveInput) => {
-      input.progress(JSON.stringify({ event: 'session', externalSessionId: `ext-${finishes.length}` }))
-      await new Promise<void>((resolve) => finishes.push(resolve))
-    })
-    const { controller } = await grantedController(runProvider as unknown as RunProvider)
-    const a = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'first task' }) })
-    const b = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'second task', resume: 'ext-old' }) })
-    await vi.waitFor(() => expect(finishes).toHaveLength(2))
-
-    const live = await controller.liveRuns(CERT, { waitMs: 0 })
-    expect(live.runs.map((run) => [run.origin, run.prompt, run.state]).sort()).toEqual([
-      ['remote', 'first task', 'running'], ['remote', 'second task', 'running']
-    ])
-    expect(live.runs.every((run) => run.cwd === AUTHORIZED && run.externalSessionId?.startsWith('ext-'))).toBe(true)
-    expect(live.runs.every((run) => run.questions.length === 0)).toBe(true)
-
-    // Unchanged list: the long-poll waits; a settled run wakes it promptly.
-    const started = Date.now()
-    const waiting = controller.liveRuns(CERT, { revision: live.revision, waitMs: 10_000 })
-    setTimeout(() => finishes[0]!(), 50)
-    const woke = await waiting
-    expect(Date.now() - started).toBeLessThan(2_000)
-    expect(woke.runs).toHaveLength(1)
-    expect(woke.revision).not.toBe(live.revision)
-    finishes[1]!()
-    await controller.idle()
-    expect((await controller.liveRuns(CERT, { waitMs: 0 })).runs).toEqual([])
-    expect([a.runId, b.runId].map((runId) => controller.runState(CERT, { runId }))).toEqual(['settled', 'settled'])
-  })
-
-  it('marks a remote run waiting while it has an open question', async () => {
+  it('keeps a remote question pending until a device answers it', async () => {
     let answered: unknown
     const runProvider = vi.fn(async (input: LiveInput) => {
       answered = await input.requestUserInput(question(input.runId), input.stopSignal)
     })
     const { controller } = await grantedController(runProvider as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'ask me' }) })
-    await vi.waitFor(async () => expect((await controller.liveRuns(CERT, { waitMs: 0 })).runs[0]?.state).toBe('waiting'))
-    expect((await controller.liveRuns(CERT, { waitMs: 0 })).runs[0]?.questions.map((q) => q.questionId)).toEqual(['q1'])
+    await vi.waitFor(() => expect(controller.pendingQuestions(CERT, { runId }).map((q) => q.questionId)).toEqual(['q1']))
     controller.answerQuestion(CERT, { runId, answerId: randomUUID(), response: { runId, questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never })
     await controller.idle()
     expect(answered).toMatchObject({ behavior: 'answered' })
@@ -152,7 +91,7 @@ describe('HostController live runs (multi-task and Mac runs)', () => {
     })
     const { controller } = await grantedController(runProvider as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'ask me' }) })
-    await vi.waitFor(async () => expect((await controller.liveRuns(CERT, { waitMs: 0 })).runs[0]?.state).toBe('waiting'))
+    await vi.waitFor(() => expect(controller.pendingQuestions(CERT, { runId }).map((q) => q.questionId)).toEqual(['q1']))
     // The Mac renderer's response carries the scry runId; the owner path keys by ledger runId.
     expect(controller.answerOwnerQuestion(runId, { runId: 'remote-run-x-0', questionId: 'q-other', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(false)
     expect(controller.answerOwnerQuestion(runId, { runId: 'remote-run-x-0', questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(true)
@@ -165,20 +104,13 @@ describe('HostController live runs (multi-task and Mac runs)', () => {
     expect(runProvider).toHaveBeenCalledTimes(1)
   })
 
-  it('exposes only authorized Mac runs and routes device stop/answer to the Mac controls', async () => {
+  it('routes device stop and answer only for authorized Mac runs', async () => {
     const macRun: MacRunView = { runId: 'run-abc123-7', providerId: 'claude', cwd: AUTHORIZED, externalSessionId: 'mac-ext',
       prompt: 'x'.repeat(500), questions: [question('run-abc123-7')], stopping: false }
     const hidden: MacRunView = { ...macRun, runId: 'run-abc123-8', cwd: '/elsewhere', questions: [] }
     const source = macSource([macRun, hidden])
     const { controller } = await grantedController(async () => {}, undefined, { macRuns: source })
 
-    const live = await controller.liveRuns(CERT, { waitMs: 0 })
-    expect(live.runs).toHaveLength(1)
-    expect(live.runs[0]).toMatchObject({ origin: 'mac', runId: 'run-abc123-7', state: 'waiting', externalSessionId: 'mac-ext' })
-    expect(live.runs[0]!.prompt).toHaveLength(200)
-    expect(live.runs[0]!.questions).toHaveLength(1)
-
-    // Unauthorized project: neither visible nor controllable.
     expect(() => controller.stopRun(CERT, { runId: hidden.runId })).toThrow('unknown_run')
     expect(source.stop).not.toHaveBeenCalled()
 
@@ -204,40 +136,5 @@ describe('HostController live runs (multi-task and Mac runs)', () => {
     macRun.stopping = true
     expect(controller.stopRun(CERT, { runId: macRun.runId })).toEqual({ status: 'already_requested' })
     expect(source.stop).toHaveBeenCalledTimes(1)
-  })
-
-  it('denies live runs to a revoked device', async () => {
-    const { controller, deviceId } = await grantedController(async () => {}, undefined, { macRuns: macSource([]) })
-    await controller.authority.revoke(deviceId)
-    await expect(controller.liveRuns(CERT, { waitMs: 0 })).rejects.toThrow('device_not_authorized')
-  })
-})
-
-describe('HostController history version joined to the live-runs long-poll', () => {
-  it('waits while the version is unchanged and returns as soon as it changes, re-authorizing each pass', async () => {
-    let version = 'v1'
-    const readHistoryVersion = vi.fn(async () => ({ version, readMode: 'indexed' as const }))
-    let changed = () => {}
-    const { controller, deviceId } = await grantedController(async () => {}, undefined, {
-      readHistoryVersion, macRuns: { list: () => [], stop: () => false, answer: () => false, subscribe: listener => {
-        changed = listener
-        return () => { changed = () => {} }
-      } }
-    })
-    const query = { providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'ext' }
-    const first = await controller.liveRuns(CERT, { waitMs: 10_000, history: { query } })
-    expect(first.historyVersion?.version).toBe('v1')
-
-    const started = Date.now()
-    const waiting = controller.liveRuns(CERT, { revision: first.revision, waitMs: 10_000, history: { query, known: 'v1' } })
-    setTimeout(() => { version = 'v2'; changed() }, 50)
-    expect((await waiting).historyVersion?.version).toBe('v2')
-    expect(Date.now() - started).toBeLessThan(2_500)
-    expect(readHistoryVersion.mock.calls.length).toBeGreaterThan(2)
-
-    const idle = await controller.liveRuns(CERT, { revision: first.revision, waitMs: 30, history: { query, known: 'v2' } })
-    expect(idle.historyVersion?.version).toBe('v2')
-    await controller.authority.revoke(deviceId)
-    await expect(controller.liveRuns(CERT, { revision: first.revision, waitMs: 10_000, history: { query, known: 'v2' } })).rejects.toThrow()
   })
 })

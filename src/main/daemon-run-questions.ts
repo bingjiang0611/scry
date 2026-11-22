@@ -29,16 +29,14 @@ export interface QuestionSinks {
 /** Publish questions the daemon now holds, and close the ones it no longer does. */
 export async function publishQuestions(
   cursor: RunCursor,
-  transport: Pick<DaemonRunTransport, 'questions'>,
-  sinks: QuestionSinks,
-  projected?: AgentQuestionRequest[]
+  pending: AgentQuestionRequest[],
+  sinks: QuestionSinks
 ): Promise<void> {
   // Wait for the App's run ID, as the window routes questions by that ID.
   if (admissionPhase(cursor) !== 'admitted') return
   const runId = windowRunId(cursor)
-  const pending = projected ?? await transport.questions(cursor.runId)
-  if (projected && (pending.length !== cursor.askedQuestions.size ||
-      pending.some(request => !cursor.askedQuestions.has(request.questionId)))) {
+  if (pending.length !== cursor.askedQuestions.size ||
+      pending.some(request => !cursor.askedQuestions.has(request.questionId))) {
     const permissionCount = pending.filter(request => request.questionKind === 'permission').length
     sinks.send('agent:questionAttention', {
       runId, pendingCount: pending.length, permissionCount, inputCount: pending.length - permissionCount

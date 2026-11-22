@@ -1,7 +1,7 @@
-import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
+import type { AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
-import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
+import type { SubscribeActiveRunRow, SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { RUN_ADMISSION_BUSY_MESSAGE } from './context-admission'
 import { DaemonRunRefusedError } from './daemon-run-admission'
 import { DaemonClientError } from './daemon-client'
@@ -39,26 +39,6 @@ export interface DaemonIntentState {
   runId: string
   state: string
 }
-
-export interface DaemonWatchReply {
-  // Lifecycle state as the daemon reports it; `null` means the ledger no longer
-  // holds the run, which is evidence, not "still running".
-  state: string | null
-  cursor: number
-  events: ReadonlyArray<{ runId: string; kind: string; detail?: string }>
-  // How much content the daemon has for this run. The text itself travels on the
-  // trace, but the count is what tells a live run apart from an idle one: the ledger
-  // only moves at lifecycle points, so a watch that waits on it alone hears nothing
-  // while the Provider is streaming.
-  output: { count: number; cursor: number }
-}
-
-export interface DaemonOutputStream {
-  chunks: ReadonlyArray<{ seq: number; text?: string }>
-  cursor: number
-}
-
-const MAX_ITEMS = 512
 
 function transportFailure(error: unknown): DaemonRunFailure {
   if (error instanceof DaemonClientError) {
@@ -122,43 +102,14 @@ export class DaemonRunTransport {
     return { runId: intent.runId, state: intent.state }
   }
 
-  async watch(input: { runId: string; cursor: number; outputCursor: number; waitMs: number; output: boolean | 'wake' }, signal?: AbortSignal): Promise<DaemonWatchReply> {
-    const reply = await this.#call({
-      op: 'watch', runId: input.runId, cursor: input.cursor,
-      outputCursor: input.outputCursor, waitMs: input.waitMs, output: input.output
-    }, signal === undefined ? undefined : { signal })
-    const watch = reply.watch
-    if (!record(watch) || !record(watch.poll) || !Array.isArray(watch.poll.events) ||
-        !Number.isSafeInteger(watch.poll.cursor) || watch.poll.events.length > MAX_ITEMS) {
-      throw new DaemonRunError('invalid_daemon_response')
-    }
-    const poll = watch.poll as { events: unknown[]; cursor: number }
-    const events = poll.events.flatMap((raw) => {
-      if (!record(raw) || typeof raw.runId !== 'string' || typeof raw.kind !== 'string') return []
-      return [{ runId: raw.runId, kind: raw.kind, ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}) }]
-    })
-    const state = watch.state === undefined || watch.state === null ? null : typeof watch.state === 'string' ? watch.state : fail()
-    const page = record(watch.output) ? watch.output : undefined
-    const chunks = page && Array.isArray(page.chunks) ? page.chunks : []
-    // A wake-only reply reports the count and no text: that is the whole point of the
-    // mode, so the count is what says whether there is content.
-    const reported = page && Number.isSafeInteger(page.count) ? page.count as number : chunks.length
-    const output = {
-      count: reported,
-      cursor: page && Number.isSafeInteger(page.cursor) ? page.cursor as number : input.outputCursor
-    }
-    return { state, cursor: poll.cursor as number, events, output }
-  }
-
   /**
    * One canonical trace read for a live run; the delta cursor is the caller's.
-   * `settledTail`: the read after `run_settled` still gets the run's final trace.
    */
-  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor; settledTail?: boolean }): Promise<DesktopRemoteTraceRead> {
+  async trace(input: { context: unknown; runId: string; after?: DesktopTraceCursor }): Promise<DesktopRemoteTraceRead> {
     return await readDaemonTrace((request, options) => this.#call(request, options), input)
   }
 
-  /** P4-3 archive read for a settled run that already left the live registry (replaces settledTail). */
+  /** P4-3 archive read for a settled run that already left the live registry. */
   async archivedRunTrace(input: { context: DesktopRemoteContext; runId: string }): Promise<ActiveRun | null> {
     return await readDaemonArchivedRunTrace((request, options) => this.#call(request, options), input)
   }
@@ -172,15 +123,6 @@ export class DaemonRunTransport {
     let subscribe = await request()
     if (subscribe.kind === 'history_chunk') subscribe = await assembleByteChunks(subscribe, request, fail)
     return parseSubscribeReply({ subscribe })
-  }
-
-  async output(input: { runId: string; cursor: number }): Promise<DaemonOutputStream> {
-    const reply = await this.#call({ op: 'output', runId: input.runId, cursor: input.cursor }, { replayable: true })
-    const output = reply.output
-    if (!record(output) || !Array.isArray(output.chunks) || !Number.isSafeInteger(output.cursor)) {
-      throw new DaemonRunError('invalid_daemon_response')
-    }
-    return output as unknown as DaemonOutputStream
   }
 
   /**
@@ -207,12 +149,6 @@ export class DaemonRunTransport {
     return stop.status
   }
 
-  async questions(runId: string): Promise<AgentQuestionRequest[]> {
-    const reply = await this.#call({ op: 'questions', runId }, { replayable: true })
-    if (!Array.isArray(reply.questions)) throw new DaemonRunError('invalid_daemon_response')
-    return reply.questions as AgentQuestionRequest[]
-  }
-
   async answerQuestion(input: { runId: string; answerId: string; response: AgentQuestionResponse }): Promise<boolean> {
     const reply = await this.#call({ op: 'answerQuestion', runId: input.runId, answerId: input.answerId, response: input.response })
     // The daemon answers with its ledger receipt: `answered` and `duplicate` both mean
@@ -223,24 +159,14 @@ export class DaemonRunTransport {
     return true
   }
 
-  async liveRuns(input: { waitMs: number; revision?: string }): Promise<{ revision: string; runs: ReadonlyArray<{ runId: string; state: string; scryRunId?: string }> }> {
-    const reply = await this.#call(
-      { op: 'liveRuns', waitMs: input.waitMs, ...(input.revision ? { revision: input.revision } : {}) },
-      { replayable: true }
-    )
-    const live = reply.liveRuns
-    if (!record(live) || typeof live.revision !== 'string' || !Array.isArray(live.runs)) throw new DaemonRunError('invalid_daemon_response')
-    const runs = live.runs.flatMap((raw) => {
-      if (!record(raw) || !isDaemonRunId(raw.runId) || typeof raw.state !== 'string') return []
-      return [{ runId: raw.runId, state: raw.state, ...(isDaemonRunId(raw.scryRunId) ? { scryRunId: raw.scryRunId } : {}) }]
-    })
-    return { revision: live.revision, runs }
+  async runProjection(runId: string): Promise<SubscribeActiveRunRow | undefined> {
+    const reply = await this.subscribe({ views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0 })
+    if (reply.mode !== 'snapshot' || !reply.snapshot.activeRuns) throw new DaemonRunError('invalid_daemon_response')
+    return reply.snapshot.activeRuns.rows.find(row => row.runId === runId)
   }
 
   async runState(runId: string): Promise<string | null> {
-    const reply = await this.subscribe({ views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0 })
-    if (reply.mode !== 'snapshot' || !reply.snapshot.activeRuns) throw new DaemonRunError('invalid_daemon_response')
-    return reply.snapshot.activeRuns.rows.find(row => row.runId === runId)?.lifecycle ?? null
+    return (await this.runProjection(runId))?.lifecycle ?? null
   }
 
   /** The App viewed one of the daemon's unread sessions (E1b). Idempotent. */

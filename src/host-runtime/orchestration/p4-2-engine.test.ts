@@ -195,7 +195,7 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         })
         expect(late).toMatchObject({ kind: 'rejected', reason: 'command_payload_conflict', sticky: true })
 
-        // Legacy imported receipt stored under actor='system' deduplicates live peer retry
+        // A pre-upgrade receipt has no original payload hash. Resolve it without reaccepting a send.
         const legacyPayload = {
           runId: 'legacy-run-1',
           sessionKey: null,
@@ -221,7 +221,9 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
           commandId: 'legacy-scoped-intent-9',
           detail: JSON.stringify({ providerId: 'codex', cwd: realWs, prompt: 'retry' })
         })
-        expect(retry).toMatchObject({ kind: 'duplicate', runId: 'legacy-run-1' })
+        expect(retry).toMatchObject({ kind: 'rejected', reason: 'command_payload_conflict' })
+        expect(engine.resolveIntent({ peerCertSHA256: PEER_A, grantScope: 'remote', commandId: 'legacy-scoped-intent-9' }))
+          .toMatchObject({ runId: 'legacy-run-1' })
       } finally {
         sink.close()
       }

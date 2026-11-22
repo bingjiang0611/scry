@@ -28,6 +28,7 @@ function text(value: unknown, max: number): string {
 
 export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   const query = object(value)
+  if (query.settledTail !== undefined) throw new Error('invalid_request')
   if (query.kind === 'info') return { kind: 'info' }
   if (query.kind === 'workspaceChoices') {
     const request = object(query.request)
@@ -68,9 +69,8 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   }
   if (query.images !== undefined && query.images !== true) throw new Error('invalid_request')
   if (query.historyScope !== undefined && (query.historyScope !== 'session' || query.kind === 'trace')) throw new Error('invalid_request')
-  if (query.settledTail !== undefined && (query.settledTail !== true || query.kind !== 'trace')) throw new Error('invalid_request')
   if (query.archive !== undefined && (query.archive !== true || query.kind !== 'trace' || !context.externalSessionId ||
-      query.settledTail !== undefined || query.delta !== undefined)) throw new Error('invalid_request')
+      query.delta !== undefined)) throw new Error('invalid_request')
   const scope = query.historyScope === 'session' ? { historyScope: 'session' as const } : {}
   if (query.kind === 'trace') {
     let delta: { after?: DesktopTraceCursor } | undefined
@@ -84,7 +84,7 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
       }
     }
     return { kind: 'trace', context, runId: text(query.runId, 128), ...(query.images ? { images: true } : {}), ...(delta ? { delta } : {}), ...parseByteChunks(query),
-      ...(query.settledTail ? { settledTail: true } : {}), ...(query.archive ? { archive: true } : {}) }
+      ...(query.archive ? { archive: true } : {}) }
   }
   if (query.kind === 'image') {
     if (!Number.isSafeInteger(query.index) || Number(query.index) < 0 || Number(query.index) >= DESKTOP_ATTACHMENT_MAX_COUNT) throw new Error('invalid_request')
@@ -127,9 +127,7 @@ export function createDesktopHostReader(deps: {
   subscribe?: 1
   authorizeWorkspace(cwd: string): string
   authorizeSession?(context: DesktopRemoteContext): void
-  // `departed`: also answer from a run that just left the live registry. Only an
-  // explicit `settledTail` trace read asks; image and device reads keep `null`.
-  getRun(runId: string, options?: { departed: boolean }): ActiveRun | null
+  getRun(runId: string): ActiveRun | null
   workspaceChoices?: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
   validateWorkspaceBranch?: (request: { cwd: string; repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
 }): (query: DesktopHostRead) => Promise<DesktopHostReadResult> {
@@ -199,7 +197,7 @@ export function createDesktopHostReader(deps: {
     // later polls start a new snapshot instead of mixing two run states. The
     // delta cursor is part of the key, so a continuation cannot answer another base.
     const chunkKey = query.kind === 'trace'
-      ? JSON.stringify({ kind: 'trace', context, runId: query.runId, images: query.images === true, delta: query.delta, settledTail: query.settledTail, archive: query.archive })
+      ? JSON.stringify({ kind: 'trace', context, runId: query.runId, images: query.images === true, delta: query.delta, archive: query.archive })
       : JSON.stringify({ context, sessionScope, before: query.before, snapshot: query.snapshot })
     if (query.chunk) {
       const page = pages.get(query.chunk.id)
@@ -212,7 +210,7 @@ export function createDesktopHostReader(deps: {
     if (query.kind === 'trace' && query.archive) {
       result = await readDesktopArchivedTrace(deps.userDataDir, cwd, query)
     } else if (query.kind === 'trace') {
-      const run = deps.getRun(query.runId, { departed: query.settledTail === true })
+      const run = deps.getRun(query.runId)
       if (run && (run.cwd !== cwd || run.providerId !== context.providerId ||
           (run.agentProfileId ?? '') !== (context.agentProfileId ?? '') ||
           (context.externalSessionId !== undefined && run.externalSessionId !== context.externalSessionId))) {

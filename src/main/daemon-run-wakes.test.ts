@@ -40,17 +40,12 @@ describe('run wakes', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(15)
   })
 
-  it('wakes every waiting run when notices may have been lost or the feed went away', async () => {
+  it('wakes every waiting run on disposal', async () => {
     const wakes = new RunWakes()
-    wakes.setLive(true)
     const a = wakes.wait('run-a', 10_000)
     const b = wakes.wait('run-b', 10_000)
     wakes.wakeAll()
     expect([await settled(a), await settled(b)]).toEqual([true, true])
-    const c = wakes.wait('run-c', 10_000)
-    // Without the feed a run must go back to its own long poll, not sit here.
-    wakes.setLive(false)
-    expect(wakes.live).toBe(false)
-    expect(await settled(c)).toBe(true)
+
   })
 })

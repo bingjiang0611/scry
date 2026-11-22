@@ -81,32 +81,11 @@ export interface MacRunView {
 
 export interface MacRunSource {
   list(): MacRunView[]
-  // Change signal for the live-runs long poll: a Mac run appears, disappears,
-  // changes state or gains/loses a pending question. Without it a device waits for
-  // the fallback tick, which is a cost every parked device pays.
-  subscribe?(listener: () => void): () => void
   // Same bounded stop lifecycle as the Mac stop button; true = requested.
   stop(runId: string): boolean
   // Same broker as the Mac question dialog; false = no such pending question.
   answer(response: AgentQuestionResponse): boolean
 }
-
-// One live run visible to the device. `remote` runs were submitted by a paired
-// device and are observed through watch; `mac` runs belong to the Mac UI.
-export interface LiveRunRef {
-  origin: 'remote' | 'mac'
-  runId: string
-  providerId: string
-  agentProfileId?: string
-  cwd: string
-  externalSessionId?: string
-  prompt: string
-  state: 'running' | 'waiting' | 'stopping'
-  // Open questions, so a device can answer a run it is not watching (answers
-  // still go through answerQuestion and its per-origin broker).
-  questions: AgentQuestionRequest[]
-}
-
 
 export interface ToolPanelSources {
   analytics(rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> | UsageAnalytics

@@ -167,7 +167,10 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : isImmediate ? (p.leaseOwner ?? 'daemon') : null,
         claimedAt: p.shadowOnly || isImmediate ? cmd.at : null
       })
-      return acceptDecision(cmd, events, [effect], { runId: p.runId })
+      return acceptDecision(cmd, events, [effect], {
+        runId: p.runId,
+        ...(cmd.actor === 'system' && p.intentDetailSha256 ? { intentDetailSha256: p.intentDetailSha256 } : {})
+      })
     }
 
     case 'run.resolve_intent': {

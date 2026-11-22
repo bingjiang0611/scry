@@ -16,8 +16,8 @@ it('recovers archived evidence written after a result already reached the window
   const result: TraceEvent = { id: 'result', ts: '2026-11-21T00:00:00.000Z', runId: 'run', kind: 'harness', stage: 'result' }
   const lateDiff: TraceEvent = { ...result, id: 'diff', stage: 'turn_diff' }
   const cursor: RunCursor = {
-    context, runId: 'run', lifecycle: 'settled', watch: 0, output: 0, pushed: [result], askedQuestions: new Set(),
-    answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false, sawText: false
+    context, runId: 'run', lifecycle: 'settled', output: 0, pushed: [result], askedQuestions: new Set(),
+    answerIds: new Map(), resyncRequired: false, stopped: false, sawText: false
   }
   const archive: ActiveRun = { ...context, providerId: 'codex', runId: 'run', userText: 'edit a file', items: [result, lateDiff], done: true }
   const archivedRunTrace = vi.fn(async () => archive)
@@ -35,8 +35,8 @@ it('recovers archived evidence written after a result already reached the window
 
 it('takes a reconnected question and its conversation scope from one subscription reply', async () => {
   const cursor: RunCursor = {
-    runId: 'run', lifecycle: 'dispatched', watch: 0, output: 0, pushed: [], askedQuestions: new Set(),
-    answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false, sawText: false, admitted: true
+    runId: 'run', lifecycle: 'dispatched', output: 0, pushed: [], askedQuestions: new Set(),
+    answerIds: new Map(), resyncRequired: false, stopped: false, sawText: false, admitted: true
   }
   const scheduleTraceRead = vi.fn(async () => {})
   const syncQuestions = vi.fn(async () => {})
@@ -81,8 +81,8 @@ it('recovers the exact segmented run outside the history page and keeps live ove
       desktop: await fixture.read(parseDesktopHostRead(request.query))
     }))
     const cursor: RunCursor = {
-      context, runId, lifecycle: 'settled', watch: 0, output: 0, pushed: [live], askedQuestions: new Set(),
-      answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false, sawText: false, scopedDelivery: false
+      context, runId, lifecycle: 'settled', output: 0, pushed: [live], askedQuestions: new Set(),
+      answerIds: new Map(), resyncRequired: false, stopped: false, sawText: false, scopedDelivery: false
     }
     const apply = vi.fn(() => true)
     await readSubscribeTraceOnce({

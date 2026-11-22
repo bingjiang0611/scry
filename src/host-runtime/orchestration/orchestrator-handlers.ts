@@ -377,6 +377,7 @@ export function decideRunEffectResult(
             runId: run.runId,
             ...(p.reason ? { reason: p.reason } : {}),
             ...(p.detail ? { detail: p.detail } : {}),
+            ...(p.catalogRunId ? { appRunId: p.catalogRunId } : {}),
             settledAt,
             recoveredAt,
             outcome,

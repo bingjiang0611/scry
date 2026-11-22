@@ -9,6 +9,7 @@ import {
 import {
   buildSubmitCommandForAuthority,
   getRunStartExpiryInfo,
+  h1DetailDigest,
   requeueRunStartOutbox,
   runAuthorityPreDispatchRecheck,
   tryRealpath,
@@ -81,12 +82,16 @@ export class AuthorityEngine {
     return 'system'
   }
 
-  private checkLegacySystemReceipt(commandId: string, actor: string): { runId: string; seq: number } | undefined {
+  private checkLegacySystemReceipt(commandId: string, actor: string):
+    { runId: string; seq: number; intentDigest?: string } | undefined {
     if (actor === 'system') return undefined
     const legacy = this.sink.getReceipt(commandId, 'system')
-    if (!legacy || legacy.status !== 'accepted') return undefined
+    if (legacy?.type !== 'run.submit' || legacy.status !== 'accepted') return undefined
     const runId = typeof legacy.result?.runId === 'string' ? legacy.result.runId : undefined
-    return runId ? { runId, seq: legacy.resultSeq ?? 0 } : undefined
+    const digest = legacy.result?.intentDetailSha256
+    return runId ? {
+      runId, seq: legacy.resultSeq ?? 0, intentDigest: typeof digest === 'string' ? digest : undefined
+    } : undefined
   }
 
   private finishSubmit(
@@ -156,7 +161,12 @@ export class AuthorityEngine {
     const hookStarted = performance.now()
     const actor = this.actorForPeer(input.peerCertSHA256)
     const legacyDup = this.checkLegacySystemReceipt(input.commandId, actor)
-    if (legacyDup) return { early: { kind: 'duplicate', ...legacyDup } }
+    if (legacyDup) {
+      if (legacyDup.intentDigest !== h1DetailDigest(input.detail)) {
+        return { early: { kind: 'rejected', reason: 'command_payload_conflict', sticky: true } }
+      }
+      return { early: { kind: 'duplicate', runId: legacyDup.runId, seq: legacyDup.seq } }
+    }
     const preview = parseLedgerIntentRouting(input.runId ?? 'probe', input.detail)
     let sessionKey = preview.sessionKey
     if (sessionKey && !preview.isConversationRun) {
@@ -381,6 +391,7 @@ export class AuthorityEngine {
 
   recordTerminal(input: {
     runId: string
+    appRunId?: string
     step: 'settled' | 'failed' | 'cancelled' | 'interrupted'
     reason?: string
     detail?: string

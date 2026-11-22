@@ -36,9 +36,7 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
     const delivered: TraceEvent[] = []
     const terminalStops = new Map<string, boolean>()
     const runtime = new DaemonRunRuntime({
-      subscribeMode: true,
-      transport, waitMs: 500,
-      send: (channel, payload) => {
+      transport, send: (channel, payload) => {
         if (channel === 'agent:trace') delivered.push(...(payload as TraceBatch).events)
         if (channel === 'agent:turnDone') {
           const { runId, stopped } = payload as { runId: string; stopped?: boolean }

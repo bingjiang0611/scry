@@ -53,12 +53,8 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
           ...context, externalSessionId: context.externalSessionId, historyScope: 'session'
         }, runtime.appSessionStore().load(), runtime.resolveRemoteProjectDirectory)
       },
-      getRun: (runId, options) => {
-        // A run leaves the registry before the ledger records it settled. The App's read
-        // that follows `run_settled` (settledTail, local grant only) still gets the run's
-        // final trace; every other read keeps the device contract: a settled run is `null`
-        // and its evidence lives in the archive.
-        const state = runtime.runs.get(runId)?.state ?? (options?.departed ? runtime.runs.departedState?.(runId) : undefined)
+      getRun: (runId) => {
+        const state = runtime.runs.get(runId)?.state
         return state ? runtime.boundedLiveRun(state) : null
       },
       workspaceChoices: (request) => runtime.sourceControl.workspaceChoices(request),
@@ -228,7 +224,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         questions: run.pendingQuestions ?? [],
         stopping: Boolean(run.stopState)
       }] : []),
-      subscribe: (listener) => runtime.runs.subscribe?.(listener) ?? (() => undefined),
       stop: (runId) => runtime.requestRunStop(runId),
       answer: (response) => runtime.userQuestionBroker.answer(response)
     },

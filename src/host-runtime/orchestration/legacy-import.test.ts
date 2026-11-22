@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { ConversationStore } from '../../main/conversation-store'
 import { SessionLedger } from '../../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../../main/remote/legacy-ledger-file.fixtures'
+import { scopedIntentId } from '../../main/remote/remote-gateway'
+import { AuthorityEngine } from './authority-engine'
 import { EventSink } from './event-sink'
 import { importLegacyStateIncrementally, startDeferredLegacyImport } from './legacy-import'
 import { ShadowMirror } from './shadow-mirror'
@@ -25,6 +27,40 @@ function makeLedgerDir(userDataDir: string): string {
 }
 
 describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
+  it('keeps an imported compacted receipt exact after pruning and rejects another payload', () => {
+    withTempDir((userDataDir) => {
+      const peerCertSHA256 = 'a'.repeat(64)
+      const commandId = scopedIntentId(peerCertSHA256, SessionLedger.newIntentId())
+      const runId = SessionLedger.newRunId()
+      const detail = JSON.stringify({ providerId: 'codex', cwd: userDataDir, prompt: 'original legacy send' })
+      const store = new SessionLedgerFileStore(makeLedgerDir(userDataDir))
+      try {
+        const ledger = new SessionLedger({ store, maxEvents: 3 })
+        ledger.recordIntent({ intentId: commandId, runId, detail })
+        ledger.markDispatched(runId)
+        ledger.markSettled(runId)
+        // The next append compacts the settled state, which keeps the digest only.
+        ledger.recordIntent({ intentId: SessionLedger.newIntentId(), runId: SessionLedger.newRunId() })
+      } finally {
+        store.close()
+      }
+      const sink = EventSink.open({ userDataDir, checkpointIntervalMs: 0 })
+      try {
+        importLegacyStateIncrementally({ sink, userDataDir, pendingTtlMs: 120_000, reconcileOpenRuns: true })
+        const original = sink.getReceipt(commandId, 'system')!
+        expect(original.status).toBe('accepted')
+        expect(sink.pruneEvents({ olderThanAt: Date.now() + 1 }).deletedEvents).toBeGreaterThan(0)
+        const engine = new AuthorityEngine({ sink })
+        const input = { peerCertSHA256, grantScope: 'remote' as const, commandId, detail }
+        expect(engine.submitSync(input)).toEqual({ kind: 'duplicate', runId, seq: original.resultSeq })
+        expect(engine.submitSync({ ...input, detail: detail.replace('original', 'different') }))
+          .toMatchObject({ kind: 'rejected', reason: 'command_payload_conflict' })
+      } finally {
+        sink.close()
+      }
+    })
+  })
+
   it('imports H1 ledger + app-sessions.json incrementally across off -> shadow -> off -> shadow without duplicates', () => {
     withTempDir((userData) => {
       const ledgerDir = makeLedgerDir(userData)
