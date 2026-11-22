@@ -25,6 +25,8 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [021: Keep measured speed, recorded usage and account billing distinct](021-usage-observation-and-billing.md)
 - [022: Project observed state without granting authority or copying payloads](022-workspace-and-content-projection.md)
 - [023: Capture Git evidence without mutating the repository](023-recorder-git-capture-isolation.md)
+- [024: Close a recorder turn on its own evidence](024-recorder-terminal-evidence.md)
+- [025: Index recovery candidates without making the index authoritative](025-recorder-recovery-attention-index.md)
 
 ## Source comment ratchet
 

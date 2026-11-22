@@ -1,0 +1,15 @@
+# 024: Close a recorder turn on its own evidence
+
+**Status:** Accepted (documents existing behavior)
+
+A Provider timeline and the recorder's publication timeline are different. Derive the turn's end from evidence within its own window. A Stop is exact when no Agent work followed; recorder delivery bookkeeping does not count as work. A deferred Stop can keep the completed verdict even when a wake extends the turn. SessionEnd is a shutdown observation, not an exact Provider end. A later prompt or a closing timestamp must not become the preceding turn's end.
+
+Pending background work blocks stale-open recovery. A matching, complete transcript with a recognized finished reply plus the quiet window can close as completed with an estimated end. Otherwise, absent SessionEnd, force expiry needs the explicit option, sufficient quiet time, and proof that the processes recorded at start are gone. Missing host identity and silence alone prove nothing. A cancelled prompt may never have reached the transcript; a real session end can then close on lifecycle evidence. For an expiry, release the old Git baseline rather than attributing later changes to the expired turn. A diff frozen at the Provider boundary is not recomputed against the current worktree.
+
+When closing without complete evidence, preserve readable rows and mark evidence partial with a reason. Do not synthesize a prompt for a context-only Codex turn or infer model, workflow, role, or human input from display text. Attach explicit workflow identity independently of recorder generation. A subagent transcript cannot replace the main transcript anchor. Commit each distinct payload once and avoid duplicating full patch bodies in the record.
+
+Capture claims open from the transcript boundary, not synthesized hooks. A repeated claim keeps its original boundary. Persist the opening identity and attention marker under the session lock before acknowledging; adopt only a completed baseline. A deferred claimant supplies original host ancestry because the daemon's own chain describes the wrong process. A capture baseline taken mid-turn does not describe earlier work. Freeze the stop-time transcript limit so a later prompt cannot enter the previous record.
+
+A continuation uses its predecessor's native transcript identity and slices after the published boundary. If that boundary was unmeasured, leave it unset and report possible repetition. Reuse the sealed end trees as the next segment's baselines and retain their object stores across the chain. Only a real new user prompt replaces the chain; managed turns do not disturb it. Baseline repositories already proved relevant in earlier turns, even if they are below the discovery depth.
+
+See [recorder-turn-state.ts](../../src/core/turn-recorder/recorder-turn-state.ts), [recorder-turn-finalize.ts](../../src/core/turn-recorder/recorder-turn-finalize.ts), [recorder-stale-open.ts](../../src/core/turn-recorder/recorder-stale-open.ts), and [ADR 008](008-turn-store-verification-and-recovery.md).
