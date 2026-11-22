@@ -40,8 +40,14 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   const closeModal = async (selector, trigger) => {
     await evaluate(`{
       const node = document.querySelector(${JSON.stringify(selector)}).closest('.modal-overlay');
-      window.structureCloseStart = null; window.structureCloseEnd = null; window.structureCloseNativeEnd = false;
-      node.addEventListener('animationend', event => { if (event.target === node) window.structureCloseNativeEnd = true });
+      window.structureCloseStart = null; window.structureCloseEnd = null;
+      window.structureCloseAnimationStart = null; window.structureCloseAnimationEnd = null;
+      node.addEventListener('animationstart', event => {
+        if (event.target === node && event.animationName === 'modal-backdrop-out') window.structureCloseAnimationStart = performance.now();
+      });
+      node.addEventListener('animationend', event => {
+        if (event.target === node && event.animationName === 'modal-backdrop-out') window.structureCloseAnimationEnd = performance.now();
+      });
       document.addEventListener('keydown', () => { window.structureCloseStart = performance.now() }, { once: true, capture: true });
       const observer = new MutationObserver(() => { if (!node.isConnected) { window.structureCloseEnd = performance.now(); observer.disconnect() } });
       observer.observe(document.body, { childList: true, subtree: true });
@@ -50,9 +56,16 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     check(await evaluate(`document.querySelector(${JSON.stringify(selector)})?.closest('.modal-overlay').dataset.state === 'exit' && document.activeElement === document.querySelector(${JSON.stringify(trigger)})`), 'Exit did not immediately restore its trigger focus')
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`document.querySelector(${JSON.stringify(selector)}) == null && window.structureCloseEnd != null`)
-    const ms = await evaluate('window.structureCloseEnd - window.structureCloseStart')
-    check(ms <= 250, `Modal DOM exit exceeded the Step03 limit: ${ms}ms`)
-    return { ms, nativeAnimationEnd: await evaluate('window.structureCloseNativeEnd') }
+    const exit = await evaluate(`(() => {
+      const elapsed = time => time == null ? null : time - window.structureCloseStart
+      return {
+        ms: elapsed(window.structureCloseEnd),
+        animationStartMs: elapsed(window.structureCloseAnimationStart),
+        animationEndMs: elapsed(window.structureCloseAnimationEnd)
+      }
+    })()`)
+    check(exit.ms <= 250, `Modal DOM exit exceeded the Step03 limit: ${JSON.stringify({ selector, ...exit })}`)
+    return { ...exit, nativeAnimationEnd: exit.animationEndMs !== null }
   }
   const panes = `document.getAnimations().filter(a => a.id === 'scry-pane')`
   const page = `document.getAnimations().find(a => a.id === 'scry-structure')`
