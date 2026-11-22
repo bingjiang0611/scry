@@ -35,17 +35,15 @@ export function submitIntent(deps: SubmitDeps, peerCertSHA256: string, input: { 
       detail: input.detail,
       ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
     })
-    let result: SubmitResult
+    if (auth.status === 'duplicate') return auth
     try {
-      result = deps.gateway.submitIntent(peerCertSHA256, { ...input, runId: auth.runId })
+      deps.gateway.submitIntent(peerCertSHA256, { ...input, runId: auth.runId })
     } catch (error) {
-      if (auth.status === 'recorded') {
-        try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
-      }
+      try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
       throw error
     }
-    if (auth.status === 'recorded') deps.dispatcher.pump()
-    return { runId: result.runId, status: auth.status, seq: result.seq }
+    deps.dispatcher.pump()
+    return auth
   }
   return recordIntent(deps, peerCertSHA256, input)
 }
@@ -55,7 +53,9 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
   assertExpectedLog(deps.orchestration, input.knownLogId)
   const { detail, referenced } = stampAttachmentPeer(peer, input.detail)
   const scoped = deps.scopedIntentId(peer, input.intentId)
-  if (referenced && !deps.ledger.intentRun(scoped)) {
+  if (referenced && !(deps.orchestration
+    ? deps.orchestration.hasSubmitReceipt(peer, scoped)
+    : deps.ledger.intentRun(scoped))) {
     const routing = parseRouting(detail)
     if (!deps.attachmentStore) throw new Error('desktop_remote_attachments_unsupported')
     const references = (routing.attachments ?? []).map((item) => ({ ...item, peer })) as DesktopAttachmentReference[]
@@ -73,17 +73,15 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
       detail,
       ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
     })
-    let result: SubmitResult
+    if (auth.status === 'duplicate') return auth
     try {
-      result = deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
+      deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
     } catch (error) {
-      if (auth.status === 'recorded') {
-        try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
-      }
+      try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
       throw error
     }
-    if (auth.status === 'recorded') deps.dispatcher.pump()
-    return { runId: result.runId, status: auth.status, seq: result.seq }
+    deps.dispatcher.pump()
+    return auth
   }
   return recordIntent(deps, peer, { ...input, detail })
 }

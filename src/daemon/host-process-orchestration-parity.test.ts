@@ -6,7 +6,7 @@ import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { SessionLedger } from '../main/remote/session-ledger'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
+import { SessionLedgerFileStore } from '../main/remote/legacy-ledger-file.fixtures'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitRunTerminal } from './host-process.fixtures'
 

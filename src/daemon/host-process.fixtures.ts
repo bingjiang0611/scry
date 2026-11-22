@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createHash, webcrypto, X509Certificate } from 'node:crypto'
+import { webcrypto } from 'node:crypto'
 import { connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { once } from 'node:events'
@@ -96,19 +96,4 @@ export async function waitForProjectedRun(
     if (terminal.has(state) || Date.now() >= deadline) return state
     reply = await read({ waitMs, known: { hostId, logId, seq } })
   }
-}
-
-type TestHost = Awaited<ReturnType<typeof createDaemonHostProcess>>
-
-function peerFingerprint(cert: string): string {
-  return createHash('sha256').update(new X509Certificate(cert).raw).digest('hex')
-}
-
-/** Observe the H1 mirror directly for its own migration and recovery assertions. */
-export function readH1Page(host: TestHost, cert: string, input: { cursor: number }) {
-  return { poll: host.service.controller.poll(peerFingerprint(cert), input), error: undefined }
-}
-
-export async function readH1Run(host: TestHost, cert: string, input: Parameters<TestHost['service']['controller']['watchRun']>[1]) {
-  return { watch: await host.service.controller.watchRun(peerFingerprint(cert), input), error: undefined }
 }

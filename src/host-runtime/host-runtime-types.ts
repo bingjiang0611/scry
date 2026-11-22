@@ -42,7 +42,6 @@ export type RemoteRuns = {
   // The final state of a run that just left the registry (RunRegistry.departedState).
   departedState?: (runId: string) => ActiveRun | undefined
 }
-export type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
 export type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
 
 export type RemoteHostRuntime = {
@@ -51,7 +50,6 @@ export type RemoteHostRuntime = {
   getRemoteProviderDiscovery: () => ReturnType<typeof import('../main/remote/provider-discovery').createProviderDiscovery>
   refreshRemoteProviderSnapshot: () => Promise<void>
   configuredRemotePermissionMode: () => AgentPermissionMode | undefined
-  remoteStartReceipts: RemoteReceipts
   startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string } | RemoteWorkspaceRunStart>
   sourceControl: SourceControlService
   providerOperationGate: ProviderOperationGate
@@ -115,7 +113,7 @@ export interface HostRuntimeInputs {
   // The App event feed's run notices (P3f E2): which ledger run changed.
   onRunActivity?: (runId: string, intentSeq?: number) => void
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
-  orchestration?: HostControllerFactoryDependencies['orchestration']
+  orchestration: NonNullable<HostControllerFactoryDependencies['orchestration']>
   listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }

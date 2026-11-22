@@ -35,7 +35,6 @@ export const FORBIDDEN_MODULES = [
   'src/main/terminal-manager.ts',
   'src/main/remote/remote-host-service.ts',
   'src/main/remote/session-ledger.ts',
-  'src/main/remote/session-ledger-file.ts',
   'src/main/source-control/service.ts',
   'src/main/db.ts',
   'src/main/agent-runner.ts',

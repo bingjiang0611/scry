@@ -70,11 +70,14 @@ describe('daemon run surface start reconciliation', () => {
   it('keeps the caller-provided intent id instead of minting a new one on retry', async () => {
     const transport = { submit: vi.fn(async () => ({ intentId: 'fixed', runId: 'run-abc-1', status: 'recorded' as const })) } as unknown as DaemonRunTransport
     const runtime = {
-      start: vi.fn(async (input: { intentId: string }) => ({ intentId: input.intentId, runId: 'run-abc-1', bound: true })),
+      start: vi.fn(async (input: { intentId: string }) => ({
+        intentId: input.intentId, runId: 'run-abc-1', bound: true, status: 'duplicate', seq: 243
+      })),
       adopt: vi.fn(), activeRuns: () => [], isTracking: () => true
     } as unknown as DaemonRunRuntime
     const value = createDaemonRunSurface({ transport, runtime, currentCwd: () => '/w' })
-    await value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'fixed-intent')
+    await expect(value.start({ prompt: 'go', providerId: 'claude', cwd: '/w' }, 'fixed-intent'))
+      .resolves.toEqual({ runId: 'run-abc-1', commandStatus: 'duplicate', commandSequence: 243 })
     expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({ intentId: 'fixed-intent' }))
   })
 })

@@ -80,8 +80,6 @@ export type BackgroundServiceDevices =
 export interface BackgroundServiceOrchestrationStatus {
   mode: 'on'
   writeIndeterminate?: boolean
-  h1FallbackUnavailable: boolean
-  h1FallbackReason?: string
 }
 
 /** What the daemon reports about itself (local op `localBackgroundService:status`). */

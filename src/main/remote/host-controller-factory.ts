@@ -2,11 +2,9 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { HostController, type HostControllerDependencies, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
 import { PairingFileStore } from './pairing-file'
-import { SessionLedgerFileStore } from './session-ledger-file'
 import { RunOutputWorkerStore } from './run-output-worker'
 import type { RunOutputStore } from './run-output-log'
 import { recoverDeadRemoteLease } from './recover-dead-lease'
-import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import type { ProviderOperationGate } from '../provider-operation-gate'
@@ -15,26 +13,18 @@ import { createProviderPrewarmer } from './remote-provider-prewarm'
 import type { LedgerStore } from './session-ledger'
 import type { OrchestrationAuthorityHooks } from './orchestration-seam'
 
-// Production binding for the remote subsystem. It gives HostController the real
-// durable persistence (exclusive-lease JSONL ledger + fsynced pairing state) and
-// leaves the pieces that require external decisions or the live app as explicit
-// injected seams, so this module adds no supply-chain, crypto, or IPC coupling:
-//
-//   - verifyCSR / issue: the host-side X.509 adapters. Deliberately injected,
-//     not implemented here — production must NOT silently gain an X.509
-//     dependency or hand-rolled crypto (CLAUDE.md). The proven reference lives
-//     in experiments/remote-g0 pending a maintainer dependency decision.
-//   - authorizeWorkspace: wraps the app's known-project authority
-//     (knownProjectDirectory) so a device can never target an unlisted path.
-//   - startRun: delegates to the live run-start path (RunRegistry + Provider
-//     adapter). It is the last seam before the IPC handler is touched.
-//   - gate: the app-wide ProviderOperationGate, so remote runs share the same
-//     auth-vs-run mutual exclusion as local runs.
+// The daemon injects SQLite authority. Pairing and run output have separate
+// durable stores and leases; standalone protocol fixtures use a transient dispatcher.
+const transientLedgerStore: LedgerStore = {
+  assertAvailable: () => undefined,
+  loadAll: () => [],
+  append: () => undefined,
+  compact: () => undefined
+}
 
 export interface HostControllerBinding {
   controller: HostController
-  // Release the durable leases. Call on app shutdown; a restart re-acquires and
-  // the ledger replays any recorded-but-undispatched intents via recover().
+  // Release pairing and output leases on shutdown.
   close(): Promise<void>
 }
 
@@ -42,7 +32,7 @@ export interface HostControllerFactoryDependencies {
   readDesktop?: HostControllerDependencies['readDesktop']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerDependencies['desktopDirectories']
-  // Directory under Scry's userData; pairing, ledger and output subdirs are created.
+  // Directory under Scry's userData; pairing and output subdirs are created.
   stateDirectory: string
   // A STABLE host identity across restarts. The persisted pairing state fails
   // closed (host_identity_changed) if this differs from a previous launch, so
@@ -96,61 +86,19 @@ function privateDir(path: string): string {
   return path
 }
 
-// Higher-level production entry point: derive the persisted host identity (inner
-// CA + stable hostId + verifyCSR/issue) from disk, then bind everything. This is
-// what index.ts calls; only the live-app seams (workspace authorization,
-// startRun, gate) remain to be supplied.
-export async function createHostControllerFromDisk(deps: {
-  stateDirectory: string
-  authorizeWorkspace(cwd: string): string
-  startRun: HostControllerDependencies['runProvider']
-  gate: ProviderOperationGate
-}): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {
-  const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))
-  const binding = await createHostController({
-    stateDirectory: deps.stateDirectory,
-    hostId: identity.hostId,
-    anchorSHA256: identity.anchorSHA256,
-    verifyCSR: identity.verifyCSR,
-    issue: identity.issue,
-    authorizeWorkspace: deps.authorizeWorkspace,
-    startRun: deps.startRun,
-    gate: deps.gate
-  })
-  return Object.assign(binding, { anchorSHA256: identity.anchorSHA256, caCertificatePEM: identity.caCertificatePEM })
-}
-
 export async function createHostController(deps: HostControllerFactoryDependencies): Promise<HostControllerBinding> {
   mkdirSync(deps.stateDirectory, { recursive: true })
   const pairingDirectory = privateDir(join(deps.stateDirectory, 'pairing'))
   recoverDeadRemoteLease(pairingDirectory, 'pairing-state.lock')
   const pairingStore = new PairingFileStore(pairingDirectory)
   let ledgerStore: LedgerStore
-  let closeLedgerStore: () => void | Promise<void>
   let outputStore: RunOutputStore
   try {
-    const ledgerDirectory = privateDir(join(deps.stateDirectory, 'ledger'))
-    recoverDeadRemoteLease(ledgerDirectory, 'session-ledger.lock')
-    if (deps.orchestration) {
-      const created = deps.orchestration.createLedgerStore(ledgerDirectory)
-      ledgerStore = created.store
-      closeLedgerStore = created.close
-    } else {
-      const fileStore = new SessionLedgerFileStore(ledgerDirectory)
-      ledgerStore = fileStore
-      closeLedgerStore = () => fileStore.close()
-    }
-  } catch (error) {
-    // Never leak the pairing lease if the ledger lease cannot be taken.
-    pairingStore.close()
-    throw error
-  }
-  try {
+    ledgerStore = deps.orchestration?.createLedgerStore() ?? transientLedgerStore
     const outputDirectory = privateDir(join(deps.stateDirectory, 'output'))
     recoverDeadRemoteLease(outputDirectory, 'run-output.lock')
     outputStore = await (deps.createOutputStore?.(outputDirectory) ?? RunOutputWorkerStore.create(outputDirectory))
   } catch (error) {
-    await closeLedgerStore()
     pairingStore.close()
     throw error
   }
@@ -219,7 +167,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
     await controller.cleanupAttachments()
   } catch (error) {
     try { await outputStore.close() } finally {
-      try { await closeLedgerStore() } finally { pairingStore.close() }
+      pairingStore.close()
     }
     throw error
   }
@@ -233,9 +181,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
       // End only desktop-owned shells and ephemeral reads before releasing leases.
       controller.closeReadResources()
       try { await deps.desktopWorkbench?.dispose() } finally {
-        try { await outputStore.close() } finally {
-          try { await closeLedgerStore() } finally { pairingStore.close() }
-        }
+        try { await outputStore.close() } finally { pairingStore.close() }
       }
     }
   }

@@ -26,14 +26,7 @@ export async function attachHostProcessOrchestration<
     attentionSnapshot,
     log,
     ...(options.orchestrationPauseBackfill ? { pauseDeferredImport: options.orchestrationPauseBackfill } : {}),
-    ...(options.orchestrationBeforeCommitHook ? { beforeCommitHook: options.orchestrationBeforeCommitHook } : {}),
-    ...(options.orchestrationMirrorWriteHook ? { mirrorWriteHook: options.orchestrationMirrorWriteHook } : {}),
-    ...(options.orchestrationMirrorMaxPendingEvents !== undefined
-      ? { mirrorMaxPendingEvents: options.orchestrationMirrorMaxPendingEvents }
-      : {}),
-    ...(options.orchestrationMirrorRetryIntervalMs !== undefined
-      ? { mirrorRetryIntervalMs: options.orchestrationMirrorRetryIntervalMs }
-      : {})
+    ...(options.orchestrationBeforeCommitHook ? { beforeCommitHook: options.orchestrationBeforeCommitHook } : {})
   })
 }
 

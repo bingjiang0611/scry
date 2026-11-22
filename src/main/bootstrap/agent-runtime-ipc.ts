@@ -1,7 +1,6 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { ActiveRun } from '../../shared/trace'
-import type { AgentQuestionResponse, AgentStartRequest, AgentStartResult } from '../../shared/runtime'
-import { CommandReceipts } from '../command-receipts'
+import { isCommandId, type AgentQuestionResponse, type AgentStartRequest } from '../../shared/runtime'
 import type { RunRegistry } from '../run-registry'
 import type { RunTraceRouter } from '../run-trace-router'
 import { unreadSessionsAnswerWhenKnown, type DockBadgeState } from '../dock-badge'
@@ -34,14 +33,12 @@ export function registerAgentRuntimeHandlers({
   runTraces: RunTraceRouter
   daemon: DaemonRunSurface
 }): void {
-  // Re-delivery returns the original admission receipt, never starts another logical run.
-  const agentStartReceipts = new CommandReceipts<AgentStartResult>()
   handleTrusted('agent:start', async (_e, payload: AgentStartRequest) => {
-    const receipt = await agentStartReceipts.submit(
-      payload?.commandId?.trim() || undefined,
-      () => daemon.start(payload)
-    )
-    return { ...receipt.result, commandStatus: receipt.status, commandSequence: receipt.sequence }
+    const commandId = payload?.commandId?.trim()
+    if (commandId && !isCommandId(commandId)) {
+      throw new Error('commandId 必须是 8-128 个字符的 [A-Za-z0-9_:-]')
+    }
+    return await daemon.start(payload)
   })
 
   // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。

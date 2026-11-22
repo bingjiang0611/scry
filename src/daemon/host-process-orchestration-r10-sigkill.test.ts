@@ -9,7 +9,7 @@ import { cryptoProvider } from '@peculiar/x509'
 import { build as esbuild } from 'esbuild'
 import { createRecentFoldersStore } from '../main/app-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, tempDir, readH1Run } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -42,7 +42,7 @@ function withOrchOnEnv() {
 }
 
 describe('W9 Blocker B3: real SIGKILL recovery from authoritative orchestration.db', () => {
-  it('B3: real SIGKILL immediately after submit recovers run from orchestration.db with monotonic seq, watch, and resolveIntent', async () => {
+  it('B3: real SIGKILL immediately after submit recovers run from orchestration.db with monotonic sequence, subscribe, and receipt lookup', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -120,6 +120,10 @@ main().catch((err) => { console.error(err); process.exit(1) })
       ])) as [{ ready: boolean; socketPath: string; ca: string; cert: string; key: string }]
       expect(msg.ready).toBe(true)
 
+      const initial = await call(msg.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], waitMs: 0
+      })
+      const known = { hostId: initial.subscribe.hostId, logId: initial.subscribe.logId, seq: initial.subscribe.seq }
       const intentId = randomUUID()
       const submitted = await call(msg.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'submit',
@@ -145,16 +149,23 @@ main().catch((err) => { console.error(err); process.exit(1) })
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      const watched = await readH1Run(host2, msg.cert, {
-        runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      const replayed = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], known, waitMs: 0
       })
-      expect(watched.error).toBeUndefined()
-      expect(['settled', 'cancelled']).toContain(watched.watch.state)
+      expect(replayed.subscribe).toMatchObject({ mode: 'events', logId: known.logId })
+      expect(replayed.subscribe.seq).toBeGreaterThanOrEqual(submitSeq)
+      expect(replayed.subscribe.events).toContainEqual(expect.objectContaining({ type: 'run.intent_recorded', runId }))
+
+      const observed = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
+      })
+      const run = observed.subscribe.snapshot.activeRuns.rows.find((row: { runId: string }) => row.runId === runId)
+      expect(['settled', 'interrupted']).toContain(run?.lifecycle)
 
       const resolved = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'resolveIntent', intentId
       })
-      expect(resolved.intent).toEqual({ runId, state: watched.watch.state })
+      expect(resolved.intent).toEqual({ runId, state: run.lifecycle === 'interrupted' ? 'cancelled' : 'settled' })
 
       const nextSub = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'submit',

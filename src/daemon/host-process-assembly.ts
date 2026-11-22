@@ -118,7 +118,6 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     getRemoteProviderDiscovery: () => providerDiscovery,
     refreshRemoteProviderSnapshot,
     configuredRemotePermissionMode,
-    remoteStartReceipts: pipeline.remoteStartReceipts,
     startAppRun: (payload: AgentStartRequest, startOptions) => pipeline.startAppRun(payload, startOptions),
     sourceControl,
     providerOperationGate: session.providerOperationGate,

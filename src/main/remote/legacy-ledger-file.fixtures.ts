@@ -1,3 +1,4 @@
+// Historical writer retained only to generate exact import fixtures.
 import {
   closeSync, constants, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, openSync,
   readFileSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync

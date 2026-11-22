@@ -4,10 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConversationStore } from '../../main/conversation-store'
 import { SessionLedger } from '../../main/remote/session-ledger'
-import { SessionLedgerFileStore } from '../../main/remote/session-ledger-file'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { EventSink } from './event-sink'
-import { LegacyMirrorWorker } from './legacy-mirror'
 import { reconcileTwoLedgersOnStartup, recoverOrchestrationOnStartup } from './recovery'
 
 async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
@@ -19,7 +17,7 @@ async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
-describe('P4-2 startup recovery, two-ledger reconciliation, and async legacy mirror', () => {
+describe('P4-2 startup recovery and two-ledger reconciliation', () => {
   it('reconciles every core §2.4 restart state, closes open questions in same tx, and uses recorder evidence when present', async () => {
     await withTempDir(async (userData) => {
       const ws = join(userData, 'ws')
@@ -231,28 +229,5 @@ describe('P4-2 startup recovery, two-ledger reconciliation, and async legacy mir
     })
   })
 
-  it('mirrors committed lifecycle events asynchronously to H1 SessionLedgerFileStore off critical path', async () => {
-    await withTempDir(async (userData) => {
-      const ledgerDir = join(userData, 'remote', 'ledger')
-      mkdirSync(ledgerDir, { recursive: true, mode: 0o700 })
-      const fileStore = new SessionLedgerFileStore(ledgerDir)
-      const sink = EventSink.open({ userDataDir: userData, checkpointIntervalMs: 0 })
-      const mirror = new LegacyMirrorWorker({ sink, ledgerStore: fileStore })
-      try {
-        const runId = SessionLedger.newRunId()
-        const intentId = SessionLedger.newIntentId()
-        mirror.enqueue({ seq: 1, at: 1_700_000_000_000, runId, kind: 'intent_recorded', intentId, detail: '{}' })
-        mirror.enqueue({ seq: 2, at: 1_700_000_000_001, runId, kind: 'run_dispatched' })
-        mirror.enqueue({ seq: 3, at: 1_700_000_000_002, runId, kind: 'run_settled' })
-        await mirror.flush()
 
-        expect(Number(sink.getMeta('legacy_ledger_seq'))).toBe(3)
-        expect(fileStore.loadAll().map((e) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
-      } finally {
-        await mirror.close()
-        sink.close()
-        fileStore.close()
-      }
-    })
-  })
 })

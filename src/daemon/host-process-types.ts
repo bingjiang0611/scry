@@ -21,12 +21,6 @@ export interface DaemonHostProcessOptions {
   terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
   /** Tests: inject a commit fault into the authoritative sink. */
   orchestrationBeforeCommitHook?: () => void
-  /** Tests: inject fault into P4-2 H1 legacy mirror file writes (append / compact). */
-  orchestrationMirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
-  /** Tests: override P4-2 H1 legacy mirror max pending queue size. */
-  orchestrationMirrorMaxPendingEvents?: number
-  /** Tests: override P4-2 H1 fallback periodic retry interval (ms). */
-  orchestrationMirrorRetryIntervalMs?: number
   /** Tests: pause deferred legacy backfill until resolved to verify live/backfill interleaving. */
   orchestrationPauseBackfill?: Promise<void>
   /** Tests: override graceful providerRegistry.dispose() timeout (default 5,000 ms). */

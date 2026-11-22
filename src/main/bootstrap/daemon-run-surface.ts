@@ -163,7 +163,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       // a connection failure records one intent, not two. The App's commandId is its
       // own idempotency key and wins when present.
       const intent = payload.commandId?.trim() || intentId || randomUUID()
-      let receipt: { runId: string; bound: boolean }
+      let receipt: Awaited<ReturnType<DaemonRunRuntime['start']>>
       try {
         receipt = await runtime.start({ intentId: intent, detail: routingDetail(payload, deps.currentCwd()), context, userText: payload.prompt })
       } catch (error) {
@@ -190,6 +190,8 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       announceFocusedRun(receipt.runId, workspace ? { ...context, cwd: workspace.cwd } : context, payload.prompt)
       return {
         runId: receipt.runId,
+        ...(receipt.status ? { commandStatus: receipt.status === 'duplicate' ? 'duplicate' as const : 'executed' as const } : {}),
+        ...(receipt.seq !== undefined ? { commandSequence: receipt.seq } : {}),
         ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}),
         ...(workspace ? { workspace } : {})
       }

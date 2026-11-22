@@ -5,12 +5,11 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
-import { SessionLedger } from '../main/remote/session-ledger'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { importLegacyStateIncrementally } from '../host-runtime/orchestration/legacy-import'
+import { readLegacyLedgerReadOnly } from '../host-runtime/orchestration/legacy-ledger-reader'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal, readH1Run } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -48,15 +47,7 @@ function sha256File(path: string): string {
 }
 
 
-function startHost(
-  userDataDir: string,
-  daemonStateDirectory: string,
-  extra?: {
-    mirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
-    mirrorRetryIntervalMs?: number
-    log?: (line: string) => void
-  }
-) {
+function startHost(userDataDir: string, daemonStateDirectory: string) {
   return createDaemonHostProcess({
     userDataDir,
     daemonStateDirectory,
@@ -65,11 +56,7 @@ function startHost(
     appVersion: 'test',
     isPackaged: false,
     createOutputStore: () => new MemoryOutputStore(),
-    log: extra?.log ?? (() => undefined),
-    ...(extra?.mirrorWriteHook ? { orchestrationMirrorWriteHook: extra.mirrorWriteHook } : {}),
-    ...(extra?.mirrorRetryIntervalMs !== undefined
-      ? { orchestrationMirrorRetryIntervalMs: extra.mirrorRetryIntervalMs }
-      : {})
+    log: () => undefined
   })
 }
 
@@ -101,7 +88,7 @@ function seedH1Runs(ledgerDir: string, runCount: number, cwd: string): Array<{ r
   return seeded
 }
 
-describe('Decision H: authority promotion, fail-closed startup, and compatibility mirror', () => {
+describe('authority promotion and fail-closed startup', () => {
   it('promotes a shadow database and imports every subsequent legacy run before accepting new sends', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
@@ -156,17 +143,20 @@ describe('Decision H: authority promotion, fail-closed startup, and compatibilit
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM
       const lastExtra = extraRuns[extraRuns.length - 1]!
-      const watched = await readH1Run(host, device.certPEM, {
-        runId: lastExtra.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      const observed = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [lastExtra.runId], waitMs: 0
       })
-      expect(watched.watch.state).toBe('settled')
+      expect(observed.subscribe.snapshot.activeRuns.rows).toContainEqual(
+        expect.objectContaining({ runId: lastExtra.runId, lifecycle: 'settled' })
+      )
 
+      const beforeSeq = authority.sink.listEvents().at(-1)!.seq
       const sub = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'run 121' })
       })
-      expect(sub.seq).toBeGreaterThan(480)
+      expect(sub.seq).toBeGreaterThan(beforeSeq)
       expect(await waitTerminal(host.channel.socketPath, ca, device.certPEM, device.keyPEM, sub.runId)).toBe('settled')
     } finally {
       await host?.dispose()
@@ -198,118 +188,12 @@ describe('Decision H: authority promotion, fail-closed startup, and compatibilit
       expect(existsSync(join(daemonDir, 'local.sock'))).toBe(false)
       expect(sha256File(logPath)).toBe(logShaBefore)
       expect(sha256File(db)).toBe(dbShaBefore)
-      const store = new SessionLedgerFileStore(ledgerDir)
-      try {
-        const ledger = new SessionLedger({ store })
-        for (const run of seeded) expect(ledger.runState(run.runId)).toBe('settled')
-      } finally {
-        store.close()
-      }
+      const { runs } = readLegacyLedgerReadOnly(ledgerDir)
+      for (const run of seeded) expect(runs.get(run.runId)?.lifecycle).toBe('settled')
     } finally {
       restore()
     }
   }, 30_000)
 
-  it('N3: fresh install first on-mode boot immediately writes a valid H1 snapshot even with 0 runs', async () => {
-    const root = tempDir()
-    const userDataDir = join(root, 'userData')
-    const daemonDir = join(userDataDir, 'daemon')
-    const ledgerDir = join(userDataDir, 'remote', 'ledger')
-    const snapshotPath = join(ledgerDir, 'session-ledger.snapshot.json')
 
-    const restore = withOrchEnv('on')
-    let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
-    try {
-      host = await startHost(userDataDir, daemonDir)
-      expect(existsSync(snapshotPath)).toBe(true)
-      expect(host.orchestrationAuthority!.sink.getMeta('h1_seq_floor')).toBeUndefined()
-      expect(Number(host.orchestrationAuthority!.sink.getMeta('h1_seq_reserved_until'))).toBe(1024)
-      await host.dispose()
-      host = undefined
-
-      const store = new SessionLedgerFileStore(ledgerDir)
-      try {
-        const ledger = new SessionLedger({ store })
-        expect(ledger.describe()).toEqual({ runs: 0, events: 0, lastSeq: 0 })
-      } finally {
-        store.close()
-      }
-    } finally {
-      await host?.dispose()
-      restore()
-    }
-  }, 30_000)
-
-  it('h1_fallback_unavailable retries periodically, clears on recovery, and is readable from daemon status interface', async () => {
-    const root = tempDir()
-    const userDataDir = join(root, 'userData')
-    const daemonDir = join(userDataDir, 'daemon')
-    const ledgerDir = join(userDataDir, 'remote', 'ledger')
-    const ws = join(root, 'ws-retry')
-    mkdirSync(ws, { recursive: true, mode: 0o700 })
-    const canonicalWs = realpathSync(ws)
-    createRecentFoldersStore(userDataDir).push(canonicalWs)
-
-    const restore = withOrchEnv('on')
-    let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
-    try {
-      let injectEnospc = true
-      host = await startHost(userDataDir, daemonDir, {
-        mirrorRetryIntervalMs: 50,
-        mirrorWriteHook: () => {
-          if (injectEnospc) throw Object.assign(new Error('ENOSPC: disk full'), { code: 'ENOSPC' })
-        }
-      })
-      const device = await enrollLocal(host.service)
-      const ca = host.service.caCertificatePEM
-
-      const status1 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'localBackgroundService',
-        method: 'status',
-        args: []
-      })
-      expect(status1.error).toBeUndefined()
-      expect(status1.result.orchestration).toMatchObject({ mode: 'on', h1FallbackUnavailable: true })
-      expect(status1.result.orchestration.h1FallbackReason).toContain('ENOSPC')
-
-      const sub1 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'submit',
-        intentId: randomUUID(),
-        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'during enospc' })
-      })
-      expect(await waitTerminal(host.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
-
-      injectEnospc = false
-      const deadline = Date.now() + 5_000
-      let recovered = false
-      while (Date.now() < deadline) {
-        const st = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-          op: 'localBackgroundService',
-          method: 'status',
-          args: []
-        })
-        if (st.result?.orchestration?.h1FallbackUnavailable === false) {
-          recovered = true
-          expect(st.result.orchestration.h1FallbackReason).toBeUndefined()
-          break
-        }
-        await new Promise((r) => setTimeout(r, 40))
-      }
-      expect(recovered).toBe(true)
-      expect(host.orchestrationAuthority!.sink.getMeta('h1_fallback_unavailable')).toBe('0')
-      await host.dispose()
-      host = undefined
-
-      const store = new SessionLedgerFileStore(ledgerDir)
-      try {
-        const ledger = new SessionLedger({ store })
-        expect(ledger.runState(sub1.runId)).toBe('settled')
-      } finally {
-        store.close()
-      }
-    } finally {
-      await host?.dispose()
-      restore()
-    }
-  }, 30_000)
 })

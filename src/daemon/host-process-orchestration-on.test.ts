@@ -1,11 +1,10 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { INLINE_BODY_MAX_BYTES } from '../host-runtime/orchestration/types'
@@ -44,7 +43,7 @@ function saveEnv() {
 }
 
 describe('P4-2 daemon authoritative orchestration integration (SCRY_ORCHESTRATION=on)', () => {
-  it('runs send, >16 KiB durable body, resolveIntent tombstone, replay parity, and async legacy mirror under on mode', async () => {
+  it('runs send, >16 KiB durable body, resolveIntent tombstone, replay parity under on mode', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -120,20 +119,6 @@ describe('P4-2 daemon authoritative orchestration integration (SCRY_ORCHESTRATIO
       // 3. Projection replay consistency matches from empty
       expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
 
-      // 4. Async legacy mirror flushed to H1 ledger file
-      await authority.flushLegacyMirror()
-      const ledgerDir = join(userDataDir, 'remote', 'ledger')
-      expect(existsSync(join(ledgerDir, 'session-ledger.log'))).toBe(true)
-      await host.dispose()
-      host = undefined
-
-      const verifyStore = new SessionLedgerFileStore(ledgerDir)
-      try {
-        const events = verifyStore.loadAll()
-        expect(events.some((e) => e.runId === runId1 && e.kind === 'run_settled')).toBe(true)
-      } finally {
-        verifyStore.close()
-      }
     } finally {
       await host?.dispose()
       restoreEnv()

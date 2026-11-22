@@ -267,7 +267,7 @@ const api = {
     ipcRenderer.invoke('agent:setSessionArchived', context, archived),
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
   /** commandStatus='duplicate' 表示这条 commandId 已被受理过，runId 是第一次的那个。 */
-  start: (request: AgentStartRequest): Promise<AgentStartResult & { commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
+  start: (request: AgentStartRequest): Promise<AgentStartResult> =>
     ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
   watchSessionDetail: (key: string | null): Promise<boolean> => ipcRenderer.invoke('agent:watchSessionDetail', key),

@@ -262,31 +262,6 @@ export function handleAuthorityRunProgress(
   }
 }
 
-/** Builds the authoritative orchestration status self-report (Decision H + W16 fenced reporting). */
-export function buildAuthorityStatus(
-  sink: EventSink,
-  readH1FallbackStatus?: () => { unavailable: boolean; reason?: string }
-): BackgroundServiceOrchestrationStatus {
-  const fenced = sink.isWriteIndeterminate()
-  const live = readH1FallbackStatus?.()
-  if (fenced) {
-    const reason = live?.unavailable && live.reason ? live.reason : 'orchestration_write_indeterminate'
-    return { mode: 'on', writeIndeterminate: true, h1FallbackUnavailable: true, h1FallbackReason: reason }
-  }
-  if (live) {
-    return {
-      mode: 'on',
-      writeIndeterminate: false,
-      h1FallbackUnavailable: live.unavailable,
-      ...(live.unavailable && live.reason ? { h1FallbackReason: live.reason } : {})
-    }
-  }
-  const unavailable = sink.handle.db.open && sink.getMeta('h1_fallback_unavailable') === '1'
-  const reason = unavailable ? sink.getMeta('h1_fallback_reason') : undefined
-  return {
-    mode: 'on',
-    writeIndeterminate: false,
-    h1FallbackUnavailable: unavailable,
-    ...(unavailable && reason ? { h1FallbackReason: reason } : {})
-  }
+export function buildAuthorityStatus(sink: EventSink): BackgroundServiceOrchestrationStatus {
+  return { mode: 'on', writeIndeterminate: sink.isWriteIndeterminate() }
 }

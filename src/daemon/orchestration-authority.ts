@@ -5,16 +5,14 @@ import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
 import type { Evidence } from '../shared/turn-record'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
 import { RemoteInteractionError } from '../main/remote/remote-interaction-broker'
-import type { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { createConversationOrdinalResolver } from '../host-runtime/orchestration/conversation-ordinal-lookup'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { startDeferredLegacyImport, type LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
-import type { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
-import { runAuthorityStartupSequence } from './orchestration-authority-startup'
+import { LEGACY_H1_IMPORT_COMPLETE, runAuthorityStartupSequence } from './orchestration-authority-startup'
 import {
   buildAuthorityStatus,
   createAuthoritySubscribeHandler,
@@ -54,7 +52,6 @@ export interface DaemonOrchestrationAuthority {
   observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
   status(): BackgroundServiceOrchestrationStatus
-  flushLegacyMirror(): Promise<void>
   close(): Promise<void>
 }
 
@@ -69,9 +66,6 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   requestRunStop: (runId: string) => boolean
   log: (line: string) => void
   beforeCommitHook?: () => void
-  mirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
-  mirrorMaxPendingEvents?: number
-  mirrorRetryIntervalMs?: number
   deferredImportThreshold?: number
   pauseDeferredImport?: Promise<void>
   attentionSnapshot?: () => SessionAttentionSnapshot
@@ -80,7 +74,7 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
 /**
  * Isolated daemon wiring for P4-2 authoritative orchestration.
  * Runs off-main-thread H1 import + single-tx startup recovery + two-ledger reconciliation
- * BEFORE `openLocalChannel`, and mirrors committed events asynchronously to H1 off critical path.
+ * before opening the local channel.
  */
 export async function attachDaemonOrchestrationAuthority<
   State extends RunRegistryState,
@@ -131,7 +125,6 @@ export async function attachDaemonOrchestrationAuthority<
       deferredPlan: startup.deferredPlan,
       importComplete: startup.importComplete,
       resolveImportComplete: startup.resolveImportComplete,
-      h1DiskLastSeq: startup.h1DiskLastSeq,
       setDeferredControl: (cancel) => { cancelDeferred = cancel },
       getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
@@ -157,7 +150,6 @@ function buildAuthorityRuntime<
   deferredPlan: LegacyLedgerPlan | undefined
   importComplete: Promise<void>
   resolveImportComplete: (() => void) | undefined
-  h1DiskLastSeq: number
   setDeferredControl: (cancel: (() => void) | undefined) => void
   getDeferredControl: () => { deferredStarted: boolean; cancelDeferred: (() => void) | undefined; setStarted: () => void }
 }): DaemonOrchestrationAuthority {
@@ -175,7 +167,7 @@ function buildAuthorityRuntime<
     }
   })
 
-  // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
+  // Track mapping between the dispatcher run ID and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
   const pendingTranscripts = new Map<string, Promise<Evidence<string>>>()
   const transcriptWrites = createRunTranscriptWrites(sink, options.log)
@@ -184,13 +176,15 @@ function buildAuthorityRuntime<
     sink,
     options.attentionSnapshot ? () => [{ kind: 'attention', snapshot: options.attentionSnapshot!() }] : undefined
   )
-  let legacyMirror: LegacyMirrorWorker | undefined
-  let backingFileStore: SessionLedgerFileStore | undefined
-  let syncMirrorSnapshot: (() => void) | undefined
-  let readH1FallbackStatus: (() => { unavailable: boolean; reason?: string }) | undefined
   let progressCounter = 0
 
   const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
+  const resolvePersistedCanonical = (runId: string): string => {
+    const active = ledgerToCanonical.get(runId)
+    if (active || !sink.handle.db.open) return active ?? runId
+    const alias = canonicalForAlias.get(runId) as { run_id: string } | undefined
+    return alias?.run_id ?? runId
+  }
   const trackCanonical = (ledgerRunId: string, canonicalRunId: string): void => {
     if (ledgerRunId === canonicalRunId) return
     if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
@@ -211,28 +205,30 @@ function buildAuthorityRuntime<
     }
   }
 
+  const aliasForCanonical = sink.handle.db.prepare(
+    'SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?'
+  )
+  const canonicalForAlias = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
+  const ledgerIdForSubmit = (runId: string, duplicate: boolean): string => {
+    if (UUID_V4_RE.test(runId)) return runId
+    if (duplicate) {
+      const alias = aliasForCanonical.get(runId) as { ledger_run_id: string } | undefined
+      return alias?.ledger_run_id ?? runId
+    }
+    const ledgerRunId = randomUUID()
+    trackCanonical(ledgerRunId, runId)
+    return ledgerRunId
+  }
+
+  const readSubmitReceipt = (peer: string, commandId: string) => {
+    if (sink.isWriteIndeterminate()) throw new Error('orchestration_write_indeterminate')
+    const receipt = sink.getReceipt(commandId, `peer:${peer}`) ?? sink.getReceipt(commandId, 'system')
+    return receipt?.type === 'run.submit' && receipt.status === 'accepted' ? receipt : undefined
+  }
+
   const hooks: OrchestrationAuthorityHooks = {
     currentLogId: () => sink.getMeta('log_id'),
-    createLedgerStore: (ledgerDirectory) => {
-      const created = createAuthorityLedgerStore({
-        ledgerDirectory,
-        sink,
-        log: options.log,
-        ...(options.mirrorWriteHook ? { mirrorWriteHook: options.mirrorWriteHook } : {}),
-        ...(options.mirrorMaxPendingEvents !== undefined
-          ? { mirrorMaxPendingEvents: options.mirrorMaxPendingEvents }
-          : {}),
-        ...(options.mirrorRetryIntervalMs !== undefined
-          ? { mirrorRetryIntervalMs: options.mirrorRetryIntervalMs }
-          : {}),
-        h1DiskLastSeq: ctx.h1DiskLastSeq
-      })
-      backingFileStore = created.fileStore
-      legacyMirror = created.mirror
-      syncMirrorSnapshot = created.syncSnapshotFromDb
-      readH1FallbackStatus = created.h1FallbackStatus
-      return { store: created.store, close: created.close }
-    },
+    createLedgerStore: () => createAuthorityLedgerStore(sink),
 
     submitAsync: async (input) => {
       const immediateDispatch = input.immediateDispatch
@@ -250,12 +246,11 @@ function buildAuthorityRuntime<
         ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      if (!immediateDispatch) {
+      if (!immediateDispatch && res.kind !== 'duplicate') {
         const routing = parseLedgerIntentRouting(res.runId, input.detail)
         trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
       }
-      const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
-      trackCanonical(ledgerRunId, res.runId)
+      const ledgerRunId = ledgerIdForSubmit(res.runId, res.kind === 'duplicate')
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
@@ -275,13 +270,24 @@ function buildAuthorityRuntime<
         ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      if (!immediateDispatch) {
+      if (!immediateDispatch && res.kind !== 'duplicate') {
         const routing = parseLedgerIntentRouting(res.runId, input.detail)
         trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
       }
-      const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
-      trackCanonical(ledgerRunId, res.runId)
+      const ledgerRunId = ledgerIdForSubmit(res.runId, res.kind === 'duplicate')
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
+    },
+
+    hasSubmitReceipt: (peer, commandId) => readSubmitReceipt(peer, commandId) !== undefined,
+
+    intentStatus: (peer, commandId) => {
+      const receipt = readSubmitReceipt(peer, commandId)
+      const runId = receipt?.result?.runId
+      const run = typeof runId === 'string' ? sink.getRun(runId) : undefined
+      if (!run) throw new Error('unknown_intent')
+      const state = run.lifecycle === 'admitted' ? 'dispatched'
+        : run.lifecycle === 'interrupted' ? 'cancelled' : run.lifecycle
+      return { runId: ledgerIdForSubmit(run.runId, true), state }
     },
 
     compensateSubmitFailure: (runId, reason) => {
@@ -292,7 +298,7 @@ function buildAuthorityRuntime<
     },
 
     recoveredRunLifecycle: (runId) => {
-      const run = sink.getRun(resolveCanonical(runId))
+      const run = sink.getRun(resolvePersistedCanonical(runId))
       if (!run) return undefined
       if (run.lifecycle === 'settled' || run.lifecycle === 'failed' || run.lifecycle === 'cancelled' || run.lifecycle === 'interrupted') {
         return run.lifecycle
@@ -350,7 +356,7 @@ function buildAuthorityRuntime<
       const res = engine.answerQuestion({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
-        runId: resolveCanonical(input.runId),
+        runId: resolvePersistedCanonical(input.runId),
         questionId: input.questionId,
         answerId: input.answerId,
         answerSha256: input.answerSha256
@@ -364,7 +370,7 @@ function buildAuthorityRuntime<
       engine.stopRun({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
-        runId: resolveCanonical(input.runId),
+        runId: resolvePersistedCanonical(input.runId),
         registry: options.runs,
         stopControl: (control) => {
           options.requestRunStop(control.runId)
@@ -409,7 +415,8 @@ function buildAuthorityRuntime<
     ctx.setDeferredControl(handle.cancel)
     handle.promise
       .then((s) => {
-        if (!closed) syncMirrorSnapshot?.()
+        if (closed || sink.isWriteIndeterminate() || s.legacyLedgerSeq < targetPlan.lastSeq) return
+        sink.setMeta(LEGACY_H1_IMPORT_COMPLETE, '1')
         options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`)
       })
       .catch((e) => options.log(`daemon.orchestration-on-import-failed ${e instanceof Error ? e.message : String(e)}`))
@@ -418,7 +425,7 @@ function buildAuthorityRuntime<
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
-  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink, readH1FallbackStatus)
+  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink)
 
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
@@ -437,7 +444,6 @@ function buildAuthorityRuntime<
     },
     startImport: pausedImport ? () => { void pausedImport.then(startImport) } : startImport,
     status,
-    flushLegacyMirror: async () => { await legacyMirror?.flush() },
     close: async () => {
       if (closed) return
       closed = true
@@ -446,8 +452,6 @@ function buildAuthorityRuntime<
       ctx.getDeferredControl().cancelDeferred?.()
       resolveImportComplete?.()
       options.conversationStore().setBeforeTurnSettledObserver(undefined)
-      await legacyMirror?.close()
-      try { backingFileStore?.close() } catch { /* may already be closed */ }
       await transcriptWrites.drain()
       sink.close()
     }

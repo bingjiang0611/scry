@@ -58,7 +58,7 @@ describe('createRunPipeline', () => {
   it('exposes the run registry, trace output and receipts main consumes', () => {
     const pipeline = createRunPipeline(inputs().inputs)
     for (const key of ['runs', 'runStopLifecycle', 'userQuestionBroker', 'traceOutput',
-      'boundedLiveRun', 'runTraces', 'startAppRun', 'remoteStartReceipts', 'requestRunStop'] as const) {
+      'boundedLiveRun', 'runTraces', 'startAppRun', 'requestRunStop'] as const) {
       expect(pipeline[key], key).toBeDefined()
     }
     expect(pipeline.runs).toBeInstanceOf(Object)

@@ -81,12 +81,12 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     gatewayLabel,
     ...(inputs.onRunActivity ? { onRunActivity: inputs.onRunActivity } : {}),
     ...(inputs.onLedgerEvent ? { onLedgerEvent: inputs.onLedgerEvent } : {}),
-    ...(inputs.orchestration ? { orchestration: inputs.orchestration } : {}),
+    orchestration: inputs.orchestration,
     ...(inputs.managedLaunches ? { onDispatchRefused: (refused) => abandonRefusedLaunch(inputs.managedLaunches!, refused) } : {}),
     startRun: createRemoteRunBinding<ManagedConversationStart>({
       permissionModeOverride: remotePermissionMode,
       ...(inputs.managedLaunches ? { managedLaunch: (runId) => inputs.managedLaunches!.take(runId) } : {}),
-      startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, async () => {
+      startAppRun: async (input) => {
         const started = await runtime.startAppRun({
           ...input.request,
           // A worktree start reserves its workspace under the ledger run's identity.
@@ -110,7 +110,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         })
         // A worktree start answers once registered; its terminal receipt follows.
         return 'remoteCompletion' in started ? started.remoteCompletion : started as RemoteRunCompletion
-      }).then((receipt) => receipt.result)
+      }
     }),
     hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),
     listProjects: () => runtime.remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),

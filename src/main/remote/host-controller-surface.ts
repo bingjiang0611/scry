@@ -123,10 +123,13 @@ export class HostController {
 
 
   intentStatus(peerCertSHA256: string, input: { intentId: string; knownLogId?: string }): { runId: string; state: RunLifecycle } {
-    if (input.knownLogId !== undefined) {
+    const { orchestration } = this.#injected
+    if (orchestration) {
       this.authorizeDevice(peerCertSHA256)
-      assertExpectedLog(this.#injected.orchestration, input.knownLogId)
+      assertExpectedLog(orchestration, input.knownLogId)
+      return orchestration.intentStatus(peerCertSHA256, scopedIntentId(peerCertSHA256, input.intentId))
     }
+    assertExpectedLog(orchestration, input.knownLogId)
     return this.#gateway.intentStatus(peerCertSHA256, input)
   }
 

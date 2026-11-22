@@ -125,7 +125,7 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      await enrollLocal(host1.service)
+      const device = await enrollLocal(host1.service)
       const peerSha = host1.service.authority.inspectLocal().grants[0]!.certificateSHA256
       await host1.dispose()
       host1 = undefined
@@ -207,18 +207,16 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       const runState = host2.service.controller.runState(peerSha, { runId })
       expect(runState).toBe('cancelled')
 
-      // Decision H: on restart, device ledger is a single state snapshot at R with retainedEvents=[];
-      // stale cursor 0 receives reset (no run_failed, no renumbered old events), while runState/resolveIntent
-      // report 'cancelled' and orchestration.db preserves run.interrupted(host_restarted).
-      const polled = host2.service.controller.poll(peerSha, { cursor: 0 })
-      expect(polled.events).toEqual([])
-      expect(polled.reset).toEqual({ requested: 0, availableFrom: polled.cursor })
-      expect(polled.cursor).toBeGreaterThanOrEqual(1024)
-      expect(
-        host2.orchestrationAuthority!.sink
-          .listEvents()
-          .some((e) => e.runId === runId && e.type === 'run.interrupted' && e.payload.reason === 'host_restarted')
-      ).toBe(true)
+      const reply = await call(host2.channel.socketPath, host2.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
+      })
+      expect(reply.subscribe.snapshot.activeRuns.rows).toContainEqual(expect.objectContaining({
+        runId, lifecycle: 'interrupted'
+      }))
+      expect(host2.orchestrationAuthority!.sink.listEvents().filter((event) => event.runId === runId))
+        .toContainEqual(expect.objectContaining({
+          type: 'run.interrupted', payload: expect.objectContaining({ reason: 'host_restarted' })
+        }))
     } finally {
       await host1?.dispose()
       await host2?.dispose()

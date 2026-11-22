@@ -7,7 +7,7 @@ import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, localSubscription, tempDir, waitForProjectedRun } from './host-process.fixtures'
 import { SessionLedger } from '../main/remote/session-ledger'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
+import { SessionLedgerFileStore } from '../main/remote/legacy-ledger-file.fixtures'
 import { createRecentFoldersStore } from '../main/app-store'
 import type { SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
 
@@ -45,6 +45,7 @@ describe('daemon host process', () => {
     })
     ledger.markDispatched(orphan)
     ledgerStore.close()
+    const originalLedger = readFileSync(join(ledgerDirectory, 'session-ledger.log'))
 
     const workspace = join(root, 'workspace')
     mkdirSync(workspace, { mode: 0o700 })
@@ -74,24 +75,13 @@ describe('daemon host process', () => {
       expect(existsSync(staleAtomicTemp)).toBe(false)
       expect(existsSync(host.channel.socketPath)).toBe(true)
       expect(host.service.relayConfigured).toBe(false)
-      if (host.orchestrationAuthority) {
-        await host.orchestrationAuthority.flushLegacyMirror()
-        const snapPath = join(ledgerDirectory, 'session-ledger.snapshot.json')
-        const recovered = existsSync(snapPath) ? readFileSync(snapPath, 'utf8') : ''
-        expect(recovered).toContain(`"runId":"${orphan}"`)
-        expect(recovered).toContain('"lifecycle":"cancelled"')
-        expect(host.orchestrationAuthority.sink.getRun(orphan)?.lifecycle).toBe('interrupted')
-        expect(
-          host.orchestrationAuthority.sink
-            .listEvents()
-            .some((e) => e.runId === orphan && e.type === 'run.interrupted' && e.payload.reason === 'host_restarted')
-        ).toBe(true)
-      } else {
-        const recovered = readFileSync(join(ledgerDirectory, 'session-ledger.log'), 'utf8')
-        expect(recovered).toContain(`\"runId\":\"${orphan}\"`)
-        expect(recovered).toContain('run_failed')
-        expect(recovered).toContain('host_restarted')
-      }
+      const sink = host.orchestrationAuthority!.sink
+      expect(sink.getRun(orphan)?.lifecycle).toBe('interrupted')
+      expect(sink.listEvents()).toContainEqual(expect.objectContaining({
+        runId: orphan, type: 'run.interrupted', payload: expect.objectContaining({ reason: 'host_restarted' })
+      }))
+      expect(readFileSync(join(ledgerDirectory, 'session-ledger.log'))).toEqual(originalLedger)
+      expect(existsSync(join(ledgerDirectory, 'session-ledger.snapshot.json'))).toBe(false)
 
       const device = await enrollLocal(host.service)
       const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

@@ -20,6 +20,7 @@ export interface TestDaemon {
   /** Canonical, and already in the recent folders, as the picker would store it. */
   workspace: string
   device: Awaited<ReturnType<typeof enrollLocal>>
+  output: MemoryOutputStore
   host: Awaited<ReturnType<typeof createDaemonHostProcess>>
   /** One local-op call on the App's socket; `absent` lists argument positions left out. */
   localOp(op: string, method: string, args: unknown[], absent?: number[]): Promise<Record<string, any>>
@@ -39,7 +40,6 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
   const { root: previous, device: enrolled, ...hostOptions } = options
   const root = previous ?? tempDir()
   const userDataDir = join(root, 'userData')
-  mkdirSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, mode: 0o700 })
   mkdirSync(join(root, 'workspace'), { recursive: true, mode: 0o700 })
   const workspace = realpathSync(join(root, 'workspace'))
   createRecentFoldersStore(userDataDir).push(workspace)
@@ -54,6 +54,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
       else process.env[key] = value
     }
   }
+  const output = new MemoryOutputStore()
   let host: TestDaemon['host']
   try {
     host = await createDaemonHostProcess({
@@ -63,7 +64,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
       resourcesPath: join(process.cwd(), 'resources'),
       appVersion: 'test',
       isPackaged: false,
-      createOutputStore: () => new MemoryOutputStore(),
+      createOutputStore: () => output,
       log: () => undefined,
       ...hostOptions
     })
@@ -76,7 +77,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
     call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, body)
   let disposed = false
   return {
-    root, userDataDir, workspace, device, host, request,
+    root, userDataDir, workspace, device, output, host, request,
     localOp: (op, method, args, absent) => request({ op, method, args, ...(absent ? { absent } : {}) }),
     async dispose() {
       if (disposed) return

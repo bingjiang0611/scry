@@ -1,7 +1,6 @@
 import { createTraceRuntime, type RunRendererSink } from '../main/bootstrap/trace-runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DockBadgeState } from '../main/dock-badge'
-import { CommandReceipts } from '../main/command-receipts'
 import { LlmNetworkConfigurationCache } from '../main/llm-network-configuration'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun, type RemoteWorkspaceRunStart } from '../main/bootstrap/workspace-start'
@@ -113,10 +112,7 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
       observeNativeTranscript: inputs.observeNativeTranscript
     })
   }
-  /** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */
-  const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
-
     // traceRuntime already exposes runs, the stop lifecycle, the question broker and
     // the trace output; only the assembly's own pieces are added on top.
-    return { ...traceRuntime, startAppRun, remoteStartReceipts, llmNetworkConfiguration }
+    return { ...traceRuntime, startAppRun, llmNetworkConfiguration }
 }

@@ -27,7 +27,7 @@ function normalizeUuid(raw: string | null | undefined, fallbackSeed: string): st
   return toDeterministicUuidV4(fallbackSeed)
 }
 
-function mapOrchLifecycleToH1(lifecycle: string): RunLifecycle {
+function dispatchLifecycle(lifecycle: string): RunLifecycle {
   if (lifecycle === 'recorded') return 'recorded'
   if (lifecycle === 'admitted' || lifecycle === 'dispatched') return 'dispatched'
   if (lifecycle === 'settled') return 'settled'
@@ -66,28 +66,11 @@ function readRecordedIntentDetail(sink: EventSink, row: RawRunRow): string | und
   })
 }
 
-export function readReservedSeqUntil(sink: EventSink): number {
-  const raw = Number(sink.getMeta('h1_seq_reserved_until') ?? '0')
-  return Number.isSafeInteger(raw) && raw > 0 ? raw : 0
-}
-
-/**
- * Rebuilds an authoritative H1 `LedgerSnapshot` strictly from `orchestration.db` (Decision H):
- * - Single state snapshot with `retainedEvents: []` (no old events, no renumbering).
- * - `SessionLedger` sets both `lastSeq` and `minCursor` to `snapshot.lastSeq` (`R`), so any
- *   stale device cursor receives the standard `reset` response and resyncs via `runState`.
- * - Every `runId` / `intentId` is a valid unique UUID v4 and every `intentSeq` satisfies
- *   `1 <= intentSeq <= snapshot.lastSeq`.
- */
-export function buildH1SnapshotFromDb(
-  sink: EventSink,
-  options?: { lastSeq?: number }
-): LedgerSnapshot {
+/** Rebuild the dispatcher's run state with no retained events. */
+export function buildDispatchLedgerSnapshot(sink: EventSink): LedgerSnapshot {
   const db = sink.handle.db
-  const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
-  const reservedUntil = readReservedSeqUntil(sink)
 
-  // Map canonical run_id -> H1 UUID ledger_run_id when an explicit alias exists.
+  // Map canonical run_id -> dispatcher UUID ledger_run_id when an explicit alias exists.
   const aliasRows = db
     .prepare('SELECT ledger_run_id, run_id FROM orch_legacy_run')
     .all() as Array<{ ledger_run_id: string; run_id: string }>
@@ -131,39 +114,35 @@ export function buildH1SnapshotFromDb(
     )
     .all() as RawRunRow[]
 
-  const requestedLastSeq =
-    options?.lastSeq !== undefined
-      ? Math.max(0, Math.floor(options.lastSeq))
-      : Math.max(reservedUntil, legacyLedgerSeq)
-  const lastSeq = Math.max(runRows.length > 0 ? 1 : 0, requestedLastSeq)
+  const lastSeq = runRows.at(-1)?.intent_seq ?? 0
 
   const usedRunIds = new Set<string>()
   const usedIntentIds = new Set<string>()
   const runs: LedgerSnapshotRun[] = []
 
   for (const row of runRows) {
-    let h1RunId = canonicalToLedgerRunId.get(row.run_id) ?? normalizeUuid(row.run_id, `run:${row.run_id}`)
-    if (usedRunIds.has(h1RunId)) {
-      h1RunId = toDeterministicUuidV4(`run-dedup:${row.run_id}:${row.intent_seq}`)
+    let dispatchRunId = canonicalToLedgerRunId.get(row.run_id) ?? normalizeUuid(row.run_id, `run:${row.run_id}`)
+    if (usedRunIds.has(dispatchRunId)) {
+      dispatchRunId = toDeterministicUuidV4(`run-dedup:${row.run_id}:${row.intent_seq}`)
     }
-    usedRunIds.add(h1RunId)
+    usedRunIds.add(dispatchRunId)
 
     const meta = intentMetaByRun.get(row.run_id)
-    let h1IntentId = normalizeUuid(meta?.commandId, `intent:${row.run_id}:${row.intent_seq}`)
-    if (usedIntentIds.has(h1IntentId)) {
-      h1IntentId = toDeterministicUuidV4(`intent-dedup:${row.run_id}:${row.intent_seq}`)
+    let dispatchIntentId = normalizeUuid(meta?.commandId, `intent:${row.run_id}:${row.intent_seq}`)
+    if (usedIntentIds.has(dispatchIntentId)) {
+      dispatchIntentId = toDeterministicUuidV4(`intent-dedup:${row.run_id}:${row.intent_seq}`)
     }
-    usedIntentIds.add(h1IntentId)
+    usedIntentIds.add(dispatchIntentId)
 
-    const lifecycle = mapOrchLifecycleToH1(row.lifecycle)
+    const lifecycle = dispatchLifecycle(row.lifecycle)
     const intentSeq = Math.min(Math.max(1, Number(row.intent_seq)), lastSeq)
     const intentAt = meta?.at ?? Date.now()
 
     if (lifecycle === 'recorded') {
       const intentDetail = readRecordedIntentDetail(sink, row)
       runs.push({
-        runId: h1RunId,
-        intentId: h1IntentId,
+        runId: dispatchRunId,
+        intentId: dispatchIntentId,
         lifecycle,
         intentSeq,
         intentAt,
@@ -173,8 +152,8 @@ export function buildH1SnapshotFromDb(
     } else {
       const intentDigest = meta?.detailSha256 ?? h1DetailDigest(row.prompt_preview ?? row.run_id)
       runs.push({
-        runId: h1RunId,
-        intentId: h1IntentId,
+        runId: dispatchRunId,
+        intentId: dispatchIntentId,
         lifecycle,
         intentSeq,
         intentAt,

@@ -35,6 +35,7 @@ export interface DaemonStartReceipt {
   intentId: string
   runId: string
   status: 'recorded' | 'duplicate'
+  seq?: number
   /** Whether `runId` is the canonical id the trace events carry. */
   bound: boolean
 }

@@ -18,7 +18,7 @@ export interface RemoteHostServiceDependencies {
   readDesktop?: HostControllerFactoryDependencies['readDesktop']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']
-  // Directory under Scry userData; identity/pairing/ledger subdirs live here.
+  // Directory under Scry userData; identity/pairing/output subdirs live here.
   stateDirectory: string
   // Maps a device-requested cwd to an already directory-picker-authorized
   // workspace, or throws. A device can never smuggle an unlisted path.

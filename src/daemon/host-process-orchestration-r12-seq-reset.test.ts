@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal, readH1Page, readH1Run } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -52,8 +52,8 @@ function startHost(userDataDir: string, daemonStateDirectory: string) {
   })
 }
 
-describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservation, and on -> off -> on non-reuse', () => {
-  it('N5 + block reservation: on restart delivers reset to mid-cursor device, preserves settled state, and avoids per-event h1_seq_floor commits', async () => {
+describe('durable v3 cursor and receipt recovery', () => {
+  it('returns a snapshot for a pruned cursor after restart and preserves settled state', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -70,6 +70,10 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
       const device = await enrollLocal(host1.service)
       const ca = host1.service.caCertificatePEM
 
+      const initial = await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, {
+        op: 'subscribe', views: ['activeRuns'], waitMs: 0
+      })
+      const known = { hostId: initial.subscribe.hostId, logId: initial.subscribe.logId, seq: initial.subscribe.seq }
       const intent1 = randomUUID()
       const sub1 = await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
@@ -77,42 +81,31 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'n5 run 1' })
       })
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
-      const poll1 = readH1Page(host1, device.certPEM, { cursor: 0 })
-      expect(poll1.poll.cursor).toBeGreaterThanOrEqual(3)
-
-      // Block reservation: no per-event h1_seq_floor key; reserved ceiling R = 1024.
-      expect(host1.orchestrationAuthority!.sink.getMeta('h1_seq_floor')).toBeUndefined()
-      const reservedR = Number(host1.orchestrationAuthority!.sink.getMeta('h1_seq_reserved_until'))
-      expect(reservedR).toBe(1024)
-
+      const sink = host1.orchestrationAuthority!.sink
+      const pruned = sink.pruneEvents({ olderThanAt: Date.now() + 1 })
+      expect(pruned.prunedThrough).toBeGreaterThan(known.seq)
       await host1.dispose()
       host1 = undefined
 
-      // Restart in on mode: device holding mid-stream cursor = 2 receives reset to R (1024),
-      // ZERO renumbered old events, and watch reports settled state.
       host2 = await startHost(userDataDir, daemonDir)
-      const midPoll = readH1Page(host2, device.certPEM, { cursor: 2 })
-      expect(midPoll.error).toBeUndefined()
-      expect(midPoll.poll.events).toEqual([])
-      expect(midPoll.poll.cursor).toBe(reservedR)
-      expect(midPoll.poll.reset).toEqual({ requested: 2, availableFrom: reservedR })
-
-      const midWatch = await readH1Run(host2, device.certPEM, {
-        runId: sub1.runId,
-        cursor: 2,
-        outputCursor: 0,
-        waitMs: 1_000
+      const reset = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
+        op: 'subscribe', views: ['activeRuns'], known, waitMs: 0
       })
-      expect(midWatch.error).toBeUndefined()
-      expect(midWatch.watch.state).toBe('settled')
-      expect(midWatch.watch.poll.reset).toEqual({ requested: 2, availableFrom: reservedR })
+      expect(reset.subscribe).toMatchObject({ mode: 'snapshot', logId: known.logId })
+      expect(reset.subscribe.seq).toBeGreaterThanOrEqual(pruned.prunedThrough)
+      const observed = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [sub1.runId], waitMs: 0
+      })
+      expect(observed.subscribe.snapshot.activeRuns.rows).toContainEqual(
+        expect.objectContaining({ runId: sub1.runId, lifecycle: 'settled' })
+      )
 
       const sub2 = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'n5 run 2' })
       })
-      expect(sub2.seq).toBe(reservedR + 1)
+      expect(sub2.seq).toBeGreaterThan(reset.subscribe.seq)
       expect(await waitTerminal(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
     } finally {
       await host2?.dispose()
@@ -121,7 +114,7 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
     }
   }, 30_000)
 
-  it('several authoritative restarts retain runs and avoid reusing H1 sequence numbers', async () => {
+  it('several authoritative restarts retain runs and never reuse durable sequence numbers', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -145,8 +138,8 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 1 on' })
       })
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
-      const r1 = Number(host1.orchestrationAuthority!.sink.getMeta('h1_seq_reserved_until'))
-      expect(r1).toBeGreaterThanOrEqual(1024)
+      const r1 = host1.orchestrationAuthority!.sink.listEvents().at(-1)!.seq
+      expect(r1).toBeGreaterThanOrEqual(sub1.seq)
       await host1.dispose()
       host1 = undefined
 
@@ -160,9 +153,7 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
       })
       expect(sub2.seq).toBeGreaterThan(r1)
       expect(await waitTerminal(hostOff.channel.socketPath, ca, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
-      const offMaxSeq = (
-        readH1Page(hostOff, device.certPEM, { cursor: r1 })
-      ).poll.cursor as number
+      const offMaxSeq = hostOff.orchestrationAuthority!.sink.listEvents().at(-1)!.seq
       expect(offMaxSeq).toBeGreaterThanOrEqual(sub2.seq)
       await hostOff.dispose()
       hostOff = undefined
@@ -183,14 +174,12 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
         [intent2, sub2.runId],
         [intent3, sub3.runId]
       ] as const) {
-        const w = await readH1Run(host2, device.certPEM, {
-          runId,
-          cursor: 0,
-          outputCursor: 0,
-          waitMs: 1_000
+        const observed = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
+          op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
         })
-        expect(w.error).toBeUndefined()
-        expect(w.watch.state).toBe('settled')
+        expect(observed.subscribe.snapshot.activeRuns.rows).toContainEqual(
+          expect.objectContaining({ runId, lifecycle: 'settled' })
+        )
         const r = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
           op: 'resolveIntent',
           intentId

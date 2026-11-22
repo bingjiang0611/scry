@@ -1,5 +1,3 @@
-import { open as openFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import type { ConversationStore } from '../main/conversation-store'
 import { createConversationProjectionAccess } from './orchestration-conversation-projection'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
@@ -17,74 +15,13 @@ import {
 } from '../host-runtime/orchestration/recovery'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 
-const SNAPSHOT_HEADER_BYTES = 512
-const LOG_TAIL_SCAN_BYTES = 1_500_000
-
-/**
- * Lightweight async peek of H1's on-disk `lastSeq` (W16 Part 1): reads only the 512 B snapshot
- * header (`"snapshot":{"version":1,"lastSeq":<N>`) and the tail of `session-ledger.log`, avoiding
- * a main-thread synchronous parse+stringify+SHA-256 of multi-megabyte snapshots (33k runs = 21 MB).
- * Strictly fail-open (corrupt/missing H1 returns 0).
- */
-async function peekH1LastSeqAsync(userDataDir: string): Promise<number> {
-  const ledgerDir = join(userDataDir, 'remote', 'ledger')
-  let maxSeq = 0
-  try {
-    const fh = await openFile(join(ledgerDir, 'session-ledger.snapshot.json'), 'r')
-    try {
-      const buf = Buffer.allocUnsafe(SNAPSHOT_HEADER_BYTES)
-      const { bytesRead } = await fh.read(buf, 0, SNAPSHOT_HEADER_BYTES, 0)
-      const header = buf.toString('utf8', 0, bytesRead)
-      const match = /"snapshot"\s*:\s*\{\s*"version"\s*:\s*1\s*,\s*"lastSeq"\s*:\s*(\d+)/.exec(header)
-      if (match) {
-        const parsed = Number(match[1])
-        if (Number.isSafeInteger(parsed) && parsed > maxSeq) maxSeq = parsed
-      }
-    } finally {
-      await fh.close()
-    }
-  } catch {
-    // Missing or unreadable snapshot: ignore.
-  }
-  try {
-    const fh = await openFile(join(ledgerDir, 'session-ledger.log'), 'r')
-    try {
-      const st = await fh.stat()
-      if (st.size > 0) {
-        const readLen = Math.min(st.size, LOG_TAIL_SCAN_BYTES)
-        const start = st.size - readLen
-        const buf = Buffer.allocUnsafe(readLen)
-        const { bytesRead } = await fh.read(buf, 0, readLen, start)
-        const lines = buf.toString('utf8', 0, bytesRead).split('\n')
-        for (let i = lines.length - 1; i >= 0; i -= 1) {
-          const line = lines[i]?.trim()
-          if (!line) continue
-          try {
-            const ev = JSON.parse(line) as { seq?: unknown }
-            if (typeof ev.seq === 'number' && Number.isSafeInteger(ev.seq) && ev.seq > maxSeq) {
-              maxSeq = ev.seq
-              break
-            }
-          } catch {
-            // Skip truncated trailing line if any and inspect prior complete line.
-          }
-        }
-      }
-    } finally {
-      await fh.close()
-    }
-  } catch {
-    // Missing or unreadable log: ignore.
-  }
-  return maxSeq
-}
+export const LEGACY_H1_IMPORT_COMPLETE = 'legacy_h1_import_complete'
 
 export interface AuthorityStartupResult {
   recovery: RecoverOrchestrationSummary
   deferredPlan: LegacyLedgerPlan | undefined
   importComplete: Promise<void>
   resolveImportComplete: (() => void) | undefined
-  h1DiskLastSeq: number
 }
 
 /**
@@ -108,14 +45,10 @@ export async function runAuthorityStartupSequence(options: {
   let resolveImportComplete: (() => void) | undefined
   let importComplete: Promise<void> = Promise.resolve()
 
-  // B1-B3 + W16 Part 1: once `on` mode is active, orchestration.db is the sole authority and H1 is a pure
-  // downstream mirror; only peek H1's `lastSeq` asynchronously (without parsing 21 MB JSON on main thread)
-  // when `alreadyOnActive` is true to guard against fail-open `off` residual. On `off -> on`,
-  // `loadLegacyLedgerPlanAsync` already parsed H1 off-thread and updated `h1_seq_reserved_until`.
-  const alreadyOnActive = sink.getMeta('orchestration_on_active') === '1'
-  let h1DiskLastSeq = 0
-  if (alreadyOnActive) {
-    h1DiskLastSeq = await peekH1LastSeqAsync(userDataDir)
+  // Before P4-6, active databases had an H1 downstream mirror. Never import it upstream.
+  const legacyImported = sink.getMeta('orchestration_on_active') === '1' ||
+    sink.getMeta(LEGACY_H1_IMPORT_COMPLETE) === '1'
+  if (legacyImported) {
     // Existing authoritative databases may have started with a catalog and no H1 entries.
     if (!sink.getMeta('legacy_catalog_sha256')) importCatalogEntries(sink, userDataDir, Date.now())
   } else {
@@ -130,12 +63,6 @@ export async function runAuthorityStartupSequence(options: {
       log(`daemon.orchestration-on-skip-corrupt-h1 ${error instanceof Error ? error.message : String(error)}`)
     }
     if (plan) {
-      if (plan.lastSeq > 0) {
-        const prevReserved = Number(sink.getMeta('h1_seq_reserved_until') ?? '0')
-        if (plan.lastSeq > (Number.isFinite(prevReserved) ? prevReserved : 0)) {
-          sink.setMeta('h1_seq_reserved_until', String(plan.lastSeq))
-        }
-      }
       if (plan.unimportedRuns.length > deferredThreshold) {
         const pendingConvRunIds = new Set<string>()
         try {
@@ -179,7 +106,7 @@ export async function runAuthorityStartupSequence(options: {
     } else {
       importCatalogEntries(sink, userDataDir, Date.now())
     }
-    sink.setMeta('orchestration_on_active', '1')
+    if (!deferredPlan) sink.setMeta(LEGACY_H1_IMPORT_COMPLETE, '1')
   }
 
   // Decision G: install before-turn-settled observer BEFORE reconcileTwoLedgersOnStartup.
@@ -218,5 +145,5 @@ export async function runAuthorityStartupSequence(options: {
   const conversations = await managed.loadOwnership()
   if (conversations.size) createConversationProjectionAccess(() => sink, log).importExisting(conversations.values())
 
-  return { recovery, deferredPlan, importComplete, resolveImportComplete, h1DiskLastSeq }
+  return { recovery, deferredPlan, importComplete, resolveImportComplete }
 }
