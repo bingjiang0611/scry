@@ -45,6 +45,8 @@ export interface ChatViewProps {
   onRetryDetection?: () => void
   submitting?: boolean
   sessionLoading?: boolean
+  // Live trace is pending; this is not a composer or session-owner lock.
+  transcriptPending?: boolean
   sessionCacheVisible?: boolean
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
   /**

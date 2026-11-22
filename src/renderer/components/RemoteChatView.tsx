@@ -68,7 +68,8 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         composerScopeKey={draftKey}
         sendBlockedReason={workspaceSelection.blockedReason ?? sendBlockedReason}
         submitting={submitting}
-        sessionLoading={(historyLoading || waitingForRun) && displayTurns.length === 0}
+        sessionLoading={historyLoading && displayTurns.length === 0 && !runActive}
+        transcriptPending={historyLoading || waitingForRun}
         sessionEvidenceGap={archiveUnavailable
           ? { status: 'unavailable', detail: historyEvidence?.reason ?? `${host} 未提供这条会话的归档` }
           : null}
