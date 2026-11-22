@@ -13,7 +13,6 @@ export type CostSource =
 export type CostConfidence = 'exact' | 'provider_reported' | 'estimated' | 'inferred'
 export type CostUnit = 'usd' | 'credits' | 'token' | 'custom'
 
-// P0：result 的 per-model 用量明细（SDK result.modelUsage 展开，落 model_usage 子表）。
 export interface ModelUsageRow {
   model: string
   inputTokens?: number
@@ -34,18 +33,14 @@ export interface ModelUsageRow {
   usageSource?: string
 }
 
-// B2/P0/P2：sqlite 跨会话分析结果（从 spans/model_usage 聚合），跨 main/preload/renderer 共用。
 export interface DbStats {
   status?: 'ready' | 'unavailable' | 'query_error'
   totals: { cost: number | null; tin: number | null; tout: number | null; turns: number; toolCalls?: number; dangerEvents?: number }
   topTools: { tool: string; n: number; mcp: number }[]
   byCwd: { cwd: string; cost: number | null; turns: number }[]
   byModel: { model: string; tin: number | null; tout: number | null; cost: number | null }[]
-  // P2 Analytics：工具耗时（墙钟推算）+ 成功率。avgMs 来自 tool_use→tool_result 墙钟差，errors=失败次数。
   toolStats: { tool: string; n: number; avgMs: number; errors: number }[]
-  // P3 跨会话危险审计趋势：哪些危险操作最频繁（从 spans.danger_* 聚合）。
   dangerTrend: { reason: string; level: string; n: number }[]
-  // Analytics v7：字段可选以兼容 dev/HMR 中旧 preload；main 的当前实现始终返回完整形状。
   tokenDaily?: {
     day: string
     input: number | null
@@ -109,7 +104,6 @@ export interface QoderCreditEvidence {
   totalTurns: number
   source: 'qoder_native_transcript' | 'qoder_recorded_usage' | 'pi_qoder_credit_observation' | 'qoder_mixed_usage'
   omissionReason?: string
-  // Only matched main-transcript requests; never a complete account bill.
   completeness: 'partial'
 }
 

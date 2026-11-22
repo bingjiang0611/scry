@@ -29,10 +29,7 @@ describe('tool panel shaping', () => {
     expect(panel.readAt).toBe(42)
     expect(panel.analytics?.totals.costUsd).toBe(1.25)
     expect(panel.analytics?.totals.inputTokens).toBeNull()
-    // A model row without a known cost is not a breakdown row at all; the Mac
-    // table drops it too, so the phone must not invent an "unavailable" line.
     expect(panel.analytics?.byModel).toEqual([])
-    // Coverage counters travel with the projection so the phone can show evidence.
     expect(panel.analytics?.totals.tokenKnownRows).toBe(2)
     expect(panel.analytics?.totals.exactCostRows).toBe(1)
   })
@@ -63,10 +60,8 @@ describe('tool panel shaping', () => {
     expect(panel.analytics?.byModel.map(row => [row.provider, row.model, row.costUsd])).toEqual([
       ['claude', 'opus', 30],
       ['codex', 'gpt-6.1-sol', 10],
-      // qoder's credits are attributed to the provider, exactly like the Mac table.
       ['qoder', null, 9]
     ])
-    // Only rows the Mac would draw as approximate carry the marker.
     expect(panel.analytics?.byModel.map(row => row.approximate)).toEqual([false, false, false])
   })
 
@@ -142,11 +137,9 @@ describe('tool panel shaping', () => {
     expect(panel.mcp?.providerId).toBe('claude')
     expect(panel.mcp?.configured[0]).toMatchObject({ name: 'fs', enabled: true, targetId: 't1' })
     expect(panel.mcp?.runtime?.[0]).toEqual({ name: 'fs', status: 'connected', tools: 4 })
-    // No scan evidence stays absent with a reason, never "no findings".
     expect(panel.mcp?.scan).toBeUndefined()
     expect(shapeMcpPanel('claude', snapshot, 1, undefined, '这次没有生成可读的扫描报告').mcp?.scanUnavailable)
       .toBe('这次没有生成可读的扫描报告')
-    // No live status is not "disconnected": the panel keeps null.
     expect(shapeMcpPanel('claude', { configured: [], runtime: null }).mcp?.runtime).toBeNull()
   })
 })

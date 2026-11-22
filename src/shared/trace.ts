@@ -46,13 +46,10 @@ export {
   normalizeWorkspaceOverlap
 } from './turn-diff.js'
 
-// 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
-// 让 SDK stream 和未来 codex adapter 都归一化到同一格式（一份数据多处用）。
 
 export type TraceKind = 'tool' | 'skill' | 'agent' | 'human' | 'model' | 'harness' | 'hook'
 export type FileOp = 'read' | 'write' | 'edit'
 
-// P3 审计：危险工具调用的标记（观测，不阻塞）。danger=高危(删/提权/push/远程脚本)，warn=可疑(跨项目写/MCP写)。
 export type DangerLevel = 'danger' | 'warn'
 export interface DangerVerdict {
   level: DangerLevel
@@ -74,16 +71,9 @@ export interface McpCallRef {
   tool: string
 }
 
-// B1：进行中 run 的快照（main 缓冲、renderer 重挂时拉取恢复，避免 reload/HMR 丢失在途 trace）。
-// 与 renderer 的 Turn 结构一致（结构化类型，可互赋）。
 export interface ActiveRun {
   runId: string
-  /** Stable owner for managed-conversation attention, independent of Provider bindings. */
   conversationId?: string
-  /**
-   * Attention owner when it is not this conversation: a side chat has no sidebar row of its
-   * own, so its unread result and questions belong to the row of the session it came from.
-   */
   attentionKey?: string
   providerId?: ProviderId
   agentProfileId?: string
@@ -93,33 +83,22 @@ export interface ActiveRun {
   attachments?: AgentInputAttachment[]
   pendingQuestions?: AgentQuestionRequest[]
   items: TraceEvent[]
-  /** Latest bounded legacy observation; global summaries must not rescan the trace. */
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   done: boolean
-  /** Provider transport settled. Independent of the local finalization below. */
   providerSettled?: boolean
-  /**
-   * Local finalization (turn diff, archive, managed settlement) is still open after the
-   * Provider settled. Such a run still owns its conversation and its recording fences, so
-   * admission and deletion keep waiting for it, while stop control must not call into an
-   * ended Provider.
-   */
   localFinalizing?: boolean
-  /** 已请求停止时的真实停止进度；缺失表示没有人请求过停止，不表示已终止。 */
   stopState?: AgentStopState
   sessionId?: string
   error?: string
   errorHint?: string
 }
 
-// 斜杠命令：来自各 Provider 的命令目录；可包含原生命令或 Scry 映射的 Skill 别名，供 composer 的 / 命令面板。
 export interface SlashCmd {
   name: string
   description: string
   argumentHint?: string
 }
 
-// MCP 真实状态：来自当前 runtime 的 init/live 信息；Claude SDK 下和终端 /mcp 一致（含 needs-auth）。
 export interface McpLiveStatus {
   name: string
   status: 'connected' | 'cached' | 'disconnected' | 'failed' | 'needs-auth' | 'needs-client-registration' | 'pending' | 'disabled'
@@ -141,17 +120,15 @@ export interface ContextCompaction {
 }
 
 export interface TraceEvent {
-  /** One run-scoped metering snapshot, separate from result USD/token counters. */
   creditUsage?: CreditUsageEvidence
   inputContent?: import('./tool-content.js').ToolContent
   outputContent?: import('./tool-content.js').ToolContent
-  /** Durable assistant/reasoning body with a bounded inline preview. */
   modelContent?: import('./tool-content.js').ToolContent
   id: string
   ts: string
-  runId: string // 一次 query() = 一个 run（模式 A 下 app 自造 baggage）
+  runId: string
   kind: TraceKind
-  stage: string // 如 tool:Bash / skill:xxx / agent:xxx / prompt / text / thinking / result
+  stage: string
   tool?: string
   toolUseId?: string
   parentToolUseId?: string | null
@@ -174,7 +151,7 @@ export interface TraceEvent {
   text?: string
   thinking?: string
   input?: unknown
-  messageId?: string // SDK assistant message.id = llm_request 级（一个 run 内多条）；result 事件无
+  messageId?: string
   durationMs?: number
   durationApiMs?: number
   llmCall?: { outputTokens: number; durationMs: number; firstTokenMs?: number; model?: string }
@@ -198,8 +175,8 @@ export interface TraceEvent {
   modelUsage?: ModelUsageRow[]
   isError?: boolean
   output?: string
-  danger?: DangerVerdict // P3 审计：危险工具标记（normalize 时分类，观测不阻塞）
-  turnDiff?: TurnDiffSnapshot // 每轮开始/结束 Git 工作树快照的净变化；Provider 无关，旧历史可缺失
+  danger?: DangerVerdict
+  turnDiff?: TurnDiffSnapshot
   providerId?: ProviderId
   runtimeProvider?: RuntimeProvider
   billingProvider?: BillingProvider

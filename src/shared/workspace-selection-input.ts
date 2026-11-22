@@ -26,7 +26,6 @@ function branch(value: unknown): WorkspaceBranchRef {
   return { kind: input.kind, name, head }
 }
 
-/** Structural validation only; main still checks native Git, canonical cwd and project authority. */
 export function parseWorkspaceStartSelection(value: unknown): WorkspaceStartSelection {
   const input = object(value)
   const operationId = text(input.operationId, 36).toLowerCase()

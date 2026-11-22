@@ -21,6 +21,9 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [017: Keep device approval local and distinct from transport](017-remote-pairing-and-host-approval.md)
 - [018: Recover remote Desktop reads without guessing about writes](018-remote-desktop-protocol-evidence.md)
 - [019: Report what the App observed about its background service](019-background-service-observation.md)
+- [020: Verify the running build; advise on Provider versions](020-build-identity-and-provider-compatibility.md)
+- [021: Keep measured speed, recorded usage and account billing distinct](021-usage-observation-and-billing.md)
+- [022: Project observed state without granting authority or copying payloads](022-workspace-and-content-projection.md)
 
 ## Source comment ratchet
 

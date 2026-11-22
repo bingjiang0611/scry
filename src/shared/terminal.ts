@@ -2,7 +2,6 @@ export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024
 export const TERMINAL_MAX_DIMENSION = 1_000
 
 export interface TerminalStartRequest {
-  /** Renderer workbench identity; grouping only, never path authorization. */
   scopeId?: string
   cwd: string | null
   cols: number
@@ -32,7 +31,6 @@ export interface TerminalAttachInfo extends TerminalSessionInfo {
 
 export interface TerminalRecordingRequest {
   id: string
-  /** Byte offset in the UTF-16LE recording, not UTF-8 or a character index. */
   offset: number
   limit?: number
 }
@@ -65,7 +63,6 @@ export interface TerminalRecordingSummary {
 export interface TerminalRecordingListPage {
   items: TerminalRecordingSummary[]
   nextCursor: string | null
-  /** Some metadata could not be read; no foreign workspace identities are exposed. */
   partial: boolean
 }
 

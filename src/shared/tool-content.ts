@@ -1,4 +1,3 @@
-// Additive schema-v1 payload. Absence means a legacy writer, never proof of complete content.
 export type ToolContentReason = 'provider_missing' | 'source_truncated' | 'field_budget' | 'turn_budget' | 'redaction_failed' | 'serialization_failed' | 'not_collected'
 
 export interface ToolContentRef {
@@ -8,11 +7,9 @@ export interface ToolContentRef {
   encoding: 'utf8' | 'json'
 }
 
-/** Generic durable captured body reference; ToolContentRef remains the schema-v1 compatibility name. */
 export type ContentRef = ToolContentRef
 
 export interface RecorderContentPageRequest {
-  /** App-owned trace bodies are scoped to the selected catalog workspace. */
   source?: 'app-trace'
   ref: ContentRef
   offset?: number
@@ -29,7 +26,6 @@ export interface RecorderContentPage {
 
 export interface ToolContent {
   content?: string
-  /** Complete captured content stored outside the bounded inline preview; inspect redaction provenance. */
   contentRef?: ToolContentRef
   encoding: 'utf8' | 'json' | 'json-fragment'
   savedBytes: number
@@ -40,7 +36,6 @@ export interface ToolContent {
   reasons: ToolContentReason[]
 }
 
-/** Generic captured body envelope; usable for tools, model output, diffs and transcript ranges. */
 export type ContentEnvelope = ToolContent
 
 export function isToolContentRef(value: unknown): value is ToolContentRef {

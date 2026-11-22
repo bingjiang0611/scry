@@ -1,27 +1,10 @@
 import type { ProviderId } from './provider.js'
 
-/**
- * Provider CLI 版本兼容性策略。
- *
- * Scry 观测的是本机已安装的 Provider CLI，它们的发版节奏与 Scry 无关：一个新版本
- * 可能换掉 transcript 结构、审批协议或 rollout 字段，让 Scry 的证据变得不完整甚至
- * 错误。版本判定必须是可声明、可随时更新的数据，而不是散落在各 adapter 里的硬编码
- * if；同时它只是**建议**，绝不替用户阻止运行，也绝不在拉取失败时让探测失败。
- *
- * 四档语义（与证据诚实原则一一对应）：
- * - `supported`：已验证，证据完整。
- * - `graceful`：可用，但已知有能力缺失；UI 必须说明缺什么。
- * - `unsupported`：未验证过，证据可能不完整，不保证正确。
- * - `broken`：已知会产出错误证据或无法运行。
- * - `unknown`：没有适用规则或版本号无法解析；不得冒充 supported。
- */
 export type ProviderCompatibilityStatus = 'supported' | 'graceful' | 'unsupported' | 'broken' | 'unknown'
 
-/** manifest 的来源，决定这条建议的权威性，必须随建议一起暴露。 */
 export type ProviderCompatibilitySource = 'bundled' | 'cache' | 'remote'
 
 export interface ProviderCompatibilityRule {
-  /** 版本范围，例如 `>=1.2.0 <2.0.0`；多段用 `||` 取并集。 */
   range: string
   status: Exclude<ProviderCompatibilityStatus, 'unknown'>
   note?: string
@@ -29,23 +12,19 @@ export interface ProviderCompatibilityRule {
 
 export interface ProviderCompatibilityPolicy {
   provider: ProviderId
-  /** 本条策略适用的 Scry 版本范围；缺省表示所有版本。 */
   scryRange?: string
   recommendedRange?: string
-  /** 顺序匹配，先命中先生效。 */
   rules: ProviderCompatibilityRule[]
 }
 
 export interface ProviderCompatibilityManifest {
   schemaVersion: 1
-  /** ISO 时间戳，用于在 remote / 磁盘缓存 / 内置之间择新。 */
   updatedAt: string
   policies: ProviderCompatibilityPolicy[]
 }
 
 export interface ProviderCompatibilityAdvisory {
   status: ProviderCompatibilityStatus
-  /** 规整后的版本号；无法解析时为 null，此时 status 必为 unknown。 */
   observedVersion: string | null
   recommendedRange: string | null
   matchedRange: string | null
@@ -58,17 +37,11 @@ interface Semver {
   major: number
   minor: number
   patch: number
-  /** 预发布标识；存在时版本低于同号正式版。 */
   prerelease: string | null
 }
 
 const SEMVER = /^(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
 
-/**
- * 从 CLI 原始输出里取出可比较的版本号。Provider 的 `--version` 会混入名称、构建号或
- * 日期前缀（如 `codex-cli 0.52.0`、`2026.01.02-a1b2c3`），取第一个 semver 形状的片段；
- * 取不到就返回 null，让上层如实标 unknown，而不是猜一个版本去比较。
- */
 export function normalizeProviderVersion(raw: string | undefined | null): string | null {
   if (typeof raw !== 'string') return null
   const match = raw.match(/\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?/)
@@ -119,10 +92,6 @@ export function compareSemver(left: Semver, right: Semver): number {
 
 const COMPARATOR = /^(>=|<=|>|<|=)?\s*(.+)$/
 
-/**
- * 范围求值。支持 `>= > <= < =` 比较符，空格分隔取交集，`||` 取并集。
- * 范围或版本无法解析时返回 null —— 这是「判不了」，不是「不匹配」。
- */
 export function satisfiesRange(version: string, range: string): boolean | null {
   const target = parseSemver(version)
   if (!target) return null
@@ -157,10 +126,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/**
- * 严格校验 manifest。任何一条非法就整体拒绝：半个策略表会让某些 Provider 静默失去
- * 兼容性判定，而用户看到的仍是「已检查」。拒绝后调用方回退到上一份可信 manifest。
- */
 export function parseCompatibilityManifest(value: unknown): ProviderCompatibilityManifest | null {
   if (!isRecord(value)) return null
   if (value.schemaVersion !== 1) return null
@@ -179,7 +144,6 @@ export function parseCompatibilityManifest(value: unknown): ProviderCompatibilit
       if (typeof rule.range !== 'string' || !rule.range.trim()) return null
       if (typeof rule.status !== 'string' || !STATUSES.has(rule.status)) return null
       if (rule.note !== undefined && typeof rule.note !== 'string') return null
-      // 范围必须可求值，否则这条规则永远判不出结果。
       if (satisfiesRange('0.0.0', rule.range) === null) return null
       rules.push({
         range: rule.range,
@@ -199,7 +163,6 @@ export function parseCompatibilityManifest(value: unknown): ProviderCompatibilit
   return { schemaVersion: 1, updatedAt: value.updatedAt, policies }
 }
 
-/** `updatedAt` 更新的 manifest 胜出；时间相同或无法比较时保留现有的。 */
 export function isNewerManifest(
   candidate: ProviderCompatibilityManifest,
   current: ProviderCompatibilityManifest | undefined
@@ -219,7 +182,6 @@ export function resolveProviderCompatibility(args: {
   manifest: ProviderCompatibilityManifest
   source: ProviderCompatibilitySource
   provider: ProviderId
-  /** CLI 原始版本输出，可带名称/前缀。 */
   version: string | undefined | null
   scryVersion: string
 }): ProviderCompatibilityAdvisory {

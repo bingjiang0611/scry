@@ -8,7 +8,6 @@ export interface ResultWallTiming {
 
 type ResultEvent = Pick<TraceEvent, 'kind' | 'stage' | 'text' | 'runtimeProvider'>
 
-/** Provider usage result：Claude continuation 为累计快照，其他 Provider 当前为增量事件。 */
 export function providerUsageResultEvents<T extends ResultEvent>(events: readonly T[]): T[] {
   const observed = events.filter((event) => event.kind === 'harness' && event.stage === 'result')
   const native = observed.filter((event) => event.text !== 'transcript assistant usage')
@@ -21,13 +20,6 @@ function finiteDuration(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
-/**
- * 合并同一顶层轮次内的多个 Provider result 墙钟区间。
- *
- * result.durationMs 是墙钟边界，不是可累加的 API 活动量。正常 continuation、后台任务通知
- * 或累计快照都可能产生多个 result；用所有 `[ts - durationMs, ts]` 的外包络既保留间隔，
- * 也不会把重叠区间重复计时。只要任一 canonical result 缺少可靠边界，就不伪造整轮墙钟。
- */
 export function resultWallTiming(events: readonly {
   kind: string
   stage: string

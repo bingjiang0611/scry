@@ -21,9 +21,6 @@ export interface CreditRequest {
 
 const CREDIT_SOURCES: readonly CreditUsageSource[] = ['qoder_sdk', 'qoder_native_transcript', 'pi_qoder_credit_observation']
 
-/** Credits describe the billing provider, which is not always the agent transport: a Pi run
- * through Rotom bills Qoder models. Pair each agent with the sources only it can observe, so a
- * Pi record never borrows Qoder's SDK/native sources and Qoder never borrows Pi's observation. */
 export function creditSourcesMatchProvider(
   providerId: unknown,
   sources: readonly string[]
@@ -47,8 +44,6 @@ export function isCreditUsageEvidence(value: unknown): value is CreditUsageEvide
     typeof usage.amount === 'number' && Number.isFinite(usage.amount) && usage.amount >= 0
 }
 
-/** Missing progress can converge to a value. Conflicting known amounts stay unknown,
- * regardless of arrival order; neither max() nor session-cumulative totals are charges. */
 export function dedupeCreditRequests(requests: Iterable<CreditRequest>): CreditRequest[] {
   const unique = new Map<string, CreditRequest>()
   const conflicts = new Set<string>()
@@ -89,8 +84,6 @@ const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const id = (value: unknown): string | undefined => typeof value === 'string' && value ? value : undefined
 
-/** Each instance belongs to one run, including resume/stop. Retains metering only,
- * never message content. Results' total_credits and modelUsage are cumulative and ignored. */
 export class QoderCreditCollector {
   private observations: Array<{ messageId?: string; requestId?: string; credits: number | null; fallbackId: string }> = []
   private truncated = false

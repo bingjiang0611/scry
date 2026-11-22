@@ -6,13 +6,6 @@ export type ProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi' | 'ant
 export type SessionProviderId = ProviderId | 'legacy_unknown'
 export type ProviderCapability = 'skills' | 'mcp' | 'commands' | 'account'
 
-/**
- * Whether a running "check every MCP" can be cancelled, per Provider. Only a check
- * that runs in a process it owns (and already closes on timeout) can be stopped; a
- * check sent to a shared server would only stop being waited for while the server
- * keeps starting MCP servers, which is not a cancel. Decided per Provider, never
- * inferred.
- */
 export const MCP_LIVE_CHECK_CANCEL: Record<ProviderId, { cancellable: true } | { cancellable: false; reason: string }> = {
   claude: { cancellable: true },
   qoder: { cancellable: true },
@@ -22,7 +15,6 @@ export const MCP_LIVE_CHECK_CANCEL: Record<ProviderId, { cancellable: true } | {
   antigravity: { cancellable: false, reason: 'Antigravity 的 MCP 运行状态仅读取配置快照，不单独发起探活' }
 }
 
-/** The reason a cancelled MCP check reports; the runtime state stays unknown. */
 export const MCP_CHECK_CANCELLED = '已取消检测；没有取得 MCP 运行状态'
 export type CapabilityMode = 'manage' | 'read' | 'none'
 export type CapabilityState = 'ready' | 'degraded' | 'unknown' | 'unsupported'
@@ -73,7 +65,6 @@ export interface DeleteSessionResult {
   failed: Array<{ store: string; error: string }>
 }
 
-/** Count of a running bulk delete; sent after each session is handled, never estimated. */
 export interface DeleteArchivedProgress {
   done: number
   total: number
@@ -83,10 +74,8 @@ export interface DeleteArchivedProgress {
 export interface DeleteArchivedSessionsResult {
   ok: boolean
   cancelled?: boolean
-  // catalog_changed: the archived set changed after the user confirmed (daemon mode); nothing was deleted.
   reason?: 'catalog_unavailable' | 'catalog_changed' | 'user_cancelled' | 'partial_failure'
   deleted: number
-  /** 未删除成功的会话；preview 用于在 UI 里指名，reason 沿用单条删除的原因码。 */
   failures: Array<{ preview: string; reason: NonNullable<DeleteSessionResult['reason']> }>
 }
 
@@ -122,16 +111,10 @@ export interface ProviderDescriptor {
   path?: string
   version?: string
   disabledReason?: string
-  /**
-   * Provider 本身无法被描述时的原因（adapter 未注册、describe 抛错等）。
-   * 与 `disabledReason`（用户主动禁用）语义不同，不得合并。
-   */
   unavailableReason?: string
   capabilities: Record<ProviderCapability, CapabilityMode>
-  /** 账号验证状态说明（如 Antigravity 钥匙串模式标「账号未验证」）。 */
   accountNote?: string
   health?: ProviderHealth
-  /** CLI 版本兼容性建议（声明性策略，非实测）；缺省表示未评估。 */
   compatibility?: ProviderCompatibilityAdvisory
 }
 
@@ -153,13 +136,6 @@ export const PROVIDER_TRANSPORTS: Record<ProviderId, string> = {
   antigravity: 'ACP (stdio)'
 }
 
-/**
- * Provider 级的影子快照。
- *
- * 一个已配置却无法描述的 Provider 必须继续出现在列表里并带上原因：直接消失会
- * 让用户以为自己没装过它，这是用沉默冒充事实。能力全部标 `none`、health 标
- * `unavailable`，没有任何字段会被读成「正常但为空」。
- */
 export function unavailableProviderDescriptor(args: {
   id: ProviderId
   reason: string
@@ -213,7 +189,6 @@ export interface McpSnapshot {
   configured: McpMeta[]
   runtime: McpLiveStatus[] | null
   operations?: {
-    /** 精确 targetId；只有 Provider 原生 OAuth 流程可由 Scry 驱动时才列入。 */
     authenticate: string[]
   }
 }

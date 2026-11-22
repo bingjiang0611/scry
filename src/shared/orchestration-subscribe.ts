@@ -2,20 +2,11 @@ import type { HostAdminNotice } from './host-admin'
 import type { AgentDataUpdated } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
 
-/**
- * Shared wire contract for P4-3 local `subscribe` (P4-orchestration-protocol.md §5).
- * Kept in `src/shared/` with zero imports from `src/host-runtime/orchestration/`
- * so Electron main preserves the Layer 3 single-writer static import boundary.
- */
 
 export type SubscribeView = 'sessions' | 'activeRuns' | 'detail'
 
 export const SUBSCRIBE_VIEWS: ReadonlySet<SubscribeView> = new Set(['sessions', 'activeRuns', 'detail'])
 
-/**
- * Window notices retained as volatile hints in P4-3 (`protocol §5.3`).
- * `agent:turnDone`, `agent:session`, and `agent:stopState` are superseded by durable run events.
- */
 export const SUBSCRIBE_RETAINED_WINDOW_NOTICES: ReadonlySet<string> = new Set([
   'agent:error',
   'agent:backgroundWork',
@@ -66,11 +57,8 @@ export interface SubscribeSessionRow {
 
 export interface SubscribeActiveRunRow {
   runId: string
-  /** Canonical scryRunId bound by remote-run-binding while live (local scope only). */
   scryRunId?: string
-  /** Whether canonical pipeline registered the run (local scope only). */
   admitted?: boolean
-  /** Native external session id bound while live (local scope only). */
   externalSessionId?: string
   sessionKey: string | null
   scope: 'local' | 'remote' | 'system'

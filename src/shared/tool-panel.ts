@@ -3,9 +3,6 @@ import { groupRunningLlmSessions } from './llm-performance.js'
 import type { McpSnapshot } from './provider.js'
 import type { UsageAnalytics, UsageAnalyticsRangeDays } from './trace.js'
 
-// A paired device reads the same panels the Mac shows, but only as a bounded,
-// already-computed projection. Nothing here scans, executes, or invents a value:
-// a missing number stays null and an unavailable source keeps its reason.
 
 export type ToolPanelKind = 'analytics' | 'llmPerformance' | 'mcpTrust'
 
@@ -46,8 +43,6 @@ export interface ToolPanelAnalytics {
     costUsd: number | null
     turns: number
     tokenKnownRows: number
-    // The Mac marks a row whose cost is estimated or inferred; a row reaching
-    // this projection without that flag must not claim to be exact.
     approximate: boolean
   }>
   byModelTruncated: boolean
@@ -75,7 +70,6 @@ export interface ToolPanelLlm {
     }>
     truncated: boolean
     invalidLines: number
-    /** Host-side cap; the phone shows this instead of pretending the list is complete. */
     cappedAt: number
   }
 }
@@ -104,7 +98,6 @@ export interface ToolPanelMcp {
   runtime: Array<{ name: string; status: string; tools?: number }> | null
   configuredTruncated: boolean
   runtimeTruncated: boolean
-  /** A read-only static scan. Absent with a reason when the host cannot scan. */
   scan?: ToolPanelMcpScan
   scanUnavailable?: string
 }
@@ -135,10 +128,6 @@ function totals(source: UsageAnalytics['totals']): ToolPanelTokenTotals {
   }
 }
 
-// Mirrors AnalyticsView.modelBreakdownRows so both surfaces list the same rows:
-// a model row needs a model id and a known cost, qoder's credits are attributed
-// to the provider instead of a model, and the list is ranked by cost. Slicing
-// happens after filtering, otherwise unavailable rows would push real ones out.
 function modelBreakdownRows(models: UsageAnalytics['byModel'], providers: UsageAnalytics['byProvider']) {
   const rows = (models ?? [])
     .filter(row => String(row.provider) !== 'qoder' && row.model && row.costUsd != null)
@@ -241,8 +230,6 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
 
-// The scan report carries evidence paths, key names and hashes. The phone gets
-// only what a reader needs to judge the finding, never that evidence.
 export function shapeMcpScan(raw: unknown): ToolPanelMcpScan | undefined {
   const report = record(raw)
   const summary = record(report?.summary)

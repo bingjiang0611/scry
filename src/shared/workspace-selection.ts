@@ -1,7 +1,6 @@
 import type { ScExpected, ScOperation, ScRead, ScRef } from './source-control.js'
 
 export interface WorkspaceBranchRef {
-  /** Full local or already-fetched remote-tracking ref; never an option or revision expression. */
   name: string
   head: string
   kind: 'local' | 'remote'
@@ -40,7 +39,6 @@ export interface WorkspaceChoicesRequest {
 export interface WorkspaceChoices {
   repositoryId: string
   root: string
-  /** Source checkout revision; preparation also revalidates the selected ref's HEAD. */
   revision: string
   branch: string | null
   head: string | null
@@ -48,14 +46,12 @@ export interface WorkspaceChoices {
   writeBlocker: string | null
   commonDirBusy: boolean
   observedAt: number
-  /** Preferred new-worktree base when origin/main is already available locally. */
   defaultBase?: WorkspaceBranchRef
   selectedWorktree?: WorkspaceWorktreeChoice
   page:
     | { kind: 'branches'; items: WorkspaceBranchChoice[] }
     | { kind: 'worktrees'; items: WorkspaceWorktreeChoice[] }
   nextCursor: WorkspaceChoicesRequest['cursor'] | null
-  /** At most 1,000 matching refs; refine search rather than treating a limit as absence. */
   limited: boolean
 }
 
@@ -81,7 +77,6 @@ export interface WorkspaceStartStatus {
   runId?: string
 }
 
-/** Desktop-local only. Listing candidates does not grant project authority. */
 export interface WorkspaceSelectionApi {
   read: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
   validateBranch: (request: { repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>

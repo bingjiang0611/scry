@@ -162,8 +162,6 @@ function looksLikeConcreteFilePath(path: string): boolean {
   ]).has(base)
 }
 
-// Codex 常把读取落成 Bash commandExecution。只识别明确的只读命令和
-// 具体文件形态，不把 rg 的 pattern、glob 或目录冒充文件；返回值以 ~R 展示。
 export function bashReadFiles(command: string): string[] {
   return bashReadTargets(command).filter(looksLikeConcreteFilePath)
 }

@@ -1,0 +1,13 @@
+# 021: Keep measured speed, recorded usage and account billing distinct
+
+**Status:** Accepted (documents existing behavior)
+
+Billing can belong to a custom upstream; do not derive it from a model name. Qoder credit evidence selects sources by the actual runtime, not just the billing provider. Match native prompt and request identities and parent links, not timestamps or prompt text. Keep request-set identity distinct, cache ancestry resolution, and ignore cumulative totals, fork copies and replay. Deduplicate stable requests. Missing amounts may converge; conflicting known amounts stay unknown. Missing identity must not turn message blocks into multiple charges. A run-scoped meter retains only usage, not bodies. The estimate covers matched main requests, not an account bill. [Issue #154](https://github.com/bingjiang0611/scry/issues/154) tracks handling malformed rows separately from an incomplete final line.
+
+Qoder's base-plan USD equivalent comes from individual subscription tiers, not cash paid: add-ons, bonuses and taxes alter effective prices. Without published token rates for auto-routed tiers, missing credits remain unknown. Keep estimation and attribution visible on all clients; credits may be attributed to a billing provider rather than a model.
+
+Speed uses either SDK API time or observed completed main-agent request intervals, not network bandwidth or server telemetry. Include first-content wait only for calls with an aligned signal. Preserve evidence coverage even without timing. Failed or stopped rounds do not enter distributions. Read the bounded run observation (not its full trace), then replace it with persisted evidence at completion. Observer freshness differs from poll time. Cross-project rows are per Agent and known model, with unknown models separate; metrics use independent arithmetic session means and measured-session denominators, not combined or call-weighted throughput.
+
+Claude continuation results are cumulative; other supported results here are increments. Wall-clock bounds use the envelope of valid result intervals, not a sum that double-counts overlaps. Missing canonical bounds prevent a full-turn wall-clock claim. Tool wall time uses the observed call/result span; missing long-task support must not become zero. Performance payloads crossing IPC contain numeric aggregates, not content.
+
+See [credit-usage.ts](../../src/shared/credit-usage.ts), [qoder-credit-requests.ts](../../src/shared/qoder-credit-requests.ts), [llm-performance.ts](../../src/shared/llm-performance.ts), and [result-timing.ts](../../src/shared/result-timing.ts).

@@ -5,20 +5,17 @@ import { sessionAttentionKey } from './session-attention.js'
 export interface LlmRunningSession {
   key: string
   runId: string
-  /** Latest observer update, not the summary polling time. */
   observedAt?: string
   providerId?: ProviderId
   cwd?: string
   model?: string
   state: LlmPerformance['state']
   outputStarted: boolean
-  /** Completed main-agent calls of this turn only; absent until a Provider gives per-call evidence. */
   tokensPerSecond?: number
   firstTokenMs?: number
   firstOutputWaitMs?: number
 }
 
-/** A bounded, read-only snapshot of currently registered sessions for the global modal. */
 export interface LlmPerformanceSummary {
   observedAt: string
   sessions: LlmRunningSession[]
@@ -34,10 +31,6 @@ export interface LlmRunningModel {
   firstOutputWaitMs?: number
 }
 
-/** One row per Agent and known model across projects; unknown models stay separate.
- * Metrics are arithmetic session means, each with its own measured-session denominator.
- * This is not combined throughput or a call-weighted mean.
- */
 export function groupRunningLlmSessions(sessions: readonly LlmRunningSession[]): LlmRunningModel[] {
   const groups = new Map<string, LlmRunningSession[]>()
   for (const session of sessions) {
@@ -59,7 +52,6 @@ export function groupRunningLlmSessions(sessions: readonly LlmRunningSession[]):
   })
 }
 
-/** Reads only the bounded per-run observation, never the trace. The latest main run owns its session. */
 export function summarizeRunningLlmSessions(activeRuns: readonly ActiveRun[], now = Date.now()): LlmPerformanceSummary {
   const sessions = new Map<string, ActiveRun>()
   for (const run of activeRuns) {
@@ -92,7 +84,6 @@ export interface LlmNetworkConfiguration {
   environmentProxy: { http: boolean; https: boolean; all: boolean; bypass: boolean }
 }
 
-/** Local observation, not network bandwidth or server-side generation telemetry. */
 export interface LlmPerformance {
   state: 'waiting' | 'streaming' | 'tool' | 'buffered' | 'complete'
   observedAt: string
@@ -107,16 +98,9 @@ export interface LlmPerformance {
   outputTokens?: number
   apiDurationMs?: number
   apiTokensPerSecond?: number
-  /**
-   * provider_api: SDK-reported API time (Claude). observed_calls: sum of locally timed main-agent
-   * requests (request start → message end, including first-token wait; tool time excluded).
-   */
   tokenTimingSource?: 'provider_api' | 'observed_calls'
-  /** Completed main-agent calls behind observed_calls timing. */
   llmCalls?: number
-  /** Mean per-call wait from request start to the first content block (thinking included). Local timing. */
   firstTokenMs?: number
-  /** Calls behind firstTokenMs; calls without an aligned first-block signal are not counted. */
   firstTokenCalls?: number
   model?: string
 }
@@ -144,9 +128,7 @@ export type LlmMetric = typeof LLM_METRICS[number]
 
 export interface LlmMetricSample {
   ts: number
-  /** Token/s for speed; seconds for both latency metrics. */
   value: number
-  /** Running turn's completed calls; replaced by the persisted round on completion. */
   provisional?: boolean
 }
 
@@ -166,7 +148,6 @@ function comparisonMetrics(speed?: number, firstTokenMs?: number, firstOutputWai
   return metrics
 }
 
-/** Keep coverage even without timing. Stopped/failed rounds never contribute to metric distributions. */
 export function llmComparisonRounds(rows: readonly LlmPerformanceHistoryRow[], sessions: readonly LlmRunningSession[] = []): LlmComparisonRound[] {
   const rounds: LlmComparisonRound[] = []
   const persisted = new Set(rows.map(row => row.runId))
