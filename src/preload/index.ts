@@ -97,7 +97,6 @@ export interface SessionMeta {
   mtime: number
   preview: string
   count: number
-  /** Execution cwd when grouped beneath a different project root. */
   cwd?: string
   pinnedAt?: number
   archivedAt?: number
@@ -108,12 +107,10 @@ export interface ProjectMeta {
   name: string
   mtime: number
   sessions: SessionMeta[]
-  /** Logical conversations group native aliases without changing raw catalogs. */
   conversations?: ConversationSummary[]
   pinnedAt?: number
 }
 
-/** 定位单条会话：置顶 / 存档只需要这几个字段。 */
 export interface SessionRef {
   providerId: SessionProviderId
   agentProfileId?: string
@@ -128,9 +125,7 @@ export type DetectedAgent = LocatedAgent & {
   capabilities?: ProviderDescriptor['capabilities']
   accountNote?: string
   health?: ProviderDescriptor['health']
-  /** Provider 已装但 adapter 不可用时的原因。 */
   unavailableReason?: string
-  /** CLI 版本兼容性判定；它是提示，不阻断发送。 */
   compatibility?: ProviderDescriptor['compatibility']
 }
 
@@ -254,12 +249,10 @@ const api = {
   gitCommitDiffSnapshot: (request: DiffCommitSnapshotRequest): Promise<DiffCommitSnapshot> => ipcRenderer.invoke('agent:gitCommitDiffSnapshot', request),
   recorderContentPage: (request: RecorderContentPageRequest): Promise<RecorderContentPage> =>
     ipcRenderer.invoke('agent:recorderContentPage', request),
-  // 只拿最近一页：完整历史不作为单个 payload 过 IPC。更早轮次用 loadSessionOlder 取回。
   loadSession: (context: ProviderContext, request?: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
     ipcRenderer.invoke('agent:loadSession', context, request),
   loadSessionOlder: (context: ProviderContext, request: SessionHistoryPageRequest): Promise<SessionHistoryPage | null> =>
     ipcRenderer.invoke('agent:loadSessionOlder', context, request),
-  // 只补一轮的终态证据（result / session_diff）：总览的用量、成本只认这份证据。
   turnTerminalEvidence: (context: ProviderContext, runId: string): Promise<TraceEvent[]> =>
     ipcRenderer.invoke('agent:turnTerminalEvidence', context, runId),
   deleteSession: (context: Omit<ProviderContext, 'providerId'> & { providerId: SessionProviderId }): Promise<DeleteSessionResult> =>
@@ -271,13 +264,11 @@ const api = {
   setSessionArchived: (context: SessionRef, archived: boolean): Promise<boolean> =>
     ipcRenderer.invoke('agent:setSessionArchived', context, archived),
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
-  /** commandStatus='duplicate' 表示这条 commandId 已被受理过，runId 是第一次的那个。 */
   start: (request: AgentStartRequest): Promise<AgentStartResult & { commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
     ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
   unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
   viewSessions: (request: { viewId: string; main: boolean; sessionKeys: string[] }): Promise<boolean> => ipcRenderer.invoke('agent:viewSessions', request),
-  /** 权威事件快照（忽略 done）：live trace 降级后用它重新对齐，包含终态被跳过的事件。 */
   focusedRunSnapshot: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:focusedRunSnapshot'),
   activeRuns: (): Promise<ActiveRun[]> => ipcRenderer.invoke('agent:activeRuns'),
   focusRun: (runId: string | null): Promise<boolean> => ipcRenderer.invoke('agent:focusRun', runId),

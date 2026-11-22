@@ -40,7 +40,6 @@ export const remoteApi = {
   remoteDesktopHostStatus: (): Promise<DesktopHostAccess> => ipcRenderer.invoke('remote:desktop:status'),
   remoteDesktopHostInvite: (): Promise<string> => ipcRenderer.invoke('remote:desktop:invite'),
   remoteDesktopHostDisable: (): Promise<void> => ipcRenderer.invoke('remote:desktop:disable'),
-  // Trusted-LOCAL remote-access pairing (Mac's own UI only).
   remoteStatus: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
   remoteBeginPairing: (): Promise<RemotePairingCode> => ipcRenderer.invoke('remote:pairing:begin'),
   remoteConfirmPairing: (pairingId: string, expectedPublicKeySHA256: string): Promise<RemoteDevice> =>

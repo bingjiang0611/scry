@@ -12,4 +12,6 @@ A content reference names a scoped body, not permission to read an arbitrary pat
 
 Terminal replay offsets are bytes in the UTF-16LE recording. Do not leak other workspace identities when metadata reads fail. After renderer reload, surface the last observed restart reason once so an interrupted view is not mistaken for continuous execution.
 
+Keep a grouped session's execution directory distinct from its project root. Conversation grouping does not rewrite the raw native catalog. Fetch history one IPC page at a time, newest first; retrieve one turn's terminal evidence separately when the usage and cost summary needs it.
+
 See [workspace-selection.ts](../../src/shared/workspace-selection.ts), [source-control.ts](../../src/shared/source-control.ts), [tool-panel.ts](../../src/shared/tool-panel.ts), and [tool-content.ts](../../src/shared/tool-content.ts).

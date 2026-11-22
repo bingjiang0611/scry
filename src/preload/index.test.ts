@@ -233,10 +233,8 @@ describe('preload IPC boundary', () => {
     expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:ack', { subscriptionId: 'sub-run-1', receipt })
     await api.runTraces.resync('sub-run-1')
     expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:resync', 'sub-run-1')
-    // 重对齐的确认只在视图提交了该快照之后才发出，并且必须带上同一个 token。
     await api.runTraces.confirmResync('sub-run-1', 3)
     expect(electron.invoke).toHaveBeenLastCalledWith('runTraces:confirm', { subscriptionId: 'sub-run-1', resyncId: 3 })
-    // 事件通道只转发 keyed 事件，不提供任意订阅。
     electron.on.mockClear()
     const seen: unknown[] = []
     const off = api.runTraces.onEvent((event) => seen.push(event))
@@ -333,7 +331,6 @@ describe('preload IPC boundary', () => {
     traceListener?.(null, { events: traceEvents, ...receipt })
     expect(traceCallback).toHaveBeenCalledTimes(1)
     expect(traceCallback).toHaveBeenCalledWith(traceEvents, receipt)
-    // preload only delivers the receipt. Renderer returns it after the batched React commit.
     expect(electron.invoke).not.toHaveBeenCalled()
     void api.traceAck(receipt)
     expect(electron.invoke).toHaveBeenCalledWith('agent:traceAck', receipt)

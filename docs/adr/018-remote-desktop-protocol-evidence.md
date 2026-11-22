@@ -8,4 +8,6 @@ Observation time and publication sequence are separate; monotonic sequence is no
 
 Recording a submit is not execution. Main owns the durable pending receipt and downstream intent ID; keep any upstream phone identity separate. A lost outcome must not be retried with a new ID. Reconnect or recovery can find acceptance or fence the original ID, not resend a prompt or stop an accepted run. Keep the original diagnostic bounded and omit the payload. A missing long-poll change hint is not proof of no change. For a run started by another device, use the host run ID for stop and answer; use the bound Scry run ID for trace.
 
+A remote run's catalog-write notice prompts a local session-list refresh; it does not focus or start a local run. Question attention exposes bounded counts, not transcript content. A duplicate start receipt reuses the run ID from the first accepted command.
+
 See [desktop-remote.ts](../../src/shared/desktop-remote.ts), [desktop-workbench.ts](../../src/shared/desktop-workbench.ts), and [remote run policy tests](../../src/main/remote/remote-run-policy.test.ts).

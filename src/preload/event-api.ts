@@ -15,16 +15,11 @@ export const eventApi = {
     return () => ipcRenderer.removeListener('agent:backgroundWork', listener)
   },
   onTrace: (cb: (events: TraceEvent[], receipt: TraceBatchReceipt) => void): (() => void) => {
-    // The full batch crosses contextBridge once. Credit is returned by the renderer only after its
-    // batched React update commits; merely invoking this callback is not proof of consumption.
     const l = (_: unknown, payload: TraceBatch): void => {
       const receipt = { generation: payload.generation, batchId: payload.batchId, bytes: payload.bytes }
       try {
         cb(payload.events, receipt)
       } catch (error) {
-        // An exception means the batch was explicitly rejected rather than queued for a React
-        // commit. Return only this fenced receipt so one bad consumer cannot deadlock all future
-        // live delivery; canonical run/archive evidence remains authoritative.
         void ipcRenderer.invoke('agent:traceAck', receipt).catch(() => { })
         throw error
       }
@@ -96,9 +91,6 @@ export const eventApi = {
     ipcRenderer.on('agent:focusedRun', l)
     return () => ipcRenderer.removeListener('agent:focusedRun', l)
   },
-  // A device-initiated (remote) run just wrote an AppSession into the catalog.
-  // This is a refresh hint only (no active-run semantics), so the Mac session
-  // list shows the phone's conversation live without corrupting local run state.
   onRemoteSessionRecorded: (cb: (e: { cwd: string }) => void): (() => void) => {
     const l = (_: unknown, e: { cwd: string }): void => cb(e)
     ipcRenderer.on('remote:sessionRecorded', l)
@@ -109,8 +101,6 @@ export const eventApi = {
     ipcRenderer.on('agent:userQuestion', l)
     return () => ipcRenderer.removeListener('agent:userQuestion', l)
   },
-  // Bounded attention summary: how many questions wait and how many of them are
-  // permission decisions. No transcript content travels here.
   onQuestionAttention: (cb: (event: {
     runId: string; pendingCount: number; permissionCount?: number; inputCount?: number
   }) => void): (() => void) => {
