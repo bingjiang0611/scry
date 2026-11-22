@@ -110,7 +110,7 @@ async function exercise(window, workspace, agentPattern) {
   await waitFor(`() => !document.body.innerText.includes('运行中')`, 'run finished', 300_000)
   const transcript = () => contents.executeJavaScript(
     `document.querySelector('.chat-transcript')?.innerText ?? ''`)
-  const emptyState = '今天想在'
+  const emptyState = '发出第一条消息后，回复和执行记录会出现在这里。'
   const afterRun = await bodyText()
   assert.ok(afterRun.includes(marker), `finished turn is not visible in the transcript:\n${afterRun.slice(-2000)}`)
   const transcriptBefore = await transcript()

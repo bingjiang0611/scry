@@ -3,14 +3,16 @@ import type { AgentQuestionRequest } from '@shared/runtime'
 import { ChatTranscriptTurns } from './chat-view/transcript'
 import { Composer } from './chat-view/Composer'
 import type { ChatViewProps, SessionChatViewProps } from './chat-view/types'
+import { EmptyState, EmptyStateSlot } from './primitives/EmptyState'
+import { EmptyStateArtwork } from './primitives/EmptyStateArtwork'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
+import { REMOTE_SESSION_COPY } from '../constants/remote-copy'
 import { UserMessage } from './ChatTurn'
 import { WorktreeSetupCard } from './WorktreeSetupCard'
-import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
-import { HISTORY_WINDOW_COPY, LOADING_COPY } from '../constants/copy'
+import { HISTORY_WINDOW_COPY, LOADING_COPY, SESSION_EMPTY_COPY } from '../constants/copy'
 import { useHistoryAutoload } from '../hooks/useHistoryAutoload'
-import { ChineseHeadingText } from '../typography'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 const NO_TURNS: ChatViewProps['turns'] = []
@@ -80,34 +82,33 @@ export function ChatView(props: ChatViewProps) {
     loading: historyOlderLoading,
     onLoadOlder: onLoadOlderTurns
   })
+  const transcriptEmpty = turns.length !== 0 || workspaceSetup != null || historyWindow?.hasOlder ? null
+    : sessionEvidenceGap?.status === 'error' && (!transcriptLoading || sessionEvidenceGap.retrying)
+      ? <EmptyState size="page" status="error" picture="alert" title={sessionEvidenceGap.title ?? SESSION_EMPTY_COPY.readFailed}
+          description={sessionEvidenceGap.title ? sessionEvidenceGap.detail : SESSION_EMPTY_COPY.readFailedDetail} announcement="alert"
+          actions={sessionEvidenceGap.retry ? [{ label: REMOTE_SESSION_COPY.readHistoryAgain, onClick: sessionEvidenceGap.retry,
+            intent: 'secondary', busy: sessionEvidenceGap.retrying, icon: 'refresh' }] : undefined} />
+      : transcriptLoading ? null
+        : sessionEvidenceGap && sessionEvidenceGap.status !== 'error'
+          ? <EmptyState size="page" status={sessionEvidenceGap.status} picture="message"
+              title={sessionEvidenceGap.status === 'empty' ? SESSION_EMPTY_COPY.archiveEmpty : SESSION_EMPTY_COPY.readUnavailable}
+              description={sessionEvidenceGap.status === 'unavailable' ? SESSION_EMPTY_COPY.readUnavailableDetail : undefined} />
+          : hasSelectedSession
+            ? emptyState
+              ? <EmptyState size={emptyState.status === 'pending-first-send' ? 'page' : 'card'} status={emptyState.status ?? 'new-side-chat'}
+                  picture="message" title={emptyState.status === 'pending-first-send' ? emptyState.title : SESSION_EMPTY_COPY.sideChat}
+                  description={emptyState.status === 'pending-first-send' ? emptyState.detail : undefined} />
+              : <EmptyState size="page" status="pending-evidence" picture="message" title={SESSION_EMPTY_COPY.waiting}
+                  description={SESSION_EMPTY_COPY.waitingDetail(remoteHost)} />
+            : <EmptyState size="page" className={`unbound-empty${cwd ? ' bound' : ''}`} title={SESSION_EMPTY_COPY.firstTitle}
+                description={workspaceName ? SESSION_EMPTY_COPY.firstBoundDetail(workspaceName) : SESSION_EMPTY_COPY.firstDetail}
+                picture={<EmptyStateArtwork scene="conversation" />} />
   return (
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
           <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={transcriptLoading && !sessionCacheVisible} data-history-autoload="scroll" data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
-            {turns.length === 0 && !transcriptLoading && sessionEvidenceGap && (
-              <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
-                <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
-                <span>{sessionEvidenceGap.detail}</span>
-                <span>{sessionEvidenceGap.status === 'error' ? '这不代表历史为空。请重新点击侧边栏中的会话加载。' : '会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。'}</span>
-              </div>
-            )}
-            {turns.length === 0 && !transcriptLoading && !sessionEvidenceGap && hasSelectedSession && (
-              emptyState
-                ? <div className="chat-session-evidence-gap" role="status" data-status={emptyState.status ?? 'new-side-chat'}>
-                  <b>{emptyState.title}</b>
-                  <span>{emptyState.detail}</span>
-                </div>
-                : <div className="chat-session-evidence-gap" role="status" data-status="empty">
-                  <b>这条会话暂时没有可显示的轮次</b>
-                  <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
-                </div>
-            )}
-            {turns.length === 0 && !workspaceSetup && !transcriptLoading && !sessionEvidenceGap && !hasSelectedSession && (
-              <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
-                <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1 className="zh-balanced-heading" lang="zh-CN"><ChineseHeadingText>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</ChineseHeadingText></h1></header>
-              </div>
-            )}
+            <EmptyStateSlot empty={transcriptEmpty} className="chat-state-slot">
             {!sessionLoading && historyWindow?.hasOlder && (
               <div className="history-window-note" role="note" aria-label={HISTORY_WINDOW_COPY.rangeLabel} aria-busy={historyOlderLoading}>
                 <span className="history-window-range">
@@ -124,7 +125,7 @@ export function ChatView(props: ChatViewProps) {
             {(transcriptLoading || sessionCacheVisible) && (
               sessionCacheVisible
                 ? <DelayedLoadingStatus loading className="is-quiet" title={LOADING_COPY.sessionHistoryVerifying} detail={LOADING_COPY.sessionHistoryVerifyingDetail} />
-                : <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />
+                : !sessionEvidenceGap?.retrying && <DelayedSkeletonRows loading rows={4} label={LOADING_COPY.sessionHistory} />
             )}
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
@@ -142,6 +143,7 @@ export function ChatView(props: ChatViewProps) {
                 </div>
               )}
             </div>
+            </EmptyStateSlot>
           </div>
         </div>
       </WorkspaceFileLinkProvider>

@@ -31,18 +31,21 @@ struct WorkspaceBrowserView: View {
 
 private struct WorkspaceDirectoryView: View {
   @Environment(RemoteRunStore.self) var run
+  @Environment(\.dismiss) private var dismiss
   let cwd: String
   let path: String
   @State private var page: G0Transport.WorkspaceListing?
   @State private var cursors: [String?] = [nil]
   @State private var revision = 0
   @State private var error: String?
+  @State private var denialDetail: String?
+  @State private var retrying = false
 
   var body: some View {
     VStack(spacing: 12) {
       if let page {
         List {
-          if page.entries.isEmpty { Text("此目录为空").foregroundStyle(Palette.dim) }
+          if page.entries.isEmpty { EmptyState(title: ConnectionCopy.directoryEmpty, symbol: nil, size: .row) }
           ForEach(page.entries) { entry in
             NavigationLink {
               if entry.kind == .directory {
@@ -64,26 +67,48 @@ private struct WorkspaceDirectoryView: View {
           Button("下一页") { if let next = page.nextCursor { cursors.append(next) } }
             .disabled(page.nextCursor == nil)
         }.frame(minHeight: 44)
-      } else if error == nil {
-        PlaceholderRows(label: "正在读取目录…", count: 8, rowHeight: 44).frame(maxHeight: .infinity, alignment: .top)
+      } else if let denialDetail {
+        EmptyState(title: ConnectionCopy.folderAccessDenied, detail: denialDetail,
+                   symbol: nil, picture: AnyView(EmptyStatePreview(scene: .lockedProjects)),
+                   action: .init(label: ConnectionCopy.back, perform: { dismiss() }))
+          .frame(maxHeight: .infinity)
+      } else if error != nil {
+        EmptyState(title: ConnectionCopy.directoryReadFailed, detail: ConnectionCopy.directoryFailureDetail,
+                   symbol: "exclamationmark.triangle",
+                   action: .init(label: ConnectionCopy.directoryReadAgain, refresh: true, busy: retrying,
+                                 perform: { retrying = true; revision += 1 }))
+          .frame(maxHeight: .infinity)
+      } else {
+        PlaceholderRows(label: ConnectionCopy.readingDirectory, count: 8, rowHeight: 44).frame(maxHeight: .infinity, alignment: .top)
       }
-      if let error { Notice(text: error, warning: true) }
-      Button("重新读取目录") { cursors = [nil]; revision += 1 }.frame(minHeight: 44)
+      if page != nil {
+        Button(ConnectionCopy.directoryReadAgain) { cursors = [nil]; revision += 1 }.frame(minHeight: 44)
+      }
     }
     .task(id: "\(path):\(cursors.last.flatMap { $0 } ?? ""): \(revision)") {
-      page = nil; error = nil
+      page = nil
+      defer { if !Task.isCancelled { retrying = false } }
       do {
         let result = try await readProject(.init(action: .list, cwd: cwd, path: path,
           cursor: cursors.last.flatMap { $0 }), run: run)
         guard case let .list(value) = result else { throw WorkspaceViewError.unexpectedResponse }
+        try Task.checkCancellation()
+        error = nil
+        denialDetail = nil
         page = value
-      } catch is CancellationError {} catch { self.error = "目录读取失败：\(error)" }
+      } catch is CancellationError {} catch {
+        if !Task.isCancelled {
+          self.error = String(describing: error)
+          denialDetail = ConnectionCopy.FileOpen.denialDetail(error)
+        }
+      }
     }
   }
 }
 
 private struct WorkspaceContentView: View {
   @Environment(RemoteRunStore.self) var run
+  @Environment(\.dismiss) private var dismiss
   let cwd: String
   let path: String? // nil = current workspace vs HEAD, not this session's edits
   @State private var file: G0Transport.WorkspaceFile?
@@ -92,6 +117,8 @@ private struct WorkspaceContentView: View {
   @State private var snapshot: String?
   @State private var revision = 0
   @State private var error: String?
+  @State private var denialDetail: String?
+  @State private var retrying = false
 
   private static let codeFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
@@ -106,10 +133,28 @@ private struct WorkspaceContentView: View {
         Text("当前工作区相对 HEAD · 包含未跟踪文件；不是本会话专属改动")
           .font(.caption).foregroundStyle(Palette.dim)
       }
-      if let diff, diff.status != .captured {
-        Notice(text: "Diff 不可用：\(diff.reason ?? diff.status.rawValue)", warning: true)
+      if let denialDetail {
+        EmptyState(title: path == nil ? ConnectionCopy.workspaceAccessDenied : ConnectionCopy.FileOpen.accessTitle,
+                   detail: denialDetail, symbol: nil,
+                   picture: AnyView(EmptyStatePreview(scene: .lockedFile)),
+                   action: .init(label: ConnectionCopy.back, perform: { dismiss() }))
+          .frame(maxHeight: .infinity)
+      } else if error != nil || (diff.map { $0.status != .captured } ?? false) {
+        EmptyState(title: path.map { ConnectionCopy.workspaceFileReadFailed(URL(fileURLWithPath: $0).lastPathComponent) } ?? ConnectionCopy.workspaceDiffReadFailed,
+                   detail: path == nil ? ConnectionCopy.workspaceDiffReadFailedDetail : ConnectionCopy.fileReadFailedDetail,
+                   symbol: "exclamationmark.triangle",
+                   action: .init(label: ConnectionCopy.readAgain, refresh: true, busy: retrying, perform: {
+                     if error == nil { error = ConnectionCopy.workspaceDiffReadFailed }
+                     retrying = true
+                     reread()
+                   }))
+          .frame(maxHeight: .infinity)
+      } else if let text = file?.content ?? diff?.patch, text.isEmpty, offset == 0, diff?.truncated != true {
+        EmptyState(title: path == nil ? ConnectionCopy.workspaceClean : ConnectionCopy.emptyFile,
+                   detail: path == nil ? ConnectionCopy.workspaceCleanDetail : nil,
+                   symbol: path == nil ? Symbol.branch : Symbol.file)
+          .frame(maxHeight: .infinity)
       } else if let text = file?.content ?? diff?.patch {
-        if text.isEmpty { Text(path == nil ? "当前没有未提交改动" : "空文件").foregroundStyle(Palette.dim) }
         let lines = text.components(separatedBy: "\n")
         ScrollView([.vertical, .horizontal]) {
           LazyVStack(alignment: .leading, spacing: 2) {
@@ -135,25 +180,41 @@ private struct WorkspaceContentView: View {
         if diff?.truncated == true {
           Notice(text: "仅显示前 64 KiB；Diff 未完整展示，请在 Mac 查看其余内容。", warning: true)
         }
-      } else if error == nil {
-        PlaceholderRows(label: "正在读取…", count: 12, rowHeight: 20, icon: false, horizontalPadding: 0).frame(maxHeight: .infinity, alignment: .top)
+      } else {
+        PlaceholderRows(label: ConnectionCopy.readingWorkspaceContent, count: 12, rowHeight: 20, icon: false, horizontalPadding: 0)
+          .frame(maxHeight: .infinity, alignment: .top)
       }
-      if let error { Notice(text: error, warning: true) }
-      Button("从头重新读取") { offset = 0; snapshot = nil; revision += 1 }.frame(minHeight: 44)
+      if file != nil || diff?.status == .captured {
+        Button(ConnectionCopy.retryWorkspaceContent, action: reread).frame(minHeight: 44)
+      }
     }
     .padding(.horizontal, path == nil ? 0 : 16)
     .task(id: "\(path ?? "diff"):\(offset):\(revision)") {
-      file = nil; diff = nil; error = nil
+      file = nil; diff = nil
+      defer { if !Task.isCancelled { retrying = false } }
       do {
         let query = path.map { G0Transport.WorkspaceQuery(action: .file, cwd: cwd, path: $0, offset: offset, snapshot: snapshot) }
           ?? .init(action: .diff, cwd: cwd)
-        switch try await readProject(query, run: run) {
+        let result = try await readProject(query, run: run)
+        try Task.checkCancellation()
+        switch result {
         case let .file(value): file = value
         case let .diff(value): diff = value
         default: throw WorkspaceViewError.unexpectedResponse
         }
-      } catch is CancellationError {} catch { self.error = "读取失败：\(error)。文件变化时请从头读取；仅支持 UTF-8 文本预览。" }
+        error = nil
+        denialDetail = nil
+      } catch is CancellationError {} catch {
+        if !Task.isCancelled {
+          self.error = String(describing: error)
+          denialDetail = ConnectionCopy.FileOpen.denialDetail(error)
+        }
+      }
     }
+  }
+
+  private func reread() {
+    offset = 0; snapshot = nil; revision += 1
   }
 }
 
@@ -206,6 +267,9 @@ enum WorkspaceViewError: Error { case notPaired, unexpectedResponse, sandboxUnav
 func readProject(_ query: G0Transport.WorkspaceQuery, run: RemoteRunStore) async throws -> G0Transport.WorkspaceResult {
   #if DEBUG
   if ProcessInfo.processInfo.arguments.contains("-uiWorkspaceFixture") {
+    if ProcessInfo.processInfo.arguments.contains("-uiWorkspaceDenied") {
+      throw G0Transport.RunError.host(code: "workspace_not_authorized")
+    }
     let json: String
     switch query.action {
     case .list: json = #"{"action":"list","listing":{"entries":[{"name":"README.md","path":"README.md","kind":"file"},{"name":"probe.html","path":"probe.html","kind":"file"}],"truncated":false}}"#

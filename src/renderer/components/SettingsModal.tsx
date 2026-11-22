@@ -12,6 +12,8 @@ import { MODAL_COPY } from '../constants/copy'
 
 import { ArchivedRemoteChatsPanel } from './ArchivedRemoteChatsPanel'
 import { useRemoteProjectGroups } from './SidebarRemoteProjects'
+import { useDesktopConnections } from '../hooks/useDesktopConnections'
+import { useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import './archived-sessions.css'
 import { RemotePairing } from './RemotePairing'
 import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
@@ -59,8 +61,18 @@ export function SettingsModal({
     void refreshArchived()
   }, [refreshArchived])
   const remoteArchived = useRemoteProjectGroups('', true)
-  const archivedCount = archived.status !== 'available' ? undefined : archived.projects.reduce((sum, project) => sum + project.sessions.length, 0)
-    + remoteArchived.reduce((sum, group) => sum + group.sessions.length, 0)
+  const remoteHosts = useDesktopConnections()
+  const catalogs = useRemoteCatalogs()
+  const uncheckedHosts = remoteHosts.connections.flatMap(connection => {
+    const entry = catalogs.get(connection.id)
+    if (connection.state === 'connected' && entry?.catalog && !entry.error && !entry.stale) return []
+    return [{ connection, failed: Boolean(entry?.error), loading: Boolean(entry?.loading) }]
+  })
+  const hostsIndex = remoteHosts.error ? 'failed' : !remoteHosts.loaded || remoteHosts.refreshing ? 'unread' : 'ready'
+  const archivedCount = archived.status !== 'available' || hostsIndex !== 'ready' || uncheckedHosts.length
+    ? undefined
+    : archived.projects.reduce((sum, project) => sum + project.sessions.length, 0)
+      + remoteArchived.reduce((sum, group) => sum + group.sessions.length, 0)
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
@@ -103,7 +115,7 @@ export function SettingsModal({
                 onRefresh={refreshArchived}
                 onSessionsChanged={onSessionsChanged}
               />
-              <ArchivedRemoteChatsPanel groups={remoteArchived} />
+              <ArchivedRemoteChatsPanel groups={remoteArchived} uncheckedHosts={uncheckedHosts} hostsIndex={hostsIndex} />
             </div>
           ) : tab === 'service' ? (
             <BackgroundServiceSettings />

@@ -21,6 +21,9 @@ private struct RemoteFilePreview: View {
   @State private var rules: WKContentRuleList?
   @State private var html: String?
   @State private var error: String?
+  @State private var denied = false
+  @State private var retrying = false
+  @Environment(\.dismiss) private var dismiss
   @State private var received = 0
   @State private var total: Int?
   @State private var revision = 0
@@ -53,19 +56,27 @@ private struct RemoteFilePreview: View {
         } else {
           DownloadedSourceView(url: url)
         }
-      } else if error == nil {
-        ProgressView(ConnectionCopy.FileOpen.downloading).frame(maxHeight: .infinity)
+      } else if let error {
+        EmptyState(title: denied ? ConnectionCopy.FileOpen.accessTitle : ConnectionCopy.FileOpen.failedTitle,
+                   detail: error,
+                   symbol: denied ? nil : "exclamationmark.triangle",
+                   picture: denied ? AnyView(EmptyStatePreview(scene: .lockedFile)) : nil,
+                   action: denied ? .init(label: ConnectionCopy.back, perform: { dismiss() })
+                     : .init(label: ConnectionCopy.FileOpen.retry, refresh: true, busy: retrying, perform: {
+                       retrying = true
+                       revision += 1
+                     }))
+          .frame(maxHeight: .infinity)
+      } else {
+        PlaceholderRows(label: ConnectionCopy.FileOpen.downloading, count: 6, rowHeight: 24, icon: false)
+          .frame(maxHeight: .infinity, alignment: .top)
         if received > 0 { Text(ConnectionCopy.FileOpen.progress(received, total)).font(.caption).foregroundStyle(Palette.dim) }
-      }
-      if let error {
-        Notice(text: error, warning: true).padding(.horizontal, 16)
-        Button(ConnectionCopy.FileOpen.retry) { revision += 1 }.frame(minHeight: 44)
-        Spacer()
       }
     }
     .task(id: revision) {
       let previous = url
-      url = nil; rules = nil; html = nil; error = nil; received = 0; total = nil
+      url = nil; rules = nil; html = nil; received = 0; total = nil
+      defer { if !Task.isCancelled { retrying = false } }
       if let previous { await Self.remove(previous) }
       var downloaded: URL?
       do {
@@ -82,12 +93,17 @@ private struct RemoteFilePreview: View {
           }.value
         }
         try Task.checkCancellation()
+        error = nil
+        denied = false
         url = file
       } catch is CancellationError {
         if let downloaded { await Self.remove(downloaded) }
       } catch {
         if let downloaded { await Self.remove(downloaded) }
-        self.error = ConnectionCopy.FileOpen.failure(error)
+        guard !Task.isCancelled else { return }
+        let denial = ConnectionCopy.FileOpen.denialDetail(error)
+        denied = denial != nil
+        self.error = denial ?? ConnectionCopy.FileOpen.failure(error)
       }
     }
     .onDisappear {

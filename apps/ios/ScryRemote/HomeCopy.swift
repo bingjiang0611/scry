@@ -25,7 +25,9 @@ extension ConnectionCopy {
   // absent — never empty-but-claimed — on a host that cannot prove an ending.
   static let sectionCompleted = "已完成"
   static let homeWaiting = "待回答"
-  static let activityEmpty = "暂无需要回复或进行中的任务，其他会话在「项目」里"
+  static let activityEmpty = "暂无需要处理的任务"
+  static func noActivityMatches(_ query: String) -> String { "没有与「\(query)」匹配的任务" }
+  static func noSessionMatches(_ query: String) -> String { "没有与「\(query)」匹配的会话" }
   static func activityOverflow(_ count: Int) -> String { "另有 \(count) 条，请搜索定位" }
   static let expanded = "已展开"
   static let collapsed = "已收起"

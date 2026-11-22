@@ -78,7 +78,8 @@ function Fixture() {
     <output id="reads">{JSON.stringify(reads)}</output>
     <section style={{ display: 'flex', flex: 1, minHeight: 0, width: '100%' }}>
       {mode === 'treeEvents' ? <WorkspaceFileTree children={{ '': [{ path: 'document.ts', name: 'document.ts', kind: 'file', mtimeMs: 1 }] }}
-        expanded={new Set()} query="" loading={new Set()} nextCursors={{}} onExpand={() => undefined} onMore={() => undefined}
+        expanded={new Set()} query="" loading={new Set()} nextCursors={{}} directoryFailures={new Map()}
+        onExpand={() => undefined} onMore={() => undefined} onClearQuery={() => undefined} onReadDirectory={() => undefined}
         onOpen={entry => setTreeEvents(previous => [...previous, { kind: 'open', path: entry.path }])}
         onRename={entry => setTreeEvents(previous => [...previous, { kind: 'rename', path: entry.path }])}
         onContext={(event, entry) => { event.preventDefault(); setTreeEvents(previous => [...previous, { kind: 'context', path: entry.path }]) }} />

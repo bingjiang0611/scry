@@ -4,6 +4,7 @@ import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { SideChatWorkspace } from '../hooks/useSideChatWorkspace'
 import { ModalFrame } from './ModalFrame'
 import { Button } from './primitives/Button'
+import { EmptyState } from './primitives/EmptyState'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 
 const capturedAt = (value: number): string => new Date(value).toLocaleString('zh-CN', {
@@ -32,7 +33,7 @@ export function SideChatHistoryDialog({ history, onClose }: {
       </div>
       <Button ref={closeRef} onClick={onClose}>{SIDE_CHAT_COPY.historyClose}</Button>
     </header>
-    {history.error && <p role="alert" className="side-chat-history-error">{history.error}</p>}
+    {history.error && <EmptyState size="row" announcement="alert" className="side-chat-history-error" title={SIDE_CHAT_COPY.historyReadFailed} />}
     {/* First read: row shapes. Paging: the current page stays, dimmed, until the next
         page answers (it is the previous page, so it is not shown as current). */}
     <DelayedSkeletonRows loading={history.loading && history.items.length === 0} rows={5} meta rowHeight={52} label={SIDE_CHAT_COPY.historyLoading} />
@@ -51,7 +52,7 @@ export function SideChatHistoryDialog({ history, onClose }: {
         </button>
       </li>)}
       {!history.loading && history.items.length === 0 && !history.error
-        ? <li className="side-chat-history-empty">{SIDE_CHAT_COPY.historyEmpty}</li> : null}
+        ? <EmptyState as="li" size="row" className="side-chat-history-empty" title={SIDE_CHAT_COPY.historyEmpty} /> : null}
     </ol>
     <footer className="side-chat-history-footer">
       {history.canLoadPrevious

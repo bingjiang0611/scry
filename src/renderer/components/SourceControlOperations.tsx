@@ -1,5 +1,6 @@
 import type { ScOperation } from '@shared/source-control'
 import { sourceControlOperationCopy as copy } from '../constants/source-control-copy'
+import { EmptyState } from './primitives/EmptyState'
 
 export function SourceControlOperations({ operations, busy, onReconcile, onAcknowledge }: {
   operations: ScOperation[]
@@ -8,7 +9,7 @@ export function SourceControlOperations({ operations, busy, onReconcile, onAckno
   onAcknowledge: (operationId: string) => void
 }) {
   return <div className="sc-scroll"><section className="sc-section"><h3>{copy.title}</h3>
-    {!operations.length && <p>{copy.empty}</p>}
+    {!operations.length && <EmptyState size="row" title={copy.empty} />}
     {operations.map(op => <article className="sc-operation" key={op.id}>
       <strong>{copy.label(op)}</strong>
       <small>{new Date(op.startedAt).toLocaleString()}</small><p className="sc-wrap">{op.message}</p>

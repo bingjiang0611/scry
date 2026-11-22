@@ -7,6 +7,7 @@ struct PairView: View {
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run
   @State private var technicalExpanded = false
+  @State private var cameraFailure: CameraScanFailure?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -44,7 +45,7 @@ struct PairView: View {
       .scrollIndicators(.hidden)
 
       VStack(spacing: 8) {
-        Button { model.pairing = .scanning } label: {
+        Button { cameraFailure = nil; model.pairing = .scanning } label: {
           Label(ConnectionCopy.scanPairingCode, systemImage: "qrcode.viewfinder")
             .font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(Palette.onAccent).background(Palette.accentFill, in: Capsule())
@@ -55,11 +56,18 @@ struct PairView: View {
     }
     .background(Palette.main)
     .fullScreenCover(isPresented: scanning) {
-      ZStack(alignment: .topTrailing) {
-        QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code, runStore: run) },
-                  onFailure: { message in model.pairing = .failed(.init(message: message)) }).ignoresSafeArea()
-        Button(ConnectionCopy.cancel) { model.pairing = .idle }
-          .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)
+      if let cameraFailure {
+        EmptyState(title: ConnectionCopy.cameraAccessTitle, detail: cameraFailure.detail, symbol: "camera",
+                   action: .init(label: ConnectionCopy.back, perform: { model.pairing = .idle }))
+          .frame(maxHeight: .infinity)
+          .background(Palette.main)
+      } else {
+        ZStack(alignment: .topTrailing) {
+          QRScanner(onCode: { code in model.pairing = .idle; model.beginPair(scanned: code, runStore: run) },
+                    onFailure: { failure in cameraFailure = failure }).ignoresSafeArea()
+          Button(ConnectionCopy.cancel) { model.pairing = .idle }
+            .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).padding(16)
+        }
       }
     }
     .onChange(of: model.pairing) { technicalExpanded = false }
@@ -107,10 +115,7 @@ struct PairView: View {
 
   private func failureCard(_ failure: PairingFailure) -> some View {
     VStack(alignment: .leading, spacing: 10) {
-      HStack(alignment: .top, spacing: 10) {
-        Circle().fill(Palette.bad).frame(width: 8, height: 8).padding(.top, 5)
-        Text(failure.message).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-      }
+      EmptyState(title: failure.message, symbol: nil, size: .row)
       if let detail = failure.technicalDetail {
         DisclosureGroup(ConnectionCopy.technicalDetails, isExpanded: $technicalExpanded) {
           Text(detail).font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.dim)

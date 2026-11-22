@@ -208,11 +208,19 @@ export function useAppInteraction(context: AppInteractionContext) {
   })
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
+  const retryHistory = activeEvidenceGap?.status === 'error' && activeSessionId
+    ? projects.flatMap(project => project.sessions.map(row => ({ cwd: row.cwd ?? project.cwd, row })))
+        .find(entry => entry.row.sessionId === activeSessionId && entry.cwd === cwd)
+    : undefined
   const chatProps = createAppChatProps({
     workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
     sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
     sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
+    retryHistory: retryHistory ? () => {
+      const { row } = retryHistory
+      void pickSession(retryHistory.cwd, row.sessionId, row.providerId, row.externalSessionId, row.runId, row.agentProfileId)
+    } : undefined,
     steerInFlightRef: steerInFlightRef.current, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
     stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,

@@ -45,8 +45,51 @@ export async function exerciseSessionTerminals(contents, scenario, pointerSource
   await click('[aria-label="右侧工作区"]')
   await wait(`document.querySelector('[aria-label="添加 Surface"]') != null`)
   await click('[aria-label="添加 Surface"]')
+  if (scenario === 'workspace-read-failure') {
+    const addFiles = async () => {
+      await wait(`document.querySelector('.surface-menu') != null`)
+      const filesIndex = await read(`[...document.querySelectorAll('.surface-menu [role="menuitem"]')].findIndex(node => node.textContent.trim().startsWith('文件'))`)
+      if (filesIndex < 0) throw new Error('Files surface is missing')
+      await click(`.surface-menu [role="menuitem"]:nth-child(${filesIndex + 1})`)
+    }
+    const files = '.workspace-panel'
+    const alert = files + ' .empty-state[role="alert"]'
+    const item = name => `document.querySelector('${files} file-tree-container')?.shadowRoot.querySelector('[data-item-path="${name}"]') != null`
+    await addFiles()
+    await wait(`document.querySelector('${alert}')?.textContent.includes('没能读取工作区文件')`)
+    if (!await read(`!document.querySelector('${files}').textContent.includes('此工作区没有文件') && !document.querySelector('${files}').textContent.includes('fixture file listing unavailable')`)) {
+      throw new Error('Initial file listing failure presented empty evidence or a raw error')
+    }
+    await click(alert + ' button')
+    await wait(item('first.txt'))
+    await click(files + ' .workspace-load-more')
+    await wait(`document.querySelector('${alert}') != null`)
+    if (!await read(item('first.txt'))) throw new Error('File pagination failure discarded the first page')
+    if (await read(`document.querySelector('${files} .workspace-load-more') != null`)) throw new Error('The failed cursor has duplicate actions')
+    await click(alert + ' button')
+    await wait(item('second.txt'))
+    if (!await read(`${item('first.txt')} && !document.querySelector('${alert}') && JSON.stringify(${state}.workspaceReads.map(read => read.cursor ?? null)) === '[null,null,"page-2","page-2"]'`)) {
+      throw new Error('File retry did not append the original failed cursor exactly once')
+    }
+    await select(session('new', 1), 'three')
+    await click('[aria-label="右侧工作区"]')
+    await click('[aria-label="添加 Surface"]')
+    await addFiles()
+    await wait(`[...document.querySelectorAll('${files}')].some(panel => panel.getBoundingClientRect().width > 0 && panel.textContent.includes('此工作区没有文件'))`)
+    return { scenario, rootFailureNotEmpty: true, retryPreservedCursor: true, successfulEmpty: true }
+  }
   await clickTerminalSurface()
   await wait(`document.querySelector('.terminal-xterm .xterm') != null`)
+  if (scenario === 'restore-failure') {
+    await wait(`document.querySelector('.terminal-state.running') != null`)
+    if (!await read(`document.querySelector('.terminal-foot[role=status]').textContent.includes('没能核对原有终端') && !document.querySelector('.terminal-surface').textContent.includes('fixture terminal probe unavailable')`)) {
+      throw new Error('Terminal restore failure is missing or exposes the raw probe error')
+    }
+    if (!await read(`${state}.starts.length === 1 && ${state}.attaches.length === 0 && !document.querySelector('.terminal-foot button')`)) {
+      throw new Error('A failed restore probe must preserve one default start without offering another start as retry')
+    }
+    return { scenario, safeFallback: true }
+  }
   await read(`globalThis.originalXterm = document.querySelector('.terminal-xterm .xterm')`)
   if (scenario === 'pending') await wait(`${state}.pending`)
   else {

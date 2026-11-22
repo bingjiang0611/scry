@@ -117,12 +117,12 @@ export async function runOpeningMeasurement({ driver, options }) {
       await wait('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true" && document.querySelector(".chat").textContent.includes("Remote history paragraph 79")', 'late history does not replace the newer selection')
       await read(`window.scry.desktopRemote.history = async () => { throw new Error("Error invoking remote method 'desktopRemote:history': Error: desktop_tls_request_eof") }; true`)
       await click('[data-remote-session="old-native"]')
-      await wait('document.querySelector(".composer-notice.is-error")?.textContent.includes("远端 Scry 在响应前关闭了连接")', 'prepared history error is actionable')
-      check(await read('!document.querySelector(".composer-notice.is-error")?.textContent.includes("Error invoking remote method")'), 'Prepared history exposed the IPC wrapper')
+      await wait('document.querySelector(".chat-state-slot > .empty-state[data-status=error][role=alert]")?.textContent.includes("没能读取「Old session」的历史") && document.querySelector(".chat-state-slot > .empty-state[data-status=error] button") != null', 'prepared history error is actionable')
+      check(await read('!document.querySelector("#main-pane").textContent.includes("Error invoking remote method")'), 'Prepared history exposed the IPC wrapper')
       check(await read('document.querySelector("[data-remote-session=old-native]")?.getAttribute("aria-current") === "true" && document.querySelectorAll(".transcript-turn").length === 0'), 'Failed target displayed previous session content')
       await read('window.scry.desktopRemote.history = window.openingHistory; true')
       await click('[data-remote-session="old-native"]')
-      await wait('document.querySelector(".chat").textContent.includes("Remote history paragraph 79") && !document.querySelector(".composer-notice.is-error")', 'explicit selection retries failed history')
+      await wait('document.querySelector(".chat").textContent.includes("Remote history paragraph 79") && !document.querySelector(".chat-state-slot > .empty-state[data-status=error]")', 'explicit selection retries failed history')
     }
     if (options.openingOnly) await verifyOpeningWithoutArchive({ read, wait, check, click })
     return { remoteSessionOpening: { samples, nativeSelection: true, nativeScroll: true, bottomChecked: options.openingOnly, atomicSelection: options.openingOnly, pendingSupersession: options.openingOnly, preparedFailureVisible: options.openingOnly,
@@ -138,7 +138,7 @@ async function verifyOpeningWithoutArchive({ read, wait, check, click }) {
   await wait('document.querySelector("[data-remote-session=old-native].running") !== null', 'catalog reports the live session')
   // Record the UI across the entire open, not just after live evidence has arrived.
   await read(`window.openingGapShown = false; window.openingGapObserver = new MutationObserver(() => {
-    window.openingGapShown ||= !!document.querySelector('.chat-session-evidence-gap');
+    window.openingGapShown ||= !!document.querySelector('.chat-state-slot > .empty-state[data-status]');
   }); window.openingGapObserver.observe(document.body, { childList: true, subtree: true }); true`)
   await click('[data-remote-session="old-native"]')
   await wait('typeof window.releaseOpeningLive === "function"', 'live lookup held while archive read resolves')
@@ -152,5 +152,5 @@ async function verifyOpeningWithoutArchive({ read, wait, check, click }) {
   await wait('document.querySelector(".chat")?.textContent.includes("host ui continue")', 'live trace opens without archived history')
   check(await read('window.openingGapObserver.disconnect(); !window.openingGapShown'), 'Missing-evidence notice flashed during live opening')
   await click('[data-remote-session="other-native"]')
-  await wait('document.querySelector(".chat-session-evidence-gap[data-status=unavailable]")?.textContent.includes("trace_archive_unavailable")', 'confirmed idle session still reports missing archive')
+  await wait('document.querySelector(".chat-state-slot > .empty-state[data-status=unavailable]")?.textContent.includes("未取得会话历史")', 'confirmed idle session still reports missing archive')
 }

@@ -324,7 +324,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    expect(unknownHtml).toContain('该时间范围没有可绘制的成本数据')
+    expect(unknownHtml).toContain('所选范围没有可绘制的成本记录')
     expect(unknownHtml).not.toContain('usage-chart-area')
     expect(unknownHtml).not.toContain('usage-chart-line')
     expect(smallCostHtml).toContain('&lt;$0.01')

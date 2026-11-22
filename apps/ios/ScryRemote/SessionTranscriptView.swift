@@ -57,6 +57,10 @@ struct SessionTranscriptView: View {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     switch run.history { case .idle, .loading: return false; default: return true }
   }
+  var hasVisibleTurn: Bool {
+    !completedTurns.isEmpty || detachedLive != nil || (hasLiveTurn && !run.liveTurnInHistory) || backgroundSend != nil
+  }
+
   var historyReadyForDisplay: Bool {
     guard run.activeSessionIdentity == sessionIdentity else { return false }
     if case .loaded = run.history { return true }

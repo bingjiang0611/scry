@@ -1,3 +1,4 @@
+import { EmptyState } from './primitives/EmptyState'
 import { useCopyFeedback } from '../hooks/useCopyFeedback'
 // 右栏纵览：会话 verdict 卡 + context 占用 + 每轮调用 + 文件与 diff 证据。
 import { memo, useId, useState, type CSSProperties, type MouseEvent } from 'react'
@@ -170,19 +171,14 @@ function OverviewPanelBody({
             <b>{ctx ? `${ctx.pct}%` : '—'}</b>
           </div>
           {/* 占用用横向刻度表达：长度比环直接可比，高度也回到一行。 */}
-          <div
-            className="ctx-track"
-            role="img"
-            style={ctx ? ({ '--p': Math.min(ctx.pct, 100) } as CSSProperties) : undefined}
-            aria-label={ctx ? `上下文占用 ${ctx.pct}%` : '暂无上下文占用数据'}
-          >
-            {ctx && <span />}
-          </div>
+          {ctx && <div className="ctx-track" role="img"
+            style={{ '--p': Math.min(ctx.pct, 100) } as CSSProperties}
+            aria-label={OVERVIEW_SESSION_COPY.contextPercent(ctx.pct)}><span /></div>}
           <div className="ctx-copy">
             {/* 显示用量是主证据，窗口总量是参照：同一行内用字级区分，文本内容保持原样。 */}
             <div className="v">{ctx
               ? <><b>{fmtTok(ctx.used)}</b><span> / {fmtTok(ctx.win)}</span></>
-              : OVERVIEW_SESSION_COPY.contextUnavailable}</div>
+              : <EmptyState size="card" title={OVERVIEW_SESSION_COPY.contextUnavailable} />}</div>
           </div>
         </div>
       )}

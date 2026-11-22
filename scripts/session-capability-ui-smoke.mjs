@@ -187,7 +187,7 @@ try {
           sessionModels = await (${fixtureSources.exerciseSessionModels})(win.webContents, ${JSON.stringify(process.env.SCRY_CAPABILITIES_UI_SCREENSHOT ?? '')})
         }
         const sessionTerminals = []
-        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly || skipTerminals ? [] : ['restored', 'pending'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly || skipTerminals ? [] : ['restored', 'pending', 'restore-failure', 'workspace-read-failure'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
           sessionTerminals.push(await (${fixtureSources.exerciseSessionTerminals})(win.webContents, scenario, ${JSON.stringify(specialSources.pointer)}))
         }

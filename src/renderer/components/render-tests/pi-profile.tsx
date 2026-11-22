@@ -36,7 +36,8 @@ describe('Pi Profile renderer identity', () => {
 
     const html = renderToStaticMarkup(<EmptySessionOverview />)
     expect(html).toContain('新会话暂无证据')
-    expect(html).toContain('发送第一条消息后')
+    expect(html).toContain('data-empty-size="card"')
+    expect(html).not.toContain('发送第一条消息后')
     expect(html).not.toContain('累计 Token 用量')
     expect(html).not.toContain('工作区未提交改动')
   })

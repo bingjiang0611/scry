@@ -6,6 +6,8 @@ import Markdown from './MarkdownImpl'
 import { Icon } from './primitives/Icon'
 import { Menu, MenuItem, MenuSeparator } from './primitives/Menu'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
+import { EmptyState } from './primitives/EmptyState'
+import { EmptyStateArtwork } from './primitives/EmptyStateArtwork'
 import { usePresence } from '../hooks/usePresence'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { MOTION } from '../motion'
@@ -15,6 +17,15 @@ import { Button } from './primitives/Button'
 // Readable IPC errors (daemon mode names its absences); the checks below still match
 // the handler's own message, which this keeps.
 const errorMessage = (error: unknown): string => ipcErrorMessage(error)
+
+export function workspaceReadDenial(error: unknown): string | null {
+  const message = errorMessage(error)
+  if (message === 'workspace_not_authorized' || message === '工作目录不在 Scry 已授权项目内') {
+    return WORKSPACE_EDITOR_COPY.workspaceAccessDetail
+  }
+  if (/^(?:EACCES|EPERM)(?::|$)/.test(message)) return WORKSPACE_EDITOR_COPY.fileAccessDetail
+  return null
+}
 export function WorkspaceContextMenu({
   context,
   onClose,
@@ -136,6 +147,7 @@ export function FileEditor({
   readPage,
   api,
   onDirtyChange,
+  onBack,
   onError
 }: {
   cwd: string
@@ -145,6 +157,7 @@ export function FileEditor({
   readPage?: ReadOnlyWorkspaceSource['workspaceReadPage']
   api: WorkspaceApi
   onDirtyChange: (dirty: boolean) => void
+  onBack: () => void
   onError: (error: string | null) => void
 }) {
   const [snapshot, setSnapshot] = useState<WorkspaceFileSnapshot | null>(null)
@@ -155,6 +168,8 @@ export function FileEditor({
   const [saving, setSaving] = useState(false)
   const [sourceExpanded, setSourceExpanded] = useState(false)
   const [externallyOpened, setExternallyOpened] = useState(false)
+  const [fileReadFailed, setFileReadFailed] = useState(false)
+  const [accessDenied, setAccessDenied] = useState<string | null>(null)
   const dirty = snapshot != null && content !== snapshot.content
   const dirtyRef = useRef(dirty)
   const loadSequence = useRef(0)
@@ -174,6 +189,8 @@ export function FileEditor({
         setPage(first)
         setPageBack([])
         setContent(first.content)
+        setFileReadFailed(false)
+        setAccessDenied(null)
         return
       }
       const read = readOnly ? api.workspaceReadKnown : api.workspaceRead
@@ -183,20 +200,29 @@ export function FileEditor({
       setPageBack([])
       setSnapshot(next)
       setContent(next.content)
+      setFileReadFailed(false)
+      setAccessDenied(null)
     } catch (loadError) {
       if (loadSequence.current !== sequence) return
+      const denial = workspaceReadDenial(loadError)
+      if (denial) {
+        console.error('[Scry] workspace preview access denied', loadError)
+        setAccessDenied(denial)
+        return
+      }
+      setAccessDenied(null)
       if (readPage) {
-        onError(errorMessage(loadError))
+        console.error('[Scry] workspace preview read failed', loadError)
       } else if (errorMessage(loadError).includes(WORKSPACE_FILE_PREVIEW_UNSUPPORTED)) {
         try {
           const open = readOnly ? api.workspaceOpenKnownExternal : api.workspaceOpenExternal
           const opened = await open({ cwd, path: entry.path })
           if (loadSequence.current !== sequence) return
           setExternallyOpened(opened)
-          if (!opened) onError('已取消系统打开')
+          if (opened) { setFileReadFailed(false); return }
         } catch (openError) {
           if (loadSequence.current !== sequence) return
-          onError(errorMessage(openError))
+          console.error('[Scry] workspace external open failed', openError)
         }
       } else if (errorMessage(loadError).includes('分页只读视图')) {
         try {
@@ -207,18 +233,16 @@ export function FileEditor({
           setPage(first)
           setPageBack([])
           setContent(first.content)
+          setFileReadFailed(false)
           return
         } catch (pageError) {
           if (loadSequence.current !== sequence) return
-          onError(errorMessage(pageError))
+          console.error('[Scry] workspace preview page failed', pageError)
         }
       } else {
-        onError(errorMessage(loadError))
+        console.error('[Scry] workspace preview read failed', loadError)
       }
-      if (!dirtyRef.current) {
-        setSnapshot(null)
-        setPage(null)
-      }
+      setFileReadFailed(true)
     } finally {
       if (loadSequence.current === sequence) setLoading(false)
     }
@@ -286,9 +310,19 @@ export function FileEditor({
 
   const markdown = /\.(md|mdx)$/i.test(entry.name)
   // Text lines in the editor's place: the file's layout is known to be lines of text.
-  if (loading && !snapshot && !page) return <div className="workspace-editor" aria-busy="true"><DelayedSkeletonRows loading rows={10} rowHeight={22} label="读取文件…" /></div>
-  if (externallyOpened) return <div className="workspace-empty">已使用系统默认应用打开 {entry.name}</div>
-  if (!snapshot && !page) return <div className="workspace-empty">文件无法打开</div>
+  if (accessDenied) return <EmptyState size="page" picture={<EmptyStateArtwork scene="locked-file" />}
+    title={WORKSPACE_EDITOR_COPY.accessDenied} description={accessDenied} announcement="alert"
+    actions={[{ label: WORKSPACE_EDITOR_COPY.backToFiles, intent: 'quiet', onClick: onBack }]} />
+  if (loading && !fileReadFailed && !snapshot && !page) {
+    return <div className="workspace-editor" aria-busy="true"><DelayedSkeletonRows loading rows={10} rowHeight={22} label={WORKSPACE_EDITOR_COPY.reading} /></div>
+  }
+  if (externallyOpened) return <EmptyState size="row" className="workspace-empty" title={WORKSPACE_EDITOR_COPY.openedExternally(entry.name)} />
+  const retry = { label: WORKSPACE_EDITOR_COPY.openAgain, intent: 'secondary' as const, icon: 'refresh' as const,
+    busy: loading, disabled: dirty, onClick: () => void load() }
+  if (!snapshot && !page) return <EmptyState size="page" picture="alert" title={WORKSPACE_EDITOR_COPY.openFailed(entry.name)}
+    description={WORKSPACE_EDITOR_COPY.openFailedDetail} announcement="alert" actions={[retry]} />
+  const refreshFailure = fileReadFailed && <EmptyState size="card" picture="alert" announcement="alert"
+    title={WORKSPACE_EDITOR_COPY.refreshFailed(entry.name)} actions={[retry]} />
   if (page && (!readPage || page.hasMore || page.offset > 0)) {
     const start = page.totalBytes === 0 ? 0 : page.offset + 1
     return (
@@ -304,6 +338,7 @@ export function FileEditor({
           }>下一页</Button>
           <Button size="sm" disabled={loading} onClick={() => void load()}>{WORKSPACE_EDITOR_COPY.reload}</Button>
         </div>
+        {refreshFailure}
         <div className="workspace-editorbody">
           <div className="workspace-source">
             <textarea className="workspace-textarea" value={content} readOnly spellCheck={false} aria-label={`查看 ${entry.name}`} />
@@ -346,6 +381,7 @@ export function FileEditor({
           Math.round((snapshot?.size ?? page!.totalBytes) / 1024 * 10) / 10
         )}</span>
       </div>
+      {refreshFailure}
       <div className="workspace-editorbody">
         {(!markdown || sourceExpanded) && (
           <div className="workspace-source">

@@ -115,7 +115,7 @@ it('does not render live task cards or controls for an inactive snapshot', () =>
 
 it('keeps an unassociated wait honest without inventing task details or controls', () => {
   const html = renderToStaticMarkup(<BackgroundWorkPanel runId="run" work={{ ...work, tasks: [] }} />)
-  expect(html).toContain('等待后续结果')
+  expect(html).toContain('尚未收到后台任务记录')
   expect(html).not.toContain('<button')
   expect(html).not.toContain('<details')
   expect(html).not.toContain('已完成')

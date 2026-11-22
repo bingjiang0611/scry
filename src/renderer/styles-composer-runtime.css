@@ -340,24 +340,4 @@
 
 .unbound-empty {
   min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px;
-  color: var(--dim);
-  text-align: center;
-}
-
-.unbound-empty strong {
-  color: var(--fg);
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-}
-
-.unbound-empty > span:last-child {
-  max-width: 360px;
-  font-size: var(--text-sm);
-  line-height: 1.5;
 }

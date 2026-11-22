@@ -34,6 +34,7 @@ export function GithubPullRequestPanel({
   const [list, setList] = useState<ScRead<ScPrList> | null>(null)
   const [pr, setPr] = useState<ScPr | null>(null)
   const [loadingPr, setLoadingPr] = useState(false)
+  const [readFailure, setReadFailure] = useState<{ repository: string; number?: number } | null>(null)
   const [draft, setDraft] = useState<ScReviewDraft | null>(null)
   const [draftState, setDraftState] = useState('')
   const draftQueue = useRef(Promise.resolve())
@@ -101,6 +102,7 @@ export function GithubPullRequestPanel({
       const [result, saved] = await Promise.all([api.pullRequest(ref), api.loadDraft(ref)])
       if (!alive.current || ticket !== epoch.current) return
       if (result.status !== 'available') throw new Error(result.reason)
+      setReadFailure(null)
       setPr(result.data)
       setPrFile(result.data.files[0]?.path ?? '')
       setMethod(result.data.methods[0] ?? 'merge')
@@ -117,7 +119,10 @@ export function GithubPullRequestPanel({
       )
       setDraftState(saved ? '草稿已恢复' : '仅保存在本机，提交后才发送 GitHub')
     } catch (caught) {
-      if (alive.current && ticket === epoch.current) report(caught)
+      if (alive.current && ticket === epoch.current) {
+        console.error('[Scry] PR read failed', caught)
+        setReadFailure({ repository, number })
+      }
     } finally {
       if (alive.current && ticket === epoch.current) setLoadingPr(false)
     }
@@ -133,6 +138,7 @@ export function GithubPullRequestPanel({
       const result = await api.pullRequests({ repositoryId: repo.id, repository })
       if (!alive.current || ticket !== epoch.current) return
       setList(result)
+      setReadFailure(null)
       if (result.status === 'available') {
         setBaseBranch(result.data.defaultBranch)
         const linked = result.data.items.filter((item) => item.headBranch === repo.branch &&
@@ -140,7 +146,10 @@ export function GithubPullRequestPanel({
         if (linked.length === 1) await openPr(linked[0].number)
       }
     } catch (caught) {
-      if (alive.current && ticket === epoch.current) report(caught)
+      if (alive.current && ticket === epoch.current) {
+        console.error('[Scry] PR list read failed', caught)
+        setReadFailure({ repository })
+      }
     } finally {
       if (alive.current && ticket === epoch.current) setLoadingPr(false)
     }
@@ -177,7 +186,7 @@ export function GithubPullRequestPanel({
 
   return <GithubPullRequestPanelBody
     repo={repo} busy={busy} loadingPr={loadingPr} repository={repository} repositories={repositories}
-    github={github} list={list} pr={pr} draft={draft} draftState={draftState} prFile={prFile} selectedPrFile={selectedPrFile}
+    github={github} list={list} readFailure={readFailure?.repository === repository ? readFailure : null} pr={pr} draft={draft} draftState={draftState} prFile={prFile} selectedPrFile={selectedPrFile}
     lineInput={lineInput} lineTarget={lineTarget} lineBody={lineBody} title={title} body={body} baseBranch={baseBranch}
     headRepository={headRepository} createDraft={createDraft} method={method} confirmation={confirmation} dialogId={dialogId}
     prExpected={prExpected} expected={expected} staleDraft={staleDraft} scCanMerge={scCanMerge} report={report} setRepository={setRepository} setList={setList} setPr={setPr} setDraft={setDraft}

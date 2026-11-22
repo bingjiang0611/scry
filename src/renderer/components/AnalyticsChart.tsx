@@ -8,6 +8,7 @@ import { PROVIDER_LABELS, type ProviderId } from '@shared/provider'
 import { QODER_PRICING_URL, QODER_USD_BASIS } from '@shared/qoder-pricing'
 
 import { ProviderGlyph } from './ProviderGlyph'
+import { EmptyState } from './primitives/EmptyState'
 import { ANALYTICS_COPY as copy } from '../constants/analytics-copy'
 
 export type ChartMetric = 'cost' | 'tokens'
@@ -256,7 +257,8 @@ export function UsageChart({ analytics, metric }: { analytics: UsageAnalytics; m
   }, [analytics, metric])
 
   if (chart.series.length === 0) {
-    return <div className="usage-empty">{metric === 'cost' ? copy.noCostChart : copy.noTokenChart}</div>
+    return <EmptyState size="card" className="usage-empty" picture="chart" announcement="polite"
+      title={metric === 'cost' ? copy.noCostChart : copy.noTokenChart} />
   }
 
   const hoveredDay = hoverIndex == null ? null : analytics.days[hoverIndex]

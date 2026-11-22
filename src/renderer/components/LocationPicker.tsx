@@ -8,6 +8,9 @@ import { refreshRemoteCatalog, useRemoteCatalogs, type RemoteCatalogEntry } from
 import { REMOTE_ACCESS_COPY as copy, LOADING_COPY } from '../constants/copy'
 import { DelayedLoadingStatus } from './LoadingStatus'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { Button } from './primitives/Button'
+import { TurningIcon } from './primitives/TurningIcon'
 import { bridge } from './DesktopRemote'
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker'
 import { moveMenuFocus, WorkdirMenuItems, WorkdirPicker } from './WorkdirPicker'
@@ -246,15 +249,19 @@ function RemoteProjects({
 }) {
   const [connectError, setConnectError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
-  if (!connection) return <p className="location-empty">这台主机已不在保存列表中。不会改用本机执行。</p>
+  if (!connection) return <EmptyState size="menu" className="location-empty" title={copy.hostRemoved} />
   if (state !== 'connected') {
     return (
       <div className="location-empty">
-        <p>{state === 'unknown' ? `无法确认 ${connection.label} 的连接状态。` : state === 'pairing' ? `${connection.label} 尚未批准此设备。` : `${connection.label} 未连接，无法读取它的项目。`}</p>
+        <EmptyState size="menu" title={state === 'unknown' ? copy.hostUnknown(connection.label)
+          : state === 'pairing' ? copy.hostUnapproved(connection.label) : copy.hostDisconnected(connection.label)} />
         {state === 'disconnected' && (
           <button type="button" className="location-action" disabled={connecting} onClick={() => {
             setConnecting(true); setConnectError(null)
-            void onConnect().catch((error) => setConnectError(error instanceof Error ? error.message : String(error))).finally(() => setConnecting(false))
+            void onConnect().catch((error) => {
+              console.error('[Scry] remote host connect failed', error)
+              setConnectError(copy.connectFailed(connection.label))
+            }).finally(() => setConnecting(false))
           }}>{connecting ? '正在连接…' : '连接'}</button>
         )}
         {connectError && <p role="alert" className="location-error">{connectError}</p>}
@@ -263,7 +270,12 @@ function RemoteProjects({
   }
   if (!entry?.catalog) {
     return entry?.error
-      ? <div className="location-empty"><p role="alert" className="location-error">无法读取项目：{entry.error}</p><button type="button" className="location-action" onClick={onRetry}>重试</button></div>
+      ? <div className="location-empty">
+          <EmptyState size="menu" announcement="alert" title={copy.projectsReadFailed(connection.label)} />
+          <Button size="sm" variant="quiet" aria-disabled={entry.loading} onClick={() => { if (!entry.loading) onRetry() }}>
+            <TurningIcon busy={entry.loading} />{copy.retry}
+          </Button>
+        </div>
       : <div className="location-empty" aria-busy="true"><DelayedLoadingStatus loading title={LOADING_COPY.remoteProjects(connection.label)} /></div>
   }
   const projects = entry.catalog.projects
@@ -271,8 +283,11 @@ function RemoteProjects({
     <>
       <div className="mhdr">{connection.label} 上的项目</div>
       <button type="button" className="mitem location-custom-directory" disabled={!entry.catalog.directorySelection} onClick={onCustom}><Icon name="folder" />选择其他目录…</button>
-      {!entry.catalog.directorySelection && <p className="location-empty">需要更新 {connection.label} 上的 Scry 才能选择其他目录。</p>}
-      {projects.length === 0 && <p className="location-empty">这台主机还没有项目。{entry.catalog.directorySelection ? '可选择一个远程目录开始。' : `请先在 ${connection.label} 的 Scry 中打开一个项目。`}</p>}
+      {!entry.catalog.directorySelection && <p className="location-empty">{copy.updateHostForDirectories(connection.label)}</p>}
+      {projects.length === 0 && !entry.error && !entry.stale && <>
+        <EmptyState size="menu" className="location-empty" title={copy.noProjects} />
+        {!entry.catalog.directorySelection && <p className="location-empty">{copy.openHostProject(connection.label)}</p>}
+      </>}
       <div className="wdrecent-list location-project-list" role="listbox" aria-label="远程项目">
         {projects.map((project) => (
           <button
@@ -291,7 +306,12 @@ function RemoteProjects({
           </button>
         ))}
       </div>
-      {entry.error && <p role="alert" className="location-error">列表可能已过期：{entry.error}</p>}
+      {entry.error && <div className="location-empty">
+        <EmptyState size="menu" announcement="alert" title={copy.projectsReadFailed(connection.label)} />
+        <Button size="sm" variant="quiet" aria-disabled={entry.loading} onClick={() => { if (!entry.loading) onRetry() }}>
+          <TurningIcon busy={entry.loading} />{copy.retry}
+        </Button>
+      </div>}
     </>
   )
 }

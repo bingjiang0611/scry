@@ -5,11 +5,13 @@ import { ModalFrame, requestModalClose } from './Modals'
 import { Patch } from './SourceControlPatch'
 import { Notice } from './primitives/Notice'
 import { Segmented } from './primitives/Segmented'
+import { EmptyState } from './primitives/EmptyState'
+import { pullRequestReadCopy as copy } from '../constants/source-control-copy'
 
 type Confirmation = { title: string; detail: string; run: () => Promise<void> }
 
 export function GithubPullRequestPanelBody({
-  repo, busy, loadingPr, repository, repositories, github, list, pr, draft, draftState, prFile, selectedPrFile, lineInput, lineTarget, lineBody, title, body, baseBranch, headRepository, createDraft, method, confirmation, dialogId, prExpected, expected, staleDraft, scCanMerge, report, setRepository, setList, setPr, setDraft, setPrFile, setLineTarget, setLineBody, setTitle, setBody, setBaseBranch, setHeadRepository, setCreateDraft, setMethod, setConfirmation, openPr, loadPrList, updateDraft, confirm
+  repo, busy, loadingPr, repository, repositories, github, list, readFailure, pr, draft, draftState, prFile, selectedPrFile, lineInput, lineTarget, lineBody, title, body, baseBranch, headRepository, createDraft, method, confirmation, dialogId, prExpected, expected, staleDraft, scCanMerge, report, setRepository, setList, setPr, setDraft, setPrFile, setLineTarget, setLineBody, setTitle, setBody, setBaseBranch, setHeadRepository, setCreateDraft, setMethod, setConfirmation, openPr, loadPrList, updateDraft, confirm
 }: {
   repo: ScRepository; busy: boolean; loadingPr: boolean; repository: string; repositories: string[]; github: string
   list: ScRead<ScPrList> | null; pr: ScPr | null; draft: ScReviewDraft | null; draftState: string; prFile: string; selectedPrFile?: ScPr['files'][number]
@@ -17,6 +19,7 @@ export function GithubPullRequestPanelBody({
   title: string; body: string; baseBranch: string; headRepository: string; createDraft: boolean; method: 'merge' | 'squash' | 'rebase'; confirmation: Confirmation | null; dialogId: string
   prExpected: { repositoryId: string; repository: string; number: number; account: string; head: string; base: string } | null
   expected: ScExpected; staleDraft: boolean; scCanMerge: (pr: ScPr) => boolean
+  readFailure: { number?: number } | null
   report: (error: unknown) => void
   setRepository: (value: string) => void; setList: Dispatch<SetStateAction<ScRead<ScPrList> | null>>; setPr: Dispatch<SetStateAction<ScPr | null>>; setDraft: Dispatch<SetStateAction<ScReviewDraft | null>>; setPrFile: (value: string) => void; setLineTarget: Dispatch<SetStateAction<{ path: string; side: 'LEFT' | 'RIGHT'; line: number } | null>>; setLineBody: (value: string) => void; setTitle: (value: string) => void; setBody: (value: string) => void; setBaseBranch: (value: string) => void; setHeadRepository: (value: string) => void; setCreateDraft: (value: boolean) => void; setMethod: (value: 'merge' | 'squash' | 'rebase') => void; setConfirmation: Dispatch<SetStateAction<Confirmation | null>>
   openPr: (number: number) => Promise<void>; loadPrList: () => Promise<void>; updateDraft: (next: ScReviewDraft) => void; confirm: (request: ScMutation, detail: string) => void
@@ -48,10 +51,10 @@ export function GithubPullRequestPanelBody({
             读取当前分支 PR
           </button>
         </section>
-        {list?.status !== 'available' && list && (
-          <Notice tone="warn" role="alert" className="sc-notice">
-            {list.reason}
-          </Notice>
+        {(readFailure || (list && list.status !== 'available')) && (
+          <EmptyState size="row" announcement="alert" title={readFailure?.number !== undefined ? copy.prFailed : copy.listFailed}
+            actions={[{ label: copy.refresh, icon: 'refresh', busy: loadingPr, disabled: busy || !repository,
+              onClick: () => void (readFailure?.number === undefined ? loadPrList() : openPr(readFailure.number)) }]} />
         )}
         {list?.status === 'available' && (
           <>
@@ -76,7 +79,7 @@ export function GithubPullRequestPanelBody({
                 </button>
               ))}
             </div>
-            {!list.data.items.length && <p className="sc-muted">{list.data.complete ? '没有开放的 PR。' : '已读取范围内没有开放 PR，列表不完整。'}</p>}
+            {!list.data.items.length && <EmptyState size="row" className="sc-muted" title={list.data.complete ? copy.listEmpty : copy.listPartial} />}
             </details>
             <details className="sc-section" open={!pr}>
               <summary>创建 Pull Request</summary>
@@ -161,7 +164,8 @@ export function GithubPullRequestPanelBody({
                 {pr.mergeState} · {pr.canWrite ? '有写入权限' : '无写入权限'} ·{' '}
                 {pr.checksComplete ? '检查读取完整' : '检查不完整，禁止合并'}
               </p>
-              {!pr.checks.length && <p>没有返回 check，不等于自动满足分支规则。</p>}
+              {!pr.canWrite && <EmptyState size="row" title={copy.noWriteAccess} />}
+              {!pr.checks.length && <EmptyState size="row" title={copy.checksUnavailable} />}
               {pr.checks.map((check, index) => (
                 <p key={index}>
                   {check.state === 'passed' ? '✓' : check.state === 'pending' ? '◷' : '!'} {check.name} ·{' '}

@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
 import { usePickerOpen, type PickerOpenProps, type RunControlSelectOption } from './picker-state'
 import { groupModelOptions, type ModelPickerOption } from './model-picker-options'
 import { useOpenPresence } from '../hooks/usePresence'
@@ -264,9 +265,10 @@ export function ModelEffortPicker({
                     ) : group.options.map(renderOption)
                   ))}
                 </div>
-                <div className="model-effort-search-status" role="status">
-                  {groups.length === 0 ? COPY.empty : COPY.count(resultCount)}
-                </div>
+                {groups.length === 0
+                  ? <EmptyState size="menu" className="model-effort-search-status" announcement={query.trim() ? 'polite' : undefined}
+                    title={query.trim() ? COPY.noMatches(query) : COPY.noModels} />
+                  : <div className="model-effort-search-status" role="status">{COPY.count(resultCount)}</div>}
               </>
             )}
           </div>

@@ -49,7 +49,7 @@ struct WorkspaceShell: View {
   // for `.home` (that stays the selected store for the waiting-decision banner).
   private var run: RemoteRunStore { targets.newTaskStore }
   private var paired: Bool {
-    run.hasConnection && (targets.newTaskScope.isLocal || run.executionTargetAvailable)
+    run.hasConnection && run.reachable != false && (targets.newTaskScope.isLocal || run.executionTargetAvailable)
   }
   // A persisted grant is a real pairing; reachability is only learned by an
   // exchange, so this label never claims more than "paired".
@@ -77,7 +77,6 @@ struct WorkspaceShell: View {
         await targets.refreshHome()
         targets.newTaskStore.loadProjects()
         targets.newTaskStore.loadProviders()
-        if !targets.homeSessions.isEmpty { await targets.localStore.refreshArchived() }
       }
     }
     .onChange(of: drawerOpen) { _, open in targets.setHomeVisible(open) }
@@ -161,27 +160,25 @@ struct WorkspaceShell: View {
   }
 
   private var centerpiece: some View {
-    VStack(spacing: 10) {
+    Group {
       if paired {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-          .fill(Palette.panel2)
-          .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.border3) }
-          .overlay { Image(systemName: Symbol.bubble).font(.system(size: 22)).foregroundStyle(Palette.dim) }
-          .frame(width: 44, height: 44)
-          .accessibilityHidden(true)
-          .padding(.bottom, 6)
-        Text(ConnectionCopy.newSession).font(.system(size: 22, weight: .semibold))
-        Text(ConnectionCopy.newSessionHint).font(.system(size: 14)).foregroundStyle(Palette.dim)
+        EmptyState(title: ConnectionCopy.newSessionTitle, detail: ConnectionCopy.newSessionDetail, symbol: nil)
+      } else if !run.hasConnection {
+        EmptyState(title: ConnectionCopy.unpairedDevice, symbol: Symbol.laptop, size: .card,
+                   action: .init(label: ConnectionCopy.connectMac, perform: { model.route = .pair }))
+          .padding(.horizontal, 16)
+      } else if run.reachable == false {
+        EmptyState(title: ConnectionCopy.hostDisconnected(targets.newTaskScope.label),
+                   symbol: "exclamationmark.triangle", size: .card,
+                   action: .init(label: ConnectionCopy.retry, refresh: true, busy: targets.homeLoading,
+                                 perform: { Task { _ = await targets.refreshHome() } }))
+          .padding(.horizontal, 16)
       } else {
-        // The reason the composer is disabled is the host's, not a generic
-        // "offline": a forwarded target that never answered differs from no Mac.
-        Notice(text: targets.newTaskScope.isLocal ? ConnectionCopy.noGatewayForNewTask : ConnectionCopy.targetUnavailable,
-               warning: true)
+        EmptyState(title: ConnectionCopy.targetUnavailable, symbol: "exclamationmark.triangle", size: .card)
+          .padding(.horizontal, 16)
       }
     }
-    .multilineTextAlignment(.center)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .padding(.horizontal, 40)
   }
 
   // MARK: - Drawer

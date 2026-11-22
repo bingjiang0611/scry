@@ -122,7 +122,7 @@ async function exercise(contents, screenshot) {
   await search('INTERNAL-42')
   await wait(`${options}.length === 1 && document.querySelector('.model-effort-list [role="option"]').textContent === 'Friendly Name'`)
   await search('nothing-matches')
-  await wait(`${options}.length === 0 && document.querySelector('.model-effort-search-status').textContent === '没有匹配的模型'`)
+  await wait(`${options}.length === 0 && document.querySelector('.model-effort-search-status .empty-state-title')?.textContent === '没有与「nothing-matches」匹配的模型' && document.querySelector('.model-effort-search-status [aria-live=polite]')?.textContent === '没有与「nothing-matches」匹配的模型'`)
   await click('.model-effort-clear')
   await wait(`${options}.length === 6 && document.activeElement === document.querySelector('.model-effort-search')`)
   await search('PROVIDER-B shared')
