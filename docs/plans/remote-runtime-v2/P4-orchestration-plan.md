@@ -83,6 +83,8 @@ W18 已实现 P4-4 至 P4-6，待核验。Desktop 与 iOS 走 v3 订阅。SQLite
 
 **合计约 12 周（11–13），不含 S3**；等维护者安装真机客户端的时间不计入。首稿 8.5 周；增加的部分：P4-2 +1 周（复核、TTL、证据恢复、两本账对账、放行停止）；P4-4 +0.5 周（扫描触发、清除与墓碑）；协议拆成 5a/5b 并加转发与真机轮 +1 周；P4-0/P4-1 各 +0.5 周（迁移执行器、正文、增量导入、CI 作业、首轮测量）；P4-3 +0.25 周。落在评审 10–12 周的上沿，主要因为协议拆两段要多一轮真机验证。
 
+**发布顺序。** 先在 iPhone 安装包含 `3d705db8` 的 v2 过渡版，再把宿主升级到 v3。见 [v3 发布说明](handoff/release-v3.md)。
+
 **开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。S3 之后 App 只走 daemon（进程内路径与 `SCRY_HOST_DAEMON=0` 均已删除）；经由当前 daemon 的 off↔on 往返规则保持：
 
 1. 每次以 `shadow` 或 `on` 启动，都读旧台账中 seq 大于 `orch_meta.legacy_ledger_seq` 的条目，幂等导入：按 scoped intent id 查回执，按台账 run id 查 `orch_legacy_run`，已有就跳过。`off` 期间派发了却没有终态的 run 在 P4-2 权威模式记 `unavailable`（P4-1 影子模式保留 `dispatched` 交由 H1 `recover()` 同步驱动以保持一致）；只记录未派发的在 P4-2 按 core §2.4 的 pending 规则处理（多半已过期，记 `not_sent`）。**历史导入 actor 说明**：H1 落盘台账只保存已绑定 peer 的 `scopedIntentId`，未落盘原始 `peerCertSHA256`，因此历史导入的回执以 `actor='system'` 落库（实时影子与 P4-2 实时命令均写 `peer:<certSHA256>`）；P4-2 对客户端重传查询回执时按 `(command_id = scopedIntentId, actor IN (peerActor, 'system'))` 兜底历史导入项，因 `scopedIntentId` 已与 `peerCertSHA256` 密码学绑定，不会发生跨设备串号。`app-sessions.json` 的哈希与 `legacy_catalog_sha256` 不同就做同样的增量导入。当未导入历史条目超过 2,000 条时，启动前仅同步导入未终态 run，其余历史终态在 `openLocalChannel` 之后分批让出导入，避免大台账阻塞守护进程就绪。
