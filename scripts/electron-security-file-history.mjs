@@ -16,7 +16,7 @@ export function seedFileHistorySource(home) {
       runId, ts, done: true, userText: 'Show the design brief',
       items: [{
         id: `${runId}-text`, runId, ts: new Date(ts).toISOString(), kind: 'model', stage: 'text',
-        text: 'Design brief: `designs/scry-unified-remote/brief.md`', filePath
+        text: 'Design brief: [brief.md](designs/scry-unified-remote/brief.md)', filePath
       }]
     }]
   }
