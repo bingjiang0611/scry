@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 
 // Transport helpers for the host smoke. Kept apart from the phases so each phase
 // reads as a sequence of checks instead of TLS plumbing.
-export const RUN_PROTOCOL_VERSION = 2
+export const RUN_PROTOCOL_VERSION = 3
 
 export async function freePort() {
   const server = createServer()
@@ -132,26 +132,51 @@ export function detail(cwd, prompt, extra = {}) {
   return JSON.stringify({ cwd, providerId: 'codex', prompt, ...extra })
 }
 
-export async function waitForRun({ transport, runPort, caPEM, certPEM, keyPEM, runId, expect = 'terminal' }) {
+async function readRunSubscription({ transport, runPort, caPEM, certPEM, keyPEM }, request) {
+  return tlsRequest(transport, runPort, caPEM, certPEM, keyPEM, {
+    op: 'subscribe', views: ['activeRuns'], ...request
+  })
+}
+
+export async function readRunCursor(input) {
+  const reply = await readRunSubscription(input, { waitMs: 0 })
+  assert.equal(reply.subscribe?.mode, 'snapshot', JSON.stringify(reply))
+  const { hostId, logId, seq } = reply.subscribe
+  return { hostId, logId, seq }
+}
+
+export async function observeRun({ runId, known, ...input }) {
+  const reply = await readRunSubscription(input, { ...(known ? { known } : {}), waitMs: known ? 1_000 : 0 })
+  const { mode, hostId, logId, seq, snapshot, events: incoming } = reply.subscribe ?? {}
+  if (mode === 'snapshot') {
+    return {
+      row: snapshot.activeRuns.rows.find(row => row.runId === runId),
+      events: [], known: { hostId, logId, seq }
+    }
+  }
+  assert.ok(known && ['events', 'idle'].includes(mode), JSON.stringify(reply))
+  assert.equal(hostId, known.hostId)
+  assert.equal(logId, known.logId)
+  assert.ok(Number.isSafeInteger(seq) && seq >= known.seq, JSON.stringify(reply))
+  const events = (incoming ?? []).filter(event => event.runId === runId)
+  return { row: events.findLast(event => event.runRow)?.runRow, events, known: { hostId, logId, seq } }
+}
+
+export async function waitForRun({ expect = 'terminal', known, ...input }) {
   const deadline = Date.now() + 30_000
   let last
+  const events = []
   while (Date.now() < deadline) {
-    last = await tlsRequest(transport, runPort, caPEM, certPEM, keyPEM, { op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 1_000 })
-    const state = last?.watch?.state
-    if (state === 'settled' || state === 'failed' || state === 'cancelled') {
+    last = await observeRun({ ...input, known: last?.known ?? known })
+    events.push(...last.events)
+    const state = last.row?.lifecycle
+    if (['settled', 'failed', 'cancelled', 'interrupted'].includes(state)) {
       if (expect === 'settled') assert.equal(state, 'settled', JSON.stringify(last))
       if (expect === 'failed') assert.equal(state, 'failed', JSON.stringify(last))
-      return last
+      return { ...last, events }
     }
   }
   throw new Error(`remote run did not reach ${expect}: ${JSON.stringify(last)}`)
-}
-
-export function progressMarkers(watch, runId) {
-  return (watch?.watch?.poll?.events ?? []).flatMap((event) => {
-    if (event.runId !== runId || event.kind !== 'run_progress' || typeof event.detail !== 'string') return []
-    try { return [JSON.parse(event.detail)] } catch { return [] }
-  })
 }
 
 export function createEvaluate(cdp) {

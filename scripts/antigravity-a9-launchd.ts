@@ -149,60 +149,48 @@ ${proxyEntries}
       args: [{ providerId: 'antigravity', cwd: canonicalWorkspace }]
     })
 
-    const submitted = await callSock({
-      op: 'submit',
-      intentId: randomUUID(),
-      detail: JSON.stringify({
-        cwd: canonicalWorkspace,
-        providerId: 'antigravity',
-        permissionMode: 'full_access',
-        prompt: 'Reply with exactly: LAUNCHD_A9_OK'
+    async function exerciseRun(permissionMode: 'full_access' | 'default', prompt: string) {
+      const request = { op: 'subscribe', views: ['activeRuns'] }
+      const snapshot = await callSock({ ...request, waitMs: 0 })
+      if (snapshot.subscribe?.mode !== 'snapshot') throw new Error(`subscribe snapshot failed: ${JSON.stringify(snapshot)}`)
+      const { hostId, logId, seq } = snapshot.subscribe
+      let known = { hostId, logId, seq }
+      const submitted = await callSock({
+        op: 'submit',
+        intentId: randomUUID(),
+        detail: JSON.stringify({ cwd: canonicalWorkspace, providerId: 'antigravity', permissionMode, prompt })
       })
-    })
-    let runState = 'dispatched'
-    let cursor = 0
-    let outputCursor = 0
-    const chunks: unknown[] = []
-    const events: Array<{ kind: string; detail?: string }> = []
-    if (submitted.runId) {
-      const runDeadline = Date.now() + 60_000
-      while (Date.now() < runDeadline && runState === 'dispatched') {
-        const watched = await callSock({ op: 'watch', runId: submitted.runId, cursor, outputCursor, waitMs: 5_000 })
-        runState = watched.watch.state
-        cursor = watched.watch.poll.cursor
-        outputCursor = watched.watch.output.cursor
-        events.push(...watched.watch.poll.events)
-        chunks.push(...watched.watch.output.chunks)
+      let state = 'dispatched'
+      const events: Array<{ type: string; payload: { reason?: string } }> = []
+      const chunks: unknown[] = []
+      if (!submitted.runId) return { submitted, state, events, chunks }
+      let outputCursor = 0
+      const deadline = Date.now() + 60_000
+      while (Date.now() < deadline && !['settled', 'failed', 'cancelled', 'interrupted'].includes(state)) {
+        const reply = await callSock({ ...request, known, waitMs: 5_000 })
+        const page = reply.subscribe
+        if (!page || page.hostId !== hostId || page.logId !== logId || !Number.isSafeInteger(page.seq) || page.seq < known.seq) {
+          throw new Error(`subscribe lost the run cursor: ${JSON.stringify(reply)}`)
+        }
+        known = { hostId, logId, seq: page.seq }
+        const row = page.snapshot?.activeRuns?.rows.find((run: { runId: string }) => run.runId === submitted.runId)
+        if (row) state = row.lifecycle
+        for (const event of page.events ?? []) {
+          if (event.runId !== submitted.runId) continue
+          events.push(event)
+          if (['run.settled', 'run.failed', 'run.cancelled', 'run.interrupted'].includes(event.type)) state = event.type.slice(4)
+        }
+        const output = await callSock({ op: 'output', runId: submitted.runId, cursor: outputCursor })
+        if (!output.output || !Array.isArray(output.output.chunks)) throw new Error(`output unavailable: ${JSON.stringify(output)}`)
+        outputCursor = output.output.cursor
+        chunks.push(...output.output.chunks)
       }
+      return { submitted, state, events, chunks }
     }
 
-    // D11: with real ~/.gemini specific permissions.allow rules, default mode must succeed (not refuse).
-    const d11Submitted = await callSock({
-      op: 'submit',
-      intentId: randomUUID(),
-      detail: JSON.stringify({
-        cwd: canonicalWorkspace,
-        providerId: 'antigravity',
-        permissionMode: 'default',
-        prompt: 'Reply with exactly: LAUNCHD_DEFAULT_D11_OK'
-      })
-    })
-    let d11State = 'dispatched'
-    const d11Events: Array<{ kind: string; detail?: string }> = []
-    const d11Chunks: unknown[] = []
-    if (d11Submitted.runId) {
-      let c = 0
-      let oc = 0
-      const d11Deadline = Date.now() + 60_000
-      while (Date.now() < d11Deadline && d11State === 'dispatched') {
-        const watched = await callSock({ op: 'watch', runId: d11Submitted.runId, cursor: c, outputCursor: oc, waitMs: 5_000 })
-        d11State = watched.watch.state
-        c = watched.watch.poll.cursor
-        oc = watched.watch.output.cursor
-        d11Events.push(...watched.watch.poll.events)
-        d11Chunks.push(...watched.watch.output.chunks)
-      }
-    }
+    const full = await exerciseRun('full_access', 'Reply with exactly: LAUNCHD_A9_OK')
+    // D11 uses the explicit user permissions.allow configuration in its manual acceptance environment.
+    const standard = await exerciseRun('default', 'Reply with exactly: LAUNCHD_DEFAULT_D11_OK')
 
     return {
       label,
@@ -211,8 +199,11 @@ ${proxyEntries}
       runControlsState: controls.result?.state,
       modelCount: controls.result?.data?.models?.length ?? 0,
       nonGeminiTagged: (controls.result?.data?.models ?? []).some((m: { description?: string }) => m.description?.includes('经 Antigravity 提供')),
-      fullAccessRun: { status: submitted.status, runState, chunks, eventsCount: events.length },
-      d11DefaultWithUserRules: { status: d11Submitted.status, state: d11State, chunks: d11Chunks, failedDetail: d11Events.find((e) => e.kind === 'run_failed')?.detail }
+      fullAccessRun: { status: full.submitted.status, runState: full.state, chunks: full.chunks, eventsCount: full.events.length },
+      d11DefaultWithUserRules: {
+        status: standard.submitted.status, state: standard.state, chunks: standard.chunks,
+        failedDetail: standard.events.find((event) => event.type === 'run.failed')?.payload.reason
+      }
     }
   } finally {
     try { execFileSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }) } catch { /* ignore */ }

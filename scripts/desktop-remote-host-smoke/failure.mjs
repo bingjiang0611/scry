@@ -2,18 +2,20 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { waitForRun } from './harness.mjs'
+import { readRunCursor, waitForRun } from './harness.mjs'
 
 // A committed Provider failure must stay a failure, and the recorder artifacts it
 // leaves behind must stay bounded.
 export async function verifyFailureAndRecords({ transport, submit, invitation, identity, deviceCertPEM, normalSession, workspace }) {
   // A real adapter rejection after publishing its native session exercises the
   // production runtime rejection/recording/finally branches, not input rejection.
+  const endpoint = { transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM }
+  const known = await readRunCursor(endpoint)
   const failed = await submit(randomUUID(), 'remote provider failure smoke')
-  const failedWatch = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: failed.runId, expect: 'failed' })
-  assert.equal(failedWatch.watch.state, 'failed')
-  const failureEvent = failedWatch.watch.poll.events.find(event => event.runId === failed.runId && event.kind === 'run_failed')
-  assert.equal(failureEvent.detail, 'fixture_provider_failure', 'committed Provider error must not become an unknown recording failure')
+  const failedWatch = await waitForRun({ ...endpoint, runId: failed.runId, known, expect: 'failed' })
+  assert.equal(failedWatch.row?.lifecycle, 'failed')
+  const failureEvent = failedWatch.events.find(event => event.type === 'run.failed')
+  assert.equal(failureEvent?.payload.reason, 'fixture_provider_failure', 'committed Provider error must not become an unknown recording failure')
 
   const scryEntries = readdirSync(join(workspace, '.scry'))
   for (const entry of scryEntries) {

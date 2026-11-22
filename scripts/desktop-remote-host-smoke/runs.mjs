@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { detail, progressMarkers, tlsRequest, waitForRun } from './harness.mjs'
+import { detail, tlsRequest, waitForRun } from './harness.mjs'
 
 // Run lifecycle over the device channel: submit, dedupe, watch, trace, history,
 // session actions and resume. Returns the helpers the later phases reuse.
@@ -24,9 +24,8 @@ export async function verifyRuns({ transport, evaluate, invitation, identity, de
     { ...fencedSubmit, knownLogId: 'replaced-log' })
   assert.equal(wrongLog.error, 'orchestration_log_changed')
   const normalWatch = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: normal.runId, expect: 'settled' })
-  const normalMarkers = progressMarkers(normalWatch, normal.runId)
-  const normalSession = normalMarkers.find((marker) => marker.event === 'session')?.externalSessionId
-  const normalScryRunId = normalMarkers.find((marker) => marker.event === 'bound')?.scryRunId
+  const normalSession = normalWatch.row?.externalSessionId
+  const normalScryRunId = normalWatch.row?.traceRunId
   assert.match(normalSession, /^smoke-session-/)
   assert.match(normalScryRunId, /^remote-run-/)
   const trace = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
@@ -65,7 +64,7 @@ export async function verifyRuns({ transport, evaluate, invitation, identity, de
   assert.ok(!(await sessionPage()).sessionsPage.sessions.find(session => session.externalSessionId === normalSession).pinnedAt)
   const resumed = await submit(randomUUID(), 'desktop remote write two', { resume: normalSession })
   const resumedWatch = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: resumed.runId, expect: 'settled' })
-  const resumedRunId = progressMarkers(resumedWatch, resumed.runId).find(marker => marker.event === 'bound')?.scryRunId
+  const resumedRunId = resumedWatch.row?.traceRunId
   const resumedHistory = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'desktop', query: { kind: 'history', context: { ...context, externalSessionId: normalSession } }
   })
