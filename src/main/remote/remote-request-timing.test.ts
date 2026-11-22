@@ -19,6 +19,13 @@ describe('remote request timing labels', () => {
     expect(remoteOperationCounters({ op: 'poll', cursor: 3 })).toEqual({ 'op.poll': 1 })
   })
 
+  it('counts v2 subscription and compatibility operations without logging their contents', () => {
+    for (const op of ['subscribe', 'submitAtLog', 'intentStatusAtLog', 'watchStream']) {
+      const request = { op, knownLogId: 'private-log', detail: 'private-prompt', intentId: 'private-intent' }
+      expect(remoteOperationCounters(request)).toEqual({ [`op.${op}`]: 1 })
+    }
+  })
+
   it('records only stage names and bounded op counters, never request content', () => {
     setPerformanceRecordingSink(sample => samples.push(sample))
     const trace = remoteRequestTrace('remote.desktop.request')!
