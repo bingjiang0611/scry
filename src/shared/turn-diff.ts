@@ -1,7 +1,6 @@
 import { type ToolContent, isToolContent } from './tool-content.js'
 
 
-// P2 Files & Diff（RFC §8.4）：最终 git diff 的每文件增删（绝对路径），与工具足迹对照。
 export type DiffFileChange = 'added' | 'modified' | 'deleted'
 
 export interface DiffFile {
@@ -11,7 +10,6 @@ export interface DiffFile {
   change?: DiffFileChange
   binary?: boolean
   patch?: string
-  /** Complete patch body plus a bounded inline preview. Absence is legacy or unavailable capture. */
   patchContent?: ToolContent
   patchStatus?: TurnDiffPatchStatus
   patchReason?: TurnDiffPatchReason
@@ -25,8 +23,6 @@ export type WorkspaceDiffResult = (
   | { status: Exclude<TurnDiffStatus, 'captured'>; reason: TurnDiffReason | 'request_failed' | 'workspace_limit' | 'workspace_attributes' | 'workspace_file_type' | 'workspace_index' | 'workspace_submodule'; files: [] }
 ) & { collectedAt?: string }
 
-// Diff 快照的四个 harness stage。`*_preview` 是运行中的临时快照（同一 Git capture 的非消费式重算），
-// 终态 `turn_diff` / `session_diff` 一到达就在展示上取代它，且不写入会话 archive。
 export const TURN_DIFF_STAGE = 'turn_diff'
 export const SESSION_DIFF_STAGE = 'session_diff'
 export const TURN_DIFF_PREVIEW_STAGE = 'turn_diff_preview'
@@ -45,24 +41,7 @@ export function isDiffPreviewStage(stage: string): boolean {
   return stage === TURN_DIFF_PREVIEW_STAGE || stage === SESSION_DIFF_PREVIEW_STAGE
 }
 
-/**
- * 会话净 diff 的基线来源：`session_start` = 会话第一轮开始前捕获的原始基线；
- * `resumed` = 该基线在本进程内不存在（恢复/选择会话/重启后）而当场重锚，
- * 净 diff 只覆盖「自重锚以来」，UI 必须照实说明，不得冒充整段会话。
- */
 export type TurnDiffBaselineOrigin = 'session_start' | 'resumed'
-/**
- * 本轮新建 worktree 的基线来源：`worktree-creation-reflog` 表示基线取自该 worktree 自己的
- * HEAD reflog 第一条（旧值全 0 的创建记录），而不是回合开始时的仓库快照。
- * 没有可信基线时只能记 partial 并写明原因，files 必须为空——不得用猜测的基线补出 diff。
- * 能确认不是本轮新建的老 worktree 不产生任何记录，因此不会出现对应原因。
- *
- * - `reflog_missing` / `reflog_creation_not_first`：拿不到创建记录，且目录时间不早于回合开始。
- * - `reflog_outside_turn`：创建时间晚于收尾上限（时钟异常）；更早的早已静默跳过。
- * - `worktree_deleted`：收尾时目录或它的 `.git` 链接已不在（不再是一个独立仓库）。
- * - `capture_failed`：基线可信，但建树/收尾失败或超时，量不到 worktree 现在的内容。
- * - `no_checkout` / `per_turn_limit`：创建可信，但拿不到 worktree 现在的内容或已超出每轮上限。
- */
 export type WorktreeBaselineReason =
   | 'reflog_missing'
   | 'reflog_creation_not_first'
@@ -85,10 +64,6 @@ export type TurnDiffPatchReason = 'deadline' | 'git_error' | 'budget' | 'policy'
 export type TurnDiffFallbackReason = 'forced' | 'discovery_failed' | 'candidate_limit' | 'git_semantics' | 'targeted_failed'
 
 export interface TurnDiffCollection {
-  /**
-   * `unchanged` is one cheap status read proving a clean baseline's repository did not change; it
-   * skips the full collection instead of reporting an empty one as if it had been computed.
-   */
   strategy: 'targeted' | 'full_fallback' | 'unchanged'
   evidence: 'git_status' | 'git_status+structured' | 'fallback'
   candidatePathCount: number
@@ -96,37 +71,19 @@ export interface TurnDiffCollection {
   targetedMs?: number
   fallbackMs?: number
   fallbackReason?: TurnDiffFallbackReason
-  /** The collection timings/path count belong to the turn's same-afterAt capture, not another scan. */
   sharedAfter?: 'turn'
 }
 
-/**
- * 同一 canonical cwd 上的并行运行观测。一次 before/after 采集只能证明「工作区变了」，
- * 不能证明是哪个 run 写的：共享工作区里另一个 run 的改动会同时进入本次采集。
- * 缺失该字段表示旧记录或没有被观测（不推出「独占」），`runIds` 为空且 coverage=observed
- * 只表示「在这次观测窗口里没有看到其他 Scry run」，不代表用户或外部编辑器的写入不存在。
- */
 export interface WorkspaceOverlapEvidence {
-  /** observed = 整个窗口都在本进程观测内；partial = 有观测记录被上限淘汰或窗口未覆盖。 */
   coverage: 'observed' | 'partial'
-  /** 同 cwd、观测窗口与本次采集相交的其他 run ID（不含自己），按开始时间排序。 */
   runIds: string[]
-  /** 本次采集的观测窗口：diff 基线建立 → 证据采集结束。 */
   observedFrom: string
   observedTo: string
-  /** 达到 run ID 上报上限：可能还有更多重叠运行。 */
   truncated?: true
 }
 
-/** 上报的 run ID 上限；超过这个数必须带 truncated，不能静默少报。 */
 export const MAX_WORKSPACE_OVERLAP_RUN_IDS = 64
 
-/**
- * 归档/记录里的重叠证据归一化。
- *
- * 硬规则：能证明的才保留。时间必须可解析且构成有序窗口；run ID 超过上报上限时
- * 保留 truncated，而不是把「还有更多」悄悄抹成「就这些」。
- */
 export function normalizeWorkspaceOverlap(value: unknown): WorkspaceOverlapEvidence | undefined {
   if (!value || typeof value !== 'object') return undefined
   const raw = value as Record<string, unknown>
@@ -156,35 +113,20 @@ export interface TurnDiffSnapshot {
   reason?: TurnDiffReason
   files: DiffFile[]
   repoRoot?: string
-  /** Observed capture request directory, not proof of a resolved Git root. */
   requestedRoot?: string
   scope?: string
   beforeAt: string
   afterAt: string
   captureMs: number
-  /** Releases this capture's ownership; a referenced shared store lives until its last peer releases it. */
   cleanup: 'ok' | 'failed'
   collection?: TurnDiffCollection
-  /** 仅 session_diff / session_diff_preview 携带：净 diff 的基线是会话首轮前还是恢复后重锚。 */
   baseline?: TurnDiffBaselineOrigin
-  /**
-   * 本轮新建 worktree 的 diff 才携带：基线来自创建该 worktree 的提交（reflog 记录），
-   * 与普通「回合开始快照」基线不同，下游必须能区分。
-   */
   baselineSource?: 'worktree-creation-reflog'
   baselineStatus?: 'available' | 'partial'
-  /** `available` 时必有：worktree 创建时检出的提交，即本 snapshot 的基线树。 */
   baselineCommit?: string
-  /** `available` 时必有：reflog 记录的创建时间（ISO）。 */
   baselineCreatedAt?: string
-  /** `partial` 时必有：拿不到可信基线的原因。 */
   baselineReason?: WorktreeBaselineReason
-  /** 并行工作区重叠证据；缺失 = 旧记录或未观测，不能读成「独占归因」。 */
   workspaceOverlap?: WorkspaceOverlapEvidence
-  /**
-   * 接入方为这次会话声明的 diff 排除：实际命中的路径，以及因此没进 `files` 的文件数。
-   * 只记路径和数量，不记文件正文；缺失 = 这次 diff 没有因接入方声明而少任何文件。
-   */
   diffExclude?: TurnDiffExcludeEvidence
 }
 
@@ -279,7 +221,6 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
   const baseline = raw.baseline === 'session_start' || raw.baseline === 'resumed'
     ? (raw.baseline as TurnDiffBaselineOrigin)
     : undefined
-  // 新建 worktree 基线只能整体保留：来源、状态与对应证据必须配套，缺一项就不能声称有基线。
   const baselineCommit = typeof raw.baselineCommit === 'string' && /^[0-9a-f]{40}$/.test(raw.baselineCommit)
     ? raw.baselineCommit
     : undefined

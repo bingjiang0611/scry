@@ -13,6 +13,8 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [009: Keep CLI integration tests isolated and prove delivery](009-cli-integration-fixture-isolation.md)
 - [010: Preserve provider-specific hook delivery contracts](010-provider-hook-contracts.md)
 - [011: Keep trace evidence separate by source and lifecycle](011-shared-trace-evidence.md)
+- [012: A Git diff proves change, not authorship](012-diff-evidence-and-attribution.md)
+- [013: Keep missing evidence and negative evidence distinct in turn records](013-turn-record-evidence-contract.md)
 
 ## Source comment ratchet
 

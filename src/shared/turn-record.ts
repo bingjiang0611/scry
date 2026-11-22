@@ -36,8 +36,6 @@ export type {
   TurnRecordValidationResult
 } from './turn-record-contracts.js'
 
-/** Sections every record must carry, followed by the optional ones. Single source of truth for
- * validation and for any surface that reports per-section evidence status. */
 export const REQUIRED_EVIDENCE_SECTIONS = [
   'user', 'assistant', 'tools', 'skills', 'mcps', 'hooks', 'usage', 'files', 'diff',
   'dangerousOperations', 'errors'
@@ -45,7 +43,6 @@ export const REQUIRED_EVIDENCE_SECTIONS = [
 
 export const OPTIONAL_EVIDENCE_SECTIONS = ['interventions', 'compactions', 'modelSegments', 'modelTiming', 'transcript', 'termination'] as const
 
-/** `status/quality` per section; a missing optional section reads as unavailable, never as empty. */
 export function evidenceStatusMap(record: AgentTurnRecord): Record<string, string> {
   const summary: Record<string, string> = {}
   for (const section of [...REQUIRED_EVIDENCE_SECTIONS, ...OPTIONAL_EVIDENCE_SECTIONS]) {

@@ -15,7 +15,6 @@ export function isEvidence(value: unknown): value is Evidence<unknown> {
       !raw.omissionCodes.every((code) => (DIFF_OMISSION_CODES as readonly unknown[]).includes(code)))) return false
   if (raw.status === 'available') return raw.value !== undefined && raw.quality !== 'unavailable' && raw.source.length > 0
   if (raw.status === 'partial') return raw.value !== undefined && raw.quality !== 'unavailable' && typeof raw.omissionReason === 'string' && raw.source.length > 0
-  // Early schema-v1 writers omitted omissionReason, so readers retain that historical compatibility.
   return raw.quality === 'unavailable'
 }
 

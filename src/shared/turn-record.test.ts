@@ -74,7 +74,6 @@ describe('AgentTurnRecord strict schema-v1 validation', () => {
       usage: { status: 'partial', quality: 'exact', source: ['pi_qoder_credit_observation'], value: { credits }, omissionReason: 'main requests only' }
     })
     expect(isAgentTurnRecord(withCredits(piCredits))).toBe(true)
-    // A Pi credential never borrows Qoder's own SDK/native sources, and Qoder never borrows Pi's observation.
     const qoderObserved = creditUsageEvidence([{ id: 'request', runId: 'run', credits: 1.25 }], 'qoder_sdk')
     expect(isAgentTurnRecord(withCredits(qoderObserved))).toBe(false)
     expect(isAgentTurnRecord({
@@ -111,8 +110,6 @@ describe('AgentTurnRecord strict schema-v1 validation', () => {
       gap.provider = { id: 'codex', modelStatus: status, modelOmissionReason: 'provider exposed no model id' }
       expect(isAgentTurnRecord(gap)).toBe(true)
 
-      // A gap may never carry a model, a source, or an empty reason: each of
-      // those is how "unknown" used to be laundered into a usable value.
       const withModel = record()
       withModel.provider = { id: 'codex', model: 'gpt-6-astra', modelStatus: status, modelOmissionReason: 'x' }
       expect(isAgentTurnRecord(withModel)).toBe(false)
@@ -130,7 +127,6 @@ describe('AgentTurnRecord strict schema-v1 validation', () => {
     const sourceWithoutStatus = record()
     sourceWithoutStatus.provider = { id: 'codex', model: 'gpt-6-astra', modelSource: 'usage_event' }
     expect(isAgentTurnRecord(sourceWithoutStatus)).toBe(false)
-    // Legacy records that never had the field stay valid; absence is not a claim.
     expect(isAgentTurnRecord(record())).toBe(true)
   })
 
@@ -154,7 +150,6 @@ describe('AgentTurnRecord strict schema-v1 validation', () => {
     roleWithoutStatus.turnRole = { role: 'main', source: 'host' }
     expect(isAgentTurnRecord(roleWithoutStatus)).toBe(false)
 
-    // Free-form prose is not a role: identity cannot come from prompt text.
     const prose = record()
     prose.turnRoleStatus = 'observed'
     prose.turnRole = { role: 'approval history for command ...', source: 'text-regex' }
