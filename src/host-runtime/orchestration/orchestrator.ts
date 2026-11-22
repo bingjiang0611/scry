@@ -6,6 +6,7 @@ import {
 } from './orchestrator-commands'
 import {
   acceptDecision,
+  decideCatalogChange,
   decideRunEffectResult,
   makeEffect,
   makeEvent,
@@ -444,27 +445,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
     }
 
-    case 'session.discover': {
-      const p = cmd.payload
-      const event = makeEvent(cmd, 0, {
-        type: 'session.discovered',
-        stream: `session:${p.sessionKey}`,
-        sessionKey: p.sessionKey,
-        cwd: p.cwd,
-        payload: {
-          sessionKey: p.sessionKey,
-          provider: p.provider,
-          profile: p.profile ?? null,
-          cwd: p.cwd,
-          title: p.title ?? null,
-          ...(p.catalog ? { catalog: p.catalog } : {}),
-          ...(p.display ? { display: p.display } : {}),
-          ...(p.transcript ? { transcript: p.transcript } : {})
-        },
-        evidence: p.evidence ?? null
-      })
-      return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
-    }
+    case 'session.discover':
+    case 'session.withdraw':
+      return decideCatalogChange(cmd, view)
 
     case 'session.import': {
       const p = cmd.payload

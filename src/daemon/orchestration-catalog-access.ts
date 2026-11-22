@@ -172,6 +172,23 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
           })
           if (updated.kind === 'rejected') throw new Error(updated.reason)
         }
+        const kept = new Set(next.map(identityKey))
+        for (const pending of pendingByRun.values()) {
+          if (kept.has(identityKey(pending))) continue
+          const session = findProjectedNativeSession(sink, pending)
+          if (session?.catalog?.nativeSessionId !== null || session.activeRunId) continue
+          const payload = { sessionKey: session.sessionKey }
+          const updated = sink.execute({
+            type: 'session.withdraw',
+            commandId: `app-catalog-withdraw:${session.sessionKey}:${session.revSeq}`,
+            actor: 'system',
+            scope: 'system',
+            at: Date.now(),
+            payload,
+            payloadSha256: sha256Hex(canonicalJson(payload))
+          })
+          if (updated.kind === 'rejected') throw new Error(updated.reason)
+        }
       })
     }
   }

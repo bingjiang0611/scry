@@ -382,3 +382,40 @@ export function decideRunEffectResult(
     }
   }
 }
+
+export function decideCatalogChange(
+  cmd: Extract<OrchestrationCommand, { type: 'session.discover' | 'session.withdraw' }>,
+  view: OrchestratorReadView
+): DecisionResult {
+  if (cmd.type === 'session.withdraw') {
+    const { sessionKey } = cmd.payload
+    const session = view.getSession(sessionKey)
+    if (cmd.actor !== 'system' || session?.catalog?.nativeSessionId !== null || session.activeRunId) {
+      return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+    }
+    const event = makeEvent(cmd, 0, {
+      type: 'session.withdrawn', stream: `session:${sessionKey}`, sessionKey, cwd: session.cwd,
+      payload: { sessionKey }
+    })
+    return acceptDecision(cmd, [event], [], { sessionKey })
+  }
+  const p = cmd.payload
+  const event = makeEvent(cmd, 0, {
+    type: 'session.discovered',
+    stream: `session:${p.sessionKey}`,
+    sessionKey: p.sessionKey,
+    cwd: p.cwd,
+    payload: {
+      sessionKey: p.sessionKey,
+      provider: p.provider,
+      profile: p.profile ?? null,
+      cwd: p.cwd,
+      title: p.title ?? null,
+      ...(p.catalog ? { catalog: p.catalog } : {}),
+      ...(p.display ? { display: p.display } : {}),
+      ...(p.transcript ? { transcript: p.transcript } : {})
+    },
+    evidence: p.evidence ?? null
+  })
+  return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
+}

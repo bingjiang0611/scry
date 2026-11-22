@@ -366,7 +366,9 @@ export function createAppSessionStore(
   )
 
   const remove = (args: AppSessionRef): void => {
-    const next = load().filter((session) => !matchesRef(session, args))
+    const previous = load()
+    const next = previous.filter((session) => !matchesRef(session, args))
+    beforeMirrorWrite?.(previous, next)
     // Write the deletion tombstone to fallback first. If primary then fails, its old entry remains retryable.
     writeAtomic(`${file}.bak`, next)
     writeAtomic(file, next)

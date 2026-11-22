@@ -412,6 +412,9 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.sessionKey
       )
       return
+    case 'session.withdrawn':
+      db.prepare('DELETE FROM orch_p_session WHERE session_key = ?').run(event.sessionKey)
+      return
     case 'session.deleted':
       if (event.sessionKey) {
         db.prepare('DELETE FROM orch_p_interaction WHERE run_id IN (SELECT run_id FROM orch_p_run WHERE session_key = ?)').run(event.sessionKey)

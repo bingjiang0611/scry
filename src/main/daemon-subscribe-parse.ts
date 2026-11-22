@@ -45,6 +45,7 @@ export const KNOWN_SUBSCRIBE_EVENT_TYPES: ReadonlySet<string> = new Set([
   'session.deleted',
   'session.forked',
   'session.discovered',
+  'session.withdrawn',
   'session.imported',
   'turn.began',
   'turn.delivery',

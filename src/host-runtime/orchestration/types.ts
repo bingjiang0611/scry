@@ -67,6 +67,7 @@ export type OrchestrationEventType =
   | 'session.deleted'
   | 'session.forked'
   | 'session.discovered'
+  | 'session.withdrawn'
   | 'session.imported'
   | 'turn.began'
   | 'turn.delivery'
@@ -98,6 +99,7 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'session.deleted',
   'session.forked',
   'session.discovered',
+  'session.withdrawn',
   'session.imported',
   'turn.began',
   'turn.delivery',

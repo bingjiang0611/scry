@@ -233,6 +233,7 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'session.restore'; payload: SessionTogglePayload })
   | (BaseCommand & { type: 'session.fork'; payload: SessionForkPayload })
   | (BaseCommand & { type: 'session.discover'; payload: SessionDiscoverPayload })
+  | (BaseCommand & { type: 'session.withdraw'; payload: { sessionKey: string } })
   | (BaseCommand & { type: 'session.import'; payload: SessionImportPayload })
   | (BaseCommand & { type: 'host.start'; payload: HostStartPayload })
 
