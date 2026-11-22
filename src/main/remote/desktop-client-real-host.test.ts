@@ -10,6 +10,7 @@ import { DesktopRemoteClient } from './desktop-client'
 import { connectDesktopLane } from './desktop-lane'
 import { faultyLaneConnector } from './desktop-lane-fixtures'
 import { createHostController } from './host-controller-factory'
+import { createHostProjectionFixture } from './host-controller-fixtures'
 import { InnerMtlsHost } from './inner-mtls-host'
 import type { MacRunView } from './host-controller'
 import { PairingTransport } from './pairing-transport'
@@ -36,6 +37,7 @@ describe('DesktopRemoteClient over real host TLS', () => {
     let outputReads: MockInstance | undefined
     let providerStarts = 0
     const projection = fixtureSubscription(identity.hostId, () => binding.controller, () => hostUiRuns)
+    const persisted = createHostProjectionFixture()
     const binding = await createHostController({
       stateDirectory: directory,
       attachmentDirectory: join(directory, 'upload-staging'),
@@ -59,7 +61,10 @@ describe('DesktopRemoteClient over real host TLS', () => {
         }
       },
       gate: new ProviderOperationGate(),
-      onLedgerEvent: projection.onLedgerEvent,
+      onLedgerEvent: (event, meta) => {
+        projection.onLedgerEvent(event)
+        persisted.onLedgerEvent(event, meta)
+      },
       createOutputStore: (path) => {
         const store = new RunOutputFileStore(path)
         outputReads = vi.spyOn(store, 'since')
@@ -221,9 +226,9 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(providerStarts).toBe(1)
       expect(wire.some(request => (request as { op?: string }).op === 'stop')).toBe(false)
       if (captureFailure) {
-        const events = binding.controller.poll(grant.certificateSHA256, { cursor: 0 }).events
-        expect(events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)
-        expect(events.find((event) => event.kind === 'run_failed')?.detail).toBe('403 model access restricted')
+        expect(persisted.events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)
+        expect(persisted.projection.listEvents().find((event) => event.type === 'run.failed')?.payload.reason)
+          .toBe('403 model access restricted')
       }
       expect(wire.some((request) => (request as { op?: string }).op === 'desktop')).toBe(true)
       const wrongIdentity = await ensureHostIdentity(join(directory, 'wrong-anchor'))

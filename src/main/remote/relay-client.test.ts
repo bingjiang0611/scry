@@ -13,6 +13,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import { HostController, type RemoteIntentRouting } from './host-controller'
 import { createHostController } from './host-controller-factory'
+import { createHostProjectionFixture } from './host-controller-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { RelayClient, ReverseTunnelTransport, type OutboundLeg } from './relay-client'
@@ -203,11 +204,12 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     const dir = mkdtempSync(join(tmpdir(), 'scry-relay-')); dirs.push(dir)
     const identity = await ensureHostIdentity(join(dir, 'identity'))
     const seen: RemoteIntentRouting[] = []
+    const { projection, onLedgerEvent } = createHostProjectionFixture()
     const binding = await createHostController({
       stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
       verifyCSR: identity.verifyCSR, issue: identity.issue,
       authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
-      startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate(),
+      startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate(), onLedgerEvent,
       createOutputStore: (directory) => new RunOutputFileStore(directory)
     })
     cleanups.push(() => binding.close())
@@ -234,9 +236,10 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     // A second session must reuse the warm pool (proves the tunnel replenishes).
     const projects = await deviceCall(relay.devicePort, caPEM, device.certPEM, device.keyPEM, { op: 'projects' })
     expect(projects.projects).toEqual([])
-    const grant = controller.authority.inspectLocal().grants[0]!
-    expect(controller.poll(grant.certificateSHA256, { cursor: 0 }).events.map(event => event.kind))
-      .toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
+    expect(projection.getRun(submit.runId)?.lifecycle).toBe('settled')
+    const lifecycle = projection.listEvents().filter(event => event.runId === submit.runId &&
+      ['run.intent_recorded', 'run.dispatched', 'run.settled'].includes(event.type))
+    expect(lifecycle.map(event => event.type)).toEqual(['run.intent_recorded', 'run.dispatched', 'run.settled'])
   })
 
   it('refuses a CA-trusted but ungranted device through the relay without running the executor', async () => {

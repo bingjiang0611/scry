@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import type { MacRunView } from './host-controller'
-import { AUTHORIZED, CERT, grantedController, routing, type RunProvider } from './host-controller-fixtures'
+import { AUTHORIZED, CERT, grantedController, grantedProjectedController, routing, type RunProvider } from './host-controller-fixtures'
 
 describe('HostController run output and stop', () => {
   type LiveInput = { runId: string; progress(d?: string): void; output(chunk: { kind: 'output'; text: string }): void; stopSignal: AbortSignal }
@@ -9,13 +9,13 @@ describe('HostController run output and stop', () => {
   it('returns only new run output and leaves the lifecycle authoritative', async () => {
     let emit!: (text: string) => void
     let finish!: () => void
-    const { controller } = await grantedController((async (input: LiveInput) => {
+    const { controller, projection } = await grantedProjectedController((async (input: LiveInput) => {
       emit = (text) => input.output({ kind: 'output', text })
       await new Promise<void>((resolve) => { finish = resolve })
     }) as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
     await vi.waitFor(() => expect(emit).toBeDefined())
-    expect(controller.runState(CERT, { runId })).toBe('dispatched')
+    expect(projection.getRun(runId)?.lifecycle).toBe('dispatched')
     const first = await controller.runOutput(CERT, { runId, cursor: 0 })
     expect(first.chunks).toEqual([])
     emit('hello')
@@ -24,7 +24,7 @@ describe('HostController run output and stop', () => {
     expect((await controller.runOutput(CERT, { runId, cursor: next.cursor })).chunks).toEqual([])
     finish()
     await controller.idle()
-    expect(controller.runState(CERT, { runId })).toBe('settled')
+    expect(projection.getRun(runId)?.lifecycle).toBe('settled')
   })
 
   it('rejects output and stop for a revoked device', async () => {
@@ -41,16 +41,16 @@ describe('HostController run output and stop', () => {
     const runProvider = vi.fn(async (input: LiveInput) => {
       await new Promise<void>((resolve) => input.stopSignal.addEventListener('abort', () => { stopped = true; resolve() }))
     })
-    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    const { controller, projection, events } = await grantedProjectedController(runProvider as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
     await vi.waitFor(() => expect(runProvider).toHaveBeenCalled())
     expect(controller.stopRun(CERT, { runId })).toEqual({ status: 'requested' })
     expect(controller.stopRun(CERT, { runId })).toEqual({ status: 'already_requested' })
     await controller.idle()
     expect(stopped).toBe(true)
-    const kinds = controller.poll(CERT, { cursor: 0 }).events.map((event) => [event.kind, event.detail])
+    const kinds = events.map((event) => [event.kind, event.detail])
     expect(kinds).toContainEqual(['run_progress', JSON.stringify({ event: 'stop_requested' })])
-    expect(controller.runState(CERT, { runId })).toBe('settled')
+    expect(projection.getRun(runId)?.lifecycle).toBe('settled')
     expect(controller.stopRun(CERT, { runId })).toEqual({ status: 'not_running' })
   })
 })
@@ -76,9 +76,11 @@ describe('HostController questions and Mac controls', () => {
     const runProvider = vi.fn(async (input: LiveInput) => {
       answered = await input.requestUserInput(question(input.runId), input.stopSignal)
     })
-    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'ask me' }) })
-    await vi.waitFor(() => expect(controller.pendingQuestions(CERT, { runId }).map((q) => q.questionId)).toEqual(['q1']))
+    await vi.waitFor(() => expect(projection.handle.db.prepare(
+      "SELECT question_id FROM orch_p_interaction WHERE run_id = ? AND state = 'open'"
+    ).all(runId)).toEqual([{ question_id: 'q1' }]))
     controller.answerQuestion(CERT, { runId, answerId: randomUUID(), response: { runId, questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never })
     await controller.idle()
     expect(answered).toMatchObject({ behavior: 'answered' })
@@ -89,9 +91,11 @@ describe('HostController questions and Mac controls', () => {
     const runProvider = vi.fn(async (input: LiveInput) => {
       answered = await input.requestUserInput(question(input.runId), input.stopSignal)
     })
-    const { controller } = await grantedController(runProvider as unknown as RunProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider as unknown as RunProvider)
     const { runId } = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'ask me' }) })
-    await vi.waitFor(() => expect(controller.pendingQuestions(CERT, { runId }).map((q) => q.questionId)).toEqual(['q1']))
+    await vi.waitFor(() => expect(projection.handle.db.prepare(
+      "SELECT question_id FROM orch_p_interaction WHERE run_id = ? AND state = 'open'"
+    ).all(runId)).toEqual([{ question_id: 'q1' }]))
     // The Mac renderer's response carries the scry runId; the owner path keys by ledger runId.
     expect(controller.answerOwnerQuestion(runId, { runId: 'remote-run-x-0', questionId: 'q-other', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(false)
     expect(controller.answerOwnerQuestion(runId, { runId: 'remote-run-x-0', questionId: 'q1', behavior: 'answered', answers: { 'Which?': 'A' } } as never)).toBe(true)

@@ -4,6 +4,11 @@ import { describe, expect, it } from 'vitest'
 const source = (path: string): string => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8')
 
 describe('v3 retirement', () => {
+  it('removes the obsolete HostController lifecycle and question readers', () => {
+    expect(source('src/main/remote/host-controller-surface.ts')).not
+      .toMatch(/^  (poll|runState|pendingQuestions)\(/m)
+  })
+
   it('keeps daemon authority enabled independently of the former environment switch', () => {
     expect(source('src/daemon/host-process.ts')).not.toMatch(/parseOrchestrationMode|orchestrationShadow/)
     expect(source('src/daemon/host-process-dispose.ts')).not.toMatch(/reconcileH1ForOffMode|attachDaemonOrchestrationShadow/)

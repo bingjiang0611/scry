@@ -12,6 +12,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import { HostController, type RemoteIntentRouting, type RemoteHistoryPreview } from './host-controller'
 import { createHostController } from './host-controller-factory'
+import { createHostProjectionFixture } from './host-controller-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
@@ -57,11 +58,12 @@ async function harness(
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
+  const { projection, onLedgerEvent } = createHostProjectionFixture()
   const binding = await createHostController({
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
-    startRun: runProvider, gate: new ProviderOperationGate(),
+    startRun: runProvider, gate: new ProviderOperationGate(), onLedgerEvent,
     readSessionStatus: () => 'not_observed',
     createOutputStore: (directory) => new RunOutputFileStore(directory),
     ...(listCommands ? { listCommands } : {}),
@@ -80,7 +82,7 @@ async function harness(
   const host = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM, ...(executionTargets ? { executionTargets } : {}) })
   const addr = await host.listen()
   cleanups.push(() => host.close())
-  return { identity, controller, caPEM: identity.caCertificatePEM, addr, host }
+  return { identity, controller, projection, caPEM: identity.caCertificatePEM, addr, host }
 }
 
 async function pairDevice(identity: HostIdentity, controller: HostController) {
@@ -131,7 +133,7 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
 
   it('authorizes a paired device by its verified peer certificate and reflects lifecycle', async () => {
     const seen: RemoteIntentRouting[] = []
-    const { identity, controller, caPEM, addr } = await harness(async ({ routing }) => { seen.push(routing) })
+    const { identity, controller, projection, caPEM, addr } = await harness(async ({ routing }) => { seen.push(routing) })
     const device = await pairDevice(identity, controller)
 
     const intentId = randomUUID()
@@ -142,13 +144,14 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     expect(seen).toEqual([{ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }])
     const receipt = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'intentStatusAtLog', intentId })
     expect(receipt.intent).toMatchObject({ runId: submit.runId, state: 'settled' })
-    expect(controller.poll(device.fingerprint, { cursor: 0 }).events.map(event => event.kind))
-      .toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
+    const lifecycle = projection.listEvents().filter(event => event.runId === submit.runId &&
+      ['run.intent_recorded', 'run.dispatched', 'run.settled'].includes(event.type))
+    expect(lifecycle.map(event => event.type)).toEqual(['run.intent_recorded', 'run.dispatched', 'run.settled'])
   })
 
   it('round-trips Provider permission and editor questions over the authorized device channel', async () => {
     let providerResponse: AgentQuestionResponse | undefined
-    const { identity, controller, caPEM, addr } = await harness(async ({ runId, requestUserInput }) => {
+    const { identity, controller, projection, caPEM, addr } = await harness(async ({ runId, requestUserInput }) => {
       providerResponse = await requestUserInput({
         runId: `provider-${runId}`,
         questionId: 'permission-1',
@@ -166,10 +169,12 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const submit = await call(addr, caPEM, device.certPEM, device.keyPEM, {
       op: 'submit', intentId: randomUUID(), detail: routing({ prompt: 'needs permission' })
     })
-    let questions: AgentQuestionRequest[] = []
+    const openQuestions = projection.handle.db.prepare(
+      "SELECT run_id AS runId, question_id AS questionId FROM orch_p_interaction WHERE run_id = ? AND state = 'open'")
+    let questions: unknown[] = []
     for (let attempt = 0; attempt < 20 && questions.length === 0; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 10))
-      questions = controller.pendingQuestions(device.fingerprint, { runId: submit.runId })
+      questions = openQuestions.all(submit.runId)
     }
     expect(questions).toEqual([expect.objectContaining({ runId: submit.runId, questionId: 'permission-1' })])
     const response = {

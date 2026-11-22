@@ -131,7 +131,7 @@ describe('createHostController (production persistence binding)', () => {
     await binding.controller.idle()
 
     expect(seen).toEqual([{ cwd: realpathSync(join(dir, 'workspace')), providerId: 'claude', prompt: 'go' }])
-    expect(binding.controller.runState(CERT, { runId: submit.runId })).toBe('settled')
+    expect(binding.authority.sink.getRun(submit.runId)?.lifecycle).toBe('settled')
     expect(existsSync(join(dir, 'pairing'))).toBe(true)
     expect(existsSync(join(dir, 'orchestration', 'orchestration.db'))).toBe(true)
     expect(existsSync(join(dir, 'ledger'))).toBe(false)
@@ -219,7 +219,7 @@ describe('createHostController (production persistence binding)', () => {
       expect((await exited)[1]).toBe('SIGKILL')
       const startRun = vi.fn(async () => {})
       const restored = await factory(dir, startRun)
-      expect(restored.controller.runState(CERT, { runId: settled.runId })).toBe('settled')
+      expect(restored.authority.sink.getRun(settled.runId)?.lifecycle).toBe('settled')
       // No executor survived the kill: the orphan closes as failed (outcome
       // unknown) instead of staying `dispatched` forever, and is never re-run.
       expect(restored.authority.sink.getRun(pending.runId)?.lifecycle).toBe('interrupted')
@@ -263,9 +263,9 @@ describe('createHostController (production persistence binding)', () => {
     // Restart against the same directory: leases re-acquired, grant survives,
     // and the prior settled run is still authoritatively readable.
     const second = await factory(dir, async () => {})
-    expect(second.controller.runState(CERT, { runId: submit.runId })).toBe('settled')
+    expect(second.authority.sink.getRun(submit.runId)?.lifecycle).toBe('settled')
     // The restored grant still authorizes the device.
-    expect(() => second.controller.poll(CERT, { cursor: 0 })).not.toThrow()
+    expect(second.authority.sink.listEvents()).toContainEqual(expect.objectContaining({ runId: submit.runId, type: 'run.settled' }))
   })
 
   it('does not leak the pairing lease when the output lease cannot be taken', async () => {

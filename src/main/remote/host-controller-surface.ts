@@ -3,7 +3,6 @@ import type { DesktopDirectoryResult, DesktopHostReadResult, RemoteProviderQuery
 import type { RemoteIntentRouting, HostControllerDependencies } from './host-controller-types'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import { DesktopAttachmentStore, type DesktopAttachmentReference } from './desktop-attachments'
-import { REMOTE_RUN_ID } from './host-controller-routing'
 import { PairingAuthority } from './pairing'
 import { RemoteDispatcher } from './remote-dispatcher'
 import { RemoteFileDownloads } from './remote-file-download'
@@ -22,7 +21,7 @@ import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
 import type { OrchestrationImmediateDispatchChecks } from './orchestration-seam'
 import { assertExpectedLog, resolveIntentCommand, submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
-import { type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
+import type { AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
 // Device-facing API of the remote host: one method per operation the paired
@@ -118,22 +117,6 @@ export class HostController {
 
   resolveIntent(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
     return resolveIntentCommand(this.#deps(), peerCertSHA256, input)
-  }
-
-  poll(peerCertSHA256: string, input: { cursor: number }): ReturnType<SessionLedger['since']> {
-    if (this.#injected.orchestration?.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
-    return this.#gateway.poll(peerCertSHA256, input)
-  }
-
-  runState(peerCertSHA256: string, input: { runId: string }): RunLifecycle | undefined {
-    if (this.#injected.orchestration?.isWriteIndeterminate()) throw new RemoteInteractionError('orchestration_write_indeterminate')
-    return this.#gateway.runState(peerCertSHA256, input)
-  }
-
-  pendingQuestions(peerCertSHA256: string, input: { runId: string }): AgentQuestionRequest[] {
-    this.authorizeDevice(peerCertSHA256)
-    if (!REMOTE_RUN_ID.test(input.runId) || !this.#ledger.runState(input.runId)) throw new RemoteInteractionError('unknown_run')
-    return this.#interactions.list(input.runId)
   }
 
   answerQuestion(peerCertSHA256: string, input: AnswerInput): RemoteQuestionAnswerReceipt {

@@ -204,8 +204,7 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       expect(resolved.runId).toBe(runId)
       expect(resolved.state).toBe('cancelled')
 
-      const runState = host2.service.controller.runState(peerSha, { runId })
-      expect(runState).toBe('cancelled')
+      expect(host2.service.controller.intentStatus(peerSha, { intentId })).toEqual({ runId, state: 'cancelled' })
 
       const reply = await call(host2.channel.socketPath, host2.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
