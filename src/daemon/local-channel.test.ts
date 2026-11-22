@@ -17,8 +17,6 @@ import { openLocalChannel, type LocalChannel } from './local-channel'
 type PeculiarCrypto = Parameters<typeof cryptoProvider.set>[0]
 cryptoProvider.set(webcrypto as unknown as PeculiarCrypto)
 
-// The daemon's local channel is the production inner-mTLS host served over a unix
-// socket: no stub TLS, no fake authorization.
 
 const dirs: string[] = []
 const cleanups: Array<() => void | Promise<void>> = []
@@ -30,7 +28,6 @@ afterEach(async () => {
 async function localHost() {
   const dir = mkdtempSync(join(tmpdir(), 'scry-daemon-local-'))
   dirs.push(dir)
-  // The desktop surface the daemon serves: same reader the app builds, without a run.
   const hostId = { current: '' }
   const service = await RemoteHostService.create({
     stateDirectory: join(dir, 'remote'), authorizeWorkspace: (cwd: string) => cwd, startRun: async () => {},
@@ -47,8 +44,6 @@ async function localHost() {
   const { publicKeySHA256 } = await verifyCSR(csrPEM)
   const pair = await service.authority.begin()
   await service.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'local daemon client' }, publicKeySHA256)
-  // The local device is enrolled through the same owner-confirmation path as a
-  // paired phone; it is a real grant, not a bypass.
   const grant = await service.authority.confirmLocal(pair.pairingId, publicKeySHA256)
   return {
     dir,
@@ -64,7 +59,6 @@ async function openChannel(serve: (stream: import('node:stream').Duplex) => void
   return channel
 }
 
-// One request over the unix socket, framed like every other host request.
 function request(host: Awaited<ReturnType<typeof localHost>>, channel: LocalChannel, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const socket = tlsConnect({
@@ -94,7 +88,6 @@ describe('daemon local channel', () => {
     expect(channel.socketPath).toBe(join(host.dir, 'daemon', 'local.sock'))
     expect(statSync(join(host.dir, 'daemon')).mode & 0o777).toBe(0o700)
     expect(statSync(channel.socketPath).mode & 0o777).toBe(0o600)
-    // The channel exposes a socket path and nothing else: no port, no address.
     expect(Object.keys(channel).sort()).toEqual(['close', 'socketPath'])
   })
 
@@ -103,7 +96,6 @@ describe('daemon local channel', () => {
     const channel = await openChannel((stream) => host.service.host.serve(stream), join(host.dir, 'daemon'))
     const info = await request(host, channel, { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } })
     expect(info.desktop).toMatchObject({ kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.service.hostId })
-    // The same hard version gate as the remote path: no downgrade, no compat layer.
     const stale = await request(host, channel, { protocol: 1, op: 'desktop', query: { kind: 'info' } })
     expect(stale).toMatchObject({ error: 'protocol_mismatch', hostProtocol: REMOTE_PROTOCOL_VERSION, clientProtocol: 1 })
   })
@@ -127,7 +119,6 @@ describe('daemon local channel', () => {
     const pair = await host.service.authority.begin()
     await host.service.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'intruder' }, publicKeySHA256)
     const foreign = await host.service.authority.confirmLocal(pair.pairingId, publicKeySHA256)
-    // Revoked, so TLS still completes but authorization fails: the grant decides, not the socket.
     await host.service.revokeDevice(foreign.deviceId)
     const foreignHost = { ...host, grant: foreign, keyPEM: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----\n` }
     expect((await request(foreignHost as typeof host, channel, { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } })).error)

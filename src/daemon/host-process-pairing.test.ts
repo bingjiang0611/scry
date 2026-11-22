@@ -8,8 +8,6 @@ import { startTestDaemon } from './host-process.harness'
 
 afterEach(cleanupTempDirs)
 
-// B4-L4 pairing: the daemon answers the pairing screen from its own host, on main's
-// enable rule, and never offers the App's own local-socket grant as a paired device.
 
 describe('daemon pairing and host status', () => {
   it('reports remote access off where the in-process App would (dev build, no SCRY_REMOTE_HOST)', async () => {
@@ -34,13 +32,11 @@ describe('daemon pairing and host status', () => {
     try {
       const status = (await daemon.localOp('localHostStatus', 'status', [])).result as { enabled: boolean; devices: Array<{ deviceId: string }> }
       expect(status.enabled).toBe(true)
-      // The harness enrolled itself over the local socket: that grant is not a device.
       const local = daemon.host.service.authority.inspectLocal().grants.filter((grant) => grant.scope === 'local')
       expect(local.length).toBeGreaterThan(0)
       expect(status.devices.map((device) => device.deviceId)).not.toContain(local[0]!.deviceId)
       const refused = await daemon.localOp('localPairing', 'revoke', [local[0]!.deviceId])
       expect(refused.error).toBe('这是本机 App 与后台服务的连接，不是已配对设备，不能在这里撤销')
-      // Still connected: the next call is answered.
       expect((await daemon.localOp('localHostStatus', 'status', [])).error).toBeUndefined()
 
       const begun = await daemon.localOp('localPairing', 'begin', [])
@@ -49,10 +45,8 @@ describe('daemon pairing and host status', () => {
       const pending = (await daemon.localOp('localHostStatus', 'status', [])).result as { pending: Array<{ pairingId: string }> }
       expect(pending.pending.map((item) => item.pairingId)).toContain(pairingId)
       expect((await daemon.localOp('localPairing', 'cancel', [pairingId])).error).toBeUndefined()
-      // A confirmation must name the key the user compared; a made-up one is refused.
       expect((await daemon.localOp('localPairing', 'confirm', [pairingId, 'a'.repeat(64)])).error).toBeTruthy()
 
-      // Desktop access (another desktop App pairs with this host) is the daemon host's too.
       expect((await daemon.localOp('localDesktopHost', 'status', [])).result).toMatchObject({ enabled: false })
       const invite = await daemon.localOp('localDesktopHost', 'invite', [])
       expect(invite.error).toBeUndefined()
@@ -67,8 +61,6 @@ describe('daemon pairing and host status', () => {
     }
   }, 30_000)
 
-  // P5-host-security §4.5: every invitation used one of 64 records, so a long-running
-  // daemon eventually refused new devices and the App's own re-enrollment.
   it('keeps inviting past the 64-record table, and the App re-enrolls after a restart', async () => {
     const saved = process.env.SCRY_REMOTE_HOST
     process.env.SCRY_REMOTE_HOST = '1'
@@ -77,7 +69,6 @@ describe('daemon pairing and host status', () => {
     try {
       for (let i = 0; i < 70; i++) expect((await first.localOp('localPairing', 'begin', [])).error).toBeUndefined()
       await first.dispose()
-      // The restart enrolls the App over the local socket again (startTestDaemon does).
       second = await startTestDaemon({ root: first.root })
       const state = second.host.service.authority.inspectLocal()
       expect(state.pairings.filter((p) => p.state === 'cancelled' || p.state === 'expired').length).toBeLessThanOrEqual(17)
@@ -91,8 +82,6 @@ describe('daemon pairing and host status', () => {
     }
   }, 60_000)
 
-  // W3 / P5-5a release 1: daemon starts and enrolls the App over a pairing file
-  // whose remote grants already carry `approvedVia`.
   it('starts and enrolls the App when persisted remote grants carry approvedVia', async () => {
     const saved = process.env.SCRY_REMOTE_HOST
     process.env.SCRY_REMOTE_HOST = '1'
