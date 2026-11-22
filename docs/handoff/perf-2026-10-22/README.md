@@ -11,4 +11,4 @@
 | E | 远程 trace 增量协议 | [E](reports/E.md) |
 | F | iOS 状态观察粒度 | [F](reports/F.md) · [F2](reports/F2.md) |
 
-验证状态见 [STATUS.md](STATUS.md)。分支整合、迁移到重写后的 main 及其复验分别见[整合报告](reports/integration.md)和[移植验证](reports/port.md)。原分工与任务书留在 [Git 历史](https://github.com/bingjiang0611/scry/tree/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/perf-2026-10-22)。
+分支整合、迁移到重写后的 main 及其复验分别见[整合报告](reports/integration.md)和[移植验证](reports/port.md)。原分工、任务书与状态表留在 [Git 历史](https://github.com/bingjiang0611/scry/tree/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/perf-2026-10-22)。

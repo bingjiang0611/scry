@@ -1,10 +1,10 @@
 # 汇总：recorder 引擎性能（M / G / R）
 
-分支：`perf/recorder-engine`。已完成本批实现、本地验证与 Sol 复核；未发布。
+分支：`perf/recorder-engine`。已完成本批实现、本地验证与 Sol 复核，PR #31 后续已合并。合并不等于此轮已发布或部署。
 提交时点的维护失败隔离、JSON 修正与门禁情况见 [PR-follow-up](PR-follow-up.md)；最新远端状态以
 [PR #31](https://github.com/bingjiang0611/scry/pull/31) 为准。并发修复见
 [R3-attention-race](R3-attention-race.md)，初始化与半行修正见 [SOL](SOL.md)。
-验证须按各报告的 revision 区分；完整条目见 [STATUS](../STATUS.md)。
+验证须按各报告的 revision 区分；[合并前状态表](https://github.com/bingjiang0611/scry/blob/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/recorder-perf-2026-11-05/STATUS.md)仅作历史记录。
 
 ## 本次 PR 的边界
 
@@ -42,7 +42,7 @@
 | 条目 | 状态与条件 |
 |---|---|
 | G1-3 多仓库并发 | 高负载样本不足，未实施；需要可信收益与正确性证据 |
-| G2 跨轮复用 | S3 / S6 已达到评估门槛；单仓库 11 个进程不构成豁免。实现仍延后，特别是索引种子需要单独论证 |
+| G2 跨轮复用 | S3 / S6 已达到评估门槛；单仓库 11 个进程不构成豁免。跨轮索引种子、私有对象库保留、布局与配置缓存均未实施；见 [G2](G2.md) |
 | R1 真正增量解析 | 未实施；需要 Provider-specific 的可合并状态及重放规则，不能把锚点复用称为解析增量 |
 | R4 提交路径重写 | 当前成本证据不足以支持改动；已有测量和设计，不扩大实现 |
 | R5 统一日志 / 执行器 | S10 不支持架构扩张，未实施 |
@@ -59,7 +59,7 @@ Linux 回归暴露的旧 oracle fixture 缺少 alternate object store 环境，�
 断言均保留，生产 Git 代码未改。
 
 仍未验证真实 Provider / App 端到端、断电恢复、Linux 发行版目标机及安装后的日常实例。
-SIGKILL 只证明进程崩溃场景，不等于断电测试。混用旧进程不受新互斥协议保护。
+SIGKILL 只证明进程崩溃场景，不等于断电测试。Linux guest 不等于 Arch/Omarchy x86_64 目标机验收。混用旧进程不受新互斥协议保护；缺少完整初始化标志的旧索引会先重建，不能仅因目录存在就跳过旧会话。
 
 ## 生效与交付
 

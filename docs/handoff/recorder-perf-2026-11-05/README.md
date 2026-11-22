@@ -11,7 +11,7 @@
 
 ## 批次结果
 
-本轮改动已通过 [PR #31](https://github.com/bingjiang0611/scry/pull/31) 合并。实测结果、未采纳项和限制见[汇总](reports/SUMMARY.md)；[状态表](STATUS.md)保留收尾前的核验记录。原任务书和执行门槛见 [Git 历史](https://github.com/bingjiang0611/scry/tree/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/recorder-perf-2026-11-05)。
+本轮改动已通过 [PR #31](https://github.com/bingjiang0611/scry/pull/31) 合并。实测结果、未采纳项和限制见[汇总](reports/SUMMARY.md)。原任务书、执行门槛及收尾前的状态表见 [Git 历史](https://github.com/bingjiang0611/scry/tree/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/recorder-perf-2026-11-05)。
 
 | 批次 | 内容 | 报告 |
 |---|---|---|

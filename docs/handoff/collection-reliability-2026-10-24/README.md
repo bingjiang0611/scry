@@ -8,10 +8,19 @@
 
 - **审查方**（Claude，本会话）：写交接文档、核验执行结果。
 - **执行方**（另一个 agent）：按批次实施，推送到本分支 `reliability/collection`。
-- 执行方完成一个批次 → 写 `reports/<批次>.md` 并更新 [STATUS.md](STATUS.md) 为 `待核验` → push。审查方核验后标 `已核验`，或在报告末尾写「核验意见」并标 `需修改`。
+- 各批次的核验意见留在 `reports/`；项目收尾时的验证和升级边界见下节。
 - 批次在同一分支上**串行**进行：A → B → C → D。E 在 D 之后做，用户已于 2026-10-25 确认 uploader 行为（见 [E.md](E.md)）；其中 uploader 侧任务不在本仓库。
 - 不 push `main`，不开 PR，不合入。合入由用户决定。
 - 用户本地可以验证 OpenCode、Qoder、Codex。每个批次需要用户在真实 Provider 上手动确认的步骤，执行方写进报告的「用户验证」一节，参考 [USER-VERIFY.md](USER-VERIFY.md) 的格式。
+
+## 收尾验收与升级边界（历史）
+
+- **真实 Provider 的验收范围**：2026-10-26 的 [F 批次](reports/F.md)中，OpenCode 实测落 12 条，Pi 限流的轮次仍落 1 条；[Codex 真机验收](reports/F-codex.md)在用户确认 hook trust 后验证了工作区根和普通子目录。Claude 本轮由用户决定不验收，Qoder 刷新凭据后未重跑，均不计通过。F-3 至 F-8 在隔离环境通过；其中通知字节校验、短暂故障后补投和 daemon 退出恢复，不代替真实外部 uploader 端到端或断电验收。
+- **已知缺口**：从多仓库工作区的子仓库启动 Codex 时，项目 hook 搜索停在子仓库根，不会加载工作区根的配置。当时没有 record，也没有 skip log，doctor 仍可能显示健康。该轮明确不修；当时的规避方法是从工作区根启动。其他 Provider 的子仓库场景未验证。
+- **升级边界**：改动已有 Provider hook 的批次需要在受影响 workspace 执行 `scry integrations repair --yes`；OpenCode idle 去重与 C3 的子目录修复属于此类，C3 还需重启 Provider。C1/C2、D2、E1 的相应旧安装需 repair 并重启 recorder daemon；纯 CLI 修复（例如 A2/V3 的诊断时间分级）升级 CLI 即生效。以 [A](reports/A.md)、[C](reports/C.md)、[D](reports/D.md)、[E](reports/E.md) 的分项说明和实际版本为准。
+- **投递边界**：序号复用和投递空洞的修复、人工恢复步骤和未验证范围见[序号报告](reports/sequence-reuse.md)及[空洞报告](reports/delivery-holes.md)。未用本地 receiver 的 ACK 冒充真实 uploader 去重、服务端落地或断电验收。
+
+[原状态表](https://github.com/bingjiang0611/scry/blob/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/collection-reliability-2026-10-24/STATUS.md)保留逐项核验、红测与提交记录，不作为当前版本验收。
 
 ## 使用场景（所有批次都要考虑）
 
@@ -31,7 +40,7 @@
 
 ## 硬约束
 
-1. **先证实再修。** 每条先写一个在旧实现上失败的测试（或可复现的脚本），单独提交；再提交修复。证实不了的条目可以放弃，在 STATUS 写明证据，这是合格结果。
+1. **先证实再修。** 每条先写一个在旧实现上失败的测试（或可复现的脚本），单独提交；再提交修复。证实不了的条目可以放弃，在对应报告写明证据，这是合格结果。
 2. **不弱化现有保证**：
    - 观测 hook 继续 fail open，任何改动都不能让 Provider 卡住或报错（hook 返回码保持 0）。
    - commit hook 的 trust / 指纹校验继续 fail closed。

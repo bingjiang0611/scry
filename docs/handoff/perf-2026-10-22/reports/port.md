@@ -199,6 +199,17 @@ python3 apps/ios/Checks/markdown-blocks.py
 - 按要求未使用真机或模拟器，未执行 XCTest UI 交互、未安装 App；`build-for-testing` 只证明编译。未补做 L2/L3、真实 Provider 或 A1/B2 重放，不复述为本轮通过。
 - 本次命令未改变依赖锁文件，未修改 `STATUS.md`、源码或测试。只提交本节并推送到 `perf/port-2026-10-23`，不合并 main、不向停用的旧 `perf/*` / `fix/*` 分支推送。
 
-### 核验意见 · iOS 补充（审查方，2026-10-23）
+### 迁移前记录的基线失败
+
+以下是 F/F2 在当时基线与候选上都复现的问题，**不是本移植引入的回归，也不是当前版本仍失败的证明**：
+
+- Catalog 146 项中 4 项失败：`followUp.routingDoesNotResumeAnotherProfile`、`recovery.explicitModelChoice`、`model.explicitAutoIsRemembered`、`model.catalogRecoveryRestoresReadiness`。真机 `-selfTest` 的 117 项中也有 3 项失败，对应后三项的 `run.*` 规则。
+- [F2 真机记录](F2.md)：流式输出到 0600 后视口停在 0290–0300，点「回到最新」仍停在中段。不是 F2 改动修复的范围。
+- [F 的 XCTest UI 记录](F.md)：31 项有 5 项同样失败（失败结果保留、首页刷新失败与缓存、从旧消息打开并发送、会话状态与只读工作区、缺失用量不能编造）。本移植只补了 iOS 编译与 Catalog 对照，没有重跑真机 XCTest。
+- 桌面 workspace dirty 断言的独立问题已修复：失败来自测试夹具未等待原生输入焦点及选区，不是产品保存逻辑，见[验证记录](fix-chat-preview.md)。
+
+[原批次状态表](https://github.com/bingjiang0611/scry/blob/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/perf-2026-10-22/STATUS.md)仍可在 Git 历史查看。
+
+## 核验意见 · iOS 补充（审查方，2026-10-23）
 
 **已核验，移植分支整体可以合入 main。** `7fe1c34` 只补报告，没有改源码。iOS `build-for-testing` 在有 Xcode 的机器上首次通过；Catalog 146 项按名称、顺序和结果与 F 的基线逐项一致（4 项原有失败不变）；Markdown 17/17 由原 runner 编译执行。四个自动合并文件相对 main 只有预期的 Observation 注解迁移，`RemoteRunStore.swift` 归一化后与 main 全文相同，main 的改动没有丢失。
