@@ -165,7 +165,7 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
     }
   })
 
-  it('falls back to snapshot on hostId/logId mismatch, seq ahead, pruned_through, >128 events, or >4096 gap', async () => {
+  it('falls back to snapshot on hostId/logId mismatch, seq ahead or >128 events', async () => {
     const dir = makeDir()
     const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 256 })
     const hub = new SubscribeHub()
@@ -212,6 +212,46 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
         waitMs: 0
       })
       expect(overflow.mode).toBe('snapshot')
+    } finally {
+      hub.close()
+      sink.close()
+    }
+  })
+
+  it('resets pruned, byte-overflow and scan-gap cursors without omitting projected sessions', async () => {
+    const sink = EventSink.open({ userDataDir: makeDir(), fullfsync: false })
+    const hub = new SubscribeHub()
+    const engine = new SubscribeEngine({ sink, hub, hostId: 'host-snap', authorizePeer: () => undefined, grantScope: () => 'local' })
+    const subscribe = (known?: { hostId: string; logId: string; seq: number }) =>
+      engine.subscribe('c'.repeat(64), { views: ['sessions'], known, waitMs: 0 })
+    const importSession = (commandId: string, sessionKey: string, title: string, at: number) => {
+      const payload = { sessionKey, title, cwd: '/tmp/w18-fixture', provider: 'codex', ts: at }
+      expect(sink.execute({ type: 'session.import', commandId, at, actor: 'system', scope: 'system',
+        payload, payloadSha256: sha256Hex(canonicalJson(payload)) }).kind).toBe('accepted')
+    }
+    try {
+      const base = await subscribe()
+      const largeTitle = '中'.repeat(4_900)
+      // Stay within the 16 KiB durable event limit while crossing 256 KiB in aggregate.
+      for (let index = 1; index <= 19; index++) importSession(`import-large-${index}`, 'large', largeTitle, index)
+      const overflow = await subscribe(base)
+      expect(overflow.seq).toBe(base.seq + 19)
+      expect(overflow).toMatchObject({ mode: 'snapshot', snapshot: { sessions: { rows: [{ sessionKey: 'large', title: largeTitle }] } } })
+
+      const prune = sink.pruneEvents({ olderThanAt: 20 })
+      expect(prune).toEqual({ deletedEvents: 18, prunedThrough: overflow.seq - 1 })
+      expect(await subscribe(base)).toMatchObject({ mode: 'snapshot', snapshot: { sessions: { rows: [{ sessionKey: 'large' }] } } })
+      importSession('rename-large', 'large', 'small title', 20)
+      const contiguous = await subscribe(overflow)
+      expect(contiguous).toMatchObject({ mode: 'events', seq: overflow.seq + 1, events: [{ sessionKey: 'large' }] })
+
+      const beyondScan = contiguous.seq + 4_096 + 1
+      sink.handle.db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'orch_event'").run(beyondScan - 1)
+      importSession('import-after-gap', 'next', 'after gap', 21)
+      expect(await subscribe(contiguous)).toMatchObject({
+        mode: 'snapshot', seq: beyondScan,
+        snapshot: { sessions: { rows: [{ sessionKey: 'next' }, { sessionKey: 'large' }] } }
+      })
     } finally {
       hub.close()
       sink.close()

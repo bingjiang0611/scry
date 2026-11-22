@@ -112,14 +112,21 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
       authority.subscribeHub.noteRunOutput('private-run')
       importSession('visible-next', workspace)
       importSession('private-next', privateWorkspace)
+      const privateSeq = authority.sink.listEvents().find(event => event.sessionKey === 'private-next')?.seq
+      expect(privateSeq).toBeGreaterThan(seq)
       const update = await request({
         op: 'subscribe', views: ['sessions', 'activeRuns'], known: { hostId, logId, seq }, waitMs: 0
       })
       expect(update).toMatchObject({ subscribe: {
-        mode: 'events', events: [{ sessionKey: 'visible-next', sessionRow: {
+        mode: 'events', seq: privateSeq, events: [{ sessionKey: 'visible-next', sessionRow: {
           sessionKey: 'visible-next', cwd: workspace
         } }], hints: [{ kind: 'hostNotice', notice }]
       } })
+      importSession('visible-after-scan', workspace)
+      const afterScan = await request({
+        op: 'subscribe', views: ['sessions', 'activeRuns'], known: { hostId, logId, seq: privateSeq }, waitMs: 0
+      })
+      expect(afterScan).toMatchObject({ subscribe: { mode: 'events', events: [{ sessionKey: 'visible-after-scan' }] } })
       const detail = await request({ op: 'subscribe', views: ['detail'], session: { sessionKey: 'private' }, waitMs: 0 })
       expect(detail).toMatchObject({ subscribe: { mode: 'snapshot', snapshot: { detail: { turns: [] } } } })
       expect(JSON.stringify(detail)).not.toContain('firstPage')
@@ -150,7 +157,7 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
           turns: [{ userText: '测试问题', items: [{ kind: 'output', text: historyText }] }], offset: 0, totalTurns: 1
         } }
       } } })
-      const updated = update.subscribe as { seq: number }
+      const updated = afterScan.subscribe as { seq: number }
       const parked = vi.spyOn(authority.subscribeHub, 'waitForWake')
       const waiting = request({ op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 5_000,
         known: { hostId, logId, seq: updated.seq } })
