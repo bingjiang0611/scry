@@ -135,7 +135,10 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       sawText: true
     }
     const apply = vi.fn(() => false)
-    const archivedRunTrace = vi.fn(async () => null)
+    const archivedRunTrace = vi.fn(async () => ({
+      cwd: '/tmp/ws', providerId: 'codex' as const, externalSessionId: 'sess-1',
+      runId: 'r1', userText: 'prompt', done: true, items: [resultEvent]
+    }))
 
     // Non-terminal trailing hint after RunRegistry deleted the run: must NOT wipe cursor.pushed
     await readSubscribeTraceOnce({
@@ -147,10 +150,12 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       syncQuestions: async () => undefined,
       flush: vi.fn()
     })
+    expect(archivedRunTrace).not.toHaveBeenCalled()
     expect(apply).not.toHaveBeenCalled()
     expect(cursor.pushed).toHaveLength(1)
 
-    // Subsequent terminal trace read sees result already delivered: must skip archive read completely
+    // The Provider result can precede archived final evidence. On the terminal read,
+    // consult the archive once, then keep the already-delivered result deduplicated.
     await readSubscribeTraceOnce({
       cursor,
       runId: 'ledger-1',
@@ -161,8 +166,9 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       syncQuestions: async () => undefined,
       flush: vi.fn()
     })
-    expect(archivedRunTrace).not.toHaveBeenCalled()
+    expect(archivedRunTrace).toHaveBeenCalledExactlyOnceWith({ context: cursor.context, runId: 'r1' })
     expect(apply).not.toHaveBeenCalled()
+    expect(cursor.pushed).toEqual([resultEvent])
   })
 
   it('still delivers the hints of a reply whose events include an unknown type', async () => {
