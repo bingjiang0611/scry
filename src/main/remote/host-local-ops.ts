@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RunControlHandlers } from './host-run-control'
 import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_LOCAL_OP_NAMES } from '../daemon-channel-gate'
 import type { SubscribeResponse, SubscribeRequest } from '../../shared/orchestration-subscribe'
+import { isExecutionTargetCallIds } from '../../shared/execution-target-work'
 import { parseSubscribeFrame } from './subscribe-frame'
 
 // One App channel handler, called with the renderer's arguments as main would have.
@@ -28,7 +29,7 @@ export interface LocalEndpointHandlers {
   }
   // Daemon-to-App pull/reply bridge for ExecutionTargetRouter (W10).
   executionTargetBridge?: {
-    poll(peer: string, waitMs: number, signal?: AbortSignal): Promise<{ calls: unknown[] }>
+    poll(peer: string, waitMs: number, signal?: AbortSignal, ackCancelledCallIds?: string[]): Promise<{ calls: unknown[]; cancelledCallIds?: string[] }>
     submitResult(peer: string, input: { callId: string; ok: boolean; result?: unknown; error?: string }): { accepted: boolean }
   }
 }
@@ -77,7 +78,7 @@ export async function handleSubscribe(
   return { subscribe: reply }
 }
 
-const TARGET_WORK_KEYS = ['op', 'keepAlive', 'protocol', 'waitMs']
+const TARGET_WORK_KEYS = ['op', 'keepAlive', 'protocol', 'waitMs', 'ackCancelledCallIds']
 const TARGET_RESULT_KEYS = ['op', 'keepAlive', 'protocol', 'callId', 'ok', 'result', 'error']
 
 /** The primary App's long poll for forwarded execution-target calls; absent on the network endpoint. */
@@ -88,10 +89,11 @@ export async function handleExecutionTargetWork(
   signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
   if (!bridge) return { error: 'unsupported_op' }
-  const { waitMs } = request
+  const { waitMs, ackCancelledCallIds } = request
   if (Object.keys(request).some((key) => !TARGET_WORK_KEYS.includes(key)) ||
-    !Number.isSafeInteger(waitMs) || (waitMs as number) < 0) return { error: 'invalid_request' }
-  return await bridge.poll(peer, waitMs as number, signal)
+    !Number.isSafeInteger(waitMs) || (waitMs as number) < 0 ||
+    (ackCancelledCallIds !== undefined && !isExecutionTargetCallIds(ackCancelledCallIds))) return { error: 'invalid_request' }
+  return await bridge.poll(peer, waitMs as number, signal, ackCancelledCallIds)
 }
 
 /** The primary App's reply to a forwarded execution-target call; absent on the network endpoint. */

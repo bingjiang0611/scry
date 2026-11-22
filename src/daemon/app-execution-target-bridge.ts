@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { DesktopMobileTargetSubmit, DesktopRemoteTargetAPI, ExecutionTargetRef } from '../shared/desktop-remote'
+import type { DesktopRemoteTargetAPI, ExecutionTargetRef } from '../shared/desktop-remote'
+import { MAX_EXECUTION_TARGET_WORK_CALLS, type ExecutionTargetWorkCall, type ExecutionTargetWorkReply } from '../shared/execution-target-work'
 import { DEFAULT_MAX_FRAME } from '../main/remote/inner-mtls-protocol'
 
 // Timeout per forwarded target call: strictly greater than the 40 s App-side
@@ -13,18 +14,9 @@ export const EXECUTION_TARGET_POLL_MAX_WAIT_MS = 25_000
 // submitResult and fails the pending call immediately instead of getting dropped at TLS framing.
 export const MAX_EXECUTION_TARGET_RESULT_BYTES = DEFAULT_MAX_FRAME - 512
 const DEFAULT_DETACH_GRACE_MS = 5_000
-const MAX_QUEUED_CALLS = 64
 const MAX_BATCH_CALLS = 16
 const MAX_TARGETS = 32
 const HASH = /^[a-f0-9]{64}$/
-
-export type ExecutionTargetWorkCall =
-  | { callId: string; method: 'executionTargets'; input: Record<string, never> }
-  | { callId: string; method: 'mobileRequest'; input: { target: { id: string; binding: string }; request: Record<string, unknown> } }
-  | { callId: string; method: 'mobileSubmit'; input: DesktopMobileTargetSubmit }
-  | { callId: string; method: 'mobileIntentStatus'; input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string } }
-  | { callId: string; method: 'shellOpenPath'; input: { path: string } }
-  | { callId: string; method: 'shellTrashItem'; input: { path: string } }
 
 export interface BridgedShellOps {
   isAvailable(): boolean
@@ -40,7 +32,7 @@ export interface ExecutionTargetResultInput {
 }
 
 export interface ExecutionTargetBridgeHandlers {
-  poll(peer: string, waitMs: number, signal?: AbortSignal): Promise<{ calls: ExecutionTargetWorkCall[] }>
+  poll(peer: string, waitMs: number, signal?: AbortSignal, ackCancelledCallIds?: string[]): Promise<ExecutionTargetWorkReply>
   submitResult(peer: string, input: ExecutionTargetResultInput): { accepted: boolean }
 }
 
@@ -63,6 +55,7 @@ interface PendingCall {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
+  removeAbortListener: () => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -113,6 +106,7 @@ export class AppExecutionTargetBridge {
   #closed = false
   #queue: PendingCall[] = []
   #inFlight = new Map<string, PendingCall>()
+  #cancelledCallIds = new Set<string>()
   #waiters = new Set<() => void>()
 
   readonly client: DesktopRemoteTargetAPI
@@ -142,11 +136,13 @@ export class AppExecutionTargetBridge {
           throw error
         }
       },
-      mobileRequest: async (target, request, authorizePeer) => {
+      mobileRequest: async (target, request, authorizePeer, signal) => {
         authorizePeer?.()
         const result = await this.#enqueue(
           { callId: randomUUID(), method: 'mobileRequest', input: { target, request } },
-          authorizePeer
+          authorizePeer,
+          this.#callTimeoutMs,
+          request.op === 'subscribe' ? signal : undefined
         )
         authorizePeer?.()
         return result
@@ -191,7 +187,7 @@ export class AppExecutionTargetBridge {
     }
 
     this.localHandlers = {
-      poll: (peer, waitMs, signal) => this.#poll(peer, waitMs, signal),
+      poll: (peer, waitMs, signal, ackCancelledCallIds) => this.#poll(peer, waitMs, signal, ackCancelledCallIds),
       submitResult: (peer, input) => this.#submitResult(peer, input)
     }
   }
@@ -216,20 +212,31 @@ export class AppExecutionTargetBridge {
     return true
   }
 
-  #enqueue(call: ExecutionTargetWorkCall, authorizePeer?: () => void, timeoutMs = this.#callTimeoutMs): Promise<unknown> {
+  #enqueue(call: ExecutionTargetWorkCall, authorizePeer?: () => void, timeoutMs = this.#callTimeoutMs, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) return Promise.reject(new Error('execution_target_cancelled'))
     if (!this.#hasLiveApp()) return Promise.reject(new Error('execution_target_gateway_offline'))
-    if (this.#queue.length + this.#inFlight.size >= MAX_QUEUED_CALLS) {
+    if (this.#queue.length + this.#inFlight.size + this.#cancelledCallIds.size >= MAX_EXECUTION_TARGET_WORK_CALLS) {
       return Promise.reject(new Error('execution_target_bridge_busy'))
     }
     const bytes = Buffer.byteLength(JSON.stringify(call))
     if (bytes > DEFAULT_MAX_FRAME) return Promise.reject(new Error('execution_target_frame_too_large'))
     return new Promise((resolve, reject) => {
+      const cancel = (): void => {
+        const assigned = this.#inFlight.has(call.callId)
+        this.#removePending(call.callId)
+        if (assigned) {
+          this.#cancelledCallIds.add(call.callId)
+          this.#wakeWaiters()
+        }
+        reject(new Error('execution_target_cancelled'))
+      }
       const pending: PendingCall = {
         call,
         bytes,
         authorizePeer,
         resolve,
         reject,
+        removeAbortListener: () => signal?.removeEventListener('abort', cancel),
         timer: setTimeout(() => {
           this.#removePending(call.callId)
           reject(new Error('execution_target_timeout'))
@@ -237,11 +244,12 @@ export class AppExecutionTargetBridge {
       }
       pending.timer.unref?.()
       this.#queue.push(pending)
+      signal?.addEventListener('abort', cancel, { once: true })
       this.#wakeWaiters()
     })
   }
 
-  async #poll(peer: string, waitMs: number, signal?: AbortSignal): Promise<{ calls: ExecutionTargetWorkCall[] }> {
+  async #poll(peer: string, waitMs: number, signal?: AbortSignal, ackCancelledCallIds: string[] = []): Promise<ExecutionTargetWorkReply> {
     if (!this.#isPrimaryAppPeer(peer)) throw new Error('execution_target_bridge_unauthorized')
     if (this.#closed || signal?.aborted) return { calls: [] }
     if (this.#connectedPeer && this.#connectedPeer !== peer) {
@@ -254,6 +262,7 @@ export class AppExecutionTargetBridge {
       this.#activePoll = null
     }
     this.#connectedPeer = peer
+    for (const id of ackCancelledCallIds) this.#cancelledCallIds.delete(id)
     this.#clearDetachTimer()
     this.#activePolls += 1
     const pollState = { wake: () => undefined as void, cancelled: false }
@@ -264,14 +273,14 @@ export class AppExecutionTargetBridge {
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     try {
-      let batch = this.#drainQueue(peer)
-      if (batch.length === 0 && !this.#closed && !pollState.cancelled && !signal?.aborted && waitMs > 0) {
+      let reply = this.#readWork(peer)
+      if (reply.calls.length === 0 && !reply.cancelledCallIds && !this.#closed && !pollState.cancelled && !signal?.aborted && waitMs > 0) {
         await this.#waitForWork(Math.min(waitMs, EXECUTION_TARGET_POLL_MAX_WAIT_MS), pollState)
         if (!this.#closed && !pollState.cancelled && !signal?.aborted && this.#activePoll === pollState && this.#connectedPeer === peer) {
-          batch = this.#drainQueue(peer)
+          reply = this.#readWork(peer)
         }
       }
-      return { calls: batch }
+      return reply
     } finally {
       signal?.removeEventListener('abort', onAbort)
       if (this.#activePoll === pollState) this.#activePoll = null
@@ -288,6 +297,7 @@ export class AppExecutionTargetBridge {
     if (!pending || pending.ownerPeer !== peer) return { accepted: false }
     this.#inFlight.delete(input.callId)
     clearTimeout(pending.timer)
+    pending.removeAbortListener()
     if (!input.ok) {
       pending.reject(new Error(sanitizeErrorCode(input.error)))
       return { accepted: true }
@@ -299,6 +309,13 @@ export class AppExecutionTargetBridge {
     }
     pending.resolve(input.result)
     return { accepted: true }
+  }
+
+  #readWork(peer: string): ExecutionTargetWorkReply {
+    // Repeat cancellations until the App acknowledges them. Send a control-only
+    // reply so a full work batch keeps its existing frame budget.
+    if (this.#cancelledCallIds.size > 0) return { calls: [], cancelledCallIds: [...this.#cancelledCallIds] }
+    return { calls: this.#drainQueue(peer) }
   }
 
   #drainQueue(peer: string): ExecutionTargetWorkCall[] {
@@ -320,12 +337,16 @@ export class AppExecutionTargetBridge {
     const idx = this.#queue.findIndex((item) => item.call.callId === callId)
     if (idx >= 0) {
       const [item] = this.#queue.splice(idx, 1)
-      if (item) clearTimeout(item.timer)
+      if (item) {
+        clearTimeout(item.timer)
+        item.removeAbortListener()
+      }
     }
     const inflight = this.#inFlight.get(callId)
     if (inflight) {
       this.#inFlight.delete(callId)
       clearTimeout(inflight.timer)
+      inflight.removeAbortListener()
     }
   }
 
@@ -336,8 +357,10 @@ export class AppExecutionTargetBridge {
     const queued = this.#queue.splice(0)
     const inflight = [...this.#inFlight.values()]
     this.#inFlight.clear()
+    this.#cancelledCallIds.clear()
     for (const item of [...queued, ...inflight]) {
       clearTimeout(item.timer)
+      item.removeAbortListener()
       item.reject(new Error(errorCode))
     }
   }

@@ -21,7 +21,7 @@ const OPS = new Set([
 
 type DesktopTargetClient = {
   executionTargets(): Promise<ExecutionTargetRef[]>
-  mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown>
+  mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void, signal?: AbortSignal): Promise<unknown>
   mobileSubmit(input: DesktopMobileTargetSubmit & { authorizePeer?: () => void }): Promise<unknown>
   mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string; authorizePeer?: () => void }): Promise<unknown>
 }
@@ -143,7 +143,7 @@ export class ExecutionTargetRouter {
     return { executionTargets: { version: 1, gateway: this.#gateway, targets } }
   }
 
-  async dispatch(peer: string, envelope: unknown): Promise<Record<string, unknown>> {
+  async dispatch(peer: string, envelope: unknown, connectionSignal?: AbortSignal): Promise<Record<string, unknown>> {
     this.#authorizePeer(peer)
     if (!record(envelope) || envelope.op !== 'target' || !record(envelope.target) || !text(envelope.target.id, MAX_TARGET_ID) || !HASH.test(String(envelope.target.binding))) fail('invalid_target')
     exact(envelope, ['op', 'target', 'request'])
@@ -161,7 +161,10 @@ export class ExecutionTargetRouter {
       response = await this.#client().mobileIntentStatus({ target, phonePeerFingerprint: peer, phoneIntentId: request.intentId as string,
         ...(typeof request.knownLogId === 'string' ? { knownLogId: request.knownLogId } : {}), authorizePeer: () => this.#authorizePeer(peer) })
     } else {
-      response = await this.#client().mobileRequest(target, request, () => this.#authorizePeer(peer))
+      const authorize = () => this.#authorizePeer(peer)
+      response = op === 'subscribe' && connectionSignal
+        ? await this.#client().mobileRequest(target, request, authorize, connectionSignal)
+        : await this.#client().mobileRequest(target, request, authorize)
     }
     this.#authorizePeer(peer)
     if (!record(response)) fail('invalid_target_response')

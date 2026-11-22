@@ -1,15 +1,10 @@
-import type { DesktopMobileTargetSubmit, DesktopRemoteTargetAPI } from '../shared/desktop-remote'
+import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
+import type { ExecutionTargetWorkCall, ExecutionTargetWorkReply, ExecutionTargetWorkRequest } from '../shared/execution-target-work'
 import { DaemonRunError } from './daemon-run-transport'
 import { executionTargetError } from './remote/execution-target-error'
 import { DEFAULT_MAX_FRAME } from './remote/inner-mtls-protocol'
 
-export type ExecutionTargetWorkCall =
-  | { callId: string; method: 'executionTargets'; input: Record<string, never> }
-  | { callId: string; method: 'mobileRequest'; input: { target: { id: string; binding: string }; request: Record<string, unknown> } }
-  | { callId: string; method: 'mobileSubmit'; input: DesktopMobileTargetSubmit }
-  | { callId: string; method: 'mobileIntentStatus'; input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string } }
-  | { callId: string; method: 'shellOpenPath'; input: { path: string } }
-  | { callId: string; method: 'shellTrashItem'; input: { path: string } }
+export type { ExecutionTargetWorkCall } from '../shared/execution-target-work'
 
 export interface AppShellOps {
   openPath(path: string): Promise<void>
@@ -17,7 +12,7 @@ export interface AppShellOps {
 }
 
 export interface ExecutionTargetWorkSource {
-  executionTargetWork(input: { waitMs: number }, signal?: AbortSignal): Promise<{ calls: ExecutionTargetWorkCall[] }>
+  executionTargetWork(input: ExecutionTargetWorkRequest, signal?: AbortSignal): Promise<ExecutionTargetWorkReply>
   executionTargetResult(input: { callId: string; ok: boolean; result?: unknown; error?: string }, signal?: AbortSignal): Promise<{ accepted: boolean }>
 }
 
@@ -45,6 +40,7 @@ const MAX_RESULT_PAYLOAD_BYTES = DEFAULT_MAX_FRAME - 512
 export class DaemonExecutionTargetPump {
   readonly #deps: DaemonExecutionTargetPumpDeps
   readonly #abort = new AbortController()
+  readonly #subscriptionReads = new Map<string, AbortController>()
   #running = false
 
   constructor(deps: DaemonExecutionTargetPumpDeps) {
@@ -66,11 +62,15 @@ export class DaemonExecutionTargetPump {
     const retry = this.#deps.retry ?? DEFAULT_RETRY
     const sleep = this.#deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
     let pause = retry.initialMs
+    let ackCancelledCallIds: string[] | undefined
     try {
       while (!this.#abort.signal.aborted) {
-        let reply: { calls: ExecutionTargetWorkCall[] }
+        let reply: ExecutionTargetWorkReply
         try {
-          reply = await source.executionTargetWork({ waitMs: this.#deps.waitMs ?? DEFAULT_WAIT_MS }, this.#abort.signal)
+          reply = await source.executionTargetWork({
+            waitMs: this.#deps.waitMs ?? DEFAULT_WAIT_MS,
+            ...(ackCancelledCallIds ? { ackCancelledCallIds } : {})
+          }, this.#abort.signal)
         } catch (error) {
           if (this.#abort.signal.aborted) return
           if (error instanceof DaemonRunError &&
@@ -84,6 +84,8 @@ export class DaemonExecutionTargetPump {
         }
         if (this.#abort.signal.aborted) return
         pause = retry.initialMs
+        ackCancelledCallIds = reply.cancelledCallIds
+        for (const id of ackCancelledCallIds ?? []) this.#subscriptionReads.get(id)?.abort()
         for (const work of reply.calls) {
           void this.#runCall(work)
         }
@@ -94,6 +96,8 @@ export class DaemonExecutionTargetPump {
   }
 
   async #runCall(work: ExecutionTargetWorkCall): Promise<void> {
+    const read = work.method === 'mobileRequest' && work.input.request.op === 'subscribe' ? new AbortController() : undefined
+    if (read) this.#subscriptionReads.set(work.callId, read)
     let payload: { callId: string; ok: boolean; result?: unknown; error?: string }
     try {
       let result: unknown
@@ -113,7 +117,9 @@ export class DaemonExecutionTargetPump {
         if (work.method === 'executionTargets') {
           result = await api.executionTargets()
         } else if (work.method === 'mobileRequest') {
-          result = await api.mobileRequest(work.input.target, work.input.request)
+          result = read
+            ? await api.mobileRequest(work.input.target, work.input.request, undefined, AbortSignal.any([this.#abort.signal, read.signal]))
+            : await api.mobileRequest(work.input.target, work.input.request)
         } else if (work.method === 'mobileSubmit') {
           result = await api.mobileSubmit(work.input)
         } else if (work.method === 'mobileIntentStatus') {
@@ -132,8 +138,10 @@ export class DaemonExecutionTargetPump {
         ? msg
         : executionTargetError(error).error
       payload = { callId: work.callId, ok: false, error: code }
+    } finally {
+      if (read) this.#subscriptionReads.delete(work.callId)
     }
-    if (this.#abort.signal.aborted) return
+    if (this.#abort.signal.aborted || read?.signal.aborted) return
     try {
       await this.#deps.source.executionTargetResult(payload, this.#abort.signal)
     } catch (error) {

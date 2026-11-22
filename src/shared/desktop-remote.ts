@@ -305,7 +305,7 @@ export interface DesktopMobileTargetSubmit {
 }
 export interface DesktopRemoteTargetAPI {
   executionTargets(): Promise<ExecutionTargetRef[]>
-  mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown>
+  mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void, signal?: AbortSignal): Promise<unknown>
   mobileSubmit(input: DesktopMobileTargetSubmit & { authorizePeer?: () => void }): Promise<unknown>
   mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string; authorizePeer?: () => void }): Promise<unknown>
 }

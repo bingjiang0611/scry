@@ -26,7 +26,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     return targets
   }
 
-  async mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown> {
+  async mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void, signal?: AbortSignal): Promise<unknown> {
     const state = await this.state()
     const item = this.connection(state, target.id)
     if (item.pending || targetBinding(item) !== target.binding) fail('execution_target_binding_changed')
@@ -37,7 +37,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     const authorize = () => this.authorizeMobileTarget(state, target, authorizePeer)
     return ['stop', 'answerQuestion', 'sessionAction'].includes(String(request.op))
       ? this.write(item.id, request, authorize)
-      : this.requestForConnection(item.id, request, authorize)
+      : this.requestForConnection(item.id, request, authorize, request.op === 'subscribe' ? signal : undefined)
   }
 
   async mobileSubmit(input: import('../../shared/desktop-remote').DesktopMobileTargetSubmit & { authorizePeer?: () => void }): Promise<unknown> {

@@ -4,6 +4,60 @@ import { DaemonRunError, DaemonRunTransport } from './daemon-run-transport'
 import { DEFAULT_MAX_FRAME } from './remote/inner-mtls-protocol'
 
 describe('DaemonExecutionTargetPump', () => {
+  it('aborts only the obsolete forwarded read before starting its replacement', async () => {
+    const target = { id: 't1', binding: 'b'.repeat(64) }
+    const old = { callId: 'old', method: 'mobileRequest' as const, input: { target, request: { op: 'subscribe', waitMs: 20_000 } } }
+    const fresh = { callId: 'fresh', method: 'mobileRequest' as const, input: { target, request: { op: 'subscribe', waitMs: 0 } } }
+    const started = Promise.withResolvers<void>()
+    const obsolete = vi.fn()
+    const results = vi.fn(async () => ({ accepted: true }))
+    let polls = 0
+    const source: ExecutionTargetWorkSource = {
+      executionTargetWork: vi.fn(async (_input, signal) => {
+        switch (++polls) {
+          case 1: return { calls: [old] }
+          case 2:
+            await started.promise
+            return { calls: [], cancelledCallIds: [old.callId] }
+          case 3: return { calls: [fresh] }
+          default:
+            return await new Promise((_, reject) => {
+              signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+            })
+        }
+      }),
+      executionTargetResult: results
+    }
+    const pump = new DaemonExecutionTargetPump({
+      source,
+      client: () => ({
+        executionTargets: async () => [],
+        mobileSubmit: async () => ({}),
+        mobileIntentStatus: async () => ({}),
+        mobileRequest: async (_target, request, _authorize, signal?: AbortSignal) => {
+          if (request.waitMs === 0) return { snapshotAfterAbort: obsolete.mock.calls.length === 1 }
+          started.resolve()
+          return await new Promise((_, reject) => {
+            signal?.addEventListener('abort', () => { obsolete(); reject(signal.reason) }, { once: true })
+          })
+        }
+      })
+    })
+    pump.start()
+    try {
+      await vi.waitFor(() => expect(results).toHaveBeenCalledWith({
+        callId: fresh.callId, ok: true, result: { snapshotAfterAbort: true }
+      }, expect.any(AbortSignal)))
+      expect(obsolete).toHaveBeenCalledOnce()
+      expect(results).toHaveBeenCalledTimes(1)
+      expect(source.executionTargetWork).toHaveBeenNthCalledWith(
+        3, expect.objectContaining({ ackCancelledCallIds: [old.callId] }), expect.any(AbortSignal)
+      )
+    } finally {
+      pump.dispose()
+    }
+  })
+
   it('pulls queued calls, executes them against DesktopRemoteTargetAPI concurrently, and reports results', async () => {
     let releaseFirst: (() => void) | undefined
     let firstStarted!: () => void

@@ -2,6 +2,7 @@ import type { AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
+import { isExecutionTargetCallIds, type ExecutionTargetWorkCall, type ExecutionTargetWorkReply, type ExecutionTargetWorkRequest } from '../shared/execution-target-work'
 import { RUN_ADMISSION_BUSY_MESSAGE } from './context-admission'
 import { DaemonRunRefusedError } from './daemon-run-admission'
 import { DaemonClientError } from './daemon-client'
@@ -177,15 +178,18 @@ export class DaemonRunTransport {
 
   /** Primary App pull for forwarded execution-target calls (W10); runs on its own lane. */
   async executionTargetWork(
-    input: { waitMs: number },
+    input: ExecutionTargetWorkRequest,
     signal?: AbortSignal
-  ): Promise<{ calls: import('./daemon-execution-target-pump').ExecutionTargetWorkCall[] }> {
+  ): Promise<ExecutionTargetWorkReply> {
     const reply = await this.#call(
-      { op: 'executionTargetWork', waitMs: input.waitMs },
+      { op: 'executionTargetWork', ...input },
       { replayable: true, ...(signal ? { signal } : {}) }
     )
-    if (!Array.isArray(reply.calls)) throw new DaemonRunError('invalid_daemon_response')
-    return { calls: reply.calls as import('./daemon-execution-target-pump').ExecutionTargetWorkCall[] }
+    const { calls, cancelledCallIds } = reply
+    if (!Array.isArray(calls) || (cancelledCallIds !== undefined && !isExecutionTargetCallIds(cancelledCallIds))) {
+      throw new DaemonRunError('invalid_daemon_response')
+    }
+    return { calls: calls as ExecutionTargetWorkCall[], ...(cancelledCallIds ? { cancelledCallIds } : {}) }
   }
 
   /** Primary App reply to a forwarded execution-target call (W10). */

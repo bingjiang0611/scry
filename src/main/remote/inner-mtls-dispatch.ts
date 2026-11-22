@@ -102,7 +102,7 @@ export async function dispatchRemoteRequest(
       // These describe the authenticated phone's Mac1 transport, not the
       // forwarded operation or Mac2's desktop peer. Keep business validation exact.
       const { keepAlive: _keepAlive, deviceLabel: _deviceLabel, protocol: _protocol, ...envelope } = request
-      try { return await executionTargets.dispatch(fingerprint, envelope) } catch (error) { return executionTargetError(error) }
+      try { return await executionTargets.dispatch(fingerprint, envelope, connectionSignal) } catch (error) { return executionTargetError(error) }
     }
     if (request.deviceLabel !== undefined) await controller.authority.updateDeviceLabel(fingerprint, request.deviceLabel)
     const historyReply = await dispatchHistoryRequest(controller, fingerprint, request)
