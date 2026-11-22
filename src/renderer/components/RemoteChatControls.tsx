@@ -124,6 +124,8 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       // the tail and live paths would stay blocked forever.
       finally { scheduler.markRead(at) }
     }
+    // A newly opened view needs a snapshot even if the client already has a watch cursor.
+    let immediate = true
     const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
       try {
@@ -139,11 +141,12 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           // receipt here. Ask only while the catalog marks this session active,
           // or to observe the end of a run already being followed.
           const followed = foreignRunRef.current
-          const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context) : null
+          const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context, { immediate }) : null
           if (cancelled || sequence !== pollSequence.current) return
           setForeignRun(keepIfEqual(live))
-          if (followed && live?.runId !== followed.runId) {
-            // The followed run left the host's live set; its turn is now history.
+          if ((followed && live?.runId !== followed.runId) || (immediate && sessionActive && !live)) {
+            // The run can finish between the opening history read and the live lookup.
+            setHistoryLoading(true)
             setHistoryRevision((revision) => revision + 1)
             void refreshRemoteCatalog(connectionId)
           }
@@ -157,11 +160,12 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           } else { showTrace(null); scheduler.setLive(undefined) }
           settlePoll(JSON.stringify([pending, live]), traceChanged)
           setPollError(null)
+          immediate = false
           setPollFresh(true)
           return
         }
         setForeignRun(null)
-        const nextStatus = await api.runStatus(connectionId, activeIntent.runId)
+        const nextStatus = await api.runStatus(connectionId, activeIntent.runId, { immediate })
         const effectiveCwd = nextStatus.cwd ?? activeIntent.context.cwd
         const effectiveContext: DesktopRemoteContext = {
           ...context, cwd: effectiveCwd,
@@ -206,6 +210,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         // Terminal status retires the main-process receipt. Refresh history even
         // if the last trace read fails, before the next poll drops that receipt.
         if (nextStatus.state === 'settled' || nextStatus.state === 'failed') {
+          if (sessionId) setHistoryLoading(true)
           setHistoryRevision((revision) => revision + 1)
           void refreshRemoteCatalog(connectionId)
         }
@@ -222,6 +227,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         } else { showTrace(null); scheduler.setLive(undefined) }
         settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)
         setPollError(null)
+        immediate = false
         setPollFresh(true)
       } catch (reason) {
         if (!cancelled && sequence === pollSequence.current) { setPollError(errorText(reason)); setPollFresh(false) }
