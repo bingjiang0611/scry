@@ -57,14 +57,19 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`document.querySelector(${JSON.stringify(selector)}) == null && window.structureCloseEnd != null`)
     const exit = await evaluate(`(() => {
-      const elapsed = time => time == null ? null : time - window.structureCloseStart
+      const start = window.structureCloseStart
+      const elapsed = time => time == null || start == null ? null : time - start
       return {
         ms: elapsed(window.structureCloseEnd),
         animationStartMs: elapsed(window.structureCloseAnimationStart),
         animationEndMs: elapsed(window.structureCloseAnimationEnd)
       }
     })()`)
-    check(exit.ms <= 250, `Modal DOM exit exceeded the Step03 limit: ${JSON.stringify({ selector, ...exit })}`)
+    const clock = JSON.stringify({ selector, ...exit })
+    check(Number.isFinite(exit.ms) && exit.ms <= 250, `Modal DOM exit exceeded the Step03 limit: ${clock}`)
+    const complete = Number.isFinite(exit.animationStartMs) && Number.isFinite(exit.animationEndMs) &&
+      exit.animationStartMs >= 0 && exit.animationEndMs > exit.animationStartMs && exit.animationEndMs <= exit.ms
+    check(complete, `Modal DOM exited without a complete native animation: ${clock}`)
     return { ...exit, nativeAnimationEnd: exit.animationEndMs !== null }
   }
   const panes = `document.getAnimations().filter(a => a.id === 'scry-pane')`
