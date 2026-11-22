@@ -104,8 +104,12 @@ export function registerConversationDeletionHandlers(handle: ChannelRegistrar, d
         })
         result.deleted.push(...receipt.deleted.map(store => `${scope}: ${store}`))
         result.retained.push(...receipt.retained)
-        result.failed.push(...receipt.failed.map(failure => ({ ...failure, store: `${scope}: ${failure.store}` })))
-        if (!receipt.ok && !receipt.failed.length) result.failed.push({ store: scope, error: receipt.reason ?? '删除结果未确认' })
+        if (receipt.reason === 'unavailable') result.reason = 'unavailable'
+        const reason = receipt.reason ? { reason: receipt.reason } : {}
+        result.failed.push(...receipt.failed.map(failure => ({ ...failure, ...reason, store: `${scope}: ${failure.store}` })))
+        if (!receipt.ok && !receipt.failed.length) {
+          result.failed.push({ store: scope, error: receipt.reason ?? '删除结果未确认', ...reason })
+        }
       } catch (error) { result.failed.push({ store: scope, error: message(error) }) }
     }
     try {
@@ -158,6 +162,7 @@ export function registerConversationDeletionHandlers(handle: ChannelRegistrar, d
           return plan
         })
         const result = await executeDeletion(child, plan, plan.fingerprint, emptyResult())
+        if (result.reason === 'unavailable') into.reason = 'unavailable'
         into.deleted.push(...result.deleted.map(store => `${label}: ${store}`))
         into.retained.push(...result.retained)
         into.failed.push(...result.failed.map(failure => ({ ...failure, store: `${label}: ${failure.store}` })))

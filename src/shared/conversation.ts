@@ -170,6 +170,7 @@ export type ConversationTurn = ImportedConversationTurn | DispatchedConversation
 export interface ConversationDeletionResult extends Omit<DeleteSessionResult, 'deleted'> {
   /** Scoped store names across multiple native bindings, plus the private handoff cache. */
   deleted: string[]
+  failed: Array<DeleteSessionResult['failed'][number] & { reason?: DeleteSessionResult['reason'] }>
 }
 
 export interface ConversationFork {
