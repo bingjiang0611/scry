@@ -114,7 +114,7 @@ C2 复核的十项修复、当时失败与通过的证据由 [c2-review-round.md
 
 阶段记录、五 Provider 目标缺陷及证据限制见 [d1-interaction-acceptance.md](d1-interaction-acceptance.md)：续作轮修好发送目标与窄窗口响应式冲突，并用真实 `BrowserWindow.setContentSize` 重放窗口尺寸验收。
 
-最新执行状态、已保留状态和后续步骤见 [continuation-checkpoint.md](continuation-checkpoint.md)。
+后续门禁、交付和大历史验收分别见 [release-verification.md](release-verification.md)、[final-delivery.md](final-delivery.md) 和 [large-history-delivery.md](large-history-delivery.md)。
 ## D2 最终验收缺口轮（Node 22.22.1）
 
 只补四项缺口，不加新能力。源码仍 0.2.227；未提交、未推送、未升版本、未安装（实例仍 0.2.229）。

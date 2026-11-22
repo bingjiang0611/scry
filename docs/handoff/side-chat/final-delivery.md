@@ -109,7 +109,7 @@ Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2
 
 - 安装产物构建自 `18326f4c`（`0.2.231` / `0.2.53`，代码与 `72ec35cc` 相同，只多版本常量与 README 安装示例）。
 - 本文件所在的最终文档 HEAD 相对 `18326f4c` 只改文档，runtime 与打包产物的输入保持相同：`git diff --name-status 18326f4c..HEAD -- src scripts packages electron-builder.yml package.json package-lock.json tsconfig.node.json tsconfig.web.json tsconfig.cli.json tsconfig.recorder.json` 为空。因此“已安装构建”与“最终 HEAD 的代码面”一致。
-- 相对 `18326f4c` 的文档改动（全部为 `.md`，截图已在 `81f2b822` 加入）：`docs/handoff/side-chat/final-delivery.md`（本文件）、`docs/handoff/side-chat/README.md`、`docs/handoff/side-chat/continuation-checkpoint.md`、`docs/handoff/side-chat/release-verification.md`。
+- 相对 `18326f4c` 的文档改动（全部为 `.md`，截图已在 `81f2b822` 加入）：`docs/handoff/side-chat/final-delivery.md`（本文件）、`docs/handoff/side-chat/README.md`、侧聊续作记录（已归入历史）、`docs/handoff/side-chat/release-verification.md`。
 
 ## 过程记录：上一阶段的流程偏差
 
@@ -125,5 +125,5 @@ Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2
 - 能力与设计：[`technical-plan.md`](technical-plan.md)、[`implementation-report.md`](implementation-report.md)（历史报告，未改写）
 - 交互验收：[`d1-interaction-acceptance.md`](d1-interaction-acceptance.md)、界面设计：[`d3-ui-polish.md`](d3-ui-polish.md)
 - 门禁与首次失败台账：[`release-verification.md`](release-verification.md)（本轮已校订证据表述）
-- 续作状态：[`continuation-checkpoint.md`](continuation-checkpoint.md)
+- [续作记录](https://github.com/bingjiang0611/scry/blob/11ba9c99be4ba3a0d5e27af0afe0a3f8ed44466a/docs/handoff/side-chat/continuation-checkpoint.md)（Git 历史，非当前状态）；大历史修复与后续安装验证见 [large-history-delivery.md](large-history-delivery.md)。
 - 用户向安装/合同说明：仓库根 [`README.md`](../../../README.md)、[`packages/turn-recorder-cli/README.md`](../../../packages/turn-recorder-cli/README.md)
