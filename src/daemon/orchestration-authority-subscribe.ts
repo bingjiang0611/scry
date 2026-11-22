@@ -15,6 +15,7 @@ export interface AuthoritySubscribeRuntimeDeps {
   grantScope: (peer: string) => 'local' | 'remote'
   attentionSnapshot?: () => SessionAttentionSnapshot
   readFirstPage?: SubscribeEngineOptions['readFirstPage']
+  scans?: SubscribeEngineOptions['scans']
 }
 
 /** Creates the volatile hint hub + commit wakeup binding for `SCRY_ORCHESTRATION=on`. */
@@ -39,7 +40,8 @@ export function createAuthoritySubscribeHandler(
     hostId: deps.hostId,
     authorizePeer: deps.authorizePeer,
     grantScope: deps.grantScope,
-    readFirstPage: deps.readFirstPage
+    readFirstPage: deps.readFirstPage,
+    scans: deps.scans
   })
   return (peer, request, signal) => engine.subscribe(peer, request, signal)
 }

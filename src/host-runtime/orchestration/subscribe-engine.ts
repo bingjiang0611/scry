@@ -10,6 +10,7 @@ import type {
   SubscribeView
 } from '../../shared/orchestration-subscribe'
 import type { EventSink } from './event-sink'
+import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
 import { mapRunRow, mapSessionRow, mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
@@ -53,6 +54,7 @@ export interface SubscribeEngineOptions {
   grantScope: (peerCertSHA256: string) => 'local' | 'remote'
   isRemoteCwdAuthorized?: (canonicalCwd: string) => boolean
   readFirstPage?: (session: SessionProjectionRow, signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
+  scans?: CatalogSubscriptionScans
   sessionsPageSize?: number
   clock?: () => number
 }
@@ -101,6 +103,7 @@ export class SubscribeEngine {
   readonly #grantScope: (peer: string) => 'local' | 'remote'
   readonly #isRemoteCwdAuthorized: (cwd: string) => boolean
   readonly #readFirstPage: SubscribeEngineOptions['readFirstPage']
+  readonly #scans: CatalogSubscriptionScans | undefined
   readonly #sessionsPageSize: number
   readonly #clock: () => number
 
@@ -112,16 +115,28 @@ export class SubscribeEngine {
     this.#grantScope = options.grantScope
     this.#isRemoteCwdAuthorized = options.isRemoteCwdAuthorized ?? (() => false)
     this.#readFirstPage = options.readFirstPage
+    this.#scans = options.scans
     this.#sessionsPageSize = Math.max(1, Math.min(500, options.sessionsPageSize ?? DEFAULT_SESSIONS_PAGE_SIZE))
     this.#clock = options.clock ?? (() => Date.now())
   }
 
   async subscribe(peer: string, request: SubscribeRequest, signal?: AbortSignal): Promise<SubscribeReply> {
     this.#hub.beginRead()
+    let detachCatalog: (() => void) | undefined
+    let detachDetail: (() => void) | undefined
     try {
       const waitMs = Math.min(Math.max(0, request.waitMs), SUBSCRIBE_MAX_WAIT_MS)
       const deadline = this.#clock() + waitMs
       const views = new Set<SubscribeView>(request.views)
+      if (this.#scans && (views.has('sessions') || views.has('detail'))) {
+        this.#authorizePeer(peer)
+        const opening = !request.known || request.known.hostId !== this.#hostId() ||
+          request.known.logId !== this.#sink.getMeta('log_id')
+        if (views.has('sessions')) detachCatalog = this.#scans.sessions(opening && !request.sessionsCursor)
+        if (views.has('detail') && request.session && this.#detailSession(this.#grantScope(peer), request.session)) {
+          detachDetail = this.#scans.detail(request.session.sessionKey, opening)
+        }
+      }
 
       for (;;) {
         this.#authorizePeer(peer)
@@ -135,7 +150,9 @@ export class SubscribeEngine {
           this.#authorizePeer(peer)
           const currentScope = this.#grantScope(peer)
           const current = this.#detailSession(currentScope, request.session)
-          if (currentScope !== scope || !current || current.revSeq !== session.revSeq) {
+          if (currentScope !== scope || !current || current.cwd !== session.cwd ||
+              current.provider !== session.provider || current.profile !== session.profile ||
+              current.catalog?.nativeSessionId !== session.catalog?.nativeSessionId) {
             return this.#evaluateOnce(peer, currentScope, views, { ...request, known: undefined })
           }
           if (firstPage) reply.snapshot.detail.firstPage = firstPage
@@ -156,6 +173,8 @@ export class SubscribeEngine {
         }
       }
     } finally {
+      detachCatalog?.()
+      detachDetail?.()
       this.#hub.endRead()
     }
   }

@@ -33,6 +33,7 @@ import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
 import { createAuthorityDetailReader } from './orchestration-authority-subscribe'
+import { createDaemonCatalogScans } from './orchestration-catalog-scan'
 import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
 import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
@@ -283,7 +284,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
           hostId: () => remoteHostService?.hostId ?? '',
           authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
           grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote',
-          readFirstPage: createAuthorityDetailReader(historyChannels)
+          readFirstPage: createAuthorityDetailReader(historyChannels),
+          scans: createDaemonCatalogScans(orchestrationAuthority.sink, options.userDataDir, workspace,
+            catalog.appSessionStore, () => publishData({ kind: 'catalog_recovered' }), log)
         })
       } : {}),
       log

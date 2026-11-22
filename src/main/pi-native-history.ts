@@ -24,6 +24,10 @@ import {
 // history/bootstrap consumers.
 export { parsePiNativeHistory, reconcilePiNativeHistory } from './pi-native-parse'
 
+export function piNativeSessionDirectory(sessionRoot: string, cwd: string): string {
+  return join(sessionRoot, `--${resolve(cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
+}
+
 // Offline fallback for catalog-authorized Pi sessions only. No launcher/config
 // execution and no renderer-supplied path. Default Pi layout (session-manager).
 // Custom profile-owned session roots remain unavailable rather than guessed.
@@ -36,7 +40,7 @@ export async function locatePiNativeSession(args: {
   maxBytes?: number
 }): Promise<{ canonical: string; size: number; revision: string } | null> {
   if (!/^[a-f0-9-]{36}$/i.test(args.sessionId)) return null
-  const directory = join(args.sessionRoot, `--${resolve(args.cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
+  const directory = piNativeSessionDirectory(args.sessionRoot, args.cwd)
   let names: string[]
   try { names = await readdir(directory) }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }

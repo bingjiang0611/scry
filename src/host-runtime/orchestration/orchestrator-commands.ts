@@ -160,6 +160,7 @@ export interface SessionDiscoverPayload {
   cwd: string
   title?: string | null
   catalog?: SessionCatalogMetadata
+  transcript?: Evidence<string>
   evidence?: string[]
 }
 
