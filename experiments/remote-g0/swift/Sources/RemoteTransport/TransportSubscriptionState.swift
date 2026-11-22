@@ -47,6 +47,34 @@ extension G0Transport {
     }
   }
 
+  struct SubscriptionDetail: Sendable {
+    let session: SubscriptionSession
+    private(set) var cursor: SubscriptionCursor
+    private(set) var changedAt: SubscriptionCursor
+    private(set) var page: RunHistoryTurnsPage?
+    var version: RunHistoryVersion?
+
+    init(session: SubscriptionSession, cursor: SubscriptionCursor, page: RunHistoryTurnsPage?) {
+      self.session = session
+      self.cursor = cursor
+      changedAt = cursor
+      self.page = page
+    }
+
+    mutating func advance(with reply: SubscriptionReply, cursor next: SubscriptionCursor) -> Bool {
+      cursor = next
+      let invalidated = reply.events?.contains {
+        ["turn.delivery", "run.settled", "run.failed", "run.cancelled", "run.interrupted", "session.discovered", "session.imported", "session.deleted", "session.withdrawn"].contains($0.type)
+      } == true
+      if invalidated {
+        changedAt = next
+        page = nil
+        version = nil
+      }
+      return invalidated
+    }
+  }
+
   actor DeviceSubscriptionState {
     private var offered = false
     private var hostId: String?
@@ -56,7 +84,7 @@ extension G0Transport {
     private var catalogOpened = false
     private var outputByRun: [String: (logId: String, seq: Int, delivered: Int)] = [:]
     private var watchedRuns: [String: (cursor: SubscriptionCursor, row: SubscriptionRunRow)] = [:]
-    private var lastDetail: (session: SubscriptionSession, cursor: SubscriptionCursor, page: RunHistoryTurnsPage?)?
+    private var lastDetail: SubscriptionDetail?
     private var observedNoticeIds: Set<String> = []
 
     func renegotiate() {
@@ -205,21 +233,34 @@ extension G0Transport {
       let next = try reply.cursor(for: hostId)
       if reply.mode == "snapshot", let detail = reply.snapshot?.detail {
         let page = detail.firstPage?.kind == "mobileHistory" ? try detail.firstPage?.page?.validated(before: nil, limit: 3, expectedSnapshot: nil) : nil
-        lastDetail = (session, next, page)
+        lastDetail = SubscriptionDetail(session: session, cursor: next, page: page)
         return page
       }
       guard let known, reply.knownEvents(since: known, next: next) else {
         lastDetail = nil
         return nil
       }
-      let invalidated = reply.events?.contains {
-        ["turn.delivery", "run.settled", "run.failed", "run.cancelled", "run.interrupted", "session.deleted", "session.withdrawn"].contains($0.type)
-      } == true
-      lastDetail = (session, next, invalidated ? nil : lastDetail?.page)
+      // Another caller can switch sessions or advance this cursor while the wire read is in flight.
+      guard lastDetail?.session == session, lastDetail?.cursor == known else { return nil }
+      let invalidated = lastDetail?.advance(with: reply, cursor: next) == true
       if latest && invalidated {
         return try await detail(endpoint: endpoint, identity: identity, hostId: hostId, session: session, waitMs: 0, latest: true)
       }
       return lastDetail?.page
+    }
+
+    func historyVersion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, hostId: String,
+                        session: SubscriptionSession, known: String?) async throws -> RunHistoryVersion? {
+      let page = try await detail(endpoint: endpoint, identity: identity, hostId: hostId, session: session, waitMs: 0, latest: false)
+      if page?.snapshot == known, page != nil { return nil }
+      guard let observed = lastDetail, observed.session == session else { return nil }
+      if let version = observed.version { return version.version == known ? nil : version }
+      let version = try await G0Transport.relayRunHistoryVersion(endpoint: endpoint, identity: identity,
+        providerId: session.providerId, cwd: session.cwd, externalSessionId: session.externalSessionId,
+        agentProfileId: session.agentProfileId)
+      guard lastDetail?.session == session, lastDetail?.changedAt == observed.changedAt else { return nil }
+      lastDetail?.version = version
+      return version.version == known ? nil : version
     }
 
     func mergingWatchedRun(_ runId: String, into status: SubscriptionStatus) -> SubscriptionStatus {

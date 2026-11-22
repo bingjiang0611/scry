@@ -211,8 +211,7 @@ struct HistoryEvidenceDetails: View {
 extension SessionTranscriptView {
   var historyIssue: SessionStatusLine? {
     guard run.activeSessionIdentity == sessionIdentity else { return nil }
-    // The exact reason stays in the header menu (历史状态); the paced
-    // refresh keeps retrying while this error stands (historyIsWatched).
+    // The history menu retains the cause while the subscription reconciles it.
     let details = SessionStatusLine.Action(title: ConnectionCopy.details, perform: { showHistoryDetails = true })
     if historyReadyForDisplay || run.history == .baseUnavailable, run.historyRefreshError != nil {
       return .init(text: run.history == .baseUnavailable ? ConnectionCopy.historyUnavailable
@@ -247,5 +246,55 @@ extension SessionTranscriptView {
     if run.historySyncing { return ConnectionCopy.historyReading }
     if run.historyFetchedAt != nil { return ConnectionCopy.historyVerified }
     return ConnectionCopy.historyStateUnavailable
+  }
+}
+
+extension SessionTranscriptView {
+  // Cheap identity for the background split task: revision counters only.
+  var splitRevision: String {
+    "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.output.last?.id ?? -1)-\(run.lifecycle)-\(run.detachedOutput.count)-\(run.detachedOutput.last?.id ?? -1)"
+  }
+
+  func refreshSplitBlocks() async {
+    var turns: [(String, ConversationTurn)] = []
+    switch run.history {
+    case let .partial(page), let .loaded(page):
+      let first = run.historyPageOffset
+      turns += page.enumerated().map { index, turn in
+        ("history-\(first + index)",
+         ConversationTurn(prompt: turn.userText.isEmpty ? nil : turn.userText, runId: turn.runId,
+                         entries: ConversationEntry.group(turn.items, kind: \.kind, text: \.text), archived: true))
+      }
+    default:
+      break
+    }
+    turns += completedTurns.map { ($0.id, ConversationTurn.completed($0)) }
+    if hasLiveTurn && !run.liveTurnInHistory { turns.append(("focused", ConversationTurn.focused(run))) }
+    if let live = detachedLive {
+      turns.append((live.runId, ConversationTurn(prompt: live.prompt.isEmpty ? nil : live.prompt, runId: live.runId,
+        running: live.state == "running", usagePending: true,
+        entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text), notice: ConversationCopy.liveCache)))
+    }
+    var plans: [String: [Int: ConversationSplitPlan]] = [:]
+    for (id, turn) in turns {
+      var hit: [Int: ConversationSplitPlan] = [:]
+      for candidate in turn.splitCandidates {
+        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate), blocks.count > 1 {
+          hit[candidate.index] = ConversationSplitPlan(token: candidate.token, blocks: blocks,
+            sourceLength: candidate.text.utf16.count, tailStart: blocks[blocks.count - 1].start,
+            crlfFree: !candidate.text.contains("\r\n"))
+        }
+      }
+      plans[id] = hit
+    }
+    splitPlans = plans
+    for (id, turn) in turns {
+      for candidate in turn.splitCandidates where plans[id]?[candidate.index]?.token != candidate.token {
+        guard let parsed = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
+        guard !Task.isCancelled else { return }
+        plans[id, default: [:]][candidate.index] = parsed
+        splitPlans = plans
+      }
+    }
   }
 }

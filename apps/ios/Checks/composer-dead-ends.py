@@ -16,7 +16,7 @@ composer = (root / 'MessageComposer.swift').read_text()
 transcript = (root / 'SessionTranscriptView.swift').read_text()
 chat = (root / 'ChatView.swift').read_text()
 popover = (root / 'Sheets/ModelEffortPopover.swift').read_text()
-store = (root / 'RemoteRunStore.swift').read_text()
+store = (root / 'RunStore/RemoteRunStoreProviderControls.swift').read_text()
 
 def at(source: str, needle: str) -> int:
     return source.find(needle)

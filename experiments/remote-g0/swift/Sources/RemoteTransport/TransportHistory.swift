@@ -157,80 +157,9 @@ extension G0Transport {
   }
   public static func relayRunWatch(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,
                                    cursor: Int, outputCursor: Int, waitMs: Int) async throws -> RunWatchOutcome {
-    if let (state, host) = try await subscription(endpoint: endpoint, identity: identity) {
-      return try await subscribedWatch(endpoint: endpoint, identity: identity, state: state, host: host, runId: runId,
-                                       cursor: cursor, outputCursor: outputCursor, waitMs: waitMs)
-    }
-    let request = try JSONEncoder().encode(RunWatchRequest(runId: runId, cursor: cursor, outputCursor: outputCursor, waitMs: waitMs))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .watch), expectedTarget: endpoint.executionTarget)
-    guard let watch = response.watch else { throw ProbeError.unexpectedReply }
-    return RunWatchOutcome(poll: RunPollOutcome(events: watch.poll.events, cursor: watch.poll.cursor),
-                           questions: watch.questions,
-                           output: RunOutputPage(chunks: watch.output.chunks, cursor: watch.output.cursor),
-                           state: watch.state)
-  }
-
-  static func decodeWatch(_ line: Data, expectedTarget: ExecutionTargetBinding?) throws -> RunWatchOutcome {
-    let response = try decodeRun(line, expectedTarget: expectedTarget)
-    guard let watch = response.watch else { throw ProbeError.unexpectedReply }
-    return RunWatchOutcome(poll: RunPollOutcome(events: watch.poll.events, cursor: watch.poll.cursor),
-                           questions: watch.questions,
-                           output: RunOutputPage(chunks: watch.output.chunks, cursor: watch.output.cursor),
-                           state: watch.state)
-  }
-
-  // Pushed run observation: the host sends an update as soon as anything
-  // changes (and a heartbeat at least every 15 s) on the multiplexed tunnel,
-  // instead of the phone asking again after each reply. Updates arrive in
-  // order; the stream finishes after the update carrying a terminal state, or
-  // when the host ends it, and then the caller subscribes again from its
-  // cursors. Unavailable (older host, serial tunnel, execution target) throws
-  // `RunError.host("watch_stream_unavailable")` so the caller long-polls.
-  public static func relayRunWatchUpdates(endpoint: RelayEndpoint, runId: String, cursor: Int,
-                                          outputCursor: Int, identity: G0ProbeIdentity? = nil) -> AsyncThrowingStream<RunWatchOutcome, Error> {
-    AsyncThrowingStream { continuation in
-      let task = Task {
-        do {
-          if let identity, let (state, host) = try await subscription(endpoint: endpoint, identity: identity) {
-            var eventCursor = cursor
-            var contentCursor = outputCursor
-            while !Task.isCancelled {
-              let outcome = try await subscribedWatch(endpoint: endpoint, identity: identity, state: state, host: host,
-                runId: runId, cursor: eventCursor, outputCursor: contentCursor, waitMs: 20_000)
-              continuation.yield(outcome)
-              eventCursor = outcome.poll.cursor
-              contentCursor = outcome.output.cursor
-              if ["settled", "failed", "cancelled"].contains(outcome.state ?? "") { break }
-            }
-            continuation.finish()
-            return
-          }
-          guard endpoint.executionTarget == nil, let session = endpoint.session, session.supportsWatchStream else {
-            throw RunError.host(code: "watch_stream_unavailable")
-          }
-          let request = try JSONEncoder().encode(RunWatchStreamRequest(runId: runId, cursor: cursor, outputCursor: outputCursor))
-          let ending: Data
-          do {
-            ending = try await session.stream(request, lane: .watch, limit: 8 * 1_024 * 1_024) { line in
-              do { continuation.yield(try G0Transport.decodeWatch(line, expectedTarget: nil)) }
-              catch { continuation.finish(throwing: error) }
-            }
-          } catch is StreamUnavailable {
-            throw RunError.host(code: "watch_stream_unavailable")
-          }
-          do {
-            continuation.yield(try G0Transport.decodeWatch(ending, expectedTarget: nil))
-          } catch let refusal as RunError where refusal.isCapacityRefusal {
-            // The tunnel is at its stream cap: long-poll instead of giving up.
-            throw RunError.host(code: "watch_stream_unavailable")
-          }
-          continuation.finish()
-        } catch {
-          continuation.finish(throwing: error)
-        }
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
+    let (state, host) = try await subscription(endpoint: endpoint, identity: identity)
+    return try await subscribedWatch(endpoint: endpoint, identity: identity, state: state, host: host, runId: runId,
+                                     cursor: cursor, outputCursor: outputCursor, waitMs: waitMs)
   }
 
   // Long-poll for the live-run list (and optionally one session's history
@@ -238,14 +167,8 @@ extension G0Transport {
   // `waitMs` (host-capped at 20 s). A read on its own lane.
   public static func relayLiveRuns(endpoint: RelayEndpoint, identity: G0ProbeIdentity, revision: String?, waitMs: Int,
                                    history: (providerId: String, cwd: String, externalSessionId: String, known: String?)? = nil, historyAgentProfileId: String? = nil) async throws -> LiveRunsOutcome {
-    if let observed = try await subscribedLiveRuns(endpoint: endpoint, identity: identity, revision: revision, waitMs: waitMs,
-                                                   history: history, profile: historyAgentProfileId) { return observed }
-    let request = try JSONEncoder().encode(LiveRunsRequest(revision: revision, waitMs: waitMs, history: history.map {
-      LiveRunsHistory(providerId: $0.providerId, cwd: $0.cwd, externalSessionId: $0.externalSessionId, known: $0.known, agentProfileId: HistoryProfileValue(value: historyAgentProfileId))
-    }))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .status), expectedTarget: endpoint.executionTarget, expectedHistoryScope: history == nil ? nil : "session")
-    guard let live = response.liveRuns else { throw ProbeError.unexpectedReply }
-    return live
+    return try await subscribedLiveRuns(endpoint: endpoint, identity: identity, revision: revision, waitMs: waitMs,
+                                        history: history, profile: historyAgentProfileId)
   }
 
   // Asks the host to interrupt the Provider for this run. "requested" is only a

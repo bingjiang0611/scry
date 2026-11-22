@@ -13,12 +13,10 @@ final class WireTests: XCTestCase {
     XCTAssertFalse(RelayTransportError.permitsReadRecovery(ProbeError.unexpectedReply))
   }
 
-  func testOnlyAFullTunnelIsARetryableHostRefusal() {
-    // mux_busy: the host ran nothing because the tunnel was at its cap.
-    XCTAssertTrue(G0Transport.RunError.host(code: "mux_busy").isCapacityRefusal)
+  func testTerminalHostRefusalsNeverTriggerReadRecovery() {
     for code in ["device_revoked", "unknown_run", "watch_stream_unavailable", "unknown_op",
-                 "execution_targets_unavailable", "execution_target_gateway_offline"] {
-      XCTAssertFalse(G0Transport.RunError.host(code: code).isCapacityRefusal, code)
+                 "execution_targets_unavailable"] {
+      XCTAssertFalse(G0Transport.RunError.host(code: code).isRecoverableReadRefusal, code)
       XCTAssertFalse(RelayTransportError.permitsReadRecovery(G0Transport.RunError.host(code: code)), code)
     }
   }

@@ -23,10 +23,15 @@ extension G0Transport {
   static func probeSubscription(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> String? {
     if let binding = endpoint.executionTarget {
       let catalog = try await relayExecutionTargets(endpoint: endpoint, identity: identity)
-      guard let target = catalog.targets.first(where: { $0.id == binding.id && $0.binding == binding.binding }) else {
-        throw RunError.host(code: "execution_target_binding_changed")
+      // The gateway can return an empty catalog while its App bridge is offline.
+      // Neither an absent target nor a different binding may receive a request.
+      guard let target = catalog.targets.first(where: { $0.id == binding.id }) else {
+        throw RunError.host(code: "execution_target_gateway_offline")
       }
-      return target.state == "connected" && target.subscribe == 1 ? target.hostId : nil
+      guard target.binding == binding.binding else { throw RunError.host(code: "execution_target_binding_changed") }
+      guard target.state == "connected" else { throw RunError.host(code: "desktop_not_connected") }
+      guard target.subscribe == 1 else { throw RunError.host(code: "subscribe_unsupported") }
+      return target.hostId
     }
     struct Reply: Decodable { let error: String?; let hostProtocol: Int?; let desktop: DesktopSubscriptionInfo? }
     let data = try await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity,
@@ -46,15 +51,15 @@ extension G0Transport {
     return info.subscribe == 1 ? info.hostId : nil
   }
 
-  static func subscription(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> (DeviceSubscriptionState, String)? {
+  static func subscription(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> (DeviceSubscriptionState, String) {
     guard let state = endpoint.session?.deviceSubscription, let host = try await state.offer(endpoint: endpoint, identity: identity) else {
-      return nil
+      throw RunError.host(code: "subscribe_unsupported")
     }
     return (state, host)
   }
 
-  public static func subscribedSessions(endpoint: RelayEndpoint, identity: G0ProbeIdentity, includeArchived: Bool) async throws -> [RunSessionRef]? {
-    guard let (state, host) = try await subscription(endpoint: endpoint, identity: identity) else { return nil }
+  public static func subscribedSessions(endpoint: RelayEndpoint, identity: G0ProbeIdentity, includeArchived: Bool) async throws -> [RunSessionRef] {
+    let (state, host) = try await subscription(endpoint: endpoint, identity: identity)
     let sessions = try await state.verifiedCatalog(endpoint: endpoint, identity: identity, hostId: host)
     return sessions.filter { includeArchived || $0.archivedAt == nil }.sorted {
       $0.ts == $1.ts ? $0.sessionId < $1.sessionId : $0.ts > $1.ts
@@ -63,18 +68,14 @@ extension G0Transport {
 
   static func subscribedLiveRuns(endpoint: RelayEndpoint, identity: G0ProbeIdentity, revision: String?, waitMs: Int,
                                 history: (providerId: String, cwd: String, externalSessionId: String, known: String?)?,
-                                profile: String?) async throws -> LiveRunsOutcome? {
-    guard let (state, host) = try await subscription(endpoint: endpoint, identity: identity) else { return nil }
+                                profile: String?) async throws -> LiveRunsOutcome {
+    let (state, host) = try await subscription(endpoint: endpoint, identity: identity)
     let status = try await state.observe(endpoint: endpoint, identity: identity, hostId: host, revision: revision, waitMs: waitMs)
     var version: RunHistoryVersion?
     if let history, let session = status.session(providerId: history.providerId, cwd: history.cwd,
                                                 externalSessionId: history.externalSessionId, agentProfileId: profile) {
-      let page = try await state.detail(endpoint: endpoint, identity: identity, hostId: host, session: session, waitMs: 0, latest: false)
-      if page == nil || page?.snapshot != history.known {
-        let read = try await relayRunHistoryVersion(endpoint: endpoint, identity: identity, providerId: history.providerId,
-          cwd: history.cwd, externalSessionId: history.externalSessionId, agentProfileId: profile)
-        if read.version != history.known { version = read }
-      }
+      version = try await state.historyVersion(endpoint: endpoint, identity: identity, hostId: host,
+        session: session, known: history.known)
     }
     let runs = status.runs.values.compactMap(\.live).sorted { $0.runId < $1.runId }
     return LiveRunsOutcome(revision: status.cursor.revision, runs: runs, historyVersion: version)
@@ -82,7 +83,7 @@ extension G0Transport {
 
   static func subscribedHistory(endpoint: RelayEndpoint, identity: G0ProbeIdentity, providerId: String, cwd: String,
                                 externalSessionId: String, agentProfileId: String?) async throws -> RunHistoryTurnsPage? {
-    guard let (state, host) = try await subscription(endpoint: endpoint, identity: identity) else { return nil }
+    let (state, host) = try await subscription(endpoint: endpoint, identity: identity)
     let status = try await state.observe(endpoint: endpoint, identity: identity, hostId: host)
     guard let session = status.session(providerId: providerId, cwd: cwd, externalSessionId: externalSessionId, agentProfileId: agentProfileId) else {
       return nil

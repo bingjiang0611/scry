@@ -99,15 +99,7 @@ struct RemoteRunClient {
     try await endpoint().session?.prewarm()
   }
 
-  // Long-poll one run: returns as soon as the host has new ledger events,
-  // output or a terminal lifecycle after the cursors, or after `waitMs`.
-  // Pushed observation of one run on the shared tunnel (current hosts). Throws
-  // RunError.host("watch_stream_unavailable") when the host or route cannot
-  // push; callers then use `watch` long-polls.
-  func watchUpdates(runId: String, cursor: Int, outputCursor: Int) -> AsyncThrowingStream<G0Transport.RunWatchOutcome, Error> {
-    G0Transport.relayRunWatchUpdates(endpoint: endpoint(), runId: runId, cursor: cursor, outputCursor: outputCursor, identity: try? identity())
-  }
-
+  // Await run changes on the host subscription.
   func watch(runId: String, cursor: Int, outputCursor: Int, waitMs: Int = 15_000) async throws -> G0Transport.RunWatchOutcome {
     try await G0Transport.relayRunWatch(endpoint: endpoint(), identity: try identity(), runId: runId,
                                         cursor: cursor, outputCursor: outputCursor, waitMs: waitMs)
@@ -143,18 +135,9 @@ struct RemoteRunClient {
     try await G0Transport.relayRunIntentStatus(endpoint: endpoint(), identity: try identity(), intentId: intentId)
   }
 
-  // Poll ledger events strictly after `cursor`; returns events + the next cursor.
-  func poll(cursor: Int) async throws -> G0Transport.RunPollOutcome {
-    try await G0Transport.relayRunPoll(endpoint: endpoint(), identity: try identity(), cursor: cursor)
-  }
-
   // Current lifecycle of one run; nil means the host has no such run for us.
   func runState(runId: String) async throws -> String? {
     try await G0Transport.relayRunState(endpoint: endpoint(), identity: try identity(), runId: runId)
-  }
-
-  func questions(runId: String) async throws -> [G0Transport.RunQuestionRequest] {
-    try await G0Transport.relayRunQuestions(endpoint: endpoint(), identity: try identity(), runId: runId)
   }
 
   func answerQuestion(runId: String, answerId: String, response: G0Transport.RunQuestionResponse) async throws -> G0Transport.RunQuestionAnswerOutcome {
@@ -237,49 +220,11 @@ struct RemoteRunClient {
   // may browse. Display metadata only; the host re-authorizes any content read.
   func sessions(includeArchived: Bool = false,
                 progress: @escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void = { _ in }) async throws -> [G0Transport.RunSessionRef] {
-    if let sessions = try await G0Transport.subscribedSessions(endpoint: endpoint(), identity: try identity(), includeArchived: includeArchived) {
-      await progress(sessions)
-      return sessions
-    }
-    // The last complete walk of this exact catalog. Offered to the host as
-    // `known`: when it still hashes the same, one page confirms it instead of
-    // re-sending every page. Only a host confirmation reuses it.
-    let memoKey = [connection.relayHost, connection.hostId, connection.deviceId,
-                   executionTarget.map { "\($0.id):\($0.binding)" } ?? "local", includeArchived ? "archived" : "active"].joined(separator: "\u{1f}")
-    let known = executionTarget == nil ? SessionCatalogMemo.shared.get(memoKey) : nil
-    return try await withHistoryConnection { reader in
-      var cursor = 0
-      var snapshot: String?
-      var total: Int?
-      var sessions: [G0Transport.RunSessionRef] = []
-      repeat {
-        let page = try await reader.sessionsPage(cursor: cursor, snapshot: snapshot, includeArchived: includeArchived,
-                                                 known: cursor == 0 ? known?.snapshot : nil)
-        if cursor == 0, page.unchanged == true, let known, page.snapshot == known.snapshot, page.total == known.sessions.count {
-          SessionCatalogMemo.shared.noteConfirmed()
-          await progress(known.sessions)
-          return known.sessions
-        }
-        let previous = cursor
-        if snapshot == nil { snapshot = page.snapshot; total = page.total }
-        guard snapshot == page.snapshot, total == page.total, page.total <= 100_000,
-              page.cursor == previous + page.sessions.count, page.cursor <= page.total,
-              page.hasMore ? page.cursor > previous && page.cursor < page.total : page.cursor == page.total else {
-          throw NSError(domain: "ScryRemote.Sessions", code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "Session snapshot or cursor changed"])
-        }
-        sessions.append(contentsOf: page.sessions)
-        await progress(sessions)
-        cursor = page.cursor
-        if !page.hasMore { break }
-      } while true
-      if let snapshot { SessionCatalogMemo.shared.set(memoKey, SessionCatalogMemo.Entry(snapshot: snapshot, sessions: sessions)) }
-      return sessions
-    }
+    let sessions = try await G0Transport.subscribedSessions(endpoint: endpoint(), identity: try identity(), includeArchived: includeArchived)
+    await progress(sessions)
+    return sessions
   }
 
-  // Rename / pin / archive on the host. `true` means the host applied it; the
-  // caller still re-reads the catalog because the catalog is the display truth.
   func sessionAction(context: G0Transport.SessionActionContext, action: G0Transport.SessionCleanup) async throws -> Bool {
     try await G0Transport.relaySessionAction(endpoint: endpoint(), identity: try identity(), context: context, action: action)
   }

@@ -86,9 +86,8 @@ struct RemoteProbe {
     printOutcome(outcome)
   }
 
-  // relay-run <submit|poll|state> <relayHost> <relayPort> <hostId> <host-anchor> <grantedCertPem> <deviceKey> <arg>
+  // relay-run <submit|state> <relayHost> <relayPort> <hostId> <host-anchor> <grantedCertPem> <deviceKey> <arg>
   //   submit: <arg> = path to routing-detail JSON; prints "submit <runId> <status>"
-  //   poll:   <arg> = cursor;                       prints "event <kind> <runId>" per event, then "poll-cursor <n>"
   //   state:  <arg> = runId;                        prints "state <lifecycle|none>"
   //   projects: no <arg>;                            prints "project <path>" per authorized dir
   //   output: <runId> <cursor>;                      prints "output <kind> <text>" per chunk, then "output-cursor <n>"
@@ -102,18 +101,15 @@ struct RemoteProbe {
       certificate: Data(contentsOf: URL(fileURLWithPath: args[5])),
       privateKey: Data(contentsOf: URL(fileURLWithPath: args[6]))
     )
-    let endpoint = G0Transport.RelayEndpoint(host: args[1], port: port, hostId: args[3])
+    let unpooled = G0Transport.RelayEndpoint(host: args[1], port: port, hostId: args[3])
+    let session = RelaySession(endpoint: unpooled) { identity }
+    let endpoint = G0Transport.RelayEndpoint(host: unpooled.host, port: unpooled.port, hostId: unpooled.hostId, session: session)
     switch args[0] {
     case "submit":
       guard args.count == 8 else { throw CLIError.invalidArguments }
       let detail = try String(contentsOf: URL(fileURLWithPath: args[7]), encoding: .utf8)
       let outcome = try await G0Transport.relayRunSubmit(endpoint: endpoint, identity: identity, intentId: UUID().uuidString.lowercased(), detail: detail)
       print("submit \(outcome.runId) \(outcome.status)")
-    case "poll":
-      guard args.count == 8, let cursor = Int(args[7]) else { throw CLIError.invalidArguments }
-      let outcome = try await G0Transport.relayRunPoll(endpoint: endpoint, identity: identity, cursor: cursor)
-      for e in outcome.events { print("event \(e.kind) \(e.runId)") }
-      print("poll-cursor \(outcome.cursor)")
     case "state":
       guard args.count == 8 else { throw CLIError.invalidArguments }
       let state = try await G0Transport.relayRunState(endpoint: endpoint, identity: identity, runId: args[7])
@@ -147,18 +143,16 @@ struct RemoteProbe {
       guard args.count == 9 else { throw CLIError.invalidArguments }
       setvbuf(stdout, nil, _IOLBF, 0)
       let detail = try String(contentsOf: URL(fileURLWithPath: args[7]), encoding: .utf8)
-      let session = RelaySession(endpoint: endpoint) { identity }
-      let live = G0Transport.RelayEndpoint(host: endpoint.host, port: endpoint.port, hostId: endpoint.hostId, session: session)
       let clock = ContinuousClock()
       let begin = clock.now
       let millis = { (d: Duration) in Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }
-      let submitted = try await G0Transport.relayRunSubmit(endpoint: live, identity: identity, intentId: UUID().uuidString.lowercased(), detail: detail)
+      let submitted = try await G0Transport.relayRunSubmit(endpoint: endpoint, identity: identity, intentId: UUID().uuidString.lowercased(), detail: detail)
       print("submit \(submitted.runId) \(submitted.status) ms=\(millis(clock.now - begin))")
       var cursor = 0, outputCursor = 0
       var stopSent = false
       while true {
         let started = clock.now
-        let watch = try await G0Transport.relayRunWatch(endpoint: live, identity: identity, runId: submitted.runId,
+        let watch = try await G0Transport.relayRunWatch(endpoint: endpoint, identity: identity, runId: submitted.runId,
                                                         cursor: cursor, outputCursor: outputCursor, waitMs: 5_000)
         cursor = watch.poll.cursor; outputCursor = watch.output.cursor
         for e in watch.poll.events where e.runId == submitted.runId { print("event \(e.kind)") }
@@ -167,17 +161,17 @@ struct RemoteProbe {
         if ["settled", "failed", "cancelled"].contains(watch.state ?? "") { break }
         if args[8] == "stop", !stopSent, ["dispatched", "running"].contains(watch.state ?? "") {
           // The live-run list rides its own lane on the same session.
-          let listed = try await G0Transport.relayLiveRuns(endpoint: live, identity: identity, revision: nil, waitMs: 0)
+          let listed = try await G0Transport.relayLiveRuns(endpoint: endpoint, identity: identity, revision: nil, waitMs: 0)
           for run in listed.runs { print("live-run \(run.origin) \(run.state) \(run.runId == submitted.runId ? "self" : "other") \(run.prompt)") }
           let stopStarted = clock.now
-          print("stop \(try await G0Transport.relayRunStop(endpoint: live, identity: identity, runId: submitted.runId)) ms=\(millis(clock.now - stopStarted))")
+          print("stop \(try await G0Transport.relayRunStop(endpoint: endpoint, identity: identity, runId: submitted.runId)) ms=\(millis(clock.now - stopStarted))")
           stopSent = true
         }
       }
       print("total ms=\(millis(clock.now - begin))")
-      await session.reset()
     default: throw CLIError.invalidArguments
     }
+    await session.reset()
   }
 
   static func printOutcome(_ outcome: G0Transport.PairOutcome) {
