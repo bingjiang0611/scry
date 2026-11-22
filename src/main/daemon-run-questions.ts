@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runtime'
 import { admissionPhase } from './daemon-run-admission'
-import { isScopedConversationRun, type RunCursor } from './daemon-run-cursor'
+import { usesScopedRunDelivery, type RunCursor } from './daemon-run-cursor'
 import type { DaemonRunTransport } from './daemon-run-transport'
 
 // A daemon run's questions, as this window shows and answers them. The daemon names a
@@ -35,8 +35,8 @@ export async function publishQuestions(cursor: RunCursor, transport: Pick<Daemon
   const runId = windowRunId(cursor)
   // A conversation run's questions go to its own view only, as in process: the window
   // stream's main session claims the first run it hears from when it has none focused.
-  const windowWide = !isScopedConversationRun(cursor)
   const pending = await transport.questions(cursor.runId)
+  const windowWide = !usesScopedRunDelivery(cursor)
   for (const pendingRequest of pending) {
     if (cursor.askedQuestions.has(pendingRequest.questionId)) continue
     cursor.askedQuestions.add(pendingRequest.questionId)

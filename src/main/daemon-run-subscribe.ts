@@ -254,7 +254,7 @@ export async function applySubscribeEventToRuntime(
       })
       ctx.runs.set(runId, cursor)
     }
-    if (p.isConversationRun === true) cursor.conversationRun = true
+    cursor.scopedDelivery = cursor.scopedDelivery === true || p.isConversationRun === true
     ctx.wakes.wake(cursor.runId)
     return
   }
@@ -301,7 +301,8 @@ export async function applySubscribeEventToRuntime(
   }
 
   if (event.type === 'run.question_opened' || event.type === 'run.question_answered' || event.type === 'run.question_closed') {
-    void ctx.syncQuestions(cursor)
+    if (cursor.scopedDelivery === undefined) void ctx.scheduleTraceRead(cursor.runId)
+    else void ctx.syncQuestions(cursor)
     return
   }
 
@@ -404,6 +405,7 @@ export async function readSubscribeTraceOnce(input: {
       context: cursor.context, runId: targetId, settledTail: false,
       ...(cursor.after ? { after: cursor.after } : {})
     })
+    if (read.run) cursor.scopedDelivery = cursor.scopedDelivery === true || Boolean(read.run.conversationId)
     if (read.kind === 'snapshot' && read.run === null) {
       // A Provider result precedes the daemon's finalization. Diff and other
       // evidence may have reached the archive after the last live read.
@@ -414,6 +416,9 @@ export async function readSubscribeTraceOnce(input: {
           const pushedIds = new Set(cursor.pushed.map((e) => e.id))
           const missing = archived.items.filter((item) => !pushedIds.has(item.id))
           if (missing.length > 0) {
+            // The legacy archive omits conversation scope. After reconnect,
+            // an unclassified run can only reach its own run view.
+            cursor.scopedDelivery ??= true
             read = { kind: 'snapshot', run: { ...archived, items: [...cursor.pushed, ...missing] } }
           }
         }

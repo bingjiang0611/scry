@@ -6,7 +6,7 @@ import type { AgentQuestionResponse, AgentStopState } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
-import { isScopedConversationRun, resume, view, type RunCursor } from './daemon-run-cursor'
+import { resume, usesScopedRunDelivery, view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
@@ -351,7 +351,7 @@ export class DaemonRunRuntime {
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
     // Conversation events reach only the run's scoped view.
-    if (!isScopedConversationRun(cursor)) this.#bridge.push(event)
+    if (!usesScopedRunDelivery(cursor)) this.#bridge.push(event)
     this.#deps.runTraces?.route(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return
@@ -361,7 +361,7 @@ export class DaemonRunRuntime {
   }
 
   #apply(read: Awaited<ReturnType<DaemonRunTransport['trace']>>, cursor: RunCursor): boolean {
-    if (read.run?.conversationId) cursor.conversationRun = true
+    if (read.run?.conversationId) cursor.scopedDelivery = true
     if (read.kind === 'snapshot' && read.run) cursor.latest = read.run
     const plan = planDelivery(cursor.pushed, read)
     for (const event of plan.events) this.#delivered(cursor, event)

@@ -100,7 +100,7 @@ describe('conversation runs on the window-wide trace stream', () => {
   it('asks a conversation run question in its own view only, and an App run question in the window', async () => {
     const question = { runId: LEDGER, questionId: 'q-1', title: 'allow?', options: [] }
     for (const [scryRunId, windowWide] of [['d428f668-cf65-493b-bc39-92a8ea149edd', false], [LEDGER, false], ['remote-run-phone0-0', true]] as const) {
-      const cursor = { runId: LEDGER, scryRunId, conversationRun: scryRunId === LEDGER ? true : undefined,
+      const cursor = { runId: LEDGER, scryRunId, scopedDelivery: scryRunId === LEDGER ? true : undefined,
         admitted: true, lifecycle: 'dispatched', askedQuestions: new Set(), answerIds: new Map(),
         pushed: [], watch: 0, output: 0, resyncRequired: false, pumping: false, stopped: false, sawText: false } as unknown as RunCursor
       const sent: string[] = []
