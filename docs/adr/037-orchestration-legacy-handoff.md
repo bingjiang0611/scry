@@ -1,0 +1,13 @@
+# 037: Hand off legacy runs without replaying their effects
+
+**Status:** Accepted (documents existing behavior)
+
+Unset orchestration mode selects the event log as authority. Explicit `shadow` observes the legacy ledger without replacing it; `off` (also the fallback for an unknown setting) keeps the legacy path. Cap pending intent lifetime at 60 seconds even with an override. Keep orchestration migrations independent of App database repairs.
+
+Import legacy ledger changes after the saved sequence and reimport the App catalog only when its digest changes. Mark catalog entries inferred, never exact. In shadow mode retain open lifecycle states so the legacy ledger can drive their next transitions. In authoritative mode reconcile interrupted dispatch and expired pending intents; legacy records do not establish the original peer grant. Imported effects are already done and must not be dispatched again. A terminal snapshot without a terminal timestamp does not establish settlement time. Recover a conversation ordinal from the authoritative conversation, never from the shadow projection's maximum. The regression fixture lets live turns commit on both sides of a deferred backfill to catch collisions.
+
+Import open runs and required conversation turns before serving requests without advancing the historical cursor. Use a worker to parse and stream the history, and yield between bounded backfill slices. Apply WAL pressure to the backfill, not live commits. An independent passive checkpoint connection temporarily needs normal SQLite locking; the daemon lock still owns host access and exclusive SQLite locking is restored when the worker closes. Repair missing shadow bodies only from legacy detail with a matching digest; report unrepairable references. Recovery tests bypass the normal terminal flush to simulate the publication gap, not an actual power loss.
+
+In authoritative mode the legacy ledger is only a downstream compatibility mirror. Write an initial snapshot even for zero runs. After append failure or queue overflow use an atomic snapshot rewrite rather than retrying an ambiguous sequence. If rewrite fails, mark legacy fallback unavailable and retry without taking down the authoritative writer. Build recovery snapshots off the emit path. Retain stable UUID aliases and discard retired event history; older cursors resync from a snapshot instead of replaying renumbered events.
+
+See [legacy import](../../src/host-runtime/orchestration/legacy-import.ts), [legacy mirror](../../src/host-runtime/orchestration/legacy-mirror.ts) and [import recovery tests](../../src/host-runtime/orchestration/legacy-import-edge.test.ts).

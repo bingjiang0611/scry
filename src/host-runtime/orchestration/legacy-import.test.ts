@@ -30,7 +30,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
       const ledgerDir = makeLedgerDir(userData)
       const t0 = 1_700_000_000_000
 
-      // Phase 1: `off` mode writes 3 runs to H1 ledger + 1 session to app-sessions.json
       const runSettled = SessionLedger.newRunId()
       const runOrphanDispatched = SessionLedger.newRunId()
       const runExpiredRecorded = SessionLedger.newRunId()
@@ -78,7 +77,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         ])
       )
 
-      // Phase 2: Authoritative mode (reconcileOpenRuns: true, after TTL expired) -> incremental import
       {
         const sink = EventSink.open({ userDataDir: userData })
         try {
@@ -93,7 +91,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
           expect(first.importedSessions).toBe(1)
 
           expect(sink.getRun(runSettled)?.lifecycle).toBe('settled')
-          // Dispatched without terminal -> interrupted with unavailable(host_restarted), settledAt=null
           const orphan = sink.getRun(runOrphanDispatched)
           expect(orphan?.lifecycle).toBe('interrupted')
           expect(orphan?.settledAt).toBeNull()
@@ -102,16 +99,13 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
             quality: 'unavailable',
             omissionReason: 'host_restarted'
           })
-          // Recorded + expired TTL -> cancelled(pending_expired)
           expect(sink.getRun(runExpiredRecorded)?.lifecycle).toBe('cancelled')
 
-          // app-sessions.json imported with quality: inferred (never exact!)
           const sess = sink.getSession('sess-legacy-1')
           expect(sess?.legacy).toBe(true)
           expect(sess?.title).toBe('Legacy Title')
           expect(sess?.lastRunOutcome?.quality).toBe('inferred')
 
-          // Re-running import in same session is a pure no-op (zero duplicates)
           const second = importLegacyStateIncrementally({
             sink,
             userDataDir: userData,
@@ -127,7 +121,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         }
       }
 
-      // Phase 3: Switch back to `off`, add 1 new H1 run and 1 new session in app-sessions.json
       const runFourth = SessionLedger.newRunId()
       {
         const store = new SessionLedgerFileStore(ledgerDir)
@@ -167,7 +160,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         ])
       )
 
-      // Phase 4: Switch back to `shadow` -> imports ONLY the 4th run and updated catalog, no duplicates!
       {
         const sink = EventSink.open({ userDataDir: userData })
         try {
@@ -182,7 +174,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
           expect(sink.getRun(runFourth)?.lifecycle).toBe('settled')
           expect(sink.getSession('sess-legacy-2')?.title).toBe('Second Legacy')
 
-          // Verify zero duplicate intent_recorded events for any run
           const intents = sink.listEvents().filter((e) => e.type === 'run.intent_recorded')
           expect(intents).toHaveLength(4)
           expect(new Set(intents.map((e) => e.runId)).size).toBe(4)
@@ -202,7 +193,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
       const snapDispatched = SessionLedger.newRunId()
       const snapRecorded = SessionLedger.newRunId()
 
-      // Write a snapshot-only ledger (no session-ledger.log tail, so terminalAt is unavailable)
       writeFileSync(
         join(ledgerDir, 'session-ledger.snapshot.json'),
         JSON.stringify({
@@ -249,7 +239,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         })
         expect(summary.importedRuns).toBe(3)
 
-        // Snapshot-only terminal run: NEVER fabricate settledAt; mark unavailable with explicit reason
         const settled = sink.getRun(snapSettled)
         expect(settled?.lifecycle).toBe('settled')
         expect(settled?.settledAt).toBeNull()
@@ -260,11 +249,9 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
           omissionReason: 'snapshot_terminal_timestamp_unavailable'
         })
 
-        // Shadow mode preserves open lifecycles so H1 recover()/pump() drive terminal state cleanly
         expect(sink.getRun(snapDispatched)?.lifecycle).toBe('dispatched')
         expect(sink.getRun(snapRecorded)?.lifecycle).toBe('recorded')
 
-        // Every imported outbox row is marked done + shadowOnly so P4-2 never re-dispatches them
         const outbox = sink.listOutbox()
         expect(outbox).toHaveLength(3)
         for (const row of outbox) {
@@ -318,7 +305,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         expect(summary.importedRuns).toBe(2_000)
         expect(summary.legacyLedgerSeq).toBe(6_000)
         expect(elapsedMs).toBeLessThan(5_000)
-        // Re-run is a fast no-op
         const noop = importLegacyStateIncrementally({ sink, userDataDir: userData, now: t0 + 100_001 })
         expect(noop.importedRuns).toBe(0)
       } finally {
@@ -385,7 +371,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
       try {
         mirror.setDeferringLegacyWatermark(true)
 
-        // 1. Live turn 4 commits BEFORE deferred backfill imports pre-fix turns 1-3
         const turn4Canonical = SessionLedger.newRunId()
         const turn4Ledger = SessionLedger.newRunId()
         mirror.onLedgerEvent({
@@ -404,7 +389,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         mirror.onLedgerEvent({ seq: 101, at: t0 + 5_001, runId: turn4Ledger, kind: 'run_dispatched' })
         mirror.onLedgerEvent({ seq: 102, at: t0 + 5_002, runId: turn4Ledger, kind: 'run_settled' })
 
-        // 2. Deferred backfill runs NOW while turn 4 already occupies ordinal 4
         const deferred = startDeferredLegacyImport({
           sink: mirror.sink!,
           userDataDir: userData,
@@ -416,7 +400,6 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
         mirror.recordImportRejections(summary.rejectedCommands)
         mirror.setDeferringLegacyWatermark(false, summary.legacyLedgerSeq)
 
-        // 3. Live turn 5 arrives at H3 ordinal 5: MUST NOT collide with deferred backfill or fence!
         const turn5Canonical = SessionLedger.newRunId()
         const turn5Ledger = SessionLedger.newRunId()
         mirror.onLedgerEvent({

@@ -11,34 +11,18 @@ const DEFAULT_FALLBACK_RETRY_MS = 30_000
 export interface LegacyMirrorWorkerOptions {
   sink: EventSink
   ledgerStore?: LedgerStore
-  /** Re-opens the H1 file store during periodic recovery if initial startup open failed. */
   reopenLedgerStore?: () => LedgerStore | undefined
-  /** Builds an authoritative H1 snapshot from orchestration.db for atomic rewrite on failure or retry. */
   createSnapshot?: () => LedgerSnapshot
-  /** Debounced idle delay before flushing H1 mirror writes off the pre-first-token path. */
   idleDelayMs?: number
-  /** Upper bound on queued mirror events before collapsing into an atomic snapshot rewrite. */
   maxPendingEvents?: number
-  /** Maximum events drained per event-loop turn before yielding via `setImmediate`. */
   maxBatchEvents?: number
-  /** Time budget (ms) per `#drain` slice before yielding via `setImmediate`. */
   maxSliceMs?: number
-  /** Periodic retry interval (ms) while `h1_fallback_unavailable` is active (default 30,000 ms). */
   fallbackRetryIntervalMs?: number
   onError?: (error: unknown) => void
   onH1FallbackUnavailable?: (error: unknown) => void
   onH1FallbackRecovered?: (lastSeq: number) => void
 }
 
-/**
- * P4-2 pure downstream H1 mirror (Decision H, `data §4.5`).
- * - H1 is NEVER authoritative in `on` mode; `on` mode always rebuilds from `orchestration.db`.
- * - First entry into `on` writes a valid initial snapshot immediately (even with 0 runs).
- * - On ANY `append` failure (e.g. fsync ENOSPC, short write), NEVER retries `append` for the same
- *   `seq`; instead atomically rewrites H1 from a DB snapshot (`tmp + fsync + rename + dir fsync`).
- * - If atomic snapshot rewrite also fails, sets `orch_meta.h1_fallback_unavailable='1'`, logs, and
- *   retries periodically in-process; clears the flag once a snapshot rewrite succeeds.
- */
 export class LegacyMirrorWorker {
   readonly #sink: EventSink
   #ledgerStore?: LedgerStore
@@ -81,7 +65,6 @@ export class LegacyMirrorWorker {
       const existing = Number(this.#sink.getMeta('legacy_ledger_seq') ?? '0')
       if (Number.isFinite(existing) && existing > 0) this.#lastMirroredSeq = existing
     } catch {
-      // Ignore if sink already fenced.
     }
     if (!this.#ledgerStore) {
       this.#markH1FallbackUnavailable(new Error('h1_ledger_store_unavailable'))
@@ -104,16 +87,10 @@ export class LegacyMirrorWorker {
     return this.#h1FallbackReason
   }
 
-  /** Backward-compatible alias for `isH1FallbackUnavailable()`. */
   isFailedClosed(): boolean {
     return this.#h1FallbackUnavailable
   }
 
-  /**
-   * Synchronously writes the startup H1 snapshot (Decision H: H1 must be a valid file immediately
-   * upon entering `on` mode, even with 0 runs). If the write fails, degrades to
-   * `h1_fallback_unavailable` with periodic retry while allowing `on` mode to continue.
-   */
   writeInitialSnapshot(snapshot: LedgerSnapshot): boolean {
     if (this.#closed) return false
     if (!this.#ledgerStore?.compact) {
@@ -141,7 +118,6 @@ export class LegacyMirrorWorker {
         this.#sink.setMeta('legacy_ledger_seq', String(seq))
       }
     } catch {
-      // Ignore if sink fenced.
     }
   }
 
@@ -198,7 +174,6 @@ export class LegacyMirrorWorker {
         this.#sink.setMeta('h1_fallback_unavailable', '1')
         this.#sink.setMeta('h1_fallback_reason', reason)
       } catch {
-        // Ignore if sink fenced.
       }
     }
   }
@@ -238,7 +213,6 @@ export class LegacyMirrorWorker {
           this.#sink.setMeta('h1_fallback_reason', '')
         }
       } catch {
-        // Ignore if sink fenced.
       }
     }
   }
@@ -251,7 +225,6 @@ export class LegacyMirrorWorker {
       this.#queue.push(event)
       if (this.#queue.length > this.#maxPendingEvents) {
         if (this.#ledgerStore?.compact) {
-          // W16 Part 1: defer DB snapshot rebuild to `#drain` so emit NEVER queries orchestration.db synchronously.
           this.#needsDbSnapshotRebuild = true
           this.#pendingCompact = null
           this.#queue.length = 0
@@ -272,7 +245,6 @@ export class LegacyMirrorWorker {
     }
   }
 
-  /** Enqueues an atomic H1 snapshot rewrite and drops queued events superseded by `snapshot.lastSeq`. */
   enqueueCompact(snapshot: LedgerSnapshot): void {
     if (this.#closed || this.#h1FallbackUnavailable) return
     this.#needsDbSnapshotRebuild = false

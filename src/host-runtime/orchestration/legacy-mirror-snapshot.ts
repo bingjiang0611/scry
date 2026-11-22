@@ -22,11 +22,6 @@ const NEXT_LIFECYCLE: Partial<Record<LedgerEvent['kind'], RunLifecycle>> = {
   run_cancelled: 'cancelled'
 }
 
-/**
- * Tracks in-memory H1 ledger state alongside `createLedgerStore` so `LegacyMirrorWorker`
- * can synthesize a valid, contiguous `LedgerSnapshot` on queue overflow or write fault
- * without ever dropping events and creating a `seq` gap (`ledger_log_corrupt`).
- */
 export class MemoryLedgerSnapshotTracker {
   readonly #runs = new Map<string, LedgerSnapshotRun>()
   #retained: LedgerEvent[] = []

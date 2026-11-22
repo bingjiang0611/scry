@@ -139,11 +139,6 @@ export interface StreamedLegacyLedgerResult {
   runs: Map<string, LegacyRunState>
 }
 
-/**
- * Off-main-thread parser for H1 `session-ledger.snapshot.json` + `session-ledger.log` (W9 P4-2).
- * Filters & sorts inside the worker and streams 500-run chunks with `setImmediate` backpressure so
- * main-thread structured-clone deserialization never blocks the event loop >50 ms even at 100k runs.
- */
 export function readLegacyLedgerStreamedAsync(
   ledgerDir: string,
   options?: { minSeqExclusive?: number; includeAllRuns?: boolean; chunkSize?: number }
@@ -198,7 +193,6 @@ export async function readLegacyLedgerAsync(
   return { lastSeq: streamed.lastSeq, runs: streamed.runs }
 }
 
-/** Read-only parser for H1 `session-ledger.snapshot.json` + `session-ledger.log`. */
 export function readLegacyLedgerReadOnly(ledgerDir: string): { lastSeq: number; runs: Map<string, LegacyRunState> } {
   const runs = new Map<string, LegacyRunState>()
   let lastSeq = 0
@@ -300,7 +294,6 @@ export function loadLegacyLedgerPlan(sink: EventSink, userDataDir: string): Lega
   return buildLegacyLedgerPlan(currentLedgerSeq, readLegacyLedgerReadOnly(ledgerDir))
 }
 
-/** Off-main-thread variant of `loadLegacyLedgerPlan` using streamed `worker_threads` chunks (W9 P4-2). */
 export async function loadLegacyLedgerPlanAsync(sink: EventSink, userDataDir: string): Promise<LegacyLedgerPlan> {
   const currentLedgerSeq = Number(sink.getMeta('legacy_ledger_seq') ?? '0')
   const ledgerDir = join(userDataDir, 'remote', 'ledger')

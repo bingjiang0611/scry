@@ -15,12 +15,6 @@ export const ORCHESTRATION_FULLFSYNC_ENV = 'SCRY_ORCHESTRATION_FULLFSYNC'
 export const ORCHESTRATION_PENDING_TTL_ENV = 'SCRY_ORCHESTRATION_PENDING_TTL_MS'
 export const MAX_PENDING_TTL_MS = DEFAULT_PENDING_TTL_MS
 
-/**
- * Unset (or empty) means `on`: the event log is the authority by default (maintainer
- * 2026-11-21, trial default on this branch). `off` and `shadow` stay available as
- * explicit escape hatches; any other value is treated as `off` so a typo never
- * silently enables a different mode.
- */
 export function parseOrchestrationMode(env: NodeJS.ProcessEnv): OrchestrationModeResolution {
   const raw = env[ORCHESTRATION_MODE_ENV]?.trim().toLowerCase()
   if (raw === undefined || raw === '' || raw === 'on') return { requested: 'on', effective: 'on', refused: false }
@@ -35,10 +29,6 @@ export function parseOrchestrationFullfsync(env: NodeJS.ProcessEnv): boolean | u
   return undefined
 }
 
-/**
- * Parses `SCRY_ORCHESTRATION_PENDING_TTL_MS`, capped strictly at `MAX_PENDING_TTL_MS` (60 s)
- * so the variable can shorten the TTL for tests without ever extending past Decision B's bound.
- */
 export function parsePendingTtlMs(env: NodeJS.ProcessEnv, fallback = DEFAULT_PENDING_TTL_MS): number {
   const boundedFallback = Math.min(Math.max(1, fallback), MAX_PENDING_TTL_MS)
   const raw = env[ORCHESTRATION_PENDING_TTL_ENV]

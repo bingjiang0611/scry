@@ -71,14 +71,6 @@ export function readReservedSeqUntil(sink: EventSink): number {
   return Number.isSafeInteger(raw) && raw > 0 ? raw : 0
 }
 
-/**
- * Rebuilds an authoritative H1 `LedgerSnapshot` strictly from `orchestration.db` (Decision H):
- * - Single state snapshot with `retainedEvents: []` (no old events, no renumbering).
- * - `SessionLedger` sets both `lastSeq` and `minCursor` to `snapshot.lastSeq` (`R`), so any
- *   stale device cursor receives the standard `reset` response and resyncs via `runState`.
- * - Every `runId` / `intentId` is a valid unique UUID v4 and every `intentSeq` satisfies
- *   `1 <= intentSeq <= snapshot.lastSeq`.
- */
 export function buildH1SnapshotFromDb(
   sink: EventSink,
   options?: { lastSeq?: number }
@@ -87,7 +79,6 @@ export function buildH1SnapshotFromDb(
   const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
   const reservedUntil = readReservedSeqUntil(sink)
 
-  // Map canonical run_id -> H1 UUID ledger_run_id when an explicit alias exists.
   const aliasRows = db
     .prepare('SELECT ledger_run_id, run_id FROM orch_legacy_run')
     .all() as Array<{ ledger_run_id: string; run_id: string }>
@@ -98,7 +89,6 @@ export function buildH1SnapshotFromDb(
     }
   }
 
-  // Load intent metadata (command_id, at, intentDetailSha256) from run.intent_recorded events.
   const intentEvents = db
     .prepare("SELECT seq, at, run_id, command_id, payload FROM orch_event WHERE type = 'run.intent_recorded' ORDER BY seq ASC")
     .all() as Array<{ seq: number; at: number; run_id: string | null; command_id: string | null; payload: string }>

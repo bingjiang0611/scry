@@ -82,13 +82,6 @@ parentPort.on('message', (msg) => {
 });
 `
 
-/**
- * Off-main-thread SQLite WAL checkpoint helper for large deferred backfills (W9 Must-Fix 1).
- * Temporarily switches the main connection to `locking_mode = NORMAL` while the same-process
- * daemon lock (`daemon.lock`) still owns exclusive host access, runs `PRAGMA wal_checkpoint(PASSIVE)`
- * on an independent connection in a worker thread (non-blocking for main-thread writers and event
- * loop), and immediately restores `locking_mode = EXCLUSIVE` on `close()`.
- */
 export class WalCheckpointWorker {
   readonly #sink: EventSink
   #worker: Worker | null = null
@@ -213,7 +206,6 @@ export class WalCheckpointWorker {
       try {
         this.#sink.setLockingMode('exclusive')
       } catch {
-        // Ignore if DB already closed or fenced.
       }
     }
   }

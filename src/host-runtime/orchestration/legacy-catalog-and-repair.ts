@@ -4,11 +4,6 @@ import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import type { LegacyRunState } from './legacy-ledger-reader'
 
-/**
- * P4-1 startup repair for S2: if a previous daemon crashed between `intent_recorded` and
- * terminal body flush, reconstruct missing `0600` external body files from the already-parsed
- * H1 ledger `detail` (verified by SHA-256) and report any still-missing refs as deviations.
- */
 export function repairMissingShadowBodies(
   sink: EventSink,
   plan: { readonly runsByLedgerId: ReadonlyMap<string, LegacyRunState> }
@@ -43,7 +38,6 @@ export function repairMissingShadowBodies(
   return { repaired, stillMissing }
 }
 
-/** Incrementally imports `app-sessions.json` entries when its content SHA-256 changes. */
 export function importCatalogEntries(
   sink: EventSink,
   userDataDir: string,

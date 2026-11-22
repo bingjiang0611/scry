@@ -38,6 +38,7 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [034: Test recorder optimizations against independent evidence](034-recorder-regression-oracles.md)
 - [035: Share host composition without sharing run ownership](035-host-runtime-composition.md)
 - [036: Commit orchestration evidence atomically and fence indeterminate writes](036-orchestration-storage-durability.md)
+- [037: Hand off legacy runs without replaying their effects](037-orchestration-legacy-handoff.md)
 
 ## Source comment ratchet
 
