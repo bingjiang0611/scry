@@ -1,6 +1,6 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentDataUpdated } from '../../shared/runtime'
-import type { ProviderContext } from '../../shared/provider'
+import type { DeleteSessionResult, ProviderContext } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
 import type { ConversationService } from '../conversation-service'
@@ -37,7 +37,7 @@ export interface ConversationTableDependencies {
   conversationService: () => ConversationService
   invalidateSessionHistoryLoad: (reason: string) => void
   publishDataUpdated: (event: AgentDataUpdated) => void
-  deleteOneSession: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<{ ok: boolean; deleted: string[]; retained: string[]; failed: Array<{ store: string; error: string }>; reason?: string }>
+  deleteOneSession: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   resolveSessionRunIds: typeof resolveSessionRunIds
   deleteConversationHistory: typeof deleteConversationHistory
   deleteConversationProjection?: (conversation: Conversation) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }

@@ -67,11 +67,12 @@ async function pendingStatus(lanes: DesktopLanes, lane: 'status' | 'bulk', endpo
 
 describe('desktop lane connection bounds', () => {
   it('closes a cancelled handshake and admits the replacement on the same subscriber lane', async () => {
-    const connected = Promise.withResolvers<import('node:net').Socket>()
+    let accept!: (socket: import('node:net').Socket) => void
+    const connected = new Promise<import('node:net').Socket>((resolve) => { accept = resolve })
     const silent = createServer((socket) => {
       socket.on('error', () => undefined)
       socket.resume()
-      connected.resolve(socket)
+      accept(socket)
     })
     const address = await new Promise<import('node:net').AddressInfo>((resolve) =>
       silent.listen(0, '127.0.0.1', () => resolve(silent.address() as import('node:net').AddressInfo)))
@@ -89,7 +90,7 @@ describe('desktop lane connection bounds', () => {
       endpoint: { ...endpoint, host: address.address, port: address.port }, request: { ...request, waitMs: 20_000 },
       replayable: true, subscriber: 'same', signal: controller.signal
     })
-    stalled = await connected.promise
+    stalled = await connected
     const closed = new Promise<void>((resolve) => stalled!.once('close', () => resolve()))
     controller.abort()
     await expect(old).rejects.toThrow('desktop_lane_cancelled')

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ExecutionTargetWorkReply } from '../shared/execution-target-work'
 import { DaemonExecutionTargetPump, type ExecutionTargetWorkCall, type ExecutionTargetWorkSource } from './daemon-execution-target-pump'
 import { DaemonRunError, DaemonRunTransport } from './daemon-run-transport'
 import { DEFAULT_MAX_FRAME } from './remote/inner-mtls-protocol'
@@ -8,7 +9,8 @@ describe('DaemonExecutionTargetPump', () => {
     const target = { id: 't1', binding: 'b'.repeat(64) }
     const old = { callId: 'old', method: 'mobileRequest' as const, input: { target, request: { op: 'subscribe', waitMs: 20_000 } } }
     const fresh = { callId: 'fresh', method: 'mobileRequest' as const, input: { target, request: { op: 'subscribe', waitMs: 0 } } }
-    const started = Promise.withResolvers<void>()
+    let start!: () => void
+    const started = new Promise<void>((resolve) => { start = resolve })
     const obsolete = vi.fn()
     const results = vi.fn(async () => ({ accepted: true }))
     let polls = 0
@@ -17,11 +19,11 @@ describe('DaemonExecutionTargetPump', () => {
         switch (++polls) {
           case 1: return { calls: [old] }
           case 2:
-            await started.promise
+            await started
             return { calls: [], cancelledCallIds: [old.callId] }
           case 3: return { calls: [fresh] }
           default:
-            return await new Promise((_, reject) => {
+            return await new Promise<ExecutionTargetWorkReply>((_, reject) => {
               signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
             })
         }
@@ -36,7 +38,7 @@ describe('DaemonExecutionTargetPump', () => {
         mobileIntentStatus: async () => ({}),
         mobileRequest: async (_target, request, _authorize, signal?: AbortSignal) => {
           if (request.waitMs === 0) return { snapshotAfterAbort: obsolete.mock.calls.length === 1 }
-          started.resolve()
+          start()
           return await new Promise((_, reject) => {
             signal?.addEventListener('abort', () => { obsolete(); reject(signal.reason) }, { once: true })
           })

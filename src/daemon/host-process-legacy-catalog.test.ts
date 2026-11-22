@@ -45,16 +45,17 @@ function seedHistory() {
 }
 
 async function startDuringBackfill(userDataDir: string) {
-  const pause = Promise.withResolvers<void>()
+  let resume!: () => void
+  const pause = new Promise<void>((resolve) => { resume = resolve })
   const conversationStore = new ConversationStore(userDataDir)
   const authority = await attachDaemonOrchestrationAuthority({
     userDataDir, env: {}, conversationStore: () => conversationStore,
     runs: new RunRegistry(), requestRunStop: () => false, log: () => undefined,
-    pauseDeferredImport: pause.promise
+    pauseDeferredImport: pause
   })
   authority.startImport()
   const catalog = createOrchestrationCatalogAccess(() => authority.sink)
-  return { authority, catalog, resume: pause.resolve }
+  return { authority, catalog, resume }
 }
 
 it('serves the full local catalog and history identity while terminal backfill is paused', async () => {
