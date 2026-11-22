@@ -60,7 +60,6 @@ export function intFlag(args: ParsedArgs, key: string): number | undefined {
   return number
 }
 
-/** 一个值型选项重复给出的全部值；单值调用也走这里，调用方不需要区分写法。 */
 export function listFlags(args: ParsedArgs, key: string): string[] {
   const repeated = args.repeated?.get(key)
   if (repeated?.length) return repeated

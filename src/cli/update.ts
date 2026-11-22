@@ -55,11 +55,6 @@ function statePath(env: NodeJS.ProcessEnv = process.env): string {
   return env.SCRY_CLI_UPDATE_STATE_PATH ?? join(homedir(), '.scry', 'cli-update.json')
 }
 
-/**
- * Registry is deployment configuration, not a code default: an unset `SCRY_CLI_REGISTRY` leaves
- * resolution to the machine's npm configuration, and only an explicitly configured registry is
- * pinned on our npm calls.
- */
 function registryArgs(env: NodeJS.ProcessEnv): string[] {
   const value = env.SCRY_CLI_REGISTRY?.trim()
   if (!value) return []
@@ -89,14 +84,6 @@ export function compareVersions(left: string, right: string): number {
   return 0
 }
 
-/**
- * Auto-update stays inside the same major. 0.x minor used to be a wall too, which meant every
- * 0.x user had to notice a manual upgrade or silently stop receiving fixes; the wall is now major
- * only, and a release that really breaks the CLI contract is expected to bump major instead.
- *
- * Clients decide this with their own copy of the rule, so a permissive rule only reaches users
- * through a release their current rule already accepts — hence shipping this inside 0.2.x.
- */
 export function isCompatibleAutoUpdate(current: string, candidate: string): boolean {
   const from = parseVersion(current)
   const to = parseVersion(candidate)
@@ -118,24 +105,10 @@ export function npmPrefixFromEntry(entryPath: string): string | null {
   return resolved.slice(0, index) || sep
 }
 
-/** Explicitly switched off, as opposed to simply unset. */
 function turnedOff(value: string | undefined): boolean {
   return value !== undefined && ['0', 'false', 'no'].includes(value.trim().toLowerCase())
 }
 
-/**
- * The environment half of the policy, shared by every trigger so there is one answer to "may this
- * machine install an update at all".
- *
- * Auto-update is **on unless switched off**. An opt-in flag only ever reached machines whose
- * operator already knew about it, which left everyone else on whatever version they first
- * installed. The cost of this default is real and stated in the README: a published release
- * installs itself, unattended, on machines running agents with the local user's permissions. It
- * stays bounded by `isCompatibleAutoUpdate` (never across a major), never runs from a Provider hook
- * event, and any of these switches it off:
- * `SCRY_AUTO_UPDATE=0`, `SCRY_NO_UPDATE_CHECK=1`, or a host that pins the CLI
- * (`SCRY_CLI_BUNDLED`, `SCRY_RECORDER_MANAGED`).
- */
 export function autoUpdateAllowedByEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   if (turnedOff(env.SCRY_AUTO_UPDATE)) return false
   return ![
@@ -155,18 +128,6 @@ export function shouldScheduleAutoUpdate(options: AutoUpdateOptions): boolean {
   return autoUpdateAllowedByEnv(env)
 }
 
-/**
- * Update trigger for the recorder daemon's idle shutdown. Hook events deliberately cannot trigger
- * one: after the curl fast path they run no Node at all, so a trigger there would re-add a process
- * launch (measured 79ms) to the hottest path and could swap the CLI between two events of the same
- * turn. The daemon instead updates when it has already decided to exit, which needs no extra
- * process and cannot split a turn.
- *
- * Pending turns deliberately do not block this. Records are durable and versioned, a newer CLI
- * recovering an older open turn is a supported path, and `doctor` reports version drift - whereas
- * requiring zero pending would silently disable updates on exactly the workspaces that accumulate
- * them.
- */
 export async function runIdleAutoUpdate(
   currentVersion: string,
   entryPath?: string,
@@ -206,11 +167,6 @@ async function runNpm(
   }
 }
 
-/**
- * `~` pins the minor and npm's `^` also treats 0.x minor as breaking, so neither range can express
- * "anything newer inside this major". Spell the bound out instead, or a 0.x install can never see
- * the next minor even when the compatibility rule allows it.
- */
 function updateSpec(currentVersion: string, allowBreaking: boolean, checkOnly: boolean): string {
   if (allowBreaking || checkOnly) return 'latest'
   const current = parseVersion(currentVersion)
@@ -308,8 +264,6 @@ export async function runBackgroundUpdate(currentVersion: string, entryPath?: st
   return await withDirectoryLock(`${path}.lock`, async () => {
     const latestState = await readJson<CliUpdateState>(path)
     if (!isUpdateDue(latestState)) return null
-    // Installs, not just checks: opt-in via SCRY_AUTO_UPDATE, bounded to the same major by
-    // isCompatibleAutoUpdate, and reported afterwards through consumeUpdateNotice.
     return await upgradeCli({
       currentVersion,
       entryPath,
@@ -338,7 +292,5 @@ export async function consumeUpdateNotice(env: NodeJS.ProcessEnv = process.env):
   const state = await readJson<CliUpdateState>(path)
   if (!state?.updatedAt || state.notifiedAt || !state.updatedFrom || !state.updatedTo) return null
   await writeJsonAtomic(path, { ...state, notifiedAt: new Date().toISOString() }).catch(() => undefined)
-  // Default-on means nobody opted in, so the one line that proves it happened also says how
-  // to stop it. Disclosure rides on the install instead of a second notice with its own state.
   return `Scry CLI 已自动更新：${state.updatedFrom} → ${state.updatedTo}（关闭：SCRY_AUTO_UPDATE=0）`
 }

@@ -25,7 +25,6 @@ function helpText(): string {
  * has not acknowledged, because moving an undelivered record would silently drop it. Exit codes:
  * 0 done, 2 recorder unavailable, 3 approval required or nothing to archive, 5 refused.
  */
-/** Report the capture settings actually in force, including defaults the config omits. */
 /**
  * Sanitised diagnostics for a maintainer. Writes to --out when given, otherwise stdout; the
  * payload lists what it deliberately omits so a recipient can see the boundary.

@@ -224,7 +224,6 @@ describe('scry integrations diff/uninstall', () => {
 
     const settings = JSON.parse(await readFile(join(root, '.claude', 'settings.local.json'), 'utf8')) as Record<string, any>
     expect(settings.hooks.Stop[0].hooks).toEqual([{ type: 'command', command: foreign }])
-    // A group that only held our entry is dropped, and an empty event key is removed.
     expect(settings.hooks.PreToolUse).toBeUndefined()
     await expect(access(join(root, '.scry', 'provider-hook.sh'))).rejects.toThrow()
     await expect(access(join(root, '.scry', 'cli-path'))).rejects.toThrow()

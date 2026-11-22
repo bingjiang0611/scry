@@ -12,6 +12,8 @@ PR 治理、维护与合入条件见 [PR 工作流运行手册](pr-workflow.md)�
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
 
+`node` 在 PR 上也运行 `check:source-comments`，以 PR 合并提交的第一父提交为基线，拒绝 `src/cli/` 新增或改写的说明性注释。规则与豁免见 [CLI 注释门禁](../adr/README.md#cli-comment-ratchet)。
+
 Node 测量豁免以当前 harness 不读取 `apps/ios` 为前提；若未来加入该目录的运行时或生成输入，须先收紧分流范围并恢复相关测量。该豁免不代表手机端性能验收通过。
 
 size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥1000；忽略空白改动，纯测试 PR 仍计算测试行。二进制改动没有行数，这个标签不表示风险。移植补充了标签定义任务的 push/手动触发入口、PR retarget 的 edited 事件，适配 Scry fixture 路径，并禁止 git 外部 diff/textconv。

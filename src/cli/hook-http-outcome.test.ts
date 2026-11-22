@@ -169,6 +169,6 @@ it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, the
     if (!legacyClosed) await new Promise<void>(resolve => legacy.close(() => resolve()))
     // 断言失败时也必须停掉刚起的 owner，否则它会留在后台继续占着 socket。
     const owner = JSON.parse(await readFile(`${f.socket}.owner.json`, 'utf8').catch(() => '{"pid":0}')) as { pid: number }
-    if (owner.pid > 0) try { process.kill(owner.pid, 'SIGTERM') } catch { /* already gone */ }
+    if (owner.pid > 0) try { process.kill(owner.pid, 'SIGTERM') } catch {}
   }
 }, 60_000)

@@ -67,7 +67,6 @@ describe('scry recorder content repair', () => {
     const [record] = await listRecords(dataRoot)
     const output = record.tools.value![0].outputContent!.contentRef!
     await expect(readRecorderContent(dataRoot, output)).resolves.toContain('REPAIRABLE-OUTPUT')
-    // 已修复后重复执行是幂等的：全部命中本库，没有可复制的正文。
     const idempotent = captureStdout()
     await expect(runScryCli(['recorder', 'content', 'repair', '--workspace', root, '--app-data', appData])).resolves.toBe(0)
     expect(JSON.parse(idempotent.text())).toMatchObject({ present: refs, repairable: 0, missing: 0 })

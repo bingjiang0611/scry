@@ -43,7 +43,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const replaceDaemon = async (): Promise<boolean> => {
       const scriptPath = process.argv[1]
       if (!scriptPath) return false
-      // Existing replacement path: stop the current owner, wait for the socket, start this CLI.
       return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
     }
     // `delivered` 已应用；`not-applied` 有证据证明守护进程没收到或明确拒绝；`unknown` 可能是

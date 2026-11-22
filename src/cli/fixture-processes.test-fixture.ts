@@ -22,7 +22,7 @@ export class FixtureProcesses {
     if (this.signal.aborted) return
     this.controller.abort(this.testSignal.reason)
     for (const child of this.children.keys()) {
-      if (child.pid === undefined) continue // spawn failure has no process group
+      if (child.pid === undefined) continue
       try {
         process.kill(-child.pid, 'SIGKILL')
       } catch (error) {

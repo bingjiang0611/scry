@@ -479,7 +479,6 @@ function claudeDisabledSet(context: DiscoveryContext, claudeJson?: unknown): Set
     try {
       collect(JSON.parse(readFileSync(join(context.home, '.claude.json'), 'utf8')) as unknown)
     } catch {
-      /* ignore */
     }
   } else {
     collect(claudeJson)
@@ -491,7 +490,6 @@ function claudeDisabledSet(context: DiscoveryContext, claudeJson?: unknown): Set
       add(enabled, localSettings.enabledMcpjsonServers)
     }
   } catch {
-    /* ignore */
   }
   for (const name of enabled) disabled.delete(name)
   return disabled

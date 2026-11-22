@@ -78,7 +78,6 @@ describe('scry doctor schema and exit codes', () => {
       workspace: root,
       payload: { session_id: 'ver-1', timestamp: '2026-07-19T12:00:01.000Z' }
     })
-    // 模拟另一份更老的安装写下的记录。
     const [name] = await readdir(join(root, '.scry', 'records'))
     const file = join(root, '.scry', 'records', name)
     const record = JSON.parse(await readFile(file, 'utf8')) as Record<string, any>

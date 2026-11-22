@@ -70,7 +70,6 @@ describe('OpenCode hook delivery outcome', () => {
     // OpenCode 的插件需要区分，才能保留暂存证据并在下一次 idle 重试。
     const pluginRun = spawnSync('sh', [hook, 'opencode', 'Stop'], { input: '{"session_id":"opencode-open"}' })
     expect(pluginRun.status).toBe(HOOK_UNDELIVERED_STATUS)
-    // 两次都留了诊断：跳过不能是静默的。
     expect(await readFile(join(root, '.scry', 'logs', 'hook-skip.log'), 'utf8')).toContain('cli_failed')
   })
 

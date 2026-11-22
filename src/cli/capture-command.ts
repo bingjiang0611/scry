@@ -19,13 +19,6 @@ import {
 } from '../core/turn-recorder/session-capture.js'
 import { queueCaptureCommand, queueHook } from '../core/turn-recorder/recorder-hook-queue.js'
 
-/**
- * Session-capture delivery. `--capture-mode` must be explicit: silently accepting the flag and then
- * applying an ordinary hook would make an opt-in workspace record sessions nobody opened.
- *
- * `--queue-only` is the durable path a host hook uses when it may not spend its own five seconds on
- * recorder work: the event is written to this session's inbox and a daemon applies it later.
- */
 export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
   const mode = flag(args, 'capture-mode')
   let context: SessionCaptureContext | undefined
@@ -47,16 +40,11 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
       payload,
       queueOnly,
       captureMode: true,
-      // This process was started by the hook script, so its parent is the host's chain.
       ancestryFromPid: process.ppid
     })
     if (queueOnly) {
-      // The entry is durable; waking a recorder is a notification, never a wait for its outcome.
       await notifyRecorderInbox({ workspace: workspaceOf(args), scriptPath: process.argv[1] })
     } else {
-      // The receiver only falls back when the daemon did not apply this event: no daemon, or one from
-      // another recorder version that refused the handshake. Start ours so the rest of the session
-      // uses the fast path; an unknown delivery is never a reason to replace a live peer.
       const daemonEnabled = process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
       if (daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED !== '1'
         && result.status !== 'ignored' && process.argv[1]) {
@@ -70,7 +58,6 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
   }
 }
 
-/** Error ACKs stay machine-readable; stderr is diagnostics, never the contract. */
 function captureFailure(action: 'start' | 'stop' | 'hook', context: SessionCaptureContext | undefined, error: unknown): number {
   if (!(error instanceof CaptureRequestError)) throw error
   process.stdout.write(`${JSON.stringify({
@@ -96,13 +83,6 @@ function hostChainOf(args: ParsedArgs): unknown {
   }
 }
 
-/**
- * CodeLens opens and closes a session here; the recorder owns the turn boundary it implies.
- *
- * `--defer` writes the claim to the inbox instead of applying it. The hook that proved the session
- * returns inside its own five seconds, and the daemon opens the turn, takes the Git baseline and
- * replays the events that arrived in between, in arrival order.
- */
 export async function captureCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[2]
   let context: SessionCaptureContext | undefined
@@ -118,8 +98,6 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
     const workspace = workspaceOf(args)
     if (!dataDir) throw new CaptureRequestError('invalid_request', '--data-dir is required for session capture')
     if (args.flags.has('defer')) {
-      // The same evidence is proved for both actions: the claim is only accepted when the recorder is
-      // enabled here, the capture root is usable and the transcript is readable.
       const prepared = await prepareCaptureStart({
         workspace,
         provider,
@@ -143,9 +121,6 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         ancestryFromPid: process.ppid,
         ...(prepared.hostChain ? { hostChain: prepared.hostChain } : {})
       })
-      // The claim is proved on a host event, and that event belongs to the turn the claim opens. It is
-      // written by this same process, right behind the claim, because a second invocation would spend
-      // the host's remaining budget on another recorder start and the event would be the one dropped.
       const event = flag(args, 'event')
       const eventEntry = event && Object.keys(envelope.payload ?? {}).length > 0
         ? basename(await queueHook(prepared.enablement, {
@@ -157,7 +132,6 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
             deferDelivery: true
           }, sessionId, arrivedAt, { announce: false }))
         : undefined
-      // Nothing has been opened yet: the ACK says queued, and only the inbox can prove otherwise.
       await notifyRecorderInbox({ workspace: prepared.workspaceRoot, scriptPath: process.argv[1] })
       process.stdout.write(`${JSON.stringify({
         protocol: SESSION_CAPTURE_PROTOCOL,
@@ -166,8 +140,6 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         captureId: prepared.context.captureId,
         sessionId,
         recorderVersion: RECORDER_VERSION,
-        // The claim is not applied yet, so the status stays `queued`. The transport is real either
-        // way: the caller may write it down now and only rely on it as a fallback.
         transport: prepared.transport,
         ...(prepared.context.diffExclude?.length ? { diffExclude: prepared.context.diffExclude } : {}),
         inbox: {

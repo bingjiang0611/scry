@@ -153,7 +153,6 @@ describe('Pi recorder extension lifecycle', () => {
       const args = await readFile(capture, 'utf8')
       expect(args).toContain('--event UserPromptSubmit')
       expect(args).not.toContain('--start-daemon')
-      // 送达证据：CLI 读到了 payload，而不只是被启动过。
       expect(args).toContain('delivered')
     } finally {
       if (previousConfigured === undefined) delete process.env.SCRY_CLI_PATH

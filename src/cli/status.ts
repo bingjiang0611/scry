@@ -22,7 +22,6 @@ const TRUST_UNOBSERVABLE = 'unknown: provider does not expose hook trust state t
 export interface ProviderStatusRow {
   provider: ProviderId
   detected: 'yes' | 'no'
-  /** `workspace` for project hooks, `global` for Pi's user-level extension. */
   configured: 'workspace' | 'global' | 'no'
   trusted: 'unknown'
   hookSeen: { at: string; event: string; events: number } | null
@@ -100,8 +99,6 @@ export async function workspaceStatus(
   const activity = enablement.enabled
     ? await readProviderActivity(enablement.dataRoot).catch(() => emptyActivity)
     : emptyActivity
-  // Records are the only proof a turn was committed. This walks the whole store, which is
-  // acceptable for an operator-invoked command but must not be copied onto the hook path.
   const records = enablement.enabled ? await listRecords(enablement.dataRoot).catch(() => []) : []
   const latestRecord = new Map<string, { at: string; sequence: number }>()
   for (const record of records) {

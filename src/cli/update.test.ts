@@ -37,7 +37,6 @@ describe('CLI auto update', () => {
 
   it('does not schedule updates for bundled, managed, recorder, CI or non-interactive runs', () => {
     const base = { command: 'doctor', noUpdateCheck: false, stderrIsTTY: true }
-    // 默认开：未设置该变量时也会调度。
     expect(shouldScheduleAutoUpdate({ ...base, env: {} })).toBe(true)
     expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_AUTO_UPDATE: '1' } })).toBe(true)
     expect(shouldScheduleAutoUpdate({ ...base, env: { SCRY_AUTO_UPDATE: '0' } })).toBe(false)
@@ -64,7 +63,6 @@ describe('CLI auto update', () => {
     expect(autoUpdateAllowedByEnv({ CI: 'true' })).toBe(false)
     expect(autoUpdateAllowedByEnv({ SCRY_NO_UPDATE_CHECK: '1' })).toBe(false)
 
-    // 显式关闭时 idle 触发器不做任何网络访问，也不写状态。
     const root = await mkdtemp(join(tmpdir(), 'scry-idle-update-'))
     tempDirs.push(root)
     vi.stubEnv('SCRY_CLI_UPDATE_STATE_PATH', join(root, 'state.json'))
@@ -150,7 +148,6 @@ if (process.argv[2] === 'view') process.stdout.write(JSON.stringify('0.2.12'))
       checkOnly: true,
       env: { ...base, SCRY_CLI_REGISTRY: 'https://registry.example.com' }
     })).resolves.toMatchObject({ status: 'current' })
-    // 非 HTTPS 的 registry 直接拒绝，不发 npm 请求。
     await expect(upgradeCli({
       currentVersion: '0.2.12',
       checkOnly: true,

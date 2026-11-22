@@ -57,7 +57,6 @@ describe('Pi extension CLI resolution', () => {
         for (const handler of handlers.get('before_agent_start') ?? []) await handler({ prompt: 'hello' }, ctx)
       }
 
-      // 成功标记：有效 pin 被真正执行，且 payload 读到了，才等于一次真实投递。
       await writeFile(pin, `${pinned}\n`)
       await deliver()
       const recorded = await readFile(pinnedCapture, 'utf8')

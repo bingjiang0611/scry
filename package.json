@@ -32,6 +32,7 @@
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "check:staged-file-size": "node scripts/check-staged-file-size.mjs",
     "check:harness-bindings": "node scripts/check-harness-bindings.mjs",
+    "check:source-comments": "node scripts/check-source-comments.mjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
