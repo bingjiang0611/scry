@@ -246,6 +246,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onNotice: (notice) => publishHint({ kind: 'hostNotice', notice })
   })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
+  const listHostAdminNotices = isHostCliExperimentalEnabled(process.env) ? () => hostAdmin.recentNotices() : undefined
   const service = await createHostRuntime({
     runtime,
     stateDirectory: remoteStateDirectory,
@@ -262,7 +263,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     managedLaunches: conversationSend.launches,
     onRunActivity: (runId) => publishHint({ kind: 'run', runId }),
     orchestration: authority.hooks,
-    ...(isHostCliExperimentalEnabled(process.env) ? { listHostAdminNotices: () => hostAdmin.recentNotices() } : {}),
+    ...(listHostAdminNotices ? { listHostAdminNotices } : {}),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, publishHint, terminal,
       runs: () => pipeline.runs,
@@ -281,6 +282,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       orchestrationStatus: () => authority.status(),
       subscribe: authority.createSubscribeHandler({
         ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
+        remoteHostNotices: listHostAdminNotices,
         runQuestions: (runId) => pipeline.runs.get(runId)?.state.pendingQuestions,
         readFirstPage: createAuthorityDetailReader(historyChannels, (id) => catalog.conversationService().read(id)),
         scans: createDaemonCatalogScans(authority.sink, options.userDataDir, workspace,

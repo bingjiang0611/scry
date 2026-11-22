@@ -130,6 +130,14 @@ describe('v3 subscribe on the authenticated network endpoint', () => {
           sessionKey: 'visible-next', cwd: workspace
         } }], hints: [{ kind: 'hostNotice', notice }]
       } })
+      const offlineNotice = host.hostAdmin.recordNotice({
+        kind: 'device_revoked_via_cli', deviceLabel: '临时测试设备'
+      })
+      const reopened = await request({ op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 0 })
+      expect(reopened).toMatchObject({ subscribe: { mode: 'snapshot' } })
+      expect((reopened.subscribe as { hints?: unknown[] }).hints).toEqual([
+        { kind: 'hostNotice', notice }, { kind: 'hostNotice', notice: offlineNotice }
+      ])
       importSession('visible-after-scan', workspace)
       const afterScan = await request({
         op: 'subscribe', views: ['sessions', 'activeRuns'], known: { hostId, logId, seq: privateSeq }, waitMs: 0
@@ -138,6 +146,7 @@ describe('v3 subscribe on the authenticated network endpoint', () => {
       const detail = await request({ op: 'subscribe', views: ['detail'], session: { sessionKey: 'private' }, waitMs: 0 })
       expect(detail).toMatchObject({ subscribe: { mode: 'snapshot', snapshot: { detail: { turns: [] } } } })
       expect(JSON.stringify(detail)).not.toContain('firstPage')
+      expect(JSON.stringify(detail)).not.toContain(offlineNotice.id)
       const visibleDetail = { op: 'subscribe', views: ['detail'], session: { sessionKey: nativeSessionId }, waitMs: 0 }
       const opened = await request(visibleDetail)
       expect(opened).toMatchObject({ subscribe: { kind: 'history_chunk', offset: 0 } })

@@ -85,7 +85,6 @@ extension G0Transport {
     private var outputByRun: [String: (logId: String, seq: Int, delivered: Int)] = [:]
     private var watchedRuns: [String: (cursor: SubscriptionCursor, row: SubscriptionRunRow)] = [:]
     private var lastDetail: SubscriptionDetail?
-    private var observedNoticeIds: Set<String> = []
 
     func renegotiate() {
       offered = false
@@ -143,7 +142,7 @@ extension G0Transport {
           current = status
           if replaced && catalogOpened { reportCatalogChange(endpoint) }
           catalogOpened = true
-          reportNotices(reply.hints ?? [])
+          reportNotices(reply.hints ?? [], hostId: hostId)
           return status
         }
         guard var status = current, let known, reply.knownEvents(since: known, next: next) else {
@@ -160,7 +159,7 @@ extension G0Transport {
         try status.apply(reply, cursor: next)
         current = status
         if catalogChanged { reportCatalogChange(endpoint) }
-        reportNotices(reply.hints ?? [])
+        reportNotices(reply.hints ?? [], hostId: hostId)
         return status
       }
     }
@@ -198,12 +197,12 @@ extension G0Transport {
         let next = try reply.cursor(for: hostId)
         if reply.mode == "snapshot", let page = reply.snapshot?.sessions {
           let sessions = try await readSessions(page, cursor: next, endpoint: endpoint, identity: identity, lane: .bulk)
-          reportNotices(reply.hints ?? [])
+          reportNotices(reply.hints ?? [], hostId: hostId)
           return sessions.values.map(\.reference)
         }
         if let known, reply.knownEvents(since: known, next: next) {
           try baseline.apply(reply, cursor: next)
-          reportNotices(reply.hints ?? [])
+          reportNotices(reply.hints ?? [], hostId: hostId)
           return baseline.sessions.values.map(\.reference)
         }
         if known == nil { throw ProbeError.unexpectedReply }
@@ -216,12 +215,12 @@ extension G0Transport {
       NotificationCenter.default.post(name: SubscriptionCatalogChange.received, object: change)
     }
 
-    private func reportNotices(_ hints: [SubscriptionHint]) {
-      for hint in hints where hint.kind == "hostNotice" {
-        guard let notice = hint.notice, notice.isDisplayable, observedNoticeIds.insert(notice.id).inserted else { continue }
+    private func reportNotices(_ hints: [SubscriptionHint], hostId: String) {
+      let notices = hints.compactMap { $0.kind == "hostNotice" ? $0.notice : nil }
+      guard !notices.isEmpty else { return }
+      for notice in HostTransportState.shared(hostId: hostId).recordNewHostNotices(notices) {
         NotificationCenter.default.post(name: HostAdminNotice.received, object: notice)
       }
-      if observedNoticeIds.count > 512 { observedNoticeIds.removeAll(keepingCapacity: true) }
     }
 
     func detail(endpoint: RelayEndpoint, identity: G0ProbeIdentity, hostId: String, session: SubscriptionSession,

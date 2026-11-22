@@ -6,7 +6,6 @@ import type { ProviderContext } from '../shared/provider'
 import { isSessionProviderId } from '../main/app-store'
 import { assembleByteChunks } from '../main/remote/desktop-byte-chunks'
 import { isCanonicalRemoteProjectDirectory } from '../main/remote/remote-directory-browser'
-import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { HostController } from '../main/remote/host-controller'
 import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
@@ -24,7 +23,7 @@ export interface AuthoritySubscribeRuntimeDeps {
   readFirstPage?: SubscribeEngineOptions['readFirstPage']
   readRemoteFirstPage?: SubscribeEngineOptions['readRemoteFirstPage']
   remoteCwdAuthorizer?: SubscribeEngineOptions['remoteCwdAuthorizer']
-  remoteHostNotices?: boolean
+  remoteHostNotices?: SubscribeEngineOptions['remoteHostNotices']
   runQuestions?: SubscribeEngineOptions['runQuestions']
   scans?: SubscribeEngineOptions['scans']
 }
@@ -64,7 +63,7 @@ export function createAuthoritySubscribeHandler(
 export function authoritySubscribeDeps(
   service: () => RemoteHostService,
   roots: () => readonly string[]
-): Pick<AuthoritySubscribeRuntimeDeps, 'hostId' | 'authorizePeer' | 'grantScope' | 'remoteCwdAuthorizer' | 'readRemoteFirstPage' | 'remoteHostNotices'> {
+): Pick<AuthoritySubscribeRuntimeDeps, 'hostId' | 'authorizePeer' | 'grantScope' | 'remoteCwdAuthorizer' | 'readRemoteFirstPage'> {
   const authorizedScope = (peer: string) => {
     const scope = service().authority.grantScope(peer)
     if (!scope) throw new Error('device_not_authorized')
@@ -78,8 +77,7 @@ export function authoritySubscribeDeps(
       const authorizedRoots = roots()
       return (cwd) => isCanonicalRemoteProjectDirectory(cwd, authorizedRoots)
     },
-    readRemoteFirstPage: (peer, session, format, signal) => readRemoteDetailPage(service().controller, peer, session, format, signal),
-    remoteHostNotices: isHostCliExperimentalEnabled(process.env)
+    readRemoteFirstPage: (peer, session, format, signal) => readRemoteDetailPage(service().controller, peer, session, format, signal)
   }
 }
 

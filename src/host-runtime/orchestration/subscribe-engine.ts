@@ -10,6 +10,7 @@ import type {
   SubscribeView
 } from '../../shared/orchestration-subscribe'
 import type { AgentQuestionRequest } from '../../shared/runtime'
+import type { HostAdminNotice } from '../../shared/host-admin'
 import type { EventSink } from './event-sink'
 import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
@@ -56,7 +57,7 @@ export interface SubscribeEngineOptions {
   authorizePeer: (peerCertSHA256: string) => void
   grantScope: (peerCertSHA256: string) => 'local' | 'remote'
   remoteCwdAuthorizer?: () => (canonicalCwd: string) => boolean
-  remoteHostNotices?: boolean
+  remoteHostNotices?: () => HostAdminNotice[]
   readFirstPage?: (session: SessionProjectionRow, signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
   readRemoteFirstPage?: (peer: string, session: SessionProjectionRow, format?: SubscribeRequest['historyFormat'], signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
   runQuestions?: (runId: string) => AgentQuestionRequest[] | undefined
@@ -86,7 +87,7 @@ export class SubscribeEngine {
   readonly #authorizePeer: (peer: string) => void
   readonly #grantScope: (peer: string) => 'local' | 'remote'
   readonly #remoteCwdAuthorizer: NonNullable<SubscribeEngineOptions['remoteCwdAuthorizer']>
-  readonly #remoteHostNotices: boolean
+  readonly #remoteHostNotices?: () => HostAdminNotice[]
   readonly #readFirstPage: SubscribeEngineOptions['readFirstPage']
   readonly #readRemoteFirstPage: SubscribeEngineOptions['readRemoteFirstPage']
   readonly #runQuestions: SubscribeEngineOptions['runQuestions']
@@ -101,7 +102,7 @@ export class SubscribeEngine {
     this.#authorizePeer = options.authorizePeer
     this.#grantScope = options.grantScope
     this.#remoteCwdAuthorizer = options.remoteCwdAuthorizer ?? (() => () => false)
-    this.#remoteHostNotices = options.remoteHostNotices ?? false
+    this.#remoteHostNotices = options.remoteHostNotices
     this.#readFirstPage = options.readFirstPage
     this.#readRemoteFirstPage = options.readRemoteFirstPage
     this.#runQuestions = options.runQuestions
@@ -433,9 +434,12 @@ export class SubscribeEngine {
     if (access.scope === 'local') return pending
     const hints: SubscribeHint[] = []
     const detail = views.has('detail')
+    if (state && !detail) {
+      for (const notice of this.#remoteHostNotices?.() ?? []) hints.push({ kind: 'hostNotice', notice })
+    }
     const detailSession = detail && request.session && this.#detailSession(access, request.session)
     for (const hint of pending) {
-      if (hint.kind === 'hostNotice' && !detail && this.#remoteHostNotices) hints.push(hint)
+      if (hint.kind === 'hostNotice' && !state && !detail && this.#remoteHostNotices) hints.push(hint)
       if (hint.kind === 'run') {
         const run = this.#sink.getRun(hint.runId)
         if (run && access.canReadCwd(run.cwd) && (!detail || (detailSession && run.sessionKey === detailSession.sessionKey))) {

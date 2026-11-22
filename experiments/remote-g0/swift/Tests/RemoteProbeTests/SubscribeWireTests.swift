@@ -145,4 +145,26 @@ final class SubscribeWireTests: XCTestCase {
     XCTAssertEqual(Array(status.sessions.keys), ["other"])
     XCTAssertEqual(status.cursor, next)
   }
+
+  func testColdStatusNoticesAreDeliveredOnceAcrossAppRelaunch() throws {
+    let hostId = UUID().uuidString
+    let prior = HostTransportState.persistence.value
+    HostTransportState.persistence.value = true
+    defer {
+      HostTransportState.persistence.value = prior
+      UserDefaults.standard.removeObject(forKey: "scry.remote.transport.\(hostId)")
+    }
+    let wire = Data("""
+      {"subscribe":{"hostId":"\(hostId)","logId":"log","seq":1,"mode":"snapshot","snapshot":{},
+       "hints":[{"kind":"hostNotice","notice":{"id":"approval","kind":"device_approved_via_cli","ts":1}},
+                {"kind":"hostNotice","notice":{"id":"revocation","kind":"device_revoked_via_cli","ts":2}}]}}
+      """.utf8)
+    let reply = try G0Transport.decodeSubscription(wire, target: nil)
+    let notices = try XCTUnwrap(reply.hints).compactMap(\.notice)
+    let running = HostTransportState(hostId: hostId)
+    XCTAssertEqual(running.recordNewHostNotices([notices[0]]).map(\.id), ["approval"])
+    let relaunched = HostTransportState(hostId: hostId)
+    XCTAssertEqual(relaunched.recordNewHostNotices(notices).map(\.id), ["revocation"])
+    XCTAssertTrue(HostTransportState(hostId: hostId).recordNewHostNotices(notices).isEmpty)
+  }
 }

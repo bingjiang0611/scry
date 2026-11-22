@@ -316,7 +316,7 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       authorizePeer: () => undefined,
       grantScope: () => scope,
       remoteCwdAuthorizer: () => cwd => cwd === '/tmp/p',
-      remoteHostNotices: true,
+      remoteHostNotices: () => [],
       sessionsPageSize: 2
     })
     try {
@@ -359,7 +359,7 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
     const sink = EventSink.open({ userDataDir: makeDir(), fullfsync: false })
     const hub = new SubscribeHub()
     const engine = new SubscribeEngine({
-      sink, hub, hostId: 'host', authorizePeer: () => undefined, grantScope: () => 'remote', remoteHostNotices: true
+      sink, hub, hostId: 'host', authorizePeer: () => undefined, grantScope: () => 'remote', remoteHostNotices: () => []
     })
     try {
       const request = { views: ['sessions', 'activeRuns'] as const, waitMs: 0 }
