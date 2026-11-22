@@ -155,7 +155,7 @@ describe('local grant scope (L1: enrolled over unix socket, useless over the net
     expect(reply.providers).toBeDefined()
   })
 
-  it('lets only the App grant ask for a settled run\'s final trace (settledTail)', async () => {
+  it('allows only an App grant to request departed or archived run traces', async () => {
     const { identity, controller, caPEM, addr, socketPath, directory, desktopReads } = await harness()
     const app = await enrollLocal(identity, controller, directory)
     const { keyPEM, csrPEM } = await deviceKeyAndCSR()
@@ -164,14 +164,19 @@ describe('local grant scope (L1: enrolled over unix socket, useless over the net
     await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
     const phone = { certPEM: (await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)).certificatePEM, keyPEM }
     const query = { kind: 'trace', context: { cwd: AUTHORIZED, providerId: 'codex' }, runId: 'run-1' }
+    const archived = { ...query, archive: true, context: { ...query.context, externalSessionId: 'session-1' } }
     // A device grant cannot opt into the departed window: refused before the reader runs.
     expect(await overNetwork(addr, caPEM!, phone, { op: 'desktop', query: { ...query, settledTail: true } }))
       .toEqual({ error: 'settled_tail_requires_local_grant' })
+    expect(await overNetwork(addr, caPEM!, phone, { op: 'desktop', query: archived }))
+      .toEqual({ error: 'archive_trace_requires_local_grant' })
     expect(desktopReads).toEqual([])
     expect((await overNetwork(addr, caPEM!, phone, { op: 'desktop', query })).desktop).toEqual({ kind: 'trace', run: null })
     expect((await overLocalSocket(socketPath, caPEM!, app, { op: 'desktop', query: { ...query, settledTail: true } })).desktop)
       .toEqual({ kind: 'trace', run: null })
-    expect(desktopReads).toEqual([query, { ...query, settledTail: true }])
+    expect((await overLocalSocket(socketPath, caPEM!, app, { op: 'desktop', query: archived })).desktop)
+      .toEqual({ kind: 'trace', run: null })
+    expect(desktopReads).toEqual([query, { ...query, settledTail: true }, archived])
   })
 
   it('refuses a phone grant presented on the local socket', async () => {

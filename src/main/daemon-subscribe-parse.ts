@@ -1,6 +1,6 @@
 import type { AgentDataUpdated } from '../shared/runtime'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
-import type { ActiveRun, TraceEvent } from '../shared/trace'
+import type { ActiveRun } from '../shared/trace'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { isHostAdminNotice } from '../shared/host-admin'
 import {
@@ -13,8 +13,7 @@ import {
   type SubscribeSnapshot
 } from '../shared/orchestration-subscribe'
 import { DaemonRunError, fail, record } from './daemon-run-error'
-import { assembleByteChunks } from './remote/desktop-byte-chunks'
-import type { DaemonTraceCall } from './daemon-run-trace-read'
+import { readDaemonTrace, type DaemonTraceCall } from './daemon-run-trace-read'
 
 const MAX_UNREAD_SESSIONS = 10_000
 const MAX_SUBSCRIBE_ITEMS = 512
@@ -159,7 +158,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeRe
 }
 
 /**
- * Reads a settled run's final trace from the host trace archive (`desktop` `history` read)
+ * Reads a settled run's final trace from its own archive segment
  * when the run has already left the live `RunRegistry`, replacing `settledTail`/`departedState`
  * in P4-3 `on` mode (`protocol §6` row 1).
  */
@@ -168,24 +167,7 @@ export async function readDaemonArchivedRunTrace(
   input: { context: DesktopRemoteContext; runId: string }
 ): Promise<ActiveRun | null> {
   if (!input.context.externalSessionId) return null
-  const query = { kind: 'history', context: input.context, images: true, byteChunks: true }
-  const page = async (chunk?: { id: string; offset: number }): Promise<Record<string, unknown>> => {
-    const reply = await call({ op: 'desktop', query: chunk ? { ...query, chunk } : query }, { replayable: true })
-    return record(reply.desktop) ? reply.desktop : fail()
-  }
-  let desktop = await page()
-  if (desktop.kind === 'history_chunk') desktop = await assembleByteChunks(desktop, page, fail)
-  if (desktop.kind !== 'history' || !record(desktop.history) || !Array.isArray(desktop.history.turns)) return null
-  const turn = (desktop.history.turns as Array<Record<string, unknown>>).find((item) => item.runId === input.runId)
-  if (!turn || !Array.isArray(turn.items)) return null
-  return {
-    runId: input.runId,
-    providerId: input.context.providerId as ActiveRun['providerId'],
-    ...(input.context.agentProfileId ? { agentProfileId: input.context.agentProfileId } : {}),
-    cwd: input.context.cwd,
-    externalSessionId: input.context.externalSessionId,
-    userText: typeof turn.userText === 'string' ? turn.userText : '',
-    items: turn.items as TraceEvent[],
-    done: true
-  }
+  const read = await readDaemonTrace(call, { ...input, archive: true })
+  if (read.kind !== 'snapshot' || (read.run && read.run.runId !== input.runId)) return fail()
+  return read.run
 }

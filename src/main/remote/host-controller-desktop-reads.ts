@@ -32,8 +32,8 @@ export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string,
   // registry's short departed window). A device grant is refused, not silently downgraded:
   // devices keep the contract that a settled run reads `null` and its evidence is in the
   // archive. The verified grant scope decides, never the transport (pairing.grantScope).
-  if (query.kind === 'trace' && query.settledTail && deps.gateway.grantScope(peerCertSHA256) !== 'local') {
-    throw new Error('settled_tail_requires_local_grant')
+  if (query.kind === 'trace' && (query.settledTail || query.archive) && deps.gateway.grantScope(peerCertSHA256) !== 'local') {
+    throw new Error(query.archive ? 'archive_trace_requires_local_grant' : 'settled_tail_requires_local_grant')
   }
   const result = await deps.readDesktop(query)
   deps.authorizeDevice(peerCertSHA256)
