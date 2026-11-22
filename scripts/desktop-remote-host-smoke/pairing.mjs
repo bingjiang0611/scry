@@ -45,6 +45,7 @@ export async function pairDevice({ evaluate, transport, temp, userDataDir, works
   assert.deepEqual(info.desktop, {
     kind: 'info', protocol: RUN_PROTOCOL_VERSION, hostId: invitation.hostId, execution: 'canonical',
     directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2, managedWorktrees: 1, traceDelta: 1,
+    hostAdminNotices: 1,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
   const workspaceChoices = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
