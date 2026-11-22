@@ -24,8 +24,8 @@ export async function exerciseWorkspaceSessions(context) {
     '-c', 'user.name=bingjiang0611', '-c', 'user.email=307659028+bingjiang0611@users.noreply.github.com', ...args],
   { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).trim()
   const inputs = () => providerInputs(conversationInputs)
-  const click = async (selector, text = '') => {
-    const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, ${json({ text, timeoutMs: 5000, scroll: true, captureReceipt: true })})`)
+  const click = async (selector, text = '', { scroll = true } = {}) => {
+    const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, ${json({ text, timeoutMs: 5000, scroll, captureReceipt: true })})`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
     assert.deepEqual(await evaluate('({ trusted: window.__nativeUiPointerReceipt?.trusted, targetMatched: window.__nativeUiPointerReceipt?.targetMatched })'),
@@ -48,10 +48,11 @@ export async function exerciseWorkspaceSessions(context) {
   const newDraft = async cwd => {
     const selector = `.sb-proj-new[aria-label$=${json(cwd)}]`
     await wait(() => evaluate(`Boolean(document.querySelector(${json(selector)}))`), `project ${cwd}`)
-    const point = await evaluate(`(() => { const element = document.querySelector(${json(selector)}).closest('.sb-proj');
-      const box = element.querySelector('.sb-proj-head').getBoundingClientRect(); return { x: box.x + 20, y: box.y + box.height / 2 } })()`)
+    const header = `.sb-proj-row:has(${selector}) .sb-proj-head`
+    const point = await evaluate(`(${nativeUiPointer.toString()})(${json(header)}, { timeoutMs: 5000, scroll: true })`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
-    await click(selector)
+    // Scrolling after moving the pointer can un-hover the row on short displays.
+    await click(selector, '', { scroll: false })
     await wait(() => evaluate(`document.querySelector('.workspace-context-strip button')?.disabled === false &&
       [${json(cwd)}, ${json(realpathSync(cwd))}].some(path =>
         document.querySelector('[data-workspace-menu="workspace"]')?.title.endsWith(path)) &&
