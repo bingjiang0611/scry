@@ -26,13 +26,15 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
   // page. A host that reports the same revision costs the request and nothing
   // else: the whole payload is skipped, not re-sent and re-validated.
   async catalog(connectionIdValue: string): Promise<DesktopRemoteCatalog> {
+    const status = await this.statusSubscription(connectionIdValue)
+    const sessionOption = status ? { includeSessions: false } : {}
     let cached = this.catalogCache.get(connectionIdValue)
-    let response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot', ...(cached ? { revision: cached.revision } : {}) })
+    let response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot', ...sessionOption, ...(cached ? { revision: cached.revision } : {}) })
     if (!record(response) || !record(response.catalogSnapshot)) fail('invalid_catalog_response')
     if (response.catalogSnapshot.unchanged === true && !cached) {
       // The cache can be dropped by a disconnect between the request and the reply.
       // Ask again from scratch rather than report a failure the host did not cause.
-      response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot' })
+      response = await this.requestForConnection(connectionIdValue, { op: 'catalogSnapshot', ...sessionOption })
       if (!record(response) || !record(response.catalogSnapshot)) fail('invalid_catalog_response')
       cached = undefined
     }
@@ -40,7 +42,7 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     if (snapshot.unchanged === true) {
       // Only a fully paged catalog is cached, so unchanged always has an answer.
       if (!cached || !text(snapshot.revision, 64)) fail('invalid_catalog_response')
-      return this.withAttention(connectionIdValue, cached.catalog)
+      return this.withAttention(connectionIdValue, status ? { ...cached.catalog, sessions: status.sessions() } : cached.catalog)
     }
     if (!text(snapshot.revision, 64)) fail('invalid_catalog_response')
     const item = this.connection(await this.state(), connectionIdValue)
@@ -48,9 +50,11 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     const rawProjects = snapshot.projects
     const rawProviders = snapshot.providers
     if (!Array.isArray(rawProjects) || !Array.isArray(rawProviders) || rawProjects.length > MAX_ITEMS || rawProviders.length > MAX_ITEMS) fail('catalog_too_large')
-    const sessions: RemoteSessionRef[] = []; let cursor = 0; let pageSnapshot: string | undefined
+    const sessions: RemoteSessionRef[] = status?.sessions() ?? []
+    let cursor = 0
+    let pageSnapshot: string | undefined
     const first = snapshot.sessionsPage
-    for (let page = 0; page < MAX_PAGES; page++) {
+    for (let page = 0; !status && page < MAX_PAGES; page++) {
       const pageResponse = page === 0 ? first : await this.catalogRequest<Record<string, unknown>>(connectionIdValue, { op: 'sessionsPage', includeArchived: true, cursor, limit: 100, ...(pageSnapshot ? { snapshot: pageSnapshot } : {}) }, 'sessionsPage')
       if (!record(pageResponse) || !Array.isArray(pageResponse.sessions) || !Number.isSafeInteger(pageResponse.cursor) || !Number.isSafeInteger(pageResponse.total) || typeof pageResponse.hasMore !== 'boolean' || !text(pageResponse.snapshot, 256)) fail('invalid_catalog_response')
       if (pageSnapshot !== undefined && pageResponse.snapshot !== pageSnapshot) fail('catalog_snapshot_changed')

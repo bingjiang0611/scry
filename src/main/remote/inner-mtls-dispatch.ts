@@ -55,6 +55,7 @@ export interface RemoteRequestEnvelope {
   sha256?: string
   index?: number
   totalCount?: number
+  includeSessions?: boolean
   // sessionsPage: the catalog snapshot the phone already holds (first page only).
   known?: string
   // historyPage: 'deflate' pages the compressed form of the same snapshot bytes.
@@ -281,7 +282,11 @@ export async function dispatchRemoteRequest(
       // Whole-catalog read in one round trip. A known revision that still matches
       // answers `unchanged` instead of re-sending it.
       if (request.revision !== undefined && (typeof request.revision !== 'string' || request.revision.length > 64)) return { error: 'invalid_request' }
-      return { catalogSnapshot: await controller.catalogSnapshot(fingerprint, { ...(typeof request.revision === 'string' ? { revision: request.revision } : {}) }) }
+      if (request.includeSessions !== undefined && typeof request.includeSessions !== 'boolean') return { error: 'invalid_request' }
+      return { catalogSnapshot: await controller.catalogSnapshot(fingerprint, {
+        ...(typeof request.revision === 'string' ? { revision: request.revision } : {}),
+        ...(request.includeSessions === false ? { includeSessions: false } : {})
+      }) }
     }
     if (request.op === 'sessions') {
       // Same owner-device authorization; display-only catalog metadata.

@@ -9,6 +9,7 @@ import { DESKTOP_ATTACHMENT_CHUNK_BYTES, attachmentSha256, newAttachmentId, norm
 import { context, fail, record, text, uuid, hash, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
 import type { DesktopCapabilities } from './desktop-client-capabilities'
 import { isUnknownFailure, targetBinding } from './desktop-client-intent-rules'
+import type { DesktopStatusSubscription } from './desktop-client-subscription'
 import type { RemoteAttentionTracker } from './remote-attention'
 
 function desktopSshRequestError(error: unknown, tunnel: DesktopSshTunnel | undefined, failureSequence: number): unknown {
@@ -34,6 +35,7 @@ export abstract class DesktopRemoteClientBase {
   protected readonly lanes: DesktopLanes
   protected readonly active = new Map<string, ActiveConnection>()
   protected readonly attention?: RemoteAttentionTracker
+  protected readonly statusSubscriptions = new Map<string, DesktopStatusSubscription>()
   protected readonly controllers = new Set<AbortController>()
   protected readonly requests = new Set<Promise<unknown>>()
   protected readonly locks = new Map<string, Promise<void>>()
@@ -65,6 +67,8 @@ export abstract class DesktopRemoteClientBase {
     return this.serializeLifecycle(async () => {
       if (this.disposed) return
       this.disposed = true
+      for (const subscription of this.statusSubscriptions.values()) subscription.close()
+      this.statusSubscriptions.clear()
       for (const controller of this.controllers) controller.abort()
       await Promise.allSettled([this.statePromise])
       await Promise.allSettled([...this.requests])
@@ -146,12 +150,12 @@ export abstract class DesktopRemoteClientBase {
   }
   protected pairPort(item: StoredConnection): number { return item.pairPort }
   protected runPort(item: StoredConnection): number { return item.runPort }
-  protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void): Promise<Record<string, unknown>> {
+  protected async requestForConnection(id: string, request: unknown, authorizePeer?: () => void, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const state = await this.state()
     const item = this.connection(state, id)
     const active = this.active.get(id)
     if (!active?.tunnel.alive) fail('desktop_not_connected')
-    return await this.laneRequest(id, active.tunnel.runPath, item, state.identity, request, { authorizePeer })
+    return await this.laneRequest(id, active.tunnel.runPath, item, state.identity, request, { authorizePeer, signal })
   }
 
   // Every run-channel request goes through a persistent lane; there is no
@@ -159,10 +163,11 @@ export abstract class DesktopRemoteClientBase {
   // `tunnel` + `classifySshFailure`: a transport error after the SSH forwarding reported a
   // failure is named by that failure (desktop_ssh_*), not as a bare EOF/reset.
   protected async laneRequest(id: string, runPath: string, item: StoredConnection, identity: EncryptedState['identity'], request: unknown,
-    options: { authorizePeer?: () => void; tunnel?: DesktopSshTunnel; classifySshFailure?: boolean } = {}): Promise<Record<string, unknown>> {
+    options: { authorizePeer?: () => void; tunnel?: DesktopSshTunnel; classifySshFailure?: boolean; signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
     const controller = new AbortController()
     // Check after all awaited state work and immediately before dispatch.
     options.authorizePeer?.()
+    options.signal?.throwIfAborted()
     this.controllers.add(controller)
     const failureSequence = options.classifySshFailure ? options.tunnel?.failure?.sequence ?? 0 : 0
     // Every run-channel request declares the version it speaks. The host refuses a
@@ -172,7 +177,7 @@ export abstract class DesktopRemoteClientBase {
       endpoint: { path: runPath, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM },
       request: payload,
       replayable: replayableRequest(payload),
-      signal: controller.signal
+      signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal
     })
     this.requests.add(promise)
     try {
@@ -194,7 +199,7 @@ export abstract class DesktopRemoteClientBase {
   async catalogRequest<T>(id: string, request: unknown, key: string): Promise<T> { const response = await this.requestForConnection(id, request); if (!record(response) || !(key in response)) fail('invalid_catalog_response'); return response[key] as T }
   // Pairing only: one-shot request on the pair channel. The run channel uses the
   // persistent lanes above; there is no one-shot fallback there.
-  protected async request(path: string, item: StoredConnection, request: unknown, options: { authorizePeer?: () => void; tunnel?: DesktopSshTunnel; classifySshFailure?: boolean } = {}): Promise<unknown> {
+  protected async request(path: string, item: StoredConnection, request: unknown, options: { authorizePeer?: () => void; tunnel?: DesktopSshTunnel; classifySshFailure?: boolean; signal?: AbortSignal } = {}): Promise<unknown> {
     const controller = new AbortController()
     const identity = (await this.state()).identity
     // Check after all awaited state/lock work and immediately before dispatch.
@@ -213,6 +218,8 @@ export abstract class DesktopRemoteClientBase {
   }
   protected async disconnectActive(connectionIdValue: string): Promise<void> {
     const active = this.active.get(connectionIdValue)
+    this.statusSubscriptions.get(connectionIdValue)?.close()
+    this.statusSubscriptions.delete(connectionIdValue)
     this.lanes.closeConnection(connectionIdValue)
     if (!active) return
     this.active.delete(connectionIdValue)

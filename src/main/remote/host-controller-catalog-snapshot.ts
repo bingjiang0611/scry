@@ -15,7 +15,7 @@ export interface CatalogSnapshotDeps {
   listHostAdminNotices?(): HostAdminNotice[]
 }
 
-export interface CatalogSnapshotInput { revision?: string }
+export interface CatalogSnapshotInput { revision?: string; includeSessions?: boolean }
 
 const SNAPSHOT_SESSION_LIMIT = 100
 
@@ -24,7 +24,7 @@ export interface CatalogSnapshot {
   info: DesktopHostReadResult
   projects: RemoteProjectRef[]
   providers: RemoteProviderRef[]
-  sessionsPage: RemoteSessionPage
+  sessionsPage?: RemoteSessionPage
   hostAdminNoticeItems?: HostAdminNotice[]
 }
 
@@ -37,17 +37,18 @@ export async function catalogSnapshot(deps: CatalogSnapshotDeps, peer: string, i
   const info = await deps.readDesktop(peer, { kind: 'info' })
   const projects = deps.listProjects(peer)
   const providers = deps.listProviders(peer)
-  const sessionsPage = deps.listSessionsPage(peer, { includeArchived: true, limit: SNAPSHOT_SESSION_LIMIT })
+  const omitSessions = input.includeSessions === false && info.kind === 'info' && info.subscribe === 1
+  const sessionsPage = omitSessions ? undefined : deps.listSessionsPage(peer, { includeArchived: true, limit: SNAPSHOT_SESSION_LIMIT })
   const hostAdminNoticeItems = deps.listHostAdminNotices?.()
   // Content hash, not a counter: the device compares what it actually holds, so a
   // restart or a second device cannot produce a false "unchanged".
   const revisionInput = hostAdminNoticeItems && hostAdminNoticeItems.length > 0
-    ? [info, projects, providers, sessionsPage.snapshot, sessionsPage.total, hostAdminNoticeItems]
-    : [info, projects, providers, sessionsPage.snapshot, sessionsPage.total]
+    ? [info, projects, providers, sessionsPage?.snapshot, sessionsPage?.total, hostAdminNoticeItems]
+    : [info, projects, providers, sessionsPage?.snapshot, sessionsPage?.total]
   const revision = createHash('sha256').update(JSON.stringify(revisionInput)).digest('hex').slice(0, 32)
   if (input.revision === revision) return { unchanged: true, revision }
   return {
-    revision, info, projects, providers, sessionsPage,
+    revision, info, projects, providers, ...(sessionsPage ? { sessionsPage } : {}),
     ...(hostAdminNoticeItems && hostAdminNoticeItems.length > 0 ? { hostAdminNoticeItems } : {})
   }
 }

@@ -115,7 +115,7 @@ function parseHints(rawHints: unknown): SubscribeHint[] | undefined {
   return hints.length > 0 ? hints : undefined
 }
 
-export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeReply {
+export function parseSubscribeReply(reply: Record<string, unknown>, network = false): SubscribeReply {
   const sub = reply.subscribe
   if (!record(sub) || typeof sub.hostId !== 'string' || typeof sub.logId !== 'string' ||
       !Number.isSafeInteger(sub.seq) || (sub.seq as number) < 0) {
@@ -141,6 +141,8 @@ export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeRe
         ...(typeof raw.runId === 'string' || raw.runId === null ? { runId: raw.runId as string | null } : {}),
         ...(typeof raw.cwd === 'string' || raw.cwd === null ? { cwd: raw.cwd as string | null } : {}),
         payload: raw.payload,
+        ...(network && (record(raw.sessionRow) || raw.sessionRow === null) ? { sessionRow: raw.sessionRow as SubscribeSessionRow | null } : {}),
+        ...(network && (record(raw.runRow) || raw.runRow === null) ? { runRow: raw.runRow as SubscribeActiveRunRow | null } : {}),
         ...(Array.isArray(raw.evidence) ? { evidence: raw.evidence.filter((e): e is string => typeof e === 'string') } : {})
       })
     }

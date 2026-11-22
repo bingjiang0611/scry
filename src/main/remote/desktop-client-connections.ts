@@ -1,11 +1,22 @@
 import type { DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
 import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { DesktopStatusSubscription } from './desktop-client-subscription'
 import { validateInfo } from './desktop-client-capabilities'
 import { readRemoteSessionPages } from './desktop-client-session-catalog'
 
 export abstract class DesktopRemoteClientConnections extends DesktopRemoteClientBase {
-  async list(): Promise<DesktopRemoteConnection[]> { const state = await this.state(); return state.connections.map((item) => publicConnection(item, this.active.get(item.id)?.tunnel.alive === true)) }
+  async list(): Promise<DesktopRemoteConnection[]> {
+    const state = await this.state()
+    return state.connections.map((item) => {
+      const active = this.active.get(item.id)
+      const connected = active?.tunnel.alive === true
+      return {
+        ...publicConnection(item, connected),
+        ...(connected && active.subscribe === 1 ? { subscribe: 1 as const } : {})
+      }
+    })
+  }
 
   async pair(input: { label: string; ssh: DesktopSshTarget; invitation: string }): Promise<DesktopPairingResult> {
     this.assertLive()
@@ -91,16 +102,18 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, { op: 'desktop', query: { kind: 'info' } }, { tunnel, classifySshFailure: true })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
-      try {
-        // The attention baseline reads the session pages on the same lanes as every run request.
-        const baseline = await readRemoteSessionPages(async (request) => {
-          const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, request, { tunnel, classifySshFailure: true })
-          if (!record(response)) fail('invalid_catalog_response')
-          return response
-        })
-        this.attention?.baseline(item.id, baseline)
-      } catch (error) {
-        if (this.disposed || !tunnel.alive) throw error
+      if (capabilities.subscribe !== 1) {
+        try {
+          // The attention baseline reads the session pages on the same lanes as every run request.
+          const baseline = await readRemoteSessionPages(async (request) => {
+            const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, request, { tunnel, classifySshFailure: true })
+            if (!record(response)) fail('invalid_catalog_response')
+            return response
+          })
+          this.attention?.baseline(item.id, baseline)
+        } catch (error) {
+          if (this.disposed || !tunnel.alive) throw error
+        }
       }
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
       this.active.set(item.id, { tunnel, serial: Promise.resolve(),
@@ -116,6 +129,33 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       await tunnel.close()
       throw error
     }
+  }
+
+  protected async statusSubscription(id: string): Promise<DesktopStatusSubscription | undefined> {
+    const item = this.connection(await this.state(), id)
+    const active = this.active.get(id)
+    if (!active?.tunnel.alive || active.subscribe !== 1) return undefined
+    const existing = this.statusSubscriptions.get(id)
+    if (existing) { await existing.open(); return existing }
+    let baseline = true
+    const subscription = new DesktopStatusSubscription({
+      hostId: item.hostId,
+      read: (request, signal) => this.requestForConnection(id, { op: 'subscribe', ...request }, undefined, signal),
+      onChange: (change) => {
+        if (change.catalog && baseline) {
+          this.attention?.baseline(id, subscription.sessions())
+          baseline = false
+        }
+      }
+    })
+    this.statusSubscriptions.set(id, subscription)
+    try { await subscription.open() }
+    catch (error) {
+      if (this.statusSubscriptions.get(id) === subscription) this.statusSubscriptions.delete(id)
+      subscription.close()
+      throw error
+    }
+    return subscription
   }
 
   async disconnect(connectionIdValue: string): Promise<void> {

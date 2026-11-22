@@ -136,7 +136,7 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
 
   it.each([undefined, 1, 2])('only announces and forwards the negotiated subscribe version %s', async (subscribe) => {
     const reply = { subscribe: { hostId: 'mac2', logId: 'log-1', seq: 1, mode: 'idle' } }
-    const fixture = await setup({ subscribe, subscribeResponse: reply })
+    const fixture = await setup({ subscribe, subscribeResponse: () => reply })
     try {
       const paired = await fixture.client.pair({ label: 'Mac2', ssh, invitation: fixture.invitation })
       await fixture.client.finishPairing(paired.connection.id)

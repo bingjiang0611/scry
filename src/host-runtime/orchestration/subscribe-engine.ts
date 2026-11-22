@@ -15,8 +15,8 @@ import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
 import { mapRunRow, mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
-import { readSessionsSnapshot, visibleCatalog } from './subscribe-sessions'
-import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type SessionProjectionRow } from './types'
+import { projectSubscribeSession, readSessionsSnapshot, visibleCatalog } from './subscribe-sessions'
+import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type RunProjectionRow, type SessionProjectionRow } from './types'
 
 export const SUBSCRIBE_MAX_WAIT_MS = 25_000
 export const SUBSCRIBE_MAX_SCAN_GAP = 4_096
@@ -274,6 +274,7 @@ export class SubscribeEngine {
         ...(event.runId !== null ? { runId: event.runId } : {}),
         ...(event.cwd !== null ? { cwd: event.cwd } : {}),
         payload: this.#projectEventPayload(access, event),
+        ...(access.scope === 'remote' ? this.#deviceProjections(access, views, event) : {}),
         ...(access.scope === 'local' && event.evidence !== null ? { evidence: event.evidence } : {})
       }
       const itemBytes = Buffer.byteLength(JSON.stringify(item), 'utf8')
@@ -345,33 +346,59 @@ export class SubscribeEngine {
     for (const raw of rows) {
       const run = mapRunRow(raw)
       if (!access.canReadCwd(run.cwd)) continue
-      const liveMeta = this.#hub.liveRunMeta(run.runId)
-      const localMeta = access.scope === 'local' ? liveMeta : undefined
-      const promptPreview =
-        access.scope === 'remote' && run.promptPreview
-          ? run.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
-          : run.promptPreview
-      result.push({
-        runId: run.runId,
-        ...(localMeta?.scryRunId ? { scryRunId: localMeta.scryRunId } : {}),
-        ...(localMeta?.admitted ? { admitted: true } : {}),
-        ...(localMeta?.externalSessionId ? { externalSessionId: localMeta.externalSessionId } : {}),
-        sessionKey: run.sessionKey,
-        scope: run.scope,
-        origin: run.origin,
-        provider: run.provider,
-        profile: run.profile,
-        cwd: run.cwd,
-        promptPreview,
-        lifecycle: run.lifecycle,
-        stopState: run.stopState,
-        outputSeq: liveMeta ? Math.max(liveMeta.outputSeq, run.outputSeq ?? 0) : run.outputSeq,
-        intentSeq: run.intentSeq,
-        settledAt: run.settledAt,
-        recoveredAt: run.recoveredAt,
-        outcome: run.outcome,
-        revSeq: run.revSeq
-      })
+      result.push(this.#projectRun(run, access))
+    }
+    return result
+  }
+
+  #projectRun(run: RunProjectionRow, access: SubscribeAccess): SubscribeActiveRunRow {
+    const liveMeta = this.#hub.liveRunMeta(run.runId)
+    const localMeta = access.scope === 'local' ? liveMeta : undefined
+    const session = access.scope === 'remote' && run.sessionKey ? this.#sink.getSession(run.sessionKey) : undefined
+    const externalSessionId = liveMeta?.externalSessionId ??
+      (session && access.canReadCwd(session.cwd) ? session.catalog?.nativeSessionId : undefined)
+    const promptPreview =
+      access.scope === 'remote' && run.promptPreview
+        ? run.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
+        : run.promptPreview
+    return {
+      runId: run.runId,
+      ...(localMeta?.scryRunId ? { scryRunId: localMeta.scryRunId } : {}),
+      ...(localMeta?.admitted ? { admitted: true } : {}),
+      ...(externalSessionId ? { externalSessionId } : {}),
+      sessionKey: run.sessionKey,
+      scope: run.scope,
+      origin: run.origin,
+      provider: run.provider,
+      profile: run.profile,
+      cwd: run.cwd,
+      promptPreview,
+      lifecycle: run.lifecycle,
+      stopState: run.stopState,
+      outputSeq: liveMeta ? Math.max(liveMeta.outputSeq, run.outputSeq ?? 0) : run.outputSeq,
+      intentSeq: run.intentSeq,
+      settledAt: run.settledAt,
+      recoveredAt: run.recoveredAt,
+      outcome: run.outcome,
+      revSeq: run.revSeq
+    }
+  }
+
+  #deviceProjections(
+    access: SubscribeAccess, views: ReadonlySet<SubscribeView>, event: OrchestrationEventRow
+  ): Pick<SubscribeEventItem, 'sessionRow' | 'runRow'> {
+    const result: Pick<SubscribeEventItem, 'sessionRow' | 'runRow'> = {}
+    if (views.has('sessions') && event.sessionKey) {
+      const session = this.#sink.getSession(event.sessionKey)
+      if (session && access.canReadCwd(session.cwd)) {
+        result.sessionRow = projectSubscribeSession(session, access.canReadCwd)
+      } else if (event.type === 'session.deleted' || event.type === 'session.withdrawn') {
+        result.sessionRow = null
+      }
+    }
+    if ((views.has('activeRuns') || views.has('detail')) && event.runId) {
+      const run = this.#sink.getRun(event.runId)
+      if (run && access.canReadCwd(run.cwd)) result.runRow = this.#projectRun(run, access)
     }
     return result
   }

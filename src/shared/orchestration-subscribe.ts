@@ -6,7 +6,7 @@ import type { ConversationPage } from './conversation-api'
 import type { DesktopHostReadResult, DesktopRemoteHistory } from './desktop-remote'
 
 /**
- * Shared wire contract for P4-3 local `subscribe` (P4-orchestration-protocol.md §5).
+ * Shared wire contract for orchestration `subscribe` (P4-orchestration-protocol.md §5).
  * Kept in `src/shared/` with zero imports from `src/host-runtime/orchestration/`
  * so Electron main preserves the Layer 3 single-writer static import boundary.
  */
@@ -84,7 +84,7 @@ export interface SubscribeActiveRunRow {
   scryRunId?: string
   /** Whether canonical pipeline registered the run (local scope only). */
   admitted?: boolean
-  /** Native external session id bound while live (local scope only). */
+  /** Native session ID from the authorized binding or projected catalog. */
   externalSessionId?: string
   sessionKey: string | null
   scope: 'local' | 'remote' | 'system'
@@ -113,6 +113,9 @@ export interface SubscribeEventItem {
   cwd?: string | null
   payload: Record<string, unknown>
   evidence?: string[] | null
+  /** Authorized projections for devices applying a delta to a paged snapshot. */
+  sessionRow?: SubscribeSessionRow | null
+  runRow?: SubscribeActiveRunRow | null
 }
 
 export type SubscribeHint =

@@ -114,6 +114,7 @@ export interface DesktopRemoteConnection {
   anchorSHA256: string
   ssh: DesktopSshTarget
   state: 'disconnected' | 'connected' | 'pairing'
+  subscribe?: 1
   expiresAt: number
 }
 export interface DesktopPairingResult {

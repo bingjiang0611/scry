@@ -89,6 +89,9 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
       expect(JSON.stringify(first)).not.toContain(privateWorkspace)
       const info = await request({ op: 'desktop', query: { kind: 'info' } })
       expect(info).toMatchObject({ desktop: { kind: 'info', protocol: 2, subscribe: 1, hostAdminNotices: 1 } })
+      const metadata = await request({ op: 'catalogSnapshot', includeSessions: false })
+      expect(metadata).toMatchObject({ catalogSnapshot: { info: { subscribe: 1 }, projects: [{ path: workspace }] } })
+      expect(metadata.catalogSnapshot).not.toHaveProperty('sessionsPage')
       const { hostId, logId, seq } = first.subscribe as { hostId: string; logId: string; seq: number }
       const notice = host.hostAdmin.recordNotice({
         kind: 'device_approved_via_cli', deviceLabel: '测试 iPhone', fingerprintPrefix: '0123456789abcdef'
@@ -104,7 +107,9 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
         op: 'subscribe', views: ['sessions', 'activeRuns'], known: { hostId, logId, seq }, waitMs: 0
       })
       expect(update).toMatchObject({ subscribe: {
-        mode: 'events', events: [{ sessionKey: 'visible-next' }], hints: [{ kind: 'hostNotice', notice }]
+        mode: 'events', events: [{ sessionKey: 'visible-next', sessionRow: {
+          sessionKey: 'visible-next', cwd: workspace
+        } }], hints: [{ kind: 'hostNotice', notice }]
       } })
       const detail = await request({ op: 'subscribe', views: ['detail'], session: { sessionKey: 'private' }, waitMs: 0 })
       expect(detail).toMatchObject({ subscribe: { mode: 'snapshot', snapshot: { detail: { turns: [] } } } })

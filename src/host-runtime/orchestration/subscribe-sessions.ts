@@ -1,6 +1,7 @@
 import type { SessionCatalogMetadata, SubscribeSessionRow, SubscribeSnapshot } from '../../shared/orchestration-subscribe'
 import type { EventSink } from './event-sink'
 import { mapSessionRow } from './projection-mappers'
+import type { SessionProjectionRow } from './types'
 
 export function visibleCatalog(
   catalog: SessionCatalogMetadata,
@@ -8,6 +9,30 @@ export function visibleCatalog(
 ): SessionCatalogMetadata {
   const { projectCwd } = catalog
   return projectCwd && !canReadCwd(projectCwd) ? { ...catalog, projectCwd: null } : catalog
+}
+
+export function projectSubscribeSession(
+  mapped: SessionProjectionRow,
+  canReadCwd: (cwd: string | null) => boolean
+): SubscribeSessionRow {
+  return {
+    sessionKey: mapped.sessionKey,
+    conversationId: mapped.conversationId,
+    provider: mapped.provider,
+    profile: mapped.profile,
+    cwd: mapped.cwd,
+    title: mapped.title,
+    ts: mapped.ts,
+    pinnedAt: mapped.pinnedAt,
+    archivedAt: mapped.archivedAt,
+    lastRunId: mapped.lastRunId,
+    lastRunOutcome: mapped.lastRunOutcome,
+    activeRunId: mapped.activeRunId,
+    pendingQuestions: mapped.pendingQuestions,
+    legacy: mapped.legacy,
+    revSeq: mapped.revSeq,
+    ...(mapped.catalog ? { catalog: visibleCatalog(mapped.catalog, canReadCwd) } : {})
+  }
 }
 
 interface SessionsKeysetCursor {
@@ -78,25 +103,7 @@ export function readSessionsSnapshot(
       hasMore = true
       break
     }
-    const mapped = mapSessionRow(raw)
-    visible.push({
-      sessionKey: mapped.sessionKey,
-      conversationId: mapped.conversationId,
-      provider: mapped.provider,
-      profile: mapped.profile,
-      cwd: mapped.cwd,
-      title: mapped.title,
-      ts: mapped.ts,
-      pinnedAt: mapped.pinnedAt,
-      archivedAt: mapped.archivedAt,
-      lastRunId: mapped.lastRunId,
-      lastRunOutcome: mapped.lastRunOutcome,
-      activeRunId: mapped.activeRunId,
-      pendingQuestions: mapped.pendingQuestions,
-      legacy: mapped.legacy,
-      revSeq: mapped.revSeq,
-      ...(mapped.catalog ? { catalog: visibleCatalog(mapped.catalog, canReadCwd) } : {})
-    })
+    visible.push(projectSubscribeSession(mapSessionRow(raw), canReadCwd))
   }
 
   let total: number | 'unavailable' = 'unavailable'
