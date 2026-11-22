@@ -1,14 +1,3 @@
-/**
- * The per-workspace session-capture receiver.
- *
- * CodeLens' guard runs on every host hook and must not pay a Node start per event, so `capture
- * start` publishes this small shell script. It posts the provider hook payload to the daemon's
- * versioned event path and only falls back to the CLI when the daemon could not have applied the
- * event. The path and version header are the same handshake ordinary hooks use, so a daemon from
- * another recorder version refuses before applying and the CLI replaces it instead of double
- * applying. Nothing is retried here: a timeout is reported as unknown delivery by exiting 0, and
- * the CLI queues that event rather than replaying it.
- */
 export function captureReceiverSource(args: {
   socketPath: string
   workspace: string

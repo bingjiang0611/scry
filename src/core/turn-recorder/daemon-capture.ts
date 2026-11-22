@@ -6,12 +6,6 @@ import { CaptureRequestError } from './session-capture-contract.js'
 import { writeJson } from './daemon-transport.js'
 import { drainRecorderDelivery } from './recorder.js'
 
-/**
- * The daemon side of session capture. The guard posts the same `{capture, payload}` document the CLI
- * reads, so the fast path and the fallback cannot disagree about what was delivered. The daemon
- * answers with the capture ACK and drains delivery after the response, outside the Provider's hook
- * budget.
- */
 export async function serveCaptureRequest(args: {
   enablement: Extract<RecorderEnablement, { enabled: true }>
   provider: ProviderId
@@ -21,7 +15,6 @@ export async function serveCaptureRequest(args: {
   response: ServerResponse
   recovery: () => void
   deliveries: Set<Promise<unknown>>
-  /** Pid reported by the receiver script; without it the turn records no host evidence. */
   ancestryFromPid?: number
 }): Promise<void> {
   let ack: Record<string, unknown>
@@ -37,7 +30,6 @@ export async function serveCaptureRequest(args: {
       ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
     })).ack
   } catch (error) {
-    // A refusal before apply stays a 4xx so the guard's fallback may still deliver the event.
     if (error instanceof CaptureRequestError) throw Object.assign(error, { statusCode: 400 })
     throw error
   }

@@ -22,7 +22,6 @@ const DEFAULT_IDLE_MS = 30 * 60 * 1_000
 const MAX_IDLE_MS = 24 * 60 * 60 * 1_000
 const RECOVERY_POLL_MS = 1_000
 const MAX_RECOVERY_POLL_MS = 15_000
-/** Notification only: a caller that had just written inbox work asks for an immediate pass. */
 const WAKE_PATH = '/v1/wake'
 const PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi'])
 export const OWNER_TOKEN_ENV = 'SCRY_RECORDER_OWNER_TOKEN'
@@ -46,17 +45,9 @@ interface RecorderDaemonListenOptions {
   env?: NodeJS.ProcessEnv
   idleCloseProbe?: () => Promise<void> | void
   recoveryProbe?: () => Promise<void> | void
-  /** Test seams for deterministic backoff coverage. Production callers leave these unset. */
   recoveryPollMs?: number
   maxRecoveryPollMs?: number
   scheduleRecoveryTimeout?: (run: () => Promise<void>, delayMs: number) => () => void
-  /**
-   * Optional hook run once the daemon has decided to shut down for inactivity: no open turn, no
-   * request for the whole idle window. That is the only safe moment to replace the CLI on disk -
-   * the process is exiting anyway, so the next hook event starts whatever version is there, and no
-   * turn can be split across two versions. Core stays offline; the caller owns the policy and any
-   * network access. Returning the installed version only affects what gets logged.
-   */
   idleUpdate?: () => Promise<string | null>
 }
 
@@ -67,8 +58,6 @@ export async function listenRecorderDaemon(args: RecorderDaemonListenOptions): P
   const socketPath = recorderSocketPath(enablement.workspaceRoot, args.socketPath
     ? { ...env, SCRY_RECORDER_SOCKET: args.socketPath }
     : env)
-  // Separate from the launcher's lock: the parent waits for this child. Direct serve callers
-  // and different workspaces sharing a socket must serialize ownership and listen here too.
   return withDirectoryLock(`${socketPath}.listen.lock`, () => startRecorderDaemon(args, enablement, socketPath, env))
 }
 
@@ -150,8 +139,6 @@ async function startRecorderDaemon(
         await args.idleCloseProbe?.()
         if (closing || activityGeneration !== scheduledGeneration) return
         if (args.idleUpdate) {
-          // No timeout here: every step the caller runs is already bounded (npm query 8s, install
-          // 120s, verify 8s). Racing it again would cut supervision while the install kept going.
           const installed = await args.idleUpdate().catch(() => null)
           if (installed) {
             await appendRotatingLog(
@@ -160,7 +147,6 @@ async function startRecorderDaemon(
             ).catch(() => undefined)
           }
         }
-        // Updating can await the registry while a new hook arrives. Do not close its owner.
         if (closing || activityGeneration !== scheduledGeneration) return
         if (await recorderHasOpenTurn(enablement.dataRoot)) {
           scheduleIdle()
@@ -218,12 +204,9 @@ async function startRecorderDaemon(
     lastRequestAt = new Date().toISOString()
     try {
       if (request.method === 'GET' && request.url === '/v1/status') {
-        // `captureProtocol` tells CodeLens' guard whether this daemon serves session capture at all.
         writeJson(response, 200, { running: true, protocol: PROTOCOL_VERSION, captureProtocol: SESSION_CAPTURE_PROTOCOL, recorderVersion: RECORDER_VERSION, pid: process.pid, startedAt, requestCount, errorCount, lastRequestAt })
         return
       }
-      // A delivery that only wrote an inbox entry cannot make this process notice it. The wake says
-      // "there is queued work" and nothing else: the answer never claims the work was applied.
       if (request.method === 'POST' && request.url === WAKE_PATH) {
         scheduleRecovery(true)
         writeJson(response, 200, { ok: true, queued: true })
@@ -234,8 +217,6 @@ async function startRecorderDaemon(
         setImmediate(() => void close())
         return
       }
-      // `/v1/hook` stays readable for hooks installed by an older CLI. New hooks use the versioned
-      // path below so a mixed-version daemon cannot apply an event under the wrong recorder.
       if (request.method !== 'POST' || (request.url !== HOOK_EVENT_PATH && request.url !== '/v1/hook')) {
         writeJson(response, 404, { ok: false, error: 'not found' })
         return
@@ -245,7 +226,6 @@ async function startRecorderDaemon(
         return
       }
       if (request.url === HOOK_EVENT_PATH && header(request, RECORDER_VERSION_HEADER) !== RECORDER_VERSION) {
-        // Refuse before reading or applying the event: the hook must replace this owner and resend.
         writeJson(response, 409, {
           ok: false,
           error: 'recorder version mismatch',
@@ -260,8 +240,6 @@ async function startRecorderDaemon(
         writeJson(response, 400, { ok: false, error: 'invalid provider or event' })
         return
       }
-      // The hook script reports its own pid so the daemon can record the chain the event came from.
-      // Empty or malformed means the transport did not know it; that is not an error.
       const clientPidHeader = header(request, 'x-scry-client-pid')
       const clientPid = clientPidHeader && /^\d{1,10}$/.test(clientPidHeader) ? Number(clientPidHeader) : undefined
       if (clientPid !== undefined && clientPid <= 1) {
@@ -290,8 +268,6 @@ async function startRecorderDaemon(
       })
       scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })
-      // The daemon outlives this response, so delivery runs after it instead of inside the
-      // Provider's hook budget. A crash before it lands is covered by at-least-once redelivery.
       const delivery = drainRecorderDelivery(enablement.workspaceRoot, env).catch(() => undefined)
       deliveryInFlight.add(delivery)
       void delivery.finally(() => { deliveryInFlight.delete(delivery) })
@@ -318,11 +294,8 @@ async function startRecorderDaemon(
       server.close(() => resolvePromise())
     }).then(async () => {
       await recoveryInFlight
-      // HTTP responses can finish before delivery; shutdown must not release a workspace still in use.
       await Promise.all(deliveryInFlight)
     }).finally(async () => {
-      // A live owner cannot be replaced by another starter. Keep the marker until the socket
-      // is removed; do not reacquire the listen lock here (startup failure already holds it).
       const currentOwner = await readJson<DaemonOwner>(markerPath)
       if (currentOwner?.instanceId === instanceId) {
         await rm(socketPath, { force: true })
@@ -342,8 +315,6 @@ async function startRecorderDaemon(
     })
     await chmod(socketPath, 0o600)
     await writeJsonAtomic(markerPath, { ...owner, state: 'running' }, { sync: false })
-    // The shell cannot hash a long endpoint without starting another process. Publish only
-    // after listen succeeds; a stale hint is harmless because the shell checks that it is a socket.
     if (await hasSymlinkComponent(enablement.workspaceRoot, '.scry')) {
       throw new Error('cannot publish recorder socket through a symlinked .scry directory')
     }
@@ -353,9 +324,6 @@ async function startRecorderDaemon(
     await removeOwnedMarker(markerPath, instanceId)
     throw error
   }
-  // 常驻进程起来时顺手清理一次中断写盘留下的 `.tmp`：排队的 hook 事件很多时，下一个提交通知可能要
-  // 等很久。与提交路径的按天清理互不依赖，失败也只是这次不清理。等待它完成，避免进程在别处收尾时
-  // 还有一次目录遍历在写标记文件。
   await pruneStaleTemps(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)
@@ -366,7 +334,6 @@ export async function serveRecorderDaemon(args: {
   workspace: string
   socketPath?: string
   env?: NodeJS.ProcessEnv
-  /** Forwarded to the idle shutdown path; see `listenRecorderDaemon`. */
   idleUpdate?: () => Promise<string | null>
 }): Promise<void> {
   const handle = await listenRecorderDaemon(args)

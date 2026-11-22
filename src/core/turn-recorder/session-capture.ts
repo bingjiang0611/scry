@@ -51,11 +51,6 @@ function captureTransport(
   }
 }
 
-/**
- * Everything a claim must prove before any turn is opened: a readable transcript, an enabled recorder,
- * a writable capture root and this capture's resolved exclusion paths. A deferred claim validates the
- * same evidence when it is queued, so an integrator learns about a refusal before the daemon runs.
- */
 export interface PreparedCaptureStart {
   enablement: Extract<RecorderEnablement, { enabled: true }>
   workspaceRoot: string
@@ -91,9 +86,6 @@ export async function prepareCaptureStart(args: {
   await ensureWorkspaceConfig(workspaceRoot, dataRoot)
   const enablement = await recorderEnablement(workspaceRoot, args.env)
   if (!enablement.enabled) throw new CaptureRequestError('recorder_unavailable', `recorder is not enabled: ${enablement.reason}`)
-  // The host tells us its commit callback exactly once, in this process. Record it now: the turns this
-  // capture produces are committed later by the daemon and the hook receiver, which never inherit the
-  // host's environment and would otherwise find no callback at all.
   if ((args.env ?? process.env).SCRY_RECORDER_COMMIT_HOOK?.trim()) {
     await resolveCommitHookActivation(workspaceRoot, enablement.config, args.env ?? process.env)
   }
@@ -121,10 +113,6 @@ export async function prepareCaptureStart(args: {
   }
 }
 
-/**
- * Claim a session. Idempotent per captureId: a repeated start adopts the recorded state instead of
- * opening a second generation, and a repeated delivery never moves the turn boundary.
- */
 export async function startSessionCapture(args: {
   workspace: string
   provider: ProviderId
@@ -134,17 +122,8 @@ export async function startSessionCapture(args: {
   payload: Record<string, unknown>
   cli: { entry?: string; nodeDir?: string }
   env?: NodeJS.ProcessEnv
-  /** Pid of the process that asked for the capture; the turn records the chain above it. */
   ancestryFromPid?: number
-  /**
-   * Host processes the caller already resolved. A queued claim is replayed by a daemon that is not on
-   * the host's process chain, and the claimant's own pid may be gone by then.
-   */
   hostChain?: import('./host-process.js').HostProcess[]
-  /**
-   * The caller already holds this session's recording lock: the inbox drain applies queued claims in
-   * arrival order inside the pass that owns it. Taking the lock again would deadlock the drain.
-   */
   sessionLockHeld?: boolean
 }): Promise<CaptureAck & { transport: Record<string, unknown> }> {
   const prepared = await prepareCaptureStart(args)
@@ -176,11 +155,6 @@ export async function startSessionCapture(args: {
   }
 }
 
-/**
- * A repeated start of this capture may only add exclusion paths: a later stage of the same workflow
- * can never narrow what an earlier one asked for. The union is written to the session state, the
- * published context and the open turn, which are the places the diff path reads it from.
- */
 async function adoptDiffExclude(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
@@ -188,16 +162,11 @@ async function adoptDiffExclude(
   state: SessionCaptureState,
   added: string[] | undefined
 ): Promise<string | undefined> {
-  // Caller holds the session lock. Repair all publications even when the control file already
-  // contains the union: a previous process may have stopped between these durable writes.
   const root = recorderSessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
-  // The claim is already active. Report this turn's missing baseline without disabling the session.
   const warning = open ? captureTurnInitializationIssue(open, enablement) : undefined
   const openCapture = open?.capture?.captureId === state.captureId ? open.capture : undefined
   const merged = unionDiffExclude(unionDiffExclude(state.diffExclude, openCapture?.diffExclude), added)
-  // Keep the session-level union first: it must survive even if Stop removes the open turn
-  // before an interrupted publication is retried. A preceding capture's exclusions stay there.
   if (merged.length !== (state.diffExclude?.length ?? 0)) {
     await writeJsonAtomic(captureStatePath(enablement.dataRoot, provider, sessionId),
       { ...state, diffExclude: merged } satisfies SessionCaptureState)
@@ -211,12 +180,6 @@ async function adoptDiffExclude(
   return warning
 }
 
-/**
- * A declared path comes from the integrator's own shell, so it can reach this workspace through a
- * symlink (`/var` and `/private/var` are one directory). Resolve each path once, before it is stored:
- * the diff comparison against the repository root Git reports is lexical. A path that does not exist
- * yet keeps its declared form and simply excludes nothing until it does.
- */
 async function resolveDiffExclude(context: SessionCaptureContext): Promise<SessionCaptureContext> {
   if (!context.diffExclude?.length) return context
   const paths = await Promise.all(context.diffExclude.map(async (path) => realpath(path).catch(() => path)))
@@ -244,11 +207,6 @@ async function ensureReceiver(
   await chmod(path, 0o700).catch(() => undefined)
 }
 
-/**
- * Stop accepting work for this session after the current turn finishes. The daemon keeps running
- * and other sessions are untouched. The turn boundary is frozen here, so a transcript that grows
- * with the next prompt can never be read back into this turn.
- */
 export async function stopSessionCapture(args: {
   workspace: string
   provider: ProviderId
@@ -256,7 +214,6 @@ export async function stopSessionCapture(args: {
   dataDir: string
   context: SessionCaptureContext
   env?: NodeJS.ProcessEnv
-  /** The caller already holds this session's recording lock; see `startSessionCapture`. */
   sessionLockHeld?: boolean
 }): Promise<CaptureAck> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
@@ -294,22 +251,18 @@ export async function stopSessionCapture(args: {
   return { status: 'stopping', ack: captureAck('stop', 'stopping', args.context) }
 }
 
-/** The session hook path: only ever applies events for the session that claimed itself. */
 export async function applySessionCaptureHook(args: {
   workspace: string
   provider: ProviderId
   event: string
   sessionId?: string
   dataDir: string
-  /** Omitted on delivery: the session names the claim, and the state written at start proves it. */
   context?: SessionCaptureContext
   payload: Record<string, unknown>
   queueOnly?: boolean
   deferDelivery?: boolean
-  /** Delivered in capture mode; see `RecorderHookInput.captureMode`. */
   captureMode?: boolean
   env?: NodeJS.ProcessEnv
-  /** Pid of the process that delivered this hook, when the transport knows it. */
   ancestryFromPid?: number
 }): Promise<CaptureAck & { reason?: string }> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
@@ -320,14 +273,9 @@ export async function applySessionCaptureHook(args: {
   }
   const state = await readCaptureState(dataRoot, args.provider, sessionId)
   if (!state) {
-    // A deferred claim writes its entry first and publishes the state when the daemon applies it, so
-    // an event queued in between has no capture to name yet. It is accepted only while that claim is
-    // still waiting in this session's own inbox; nothing is applied here either way.
     const claimWaiting = args.queueOnly === true &&
       await recorderInboxHasCaptureCommand(recorderSessionRoot(dataRoot, args.provider, sessionId))
     if (!claimWaiting) {
-      // Opt-in means ordinary sessions in this workspace reach no claim. Nothing was applied, and the
-      // caller must not retry: there is nothing to record.
       const ack = { protocol: SESSION_CAPTURE_PROTOCOL, action: 'hook', status: 'ignored', captureId: null, sessionId }
       return { status: 'ignored', ack, reason: 'no capture is open for this session' }
     }
@@ -361,7 +309,6 @@ export async function applySessionCaptureHook(args: {
   const enablement = await recorderEnablement(args.workspace, args.env)
   if (!enablement.enabled) throw new CaptureRequestError('recorder_unavailable', `recorder is not enabled: ${enablement.reason}`)
   if (state.stopRequestedAt && START_EVENT_NAMES.has(args.event)) {
-    // The next turn must not be recorded even if the host still delivers its start event.
     return {
       status: 'accepted',
       ack: { ...captureAck('hook', 'accepted', context), recorded: false, reason: 'capture stopped' },
@@ -379,8 +326,6 @@ export async function applySessionCaptureHook(args: {
     env: args.env,
     ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
   })
-  // The edited file names the repository; its PreToolUse arrives before the write, so the baseline
-  // taken here is the pre-edit state.
   if (args.event === 'PreToolUse') await recordCaptureRepositories(enablement, args.provider, sessionId, args.payload)
   return {
     status: 'accepted',

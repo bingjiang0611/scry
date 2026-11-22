@@ -8,21 +8,13 @@ import { RECORDER_VERSION } from './store.js'
 
 
 export const PROTOCOL_VERSION = '2'
-/**
- * Versioned event endpoint. A daemon older than this path answers 404, and a daemon of another
- * version answers 409 before it applies anything: both tell the hook that the event was not
- * applied, so replacing the owner cannot lose or double-apply it.
- */
 export const HOOK_EVENT_PATH = '/v2/hook'
-/** The hook's own recorder version, checked before an event is applied. */
 export const RECORDER_VERSION_HEADER = 'x-scry-recorder-version'
 
-/** A completed daemon response that proves the event was not applied. */
 export class RecorderHookRejected extends Error {
   constructor(
     readonly statusCode: number,
     readonly detail: string,
-    /** 404 = legacy daemon without the versioned path; 409 = explicit version handshake refusal. */
     readonly replaceDaemon: boolean
   ) {
     super(`recorder daemon rejected hook (${statusCode}): ${detail}`)
@@ -54,8 +46,6 @@ export function recorderSocketPath(workspace: string, env: NodeJS.ProcessEnv = p
     ? (isAbsolute(configured) ? configured : resolve(workspace, configured))
     : join(resolve(workspace), '.scry', 'recorder-v1.sock')
   if (Buffer.byteLength(socketPath) <= MAX_SOCKET_BYTES) return socketPath
-  // Hash the requested endpoint, not just cwd: explicit endpoints in one workspace stay distinct.
-  // A long TMPDIR must not recreate the original sockaddr_un overflow.
   const digest = createHash('sha256').update(`${resolve(workspace)}\0${socketPath}`).digest('hex').slice(0, 32)
   const name = `scry-${process.getuid?.() ?? 'user'}-${digest}.sock`
   const temporaryPath = join(tmpdir(), name)
