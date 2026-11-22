@@ -213,12 +213,10 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       return reply.backgroundTask as unknown as BackgroundTaskStopResult
     },
     async adopt(runId) {
-      const reply = await deps.transport.runControl({ method: 'adopt', runId })
-      if (reply.run === null) return null
-      if (!record(reply.run) || typeof reply.run.runId !== 'string') throw new Error('daemon_run_control_unavailable')
+      const run = await deps.transport.adopt(runId)
       // Adopting means this window now shows the run, so the next activeRun() agrees.
-      focusedRunId = runId
-      return reply.run as unknown as ActiveRun
+      if (run) focusedRunId = runId
+      return run
     },
     follow(ledger) { return runtime.follow(ledger) },
     localOp(call) { return deps.transport.localOp(call) },
