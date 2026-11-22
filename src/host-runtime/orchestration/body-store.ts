@@ -54,6 +54,7 @@ async function fsyncDirectoryAsync(dir: string): Promise<void> {
 export class BodyStore {
   readonly bodiesDir: string
   readonly #pinned = new Map<string, number>()
+  readonly #afterUnpin = new Map<string, () => void>()
 
   constructor(orchestrationDir: string) {
     this.bodiesDir = join(orchestrationDir, 'bodies')
@@ -68,13 +69,24 @@ export class BodyStore {
       if (released) return
       released = true
       const next = (this.#pinned.get(sha256) ?? 1) - 1
-      if (next <= 0) this.#pinned.delete(sha256)
-      else this.#pinned.set(sha256, next)
+      if (next > 0) {
+        this.#pinned.set(sha256, next)
+        return
+      }
+      this.#pinned.delete(sha256)
+      const afterUnpin = this.#afterUnpin.get(sha256)
+      this.#afterUnpin.delete(sha256)
+      afterUnpin?.()
     }
   }
 
   isPinned(sha256: string): boolean {
     return (this.#pinned.get(sha256) ?? 0) > 0
+  }
+
+  /** Called while pinned. One erasure callback covers all pending rows for this hash. */
+  eraseAfterUnpin(sha256: string, erase: () => void): void {
+    this.#afterUnpin.set(sha256, erase)
   }
 
   private ensureDir(): void {

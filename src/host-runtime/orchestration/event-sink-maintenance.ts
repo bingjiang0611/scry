@@ -277,21 +277,34 @@ export function unlinkUnreferencedExternalBodyInDb(
 export function resumeBodyErasure(
   db: Database.Database,
   bodyStore: BodyStore,
-  sessionKey?: string
-): { completed: number; erased: number; error?: string } {
-  const rows = (sessionKey
-    ? db.prepare('SELECT session_key, sha256 FROM orch_body_erase WHERE session_key = ?').all(sessionKey)
-    : db.prepare('SELECT session_key, sha256 FROM orch_body_erase').all()
-  ) as Array<{ session_key: string; sha256: string }>
+  options: { sessionKey?: string; sha256?: string; canWrite?: () => boolean } = {}
+): { completed: number; erased: number; deferred: number; error?: string } {
+  const select = 'SELECT session_key, sha256 FROM orch_body_erase'
+  const rows = (options.sessionKey !== undefined ? db.prepare(`${select} WHERE session_key = ?`).all(options.sessionKey)
+    : options.sha256 !== undefined ? db.prepare(`${select} WHERE sha256 = ?`).all(options.sha256)
+    : db.prepare(select).all()) as Array<{ session_key: string; sha256: string }>
   const clear = db.prepare('DELETE FROM orch_body_erase WHERE session_key = ? AND sha256 = ?')
   let completed = 0
   let erased = 0
+  let deferred = 0
   let error: string | undefined
   for (const row of rows) {
     try {
       const result = unlinkUnreferencedExternalBodyInDb(db, bodyStore, row.sha256)
       if (result === 'pinned') {
-        error ??= 'orchestration_body_erase_pending'
+        // The deleting session has no remaining references. A concurrent submit
+        // still owns the bytes until commit or abandonment. Retain the durable
+        // erasure queue through that boundary and recheck all surviving owners.
+        bodyStore.eraseAfterUnpin(row.sha256, () => {
+          if (!db.open || options.canWrite?.() === false) return
+          try {
+            const next = resumeBodyErasure(db, bodyStore, { sha256: row.sha256, canWrite: options.canWrite })
+            if (next.error) console.warn('[scry] orchestration body erasure pending:', next.error)
+          } catch (failure) {
+            console.warn('[scry] orchestration body erasure pending:', failure)
+          }
+        })
+        deferred += 1
         continue
       }
       clear.run(row.session_key, row.sha256)
@@ -301,5 +314,5 @@ export function resumeBodyErasure(
       error ??= failure instanceof Error ? failure.message : String(failure)
     }
   }
-  return { completed, erased, ...(error ? { error } : {}) }
+  return { completed, erased, deferred, ...(error ? { error } : {}) }
 }

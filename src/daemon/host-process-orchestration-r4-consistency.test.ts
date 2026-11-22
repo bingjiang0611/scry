@@ -409,6 +409,9 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         if (subB.kind === 'accepted') {
           const readBuf = sink.bodyStore.readBody(sink.getRun(subB.runId)!.body!)
           expect(readBuf.toString('utf8')).toBe(detailB)
+          unpin()
+          expect(sink.bodyStore.readBody(sink.getRun(subB.runId)!.body!).toString('utf8')).toBe(detailB)
+          expect(sink.handle.db.prepare('SELECT * FROM orch_body_erase').all()).toEqual([])
         }
       } finally {
         unpin()

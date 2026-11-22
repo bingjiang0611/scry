@@ -390,6 +390,40 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
     })
   })
 
+  it('releases a deleted session body once the last uncommitted reader stops using it', () => {
+    withTempDir((userData) => {
+      const sink = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
+      try {
+        const prompt = 'S'.repeat(INLINE_BODY_MAX_BYTES + 200)
+        const sha256 = sha256Hex(prompt)
+        expect(sink.execute(makeSubmit(sink, {
+          commandId: 'submit-pinned', runId: 'run-pinned', sessionKey: 'pinned', prompt
+        })).kind).toBe('accepted')
+        const releaseFirst = sink.bodyStore.pin(sha256)
+        const releaseLast = sink.bodyStore.pin(sha256)
+        try {
+          const result = sink.deleteSession({
+            sessionKey: 'pinned', cwd: '/tmp/ws', actor: PEER_A, scope: 'remote', at: 1_700_000_010_000
+          })
+          expect(sink.getRun('run-pinned')).toBeUndefined()
+          expect(sink.listEvents().filter((event) => event.type === 'session.deleted')).toHaveLength(1)
+          expect(sink.bodyStore.hasExternalBody(sha256)).toBe(true)
+          releaseFirst()
+          expect(sink.bodyStore.hasExternalBody(sha256)).toBe(true)
+          releaseLast()
+          expect(sink.bodyStore.hasExternalBody(sha256)).toBe(false)
+          expect(sink.handle.db.prepare('SELECT * FROM orch_body_erase').all()).toEqual([])
+          expect(result).toMatchObject({ status: 'deleted', deletedBodies: 0 })
+        } finally {
+          releaseFirst()
+          releaseLast()
+        }
+      } finally {
+        sink.close()
+      }
+    })
+  })
+
   it('prunes old events while keeping latest per stream and NEVER pruning receipts', () => {
     withTempDir((userData) => {
       const sink = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })

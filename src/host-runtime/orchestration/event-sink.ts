@@ -456,9 +456,11 @@ export class EventSink {
         this.scheduleIdleCheckpoint()
         this.#notifyCommitted()
       }
-      const erased = resumeBodyErasure(this.handle.db, this.bodyStore, input.sessionKey)
+      const erased = resumeBodyErasure(this.handle.db, this.bodyStore, {
+        sessionKey: input.sessionKey, canWrite: () => !this.#writeIndeterminate
+      })
       if (erased.error) return { status: 'unavailable', error: erased.error }
-      if (!existed && erased.completed === 0) return { status: 'not_present' }
+      if (!existed && erased.completed === 0 && erased.deferred === 0) return { status: 'not_present' }
       return { status: 'deleted', deletedBodies: erased.erased, redactedEvents }
     } catch (error) {
       this.#writeIndeterminate = true
