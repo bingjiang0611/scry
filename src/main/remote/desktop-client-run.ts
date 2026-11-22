@@ -14,7 +14,7 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
   // Revision the device last saw, so the host can wait while it is unchanged.
   protected readonly liveRunsRevision = new Map<string, string>()
 
-  async runStatus(connectionIdValue: string, runIdValue: string, options: { waitMs?: number } = {}): Promise<DesktopRemoteRunStatus> {
+  async runStatus(connectionIdValue: string, runIdValue: string, options: { immediate?: boolean; waitMs?: number } = {}): Promise<DesktopRemoteRunStatus> {
     if (!validRunId(runIdValue)) fail('invalid_run_id')
     const key = `${connectionIdValue}:${runIdValue}`
     const watch = this.runWatch.get(key) ?? { cursor: 0 }
@@ -26,7 +26,7 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     let authoritativeState: string | null = null
     // The first read for this run answers now; later reads wait for a change.
     // A device that has never seen the run must not sit in a window first.
-    let waitMs = options.waitMs ?? (this.runWatch.has(key) ? RUN_STATUS_WAIT_MS : 0)
+    let waitMs = options.immediate === true ? 0 : (options.waitMs ?? (this.runWatch.has(key) ? RUN_STATUS_WAIT_MS : 0))
     for (let page = 0; page < MAX_PAGES; page++) {
       const response = await this.requestForConnection(connectionIdValue, { op: 'watch', runId: runIdValue, cursor: watch.cursor, outputCursor: 0, waitMs, output: false })
       if (!record(response) || !record(response.watch) || !record(response.watch.poll) || !Array.isArray(response.watch.poll.events) ||
@@ -92,13 +92,13 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
   // Finds the host's live run on one opened session, whichever client started
   // it. Long-polls the device liveRuns set: the host answers as soon as the set
   // differs from the revision this device last saw, or when the window ends.
-  async liveRun(connectionIdValue: string, value: DesktopRemoteContext, options: { waitMs?: number } = {}): Promise<DesktopRemoteLiveRun | null> {
+  async liveRun(connectionIdValue: string, value: DesktopRemoteContext, options: { immediate?: boolean; waitMs?: number } = {}): Promise<DesktopRemoteLiveRun | null> {
     const scope = context(value)
     if (!scope.externalSessionId) fail('session_required')
     const known = this.liveRunsRevision.get(connectionIdValue)
     // No known revision yet: answer with the current set instead of waiting for a
     // change the device could not compare against.
-    const waitMs = options.waitMs ?? (known ? LIVE_RUNS_WAIT_MS : 0)
+    const waitMs = options.immediate === true ? 0 : (options.waitMs ?? (known ? LIVE_RUNS_WAIT_MS : 0))
     const response = await this.requestForConnection(connectionIdValue, { op: 'liveRuns', waitMs, ...(known && waitMs > 0 ? { revision: known } : {}) })
     if (!record(response) || !record(response.liveRuns) || !Array.isArray(response.liveRuns.runs) || response.liveRuns.runs.length > MAX_ITEMS ||
         !text(response.liveRuns.revision, 64)) fail('invalid_live_runs_response')

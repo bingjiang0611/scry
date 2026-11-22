@@ -124,6 +124,33 @@ export async function runOpeningMeasurement({ driver, options }) {
       await click('[data-remote-session="old-native"]')
       await wait('document.querySelector(".chat").textContent.includes("Remote history paragraph 79") && !document.querySelector(".composer-notice.is-error")', 'explicit selection retries failed history')
     }
+    if (options.openingOnly) await verifyOpeningWithoutArchive({ read, wait, check, click })
     return { remoteSessionOpening: { samples, nativeSelection: true, nativeScroll: true, bottomChecked: options.openingOnly, atomicSelection: options.openingOnly, pendingSupersession: options.openingOnly, preparedFailureVisible: options.openingOnly,
-      noLocalExecution: (await fixture()).localStarts === 0, onDemandCommands: options.openingOnly } }
+      noLocalExecution: (await fixture()).localStarts === 0, onDemandCommands: options.openingOnly, liveBeforeArchive: options.openingOnly } }
   }
+
+async function verifyOpeningWithoutArchive({ read, wait, check, click }) {
+  await click('[data-remote-session="other-native"]')
+  await wait('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true" && document.querySelector(".chat")?.textContent.includes("Remote history paragraph 79")', 'idle session selected before live reopen')
+  await read(`Object.assign(window.desktopRemoteFixture, {
+    openingWithoutArchive: true, sessionActive: true, holdOpeningLive: true, holdOpeningTrace: true
+  }); true`)
+  await wait('document.querySelector("[data-remote-session=old-native].running") !== null', 'catalog reports the live session')
+  // Record the UI across the entire open, not just after live evidence has arrived.
+  await read(`window.openingGapShown = false; window.openingGapObserver = new MutationObserver(() => {
+    window.openingGapShown ||= !!document.querySelector('.chat-session-evidence-gap');
+  }); window.openingGapObserver.observe(document.body, { childList: true, subtree: true }); true`)
+  await click('[data-remote-session="old-native"]')
+  await wait('typeof window.releaseOpeningLive === "function"', 'live lookup held while archive read resolves')
+  await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  check(await read('document.querySelector(".chat").getAttribute("aria-busy") === "true" && !window.openingGapShown'), 'Archive miss was reported while live lookup was pending')
+  check(await read('window.desktopRemoteFixture.openingLiveImmediate'), 'Opening waited for the next host change rather than requesting a snapshot')
+  await read('window.desktopRemoteFixture.holdOpeningLive = false; window.releaseOpeningLive(); true')
+  await wait('typeof window.releaseOpeningTrace === "function"', 'live trace is held after the run is found')
+  check(await read('document.querySelector(".chat").getAttribute("aria-busy") === "true" && !window.openingGapShown'), 'Archive miss was reported while live trace was pending')
+  await read('window.desktopRemoteFixture.holdOpeningTrace = false; window.releaseOpeningTrace(); true')
+  await wait('document.querySelector(".chat")?.textContent.includes("host ui continue")', 'live trace opens without archived history')
+  check(await read('window.openingGapObserver.disconnect(); !window.openingGapShown'), 'Missing-evidence notice flashed during live opening')
+  await click('[data-remote-session="other-native"]')
+  await wait('document.querySelector(".chat-session-evidence-gap[data-status=unavailable]")?.textContent.includes("trace_archive_unavailable")', 'confirmed idle session still reports missing archive')
+}

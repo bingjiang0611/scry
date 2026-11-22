@@ -194,10 +194,21 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
       // The live set is already fresh, so the status read does not wait again.
       expect(fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op).slice(-2)).toEqual(['liveRuns', 'watch'])
       expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'watch', waitMs: 0 })
+      const watchReply = { watch: { state: 'dispatched', questions: [], poll: { cursor: 1, events: [] } } }
+      fixture.tlsRequest.mockResolvedValueOnce(watchReply)
+      await expect(fixture.client.runStatus(id, ledgerRunId, { immediate: true })).resolves.toMatchObject({ scryRunId: 'run-phone-1' })
+      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'watch', cursor: 1, waitMs: 0 })
+      fixture.tlsRequest.mockResolvedValueOnce(watchReply)
+      await fixture.client.runStatus(id, ledgerRunId)
+      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'watch', cursor: 1, waitMs: 15_000 })
+
       fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r2', runs: [live('session-b')] } })
-      await expect(fixture.client.liveRun(id, scope)).resolves.toBeNull()
+      await expect(fixture.client.liveRun(id, scope, { immediate: true })).resolves.toBeNull()
+      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'liveRuns', waitMs: 0 })
+      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).not.toHaveProperty('revision')
       fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r3', runs: [{ ...live('session-a'), state: 'done' }] } })
       await expect(fixture.client.liveRun(id, scope)).rejects.toThrow('invalid_live_runs_response')
+      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'liveRuns', revision: 'r2', waitMs: 15_000 })
       await expect(fixture.client.liveRun(id, { cwd: '/workspace', providerId: 'pi' })).rejects.toThrow('session_required')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
