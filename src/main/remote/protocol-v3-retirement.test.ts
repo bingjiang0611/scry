@@ -1,9 +1,39 @@
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const source = (path: string): string => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8')
+const repository = fileURLToPath(new URL('../../../', import.meta.url))
+const source = (path: string): string => readFileSync(join(repository, path), 'utf8')
+
+const staleModeContracts = new Set([
+  'src/daemon/host-process-orchestration-r12-seq-reset.test.ts',
+  'src/daemon/host-process-orchestration-subscribe.test.ts',
+  'src/daemon/host-process-trial-defaults.test.ts',
+  'src/daemon/supervisor.test.ts',
+  'src/main/daemon-subscribe-integration.test.ts',
+  'src/main/remote/protocol-v3-retirement.test.ts'
+])
+
+function filesMentioning(word: string, paths: string[]): string[] {
+  const result = spawnSync('git', ['grep', '-lzw', '--untracked', '-e', word, '--', ...paths], {
+    cwd: repository, encoding: 'utf8'
+  })
+  if (result.error) throw result.error
+  if (result.status === 1) return []
+  if (result.status !== 0) throw new Error(result.stderr)
+  return result.stdout.split('\0').filter(Boolean)
+}
 
 describe('v3 retirement', () => {
+  it('keeps the retired environment switch only in explicit compatibility tests', () => {
+    expect(filesMentioning('SCRY_ORCHESTRATION', ['src']).filter((file) =>
+      !staleModeContracts.has(file)
+    )).toEqual([])
+    expect(source('scripts/desktop-remote-ui-smoke/sidebar-activity.mjs')).not.toContain('No explicit refresh')
+  })
+
   it('removes the obsolete HostController lifecycle and question readers', () => {
     expect(source('src/main/remote/host-controller-surface.ts')).not
       .toMatch(/^  (poll|runState|pendingQuestions)\(/m)

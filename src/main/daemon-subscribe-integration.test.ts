@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { build as esbuild } from 'esbuild'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostAdminNotice } from '../shared/host-admin'
 import type { TraceEvent } from '../shared/trace'
 import type { TraceBatch } from './trace-output'
@@ -19,17 +19,13 @@ import { startDaemonRunEvents } from './daemon-run-events'
 import { createDaemonRunSurface } from './bootstrap/daemon-run-surface'
 import { laneForRequest } from './remote/desktop-lane'
 
-const savedMode = process.env.SCRY_ORCHESTRATION
-
 afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
+  vi.unstubAllEnvs()
   cleanupTempDirs()
 })
 
 describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
-  it('on mode: drives lifecycle via subscribe with 0 watch / 0 liveRuns / 0 settledTail / 0 appEvents, reads archive on post-settle trace, and delivers W11 hostNotice', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
+  it('drives lifecycle via subscribe with 0 watch / 0 liveRuns / 0 settledTail / 0 appEvents, reads archive on post-settle trace, and delivers W11 hostNotice', async () => {
     const daemon = await startTestDaemon()
     const ops: Array<{ op: string; settledTail?: unknown }> = []
     const deliveredTraces: TraceEvent[] = []
@@ -143,7 +139,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
   }, 45_000)
 
   it('a stale off environment still delivers runs on the subscription path', async () => {
-    process.env.SCRY_ORCHESTRATION = 'off'
+    vi.stubEnv('SCRY_ORCHESTRATION', 'off')
     const daemon = await startTestDaemon()
     const ops: string[] = []
     const transport = new DaemonRunTransport(async (request) => {
@@ -171,8 +167,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     }
   }, 30_000)
 
-  it('on mode restart + logId reset: resyncs from snapshot without losing run state or emitting duplicate turnDone', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
+  it('restart + logId reset: resyncs from snapshot without losing run state or emitting duplicate turnDone', async () => {
     let daemon = await startTestDaemon()
     const root = daemon.root
     const turnDoneEvents: Array<Record<string, unknown>> = []
@@ -238,7 +233,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     }
   }, 45_000)
 
-  it('on mode SIGKILL + reconnect: real child daemon killed with SIGKILL, relaunched, App reconnects over subscribe cleanly', async () => {
+  it('SIGKILL + reconnect: real child daemon killed with SIGKILL, relaunched, App reconnects over subscribe cleanly', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -267,7 +262,6 @@ async function main() {
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   const [userData, daemonState] = process.argv.slice(2)
   const host = await createDaemonHostProcess({
@@ -352,6 +346,9 @@ main().catch((err) => { console.error(err); process.exit(1) })
       // First run before SIGKILL
       const r1 = await surface.start({ prompt: 'before sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() })
       await expect.poll(() => runtime!.runView(r1.runId)?.done, { timeout: 10_000 }).toBe(true)
+
+      // Capture the App notification before killing the transport that delivers it.
+      await expect.poll(() => turnDone.filter((id) => id === r1.runId).length, { timeout: 3_000 }).toBe(1)
 
       // Hard-kill child daemon with SIGKILL
       child.kill('SIGKILL')

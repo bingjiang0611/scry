@@ -99,7 +99,7 @@ export interface BackgroundServiceSelfReport {
   remoteConfig?: BackgroundServiceRemoteConfig
   /** CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
   cliApproval?: HostCliApprovalSelfReport
-  /** Authoritative orchestration status; omitted unless SCRY_ORCHESTRATION=on (P4-2 Decision H). */
+  /** Authoritative orchestration status when reported by the running daemon. */
   orchestration?: BackgroundServiceOrchestrationStatus
 }
 
@@ -124,7 +124,7 @@ export type BackgroundServiceStatus =
     loginStart?: LoginStartStatus
     /** Host CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
     cliApproval?: CliApprovalStatus
-    /** Authoritative orchestration status; omitted unless SCRY_ORCHESTRATION=on (P4-2 Decision H). */
+    /** Authoritative orchestration status when reported by the running daemon. */
     orchestration?: BackgroundServiceOrchestrationStatus
     /** Non-silent warnings from service-launch fallback or adopted-daemon policy drift. */
     runtimeNotice?: BackgroundServiceRuntimeNotice

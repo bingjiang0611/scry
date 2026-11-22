@@ -17,19 +17,16 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 afterEach(cleanupTempDirs)
 
 
-async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
+async function withSmokeEnv<T>(fn: () => Promise<T>): Promise<T> {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   try {
     return await fn()
@@ -41,8 +38,6 @@ async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): 
     else process.env.SCRY_REMOTE_RELAY_ENABLED = saved.relay
     if (saved.smoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -57,7 +52,7 @@ describe('Authoritative daemon startup and legacy import', () => {
     createRecentFoldersStore(userDataDir).push(canonicalWs)
     const logs: string[] = []
 
-    await withSmokeEnv('on', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -119,7 +114,7 @@ describe('Authoritative daemon startup and legacy import', () => {
       }
 
       try {
-        await withSmokeEnv('shadow', async () => {
+        await withSmokeEnv(async () => {
           await expect(createDaemonHostProcess({
             userDataDir,
             daemonStateDirectory,
@@ -149,7 +144,7 @@ describe('Authoritative daemon startup and legacy import', () => {
 
     // Persist the large intent in the authoritative database.
     let run1Id = ''
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -198,7 +193,7 @@ describe('Authoritative daemon startup and legacy import', () => {
 
     // Settle a second run after a restart while the former setting is absent.
     let run2Id = ''
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -227,7 +222,7 @@ describe('Authoritative daemon startup and legacy import', () => {
     })
 
     // Restart again and verify all three runs in the durable projection.
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -291,7 +286,7 @@ describe('Authoritative daemon startup and legacy import', () => {
       seedStore.close()
     }
 
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       await expect(createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -353,7 +348,7 @@ describe('Authoritative daemon startup and legacy import', () => {
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
     const logs: string[] = []
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,

@@ -13,7 +13,7 @@ export async function runSidebarActivity({ driver, options }) {
   check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
   if (options.scenario === 'activity') {
     // Host-side activity changes while the user stays in the local composer.
-    // No explicit refresh: the shared loader must observe starts and stops itself.
+    // Publish the remote catalog and run changes while the local composer stays open.
     await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000; window.publishFixtureRemoteUpdate({ catalog: true, runs: true })')
     await wait('document.querySelector(".sb-remote-proj .sb-sess.running .sb-running") != null', 'background remote session shows a running spinner')
     check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')

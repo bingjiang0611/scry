@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
 import { startDaemonRunEvents } from '../main/daemon-run-events'
 import { DaemonRunRuntime } from '../main/daemon-run-runtime'
@@ -12,17 +12,13 @@ import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonica
 import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
-const savedMode = process.env.SCRY_ORCHESTRATION
-
 afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
+  vi.unstubAllEnvs()
   cleanupTempDirs()
 })
 
 describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
   it('returns the legacy page from the actual host cache with the detail snapshot', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     mkdirSync(userDataDir)
@@ -82,7 +78,6 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
   }, 30_000)
 
   it('keeps the App run identity in the sidebar after authoritative settlement and restart', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
     let daemon = await startTestDaemon()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
     const runtime = new DaemonRunRuntime({ transport, send: () => undefined })
@@ -144,7 +139,6 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
   }, 30_000)
 
   it('exposes subscribe=1 on daemonInfo, streams events and W11 hostNotice on the local endpoint and requires a configured handler', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
     const daemon = await startTestDaemon()
     try {
       const info = await daemon.request({ op: 'daemonInfo' })
@@ -206,7 +200,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
 
   it('keeps the subscription authoritative when a former mode value is still set', async () => {
     for (const mode of ['off', 'shadow'] as const) {
-      process.env.SCRY_ORCHESTRATION = mode
+      vi.stubEnv('SCRY_ORCHESTRATION', mode)
       const daemon = await startTestDaemon()
       try {
         const info = await daemon.request({ op: 'daemonInfo' })

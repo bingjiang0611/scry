@@ -14,19 +14,16 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 afterEach(cleanupTempDirs)
 
 
-async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
+async function withSmokeEnv<T>(fn: () => Promise<T>): Promise<T> {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) process.env.SCRY_ORCHESTRATION = 'off'
-  else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   try {
     return await fn()
@@ -38,8 +35,6 @@ async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): 
     else process.env.SCRY_REMOTE_RELAY_ENABLED = saved.relay
     if (saved.smoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -107,7 +102,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     })
     expect(adopted.turns.map((t) => t.ordinal)).toEqual([1, 2])
 
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -147,7 +142,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
 
     // Create a source conversation with 2 real settled turns, then fork it via ConversationStore
     let forkedId = ''
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -189,7 +184,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       }
     })
 
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -228,7 +223,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
 
     // Record the first two turns before the first restart.
     let convId = ''
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -256,7 +251,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
 
     // Start a new daemon and send turn 3.
     let turn3RunId = ''
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -285,7 +280,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     })
 
     // Restart again and send turn 4.
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,

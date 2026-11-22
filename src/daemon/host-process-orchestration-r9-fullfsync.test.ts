@@ -18,14 +18,12 @@ function saveEnv() {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     fullfsync: process.env.SCRY_ORCHESTRATION_FULLFSYNC,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   delete process.env.SCRY_ORCHESTRATION_FULLFSYNC
   process.argv.push('--remote-debugging-port=0')
   return () => {
@@ -36,8 +34,6 @@ function saveEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
     if (saved.fullfsync === undefined) delete process.env.SCRY_ORCHESTRATION_FULLFSYNC
     else process.env.SCRY_ORCHESTRATION_FULLFSYNC = saved.fullfsync
   }
@@ -45,7 +41,7 @@ function saveEnv() {
 
 
 describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit immediate dispatch', () => {
-  it('enables fullfsync=ON and checkpoint_fullfsync=ON by default in on mode, merges immediate submit+dispatch into 1 commit, and preserves trust-gate fallback', async () => {
+  it('enables fullfsync=ON and checkpoint_fullfsync=ON by default, merges immediate submit+dispatch into 1 commit, and preserves trust-gate fallback', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -69,7 +65,7 @@ describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit im
       })
 
       const authority = host.orchestrationAuthority!
-      // Maintainer decision (2026-11-20): both fullfsync and checkpoint_fullfsync ON by default in on mode.
+      // Maintainer decision (2026-11-20): both fullfsync and checkpoint_fullfsync ON by default.
       expect(authority.fullfsync).toBe(true)
       expect(authority.checkpointFullfsync).toBe(true)
       expect(authority.sink.handle.db.pragma('fullfsync', { simple: true })).toBe(1)

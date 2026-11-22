@@ -15,19 +15,16 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 
 afterEach(cleanupTempDirs)
 
-function withOrchEnv(mode: 'on' | 'off' | 'shadow' | undefined) {
+function setSmokeEnv() {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) process.env.SCRY_ORCHESTRATION = 'off'
-  else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -37,8 +34,6 @@ function withOrchEnv(mode: 'on' | 'off' | 'shadow' | undefined) {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -130,7 +125,7 @@ describe('authority promotion and fail-closed startup', () => {
     writeFileSync(logPath, `${readFileSync(logPath, 'utf8')}${extraLines.join('\n')}\n`, { mode: 0o600 })
     expect(existsSync(snapshotPath)).toBe(false)
 
-    const restore = withOrchEnv(undefined)
+    const restore = setSmokeEnv()
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await startHost(userDataDir, daemonDir)
@@ -182,7 +177,7 @@ describe('authority promotion and fail-closed startup', () => {
     writeFileSync(db, 'NOT A VALID SQLITE DATABASE CORRUPT BYTES!!!', { mode: 0o600 })
     const dbShaBefore = sha256File(db)
 
-    const restore = withOrchEnv(undefined)
+    const restore = setSmokeEnv()
     try {
       await expect(startHost(userDataDir, daemonDir)).rejects.toThrow(/database|SQLITE_NOTADB/)
       expect(existsSync(join(daemonDir, 'local.sock'))).toBe(false)

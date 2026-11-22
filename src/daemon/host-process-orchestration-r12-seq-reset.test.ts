@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
@@ -10,20 +10,21 @@ import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitFor
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
-afterEach(cleanupTempDirs)
+afterEach(() => {
+  vi.unstubAllEnvs()
+  cleanupTempDirs()
+})
 
-function withOrchEnv(mode: 'on' | 'off') {
+function setSmokeEnv() {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -33,8 +34,6 @@ function withOrchEnv(mode: 'on' | 'off') {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -62,7 +61,7 @@ describe('durable v3 cursor and receipt recovery', () => {
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    const restore = withOrchEnv('on')
+    const restore = setSmokeEnv()
     let host1: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     let host2: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
@@ -114,16 +113,16 @@ describe('durable v3 cursor and receipt recovery', () => {
     }
   }, 30_000)
 
-  it('several authoritative restarts retain runs and never reuse durable sequence numbers', async () => {
+  it('retains runs and sequence numbers across a restart with the stale off value', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
-    const ws = join(root, 'ws-on-off-on')
+    const ws = join(root, 'ws-restarts')
     mkdirSync(ws, { recursive: true, mode: 0o700 })
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    const restore = withOrchEnv('on')
+    const restore = setSmokeEnv()
     let host1: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     let hostOff: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     let host2: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
@@ -135,7 +134,7 @@ describe('durable v3 cursor and receipt recovery', () => {
       const sub1 = await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: intent1,
-        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 1 on' })
+        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 1' })
       })
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
       const r1 = host1.orchestrationAuthority!.sink.listEvents().at(-1)!.seq
@@ -143,13 +142,13 @@ describe('durable v3 cursor and receipt recovery', () => {
       await host1.dispose()
       host1 = undefined
 
-      process.env.SCRY_ORCHESTRATION = 'off'
+      vi.stubEnv('SCRY_ORCHESTRATION', 'off')
       hostOff = await startHost(userDataDir, daemonDir)
       const intent2 = randomUUID()
       const sub2 = await call(hostOff.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: intent2,
-        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 2 off' })
+        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 2' })
       })
       expect(sub2.seq).toBeGreaterThan(r1)
       expect(await waitTerminal(hostOff.channel.socketPath, ca, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
@@ -158,13 +157,13 @@ describe('durable v3 cursor and receipt recovery', () => {
       await hostOff.dispose()
       hostOff = undefined
 
-      process.env.SCRY_ORCHESTRATION = 'on'
+      vi.unstubAllEnvs()
       host2 = await startHost(userDataDir, daemonDir)
       const intent3 = randomUUID()
       const sub3 = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: intent3,
-        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 3 on' })
+        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'phase 3' })
       })
       expect(sub3.seq).toBeGreaterThan(offMaxSeq)
       expect(await waitTerminal(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, sub3.runId)).toBe('settled')

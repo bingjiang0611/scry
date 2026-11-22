@@ -149,10 +149,8 @@ describe('daemon graceful dispose cleans up pooled provider private env director
 
     const savedRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
     const savedSmoke = process.env.SCRY_ELECTRON_SMOKE_PROVIDER
-    const savedOrch = process.env.SCRY_ORCHESTRATION
     process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
     delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
-    process.env.SCRY_ORCHESTRATION = 'shadow'
 
     const logs: string[] = []
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
@@ -192,8 +190,6 @@ describe('daemon graceful dispose cleans up pooled provider private env director
       else process.env.SCRY_REMOTE_RELAY_ENABLED = savedRelay
       if (savedSmoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
       else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = savedSmoke
-      if (savedOrch === undefined) delete process.env.SCRY_ORCHESTRATION
-      else process.env.SCRY_ORCHESTRATION = savedOrch
     }
   })
 })

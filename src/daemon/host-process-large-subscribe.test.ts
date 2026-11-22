@@ -8,16 +8,9 @@ import { upsertTraceArchiveTurn } from '../main/transcript-archive'
 import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
-const savedMode = process.env.SCRY_ORCHESTRATION
-
-afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
-  cleanupTempDirs()
-})
+afterEach(cleanupTempDirs)
 
 it('returns a large detail page in bounded mTLS chunks and invalidates a deleted session’s continuations', async () => {
-  process.env.SCRY_ORCHESTRATION = 'on'
   const root = tempDir()
   const userDataDir = join(root, 'userData')
   mkdirSync(userDataDir)

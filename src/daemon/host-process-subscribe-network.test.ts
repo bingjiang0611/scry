@@ -13,11 +13,8 @@ import { upsertTraceArchiveTurn } from '../main/transcript-archive'
 import { assembleByteChunks } from '../main/remote/desktop-byte-chunks'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 
-const savedMode = process.env.SCRY_ORCHESTRATION
 const savedCli = process.env.SCRY_EXPERIMENTAL_HOST_CLI
 afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
   if (savedCli === undefined) delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
   else process.env.SCRY_EXPERIMENTAL_HOST_CLI = savedCli
   cleanupTempDirs()
@@ -39,7 +36,6 @@ async function callTcp(port: number, ca: string, cert: string, key: string, requ
 
 describe('v3 subscribe on the authenticated network endpoint', () => {
   it('negotiates the capability and filters durable rows and volatile hints', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
     process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
     const userDataDir = tempDir()
     const workspace = realpathSync(tempDir())

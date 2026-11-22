@@ -62,7 +62,6 @@ afterEach(() => {
 })
 
 it('references each completed Provider turn’s own native bytes across consecutive sends', async () => {
-  vi.stubEnv('SCRY_ORCHESTRATION', 'on')
   vi.stubEnv('SCRY_ELECTRON_SMOKE_CONVERSATIONS', '1')
   const root = tempDir()
   const home = join(root, 'home')
@@ -110,7 +109,6 @@ it('references each completed Provider turn’s own native bytes across consecut
 }, 30_000)
 
 it('drains a settled run’s pending transcript write before closing SQLite', async () => {
-  vi.stubEnv('SCRY_ORCHESTRATION', 'on')
   vi.stubEnv('SCRY_ELECTRON_SMOKE_CONVERSATIONS', '1')
   const root = tempDir()
   const home = join(root, 'home')
@@ -149,7 +147,6 @@ it('drains a settled run’s pending transcript write before closing SQLite', as
 }, 30_000)
 
 it('omits a transcript whose encoded path collides with another canonical workspace', async () => {
-  vi.stubEnv('SCRY_ORCHESTRATION', 'on')
   vi.stubEnv('SCRY_ELECTRON_SMOKE_CONVERSATIONS', '1')
   const root = tempDir()
   const home = join(root, 'home')

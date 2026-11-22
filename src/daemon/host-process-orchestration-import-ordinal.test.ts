@@ -14,19 +14,16 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 afterEach(cleanupTempDirs)
 
 
-async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
+async function withSmokeEnv<T>(fn: () => Promise<T>): Promise<T> {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   try {
     return await fn()
@@ -38,8 +35,6 @@ async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): 
     else process.env.SCRY_REMOTE_RELAY_ENABLED = saved.relay
     if (saved.smoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -147,7 +142,7 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
       { mode: 0o600 }
     )
 
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -244,7 +239,7 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
     }
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       let releaseBackfill: (() => void) | undefined
       const pauseBackfill = new Promise<void>((resolve) => {
         releaseBackfill = resolve

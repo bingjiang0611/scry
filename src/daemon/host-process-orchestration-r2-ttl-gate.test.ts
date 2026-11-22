@@ -20,14 +20,12 @@ function setOnEnv(pendingTtlMs?: number) {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     ttl: process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   if (pendingTtlMs !== undefined) process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS = String(pendingTtlMs)
   else delete process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS
   process.argv.push('--remote-debugging-port=0')
@@ -39,8 +37,6 @@ function setOnEnv(pendingTtlMs?: number) {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
     if (saved.ttl === undefined) delete process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS
     else process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS = saved.ttl
   }

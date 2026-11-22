@@ -11,16 +11,9 @@ import { createRecentFoldersStore } from '../main/app-store'
 
 const sessionId = 'old-session'
 const runId = 'legacy-unbound-run'
-const savedMode = process.env.SCRY_ORCHESTRATION
-
-afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
-  cleanupTempDirs()
-})
+afterEach(cleanupTempDirs)
 
 async function startLegacySession(corruptDatabase = false) {
-  process.env.SCRY_ORCHESTRATION = 'on'
   const root = tempDir()
   const userDataDir = join(root, 'userData')
   const workspace = join(root, 'workspace')
@@ -91,7 +84,6 @@ it('returns unavailable and preserves the retry catalog when scry.db cannot be o
 }, 30_000)
 
 it('erases the private projection when an authorized unified conversation is deleted', async () => {
-  process.env.SCRY_ORCHESTRATION = 'on'
   const daemon = await startTestDaemon()
   try {
     const sink = daemon.host.orchestrationAuthority!.sink
@@ -134,7 +126,6 @@ it('erases the private projection when an authorized unified conversation is del
 }, 30_000)
 
 it('uses the unified conversation projection for the sidebar and the detail first page', async () => {
-  process.env.SCRY_ORCHESTRATION = 'on'
   const daemon = await startTestDaemon()
   try {
     const sink = daemon.host.orchestrationAuthority!.sink
@@ -194,7 +185,6 @@ it('includes an old empty unified conversation in the first subscription after e
 }, 30_000)
 
 it('keeps the committed conversation ID when projecting its metadata fails', async () => {
-  process.env.SCRY_ORCHESTRATION = 'on'
   const daemon = await startTestDaemon()
   let id: string
   try {

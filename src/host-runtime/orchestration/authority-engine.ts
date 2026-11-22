@@ -52,7 +52,7 @@ export type AuthorityBeforeDispatchResult =
   | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
 
 /**
- * P4-2 authoritative orchestration engine (`SCRY_ORCHESTRATION=on`).
+ * Authoritative orchestration engine.
  */
 export class AuthorityEngine {
   readonly sink: EventSink
