@@ -31,16 +31,16 @@ extension RemoteRunStore {
       G0Transport.RunControlOption(id: "full_access", label: "完全访问", description: "仅由设备所有者显式选择")
     ]
     let availableProviders = [
-      G0Transport.RunProviderRef(id: "codex", label: "Codex", available: true, modelId: "gpt-5.6-sol",
-        models: [G0Transport.RunModelOption(id: "gpt-5.6-sol", label: "GPT-5.6", isDefault: true, efforts: efforts)],
+      G0Transport.RunProviderRef(id: "codex", label: "Codex", available: true, modelId: "example-model-a",
+        models: [G0Transport.RunModelOption(id: "example-model-a", label: "示例模型 A", isDefault: true, efforts: efforts)],
         efforts: efforts, permissions: permissions),
       G0Transport.RunProviderRef(id: "pi", label: "Pi · Rotom", available: true, agentProfileId: "pi:rotom",
-        modelId: "gpt-6-astra", models: [
-          G0Transport.RunModelOption(id: "gpt-6-astra", providerId: "openai", label: "GPT-6 Astra", isDefault: true, efforts: efforts),
-          G0Transport.RunModelOption(id: "claude-opus", providerId: "anthropic", label: "Claude Opus", efforts: efforts)
+        modelId: "example-model-b", models: [
+          G0Transport.RunModelOption(id: "example-model-b", providerId: "openai", label: "示例模型 B", isDefault: true, efforts: efforts),
+          G0Transport.RunModelOption(id: "example-model-c", providerId: "anthropic", label: "示例模型 C", efforts: efforts)
         ], efforts: efforts, permissions: permissions),
-      G0Transport.RunProviderRef(id: "qoder", label: "Qoder", available: true, modelId: "ultimate",
-        models: [G0Transport.RunModelOption(id: "ultimate", label: "Ultimate", isDefault: true)], permissions: permissions),
+      G0Transport.RunProviderRef(id: "qoder", label: "Qoder", available: true, modelId: "example-model-d",
+        models: [G0Transport.RunModelOption(id: "example-model-d", label: "示例模型 D", isDefault: true)], permissions: permissions),
       G0Transport.RunProviderRef(id: "opencode", label: "OpenCode", available: true, modelId: nil,
         models: [], permissions: [permissions[0], permissions[2]])
     ]
