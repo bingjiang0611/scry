@@ -6,6 +6,33 @@ import type { Evidence } from '../shared/turn-record'
 import { transcriptPath } from '../main/transcript-archive-paths'
 import { observeNativeRunTranscript } from './orchestration-run-transcript'
 
+const rewrite = vi.hoisted(() => ({ path: '', bytes: '', injected: false }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const file = await actual.open(...args)
+      if (args[0] === rewrite.path && !rewrite.injected) {
+        const read = file.read.bind(file)
+        Object.defineProperty(file, 'read', {
+          async value(buffer: Buffer, offset: number, length: number, position: number) {
+            const result = await read(buffer, offset, length, position)
+            if (!rewrite.injected) {
+              rewrite.injected = true
+              await actual.writeFile(rewrite.path, rewrite.bytes)
+              await actual.utimes(rewrite.path, 1, 1)
+            }
+            return result
+          }
+        })
+      }
+      return file
+    }
+  }
+})
+
 vi.mock('../host-runtime/orchestration/transcript-interval', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../host-runtime/orchestration/transcript-interval')>()
   return {
@@ -17,7 +44,7 @@ vi.mock('../host-runtime/orchestration/transcript-interval', async (importOrigin
   }
 })
 
-it.each(['new', 'preexisting', 'undated'] as const)('uses identity and transcript time with zero birthtime: %s', async mode => {
+it.each(['new', 'preexisting', 'undated', 'rewritten'] as const)('uses identity and transcript time with zero birthtime: %s', async mode => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'scry-transcript-birthtime-')))
   const cwd = join(home, 'workspace')
   const sessionId = 'bb91df54-79c3-43e5-bead-f3df063d34fa'
@@ -31,7 +58,7 @@ it.each(['new', 'preexisting', 'undated'] as const)('uses identity and transcrip
       cwd, sessionId, type: 'user', ...(at === undefined ? {} : { timestamp: new Date(at).toISOString() }),
       message: { role: 'user', content: 'transcript fixture' }
     }) + '\n'
-    const first = row(mode === 'undated' ? undefined : startedAt + (mode === 'new' ? 1_000 : -1_000))
+    const first = row(mode === 'undated' ? undefined : startedAt + (mode === 'preexisting' ? -1_000 : 1_000))
     const next = row(startedAt + 2_000)
     const content = first + next
     if (mode === 'preexisting') await writeFile(file, first)
@@ -40,6 +67,11 @@ it.each(['new', 'preexisting', 'undated'] as const)('uses identity and transcrip
       transcript => evidence.push(transcript), message => { throw new Error(message) })
     if (mode === 'preexisting') await appendFile(file, next)
     else await writeFile(file, content)
+    if (mode === 'rewritten') {
+      rewrite.path = file
+      rewrite.bytes = row(startedAt - 1_000) + next
+      expect(Buffer.byteLength(rewrite.bytes)).toBe(Buffer.byteLength(content))
+    }
     await finish(sessionId)
     expect(evidence).toHaveLength(1)
     if (mode === 'new') {
@@ -49,8 +81,11 @@ it.each(['new', 'preexisting', 'undated'] as const)('uses identity and transcrip
       })
     } else {
       expect(await evidence[0]).toMatchObject({ status: 'unavailable', omissionReason: 'transcript_frontier_unavailable' })
+      if (mode === 'rewritten') expect(rewrite.injected).toBe(true)
     }
   } finally {
+    rewrite.path = ''
+    rewrite.injected = false
     vi.restoreAllMocks()
     await rm(home, { recursive: true, force: true })
   }

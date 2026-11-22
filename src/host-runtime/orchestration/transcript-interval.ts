@@ -18,6 +18,7 @@ export interface TranscriptExtent {
   inode: bigint
   size: number
   mtimeNs: bigint
+  ctimeNs?: bigint
   birthtimeNs: bigint
 }
 
@@ -25,7 +26,8 @@ export const catalogFrontierKey = (sessionKey: string): string => `catalog_trans
 
 function extent(stat: BigIntStats): TranscriptExtent | undefined {
   if (!stat.isFile() || stat.size > BigInt(Number.MAX_SAFE_INTEGER)) return undefined
-  return { device: stat.dev, inode: stat.ino, size: Number(stat.size), mtimeNs: stat.mtimeNs, birthtimeNs: stat.birthtimeNs }
+  return { device: stat.dev, inode: stat.ino, size: Number(stat.size), mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs,
+    birthtimeNs: stat.birthtimeNs }
 }
 
 function isMissing(error: unknown): boolean {
@@ -55,64 +57,52 @@ async function openTranscript(source: TranscriptSource): Promise<FileHandle | un
   }
 }
 
-async function hashRange(file: FileHandle, start: number, end: number, bytes?: Buffer): Promise<string | undefined> {
+async function hashRange(
+  file: FileHandle, start: number, end: number, bytes?: Buffer, acceptPrefix?: (prefix: Buffer) => boolean
+): Promise<string | undefined> {
   const hash = createHash('sha256')
   const chunk = bytes ?? Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, end - start))
   for (let position = start; position < end;) {
     const offset = bytes ? position - start : 0
     const { bytesRead } = await file.read(chunk, offset, Math.min(READ_CHUNK_BYTES, end - position), position)
     if (bytesRead === 0) return undefined
-    hash.update(chunk.subarray(offset, offset + bytesRead))
+    const read = chunk.subarray(offset, offset + bytesRead)
+    if (position === start && acceptPrefix && !acceptPrefix(read)) return undefined
+    hash.update(read)
     position += bytesRead
   }
   return hash.digest('hex')
 }
 
-// Without filesystem creation time, the first native timestamp is usable only
-// while observing the same file and within the previously captured extent.
-export async function transcriptStartsAfter(
-  source: TranscriptSource,
-  through: TranscriptExtent,
-  startedAt: bigint
-): Promise<boolean> {
-  if (through.inode <= 0n || through.mtimeNs <= startedAt || through.size === 0) return false
-  const file = await openTranscript(source)
-  if (!file) return false
-  try {
-    const observed = extent(await file.stat({ bigint: true }))
-    if (!observed || observed.device !== through.device || observed.inode !== through.inode || observed.size < through.size) {
-      return false
-    }
-    const buffer = Buffer.allocUnsafe(Math.min(16 * 1024, through.size))
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
-    const firstLine = buffer.subarray(0, bytesRead)
-    const lineEnd = firstLine.indexOf(0x0a)
-    if (lineEnd < 0) return false
-    let timestamp: unknown
-    try { timestamp = (JSON.parse(firstLine.toString('utf8', 0, lineEnd)) as { timestamp?: unknown } | null)?.timestamp }
-    catch (error) {
-      if (error instanceof SyntaxError) return false
-      throw error
-    }
-    if (typeof timestamp !== 'string') return false
-    const milliseconds = Date.parse(timestamp)
-    if (!Number.isFinite(milliseconds)) return false
-    const firstAt = BigInt(milliseconds) * 1_000_000n
-    return firstAt > startedAt && firstAt <= through.mtimeNs
-  } finally {
-    await file.close()
+// Call only with the prefix bytes about to be hashed for the reference.
+function hasNewNativeStart(bytes: Buffer, startedAt: bigint, mtimeNs: bigint): boolean {
+  const prefix = bytes.subarray(0, 16 * 1024)
+  const lineEnd = prefix.indexOf(0x0a)
+  if (lineEnd < 0) return false
+  let timestamp: unknown
+  try { timestamp = (JSON.parse(prefix.toString('utf8', 0, lineEnd)) as { timestamp?: unknown } | null)?.timestamp }
+  catch (error) {
+    if (error instanceof SyntaxError) return false
+    throw error
   }
+  if (typeof timestamp !== 'string') return false
+  const milliseconds = Date.parse(timestamp)
+  if (!Number.isFinite(milliseconds)) return false
+  const firstAt = BigInt(milliseconds) * 1_000_000n
+  return firstAt > startedAt && firstAt <= mtimeNs
 }
 
 export async function captureTranscriptInterval(
   source: TranscriptSource,
   before?: TranscriptExtent,
-  through?: TranscriptExtent
+  through?: TranscriptExtent,
+  verifyStartAfter?: bigint
 ): Promise<Evidence<string>> {
   const file = await openTranscript(source)
   if (!file) return unavailable('source_removed')
   try {
-    const after = extent(await file.stat({ bigint: true }))
+    const opened = await file.stat({ bigint: true })
+    const after = extent(opened)
     const start = before?.size ?? 0
     const end = through?.size ?? after?.size ?? 0
     if (!after || after.size < end || end < start ||
@@ -122,8 +112,20 @@ export async function captureTranscriptInterval(
     }
     if (end === start) return unavailable('no_new_transcript_bytes')
     if (end - start > MAX_RESOLVED_BYTES) return unavailable('transcript_interval_too_large')
-    const digest = await hashRange(file, start, end)
-    if (!digest) return unavailable('source_removed')
+    const verifiedStart = verifyStartAfter !== undefined
+    if (verifiedStart && (!through || start !== 0 || after.inode <= 0n ||
+        after.size !== through.size || after.mtimeNs !== through.mtimeNs || after.ctimeNs !== through.ctimeNs)) {
+      return unavailable('transcript_frontier_unavailable')
+    }
+    const digest = await hashRange(file, start, end, undefined,
+      verifiedStart ? prefix => hasNewNativeStart(prefix, verifyStartAfter, after.mtimeNs) : undefined)
+    if (!digest) return unavailable(verifiedStart ? 'transcript_frontier_unavailable' : 'source_removed')
+    if (verifiedStart) {
+      const finished = await file.stat({ bigint: true })
+      if (finished.size !== opened.size || finished.mtimeNs !== opened.mtimeNs || finished.ctimeNs !== opened.ctimeNs) {
+        return unavailable('transcript_frontier_unavailable')
+      }
+    }
     const reference = `${referencePrefix(source)}${start}-${end},sha256=${digest}`
     return available(reference, [reference])
   } finally {

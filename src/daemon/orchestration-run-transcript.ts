@@ -4,7 +4,7 @@ import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import {
-  captureTranscriptInterval, readTranscriptExtent, transcriptStartsAfter, type TranscriptExtent, type TranscriptSource
+  captureTranscriptInterval, readTranscriptExtent, type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
 import { locateOwnedTranscript, verifiesNativeTranscript } from './orchestration-native-source'
 
@@ -94,10 +94,8 @@ export async function observeNativeRunTranscript(
       // a bounded range can finish independently of the turn and its archive.
       const capture = setImmediate().then(async () => {
         if (!await verifiesNativeTranscript(homeDir, cwd, source)) return unavailable<string>('transcript_identity_unavailable')
-        if (needsTimestamp && !await transcriptStartsAfter(source, through, startedAt)) {
-          return unavailable<string>('transcript_frontier_unavailable')
-        }
-        return captureTranscriptInterval(source, resumedHere ? before : undefined, through)
+        return captureTranscriptInterval(source, resumedHere ? before : undefined, through,
+          needsTimestamp ? startedAt : undefined)
       })
       save(capture.then(
         (transcript) => {
