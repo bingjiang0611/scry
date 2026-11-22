@@ -120,7 +120,9 @@ describe('WorktreeSetupCard', () => {
     expect(html).toContain(copy.creatingWorktree)
     expect(html).toContain('50%')
     expect(html).toContain(copy.waitingForWorktreeSetup)
+    expect(html).toContain('is-worktree-waiting')
     expect(html).not.toContain('今天想在')
-    expect(html).not.toContain('draft stays durable in store')
+    // Real textarea DOM value stays durable until ACK (masked visually by waiting overlay).
+    expect(html).toContain('draft stays durable in store')
   })
 })

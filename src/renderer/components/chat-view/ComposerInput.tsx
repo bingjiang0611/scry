@@ -194,14 +194,14 @@ export function ComposerInput({
             </button>
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          className="input"
-          aria-label="描述任务"
-          aria-describedby={composerStatus ? 'composer-status' : undefined}
-          value={workspaceSetupActive ? '' : input}
-          placeholder={workspaceSetupActive ? workspaceCopy.waitingForWorktreeSetup : undefined}
-          disabled={workspaceSetupActive}
+        <div className={workspaceSetupActive ? 'composer-input-field is-worktree-waiting' : 'composer-input-field'}>
+          <textarea
+            ref={textareaRef}
+            className="input"
+            aria-label="描述任务"
+            aria-describedby={composerStatus ? 'composer-status' : undefined}
+            value={input}
+            disabled={workspaceSetupActive}
           onChange={(event) => {
             resetPromptHistory()
             onInput(event.target.value)
@@ -308,6 +308,12 @@ export function ComposerInput({
             }
           }}
         />
+          {workspaceSetupActive && (
+            <span className="composer-waiting-placeholder" aria-hidden="true">
+              {workspaceCopy.waitingForWorktreeSetup}
+            </span>
+          )}
+        </div>
         {composerStatus && (
           <div
             id="composer-status"
