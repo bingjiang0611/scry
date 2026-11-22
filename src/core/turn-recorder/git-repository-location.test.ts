@@ -3,10 +3,16 @@ import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeTurnDiffSnapshot } from '../../shared/turn-diff'
+import { aggregateTurnEvidence } from './aggregate'
 import { beginGitTurnDiff, finishGitTurnDiff } from './git'
-import { normalizeGitOrigin, readGitRepositoryLocation, type GitRepositoryLocation } from './git-repository-location'
+import { normalizeGitOrigin, readGitRepositoryLocation, sampleGitRepositoryLocation, type GitRepositoryLocation } from './git-repository-location'
+
+vi.mock('./git-repository-location.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./git-repository-location.js')>()
+  return { ...actual, sampleGitRepositoryLocation: vi.fn(actual.sampleGitRepositoryLocation) }
+})
 
 const exec = promisify(execFile)
 
@@ -60,6 +66,24 @@ describe('Git repository location from disk', () => {
       branch: 'feature/first', branchAfter: 'feature/second', commitBefore: oid, commitAfter,
       remote: 'example.invalid/group/repo'
     })
+  })
+
+  it('records the end branch and commit for an unchanged turn after an empty early sample', async () => {
+    await init()
+    const capture = await beginGitTurnDiff(root)
+    const location = vi.fn<() => GitRepositoryLocation>()
+      .mockReturnValueOnce({})
+      .mockReturnValue({ branch: 'feature/first', commit: oid })
+    vi.mocked(sampleGitRepositoryLocation).mockReturnValueOnce(location)
+    const onAfter = vi.fn()
+    const snapshot = await finishGitTurnDiff(capture, undefined, { onAfter })
+    expect(snapshot.collection?.strategy).toBe('unchanged')
+    expect(snapshot.files).toEqual([])
+    expect(onAfter).toHaveBeenCalledOnce()
+    const record = aggregateTurnEvidence({ events: [{
+      id: 'diff', runId: 'turn', ts: snapshot.afterAt, kind: 'harness', stage: 'turn_diff', turnDiff: snapshot
+    }] })
+    expect(record.diff.value?.[0].repositoryLocation).toMatchObject({ branchAfter: 'feature/first', commitAfter: oid })
   })
 
   it('samples the actual HEAD independently of a continuation baseline tree and records detached end', async () => {

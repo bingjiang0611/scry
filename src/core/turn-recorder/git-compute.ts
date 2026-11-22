@@ -216,7 +216,12 @@ export async function computeGitTurnDiff(
   const location = !sharedAfter && !options.workspaceSnapshot && capture.repoRoot
     ? sampleGitRepositoryLocation(capture.repoRoot, false) : undefined
   let repositoryEnd = sharedAfter?.repositoryEnd
-  const readEnd = () => repositoryEnd ??= location?.()
+  const readEnd = () => {
+    if (repositoryEnd) return repositoryEnd
+    const observed = location?.()
+    if (observed?.branch !== undefined || observed?.commit !== undefined) repositoryEnd = observed
+    return repositoryEnd
+  }
   const located = (snapshot: TurnDiffSnapshot): TurnDiffSnapshot =>
     withRepositoryLocation(snapshot, capture.repositoryStart, readEnd())
   if (!sharedAfter && capture.status === 'ready' && capture.beforeTree && capture.tempDir && capture.objectDir) {
