@@ -217,6 +217,31 @@
   line-height: 1.5;
 }
 
+.composer-input-field {
+  position: relative;
+}
+
+.composer-input-field.is-worktree-waiting .input {
+  color: transparent;
+  caret-color: transparent;
+  user-select: none;
+}
+
+.composer-waiting-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 8px 8px;
+  font-size: var(--text-base);
+  line-height: 1.55;
+  color: var(--dim2);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @keyframes worktree-setup-spin {
   to {
     transform: rotate(360deg);
