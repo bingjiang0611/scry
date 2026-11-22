@@ -1,10 +1,12 @@
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import type { ProviderContext } from '../shared/provider'
+import { isSessionProviderId } from '../main/app-store'
 import type { AppEvent } from '../main/remote/app-event-feed'
 import type { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
-import { SubscribeEngine } from '../host-runtime/orchestration/subscribe-engine'
+import { SubscribeEngine, type SubscribeEngineOptions } from '../host-runtime/orchestration/subscribe-engine'
 import { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 
 export interface AuthoritySubscribeRuntimeDeps {
@@ -12,6 +14,7 @@ export interface AuthoritySubscribeRuntimeDeps {
   authorizePeer: (peer: string) => void
   grantScope: (peer: string) => 'local' | 'remote'
   attentionSnapshot?: () => SessionAttentionSnapshot
+  readFirstPage?: SubscribeEngineOptions['readFirstPage']
 }
 
 /** Creates the volatile hint hub + commit wakeup binding for `SCRY_ORCHESTRATION=on`. */
@@ -35,9 +38,30 @@ export function createAuthoritySubscribeHandler(
     hub,
     hostId: deps.hostId,
     authorizePeer: deps.authorizePeer,
-    grantScope: deps.grantScope
+    grantScope: deps.grantScope,
+    readFirstPage: deps.readFirstPage
   })
   return (peer, request, signal) => engine.subscribe(peer, request, signal)
+}
+
+/** Resolves the existing native history page using the projected session identity. */
+export function createAuthorityDetailReader(
+  historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>
+): NonNullable<SubscribeEngineOptions['readFirstPage']> {
+  const load = historyChannels['agent:loadSession'] as
+    (event: undefined, context: ProviderContext) => Promise<{ page: import('../shared/orchestration-subscribe').SubscribeHistoryPage } | null>
+  return async (session, signal) => {
+    const { provider, profile, cwd, sessionKey } = session
+    if (session.conversationId || cwd === null || !isSessionProviderId(provider) || provider === 'legacy_unknown') return null
+    signal?.throwIfAborted()
+    const loaded = await load(undefined, {
+      providerId: provider,
+      agentProfileId: profile ?? undefined,
+      cwd,
+      externalSessionId: sessionKey
+    })
+    return loaded?.page ?? null
+  }
 }
 
 /** Updates in-memory live run binding/admission metadata in `SubscribeHub` without extra SQLite fsyncs. */

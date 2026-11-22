@@ -32,6 +32,7 @@ import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } 
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
+import { createAuthorityDetailReader } from './orchestration-authority-subscribe'
 import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
 import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
@@ -281,7 +282,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
         subscribe: orchestrationAuthority.createSubscribeHandler({
           hostId: () => remoteHostService?.hostId ?? '',
           authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
-          grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote'
+          grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote',
+          readFirstPage: createAuthorityDetailReader(historyChannels)
         })
       } : {}),
       log

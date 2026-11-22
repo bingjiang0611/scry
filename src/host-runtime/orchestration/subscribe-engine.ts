@@ -1,9 +1,11 @@
 import type {
   SubscribeActiveRunRow,
   SubscribeEventItem,
+  SubscribeHistoryPage,
   SubscribeReply,
   SubscribeRequest,
   SubscribeSessionRow,
+  SubscribeSessionRef,
   SubscribeSnapshot,
   SubscribeView
 } from '../../shared/orchestration-subscribe'
@@ -11,7 +13,7 @@ import type { EventSink } from './event-sink'
 import { mapEventRow } from './event-sink-statements'
 import { mapRunRow, mapSessionRow, mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
-import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow } from './types'
+import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type SessionProjectionRow } from './types'
 
 export const SUBSCRIBE_MAX_WAIT_MS = 25_000
 export const SUBSCRIBE_MAX_SCAN_GAP = 4_096
@@ -50,6 +52,7 @@ export interface SubscribeEngineOptions {
   authorizePeer: (peerCertSHA256: string) => void
   grantScope: (peerCertSHA256: string) => 'local' | 'remote'
   isRemoteCwdAuthorized?: (canonicalCwd: string) => boolean
+  readFirstPage?: (session: SessionProjectionRow, signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
   sessionsPageSize?: number
   clock?: () => number
 }
@@ -97,6 +100,7 @@ export class SubscribeEngine {
   readonly #authorizePeer: (peer: string) => void
   readonly #grantScope: (peer: string) => 'local' | 'remote'
   readonly #isRemoteCwdAuthorized: (cwd: string) => boolean
+  readonly #readFirstPage: SubscribeEngineOptions['readFirstPage']
   readonly #sessionsPageSize: number
   readonly #clock: () => number
 
@@ -107,6 +111,7 @@ export class SubscribeEngine {
     this.#authorizePeer = options.authorizePeer
     this.#grantScope = options.grantScope
     this.#isRemoteCwdAuthorized = options.isRemoteCwdAuthorized ?? (() => false)
+    this.#readFirstPage = options.readFirstPage
     this.#sessionsPageSize = Math.max(1, Math.min(500, options.sessionsPageSize ?? DEFAULT_SESSIONS_PAGE_SIZE))
     this.#clock = options.clock ?? (() => Date.now())
   }
@@ -122,6 +127,20 @@ export class SubscribeEngine {
         this.#authorizePeer(peer)
         const scope = this.#grantScope(peer)
         const reply = this.#evaluateOnce(peer, scope, views, request)
+        if (reply.mode === 'snapshot' && request.session && reply.snapshot.detail && this.#readFirstPage) {
+          const session = this.#detailSession(scope, request.session)
+          if (!session) return reply
+          const firstPage = await this.#readFirstPage(session, signal)
+          signal?.throwIfAborted()
+          this.#authorizePeer(peer)
+          const currentScope = this.#grantScope(peer)
+          const current = this.#detailSession(currentScope, request.session)
+          if (currentScope !== scope || !current || current.revSeq !== session.revSeq) {
+            return this.#evaluateOnce(peer, currentScope, views, { ...request, known: undefined })
+          }
+          if (firstPage) reply.snapshot.detail.firstPage = firstPage
+          return reply
+        }
         if (reply.mode !== 'idle' || (reply.hints && reply.hints.length > 0)) return reply
 
         const remaining = deadline - this.#clock()
@@ -269,7 +288,7 @@ export class SubscribeEngine {
       snapshot.activeRuns = { rows: this.#readActiveRunsSnapshot(scope) }
     }
     if (views.has('detail') && request.session) {
-      snapshot.detail = this.#readDetailSnapshot(scope, request.session.sessionKey)
+      snapshot.detail = this.#readDetailSnapshot(this.#detailSession(scope, request.session))
     }
     const hints = this.#hub.drainHints(peer, true, !request.known)
     return {
@@ -417,19 +436,25 @@ export class SubscribeEngine {
     return result
   }
 
-  #readDetailSnapshot(scope: 'local' | 'remote', sessionKey: string): NonNullable<SubscribeSnapshot['detail']> {
+  #detailSession(scope: 'local' | 'remote', ref: SubscribeSessionRef): SessionProjectionRow | undefined {
+    const session = this.#sink.getSession(ref.sessionKey)
+    if (!session || !this.#isCwdVisible(scope, session.cwd)) return undefined
+    if ((ref.cwd !== undefined && ref.cwd !== session.cwd) ||
+        (ref.providerId !== undefined && ref.providerId !== session.provider) ||
+        (ref.agentProfileId !== undefined && ref.agentProfileId !== session.profile)) return undefined
+    return session
+  }
+
+  #readDetailSnapshot(session: SessionProjectionRow | undefined): NonNullable<SubscribeSnapshot['detail']> {
+    if (!session) return { turns: [] }
     const db = this.#sink.handle.db
-    const session = this.#sink.getSession(sessionKey)
-    if (session && !this.#isCwdVisible(scope, session.cwd)) {
-      return { turns: [] }
-    }
     const rows = db
       .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? ORDER BY ordinal ASC')
-      .all(sessionKey) as Array<Record<string, unknown>>
+      .all(session.sessionKey) as Array<Record<string, unknown>>
     const turns = rows.map(mapTurnRow)
     return {
       turns,
-      ...(session?.legacy ? { legacyBefore: true as const } : {})
+      ...(session.legacy ? { legacyBefore: true as const } : {})
     }
   }
 

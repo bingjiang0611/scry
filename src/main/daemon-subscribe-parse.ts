@@ -8,6 +8,7 @@ import {
   type SubscribeActiveRunRow,
   type SubscribeEventItem,
   type SubscribeHint,
+  type SubscribeHistoryPage,
   type SubscribeReply,
   type SubscribeSessionRow,
   type SubscribeSnapshot
@@ -61,6 +62,15 @@ export function isDataUpdated(value: unknown): value is AgentDataUpdated {
 export function isAttentionSnapshot(value: unknown): value is SessionAttentionSnapshot {
   return record(value) && Number.isSafeInteger(value.revision) && Array.isArray(value.unreadSessionKeys) &&
     value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
+}
+
+function isHistoryPage(value: unknown): value is SubscribeHistoryPage {
+  if (!record(value) || !Array.isArray(value.turns) || !Number.isSafeInteger(value.offset) ||
+      !Number.isSafeInteger(value.totalTurns) || typeof value.hasOlder !== 'boolean' ||
+      (value.completeness !== 'complete' && value.completeness !== 'partial')) return false
+  const offset = value.offset as number
+  return offset >= 0 && offset + value.turns.length <= (value.totalTurns as number) &&
+    value.turns.every((turn) => record(turn) && typeof turn.userText === 'string' && Array.isArray(turn.items))
 }
 
 function parseHints(rawHints: unknown): SubscribeHint[] | undefined {
@@ -149,7 +159,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeRe
       snapshot.detail = {
         turns: rawSnap.detail.turns,
         ...(rawSnap.detail.legacyBefore === true ? { legacyBefore: true } : {}),
-        ...(rawSnap.detail.firstPage !== undefined ? { firstPage: rawSnap.detail.firstPage } : {})
+        ...(isHistoryPage(rawSnap.detail.firstPage) ? { firstPage: rawSnap.detail.firstPage } : {})
       }
     }
     return { ...base, mode: 'snapshot', snapshot }

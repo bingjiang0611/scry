@@ -49,7 +49,7 @@ export function importCatalogEntries(
   sink: EventSink,
   userDataDir: string,
   now: number,
-  batchSize: number
+  batchSize = 500
 ): { importedSessions: number; rejectedCommands: number; catalogSha256: string } {
   let importedSessions = 0
   let rejectedCommands = 0

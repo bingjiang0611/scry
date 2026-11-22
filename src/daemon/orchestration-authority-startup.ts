@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { ConversationStore } from '../main/conversation-store'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
+import { importCatalogEntries } from '../host-runtime/orchestration/legacy-catalog-and-repair'
 import {
   importLegacyStateIncrementally,
   loadLegacyLedgerPlanAsync,
@@ -114,6 +115,8 @@ export async function runAuthorityStartupSequence(options: {
   let h1DiskLastSeq = 0
   if (alreadyOnActive) {
     h1DiskLastSeq = await peekH1LastSeqAsync(userDataDir)
+    // Existing authoritative databases may have started with a catalog and no H1 entries.
+    if (!sink.getMeta('legacy_catalog_sha256')) importCatalogEntries(sink, userDataDir, Date.now())
   } else {
     let plan: LegacyLedgerPlan | undefined
     try {
@@ -161,7 +164,7 @@ export async function runAuthorityStartupSequence(options: {
         importComplete = new Promise<void>((resolve) => {
           resolveImportComplete = resolve
         })
-      } else if (plan.unimportedRuns.length > 0 || plan.lastSeq > plan.currentLedgerSeq) {
+      } else {
         importLegacyStateIncrementally({
           sink,
           userDataDir,
@@ -172,6 +175,8 @@ export async function runAuthorityStartupSequence(options: {
           resolveTurnOrdinal
         })
       }
+    } else {
+      importCatalogEntries(sink, userDataDir, Date.now())
     }
     sink.setMeta('orchestration_on_active', '1')
   }

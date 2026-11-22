@@ -1,7 +1,10 @@
 import 'reflect-metadata'
 import { randomUUID } from 'node:crypto'
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanupTempDirs } from './host-process.fixtures'
+import { upsertTraceArchiveTurn } from '../main/transcript-archive'
+import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
 const savedMode = process.env.SCRY_ORCHESTRATION
@@ -13,6 +16,43 @@ afterEach(() => {
 })
 
 describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
+  it('returns the legacy page from the actual host cache with the detail snapshot', async () => {
+    process.env.SCRY_ORCHESTRATION = 'on'
+    const root = tempDir()
+    const userDataDir = join(root, 'userData')
+    mkdirSync(userDataDir)
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const cwd = realpathSync(workspace)
+    const sessionId = 'old-native-session'
+    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
+      sessionId, providerId: 'codex', cwd, preview: '之前的对话', ts: 100
+    }]))
+    for (const [i, userText] of ['问题一', '问题二'].entries()) {
+      expect(upsertTraceArchiveTurn({
+        cwd, sessionId, providerId: 'codex', runtimeProvider: 'codex_cli', userDataDir,
+        turn: { runId: `legacy-run-${i}`, userText, items: [], done: true }
+      })).toBe(true)
+    }
+    const daemon = await startTestDaemon({ root })
+    try {
+      const response = await daemon.request({
+        op: 'subscribe', views: ['detail'], session: { sessionKey: sessionId }, waitMs: 0
+      })
+      expect(response.error).toBeUndefined()
+      expect(response.subscribe).toMatchObject({
+        mode: 'snapshot', snapshot: {
+          detail: {
+            legacyBefore: true, turns: [],
+            firstPage: { turns: [{ userText: '问题一' }, { userText: '问题二' }], offset: 0, totalTurns: 2, hasOlder: false }
+          }
+        }
+      })
+    } finally {
+      await daemon.dispose()
+    }
+  }, 30_000)
+
   it('exposes subscribe=1 on daemonInfo, streams events & W11 hostNotice on local endpoint, and rejects subscribe on network endpoint in on mode', async () => {
     process.env.SCRY_ORCHESTRATION = 'on'
     const daemon = await startTestDaemon()
