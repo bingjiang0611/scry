@@ -235,5 +235,6 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   return { test: 'conversation ownership production IPC', blocked, providerCalls: calls(),
     completedRunId: started.runId, completedArchiveAndWorkspaceWriteVerified: true,
     positiveControls: ['unowned fork', 'unowned deletion', 'unowned resume'],
-    orphanRecovery: 'pending -> unknown or not_sent (orchestration on), revision 1 -> 2', ownedEvidenceUnchanged: true }
+    orphanRecovery: `pending -> ${fixture.orchestration === 'on' ? 'not_sent (no orchestration intent)' : 'unknown'}, revision 1 -> 2`,
+    dispatchedOrphanRecovery: 'pending -> unknown, revision 1 -> 2', orchestration: fixture.orchestration, ownedEvidenceUnchanged: true }
 }
