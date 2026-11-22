@@ -246,14 +246,18 @@ try {
     `window.scry.activeRuns().then(runs => runs.length >= 0)`,
     (value) => value === true, 60_000)
   results.steps.daemonRelaunched = { ok: recovered === true }
-  // The supervisor relaunched the daemon from the same binary and entry.
-  results.steps.daemonProcessesAfterRestart = daemonProcessEvidence(daemonState, target)
   const afterRestart = await evaluate(`window.scry.start({ prompt: 'native composer complete daemon mode after restart', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
   if (!afterRestart || typeof afterRestart.runId !== 'string') fail('after-restart-start', JSON.stringify(afterRestart))
   const restartSettled = await until('after-restart-settled', evaluate,
     `window.scry.focusedRunSnapshot().then(run => run ? { done: run.done, runId: run.runId } : null)`,
     (value) => value && value.done === true)
   results.steps.afterRestartSettled = { ok: true, runId: restartSettled.runId }
+  // activeRuns can return cached data while the killed holder is still in daemon.lock.
+  // A newly started and settled run is the barrier before inspecting its replacement.
+  const replacement = daemonProcessEvidence(daemonState, target)
+  results.steps.daemonProcessesAfterRestart = replacement.ok && replacement.daemon.pid === lock.pid
+    ? { ...replacement, ok: false, reason: 'daemon_pid_unchanged' }
+    : replacement
 } catch (error) {
   results.error = String(error?.message ?? error)
 } finally {
