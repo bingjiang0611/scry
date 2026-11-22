@@ -117,6 +117,7 @@ export async function probeNativeComposer({ evaluate, wait, click, send, beginCo
       if (mode !== 'stop-immediate') await ready('visibleReadyAt')
       const stopWorkCounters = stopCounterStart ? await endCounters(stopCounterStart) : undefined
       const sendWorkCounters = await endCounters(sendCounterStart)
+      // Keep the earliest UI-side observation for diagnostics. The gate compares trace receipts on both builds.
       const state = await evaluate(`(() => {
         const state = window.__composerProbe
         const snapshot = performance.getEntriesByName('scry:history-snapshot-output', 'mark')
