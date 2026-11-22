@@ -46,7 +46,7 @@ const catalog = {
     { sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 },
     { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
   ],
-  providerEvidence: 'host_snapshot', managedWorktrees: 1, directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
+  subscribe: 1, providerEvidence: 'host_snapshot', managedWorktrees: 1, directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
   workbench: ${structureOnly ? '1' : 'undefined'},
   attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 }
 }

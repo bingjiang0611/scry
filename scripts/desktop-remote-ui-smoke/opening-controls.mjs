@@ -22,19 +22,19 @@ export async function runOpeningControls({ driver, options }) {
   await wait('!document.querySelector(".runtime-composer button.send").disabled', 'explicit controls retry restores send')
   await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
   const beforeLegacy = (await fixture()).providerControlsCalls.length
-  await read('window.desktopRemoteFixture.legacyProviderHost = true')
+  await read('window.desktopRemoteFixture.legacyProviderHost = true; window.refreshFixtureCatalog()')
   await wait('document.querySelector(".composer-notice")?.textContent.includes("旧版主机能力快照")', 'negotiated legacy snapshot is labelled')
   await click('textarea[aria-label="描述任务"]'); await insert('legacy-control-check')
   await wait('!document.querySelector(".runtime-composer button.send").disabled', 'legacy host preserves its existing send contract')
   check((await fixture()).providerControlsCalls.length === beforeLegacy, 'Legacy host received a selected-controls query')
   await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
-  await read('window.desktopRemoteFixture.legacyProviderHost = false')
+  await read('window.desktopRemoteFixture.legacyProviderHost = false; window.refreshFixtureCatalog()')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeLegacy, 'new-host selected lookup resumes after negotiation')
   await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"', 'new-host controls restored')
   if (options.openingOnly) {
   check(!await read('document.querySelector(".composer-notice")'), 'Successful controls still show the host-read banner')
   const beforeMetadataRefresh = (await fixture()).providerControlsCalls.length
-  await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1')
+  await read('window.desktopRemoteFixture.providerControlsObservedAt += 1000; window.desktopRemoteFixture.providerMetadataRevision += 1; window.refreshFixtureCatalog()')
   await wait('window.desktopRemoteFixture.providerControlsCalls.length > ' + beforeMetadataRefresh, 'same-context metadata invalidates selected controls')
   await wait('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default" && !document.querySelector(".composer-notice")', 'selected controls refresh without the removed banner')
   check(await read('document.querySelector(".model-effort-model")?.textContent === "qoder / Beta Default"'), 'Refresh silently changed selected model')

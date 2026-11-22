@@ -6,6 +6,10 @@ window.scry = {
   // Same minimal full-App bridge contract as session-selection-smoke.tsx.
   activeRun: async () => null, activeRuns: async () => [],
   workspaceSelection: unavailableWorkspaceSelection,
+  onDesktopRemoteUpdate(listener) {
+    remoteUpdateListeners.add(listener)
+    return () => remoteUpdateListeners.delete(listener)
+  },
   onTrace: noopSubscribe, onTurnDone: noopSubscribe, onError: noopSubscribe,
   listProjects: async () => [
     { cwd: '/fixture/pinned', name: 'Pinned local', pinnedAt: 1, mtime: 1, sessions: [], ...(${conversationNavigationOnly} ? { conversations: [navigationConversation] } : {}) },
@@ -49,6 +53,7 @@ for (const method of ['workspaceList', 'workspaceRead', 'workspaceReadKnown', 'w
   window.scry[method] = async () => { state.localWorkspaceCalls.push(method); throw new Error('Local workspace must not be reached: ' + method) }
 }
 window.desktopRemoteFixture = state
+window.publishFixtureRemoteUpdate = publishFixtureRemoteUpdate
 window.refreshFixtureCatalog = () => refreshRemoteCatalog(connection.id)
 window.refreshFixtureConnections = refreshDesktopConnections
 for (const type of ['keydown', 'change', 'mousedown', 'click']) document.addEventListener(type, event => {
