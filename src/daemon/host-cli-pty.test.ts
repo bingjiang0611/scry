@@ -80,7 +80,6 @@ describe('W11 P5-6: real node-pty interactive & piped host-cli execution', () =>
         dev.publicKeySHA256
       )
 
-      // 1. Piped non-TTY invocation MUST fail with exit 1 and host_cli_requires_tty.
       let pipedCode: number | null = null
       let pipedStderr = ''
       try {
@@ -98,7 +97,6 @@ describe('W11 P5-6: real node-pty interactive & piped host-cli execution', () =>
       expect(pipedCode).toBe(1)
       expect(pipedStderr).toContain('host_cli_requires_tty')
 
-      // 2. Real node-pty interactive approve succeeds and records approvedVia: 'host_cli'.
       const ptyResult = await new Promise<{ exitCode: number; output: string }>((resolve, reject) => {
         const term = pty.spawn(process.execPath, [bundlePath, 'approve'], {
           name: 'xterm-256color',
@@ -111,7 +109,7 @@ describe('W11 P5-6: real node-pty interactive & piped host-cli execution', () =>
         let sentFp = false
         let sentYes = false
         const timer = setTimeout(() => {
-          try { term.kill() } catch { /* ignore */ }
+          try { term.kill() } catch {}
           reject(new Error(`node-pty approve timed out. output:\n${output}`))
         }, 15_000)
         term.onData((chunk) => {

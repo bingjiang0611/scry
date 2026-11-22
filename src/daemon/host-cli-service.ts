@@ -121,7 +121,6 @@ export async function runHostCliRestart(ctx: HostCliServiceContext): Promise<num
   }
 
   if (prepared.status === 'running') {
-    // Best-effort read activeRuns; if unavailable or mismatched, ask confirmation conservatively (§3.8).
     let activeRuns: number | null = null
     const st = await callHostAdmin({
       daemonStateDirectory: stopDeps.paths.stateDirectory,

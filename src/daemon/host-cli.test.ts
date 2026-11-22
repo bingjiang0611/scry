@@ -68,7 +68,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     const userDataDir = join(root, 'userData')
     mkdirSync(userDataDir, { recursive: true })
 
-    // Experimental flag OFF -> exit 4
     const offInv = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' } })
     expect(await runHostCli(['invite', 'phone'], offInv.io)).toBe(4)
     expect(offInv.err()).toContain('SCRY_EXPERIMENTAL_HOST_CLI')
@@ -76,7 +75,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     const offApp = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' } })
     expect(await runHostCli(['approve'], offApp.io)).toBe(4)
 
-    // Daemon not running -> exit 2 and NEVER creates daemon.lock
     const notRunning = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' } })
     expect(await runHostCli(['status'], notRunning.io)).toBe(2)
     expect(existsSync(join(userDataDir, 'daemon', 'daemon.lock'))).toBe(false)
@@ -86,7 +84,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     const root = makeShortRoot()
     const userDataDir = join(root, 'userData')
 
-    // Non-TTY piped stdin/stdout -> host_cli_requires_tty (exit 1)
     const pipedInv = makeIo({ userDataDir, stdinIsTTY: false, stdoutIsTTY: false, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' } })
     expect(await runHostCli(['invite', 'phone'], pipedInv.io)).toBe(1)
     expect(pipedInv.err()).toContain('host_cli_requires_tty')
@@ -95,13 +92,11 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     expect(await runHostCli(['approve'], pipedApp.io)).toBe(1)
     expect(pipedApp.err()).toContain('host_cli_requires_tty')
 
-    // Forbidden non-interactive flags on approve
     const badFlag = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' } })
     expect(await runHostCli(['approve', '--yes'], badFlag.io)).toBe(1)
     const badFpFlag = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' } })
     expect(await runHostCli(['approve', '--fingerprint', 'a'.repeat(64)], badFpFlag.io)).toBe(1)
 
-    // Running markers -> host_cli_inside_agent (exit 1) for invite, approve, login-start enable
     for (const markerEnv of [
       { SCRY_EXPERIMENTAL_HOST_CLI: '1', SCRY_HOST_CHILD: 'run' },
       { SCRY_EXPERIMENTAL_HOST_CLI: '1', SCRY_HOST_CHILD: 'terminal' },
@@ -123,10 +118,8 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     const daemon = await startTestDaemon({ root: makeShortRoot() })
     try {
       const env = { ...process.env, SCRY_EXPERIMENTAL_HOST_CLI: '1' }
-      // Enable switch via local op (App-only path)
       expect((await daemon.localOp('localHostAdmin', 'setCliApproval', [true])).error).toBeUndefined()
 
-      // 1. status --json reports pairingCapacity
       const st = makeIo({ userDataDir: daemon.userDataDir, env })
       expect(await runHostCli(['status', '--json'], st.io)).toBe(0)
       const stJson = JSON.parse(st.out()) as { pairingCapacity: { pairings: number; grants: number; limit: number }; cliApproval: { enabled: boolean } }
@@ -134,7 +127,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       expect(stJson.pairingCapacity.limit).toBe(64)
       expect(stJson.pairingCapacity.grants).toBeGreaterThanOrEqual(1)
 
-      // 2. invite phone prints pairing info on TTY (never --json)
       const invJsonRefused = makeIo({ userDataDir: daemon.userDataDir, env })
       expect(await runHostCli(['invite', 'phone', '--json'], invJsonRefused.io)).toBe(1)
 
@@ -142,19 +134,16 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       expect(await runHostCli(['invite', 'phone'], inv.io)).toBe(0)
       const pendingBefore = daemon.host.service.authority.inspectLocal().pairings.find((p) => p.state === 'created')!
       expect(pendingBefore).toBeDefined()
-      // Extract secret from TTY output (relay is disabled in test daemon, so raw secret is shown on TTY).
       const secretMatch = inv.out().match(/([A-Za-z0-9_-]{43})/)
       expect(secretMatch).toBeTruthy()
       const secret = secretMatch![1]!
 
-      // Device submits proof
       const dev = await generateDesktopDeviceIdentity()
       await daemon.host.service.authority.prove(
         { pairingId: pendingBefore.pairingId, secret, csrPEM: dev.csrPEM, deviceLabel: 'CLI Approved iPhone' },
         dev.publicKeySHA256
       )
 
-      // 3. approve rejects fingerprint < 16 hex chars
       const shortFp = makeIo({
         userDataDir: daemon.userDataDir,
         env,
@@ -163,7 +152,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       expect(await runHostCli(['approve'], shortFp.io)).toBe(1)
       expect(shortFp.err()).toMatch(/16/)
 
-      // 4. approve cancels cleanly when user does not type yes -> exit 5
       const cancelApprove = makeIo({
         userDataDir: daemon.userDataDir,
         env,
@@ -171,7 +159,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       })
       expect(await runHostCli(['approve'], cancelApprove.io)).toBe(5)
 
-      // 5. approve succeeds with 16-hex grouped/uppercase prefix + yes
       const groupedPrefix = dev.publicKeySHA256.slice(0, 16).replace(/(.{4})/g, '$1 ').trim().toUpperCase()
       const okApprove = makeIo({
         userDataDir: daemon.userDataDir,
@@ -180,13 +167,11 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       })
       expect(await runHostCli(['approve'], okApprove.io)).toBe(0)
 
-      // 6. devices shows approvedVia: 命令行
       const devs = makeIo({ userDataDir: daemon.userDataDir, env })
       expect(await runHostCli(['devices'], devs.io)).toBe(0)
       expect(devs.out()).toContain('CLI Approved iPhone')
       expect(devs.out()).toContain('命令行')
 
-      // 7. revoke --yes requires full UUID (rejects prefix), succeeds with full UUID
       const approved = daemon.host.service.authority.inspectLocal().grants.find((g) => g.publicKeySHA256 === dev.publicKeySHA256)!
       expect(approved.approvedVia).toBe('host_cli')
       const badRevoke = makeIo({ userDataDir: daemon.userDataDir, env })
@@ -288,13 +273,11 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       readIdentity: async (pid: number) => (pid === 65432 ? row : undefined)
     }
 
-    // 1. status text mode: daemon running without admin socket -> exit 4 + clear feature-disabled hint, NOT daemon_not_running
     const stText = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' }, stopDeps })
     expect(await runHostCli(['status'], stText.io)).toBe(4)
     expect(stText.err()).toContain('功能未开启')
     expect(stText.err()).not.toContain('后台服务未运行')
 
-    // 2. status --json mode: honest running=true & hostCliEnabled=false
     const stJson = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '0' }, stopDeps })
     expect(await runHostCli(['status', '--json'], stJson.io)).toBe(4)
     expect(JSON.parse(stJson.out())).toMatchObject({
@@ -303,8 +286,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       error: 'host_cli_experimental_disabled'
     })
 
-    // 2b. When flag IS enabled in caller env but admin socket is missing (e.g. socket bind failed),
-    // point to daemon.log for the host-admin.disabled reason instead of only asking to enable the flag.
     const stFlagOn = makeIo({ userDataDir, env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' }, stopDeps })
     expect(await runHostCli(['status'], stFlagOn.io)).toBe(4)
     expect(stFlagOn.err()).toContain('daemon.log')
@@ -320,7 +301,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       daemonLogPath: join(userDataDir, 'logs', 'daemon.log')
     })
 
-    // 3. CLI login-start respects SCRY_HOST_DAEMON=0 (does not hardcode daemonMode: true)
     const lsOff = makeIo({
       userDataDir,
       executable: '/Applications/Scry.app/Contents/MacOS/Scry',
@@ -331,7 +311,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     expect(await runHostCli(['login-start', 'status'], lsOff.io)).toBe(0)
     expect(JSON.parse(lsOff.out())).toEqual({ state: 'unavailable', reason: 'daemon_mode_disabled' })
 
-    // 4. C0 & C1 control characters are stripped when printing deviceLabel
     const { formatDeviceList, formatPendingList } = await import('./host-cli-format')
     const dirtyLabel = 'Phone\x1b[31mRed\u009b2J\r\nFake'
     const devText = formatDeviceList([{
