@@ -6,7 +6,7 @@ import type { ActiveRun, TraceEvent } from './trace'
 import type { LoadedSessionTurn } from './session-history'
 import type { WorkspaceFilePage, WorkspaceListResult } from './workspace'
 import type { ScRead } from './source-control'
-import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceStartSelection } from './workspace-selection'
+import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspacePrepareProgress, WorkspaceStartSelection } from './workspace-selection'
 import type { HostAdminNotice } from './host-admin'
 
 export interface RemoteProjectRef { path: string; label: string }
@@ -228,6 +228,7 @@ export interface DesktopRemoteRunStatus {
   externalSessionId?: string
   cwd?: string
   detail?: string
+  workspaceProgress?: WorkspacePrepareProgress
   changed?: boolean
 }
 export interface DesktopRemoteLiveRun {

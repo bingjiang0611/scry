@@ -82,5 +82,18 @@ export const workspaceCopy = {
   invalidWorktree: '已锁定或失效',
   detached: (head: string) => `分离 HEAD · ${head.slice(0, 8)}`,
   target: (path: string) => `目标：${path}`,
-  failure: (error: unknown) => error instanceof Error ? error.message : String(error)
+  failure: (error: unknown) => error instanceof Error ? error.message : String(error),
+  creatingWorktree: '正在创建 worktree',
+  cancellingWorktree: '正在取消创建 worktree',
+  stepPreparingWorkspace: '准备工作区',
+  stepCheckingOutFiles: '检出文件',
+  moreDetails: '更多详情',
+  hideDetails: '收起详情',
+  cancelSetup: '取消',
+  cancellingSetup: '正在取消…',
+  waitingForWorktreeSetup: '正在等待 worktree 准备完成…',
+  setupBranchMeta: (branch: string) => `分支：${branch}`,
+  setupBaseMeta: (base: string) => `基准：${base}`,
+  setupCheckoutFilesMeta: (done: number, total: number) => `已检出 ${done} / ${total} 个文件`,
+  setupNoDetails: '暂无更多日志'
 }

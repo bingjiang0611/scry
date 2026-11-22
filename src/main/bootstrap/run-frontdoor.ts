@@ -26,6 +26,8 @@ export interface AppRunStartOptions {
   grantScope?: 'local' | 'remote'
   runId?: string
   stopSignal?: AbortSignal
+  /** Real-time progress for managed worktree creation (both local IPC and remote ledger). */
+  onWorkspaceProgress?: (progress: import('../../shared/workspace-selection').WorkspacePrepareProgress) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
   permissionModeOverride?: AgentPermissionMode
   providerPrompt?: string

@@ -69,6 +69,49 @@ export interface PreparedWorkspace {
   head: string | null
 }
 
+export const WORKSPACE_START_CANCELLED_CODE = 'workspace_start_cancelled'
+
+export type WorkspacePrepareStage =
+  | 'preparing'
+  | 'checking_out'
+  | 'verifying'
+  | 'cancelling'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+
+export interface WorkspaceCheckoutProgress {
+  completed: number
+  total: number
+  percent: number
+}
+
+export interface WorkspacePrepareProgress {
+  operationId: string
+  repositoryId: string
+  stage: WorkspacePrepareStage
+  /** True only once preflight checks and worktree metadata creation succeeded. */
+  workspacePrepared: boolean
+  /** Present only when Git reported real checkout progress or checkout completed. */
+  checkout?: WorkspaceCheckoutProgress
+  /** True only while cancelling can safely stop preparation before Provider launch. */
+  cancellable: boolean
+  /** Bounded sanitized step/stderr lines for the expandable details section. */
+  details: string[]
+  branch?: string
+  baseRef?: string
+  message?: string
+  updatedAt: number
+}
+
+export function isWorkspaceStartCancelledError(error: unknown): boolean {
+  if (!error) return false
+  if (typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === WORKSPACE_START_CANCELLED_CODE)
+    return true
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes(WORKSPACE_START_CANCELLED_CODE)
+}
+
 export interface WorkspaceStartStatus {
   operation: ScOperation
   phase: 'planned' | 'git_requested' | 'prepared' | 'start_requested' | 'registered'
@@ -81,4 +124,5 @@ export interface WorkspaceSelectionApi {
   read: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
   validateBranch: (request: { repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
   inspectStart: (request: ScRef & { operationId: string }) => Promise<ScRead<WorkspaceStartStatus | null>>
+  cancelStart: (request: ScRef & { operationId: string }) => Promise<boolean>
 }

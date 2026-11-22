@@ -193,7 +193,7 @@ export function WorkspaceContext({ controller, cwd, isWorktree = false, onOpenRu
         <Icon name="branch" /><span>{branch}</span>{editable && mode !== 'existingWorktree' && <Icon name="chevronDown" />}
       </button>
     </div>
-    {editable && busy && selection && <p role="status">{copy.preparing}</p>}
+    {editable && busy && selection && intent?.kind !== 'newWorktree' && <p role="status">{copy.preparing}</p>}
     {editable && !busy && controller.blockedReason && controller.blockedReason !== copy.loading && <p role="status">{controller.blockedReason}</p>}
     {editable && !busy && operation?.phase === 'prepared' && <p role="status">{copy.prepared}</p>}
     {editable && selection && !('invalid' in selection) && !busy &&

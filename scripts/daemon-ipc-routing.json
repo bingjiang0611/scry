@@ -688,6 +688,13 @@
       "source": "daemon:workspaceSelection:setCwd（每次问 daemon）"
     },
     {
+      "channel": "workspaceSelection:cancelStart",
+      "route": "new-op",
+      "op": "workspaceSelection",
+      "method": "cancelStart",
+      "why": "取消进行中的 worktree 创建并按宿主边界清理"
+    },
+    {
       "channel": "workspaceSelection:inspectStart",
       "route": "new-op",
       "op": "workspaceSelection",

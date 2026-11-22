@@ -5,6 +5,7 @@ import { WorkdirPicker } from '../WorkdirPicker'
 import { Icon } from '../primitives/Icon'
 import { QUEUE_COPY, RUN_STOP_COPY } from '../../constants/copy'
 import { CONVERSATION_COPY } from '../../constants/conversation-copy'
+import { workspaceCopy } from '../../constants/workspace-copy'
 import { RunElapsed } from './RunElapsed'
 import { imageFilesFromClipboardData, composerEnterConfirmsIme, navigateComposerHistory } from './composer-utils'
 import { Notice } from '../primitives/Notice'
@@ -60,6 +61,7 @@ type ComposerInputProps = Pick<ChatViewProps,
   historyNavigation: { scopeKey?: string; history: string[]; position: number } | null
   promptHistoryRef: { current: { scopeKey?: string; history: string[]; position: number } | null }
   composerScopeKey?: string
+  workspaceSetupActive?: boolean
 }
 
 export function ComposerInput({
@@ -105,6 +107,7 @@ export function ComposerInput({
   historyNavigation,
   promptHistoryRef,
   composerScopeKey,
+  workspaceSetupActive = false,
   onHideSlash,
   onSlashSel,
   onPickSlash
@@ -157,7 +160,7 @@ export function ComposerInput({
             {composerNotice.text}
           </Notice>
         )}
-        {busy && (
+        {busy && !workspaceSetupActive && (
           <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone} data-background-waiting={backgroundStatus?.waiting || undefined}>
             <span className="run-status-left">
               <i className="run-status-dot" aria-hidden="true" />
@@ -196,7 +199,9 @@ export function ComposerInput({
           className="input"
           aria-label="描述任务"
           aria-describedby={composerStatus ? 'composer-status' : undefined}
-          value={input}
+          value={workspaceSetupActive ? '' : input}
+          placeholder={workspaceSetupActive ? workspaceCopy.waitingForWorktreeSetup : undefined}
+          disabled={workspaceSetupActive}
           onChange={(event) => {
             resetPromptHistory()
             onInput(event.target.value)

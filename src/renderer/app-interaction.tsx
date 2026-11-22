@@ -213,7 +213,7 @@ export function useAppInteraction(context: AppInteractionContext) {
         .find(entry => entry.row.sessionId === activeSessionId && entry.cwd === cwd)
     : undefined
   const chatProps = createAppChatProps({
-    workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason,
+    workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
     sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
     sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,

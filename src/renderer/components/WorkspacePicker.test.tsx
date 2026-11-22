@@ -15,7 +15,7 @@ function renderContext(blockedReason?: string) {
     refresh: vi.fn(), nextPage: vi.fn(), firstPage: vi.fn(), reset: vi.fn(),
     chooseNewWorktree: vi.fn(async () => {}), chooseBranch: vi.fn(async () => {}), chooseWorktree: vi.fn(async () => {}),
     inspect: vi.fn(async () => {}), operation: undefined,
-    blockedReason, canChange: !blockedReason, busy: false, editable: true
+    blockedReason, canChange: !blockedReason, busy: false, editable: true, workspaceSetup: null
   }
   return renderToStaticMarkup(<WorkspaceContext controller={controller} cwd="/workspace" onOpenRun={vi.fn()} />)
 }
