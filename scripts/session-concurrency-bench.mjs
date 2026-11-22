@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { cpus, release, tmpdir, totalmem } from 'node:os'
+import { cpus, release, totalmem } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
@@ -22,7 +22,7 @@ import { parseConcurrency, parseTaskCount, planAdmissionTargets, planHistorySwit
   from './session-concurrency-contract.mjs'
 import { buildConcurrencyReport } from './session-concurrency-report.mjs'
 import { validateConcurrencyReport } from './session-concurrency-validate.mjs'
-import { noteDaemonNotSampled } from './daemon-sampling-note.mjs'
+import { noteMissingDaemonSamples } from './daemon-resource-sampling.mjs'
 
 // P0 concurrency attribution: real hidden Electron process tree, temp userData and one workspace per task,
 // offline smoke adapter. Fixed total work (tasks) with a bounded in-flight limit (concurrency), no warmup, no
@@ -32,13 +32,13 @@ const scenario = selectScenario(process.env.SCRY_CONCURRENCY_SCENARIO ?? 'stream
 const concurrency = parseConcurrency(process.env.SCRY_CONCURRENCY_RUNS)
 const taskCount = parseTaskCount(process.env.SCRY_CONCURRENCY_TASKS, concurrency)
 const RUN_DEADLINE_MS = 60_000
-const temp = mkdtempSync(join(tmpdir(), 'scry-concurrency-'))
+const temp = realpathSync(mkdtempSync('/tmp/scry-concurrency-'))
 const logPath = join(temp, 'app.log')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const harnessIdentity = harnessSha256(root)
 let ownedChild = null
 let cleanupAttempted = false
-// Created at spawn so an early 'close' is never missed; its deadline starts only inside wait(), after the stop.
+// Subscribe at spawn. The drain deadline starts after stopping.
 let childClose = null
 // Set once the batch is dispatched: the failure path reports its outcome but never waits for it.
 let poolBatch = null
@@ -150,7 +150,7 @@ try {
   const startupDriverReadyMs = performance.now() - launchStarted
   const driverReadyEpochMs = Date.now()
   // Boundaries: before dispatch, after the last terminal, and after the quiet wait when set.
-  const boundary = createBoundarySampler({ snapshotChannel: snapshots, send: session.send })
+  const boundary = createBoundarySampler({ snapshotChannel: snapshots, send: session.send, userData })
   // Before dispatch only the seeded catalog is awaited; the row of the session this run starts is
   // awaited after the sweeps are issued and before the first history click.
   const switchTargets = planHistorySwitches({ runs: tasks, scenario })
@@ -251,12 +251,13 @@ try {
           requestedStartEpochMs: run.startRequestedAtEpochMs, requestedEndEpochMs: run.terminalAtEpochMs,
           acceptedStartEpochMs: run.startReplyAtEpochMs })) }),
       rendererMount: summarizeRendererMount(rendererMountRows),
-      resourceSampling: { intervalMs: 5000,
-        source: 'src/main/bootstrap/app-lifecycle.ts startPerformanceResourceMonitor({ intervalMs: 5000 })',
+      resourceSampling: { intervalMs: 5000, source: 'App [scry:resource] windows',
         windows: resourceWindows.length, fullyInsidePhase: windowsByPhase.startup.length
           + windowsByPhase.active.length + windowsByPhase.quiet.length,
         spanning: windowsByPhase.spanning.length, unknown: windowsByPhase.unknown.length,
-        note: 'sparse App samples; the boundary snapshot lanes carry the CPU evidence, and spanning windows are not counted for one phase' },
+        note: 'sparse App samples; phase counts exclude spanning windows' },
+      daemonResources: { beforeDispatch: boundaryBefore.daemon, afterTerminal: boundaryAfterTerminal.daemon,
+        ...(boundaryAfterQuiet && { afterQuiet: boundaryAfterQuiet.daemon }) },
       resources: summarizeResources(windowsByPhase.active, 'active'),
       quietResources: scenario.quietMs > 0 ? summarizeResources(windowsByPhase.quiet, 'quiet')
         : { status: 'unavailable', reason: 'scenario has no quiet window' },
@@ -279,7 +280,7 @@ try {
     if (report.status !== 'measured') process.exitCode = 1
     assert.equal(process.exitCode === 1, report.status !== 'measured', 'exit code must match the reported status')
     console.log(JSON.stringify(report, null, 2))
-    noteDaemonNotSampled('session-concurrency-bench')
+    noteMissingDaemonSamples('session-concurrency-bench', report.lanes.daemonResources)
   } catch (error) {
     if (report) console.error('SCRY_CONCURRENCY_REPORT', JSON.stringify(report, null, 2))
     throw error
