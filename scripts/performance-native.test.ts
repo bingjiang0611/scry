@@ -122,6 +122,13 @@ describe('interleaved scenario shards', () => {
     failed[1].errors.push({ scenario: 'short', message: 'boom' })
     expect(() => combineNativeShards(failed)).toThrow('failed native lanes cannot pass')
   })
+
+  it('reports failed execution when all native shards lack results', () => {
+    const failed = shards().map((shard, index) => ({
+      ...shard, results: {}, errors: [{ scenario: Object.keys(nativeWorkloads)[index], message: 'no native sample' }]
+    }))
+    expect(() => combineNativeShards(failed)).toThrow('failed native lanes cannot pass')
+  })
 })
 
 describe('native diagnostic evidence', () => {
