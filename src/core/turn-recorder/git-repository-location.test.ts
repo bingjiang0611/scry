@@ -21,10 +21,17 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return stdout.trim()
 }
 
-async function read(root: string): Promise<GitRepositoryLocation> {
+async function read(root: string, includeOrigin = true): Promise<GitRepositoryLocation> {
   const location = {}
-  await readGitRepositoryLocation(root, Date.now() + 1000, true, fields => Object.assign(location, fields))
+  await readGitRepositoryLocation(root, Date.now() + 1000, includeOrigin, fields => Object.assign(location, fields))
   return location
+}
+
+// A best-effort production sample never waits. Read the real Git files before handing the
+// observation to each boundary so a slow CI filesystem cannot make these mapping tests flaky.
+async function sampleNextBoundary(root: string, includeOrigin: boolean): Promise<void> {
+  const observed = await read(root, includeOrigin)
+  vi.mocked(sampleGitRepositoryLocation).mockReturnValueOnce(() => observed)
 }
 
 describe('Git repository location from disk', () => {
@@ -57,10 +64,12 @@ describe('Git repository location from disk', () => {
   it('keeps the start branch and HEAD when the turn creates and switches to another branch', async () => {
     await init()
     await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/repo.git')
+    await sampleNextBoundary(root, true)
     const capture = await beginGitTurnDiff(root)
     await git(root, 'switch', '-c', 'feature/second')
     await git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'next')
     const commitAfter = await git(root, 'rev-parse', 'HEAD')
+    await sampleNextBoundary(root, false)
     const snapshot = await finishGitTurnDiff(capture)
     expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation).toEqual({
       branch: 'feature/first', branchAfter: 'feature/second', commitBefore: oid, commitAfter,
@@ -90,8 +99,10 @@ describe('Git repository location from disk', () => {
     await init()
     await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/repo.git')
     const tree = await git(root, 'rev-parse', 'HEAD^{tree}')
+    await sampleNextBoundary(root, true)
     const capture = await beginGitTurnDiff(root, undefined, undefined, [], false, { commit: tree, at: new Date().toISOString() })
     await git(root, 'switch', '--detach')
+    await sampleNextBoundary(root, false)
     const snapshot = await finishGitTurnDiff(capture)
     expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation).toEqual({
       branch: 'feature/first', branchAfter: null, commitBefore: oid, commitAfter: oid,
