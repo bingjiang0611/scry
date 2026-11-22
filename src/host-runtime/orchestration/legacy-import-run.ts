@@ -1,26 +1,28 @@
 import { canonicalJson, sha256Hex } from './canonical-json'
+import { tryRealpath } from './authority-dispatch'
 import type { TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
 import type { LegacyRunState } from './legacy-ledger-reader'
-import { deletedNativeSessionKey, findNativeSession } from './native-session-lookup'
+import { deletedNativeSessionKey, findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 import { parseLedgerIntentRouting, type ParsedIntentRouting } from './shadow-routing'
 
 /** Resolve a legacy run against the current catalog and honor deletions within its import transaction. */
-function legacyImportSessionKey(sink: EventSink, routing: ParsedIntentRouting): string | null | undefined {
-  const { sessionKey, cwd, provider, profile, isConversationRun } = routing
+function legacyImportSessionKey(sink: EventSink, routing: ParsedIntentRouting, cwd: string): string | null | undefined {
+  const { sessionKey, provider, profile, isConversationRun } = routing
   if (sessionKey === null) return null
-  if (!isConversationRun) {
-    const identity = { sessionId: sessionKey, provider, profile, cwd }
-    if (deletedNativeSessionKey(sink, identity)) return undefined
-    const projected = findNativeSession(sink, identity)
-    if (projected) return projected.sessionKey
-  }
+  const identity = isConversationRun ? undefined : { sessionId: sessionKey, provider, profile, cwd }
+  if (identity && (deletedNativeSessionKey(sink, identity) ||
+      (cwd !== routing.cwd && deletedNativeSessionKey(sink, { ...identity, cwd: routing.cwd })))) return undefined
   const deleted = sink.handle.db.prepare(
     `SELECT 1 FROM orch_event WHERE session_key = ? AND type = 'session.deleted'
-       AND (? OR (cwd = ? AND json_extract(payload, '$.nativeIdentity') IS NULL))
+       AND (? OR (cwd IN (?, ?) AND json_extract(payload, '$.nativeIdentity') IS NULL))
      LIMIT 1`
-  ).get(sessionKey, Number(isConversationRun), cwd)
-  return deleted ? undefined : sessionKey
+  ).get(sessionKey, Number(isConversationRun), cwd, routing.cwd)
+  if (deleted) return undefined
+  if (!identity) return sessionKey
+
+  const projected = findNativeSession(sink, identity)
+  return projected?.sessionKey ?? (sink.getSession(sessionKey) ? scopedNativeSessionKey(identity) : sessionKey)
 }
 
 export function importSingleRun(
@@ -42,7 +44,8 @@ export function importSingleRun(
   }
 
   const routing = parseLedgerIntentRouting(run.ledgerRunId, run.detail)
-  const sessionKey = legacyImportSessionKey(sink, routing)
+  const cwd = routing.sessionKey && !routing.isConversationRun ? tryRealpath(routing.cwd) ?? routing.cwd : routing.cwd
+  const sessionKey = legacyImportSessionKey(sink, routing, cwd)
   if (sessionKey === undefined) return { imported, rejected }
   const existingMapping = stmtLegacyMapping.get(run.ledgerRunId) as { run_id: string } | undefined
   const existingReceipt = sink.getReceipt(run.intentId, 'system')
@@ -65,7 +68,7 @@ export function importSingleRun(
       ...(resolvedOrdinal !== undefined ? { ordinal: resolvedOrdinal } : {}),
       provider: routing.provider,
       profile: routing.profile,
-      cwd: routing.cwd,
+      cwd,
       ...(routing.promptPreview !== undefined ? { promptPreview: routing.promptPreview } : {}),
       claimMode: (run.lifecycle === 'recorded' && !expired ? 'queued' : 'immediate') as 'queued' | 'immediate',
       pendingTtlMs: cfg.pendingTtlMs,

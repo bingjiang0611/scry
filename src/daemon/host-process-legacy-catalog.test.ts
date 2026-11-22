@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -17,7 +17,7 @@ afterEach(cleanupTempDirs)
 
 function seedHistory() {
   const userDataDir = tempDir()
-  const cwd = tempDir()
+  const cwd = realpathSync(tempDir())
   const ledgerDir = join(userDataDir, 'remote', 'ledger')
   const store = createAppSessionStore(userDataDir)
   const providerId = 'codex' as const
@@ -39,8 +39,9 @@ function seedHistory() {
     ]
   })
   mkdirSync(ledgerDir, { recursive: true })
-  writeFileSync(join(ledgerDir, 'session-ledger.log'), lines.map((event) => JSON.stringify(event)).join('\n') + '\n')
-  return { userDataDir, resumable, runIds }
+  const log = join(ledgerDir, 'session-ledger.log')
+  writeFileSync(log, lines.map((event) => JSON.stringify(event)).join('\n') + '\n')
+  return { userDataDir, resumable, runIds, log }
 }
 
 async function startDuringBackfill(userDataDir: string) {
@@ -58,12 +59,18 @@ async function startDuringBackfill(userDataDir: string) {
 
 it('serves the full local catalog and history identity while terminal backfill is paused', async () => {
   const { userDataDir, resumable, runIds } = seedHistory()
+  const seededCatalog = createAppSessionStore(userDataDir).load()
+  const extra = runIds.slice(resumable.length).map((runId, index) => ({
+    ...resumable[0], sessionId: `legacy-${index}`, externalSessionId: `legacy-${index}`, runId,
+    ts: Date.now() - index, preview: 'older history'
+  }))
+  writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([...seededCatalog, ...extra]))
   const { authority, catalog, resume } = await startDuringBackfill(userDataDir)
   try {
     expect(authority.sink.getRun(runIds[0])).toBeUndefined()
     expect(authority.sink.getRun(runIds.at(-1)!)).toBeUndefined()
     expect(catalog.read()?.map((row) => row.externalSessionId).sort())
-      .toEqual(resumable.map((row) => row.externalSessionId).sort())
+      .toEqual([...resumable, ...extra].map((row) => row.externalSessionId).sort())
     expect(readHistoryCatalogEntry(resumable[0], (path) => path, () => [], catalog.readDetail))
       .toMatchObject({ session: { externalSessionId: resumable[0].externalSessionId }, projection: { legacyBefore: true } })
   } finally {
@@ -93,6 +100,46 @@ it('preserves a deletion made while backfill is paused without discarding neighb
     expect(authority.sink.getRun(runIds.at(-1)!)?.lifecycle).toBe('settled')
     expect(catalog.read()?.map((row) => row.externalSessionId)).toEqual([resumable[1].externalSessionId])
     expect(catalog.readDetail(resumable[0], resumable[0].cwd)).toBeNull()
+  } finally {
+    await authority.close()
+    resume()
+  }
+}, 15_000)
+
+it('scopes colliding native history by workspace and honors a tombstone across cwd aliases', async () => {
+  const { userDataDir, resumable, runIds, log } = seedHistory()
+  const otherCwd = realpathSync(tempDir())
+  const alias = join(tempDir(), 'native-workspace-alias')
+  symlinkSync(resumable[1].cwd, alias, 'dir')
+  const [foreignRun, deletedRun] = [randomUUID(), randomUUID()]
+  const at = Date.now() - 50_000
+  let seq = runIds.length * 3
+  for (const [runId, cwd, resume] of [
+    [foreignRun, otherCwd, resumable[0].externalSessionId],
+    [deletedRun, alias, resumable[1].externalSessionId]
+  ]) {
+    const detail = JSON.stringify({ providerId: 'codex', cwd, resume })
+    const events = [
+      { seq: ++seq, at, kind: 'intent_recorded', runId, intentId: randomUUID(), detail },
+      { seq: ++seq, at, kind: 'run_dispatched', runId },
+      { seq: ++seq, at, kind: 'run_settled', runId }
+    ]
+    appendFileSync(log, events.map((event) => JSON.stringify(event)).join('\n') + '\n')
+  }
+  const { authority, catalog, resume } = await startDuringBackfill(userDataDir)
+  try {
+    expect(catalog.deleteNative(resumable[1], new Set())).toMatchObject({ status: 'deleted' })
+    resume()
+    await authority.importComplete
+    const visibleTurns = authority.sink.handle.db.prepare(
+      'SELECT run_id FROM orch_p_turn WHERE session_key = ? ORDER BY ordinal'
+    ).all(resumable[0].externalSessionId)
+    expect.soft(visibleTurns).toEqual([{ run_id: runIds[0] }])
+    const foreign = authority.sink.getRun(foreignRun)
+    expect.soft(foreign).toMatchObject({ cwd: otherCwd, sessionKey: expect.stringMatching(/^native:/) })
+    expect.soft(authority.sink.getSession(foreign?.sessionKey ?? '')).toMatchObject({ cwd: otherCwd })
+    expect.soft(authority.sink.getRun(deletedRun)).toBeUndefined()
+    expect(catalog.readDetail(resumable[1], resumable[1].cwd)).toBeNull()
   } finally {
     await authority.close()
     resume()
