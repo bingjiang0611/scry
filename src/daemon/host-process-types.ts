@@ -18,21 +18,13 @@ export interface DaemonHostProcessOptions {
   gatewayLabel?: string
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
   log?: (line: string) => void
-  /** Tests: a fake PTY, recordings in this process, a fixed shell environment, a short reclaim. */
   terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
-  /** Tests: inject commit fault into P4-1 orchestration shadow sink. */
   orchestrationShadowBeforeCommitHook?: () => void
-  /** Tests: inject fault into P4-2 H1 legacy mirror file writes (append / compact). */
   orchestrationMirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
-  /** Tests: override P4-2 H1 legacy mirror max pending queue size. */
   orchestrationMirrorMaxPendingEvents?: number
-  /** Tests: override P4-2 H1 fallback periodic retry interval (ms). */
   orchestrationMirrorRetryIntervalMs?: number
-  /** Tests: pause deferred shadow backfill until resolved to verify live/backfill interleaving. */
   orchestrationShadowPauseBackfill?: Promise<void>
-  /** Tests: override graceful providerRegistry.dispose() timeout (default 5,000 ms). */
   providerDisposeTimeoutMs?: number
-  /** Tests: override per-call timeout for App-forwarded execution-target calls (default 35,000 ms). */
   executionTargetCallTimeoutMs?: number
 }
 

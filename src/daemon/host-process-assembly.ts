@@ -42,10 +42,6 @@ export interface DaemonRemoteAssemblyDeps {
   log: (line: string) => void
 }
 
-/**
- * Builds the daemon's provider discovery, RemoteHostRuntime view, session history
- * channels, and native fork operations over the process's shared stores.
- */
 export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
   const { workspace, pi, providers, session, catalog, pipeline, sourceControl } = deps
   const configuredRemotePermissionMode = () => {
@@ -69,8 +65,6 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
   })
   const refreshRemoteProviderSnapshot = () => providerDiscovery.refreshMetadata()
 
-  // Session history pages, loaded and cached in this process (the cache backs older-page
-  // reads). The window's session selection is reported with the page for the App to apply.
   const historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown> = {}
   const history = createHistoryRuntime()
   history.register({
@@ -88,9 +82,6 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     reportSelection: true
   })
 
-  // Native fork, as main builds it (index.ts). The daemon has no window selection: a
-  // request without a cwd is filled by the App with the window's (session-lifecycle-
-  // daemon.ts) and re-resolved here, so getCurrentCwd stays empty on purpose.
   const forkOperations = createForkOperations({
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     providerRegistry: providers.providerRegistry,
@@ -121,7 +112,6 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     providerRegistry: providers.providerRegistry,
     runs: pipeline.runs,
     requestRunStop: deps.requestRunStop,
-    // W17: reuse daemon's local-ops session lifecycle & native fork with identical remote authority.
     sessionRefFromRequest: (value) => deps.sessionLinks.sessionRefFromRequest ? deps.sessionLinks.sessionRefFromRequest(value) : null,
     changeLegacySessionMetadata: (ref, change) => {
       if (!deps.sessionLinks.changeLegacySessionMetadata) throw new Error('daemon_capability_unavailable:session-metadata')

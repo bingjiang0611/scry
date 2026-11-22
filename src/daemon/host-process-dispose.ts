@@ -7,7 +7,6 @@ import { reconcileH1ForOffMode } from './orchestration-off-fallback'
 import { attachDaemonOrchestrationShadow, type DaemonOrchestrationShadow } from './orchestration-shadow'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
-/** Attaches off-fallback reconciliation, shadow mode, or authoritative on-mode orchestration for host-process. */
 export async function attachHostProcessOrchestration<
   State extends RunRegistryState,
   Control extends RunRegistryControl
@@ -57,7 +56,6 @@ export async function attachHostProcessOrchestration<
   return { orchestrationShadow, orchestrationAuthority }
 }
 
-/** Bounded provider registry shutdown helper extracted from host-process.ts to stay within the 20 KB file budget. */
 export async function disposeProviderRegistryBounded(
   providerRegistry: { dispose(): Promise<void> },
   timeoutMs: number,

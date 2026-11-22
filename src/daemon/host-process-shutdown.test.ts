@@ -7,10 +7,6 @@ import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { createLazyDaemonRunSurface } from '../main/bootstrap/daemon-run-lazy'
 
-// B4-S S0-1 verification (macOS): 「重启后台服务」 and 「退出 Scry 与后台服务」 timed out
-// at 15 s whenever an App was connected, and the daemon exited within ~120 ms as soon as
-// that App was killed. Stopping must not wait for the App to hang up: the App is the one
-// waiting for the daemon to go away.
 
 const encrypt = (value: string) => Buffer.from(value.split('').reverse().join(''), 'utf8')
 const decrypt = (value: Buffer) => value.toString('utf8').split('').reverse().join('')
@@ -28,8 +24,6 @@ describe('daemon shutdown with an App connected', () => {
     const daemon = await startTestDaemon()
     process.env.SCRY_HOST_DAEMON = '1'
     const stateDirectory = join(daemon.userDataDir, 'daemon')
-    // The App as it runs: its lazy run surface connected, a long poll parked on the
-    // event feed, and its lanes left open.
     const lazy = createLazyDaemonRunSurface({
       userDataDir: daemon.userDataDir,
       daemonStateDirectory: stateDirectory,
@@ -38,7 +32,6 @@ describe('daemon shutdown with an App connected', () => {
       send: () => undefined,
       currentCwd: () => daemon.workspace
     })
-    // Also a bare connection that never speaks, as a stalled peer would hold one.
     const idle = connect(daemon.host.channel.socketPath)
     await new Promise<void>((resolve, reject) => { idle.once('connect', () => resolve()); idle.once('error', reject) })
     const idleClosed = new Promise<void>((resolve) => idle.once('close', () => resolve()))
