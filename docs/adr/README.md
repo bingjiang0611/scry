@@ -24,9 +24,10 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [020: Verify the running build; advise on Provider versions](020-build-identity-and-provider-compatibility.md)
 - [021: Keep measured speed, recorded usage and account billing distinct](021-usage-observation-and-billing.md)
 - [022: Project observed state without granting authority or copying payloads](022-workspace-and-content-projection.md)
+- [023: Capture Git evidence without mutating the repository](023-recorder-git-capture-isolation.md)
 
 ## Source comment ratchet
 
-`npm run check:source-comments` checks JS and TS under `src/cli/` and `src/shared/`, including tests. A comment is grandfathered only if the same text already occurs in the same file. Moving it within a file is fine; copying it, rewriting it, or moving it to another file is not. Git is the baseline: CI uses the PR merge commit's first parent and local runs use the merge base with `origin/main` (fetch it first). Once a deletion reaches main, it cannot grow back.
+`npm run check:source-comments` checks JS and TS under `src/cli/`, `src/shared/` and `src/core/turn-recorder/`, including tests. A comment is grandfathered only if the same text already occurs in the same file. Moving it within a file is fine; copying it, rewriting it, or moving it to another file is not. Git is the baseline: CI uses the PR merge commit's first parent and local runs use the merge base with `origin/main` (fetch it first). Once a deletion reaches main, it cannot grow back.
 
 Compiler and bundler directives, source-map directives, and license notices are not prose. The ratchet does not inspect comment-like strings, embedded scripts, or languages other than JS/TS. The [delete-comment skill](../../.agents/skills/delete-comment/SKILL.md) describes the cleanup workflow. In Pi, invoke it with `/skill:delete-comment` followed by an optional path.

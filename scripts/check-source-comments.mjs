@@ -8,7 +8,7 @@ const cwd = fileURLToPath(new URL('..', import.meta.url))
 const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
 const paths = (...args) => git(...args).split('\0').filter(file => sourcePattern.test(file))
 const read = file => readFileSync(join(cwd, file), 'utf8')
-const scope = ['src/cli/', 'src/shared/']
+const scope = ['src/cli/', 'src/shared/', 'src/core/turn-recorder/']
 
 export function addedProse(file, baseline, current) {
   const remaining = new Map()

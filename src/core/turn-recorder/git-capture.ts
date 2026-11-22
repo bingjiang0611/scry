@@ -43,48 +43,27 @@ export interface GitTurnDiffCapture {
   scope?: string
   requestedRoot?: string
   beforeTree?: string
-  /** HEAD observed by the same layout/status read that starts this capture. */
   head?: string
   branch?: string
   baselineClean?: boolean
   indexPath?: string
-  /**
-   * 启动时观测到的真实 index 身份。finish 的候选发现只在 index 未被改写时沿用它：
-   * 那时 index 仍等于 beforeTree，可以省掉一次 read-tree --reset，且 stat cache 仍然有效。
-   */
   indexState?: { mtimeMs: number; ctimeMs: number; size: number; ino: number }
-  /** 启动快照自带、内容等于 beforeTree 且 stat cache 有效的隔离 index（仅 worktree 脏时存在）。 */
   beforeIndex?: string
   tempDir?: string
   objectDir?: string
   alternateObjectDirs?: string
   filterOverrides?: string[]
-  /** 保留 object store 供下一段当基线；随 open 状态持久化，跨进程生效。 */
   preservedStorage?: boolean
   pathspec?: string[]
   excludedPaths?: string[]
-  /** clone 之间共享的只读 baseline object store；引用归零后才删除 owner 根目录。 */
   sharedStorage?: { rootDir: string; objectDir: string; alternateObjectDirs?: string; refs: number }
   finishPromise?: Promise<TurnDiffSnapshot>
-  /**
-   * 同一个 capture 上所有重算的串行链。运行中预览与终态都用 capture.tempDir 下同名的
-   * after.index / discovery.index，并发会互相踩锁；一律排队执行。
-   */
   opChain?: Promise<void>
 }
 
-/**
- * 显式基线：diff 的 before-tree 是 `commit` 当时的树，不是本次 begin 时刻的工作树。
- * 只用于可证明的基线（本轮新建 worktree 的创建提交），调用方必须先证明来源。
- */
 export interface GitTurnDiffBaseline {
   commit: string
-  /** 基线观测时间（ISO），写入 snapshot.beforeAt。 */
   at: string
-  /**
-   * 基线所在的只读 object store（会话内上一段冻结的结束状态）。
-   * 基线树里的 blob 可能只存在于那里，不是本仓库的已提交对象。
-   */
   objectDirs?: string[]
 }
 
@@ -92,28 +71,13 @@ export interface GitTurnDiffFinishOptions {
   structuredPaths?: string[]
   forceFull?: boolean
   patchExcludeBasenames?: string[]
-  /** 接入方声明的仓库相对路径：这些路径不参与本轮 diff。 */
   diffExclude?: string[]
-  /** Recorder-only capture: retain complete patches before producing bounded inline previews. */
   completePatches?: boolean
-  /** Bounded, read-only workspace inspector; not the recorder retention policy. */
   workspaceSnapshot?: boolean
-  /** New untracked files above this count keep only their manifest entry. Defaults to the recorder limit. */
   untrackedPatchLimit?: number
-  /**
-   * 终态 after-tree 的出口。分段记录用它冻结「本段结束时的状态」，作为下一段的基线；
-   * 共享 after 的重算不触发，因为那时树属于另一个 capture。
-   */
   onAfter?: (after: GitAfterTree) => void
 }
 
-/**
- * 复制一个已经完成的启动快照，生成清理与操作队列完全独立的 capture。
- *
- * 新会话首轮的 turn baseline 与 session baseline 描述的是同一个时刻；重新扫描工作树既浪费
- * 启动时间，也可能因外部写入得到两个不同锚点。clone 只新建独立 scratch/index/object 目录，
- * 并通过 alternates 只读原 baseline object store；引用计数保证 turn 清理不会破坏跨轮基线。
- */
 export async function cloneGitTurnDiffCapture(capture: GitTurnDiffCapture): Promise<GitTurnDiffCapture> {
   if (capture.status !== 'ready') {
     return { ...capture, finishPromise: undefined, opChain: undefined }
@@ -220,9 +184,6 @@ export async function beginGitTurnDiff(
   try {
     const canonicalCwd = await realpath(cwd)
     const readEnv = workspaceSnapshot ? { ...process.env, GIT_NO_LAZY_FETCH: '1' } : undefined
-    // Layout 与 status 都只读同一仓库且彼此无依赖，并行启动。porcelain v2 的 branch.oid
-    // 同时给出 HEAD；没有显式排除路径时，它还直接给出 baselineClean。这样常见路径只需
-    // 一轮并行 Git 进程，不再串行执行 HEAD 与 status 两轮探测。
     const [layoutResult, statusResult] = await Promise.allSettled([
       gitCommand(
         [
@@ -238,8 +199,6 @@ export async function beginGitTurnDiff(
       })
     ])
     if (layoutResult.status === 'rejected') {
-      // Bare repositories exit 128 on `--show-toplevel`, and non-repositories exit 128 immediately;
-      // both meant `not_git` when the work-tree probe was a separate call.
       if (layoutResult.reason instanceof GitDeadlineError) throw layoutResult.reason
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
@@ -268,10 +227,6 @@ export async function beginGitTurnDiff(
         return resolve(path)
       }
     }))
-    // `git add -- . :(exclude)<path>` exits 1 when <path> is already ignored,
-    // even though the positive pathspec alone would naturally skip it. Keep an
-    // explicit exclusion only for visible/tracked paths; ignored dataDir paths
-    // are already absent from the temporary snapshot index.
     const explicitExcludedPaths = (await Promise.all(canonicalExcludedPaths.map(async (path) => {
       const fromRepo = relative(repoRoot, path)
       if (fromRepo.startsWith('..') || isAbsolute(fromRepo)) return undefined
@@ -292,22 +247,13 @@ export async function beginGitTurnDiff(
     tempDir = await mkdtemp(join(captureRoot ?? tmpdir(), 'scry-turn-diff-'))
     const objectDir = join(tempDir, 'objects')
     await mkdir(objectDir)
-    // A segment baseline can hand over the whole chain's stores, which overlap on the repository's own.
     const alternateObjectDirs = [...new Set([
       join(commonDir, 'objects'),
       ...(baseline?.objectDirs ?? []),
       ...(process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES ? process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES.split(delimiter) : [])
     ].filter((value): value is string => !!value))].join(delimiter)
-    // Sparse checkout 的 skip-worktree 标记代表「本来就不在工作树里」，重建 index 会把它们
-    // 变成删除。那种仓库不发布可复用的基线 index，finish 仍走 read-tree --reset。
-    // linked worktree 的规则文件在自己的 git 目录（`<common>/worktrees/<id>/info/...`），
-    // 所以路径必须由 `--git-path` 解析，不能拼 commonDir。
     const sparsePath = isAbsolute(sparsePathRaw) ? sparsePathRaw : resolve(canonicalCwd, sparsePathRaw)
     if (baseline) {
-      // 显式基线的仓库不需要工作树快照：基线树就是创建提交的树。仍要先建立本 capture 自己的
-      // object store，after 快照只能写进这里，不能污染真实仓库。
-      // A frozen segment baseline is a tree object that only exists in that segment's store: it is
-      // not in the repository, so it can only be resolved through the alternates it came from.
       const baselineTree = (await gitCommand(
         ['rev-parse', '--verify', '--end-of-options', `${baseline.commit}^{tree}`],
         {
@@ -340,9 +286,6 @@ export async function beginGitTurnDiff(
         (value) => ({ mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, size: value.size, ino: value.ino }),
         () => undefined
       ),
-      // 只有 ENOENT 能证明“这个工作树没有 sparse 规则文件”。其他错误（EACCES、ENOTDIR、悬空路径）
-      // 说明判断失败，此时按 sparse 处理：宁可白跑一次 read-tree --reset，也不能把 skip-worktree
-      // 条目当成删除写进证据。
       stat(sparsePath).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')
     ])
     if (baselineClean) {
@@ -427,8 +370,6 @@ export interface GitAfterTree {
   collection?: TurnDiffCollection
 }
 
-// 同一个 capture 上的重算一律排队：预览与终态共用 tempDir 下的隔离 index，
-// 并发会互相踩 index.lock，得到假的空 diff 或 git_error。
 export function serializeCaptureOp<T>(capture: GitTurnDiffCapture, task: () => Promise<T>): Promise<T> {
   const queued = (capture.opChain ?? Promise.resolve()).then(task, task)
   capture.opChain = queued.then(() => undefined, () => undefined)
