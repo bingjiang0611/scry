@@ -4,6 +4,8 @@ import { DaemonRunRuntime } from './daemon-run-runtime'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { TraceOutputBridge } from './trace-output'
 import { isConversationRunId } from './daemon-run-evidence'
+import { publishQuestions } from './daemon-run-questions'
+import type { RunCursor } from './daemon-run-cursor'
 
 // A conversation or side-chat send belongs to its conversation view. In process it never
 // reached the window-wide (legacy focus) trace stream, whose main pane adopts the first
@@ -70,5 +72,21 @@ describe('conversation runs on the window-wide trace stream', () => {
     expect(legacy.map((event) => event.text)).toEqual(['child words'])
     expect(scoped.map((event) => event.text)).toEqual(['child words'])
     runtime.dispose()
+  })
+
+  it('asks a conversation run question in its own view only, and an App run question in the window', async () => {
+    const question = { runId: LEDGER, questionId: 'q-1', title: 'allow?', options: [] }
+    for (const [scryRunId, windowWide] of [['d428f668-cf65-493b-bc39-92a8ea149edd', false], ['remote-run-phone0-0', true]] as const) {
+      const cursor = { runId: LEDGER, scryRunId, admitted: true, lifecycle: 'dispatched', askedQuestions: new Set(), answerIds: new Map(),
+        pushed: [], watch: 0, output: 0, resyncRequired: false, pumping: false, stopped: false, sawText: false } as unknown as RunCursor
+      const sent: string[] = []
+      const scoped: string[] = []
+      const sinks = { send: (channel: string) => { sent.push(channel) }, subscription: {
+        publishQuestion: () => { scoped.push('open') }, publishQuestionClosed: () => { scoped.push('closed') } } }
+      await publishQuestions(cursor, { questions: async () => [question] } as never, sinks)
+      await publishQuestions(cursor, { questions: async () => [] } as never, sinks)
+      expect(scoped).toEqual(['open', 'closed'])
+      expect(sent).toEqual(windowWide ? ['agent:userQuestion', 'agent:userQuestionClosed'] : [])
+    }
   })
 })
