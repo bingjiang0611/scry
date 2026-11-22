@@ -36,15 +36,21 @@ export async function exerciseQuestion(smokeContext) {
       })
       if (!answered) throw new Error('Fixture question response was rejected')
       const run = await waitFor(() => pendingRun(runId + ':question:2'), 'background question')
-      const unread = await window.scry.unreadSessions()
+      const unread = await waitFor(async () => {
+        const snapshot = await window.scry.unreadSessions()
+        return snapshot.unreadSessionKeys.length === 1 ? snapshot : null
+      }, 'background question unread snapshot')
       await window.scry.focusRun(runId)
+      const focused = await window.scry.focusedRunSnapshot()
       const viewed = await window.scry.unreadSessions()
-      return { runId, done: run.done, pendingCount: run.pendingQuestions.length, unread, viewed }
+      const identity = focused ? { runId: focused.runId, providerId: focused.providerId, cwd: focused.cwd,
+        externalSessionId: focused.externalSessionId, sessionId: focused.sessionId, attentionKey: focused.attentionKey } : null
+      return { runId, done: run.done, pendingCount: run.pendingQuestions.length, unread, viewed, identity, windowFocused: document.hasFocus() }
     })()`)
     assert.equal(result.done, false, 'question attention must arrive before a terminal result')
     assert.equal(result.pendingCount, 1)
     assert.equal(result.unread.unreadSessionKeys.length, 1, 'background question must trigger Dock attention')
-    assert.equal(result.viewed.unreadSessionKeys.length, 0, 'viewing the pending session must clear its attention')
+    assert.equal(result.viewed.unreadSessionKeys.length, 0, `viewing the pending session must clear its attention: ${JSON.stringify(result)}`)
     const beforeRepeat = JSON.parse(readFileSync(badgeReceipt, 'utf8'))
     assert.ok(beforeRepeat.residual, 'fixture must recreate a native badge after the session is read')
     if (beforeRepeat.residual.success) {

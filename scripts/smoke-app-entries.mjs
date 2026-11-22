@@ -30,7 +30,7 @@ export function writeDockBadgeEntry(entryPath, badgeReceipt) {
   // Exercise startup and repeated viewing against a stale native Dock badge.
   // Forward every call to Electron; a denied OS permission remains explicit.
   writeFileSync(entryPath, `
-    import { app } from 'electron'
+    import { app, BrowserWindow, ipcMain } from 'electron'
     import { writeFileSync } from 'node:fs'
     app.setAppPath(${JSON.stringify(repoRoot)})
     app.whenReady().then(async () => {
@@ -38,12 +38,26 @@ export function writeDockBadgeEntry(entryPath, badgeReceipt) {
       const requests = []
       let residual = null
       const setBadgeCount = app.setBadgeCount.bind(app)
+      const focusWindow = (window) => {
+        app.focus({ steal: true })
+        window.focus()
+      }
       app.once('browser-window-created', (_event, window) => {
         window.once('ready-to-show', () => {
           window.show()
-          window.focus()
+          focusWindow(window)
         })
       })
+      // The preload action stands in for clicking a session in the foreground.
+      // Activate the real window if another app took focus during the fixture run.
+      const handle = ipcMain.handle.bind(ipcMain)
+      ipcMain.handle = (channel, listener) => handle(channel, channel === 'agent:focusRun'
+        ? (event, runId) => {
+            const window = BrowserWindow.fromWebContents(event.sender)
+            if (runId && window && !window.isFocused()) focusWindow(window)
+            return listener(event, runId)
+          }
+        : listener)
       app.setBadgeCount = (count) => {
         if (!initial) {
           // Keep test service isolation. Only this fixture opts into a native Dock and window.
