@@ -41,11 +41,16 @@ it.each([0x1421, 0x712f, 0x1ed41, 0x923f247])('replays every projection field ac
     for (const [index, sessionKey] of sessions.entries()) {
       expect(apply(sink, index + 1, { type: 'session.create', payload: { sessionKey, cwd, provider: 'codex' } }).kind).toBe('accepted')
     }
+    const nativeSessionId = 'bound-native-session'
+    let pendingBind: string | undefined
     let accepted = 0
-    for (let at = 10; at < 90; at++) {
+    for (let at = 10; at < 150; at++) {
       const sessionKey = sessions[choose(sessions.length)]!
-      const active = sink.getSession(sessionKey)!.activeRunId
-      const choices: Command[] = [
+      const session = sink.getSession(sessionKey)
+      const active = session?.activeRunId
+      const provisional = `provisional-${choose(3)}`
+      const boundRunId = sink.getSession(nativeSessionId)?.activeRunId
+      const choices: Array<Command | 'delete'> = [
         { type: 'session.rename', payload: { sessionKey, title: `会话 ${choose(1_000)}` } },
         { type: 'session.pin', payload: { sessionKey } },
         { type: 'session.unpin', payload: { sessionKey } },
@@ -55,21 +60,65 @@ it.each([0x1421, 0x712f, 0x1ed41, 0x923f247])('replays every projection field ac
           sessionKey, cwd, provider: 'codex',
           catalog: { nativeSessionId: `native-${sessionKey}`, projectCwd: cwd, preview: `preview ${at}`, runtimeProvider: 'codex_cli' }
         } },
+        { type: 'session.import', payload: { sessionKey, cwd, provider: 'codex', title: `imported ${at}`, ts: at } },
+        sink.getSession(provisional)
+          ? { type: 'session.withdraw', payload: { sessionKey: provisional } }
+          : { type: 'session.discover', payload: {
+            sessionKey: provisional, cwd, provider: 'codex',
+            catalog: { nativeSessionId: null, projectCwd: cwd, preview: null, runtimeProvider: 'codex_cli' }
+          } },
         { type: 'run.submit', payload: {
           runId: `run-${at}`, sessionKey, cwd, provider: 'codex', profile: null, claimMode: 'immediate',
           dispatchImmediately: true, promptPreview: `question ${at}`
         } },
         { type: 'run.effect_result', payload: { runId: active ?? 'absent', step: choose(2) ? 'failed' : 'settled' } }
       ]
+      if (session && !active) choices.push('delete')
+      if (boundRunId) {
+        choices.push({ type: 'run.effect_result', payload: { runId: boundRunId, step: 'settled' } })
+      } else if (pendingBind) {
+        choices.push({ type: 'run.effect_result', payload: {
+          runId: pendingBind, step: 'session_bound', nativeSessionId, attachNative: true,
+          catalogRunId: `app-${pendingBind}`
+        } })
+      } else {
+        choices.push({ type: 'run.submit', payload: {
+          runId: `unbound-${at}`, sessionKey: null, cwd, provider: 'codex', profile: null,
+          claimMode: 'immediate', dispatchImmediately: true
+        } })
+      }
       const command = choices[choose(choices.length)]!
       const before = sink.listEvents().length
-      const result = apply(sink, at, command)
-      if (result.kind === 'accepted') accepted += 1
-      else expect(sink.listEvents()).toHaveLength(before)
+      if (command === 'delete') {
+        expect(sink.deleteSession({ sessionKey, cwd, actor: 'system', scope: 'system', at }).status).toBe('deleted')
+        expect(sink.getSession(sessionKey)).toBeUndefined()
+        accepted += 1
+      } else {
+        const result = apply(sink, at, command)
+        if (result.kind === 'accepted') {
+          accepted += 1
+          if (command.type === 'run.submit' && command.payload.sessionKey === null) {
+            pendingBind = command.payload.runId
+          }
+          if (command.type === 'run.effect_result' && command.payload.step === 'session_bound') {
+            expect(sink.getRun(command.payload.runId)).toMatchObject({
+              appRunId: command.payload.catalogRunId, sessionKey: nativeSessionId
+            })
+            pendingBind = undefined
+          }
+        } else expect(sink.listEvents()).toHaveLength(before)
+      }
       if (at % 11 === 0) expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
     }
     expect(accepted).toBeGreaterThan(40)
-    expect(sink.listEvents().some(event => event.type === 'turn.began')).toBe(true)
+    const events = sink.listEvents()
+    expect(events.some(event => event.type === 'turn.began')).toBe(true)
+    expect(events.map(event => event.type)).toEqual(expect.arrayContaining([
+      'session.imported', 'session.deleted', 'session.withdrawn'
+    ]))
+    expect(events.find(event => event.type === 'run.session_bound')).toMatchObject({
+      payload: { attachNative: true, appRunId: expect.any(String) }
+    })
     expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   })
 })
