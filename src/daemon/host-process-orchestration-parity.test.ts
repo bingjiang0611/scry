@@ -46,13 +46,11 @@ describe('authoritative daemon lifecycle parity', () => {
       relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
       smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
       logging: process.env.ELECTRON_ENABLE_LOGGING,
-      orch: process.env.SCRY_ORCHESTRATION,
       argvLen: process.argv.length
     }
     process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
     process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
     process.env.ELECTRON_ENABLE_LOGGING = '1'
-    process.env.SCRY_ORCHESTRATION = 'shadow'
     process.argv.push('--remote-debugging-port=0')
 
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
@@ -76,10 +74,14 @@ describe('authoritative daemon lifecycle parity', () => {
 
       // Recovery is committed before any App traffic reaches the socket.
       const orphan = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'runControl', method: 'probeLifecycle', runId: orphanRunId
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [orphanRunId], waitMs: 0
       })
-      expect(orphan.lifecycle).toBe('interrupted')
-      expect(authority.sink.getRun(orphanRunId)?.lifecycle).toBe(orphan.lifecycle)
+      expect(orphan.subscribe).toMatchObject({
+        mode: 'snapshot', snapshot: { activeRuns: { rows: expect.arrayContaining([
+          expect.objectContaining({ runId: orphanRunId, lifecycle: 'interrupted' })
+        ]) } }
+      })
+      expect(authority.sink.getRun(orphanRunId)?.lifecycle).toBe('interrupted')
 
       // 1. Multi-turn conversation (3 turns) + H3 settle parity + peer actor / local origin
       const created = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
@@ -180,8 +182,6 @@ describe('authoritative daemon lifecycle parity', () => {
       else process.env.SCRY_REMOTE_RELAY_ENABLED = saved.relay
       if (saved.smoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
       else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
-      if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-      else process.env.SCRY_ORCHESTRATION = saved.orch
     }
   })
 

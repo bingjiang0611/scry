@@ -1,18 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { DaemonRunRuntime } from './daemon-run-runtime'
-import { DaemonRunTransport } from './daemon-run-transport'
+import { DaemonRunTransport, type DaemonRequest } from './daemon-run-transport'
 import { TraceOutputBridge, type TraceBatch } from './trace-output'
 import { laneForRequest } from './remote/desktop-lane'
 import { startDaemonRunEvents } from './daemon-run-events'
+import type { SubscribeEventItem, SubscribeHint, SubscribeKnownCursor, SubscribeReply } from '../shared/orchestration-subscribe'
 
-// P3f E0: two runs on one daemon connection.
-//
-// Each lane carries one outstanding request (desktop-lane.ts), and every run's long
-// poll goes to the same `watch` lane. The daemon answers a watch on that run's own
-// output or on any ledger event, so while run A thinks quietly, run B's poll waits
-// behind A's - B's bind and B's text arrive only when A's poll ends. Worse, B's start
-// outlives its own bind budget: the budget is checked between watches, and the watch
-// it is waiting for is A's.
+// P3f E0: two runs share one status lane. A quiet run does not get its own
+// blocking watch, so a second run must still bind and stream within its budget.
 
 const RUN_A = '1a2b3c4d-1111-4a3f-9a2e-2f2c1a4b5d6e'
 const RUN_B = '1a2b3c4d-2222-4a3f-9a2e-2f2c1a4b5d6e'
@@ -22,44 +17,54 @@ const CANONICAL: Record<string, string> = { [RUN_A]: 'remote-run-aaaa-0', [RUN_B
 
 function daemon() {
   const lanes = new Map<string, Promise<unknown>>()
-  const quietA: Array<() => void> = []
-  let submits = 0
-  const bound = new Set<string>()
-  const output = new Map<string, number>()
   const text = new Map<string, string>()
-  const settled = new Set<string>()
-  // The daemon's App event feed: run notices, answered at once or on the next one.
-  const notices: Array<{ kind: 'run'; runId: string; intentSeq?: number } | { kind: 'window'; channel: string; payload: unknown }> = []
-  const live = new Set<string>()
-  const liveRequests: number[] = []
-  const noticeWaiters: Array<() => void> = []
-  const notice = (runId: string, intentSeq?: number) => {
-    notices.push({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) })
-    for (const wake of noticeWaiters.splice(0)) wake()
+  const updates: Array<{ hint: SubscribeHint } | { event: SubscribeEventItem }> = []
+  const statusOpens: number[] = []
+  let notify = () => {}
+  let submits = 0
+  const ids = { hostId: 'fixture-host', logId: 'fixture-log' }
+
+  const publish = (update: typeof updates[number]) => { updates.push(update); notify() }
+  const hint = (runId: string, outputSeq = 0) => publish({
+    hint: { kind: 'run', runId, scryRunId: CANONICAL[runId], providerId: 'codex', cwd: '/w', admitted: true, outputSeq }
+  })
+  const settle = (runId: string) => publish({
+    event: { seq: updates.length + 1, type: 'run.settled', stream: 'run', at: 0, runId, payload: {} }
+  })
+
+  async function subscribe(known: SubscribeKnownCursor | undefined, signal?: AbortSignal): Promise<SubscribeReply> {
+    if (!known) {
+      statusOpens.push(Date.now())
+      return { ...ids, seq: updates.length, mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } }
+    }
+    if (known.seq === updates.length && !signal?.aborted) {
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          signal?.removeEventListener('abort', done)
+          notify = () => {}
+          resolve()
+        }
+        notify = done
+        signal?.addEventListener('abort', done, { once: true })
+      })
+    }
+    if (known.seq === updates.length) return { ...ids, seq: known.seq, mode: 'idle' }
+    const batch = updates.slice(known.seq)
+    return {
+      ...ids, seq: updates.length, mode: 'events',
+      events: batch.flatMap((update) => 'event' in update ? [update.event] : []),
+      hints: batch.flatMap((update) => 'hint' in update ? [update.hint] : [])
+    }
   }
-  const answer = async (payload: Record<string, unknown>): Promise<unknown> => {
+
+  const answer: DaemonRequest = async (payload, options) => {
     if (payload.op === 'submit') {
       const runId = submits++ === 0 ? RUN_A : RUN_B
-      return { runId, status: 'recorded', seq: 1 }
+      hint(runId)
+      return { runId, status: 'recorded', seq: updates.length }
     }
-    if (payload.op === 'watch') {
-      const runId = String(payload.runId)
-      if (!bound.has(runId)) {
-        bound.add(runId)
-        const detail = JSON.stringify({ event: 'bound', ledgerRunId: runId, scryRunId: CANONICAL[runId], cwd: '/w', providerId: 'codex' })
-        return { watch: { state: 'dispatched', poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail }] }, output: { chunks: [], cursor: 0, count: 0 } } }
-      }
-      // A is thinking: like the real daemon, its poll stays open for the wait it was
-      // given (the pump asks for 15 s), or until the test ends it.
-      if (runId === RUN_A) {
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, Number(payload.waitMs))
-          quietA.push(() => { clearTimeout(timer); resolve() })
-        })
-      }
-      const count = output.get(runId) ?? 0
-      output.set(runId, 0)
-      return { watch: { state: settled.has(runId) ? 'settled' : 'dispatched', poll: { cursor: 1, events: [] }, output: { chunks: [], cursor: count, count } } }
+    if (payload.op === 'subscribe') {
+      return { subscribe: await subscribe(payload.known as SubscribeKnownCursor | undefined, options?.signal) }
     }
     if (payload.op === 'desktop') {
       const query = payload.query as { runId: string }
@@ -68,29 +73,13 @@ function daemon() {
       const items = value ? [{ id: `${runId}-t`, ts: '2024-01-01T00:00:00.000Z', runId: query.runId, kind: 'model', stage: 'text', messageId: 'm', text: value }] : []
       return { desktop: { kind: 'trace', run: { runId: query.runId, providerId: 'codex', cwd: '/w', userText: 'hi', items, done: false }, cursor: { revision: `r${items.length}`, count: items.length } } }
     }
-    if (payload.op === 'questions') return { questions: [] }
-    if (payload.op === 'liveRuns') {
-      liveRequests.push(Date.now())
-      return { liveRuns: { revision: String(live.size), runs: [...live].map((runId) => ({ runId, state: 'running' })) } }
-    }
-    if (payload.op === 'appEvents') {
-      if (payload.epoch === undefined) return { events: { epoch: 'e1', cursor: notices.length, items: [] } }
-      const cursor = Number(payload.cursor)
-      if (notices.length <= cursor) {
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, Number(payload.waitMs))
-          noticeWaiters.push(() => { clearTimeout(timer); resolve() })
-        })
-      }
-      return { events: { epoch: 'e1', cursor: notices.length, items: notices.slice(cursor) } }
-    }
-    return { error: 'unknown_op' }
+    throw new Error(`unexpected daemon operation ${String(payload.op)}`)
   }
-  // The production rule: one request at a time per lane, the lane chosen from the op.
-  const request = (payload: Record<string, unknown>): Promise<unknown> => {
+  // Use the production lane routing and keep one outstanding request per lane.
+  const request: DaemonRequest = (payload, options) => {
     const lane = laneForRequest(payload)
     const previous = lanes.get(lane) ?? Promise.resolve()
-    const next = previous.then(() => answer(payload))
+    const next = previous.then(() => answer(payload, options))
     lanes.set(lane, next.then(() => undefined, () => undefined))
     return next
   }
@@ -107,7 +96,10 @@ function daemon() {
   const runtime = new DaemonRunRuntime({
     transport,
     runTraces,
-    send: () => {},
+    send: (channel, payload) => {
+      if (channel === 'agent:turnDone') delivered.push(`notice:${channel}:${(payload as { runId: string }).runId}`)
+    },
+    subscribeMode: true,
     bridge: new TraceOutputBridge({
       canSend: () => true,
       send: (batch: TraceBatch) => { for (const event of batch.events ?? []) if (event.text) delivered.push(`${event.runId}:${event.text}`) },
@@ -120,25 +112,13 @@ function daemon() {
   let isLive = false
   const setWakesLive = runtime.setWakesLive.bind(runtime)
   runtime.setWakesLive = (value: boolean) => { isLive = value; setWakesLive(value) }
-  const start = () => startDaemonRunEvents({
-    transport, waitMs: 5_000,
-    send: (channel, payload) => delivered.push(`notice:${channel}:${(payload as { runId?: string }).runId}`),
-    runtime
-  })
+  const start = () => startDaemonRunEvents({ transport, waitMs: 5_000, send: () => {}, runtime })
   return {
-    runtime, delivered, start, isLive: () => isLive, liveRequests, subscription,
-    settle: (runId: string) => { settled.add(runId); notice(runId) },
-    write: (runId: string, value: string) => { text.set(runId, value); output.set(runId, (output.get(runId) ?? 0) + 1); notice(runId) },
-    phone: (runId: string) => { live.add(runId); notice(runId, 1) },
-    // The daemon's text grew and its pipeline said the turn is done, with no run notice
-    // in between: what a window must not do is show "done" before that text.
-    finish: (runId: string, value: string) => {
-      text.set(runId, value)
-      output.set(runId, (output.get(runId) ?? 0) + 1)
-      notices.push({ kind: 'window', channel: 'agent:turnDone', payload: { runId: CANONICAL[runId] } })
-      for (const wake of noticeWaiters.splice(0)) wake()
-    },
-    endQuietPoll: () => { for (const resolve of quietA.splice(0)) resolve(); for (const wake of noticeWaiters.splice(0)) wake() }
+    runtime, delivered, start, isLive: () => isLive, statusOpens, subscription, settle,
+    write: (runId: string, value: string) => { text.set(runId, value); hint(runId, 1) },
+    phone: (runId: string) => hint(runId),
+    // With no live output hint, the terminal event must still deliver the final text first.
+    finish: (runId: string, value: string) => { text.set(runId, value); settle(runId) }
   }
 }
 
@@ -151,7 +131,7 @@ const start = (runtime: DaemonRunRuntime, intentId: string) =>
 
 describe('concurrent daemon runs (P3f E0)', () => {
   it('binds and streams a second run while the first one is quiet', async () => {
-    const { runtime, delivered, start: startEvents, isLive, write, endQuietPoll } = daemon()
+    const { runtime, delivered, start: startEvents, isLive, write } = daemon()
     const events = startEvents()
     try {
       await expect.poll(isLive).toBe(true)
@@ -163,14 +143,12 @@ describe('concurrent daemon runs (P3f E0)', () => {
       await expect.poll(() => delivered, { timeout: 500 }).toContain(`${CANONICAL[RUN_B]}:from B`)
     } finally {
       events.dispose()
-      endQuietPoll()
       runtime.dispose()
-      endQuietPoll()
     }
   })
 
   it('shows a run another client started without the renderer asking (E3)', async () => {
-    const { runtime, delivered, start: startEvents, isLive, write, phone, liveRequests, endQuietPoll } = daemon()
+    const { runtime, delivered, start: startEvents, isLive, write, phone, statusOpens } = daemon()
     const events = startEvents()
     try {
       await expect.poll(isLive).toBe(true)
@@ -178,16 +156,15 @@ describe('concurrent daemon runs (P3f E0)', () => {
       await expect.poll(() => runtime.isTracking(RUN_PHONE)).toBe(true)
       write(RUN_PHONE, 'from the phone')
       await expect.poll(() => delivered, { timeout: 1_000 }).toContain(`${CANONICAL[RUN_PHONE]}:from the phone`)
-      expect(liveRequests).toHaveLength(1)
+      expect(statusOpens).toHaveLength(1)
     } finally {
       events.dispose()
-      endQuietPoll()
       runtime.dispose()
     }
   })
 
-  it('delivers a run notice only after the text the daemon had when it sent it (W1)', async () => {
-    const { runtime, delivered, start: startEvents, isLive, finish, endQuietPoll } = daemon()
+  it('delivers turn completion only after the text the daemon had when it settled (W1)', async () => {
+    const { runtime, delivered, start: startEvents, isLive, finish } = daemon()
     const events = startEvents()
     try {
       await expect.poll(isLive).toBe(true)
@@ -199,13 +176,12 @@ describe('concurrent daemon runs (P3f E0)', () => {
       expect(text).toBeLessThan(delivered.indexOf(`notice:agent:turnDone:${CANONICAL[RUN_A]}`))
     } finally {
       events.dispose()
-      endQuietPoll()
       runtime.dispose()
     }
   })
 
   it('feeds a run-level subscription the run text, then its end (W2)', async () => {
-    const { runtime, subscription, start: startEvents, isLive, write, settle, endQuietPoll } = daemon()
+    const { runtime, subscription, start: startEvents, isLive, write, settle } = daemon()
     const events = startEvents()
     try {
       await expect.poll(isLive).toBe(true)
@@ -219,7 +195,6 @@ describe('concurrent daemon runs (P3f E0)', () => {
       expect(subscription.indexOf(`settled:${CANONICAL[RUN_A]}`)).toBe(subscription.length - 1)
     } finally {
       events.dispose()
-      endQuietPoll()
       runtime.dispose()
     }
   })
