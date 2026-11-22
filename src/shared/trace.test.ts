@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contextUsageEvidence, fileOpOf, mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp } from './trace.js'
+import { contextUsageEvidence, fileOpOf, mcpCallsForEvent, mcpPayloadFailed, normalizeTurnDiffSnapshot, parseMcp, toolInvocation } from './trace.js'
 
 describe('context usage evidence', () => {
   it('binds context tokens only to the declared model', () => {
@@ -73,6 +73,39 @@ describe('MCP shell bridge evidence', () => {
       { server: 'workitem', action: 'get_sub_workitem', tool: 'mcporter:workitem.get_sub_workitem' },
       { server: 'workitem', action: 'get_workitem_comments', tool: 'mcporter:workitem.get_workitem_comments' }
     ])
+  })
+
+  it('识别 Qoder 原生 mcp_call 包装器，并取内层参数', () => {
+    expect(parseMcp('mcp_call', { toolName: 'mcp__probe__echo', arguments: { text: 'hi' } })).toEqual({
+      isMcp: true, mcpServer: 'probe', mcpAction: 'echo', mcpTool: 'mcp__probe__echo',
+      mcpCalls: [{ server: 'probe', action: 'echo', tool: 'mcp__probe__echo' }]
+    })
+    expect(toolInvocation('mcp_call', { toolName: 'mcp__probe__echo', arguments: { text: 'hi' } })).toMatchObject({
+      tool: 'mcp__probe__echo',
+      input: { text: 'hi' },
+      mcp: { isMcp: true, mcpServer: 'probe', mcpAction: 'echo' }
+    })
+  })
+
+  it('不把其他包装名或不像 mcp__<server>__<action> 的 toolName 猜成 MCP', () => {
+    expect(parseMcp('mcp_get', { toolName: 'mcp__probe__echo' }).isMcp).toBe(false)
+    expect(parseMcp('mcp_call', { toolName: 'not-a-mcp-tool', arguments: {} }).isMcp).toBe(false)
+    expect(parseMcp('mcp_call', { toolName: 'mcp__probe', arguments: {} }).isMcp).toBe(false)
+    expect(parseMcp('mcp_call', {}).isMcp).toBe(false)
+    expect(toolInvocation('mcp_get', { toolName: 'mcp__probe__echo' })).toMatchObject({
+      tool: 'mcp_get', input: { toolName: 'mcp__probe__echo' }
+    })
+  })
+
+  it('从旧归档的 mcp_call 事件回填包装调用', () => {
+    expect(mcpCallsForEvent({
+      isMcp: true,
+      tool: 'mcp_call',
+      input: { toolName: 'mcp__probe__echo', arguments: { text: 'hi' } },
+      mcpServer: 'probe',
+      mcpAction: 'echo',
+      mcpTool: 'mcp__probe__echo'
+    })).toEqual([{ server: 'probe', action: 'echo', tool: 'mcp__probe__echo' }])
   })
 
   it('识别四端可能出现的顶层 JSON 与 Claude/Qoder text envelope 业务失败', () => {
