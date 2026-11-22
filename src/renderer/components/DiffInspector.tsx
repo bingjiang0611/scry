@@ -32,7 +32,7 @@ export function DiffInspector({ state, onClose, history }: {
       {state.refreshing && <span className="visually-hidden" role="status">{copy.refreshing}</span>}
       <div className="diff-inspector-body" role="region" aria-label={copy.scopes[state.scope]}>
         {state.review ? <TurnDiffReviewPanel review={state.review} onClose={onClose} history={state.scope === 'branch' ? commits : undefined} embedded /> : <EmptyState size="card" picture={state.pending ? 'clock' : 'diff'}
-          title={state.pending ? copy.pending : state.failure ? workspaceDiffCopy.label(state.failure)
+          title={state.pending ? copy.pending : state.failure ? workspaceDiffCopy.detail(state.failure)
             : state.emptySession && state.scope === 'turn' ? copy.beforeSend : copy.missing(state.scope)}
           actions={state.failure && state.cwd && (state.scope === 'workspace' || state.scope === 'branch')
             ? [{ label: copy.refresh, icon: 'refresh', onClick: state.refresh, busy: state.refreshing }] : undefined} />}

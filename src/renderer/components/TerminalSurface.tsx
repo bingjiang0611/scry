@@ -593,7 +593,7 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
         </div>
       </div>
 
-      <div className="terminal-stage">
+      <div className="terminal-stage" aria-busy={!hydrated}>
         {!hydrated ? (
           <DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />
         ) : tabs.length === 0 ? (

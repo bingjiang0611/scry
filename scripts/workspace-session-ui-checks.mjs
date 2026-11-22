@@ -224,7 +224,7 @@ export async function exerciseWorkspaceSessions(context) {
     if (!await evaluate(`Boolean(document.querySelector('button.pinned-summary-row'))`)) await click('[data-pinned-summary-toggle]')
     await click('button.pinned-summary-row', 'Changes')
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'workspace' &&
-      document.querySelector('.diff-review-content > .empty-state')?.textContent.includes('不是 Git')`), 'non-Git evidence is unavailable')
+      document.querySelector('.diff-inspector-body > .empty-state, .diff-review-content > .empty-state')?.textContent.includes('不是 Git')`), 'non-Git evidence is unavailable')
     assert.equal(await evaluate(`Boolean(document.querySelector('.diff-review-totals'))`), false, 'missing evidence is never zero')
     assert.equal(inputs().length, 4, 'read-only scope changes never start a Provider')
     await screenshot('inspector-unavailable')
