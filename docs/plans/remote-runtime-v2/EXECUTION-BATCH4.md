@@ -7,7 +7,7 @@
 - [P3-daemon-design.md](P3-daemon-design.md) §2–§7、§9
 - [P3b-local-runtime-design.md](P3b-local-runtime-design.md) §2–§8
 
-工作约定、停止条件、提交与 STATUS 规则同 [EXECUTION.md](EXECUTION.md) 第 0、1 节。进度写入新文件 `STATUS-BATCH4.md`（总览表加 `status/b4-*.md`）。分支继续使用 `claude/remote-runtime-v2`。
+本批继承的工作约定、停止条件、提交与 STATUS 规则见[原 Batch 1 任务书第 0、1 节](https://github.com/bingjiang0611/scry/blob/77dd5a26135350a478e153a06f39f1464b3393f5/docs/plans/remote-runtime-v2/EXECUTION.md#0-工作约定)。进度写入新文件 `STATUS-BATCH4.md`（总览表加 `status/b4-*.md`）。分支继续使用 `claude/remote-runtime-v2`。
 
 **本批目标：** 纯本机使用也走 daemon。App 不再组装运行管线、不再持有台账或 SQLite 写者、不再自己 spawn Provider，只做 UI、IPC 与「连接别的宿主」的客户端。关闭 App 窗口后，run、终端和远程设备连接都继续工作。本批结束时删除进程内宿主和 App 直连 SQLite，不保留兼容版本。
 
@@ -152,7 +152,7 @@
 
 另外，在 macOS 宿主上执行 `npm run install:mac:dev`，并按上表的升级场景实测一次。无法执行的项写 not-run 并说明原因。不升版本号，不开 PR。
 
-## 停止条件（在 EXECUTION.md 之外追加）
+## Batch 4 追加的停止条件
 
 - B4-D 完成后停下，等维护者确认第 2 条（本机入网与授权语义）和第 4 条（trace 推送方式与延迟预算）。
 - B4-L3 完成后停下核验，之后再做 B4-L4 与删除。

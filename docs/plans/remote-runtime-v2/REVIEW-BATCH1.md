@@ -66,4 +66,4 @@
 
 ## 下一步
 
-Batch 2 = F1–F4 修复 + S1 测量 → P3 daemon 实现。维护者确认上面的决策后，核验方写 `EXECUTION-BATCH2.md`。
+Batch 2 = F1–F4 修复 + S1 测量 → P3 daemon 实现。后续实施和核验见 [Batch 2 状态](STATUS-BATCH2.md) 和 [Batch 2 评审](REVIEW-BATCH2.md)。

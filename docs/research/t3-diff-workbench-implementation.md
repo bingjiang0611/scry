@@ -1,5 +1,9 @@
 # Diff workbench：v4 设计落地
 
+## 前一版：四个比较范围
+
+v3 已验证 Changes 用所选基准与已观测 HEAD 的 merge-base 比较捕获的工作树，Uncommitted 用 HEAD 比较同一工作树；Latest turn 和 Turn 都读取保存的轮次证据，不能回退到当前文件。旧实现改回仅比较 HEAD 后，包含已提交文件的负向对照失败。v3 的键盘、窄屏和四范围验证使用真实临时 Git 与离线 Provider；[当时的完整记录](https://github.com/bingjiang0611/scry/blob/77dd5a26135350a478e153a06f39f1464b3393f5/docs/research/t3-diff-four-scopes.md)不代表 v4 的验收。
+
 ## 范围与入口
 
 在 `feat/workspace-diff-worktree` 实现已确认的 v4 方向，基于 `529eb406`。只修改独立 `scry-workspace-diff` checkout；不改原 checkout，不合并、不推送、不安装。
