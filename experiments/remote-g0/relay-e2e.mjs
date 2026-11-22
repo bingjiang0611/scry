@@ -10,6 +10,7 @@ import { WebSocket, createWebSocketStream } from 'ws'
 import { Pkcs10CertificateRequestGenerator, X509CertificateGenerator, cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity.ts'
 import { createHostController } from '../../src/main/remote/host-controller-factory.ts'
+import { RunOutputFileStore } from '../../src/main/remote/run-output-file.ts'
 import { InnerMtlsHost } from '../../src/main/remote/inner-mtls-host.ts'
 import { PairingTransport } from '../../src/main/remote/pairing-transport.ts'
 import { RelayClient, ReverseTunnelTransport } from '../../src/main/remote/relay-client.ts'
@@ -60,7 +61,9 @@ async function main() {
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
-    startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate()
+    startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate(),
+    // This source-level smoke has no bundled worker entry. Use the same file store directly.
+    createOutputStore: (directory) => new RunOutputFileStore(directory)
   })
   const controller = binding.controller
   const server = await identity.issueHostServer()
