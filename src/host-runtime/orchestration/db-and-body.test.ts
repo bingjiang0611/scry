@@ -68,7 +68,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         const meta = new Map(metaRows.map((r) => [r.key, r.value]))
         expect(meta.get('log_id')).toMatch(/^[0-9a-f-]{36}$/i)
         expect(meta.get('pruned_through')).toBe('0')
-        expect(meta.get('projection_schema_version')).toBe('3')
+        expect(meta.get('projection_schema_version')).toBe('4')
         expect(meta.get('legacy_ledger_seq')).toBe('0')
         expect(meta.has('legacy_catalog_sha256')).toBe(true)
 
@@ -131,7 +131,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
 
       const upgraded = openOrchestrationDatabase({ userDataDir: userData })
       try {
-        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(5)
+        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(6)
         // Old non-zero output_seq preserved; legacy V1 default 0 converted to honest NULL
         const oldRow = upgraded.db
           .prepare('SELECT output_seq, app_run_id FROM orch_p_run WHERE run_id = ?')
@@ -169,12 +169,12 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           VALUES ('old', '/tmp/工作区', 10, 42, '旧标题');
       `)
       migrateOrchestrationDatabase(db)
-      expect(db.pragma('user_version', { simple: true })).toBe(5)
+      expect(db.pragma('user_version', { simple: true })).toBe(6)
       expect(db.prepare('SELECT session_key, cwd, rev_seq, title, catalog FROM orch_p_session').get()).toEqual({
         session_key: 'old', cwd: '/tmp/工作区', rev_seq: 42, title: '旧标题', catalog: null
       })
       const meta = db.prepare('SELECT value FROM orch_meta WHERE key = ?').pluck()
-      expect(meta.get('projection_schema_version')).toBe('3')
+      expect(meta.get('projection_schema_version')).toBe('4')
       expect(meta.get('legacy_catalog_sha256')).toBe('')
       expect(meta.get('log_id')).toBe('before')
     } finally {

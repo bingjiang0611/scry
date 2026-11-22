@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { expect, it } from 'vitest'
 import { transcriptPath } from '../main/transcript-archive'
 import { createAppSessionStore } from '../main/app-store'
-import { sha256Hex } from '../host-runtime/orchestration/canonical-json'
+import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createCatalogScanWork } from './orchestration-catalog-scan'
 import { createOrchestrationCatalogAccess } from './orchestration-catalog-access'
@@ -96,6 +96,79 @@ it('does not recover a deleted native transcript session whose projection used t
     await work.scanCatalog()
     expect(sink.listEvents().at(-1)).toEqual(tombstone)
     expect(access.read()).toEqual([])
+  } finally {
+    sink.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it.each(['new projection', 'v5 upgrade'])('counts after recorded transcript history in a %s', async (mode) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-scan-ordinal-')))
+  const userDataDir = join(root, 'userData')
+  const homeDir = join(root, 'home')
+  const cwd = join(root, 'workspace')
+  const nativeSessionId = '43a699f3-f027-4e92-970e-021772d5d7b8'
+  const transcript = transcriptPath(cwd, nativeSessionId, homeDir)
+  mkdirSync(cwd)
+  mkdirSync(dirname(transcript), { recursive: true })
+  writeFileSync(transcript, JSON.stringify({
+    cwd, sessionId: nativeSessionId, type: 'user', message: { role: 'user', content: '先前的消息' }
+  }) + '\n')
+  const open = () => EventSink.open({ userDataDir, fullfsync: false })
+  let sink = open()
+  try {
+    const work = createCatalogScanWork({
+      sink, homeDir, userDataDir, workspaces: () => [cwd],
+      isActive: () => false, log: (message) => { throw new Error(message) }
+    })
+    await work.scanCatalog()
+    const [discovered] = sink.listEvents()
+    expect(discovered).toMatchObject({ type: 'session.discovered', payload: { transcript: { status: 'available' } } })
+    const sessionKey = discovered!.sessionKey!
+    const submit = (runId: string) => {
+      const payload = {
+        runId, sessionKey: null, cwd, provider: 'claude', profile: null,
+        claimMode: 'immediate' as const, dispatchImmediately: true
+      }
+      expect(sink.execute({
+        type: 'run.submit', commandId: `submit:${runId}`, actor: 'system', scope: 'system', at: 20,
+        payload, payloadSha256: sha256Hex(canonicalJson(payload))
+      }).kind).toBe('accepted')
+    }
+    const bind = (runId: string, sourceId: string) => {
+      const payload = { runId, step: 'session_bound' as const, nativeSessionId: sourceId, attachNative: true as const }
+      expect(sink.execute({
+        type: 'run.effect_result', commandId: `bind:${runId}`, actor: 'system', scope: 'system', at: 21,
+        payload, payloadSha256: sha256Hex(canonicalJson(payload))
+      }).kind).toBe('accepted')
+    }
+
+    const freshId = '7bb91f84-32b0-4af7-80e9-27eb488534bd'
+    submit('fresh-run')
+    bind('fresh-run', freshId)
+    const freshTranscript = transcriptPath(cwd, freshId, homeDir)
+    writeFileSync(freshTranscript, JSON.stringify({
+      cwd, sessionId: freshId, type: 'user', message: { role: 'user', content: '已投影的第一轮' }
+    }) + '\n')
+    await work.scanCatalog()
+    expect(sink.listEvents().at(-1)).toMatchObject({
+      type: 'session.discovered', sessionKey: freshId, payload: { transcript: { status: 'available' } }
+    })
+    expect(sink.getSession(freshId)?.legacy).toBe(false)
+
+    if (mode === 'v5 upgrade') {
+      sink.handle.db.prepare('UPDATE orch_p_session SET legacy = 0 WHERE session_key = ?').run(sessionKey)
+      sink.handle.db.pragma('user_version = 5')
+      sink.close()
+      sink = open()
+    }
+
+    submit('existing-run')
+    bind('existing-run', nativeSessionId)
+    expect(sink.getTurn(sessionKey, 1)).toMatchObject({ runId: 'existing-run', ordinalOrigin: 'since_import' })
+    expect(sink.getSession(freshId)?.legacy).toBe(false)
+    expect(sink.getTurn(freshId, 1)).toMatchObject({ runId: 'fresh-run', ordinalOrigin: 'native' })
+    expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   } finally {
     sink.close()
     rmSync(root, { recursive: true, force: true })

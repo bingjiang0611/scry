@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 5
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 3
+export const ORCHESTRATION_SCHEMA_VERSION = 6
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 4
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -217,4 +217,32 @@ export const ORCH_DDL_V5: readonly string[] = [
   "UPDATE orch_meta SET value = '3' WHERE key = 'projection_schema_version'"
 ]
 
-export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5]
+const ORCH_DDL_V6: readonly string[] = [
+  // Restore prior-history flags from discoveries of the current session generation.
+  // Already written turn ordinals and subscriber revisions remain immutable.
+  `UPDATE orch_p_session SET legacy = 1
+   WHERE legacy = 0 AND EXISTS (
+     SELECT 1 FROM orch_event AS discovery
+     WHERE discovery.session_key = orch_p_session.session_key AND discovery.type = 'session.discovered'
+       AND json_extract(discovery.payload, '$.transcript.status') = 'available'
+       AND json_extract(discovery.payload, '$.transcript.quality') = 'exact'
+       AND length(json_extract(discovery.payload, '$.transcript.value')) > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM orch_event AS retired WHERE retired.session_key = discovery.session_key
+           AND retired.seq > discovery.seq AND retired.type IN ('session.deleted', 'session.withdrawn')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM orch_event AS turn WHERE turn.session_key = discovery.session_key
+           AND turn.seq < discovery.seq AND turn.type = 'turn.began'
+           AND turn.seq > COALESCE((
+             SELECT MAX(previous.seq) FROM orch_event AS previous WHERE previous.session_key = discovery.session_key
+               AND previous.seq < discovery.seq AND previous.type IN ('session.deleted', 'session.withdrawn')
+           ), 0)
+       )
+   )`,
+  "UPDATE orch_meta SET value = '4' WHERE key = 'projection_schema_version'"
+]
+
+export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6
+]

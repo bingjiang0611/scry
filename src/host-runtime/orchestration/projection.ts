@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { Evidence } from '../../shared/turn-record'
 import { canonicalJson } from './canonical-json'
 import type { OrchestrationEventRow } from './types'
 
@@ -306,15 +307,21 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     }
 
     case 'session.discovered': {
+      // Verified transcript bytes that predate any projected turn are prior history.
+      const transcript = p.transcript as Evidence<string> | undefined
+      const priorHistory = transcript?.status === 'available' && transcript.quality === 'exact' && Boolean(transcript.value)
       db.prepare(
         `INSERT INTO orch_p_session (
           session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by, catalog, conversation_id
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
           conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
           title = COALESCE(excluded.title, orch_p_session.title),
           ts = MAX(orch_p_session.ts, excluded.ts),
           catalog = COALESCE(excluded.catalog, orch_p_session.catalog),
+          legacy = CASE WHEN excluded.legacy = 1 AND NOT EXISTS (
+            SELECT 1 FROM orch_p_turn WHERE session_key = excluded.session_key
+          ) THEN 1 ELSE orch_p_session.legacy END,
           rev_seq = excluded.rev_seq`
       ).run(
         String(p.sessionKey),
@@ -323,6 +330,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         (p.cwd as string | null) ?? null,
         (p.title as string | null) ?? null,
         event.at,
+        priorHistory ? 1 : 0,
         event.seq,
         event.actor,
         p.catalog ? canonicalJson(p.catalog) : null,
