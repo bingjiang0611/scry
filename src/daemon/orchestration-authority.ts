@@ -377,7 +377,7 @@ function buildAuthorityRuntime<
         runId: canonicalRunId,
         step,
         ...(detail ? { reason: detail } : {}),
-        evidence: ['provider']
+        evidence: [step === 'cancelled' ? 'host.run_completion' : 'provider']
       })
       subscribeHub.noteRunTerminal(canonicalRunId)
       trustGate.delete(canonicalRunId)

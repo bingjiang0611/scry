@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { HostController, type HostControllerDependencies, type RemoteIntentRouting, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
+import { HostController, type HostControllerDependencies, type RemoteProjectRef, type RemoteDirectoryListing, type RemoteProviderRef, type RemoteCommandCatalog, type RemoteCommandQuery, type RemoteSessionRef, type RemoteHistoryTurn, type RemoteHistoryQuery, type RemoteHistoryPreview } from './host-controller'
 import { PairingFileStore } from './pairing-file'
 import { SessionLedgerFileStore } from './session-ledger-file'
 import { RunOutputWorkerStore } from './run-output-worker'
@@ -10,7 +10,6 @@ import { ensureHostIdentity } from './host-identity'
 import type { VerifiedPairingCSR, IssuedPairingCertificate } from './pairing'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
 import type { ProviderOperationGate } from '../provider-operation-gate'
-import type { AgentQuestionRequest, AgentQuestionResponse } from '../../shared/runtime'
 import type { DesktopAttachmentStore } from './desktop-attachments'
 import { createProviderPrewarmer } from './remote-provider-prewarm'
 import type { LedgerStore } from './session-ledger'
@@ -54,15 +53,7 @@ export interface HostControllerFactoryDependencies {
   verifyCSR(csrPEM: string): Promise<VerifiedPairingCSR>
   issue(input: VerifiedPairingCSR & { deviceId: string }): Promise<IssuedPairingCertificate>
   authorizeWorkspace(cwd: string): string
-  startRun(input: {
-    runId: string
-    routing: RemoteIntentRouting
-    progress(detail?: string): void
-    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
-    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
-    stopSignal: AbortSignal
-    grantScope?: 'local' | 'remote'
-  }): Promise<void>
+  startRun: HostControllerDependencies['runProvider']
   onDispatchRefused?: HostControllerDependencies['onDispatchRefused']
   onRunActivity?: HostControllerDependencies['onRunActivity']
   onLedgerEvent?: HostControllerDependencies['onLedgerEvent']
@@ -112,15 +103,7 @@ function privateDir(path: string): string {
 export async function createHostControllerFromDisk(deps: {
   stateDirectory: string
   authorizeWorkspace(cwd: string): string
-  startRun(input: {
-    runId: string
-    routing: RemoteIntentRouting
-    progress(detail?: string): void
-    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
-    requestUserInput(request: AgentQuestionRequest, signal: AbortSignal): Promise<AgentQuestionResponse>
-    stopSignal: AbortSignal
-    grantScope?: 'local' | 'remote'
-  }): Promise<void>
+  startRun: HostControllerDependencies['runProvider']
   gate: ProviderOperationGate
 }): Promise<HostControllerBinding & { anchorSHA256: string; caCertificatePEM: string }> {
   const identity = await ensureHostIdentity(join(deps.stateDirectory, 'identity'))

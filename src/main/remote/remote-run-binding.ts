@@ -5,6 +5,7 @@ import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse,
 import { traceEventToOutputChunk } from './trace-output'
 import { startLegacyRemoteRun } from './remote-run-binding-legacy'
 import { claimConversationLaunch, type ConversationRunMarker, type ManagedLaunch } from './managed-launches'
+import type { RemoteExecutionOutcome } from './remote-dispatcher'
 
 // The remote binding adapts an authenticated device intent to the canonical
 // App run lifecycle. Production supplies startAppRun from index.ts, so trust,
@@ -25,9 +26,7 @@ import { claimConversationLaunch, type ConversationRunMarker, type ManagedLaunch
 //   - Native Provider clarification, editor, and permission prompts are routed
 //     through the authenticated remote interaction broker. The binding never
 //     synthesizes an approval or substitutes an empty answer.
-//   - The provider's own terminal status drives the ledger: a 'failed' result
-//     rejects (dispatcher -> markFailed), every other terminal resolves
-//     (dispatcher -> markSettled). Nothing is fabricated as success.
+//   - The canonical host run result reports terminal failures and cancellations.
 
 export interface RemoteRunTrace {
   providerId: string
@@ -152,10 +151,10 @@ export interface RemoteRunInput {
 
 const marker = (value: Record<string, unknown>): string => JSON.stringify(value)
 
-export function createRemoteRunBinding<M extends ConversationRunMarker = ConversationRunMarker>(deps: RemoteRunBindingDependencies<M>): (input: RemoteRunInput) => Promise<void> {
+export function createRemoteRunBinding<M extends ConversationRunMarker = ConversationRunMarker>(deps: RemoteRunBindingDependencies<M>): (input: RemoteRunInput) => Promise<RemoteExecutionOutcome> {
   let seq = 0
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
-  return async function startRemoteRun(input: RemoteRunInput): Promise<void> {
+  return async function startRemoteRun(input: RemoteRunInput): Promise<RemoteExecutionOutcome> {
     if (deps.startAppRun) return startCanonicalRemoteRun(input)
     // The provider seam below exists only for focused protocol tests; production
     // always supplies startAppRun. Kept in its own module so the canonical path stays
@@ -163,7 +162,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
     return startLegacyRemoteRun(deps, nextScryRunId(), input)
   }
 
-  async function startCanonicalRemoteRun({ runId: ledgerRunId, routing, progress, output, activity, requestUserInput, stopSignal, grantScope }: RemoteRunInput): Promise<void> {
+  async function startCanonicalRemoteRun({ runId: ledgerRunId, routing, progress, output, activity, requestUserInput, stopSignal, grantScope }: RemoteRunInput): Promise<RemoteExecutionOutcome> {
     // A conversation run carries only a marker; its request and run id are the launch's.
     const launch = routing.conversation ? claimConversationLaunch(deps.managedLaunch, routing) : undefined
     const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
@@ -265,6 +264,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
       if (completion.recording === 'failed') throw new Error(completion.error ?? 'remote_recording_failed')
       if (completion.status === 'failed') throw new Error(completion.error ?? 'provider_run_failed')
       progress(marker({ event: 'settled', status: completion.status }))
+      if (completion.status === 'cancelled' || completion.status === 'interrupted') return 'cancelled'
     } catch (error) {
       // Before registration the send still waits on this launch; afterwards the run's
       // own conversation settlement records the outcome.

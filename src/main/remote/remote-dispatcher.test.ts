@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { SessionLedger, type LedgerEvent, type LedgerStore } from './session-ledger'
 import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
+import { createRemoteRunBinding } from './remote-run-binding'
 
 class MemoryLedgerStore implements LedgerStore {
   log: LedgerEvent[]
@@ -57,6 +58,25 @@ describe('RemoteDispatcher', () => {
     expect(ledger.runState(runId)).toBe('failed')
     const failed = ledger.since(0).events.find((e) => e.kind === 'run_failed')
     expect(failed?.detail).toContain('provider exploded')
+  })
+
+  it.each(['cancelled', 'interrupted'] as const)('publishes canonical %s to orchestration and keeps the v2 legacy reply', async (status) => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const start = createRemoteRunBinding({ startAppRun: async () => ({ status, recording: 'committed' }) })
+    const onSettled = vi.fn()
+    const dispatcher = new RemoteDispatcher({
+      ledger, onSettled,
+      executor: { execute: input => start({ ...input, routing: { cwd: '/w', providerId: 'codex', prompt: 'task' } }) }
+    })
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    expect(dispatcher.pump()).toEqual([runId])
+    await dispatcher.idle()
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith(runId, 'cancelled', undefined)
+    expect(ledger.runState(runId)).toBe('settled')
+    const events = ledger.since(0).events
+    expect(events.at(-1)?.kind).toBe('run_settled')
+    expect(JSON.parse(events.at(-2)?.detail ?? '')).toEqual({ event: 'settled', status })
   })
 
   it('records one durable evidence-gap marker when output persistence fails without failing the run', async () => {

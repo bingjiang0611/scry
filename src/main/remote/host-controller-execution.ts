@@ -157,7 +157,7 @@ export function createExecution(input: ExecutionDeps): {
       live.set(executorInput.runId, current)
       reached.add(executorInput.runId)
       try {
-        await deps.runProvider({
+        return await deps.runProvider({
           runId: executorInput.runId,
           routing,
           progress: (detail) => {
@@ -221,14 +221,14 @@ export function createExecution(input: ExecutionDeps): {
         }
         return check
       },
-      onSettled: (runId, ok, detail) => {
-        deps.orchestration!.onRunTerminal(runId, ok ? 'settled' : 'failed', detail)
+      onSettled: (runId, lifecycle, detail) => {
+        deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
       }
     } : {}),
     executor: { execute: async (executorInput) => {
       try {
         const routing = parseRouting(executorInput.detail, { cwdOptional: gateway.runScope(executorInput.runId) === 'local' })
-        try { await gated.execute(executorInput) }
+        try { return await gated.execute(executorInput) }
         finally {
           // Attachments are per-intent scratch: released after the run, whatever it did.
           try { await input.releaseAttachments(routing) }

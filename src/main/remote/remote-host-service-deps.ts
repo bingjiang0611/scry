@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteTargetAPI } from '../../shared/desktop-remote'
 import type { HostControllerFactoryDependencies } from './host-controller-factory'
 import type { HostIdentity } from './host-identity'
-import type { RemoteIntentRouting, RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview } from './host-controller'
+import type { RemoteProjectRef, RemoteDirectoryListing, RemoteProviderRef, RemoteCommandCatalog, RemoteCommandQuery, RemoteSessionRef, RemoteHistoryTurn, RemoteHistoryQuery, RemoteHistoryPreview } from './host-controller'
 import type { RelayTransport } from './relay-client'
 import type { RunOutputStore } from './run-output-log'
 import type { ProviderOperationGate } from '../provider-operation-gate'
@@ -24,12 +24,7 @@ export interface RemoteHostServiceDependencies {
   // workspace, or throws. A device can never smuggle an unlisted path.
   authorizeWorkspace(cwd: string): string
   // Delegates a fully-authorized remote intent to the live run-start path.
-  startRun(input: {
-    runId: string
-    routing: RemoteIntentRouting
-    progress(detail?: string): void
-    output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
-  }): Promise<void>
+  startRun: HostControllerFactoryDependencies['startRun']
   onDispatchRefused?: HostControllerFactoryDependencies['onDispatchRefused']
   onRunActivity?: HostControllerFactoryDependencies['onRunActivity']
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']

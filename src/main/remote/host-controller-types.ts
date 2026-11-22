@@ -17,6 +17,7 @@ import { type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestion
 import { DesktopAttachmentStore } from './desktop-attachments'
 import type { OrchestrationAuthorityHooks } from './orchestration-seam'
 import type { HostAdminNotice } from '../../shared/host-admin'
+import type { RemoteExecutionOutcome } from './remote-dispatcher'
 
 // The structured routing a device intent must resolve to before any Provider
 // run. Carried in the intent detail as JSON; malformed detail is denied.
@@ -158,7 +159,7 @@ export interface HostControllerDependencies {
     // this, never the transport: transport says where bytes came from, not who the
     // caller is.
     grantScope?: 'local' | 'remote'
-  }): Promise<void>
+  }): Promise<RemoteExecutionOutcome>
   // The ledger refused a run before it reached the run start (policy, routing or
   // attachments). A daemon conversation send waits on that start, so it learns the
   // refusal here instead of waiting forever.
