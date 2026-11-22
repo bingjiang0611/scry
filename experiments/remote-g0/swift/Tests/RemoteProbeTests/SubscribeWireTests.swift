@@ -122,4 +122,27 @@ final class SubscribeWireTests: XCTestCase {
     XCTAssertTrue(notice.isDisplayable)
     XCTAssertEqual(notice.deviceLabel, "测试 iPhone")
   }
+
+  func testWithdrawalRemovesOnlyTheProvisionalSession() throws {
+    let rowData = Data("""
+      {"sessionKey":"provisional","cwd":"/workspace","provider":"codex","ts":1,"revSeq":1,"catalog":{}}
+      """.utf8)
+    let row = try JSONDecoder().decode(G0Transport.SubscriptionSessionRow.self, from: rowData)
+    let other = try JSONDecoder().decode(G0Transport.SubscriptionSessionRow.self, from: Data("""
+      {"sessionKey":"other","cwd":"/workspace","provider":"codex","ts":1,"revSeq":1,"catalog":{}}
+      """.utf8))
+    let before = G0Transport.SubscriptionCursor(hostId: "mac2", logId: "log-a", seq: 1)
+    var status = G0Transport.SubscriptionStatus(cursor: before, sessions: ["provisional": row, "other": other], runs: [:])
+    let wire = Data("""
+      {"subscribe":{"hostId":"mac2","logId":"log-a","seq":2,"mode":"events","events":[
+        {"seq":2,"at":10,"type":"session.withdrawn","stream":"session:provisional",
+         "sessionKey":"provisional","sessionRow":null,"payload":{"sessionKey":"provisional"}}]}}
+      """.utf8)
+    let reply = try G0Transport.decodeSubscription(wire, target: nil)
+    let next = try reply.cursor(for: "mac2")
+    XCTAssertTrue(reply.knownEvents(since: before, next: next))
+    try status.apply(reply, cursor: next)
+    XCTAssertEqual(Array(status.sessions.keys), ["other"])
+    XCTAssertEqual(status.cursor, next)
+  }
 }

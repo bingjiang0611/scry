@@ -66,12 +66,17 @@ it('applies visible deltas and opens a fresh snapshot on an unknown event type',
     }] } })
     await expect.poll(async () => (await fixture.client.catalog(id)).sessions.map(item => item.sessionId)).toEqual(['new', 'before'])
     await expect.poll(() => typeof calls[2]?.reply).toBe('function')
-    calls[2]!.reply!({ subscribe: { hostId: fixture.host.hostId, logId: 'old-log', seq: 10, mode: 'events', events: [{
-      seq: 9, type: 'session.future', stream: 'session:new', at: 9, payload: {}
+    calls[2]!.reply!({ subscribe: { hostId: fixture.host.hostId, logId: 'old-log', seq: 9, mode: 'events', events: [{
+      seq: 9, type: 'session.withdrawn', stream: 'session:new', at: 9, sessionKey: 'new', sessionRow: null, payload: {}
     }] } })
-    await expect.poll(() => calls.length).toBe(5)
-    expect(calls[3]?.request).not.toHaveProperty('known')
-    expect(calls[4]?.request.known).toMatchObject({ logId: 'new-log', seq: 2 })
+    await expect.poll(async () => (await fixture.client.catalog(id)).sessions.map(item => item.sessionId)).toEqual(['before'])
+    await expect.poll(() => typeof calls[3]?.reply).toBe('function')
+    calls[3]!.reply!({ subscribe: { hostId: fixture.host.hostId, logId: 'old-log', seq: 10, mode: 'events', events: [{
+      seq: 10, type: 'session.future', stream: 'session:new', at: 10, payload: {}
+    }] } })
+    await expect.poll(() => calls.length).toBe(6)
+    expect(calls[4]?.request).not.toHaveProperty('known')
+    expect(calls[5]?.request.known).toMatchObject({ logId: 'new-log', seq: 2 })
     expect((await fixture.client.catalog(id)).sessions.map(item => item.sessionId)).toEqual(['reset'])
   } finally {
     await fixture.client.dispose()

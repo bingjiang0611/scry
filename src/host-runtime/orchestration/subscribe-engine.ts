@@ -34,6 +34,7 @@ const SESSION_VIEW_EVENTS = new Set([
   'session.archived',
   'session.restored',
   'session.deleted',
+  'session.withdrawn',
   'session.forked',
   'session.discovered',
   'session.imported',
