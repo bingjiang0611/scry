@@ -124,17 +124,10 @@ export function agentPermissionDecision(
   return answer === '允许一次' ? 'once' : 'reject'
 }
 
-/**
- * 把 Provider 给出的风险说明整理成可直接显示的一行文本。
- *
- * 这段文本来自 Provider，可能含控制字符、ANSI 序列或凭据；它是**数据**，不是指令。
- * 这里只做脱敏、去控制字符和长度收敛，不解释也不执行其中的内容。
- */
 export function sanitizeApprovalWarning(value: unknown, maxLength = 400): string | undefined {
   if (typeof value !== 'string') return undefined
   const masked = maskSecrets(value) ?? ''
   const flattened = masked
-    // CSI/OSC 等 ANSI 转义序列
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/g, '')
     .replace(/[\u0000-\u001F\u007F]+/g, ' ')
@@ -152,8 +145,6 @@ export function decodedBase64ByteLength(value: string): number | null {
   const compact = value.replace(/\s+/g, '')
   if (!compact || compact.length % 4 !== 0) return null
   const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0
-  // An unquantified character-class search keeps validation linear without a
-  // per-byte JS loop or the backtracking stack of a whole-string Base64 regexp.
   if (/[^A-Za-z0-9+/]/.test(compact.slice(0, compact.length - padding))) return null
   return (compact.length / 4) * 3 - padding
 }

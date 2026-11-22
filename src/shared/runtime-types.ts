@@ -4,10 +4,7 @@ import type { PreparedWorkspace, WorkspaceStartSelection } from './workspace-sel
 export type AgentDataUpdated =
   | { runId: string; kind?: 'turn_recorded' | 'session_deleted' }
   | { kind: 'conversation_changed'; conversationId: string }
-  // Background catalog recovery added sessions after the project list was already read.
   | { kind: 'catalog_recovered' }
-  // Daemon mode: notices were lost (the daemon restarted, or more changed than its feed
-  // keeps). Anything shown may be stale; every view re-reads what it shows.
   | { kind: 'resynchronize' }
 
 export type RuntimeBackend = 'local' | 'api'
@@ -33,7 +30,6 @@ export const RUN_TERMINATION_REASONS = [
   'budget_exceeded'
 ] as const
 
-/** Every value proves the run ended without finishing its own work. */
 export type RunTerminationReason = typeof RUN_TERMINATION_REASONS[number]
 
 export function isRunTerminationReason(value: unknown): value is RunTerminationReason {
@@ -46,11 +42,6 @@ export interface RunTerminationEvidence {
   message?: unknown
 }
 
-/**
- * 审批档位。四档是语义栈升：默认全部问 → 只自动放行文件编辑 → 交给 Provider 原生
- * 审查器 → 不再审批。没有原生等价语义的 Provider **不得静默降档**，必须不提供该
- * 选项并在收到时显式报错（见各 adapter）。默认值永远是 `default`。
- */
 export type AgentPermissionMode = 'default' | 'auto_accept_edits' | 'auto_review' | 'full_access'
 
 export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = [
@@ -101,26 +92,8 @@ export interface AgentRunControls {
   permissionMode: AgentPermissionMode
 }
 
-/**
- * 硬杀（forceKill）的真实作用范围。它是 Provider transport 的事实，不是偏好：
- * - run_scoped：硬杀只会终止这一个 run 自己持有的进程/连接。
- * - shared_transport：transport 由同一 cwd 的其他并发 run 复用（Codex app-server client、
- *   OpenCode server），硬杀会连带终止无关 run，因此自动升级不允许发出它。
- */
 export type AgentForceKillScope = 'run_scoped' | 'shared_transport'
 
-/**
- * 停止请求的真实进度。它描述 Scry 对 Provider 做了什么以及拿到了什么证据，
- * 不代表「这一轮已经结束」——只有 Provider runtime 真正 settle 才是终止证据。
- * - interrupt_requested：已发出协作式取消，等待 Provider 收口。
- * - interrupt_request_failed：取消调用本身失败，Scry 无法确认取消已发出；用户的停止意图
- *   仍然保留（继续升级），Provider 终止证据仍然缺失。
- * - force_kill_requested：优雅窗口耗尽，已升级到 run-scoped forceKill，仍在等待 settle。
- * - no_safe_force_kill：优雅窗口耗尽，但硬杀只能作用于共享 transport，会波及无关 run；
- *   Scry 没有发出硬杀，这一轮的终止仍然未被 Provider 确认。
- * - provider_unsettled：forceKill 窗口也耗尽，Provider 未确认终止（可能仍在后台运行）。
- * - settled：Provider runtime 已 settle，终止有证据。
- */
 export type AgentStopPhase =
   | 'interrupt_requested'
   | 'interrupt_request_failed'
@@ -142,9 +115,7 @@ export interface AgentStopState {
   phase: AgentStopPhase
   requestedAt: string
   updatedAt: string
-  /** no_safe_force_kill 的事实原因，避免把「共享 transport」「句柄未建立」和「硬杀调用失败」混为一谈。 */
   forceKillBlockReason?: 'shared_transport' | 'scope_unavailable' | 'force_kill_failed'
-  /** Provider runtime 是否已 settle。与 phase 分开保存，避免把「已请求」读成「已终止」。 */
   providerSettled: boolean
   window: AgentStopEscalationWindow
 }
@@ -186,13 +157,8 @@ export interface AgentStartResult {
 export interface AgentStartRequest {
   prompt: string
   workspace?: WorkspaceStartSelection
-  /**
-   * 调用方自带的命令标识。给了它，这条启动命令就是幂等的：重投只会拿回同一个 runId，
-   * 不会起第二轮。不给表示调用方不要求幂等。
-   */
   commandId?: string
   cwd?: string
-  /** Manual comparison label; never changes network configuration. */
   networkLabel?: string
   expectedExternalSessionId?: string | null
   forkLastTurn?: AgentForkLastTurn
@@ -225,7 +191,6 @@ export interface AgentSteerRequest extends AgentSteerInput {
   expectedExternalSessionId: string
 }
 
-/** Acceptance means native admission, not that the model has followed the message. */
 export type AgentSteerResult =
   | { status: 'accepted'; providerTurnId?: string }
   | { status: 'rejected' | 'unavailable' | 'unknown'; message: string }
@@ -240,7 +205,6 @@ export interface AgentQuestionOption {
   label: string
   description: string
   preview?: string
-  /** Provider-specific value returned when the visible option is selected. */
   answerValue?: string
 }
 
@@ -249,18 +213,10 @@ export interface AgentQuestionPrompt {
   header: string
   options: AgentQuestionOption[]
   multiSelect: boolean
-  /**
-   * Provider 自己给出的风险说明（例如 Claude 的 decisionReason、被拦下的路径）。
-   * 只有 Provider 真的给了理由才会出现：缺省表示「Provider 没说明原因」，
-   * 不得由 Scry 编造一条看起来像风险评估的文案。
-   */
   warning?: string
   placeholder?: string
-  /** Native input/editor requests have no synthetic choice list. */
   inputMode?: 'singleline' | 'multiline'
-  /** False for native closed-choice dialogs that only accept one listed value. */
   allowCustomAnswer?: boolean
-  /** Provider-native editor content, kept separate from its placeholder. */
   initialValue?: string
 }
 
@@ -282,12 +238,7 @@ export type AgentQuestionResponse =
       questionId: string
       behavior: 'answered'
       answers: Record<string, string>
-      /** Pi's single select → input answer is text, even when it equals a listed value. */
       nativeCustomAnswer?: true
-      /**
-       * Pi questionnaire replies use option values, with custom text for the listed questions.
-       * Absent on legacy clients that submit option labels instead.
-       */
       nativeCustomAnswers?: string[]
     }
   | {

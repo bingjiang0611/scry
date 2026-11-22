@@ -1,0 +1,15 @@
+# 014: Side chats copy context, not native session ownership
+
+**Status:** Accepted (documents existing behavior)
+
+A Scry conversation is not a native session or transport. Match bindings by their adapter-owned Provider/profile identity, not by display name or archive path. Forks may share archive reads but not ownership or native controls. Keep retired bindings in history without reusing them; only the native fork boundary proves fork coverage. Never resume a foreign binding, or treat an unknown send outcome as proof that no input reached the model.
+
+A side chat freezes a terminal prefix of a conversation or a verified native session. An interrupted or failed turn may be the boundary; an active one may not. Recheck the exact prefix and manifest fingerprints at creation; appends beyond the boundary do not invalidate the preview. The parent remains the source of attention and deletion scope; a native source later adopted by a conversation uses that conversation's row. The child has its own default title, origin and initial runtime intent. That selector does not prove the source model, account or permission and the first send revalidates it.
+
+The child owns its sealed text, not source file paths or reasoning/tool-protocol state. Keep format 3's monolithic artifact readable, but format 4 stores only a descriptor in the conversation record and pages through a bounded manifest. Check ordered metadata against sealed bodies, and split an oversized message using a continuation rather than silent truncation. Frozen positions are namespaced, precede the child's own turns, and never become run IDs, usage rows or child ordinals. Store omitted positions as ranges when contiguous and as explicit references otherwise. Read only this child's own snapshot. A format 4 caller that hasn't read the manifest must not interpret absent inline references as an empty prefix.
+
+Preview and first send share the same budget. Distinguish context sent inline from context reachable via a verified reader. Refuse unsupported handoffs rather than claiming delivery; local creation does not call a Provider. Publish the immutable bootstrap artifact before a dispatch intent, even when all items were omitted. Preserve exact native coverage and do not promise that content survived native compaction.
+
+Use typed operations through preload. Creation and adoption recovery receipts are read-only; a command ID publishes at most one child. On send, `accepted` proves the host started a run; only `not_sent` lets the caller treat the original text as undelivered. Keep deletion plans fingerprinted across children and use durable tombstones with identities and hashes, not historical bodies. Use a stable child-list cursor (capture time and ID); restored tabs can validate a bounded ID set without reading the full list.
+
+See [conversation.ts](../../src/shared/conversation.ts), [conversation-api.ts](../../src/shared/conversation-api.ts) and [side-chat creation tests](../../src/main/conversation-side-chat-creation.test.ts).

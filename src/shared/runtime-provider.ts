@@ -14,10 +14,6 @@ export function runtimeProviderForAgentId(agentId: string | undefined): RuntimeP
   return undefined
 }
 
-/**
- * Registered Pi Agent Profile ids are stable launcher hashes. Historical discovery ids
- * (`pi:default`, `pi:rotom`) name a native session, not a registered Agent Profile.
- */
 export function isPiAgentProfileId(agentId: unknown): agentId is string {
   return typeof agentId === 'string' && /^pi:[a-f0-9]{16}$/.test(agentId)
 }
@@ -50,7 +46,6 @@ export function runtimeProviderForProviderId(providerId: ProviderId): RuntimePro
 
 const COMMAND_ID_PATTERN = /^[A-Za-z0-9_:-]{8,128}$/
 
-/** 命令标识的合同：足够长以避免碰撞，字符集足够窄以安全地做 Map 键与日志字段。 */
 export function isCommandId(value: string): boolean {
   return COMMAND_ID_PATTERN.test(value)
 }

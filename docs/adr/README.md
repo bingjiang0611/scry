@@ -15,6 +15,9 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [011: Keep trace evidence separate by source and lifecycle](011-shared-trace-evidence.md)
 - [012: A Git diff proves change, not authorship](012-diff-evidence-and-attribution.md)
 - [013: Keep missing evidence and negative evidence distinct in turn records](013-turn-record-evidence-contract.md)
+- [014: Side chats copy context, not native session ownership](014-conversation-ownership-and-side-chat.md)
+- [015: Give each visible run its own bounded live trace](015-scoped-live-run-traces.md)
+- [016: A stop request is not proof of Provider termination](016-provider-runtime-control-evidence.md)
 
 ## Source comment ratchet
 
