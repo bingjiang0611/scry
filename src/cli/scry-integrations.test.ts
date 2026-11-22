@@ -183,7 +183,6 @@ describe('scry integrations diff/uninstall', () => {
       Stop: [{ hooks: [{ type: 'command', command: managed.replace('claude Stop', 'qoder Stop') }] }],
       SessionEnd: [{ hooks: [userHook] }]
     } }))
-    // A foreign callback does not supply Scry's terminal evidence. This is the old-config control.
     const before = await integrationsDiff(root)
     expect(before.providers.find(row => row.provider === 'qoder')?.missingEvents).toContain('SessionEnd')
     await integrationsRepair({ workspace: root, cliPath: process.execPath })

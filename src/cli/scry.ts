@@ -20,15 +20,6 @@ function helpText(): string {
   scry records maintain [--apply]\n  scry recorder hook|recover|notify-drain|start|serve|status|stop|restart [options]\n  scry recorder recover [--provider qoder --session-id <id>] [--expire-open [--session <id>]...] [--workspace <root>]\n  scry recorder notify-retry (--sequence N | --all-dead) [--workspace <root>]\n  scry recorder content repair [--apply] [--record-id <id>]... [--app-data <dir>]\n  scry turns list|show|timeline|summary|export|content|verify [options]\n  scry doctor [--workspace <root>]\n  scry support-bundle create [--out <path>]\n  scry integrations install-pi|status-pi|diff|repair|uninstall [--yes]\n  scry upgrade [--check]\n  scry version\n\nOptions:\n  --workspace <root>   Workspace root (also accepts --workspace=<root>)\n  --providers <list>   Providers configured by init; otherwise auto-detected\n  --provider <id>      Provider for scoped recorder recovery\n  --session-id <id>    Session for scoped recorder recovery\n  --help, -h           Show help\n  --version            Show version\n`
 }
 
-/**
- * Archive a contiguous prefix of records. Refuses to archive anything the configured commit hook
- * has not acknowledged, because moving an undelivered record would silently drop it. Exit codes:
- * 0 done, 2 recorder unavailable, 3 approval required or nothing to archive, 5 refused.
- */
-/**
- * Sanitised diagnostics for a maintainer. Writes to --out when given, otherwise stdout; the
- * payload lists what it deliberately omits so a recipient can see the boundary.
- */
 async function supportBundleCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[1] !== 'create') throw new Error('usage: scry support-bundle create [--out <path>]')
   const workspace = workspaceOf(args)

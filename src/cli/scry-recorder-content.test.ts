@@ -24,7 +24,6 @@ describe('scry recorder content repair', () => {
     await handleRecorderHook({ ...base, event: 'PostToolUse:Bash', payload: event({ tool_name: 'Bash', tool_use_id: 'call', tool_response: 'REPAIRABLE-OUTPUT' }) })
     await handleRecorderHook({ ...base, event: 'Stop', payload: event({ assistant_response: 'done' }) })
     const [record] = await listRecords(dataRoot)
-    // 线上形态：记录还在本库，正文只在 App trace 库。把字节搬过去，再清空本库内容目录。
     const appData = await mkdtemp(join(tmpdir(), 'scry-cli-app-data-'))
     roots.push(appData)
     const appRoot = appTraceContentRoot(appData, root)

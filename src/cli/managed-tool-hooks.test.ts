@@ -118,7 +118,6 @@ it('keeps a queued start durable during skipped tools and replays it at the reta
 
 it('keeps private CLI validation before the managed tool bypass', () => processes.run(async () => {
   const f = await fixture()
-  // Invalid launch exits before reading stdin; large-input draining is tested on the successful path above.
   await f.invoke('PreToolUse', 'claude', { ...f.env, SCRY_CLI_PATH: join(f.root, 'missing-cli') }, '{}')
   expect((await f.deliveries()).length).toBe(0)
   expect(await readFile(join(f.root, '.scry/logs/hook-skip.log'), 'utf8')).toContain('\tmanaged_cli_invalid\t0\n')

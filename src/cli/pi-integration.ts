@@ -5,11 +5,6 @@ import { fileURLToPath } from 'node:url'
 
 const MARKER = '// managed-by: scry-turn-recorder pi integration'
 
-/**
- * Older releases wrote the npm scope into the marker, and published CLI packages carry different
- * scopes. Recognize the shape instead of one literal, so an upgrade still treats the previously
- * installed extension as managed instead of refusing to replace it.
- */
 function isManagedContent(content: string): boolean {
   const [firstLine = ''] = content.split('\n', 1)
   return /^\/\/ managed-by: (?:\S+\/)?scry-turn-recorder pi integration$/.test(firstLine.trimEnd())

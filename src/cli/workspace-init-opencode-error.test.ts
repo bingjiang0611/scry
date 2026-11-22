@@ -55,7 +55,6 @@ describe('scry init OpenCode plugin errors', () => {
     expect(stops().at(-1)).toMatchObject({ session_id: 'clean' })
     expect(stops().at(-1)).not.toHaveProperty('error')
 
-    // 上一轮的错误不能被下一轮继承。
     await hooks['chat.message']({ sessionID: 'failed', prompt: 'again' })
     await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'failed' } } })
     expect(stops().at(-1)).not.toHaveProperty('error')
@@ -64,7 +63,6 @@ describe('scry init OpenCode plugin errors', () => {
   it('Stop 首次送达失败时保留暂存错误，重试成功后清除', async () => {
     const root = await gitWorkspace()
     let attempt = 0
-    // 第一次 Stop 送达失败，之后成功：失败不能算作“终态已交付”。
     const { hooks, stops } = await loadHooks(root, (event) => ({ status: event === 'Stop' && ++attempt === 1 ? 1 : 0 }))
 
     await hooks['chat.message']({ sessionID: 'retry', prompt: 'go' })
@@ -73,12 +71,10 @@ describe('scry init OpenCode plugin errors', () => {
     expect(stops()).toHaveLength(1)
     expect(stops()[0]).toMatchObject({ session_id: 'retry', error: 'stream aborted' })
 
-    // 同一次 session.idle 重试：错误证据仍在，不能被失败的那次送达清掉。
     await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'retry' } } })
     expect(stops()).toHaveLength(2)
     expect(stops()[1]).toMatchObject({ session_id: 'retry', error: 'stream aborted' })
 
-    // 送达成功后该轮结束：下一次 idle 不再投递，错误也不再随新回合出现。
     await hooks['chat.message']({ sessionID: 'retry', prompt: 'again' })
     await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'retry' } } })
     expect(stops()).toHaveLength(3)

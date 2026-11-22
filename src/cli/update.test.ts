@@ -26,12 +26,10 @@ describe('CLI auto update', () => {
   it('only auto-updates within a compatible release line', () => {
     expect(compareVersions('0.2.13', '0.2.12')).toBeGreaterThan(0)
     expect(isCompatibleAutoUpdate('0.2.12', '0.2.13')).toBe(true)
-    // 0.x 跨 minor 现在也自动更新：破坏性发布改为升 major。
     expect(isCompatibleAutoUpdate('0.2.32', '0.3.0')).toBe(true)
     expect(isCompatibleAutoUpdate('1.4.0', '1.5.0')).toBe(true)
     expect(isCompatibleAutoUpdate('1.4.0', '2.0.0')).toBe(false)
     expect(isCompatibleAutoUpdate('0.9.9', '1.0.0')).toBe(false)
-    // 迁移链：存量 0.2.31 客户端用旧规则也接受 0.2.32，装上之后才拿到新规则。
     expect(isCompatibleAutoUpdate('0.2.31', '0.2.32')).toBe(true)
   })
 
@@ -52,7 +50,6 @@ describe('CLI auto update', () => {
   })
 
   it('idle 更新走同一套 env 门，且不因为交互条件而放宽', async () => {
-    // 与 shouldScheduleAutoUpdate 共用 autoUpdateAllowedByEnv，不是第二套策略。
     expect(autoUpdateAllowedByEnv({})).toBe(true)
     expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '1' })).toBe(true)
     expect(autoUpdateAllowedByEnv({ SCRY_AUTO_UPDATE: '0' })).toBe(false)
@@ -139,7 +136,6 @@ if (process.argv[2] === 'view') process.stdout.write(JSON.stringify('0.2.12'))
       SCRY_CLI_UPDATE_STATE_PATH: join(root, 'state.json'),
       MOCK_NPM_LOG: npmLog
     }
-    // 未设置时交由本机 npm 配置决定 registry，不再带上任何硬编码地址。
     await expect(upgradeCli({ currentVersion: '0.2.12', checkOnly: true, env: { ...base } })).resolves.toMatchObject({
       status: 'current'
     })
@@ -186,7 +182,6 @@ else writeFileSync(process.env.MOCK_SCRY_ENTRY, '#!/usr/bin/env node\\nprocess.s
       status: 'updated', latestVersion: '0.3.0'
     })
     const calls = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[])
-    // 查询范围必须能看见下一个 minor：`~` 与 npm 的 `^` 对 0.x 都做不到。
     expect(calls[0].join(' ')).toContain('>=0.2.32 <1.0.0')
     expect(calls.some((call) => call[0] === 'install' && call.includes('--ignore-scripts'))).toBe(true)
     const saved = JSON.parse(await readFile(state, 'utf8')) as { updatedFrom?: string; updatedTo?: string }
@@ -230,7 +225,6 @@ process.stdout.write(JSON.stringify('1.0.0'))
     }))
     const env = { SCRY_CLI_UPDATE_STATE_PATH: state }
     await expect(consumeUpdateNotice({ ...env, SCRY_CLI_BUNDLED: '1' })).resolves.toBeNull()
-    // 默认开意味着没人 opt-in 过，所以证明"确实装了"的这一行同时要给出关闭方法。
     await expect(consumeUpdateNotice(env)).resolves.toBe(
       'Scry CLI 已自动更新：0.2.12 → 0.2.13（关闭：SCRY_AUTO_UPDATE=0）'
     )

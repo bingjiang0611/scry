@@ -7,7 +7,6 @@ import { resolveRecorderLocation } from '../core/turn-recorder/config.js'
 export interface ParsedArgs {
   positionals: string[]
   flags: Map<string, string | true>
-  /** 重复给出的值型选项（REPEATABLE_FLAGS）；`flags` 保留最后一个值以兼容既有调用方。 */
   repeated?: Map<string, string[]>
 }
 

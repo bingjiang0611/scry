@@ -32,7 +32,6 @@ async function workspace(times: string[]): Promise<string> {
   }))
   await mkdir(join(root, '.scry/logs'), { recursive: true })
   for (const [index, time] of times.entries()) {
-    // Exercise both retained generations; neither file mtime nor rotation defines recency.
     await writeFile(join(root, `.scry/logs/hook-skip.log${index ? '.1' : ''}`),
       `${time}\tcodex\tStop\tcli_not_executable\t0\n`)
   }

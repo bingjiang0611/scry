@@ -5,10 +5,13 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [001: Defer session capture without losing event order](001-deferred-session-capture.md)
 - [002: Manage integration hooks by ownership, not command text](002-managed-integration-hook-ownership.md)
 - [003: Bound automatic CLI updates without slowing hook delivery](003-cli-auto-updates.md)
-
 - [004: Queue recorder hooks on unknown delivery](004-recorder-hook-delivery.md)
 - [005: Deduplicate only comparable transcript usage](005-transcript-usage-dedupe.md)
 - [006: Report only observed file operations](006-observed-file-operations.md)
+- [007: Separate recorder diagnostics from claims about capture and delivery](007-recorder-diagnostic-contract.md)
+- [008: Verify and repair turn evidence without rewriting history](008-turn-store-verification-and-recovery.md)
+- [009: Keep CLI integration tests isolated and prove delivery](009-cli-integration-fixture-isolation.md)
+- [010: Preserve provider-specific hook delivery contracts](010-provider-hook-contracts.md)
 
 ## Source comment ratchet
 

@@ -14,9 +14,6 @@ import { piIntegrationStatus } from './pi-integration.js'
 
 const PROVIDERS: ProviderId[] = ['claude', 'codex', 'qoder', 'opencode', 'pi']
 
-// The CLI cannot observe whether a provider trusts our hook: Codex requires an interactive
-// `/hooks` approval, and the others expose no trust state at all. Reporting `n/a` would
-// assert "no trust needed", so every provider reports `unknown` with a reason instead.
 const TRUST_UNOBSERVABLE = 'unknown: provider does not expose hook trust state to the CLI'
 
 export interface ProviderStatusRow {
@@ -34,7 +31,6 @@ export interface CommitHookStatusSection {
   entry: string | null
   activation: CommitHookActivation['status']
   ackedThrough: number | null
-  /** Null when no hook is activated: the backlog is unobservable, not empty. */
   notifyBacklog: number | null
   backlogEvidence: string
 }
@@ -47,27 +43,15 @@ export interface WorkspaceStatusReport {
     | {
         enabled: true
         dataRoot: string
-        /**
-         * Turns the recorder still owes a record for: those waiting to be committed plus those still
-         * open. A turn that never reaches `closing` is not "pending finalization" internally, but it
-         * is exactly what a reader means by pending work, and leaving it out hid turns open for days.
-         * Full health counters live in `scry doctor`.
-         */
         openTurnsPending: number
-        /** Open turns that wrote nothing for the stale window: the ones worth looking at first. */
         staleOpenTurns: number
       }
   providers: ProviderStatusRow[]
-  /** Stated once instead of per row: the CLI can never observe provider hook trust. */
   trustEvidence: string
   commitHook: CommitHookStatusSection | null
 }
 
 function stateOf(row: Omit<ProviderStatusRow, 'state'>): ProviderStatusRow['state'] {
-  // Observed capture evidence outranks the workspace config probe. A provider can be driven
-  // by a hook installed outside this workspace's settings (e.g. a user-level integration), so
-  // reporting 'not-configured' while hook events or committed records exist would deny observed
-  // facts. 'not-configured' is only honest when there is no capture evidence at all.
   if (row.recordSeen) return 'capturing'
   if (row.hookSeen) return 'events-without-record'
   return row.configured === 'no' ? 'not-configured' : 'configured-no-events'
@@ -80,7 +64,6 @@ async function configuredOf(
 ): Promise<ProviderStatusRow['configured']> {
   if (provider === 'antigravity') return 'no'
   if (provider === 'pi') {
-    // Pi is a user-global lifecycle extension, never a workspace hook.
     const status = await piIntegrationStatus({ home: env.HOME }).catch(() => null)
     return status?.installed ? 'global' : 'no'
   }
@@ -114,7 +97,6 @@ export async function workspaceStatus(
     const configured = await configuredOf(workspaceRoot, provider, env)
     const base = {
       provider,
-      // Pi has no project marker to probe: the installed global extension is the only signal.
       detected: (provider === 'pi' ? configured === 'global' : detected.has(provider)) ? 'yes' as const : 'no' as const,
       configured,
       trusted: 'unknown' as const,

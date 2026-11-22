@@ -17,8 +17,6 @@ afterEach(async () => { await fixtureTest })
 
 function runFixtureTest(body: () => Promise<void>): Promise<void> {
   const operation = body()
-  // A Vitest timeout does not join its test continuation. Restore the signal spy
-  // and close this test's pipes before the next case can reuse process.kill.
   fixtureTest = operation.then(() => undefined, () => undefined)
   return operation
 }
@@ -61,7 +59,6 @@ child.stdout.once('data', () => {
         joined = true
       }
     })
-    // Observe rejection immediately: cancellation can break the blocked stdin pipe.
     rejected = expect(operation).rejects.toThrow()
     ;[socket] = await connected
     phase = 'callback ready'
@@ -113,7 +110,6 @@ it('cancels the remaining groups and joins before reporting a signal failure', (
     first.stdin.end()
     await expect(closed).rejects.toMatchObject({ errors: [denied] })
   } finally {
-    // Release the deliberately denied group without retrying its signal.
     first.stdin.end()
     second.stdin.end()
     await Promise.allSettled([firstClosed, secondClosed, owned.close()])

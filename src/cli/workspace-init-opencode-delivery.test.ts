@@ -14,12 +14,6 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })))
 })
 
-/**
- * The stub CLI is what the generated `provider-hook.sh` runs. Like the real recorder CLI it exits
- * non-zero when it could not record the event, and it keeps a copy of every payload it accepted so
- * the test can replay exactly what the provider hook delivered. Only shell builtins are used: the
- * hook script prepends the workspace node bin dir to PATH, and the test must not depend on tools.
- */
 const stubCli = (root: string): string => `#!/bin/sh
 event=''
 for arg in "$@"; do
@@ -63,11 +57,9 @@ describe('OpenCode hook delivery outcome', () => {
     await writeFile(join(root, '.scry', 'cli-path'), `${cli}\n`)
     const hook = join(root, '.scry', 'provider-hook.sh')
 
-    // Provider 的 hook：CLI 记录失败也不能阻断 Agent，退出码保持 0。
     const providerRun = spawnSync('sh', [hook, 'claude', 'PostToolUse'], { input: '{"session_id":"claude-open"}' })
     expect(providerRun.status).toBe(0)
     expect(await readFile(join(root, 'cli-executed'), 'utf8')).toBe('')
-    // OpenCode 的插件需要区分，才能保留暂存证据并在下一次 idle 重试。
     const pluginRun = spawnSync('sh', [hook, 'opencode', 'Stop'], { input: '{"session_id":"opencode-open"}' })
     expect(pluginRun.status).toBe(HOOK_UNDELIVERED_STATUS)
     expect(await readFile(join(root, '.scry', 'logs', 'hook-skip.log'), 'utf8')).toContain('cli_failed')
@@ -78,8 +70,6 @@ describe('OpenCode hook delivery outcome', () => {
     roots.push(root)
     execFileSync('git', ['init', '-q', root])
     await initWorkspace({ workspace: root, providers: 'opencode', cliPath: process.execPath })
-    // The plugin resolves the workspace through its own location, so the executable copy keeps the
-    // same directory depth as the generated module but can run as ESM without a package type.
     const plugins = join(root, '.opencode', 'plugins')
     await writeFile(join(plugins, 'scry-recorder.mjs'), await readFile(join(plugins, 'scry-recorder.js'), 'utf8'))
     await writeFile(join(plugins, 'driver.mjs'), driver())
@@ -101,7 +91,6 @@ describe('OpenCode hook delivery outcome', () => {
     expect(stops).toHaveLength(1)
     expect(stops[0].payload).toMatchObject({ session_id: 'delivery', error: 'stream aborted' })
 
-    // 重放 provider hook 真正交付过的 payload，走 CLI 同一条 recorder 生命周期。
     for (const item of accepted) {
       await handleRecorderHook({ provider: 'opencode', event: item.event, workspace: root, payload: item.payload })
     }

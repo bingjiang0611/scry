@@ -125,9 +125,6 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
         return 2
       }
     }
-    // Only proof closes a turn that never wrote a terminal event: silence alone, or a host that may
-    // still be running, is not evidence. `--session` narrows that proof to the sessions whose host
-    // is known to be gone, so one unprovable turn cannot block the rest of the workspace.
     const expireOpen = args.flags.has('expire-open')
     const expireSessions = args.repeated?.get('session') ?? (flag(args, 'session') ? [flag(args, 'session')!] : [])
     if (expireSessions.length && !expireOpen) throw new Error('--session requires --expire-open')
@@ -146,7 +143,6 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
     if (action === 'notify-retry' && (args.positionals.length !== 2 || (sequence !== undefined) === args.flags.has('all-dead') || sequence === 0)) {
       throw new Error('notify-retry requires exactly one of --sequence N (positive integer) or --all-dead')
     }
-    // Unbounded attempts, but deferred retries still respect their persisted due time.
     const workspace = workspaceOf(args)
     const enablement = await recorderEnablement(workspace)
     if (!enablement.enabled) {
@@ -163,15 +159,12 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
       ? await retryCommitNotifications(enablement.dataRoot, env, sequence)
       : await drainCommitNotifications(enablement.dataRoot, env)
     print({ action, workspace, activation: activation.status, ...result })
-    // An unknown backlog (delivery state unreadable) is pending work, not success.
     return result.pending === null || result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {
     await serveRecorderDaemon({
       workspace: workspaceOf(args),
       socketPath: flag(args, 'socket'),
-      // The daemon is the only trigger that reaches a machine nobody runs `scry` on by hand, and
-      // its idle shutdown is the one moment where replacing the CLI cannot split a turn.
       idleUpdate: () => runIdleAutoUpdate(RECORDER_VERSION, process.argv[1])
     })
     return 0
@@ -203,11 +196,6 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
   throw new Error('usage: scry recorder hook|recover|notify-drain|notify-retry|start|serve|status|stop|restart ...')
 }
 
-/**
- * Exit codes: 0 ok (trusted, host-provided, or nothing configured), 2 storage/config
- * unavailable, 5 bundle invalid. Valid repository commit hooks are auto-authorized after
- * fingerprint validation; `--yes` remains accepted for backward-compatible scripts.
- */
 export async function commitHookCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1] ?? 'status'
   if (!['status', 'trust', 'revoke'].includes(action)) {
@@ -282,7 +270,6 @@ export async function commitHookCommand(args: ParsedArgs): Promise<number> {
   return activation.status === 'bundle-invalid' ? 5 : 0
 }
 
-/** App 的 userData 默认目录，与 Electron `app.getPath('userData')` 的平台规则一致。 */
 export function defaultAppDataDir(platform: NodeJS.Platform = process.platform): string {
   const home = homedir()
   if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'scry')
@@ -290,10 +277,6 @@ export function defaultAppDataDir(platform: NodeJS.Platform = process.platform):
   return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'scry')
 }
 
-/**
- * 修复记录引用、但本库缺失的正文。默认只读演练：报告汇总与未命中清单，`--apply` 才按 sha256 从
- * App trace 库复制（读时校验长度与摘要）。它不重写记录：记录语义仍由提交边界决定。
- */
 async function contentCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[2] !== 'repair') {
     throw new Error('usage: scry recorder content repair [--apply] [--record-id <id>]... [--app-data <dir>] [--workspace <root>]')
@@ -315,8 +298,6 @@ async function contentCommand(args: ParsedArgs): Promise<number> {
     action: 'content-repair',
     workspace,
     appData,
-    // 缺失与损坏是两件事：前者是“本库没有这份字节”，后者是“有这个名字的字节但不对”。两者都
-    // 意味着引用仍无法兑现，所以都退出 3，但报告必须分开。
     status: report.missing > 0 && report.corrupt > 0
       ? (report.applied ? 'applied-with-unresolved' : 'unresolved')
       : report.missing > 0

@@ -63,7 +63,6 @@ it.each([400, 404, 409, 413, 500])('classifies a completed HTTP %i response with
   await new Promise<void>(resolve => server.listen(f.socket, resolve))
   await shell(f.script, f.env)
   expect(await readFile(f.marker, 'utf8')).toBe(code >= 500 ? '1' : 'unset')
-  // Only a completed 404/409 asks the CLI to replace the owner; other refusals fall back directly.
   expect(await readFile(f.rejectedMarker, 'utf8')).toBe(code === 404 || code === 409 ? String(code) : 'unset')
 }, 15_000)
 
@@ -83,8 +82,6 @@ it('a stale protocol header is refused before apply, and the event still lands e
   const open = JSON.parse(await readFile(join(sessionRoot, 'open.json'), 'utf8')) as RecorderOpenTurnState
   expect(open.prompt).toBe('fixture')
   expect(await recorderInboxEntries(sessionRoot)).toEqual([])
-  // The same recorder version already owns the socket, so the CLI applies the refused event
-  // directly instead of restarting an equivalent owner.
   expect(await readFile(`${f.socket}.owner.json`, 'utf8')).toContain(JSON.stringify(RECORDER_VERSION))
 }, 30_000)
 
@@ -92,7 +89,6 @@ it('queues the event instead of applying it in-process when the daemon response 
   const f = await fixture()
   const entry = join(f.root, 'cli.mjs')
   await build({ entryPoints: [resolve('src/cli/scry.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
-  // 5xx 是“可能已经应用”：守护进程可能先落了状态再失败。CLI 不能在同一进程里再应用一次。
   let hookRequests = 0
   const owner: HttpServer = createHttpServer((request, response) => {
     request.resume()
@@ -103,7 +99,6 @@ it('queues the event instead of applying it in-process when the daemon response 
   })
   servers.push(owner)
   await new Promise<void>(resolve => owner.listen(f.socket, resolve))
-  // 直接跑 CLI（不经 shell 快路径）：只有它能决定“未知投递”是否在本进程里再应用一次。
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [entry, 'recorder', 'hook', '--event', 'UserPromptSubmit', '--provider', 'pi', '--workspace', f.root], { env: f.env, stdio: ['pipe', 'ignore', 'pipe'] })
     let stderr = ''
@@ -114,7 +109,6 @@ it('queues the event instead of applying it in-process when the daemon response 
   })
   const sessionRoot = join(f.root, '.scry/runtime/pi', safeKey('protocol'))
   expect(hookRequests).toBe(1)
-  // 只排队：没有开出轮次，也没有在可能已应用的前提下再应用一次。
   expect((await recorderInboxEntries(sessionRoot)).length).toBe(1)
   await expect(readFile(join(sessionRoot, 'open.json'), 'utf8')).rejects.toThrow()
 }, 60_000)
@@ -124,7 +118,6 @@ it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, the
   const entry = join(f.root, 'cli.mjs')
   await build({ entryPoints: [resolve('src/cli/scry.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
   await writeFile(f.cli, `${f.capture}exec ${JSON.stringify(process.execPath)} ${JSON.stringify(entry)} "$@"\n`, { mode: 0o700 })
-  // A real 0.2.66 owner only knows /v1/hook: the versioned path is 404, the handshake never happens.
   let versionedRequests = 0
   let legacyHookRequests = 0
   let legacyClosed = false
@@ -136,7 +129,6 @@ it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, the
     }
     if (request.url === HOOK_EVENT_PATH) { versionedRequests++; json(404, { ok: false, error: 'not found' }); return }
     if (request.url === '/v1/status') {
-      // Any version other than this build's is a real predecessor that cannot serve /v2/hook.
       json(200, { running: true, protocol: '2', recorderVersion: `${RECORDER_VERSION}-legacy`, pid: process.pid, socketPath: f.socket })
       return
     }
@@ -166,7 +158,6 @@ it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, the
     expect((await readHealth(join(f.root, '.scry'))).droppedEvents).toBe(0)
   } finally {
     if (!legacyClosed) await new Promise<void>(resolve => legacy.close(() => resolve()))
-    // 断言失败时也必须停掉刚起的 owner，否则它会留在后台继续占着 socket。
     const owner = JSON.parse(await readFile(`${f.socket}.owner.json`, 'utf8').catch(() => '{"pid":0}')) as { pid: number }
     if (owner.pid > 0) try { process.kill(owner.pid, 'SIGTERM') } catch {}
   }

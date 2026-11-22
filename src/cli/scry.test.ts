@@ -24,7 +24,6 @@ describe('Scry CLI arguments', () => {
   })
 
   it('recover --expire-open 是布尔开关，不吞后面的位置参数', () => {
-    // CodeLens 每 15 分钟自动执行这条命令；未注册时它直接以 unknown option 退出 1。
     const parsed = parseArgs(['recorder', 'recover', '--expire-open', '--workspace', '/repo'])
     expect(parsed.flags.get('expire-open')).toBe(true)
     expect(parsed.flags.get('workspace')).toBe('/repo')

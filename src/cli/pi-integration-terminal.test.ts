@@ -129,8 +129,6 @@ describe('Pi recorder extension lifecycle', () => {
     roots.push(root)
     const capture = join(root, 'capture.txt')
     const cli = join(root, 'scry')
-    // 只用 shell 内建命令读 stdin：外部 cat 在受限 PATH 下失败也会让脚本继续跑，“跑到过”不等于
-    // “送达过”。delivered 只在 stdin 真的带来 payload 时才写，断言才有意义。
     await writeFile(cli, `#!/bin/sh\nprintf '%s' "$*" > ${JSON.stringify(capture)}\npayload=''\n` +
       `while IFS= read -r line || [ -n "$line" ]; do payload="$payload$line"; done\n` +
       `if [ -n "$payload" ]; then printf '\\ndelivered' >> ${JSON.stringify(capture)}\nfi\n`)
@@ -337,8 +335,6 @@ setInterval(() => {}, 60_000)
     const cli = join(root, 'scry')
     const harness = join(root, 'harness.mjs')
     const extensionUrl = pathToFileURL(resolve('packages/turn-recorder-cli/integrations/pi-scry-recorder.mjs')).href
-    // Only the parent needs Node. Close the child pipe directly, without another
-    // Node startup or a timer that is unrelated to EPIPE handling.
     await writeFile(cli, '#!/bin/sh\nexec 0<&-\n')
     await chmod(cli, 0o700)
     await writeFile(harness, `

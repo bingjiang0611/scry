@@ -6,6 +6,6 @@ Opt-in updates miss machines whose operators never see the instructions. Staying
 
 Enable automatic updates unless explicitly disabled. Stay within the installed major, including for 0.x; use explicit npm range bounds because neither tilde nor caret expresses that policy for 0.x. Treat breaking CLI contract changes as major releases. Use the machine's npm registry configuration unless a registry override is provided.
 
-The recorder daemon checks on idle shutdown, not on hook delivery; this reaches unattended installations without splitting an active turn. The install notice also tells operators how to turn updates off.
+The recorder daemon checks on idle shutdown, not on hook delivery; this reaches unattended installations without splitting an active turn. The install notice also tells operators how to turn updates off. The transition left an upgrade path for older installs: 0.2.31 accepted the policy change in 0.2.32 under the previous same-minor rule.
 
 See [update.ts](../../src/cli/update.ts) and [update.test.ts](../../src/cli/update.test.ts).

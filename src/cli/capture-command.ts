@@ -72,7 +72,6 @@ function captureFailure(action: 'start' | 'stop' | 'hook', context: SessionCaptu
   return captureExitCode(error.code)
 }
 
-/** The chain a claimant resolved, as JSON on the command line: `[{"pid":1,"token":"…"}]`. */
 function hostChainOf(args: ParsedArgs): unknown {
   const raw = flag(args, 'host-chain')
   if (raw === undefined) return undefined

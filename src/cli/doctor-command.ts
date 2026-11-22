@@ -11,11 +11,6 @@ import { relative } from 'node:path'
 import { commitHookEnv, resolveCommitHookActivation } from '../core/turn-recorder/commit-hook-grant.js'
 
 
-/**
- * Stable schema for team CI: `schemaVersion`, `status`, `checks[]`, `runtime`, `evidence`.
- * Exit codes are a frozen contract: 0 healthy, 2 recorder disabled, 3 config missing/invalid,
- * 4 store corrupt, 5 degraded (pending turns or a recorded error).
- */
 export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const workspace = workspaceOf(args)
   const enablement = await recorderEnablement(workspace)
@@ -28,8 +23,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   type Check = { id: string; status: 'pass' | 'fail' | 'warn'; detail: string; remediation?: string }
   const userSummary = userHookSkips.value
   const userWindowEmpty = userHookSkips.status === 'available' && userSummary?.count === 0
-  // This log cannot identify a workspace. Show the warning without changing this
-  // workspace's health/exit code or adding its rows to workspace failure counters.
   const userHookCheck: Check = {
     id: 'hook.userBridgeSkips',
     status: userWindowEmpty ? 'pass' : 'warn',
@@ -79,8 +72,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   let deliveryError = activation.status === 'bundle-invalid' ? activation.detail : undefined
   if (activation.status === 'trusted' || activation.status === 'host-provided') {
     try { delivery = await commitNotificationStatus(enablement.dataRoot, commitHookEnv(activation, process.env)) } catch (error) {
-      // A lost delivery outcome is recoverable on request, so name the blocked sequence and the
-      // exact command instead of a generic "unavailable".
       deliveryError = error instanceof UnresolvedDeliveryPrefixError
         ? `sequence ${error.sequence} has a record file but no delivery outcome, so the ACK cannot advance; run \`scry recorder notify-retry --sequence ${error.sequence}\` to re-deliver it (the receiver dedupes by recordId)`
         : 'commit notification state unavailable; inspect notifications/commit-hooks, notifications/delivery-outcomes and notifications/dead-letters'
@@ -93,8 +84,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const absent = delivery?.absentCount ? `; ${delivery.absentCount} absent sequence(s) acknowledged with no record file: ` +
     delivery.absentRanges!.map(([from, to]) => from === to ? `${from}` : `${from}-${to}`).join(', ') +
     (delivery.absentTruncated ? ' (range sample truncated)' : '') : ''
-  // A workspace that records turns but has no activated callback keeps every record on disk and
-  // never uploads it. That is a warning with the exact fix, never a silent pass.
   const queuedWithoutHook = delivery === undefined && !deliveryError && activation.status !== 'trusted' && activation.status !== 'host-provided'
     ? await commitNotificationStatus(enablement.dataRoot, process.env).then((status) => status.notifyBacklog).catch(() => null)
     : null
@@ -114,8 +103,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       remediation: 'inspect the callback and sequence diagnostics; repair the cause before `scry recorder notify-retry --sequence N` or `--all-dead`; dead letters are not ACKs'
     } : {})
   }
-  // The issued watermark proves which sequence numbers were handed out; the live store cannot. A
-  // difference means record files were deleted (or moved) without `scry turns archive`.
   let issuedWatermark: number | null = null
   let sequenceError: string | undefined
   try {
@@ -126,8 +113,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   const acknowledged = Number.isSafeInteger(delivery?.ackedThrough) ? delivery?.ackedThrough ?? 0 : 0
   const issuedSequence = Math.max(issuedWatermark ?? 0, acknowledged)
   const recordsDeletedOutsideArchive = !sequenceError && issuedSequence > Math.max(store.maxSequence, store.archivedThrough)
-  // Stale open turns need investigation, not a fabricated interruption. Warn separately from
-  // pendingCount (managed/closing/quarantined); elapsed time does not prove the Provider stopped.
   const degraded = !!health.lastError || health.pendingCount > 0 || staleOpenTurns.length > 0 || hookSkips.recentCount > 0 ||
     !!deliveryError || !!retry || deadCount > 0 || !!sequenceError || recordsDeletedOutsideArchive
   const checks: Check[] = [
@@ -156,9 +141,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       ...(store.ok ? {} : { remediation: 'do not delete individual record files; run `scry turns verify` for detail' })
     },
     {
-      // Deleting the newest record leaves no gap for `store.integrity` (contiguity is only checked
-      // between the archive floor and the live maximum). Only the issued watermark can prove that a
-      // record is missing, so this warns instead of reporting healthy.
       id: 'records.sequence',
       status: sequenceError ? 'fail' : recordsDeletedOutsideArchive ? 'warn' : 'pass',
       detail: sequenceError ?? (recordsDeletedOutsideArchive
@@ -177,8 +159,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
       ...(health.pendingCount > 0 ? { remediation: 'run `scry recorder recover`; for exhausted or unreadable inbox-failed sidecars see scry-turn-recorder README: Retry quarantined hooks' } : {})
     },
     {
-      // Upgrading the CLI leaves this file alone, so an old script keeps running silently. It still
-      // records correctly, only without the newer fast path, so this warns without degrading.
       id: 'hook.script',
       status: hookScript === 'outdated' ? 'warn' : 'pass',
       detail: {
@@ -208,10 +188,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
         : {})
     },
     {
-      // Warn only: right after an upgrade this is expected until the next turn is recorded, so it
-      // must not flip the exit code. It exists to catch the case where the hook keeps using an
-      // older install that a shell-level `scry upgrade` never touched. The newest record alone
-      // hides a split install, so the detail counts every version in the recent batch.
       id: 'recorder.version',
       status: recordingVersion && recordingVersion !== RECORDER_VERSION ? 'warn' : recentVersions.length > 0 && recentVersions.some((entry) => entry.version !== RECORDER_VERSION) ? 'warn' : 'pass',
       detail: recordingVersion == null
@@ -234,8 +210,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
   ]
   print({
     schemaVersion: 1,
-    // An unreadable delivery/activation state is an error: the recorder cannot tell whether
-    // records were handed over, so this must never read as merely degraded or healthy.
     status: !store.ok ? 'corrupt' : hookSkips.recentCount > 0 || !!deliveryError ? 'error' : degraded ? 'degraded' : 'healthy',
     hookSkips,
     userHookSkips,
@@ -245,8 +219,6 @@ export async function doctorCommand(args: ParsedArgs): Promise<number> {
     workspace: enablement.workspaceRoot,
     dataRoot: enablement.dataRoot,
     checks,
-    /** Resolved capture settings, including defaults the config file may omit. Turning off
-     *  prompt/assistant/toolOutput does not remove tool inputs, file paths or diff patches. */
     capture: enablement.config.capture,
     hookScript,
     commitNotifications: delivery,

@@ -1,8 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptionsWithoutStdio } from 'node:child_process'
 import { once } from 'node:events'
 
-// POSIX fixtures start a private process group. Cancellation targets only groups
-// created here, including shell descendants that still hold the fixture's pipes.
 export class FixtureProcesses {
   private readonly controller = new AbortController()
   private readonly children = new Map<ChildProcess, Promise<void>>()
@@ -17,8 +15,6 @@ export class FixtureProcesses {
   }
 
   private readonly cancel = () => {
-    // Timeout and afterEach both call cancellation. Never signal the same group
-    // again while close events from the first signal are still being delivered.
     if (this.signal.aborted) return
     this.controller.abort(this.testSignal.reason)
     for (const child of this.children.keys()) {
@@ -31,7 +27,6 @@ export class FixtureProcesses {
     }
   }
 
-  // Also used by the exact-path commit callback spawn observer in the fixture.
   register(child: ChildProcess): void {
     const closed = new Promise<void>(resolve => child.once('close', () => resolve()))
     this.children.set(child, closed)
@@ -81,8 +76,6 @@ export class FixtureProcesses {
     this.cancel()
     this.testSignal.removeEventListener('abort', this.cancel)
     await Promise.all(this.children.values())
-    // Vitest's timeout aborts the signal, not the async test continuation. Join
-    // that continuation before its workspace may be removed by afterEach.
     await Promise.allSettled(this.pending)
     if (this.cancellationErrors.length) throw new AggregateError(this.cancellationErrors, 'Fixture cancellation failed')
   }
