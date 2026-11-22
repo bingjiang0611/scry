@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { installBundle } from './install-macos-core.mjs'
+import { checkReleaseCommit } from './check-release-commit.mjs'
 
 if (process.platform !== 'darwin') {
   throw new Error('install:mac 仅支持 macOS')
@@ -10,6 +11,8 @@ if (process.platform !== 'darwin') {
 const source = join(process.cwd(), 'dist', process.arch === 'arm64' ? 'mac-arm64' : 'mac', 'Scry.app')
 const requireRelease = process.argv.includes('--require-release')
 const installRoot = process.env.SCRY_INSTALL_DIR || '/Applications'
+
+if (requireRelease) await checkReleaseCommit({ cwd: process.cwd() })
 
 if (!existsSync(source)) {
   throw new Error(`找不到打包产物：${source}`)

@@ -70,5 +70,5 @@ Agent 完成验证和自查后默认推送任务分支并创建 PR；合并须�
 
 - 评审意见在本地全部改完、跑过受影响的测试后一次推送，不逐条推送；CI 运行中不为小改动再推。
 - 推送前先在本地跑受影响的测试，不把 CI 当作第一次验证；本地验证是合并前唯一的必需检查。
-- recorder/CLI 升版本时，把版本号改动放进最后一个功能 PR，不再单开 `chore(cli): release` PR；合并后在 main 上执行 `npm run publish:cli`（公开）或 `npm run publish:cli:internal -- --publish`（内网 `@ali/`，先跑 `build:cli` 与 `check:cli-release`，见 [验证与交付](docs/agent/verification.md)）。main 的 CI 只保留最新一次 run，发布记录需要该提交的 CI 结果时，等它跑完再合并下一个 PR。
+- recorder/CLI 升版本时，把版本号改动放进最后一个功能 PR，不再单开 `chore(cli): release` PR；从全量通过的 main 提交只发布到内网：先跑 `check:cli-release`，再用 `npm run publish:cli:internal -- --publish` 重新构建并发布 `@ali/scry-turn-recorder`（见 [验证与交付](docs/agent/verification.md)）。main 的 CI 只保留最新一次 run，发布记录需要该提交的 CI 结果时，等它跑完再合并下一个 PR。
 - 不必等 CI 跑完再合并，也不必为跟上 main 更新分支；main 的 CI 变红时优先修复。

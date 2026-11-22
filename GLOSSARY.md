@@ -134,6 +134,11 @@ _Avoid_: 永久信任仓库、用户批准、全权限的附带许可
 轮次记录提交后向接收方发送的通知，不是 Git 提交钩子。回调确认接收不等于外部系统已成功完成上传或处理。
 _Avoid_: Git hook、上传成功证明
 
+### 验证与发布
+
+**全量通过提交（Full-suite verified commit）**：
+可从最新的 `origin/main` 到达，且同一 SHA 的 `scry/full-suite` 与 `scry/remote-g0` 两个 commit status 最新状态都为 `success` 的提交。`Performance Check` 不计入。缺失状态（例如 main push 被取消）是未验证，不等于失败。发布仍要求工作区干净与候选构件通过验证。
+
 ### 界面提醒
 
 **待查看（Unread）**：

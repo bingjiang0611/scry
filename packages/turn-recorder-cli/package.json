@@ -1,5 +1,6 @@
 {
   "name": "scry-turn-recorder",
+  "private": true,
   "version": "0.2.82",
   "description": "Provider-neutral local top-level turn recorder for AI coding agents",
   "type": "module",
@@ -20,7 +21,7 @@
     "linux"
   ],
   "scripts": {
-    "prepublishOnly": "npm --prefix ../.. run check:cli-release"
+    "prepublishOnly": "node -e \"console.error('Public npm publishing is disabled. Use npm run publish:cli:internal -- --publish from the repository root.'); process.exit(1)\""
   },
   "license": "MIT",
   "author": "bingjiang0611",

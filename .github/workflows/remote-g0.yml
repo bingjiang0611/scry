@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# PR pushes and main pushes each keep only their newest run. A cancelled main run
+# records no status, so its SHA stays unverified; the newest push validates fully.
 concurrency:
-  group: remote-g0-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: remote-g0-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -26,9 +28,11 @@ jobs:
       - id: diff
         name: Detect remote changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
+          # A main push cannot inherit an unverified parent via a path-only diff.
+          if [[ "$EVENT_NAME" == push || "$BASE_SHA" =~ ^0+$ ]]; then
             echo 'required=true' >> "$GITHUB_OUTPUT"
           elif git diff --quiet --no-ext-diff --no-textconv "$BASE_SHA" HEAD -- \
             experiments/remote-g0 apps/ios .github/workflows \
@@ -129,3 +133,33 @@ jobs:
               (.changes.outputs.required == "false" and
                 ([.transport.result, .ios.result] | all(. == "skipped")))
             )' > /dev/null
+
+  record-remote:
+    name: Record Remote commit status
+    needs: check
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Record commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f context=scry/remote-g0 -f state=success \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  main-red:
+    needs: [check, record-remote]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.check.result == 'failure' || needs.record-remote.result == 'success') }}
+    permissions:
+      issues: write
+      statuses: read
+      contents: read
+      actions: read
+    uses: ./.github/workflows/main-red.yml
+    with:
+      check-result: ${{ needs.check.result }}
+      check-workflow: Remote G0 local contracts

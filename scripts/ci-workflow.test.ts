@@ -24,6 +24,9 @@ interface Job {
   if?: string
   needs?: string[] | string
   permissions?: Record<string, string>
+  uses?: string
+  with?: Record<string, string>
+  concurrency?: { group: string; queue?: string }
   steps: Step[]
 }
 interface Workflow {
@@ -86,6 +89,156 @@ const SERIAL_RENDERER_UI_ORDER = [
   'node scripts/electron-security-smoke.mjs --dev-pi-history-only',
 ]
 
+describe('main correctness records and alerts', () => {
+  const mainPush = "!cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'"
+  const alertPermissions = { issues: 'write', statuses: 'read', contents: 'read', actions: 'read' }
+  for (const [file, id, context, checkWorkflow] of [
+    ['ci.yml', 'record-full-suite', 'scry/full-suite', 'CI'],
+    ['remote-g0.yml', 'record-remote', 'scry/remote-g0', 'Remote G0 local contracts'],
+  ] as const) {
+    it(`${file} writes only a successful status from a non-cancelled main push with no checkout`, () => {
+      const flow = workflow(file)
+      expect(flow.permissions).toEqual({ contents: 'read' })
+      expect(flow.on.push).toEqual({ branches: ['main'] })
+      const job = flow.jobs[id]
+      expect(job.needs).toBe('check')
+      expect(job.if).toBe(`\${{ ${mainPush} && needs.check.result == 'success' }}`)
+      expect(job.permissions).toEqual({ statuses: 'write' })
+      expect(job.steps).toHaveLength(1)
+      expect(job.steps[0].uses).toBeUndefined()
+      expect(job.steps[0].run).toContain('gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"')
+      expect(job.steps[0].run).toContain(`-f context=${context} -f state=success`)
+      const alert = flow.jobs['main-red']
+      expect(alert.needs).toEqual(['check', id])
+      expect(alert.if).toBe(`\${{ ${mainPush} && (needs.check.result == 'failure' || needs.${id}.result == 'success') }}`)
+      expect(alert.permissions).toEqual(alertPermissions)
+      expect(alert.uses).toBe('./.github/workflows/main-red.yml')
+      expect(alert.with).toEqual({ 'check-result': '${{ needs.check.result }}', 'check-workflow': checkWorkflow })
+    })
+  }
+
+  it('serializes issue writers and permits only non-cancelled failure or recovery, without checkout', () => {
+    const flow = workflow('main-red.yml')
+    expect(Object.keys(flow.on)).toEqual(['workflow_call'])
+    expect(flow.permissions).toEqual({})
+    const job = flow.jobs.alert
+    expect(job.if).toBe(`\${{ ${mainPush} && (inputs.check-result == 'success' || inputs.check-result == 'failure') }}`)
+    expect(job.permissions).toEqual(alertPermissions)
+    expect(job.concurrency).toEqual({ group: 'main-red-issue', queue: 'max' })
+    expect(job.steps).toHaveLength(1)
+    expect(job.steps[0].uses).toMatch(/^actions\/github-script@[0-9a-f]{40}$/)
+    expect(job.steps[0].with?.script).not.toContain('${{')
+    expect(job.steps[0].with?.script).not.toMatch(/publicApi|new github\.constructor/)
+    expect(job.steps[0].with?.script).toContain("['scry/full-suite', 'scry/remote-g0']")
+  })
+
+  it('opens once, updates on another failure, and closes only on a full recovery', async () => {
+    const script = source(workflow('main-red.yml').jobs.alert, 'Reconcile the main-red issue').with!.script!
+    const run = new Function('github', 'context', 'core', 'process', `return (async () => {\n${script}\n})()`)
+    const previous = 'a'.repeat(40)
+    const first = 'b'.repeat(40)
+    const second = 'c'.repeat(40)
+    const recovery = 'd'.repeat(40)
+    let main = first
+    let hasRemote = false
+    let issue: { number: number; body: string } | undefined
+    const issues = {
+      listForRepo: async () => issue ? [issue] : [],
+      getLabel: async () => ({}),
+      create: async ({ body }: { body: string }) => { issue = { number: 1, body } },
+      update: async ({ body, state }: { body?: string; state?: string }) => {
+        if (state === 'closed') issue = undefined
+        else if (issue && body) issue.body = body
+      },
+      createComment: async () => ({}),
+    }
+    const history = [recovery, second, first, previous]
+    const success = ['scry/full-suite', 'scry/remote-g0'].map(context => ({ context, state: 'success' }))
+    class Api {
+      rest = {
+        issues,
+        repos: {
+          listCommitStatusesForRef: async ({ ref }: { ref: string }) => ref === previous ? success
+            : ref === recovery ? (hasRemote ? success : success.slice(0, 1)) : [],
+          listCommits: async ({ path }: { path?: string }) => (path ? [previous] : history.slice(history.indexOf(main))).map(sha => ({ sha })),
+          compareCommitsWithBasehead: async ({ basehead }: { basehead: string }) => {
+            const [base, head] = basehead.split('...')
+            return { data: { status: history.indexOf(base) > history.indexOf(head) ? 'ahead' : 'behind' } }
+          },
+        },
+        actions: { listJobsForWorkflowRunAttempt: async () => [
+          { name: 'unit (2)', conclusion: 'failure' }, { name: 'packaged-linux', conclusion: 'cancelled' },
+        ] },
+      }
+      paginate = Object.assign(async <T, P>(fn: (params: P) => Promise<T>, params: P) => fn(params), {
+        iterator: async function* <T, P>(fn: (params: P) => Promise<T>, params: P) { yield { data: await fn(params) } },
+      })
+    }
+    const dispatch = (checkResult: string, sha: string, checkWorkflow = 'CI') => run(new Api(), {
+      repo: { owner: 'owner', repo: 'repo' }, runId: 123, sha,
+    }, { warning: (message: string) => { throw new Error(message) } }, { env: {
+      CHECK_RESULT: checkResult, CHECK_WORKFLOW: checkWorkflow, GITHUB_RUN_ATTEMPT: '2', GITHUB_SERVER_URL: 'https://github.com',
+    } })
+    await dispatch('failure', first)
+    const original = issue
+    expect(original?.body).toContain(`Failed commit: \`${first}\``)
+    expect(original?.body).toContain(`Latest commit with both success statuses: \`${previous}\``)
+    expect(original?.body).toContain('/actions/runs/123/attempts/2')
+    expect(original?.body).toContain('Failed workflow: CI')
+    expect(original?.body).toContain('- unit (2)')
+    expect(original?.body).not.toContain('packaged-linux')
+    main = second
+    await dispatch('failure', second, 'Remote G0 local contracts')
+    expect(issue).toBe(original)
+    expect(issue?.body).toContain(second)
+    expect(issue?.body).toContain('Failed workflow: Remote G0 local contracts')
+    await dispatch('failure', first)
+    expect(issue?.body).toContain(second)
+    main = recovery
+    await dispatch('success', recovery)
+    expect(issue).toBe(original)
+    hasRemote = true
+    await dispatch('success', recovery)
+    expect(issue).toBeUndefined()
+  })
+
+  it('always runs full Remote G0 on main push even if the base has no validation record', () => {
+    const flow = workflow('remote-g0.yml')
+    const changes = source(flow.jobs.changes, 'Detect remote changes')
+    // Same commit at both ends: the diff alone would allow a skip. A main
+    // push must not use that diff as proof that its parent passed Remote G0.
+    const result = shell(changes.run!, { BASE_SHA: 'HEAD', EVENT_NAME: 'pull_request', GITHUB_OUTPUT: '/dev/stdout' })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('required=false\n')
+    const push = shell(changes.run!, { BASE_SHA: 'HEAD', EVENT_NAME: 'push', GITHUB_OUTPUT: '/dev/stdout' })
+    expect(push.status).toBe(0)
+    expect(push.stdout).toBe('required=true\n')
+    for (const id of ['transport', 'ios']) expect(flow.jobs[id].if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+  })
+
+  it('documents and exposes status writer failures without issuing a false validation alert', () => {
+    const docs = readFileSync(join(root, 'docs/agent/validation-workflows.md'), 'utf8')
+    expect(docs).toContain('`record-full-suite` / `record-remote` 自身失败不会开启 `main-red`')
+    expect(docs).toContain('重跑失败的写入 job')
+    for (const [file, id] of [['ci.yml', 'record-full-suite'], ['remote-g0.yml', 'record-remote']]) {
+      expect(workflow(file).jobs[id]['continue-on-error']).toBeUndefined()
+      expect(workflow(file).jobs['main-red'].if).not.toContain(`needs.${id}.result == 'failure'`)
+    }
+  })
+
+  it('gates the real release entries, not offline testing, packaging or dev installation', () => {
+    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    expect(scripts['publish:cli:internal']).toBe('node scripts/publish-cli-internal.mjs')
+    expect(readFileSync(join(root, 'scripts/publish-cli-internal.mjs'), 'utf8')).toContain('await checkReleaseCommit({ dryRun: !options.publish })')
+    expect(scripts['install:mac']).toBe('npm run check:release-commit && npm run pack:release && node scripts/install-macos.mjs --require-release')
+    expect(readFileSync(join(root, 'scripts/install-macos.mjs'), 'utf8')).toContain('if (requireRelease) await checkReleaseCommit(')
+    expect(scripts['check:release-commit']).toBe('node scripts/check-release-commit.mjs')
+    for (const entry of ['pack:release', 'pack:artifact', 'check:cli-release', 'install:mac:dev']) {
+      expect(scripts[entry]).not.toContain('check:release-commit')
+    }
+  })
+})
+
 describe('required PR checks', () => {
   // The fourth entry is the changes output that gates the macOS App jobs: CI keys them on desktop,
   // Performance keys native on native_performance, which implies desktop.
@@ -101,7 +254,8 @@ describe('required PR checks', () => {
     it(`${file} includes every validation and accepts only proven pass, doc skip or macOS App skip`, () => {
       const jobs = workflow(file).jobs
       expect(jobs.check.needs).toEqual([...dependencies])
-      expect(Object.keys(jobs).filter(key => key !== 'check' && key !== 'comment').sort()).toEqual([...dependencies].sort())
+      const auxiliaries = file === 'ci.yml' ? ['check', 'record-full-suite', 'main-red'] : ['check', 'comment']
+      expect(Object.keys(jobs).filter(key => !auxiliaries.includes(key)).sort()).toEqual([...dependencies].sort())
       expect(gate(file, success)).toBe(0)
       expect(gate(file, skipped)).toBe(0)
       expect(gate(file, noDesktop)).toBe(0)
@@ -253,11 +407,15 @@ describe('required PR checks', () => {
   })
 
   it('cancels obsolete PR runs and coalesces only fully validated main CI runs', () => {
-    for (const file of ['performance.yml', 'remote-g0.yml']) {
-      const ci = workflow(file)
-      expect(ci.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}")
-      expect(ci.concurrency.group).toMatch(/github.event.pull_request.number \|\| github\.(sha|run_id)/)
-    }
+    const performance = workflow('performance.yml')
+    expect(performance.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}")
+    expect(performance.concurrency.group).toBe('performance-${{ github.event.pull_request.number || github.run_id }}')
+    // Remote runs full on every main push, so main pushes coalesce like CI instead of
+    // queueing one macOS pair per merge. A cancelled run records no status.
+    const remote = workflow('remote-g0.yml')
+    expect(remote.concurrency.group).toBe("remote-g0-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number }}")
+    expect(remote.concurrency['cancel-in-progress']).toBe(true)
+    expect(Object.keys(remote.on).sort()).toEqual(['pull_request', 'push'])
     // A coalesced main run validates everything, since its before..HEAD diff can omit
     // commits whose run was cancelled; manual dispatch keeps a unique group.
     const ci = workflow('ci.yml')
@@ -279,7 +437,7 @@ describe('required PR checks', () => {
       const jobs = workflow(file).jobs
       expect(jobs.changes).toEqual({ uses: './.github/workflows/validation-changes.yml' })
       for (const [name, job] of Object.entries(jobs)) {
-        if (['changes', 'check', 'comment', 'unit-coverage'].includes(name)) continue
+        if (['changes', 'check', 'comment', 'unit-coverage', 'record-full-suite', 'record-remote', 'main-red'].includes(name)) continue
         expect(job.needs).toBe('changes')
         const output = name === 'compare' ? 'node_performance'
           : name === 'native' ? 'native_performance'
