@@ -37,6 +37,8 @@ import { BACKGROUND_SERVICE_LOCAL_OPS } from './daemon-local-ops/background-serv
  * of openExternal takes its known projects from the daemon (bootstrap/workspace.ts).
  */
 export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
+  // Read the daemon's subscribed projection already held by this window.
+  'agent:activeRun', 'agent:activeRuns', 'agent:focusedRunSnapshot',
   'agent:clipboardImage', 'agent:focusRun', 'agent:revealProject', 'agent:setCwd',
   'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions', 'agent:viewSessions',
   'agent:watchSessionDetail',
@@ -56,7 +58,7 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
 
 /** Channels whose App handler asks the daemon run surface itself (B4-L3). */
 export const DAEMON_MODE_SERVED_CHANNELS: ReadonlySet<string> = new Set([
-  'agent:start', 'agent:activeRun', 'agent:activeRuns', 'agent:focusedRunSnapshot',
+  'agent:start',
   'agent:adoptActiveRun', 'agent:answerQuestion', 'agent:stop', 'agent:steer', 'agent:stopBackgroundTask'
 ])
 
