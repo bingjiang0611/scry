@@ -431,6 +431,11 @@
       "method": "usageStats"
     },
     {
+      "channel": "agent:watchSessionDetail",
+      "route": "main",
+      "why": "窗口维护当前会话的订阅焦点，daemon 仍校验并读取详情"
+    },
+    {
       "channel": "app:copyText",
       "route": "main",
       "why": "剪贴板"

@@ -2,8 +2,8 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：181 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：62，一半 main 一半 daemon（`split`）：8，转发到现有 op：26，需要新增 op：85
+- 生产特权 IPC channel：182 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：63，一半 main 一半 daemon（`split`）：8，转发到现有 op：26，需要新增 op：85
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 18 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 桌面远程客户端（`desktopRemote:*`，共 32 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)
@@ -91,6 +91,7 @@
 | `agent:usageCredits` | new-op | `usage:usageCredits` | analytics | — | usage 来自 daemon 持有的 SQLite 与 usage JSONL |
 | `agent:usageStats` | new-op | `usage:usageStats` | analytics | — | usage 来自 daemon 持有的 SQLite 与 usage JSONL |
 | `agent:viewSessions` | main | `—` | — | — | badge 由 main 渲染 |
+| `agent:watchSessionDetail` | main | `—` | — | — | 窗口维护当前会话的订阅焦点，daemon 仍校验并读取详情 |
 | `app:copyText` | main | `—` | — | — | 剪贴板 |
 | `app:performanceDiagnosticsEnabled` | main | `—` | — | — | 本机性能开关 |
 | `app:rendererRestart` | main | `—` | — | — | 窗口行为 |
