@@ -25,39 +25,31 @@ export function writeEntryPackage(entryPath) {
   }))
 }
 
-export function writeDockBadgeEntry(entryPath, badgeReceipt) {
+export function writeDockBadgeEntry(entryPath, badgeReceipt, focusRequest) {
   writeEntryPackage(entryPath)
+  writeFileSync(focusRequest, '')
   // Exercise startup and repeated viewing against a stale native Dock badge.
   // Forward every call to Electron; a denied OS permission remains explicit.
   writeFileSync(entryPath, `
-    import { app, BrowserWindow, ipcMain } from 'electron'
-    import { writeFileSync } from 'node:fs'
+    import { app } from 'electron'
+    import { watch, writeFileSync } from 'node:fs'
     app.setAppPath(${JSON.stringify(repoRoot)})
     app.whenReady().then(async () => {
       let initial
       const requests = []
       let residual = null
       const setBadgeCount = app.setBadgeCount.bind(app)
-      const focusWindow = (window) => {
-        app.focus({ steal: true })
-        window.focus()
-      }
       app.once('browser-window-created', (_event, window) => {
-        window.once('ready-to-show', () => {
-          window.show()
-          focusWindow(window)
-        })
-      })
-      // The preload action stands in for clicking a session in the foreground.
-      // Activate the real window if another app took focus during the fixture run.
-      const handle = ipcMain.handle.bind(ipcMain)
-      ipcMain.handle = (channel, listener) => handle(channel, channel === 'agent:focusRun'
-        ? (event, runId) => {
-            const window = BrowserWindow.fromWebContents(event.sender)
-            if (runId && window && !window.isFocused()) focusWindow(window)
-            return listener(event, runId)
+        // The fixture driver requests activation before the actual preload action.
+        const requests = watch(${JSON.stringify(focusRequest)}, { persistent: false }, () => {
+          if (!window.isVisible()) window.show()
+          if (!window.isFocused()) {
+            app.focus({ steal: true })
+            window.focus()
           }
-        : listener)
+        })
+        window.once('closed', () => requests.close())
+      })
       app.setBadgeCount = (count) => {
         if (!initial) {
           // Keep test service isolation. Only this fixture opts into a native Dock and window.

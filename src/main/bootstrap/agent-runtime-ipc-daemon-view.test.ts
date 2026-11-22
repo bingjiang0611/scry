@@ -52,6 +52,17 @@ describe('daemon mode: showing a run views its session', () => {
     expect(viewed).not.toHaveBeenCalled()
     expect(badge.count).toBe(1)
   })
+
+  it('keeps later attention unread after the window leaves its focused run', async () => {
+    const { handlers, viewed, badge } = register(true)
+    const focus = handlers.get('agent:focusRun')!
+    await focus({}, 'turn-1')
+    expect(badge.count).toBe(0)
+    await focus({}, null)
+    badge.setDaemon({ revision: 2, unreadSessionKeys: ['key:native-1'] }, true)
+    expect(viewed).toHaveBeenCalledTimes(1)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['key:native-1'])
+  })
 })
 
 describe('agent:viewSessions: a conversation names the sessions it shows', () => {

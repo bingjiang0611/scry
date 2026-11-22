@@ -69,7 +69,8 @@ export function registerAgentRuntimeHandlers({
   }
   handleTrusted('agent:focusRun', async (_event, runId: string | null): Promise<boolean> => {
     const focused = await daemon.focusRun(runId)
-    if (focused && runId) viewRunSession(await daemon.focusedRunSnapshot())
+    if (focused && runId === null) dockBadge.view(null, false)
+    else if (focused && runId) viewRunSession(await daemon.focusedRunSnapshot())
     return focused
   })
   handleTrusted('agent:adoptActiveRun', async (_event, runId: string): Promise<ActiveRun | null> => {

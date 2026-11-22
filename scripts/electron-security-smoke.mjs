@@ -125,8 +125,9 @@ async function main() {
   const filesEntry = join(temp, 'files-app', 'files-main.mjs')
   if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')
+  const focusRequest = join(temp, 'dock-focus.request')
   const questionEntry = join(temp, 'question-app', 'question-main.mjs')
-  if (devQuestionOnly) writeDockBadgeEntry(questionEntry, badgeReceipt)
+  if (devQuestionOnly) writeDockBadgeEntry(questionEntry, badgeReceipt, focusRequest)
   // Every temp entry has its own app directory: the daemon supervisor refuses an App that
   // announces Electron's version instead of the build's (smoke-app-entries.mjs).
   const conversationEntry = join(temp, 'conversation-app', 'conversation-main.mjs')
@@ -231,7 +232,7 @@ async function main() {
   }))`)
   assert.deepEqual(disabledCapabilities, [true, true, true, true], 'smoke must not start non-fixture providers')
   if (filesOnly) return exerciseFiles(context())
-  if (devQuestionOnly) return exerciseQuestion(context())
+  if (devQuestionOnly) return exerciseQuestion({ ...context(), focusRequest })
   if (devTerminalOnly) return exerciseDevTerminal(context())
   const surfaces = await exerciseSurfaces(context())
   const providerHistory = await exerciseProviderHistory(context())
