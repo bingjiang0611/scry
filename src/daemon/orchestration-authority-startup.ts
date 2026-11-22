@@ -64,6 +64,8 @@ export async function runAuthorityStartupSequence(options: {
     }
     if (plan) {
       if (plan.unimportedRuns.length > deferredThreshold) {
+        // The local channel can serve every catalog row while terminal runs backfill.
+        importCatalogEntries(sink, userDataDir, Date.now())
         const pendingConvRunIds = new Set<string>()
         try {
           const ownership = await conversationStore().loadOwnership()
