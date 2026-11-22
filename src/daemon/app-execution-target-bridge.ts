@@ -2,15 +2,9 @@ import { randomUUID } from 'node:crypto'
 import type { DesktopMobileTargetSubmit, DesktopRemoteTargetAPI, ExecutionTargetRef } from '../shared/desktop-remote'
 import { DEFAULT_MAX_FRAME } from '../main/remote/inner-mtls-protocol'
 
-// Timeout per forwarded target call: strictly greater than the 40 s App-side
-// watch/status lane timeout (desktop-lane.ts) so a legitimate long-poll never trips it.
 export const EXECUTION_TARGET_CALL_TIMEOUT_MS = 45_000
-// Wider budget for mobileSubmit, which serializes per target with 30 s per attempt
-// plus receipt persistence/reconciliation across the local hop.
 export const EXECUTION_TARGET_SUBMIT_TIMEOUT_MS = 65_000
 export const EXECUTION_TARGET_POLL_MAX_WAIT_MS = 25_000
-// Reserve envelope headroom inside DEFAULT_MAX_FRAME so an oversized reply reaches
-// submitResult and fails the pending call immediately instead of getting dropped at TLS framing.
 export const MAX_EXECUTION_TARGET_RESULT_BYTES = DEFAULT_MAX_FRAME - 512
 const DEFAULT_DETACH_GRACE_MS = 5_000
 const MAX_QUEUED_CALLS = 64
@@ -45,13 +39,9 @@ export interface ExecutionTargetBridgeHandlers {
 }
 
 export interface AppExecutionTargetBridgeOptions {
-  /** True only for the primary Scry App's enrolled local grant. */
   isPrimaryAppPeer(fingerprint: string): boolean
-  /** Override per-call deadline in tests (default 45,000 ms). */
   callTimeoutMs?: number
-  /** Override mobileSubmit deadline in tests (default max(callTimeoutMs, 65,000 ms)). */
   submitTimeoutMs?: number
-  /** Override grace before marking App detached if polls stop while another socket stays open. */
   detachGraceMs?: number
 }
 
@@ -93,13 +83,6 @@ function sanitizeErrorCode(raw: unknown): string {
   return /^[a-zA-Z0-9_.:-]+$/.test(trimmed) ? trimmed : 'execution_target_failed'
 }
 
-/**
- * Daemon-side bridge that routes ExecutionTargetRouter calls to the primary Scry App
- * over local.sock using a long-poll pull (`executionTargetWork`) + reply (`executionTargetResult`)
- * pair. The daemon never holds the App's safeStorage desktop credentials; when the App is
- * absent, discovery honestly reports only the gateway (`targets: []`) and target calls fail
- * closed with `execution_target_gateway_offline`.
- */
 export class AppExecutionTargetBridge {
   readonly #isPrimaryAppPeer: (fingerprint: string) => boolean
   readonly #callTimeoutMs: number
@@ -246,7 +229,6 @@ export class AppExecutionTargetBridge {
     if (this.#connectedPeer && this.#connectedPeer !== peer) {
       this.#detach('execution_target_gateway_offline')
     }
-    // Supersede any older waiting poll so a half-open targetWork socket cannot steal work.
     if (this.#activePoll) {
       this.#activePoll.cancelled = true
       this.#activePoll.wake()

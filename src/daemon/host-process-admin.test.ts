@@ -13,7 +13,6 @@ import { HOST_ADMIN_DIR_NAME, HOST_ADMIN_SOCKET_NAME } from './host-admin-socket
 
 const extraDirs: string[] = []
 function makeShortRoot(): string {
-  // Keep unix socket path `<root>/userData/daemon/host-admin/host-admin.sock` < 100 bytes on macOS.
   const base = process.platform === 'darwin' ? '/tmp' : tmpdir()
   const dir = mkdtempSync(join(base, 'scry-ha-'))
   extraDirs.push(dir)
@@ -76,7 +75,6 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       expect(existsSync(sock)).toBe(false)
       expect(daemon.host.adminSocket).toBeUndefined()
 
-      // App pairing confirmation must NOT write approvedVia when flag is off (release-order compatibility).
       const begun = await daemon.localOp('localPairing', 'begin', [])
       const { pairingId, secret } = begun.result as { pairingId: string; secret: string }
       const { publicKeySHA256 } = await createProvedPairing(daemon, pairingId, secret, 'Legacy Phone')
@@ -107,7 +105,6 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       expect(statSync(adminDir).mode & 0o777).toBe(0o700)
       expect(statSync(sockPath).mode & 0o777).toBe(0o600)
 
-      // 1. Version mismatch rejected before challenge creation.
       const mismatch = await callHostAdmin({
         daemonStateDirectory: stateDir,
         clientIdentity: { version: '9.9.9', build: 'other-build' },
@@ -115,7 +112,6 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       })
       expect(mismatch).toMatchObject({ ok: false, error: 'daemon_version_mismatch', daemon: { version: 'test' } })
 
-      // 2. Missing challenge token & wrong challenge token rejected, and challenge file is deleted.
       const id = buildIdentity('test')
       const badTokenReplies = await sendRawFrames(sockPath, [
         JSON.stringify({ version: 1, client: id }),
@@ -132,7 +128,6 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       expect(JSON.parse(missingTokenReplies[1]!)).toEqual({ ok: false, error: 'host_admin_auth_failed' })
       expect(readdirSync(adminDir).filter((f) => f.startsWith('challenge-'))).toEqual([])
 
-      // 3. Replay of a consumed challenge token on a second connection fails.
       const captured = await new Promise<{ file: string; token: string }>((resolve, reject) => {
         const s = createConnection(sockPath)
         s.on('error', reject)
@@ -158,7 +153,6 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       ])
       expect(JSON.parse(replayReplies[1]!)).toEqual({ ok: false, error: 'host_admin_auth_failed' })
 
-      // 4. Client challenge reader rejects symlink, non-0600 mode, wrong owner, and invalid filename.
       const checkDir = mkdtempSync(join(tmpdir(), 'scry-chal-check-'))
       extraDirs.push(checkDir)
       const validName = `challenge-${'a'.repeat(32)}`
@@ -199,7 +193,6 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       const call = (method: string, args?: Record<string, unknown>) =>
         callHostAdmin({ daemonStateDirectory: stateDir, clientIdentity: id, method, ...(args ? { args } : {}) })
 
-      // 1. Switch OFF: status/pending/devices work; invite/approve refused; whitelist enforced.
       const st = await call('status')
       expect(st).toMatchObject({
         ok: true,
@@ -215,19 +208,16 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       expect(await call('approve', { pairingId: '00000000-0000-4000-8000-000000000000', publicKeySHA256: 'a'.repeat(64) })).toEqual({
         ok: false, error: 'host_cli_approval_disabled'
       })
-      // Forbidden methods outside whitelist -> unsupported_method.
       for (const badMethod of ['setCliApproval', 'localHostAdmin', 'submit', 'enroll', 'stop', 'unknown_op']) {
         expect(await call(badMethod)).toEqual({ ok: false, error: 'unsupported_method' })
       }
 
-      // 2. Switch OFF tightening still works (cancel, revoke, desktop_off) & maps Chinese errors to machine codes.
       const localGrant = daemon.host.service.authority.inspectLocal().grants.find((g) => g.scope === 'local')!
       expect(await call('revoke', { deviceId: localGrant.deviceId })).toEqual({ ok: false, error: 'local_grant_not_revocable' })
       expect(await call('cancel', { pairingId: 'not-a-uuid' })).toEqual({ ok: false, error: 'invalid_arguments' })
       expect(await call('desktop_off')).toEqual({ ok: true, result: { disabled: true } })
       expect(daemon.host.hostAdmin.recentNotices().some((n) => n.kind === 'desktop_disabled_via_cli')).toBe(true)
 
-      // 3. Turn switch ON via local op -> full flow: invite -> prove -> wrong fp refused -> right fp approved with approvedVia:host_cli + notice.
       expect((await daemon.localOp('localHostAdmin', 'setCliApproval', [true])).error).toBeUndefined()
       const inv = await call('invite_phone')
       expect(inv.ok).toBe(true)
@@ -246,22 +236,18 @@ describe('W11 P5-5: host-admin.sock security, challenge auth, whitelist, rate li
       expect(persistedGrant?.approvedVia).toBe('host_cli')
       expect(daemon.host.hostAdmin.recentNotices().some((n) => n.kind === 'device_approved_via_cli' && n.deviceId === approvedDevice.deviceId)).toBe(true)
 
-      // Logs must NEVER contain the pairing secret!
       expect(logs.join('\n')).not.toContain(inviteData.secret)
 
-      // 4. Rate limit on approve (3/h; we already used 2 above -> 3rd attempt allowed, 4th rate-limited even after restart).
       const inv2 = await call('invite_phone')
       expect(inv2.ok).toBe(true)
       const inv2Data = (inv2 as { ok: true; result: { pairingId: string; secret: string } }).result
       await createProvedPairing(daemon, inv2Data.pairingId, inv2Data.secret, 'Phone 2')
-      // 3rd approve call hits wrong fp (consumes 3rd slot); 4th is rate-limited!
       expect(await call('approve', { pairingId: inv2Data.pairingId, publicKeySHA256: '1'.repeat(64) })).toEqual({
         ok: false, error: 'local_confirmation_mismatch'
       })
       const rateLimited = await call('approve', { pairingId: inv2Data.pairingId, publicKeySHA256: '2'.repeat(64) })
       expect(rateLimited).toMatchObject({ ok: false, error: 'host_cli_rate_limited', retryAfterMs: expect.any(Number) })
 
-      // Restart preserves rate limit counter in host-admin.json.
       await daemon.dispose()
       restarted = await startTestDaemon({ root: daemon.root })
       const afterRestart = await callHostAdmin({

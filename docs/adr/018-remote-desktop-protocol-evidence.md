@@ -10,4 +10,6 @@ Recording a submit is not execution. Main owns the durable pending receipt and d
 
 A remote run's catalog-write notice prompts a local session-list refresh; it does not focus or start a local run. Question attention exposes bounded counts, not transcript content. A duplicate start receipt reuses the run ID from the first accepted command.
 
+Only the primary enrolled App can receive and complete forwarded execution-target work; the daemon does not own the App's stored Desktop credentials. An absent App yields gateway-only discovery and a clear refusal for targeted calls. A replacement poll supersedes the older poll; a still-open control lane is not proof that work is being read. Keep the forwarding deadline longer than the downstream watch/status wait and give submits a separate budget for receipt persistence. Reserve frame headroom so a too-large reply can fail the pending call explicitly rather than leaving it to time out. Test disconnect and recovery, wrong-owner replies, and queue saturation separately.
+
 See [desktop-remote.ts](../../src/shared/desktop-remote.ts), [desktop-workbench.ts](../../src/shared/desktop-workbench.ts), and [remote run policy tests](../../src/main/remote/remote-run-policy.test.ts).

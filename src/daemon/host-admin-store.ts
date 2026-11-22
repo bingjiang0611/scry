@@ -9,10 +9,6 @@ import {
   type HostCliApprovalSelfReport
 } from '../shared/host-admin'
 
-// Durable state for P5 Step 2 host CLI administration (P5-host-security §4.3, §4.4):
-// `<userData>/remote/host-admin.json` (0600, atomic write). Holds the default-off
-// "允许命令行批准" switch and hourly rate-limit timestamps so `scry-host restart`
-// cannot clear rate counters. Reading a missing file does NOT create it.
 
 export const HOST_ADMIN_FILE_NAME = 'host-admin.json'
 const MAX_NOTICES = 32
@@ -33,7 +29,6 @@ export type RateConsumeResult =
   | { allowed: false; retryAfterMs: number; nextAllowedAt: number }
 
 export interface HostAdminStoreOptions {
-  /** `<userData>/remote` directory. */
   stateDirectory: string
   clock?: () => number
   onNotice?: (notice: HostAdminNotice) => void
@@ -82,10 +77,6 @@ export class HostAdminStore {
     return () => { this.#listeners.delete(listener) }
   }
 
-  /**
-   * Read persisted state fail-closed: missing file returns default disabled without creating
-   * anything; corrupt JSON, symlink, or permissions other than 0600 fail closed to disabled.
-   */
   #readFailClosed(): { state: PersistedHostAdminState; corrupted: boolean } {
     let stat: ReturnType<typeof lstatSync>
     try {
@@ -140,10 +131,6 @@ export class HostAdminStore {
     return { enabled: next.cliApprovalEnabled, updatedAt: next.updatedAt }
   }
 
-  /**
-   * Check and record one rate-limited CLI operation (`approve` 3/h, `invite` 6/h).
-   * Timestamps are persisted atomically to `host-admin.json` so restarts never reset counters.
-   */
   consumeRate(action: HostAdminRateAction): RateConsumeResult {
     const { state } = this.#readFailClosed()
     const now = this.#clock()
@@ -189,7 +176,7 @@ export class HostAdminStore {
       this.#notices.shift()
     }
     for (const listener of this.#listeners) {
-      try { listener(notice) } catch { /* listener failure must not break admin state */ }
+      try { listener(notice) } catch {}
     }
     return notice
   }

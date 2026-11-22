@@ -7,8 +7,6 @@ import { computeEffectiveRemoteConfig } from './login-start/policy-env'
 import type { HostAdminStore } from './host-admin-store'
 import { mapHostAdminError, openHostAdminSocket, type HostAdminReply, type HostAdminSocket } from './host-admin-socket'
 
-// Wires `host-admin.sock` to the daemon's PairingAuthority, HostAdminStore, and self-report.
-// Kept outside `host-process.ts` so `host-process.ts` stays minimal and under 20 KB.
 
 export interface DaemonHostAdminRuntimeDeps {
   daemonStateDirectory: string
@@ -49,7 +47,6 @@ function readSupervisorPid(env: NodeJS.ProcessEnv): number | undefined {
 
 export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): Promise<HostAdminSocket | undefined> {
   const env = deps.env ?? process.env
-  // Release-order isolation: do NOT listen on host-admin.sock unless SCRY_EXPERIMENTAL_HOST_CLI=1.
   if (!isHostCliExperimentalEnabled(env)) return undefined
 
   const handlers = pairingChannelHandlers({ host: deps.remoteHost })
@@ -127,7 +124,6 @@ export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): P
           return { ok: false, error: 'host_cli_rate_limited', retryAfterMs: rate.retryAfterMs, nextAllowedAt: rate.nextAllowedAt }
         }
         const code = await handlers['remote:pairing:begin']()
-        // Never log `code.secret` or `code.deviceCode`!
         deps.log(`host-admin method=invite_phone result=ok pairingId=${code.pairingId}`)
         return { ok: true, result: code }
       }
@@ -140,7 +136,6 @@ export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): P
           return { ok: false, error: 'host_cli_rate_limited', retryAfterMs: rate.retryAfterMs, nextAllowedAt: rate.nextAllowedAt }
         }
         const invitation = await handlers['remote:desktop:invite']()
-        // Never log `invitation` string!
         deps.log('host-admin method=invite_desktop result=ok')
         return { ok: true, result: { invitation } }
       }
@@ -208,7 +203,6 @@ export async function attachDaemonHostAdmin(deps: DaemonHostAdminRuntimeDeps): P
         return { ok: true, result: { revoked: true, deviceId } }
       }
 
-      // desktop_off
       if (!hasOnlyKeys(args, [])) return { ok: false, error: 'invalid_arguments' }
       await handlers['remote:desktop:disable']()
       deps.hostAdmin.recordNotice({ kind: 'desktop_disabled_via_cli' })
