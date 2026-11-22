@@ -5,10 +5,39 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { combineNativeShards } from './performance-native-run.mjs'
+import { writeSessionFixture } from './session-open-fixture.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
+import { readDaemonArchivedRunTrace } from '../src/main/daemon-subscribe-parse'
+import { createDesktopHostReader, parseDesktopHostRead } from '../src/main/remote/desktop-host-reader'
+import { upsertTraceArchiveTurn } from '../src/main/transcript-archive'
 const root = new URL('..', import.meta.url).pathname
 
 const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
+
+it('recovers a settled default-profile run after the native benchmark opens seeded history', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'scry-native-archive-test-'))
+  try {
+    const { cwd, sessions, userData } = writeSessionFixture(root, directory, ...nativeWorkloads.markdown)
+    const externalSessionId = sessions[1]
+    const context = { cwd, providerId: 'codex', externalSessionId }
+    const runId = 'retry-native-composer'
+    const text = 'Reply persisted after the run left the live registry'
+    const item = { id: 'reply', runId, ts: '2026-11-21T12:00:00.000Z', kind: 'model' as const, stage: 'text', text }
+    expect(upsertTraceArchiveTurn({ cwd, sessionId: externalSessionId, providerId: 'codex', userDataDir: userData,
+      turn: { runId, agentProfileId: null, userText: 'composer prompt', items: [item], ts: Date.parse(item.ts), done: true } })).toBe(true)
+    const readDesktop = createDesktopHostReader({
+      userDataDir: userData, hostId: () => 'native-fixture',
+      authorizeWorkspace: path => { expect(path).toBe(cwd); return cwd },
+      getRun: () => null
+    })
+    const read = (request: Record<string, unknown>) => readDesktop(parseDesktopHostRead(request.query)).then(desktop => ({ desktop }))
+    await expect(readDaemonArchivedRunTrace(read, { context, runId })).resolves.toMatchObject({
+      runId, externalSessionId, items: [{ id: item.id, text }], done: true
+    })
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 
 function report() {
   const errors: Array<{ scenario: string; message: string }> = []
