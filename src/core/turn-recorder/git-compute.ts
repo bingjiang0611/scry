@@ -12,6 +12,7 @@ import {
   terminalSnapshot,
   cleanupCapture
 } from './git-capture.js'
+import { sampleGitRepositoryLocation, withRepositoryLocation } from './git-repository-location.js'
 import {
   rm,
   stat
@@ -212,6 +213,17 @@ export async function computeGitTurnDiff(
 ): Promise<TurnDiffSnapshot> {
   const started = Date.now()
   let afterAt = new Date(started).toISOString()
+  const location = !sharedAfter && !options.workspaceSnapshot && capture.repoRoot
+    ? sampleGitRepositoryLocation(capture.repoRoot, false) : undefined
+  let repositoryEnd = sharedAfter?.repositoryEnd
+  const readEnd = () => {
+    if (repositoryEnd) return repositoryEnd
+    const observed = location?.()
+    if (observed?.branch !== undefined || observed?.commit !== undefined) repositoryEnd = observed
+    return repositoryEnd
+  }
+  const located = (snapshot: TurnDiffSnapshot): TurnDiffSnapshot =>
+    withRepositoryLocation(snapshot, capture.repositoryStart, readEnd())
   if (!sharedAfter && capture.status === 'ready' && capture.beforeTree && capture.tempDir && capture.objectDir) {
     // A clean baseline is the start commit, so deciding "this repository did not change" costs one
     // status read instead of the whole discovery/targeted/fallback pipeline. Anything unproven takes
@@ -225,6 +237,7 @@ export async function computeGitTurnDiff(
         // for a commit baseline, so it stays the empty path the full pipeline would have filled.
         onAfter({
           tree: capture.beforeTree,
+          repositoryEnd: readEnd(),
           afterAt,
           indexFile: join(capture.tempDir, 'after.index'),
           objectDir: capture.objectDir,
@@ -233,7 +246,7 @@ export async function computeGitTurnDiff(
           collection: unchanged
         })
       }
-      return terminalSnapshot(
+      return located(terminalSnapshot(
         capture,
         'captured',
         undefined,
@@ -242,11 +255,11 @@ export async function computeGitTurnDiff(
         Date.now() - started,
         consume ? await cleanupCapture(capture) : 'ok',
         unchanged
-      )
+      ))
     }
   }
   if (capture.status !== 'ready' || !capture.repoRoot || !capture.scope || !capture.beforeTree || !capture.tempDir || !capture.objectDir) {
-    return terminalSnapshot(
+    return located(terminalSnapshot(
       capture,
       capture.status === 'ready' ? 'failed' : capture.status,
       capture.reason ?? (capture.status === 'ready' ? 'git_error' : undefined),
@@ -254,7 +267,7 @@ export async function computeGitTurnDiff(
       afterAt,
       0,
       consume ? await cleanupCapture(capture) : 'ok'
-    )
+    ))
   }
   const deadline = started + deadlineMs
   let status: TurnDiffSnapshot['status'] = 'captured'
@@ -434,15 +447,15 @@ export async function computeGitTurnDiff(
     }
     if (!afterTree) throw new Error('Git after tree was not created')
     if (!sharedAfter) onAfter?.({
-      tree: afterTree, afterAt, indexFile: env.GIT_INDEX_FILE!, objectDir: capture.objectDir,
+      tree: afterTree, repositoryEnd: readEnd(), afterAt, indexFile: env.GIT_INDEX_FILE!, objectDir: capture.objectDir,
       alternateObjectDirs: capture.alternateObjectDirs, filterOverrides, collection
     })
 
     if (capture.beforeTree === afterTree) {
-      return terminalSnapshot(
+      return located(terminalSnapshot(
         capture, 'captured', undefined, [], afterAt, Date.now() - started,
         consume ? await cleanupCapture(capture) : 'ok', collection
-      )
+      ))
     }
 
     // One tree comparison yields both the change kinds and the line counts: `--raw` and
@@ -506,6 +519,6 @@ export async function computeGitTurnDiff(
   }
   const finishMs = Date.now() - started
   const cleanup = consume ? await cleanupCapture(capture) : 'ok'
-  const snapshot = terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection)
+  const snapshot = located(terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection))
   return exclusion ? { ...snapshot, diffExclude: exclusion } : snapshot
 }
