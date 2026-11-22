@@ -54,8 +54,13 @@ export async function pairDevice({ evaluate, transport, temp, userDataDir, works
   assert.equal(snapshot.hostId, invitation.hostId)
   assert.equal(snapshot.mode, 'snapshot')
   assert.ok(typeof snapshot.logId === 'string' && snapshot.logId.length > 0)
-  assert.ok(snapshot.snapshot.sessions.rows.some(row => row.cwd === canonicalWorkspace && row.catalog?.nativeSessionId === 'desktop-remote-bootstrap'),
-    'The v2 subscription must read the imported, authorized session')
+  const imported = snapshot.snapshot.sessions.rows.find(row => row.sessionKey === 'desktop-remote-bootstrap')
+  assert.ok(imported, 'The v2 subscription must read the imported session')
+  assert.equal(imported.cwd, canonicalWorkspace)
+  assert.equal(imported.provider, 'codex')
+  assert.equal(imported.legacy, true)
+  assert.equal(imported.catalog.preview, 'desktop remote host smoke')
+  assert.equal(imported.catalog.nativeSessionId, null, 'An unbound legacy row must not invent a Provider session ID')
   const workspaceChoices = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'desktop', query: { kind: 'workspaceChoices', request: { cwd: canonicalWorkspace, kind: 'branches', query: '' } }
   })
