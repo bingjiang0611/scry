@@ -19,6 +19,7 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkReleaseCommit } from './check-release-commit.mjs'
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const packageRoot = join(repoRoot, 'packages', 'turn-recorder-cli')
@@ -106,6 +107,8 @@ function parse(argv) {
 
 export async function main(argv = process.argv.slice(2)) {
   const options = parse(argv)
+  if (options.publish && options.packageRoot !== packageRoot) throw new Error('--source is only supported for dry runs')
+  await checkReleaseCommit({ dryRun: !options.publish })
   assertBuildPresent(options.packageRoot)
   const target = await mkdtemp(join(tmpdir(), 'scry-cli-internal-'))
   try {

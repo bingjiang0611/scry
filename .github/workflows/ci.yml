@@ -444,3 +444,30 @@ jobs:
           path: daemon-mode-smoke-packaged.log
           if-no-files-found: ignore
           retention-days: 3
+
+  record-full-suite:
+    name: Record CI commit status
+    needs: check
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Record commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f context=scry/full-suite -f state=success \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  main-red:
+    needs: [check, record-full-suite]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.check.result == 'failure' || needs.record-full-suite.result == 'success') }}
+    permissions:
+      issues: write
+      statuses: read
+    uses: ./.github/workflows/main-red.yml
+    with:
+      check-result: ${{ needs.check.result }}

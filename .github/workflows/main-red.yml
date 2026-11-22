@@ -1,0 +1,121 @@
+name: Main red alert
+
+on:
+  workflow_call:
+    inputs:
+      check-result:
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  alert:
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (inputs.check-result == 'success' || inputs.check-result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      statuses: read
+    # Both correctness workflows share the lock. Neither pending updates nor a
+    # recovery should replace one another while a different update is in flight.
+    concurrency:
+      group: main-red-issue
+      queue: max
+    steps:
+      - name: Reconcile the main-red issue
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CHECK_RESULT: ${{ inputs.check-result }}
+        with:
+          script: |
+            const repo = context.repo
+            const sha = context.sha
+            const label = 'main-red'
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`
+            const required = ['scry/full-suite', 'scry/remote-g0']
+
+            // This repository is public. Read public commits and Actions job metadata
+            // without granting the issue writer contents:read or actions:read.
+            const publicApi = new github.constructor({ baseUrl: process.env.GITHUB_API_URL })
+            async function passed(ref) {
+              const statuses = new Map()
+              for await (const { data } of github.paginate.iterator(github.rest.repos.listCommitStatusesForRef, { ...repo, ref, per_page: 100 })) {
+                for (const { context, state } of data) {
+                  if (!statuses.has(context)) statuses.set(context, state)
+                }
+                if (required.every(name => statuses.has(name))) break
+              }
+              return required.every(name => statuses.get(name) === 'success')
+            }
+            async function follows(base, head) {
+              if (base === head) return true
+              const { data } = await publicApi.rest.repos.compareCommitsWithBasehead({ ...repo, basehead: `${base}...${head}`, per_page: 1 })
+              return data.status === 'ahead' || data.status === 'identical'
+            }
+            async function latestPass() {
+              // No sha before this workflow was introduced can have both attestations.
+              const history = await publicApi.paginate(publicApi.rest.repos.listCommits, {
+                ...repo, sha: 'main', path: '.github/workflows/main-red.yml', per_page: 100
+              })
+              const first = history.at(-1)?.sha
+              if (!first) throw new Error('main-red workflow not found on main')
+              for await (const { data } of publicApi.paginate.iterator(publicApi.rest.repos.listCommits, { ...repo, sha: 'main', per_page: 100 })) {
+                for (const { sha } of data) {
+                  if (await passed(sha)) return sha
+                  if (sha === first) return null
+                }
+              }
+              return null
+            }
+
+            const open = (await github.paginate(github.rest.issues.listForRepo, { ...repo, labels: label, state: 'open' }))
+              .filter(item => !item.pull_request)
+            if (open.length > 1) throw new Error('More than one main-red issue is open; reconcile them before continuing')
+            const issue = open[0]
+            const failedSha = issue?.body?.match(/^<!-- scry-main-red: ([0-9a-f]{40}) -->/m)?.[1]
+
+            if (process.env.CHECK_RESULT === 'success') {
+              if (!failedSha || !await passed(sha) || !await follows(failedSha, sha)) return
+              const issueRef = { ...repo, issue_number: issue.number }
+              await github.rest.issues.createComment({ ...issueRef, body: `Main passed both correctness checks at \`${sha}\`. [Run](${runUrl})` })
+              await github.rest.issues.update({ ...issueRef, state: 'closed', state_reason: 'completed' })
+              return
+            }
+
+            // An older run can finish or be rerun after an issue for a newer sha.
+            if (failedSha && !await follows(failedSha, sha)) return
+            let latest = null
+            let latestText = 'None recorded yet'
+            try {
+              latest = await latestPass()
+              if (latest) latestText = `\`${latest}\``
+            } catch (error) {
+              core.warning(`Could not find the last full pass: ${error.message}`)
+              latestText = 'Lookup failed; see the alert job log'
+            }
+            if (latest && latest !== sha && await follows(sha, latest)) return
+
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT)
+            const jobs = await publicApi.paginate(publicApi.rest.actions.listJobsForWorkflowRunAttempt, {
+              ...repo, run_id: context.runId, attempt_number: attempt, per_page: 100
+            })
+            const failed = jobs.filter(job => job.conclusion === 'failure').map(job => `- ${job.name}`).join('\n')
+            const body = [
+              `<!-- scry-main-red: ${sha} -->`,
+              `Failed commit: \`${sha}\``,
+              `Run: ${runUrl}`,
+              `Latest commit with both success statuses: ${latestText}`,
+              `Failed jobs:\n${failed || '- Check'}`,
+            ].join('\n\n')
+            if (issue) {
+              await github.rest.issues.update({ ...repo, issue_number: issue.number, body })
+            } else {
+              try {
+                await github.rest.issues.getLabel({ ...repo, name: label })
+              } catch (error) {
+                if (error.status !== 404) throw error
+                await github.rest.issues.createLabel({ ...repo, name: label, color: 'b60205', description: 'Main correctness CI failed' })
+              }
+              await github.rest.issues.create({ ...repo, title: 'Main is red', labels: [label], body })
+            }

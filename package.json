@@ -25,6 +25,7 @@
     "mcpguard": "npm run build:cli --silent && node out/cli/mcpguard.js",
     "scry": "npm run build:cli --silent && node packages/turn-recorder-cli/dist/cli/scry.js",
     "pack:cli": "npm run build:cli && npm pack ./packages/turn-recorder-cli",
+    "check:release-commit": "node scripts/check-release-commit.mjs",
     "check:cli-release": "npm run typecheck && npm run check:cli-runtime",
     "check:cli-runtime": "vitest run src/cli src/core/turn-recorder src/shared/turn-record.test.ts src/shared/credit-usage.test.ts src/shared/trace.test.ts src/shared/runtime.test.ts src/main/normalize.test.ts src/main/danger.test.ts src/main/claude-locate.test.ts src/main/managed-turn-commit.test.ts && npm run build:cli && npm run smoke:cli-package",
     "publish:cli": "npm publish ./packages/turn-recorder-cli",
@@ -77,7 +78,7 @@
     "check:pacman-package": "node scripts/check-pacman-package.mjs",
     "smoke:session-restore": "node scripts/session-restore-provider-smoke.mjs",
     "smoke:electron": "node scripts/external-links-smoke.mjs && node scripts/renderer-crash-recovery-smoke.mjs && node scripts/electron-security-smoke.mjs && node scripts/electron-security-smoke.mjs --files-only && node scripts/electron-security-smoke.mjs --steer-only && node scripts/desktop-remote-host-smoke.mjs",
-    "install:mac": "npm run pack:release && node scripts/install-macos.mjs --require-release",
+    "install:mac": "npm run check:release-commit && npm run pack:release && node scripts/install-macos.mjs --require-release",
     "install:mac:dev": "npm run pack && node scripts/install-macos.mjs",
     "test:history-autoload:ui": "node scripts/history-autoload-ui-smoke.mjs",
     "test:provider-menu:ui": "node scripts/provider-menu-ui-smoke.mjs"

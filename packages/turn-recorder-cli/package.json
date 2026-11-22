@@ -20,7 +20,7 @@
     "linux"
   ],
   "scripts": {
-    "prepublishOnly": "npm --prefix ../.. run check:cli-release"
+    "prepublishOnly": "node ../../scripts/check-release-commit.mjs --npm-publish && npm --prefix ../.. run check:cli-release"
   },
   "license": "MIT",
   "author": "bingjiang0611",

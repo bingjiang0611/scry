@@ -150,6 +150,14 @@ App 与独立 CLI **分别版本化**；不要默认每次 App 修改都升 CLI�
 - 如果同一改动同时影响两个分发面，分别判断并分别升版本；两者无需强行相同。
 - README 中的 CLI 安装版本必须与 CLI package 当前版本一致，避免复制陈旧命令。
 
+### 发布提交门禁
+
+公开 `publish:cli`（CLI 的 `prepublishOnly`）、内网 `publish:cli:internal -- --publish` 和 App 的正式签名/公证安装 `install:mac` 只接受**全量通过提交**。门禁要求工作区干净（含暂存、未跟踪文件）、HEAD 可从刚 fetch 的官方 `origin/main` 到达，并且 GitHub 上该 SHA 最新的 `scry/full-suite`、`scry/remote-g0` 都是 `success`。HEAD 不必是 main tip。`npm run check:release-commit` 可提前检查。查询走公开 GitHub REST API，需要 Git、Node 与网络，不需要 `gh` 或 PAT；API、网络、认证、限流和缺记录都拒绝真发布，没有门禁绕过选项。
+
+CLI 的 dry run 只报告这道门禁的结论，原有验证仍照常执行。未验证时用报出的已验证 SHA（诊断检查最近 20 个 main 主线提交），或在 Actions 重跑目标 SHA 的原 main push run，等两个状态齐全。也可在 main 用 `workflow_dispatch` 全量诊断，但它不会写入状态；若原 main push run 已不可重跑，等下一个 main push 全量通过。不要自己补写 status。
+
+`check:cli-release`、`pack:release`、`pack:artifact`、CI 的 `packaged-linux` 和 `install:mac:dev` 都不是正式发布入口，不查这两个状态。仓库没有桌面 App 的上传发布工作流；目前正式 App 入口是 `install:mac`，安装器在正式安装前也会检查。通过提交门禁不替代构件验证、版本核对、签名或公证。
+
 开发目录包：
 
 ```bash
@@ -193,6 +201,6 @@ npm run publish:cli:internal -- --publish     # 真发布，并回读版本与 d
 已在 CI 与本地各跑一次（脚本用 `--ignore-scripts`，不会再跑生命周期门禁），目标版本在 registry
 上尚不存在（`--force` 才允许重发同版本）。默认 `--registry https://registry.anpm.alibaba-inc.com/`，
 可用 `--registry` 覆盖。发布后必须回读 `npm view <包名>@<版本> version` 与 `dist-tags`。
-不要从陈旧 `dist` 手工 `npm publish`。
+真发布仅接受当前仓库的 CLI 包目录；`--source` 仅用于 dry run。不要从陈旧 `dist` 手工 `npm publish`。
 
 完成对应验证后，Agent 默认主动执行[本地提交前自查](pr-workflow.md#local-preflight)，检查需求与批准、范围、风险、验证证据以及完整 diff / 暂存区；无需用户再次提醒。处理发现的问题后，在任务分支只提交本任务改动，并在交付中简述自查结论与未验证项。随后按 [PR 工作流](pr-workflow.md) 推送任务分支并开 PR，避免混入已有无关未推送提交；合并须用户明确要求。本地自查不替代正式 PR 分诊或独立评审。
