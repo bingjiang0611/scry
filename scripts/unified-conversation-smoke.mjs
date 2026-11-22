@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { conversationFixtureArchivePath } from './conversation-ownership-smoke.mjs'
 import { exerciseConversationFork } from './conversation-fork-smoke.mjs'
-import { nativeUiPointer } from './native-ui-pointer.mjs'
+import { aimNativeUiPointer } from './native-ui-pointer.mjs'
 import { checkConversationLayout } from './unified-conversation-layout.mjs'
 import { exerciseConversationManagement } from './conversation-management-smoke.mjs'
 import { exercisePiAgentSwitch, exerciseConversationImages } from './conversation-agent-switch-smoke.mjs'
@@ -42,7 +42,7 @@ export async function exerciseUnifiedConversation(cdp, evaluate, fixture) {
       await click('.conversation-options > summary')
     }
     await wait(() => evaluate(`Boolean(document.querySelector(${json(selector)}) && !document.querySelector(${json(selector)}).disabled)`), `enabled UI target: ${selector}`)
-    const point = await evaluate(`(${nativeUiPointer.toString()})(${json(selector)}, { timeoutMs: 20000, scroll: true, captureReceipt: true })`)
+    const point = await aimNativeUiPointer(cdp, evaluate, selector, 20_000)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
     await wait(() => evaluate('window.__nativeUiPointerReceipt'), 'native pointer receipt')
