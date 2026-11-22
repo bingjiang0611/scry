@@ -1,13 +1,12 @@
 import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BUDGET_MS, lateRefusalNotice } from './daemon-run-admission'
 import { planDelivery } from './daemon-run-delivery'
-import { isConversationRunId } from './daemon-run-evidence'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse, AgentStopState } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
-import { resume, view, type RunCursor } from './daemon-run-cursor'
+import { isScopedConversationRun, resume, view, type RunCursor } from './daemon-run-cursor'
 import { DaemonRunTransport } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
@@ -351,8 +350,8 @@ export class DaemonRunRuntime {
   // The stamp ends when text first reaches the renderer; that is the number the user
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
-    // A conversation run reaches its own view only (isConversationRunId).
-    if (!isConversationRunId(cursor.scryRunId, cursor.runId)) this.#bridge.push(event)
+    // Conversation events reach only the run's scoped view.
+    if (!isScopedConversationRun(cursor)) this.#bridge.push(event)
     this.#deps.runTraces?.route(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return
@@ -362,6 +361,7 @@ export class DaemonRunRuntime {
   }
 
   #apply(read: Awaited<ReturnType<DaemonRunTransport['trace']>>, cursor: RunCursor): boolean {
+    if (read.run?.conversationId) cursor.conversationRun = true
     if (read.kind === 'snapshot' && read.run) cursor.latest = read.run
     const plan = planDelivery(cursor.pushed, read)
     for (const event of plan.events) this.#delivered(cursor, event)

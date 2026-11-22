@@ -2,7 +2,7 @@ import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor } from '../shared/desktop-remote'
 import type { PerformanceTrace } from './performance-timing'
 import { noteAdmission, refusedView } from './daemon-run-admission'
-import { boundMarker } from './daemon-run-evidence'
+import { boundMarker, isConversationRunId } from './daemon-run-evidence'
 
 // One window's cursor for one daemon run: what it has been told, what it has already
 // delivered, and what the window currently shows. Kept apart from the polling so the
@@ -17,6 +17,7 @@ export interface RunCursor {
   after?: DesktopTraceCursor
   // Canonical run id the daemon bound to this ledger run, once it said so.
   scryRunId?: string
+  conversationRun?: true
   // Last ledger position this run's watch has read. The ledger answers with one page
   // at a time from a global sequence, so a watch that keeps asking from 0 only ever
   // re-reads the session's first page; this is what lets it walk forward to its own
@@ -55,6 +56,10 @@ export interface RunCursor {
   settledNotified?: boolean
   notifiedSessionId?: string
   stopNotified?: boolean
+}
+
+export function isScopedConversationRun(cursor: RunCursor): boolean {
+  return cursor.conversationRun === true || isConversationRunId(cursor.scryRunId, cursor.runId)
 }
 
 /**

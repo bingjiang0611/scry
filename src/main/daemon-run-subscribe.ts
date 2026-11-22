@@ -242,8 +242,8 @@ export async function applySubscribeEventToRuntime(
 
   let cursor = ctx.cursorFor(runId)
   if (event.type === 'run.intent_recorded') {
+    const p = event.payload
     if (!cursor) {
-      const p = event.payload
       const cwd = event.cwd ?? (typeof p.cwd === 'string' ? p.cwd : undefined)
       const providerId = typeof p.provider === 'string' ? p.provider : undefined
       const agentProfileId = typeof p.profile === 'string' ? p.profile : undefined
@@ -254,6 +254,7 @@ export async function applySubscribeEventToRuntime(
       })
       ctx.runs.set(runId, cursor)
     }
+    if (p.isConversationRun === true) cursor.conversationRun = true
     ctx.wakes.wake(cursor.runId)
     return
   }
