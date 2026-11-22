@@ -3,6 +3,7 @@ import type { ConversationSummary } from '@shared/conversation-api'
 import type { ProjectMeta, SessionMeta } from '../env'
 import { SIDEBAR_PROJECT_COPY as copy } from '../constants/copy'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
 import type { RemoteProjectGroup } from './SidebarRemoteProjects'
 import { Disclosure } from './Disclosure'
 import { useFlipList } from '../hooks/useFlipList'
@@ -14,13 +15,18 @@ function SessionMotionList({ revision, children, className = 'sb-sess-list' }: {
 }
 
 export function SidebarProjects({
-  projects, projectsError = null, q, remoteGroups, showRemote, activeCwd, activeSessionId, collapsed, toggle,
-  onNewProjectChat, openProjectMenu, renderSession, renderConversation, renderRemoteProject
+  projects, projectsError = null, canShowEmpty = true, q, remoteGroups, showRemote, activeCwd, activeSessionId, collapsed, toggle,
+  onNewProjectChat, openProjectMenu, renderSession, renderConversation, renderRemoteProject,
+  onClearSearch, onChooseFolder, onRetryProjects
 }: {
   projects: ProjectMeta[]
   // The project read failed: say so instead of showing the empty catalog.
   projectsError?: string | null
+  canShowEmpty?: boolean
   q: string
+  onClearSearch?: () => void
+  onChooseFolder?: () => void
+  onRetryProjects?: () => void
   remoteGroups: RemoteProjectGroup[]
   showRemote: boolean
   activeCwd: string | null
@@ -90,10 +96,15 @@ export function SidebarProjects({
       </>
     )}
     <div className="sb-section sb-project-section">{copy.projects}</div>
-    {filtered.length === 0 && pinned.length === 0 && !showRemote && (
-      <div className="sb-empty" {...(projectsError ? { role: 'status', 'data-projects-read-error': '' } : {})}>
-        {projectsError ? copy.projectsReadFailed(projectsError) : projects.length === 0 ? copy.noProjects : copy.noMatches}
-      </div>
+    {projectsError && <div data-projects-read-error="">
+      <EmptyState size="card" title={copy.projectsReadFailedTitle} picture="alert" announcement="alert" className="sb-empty"
+        actions={onRetryProjects ? [{ label: copy.retryProjects, onClick: onRetryProjects }] : undefined} />
+    </div>}
+    {canShowEmpty && !projectsError && filtered.length === 0 && pinned.length === 0 && !showRemote && (
+      <EmptyState size="card" className="sb-empty" picture={ql ? undefined : 'folder'}
+        announcement={ql ? 'polite' : undefined} title={ql ? copy.projectQueryEmpty(q) : copy.noProjects}
+        actions={ql ? (onClearSearch ? [{ label: copy.clearSearch, onClick: onClearSearch }] : undefined)
+          : (onChooseFolder ? [{ label: copy.chooseFolder, onClick: onChooseFolder }] : undefined)} />
     )}
     {projectGroups.map((group) => {
       if (group.kind === 'remote') return renderRemoteProject(group.project)
@@ -101,7 +112,7 @@ export function SidebarProjects({
       const open = !collapsed.has(p.cwd)
       const active = p.cwd ? p.cwd === activeCwd : activeCwd == null
       const projectSelected = active && activeSessionId == null
-      const emptyLabel = p.totalSessions === 0 ? copy.noSessions : ql ? copy.noSessionMatches : copy.sessionsPinned
+      const emptyLabel = ql ? copy.sessionQueryEmpty(q) : p.totalSessions === 0 ? copy.noSessions : copy.sessionsPinned
       return (
         <div key={p.cwd} className={`sb-proj ${open ? 'open' : ''}`}>
           <div className={`sb-proj-row ${projectSelected ? 'active' : ''}`}>
@@ -146,7 +157,9 @@ export function SidebarProjects({
               {p.conversations.sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)).map(renderConversation)}
               {p.sessions.map((session) => renderSession(session.cwd ?? p.cwd, session, p.name, false, `${p.cwd}:${session.sessionId}`))}
               {p.sessions.length === 0 && p.conversations.length === 0 && (
-                <div className="sb-project-empty">{emptyLabel}</div>
+                <EmptyState size="row" className="sb-project-empty" title={emptyLabel}
+                  actions={!ql && p.totalSessions === 0 && p.cwd && onNewProjectChat
+                    ? [{ label: copy.newChatAction, onClick: () => onNewProjectChat(p.cwd) }] : undefined} />
               )}
             </SessionMotionList>
           )}</Disclosure>

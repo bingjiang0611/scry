@@ -1,13 +1,8 @@
 /* composer */
 /* 顶层 error boundary 兜底界面（替代黑屏） */
 .err-boundary {
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+  min-height: 100vh;
   background: var(--bg);
-  color: var(--fg);
 }
 .err-card {
   max-width: 520px;

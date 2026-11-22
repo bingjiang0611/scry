@@ -67,12 +67,17 @@ export function useAppSessionRuntime(context: AppSessionRuntimeContext) {
     presentedSessionId.current = null
     session.clearTurns(...args)
   }, [session.clearTurns])
-  const replacePresentedSession = useCallback((...args: Parameters<typeof session.replaceWithParsedSession>): void => {
-    const [sessionId, parsed, options] = args
+  const replacePresentedSession = useCallback((
+    sessionId: Parameters<typeof session.replaceWithParsedSession>[0],
+    parsed: Parameters<typeof session.replaceWithParsedSession>[1],
+    options?: Parameters<typeof session.replaceWithParsedSession>[2],
+    onPresented?: () => void
+  ): void => {
     const hasContent = parsed.length > 0 || Boolean(options?.activeRun?.items.length)
     const commit = (): void => {
-      session.replaceWithParsedSession(...args)
+      session.replaceWithParsedSession(sessionId, parsed, options)
       if (hasContent) presentedSessionId.current = sessionId
+      onPresented?.()
     }
     if (hasContent && presentedSessionId.current !== sessionId) runStructuralTransition('session', commit)
     else commit()

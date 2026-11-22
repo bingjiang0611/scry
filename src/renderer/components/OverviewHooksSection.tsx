@@ -1,4 +1,6 @@
 // 总览的 HOOKS 面板：会话级 Hook 汇总与逐次执行明细。
+import { EmptyState } from './primitives/EmptyState'
+import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import type { ReactNode } from 'react'
 import type { TraceEvent } from '@shared/trace'
 import { hookCommandLabel } from '../format'
@@ -35,7 +37,7 @@ export function OverviewHooksSection({ hookSummary, onSelect }: {
             </span>
           </h4>
           {hookSummary.groups.length === 0 ? (
-            <div className="dim pad2">本会话无 Hook 事件</div>
+            <EmptyState size="row" className="dim pad2" title={OVERVIEW_SESSION_COPY.noHookEvidence} />
           ) : (
             hookSummary.groups.map((h) => {
               const tone = hookTone(h)

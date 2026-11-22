@@ -5,6 +5,8 @@ import { useStaleWhileRefresh } from '../hooks/useStaleWhileRefresh'
 import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
 import { ModalFrame, requestModalClose } from './Modals'
 import { Button } from './primitives/Button'
+import { EmptyState } from './primitives/EmptyState'
+import { TERMINAL_EMPTY_COPY as copy } from '../constants/copy'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { SkeletonRows } from './primitives/Skeleton'
 import { TurningIcon } from './primitives/TurningIcon'
@@ -42,10 +44,12 @@ export function TerminalHistory({ cwd, canOpen, onOpen, onClose, api: injectedAp
       </header>
       <div className="modal-body">
         <p title={cwd ?? '用户主目录'}>当前工作区：{cwd ?? '用户主目录'} · 原文可能含密钥</p>
-        {error && <p role="alert">{page ? '刷新失败，下面是上次读取的列表：' : '录制列表不可用：'}{error}</p>}
+        {error && <EmptyState size="card" picture="alert" announcement="alert"
+          title={page ? copy.recordingRefreshFailed : copy.recordingReadFailed}
+          actions={[{ label: copy.refreshRecording, icon: 'refresh', busy, onClick: list.refresh }]} />}
         {page?.partial && <p role="alert">部分索引不可读，列表可能不完整；未展示其标识或内容。</p>}
         {!canOpen && <p role="status">终端标签页已达上限，请先关闭一个标签页。</p>}
-        {page && page.items.length === 0 && <p>本页没有可列出的录制。</p>}
+        {page && !error && page.items.length === 0 && <EmptyState size="row" title={page.partial ? copy.recordingPartial : copy.recordingEmpty} />}
         <div className="arch-list" aria-busy={busy}>
           {list.status === 'loading' && showSkeleton && <SkeletonRows rows={5} meta rowHeight={60} label="正在读取录制索引…" />}
           {page?.items.map((item) => (

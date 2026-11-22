@@ -8,6 +8,7 @@ import type { CapabilityEnvelope, McpSnapshot } from '@shared/provider'
 import { TurningIcon } from './primitives/TurningIcon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
+import { EmptyState } from './primitives/EmptyState'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { DelayedLoadingStatus } from './LoadingStatus'
@@ -189,14 +190,10 @@ export function CapabilitiesModal({
               <p title={skill.description}>{skill.description}</p>
             </article>
           )) : skillsUnavailable ? (
-            <div className="capabilities-empty" role="status">
-              <strong>{LOADING_COPY.skillsUnavailable}</strong>
-              <button type="button" className="capabilities-refresh" onClick={onRefreshSkills}>{LOADING_COPY.refresh}</button>
-            </div>
+            <EmptyState size="card" picture="alert" announcement="alert" title={LOADING_COPY.skillsUnavailable}
+              actions={[{ label: LOADING_COPY.refresh, icon: 'refresh', onClick: onRefreshSkills }]} />
           ) : (skillsRefreshing || skillCapability === null) && skills.length === 0 ? <DelayedSkeletonRows loading={skillsRefreshing} rows={6} meta rowHeight={56} label={LOADING_COPY.skills} /> : (
-            <div className="capabilities-empty" role="status">
-              <strong>{skillCapability?.data == null ? LOADING_COPY.skillsSourceUnread : LOADING_COPY.skillsSourceEmpty}</strong>
-            </div>
+            <EmptyState size="row" title={skillCapability?.data == null ? LOADING_COPY.skillsSourceUnread : LOADING_COPY.skillsSourceEmpty} />
           )}
         </div>
       ) : (
@@ -280,12 +277,10 @@ export function CapabilitiesModal({
                 )}
               </article>
             )
-          }) : mcpUnavailable ? <div className="capabilities-empty" role="status"><strong>{LOADING_COPY.mcpUnavailable}</strong></div>
-            : loadingMcpConfig || mcpCapability === null ? <DelayedSkeletonRows loading={loadingMcp} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} /> : (
-            <div className="capabilities-empty" role="status">
-              <strong>{mcpCapability?.data == null ? LOADING_COPY.mcpSourceUnread : LOADING_COPY.mcpSourceEmpty}</strong>
-            </div>
-          )}
+          }) : mcpUnavailable ? <EmptyState size="card" picture="alert" announcement="alert" title={LOADING_COPY.mcpUnavailable}
+            actions={[{ label: LOADING_COPY.refresh, icon: 'refresh', onClick: onRefreshMcp }]} />
+            : loadingMcpConfig || mcpCapability === null ? <DelayedSkeletonRows loading={loadingMcp} rows={4} meta rowHeight={64} label={LOADING_COPY.mcp} />
+              : <EmptyState size="row" title={mcpCapability?.data == null ? LOADING_COPY.mcpSourceUnread : LOADING_COPY.mcpSourceEmpty} />}
         </div>
       )}
     </ModalFrame>

@@ -3,6 +3,8 @@ import type { TurnDiffReview } from '../turn-diff'
 import type { DiffLayout } from '../diff-stack'
 import type { DiffCommitHistory } from '../hooks/useDiffCommitHistory'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows, SkeletonRows } from './primitives/Skeleton'
 import { TURN_DIFF_REVIEW_COPY as copy } from '../constants/copy'
 import { DIFF_COPY as detail } from '../constants/diff-copy'
 import { DiffFiles } from './DiffFiles'
@@ -68,14 +70,15 @@ export function TurnDiffReviewPanel({ review: source, onClose, embedded = false,
         {available && <DiffFiles files={files} selectedPath={selected?.path ?? ''} select={select} scope={scope} repoRoot={turnDiff?.repoRoot} showTitle={!history} />}
       </DiffNavigation>}
       <section className="diff-review-content" aria-busy={history?.pending || undefined}>
-        {!review || !turnDiff ? <div className="diff-review-empty" role="status"><Icon name={history?.pending ? 'clock' : 'alert'} />
-          <b>{history?.pending ? detail.commitPending : detail.commitUnavailable}</b>
-        </div> : !available ? <div className="diff-review-empty"><Icon name="alert" /><b>{detail.evidence(turnDiff)}</b></div>
-          : selected ? <Suspense fallback={<div className="diff-review-empty" role="status">{detail.loadingView}</div>}>
+        {!review || !turnDiff ? history?.pending
+          ? <DelayedSkeletonRows loading rows={4} label={detail.commitPending} />
+          : <EmptyState size="card" picture="alert" title={detail.commitUnavailable} />
+          : !available ? <EmptyState size="card" picture="diff" title={detail.evidence(turnDiff)} />
+          : selected ? <Suspense fallback={<SkeletonRows rows={4} label={detail.loadingView} />}>
             <StackedDiff key={identity} files={files} path={selected.path} jump={jump} scope={scope} repoRoot={turnDiff.repoRoot}
               layout={layout} setLayout={setLayout} />
           </Suspense>
-            : <div className="diff-review-empty"><Icon name="check" /><b>{review.commit ? detail.commitEmpty : detail.empty(scope)}</b></div>}
+            : <EmptyState size="row" title={review.commit ? detail.commitEmpty : detail.empty(scope)} />}
       </section>
     </div>
   </aside>

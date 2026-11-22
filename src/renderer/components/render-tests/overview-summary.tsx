@@ -207,7 +207,7 @@ it('上下文缺少占用或窗口任一字段时保持未知，不拼出假比�
       <OverviewPanel turns={[missingWindow, missingContext]} selected={null} onSelect={() => {}} usage={null} stats={null} />
     )
 
-    expect(unknownHtml).toContain('暂无上下文数据')
+    expect(unknownHtml).toContain('未取得上下文占用数据')
     expect(unknownHtml).not.toContain('<b>50.0k</b><span> / 200.0k</span>')
     expect(unknownHtml).not.toContain('已占 25%')
   })
@@ -367,7 +367,7 @@ it('本轮文件足迹优先展示 Git 净改动与行数；无 diff 时诚实�
     expect(zeroDiffHtml).toContain('0 files')
     expect(zeroDiffHtml).not.toContain('validation.txt')
     expect(zeroDiffHtml).not.toContain('本轮文件足迹（工具证据）')
-    expect(emptyHtml).toContain('暂无文件工具证据')
+    expect(emptyHtml).toContain('未捕获到文件工具证据')
   })
 it('每轮文件数量优先采用 turn_diff，不再把 Bash 临时文件数量冒充实际改动数', () => {
     const html = renderToStaticMarkup(

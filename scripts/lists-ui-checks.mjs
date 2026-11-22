@@ -73,7 +73,7 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
   if (campaign === 'structure') return exerciseStructure({ read, check, wait, click, settle, arm, captured, screenshot, contents })
   if (campaign === 'history') {
     await click('#list-analytics')
-    await wait("document.querySelector('.usage-state')")
+    await wait("document.querySelector('.usage-page[aria-busy=true]')")
     await read(`(() => {
       window.__historicalEntry = false
       const sample = () => {
@@ -185,7 +185,7 @@ export async function exerciseLists(contents, win, screenshotPrefix = '', pointe
   try {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
     await wait("matchMedia('(prefers-reduced-motion: reduce)').matches")
-    await click('#list-analytics'); await wait("document.querySelector('.usage-state')")
+    await click('#list-analytics'); await wait("document.querySelector('.usage-page[aria-busy=true]')")
     await arm("node.classList.contains('motion-stagger')")
     await click('#list-resolve')
     const reduced = await captured()

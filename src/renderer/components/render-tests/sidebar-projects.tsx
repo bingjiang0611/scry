@@ -28,8 +28,9 @@ describe('Sidebar 项目分组', () => {
       <Sidebar projects={[]} projectsError="后台服务尚未提供这项功能（agent:listProjects）" activeCwd={null}
         onNewChat={() => {}} onPick={() => {}} onTogglePin={() => {}} onArchive={() => {}} />
     )
-    expect(html).toContain('无法读取项目列表：后台服务尚未提供这项功能（agent:listProjects）')
-    expect(html).not.toContain('暂无项目')
+    expect(html).toContain('没能读取本机项目')
+    expect(html).not.toContain('agent:listProjects')
+    expect(html).not.toContain('还没有项目')
   })
 
   it('会话索引状态读取失败时说明读失败，不归因到 app-sessions.json', () => {
@@ -38,8 +39,18 @@ describe('Sidebar 项目分组', () => {
         catalogHealthError="后台服务尚未提供这项功能（agent:catalogHealth）" activeCwd={null}
         onNewChat={() => {}} onPick={() => {}} onTogglePin={() => {}} onArchive={() => {}} />
     )
-    expect(html).toContain('无法读取会话索引状态：后台服务尚未提供这项功能（agent:catalogHealth）')
+    expect(html).toContain('没能读取会话索引状态')
+    expect(html).not.toContain('agent:catalogHealth')
     expect(html).not.toContain('app-sessions.json')
+  })
+
+  it('does not claim there are no projects before the catalog loads', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar projects={[]} activeCwd={null} projectsLoading
+        onNewChat={() => {}} onPick={() => {}} onTogglePin={() => {}} onArchive={() => {}} />
+    )
+    expect(html).not.toContain('还没有项目')
+    expect(html).not.toContain('没能读取本机项目')
   })
 
   it('Skill 和 MCP 与分析同组展示，入口不读取数量或连接状态', () => {

@@ -77,17 +77,34 @@ final class HomeUITests: XCTestCase {
     search.tap(); search.typeText("支付")
     XCTAssertTrue(app.buttons["home-tab-activity"].isSelected)
     XCTAssertFalse(row("重构远程会话列表").exists)
-    XCTAssertTrue(app.staticTexts["暂无需要回复或进行中的任务，其他会话在「项目」里"].exists)
+    XCTAssertTrue(app.staticTexts["没有与「支付」匹配的任务"].waitForExistence(timeout: 5))
+    XCTAssertEqual(search.value as? String, "支付")
     tab("projects")
     XCTAssertTrue(row("排查支付页").exists)
     XCTAssertFalse(row("重构远程会话列表").exists)
-    app.buttons["清除搜索"].tap()
+    app.buttons["home-search-clear"].tap()
     XCTAssertTrue(row("重构远程会话列表").exists)
     app.buttons["设置"].firstMatch.tap()
     app.buttons["返回"].firstMatch.tap()
     // Settings returns to the new-session page with the drawer collapsed by design.
     openDrawer()
     XCTAssertTrue(app.buttons["home-tab-projects"].isSelected)
+  }
+
+  func testArchiveReadFailureIsNotAnEmptyArchive() {
+    launchHome(extra: ["-uiArchiveReadFixture"])
+    app.buttons["设置"].firstMatch.tap()
+    let archived = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "已存档会话")).firstMatch
+    XCTAssertTrue(archived.waitForExistence(timeout: 5))
+    archived.tap()
+    let failed = app.staticTexts["没能读取已存档会话"]
+    let empty = app.staticTexts["没有已存档会话"]
+    XCTAssertTrue(failed.waitForExistence(timeout: 5))
+    XCTAssertFalse(empty.exists)
+    XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "archive-fixture")).firstMatch.exists)
+    app.buttons["重新读取"].tap()
+    XCTAssertTrue(empty.waitForExistence(timeout: 5))
+    XCTAssertFalse(failed.exists)
   }
 
   func testProjectsExpandScopeAndOpenSession() {

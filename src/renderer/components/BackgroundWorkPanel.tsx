@@ -3,6 +3,7 @@ import type { BackgroundTaskStopResult, BackgroundWork } from '@shared/backgroun
 import { BACKGROUND_WORK_COPY as copy } from '../constants/copy'
 import { useFlipList } from '../hooks/useFlipList'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
 import './background-work.css'
 import { Button } from './primitives/Button'
 
@@ -78,7 +79,7 @@ export function BackgroundWorkPanel({ runId, work, stopTask = (taskId) => window
         {result?.message && <p className="background-work-result" role="status">{result.message}</p>}
       </article>
     })}
-    {work.tasks.length === 0 && <p className="background-work-empty"><Icon name="clock" />{copy.empty}</p>}
+    {work.tasks.length === 0 && <EmptyState size="row" className="background-work-empty" title={copy.empty} />}
     {work.quiet && <p className="background-work-warning" role="status">{copy.quiet}</p>}
   </section>
 }

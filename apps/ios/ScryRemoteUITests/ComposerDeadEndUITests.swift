@@ -29,7 +29,7 @@ final class ComposerDeadEndUITests: XCTestCase {
     // The listing must replace the reading state; the regression was an endless
     // spinner because the sheet never issued a request.
     let listed = app.buttons["scry"].waitForExistence(timeout: 10) ||
-      app.staticTexts["无法读取文件夹"].waitForExistence(timeout: 10)
+      app.staticTexts["没能读取文件夹"].waitForExistence(timeout: 10)
     XCTAssertTrue(listed, "folder sheet never left 读取文件夹…")
     XCTAssertFalse(app.staticTexts["读取文件夹…"].exists)
   }

@@ -1,11 +1,25 @@
 import SwiftUI
 import AVFoundation
+import OSLog
+
+enum CameraScanFailure {
+  case denied, restricted, unavailable, setup
+
+  var detail: String {
+    switch self {
+    case .denied: ConnectionCopy.cameraDenied
+    case .restricted: ConnectionCopy.cameraRestricted
+    case .unavailable: ConnectionCopy.cameraUnavailable
+    case .setup: ConnectionCopy.cameraFailed
+    }
+  }
+}
 
 // The scanner only returns bytes. PairingCode and the mTLS possession proof
 // remain the trust boundary; camera denial must not strand the user on black.
 struct QRScanner: UIViewControllerRepresentable {
   let onCode: (String) -> Void
-  let onFailure: (String) -> Void
+  let onFailure: (CameraScanFailure) -> Void
 
   func makeUIViewController(context: Context) -> ScannerViewController {
     let controller = ScannerViewController()
@@ -18,7 +32,7 @@ struct QRScanner: UIViewControllerRepresentable {
 
 final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
   var onCode: ((String) -> Void)?
-  var onFailure: ((String) -> Void)?
+  var onFailure: ((CameraScanFailure) -> Void)?
   private let session = AVCaptureSession()
   private let captureQueue = DispatchQueue(label: "com.scry.remote.camera")
   private var preview: AVCaptureVideoPreviewLayer?
@@ -34,22 +48,24 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
         DispatchQueue.main.async {
           guard let self, !self.finished else { return }
           if allowed { self.configureCamera() }
-          else { self.fail("未允许相机访问。请在系统设置中允许 Scry 使用相机，再扫描配对码。") }
+          else { self.fail(.denied) }
         }
       }
-    default: fail("相机访问已关闭。请在系统设置中允许 Scry 使用相机，再扫描配对码。")
+    case .denied: fail(.denied)
+    case .restricted: fail(.restricted)
+    @unknown default: fail(.setup)
     }
   }
 
   private func configureCamera() {
     guard let device = AVCaptureDevice.default(for: .video) else {
-      fail("此设备没有可用相机，无法扫码配对。"); return
+      fail(.unavailable); return
     }
     do {
       let input = try AVCaptureDeviceInput(device: device)
       let output = AVCaptureMetadataOutput()
       guard session.canAddInput(input), session.canAddOutput(output) else {
-        fail("无法启动相机，请关闭扫描页后重试。"); return
+        fail(.setup); return
       }
       session.addInput(input)
       session.addOutput(output)
@@ -62,10 +78,13 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
       view.layer.addSublayer(layer)
       preview = layer
       captureQueue.async { [session] in session.startRunning() }
-    } catch { fail("无法启动相机：\(error.localizedDescription)。请关闭扫描页后重试。") }
+    } catch {
+      Logger(subsystem: "com.scry.remote", category: "camera").error("Scanner setup failed: \(String(describing: error), privacy: .private)")
+      fail(.setup)
+    }
   }
 
-  private func fail(_ message: String) {
+  private func fail(_ message: CameraScanFailure) {
     guard !finished else { return }
     finished = true
     // Presenting SwiftUI state must happen after the representable update.
