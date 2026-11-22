@@ -55,15 +55,16 @@ describe('live concurrency trace build instrumentation', () => {
     // field and the production readiness flags the fixture reads (`sessionActive`, `traceDelta`).
     const normalized = controls.replace(/\s+/g, ' ')
     expect(normalized).toContain(
-      'window.__scryTraceLive?.registerPoll?.({ poll, context, contextKey, connectionId, connected, catalogReady, sessionActive, traceDelta, diagnostics: {'
+      'window.__scryTraceLive?.registerPoll?.({ poll: pollForFixture, context, contextKey, connectionId, connected, catalogReady, sessionActive, traceDelta, diagnostics: {'
     )
     // An emptied diagnostics object would still match the prefix above.
     expect(normalized).toContain('catalogSessions: (catalog?.sessions ?? [])')
-    expect(controls).toContain('window.__scryTraceLive?.unregisterPoll?.(poll)')
-    expect(controls).toContain('() => { window.__scryTraceLive?.autoPoll?.() }')
-    expect(controls).not.toContain('() => pollRef.current?.()')
+    expect(controls).toContain('window.__scryTraceLive?.unregisterPoll?.(pollForFixture)')
+    expect(normalized).toContain('const poll = (): Promise<void> => { window.__scryTraceLive?.autoPoll?.() return Promise.resolve() }')
+    expect(normalized).toContain('const pollForFixture = (): Promise<void> => { const active = pollInFlight.current')
+    expect(controls).toContain('pollRef.current = poll')
     expect(controls.indexOf('registerPoll')).toBeLessThan(controls.indexOf('unregisterPoll'))
-    expect(controls.indexOf('unregisterPoll')).toBeLessThan(controls.indexOf('autoPoll'))
+    expect(controls.indexOf('autoPoll')).toBeLessThan(controls.indexOf('registerPoll'))
 
     // The committed run is published from a layout-effect hook, not from render.
     expect(foundation).toContain('useLayoutEffect as useFixtureCommitEffect')
@@ -77,7 +78,7 @@ describe('live concurrency trace build instrumentation', () => {
     expect(plugin.transform('const x = 1\n', join(root, 'src/renderer/other.ts'))).toBeUndefined()
   })
 
-  it('fails when the second or third anchor is missing instead of silently skipping it', async () => {
+  it('fails when a driver isolation or cleanup anchor is missing instead of silently skipping it', async () => {
     const build = await loadBuild()
     const controls = await source(CONTROLS)
 
@@ -87,11 +88,11 @@ describe('live concurrency trace build instrumentation', () => {
     cleanupPlugin.buildStart()
     expect(() => transform(cleanupPlugin, withoutCleanup, CONTROLS)).toThrow(/controls-unregister-poll/)
 
-    const withoutAutoAnchor = controls.replace('() => pollRef.current?.()', '() => undefined')
+    const withoutAutoAnchor = controls.replace('    const poll = (): Promise<void> => {\n', '    const renamedPoll = (): Promise<void> => {\n')
     expect(withoutAutoAnchor).not.toBe(controls)
     const autoPlugin = build.liveInstrumentationPlugin(root)
     autoPlugin.buildStart()
-    expect(() => transform(autoPlugin, withoutAutoAnchor, CONTROLS)).toThrow(/controls-suppress-auto-poll/)
+    expect(() => transform(autoPlugin, withoutAutoAnchor, CONTROLS)).toThrow(/controls-isolate-driver-poll/)
   })
 
   it('fails when an anchor occurs more than once', async () => {
@@ -119,9 +120,9 @@ describe('live concurrency trace build instrumentation', () => {
   it('keeps the anchors unique in the real sources and the fixture ABI in sync', async () => {
     const build = await loadBuild()
     expect(build.LIVE_INSTRUMENTATION.map((entry) => entry.id)).toEqual([
+      'controls-isolate-driver-poll',
       'controls-register-poll',
       'controls-unregister-poll',
-      'controls-suppress-auto-poll',
       'foundation-commit-hook-alias',
       'foundation-publish-committed-run'
     ])
@@ -138,7 +139,7 @@ describe('live concurrency trace build instrumentation', () => {
     expect(build.INDEX_HTML).toContain("script-src 'self'")
     const insertions = build.LIVE_INSTRUMENTATION.map((entry) => entry.insertion).join('\n')
     expect(insertions).toContain(`${LIVE_DRIVER_KEY}?.registerPoll?.`)
-    expect(insertions).toContain(`${LIVE_DRIVER_KEY}?.unregisterPoll?.(poll)`)
+    expect(insertions).toContain(`${LIVE_DRIVER_KEY}?.unregisterPoll?.(pollForFixture)`)
     expect(insertions).toContain(`${LIVE_DRIVER_KEY}?.autoPoll?.()`)
     expect(insertions).toContain(`${LIVE_DRIVER_KEY}?.publishRun?.(activeRun)`)
     expect(insertions).toContain(`${LIVE_DRIVER_KEY}?.releaseRun?.(activeRun)`)
