@@ -83,17 +83,38 @@ extension G0Transport {
   // JSON { cwd, providerId, agentProfileId?, prompt }. Returns the host-assigned
   // runId; the device polls the ledger for the real lifecycle.
   public static func relayRunSubmit(endpoint: RelayEndpoint, identity: G0ProbeIdentity, intentId: String, detail: String) async throws -> RunSubmitOutcome {
-    let request = try JSONEncoder().encode(RunSubmitRequest(intentId: intentId, detail: detail))
-    let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, replayable: false), expectedTarget: endpoint.executionTarget)
+    let fences = SubmissionFence.shared
+    let response: RunResponse
+    do {
+      let reservation = try await fences.submitLog(intentId, endpoint: endpoint) {
+        guard let (state, host) = try await subscription(endpoint: endpoint, identity: identity) else { return nil }
+        return try await state.observe(endpoint: endpoint, identity: identity, hostId: host).cursor.logId
+      }
+      let request = try JSONEncoder().encode(RunSubmitRequest(intentId: intentId, detail: detail, knownLogId: reservation.logId))
+      do {
+        response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity,
+          request: request, replayable: false), expectedTarget: endpoint.executionTarget)
+      } catch let RunError.host(code) {
+        try await fences.rejected(intentId, endpoint: endpoint, reservation: reservation, code: code)
+        throw RunError.host(code: code)
+      }
+    } catch RunError.host(code: "orchestration_log_changed") {
+      // The delivery owner already reconciles conflicting receipts and retains
+      // an uncertain intent if the host cannot answer that exact lookup.
+      throw RunError.host(code: "intent_payload_conflict")
+    }
     guard let runId = response.runId, let status = response.status else { throw ProbeError.unexpectedReply }
+    try await fences.acknowledge(intentId, endpoint: endpoint)
     return RunSubmitOutcome(runId: runId, status: status)
   }
 
   // Read-only reconciliation of a submit whose receipt was lost. nil means the
-  // host has no record of this device's intent id, so a resend cannot duplicate
-  // it. Older hosts answer `unknown_op`, surfaced as RunError.host.
+  // current host has no record of this device's intent id. The caller retains
+  // the unknown result when the original log could not be verified.
   public static func relayRunIntentStatus(endpoint: RelayEndpoint, identity: G0ProbeIdentity, intentId: String) async throws -> RunSubmitOutcome? {
-    let request = try JSONEncoder().encode(RunIntentStatusRequest(intentId: intentId))
+    let fences = SubmissionFence.shared
+    let knownLog = try await fences.statusLog(intentId, endpoint: endpoint)
+    let request = try JSONEncoder().encode(RunIntentStatusRequest(intentId: intentId, knownLogId: knownLog))
     let response: RunResponse
     do {
       response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
@@ -101,6 +122,7 @@ extension G0Transport {
       return nil
     }
     guard let intent = response.intent else { throw ProbeError.unexpectedReply }
+    try await fences.acknowledge(intentId, endpoint: endpoint)
     return RunSubmitOutcome(runId: intent.runId, status: "duplicate")
   }
 
@@ -115,12 +137,18 @@ extension G0Transport {
   // Query a single run's current lifecycle; nil means the host has no such run
   // for this device.
   public static func relayRunState(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> String? {
+    if let (state, host) = try await subscription(endpoint: endpoint, identity: identity) {
+      return try await state.observe(endpoint: endpoint, identity: identity, hostId: host).runs[runId]?.state
+    }
     let request = try JSONEncoder().encode(RunStateRequest(runId: runId))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     return response.state
   }
 
   public static func relayRunQuestions(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> [RunQuestionRequest] {
+    if let (state, host) = try await subscription(endpoint: endpoint, identity: identity) {
+      return try await state.observe(endpoint: endpoint, identity: identity, hostId: host).runs[runId]?.questions ?? []
+    }
     let request = try JSONEncoder().encode(RunQuestionsRequest(runId: runId))
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
     guard let questions = response.questions else { throw ProbeError.unexpectedReply }

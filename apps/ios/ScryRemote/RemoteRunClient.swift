@@ -105,7 +105,7 @@ struct RemoteRunClient {
   // RunError.host("watch_stream_unavailable") when the host or route cannot
   // push; callers then use `watch` long-polls.
   func watchUpdates(runId: String, cursor: Int, outputCursor: Int) -> AsyncThrowingStream<G0Transport.RunWatchOutcome, Error> {
-    G0Transport.relayRunWatchUpdates(endpoint: endpoint(), runId: runId, cursor: cursor, outputCursor: outputCursor)
+    G0Transport.relayRunWatchUpdates(endpoint: endpoint(), runId: runId, cursor: cursor, outputCursor: outputCursor, identity: try? identity())
   }
 
   func watch(runId: String, cursor: Int, outputCursor: Int, waitMs: Int = 15_000) async throws -> G0Transport.RunWatchOutcome {
@@ -237,6 +237,10 @@ struct RemoteRunClient {
   // may browse. Display metadata only; the host re-authorizes any content read.
   func sessions(includeArchived: Bool = false,
                 progress: @escaping @Sendable ([G0Transport.RunSessionRef]) async -> Void = { _ in }) async throws -> [G0Transport.RunSessionRef] {
+    if let sessions = try await G0Transport.subscribedSessions(endpoint: endpoint(), identity: try identity(), includeArchived: includeArchived) {
+      await progress(sessions)
+      return sessions
+    }
     // The last complete walk of this exact catalog. Offered to the host as
     // `known`: when it still hashes the same, one page confirms it instead of
     // re-sending every page. Only a host confirmation reuses it.

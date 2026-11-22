@@ -34,6 +34,9 @@ struct ScryRemoteApp: App {
         RootView()
         #endif
       }
+      .overlay(alignment: .top) {
+        if model.canShowWorkspace { HostNoticeBanner() }
+      }
       .environmentObject(model).environment(model.targetCoordinator)
     }
   }
@@ -145,6 +148,17 @@ struct RootView: View {
     }
     // Questions belong to the run, not a particular route. Returning home or
     // continuing an archived conversation must never hide a waiting request.
+    .onReceive(NotificationCenter.default.publisher(for: G0Transport.SubscriptionCatalogChange.received).receive(on: RunLoop.main)) { event in
+      guard model.canShowWorkspace, let change = event.object as? G0Transport.SubscriptionCatalogChange,
+            let scope = targets.targetScopes.first(where: {
+              $0.gatewayHostId == change.gatewayHostId && $0.targetBinding == change.target
+            }) else { return }
+      Task {
+        let store = targets.store(for: scope)
+        if store.catalogRefreshInFlight { await store.refreshSessions() }
+        if model.canShowWorkspace, targets.targetScopes.contains(scope) { await store.refreshSessions() }
+      }
+    }
     .onChange(of: run.focusedQuestionIdentity) { _, id in model.showRunQuestion = model.canShowWorkspace && id != nil }
     .sheet(isPresented: Binding(get: { model.canShowWorkspace && model.showRunQuestion }, set: { model.showRunQuestion = $0 })) {
       if model.canShowWorkspace, let request = run.pendingQuestions.first {

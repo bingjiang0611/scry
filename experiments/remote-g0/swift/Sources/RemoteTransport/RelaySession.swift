@@ -46,6 +46,7 @@ public final class RelaySession: Sendable {
   private let deviceLabel: String?
   private let hostId: String
   let transport: HostTransportState
+  let deviceSubscription = G0Transport.DeviceSubscriptionState()
   private let timings: LockedValue<[RelayConnectTiming]>
   public static let timingHistoryLimit = 64
 
@@ -151,6 +152,7 @@ public final class RelaySession: Sendable {
   // Drops every tunnel (app backgrounded, network path changed). In-flight
   // replayable reads reconnect on their own; writes report an unknown outcome.
   public func reset() async {
+    await deviceSubscription.renegotiate()
     for lane in lanes.values { await lane.reset() }
   }
 
@@ -235,6 +237,7 @@ struct LaneOpenContext: Sendable {
   let lane: String
   let target: String?
   let transport: HostTransportState
+  let deviceSubscription = G0Transport.DeviceSubscriptionState()
   let deviceLabel: String?
   let record: @Sendable (RelayConnectTiming) -> Void
 }

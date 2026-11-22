@@ -12,8 +12,28 @@ extension G0Transport {
     let executionTargets: ExecutionTargetCatalog?
     let error: String?
   }
-  struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
-  struct RunIntentStatusRequest: Encodable { let op = "intentStatus"; let intentId: String }
+  struct RunSubmitRequest: Encodable {
+    let op: String
+    let intentId: String
+    let detail: String
+    let knownLogId: String?
+    init(intentId: String, detail: String, knownLogId: String? = nil) {
+      op = knownLogId == nil ? "submit" : "submitAtLog"
+      self.intentId = intentId
+      self.detail = detail
+      self.knownLogId = knownLogId
+    }
+  }
+  struct RunIntentStatusRequest: Encodable {
+    let op: String
+    let intentId: String
+    let knownLogId: String?
+    init(intentId: String, knownLogId: String? = nil) {
+      op = knownLogId == nil ? "intentStatus" : "intentStatusAtLog"
+      self.intentId = intentId
+      self.knownLogId = knownLogId
+    }
+  }
   struct RunIntentBody: Decodable { let runId: String; let state: String }
   struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
   struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
