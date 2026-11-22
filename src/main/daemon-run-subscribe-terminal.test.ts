@@ -56,7 +56,10 @@ it('recovers the exact segmented run outside the history page and keeps live ove
     const ts = '2026-10-01T00:00:00.000Z'
     const live: TraceEvent = { id: 'result', ts, runId, kind: 'harness', stage: 'result' }
     const archived = { ...live, text: 'archive representation of the same event' }
-    const late: TraceEvent = { ...live, id: 'diff', stage: 'turn_diff' }
+    const late: TraceEvent = {
+      ...live, id: 'diff', stage: 'turn_diff',
+      turnDiff: { version: 1, status: 'captured', files: [], beforeAt: ts, afterAt: ts, captureMs: 1, cleanup: 'ok' }
+    }
     expect(upsertTraceArchiveTurn({
       cwd: context.cwd, sessionId: context.externalSessionId, providerId: 'codex', userDataDir,
       turn: { runId, providerTurnId: 'target-native-turn', agentProfileId: null,
