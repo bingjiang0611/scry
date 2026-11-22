@@ -24,7 +24,7 @@ import {
   type AuthoritySubscribeRuntimeDeps
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
-import { observeNativeRunTranscript, recordNativeRunTranscript } from './orchestration-run-transcript'
+import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { AppEvent } from '../main/remote/app-event-feed'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
@@ -184,6 +184,7 @@ function buildAuthorityRuntime<
   // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
   const pendingTranscripts = new Map<string, Promise<Evidence<string>>>()
+  const transcriptWrites = createRunTranscriptWrites(sink, options.log)
   const trustGate = new AuthorityMcpTrustGate()
   const subscribeHub = createAuthoritySubscribeHub(
     sink,
@@ -386,7 +387,7 @@ function buildAuthorityRuntime<
       })
       const transcript = pendingTranscripts.get(canonicalRunId)
       pendingTranscripts.delete(canonicalRunId)
-      if (transcript) void transcript.then((value) => recordNativeRunTranscript(sink, canonicalRunId, value, options.log))
+      if (transcript) transcriptWrites.enqueue(canonicalRunId, transcript)
       subscribeHub.noteRunTerminal(canonicalRunId)
       trustGate.delete(canonicalRunId)
       ledgerToCanonical.delete(runId)
@@ -450,6 +451,7 @@ function buildAuthorityRuntime<
       options.conversationStore().setBeforeTurnSettledObserver(undefined)
       await legacyMirror?.close()
       try { backingFileStore?.close() } catch { /* may already be closed */ }
+      await transcriptWrites.drain()
       sink.close()
     }
   }

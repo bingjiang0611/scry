@@ -1,13 +1,14 @@
 import { available, unavailable, type Evidence } from '../shared/turn-record'
+import { setImmediate } from 'node:timers/promises'
 import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import {
   captureTranscriptInterval, readTranscriptExtent, type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
-import { locateOwnedTranscript } from './orchestration-native-source'
+import { locateOwnedTranscript, verifiesNativeTranscript } from './orchestration-native-source'
 
-export function recordNativeRunTranscript(
+function recordNativeRunTranscript(
   sink: EventSink, runId: string, transcript: Evidence<string>, log: (message: string) => void
 ): void {
   if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
@@ -21,6 +22,34 @@ export function recordNativeRunTranscript(
     if (result.kind === 'rejected') log(`daemon.transcript-rejected ${result.reason}`)
   } catch (error) {
     log(`daemon.transcript-record ${(error as NodeJS.ErrnoException).code ?? 'unavailable'}`)
+  }
+}
+
+/** Keep post-terminal writes visible to orderly shutdown. */
+export function createRunTranscriptWrites(sink: EventSink, log: (message: string) => void) {
+  const pending = new Map<string, Promise<void>>()
+  const record = (runId: string, transcript: Evidence<string>) => recordNativeRunTranscript(sink, runId, transcript, log)
+  return {
+    enqueue(runId: string, transcript: Promise<Evidence<string>>): void {
+      const write = transcript.then((result) => {
+        if (pending.delete(runId)) record(runId, result)
+      })
+      pending.set(runId, write)
+    },
+    async drain(): Promise<void> {
+      if (!pending.size) return
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          Promise.all(pending.values()),
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, 2_000) })
+        ])
+      } finally {
+        clearTimeout(timer)
+        for (const id of pending.keys()) record(id, unavailable('transcript_capture_shutdown_timeout'))
+        pending.clear()
+      }
+    }
   }
 }
 
@@ -62,7 +91,10 @@ export async function observeNativeRunTranscript(
       }
       // Only the stat frontier needs to precede normal run settlement. Hashing
       // a bounded range can finish independently of the turn and its archive.
-      save(captureTranscriptInterval(source, resumedHere ? before : undefined, through).then(
+      const capture = setImmediate().then(() => verifiesNativeTranscript(homeDir, cwd, source)).then((verified) => verified
+        ? captureTranscriptInterval(source, resumedHere ? before : undefined, through)
+        : unavailable<string>('transcript_identity_unavailable'))
+      save(capture.then(
         (transcript) => {
           // The bytes are proven. An external writer could have appended in the
           // same interval, so attribution to this run is an inference.
