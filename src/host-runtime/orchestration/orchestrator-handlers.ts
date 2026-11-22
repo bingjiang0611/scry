@@ -240,7 +240,6 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, events, [], { runId: run.runId, lifecycle: 'dispatched' })
     }
     case 'session_bound': {
-      // Align with H1: progress/binding only valid after dispatch (not while still recorded).
       if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       events.push(
         makeEvent(cmd, 0, {
@@ -328,7 +327,6 @@ export function decideRunEffectResult(
       if (!canTransitionRun(run.lifecycle, target)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       const settledAt = target === 'interrupted' ? null : (p.settledAt === undefined ? cmd.at : p.settledAt)
       const recoveredAt = target === 'interrupted' ? (p.recoveredAt ?? cmd.at) : (p.recoveredAt ?? null)
-      // data §3.2: never fabricate `exact` when outcome evidence was not supplied.
       const outcome = p.outcome ?? (
         target === 'interrupted'
           ? { status: 'unavailable', quality: 'unavailable', source: ['host.recovery'], omissionReason: p.reason ?? 'host_restarted' }

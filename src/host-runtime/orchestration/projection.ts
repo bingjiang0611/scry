@@ -44,11 +44,6 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
   )
 }
 
-/**
- * Deterministic SQL projection applier (data §4.4).
- * Executed inside the same SQLite transaction as event insertion, and reused verbatim for
- * replay-from-empty consistency verification.
- */
 export function applyEventToProjection(db: Database.Database, event: OrchestrationEventRow): void {
   const p = event.payload
   switch (event.type) {

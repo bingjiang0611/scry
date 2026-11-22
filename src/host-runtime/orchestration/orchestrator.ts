@@ -58,12 +58,7 @@ export function isRetryableRejection(reason: RejectionReason): reason is Retryab
   return RETRYABLE_REASONS.has(reason as RetryableRejectionReason)
 }
 
-/**
- * Pure synchronous orchestrator decision function (core §2.1).
- * Performs zero I/O; reads only `view` and returns events, effects, and receipt.
- */
 export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): DecisionResult {
-  // R2: P4 does not execute agent: commands; reject retryably without leaving a receipt.
   if (isAgentActor(cmd.actor)) return retryableReject('agent_commands_unsupported')
   if (!isValidP4Actor(cmd.actor) || !view.isActorAuthorized(cmd.actor)) {
     return retryableReject('device_not_authorized')

@@ -29,9 +29,7 @@ export interface ShadowLedgerEventMeta {
 export interface ShadowMirrorOptions extends EventSinkOptions {
   leaseOwner?: string
   clock?: () => number
-  /** Optional resolver returning the submitting peer cert SHA-256 and grant scope for a ledger run. */
   resolveRunMeta?: (ledgerRunId: string) => { peerCertSHA256?: string; grantScope?: 'local' | 'remote' } | undefined
-  /** Optional fallback resolver returning authoritative H3 ordinal if a legacy routing detail omitted it. */
   resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
   onCommitTiming?: (sample: ShadowCommitSample) => void
   onError?: (error: unknown) => void
@@ -40,11 +38,6 @@ export interface ShadowMirrorOptions extends EventSinkOptions {
 const PEER_SHA_RE = /^[0-9a-f]{64}$/
 const MAX_PENDING_SHADOW_BODIES = 16
 
-/**
- * P4-1 fail-open shadow mirror (plan §9 P4-1).
- * Mirrors H1 `SessionLedger.#emit` and H3 `ConversationStore.settle` into `orchestration.db`
- * strictly through `EventSink.execute(...)` without altering any user-visible run behavior.
- */
 export class ShadowMirror {
   readonly sink: EventSink | null
   readonly #leaseOwner: string
@@ -121,25 +114,18 @@ export class ShadowMirror {
     }
   }
 
-  /** Marks shadow as failed-open (e.g. when startup import trips the sink fence). */
   markFailedOpen(error: unknown): void {
     this.failOpen(error)
   }
 
-  /** Records rejections observed during incremental startup import so deviations stay honest. */
   recordImportRejections(count: number): void {
     if (count > 0) this.#importRejections += count
   }
 
-  /** Records dangling external body references that could not be repaired from H1 on startup. */
   recordMissingBodies(count: number): void {
     if (count > 0) this.#missingBodies += count
   }
 
-  /**
-   * Pauses advancing `legacy_ledger_seq` on live writes while deferred historical import runs
-   * after `openLocalChannel`, then flushes the highest seen live seq once backfill finishes.
-   */
   setDeferringLegacyWatermark(defer: boolean, flushThroughSeq?: number): void {
     this.#deferringLegacyWatermark = defer
     if (!defer && this.sink && !this.#failedOpen && !this.sink.isWriteIndeterminate()) {
@@ -224,8 +210,6 @@ export class ShadowMirror {
       return false
     }
 
-    // Only accepted commits enter commit counts and timing samples (B2).
-    // durationMs covers the entire shadow hook (parse, ordinal, hash, EventSink).
     this.#acceptedCommits += 1
     if (meta.preFirstToken) {
       this.#preFirstTokenCommits.set(meta.runId, (this.#preFirstTokenCommits.get(meta.runId) ?? 0) + 1)
@@ -246,7 +230,6 @@ export class ShadowMirror {
     return true
   }
 
-  /** Flushes deferred >16 KiB shadow bodies to `BodyStore` off the pre-first-token hot path. */
   flushPendingBodies(runId?: string): void {
     if (!this.sink || this.#failedOpen || this.sink.isWriteIndeterminate()) {
       if (runId) this.#pendingBodies.delete(runId)
@@ -258,7 +241,6 @@ export class ShadowMirror {
       const entry = this.#pendingBodies.get(key)
       this.#pendingBodies.delete(key)
       if (!entry) continue
-      // Never resurrect an external body file after its run/session was deleted.
       if (!this.sink.getRun(key)) continue
       try {
         this.sink.bodyStore.prepareBody(entry.content)
@@ -269,7 +251,6 @@ export class ShadowMirror {
     }
   }
 
-  /** H1 `#emit` shadow hook: mirrors ledger lifecycle transitions into `orchestration.db`. */
   onLedgerEvent(event: LedgerEvent, meta?: ShadowLedgerEventMeta): void {
     if (!this.sink || this.#failedOpen) return
     const hookStarted = performance.now()
@@ -293,9 +274,6 @@ export class ShadowMirror {
             this.sink.getNextTurnOrdinal(routing.sessionKey))
           : undefined
         const detailBytes = event.detail ? Buffer.byteLength(event.detail, 'utf8') : 0
-        // Defer >16 KiB external body file write + fsync off the pre-first-token path (shadow never
-        // dispatches from BodyStore; content is hashed in memory now and persisted on terminal/close).
-        // Only queue after the commit is accepted so rejected submits never leave orphan body files.
         const body =
           event.detail && detailBytes > INLINE_BODY_MAX_BYTES
             ? { storage: 'external' as const, sha256: sha256Hex(event.detail), bytes: detailBytes }
@@ -438,11 +416,6 @@ export class ShadowMirror {
     })
   }
 
-  /**
-   * H3 `ConversationStore.settle` shadow hook (B1 + B3): compares H3's authoritative ordinal
-   * against the shadow turn's ordinal (counting any mismatch as a deviation without fencing),
-   * and commits `turn.record_delivery` through `EventSink.execute(...)`.
-   */
   onConversationTurnSettled(info: ConversationTurnSettledInfo): void {
     if (!this.sink || this.#failedOpen) return
     const hookStarted = performance.now()
@@ -521,7 +494,6 @@ export class ShadowMirror {
       this.flushPendingBodies()
       this.sink?.close()
     } catch {
-      // Ignore close errors in shadow mode.
     }
   }
 }

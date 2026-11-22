@@ -79,7 +79,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           }
         })
 
-        // 1. Full local App send -> dispatch -> session -> question -> answer -> close -> settle
         const run1 = SessionLedger.newRunId()
         const intent1 = SessionLedger.newIntentId()
         metaByRun.set(run1, { peerCertSHA256: localPeer, grantScope: 'local' })
@@ -114,7 +113,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         )
         ledger.markSettled(run1)
 
-        // 2. Cancelled remote run
         const run2 = SessionLedger.newRunId()
         const intent2 = SessionLedger.newIntentId()
         metaByRun.set(run2, { peerCertSHA256: remotePeer, grantScope: 'remote' })
@@ -126,7 +124,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         ledger.markDispatched(run2)
         ledger.markCancelled(run2)
 
-        // 3. Failed remote run with ~1.2 MB intent body (just under H1 1,200,000 cap; externalized to BodyStore off pre-first-token path)
         const run3 = SessionLedger.newRunId()
         const bigBody = 'M'.repeat(1_199_800)
         metaByRun.set(run3, { peerCertSHA256: remotePeer, grantScope: 'remote' })
@@ -136,13 +133,11 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-1', prompt: 'fail me', blob: bigBody })
         })
         ledger.markDispatched(run3)
-        // Before terminal event (pre-first-token path), BodyStore must NOT have written/fsynced the external body file yet
         const preTerminalRun3 = mirror.sink!.getRun(run3)
         expect(preTerminalRun3?.body?.storage).toBe('external')
         expect(mirror.sink!.bodyStore.hasExternalBody(preTerminalRun3!.body!.sha256)).toBe(false)
         ledger.markFailed(run3, 'provider_crashed')
 
-        // Verify zero deviations and full field-for-field parity against H1 SessionLedger
         const st = mirror.stats()
         expect(st.failures).toBe(0)
         expect(st.deviations).toBe(0)
@@ -180,7 +175,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           answeredBy: `peer:${remotePeer}`
         })
 
-        // Every shadow outbox row (both provider.run.start AND question.respond) must be done/shadowOnly
         const outbox = mirror.sink!.listOutbox()
         expect(outbox.some((row) => row.kind === 'question.respond')).toBe(true)
         for (const row of outbox) {
@@ -207,7 +201,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
         expect(mirror.sink!.getMeta('legacy_ledger_seq')).toBe(String(ledger.describe().lastSeq))
         expect(mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
 
-        // 4. H3 settle mirrors turn delivery into orch_p_turn
         const fakeConversation: Conversation = {
           version: 1,
           id: 'conv-1',
@@ -267,7 +260,6 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
           detail: JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws', prompt: 'hi' })
         })
 
-        // Inject shadow write failure on dispatch; H1 ledger must still complete cleanly
         injectFail = true
         expect(() => ledger.markDispatched(runId)).not.toThrow()
         expect(() => ledger.markSettled(runId)).not.toThrow()

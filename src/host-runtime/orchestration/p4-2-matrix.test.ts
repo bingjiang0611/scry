@@ -35,7 +35,6 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
       const sink1 = EventSink.open({ userDataDir: userData, maxActiveRuns: 1, checkpointIntervalMs: 0 })
       const engine1 = new AuthorityEngine({ sink: sink1, clock: () => 1_700_000_000_000 })
       try {
-        // Retryable rejection (capacity_exceeded after first run active) leaves NO receipt
         const s1 = await engine1.submitAsync({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -55,7 +54,6 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
         expect(capRejected).toEqual({ kind: 'rejected', reason: 'capacity_exceeded', sticky: false })
         expect(sink1.getReceipt('cmd-2', `peer:${PEER_A}`)).toBeUndefined()
 
-        // Complete run 1, then cmd-2 succeeds on retry!
         expect(
           engine1.beforeDispatch({
             runId,
@@ -78,14 +76,12 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
         })
         expect(retryAccepted.kind).toBe('accepted')
 
-        // Prune older events -> receipts MUST survive pruning
         const pruned = sink1.pruneEvents({ olderThanAt: 1_700_000_000_001 })
         expect(pruned.deletedEvents).toBeGreaterThan(0)
       } finally {
         sink1.close()
       }
 
-      // Reopen after restart -> duplicate cmd-1 returns original runId; mismatched detail conflicts
       const sink2 = EventSink.open({ userDataDir: userData, checkpointIntervalMs: 0 })
       const engine2 = new AuthorityEngine({ sink: sink2 })
       try {
@@ -160,7 +156,6 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
         expect(lateAnswer).toMatchObject({ kind: 'rejected', reason: 'illegal_transition', sticky: true })
 
         engine.recordTerminal({ runId: s1.runId, step: 'cancelled', reason: 'user_stop', evidence: ['host.stop'] })
-        // Late settled after cancelled -> rejected as illegal_transition
         const lateSettle = sink.execute({
           type: 'run.effect_result',
           commandId: 'eff-late-settle',
@@ -209,7 +204,6 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
         ).toEqual({ ok: true })
         engine.recordTerminal({ runId: s1.runId, step: 'settled', evidence: ['provider:codex'] })
 
-        // Verify R1-R12 non-emission across all recorded events
         for (const evt of sink.listEvents()) {
           expect(ORCHESTRATION_EVENT_TYPES.has(evt.type)).toBe(true)
           expect(evt.actor.startsWith('agent:')).toBe(false)
@@ -232,7 +226,6 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
           })
         }
 
-        // Negative controls (plan §10): each security/correctness invariant fails if its check flips
         expect(
           evaluatePreDispatchRecheck({
             actor: `peer:${PEER_A}`,

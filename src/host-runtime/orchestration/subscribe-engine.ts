@@ -85,11 +85,6 @@ function matchesViews(event: OrchestrationEventRow, views: ReadonlySet<Subscribe
   return false
 }
 
-/**
- * Orchestration-backed `subscribe` read engine (`P4-orchestration-protocol.md` §5.1–§5.5).
- * Reads `orch_event` + projection tables synchronously in one better-sqlite3 turn so
- * snapshot `seq` matches projection state atomically, and wakes immediately on commits.
- */
 export class SubscribeEngine {
   readonly #sink: EventSink
   readonly #hub: SubscribeHub
@@ -363,8 +358,6 @@ export class SubscribeEngine {
   #readActiveRunsSnapshot(scope: 'local' | 'remote'): SubscribeActiveRunRow[] {
     const db = this.#sink.handle.db
     const cutoff = this.#clock() - SUBSCRIBE_ACTIVE_RUN_RETENTION_MS
-    // Every non-terminal run is always included (a live run must never be pushed out
-    // of the snapshot by recent terminal ones); only the 24 h terminal tail is capped.
     const live = db
       .prepare(
         `SELECT * FROM orch_p_run

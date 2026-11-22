@@ -8,13 +8,10 @@ export const DEFAULT_PENDING_TTL_MS = 60_000
 
 export type OrchestrationScope = 'local' | 'remote' | 'system'
 
-/** R12: `'agent'` is reserved for P6; P4 never produces it. */
 export type OrchestrationOrigin = 'local' | 'remote' | 'system' | 'agent'
 
-/** R3: author of a turn. Daemon-dispatched turns are `'user'`; externally discovered are `'unavailable'`. */
 export type TurnAuthor = 'user' | 'agent' | 'system' | 'unavailable'
 
-/** data §3.2: turns added to imported legacy sessions count from import time. */
 export type OrdinalOrigin = 'native' | 'since_import'
 
 export type TurnDeliveryState = 'pending' | 'accepted' | 'not_sent' | 'unknown'
@@ -30,7 +27,6 @@ export type RunLifecycleState =
 
 export type H1RunLifecycle = 'recorded' | 'dispatched' | 'settled' | 'failed' | 'cancelled'
 
-/** R1: session lineage; `'delegated'` is reserved for P6 and never emitted in P4. */
 export interface SessionLineage {
   kind: 'fork' | 'side_chat' | 'delegated'
   source: {
@@ -108,7 +104,6 @@ export const ORCHESTRATION_EVENT_TYPES: ReadonlySet<OrchestrationEventType> = ne
   ORCHESTRATION_EVENT_TYPE_LIST
 )
 
-/** R9: reserved for P6; whitelist tests assert P4 never emits or accepts them. */
 export const RESERVED_TASK_EVENT_TYPES = [
   'task.requested',
   'task.child_bound',
@@ -116,7 +111,6 @@ export const RESERVED_TASK_EVENT_TYPES = [
   'task.cancel_requested'
 ] as const
 
-/** R10: reserved evidence reference prefixes for P6; P4 never produces them. */
 export const RESERVED_EVIDENCE_PREFIXES = ['task-result:'] as const
 
 export function isReservedEvidenceRef(ref: string): boolean {
@@ -169,11 +163,8 @@ export interface OrchestrationEventRow {
   scope: OrchestrationScope
   payload: Record<string, unknown>
   evidence: string[] | null
-  /** R2: equals `actor` in P4. */
   principal: string
-  /** R2: null in P4. */
   via: string | null
-  /** R2: null in P4. */
   actorRunId: string | null
 }
 
@@ -210,7 +201,6 @@ export interface SessionProjectionRow {
   pendingQuestions: number
   legacy: boolean
   revSeq: number
-  /** R1 reserved columns. */
   parentSessionKey: string | null
   rootSessionKey: string | null
   lineage: SessionLineage | null
@@ -231,7 +221,6 @@ export interface TurnProjectionRow {
   contentRef: string | null
   evidence: string[] | null
   revSeq: number
-  /** R3 reserved column. */
   author: TurnAuthor
 }
 
@@ -254,7 +243,6 @@ export interface RunProjectionRow {
   recoveredAt: number | null
   outcome: Evidence<string> | null
   revSeq: number
-  /** R5 reserved column. */
   parentRunId: string | null
 }
 
@@ -268,7 +256,6 @@ export interface InteractionProjectionRow {
   answerSha256: string | null
   openedSeq: number
   closedSeq: number | null
-  /** R3 reserved column. */
   answeredBy: string | null
 }
 

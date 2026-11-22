@@ -105,7 +105,6 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       expect(first.snapshot.sessions?.rows).toHaveLength(1)
       expect(first.hints?.some((h) => h.kind === 'attention')).toBe(true)
 
-      // Settle run-1 -> incremental events mode
       settleRun(sink, 'run-1')
       const second = await engine.subscribe(peer, {
         views: ['sessions', 'activeRuns'],
@@ -117,7 +116,6 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       expect(second.events.some((e) => e.type === 'run.settled' && e.runId === 'run-1')).toBe(true)
       expect(second.seq).toBeGreaterThan(first.seq)
 
-      // No new events -> idle mode
       const third = await engine.subscribe(peer, {
         views: ['sessions', 'activeRuns'],
         known: { hostId: second.hostId, logId: second.logId, seq: second.seq },
@@ -202,7 +200,6 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       })
       expect(ahead.mode).toBe('snapshot')
 
-      // >128 relevant events -> snapshot
       for (let i = 0; i < 65; i++) {
         submitRun(sink, { commandId: `c-bulk-${i}`, runId: `run-bulk-${i}`, sessionKey: `sess-b-${i}`, cwd: '/tmp/b', dispatchImmediately: true })
       }
@@ -234,12 +231,10 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       const init = await engine.subscribe(peer, { views: ['activeRuns'], waitMs: 0 })
       const known = { hostId: init.hostId, logId: init.logId, seq: init.seq }
 
-      // Leading edge: first output hint delivers immediately
       hub.noteRunOutput('run-h', 1)
       const h1 = await engine.subscribe(peer, { views: ['activeRuns'], known, waitMs: 0 })
       expect(h1.hints?.filter((h) => h.kind === 'run')).toHaveLength(1)
 
-      // Burst of 5 outputs within 50 ms coalesces into 1 trailing hint with outputSeq=6
       for (let s = 2; s <= 6; s++) hub.noteRunOutput('run-h', s)
       const immediate = await engine.subscribe(peer, { views: ['activeRuns'], known, waitMs: 0 })
       expect(immediate.hints?.filter((h) => h.kind === 'run') ?? []).toHaveLength(0)
@@ -249,7 +244,6 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       expect(runHints).toHaveLength(1)
       expect(runHints[0]).toMatchObject({ kind: 'run', runId: 'run-h', outputSeq: 6 })
 
-      // W11 hostNotice hints are NEVER coalesced and arrive immediately
       hub.emitHostNotice({
         id: 'n1', kind: 'cli_approval_enabled', ts: 1
       })
@@ -289,7 +283,6 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       expect(page1.snapshot.sessions?.rows.map((r) => r.sessionKey)).toEqual(['s3', 's2'])
       expect(page1.snapshot.sessions?.nextCursor).toBeTruthy()
 
-      // Insert a newer session before fetching page 2
       submitRun(sink, { commandId: 'p4', runId: 'r4', sessionKey: 's4', cwd: '/tmp/p', at: 4000 })
       const page2 = await engine.subscribe(peer, {
         views: ['sessions'],
@@ -341,14 +334,12 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       const fresh = await engine.subscribe(peer, { views: ['activeRuns'], waitMs: 0 })
       expect(fresh.hints?.some((h) => h.kind === 'hostNotice') ?? false).toBe(false)
       expect(fresh.hints?.some((h) => h.kind === 'attention')).toBe(true)
-      // After that first reply, new hints are delivered normally.
       hub.emitHostNotice({ id: 'new-1', kind: 'device_approved_via_cli', ts: 2, deviceLabel: 'Phone' })
       const next = await engine.subscribe(peer, {
         views: ['activeRuns'], known: { hostId: fresh.hostId, logId: fresh.logId, seq: fresh.seq }, waitMs: 0
       })
       const notices = next.hints?.filter((h) => h.kind === 'hostNotice') ?? []
       expect(notices).toHaveLength(1)
-      // An App restart is a fresh subscriber again: the delivered notice is not replayed.
       hub.emitHostNotice({ id: 'missed-1', kind: 'cli_approval_enabled', ts: 3 })
       const restarted = await engine.subscribe(peer, { views: ['activeRuns'], waitMs: 0 })
       expect(restarted.hints?.some((h) => h.kind === 'hostNotice') ?? false).toBe(false)

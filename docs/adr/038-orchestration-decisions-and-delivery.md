@@ -1,0 +1,13 @@
+# 038: Keep orchestration decisions, recovery and delivery evidence separate
+
+**Status:** Accepted (documents existing behavior)
+
+The decision function reads a view and produces events, effects and a receipt without I/O. Recheck grant, canonical working directory, workspace authority and trust before dispatch. An immediate dispatch may commit admission and dispatch together after this recheck. Binding and progress cannot precede dispatch. Retryable rejections do not reserve a command ID. Reserved agent behavior is not emitted in this generation. Unknown optional fields are forward compatible; unknown event kinds require a snapshot reset. Missing outcome or actor evidence is unavailable, not exact or attributed to the system. A nullable output sequence distinguishes missing evidence from a number; migration preserves existing nonzero sequences.
+
+Reconcile stale effects, open runs and interactions before clients connect, in one storage transaction. A claim without dispatch is voided. For a dispatched run, prefer committed trace archive evidence, then committed result spans; neither a partial archive nor silence proves terminal completion. Match the conversation and event ledgers: without a `turn.began` event settle a pending turn as not sent, write back a proven terminal conclusion, and flag native session binding conflicts without inventing a native ID.
+
+Shadow mode observes legacy and conversation transitions without changing the user-visible run. Count only accepted commits in commit statistics, and report ordinal mismatches, rejections, missing bodies and failures separately. Pause the import cursor while historical backfill catches up with live events. A shadow body can be staged in memory because shadow mode never dispatches it; queue only after acceptance and do not recreate bodies removed by session deletion. Late historical import must not replace the last outcome of a newer live run.
+
+Build each subscription snapshot at one event-log position. Always include all live runs; only recent terminal history is capped. Durable events come from the event sink. Output and registration hints don't need a pre-first-token SQLite commit. Coalesce output hints per run, not host-admin notices. Initial connections and App restarts receive current state rather than previously missed volatile notices. Test both edges of output coalescing and insert a new session between catalog pages to probe pagination.
+
+See [recovery](../../src/host-runtime/orchestration/recovery.ts), [shadow parity tests](../../src/host-runtime/orchestration/shadow-mirror-parity.test.ts), and [subscription tests](../../src/host-runtime/orchestration/subscribe-engine.test.ts).

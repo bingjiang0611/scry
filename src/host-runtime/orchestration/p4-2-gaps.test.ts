@@ -35,7 +35,6 @@ describe('P4-2 gap 1: WAL checkpoint off the commit critical path', () => {
       const handle = openOrchestrationDatabase({ userDataDir: userData })
       try {
         expect(handle.db.pragma('wal_autocheckpoint', { simple: true })).toBe(0)
-        // Write several rows without auto-checkpointing inline
         const ins = handle.db.prepare('INSERT OR REPLACE INTO orch_meta (key, value) VALUES (?, ?)')
         for (let i = 0; i < 10; i += 1) ins.run(`k-${i}`, 'v'.repeat(512))
         const result = handle.checkpointPassive()
@@ -72,7 +71,6 @@ describe('P4-2 gap 1: WAL checkpoint off the commit critical path', () => {
           payloadSha256: sha256Hex(canonicalJson(payload))
         })
         expect(res.kind).toBe('accepted')
-        // Wait for idle background checkpoint timer to run
         await new Promise((resolve) => setTimeout(resolve, 60))
         const manual = sink.checkpointPassive()
         expect(manual.busy).toBe(0)
@@ -178,7 +176,6 @@ describe('P4-2 gap 2: >16 KiB body durable before event reference and deleteSess
       const sink = EventSink.open({ userDataDir: userData })
       try {
         const sessionKey = 'sess-race-del'
-        // Seed an earlier run so the session exists before deleteSession
         const seedPayload = {
           runId: 'run-seed-1',
           sessionKey,
@@ -206,7 +203,6 @@ describe('P4-2 gap 2: >16 KiB body durable before event reference and deleteSess
         const prepared = await sink.bodyStore.prepareBodyAsync(bigBody)
         expect(sink.bodyStore.hasExternalBody(prepared.sha256)).toBe(true)
 
-        // Concurrent deleteSession arrives while body was being prepared
         const del = sink.deleteSession({
           sessionKey,
           cwd: '/tmp/ws',
@@ -241,7 +237,6 @@ describe('P4-2 gap 2: >16 KiB body durable before event reference and deleteSess
         )
         expect(res).toMatchObject({ kind: 'rejected', reason: 'session_deleted_during_prepare', sticky: false })
         expect(sink.getRun('run-race-2')).toBeUndefined()
-        // Newly prepared orphan body must be unlinked because no surviving run references it
         expect(sink.bodyStore.hasExternalBody(prepared.sha256)).toBe(false)
       } finally {
         sink.close()
@@ -273,7 +268,6 @@ describe('P4-2 gap 2: >16 KiB body durable before event reference and deleteSess
         const sha = mirror.sink!.getRun(runId)!.body!.sha256
         expect(mirror.sink!.bodyStore.hasExternalBody(sha)).toBe(false)
 
-        // Delete session while body is still queued in memory
         const del = mirror.sink!.deleteSession({
           sessionKey,
           cwd: '/tmp/ws',
@@ -283,7 +277,6 @@ describe('P4-2 gap 2: >16 KiB body durable before event reference and deleteSess
         })
         expect(del.status).toBe('deleted')
 
-        // Flush pending bodies -> must NOT write file for deleted session/run
         mirror.flushPendingBodies()
         expect(mirror.sink!.bodyStore.hasExternalBody(sha)).toBe(false)
       } finally {
@@ -378,7 +371,6 @@ describe('P4-2 gap 3: off-main-thread legacy ledger parsing', () => {
     }
     expect(performanceAbabHarnessFiles).toContain('scripts/performance-orchestration-scenario.ts')
     const scenarioSrc = readFileSync(join(process.cwd(), 'scripts/performance-orchestration-scenario.ts'), 'utf8')
-    // Must not have static value imports from src/host-runtime/orchestration/ so baseline worktrees (e.g. main) never crash.
     expect(scenarioSrc).not.toMatch(/^\s*import\s+(?!type\b).*src\/host-runtime\/orchestration\//m)
   })
 })

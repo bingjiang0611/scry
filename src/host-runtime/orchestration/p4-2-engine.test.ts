@@ -71,7 +71,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         expect(run.body?.storage).toBe('external')
         expect(sink.bodyStore.hasExternalBody(run.body!.sha256)).toBe(true)
 
-        // Pre-dispatch recheck passes -> commits admitted_and_dispatched (2nd pre-first-token commit)
         const dispatch = engine.beforeDispatch({
           runId: submitRes.runId,
           cwd: realWs,
@@ -111,7 +110,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
       const sink = EventSink.open({ userDataDir: userData, checkpointIntervalMs: 0 })
       const engine = new AuthorityEngine({ sink, leaseOwner: 'daemon:test' })
       try {
-        // Case 1: grant revoked between submit and dispatch
         const s1 = await engine.submitAsync({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -134,7 +132,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         expect(d1).toEqual({ ok: false, action: 'fail', reason: 'grant_revoked' })
         expect(sink.getRun(s1.runId)?.lifecycle).toBe('failed')
 
-        // Case 2: cwd changed (symlink retargeted after submit)
         const s2 = await engine.submitAsync({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -159,7 +156,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         expect(d2).toEqual({ ok: false, action: 'fail', reason: 'cwd_changed' })
         expect(sink.getRun(s2.runId)?.lifecycle).toBe('failed')
 
-        // Case 3: trust gate failed (fail closed)
         const s3 = await engine.submitAsync({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -195,7 +191,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
       const sink = EventSink.open({ userDataDir: userData, checkpointIntervalMs: 0 })
       const engine = new AuthorityEngine({ sink, leaseOwner: 'daemon:test' })
       try {
-        // Tombstone for an absent intent
         const resolved = engine.resolveIntent({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -203,7 +198,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         })
         expect(resolved.state).toBe('cancelled')
 
-        // Late submit with same intentId -> sticky conflict, 0 runs created
         const late = await engine.submitAsync({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -212,7 +206,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         })
         expect(late).toMatchObject({ kind: 'rejected', reason: 'command_payload_conflict', sticky: true })
 
-        // Legacy imported receipt stored under actor='system' deduplicates live peer retry
         const legacyPayload = {
           runId: 'legacy-run-1',
           sessionKey: null,
@@ -274,7 +267,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
           { runId: s1.runId, done: false },
           { runId: s1.runId, stop: () => { stoppedCount += 1 } }
         )
-        // Trip the write-indeterminate fence
         failNextCommit = true
         expect(() =>
           engine.beforeDispatch({
@@ -291,7 +283,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         ).toThrow()
         expect(sink.isWriteIndeterminate()).toBe(true)
 
-        // New submit rejects retryably
         const blocked = await engine.submitAsync({
           peerCertSHA256: PEER_A,
           grantScope: 'remote',
@@ -300,7 +291,6 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
         })
         expect(blocked).toMatchObject({ kind: 'rejected', reason: 'orchestration_write_indeterminate', sticky: false })
 
-        // Tightening-only stop STILL stops the live run!
         let liveAborted = false
         const stopRes = engine.stopRun({
           peerCertSHA256: PEER_A,

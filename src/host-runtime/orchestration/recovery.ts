@@ -17,7 +17,6 @@ export interface RecoverOrchestrationOptions {
   sink: EventSink
   leaseOwner: string
   now?: number
-  /** Optional recorder-evidence lookup for dispatched runs across crashes (core §2.4). */
   findRecorderEvidence?: (runId: string) => RecorderTerminalEvidence | undefined
 }
 
@@ -32,11 +31,6 @@ export interface RecoverOrchestrationSummary {
   requeuedReplayableEffects: number
 }
 
-/**
- * P4-2 startup recovery (core §2.4 + §2.6): runs AFTER `runStartupRecovery` and BEFORE
- * `openLocalChannel` in a single atomic transaction so every stale outbox row, undispatched
- * claim, dispatched run, and open interaction converges before clients connect.
- */
 export function recoverOrchestrationOnStartup(
   options: RecoverOrchestrationOptions
 ): RecoverOrchestrationSummary {
@@ -121,7 +115,6 @@ export function recoverOrchestrationOnStartup(
         continue
       }
 
-      // provider.run.start (run_start_reconcile)
       if (!row.runId) {
         updateOutbox.run('voided', null, null, now, row.effectId)
         continue
@@ -159,9 +152,7 @@ export function recoverOrchestrationOnStartup(
         continue
       }
 
-      // row.state === 'running'
       if (run.lifecycle === 'recorded') {
-        // Claimed without run.dispatched -> void effect + cancel (host_restarted_before_dispatch)
         insertEffectVoided.run(
           randomUUID(),
           now,
@@ -179,7 +170,6 @@ export function recoverOrchestrationOnStartup(
       }
     }
 
-    // Reconcile every run left in `admitted` or `dispatched` without terminal conclusion
     const openRuns = db
       .prepare("SELECT run_id FROM orch_p_run WHERE lifecycle IN ('admitted', 'dispatched')")
       .all() as Array<{ run_id: string }>
@@ -272,7 +262,6 @@ export function recoverOrchestrationOnStartup(
       }
     }
 
-    // Close every open interaction in the SAME recovery transaction (core §2.4)
     const openInteractions = db
       .prepare("SELECT run_id, question_id FROM orch_p_interaction WHERE state = 'open'")
       .all() as Array<{ run_id: string; question_id: string }>
@@ -306,12 +295,6 @@ export interface TwoLedgerReconciliationSummary {
   bindingConflicts: number
 }
 
-/**
- * core §2.8 + Decision G two-ledger reconciliation on startup:
- * - Conversation turn `pending` with no `turn.began` in orchestration.db -> settle `not_sent`
- * - Event log terminal while conversation turn still `pending` -> writeback conclusion
- * - `nativeSessionId` mismatch -> `conversation_binding_conflict`
- */
 export async function reconcileTwoLedgersOnStartup(options: {
   sink: EventSink
   conversationStore: ConversationStore
@@ -379,7 +362,6 @@ export async function reconcileTwoLedgersOnStartup(options: {
             []
           )
         } else {
-          // Decision G / evidence honesty: never fabricate a synthetic nativeSessionId (`orch:<runId>`).
           await conversationStore.settle(
             conv.id,
             turn.runId,
@@ -407,7 +389,6 @@ export async function reconcileTwoLedgersOnStartup(options: {
       }
     }
   }
-  // Finish generic recovery for any remaining non-orchestration pending turns or pending forks.
   try {
     await conversationStore.recoverAll(new Set())
   } catch (error) {

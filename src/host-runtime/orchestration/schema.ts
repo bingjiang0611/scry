@@ -150,10 +150,6 @@ export const ORCH_DDL_V1: readonly string[] = [
   )`
 ]
 
-/**
- * V2 migration: rebuilds `orch_p_run` with nullable `output_seq INTEGER` so databases created
- * under early V1 builds (where `output_seq` had `NOT NULL DEFAULT 0`) accept `NULL` cleanly.
- */
 export const ORCH_DDL_V2: readonly string[] = [
   `CREATE TABLE orch_p_run_v2 (
     run_id TEXT PRIMARY KEY,

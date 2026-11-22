@@ -31,18 +31,11 @@ interface CoalesceSlot {
 }
 
 export interface SubscribeHubOptions {
-  /** Leading-edge coalescing window for volatile hints (protocol §5.3: 50 ms). */
   coalesceMs?: number
-  /** Snapshot-time volatile state hints (e.g. unread attention snapshot). */
   stateHints?: () => SubscribeHint[]
   now?: () => number
 }
 
-/**
- * In-memory volatile hint hub and commit-wakeup fanout for `subscribe` (protocol §5.3).
- * Durable events come from `EventSink`; volatile hints (run output, terminal, oauth,
- * W11 hostNotice, retained non-run window notices, attention) flow here without touching SQLite.
- */
 export class SubscribeHub {
   readonly #coalesceMs: number
   readonly #stateHints: () => SubscribeHint[]
@@ -73,7 +66,6 @@ export class SubscribeHub {
     return this.#commitSeq
   }
 
-  /** How long no local subscribe call has been active (used by terminal idle timeout). */
   idleMs(): number {
     return this.#reading > 0 ? 0 : Math.max(0, this.#now() - this.#lastRead)
   }
@@ -87,7 +79,6 @@ export class SubscribeHub {
     this.#lastRead = this.#now()
   }
 
-  /** Called synchronously after `EventSink` commits; wakes all parked subscribers immediately. */
   notifyCommit(seq: number): void {
     if (seq > this.#commitSeq) this.#commitSeq = seq
     this.#wake()
@@ -125,7 +116,6 @@ export class SubscribeHub {
     }
   }
 
-  /** Records canonical scryRunId/context bind without adding a pre-first-token SQLite fsync. */
   noteRunBound(
     runId: string,
     info: { scryRunId: string; cwd?: string; providerId?: string; agentProfileId?: string }
@@ -139,7 +129,6 @@ export class SubscribeHub {
     this.#emitUrgent(`run:${runId}`, this.#buildRunHint(runId, meta))
   }
 
-  /** Records canonical pipeline registration (admitted) immediately on the volatile hint channel. */
   noteRunAdmitted(runId: string, scryRunId?: string): void {
     if (this.#closed) return
     const meta = this.#ensureRunMeta(runId)
@@ -154,7 +143,6 @@ export class SubscribeHub {
     meta.externalSessionId = externalSessionId
   }
 
-  /** Emits a run output hint with leading-edge 50 ms coalescing per run. */
   noteRunOutput(runId: string, outputSeq?: number): void {
     if (this.#closed) return
     const meta = this.#ensureRunMeta(runId)
@@ -184,7 +172,6 @@ export class SubscribeHub {
     this.#pushEntry({ kind: 'oauth', url })
   }
 
-  /** P5 W11 host-admin notice: never coalesced, exact payload preserved. */
   emitHostNotice(notice: HostAdminNotice): void {
     if (this.#closed) return
     this.#pushEntry({ kind: 'hostNotice', notice })
@@ -217,11 +204,7 @@ export class SubscribeHub {
     return this.#entries.some((entry) => entry.seq > last)
   }
 
-  /** Drains undelivered hints for `peer`; when `includeState` is true (snapshot), prepends state hints. */
   drainHints(peer: string, includeState: boolean, fresh = false): SubscribeHint[] {
-    // A client with no cursor (first connect, or an App restart) gets the current
-    // state only, never a replay of volatile hints it never saw: the legacy appEvents
-    // feed behaves the same, and replaying would re-show old notices and errors.
     const last = fresh ? this.#hintSeq : (this.#peerHintSeq.get(peer) ?? 0)
     const drained = this.#entries.filter((entry) => entry.seq > last).map((entry) => entry.hint)
     this.#peerHintSeq.set(peer, this.#hintSeq)
