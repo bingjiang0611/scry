@@ -33,10 +33,8 @@ export interface AuthoritySubmitInput {
   grantScope: 'local' | 'remote'
   commandId: string
   detail?: string
-  /** Optional explicit runId (defaults to routing.canonicalRunId or fresh UUID). */
   runId?: string
   claimMode?: 'immediate' | 'queued'
-  /** Optional §2.3 pre-dispatch checks to enable single-commit immediate submit+dispatch. */
   immediateDispatch?: AuthorityImmediateDispatchChecks
 }
 
@@ -102,7 +100,6 @@ export function buildSubmitCommandForAuthority(options: {
     if (check.ok) dispatchImmediately = true
     else if (check.action === 'requeue') claimMode = 'queued'
   }
-  // For queued/non-dispatched runs, keep inline body so DB-rebuilt H1 snapshots have exact intentDetail.
   const effectiveBody: PreparedBody | undefined =
     preparedBody ??
     (!dispatchImmediately && input.detail !== undefined && detailBytes <= INLINE_BODY_MAX_BYTES
@@ -131,8 +128,6 @@ export function buildSubmitCommandForAuthority(options: {
     origin: input.grantScope,
     isConversationRun: routing.isConversationRun
   }
-  // Hash only client-supplied intent semantics (never the host-allocated fresh runId)
-  // so idempotent retries of the same commandId + detail produce the exact same digest.
   const semanticHashPayload = {
     grantScope: input.grantScope,
     detail: input.detail ?? null

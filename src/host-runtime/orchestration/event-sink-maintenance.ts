@@ -24,11 +24,6 @@ export type DeleteSessionOutcome =
   | { status: 'not_present' }
   | { status: 'unavailable'; error: string }
 
-/**
- * data §4.7: atomically emit `session.deleted` tombstone, drop projections/outbox,
- * redact historical event preview payloads to `{"redacted":true}`, and return
- * unreferenced external body sha256s for post-commit unlink.
- */
 export function deleteSessionInDb(
   db: Database.Database,
   input: DeleteSessionInput,
@@ -131,10 +126,6 @@ export function deleteSessionInDb(
   return { existed, unreferencedShas, redactedEvents }
 }
 
-/**
- * data §4.8: prune events older than `olderThanAt` while retaining the latest event per stream
- * and updating `pruned_through` in the same transaction. Receipts are NEVER pruned.
- */
 export function pruneEventsInDb(
   db: Database.Database,
   olderThanAt: number,
@@ -166,7 +157,6 @@ export function pruneEventsInDb(
   return { deletedEvents, prunedThrough }
 }
 
-/** Verifies that replaying all events from empty equals online projections (plan §10). */
 export function verifyReplayConsistencyInDb(
   db: Database.Database,
   events: OrchestrationEventRow[]
@@ -192,10 +182,6 @@ export function verifyReplayConsistencyInDb(
   }
 }
 
-/**
- * core §2.5 + R5: tightening-only stop bypasses the storage fence without touching SQLite
- * and cascades along in-memory `RunRegistryState.parentRunId` edges.
- */
 export function stopRunBypassingFenceInRegistry<
   State extends RunRegistryState,
   Control extends RunRegistryControl

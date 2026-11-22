@@ -49,9 +49,6 @@ export type AuthorityBeforeDispatchResult =
   | { ok: false; action: 'fail'; reason: string }
   | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
 
-/**
- * P4-2 authoritative orchestration engine (`SCRY_ORCHESTRATION=on`).
- */
 export class AuthorityEngine {
   readonly sink: EventSink
   readonly #leaseOwner: string
@@ -159,7 +156,6 @@ export class AuthorityEngine {
     return { actor, hookStarted, epochBeforePrepare }
   }
 
-  /** Async authoritative submit: writes and fsyncs >16 KiB body BEFORE EventSink commit (data §4.7). */
   async submitAsync(input: AuthoritySubmitInput): Promise<AuthoritySubmitResult> {
     const start = this.beginSubmit(input)
     if ('early' in start) return start.early
@@ -179,7 +175,6 @@ export class AuthorityEngine {
     }
   }
 
-  /** Synchronous authoritative submit for non-attachment local/conversation submit path. */
   submitSync(input: AuthoritySubmitInput): AuthoritySubmitResult {
     const start = this.beginSubmit(input)
     if ('early' in start) return start.early
@@ -284,7 +279,6 @@ export class AuthorityEngine {
     return { ok: true }
   }
 
-  /** Write command writing a permanent `resolved_absent` tombstone if the intent never existed. */
   resolveIntent(input: {
     peerCertSHA256?: string
     grantScope: 'local' | 'remote'
@@ -299,7 +293,6 @@ export class AuthorityEngine {
     })
   }
 
-  /** Tightening-only stop (core §2.5 + R5): always stops live runs even during storage fence. */
   stopRun<State extends RunRegistryState, Control extends RunRegistryControl>(input: {
     peerCertSHA256?: string
     grantScope: 'local' | 'remote'

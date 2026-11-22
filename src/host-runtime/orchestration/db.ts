@@ -11,7 +11,6 @@ const require = createRequire(import.meta.url)
 
 const NETWORK_FS_MESSAGE = '后台服务的运行记录需要本地磁盘，当前数据目录在网络文件系统上'
 
-// Linux statfs magic numbers for network/distributed filesystems (plan §8.3).
 const LINUX_NETWORK_FS_MAGIC = new Set([
   0x6969, // NFS_SUPER_MAGIC
   0xff534d42, // CIFS_MAGIC_NUMBER
@@ -32,8 +31,6 @@ export function detectNetworkFilesystem(directory: string): boolean {
     }
   }
   if (process.platform === 'darwin') {
-    // One-time open check: BSD `df -T nfs,smbfs,afpfs,webdav,autofs <dir>` exits 0 iff
-    // the directory resides on one of those network filesystem types.
     try {
       const res = spawnSync('df', ['-T', 'nfs,smbfs,afpfs,webdav,autofs', directory], {
         encoding: 'utf8',
@@ -55,10 +52,8 @@ export function enforceOrchestrationFileModes(dbPath: string): void {
 
 export interface OpenOrchestrationDbOptions {
   userDataDir: string
-  /** Optional override for macOS fullfsync experiment (plan §8.3). */
   fullfsync?: boolean
   checkpointFullfsync?: boolean
-  /** Injectable test seam for network filesystem detection. */
   isNetworkFilesystem?: (dir: string) => boolean
   logId?: string
 }
@@ -85,13 +80,9 @@ export interface OrchestrationDbHandle {
   readonly orchestrationDir: string
   readonly checkpointFullfsync: boolean
   enforceModes(): void
-  /** Switches locking_mode temporarily to NORMAL for same-process worker checkpoints and back to EXCLUSIVE. */
   setLockingMode(mode: 'normal' | 'exclusive'): void
-  /** Current `-wal` file size in bytes (0 when absent). */
   walFileBytes(): number
-  /** Runs a non-blocking PASSIVE WAL checkpoint off the commit critical path. */
   checkpointPassive(): WalCheckpointResult
-  /** Runs a TRUNCATE WAL checkpoint to reclaim `-wal` file size under EXCLUSIVE lock. */
   checkpointTruncate(): WalCheckpointResult
   close(options?: { skipCheckpoint?: boolean }): void
 }
@@ -131,16 +122,12 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
     db = new DatabaseCtor(dbPath, { timeout: 0 })
     if (existsSync(dbPath)) chmodSync(dbPath, 0o600)
 
-    // Layer 2 single-writer lock (core §2.9): acquire EXCLUSIVE before WAL/migration.
     db.pragma('locking_mode = EXCLUSIVE')
     db.pragma('journal_mode = WAL')
-    // Move WAL checkpoints off the commit critical path (W9 P4-2); explicit PASSIVE checkpoints run idle.
     db.pragma('wal_autocheckpoint = 0')
     db.pragma('synchronous = FULL')
     db.pragma('foreign_keys = ON')
     db.pragma('secure_delete = ON')
-    // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON
-    // in P4-2 authoritative mode; callers (e.g. P4-1 shadow or experiments) may explicitly override.
     const fullfsync = options.fullfsync ?? true
     const checkpointFullfsync = options.checkpointFullfsync ?? true
     db.pragma(`fullfsync = ${fullfsync ? 'ON' : 'OFF'}`)
@@ -153,7 +140,6 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
 
     migrateOrchestrationDatabase(db, ORCHESTRATION_MIGRATIONS, { logId: options.logId })
 
-    // Force acquisition of the exclusive lock even when no migration statements ran.
     db.prepare('BEGIN IMMEDIATE').run()
     db.prepare('COMMIT').run()
 
@@ -168,7 +154,6 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
       setLockingMode: (mode) => {
         if (!liveDb.open) return
         if (mode === 'normal') {
-          // SQLite exclusive-mode WAL only releases the exclusive lock after cycling through DELETE.
           liveDb.pragma('busy_timeout = 500')
           liveDb.pragma('journal_mode = DELETE')
           liveDb.pragma('locking_mode = NORMAL')
@@ -225,7 +210,6 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
           try {
             liveDb.pragma('wal_checkpoint(TRUNCATE)')
           } catch {
-            // Preserve clean close semantics even if checkpoint cannot run.
           }
         }
         liveDb.close()
@@ -235,7 +219,6 @@ export function openOrchestrationDatabase(options: OpenOrchestrationDbOptions): 
     try {
       if (db?.open) db.close()
     } catch {
-      // Preserve the original open/migration failure.
     }
     throw classifyOpenError(error)
   }

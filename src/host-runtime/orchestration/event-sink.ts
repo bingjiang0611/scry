@@ -53,22 +53,17 @@ export interface EventSinkOptions extends OpenOrchestrationDbOptions {
   authorizedActors?: Iterable<string>
   maxActiveRuns?: number
   isProviderAuthenticating?: (provider: string, profile: string | null) => boolean
-  /** Idle delay (ms) for off-commit PASSIVE WAL checkpoints (default 500; 0 disables timer). */
   checkpointIntervalMs?: number
-  /** Test seam invoked inside the commit transaction immediately before SQLite commits. */
   beforeCommitHook?: () => void
 }
 
 export interface EventSinkTxExtras {
   legacyLedgerSeq?: number
   legacyRunMapping?: { ledgerRunId: string; runId: string }
-  /** P4-2: assert any referenced external body already exists on disk before commit. */
   requireExternalBodyDurable?: boolean
-  /** P4-2: coordinate async body prepare with concurrent `deleteSession`. */
   expectedSessionDeleteEpoch?: number
 }
 
-/** Single-writer atomic persistence sink for P4 orchestration (core §2.5, data §4). */
 export class EventSink {
   readonly handle: OrchestrationDbHandle
   readonly bodyStore: BodyStore
@@ -117,7 +112,6 @@ export class EventSink {
       const row = this.#maxSeqStatement.get() as { seq: number }
       this.#onCommit(Number(row.seq))
     } catch {
-      // Observer notification must never break commit semantics.
     }
   }
 
@@ -202,7 +196,6 @@ export class EventSink {
     return this.#writeIndeterminate
   }
 
-  /** Registers a verified peer actor so shadow/live commands under that peer pass auth checks. */
   authorizeActor(actor: string): void {
     this.#authorizedActors.add(actor)
   }
@@ -291,10 +284,6 @@ export class EventSink {
     }
   }
 
-  /**
-   * Executes multiple `execute()` / `setMeta()` operations inside a single SQLite transaction
-   * (one fsync per batch) for bulk startup import while preserving fail-closed rollback semantics.
-   */
   runInBatchTransaction<T>(fn: () => T): T {
     this.assertDeterminate()
     if (this.#inBatchTransaction) return fn()

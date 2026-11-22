@@ -46,11 +46,6 @@ async function fsyncDirectoryAsync(dir: string): Promise<void> {
   }
 }
 
-/**
- * Content-addressed body store (data §4.7).
- * Bodies <= 16 KiB stay inline in `orch_outbox.payload`; larger bodies are written
- * synchronously with file + directory fsync to `<orchestrationDir>/bodies/<sha256>` (0600).
- */
 export class BodyStore {
   readonly bodiesDir: string
   readonly #pinned = new Map<string, number>()
@@ -59,7 +54,6 @@ export class BodyStore {
     this.bodiesDir = join(orchestrationDir, 'bodies')
   }
 
-  /** Pins an external body sha256 in memory while a submit is preparing/committing so deleteSession cannot unlink it. */
   pin(sha256: string): () => void {
     if (!SHA256_RE.test(sha256)) return () => undefined
     this.#pinned.set(sha256, (this.#pinned.get(sha256) ?? 0) + 1)
@@ -134,10 +128,6 @@ export class BodyStore {
     return { storage: 'external', sha256, bytes }
   }
 
-  /**
-   * Async durable external body write (data §4.7) for P4-2 authoritative submit:
-   * persists and fsyncs >16 KiB bodies BEFORE the event transaction references them.
-   */
   async prepareBodyAsync(content: string | Buffer): Promise<PreparedBody> {
     const buffer = typeof content === 'string' ? Buffer.from(content, 'utf8') : content
     const bytes = buffer.byteLength
@@ -160,7 +150,6 @@ export class BodyStore {
       await chmod(targetPath, 0o600)
       return { storage: 'external', sha256, bytes }
     } catch {
-      // Not yet present; write atomically below.
     }
 
     const tmpPath = join(this.bodiesDir, `.tmp-${sha256}-${randomUUID()}`)

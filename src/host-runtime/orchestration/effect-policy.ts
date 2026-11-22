@@ -28,7 +28,6 @@ export const ALL_EFFECT_KINDS: readonly EffectKind[] = [
   'legacy.mirror'
 ]
 
-/** Centralized outbox policy table (data §4.5). Policy is fixed at enqueue time. */
 export const EFFECT_POLICIES: Readonly<Record<EffectKind, EffectPolicySpec>> = {
   'provider.run.start': { policy: 'process_bound', onRestart: 'run_start_reconcile' },
   'provider.run.stop': { policy: 'process_bound', onRestart: 'void' },
