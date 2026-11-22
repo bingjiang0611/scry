@@ -6,7 +6,7 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   // measuring it, or the transition can move the target before native input.
   await wait('document.querySelector(".unbound-empty.bound") != null && document.querySelector(".location-button") != null', 'remote new draft location picker')
   await click('.location-button')
-  await wait('document.querySelector(\'[data-machine-id="local"]\') != null', 'local machine option')
+  await wait('document.querySelector(\'.location-machine-select option[value="local"]\') != null', 'local machine option')
   await read(`(() => {
     const field = document.querySelector('.location-machine-select select')
     field.value = 'local'
@@ -17,8 +17,14 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
     field.value = 'unbound'
     field.dispatchEvent(new Event('change', { bubbles: true }))
   })()`)
-  await read('[...document.querySelectorAll(".settings-rail button")].find(node => node.textContent.trim() === "远程访问").setAttribute("data-remote-settings-tab", "")')
-  await click('[data-remote-settings-tab]')
+  await wait(`!(${remoteShown})`, 'local location leaves the remote conversation')
+  await click('.sb-new')
+  await wait(`window.desktopRemoteFixture.localNewSessions === ${localBefore + 1}`, 'local new-session route remains intact')
+  check(!(await read(remoteShown)), 'Local new session retained the remote composer')
+  check((await fixture()).localStarts === 0, 'New-session selection started an unrequested local model')
+
+  await click('.sb-settings')
+  await click('.settings-rail [role="tab"]', '远程访问')
   await wait('document.querySelector(".remote-pairing")?.textContent.includes("Fixture iPhone")', 'inbound device grant')
   check(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture desktop")'), 'Remote settings omitted saved host')
   check(!(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')
