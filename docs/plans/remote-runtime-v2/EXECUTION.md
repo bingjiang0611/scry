@@ -80,7 +80,7 @@
 ### T6 · P3、P4 设计文档（只写文档，不写实现代码）
 
 - `docs/plans/remote-runtime-v2/P3-daemon-design.md`：进程边界（哪些模块迁出 Electron main，逐一列文件）、本机通道认证、生命周期（按 PLAN.md 已定决策：App 拉起、关闭后继续运行、可选登录自启）、打包与私有 CLI 绝对路径、启动环境清洗、进程身份登记与停止规则、崩溃恢复、macOS/Linux 差异、迁移步骤、测试计划。
-- `docs/plans/remote-runtime-v2/P4-event-log-contract.md`：事件 / 命令 / 回执 / outbox 表结构，事务边界，与现有 `session-ledger.ts`、intent 回执的映射，四个 projection，快照 + cursor 协议，证据引用格式与质量标记如何携带，「进程丢失副作用作废」的具体规则，哪些现有轮询被替代，测试（重放、幂等、乱序、崩溃）。
+- Batch 1 旧事件日志契约（[历史版本](https://github.com/bingjiang0611/scry/blob/11ba9c99be4ba3a0d5e27af0afe0a3f8ed44466a/docs/plans/remote-runtime-v2/P4-event-log-contract.md)，已由 [P4 编排设计](P4-orchestration-design.md) 取代）：事件 / 命令 / 回执 / outbox 表结构，事务边界，与现有 `session-ledger.ts`、intent 回执的映射，四个 projection，快照 + cursor 协议，证据引用格式与质量标记如何携带，「进程丢失副作用作废」的具体规则，哪些现有轮询被替代，测试（重放、幂等、乱序、崩溃）。
 - 可以只读参考 T3 Code 的 `docs/orchestration-v2/` 与 `docs/internals/overview.md`（`git clone --depth 1 https://github.com/pingdotgg/t3code`），不复制代码。
 - 两份文档都要逐条说明与 CLAUDE.md 五条不妥协项的关系，并给出「需要维护者决定」清单。
 

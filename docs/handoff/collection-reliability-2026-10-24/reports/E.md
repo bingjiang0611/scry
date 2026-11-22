@@ -1,6 +1,6 @@
 # 批次 E：核验与修订
 
-[原批次修改记录](E-initial.md) 原文归档。E1/E3 的旧行为与手验预期以本页核验意见及后续修订为准；E2 已核验，M3 放弃已接受。
+[原批次修改记录与失败证据](https://github.com/bingjiang0611/scry/blob/11ba9c99be4ba3a0d5e27af0afe0a3f8ed44466a/docs/handoff/collection-reliability-2026-10-24/reports/E-initial.md)可从 Git 历史查看。E1/E3 的旧行为与手验预期以本页核验意见及后续修订为准；E2 已核验，M3 放弃已接受。
 
 ## 核验意见（审查方，2026-10-26）
 
@@ -53,7 +53,7 @@ H3 → 需修改（VE1）；M4（E2）→ 已核验；M2（E3）→ 需修改（
 
 | 顺序 | 提交 | 内容 |
 |---|---|---|
-| 0 | `4ba8148e` | 纯拆分：callback 执行提取到 `commit-hook-process.ts`；原报告归档为 `E-initial.md`。18 个声明/注释不变（`/tmp/scry-VE-split-audit.log`）。 |
+| 0 | `4ba8148e` | 纯拆分：callback 执行提取到 `commit-hook-process.ts`。18 个声明/注释不变（`/tmp/scry-VE-split-audit.log`）。 |
 | 1 | `d71c88a7` | VE1 红测：`src/cli/hook-http-outcome.test.ts`。 |
 | 2 | `44f4ed00` | VE1 修复。 |
 | 3 | `d837ed22` | VE2 红测：`commit-delivery.test.ts`。 |

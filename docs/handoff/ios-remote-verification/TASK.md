@@ -28,7 +28,7 @@
 
 ## 往轮记录
 
-第二轮到第四轮的执行要求和核验结论在 [`ROUNDS.md`](ROUNDS.md)（按时间倒序）。下面第 1–7 节是每轮都适用的通用规则。
+各轮判定、归因更正和原始证据见[结果索引](results/README.md)。下面第 1–7 节是每轮都适用的通用规则。
 
 ## 1. 完成定义
 
@@ -90,7 +90,7 @@ cd experiments/remote-g0/cf-relay && npx --prefix .. wrangler deploy
 
 ## 6. 交回内容（提交并推送到本分支）
 
-1. 结果目录 `docs/handoff/ios-remote-verification/results/<时间戳>/`：`env.txt`、`checks.json`、`logs/*.tail.txt`、`netbench-*.jsonl`、`relay-probe-*.jsonl`、`summary.json`、`acceptance.json`、`SUMMARY.md`。
+1. 结果目录 `docs/handoff/ios-remote-verification/results/<时间戳>/`：`env.txt`、`checks.json`、`logs/*.tail.txt`、`netbench-*.jsonl`、`relay-probe-*.jsonl`、`summary.json`、`acceptance.json`。`SUMMARY.md` 是脚本生成的阅读版；保存 JSON 后不必重复提交阅读版。
 2. 同一目录下的 `REPORT.md`，按 `REPORT-TEMPLATE.md` 填写。
 3. 你做的修复提交（与结果提交分开）。
    - 手工加进结果目录的证据文件（`logs/evidence-*.txt` 等）必须在**最后一次 `summarize` 之前**放进去，因为 `summarize` 会先运行 `redact.mjs` 脱敏。提交前再执行一次 `node experiments/remote-g0/verify/redact.mjs <结果目录>`，并用 `git grep` 确认没有账户名、Apple ID、团队 ID 或证书哈希。第四轮的证据文件就是因为漏了这一步，带着账户名和签名身份被提交了。

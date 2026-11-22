@@ -7,25 +7,18 @@
 - **提案二**：Git 快照引擎。同一轮内复用已有工作，再评估跨轮常驻。
 - **提案三**：recorder 执行与持久化路径。先测量规模性成本，再做有证据的增量改动。
 
-**不在范围内**：Pi 集成（用户 2026-11-05 明确先不管）、uploader、Electron App、原生 Git 引擎、新的统一持久接收日志和用户级服务监管器（后两者只允许写设计说明，见 [R.md](R.md)）。
+**不在范围内**：Pi 集成（用户 2026-11-05 明确先不管）、uploader、Electron App、原生 Git 引擎、新的统一持久接收日志和用户级服务监管器（[R 批次报告](reports/R.md)记录了未推进后两项的证据）。
 
-## 协作方式（为减少往返而设计）
+## 批次结果
 
-- **审查方**（Claude，本会话）：写交接文档、在全部批次结束后集中核验。
-- **执行方**（另一个 agent）：在分支 `perf/recorder-engine` 上**连续完成所有批次**，每个批次写报告、更新 [STATUS.md](STATUS.md) 并 push，**不需要等审查方核验就继续下一批**。
-- 只有遇到下面的「必须停下」条件才停止并在 STATUS 写明原因；其他问题自行判断，在报告里写清楚理由。
-- 不 push `main`，不开 PR，不合入，不发布 npm。合入由用户决定。
+本轮改动已通过 [PR #31](https://github.com/bingjiang0611/scry/pull/31) 合并。实测结果、未采纳项和限制见[汇总](reports/SUMMARY.md)。原任务书、执行门槛及收尾前的状态表见 [Git 历史](https://github.com/bingjiang0611/scry/tree/3f4afcab2b2f756aa253b2e6c680d3d483bec55a/docs/handoff/recorder-perf-2026-11-05)。
 
-### 执行顺序
-
-| 批次 | 内容 | 依赖 | 文档 |
-|---|---|---|---|
-| M | 计数测量工具 + 正确性对照（oracle）+ 基线 | 无，**先做** | [M.md](M.md) |
-| G1 | 同轮复用 discovery index；合并两次 diff；多仓库有界并发；大 patch 内存 | M | [G.md](G.md#g1同一轮内不重复做) |
-| G2 | 跨轮常驻：仓库布局/配置缓存、索引种子、私有对象复用 | G1，且满足 G.md 中的**进入条件** | [G.md](G.md#g2跨轮复用) |
-| R | recorder 规模性成本：transcript 增量、正文写入、提交临界区、恢复扫描 | M（可在 G2 之前或之后做） | [R.md](R.md) |
-
-G 和 R 改的文件基本不重叠，但都在同一分支上**串行**提交，避免冲突。
+| 批次 | 内容 | 报告 |
+|---|---|---|
+| M | 计数测量、全量快照正确性对照、基线 | [M](reports/M.md) |
+| G1 | 同轮复用 discovery index、合并 diff、多仓库并发与大 patch | [G1](reports/G1.md) · [G1-4](reports/G1-4.md) |
+| G2 | 跨轮复用的门槛与方案取舍 | [G2](reports/G2.md) |
+| R | Transcript 锚点、正文写入与恢复扫描 | [R](reports/R.md) |
 
 ### 必须停下的情况（其余自行决定）
 
@@ -39,7 +32,7 @@ G 和 R 改的文件基本不重叠，但都在同一分支上**串行**提交�
 ## 硬约束
 
 1. **先测再改，测量与优化分开提交**（仓库 CLAUDE.md「不骗计数」）。每个优化条目先有一条在旧实现上给出基线数字的测量提交，再有优化提交。不缩小 workload、不换调用方式、不把工作挪到不计数的地方。
-2. **正确性先于速度。** 所有 G 批次改动都必须通过 [M.md](M.md) 的 oracle：同一场景下 targeted / 新实现与 `SCRY_TURN_DIFF_STRATEGY=full` 的全量路径产生**完全相同**的 afterTree 和文件证据。
+2. **正确性先于速度。** 所有 G 批次改动都必须通过 [M 批次报告](reports/M.md)记录的正确性对照：同一场景下 targeted / 新实现与 `SCRY_TURN_DIFF_STRATEGY=full` 的全量路径产生**完全相同**的 afterTree 和文件证据。
 3. **不弱化现有保证**：
    - 观测 hook 继续 fail open（返回码 0），不能让 Provider 卡住。
    - 证据诚实：拿不到的证据标 `unavailable` / `partial` 并写原因，不能显示成空或 0。
@@ -82,4 +75,4 @@ G 和 R 改的文件基本不重叠，但都在同一分支上**串行**提交�
 - 是否需要 `scry integrations repair` 或 `scry recorder restart` 才生效。
 - 未验证项、留给用户决定的事。
 
-全部批次结束后，在 `reports/SUMMARY.md` 汇总：每个场景的最终 L1 前后对比、所有放弃项及理由、需要用户决定的事。然后 push，并在 STATUS 顶部写「全部待核验」。
+本轮的最终对比、放弃项及其理由见 [SUMMARY.md](reports/SUMMARY.md)。

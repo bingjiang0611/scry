@@ -1,6 +1,6 @@
 # P4 · 编排事件日志：总体设计
 
-状态：最终设计（独立评审之后，维护者 2026-11-18 裁定），不含实现。取代 Batch 1 的 [P4-event-log-contract](P4-event-log-contract.md)：那份写于 daemon 之前，把组件放在 `src/main/remote` 与 Electron main。
+状态：最终设计（独立评审之后，维护者 2026-11-18 裁定），不含实现。取代 Batch 1 的旧编排事件日志设计：旧稿写于 daemon 之前，把组件放在 `src/main/remote` 与 Electron main。
 
 行号以分支 `claude/scry-performance-optimization-46ngcf` 的 `72c83932` 为准。评审核对在 `172074a2` 上重做：所引源文件在两者之间没有改动，只有 iOS 的 `TransportRunOperations.swift` 改了一行（protocol §5.7）。
 

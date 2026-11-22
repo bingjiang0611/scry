@@ -1,6 +1,6 @@
 # iOS 重设计规范
 
-依据：Mac 端 `src/renderer/codex-alignment.css`、`styles.css`、`motion.css`（PR #4）、`components/Sidebar.tsx`、`SidebarActivity.tsx`、`ChatTurn.tsx`、`OverviewPanel.tsx`；设计稿源码在 [mockups/](mockups/)。下面的数值是规范，设计稿与本文不一致时以本文为准。
+依据：Mac 端 `src/renderer/codex-alignment.css`、`styles.css`、`motion.css`（PR #4）、`components/Sidebar.tsx`、`SidebarActivity.tsx`、`ChatTurn.tsx`、`OverviewPanel.tsx`。下面的数值是规范，视觉验收记录见 [reports/](reports/)。
 
 原则：两端共享**结构、语义、token 和动效**；iOS 保留原生交互（NavigationStack 推入、系统 Sheet、长按菜单、44pt 触控、Dynamic Type）。不把 Mac 的 hover 搬到手机上。
 

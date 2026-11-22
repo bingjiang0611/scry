@@ -76,7 +76,7 @@
 - 实现 worker `1c482abe-34f6-42ee-8466-5f2fa84e9670` 已结束，进程与登记资源关闭已确认。前向/反向工作区围栏已改为同一会话身份冲突；新增共享工作区重叠证据与原生别名嵌套保护。
 - 主 agent 独立运行 node+web typecheck、8 files / **44 tests**、`git diff --check`，全部通过。子 agent 另报告真实隐藏 App 的 `test:conversation:ipc` 通过（22 次隔离 fixture 调用）；恢复旧围栏后新增并行 smoke 失败，恢复修复后通过。它不是五个真实账号探针。
 - 旧 adoption **来源**仍限 Claude/Codex/Pi；通用发送**目标**支持五 Provider。主 agent 决定保留两条不同合同：拒绝 Qoder/OpenCode adoption 来源；被配置禁用的 Qoder 目标诚实报告 disabled。旧 smoke 改用真正不支持的目标验证拒绝，并额外验证禁用目标、来源字节不变与零 Provider 调用。
-- 全量 Vitest 首轮另有两项失败：未改动的 `source-control/workspace-choices.test.ts` 在并行负载下 5000 ms 超时（独立 6/6 通过，不抹去首轮失败）；设计稿的 `prototype.test.mjs` 使用 Node test runner，却被 Vitest 默认发现为无套件。后者由本次设计文件引入，必须修正发现路径并继续保留其 Node 检查，不称作无关失败。**已在 C1a 修复**：文件改名为 `prototype.check.mjs`，Vitest 不再发现它，`node --test docs/handoff/side-chat/prototype.check.mjs` 在 Node 22.22.1 与 24 上均 12/12 通过。
+- 全量 Vitest 首轮另有两项失败：未改动的 `source-control/workspace-choices.test.ts` 在并行负载下 5000 ms 超时（独立 6/6 通过，不抹去首轮失败）；原型使用 Node test runner 的测试被 Vitest 默认发现为无套件。**C1a 当时已修复**：测试改名后不再被 Vitest 发现，独立的 Node 检查在 22.22.1 与 24 上均 12/12 通过。原型及其独立检查文件现已删除。
 - 主 agent 的独立时钟探测找到了重叠证据的边界缺口：仍开放的兄弟窗口会因一次中间采集被误排除；跨已淘汰记录的 session 窗口未降级；按 cwd 保留的完成窗口缺总量上限。继续修正后再验收，不把现有测试全绿当作这些场景已正确。
 
 ### C1a 独立实时流与重叠修正
@@ -114,7 +114,7 @@ C2 复核的十项修复、当时失败与通过的证据由 [c2-review-round.md
 
 阶段记录、五 Provider 目标缺陷及证据限制见 [d1-interaction-acceptance.md](d1-interaction-acceptance.md)：续作轮修好发送目标与窄窗口响应式冲突，并用真实 `BrowserWindow.setContentSize` 重放窗口尺寸验收。
 
-最新执行状态、已保留状态和后续步骤见 [continuation-checkpoint.md](continuation-checkpoint.md)。
+后续门禁、交付和大历史验收分别见 [release-verification.md](release-verification.md)、[final-delivery.md](final-delivery.md) 和 [large-history-delivery.md](large-history-delivery.md)。
 ## D2 最终验收缺口轮（Node 22.22.1）
 
 只补四项缺口，不加新能力。源码仍 0.2.227；未提交、未推送、未升版本、未安装（实例仍 0.2.229）。
