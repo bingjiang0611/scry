@@ -421,6 +421,13 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       }
       return
     case 'run.session_bound':
+      if (p.attachNative === true && event.sessionKey && event.runId) {
+        db.prepare('UPDATE orch_p_run SET session_key = ?, rev_seq = ? WHERE run_id = ?').run(
+          event.sessionKey, event.seq, event.runId
+        )
+        ensureSessionForRun(db, event, p)
+      }
+      return
     case 'run.provider_settled':
     case 'run.content_gap':
     case 'effect.voided':

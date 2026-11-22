@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { assertBoundedPayload, assertNoUsageNumbersInEvent } from './canonical-json'
 import { getEffectPolicy, type EffectKind } from './effect-policy'
+import { scopedNativeSessionKey, type NativeSessionIdentity } from './native-session-lookup'
 import type { OrchestrationCommand, RunEffectResultPayload } from './orchestrator-commands'
 import { canTransitionRun } from './run-transitions'
 import {
@@ -25,6 +26,7 @@ export interface OrchestratorReadView {
   getReceipt(commandId: string, actor: string): CommandReceiptRow | undefined
   getRun(runId: string): RunProjectionRow | undefined
   getSession(sessionKey: string): SessionProjectionRow | undefined
+  getNativeSession?(identity: NativeSessionIdentity): SessionProjectionRow | undefined
   getTurnByRunId?(runId: string): TurnProjectionRow | undefined
   getNextTurnOrdinal?(sessionKey: string): number
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined
@@ -242,13 +244,36 @@ export function decideRunEffectResult(
     case 'session_bound': {
       // Align with H1: progress/binding only valid after dispatch (not while still recorded).
       if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      const identity = p.attachNative && !run.sessionKey && p.nativeSessionId && run.provider && run.cwd !== null
+        ? { sessionId: p.nativeSessionId, provider: run.provider, profile: run.profile, cwd: run.cwd }
+        : undefined
+      const existing = identity ? view.getNativeSession?.(identity) ??
+        (p.catalogRunId ? view.getNativeSession?.({ ...identity, sessionId: p.catalogRunId }) : undefined) : undefined
+      const attach = identity && (!existing?.activeRunId || existing.activeRunId === run.runId)
+      const sessionKey = attach
+        ? existing?.sessionKey ?? (view.getSession(identity.sessionId) ? scopedNativeSessionKey(identity) : identity.sessionId)
+        : run.sessionKey
       events.push(
         makeEvent(cmd, 0, {
           ...common,
           type: 'run.session_bound',
-          payload: { runId: run.runId, nativeSessionId: p.nativeSessionId ?? null, bindingId: p.bindingId ?? null }
+          sessionKey,
+          payload: {
+            runId: run.runId, nativeSessionId: p.nativeSessionId ?? null, bindingId: p.bindingId ?? null,
+            ...(attach ? { attachNative: true, provider: run.provider, profile: run.profile } : {})
+          }
         })
       )
+      if (attach && sessionKey) {
+        events.push(makeEvent(cmd, 1, {
+          type: 'turn.began', stream: `session:${sessionKey}`, runId: run.runId, sessionKey, cwd: run.cwd,
+          payload: {
+            sessionKey, runId: run.runId, ordinal: view.getNextTurnOrdinal?.(sessionKey) ?? 1,
+            ordinalOrigin: existing?.legacy ? 'since_import' : 'native',
+            userTextPreview: run.promptPreview, author: 'user'
+          }
+        }))
+      }
       return acceptDecision(cmd, events, [], { runId: run.runId })
     }
     case 'question_opened': {

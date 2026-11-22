@@ -154,7 +154,9 @@ export function handleAuthorityRunProgress(
         runId: canonicalRunId,
         step: 'session_bound',
         commandSuffix: suffix,
-        nativeSessionId: marker.externalSessionId
+        nativeSessionId: marker.externalSessionId,
+        attachNative: true,
+        catalogRunId: hub.liveRunMeta(canonicalRunId)?.scryRunId
       })
     } else if (marker.event === 'question_opened' && typeof marker.questionId === 'string') {
       engine.recordProgress({

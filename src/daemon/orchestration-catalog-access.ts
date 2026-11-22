@@ -4,6 +4,7 @@ import { available } from '../shared/turn-record'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { DeleteSessionOutcome } from '../host-runtime/orchestration/event-sink-maintenance'
+import { findNativeSession } from '../host-runtime/orchestration/native-session-lookup'
 import type { SessionDiscoverPayload } from '../host-runtime/orchestration/orchestrator-commands'
 import { mapSessionRow } from '../host-runtime/orchestration/projection-mappers'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
@@ -15,25 +16,12 @@ function identityKey(session: NativeIdentity): string {
 }
 
 export function findProjectedNativeSession(sink: EventSink, session: NativeIdentity): SessionProjectionRow | undefined {
-  const provider = session.providerId ?? 'legacy_unknown'
-  const profile = session.agentProfileId ?? null
-  // The normal case is an imported session keyed by its native id. Avoid a
-  // catalog-wide search on each reopen in a known workspace.
-  if (session.cwd !== undefined) {
-    const direct = sink.getSession(session.sessionId)
-    if (direct && !direct.conversationId && (direct.provider ?? 'legacy_unknown') === provider &&
-        direct.profile === profile && direct.cwd === session.cwd &&
-        (direct.catalog?.nativeSessionId == null || direct.catalog.nativeSessionId === session.sessionId)) return direct
-  }
-  const rows = sink.handle.db.prepare(
-    `SELECT * FROM orch_p_session
-     WHERE conversation_id IS NULL AND COALESCE(provider, 'legacy_unknown') = ? AND profile IS ?
-       AND (? IS NULL OR cwd = ?)
-       AND (json_extract(catalog, '$.nativeSessionId') = ?
-         OR (json_extract(catalog, '$.nativeSessionId') IS NULL AND session_key = ?))
-     LIMIT 2`
-  ).all(provider, profile, session.cwd ?? null, session.cwd ?? null, session.sessionId, session.sessionId) as Record<string, unknown>[]
-  return rows.length === 1 ? mapSessionRow(rows[0]) : undefined
+  return findNativeSession(sink, {
+    sessionId: session.sessionId,
+    provider: session.providerId ?? 'legacy_unknown',
+    profile: session.agentProfileId ?? null,
+    cwd: session.cwd
+  })
 }
 
 function displayedOutcome(value: string | undefined): AppSession['lastRunOutcome'] {

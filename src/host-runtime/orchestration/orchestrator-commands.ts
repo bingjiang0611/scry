@@ -91,6 +91,8 @@ export interface RunEffectResultPayload {
   isError?: boolean
   providerResultRef?: string
   nativeSessionId?: string
+  attachNative?: true
+  catalogRunId?: string
   bindingId?: string
   questionId?: string
   questionKind?: string

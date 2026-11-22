@@ -10,6 +10,7 @@ import {
   type WalCheckpointSample
 } from './db'
 import { getEffectPolicy } from './effect-policy'
+import { findNativeSession } from './native-session-lookup'
 import {
   deleteSessionInDb,
   pruneEventsInDb,
@@ -225,6 +226,7 @@ export class EventSink {
       getReceipt: (commandId, actor) => readReceiptRaw(this.#stmts, commandId, actor),
       getRun: (runId) => readRunRaw(this.#stmts, runId),
       getSession: (sessionKey) => readSessionRaw(this.#stmts, sessionKey),
+      getNativeSession: (identity) => findNativeSession(this, identity),
       getTurnByRunId: (runId) => readTurnByRunIdRaw(this.#stmts, runId),
       getNextTurnOrdinal: (sessionKey) => readNextTurnOrdinalRaw(this.#stmts, sessionKey),
       getInteraction: (runId, questionId) => readInteractionRaw(this.#stmts, runId, questionId),

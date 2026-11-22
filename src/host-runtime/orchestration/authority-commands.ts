@@ -131,6 +131,8 @@ export function recordProgressWithSink(
     step: 'session_bound' | 'question_opened' | 'question_closed' | 'content_gap' | 'provider_settled' | 'finalized'
     commandSuffix: string
     nativeSessionId?: string
+    attachNative?: true
+    catalogRunId?: string
     questionId?: string
     questionKind?: string
     reason?: string
@@ -145,6 +147,8 @@ export function recordProgressWithSink(
     runId: input.runId,
     step: input.step,
     ...(input.nativeSessionId ? { nativeSessionId: input.nativeSessionId } : {}),
+    ...(input.attachNative ? { attachNative: true as const } : {}),
+    ...(input.catalogRunId ? { catalogRunId: input.catalogRunId } : {}),
     ...(input.questionId ? { questionId: input.questionId } : {}),
     ...(input.questionKind ? { questionKind: input.questionKind } : {}),
     ...(input.reason ? { reason: input.reason } : {}),

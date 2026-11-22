@@ -5,6 +5,7 @@ import { unavailable } from '../../shared/turn-record'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import type { LegacyRunState } from './legacy-ledger-reader'
+import { findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 
 /**
  * P4-1 startup repair for S2: if a previous daemon crashed between `intent_recorded` and
@@ -62,12 +63,17 @@ export function importCatalogEntries(
   const nextSha = sha256Hex(rawBytes)
   if (nextSha === catalogSha256) return { importedSessions, rejectedCommands, catalogSha256 }
 
-  let entries: unknown[] = []
+  let entries: Record<string, unknown>[] = []
   try {
     const parsed = JSON.parse(rawBytes.toString('utf8'))
-    if (Array.isArray(parsed)) entries = parsed
+    if (Array.isArray(parsed)) entries = parsed.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
   } catch {
     entries = []
+  }
+  const frequencies = new Map<string, number>()
+  for (const entry of entries) {
+    const key = catalogEntryKey(entry)
+    if (key) frequencies.set(key, (frequencies.get(key) ?? 0) + 1)
   }
   const previousImport = sink.handle.db.prepare(
     `SELECT seq, payload FROM orch_event
@@ -84,15 +90,21 @@ export function importCatalogEntries(
     const chunk = entries.slice(offset, offset + batchSize)
     const isLastChunk = offset + batchSize >= entries.length
     sink.runInBatchTransaction(() => {
-      for (const item of chunk) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) continue
-        const entry = item as Record<string, unknown>
-        const sessionKey =
-          (typeof entry.sessionId === 'string' && entry.sessionId) ||
-          (typeof entry.externalSessionId === 'string' && entry.externalSessionId) ||
-          (typeof entry.runId === 'string' && entry.runId) ||
-          ''
-        if (!sessionKey) continue
+      for (const entry of chunk) {
+        const legacyKey = catalogEntryKey(entry)
+        if (!legacyKey) continue
+        const profile = typeof entry.agentProfileId === 'string' ? entry.agentProfileId : null
+        const cwd = typeof entry.cwd === 'string' ? entry.cwd : null
+        const providerId = typeof entry.providerId === 'string' ? entry.providerId : null
+        const lastRunId = typeof entry.runId === 'string' ? entry.runId : null
+        const nativeSessionId = typeof entry.externalSessionId === 'string' && entry.externalSessionId
+          ? entry.externalSessionId : lastRunId ? null : legacyKey
+        const identity = {
+          sessionId: nativeSessionId ?? legacyKey, provider: providerId ?? 'legacy_unknown', profile, cwd: cwd ?? undefined
+        }
+        const scoped = findNativeSession(sink, identity)
+        const sessionKey = scoped?.sessionKey ?? ((frequencies.get(legacyKey) ?? 0) > 1 && sink.getSession(legacyKey)
+          ? scopedNativeSessionKey(identity) : legacyKey)
         if (deletedSession.get(sessionKey, sessionKey)) continue
         const imported = previousImport.get(sessionKey) as { seq: number; payload: string } | undefined
         const previous = imported ? JSON.parse(imported.payload) as Record<string, unknown> : undefined
@@ -104,21 +116,19 @@ export function importCatalogEntries(
               : null
         const fields = {
           sessionKey,
-          provider: typeof entry.providerId === 'string' ? entry.providerId : null,
-          profile: typeof entry.agentProfileId === 'string' ? entry.agentProfileId : null,
-          cwd: typeof entry.cwd === 'string' ? entry.cwd : null,
+          provider: providerId,
+          profile,
+          cwd,
           title,
           ts: catalogTimestamp(entry.ts) ?? catalogTimestamp(previous?.ts) ?? now,
           pinnedAt: catalogTimestamp(entry.pinnedAt),
           archivedAt: catalogTimestamp(entry.archivedAt),
-          lastRunId: typeof entry.runId === 'string' ? entry.runId : null
+          lastRunId
         }
         const provider = providerIdForAgentId(fields.provider ?? undefined)
         const runtime = provider === undefined ? null : runtimeProviderForProviderId(provider)
         const catalog = {
-          nativeSessionId: typeof entry.externalSessionId === 'string' && entry.externalSessionId
-            ? entry.externalSessionId
-            : fields.lastRunId ? null : sessionKey,
+          nativeSessionId,
           projectCwd: typeof entry.projectCwd === 'string' ? entry.projectCwd : null,
           preview: typeof entry.preview === 'string' ? entry.preview.slice(0, 200) : null,
           runtimeProvider: entry.runtimeProvider === runtime ? runtime : null
@@ -156,6 +166,12 @@ export function importCatalogEntries(
   }
   if (entries.length === 0) sink.setMeta('legacy_catalog_sha256', nextSha)
   return { importedSessions, rejectedCommands, catalogSha256: nextSha }
+}
+
+function catalogEntryKey(entry: Record<string, unknown>): string {
+  return (typeof entry.sessionId === 'string' && entry.sessionId) ||
+    (typeof entry.externalSessionId === 'string' && entry.externalSessionId) ||
+    (typeof entry.runId === 'string' && entry.runId) || ''
 }
 
 function catalogTimestamp(value: unknown): number | null {

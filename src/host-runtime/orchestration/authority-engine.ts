@@ -18,6 +18,7 @@ import {
 } from './authority-dispatch'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
+import { findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 import { parseLedgerIntentRouting, type ShadowCommitSample } from './shadow-routing'
 import {
   DEFAULT_PENDING_TTL_MS,
@@ -127,6 +128,7 @@ export class AuthorityEngine {
     input: AuthoritySubmitInput,
     actor: string,
     hookStarted: number,
+    sessionKey: string | null,
     epochBeforePrepare: number | undefined,
     preparedBody: PreparedBody | undefined,
     bodyWriteMs: number | undefined
@@ -138,6 +140,7 @@ export class AuthorityEngine {
       pendingTtlMs: this.#pendingTtlMs,
       now: this.#clock(),
       resolveTurnOrdinal: this.#resolveTurnOrdinal,
+      sessionKey,
       input,
       preparedBody
     })
@@ -146,7 +149,7 @@ export class AuthorityEngine {
 
   private beginSubmit(input: AuthoritySubmitInput):
     | { early: AuthoritySubmitResult }
-    | { actor: string; hookStarted: number; epochBeforePrepare: number | undefined } {
+    | { actor: string; hookStarted: number; sessionKey: string | null; epochBeforePrepare: number | undefined } {
     if (this.sink.isWriteIndeterminate()) {
       return { early: { kind: 'rejected', reason: 'orchestration_write_indeterminate', sticky: false } }
     }
@@ -155,8 +158,17 @@ export class AuthorityEngine {
     const legacyDup = this.checkLegacySystemReceipt(input.commandId, actor)
     if (legacyDup) return { early: { kind: 'duplicate', ...legacyDup } }
     const preview = parseLedgerIntentRouting(input.runId ?? 'probe', input.detail)
-    const epochBeforePrepare = preview.sessionKey ? this.sink.getSessionDeleteEpoch(preview.sessionKey) : undefined
-    return { actor, hookStarted, epochBeforePrepare }
+    let sessionKey = preview.sessionKey
+    if (sessionKey && !preview.isConversationRun) {
+      const identity = {
+        sessionId: sessionKey, provider: preview.provider, profile: preview.profile,
+        cwd: tryRealpath(preview.cwd) ?? preview.cwd
+      }
+      const session = findNativeSession(this.sink, identity)
+      sessionKey = session?.sessionKey ?? (this.sink.getSession(sessionKey) ? scopedNativeSessionKey(identity) : sessionKey)
+    }
+    const epochBeforePrepare = sessionKey ? this.sink.getSessionDeleteEpoch(sessionKey) : undefined
+    return { actor, hookStarted, sessionKey, epochBeforePrepare }
   }
 
   /** Async authoritative submit: writes and fsyncs >16 KiB body BEFORE EventSink commit (data §4.7). */
@@ -173,7 +185,7 @@ export class AuthorityEngine {
         preparedBody = await this.sink.bodyStore.prepareBodyAsync(input.detail)
         bodyWriteMs = performance.now() - bodyStart
       }
-      return this.submitBuilt(input, start.actor, start.hookStarted, start.epochBeforePrepare, preparedBody, bodyWriteMs)
+      return this.submitBuilt(input, start.actor, start.hookStarted, start.sessionKey, start.epochBeforePrepare, preparedBody, bodyWriteMs)
     } finally {
       unpinBody?.()
     }
@@ -193,7 +205,7 @@ export class AuthorityEngine {
         preparedBody = this.sink.bodyStore.prepareBody(input.detail)
         bodyWriteMs = performance.now() - bodyStart
       }
-      return this.submitBuilt(input, start.actor, start.hookStarted, start.epochBeforePrepare, preparedBody, bodyWriteMs)
+      return this.submitBuilt(input, start.actor, start.hookStarted, start.sessionKey, start.epochBeforePrepare, preparedBody, bodyWriteMs)
     } finally {
       unpinBody?.()
     }
@@ -339,6 +351,8 @@ export class AuthorityEngine {
     step: 'session_bound' | 'question_opened' | 'question_closed' | 'content_gap' | 'provider_settled' | 'finalized'
     commandSuffix: string
     nativeSessionId?: string
+    attachNative?: true
+    catalogRunId?: string
     questionId?: string
     questionKind?: string
     reason?: string
