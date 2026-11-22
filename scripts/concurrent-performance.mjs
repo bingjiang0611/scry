@@ -3,22 +3,23 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync, symlinkSync, copyFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir, loadavg, cpus } from 'node:os'
+import { loadavg, cpus } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
-import { stopOwnedApp } from './owned-app-processes.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
 import { summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
+import { stopConcurrentApp, writeConcurrentAppEntry } from './concurrent-performance-launch.mjs'
+import { daemonSupportFiles } from './session-open-bench-daemon.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
 assert.ok([1, 3, 5].includes(count), 'Expected N=1/3/5')
 const expectedHookStartsPerSession = Number(process.argv[3] ?? 42)
 assert.ok([2, 42].includes(expectedHookStartsPerSession), 'Expected 2 lifecycle-only or 42 full CLI receipts/session')
-const temp = mkdtempSync(join(tmpdir(), `scry-concurrent-n${count}-`))
+const temp = realpathSync(mkdtempSync(`/tmp/scry-concurrent-n${count}-`))
 const home = join(temp, 'home')
 const userData = join(temp, 'userData')
 const workspaces = Array.from({ length: count }, (_, index) => join(home, `workspace-${index}`))
@@ -34,7 +35,9 @@ const output = []
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = ['scripts/concurrent-performance.mjs', 'scripts/concurrent-performance-probe.cjs',
   'scripts/concurrent-performance.config.ts', 'scripts/fixtures/concurrent-performance-provider.ts', 'scripts/native-ui-pointer.mjs',
-  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs']
+  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs',
+  'scripts/concurrent-performance-launch.mjs', 'scripts/smoke-app-entries.mjs',
+  'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-bench-mode.mjs', ...daemonSupportFiles]
 const harnessHash = hash(files.map(path => readFileSync(join(root, path))).join('\0'))
 const artifactHash = () => hash(['out', 'packages/turn-recorder-cli/dist'].flatMap(dir =>
   readdirSync(join(root, dir), { recursive: true, withFileTypes: true }).filter(entry => entry.isFile()).map(entry =>
@@ -71,17 +74,7 @@ try {
   // Seed only the temporary App's existing project authority, as other native fixtures do.
   writeFileSync(join(userData, 'recent-folders.json'), JSON.stringify(workspaces))
   const bootstrap = join(temp, 'app')
-  mkdirSync(bootstrap)
-  writeFileSync(join(bootstrap, 'package.json'), JSON.stringify({ name: 'scry-concurrent-measurement', version: '0.0.0', main: 'main.cjs' }))
-  writeFileSync(join(bootstrap, 'main.cjs'), `
-    const { app } = require('electron');
-    app.setAppPath(${JSON.stringify(root)});
-    require(${JSON.stringify(probe)});
-    // Hidden native fixture, but foreground renderer workload (including visibility-gated polling).
-    app.on('browser-window-created', (_event, win) => win.webContents.setBackgroundThrottling(false));
-    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);
-    require(${JSON.stringify(join(root, 'out/main/index.js'))});
-  `)
+  writeConcurrentAppEntry(bootstrap, root, probe)
   const server = createServer()
   await new Promise(ready => server.listen(0, '127.0.0.1', ready))
   const port = server.address().port
@@ -200,7 +193,7 @@ try {
   await evaluate('new Promise(r => setTimeout(r, 3000))')
   const closing = child
   child = null
-  cleanup = await stopOwnedApp(closing)
+  cleanup = await stopConcurrentApp(closing, userData)
   const paintTrace = cdp.trace
   cdp.close(); cdp = null
   writeFileSync(appLog, output.join(''))
@@ -277,5 +270,5 @@ try {
   process.exitCode=1
 } finally {
   cdp?.close()
-  if(child) { const closing=child; child=null; const cleanup=await stopOwnedApp(closing); writeFileSync(join(temp,'cleanup.json'),JSON.stringify(cleanup)) }
+  if(child) { const closing=child; child=null; const cleanup=await stopConcurrentApp(closing, userData); writeFileSync(join(temp,'cleanup.json'),JSON.stringify(cleanup)) }
 }
