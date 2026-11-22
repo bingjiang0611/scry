@@ -4,9 +4,12 @@ import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderAdapter, ProviderRunRequest } from '../../src/main/providers/types'
 import { HistoricalInput } from '../../src/main/providers/historical-input'
+import { hookTreeTimeBinary, requireHookTreeTimer } from '../concurrent-performance-timer.mjs'
 
 // Offline, fixed-rate workload. Hook payloads and tool evidence use the same identities.
-export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'claude' | 'codex' | 'pi'): ReturnType<ProviderAdapter['run']> {
+export function runConcurrentFixture(
+  request: ProviderRunRequest, providerId: 'claude' | 'codex' | 'pi', timeBinary = hookTreeTimeBinary
+): ReturnType<ProviderAdapter['run']> {
   assert.equal(providerId, 'claude')
   assert.ok(request.cwd && request.managedRecorder && request.managedRecorderIdentity)
   const cwd = request.cwd
@@ -21,7 +24,7 @@ export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'c
   const hookTrees: Array<{ argv: string[]; code: number; stderr: string }> = []
   const hook = async (name: string, extra: Record<string, unknown> = {}) => {
     const argv = ['/bin/sh', join(cwd, '.scry/provider-hook.sh'), providerId, name]
-    const child = spawn('/usr/bin/time', ['-p', ...argv], {
+    const child = spawn(timeBinary, ['-p', ...argv], {
       cwd,
       env: { ...process.env, SCRY_RECORDER_MANAGED: '1', SCRY_MANAGED_RUN_ID: identity.runId,
         SCRY_MANAGED_PROMPT_HASH: identity.promptHash,
@@ -41,6 +44,7 @@ export function runConcurrentFixture(request: ProviderRunRequest, providerId: 'c
     hookTrees.push({ argv, code, stderr: error })
   }
   const promise = Promise.resolve().then(async () => {
+    await requireHookTreeTimer(timeBinary)
     const startedAt = Date.now()
     request.onExternalSessionId?.(sessionId)
     const history = new HistoricalInput(request)

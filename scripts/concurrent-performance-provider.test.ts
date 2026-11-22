@@ -1,14 +1,20 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { runConcurrentFixture } from './fixtures/concurrent-performance-provider'
 
-it('loads Hook instrumentation from a path containing spaces and double quotes', async () => {
+it.each(['system', 'missing'] as const)('handles Hook timing with a %s executable', async time => {
   const root = await mkdtemp(join(tmpdir(), 'scry fixture "quoted" '))
   const cwd = join(root, 'workspace')
   const marker = join(root, 'loaded.txt')
   const ledger = join(root, 'receipts.jsonl')
+  const missingTime = join(root, 'missing-time')
+  const canTime = time === 'system' && await access('/usr/bin/time', constants.X_OK).then(() => true, error => {
+    if (['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) return false
+    throw error
+  })
   const probe = join(root, 'probe "quoted".cjs')
   await mkdir(join(cwd, '.scry'), { recursive: true })
   await writeFile(probe, `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'loaded\\n')`)
@@ -20,9 +26,15 @@ it('loads Hook instrumentation from a path containing spaces and double quotes',
     const run = runConcurrentFixture({
       runId: 'quoted-path-fixture', prompt: 'fixture', cwd, attachments: [], emit: () => {},
       managedRecorder: true, managedRecorderIdentity: { runId: 'quoted-path-fixture', promptHash: 'fixture-hash' }
-    }, 'claude')
+    }, 'claude', time === 'missing' ? missingTime : undefined)
     // Exercise both lifecycle Hooks without running the 20-second streaming workload.
     run.interrupt()
+    if (!canTime) {
+      await expect(run.promise).rejects.toThrow('Whole Hook-tree timing requires an executable time binary')
+      await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(ledger, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      return
+    }
     const result = await run.promise
     expect(result.status).toBe('interrupted')
     expect(await readFile(marker, 'utf8')).toBe('loaded\nloaded\n')

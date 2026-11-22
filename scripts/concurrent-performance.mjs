@@ -12,6 +12,7 @@ import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
 import { readDaemonHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
 import { writeConcurrentAppEntry } from './concurrent-performance-launch.mjs'
+import { requireHookTreeTimer } from './concurrent-performance-timer.mjs'
 import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 import { daemonServingEvidence, daemonSupportFiles } from './session-open-bench-daemon.mjs'
 
@@ -20,6 +21,7 @@ const count = Number(process.argv[2] ?? 1)
 assert.ok([1, 3, 5].includes(count), 'Expected N=1/3/5')
 const expectedHookStartsPerSession = Number(process.argv[3] ?? 42)
 assert.ok([2, 42].includes(expectedHookStartsPerSession), 'Expected 2 lifecycle-only or 42 full CLI receipts/session')
+await requireHookTreeTimer()
 const temp = realpathSync(mkdtempSync(`/tmp/scry-concurrent-n${count}-`))
 const home = join(temp, 'home')
 const userData = join(temp, 'userData')
@@ -37,7 +39,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const files = ['scripts/concurrent-performance.mjs', 'scripts/concurrent-performance-probe.cjs',
   'scripts/concurrent-performance.config.ts', 'scripts/fixtures/concurrent-performance-provider.ts', 'scripts/native-ui-pointer.mjs',
   'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs',
-  'scripts/concurrent-performance-launch.mjs', 'scripts/smoke-app-entries.mjs',
+  'scripts/concurrent-performance-launch.mjs', 'scripts/concurrent-performance-timer.mjs', 'scripts/smoke-app-entries.mjs',
   'scripts/owned-daemon-app.mjs', 'scripts/owned-app-processes.mjs',
   'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-bench-mode.mjs', ...daemonSupportFiles]
 const harnessHash = hash(files.map(path => readFileSync(join(root, path))).join('\0'))
