@@ -7,7 +7,8 @@ import type { SideChatCascade } from './conversation-delete'
 const showMessageBox = vi.hoisted(() => vi.fn(async () => ({ response: 0 })))
 vi.mock('electron', () => ({ dialog: { showMessageBox } }))
 
-const { registerSessionDeletionHandlers } = await import('./session-deletion')
+const { createSessionLifecycle } = await import('./session-lifecycle')
+const { confirmWithDialog, notifyWithDialog } = await import('./session-dialogs')
 
 const cwd = '/workspace'
 const row: AppSession = { sessionId: 'app-session', externalSessionId: 'native-session', providerId: 'claude', cwd,
@@ -26,8 +27,11 @@ function setup(cascade: Partial<SideChatCascade>, overrides: Record<string, unkn
     run: vi.fn(async (scope) => { order.push('run'); return cascade.run ? cascade.run(scope) : { deleted: [], retained: [], failed: [] } })
   }
   const unexpected = (): never => { throw new Error('unexpected dependency') }
-  const { deleteOneSession } = registerSessionDeletionHandlers({
-    handleTrusted: () => {},
+  const { deleteOneSession } = createSessionLifecycle({
+    publishDataUpdated: () => {},
+    publishDeleteProgress: () => {},
+    confirm: confirmWithDialog(() => null),
+    notifyFailure: notifyWithDialog(() => null),
     getRuns: () => ({ unsettledStates: () => [] }) as never,
     appSessionStore: () => ({ load: () => [row], remove: removed }) as never,
     conversationStore: unexpected,
@@ -39,10 +43,7 @@ function setup(cascade: Partial<SideChatCascade>, overrides: Record<string, unkn
     sessionDiffBaselines: { discard: unexpected } as never,
     sessionBaselineKey: unexpected,
     recordingBlockedSessions: new Set(),
-    getWindow: () => null,
-    rendererCanReceive: () => false,
     appUserDataDir: '/unused-by-these-cases',
-    isOwnedTestApp: true,
     requestRunStop: unexpected,
     prepareConversationDeletion: unexpected,
     sideChatCascade,
@@ -51,7 +52,7 @@ function setup(cascade: Partial<SideChatCascade>, overrides: Record<string, unkn
     adoptingSessionKeys: new Set(),
     dockBadge: { remove: unexpected },
     ...overrides
-  } as unknown as Parameters<typeof registerSessionDeletionHandlers>[0])
+  } as unknown as Parameters<typeof createSessionLifecycle>[0])
   const request = { providerId: 'claude' as const, cwd, externalSessionId: 'native-session' }
   return { deleteOneSession, sideChatCascade, order, removed, request, event: {} as IpcMainInvokeEvent }
 }

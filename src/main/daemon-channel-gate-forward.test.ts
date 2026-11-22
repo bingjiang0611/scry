@@ -6,7 +6,6 @@ import { DAEMON_FORWARD_CHANNELS, DAEMON_LOCAL_OP_CHANNELS, gateDaemonChannel, i
 // Route `forward`: the daemon already serves the op to paired devices, so the App sends
 // that op's own request for the renderer's channel and maps the reply back.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const routing = ['daemon-ipc-routing.json', 'daemon-ipc-routing-workbench.json']
   .flatMap((file) => (JSON.parse(readFileSync(join(process.cwd(), 'scripts', file), 'utf8')) as { channels: Array<{ channel: string; route: string; op?: string }> }).channels)
 
@@ -23,7 +22,7 @@ describe('forwarded channels', () => {
     const after = vi.fn((value: unknown) => ({ after: value }))
     undo.push(installDaemonChannelResultHandler('test:forwarded', after))
     const listener = vi.fn()
-    const gated = gateDaemonChannel('test:forwarded', listener, ON) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
+    const gated = gateDaemonChannel('test:forwarded', listener) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
     await expect(gated({}, 'a', 1)).resolves.toEqual({ after: { ok: true } })
     expect(forwarder).toHaveBeenCalledWith({ op: 'sessionAction', action: 'rename', args: ['a', 1] }, false)
     expect(listener).not.toHaveBeenCalled()
@@ -32,7 +31,7 @@ describe('forwarded channels', () => {
   it('is a named absence until the daemon client is ready', async () => {
     Object.assign(DAEMON_FORWARD_CHANNELS as Record<string, unknown>, { 'test:forwarded': { op: 'commands', read: true, request: () => ({ op: 'commands' }) } })
     undo.push(() => { delete (DAEMON_FORWARD_CHANNELS as Record<string, unknown>)['test:forwarded'] })
-    const gated = gateDaemonChannel('test:forwarded', vi.fn(), ON) as unknown as (event: unknown) => Promise<unknown>
+    const gated = gateDaemonChannel('test:forwarded', vi.fn()) as unknown as (event: unknown) => Promise<unknown>
     await expect(gated({})).rejects.toThrow('daemon_capability_unavailable:test:forwarded')
   })
 

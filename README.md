@@ -58,13 +58,13 @@ npm run dev
 
 ### 后台服务开发流程
 
-打包版、开发构建（`npm run dev`）与 `SCRY_TEST_APP=1` 测试实例均默认运行在后台服务模式（`SCRY_HOST_DAEMON=1`），Agent、会话台账与终端由本机 `daemon` 托管：
+打包版、开发构建（`npm run dev`）与 `SCRY_TEST_APP=1` 测试实例都运行在后台服务模式：Agent、会话台账、SQLite、终端、源代码管理与 recorder 只由本机 `daemon` 托管，App 主进程只负责窗口、界面与系统交互：
 
 - **数据目录共享提醒**：开发构建（`npm run dev`）默认与日常安装的打包版 App **共用同一份 `userData` 数据目录**（macOS 为 `~/Library/Application Support/scry`，Linux 为 `~/.config/scry`）。若日常打包版 daemon 正在运行，开发构建不会自动替换它，而会弹出版本不一致确认框；如需与日常数据完全隔离，请在开发或验证时显式传入临时 `--user-data-dir`（例如 `/tmp/scry-dev-...`）。
 - **改动 daemon 代码后**：重新构建或重启 `npm run dev` 时，开发构建仅在同时满足以下条件时才自动平滑重启后台服务（不弹阻塞确认框）：① 目标 daemon 明确报告为未打包构建（`isPackaged: false`）或其锁持有者命令属于当前检出的 `out/main/daemon.js`；② 发信号前立即复核 `activeRuns` 严格等于 `0`。只要目标是打包版、无法归属当前检出、存在活动 run 或无法确认空闲，均退回确认对话框。打包版自身始终弹窗确认，绝不静默替换。
 - **手动控制**：可在「设置 → 后台服务」随时点击「重启后台服务」或「退出 Scry 与后台服务」。
 - **测试实例隔离**：`SCRY_TEST_APP=1` 强制要求隔离的 `--user-data-dir`（不得等于默认的 `appData/<name>`，否则启动与 daemon 模式均 fail-closed 拒绝），使用独立的 `<userData>/daemon/*.sock`，默认禁用系统登录服务，不会连接或拉起日常 `com.scry.daemon`。
-- **逃生开关**：临时需要对照或回退进程内模式时，显式传入 `SCRY_HOST_DAEMON=0`（例如 `SCRY_HOST_DAEMON=0 npm run dev`）。
+- **没有进程内模式**：S3 已删除 App 主进程内的运行时，`SCRY_HOST_DAEMON=0` 逃生开关随之移除；显式设置它只会在启动日志里留下一行“已忽略”的警告，App 仍连接后台服务。
 
 **Linux 用户从这里开始：[安装与首次使用指南](docs/linux-getting-started.md)**（获取包/源码构建、安装启动、Provider 与项目选择、升级卸载、排错及目标机验收清单）。
 

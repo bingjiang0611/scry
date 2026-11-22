@@ -47,8 +47,6 @@ import type { LazyDaemonRunSurface } from './daemon-run-lazy'
 
 type TrustedRegistrar = <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
 
-const DISABLED: BackgroundServiceConnection = { state: 'unavailable', reason: 'daemon_mode_disabled' }
-
 function refuseArguments(args: readonly unknown[]): void {
   if (args.length > 0) throw new Error('invalid_request')
 }
@@ -59,14 +57,12 @@ function requireBooleanArgument(args: readonly unknown[]): boolean {
 }
 
 export function createAppLoginStartManager(options: {
-  daemonMode: boolean
   env?: NodeJS.ProcessEnv
-}): LoginStartManager {
+} = {}): LoginStartManager {
   const userDataDir = app.getPath('userData')
   const appPath = typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd()
   const resourcesPath = process.resourcesPath ?? process.cwd()
   return createLoginStartManager({
-    daemonMode: options.daemonMode,
     target: {
       executable: process.execPath,
       appPath,
@@ -79,20 +75,20 @@ export function createAppLoginStartManager(options: {
   })
 }
 
-export function createDaemonLoginStartBridge(daemonMode: boolean) {
+export function createDaemonLoginStartBridge() {
   let fallback: BackgroundServiceRuntimeNotice['serviceLaunchFallback']
   let listener: ((next: BackgroundServiceRuntimeNotice['serviceLaunchFallback']) => void) | undefined
-  const loginStart = daemonMode ? createAppLoginStartManager({ daemonMode: true }) : undefined
+  const loginStart = createAppLoginStartManager()
   return {
-    daemonModeOptions: loginStart ? {
+    daemonModeOptions: {
       loginStart,
       onServiceLaunchFallback: (next: BackgroundServiceRuntimeNotice['serviceLaunchFallback']) => {
         fallback = next
         listener?.(next)
       }
-    } : {},
+    },
     handlerOptions: {
-      ...(loginStart ? { loginStart } : {}),
+      loginStart,
       serviceLaunchFallback: () => fallback,
       onServiceLaunchFallback: (cb: (next: BackgroundServiceRuntimeNotice['serviceLaunchFallback']) => void) => { listener = cb }
     }
@@ -101,8 +97,8 @@ export function createDaemonLoginStartBridge(daemonMode: boolean) {
 
 export function registerBackgroundServiceHandlers(input: {
   handleTrusted: TrustedRegistrar
-  /** The App's daemon client; absent with the switch off. */
-  daemon: LazyDaemonRunSurface | undefined
+  /** The App's daemon client. */
+  daemon: LazyDaemonRunSurface
   getWindow: () => BrowserWindow | null
   /** Shared login-start manager (also used by appDaemonModeDeps for service launch). */
   loginStart?: LoginStartManager
@@ -128,7 +124,7 @@ export function registerBackgroundServiceHandlers(input: {
     readIdentity,
     ...input.stopDepsOverride
   }
-  const loginStart = input.loginStart ?? createAppLoginStartManager({ daemonMode: daemon !== undefined, env })
+  const loginStart = input.loginStart ?? createAppLoginStartManager({ env })
 
   let latestConfigMismatch: BackgroundServiceRuntimeNotice['remoteConfigMismatch']
   let latestFallback: BackgroundServiceRuntimeNotice['serviceLaunchFallback'] = input.serviceLaunchFallback?.()
@@ -154,14 +150,13 @@ export function registerBackgroundServiceHandlers(input: {
   })
 
   const connection = async (): Promise<BackgroundServiceConnection> =>
-    daemon ? connectionFromMode(await daemon.ready(), appVersion) : DISABLED
+    connectionFromMode(await daemon.ready(), appVersion)
   // The daemon's own report, asked without the channel's guard (which is this status).
   const selfReport = (): Promise<unknown> => callDaemonChannel('remote:backgroundService:status', [])
   const expectedRemoteConfig = () => computeEffectiveRemoteConfig(env, isPackaged)
   const hostCliExperimental = isHostCliExperimentalEnabled(env)
   const hostCliPath = isPackaged && process.resourcesPath ? join(process.resourcesPath, 'bin', 'scry-host') : undefined
   const status = () => readBackgroundServiceStatus({
-    daemonMode: daemon !== undefined,
     userDataDir,
     connection,
     selfReport,
@@ -181,7 +176,6 @@ export function registerBackgroundServiceHandlers(input: {
     return response
   }
   const actionDeps: BackgroundServiceActionDeps = {
-    daemonMode: daemon !== undefined,
     connection,
     activeRuns: async () => {
       if ((await connection()).state !== 'ready') return undefined
@@ -190,8 +184,8 @@ export function registerBackgroundServiceHandlers(input: {
     prepareStop: () => prepareBackgroundServiceStop(stopDeps),
     stop: (holder) => stopBackgroundService(holder, stopDeps),
     confirm: async (action, runs) => await show(confirmPrompt(action, runs)) === CONFIRM_BUTTON,
-    holdLaunches: () => daemon?.holdLaunches() ?? (() => undefined),
-    reconnect: async () => daemon ? connectionFromMode(await daemon.restart(), appVersion) : DISABLED,
+    holdLaunches: () => daemon.holdLaunches(),
+    reconnect: async () => connectionFromMode(await daemon.restart(), appVersion),
     // The credential the daemon refused; its 0600 file is the App's own (daemon-client.ts).
     discardLocalCredential: () => rm(daemonClientPaths(stopDeps.paths.stateDirectory, userDataDir).statePath, { force: true }),
     requestLocalEnrollment: () => requestLocalEnrollment(stopDeps.paths.stateDirectory),
@@ -234,7 +228,6 @@ export function registerBackgroundServiceHandlers(input: {
     return Boolean(row && daemonCommandBelongsToCheckout(row.command, appPath))
   }
   const setLoginStart = (enabled: boolean) => exclusive(() => setBackgroundServiceLoginStart(enabled, {
-    daemonMode: daemon !== undefined,
     precheckEnable: () => loginStart.precheckEnable(),
     confirmEnable: async (policyEnvKeys) => await show(confirmLoginStartPrompt(policyEnvKeys)) === CONFIRM_BUTTON,
     isDaemonRunning: async () => (await prepareBackgroundServiceStop(stopDeps)).status === 'running',
@@ -244,7 +237,6 @@ export function registerBackgroundServiceHandlers(input: {
 
   const setCliApproval = (enabled: boolean) => exclusive(() => setHostCliApproval(enabled, {
     experimentalEnabled: hostCliExperimental,
-    daemonMode: daemon !== undefined,
     connection,
     confirmEnable: async () => await show(confirmHostCliApprovalPrompt()) === CONFIRM_BUTTON,
     apply: async (value) => { await callDaemonChannel('remote:hostAdmin:setCliApproval', [value]) }
@@ -264,56 +256,53 @@ export function registerBackgroundServiceHandlers(input: {
     return await setCliApproval(enabled)
   })
 
-  // Switch on: the gate routes the status channel to the daemon; the App's part comes
-  // first and answers it, asking the daemon itself only while connected.
-  if (daemon) {
-    // Reconcile moved-App service file once explicitly (status() stays read-only).
-    loginStart.reconcileMovedApp()
-    installDaemonChannelGuard('remote:backgroundService:status', async (args) => {
-      refuseArguments(args)
-      return { result: await status() }
-    })
-    installDaemonChannelGuard('remote:hostAdmin:setCliApproval', async (args) => {
-      const enabled = requireBooleanArgument(args)
-      return { result: await setCliApproval(enabled) }
-    })
-    // The one startup prompt for a daemon of another version (approved 2026-11-12): told
-    // by the lazy surface when it connects on its own, so no probe is added and nothing
-    // waits on the answer. 重启后台服务 is the restart channel's own action.
-    const promptMismatch = createVersionMismatchPrompt({
-      daemonMode: true,
-      autoRestartIdle: !isPackaged,
-      canAutoRestartTarget,
-      ask: show,
-      restart,
-      restartIdle,
-      reportFailure: async (prompt) => { await show(prompt) },
-      actionInProgress: () => busy
-    })
-    daemon.onOutcome((result) => {
-      void promptMismatch(
-        connectionFromMode(result, appVersion),
-        {
-          ...(result.runningActiveRuns !== undefined ? { activeRuns: result.runningActiveRuns } : {}),
-          ...(result.runningIsPackaged !== undefined ? { isPackaged: result.runningIsPackaged } : {}),
-          ...(result.probeActiveRuns ? { probeActiveRuns: result.probeActiveRuns } : {})
-        }
-      ).catch((error: unknown) => {
-        console.warn('[background-service] version mismatch prompt failed', error)
-      })
-      if (result.status === 'ready') {
-        void selfReport().then((raw) => {
-          const report = parseSelfReport(raw)
-          if (report?.launchedBy === 'service' && report.remoteConfig) {
-            const expected = expectedRemoteConfig()
-            const diffs = diffRemoteConfigs(expected, report.remoteConfig)
-            latestConfigMismatch = diffs.length > 0 ? { diffs, expected, actual: report.remoteConfig } : undefined
-          } else {
-            latestConfigMismatch = undefined
-          }
-          pushRuntimeNotice()
-        }, () => undefined)
+  // The gate routes the status channel to the daemon; the App's part comes first and
+  // answers it, asking the daemon itself only while connected.
+  // Reconcile moved-App service file once explicitly (status() stays read-only).
+  loginStart.reconcileMovedApp()
+  installDaemonChannelGuard('remote:backgroundService:status', async (args) => {
+    refuseArguments(args)
+    return { result: await status() }
+  })
+  installDaemonChannelGuard('remote:hostAdmin:setCliApproval', async (args) => {
+    const enabled = requireBooleanArgument(args)
+    return { result: await setCliApproval(enabled) }
+  })
+  // The one startup prompt for a daemon of another version (approved 2026-11-12): told
+  // by the lazy surface when it connects on its own, so no probe is added and nothing
+  // waits on the answer. 重启后台服务 is the restart channel's own action.
+  const promptMismatch = createVersionMismatchPrompt({
+    autoRestartIdle: !isPackaged,
+    canAutoRestartTarget,
+    ask: show,
+    restart,
+    restartIdle,
+    reportFailure: async (prompt) => { await show(prompt) },
+    actionInProgress: () => busy
+  })
+  daemon.onOutcome((result) => {
+    void promptMismatch(
+      connectionFromMode(result, appVersion),
+      {
+        ...(result.runningActiveRuns !== undefined ? { activeRuns: result.runningActiveRuns } : {}),
+        ...(result.runningIsPackaged !== undefined ? { isPackaged: result.runningIsPackaged } : {}),
+        ...(result.probeActiveRuns ? { probeActiveRuns: result.probeActiveRuns } : {})
       }
+    ).catch((error: unknown) => {
+      console.warn('[background-service] version mismatch prompt failed', error)
     })
-  }
+    if (result.status === 'ready') {
+      void selfReport().then((raw) => {
+        const report = parseSelfReport(raw)
+        if (report?.launchedBy === 'service' && report.remoteConfig) {
+          const expected = expectedRemoteConfig()
+          const diffs = diffRemoteConfigs(expected, report.remoteConfig)
+          latestConfigMismatch = diffs.length > 0 ? { diffs, expected, actual: report.remoteConfig } : undefined
+        } else {
+          latestConfigMismatch = undefined
+        }
+        pushRuntimeNotice()
+      }, () => undefined)
+    }
+  })
 }

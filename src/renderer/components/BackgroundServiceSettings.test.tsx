@@ -81,12 +81,6 @@ describe('BackgroundServicePanel', () => {
     expect(html).toContain('远程访问未启用')
   })
 
-  it('offers nothing to operate with the switch off', () => {
-    const html = render({ mode: 'in-process', userDataDir: '/u' })
-    expect(html).toContain('后台服务模式未启用')
-    expect(buttons(html)).toEqual(['刷新'])
-  })
-
   it('disables every button while an action or a read is running', () => {
     const html = render(daemon(), { busy: 'restart' })
     expect(html).toContain('重启后台服务…')

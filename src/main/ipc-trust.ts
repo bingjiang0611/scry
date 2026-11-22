@@ -15,6 +15,11 @@ export function assertTrustedIpcEvent(event: IpcMainInvokeEvent, win: BrowserWin
   }
 }
 
+/**
+ * The App's registrar: every privileged channel passes here, so this is where a channel
+ * the daemon answers is forwarded to it and an unclassified one is refused
+ * (daemon-channel-gate.ts); the trust check still runs first on every call.
+ */
 export function registerTrustedIpcHandler<TArgs extends unknown[], TResult>(
   ipcMain: Pick<IpcMain, 'handle'>,
   channel: string,
@@ -22,9 +27,21 @@ export function registerTrustedIpcHandler<TArgs extends unknown[], TResult>(
   rendererEntryUrl: string,
   privilegedListener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult
 ): void {
-  // Every privileged channel passes here, so this is where daemon mode refuses the ones
-  // it has not migrated; the trust gate below still runs first on every call.
-  const listener = gateDaemonChannel(channel, privilegedListener)
+  registerTrustCheckedListener(ipcMain, channel, getWindow, rendererEntryUrl, gateDaemonChannel(channel, privilegedListener))
+}
+
+/**
+ * The trust check and timing around one listener, without the daemon gate. The App uses
+ * it only through registerTrustedIpcHandler; tests use it to drive a shared handler table
+ * (the daemon's implementation of a channel) behind the same trust check.
+ */
+export function registerTrustCheckedListener<TArgs extends unknown[], TResult>(
+  ipcMain: Pick<IpcMain, 'handle'>,
+  channel: string,
+  getWindow: () => BrowserWindow | null,
+  rendererEntryUrl: string,
+  listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult
+): void {
   ipcMain.handle(channel, (event, ...args) => {
     assertTrustedIpcEvent(event, getWindow(), rendererEntryUrl)
     // Measure privileged work only after the existing trust gate. Never inspect IPC payloads or

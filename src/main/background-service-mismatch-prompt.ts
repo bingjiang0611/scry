@@ -52,7 +52,6 @@ export interface VersionMismatchMeta {
 }
 
 export interface VersionMismatchPromptDeps {
-  daemonMode: boolean
   /**
    * Development builds only (`!app.isPackaged`): when true and the mismatched daemon
    * proves it is unpackaged / belongs to this checkout AND has `activeRuns === 0`
@@ -82,7 +81,7 @@ export interface VersionMismatchPromptDeps {
 }
 
 export type VersionMismatchPromptOutcome =
-  | { status: 'not-shown'; reason: 'daemon-mode-disabled' | 'not-mismatch' | 'already-shown' | 'action-in-progress' }
+  | { status: 'not-shown'; reason: 'not-mismatch' | 'already-shown' | 'action-in-progress' }
   | { status: 'later' }
   | { status: 'restart'; result: BackgroundServiceActionResult }
 
@@ -93,7 +92,6 @@ export function createVersionMismatchPrompt(
 ): (connection: BackgroundServiceConnection, meta?: VersionMismatchMeta) => Promise<VersionMismatchPromptOutcome> {
   let spent = false
   return async (connection, meta) => {
-    if (!deps.daemonMode) return { status: 'not-shown', reason: 'daemon-mode-disabled' }
     if (connection.state !== 'version-mismatch') return { status: 'not-shown', reason: 'not-mismatch' }
     if (spent) return { status: 'not-shown', reason: 'already-shown' }
     // Spent before the first await: a second detection while the dialog is open, or

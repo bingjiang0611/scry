@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
-import { createBoundarySampler, createOutputCapture, freePort, inProcessBenchEnv, openRendererSession, openSnapshotChannel,
+import { createBoundarySampler, createOutputCapture, freePort, benchEnv, openRendererSession, openSnapshotChannel,
   readRendererMount, readSettlement, watchChildClose, writeBootstrap } from './session-concurrency-electron.mjs'
 import { performHistorySwitches, prepareHistoryTargets, waitForAdmittedTasks } from './session-concurrency-ui.mjs'
 import { driveConcurrencyRun, installConcurrencyProbe } from './session-concurrency-page.mjs'
@@ -22,6 +22,7 @@ import { parseConcurrency, parseTaskCount, planAdmissionTargets, planHistorySwit
   from './session-concurrency-contract.mjs'
 import { buildConcurrencyReport } from './session-concurrency-report.mjs'
 import { validateConcurrencyReport } from './session-concurrency-validate.mjs'
+import { noteDaemonNotSampled } from './daemon-sampling-note.mjs'
 
 // P0 concurrency attribution: real hidden Electron process tree, temp userData and one workspace per task,
 // offline smoke adapter. Fixed total work (tasks) with a bounded in-flight limit (concurrency), no warmup, no
@@ -130,7 +131,7 @@ try {
   const launchStarted = performance.now()
   ownedChild = spawn(electron, [bootstrap, `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--no-first-run'], {
-    env: inProcessBenchEnv(home),
+    env: benchEnv(home),
     // The extra 'ipc' entry is the fixture's private snapshot channel: fixed request/reply only.
     stdio: ['ignore', 'pipe', 'pipe', 'ipc']
   })
@@ -278,6 +279,7 @@ try {
     if (report.status !== 'measured') process.exitCode = 1
     assert.equal(process.exitCode === 1, report.status !== 'measured', 'exit code must match the reported status')
     console.log(JSON.stringify(report, null, 2))
+    noteDaemonNotSampled('session-concurrency-bench')
   } catch (error) {
     if (report) console.error('SCRY_CONCURRENCY_REPORT', JSON.stringify(report, null, 2))
     throw error

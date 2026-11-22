@@ -163,7 +163,6 @@ export function createEvaluate(cdp) {
 }
 
 export function launch({ spawn, executable, devApp, root, port, userDataDir, home, appendLog, env = {} }) {
-  const inProcess = (env.SCRY_HOST_DAEMON ?? process.env.SCRY_HOST_DAEMON) === '0'
   const child = spawn(executable, [
     ...(devApp ? [root] : []),
     `--remote-debugging-port=${port}`,
@@ -177,7 +176,7 @@ export function launch({ spawn, executable, devApp, root, port, userDataDir, hom
       ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
       SCRY_TEST_APP: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1',
-      ...(inProcess ? {} : { SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }),
+      SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
       SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi',
       SCRY_REMOTE_HOST: '1',
       SCRY_REMOTE_RELAY_ENABLED: '0',

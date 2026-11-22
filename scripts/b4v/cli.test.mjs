@@ -21,13 +21,14 @@ describe('b4v command lines', () => {
     expect(() => parseTimingArgs(['--max-load', '-1'])).toThrow(/max-load/)
   })
 
-  it('the switch is explicit in both directions', () => {
-    expect(modeEnv('daemon')).toMatchObject({ SCRY_HOST_DAEMON: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0' })
-    expect(modeEnv('switch-off')).toMatchObject({ SCRY_HOST_DAEMON: '0', SCRY_REMOTE_HOST: '0' })
-    expect(modeEnv('switch-off').SCRY_DAEMON_SMOKE_PROVIDER).toBeUndefined()
+  it('runs every App against the daemon and refuses the retired switch-off control (S3)', () => {
+    expect(modeEnv('daemon')).toMatchObject({ SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0', SCRY_DAEMON_SMOKE_PROVIDER: '1' })
+    expect(modeEnv('daemon').SCRY_HOST_DAEMON).toBeUndefined()
+    expect(() => modeEnv('switch-off')).toThrow(/switch_off_control_retired/)
     expect(() => modeEnv('on')).toThrow(/unknown mode/)
-    expect(caseMode('switch-off')).toBe('switch-off')
+    expect(CASES).not.toContain('switch-off')
     expect(caseMode('daemon-running')).toBe('daemon')
+    expect(parseArgs([]).noControls).toBe(true)
   })
 
   it('reads the App startup trace from its log', () => {

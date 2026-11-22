@@ -39,7 +39,6 @@ export interface LazyDaemonRunSurface extends DaemonRunSurface {
 }
 
 const FAILURE_STATUS = {
-  disabled: 'daemon_mode_disabled',
   'version-mismatch': 'daemon_version_mismatch',
   'credential-unavailable': 'daemon_credential_unavailable',
   'device-not-authorized': 'daemon_device_not_authorized',

@@ -92,7 +92,7 @@ try {
   child = launch({
     spawn, executable: electron, devApp: true, root, port, userDataDir, home, appendLog,
     env: {
-      SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1',
+      SCRY_DAEMON_SMOKE_PROVIDER: '1',
       SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0',
       // Stage marks from both processes, so a stuck run can be placed on the timeline.
       SCRY_RUN_TIMING: '1', SCRY_PERF_LOG: '1'

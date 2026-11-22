@@ -1,5 +1,6 @@
 import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BUDGET_MS, lateRefusalNotice } from './daemon-run-admission'
 import { planDelivery } from './daemon-run-delivery'
+import { isConversationRunId } from './daemon-run-evidence'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
 import type { AgentQuestionResponse, AgentStopState } from '../shared/runtime'
@@ -350,7 +351,8 @@ export class DaemonRunRuntime {
   // The stamp ends when text first reaches the renderer; that is the number the user
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
-    this.#bridge.push(event)
+    // A conversation run reaches its own view only (isConversationRunId).
+    if (!isConversationRunId(cursor.scryRunId, cursor.runId)) this.#bridge.push(event)
     this.#deps.runTraces?.route(event)
     if (cursor.sawText || cursor.stamp === undefined) return
     if (event.stage !== 'text' && event.stage !== 'text_delta') return

@@ -185,9 +185,12 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
   // A ledger full of other parents' commands no longer blocks this parent: the full ledger
   // is read back first, rows the host can prove (here: never created) are settled, the
   // create goes through once, and nothing unresolved is left behind.
+  // The other parent is well-formed but absent, so the host can answer `not-found` for
+  // it; a malformed source id is refused before any lookup, which proves nothing and
+  // rightly keeps the row (findCreatedSideChat: an unreadable lookup stays unknown).
   const otherScopeRow = (index) => ({
     commandId: `structure-ledger-row-${index}`, scopeKey: 'other-scope',
-    source: { kind: 'conversation', conversationId: 'structure-ledger-parent' },
+    source: { kind: 'conversation', conversationId: '5b1f7a3e-0c2d-4e8f-9a1b-2c3d4e5f6a7b' },
     expectedThroughOrdinal: 1, expectedThroughRunId: 'structure-run',
     expectedPrefixFingerprint: 'a'.repeat(64), expectedManifestFingerprint: 'b'.repeat(64), createdAt: 1
   })

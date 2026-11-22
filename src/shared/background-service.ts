@@ -106,8 +106,6 @@ export interface BackgroundServiceSelfReport {
 }
 
 export type BackgroundServiceStatus =
-  // Switch off: there is no background service; runs live in this App.
-  | { mode: 'in-process'; userDataDir: string }
   | {
     mode: 'daemon'
     userDataDir: string

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DaemonClientError } from '../daemon-client'
 import { DaemonRunError } from '../daemon-run-transport'
-import { connectForRunMode, createDaemonRunMode, daemonModeEnabled, retryAfterReconnect } from './daemon-run-mode'
+import { connectForRunMode, createDaemonRunMode, retryAfterReconnect } from './daemon-run-mode'
 
-// The switch has to be boring: absent, the App keeps its in-process pipeline; present,
-// either the daemon is usable and owns the runs, or the reason it is not is returned.
+// Either the daemon is usable and owns the runs, or the reason it is not is returned:
+// there is no in-process pipeline to fall back to.
 // None of these paths may start a second daemon or write a credential it cannot protect.
 
 afterEach(() => { vi.unstubAllEnvs() })
@@ -37,14 +37,6 @@ describe('daemon reconnect policy', () => {
 })
 
 describe('daemon run mode', () => {
-  it('stays off unless the switch is exactly 1', async () => {
-    expect(daemonModeEnabled({})).toBe(false)
-    expect(daemonModeEnabled({ SCRY_HOST_DAEMON: 'true' })).toBe(false)
-    expect(daemonModeEnabled({ SCRY_HOST_DAEMON: '1' })).toBe(true)
-    const result = await createDaemonRunMode({ ...base, credentialCipher: cipher })
-    expect(result).toEqual({ status: 'disabled' })
-  })
-
   it('refuses before writing a credential it cannot protect', async () => {
     vi.stubEnv('SCRY_HOST_DAEMON', '1')
     const probe = vi.fn()

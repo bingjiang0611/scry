@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { DESKTOP_WORKBENCH_METHODS, type DesktopTerminalEvent, type DesktopTerminalEvents } from '../../shared/desktop-workbench'
+import type { DesktopTerminalEvent, DesktopTerminalEvents } from '../../shared/desktop-workbench'
+import { workbenchObject as object, workbenchText as text, type DesktopWorkbenchQuery } from './desktop-workbench-query'
 import { TERMINAL_MAX_DIMENSION, TERMINAL_MAX_INPUT_BYTES } from '../../shared/terminal'
 import type { WorkspaceFilePageRequest, WorkspaceListRequest } from '../../shared/workspace'
 import { createTerminalManager, type TerminalManager, type TerminalPtyFactory } from '../terminal-manager'
@@ -12,25 +13,13 @@ import {
   readWorkspaceFile, readWorkspaceFilePage, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile
 } from '../workspace-files'
 
-export interface DesktopWorkbenchQuery {
-  surface: keyof typeof DESKTOP_WORKBENCH_METHODS
-  cwd: string
-  method: string
-  args: unknown[]
-}
+export { parseDesktopWorkbenchQuery, type DesktopWorkbenchQuery } from './desktop-workbench-query'
+
 export interface DesktopWorkbenchHost {
   operations: { openPath: boolean; trashItem: boolean }
   request(peer: string, query: DesktopWorkbenchQuery, authorizePeer: () => void): Promise<unknown>
   release(peer: string): Promise<void>
   dispose(): Promise<void>
-}
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_workbench_request')
-  return value as Record<string, unknown>
-}
-function text(value: unknown, max = 4096, empty = false): string {
-  if (typeof value !== 'string' || (!empty && !value) || value.length > max || value.includes('\0')) throw new Error('invalid_workbench_request')
-  return value
 }
 function integer(value: unknown, min: number, max = Number.MAX_SAFE_INTEGER): number {
   if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw new Error('invalid_workbench_request')
@@ -40,16 +29,6 @@ function optionalText(value: unknown): string | undefined { return value === und
 function optionalInteger(value: unknown, min: number, max?: number): number | undefined {
   return value === undefined ? undefined : integer(value, min, max)
 }
-export function parseDesktopWorkbenchQuery(value: unknown): DesktopWorkbenchQuery {
-  const input = object(value)
-  const cwd = text(input.cwd)
-  const surface = input.surface
-  if (surface !== 'workspace' && surface !== 'sourceControl' && surface !== 'terminal') throw new Error('invalid_workbench_surface')
-  const method = text(input.method, 64)
-  if (!(DESKTOP_WORKBENCH_METHODS[surface] as readonly string[]).includes(method) || !Array.isArray(input.args) || input.args.length > 4) throw new Error('invalid_workbench_method')
-  return { surface, cwd, method, args: input.args }
-}
-
 interface TerminalScope {
   manager: TerminalManager
   output: TerminalOutputBridge

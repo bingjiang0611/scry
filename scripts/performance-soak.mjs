@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { freePort } from './electron-security-cdp.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
+import { noteDaemonNotSampled } from './daemon-sampling-note.mjs'
 
 const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
 const cycleLimit = requestedCycles !== null && Number.isSafeInteger(requestedCycles) && requestedCycles > 0 ? requestedCycles : null
@@ -122,9 +123,10 @@ async function main() {
     env: {
       ...process.env,
       HOME: home,
-      // Soak benchmark: measures Electron main [scry:perf]/[scry:resource] samples against the
-      // in-process smoke provider; keep explicit mode so flipping the default does not shift baseline.
-      SCRY_HOST_DAEMON: '0',
+      // Soak benchmark: Electron main [scry:perf]/[scry:resource] samples while the daemon
+      // runs the smoke provider (S3 removed the in-process arm).
+      SCRY_DAEMON_SMOKE_PROVIDER: '1',
+      SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
       ELECTRON_ENABLE_LOGGING: '1',
       SCRY_TEST_APP: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1',
@@ -391,6 +393,7 @@ async function main() {
     lastResource
   }
   console.log(`SCRY_PERFORMANCE_SOAK_RESULT=${JSON.stringify(report)}`)
+  noteDaemonNotSampled('performance-soak')
   cdp.close()
 }
 

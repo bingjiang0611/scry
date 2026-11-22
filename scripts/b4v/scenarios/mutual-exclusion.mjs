@@ -78,7 +78,7 @@ export async function run(ctx) {
   return runScenario(ctx, { id: 'mutual-exclusion', title: '同 provider/profile 互斥', mode: 'daemon', label: 'excl', plan: daemonPlan }, async ({ scenario, fixture }) => {
     const outcome = await exercise(ctx, scenario, fixture, 'daemon')
     if (!control || Object.values(control).includes('unknown')) {
-      recordNotRun(scenario, { id: 'matches-in-process', reason: control ? 'the switch-off control could not classify its own outcomes' : 'switch-off control did not complete (--no-controls or it aborted)' })
+      recordNotRun(scenario, { id: 'matches-in-process', reason: control ? 'the switch-off control could not classify its own outcomes' : 'no switch-off control: S3 removed the in-process App (--no-controls is always on)' })
     } else {
       recordStep(scenario, { id: 'matches-in-process', actual: { daemon: outcome, control },
         pass: outcome.sameSession === control.sameSession && outcome.newSession === control.newSession })

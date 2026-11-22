@@ -55,14 +55,17 @@ export async function freePort() {
 }
 
 /**
- * Timing benchmark env: observes main-process [scry:perf]/[scry:resource] and the private main
- * IPC snapshot channel with SCRY_ELECTRON_SMOKE_PROVIDER=1; keep explicit in-process mode.
+ * Timing benchmark env: the App with its daemon (S3 removed the in-process arm). It observes
+ * main-process [scry:perf]/[scry:resource] and the private main IPC snapshot channel; the
+ * daemon serves the smoke fixture.
  */
-export function inProcessBenchEnv(home, base = process.env) {
+export function benchEnv(home, base = process.env) {
+  const { SCRY_HOST_DAEMON: _retired, ...inherited } = base
   return {
-    ...base,
+    ...inherited,
     HOME: home,
-    SCRY_HOST_DAEMON: '0',
+    SCRY_DAEMON_SMOKE_PROVIDER: '1',
+    SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
     SCRY_TEST_APP: '1',
     SCRY_PERF_LOG: '1',
     ELECTRON_ENABLE_LOGGING: '1',

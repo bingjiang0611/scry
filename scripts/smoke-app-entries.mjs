@@ -17,7 +17,7 @@ function productionMain() {
 // version and the daemon supervisor (which carries the build's version) refuses it with
 // daemon_config_version_conflict. A temp entry therefore lives in its own app directory
 // with the repo's name and version, and the smoke launches that directory.
-function writeEntryPackage(entryPath) {
+export function writeEntryPackage(entryPath) {
   const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
   mkdirSync(dirname(entryPath), { recursive: true })
   writeFileSync(join(dirname(entryPath), 'package.json'), JSON.stringify({
@@ -45,10 +45,13 @@ export function writeFileOpenEntry(entryPath, receiptPath) {
 
 /** Lose one fork reply after the native effect and the durable commit. */
 export function writeConversationFaultEntry(entryPath, markerPath) {
+  writeEntryPackage(entryPath)
   writeFileSync(entryPath, `
     import { app, ipcMain } from 'electron'
     import { existsSync, promises as fs, writeFileSync } from 'node:fs'
     import { join } from 'node:path'
+    // The App launches its daemon from its own app path, not from this entry's directory.
+    app.setAppPath(${JSON.stringify(repoRoot)})
     const marker = ${JSON.stringify(markerPath)}
     const handle = ipcMain.handle.bind(ipcMain)
     ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
@@ -79,6 +82,7 @@ export function writeConversationFaultEntry(entryPath, markerPath) {
  * new privilege, so the measured layout is the real one.
  */
 export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sideChatRequestsPath) {
+  writeEntryPackage(entryPath)
   writeFileSync(entryPath, `
     import { app, ipcMain } from 'electron'
     import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, watchFile, writeFileSync } from 'node:fs'

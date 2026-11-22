@@ -44,7 +44,8 @@ export const SCENARIOS = Object.freeze({
 })
 
 export function parseArgs(argv) {
-  const options = { only: null, out: null, keep: false, noControls: false, restartApi: null, quitApi: null, oldDaemonEntry: null }
+  // S3 removed the in-process App, so the switch-off controls cannot run: always off.
+  const options = { only: null, out: null, keep: false, noControls: true, restartApi: null, quitApi: null, oldDaemonEntry: null }
   const value = (index, name) => {
     const next = argv[index + 1]
     if (next === undefined || next.startsWith('--')) throw new Error(`${name} needs a value`)

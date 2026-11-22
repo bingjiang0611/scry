@@ -1,5 +1,5 @@
 import { DESKTOP_WORKBENCH_READ_METHODS, type DesktopWorkbenchRequest, type DesktopWorkbenchResult } from '../../shared/desktop-workbench'
-import { parseDesktopWorkbenchQuery } from './desktop-workbench'
+import { parseDesktopWorkbenchQuery } from './desktop-workbench-query'
 import { validateDesktopWorkbenchResponse } from './desktop-workbench-response'
 import type { DesktopRemoteContext } from '../../shared/desktop-remote'
 import type { WorkspaceFilePage, WorkspaceListResult } from '../../shared/workspace'

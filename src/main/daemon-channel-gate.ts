@@ -12,13 +12,10 @@ import { BILLING_LOCAL_OPS } from './daemon-local-ops/billing'
 import { PAIRING_LOCAL_OPS } from './daemon-local-ops/pairing'
 import { BACKGROUND_SERVICE_LOCAL_OPS } from './daemon-local-ops/background-service'
 
-// Development switch for "the daemon owns runs". Kept here, free of Electron, so the IPC
-// registrar can consult it without importing the daemon client assembly.
-export const DAEMON_MODE_ENV = 'SCRY_HOST_DAEMON'
-
-export function daemonModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[DAEMON_MODE_ENV] === '1'
-}
+// The daemon owns runs, Providers, terminals and the App's userData (S3: the in-process
+// runtime is gone from Electron main). Every privileged channel the App registers is
+// classified here: kept in the App, served by the daemon run surface, or answered by the
+// daemon through a local-only op or an op it already serves paired devices.
 
 /**
  * Channels whose in-process handler stays correct while the daemon owns runs: window,
@@ -56,7 +53,7 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   ...DESKTOP_REMOTE_CLIENT_METHODS.map((method) => `desktopRemote:${method}`)
 ])
 
-/** Channels whose handler already asks the daemon when the switch is on (B4-L3). */
+/** Channels whose App handler asks the daemon run surface itself (B4-L3). */
 export const DAEMON_MODE_SERVED_CHANNELS: ReadonlySet<string> = new Set([
   'agent:start', 'agent:activeRun', 'agent:activeRuns', 'agent:focusedRunSnapshot',
   'agent:adoptActiveRun', 'agent:answerQuestion', 'agent:stop', 'agent:steer', 'agent:stopBackgroundTask'
@@ -185,17 +182,14 @@ export function installDaemonChannelForwarder(next: DaemonChannelForwarder): () 
 }
 
 /**
- * With the switch on, every privileged channel is either listed above or refused with a
- * named absence. An unmigrated in-process handler would read or write the userData the
- * daemon owns as a second owner, or answer from state the daemon no longer keeps; an
+ * Every privileged channel is either listed above or refused with a named absence. A
+ * handler that read or wrote the userData the daemon owns would be a second owner; an
  * unclassified new channel is refused too, so the default is closed rather than local.
  */
 export function gateDaemonChannel<TListener extends (...args: never[]) => unknown>(
   channel: string,
-  listener: TListener,
-  env: NodeJS.ProcessEnv = process.env
+  listener: TListener
 ): TListener {
-  if (!daemonModeEnabled(env)) return listener
   if (DAEMON_MODE_IN_PROCESS_CHANNELS.has(channel) || DAEMON_MODE_SERVED_CHANNELS.has(channel)) return listener
   const local = DAEMON_LOCAL_OP_CHANNELS[channel]
   if (local) {

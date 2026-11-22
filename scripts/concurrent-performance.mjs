@@ -86,8 +86,8 @@ try {
   await new Promise(ready => server.listen(0, '127.0.0.1', ready))
   const port = server.address().port
   await new Promise(ready => server.close(ready))
-  // Timing benchmark (in-process main probe + SMOKE_CONVERSATIONS): pin in-process mode.
-  const env = { ...process.env, HOME: home, SCRY_HOST_DAEMON: '0', SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
+  // The daemon serves the smoke fixture (S3).
+  const env = { ...process.env, HOME: home, SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
     SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_DISABLED_PROVIDERS: 'codex,qoder,opencode,pi', SCRY_REMOTE_HOST: '0',
     SCRY_CLI_PATH: cli, SCRY_CONCURRENT_PROBE: probe, SCRY_CONCURRENT_LOG: probeLog, SCRY_CONCURRENT_ROLE: 'main' }
   delete env.NODE_OPTIONS

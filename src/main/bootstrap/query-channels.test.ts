@@ -22,11 +22,9 @@ const db = await import('../db')
 const { readWorkspaceNumstat } = await import('../../core/turn-recorder/git.js')
 const { appendUsage } = await import('../usage-jsonl')
 const { llmPerformanceChannelHandlers, skillChannelHandlers, usageChannelHandlers, workspaceDiffChannelHandlers } = await import('./query-channels')
-const { registerAgentRuntimeHandlers } = await import('./agent-runtime-ipc')
-const { registerProviderHandlers } = await import('./provider-handlers')
+const { daemonOwnedChannels } = await import('./daemon-owned-channels')
 
-// The query tables main registers and the daemon serves as local ops (B4-L4). Main's
-// registration must reach these tables, so the daemon's answer is main's answer.
+// The query tables the daemon serves as local ops (B4-L4).
 
 type Table = Record<string, (...args: unknown[]) => unknown>
 const dirs: string[] = []
@@ -117,43 +115,12 @@ describe('skill channel table', () => {
   })
 })
 
-describe('main registers the shared query tables', () => {
-  it('answers usage, LLM performance, diff and Skills through the same tables', async () => {
-    state.userData = tempDir()
-    appendUsage(state.userData, { providerId: 'claude', runtimeProvider: 'claude_sdk', cwd: '/repo' }, { ts: ts(), tokensOut: 7 })
-    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
-    const handleTrusted = ((channel: string, listener: (event: unknown, ...args: unknown[]) => unknown) => { handlers.set(channel, listener) }) as never
-    registerAgentRuntimeHandlers({
-      handleTrusted, startAppRun: vi.fn(), runs: { activeStates: () => [] } as never, boundedLiveRun: (run) => run,
-      dockBadge: {} as never, activeRunSessionKey: () => null, getWindow: () => null,
-      getRemoteRunLedgerId: () => undefined, getRemoteHostService: () => null, userQuestionBroker: {} as never,
-      resolveKnownProjectDirectory: (cwd) => { throw new Error(`directory_not_known:${cwd}`) }, getCurrentCwd: () => undefined,
-      traceOutput: {} as never, requestRunStop: () => true, runTraces: {} as never
-    })
-    const listSkills = vi.fn(async () => ({ providerId: 'claude', mode: 'read', state: 'ready', data: [] }))
-    registerProviderHandlers({
-      handleTrusted, providerRegistry: { listSkills } as never,
-      withProviderOperation: async (_providerId, operation) => await operation(),
-      getRemoteProviderDiscovery: () => ({ invalidate: () => undefined }), refreshInvalidatedRemoteProviderMetadata: () => undefined,
-      ensureMcpExecutionAuthorized: async () => null, authorizedMcpExecution: () => undefined,
-      homeDir: '/home', getCurrentCwd: () => '/w', getRuns: () => ({ activeStates: () => [] }), canonicalProviderCwd: (cwd) => cwd ?? '/w',
-      providerOperationKey: () => 'k', providerOperationGate: {} as never
-    })
-    const shared = {
-      ...usageChannelHandlers({ userDataDir: () => state.userData }),
-      ...llmPerformanceChannelHandlers({ userDataDir: () => state.userData, activeRuns: () => [] })
-    } as Table
-    const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args)
-    expect(invoke('agent:usageStats', { providerId: 'claude', cwd: '/repo' })).toEqual(shared['agent:usageStats']({ providerId: 'claude', cwd: '/repo' }))
-    expect(invoke('agent:usageStats', { providerId: 'claude', cwd: '/repo' })).toMatchObject({ tout: 7, turns: 1 })
-    expect(invoke('agent:usageAnalytics', 30)).toEqual({ status: 'ready', rangeDays: 30 })
-    expect(() => invoke('agent:usageCredits', 31)).toThrow('分析时间范围无效')
-    expect(invoke('agent:stats')).toEqual({ status: 'ready', args: [] })
-    await expect(invoke('agent:llmPerformanceHistory')).resolves.toEqual(await shared['agent:llmPerformanceHistory']())
-    expect(invoke('agent:llmPerformanceSummary')).toMatchObject({ sessions: [] })
-    for (const channel of ['agent:gitDiff', 'agent:gitDiffSnapshot']) await expect(invoke(channel, '/x')).rejects.toThrow('directory_not_known:/x')
-    for (const channel of ['agent:gitDiffCommits', 'agent:gitCommitDiffSnapshot']) expect(handlers.has(channel)).toBe(true)
-    await invoke('agent:listSkills', { providerId: 'claude', cwd: '/w' })
-    expect(listSkills).toHaveBeenCalledWith({ providerId: 'claude', cwd: '/w' })
+describe('the App registers the shared query tables only as daemon channels', () => {
+  it('lists usage, LLM performance, diff and Skills among the channels the daemon answers', () => {
+    const owned = new Set(daemonOwnedChannels())
+    for (const channel of ['agent:usageStats', 'agent:usageAnalytics', 'agent:usageCredits', 'agent:stats', 'agent:llmPerformanceHistory',
+      'agent:llmPerformanceSummary', 'agent:gitDiff', 'agent:gitDiffSnapshot', 'agent:gitDiffCommits', 'agent:gitCommitDiffSnapshot', 'agent:listSkills']) {
+      expect(owned.has(channel), channel).toBe(true)
+    }
   })
 })

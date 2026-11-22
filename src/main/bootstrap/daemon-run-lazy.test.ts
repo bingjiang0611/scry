@@ -42,11 +42,6 @@ describe('lazy daemon run surface', () => {
     await expect(lazy.activeRuns()).rejects.toThrow('daemon_version_mismatch')
   })
 
-  it('keeps the switch off as a named failure, not an empty run list', async () => {
-    const lazy = createLazyDaemonRunSurface(deps, async () => ({ status: 'disabled' }))
-    await expect(lazy.activeRun()).rejects.toThrow('daemon_mode_disabled')
-  })
-
   it('asks again after a daemon that was not ready yet', async () => {
     // A daemon that is still starting is not a decision for the user: the first call
     // reports it, and the next call must be able to find the daemon it became.
@@ -134,7 +129,7 @@ describe('lazy daemon run surface', () => {
   it('carries gated App channels to the daemon and stops when disposed', async () => {
     const localOp = vi.fn(async () => ['/w'])
     const lazy = createLazyDaemonRunSurface(deps, async () => ({ status: 'ready', surface: surface({ localOp }) }))
-    const gated = gateDaemonChannel('agent:recentFolders', vi.fn(), { SCRY_HOST_DAEMON: '1' }) as unknown as (event: unknown) => Promise<unknown>
+    const gated = gateDaemonChannel('agent:recentFolders', vi.fn()) as unknown as (event: unknown) => Promise<unknown>
     await expect(gated({})).resolves.toEqual(['/w'])
     expect(localOp).toHaveBeenCalledWith({ op: 'projectStore', method: 'recentFolders', args: [], read: true })
     lazy.dispose()

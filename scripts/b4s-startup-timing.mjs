@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // S0-6: how long the App takes to become usable in daemon mode, with the daemon cold
-// (not running) and already running, against the switch-off App as the control.
+// (not running) and already running. The switch-off control was retired with S3.
 //
 //   npm run build && node .agents/skills/scry-performance-climb/scripts/timing-run.mjs b4s-startup -- \
-//     node scripts/b4s-startup-timing.mjs --samples 10 [--cases daemon-cold,daemon-running,switch-off] [--out file]
+//     node scripts/b4s-startup-timing.mjs --samples 10 [--cases daemon-cold,daemon-running] [--out file]
 //
 // N serial samples per case, cases interleaved round by round so a drifting machine
 // affects each case alike; one unmeasured warm-up per case (first enrollment, caches).

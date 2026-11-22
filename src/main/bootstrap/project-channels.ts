@@ -5,6 +5,9 @@ import { piProfileForExecutable, resolvePiLauncherExecutable, type PiAgentProfil
 import { probeCliVersion, PI_VERSION_PROBE_TIMEOUT_MS } from '../claude-locate'
 import { piRpcEnvironment, probePiAgent } from '../providers/pi'
 import type { ChannelHandlers } from './startup-channels'
+import { projectCwdFromRequest } from './project-cwd'
+
+export { projectCwdFromRequest }
 
 // Project list, recent folders, the chosen workspace folder, Provider context invalidation
 // and Pi profiles: the handlers Electron main registers and the daemon serves as local
@@ -16,10 +19,6 @@ import type { ChannelHandlers } from './startup-channels'
 
 type WithProviderOperation = <T>(providerId: ProviderId, operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
 
-export function projectCwdFromRequest(value: unknown): string {
-  if (typeof value !== 'string' || !isAbsolute(value) || value.length > 4_096) throw new Error('无效的项目目录')
-  return value
-}
 
 /** Pin, rename and remove one project of the sidebar list. */
 export function projectStoreChannelHandlers(deps: {

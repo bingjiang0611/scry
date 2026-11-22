@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gateDaemonChannel, installDaemonChannelForwarder } from '../daemon-channel-gate'
-import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
+import { resetProviderSession } from './startup-channels'
+import { viewNothingAfterDaemonNewSession } from './new-session-daemon'
 
 // agent:newSession: the sidebar's "new session". In daemon mode it was refused with the
 // raw IPC wrapper; the daemon now resets the context it runs and the window keeps its
 // own part, viewing no session.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 
 describe('new session', () => {
   let undo: Array<() => void> = []
@@ -35,7 +35,7 @@ describe('new session', () => {
     undo.push(viewNothingAfterDaemonNewSession(badge, () => true))
     const forwarder = vi.fn(async () => true)
     undo.push(installDaemonChannelForwarder(forwarder))
-    const gated = gateDaemonChannel('agent:newSession', vi.fn(), ON) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
+    const gated = gateDaemonChannel('agent:newSession', vi.fn()) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
     await expect(gated({}, { providerId: 'codex', cwd: '/w' })).resolves.toBe(true)
     expect(forwarder).toHaveBeenCalledWith({ op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: '/w' }], read: false })
     expect(badge.view).toHaveBeenCalledWith(null, true)

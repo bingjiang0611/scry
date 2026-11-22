@@ -81,7 +81,7 @@ export async function run(ctx) {
   return runScenario(ctx, { id: 'trust-gate', title: 'trust gate 在 daemon 内重验', mode: 'daemon', label: 'trust', plan: daemonPlan }, async ({ scenario, fixture }) => {
     const outcomes = await exercise(ctx, scenario, fixture, 'daemon')
     if (!control) {
-      recordNotRun(scenario, { id: 'matches-in-process', reason: 'switch-off control did not complete (--no-controls or it aborted)' })
+      recordNotRun(scenario, { id: 'matches-in-process', reason: 'no switch-off control: S3 removed the in-process App (--no-controls is always on)' })
       return
     }
     recordStep(scenario, { id: 'matches-in-process', actual: { daemon: outcomes, control },

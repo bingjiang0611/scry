@@ -280,8 +280,11 @@ export async function startRun(
       startPerf.finish({ attachments: attachments.length })
       return { runId, ...(runState.externalSessionId ? { externalSessionId: runState.externalSessionId } : {}) }
     })
-    options.onStarted?.(started.runId)
+    // Registration first: a run that starts outside its submitted directory (a prepared
+    // worktree) is re-announced there, and that must precede `admitted`, so whoever waits
+    // for admission already addresses the run where it really runs.
     options.onRegistered?.(started)
+    options.onStarted?.(started.runId)
     return isRemoteRun ? await remoteResult! : started
   } catch (error) {
     startPerf.finish(undefined, 'error')

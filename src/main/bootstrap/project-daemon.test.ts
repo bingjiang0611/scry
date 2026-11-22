@@ -7,7 +7,6 @@ import { installProjectDaemonWindow, installProviderContextWindowCwd } from './p
 // picker, never from the renderer: a renderer that names a path itself must not get
 // that path remembered as a project (it is the daemon's authorization input).
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
 function wire(options: { folder?: string | null; launcher?: string | null; cwd?: string }, reply: (call: Call) => unknown) {
@@ -24,7 +23,7 @@ function wire(options: { folder?: string | null; launcher?: string | null; cwd?:
   undo.push(installProviderContextWindowCwd(() => windowCwd))
   const forwarder = vi.fn(async (call: Call) => reply(call))
   undo.push(installDaemonChannelForwarder(forwarder))
-  const channel = (name: string) => gateDaemonChannel(name, vi.fn(), ON) as unknown as (event: unknown, ...args: unknown[]) => Promise<any>
+  const channel = (name: string) => gateDaemonChannel(name, vi.fn()) as unknown as (event: unknown, ...args: unknown[]) => Promise<any>
   return { window, forwarder, channel, windowCwd: () => windowCwd, dispose: () => { for (const step of undo.splice(0)) step() } }
 }
 

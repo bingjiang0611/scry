@@ -1,6 +1,6 @@
 import type { DesktopMobileTargetSubmit, DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import { DaemonRunError } from './daemon-run-transport'
-import { executionTargetError } from './remote/execution-targets'
+import { executionTargetError } from './remote/execution-target-error'
 import { DEFAULT_MAX_FRAME } from './remote/inner-mtls-protocol'
 
 export type ExecutionTargetWorkCall =

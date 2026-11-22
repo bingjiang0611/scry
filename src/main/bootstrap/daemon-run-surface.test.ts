@@ -19,6 +19,7 @@ function surface(overrides: Partial<DaemonRunTransport> & { live?: ActiveRun[] }
       if (request.method === 'steer') return { steer: { status: 'accepted', messageId: 'm-1' } }
       if (request.method === 'stopBackgroundTask') return { backgroundTask: { status: 'requested', message: '' } }
       if (request.runId === 'run-abc-1') return { run: run('run-abc-1') }
+      if (request.runId === 'run-managed-3') return { run: null, refused: '统一对话不能由旧会话入口接管，请打开其稳定对话条目' }
       return { run: null }
     }),
     liveRuns: vi.fn(async () => ({ runs: overrides.live ?? [] }))
@@ -115,6 +116,12 @@ describe('daemon run surface controls', () => {
     await value.focusRun('remote-run-abc-1')
     await expect(value.activeRun()).resolves.toBeNull()
     await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'remote-run-abc-1', done: true })
+  })
+
+  it('raises the daemon refusal to adopt a unified conversation run, and does not show it', async () => {
+    const { value } = surface({ live: [run('run-managed-3')] })
+    await expect(value.adopt('run-managed-3')).rejects.toThrow('统一对话不能由旧会话入口接管')
+    await expect(value.focusedRunSnapshot()).resolves.toBeNull()
   })
 
   it('reports a run the daemon no longer knows as absent, not as adopted', async () => {

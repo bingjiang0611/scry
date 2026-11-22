@@ -126,11 +126,11 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
     throw new RemoteRunDenied('invalid_target')
   }
   if (routing.attachmentPeer !== undefined && (typeof routing.attachmentPeer !== 'string' || !SHA256.test(routing.attachmentPeer))) throw new RemoteRunDenied('invalid_target')
-  // A device may start a fresh session in a managed worktree: the selection is parsed
-  // here and prepared by the host under the ledger run's identity. An App submission
-  // (cwdOptional) has no such flow yet, so it is refused by name rather than dropped:
-  // running the plain turn instead would answer a request the user did not make.
-  if (routing.workspace !== undefined && options.cwdOptional) throw new RemoteRunDenied('unsupported_local_request:workspace')
+  // A fresh session in a prepared workspace (switch, new or existing worktree): the
+  // selection is parsed here and prepared by the host under the ledger run's identity,
+  // for a device and for the App alike. The App must name the source directory it
+  // reviewed: a selection is only meaningful against the checkout it was made in.
+  if (routing.workspace !== undefined && options.cwdOptional && !cwd) throw new RemoteRunDenied('unsupported_local_request:workspace')
   let workspace: WorkspaceStartSelection | undefined
   try { if (routing.workspace !== undefined) workspace = parseWorkspaceStartSelection(routing.workspace) } catch { throw new RemoteRunDenied('invalid_target') }
   // Turn boundaries (edit-last-message fork / restart) do travel, but only from the

@@ -14,18 +14,13 @@ import { isDefaultAppUserDataDir } from '../daemon-mode-default'
 
 export { appDaemonModeDeps } from './app-daemon-mode-deps'
 
-// Daemon mode for the App's own run surface. One switch, one decision: either the
-// App talks to the daemon that owns the ledger and the runs, or it does not start
-// this path at all and the caller keeps the in-process pipeline.
+// The App's own run surface: the App talks to the daemon that owns the ledger and the
+// runs; there is no in-process pipeline to fall back to (S3).
 //
 // Nothing here retries, replaces, or hides a daemon. A version mismatch is the
 // user's decision (restart the background service); a missing secret or a grant
 // the daemon revoked is reported as such; unsafe credential storage refuses before
 // a credential is written.
-
-// The switch itself lives beside the IPC gate, which must not import this assembly.
-import { DAEMON_MODE_ENV, daemonModeEnabled } from '../daemon-channel-gate'
-export { DAEMON_MODE_ENV, daemonModeEnabled }
 
 /**
  * Whether a failed request may be retried after the daemon is relaunched. A read the
@@ -39,7 +34,7 @@ export function retryAfterReconnect(error: unknown, replayable: boolean): boolea
 }
 
 export interface DaemonRunModeResult {
-  status: 'disabled' | 'ready' | 'version-mismatch' | 'unavailable' | 'credential-unavailable' | 'device-not-authorized'
+  status: 'ready' | 'version-mismatch' | 'unavailable' | 'credential-unavailable' | 'device-not-authorized'
   surface?: DaemonRunSurface
   version?: string
   running?: string
@@ -115,7 +110,6 @@ export async function connectForRunMode(
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
   const env = deps.env ?? process.env
-  if (!daemonModeEnabled(env)) return { status: 'disabled' }
   if (env.SCRY_TEST_APP === '1' && deps.appDataDir && deps.appName &&
       isDefaultAppUserDataDir({ userDataDir: deps.userDataDir, appDataDir: deps.appDataDir, appName: deps.appName })) {
     return { status: 'unavailable', reason: 'test_app_requires_isolated_user_data' }
