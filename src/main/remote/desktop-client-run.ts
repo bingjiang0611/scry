@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteRunStatus, DesktopRemoteLiveRun } from '../../shared/desktop-remote'
 import { DesktopRemoteClientSession } from './desktop-client-session'
-import { context, fail, record, text, validRunId, MAX_PAGES, MAX_ITEMS } from './desktop-client-validation'
+import { context, fail, parseWorkspacePrepareProgress, record, text, validRunId, MAX_PAGES, MAX_ITEMS } from './desktop-client-validation'
 
 // The device waits on the host instead of ticking: one watch call holds until
 // something changes, so an idle run costs one request per window, not one per
@@ -52,6 +52,13 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
             if (text(marker.cwd, 16_384)) watch.cwd = marker.cwd
           }
           if (marker.event === 'session' && text(marker.externalSessionId, 256)) watch.externalSessionId = marker.externalSessionId
+          if (marker.event === 'workspaceProgress') {
+            const parsed = parseWorkspacePrepareProgress(marker.progress)
+            if (parsed) watch.workspaceProgress = parsed
+          }
+          if (marker.event === 'admitted' && watch.workspaceProgress) {
+            watch.workspaceProgress = { ...watch.workspaceProgress, stage: 'completed', cancellable: false }
+          }
         } catch { /* opaque progress is not evidence */ }
       }
       // Only a full page needs another read; the cursor jump is the common case.
@@ -86,7 +93,14 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
         if (contextChanged) await this.save(stateData)
       }
     }
-    return { state, changed, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}) }
+    return {
+      state,
+      changed,
+      ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}),
+      ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}),
+      ...(watch.cwd ? { cwd: watch.cwd } : {}),
+      ...(watch.workspaceProgress ? { workspaceProgress: watch.workspaceProgress } : {})
+    }
   }
 
   // Finds the host's live run on one opened session, whichever client started

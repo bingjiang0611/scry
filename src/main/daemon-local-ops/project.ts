@@ -14,6 +14,7 @@ export const PROJECT_LOCAL_OPS: DaemonLocalOpTable = {
   'workspaceSelection:read': { op: 'workspaceSelection', method: 'read', read: true },
   'workspaceSelection:validateBranch': { op: 'workspaceSelection', method: 'validateBranch', read: true },
   'workspaceSelection:inspectStart': { op: 'workspaceSelection', method: 'inspectStart', read: false },
+  'workspaceSelection:cancelStart': { op: 'workspaceSelection', method: 'cancelStart', read: false },
   // The window's selection and the known-project file channels stay in the App, which
   // asks here whether a directory is a project the daemon knows (bootstrap/known-project-daemon.ts).
   // Persists nothing: safe to ask again after a reconnect.

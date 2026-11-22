@@ -41,6 +41,10 @@ export class ScProcess {
       gitIndexFile?: string
       /** A person's cancel. Stops only this registered child's own group, like a timeout. */
       signal?: AbortSignal
+      /** Host-only stderr chunk observer for real Git progress streaming. */
+      onStderrChunk?: (chunk: string) => void
+      /** Host-only opt-in to report Git checkout progress immediately without the default 2s delay. */
+      progressDelayZero?: boolean
     } = {}
   ): Promise<string> {
     if (this.closed) throw new Error('源代码管理已关闭')
@@ -75,6 +79,7 @@ export class ScProcess {
       NO_COLOR: '1'
     })
     if (command === 'git' && options.gitIndexFile) env.GIT_INDEX_FILE = options.gitIndexFile
+    if (command === 'git' && options.progressDelayZero) env.GIT_PROGRESS_DELAY = '0'
     // Preserve an explicit opt-out of machine configuration, but no injected config paths/values.
     if (inherited.GIT_CONFIG_NOSYSTEM === '1') env.GIT_CONFIG_NOSYSTEM = '1'
     const executable = resolveCommandOnPath(command, env.PATH ?? '')
@@ -119,6 +124,9 @@ export class ScProcess {
       })
       child.stderr.on('data', (chunk: Buffer) => {
         stderr = Buffer.concat([stderr, chunk]).subarray(-16 * 1024)
+        if (options.onStderrChunk) {
+          try { options.onStderrChunk(chunk.toString('utf8')) } catch { /* observer failure must not disrupt child */ }
+        }
       })
       child.on('error', (error) => {
         spawnError = error

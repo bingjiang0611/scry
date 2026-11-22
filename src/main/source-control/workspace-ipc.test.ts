@@ -16,6 +16,7 @@ it('rejects untrusted senders and malformed selection payloads before privileged
     const reads = vi.spyOn(service, 'workspaceChoices').mockResolvedValue({ status: 'unavailable', reason: 'fixture' })
     const names = vi.spyOn(service, 'validateWorkspaceBranch').mockResolvedValue({ status: 'unavailable', reason: 'fixture' })
     const inspections = vi.spyOn(service, 'inspectWorkspaceStart').mockResolvedValue({ status: 'unavailable', reason: 'fixture' })
+    const cancels = vi.spyOn(service, 'cancelWorkspaceStart').mockResolvedValue(false)
     const frame = { url: 'file:///app/renderer/index.html' }
     const contents = { mainFrame: frame }
     const win = { webContents: contents, isDestroyed: () => false } as unknown as BrowserWindow
@@ -29,7 +30,8 @@ it('rejects untrusted senders and malformed selection payloads before privileged
     const requests = [
       ['workspaceSelection:read', { cwd: root, kind: 'branches' }],
       ['workspaceSelection:validateBranch', { repositoryId: 'a'.repeat(64), name: 'valid' }],
-      ['workspaceSelection:inspectStart', { repositoryId: 'a'.repeat(64), operationId: 'f4826a0a-ef56-4309-8d70-e3cd76f0181c' }]
+      ['workspaceSelection:inspectStart', { repositoryId: 'a'.repeat(64), operationId: 'f4826a0a-ef56-4309-8d70-e3cd76f0181c' }],
+      ['workspaceSelection:cancelStart', { repositoryId: 'a'.repeat(64), operationId: 'f4826a0a-ef56-4309-8d70-e3cd76f0181c' }]
     ] as const
     for (const [channel, payload] of requests) {
       for (const sender of [
@@ -47,22 +49,28 @@ it('rejects untrusted senders and malformed selection payloads before privileged
     ]) await expect(invoke('workspaceSelection:read', payload)).rejects.toThrow()
     await expect(invoke('workspaceSelection:validateBranch', { repositoryId: '../escape', name: 'valid' })).rejects.toThrow()
     await expect(invoke('workspaceSelection:inspectStart', { repositoryId: 'a'.repeat(64), operationId: '../escape' })).rejects.toThrow()
+    await expect(invoke('workspaceSelection:cancelStart', { repositoryId: 'a'.repeat(64), operationId: '../escape' })).rejects.toThrow()
     expect(reads).not.toHaveBeenCalled()
     expect(names).not.toHaveBeenCalled()
     expect(inspections).not.toHaveBeenCalled()
-    for (const [channel, payload] of requests) await expect(invoke(channel, payload))
+    expect(cancels).not.toHaveBeenCalled()
+    for (const [channel, payload] of requests.slice(0, 3)) await expect(invoke(channel, payload))
       .resolves.toEqual({ status: 'unavailable', reason: 'fixture' })
+    await expect(invoke(requests[3][0], requests[3][1])).resolves.toBe(false)
     expect(reads).toHaveBeenCalledExactlyOnceWith(requests[0][1])
     expect(names).toHaveBeenCalledExactlyOnceWith(requests[1][1])
     expect(inspections).toHaveBeenCalledExactlyOnceWith(requests[2][1])
+    expect(cancels).toHaveBeenCalledExactlyOnceWith(requests[3][1])
     reads.mockClear()
     names.mockClear()
     inspections.mockClear()
+    cancels.mockClear()
     frame.url = 'https://untrusted.invalid/'
     for (const [channel, payload] of requests) await expect(invoke(channel, payload)).rejects.toThrow('非可信 renderer')
     expect(reads).not.toHaveBeenCalled()
     expect(names).not.toHaveBeenCalled()
     expect(inspections).not.toHaveBeenCalled()
+    expect(cancels).not.toHaveBeenCalled()
   } finally {
     await service.dispose()
     await rm(root, { recursive: true, force: true })

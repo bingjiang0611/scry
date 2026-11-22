@@ -18,6 +18,7 @@ import type { RemoteChatProps } from './RemoteChat'
 import { errorText, remoteAgentId } from './RemoteChatShared'
 import { workspaceCopy } from '../constants/workspace-copy'
 import { consumeWorkspaceDraft, type WorkspaceDraftSelection } from '../workspace-drafts'
+import { useRemoteWorktreeSetup } from './RemoteChatWorktreeSetup'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
 // ChatView as local sessions; only the controller differs. The host owns Provider
@@ -28,7 +29,7 @@ import { consumeWorkspaceDraft, type WorkspaceDraftSelection } from '../workspac
 const POLL_MS = 1500
 
 export function useRemoteChatExecution(foundation: FoundationState, presentation: PresentationState, { connectionId, draftStore, queueStore }: Pick<RemoteChatProps, 'connectionId' | 'draftStore' | 'queueStore'>) {
-  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
+  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, pendingWorktreeRef, setPendingWorktree, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
   const { chosenModel, validEffort, validPermissionMode, displayTurns, chatNavigation, currentIntent, unknownReceiptBlocked, currentRunStatus, runActive, controlRunId, projectAvailable, contextAvailable } = presentation
   const submission = (text: string, attachments: AgentInputAttachment[] = [], workspace?: WorkspaceDraftSelection) => ({
     context, prompt: text,
@@ -46,6 +47,17 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     chatNavigation.cancel()
     followLatest.current = true
     setSubmitting(true); setError(null); setStatus(null); setPollInterval(POLL_MS)
+    const isNewWorktree = !queued && request.workspace?.intent.kind === 'newWorktree'
+    if (isNewWorktree && request.workspace) {
+      setPendingWorktree({
+        draftKey: submittedKey,
+        prompt: request.prompt,
+        attachments: submittedAttachments,
+        workspace: request.workspace,
+        cancelling: false,
+        cancelRequested: false
+      })
+    }
     let acknowledged = false
     try {
       const intent = await api.submit(connectionId, request)
@@ -67,9 +79,29 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
             }
           }
         }
-        releaseAttachments(submittedAttachments.filter(attachment => !draftStore.getSnapshot().get(submittedKey)?.attachments.some(current => current.id === attachment.id)))
+        if (!isNewWorktree) {
+          releaseAttachments(submittedAttachments.filter(attachment => !draftStore.getSnapshot().get(submittedKey)?.attachments.some(current => current.id === attachment.id)))
+        }
       }
-      if (submittedGeneration !== contextGeneration.current) return
+      if (submittedGeneration !== contextGeneration.current) {
+        if (isNewWorktree) {
+          releaseAttachments(submittedAttachments)
+          setPendingWorktree(null)
+        }
+        return
+      }
+      if (isNewWorktree) {
+        const pending = pendingWorktreeRef.current
+        const alreadyRequestedCancel = Boolean(pending?.cancelRequested && pending.workspace.operationId === request.workspace?.operationId)
+        setPendingWorktree(current => current && current.workspace.operationId === request.workspace?.operationId
+          ? { ...current, intentId: intent.intentId, ...(intent.runId ? { runId: intent.runId } : {}) }
+          : current)
+        if (alreadyRequestedCancel && intent.runId) {
+          void api.stop(connectionId, intent.runId).catch((reason) => {
+            if (submittedGeneration === contextGeneration.current) setError(errorText(reason))
+          })
+        }
+      }
       setIntents((current) => [...current.filter((item) => item.intentId !== intent.intentId), intent])
       if (shouldQueryUnknownIntent(intent)) {
         const queried = await api.intentStatus(connectionId, intent.intentId)
@@ -77,6 +109,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
         setIntents((current) => current.map((item) => item.intentId === queried.intentId ? queried : item))
       }
     } catch (reason) {
+      if (isNewWorktree && !acknowledged) setPendingWorktree(null)
       if (queued && !acknowledged) queueStore.fail(queueKey)
       if (submittedGeneration === contextGeneration.current) {
         const detail = errorText(reason)
@@ -227,6 +260,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     ...(missingAgentId ? [missingAgentId] : [])
   ]), [catalog, missingAgentId])
   const selectedAgentId = provider ? remoteAgentId(provider) : missingAgentId ?? ''
+  const workspaceSetup = useRemoteWorktreeSetup(foundation, connectionId, controlRunId, currentRunStatus, POLL_MS)
 
   const unknownIntent = intents.find((intent) => intent.status === 'unknown')
   const noticeError = error ?? pollError ?? (historyError && displayTurns.length > 0 ? REMOTE_SESSION_COPY.refreshHistoryFailed : null) ?? catalogEntry?.error
@@ -260,19 +294,19 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
       : currentRunStatus?.state === 'unknown'
         ? { tone: 'blocked' as const, text: `远程运行结果未知${currentRunStatus.detail ? ` · ${currentRunStatus.detail}` : ''}；不会自动重试。` }
         // Stop/answer notes remain relevant while the run is in flight.
-        : status && (submitting || runActive)
+        : status && (submitting || runActive) && !workspaceSetup
           ? { tone: 'blocked' as const, text: status }
           // Receipt acknowledgement is not dispatch. Only this run's host state
           // can retire the waiting notice, even before its first trace arrives.
-          : currentIntent?.status === 'recorded' && (!currentRunStatus || currentRunStatus.state === 'recorded')
+          : !workspaceSetup && currentIntent?.status === 'recorded' && (!currentRunStatus || currentRunStatus.state === 'recorded')
             ? { tone: 'blocked' as const, text: '已记录提交，等待远端派发…' }
-            : submitting && !currentIntent
+            : !workspaceSetup && submitting && !currentIntent
               ? { tone: 'blocked' as const, text: '正在提交到远端…' }
               : null
 
   const diffReview = sessionNetDiffReview(displayTurns) ?? resolveTurnDiffReview(displayTurns)
   const workspaceAvailable = projectAvailable
   const upgradeWorkbench = <EmptyState size="card" title={WORKBENCH_EMPTY_COPY.upgrade} />
-  return { submission, execute, attachmentBytes, attachmentError, submit, resolveUnknown, stop, answer, loadOlderHistory, historyOlderLoading, connect, missingAgentId, agents, unavailableAgentIds, selectedAgentId, unknownIntent, noticeError, notice, diffReview, workspaceAvailable, upgradeWorkbench }
+  return { submission, execute, attachmentBytes, attachmentError, submit, resolveUnknown, stop, answer, loadOlderHistory, historyOlderLoading, connect, missingAgentId, agents, unavailableAgentIds, selectedAgentId, unknownIntent, noticeError, notice, diffReview, workspaceAvailable, upgradeWorkbench, workspaceSetup }
 }
 export type ExecutionState = ReturnType<typeof useRemoteChatExecution>

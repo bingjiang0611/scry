@@ -26,16 +26,17 @@ export function Composer({
   onInput, onChooseFolder, onUnbindProject = () => {}, onPickRecent, onRemoveRecent, onRetrySlash, onPickSlash,
   onSlashSel, onHideSlash, onSend, onStop, onPasteImages, onPasteClipboardImage, onRemoveDraftAttachment,
   onRemoveQueuedPrompt, onSelectAgent, onAddPiAgent, onRemovePiAgent, onRunModel, onRunEffort, onPermissionMode,
-  onRescan, agentsScanning, agentsScanFailed, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel,
+  onRescan, agentsScanning, agentsScanFailed, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel, workspaceSetup = null,
   onOpenRunControls
 }: Omit<ChatViewProps, 'selectedId' | 'scrollRef' | 'onSelect' | 'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'onOpenFile' | 'onAnswerQuestion' | 'focusedTurnRunId' | 'scrollNavigation' | 'onTurnRef' | 'historyWindow'>) {
   const remote = remoteHost != null
+  const workspaceSetupActive = workspaceSetup != null
   const sessionOwnerLoading = sessionLoading || sessionCacheVisible
   const resettingNewConversation = sessionLoading && !hasSelectedSession
   // New conversation clears the visible session synchronously, while main may still be
   // invalidating Provider context. Do not make the project picker wait for that background
   // work; historical-session loading remains hidden because it already has a session id.
-  const showWorkdirPicker = !cwd || (turns.length === 0 && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionOwnerLoading || resettingNewConversation) && !sessionEvidenceGap)
+  const showWorkdirPicker = !cwd || (turns.length === 0 && !workspaceSetupActive && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionOwnerLoading || resettingNewConversation) && !sessionEvidenceGap)
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
@@ -93,8 +94,8 @@ export function Composer({
       description: option.description
     }))
   ]
-  const queueing = busy && queueWhileBusy
-  const sendActionLabel = submitting ? workspaceCopy.starting : queueing ? workspaceCopy.queue : workspaceSendLabel ?? workspaceCopy.send
+  const queueing = busy && queueWhileBusy && !workspaceSetupActive
+  const sendActionLabel = workspaceSetupActive ? workspaceCopy.creatingWorktree : submitting ? workspaceCopy.starting : queueing ? workspaceCopy.queue : workspaceSendLabel ?? workspaceCopy.send
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
   const composerStatus = composerError ?? (showSendBlockedReason ? sendBlockedReason : detectionIssue ?? (hasDraft ? sendBlockedReason : null))
 
@@ -186,7 +187,7 @@ export function Composer({
           slashMatches={slashMatches} slashSel={slashSel} promptHistory={promptHistory}
           historyNavigation={historyNavigation} promptHistoryRef={promptHistoryRef}
           composerScopeKey={composerScopeKey} onHideSlash={onHideSlash} onSlashSel={onSlashSel}
-          onPickSlash={onPickSlash}
+          onPickSlash={onPickSlash} workspaceSetupActive={workspaceSetupActive}
         />
         <ComposerControls
           agents={agents} selectedAgentId={selectedAgentId} onSelectAgent={onSelectAgent}
@@ -197,7 +198,7 @@ export function Composer({
           onOpenRunControls={onOpenRunControls}
           modelValue={modelValue} modelOptions={modelOptions} effortOptions={effortOptions}
           permissionOptions={permissionOptions} loading={runControlsLoading}
-          composerStatus={composerStatus} submitting={submitting} sessionLoading={sessionOwnerLoading}
+          composerStatus={composerStatus} submitting={submitting || workspaceSetupActive} sessionLoading={sessionOwnerLoading}
           input={input} draftAttachments={draftAttachments} sendBlockedReason={sendBlockedReason}
           sendActionLabel={sendActionLabel} queueing={queueing} resetPromptHistory={resetPromptHistory}
           onSend={onSend} runControlCatalog={runControlCatalog}

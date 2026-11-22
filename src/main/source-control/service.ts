@@ -13,13 +13,13 @@ import type {
   ScRepository,
   ScReviewDraft
 } from '../../shared/source-control'
-import { githubRepositoryFromUrl } from '../../shared/source-control'
 import type { WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceStartStatus } from '../../shared/workspace-selection'
-import { inspectWorkspaceStart, startWorkspace, type StartPreparedWorkspace, type WorkspaceBusyScope, type WorkspaceStartDependencies, type WorkspaceStartRequest } from './workspace-start'
+import { inspectWorkspaceStart, startWorkspace, type StartPreparedWorkspace, type WorkspaceBusyScope, type WorkspaceStartDependencies, type WorkspaceStartOptions, type WorkspaceStartRequest } from './workspace-start'
 import { readWorkspaceChoices, validateWorkspaceBranch } from './workspace-choices'
 import { ScGit, isNotRepository, type GitIdentity } from './git'
 import { ScGithub, type GithubSession } from './github'
 import { executeMutation } from './mutation'
+import { assertGithubScope, reconcileUnknownOperation } from './reconcile'
 import { ScProcess, scMessage } from './process'
 import { ScStore, type StoredOperation } from './store'
 
@@ -30,6 +30,8 @@ export class SourceControlService {
   private readonly pending = new Set<Promise<unknown>>()
   // Running push/fetch operations a person may cancel, by operation id.
   private readonly cancels = new Map<string, { repositoryId: string; controller: AbortController }>()
+  // Running workspace-preparation starts a person may cancel before Provider handoff.
+  private readonly workspaceCancels = new Map<string, { repositoryId: string; controller: AbortController; cancellable: boolean }>()
   private closed = false
   readonly git: ScGit
   readonly github: ScGithub
@@ -210,14 +212,49 @@ export class SourceControlService {
     }
   }
 
-  async startWorkspace(request: WorkspaceStartRequest, start: StartPreparedWorkspace, requestedRunId?: string) {
+  async startWorkspace(
+    request: WorkspaceStartRequest,
+    start: StartPreparedWorkspace,
+    requestedRunId?: string,
+    options: Pick<WorkspaceStartOptions, 'signal' | 'onProgress'> = {}
+  ) {
     const identity = await this.identity(request.workspace.intent)
-    return this.exclusive(identity, async () => {
-      await this.identity(request.workspace.intent)
-      const cwd = this.options.authorizeDirectory(request.cwd)
-      if ((await this.git.identity(cwd)).id !== identity.id) throw new Error('所选仓库与发送目录不一致')
-      return startWorkspace(identity, { ...request, cwd }, this.workspaceDependencies(identity), start, requestedRunId)
-    })
+    const operationId = request.workspace.operationId
+    const controller = new AbortController()
+    const external = options.signal
+    const forwardAbort = (): void => controller.abort()
+    if (external?.aborted) controller.abort()
+    else external?.addEventListener('abort', forwardAbort, { once: true })
+    const entry = { repositoryId: identity.id, controller, cancellable: true }
+    if (!this.workspaceCancels.has(operationId)) this.workspaceCancels.set(operationId, entry)
+    try {
+      return await this.exclusive(identity, async () => {
+        await this.identity(request.workspace.intent)
+        const cwd = this.options.authorizeDirectory(request.cwd)
+        if ((await this.git.identity(cwd)).id !== identity.id) throw new Error('所选仓库与发送目录不一致')
+        return startWorkspace(identity, { ...request, cwd }, this.workspaceDependencies(identity), start, requestedRunId, {
+          signal: controller.signal,
+          onProgress: options.onProgress,
+          onCancellableChange: (cancellable) => { entry.cancellable = cancellable }
+        })
+      })
+    } finally {
+      external?.removeEventListener('abort', forwardAbort)
+      if (this.workspaceCancels.get(operationId) === entry) this.workspaceCancels.delete(operationId)
+    }
+  }
+
+  /**
+   * Cancels an in-flight workspace preparation before Provider handoff.
+   * Stops only this operation's registered git child; cleanup is verified inside startWorkspace.
+   */
+  async cancelWorkspaceStart(ref: ScRef & { operationId: string }): Promise<boolean> {
+    await this.identity(ref)
+    const entry = this.workspaceCancels.get(ref.operationId)
+    if (!entry || entry.repositoryId !== ref.repositoryId || !entry.cancellable) return false
+    entry.cancellable = false
+    entry.controller.abort()
+    return true
   }
 
   async inspectWorkspaceStart(ref: ScRef & { operationId: string }): Promise<ScRead<WorkspaceStartStatus | null>> {
@@ -263,24 +300,8 @@ export class SourceControlService {
     }
   }
 
-  private async githubScope(
-    identity: GitIdentity,
-    repository: string,
-    session: GithubSession
-  ): Promise<void> {
-    const snapshot = await this.git.status(identity)
-    const known = new Set(
-      snapshot.remotes
-        .flatMap((remote) => [...remote.pushUrls, ...remote.fetchUrls].map(githubRepositoryFromUrl))
-        .filter((value): value is string => value !== null)
-    )
-    if (known.has(repository)) return
-    for (const candidate of known) {
-      if ((await session.metadata(candidate)).parent?.full_name === repository) return
-    }
-    throw new Error(
-      'GitHub 仓库不属于此项目的可验证 remote/fork；SSH alias 或自定义映射尚不可用，请在 GitHub 操作'
-    )
+  private githubScope(identity: GitIdentity, repository: string, session: GithubSession): Promise<void> {
+    return assertGithubScope(this.git, identity, repository, session)
   }
 
   async pullRequests(request: ScRef & { repository: string }): Promise<ScRead<ScPrList>> {
@@ -386,59 +407,13 @@ export class SourceControlService {
     return this.exclusive(identity, async () => {
       const record = await this.store.get(ref.operationId)
       if (!record || record.operation.repositoryId !== identity.id) throw new Error('操作不属于此仓库')
-      if (record.operation.status !== 'unknown') return record.operation
-      if (record.operation.action === 'prepareWorkspace')
-        return (await inspectWorkspaceStart(identity, record, this.workspaceDependencies(identity))).operation
-      const { intent } = record
-      try {
-        if (record.operation.action === 'push' && intent.branch && intent.target && intent.head) {
-          const snapshot = await this.git.status(identity)
-          const remote = snapshot.remotes.find(
-            (remote) => remote.pushUrls.length === 1 && remote.pushUrls[0] === intent.target
-          )
-          if (!remote || (await this.git.transportTarget(identity, remote.name, 'push')) !== intent.target)
-            throw new Error('实际 push 端点配置已改变，不能用 fetch URL 代替核查')
-          if ((await this.git.remoteHead(identity, intent.target, intent.branch)) === intent.head) {
-            record.operation.status = 'succeeded'
-            record.operation.evidence = { sha: intent.head }
-            record.operation.message = '只读核查确认：同一推送端点的分支已到达预期 SHA'
-          } else record.operation.message = '远端尚不能确认为预期 SHA；保持未知，不重试'
-        } else if (record.operation.action === 'commit' && intent.tree) {
-          const state = await this.git.status(identity)
-          if (state.head) {
-            const [tree, parents] = (
-              await this.git.run(identity.root, ['show', '--no-patch', '--format=%T%n%P', state.head])
-            )
-              .trimEnd()
-              .split('\n')
-            if (tree === intent.tree && (parents ?? '') === (intent.parent ?? '')) {
-              record.operation.status = 'succeeded'
-              record.operation.evidence = { sha: state.head }
-              record.operation.message = '只读核查确认：HEAD 的 tree/parent 与预期提交一致'
-            } else record.operation.message = 'HEAD 已变化，无法归因原提交；保持未知'
-          }
-        } else if (record.operation.action === 'merge' && intent.repository && intent.number) {
-          const session = await this.github.connect()
-          if (session.account !== intent.account) throw new Error('GitHub 账户已改变')
-          await this.githubScope(identity, intent.repository, session)
-          const pr = await session.request<{
-            merged: boolean
-            head: { sha: string }
-            merge_commit_sha: string | null
-          }>('GET', `/repos/${intent.repository}/pulls/${intent.number}`)
-          if (pr.merged && pr.head.sha === intent.head && pr.merge_commit_sha) {
-            record.operation.status = 'succeeded'
-            record.operation.evidence = { sha: pr.merge_commit_sha }
-            record.operation.message = '只读核查确认：预期 PR HEAD 已合并'
-          } else record.operation.message = '尚不能确认预期 HEAD 已合并；保持未知'
-        } else
-          record.operation.message =
-            '无法用只读证据唯一确认此操作；请在 Git/GitHub 人工核查。不会重新创建 PR、评论或审查'
-      } catch (error) {
-        record.operation.message = `核查未完成：${scMessage(error)}`
-      }
-      await this.store.save(record)
-      return record.operation
+      return reconcileUnknownOperation(identity, record, {
+        git: this.git,
+        github: this.github,
+        store: this.store,
+        githubScope: (target, repository, session) => this.githubScope(target, repository, session),
+        workspaceDependencies: (target) => this.workspaceDependencies(target)
+      })
     })
   }
 

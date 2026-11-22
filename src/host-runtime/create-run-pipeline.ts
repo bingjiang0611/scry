@@ -90,11 +90,21 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
     // be invisible to the daemon's ledger and the App's own view. Refusing by name is
     // the only honest answer; the caller's channel routes to the daemon instead.
     if (inputs.execution === 'daemon') throw new Error('daemon_mode_owns_runs')
-    if (payload?.workspace !== undefined) return workspaceStart(payload, options, {
-      sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,
-      getCurrentCwd: inputs.getCurrentCwd, getStartupManagedRecovery: inputs.getStartupManagedRecovery,
-      start: startAppRun
-    })
+    if (payload?.workspace !== undefined) {
+      const workspaceOptions: AppRunStartOptions = options.origin === 'remote' || options.onWorkspaceProgress
+        ? options
+        : {
+          ...options,
+          onWorkspaceProgress: (progress) => {
+            try { renderer.send('workspaceSelection:progress', progress) } catch { /* window may have closed */ }
+          }
+        }
+      return workspaceStart(payload, workspaceOptions, {
+        sourceControl, providerRegistry, resolveKnownProjectDirectory, resolveRemoteProjectDirectory,
+        getCurrentCwd: inputs.getCurrentCwd, getStartupManagedRecovery: inputs.getStartupManagedRecovery,
+        start: startAppRun
+      })
+    }
     return run(payload, options, {
       providerRegistry, piRunDiagnostics, appSessionStore, resolveRemoteProjectDirectory, resolveKnownProjectDirectory,
       providerOperationGate, providerContextKey, providerSessionKey, contextAdmission,

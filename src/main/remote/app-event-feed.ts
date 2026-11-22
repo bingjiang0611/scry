@@ -42,7 +42,9 @@ export interface AppEventsReply {
 export const DAEMON_WINDOW_NOTICES: ReadonlySet<string> = new Set([
   'agent:turnDone', 'agent:error', 'agent:session', 'agent:stopState', 'agent:backgroundWork', 'agent:questionAttention',
   // The archived-session purge's progress, from the daemon's lifecycle (not the run pipeline).
-  'agent:deleteArchivedProgress'
+  'agent:deleteArchivedProgress',
+  // Managed worktree preparation progress for local desktop first-send.
+  'workspaceSelection:progress'
 ])
 
 export const APP_EVENTS_MAX_WAIT_MS = 25_000

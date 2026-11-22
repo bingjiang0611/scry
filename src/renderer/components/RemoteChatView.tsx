@@ -43,7 +43,7 @@ export type RemoteChatViewProps = FoundationState & ControlsState & Presentation
 }
 
 export function RemoteChatView(props: RemoteChatViewProps) {
-  const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, historyOlderLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface, workspaceSelection } = props
+  const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, historyOlderLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface, workspaceSelection, workspaceSetup } = props
   // An archive miss is not a session miss while the initial poll is unresolved
   // or the host reports a live run whose trace has not arrived yet.
   const waitingForRun = Boolean(sessionId && connected && !props.pollError && !props.catalogEntry?.error &&
@@ -195,6 +195,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
           ? <WorkspaceContext controller={workspaceSelection} cwd={cwd} onOpenRun={() => undefined} />
           : undefined}
         workspaceSendLabel={workspaceSelection.sendLabel}
+        workspaceSetup={workspaceSetup}
         renderLocationPicker={renderLocationPicker}
         remoteHost={host}
         composerNotice={notice ?? (providerControlsError || (controlProvider && !controlProvider.available)

@@ -7,6 +7,8 @@ import { EmptyState, EmptyStateSlot } from './primitives/EmptyState'
 import { EmptyStateArtwork } from './primitives/EmptyStateArtwork'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { REMOTE_SESSION_COPY } from '../constants/remote-copy'
+import { UserMessage } from './ChatTurn'
+import { WorktreeSetupCard } from './WorktreeSetupCard'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
 import { HISTORY_WINDOW_COPY, LOADING_COPY, SESSION_EMPTY_COPY } from '../constants/copy'
@@ -54,12 +56,14 @@ export function ChatView(props: ChatViewProps) {
     forkableRunIds,
     onOpenFile,
     onAnswerQuestion,
+    workspaceSetup = null,
     remoteHost
   } = props
   const remote = remoteHost != null
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
   // Only the selected session's turns or its own display cache may be rendered.
   const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : NO_TURNS
+  const hasPendingTurnForSetup = Boolean(workspaceSetup && displayedTurns.some(turn => turn.pendingStart))
   const ownerReady = !sessionLoading && !sessionCacheVisible
   const transcriptLoading = sessionLoading || (transcriptPending && displayedTurns.length === 0)
   const liveRunId = ownerReady && busy ? turns.find(turn => !turn.done && !turn.error)?.runId ?? null : null
@@ -78,7 +82,7 @@ export function ChatView(props: ChatViewProps) {
     loading: historyOlderLoading,
     onLoadOlder: onLoadOlderTurns
   })
-  const transcriptEmpty = turns.length !== 0 || historyWindow?.hasOlder ? null
+  const transcriptEmpty = turns.length !== 0 || workspaceSetup != null || historyWindow?.hasOlder ? null
     : sessionEvidenceGap?.status === 'error' && (!transcriptLoading || sessionEvidenceGap.retrying)
       ? <EmptyState size="page" status="error" picture="alert" title={sessionEvidenceGap.title ?? SESSION_EMPTY_COPY.readFailed}
           description={sessionEvidenceGap.title ? sessionEvidenceGap.detail : SESSION_EMPTY_COPY.readFailedDetail} announcement="alert"
@@ -125,7 +129,19 @@ export function ChatView(props: ChatViewProps) {
             )}
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
-                liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
+                liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} workspaceSetup={workspaceSetup} />
+              {workspaceSetup && !hasPendingTurnForSetup && (
+                <div className="turn transcript-turn worktree-setup-turn" role="article">
+                  {(workspaceSetup.prompt || (workspaceSetup.attachments && workspaceSetup.attachments.length > 0)) && (
+                    <UserMessage text={workspaceSetup.prompt ?? ''} attachments={workspaceSetup.attachments} />
+                  )}
+                  <WorktreeSetupCard
+                    progress={workspaceSetup.progress}
+                    cancelling={workspaceSetup.cancelling}
+                    onCancel={workspaceSetup.onCancel}
+                  />
+                </div>
+              )}
             </div>
             </EmptyStateSlot>
           </div>
