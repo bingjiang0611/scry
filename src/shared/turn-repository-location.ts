@@ -6,11 +6,8 @@ export const TURN_REPOSITORY_LOCATION_LIMITS = {
 } as const
 
 export interface TurnRepositoryLocation {
-  /** Origin identity, without transport, credentials, query, fragment or a trailing .git. */
   remote?: string
-  /** Branch at turn start; null means HEAD was detached, absence means unknown. */
   branch?: string | null
-  /** Branch at turn end; null means HEAD was detached, absence means unknown. */
   branchAfter?: string | null
   commitBefore?: string
   commitAfter?: string

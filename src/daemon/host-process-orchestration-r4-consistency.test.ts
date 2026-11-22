@@ -110,7 +110,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         device.keyPEM,
         sub.runId
       )
-      // Must-Fix 1 + 5a: both device H1 and orchestration.db agree on `failed`, with `trust_gate_rejected` and 0 Provider dispatches!
       expect(deviceState).toBe('failed')
       const orchRun = host.orchestrationAuthority!.sink.getRun(sub.runId)
       expect(orchRun?.lifecycle).toBe('failed')
@@ -136,7 +135,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
     let host1: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     let host2: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
-      // First enroll a device so pairing state exists on disk, then dispose host1 cleanly.
       host1 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -152,7 +150,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       await host1.dispose()
       host1 = undefined
 
-      // Simulate an in-flight dispatched run crashed mid-flight (in BOTH orchestration.db and H1 ledger) with no recorder evidence.
       const runId = randomUUID()
       const intentId = randomUUID()
       const { scopedIntentId } = await import('../main/remote/remote-gateway')
@@ -208,7 +205,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         { mode: 0o600 }
       )
 
-      // Boot host2: recovery interrupts the run in orch, and device MUST NOT see `failed`!
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -229,9 +225,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       const runState = host2.service.controller.runState(peerSha, { runId })
       expect(runState).toBe('cancelled')
 
-      // Decision H: on restart, device ledger is a single state snapshot at R with retainedEvents=[];
-      // stale cursor 0 receives reset (no run_failed, no renumbered old events), while runState/resolveIntent
-      // report 'cancelled' and orchestration.db preserves run.interrupted(host_restarted).
       const polled = host2.service.controller.poll(peerSha, { cursor: 0 })
       expect(polled.events).toEqual([])
       expect(polled.reset).toEqual({ requested: 0, availableFrom: polled.cursor })
@@ -281,7 +274,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
     const recorded: unknown[] = []
     const broker = new RemoteInteractionBroker(() => undefined)
     const runId = randomUUID()
-    // Invalid answerId & non-pending question MUST throw BEFORE calling orchestration.onQuestionAnswer!
     expect(() =>
       answerRunQuestion(
         {
@@ -344,7 +336,6 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       if (sub.kind !== 'accepted') return
       const r1 = engine.stopRun({ grantScope: 'local', runId: sub.runId })
       expect(r1.status).toBe('requested')
-      // Even if a second stop arrives (or via sink directly), commandId is deterministic `stop:<runId>`, no clock suffix!
       const receipts = sink.handle.db
         .prepare("SELECT command_id FROM orch_command WHERE type = 'run.stop'")
         .all() as Array<{ command_id: string }>
@@ -367,9 +358,8 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         conversation: { conversationId: 'sess-A', runId: convRunA, ordinal: 1 },
         prompt: sharedPrompt
       })
-      const detailB = detailA // identical content -> identical body sha256!
+      const detailB = detailA
 
-      // Submit in session A first
       const subA = await engine.submitAsync({
         grantScope: 'local',
         commandId: 'cmd-sess-A',
@@ -384,10 +374,8 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       const bodyPath = sink.bodyStore.externalPath(bodyA!.sha256)
       expect(existsSync(bodyPath)).toBe(true)
 
-      // Pin the shared body sha256 as if Session B is mid-prepareBodyAsync BEFORE its SQLite commit!
       const unpin = sink.bodyStore.pin(bodyA!.sha256)
       try {
-        // Session A is deleted while Session B holds the in-flight pin for the same sha256!
         const del = sink.deleteSession({
           sessionKey: 'sess-A',
           cwd: root,
@@ -396,9 +384,7 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
           at: Date.now()
         })
         expect(del.status).toBe('deleted')
-        // Shared body file MUST NOT have been unlinked while Session B has it pinned!
         expect(existsSync(bodyPath)).toBe(true)
-        // Session B (different runId, same external body sha256) can still commit and read the body cleanly
         const subB = await engine.submitAsync({
           grantScope: 'local',
           commandId: 'cmd-sess-B',

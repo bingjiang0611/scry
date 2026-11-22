@@ -48,7 +48,6 @@ describe('P4-1 daemon orchestration shadow integration', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Pre-seed an orphaned dispatched H1 run before daemon startup to verify recovery + incremental import
     const ledgerDirectory = join(userDataDir, 'remote', 'ledger')
     mkdirSync(ledgerDirectory, { recursive: true, mode: 0o700 })
     const orphanRunId = randomUUID()
@@ -101,7 +100,6 @@ describe('P4-1 daemon orchestration shadow integration', () => {
 
       const device = await enrollLocal(host.service)
 
-      // Orphan run must match H1 recover() exactly (failed, zero illegal_transition deviations)
       const orphanH1 = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'watch',
         runId: orphanRunId,
@@ -115,7 +113,6 @@ describe('P4-1 daemon orchestration shadow integration', () => {
       expect(shadow.mirror.stats().rejectedSticky).toBe(0)
       expect(shadow.mirror.stats().deviations).toBe(0)
 
-      // 1. Multi-turn conversation (3 turns) + H3 settle parity + peer actor / local origin
       const created = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation',
         method: 'create',
@@ -179,14 +176,12 @@ describe('P4-1 daemon orchestration shadow integration', () => {
       expect(turnRunIds).toHaveLength(3)
       expect(shadow.mirror.stats().deviations).toBe(0)
 
-      // All shadow outbox rows must be marked done + shadowOnly
       for (const row of shadow.mirror.sink!.listOutbox()) {
         expect(row.state).toBe('done')
         expect(row.leaseOwner).toBe('shadow:no-dispatch')
         expect(row.payload.shadowOnly).toBe(true)
       }
 
-      // 2. Stop path: start a paced run and request stop mid-flight; shadow must match H1 exact state
       const stopIntent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),

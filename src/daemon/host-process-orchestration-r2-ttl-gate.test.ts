@@ -117,7 +117,6 @@ describe('W9 Blocker 2 + Must-Fix 2: pending TTL, gate release re-pump, and pers
       expect(host.orchestrationAuthority!.sink.getRun(sub.runId)?.lifecycle).toBe('recorded')
       expect(host.orchestrationAuthority!.sink.listEvents().some((e) => e.runId === sub.runId && e.type === 'run.dispatched')).toBe(false)
 
-      // Release auth lease: daemon must automatically re-pump, dispatch, and settle without any new submit!
       if (authLease.ok) authLease.release()
 
       const finalState = await waitRunTerminal(
@@ -167,7 +166,6 @@ describe('W9 Blocker 2 + Must-Fix 2: pending TTL, gate release re-pump, and pers
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'will expire while queued' })
       })
 
-      // Even while auth gate stays held past 150ms TTL, the expiry wakeup must cancel it cleanly.
       const expired = await waitUntil(
         () => host!.orchestrationAuthority!.sink.getRun(sub1.runId)?.lifecycle === 'cancelled',
         3_000
@@ -179,7 +177,6 @@ describe('W9 Blocker 2 + Must-Fix 2: pending TTL, gate release re-pump, and pers
       expect(cancelEvt?.payload?.reason).toBe('pending_expired')
       expect(host.orchestrationAuthority!.sink.listEvents().some((e) => e.runId === sub1.runId && e.type === 'run.dispatched')).toBe(false)
 
-      // Release auth gate and submit another run: session slot must be free.
       if (authLease.ok) authLease.release()
       const sub2 = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
@@ -226,7 +223,6 @@ describe('W9 Blocker 2 + Must-Fix 2: pending TTL, gate release re-pump, and pers
       const device = await enrollLocal(host1.service)
       const grant = host1.service.authority.inspectLocal().grants[0]!
 
-      // Hold auth gate so submitted run stays durably recorded without dispatching.
       const authLease = host1.providerOperationGate.acquireAuthentication(providerOperationKey('codex'))
       expect(authLease.ok).toBe(true)
 
@@ -238,13 +234,10 @@ describe('W9 Blocker 2 + Must-Fix 2: pending TTL, gate release re-pump, and pers
       expect(host1.orchestrationAuthority!.sink.getRun(sub.runId)?.lifecycle).toBe('recorded')
       expect(host1.orchestrationAuthority!.sink.getRun(sub.runId)?.ownerActor).toBe(`peer:${grant.certificateSHA256}`)
 
-      // Revoke the device grant BEFORE restarting host2.
       host1.service.revokeDevice(grant.deviceId)
       await host1.dispose()
       host1 = undefined
 
-      // Boot host2: in-memory gateway.runMeta is empty! Recover pumps the recorded intent.
-      // beforeDispatch MUST use persisted run.ownerActor and reject with grant_revoked (0 Provider calls).
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -285,7 +278,6 @@ describe('W9 Blocker 2 + Must-Fix 2: pending TTL, gate release re-pump, and pers
       })
       expect(sub.kind).toBe('accepted')
       if (sub.kind !== 'accepted') return
-      // Simulate system clock rolling backwards before intentAt
       now = 5_000
       const check = engine.beforeDispatch({
         runId: sub.runId,

@@ -147,7 +147,6 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
       selectedItems: []
     })
 
-    // Seed 2,100 terminal H1 runs (> 2,000 deferred threshold), including `settledConvRunId`!
     const ledgerDir = join(userDataDir, 'remote', 'ledger')
     mkdirSync(ledgerDir, { recursive: true, mode: 0o700 })
     const lines: string[] = []
@@ -181,7 +180,6 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
     )
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
-    // Use whitespace + uppercase " ON " to verify Must-Fix 5a (parseOrchestrationMode in host-process.ts)!
     const restore = setOrchEnv(' ON ')
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
@@ -205,12 +203,9 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
       expect(tAbsent.origin).toBe('dispatch')
       if (tDeferred.origin !== 'dispatch' || tAbsent.origin !== 'dispatch') return
 
-      // Must-Fix 5c: settled H1 conversation turn MUST NOT be falsely marked `not_sent` during deferred import!
       expect(tDeferred.delivery.status).not.toBe('not_sent')
-      // Must-Fix 5a: genuinely absent turn is reconciled as `not_sent` (not hijacked by early recoverAll)!
       expect(tAbsent.delivery).toEqual({ status: 'not_sent', reason: 'orchestration_intent_absent' })
 
-      // Must-Fix 5b: reconciled turn ALSO committed `turn.delivery` event to orchestration.db!
       const deliveryEvents = host.orchestrationAuthority!.sink
         .listEvents()
         .filter((e) => e.type === 'turn.delivery' && e.runId === settledConvRunId)
@@ -231,7 +226,7 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
       join(ledgerDir, 'session-ledger.log'),
       JSON.stringify({
         seq: 1,
-        at: now - 1_000, // NOT expired (< 30s TTL), non-conversation remote run
+        at: now - 1_000,
         runId,
         kind: 'intent_recorded',
         intentId: randomUUID(),
@@ -270,7 +265,6 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
         workspace: { authorize: (c) => c },
         runProvider: async () => undefined,
         gate
-        // orchestration intentionally undefined (`off` / `shadow` mode!)
       },
       authority: { authorizesCertificate: () => true } as never,
       ledger,

@@ -31,6 +31,6 @@ Recorder 合同在 `diff.value[].repositoryLocation` 增加可选对象。内部
 
 起始位置独立于 diff 基线：接续轮在该段采集开始时重新读 Git；`baseline_after_turn_start` 表示迟启采集，起始字段只代表采集开启时，不能还原原始提问时的位置。
 
-每条记录最多给 32 个不同的仓库根各附一次位置；重复快照和超过上限的仓库仍保留原 diff。读取不启进程、不等待额外 I/O；只读已知 Git 文件布局。支持 loose ref、`packed-refs` 和 worktree/gitdir 指针，不追踪 Git config include、不应用 URL 重写规则、不读取其他 ref 后端。超过读取预算、读失败或无法确认的字段留空。
+每条记录最多给 32 个不同的仓库根各附一次位置；重复快照和超过上限的仓库仍保留原 diff。读取不启进程、不等待额外 I/O；只读已知 Git 文件布局。支持 loose ref、`packed-refs` 和 worktree/gitdir 指针，不追踪 Git config include、不解析续行、不应用 URL 重写规则、不读取其他 ref 后端。超过读取预算、读失败或无法确认的字段留空。
 - 会话捕获记录里的 `source` 与 `client` 是两件事：`source` 是谁要求采集，`client` 是这轮发生在哪个客户端里（例如 `source=friday` + `client=3eye`）。`client` 缺失只表示没观测到，不能读成“不在任何客户端里”；它只能是 `[a-z0-9][a-z0-9-]{0,31}` 形式的标识，不是自由文案。
 - `diff` 为 `partial` 时，`omissionReason` 是给人读的句子，`omissionCodes` 是同一批原因的封闭枚举（`baseline_after_turn_start` / `continuation_no_baseline` / `diff_exclude` / `untracked_limit` / `patch_policy` / `patch_budget` / `patch_deadline` / `patch_git_error` / `patch_truncated` / `patch_unavailable`）。平台与测试按码判断，不从句子解析；旧记录没有该字段表示只有文案。

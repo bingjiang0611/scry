@@ -193,7 +193,6 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Phase 1: live shadow write with 1.2 MB prompt body
     let run1Id = ''
     await withSmokeEnv('shadow', async () => {
       const host = await createDaemonHostProcess({
@@ -208,7 +207,6 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       })
       try {
         const device = await enrollLocal(host.service)
-        // Build a ~1.05 MB valid intent with 120 KB prompt + 690 KiB UTF-8 text attachments (~940 KB base64)
         const bigPrompt = `large:${'P'.repeat(120_000)}`
         const attA = Buffer.from('A'.repeat(450 * 1024), 'utf8')
         const attB = Buffer.from('B'.repeat(240 * 1024), 'utf8')
@@ -243,7 +241,6 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       }
     })
 
-    // Phase 2: daemon runs with SCRY_ORCHESTRATION=off and settles a 2nd run in H1 only
     let run2Id = ''
     await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
@@ -274,7 +271,6 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       }
     })
 
-    // Phase 3: restart in shadow -> imports run2 incrementally, then mirrors live run3 with zero deviations
     await withSmokeEnv('shadow', async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
@@ -433,10 +429,8 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       try {
         expect(logs.some((l) => l.includes('daemon.orchestration-shadow-deferred-import'))).toBe(true)
         const shadow = host.orchestrationShadow!
-        // Orphan open run was already imported synchronously before service.start() and settled as failed
         expect(shadow.mirror.sink!.getRun(orphanId)?.lifecycle).toBe('failed')
 
-        // Live run can execute immediately while deferred backfill yields in background
         const device = await enrollLocal(host.service)
         const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'submit',

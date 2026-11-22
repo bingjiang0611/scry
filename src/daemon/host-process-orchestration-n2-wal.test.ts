@@ -84,7 +84,6 @@ describe('W9 Blocker N2: bounded WAL checkpoints during deferred backfill (no wh
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Seed 2,500 terminal runs (> 2,000 deferred threshold) so real daemon enters startDeferredLegacyImport!
     seedLedgerRuns(userDataDir, canonicalWs, 2_500)
 
     const restore = setOrchEnv('on')
@@ -114,7 +113,6 @@ describe('W9 Blocker N2: bounded WAL checkpoints during deferred backfill (no wh
       const finalWal = walBytes(userDataDir)
       if (finalWal > walPeak) walPeak = finalWal
 
-      // Verify setIdleCheckpointPaused was removed AND real checkpoints ran during backfill!
       const sink = host.orchestrationAuthority!.sink as unknown as {
         setIdleCheckpointPaused?: unknown
         checkpointCount?: () => number
@@ -122,7 +120,6 @@ describe('W9 Blocker N2: bounded WAL checkpoints during deferred backfill (no wh
       expect(sink.setIdleCheckpointPaused).toBeUndefined()
       expect(typeof sink.checkpointCount).toBe('function')
       expect(sink.checkpointCount!()).toBeGreaterThan(0)
-      // WAL peak must stay strictly bounded (well under 32 MiB cap for 2,500 runs)
       expect(walPeak).toBeLessThanOrEqual(32 * 1024 * 1024)
     } finally {
       await host?.dispose()
@@ -152,7 +149,6 @@ describe('W9 Blocker N2: bounded WAL checkpoints during deferred backfill (no wh
           reconcileOpenRuns: false,
           shadowOnly: true,
           plan,
-          // Tight WAL checkpoint threshold (2 MiB) & hard cap (8 MiB) to prove cap enforcement!
           walCheckpointBytes: 2 * 1024 * 1024,
           walHardCapBytes: 8 * 1024 * 1024
         } as Parameters<typeof startDeferredLegacyImport>[0])

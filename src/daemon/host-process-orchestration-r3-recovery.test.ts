@@ -89,7 +89,6 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
     const runWithArchive = randomUUID()
     const runWithoutEvidence = randomUUID()
 
-    // Seed two dispatched runs in orchestration.db before daemon startup.
     const seedSink = EventSink.open({ userDataDir, checkpointIntervalMs: 0 })
     try {
       seedDispatchedRun(seedSink, runWithArchive, canonicalWs)
@@ -98,7 +97,6 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
       seedSink.close()
     }
 
-    // Write real committed trace archive turn evidence for runWithArchive only.
     upsertTraceArchiveTurn({
       userDataDir,
       cwd: canonicalWs,
@@ -185,10 +183,6 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
       selectedItems: []
     })
 
-    // Seed orchestration.db:
-    // - runAbsent is NOT in orchestration.db at all
-    // - runSettledNoBind is settled WITHOUT run.session_bound
-    // - runSettledWithBind is settled WITH real run.session_bound('real-native-session-123')
     const seedSink = EventSink.open({ userDataDir, checkpointIntervalMs: 0 })
     try {
       const now = Date.now() - 4_000
@@ -256,17 +250,14 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
       expect(t3.origin).toBe('dispatch')
       if (t1.origin !== 'dispatch' || t2.origin !== 'dispatch' || t3.origin !== 'dispatch') return
 
-      // conv1: no turn.began -> MUST be not_sent (not hijacked into unknown by early recoverAll!)
       expect(t1.delivery).toEqual({
         status: 'not_sent',
         reason: 'orchestration_intent_absent'
       })
 
-      // conv2: settled without nativeSessionId -> MUST be unknown, NEVER fake 'orch:<runId>'!
       expect(t2.delivery.status).toBe('unknown')
       expect(after2.bindings.some((b) => b.nativeSessionId?.startsWith('orch:'))).toBe(false)
 
-      // conv3: settled with real nativeSessionId -> MUST be accepted with real nativeSessionId!
       expect(t3.delivery.status).toBe('accepted')
       expect(after3.bindings.some((b) => b.nativeSessionId === 'real-native-session-123')).toBe(true)
     } finally {
@@ -299,7 +290,6 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
       })
       seedDispatchedRun(sink, runId, canonicalWs, conv.id)
 
-      // Attach Decision G before-settle observer (same contract orchestration-authority wires in on mode)
       const beforeSetter = (convStore as unknown as {
         setBeforeTurnSettledObserver?: (fn: (info: {
           conversationId: string
@@ -332,7 +322,6 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
 
       const origPersist = convStore.persist.bind(convStore)
       convStore.persist = async (conversation, exclusive) => {
-        // At the moment conversation file is about to be persisted, turn.delivery MUST already exist in orchestration.db!
         eventCommittedBeforePersist = sink
           .listEvents()
           .some((e) => e.runId === runId && e.type === 'turn.delivery')

@@ -91,7 +91,6 @@ describe('W9 Round-4: worker-thread WAL checkpoint proof, SIGKILL block-reservat
       const summary = await deferred.promise
       expect(summary.importedRuns).toBe(600)
       expect(samples.length).toBeGreaterThanOrEqual(1)
-      // Must execute exclusively in a worker thread, NEVER on the main thread's DB connection.
       expect(mainThreadCheckpointPragmas).toBe(0)
       for (const s of samples) {
         expect((s as WalCheckpointSample & { executor?: string }).executor).toBe('worker')
@@ -212,7 +211,6 @@ main().catch((err) => { console.error(err); process.exit(1) })
       const reservedAfterRestart = Number(host2.orchestrationAuthority!.sink.getMeta('h1_seq_reserved_until'))
       expect(reservedAfterRestart).toBe(2048)
 
-      // Old cursor 1 must receive reset to R=1024 with empty events (no renumbering).
       const polled = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, { op: 'poll', cursor: 1 })
       expect(polled.poll.events).toEqual([])
       expect(polled.poll.cursor).toBe(1024)

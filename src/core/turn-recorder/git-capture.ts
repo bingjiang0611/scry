@@ -186,7 +186,6 @@ export async function beginGitTurnDiff(
   try {
     const canonicalCwd = await realpath(cwd)
     const readEnv = workspaceSnapshot ? { ...process.env, GIT_NO_LAZY_FETCH: '1' } : undefined
-    // For a repo-root request, sample live HEAD in parallel with the existing layout and status commands.
     const cwdLocation = workspaceSnapshot ? undefined : sampleGitRepositoryLocation(canonicalCwd, true)
     const [layoutResult, statusResult] = await Promise.allSettled([
       gitCommand(
@@ -211,7 +210,6 @@ export async function beginGitTurnDiff(
     if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw || !sparsePathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
-    // The diff baseline may be a frozen tree, but location comes from the live worktree at capture start.
     const location = repoRoot === canonicalCwd ? cwdLocation
       : workspaceSnapshot ? undefined : sampleGitRepositoryLocation(repoRoot, true)
     if (statusResult.status === 'rejected') throw statusResult.reason

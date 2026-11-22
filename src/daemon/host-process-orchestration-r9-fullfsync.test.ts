@@ -80,7 +80,6 @@ describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit im
       })
 
       const authority = host.orchestrationAuthority!
-      // Maintainer decision (2026-11-20): both fullfsync and checkpoint_fullfsync ON by default in on mode.
       expect(authority.fullfsync).toBe(true)
       expect(authority.checkpointFullfsync).toBe(true)
       expect(authority.sink.handle.db.pragma('fullfsync', { simple: true })).toBe(1)
@@ -89,7 +88,6 @@ describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit im
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM
 
-      // 1. Happy-path immediate dispatch: must commit intent+admitted+dispatched in 1 command (1 commit pre-first-token)
       const run1 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
@@ -106,10 +104,8 @@ describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit im
         'run.admitted',
         'run.dispatched'
       ])
-      // All 3 pre-first-token events share the SAME commandId -> committed in 1 single SQLite transaction!
       expect(new Set(preDispatchEvents.map((e) => e.commandId)).size).toBe(1)
 
-      // 2. Large body (>16 KiB) also commits in 1 single SQLite transaction with durable external body
       const run2 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
@@ -127,7 +123,6 @@ describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit im
       expect(new Set(pre2.map((e) => e.commandId)).size).toBe(1)
       expect(authority.sink.getRun(run2.runId)?.body?.storage).toBe('external')
 
-      // 3. Trust gate failure still fails closed and never emits run.dispatched
       writeFileSync(join(canonicalWs, '.mcp.json'), '{broken json')
       const run3 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',

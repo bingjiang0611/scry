@@ -27,8 +27,6 @@ async function read(root: string, includeOrigin = true): Promise<GitRepositoryLo
   return location
 }
 
-// A best-effort production sample never waits. Read the real Git files before handing the
-// observation to each boundary so a slow CI filesystem cannot make these mapping tests flaky.
 async function sampleNextBoundary(root: string, includeOrigin: boolean): Promise<void> {
   const observed = await read(root, includeOrigin)
   vi.mocked(sampleGitRepositoryLocation).mockReturnValueOnce(() => observed)
