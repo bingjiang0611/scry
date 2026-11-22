@@ -66,6 +66,8 @@ function digest(bytes: Uint8Array): string {
 
 export class InnerMtlsHost {
   #server: Server
+  #desktopServer?: Server
+  readonly #openDesktopServer: () => Server
   #maxFrame: number
   #transport: 'local' | 'network'
   #info?: InnerMtlsHostOptions['info']
@@ -83,7 +85,12 @@ export class InnerMtlsHost {
     this.#info = options.info
     this.#onPeerDisconnected = options.onPeerDisconnected
     this.#networkSubscribe = this.#transport === 'network' ? options.networkSubscribe : undefined
-    this.#server = createServer({
+    this.#server = this.#makeServer(options, false)
+    this.#openDesktopServer = () => this.#makeServer(options, true)
+  }
+
+  #makeServer(options: InnerMtlsHostOptions, desktopTransport: boolean): Server {
+    const server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
       ca: options.caPEM,
@@ -95,11 +102,12 @@ export class InnerMtlsHost {
       // Relay legs start TLS only once device bytes arrive and direct LAN
       // peers are unauthenticated until the handshake ends: bound it.
       handshakeTimeout: 10_000
-    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets, options.localEndpoint))
-    this.#server.on('tlsClientError', (err) => {
+    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets, options.localEndpoint, desktopTransport))
+    server.on('tlsClientError', (err) => {
       // Rejected handshakes are not host errors. Optional diagnostics only.
       if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] tlsClientError: ${(err as Error)?.message}`)
     })
+    return server
   }
 
   // Direct-route addresses reported to an authorized phone's ping. Set once the
@@ -116,7 +124,14 @@ export class InnerMtlsHost {
     this.#server.emit('connection', stream)
   }
 
-  #onConnection(socket: TLSSocket, controller: HostController, executionTargets?: ExecutionTargetRouter, localEndpoint?: LocalEndpointHandlers): void {
+  /** Only the loopback Desktop/SSH listener supplies this origin. Both servers verify the same grants. */
+  serveDesktop(stream: Duplex): void {
+    this.#desktopServer ??= this.#openDesktopServer()
+    this.#desktopServer.emit('connection', stream)
+  }
+
+  #onConnection(socket: TLSSocket, controller: HostController, executionTargets: ExecutionTargetRouter | undefined,
+                localEndpoint: LocalEndpointHandlers | undefined, desktopTransport: boolean): void {
     // Fail closed on anything but a fresh, fully-verified TLS 1.3 session.
     if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] onConnection authorized=${socket.authorized} authErr=${socket.authorizationError} proto=${socket.getProtocol()} reused=${socket.isSessionReused()}`)
     if (!socket.authorized || socket.getProtocol() !== 'TLSv1.3' || socket.isSessionReused()) { socket.destroy(); return }
@@ -146,7 +161,8 @@ export class InnerMtlsHost {
     serveInnerConnection(socket, {
       certificateExpiresAt, maxFrame: this.#maxFrame,
       preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
-      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal, this.#networkSubscribe),
+      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint,
+        () => this.#lanAdvertisement(), connAbort.signal, this.#networkSubscribe, desktopTransport),
       timing: (parsed) => requestTiming(parsed)
     })
   }
@@ -197,7 +213,8 @@ export class InnerMtlsHost {
 
   async close(): Promise<void> {
     for (const socket of this.#connections) socket.destroy()
-    await new Promise<void>((resolve) => this.#server.close(() => resolve()))
+    const servers = this.#desktopServer ? [this.#server, this.#desktopServer] : [this.#server]
+    await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
   }
 }
 

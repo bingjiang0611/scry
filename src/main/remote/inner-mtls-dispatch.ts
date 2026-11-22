@@ -63,7 +63,8 @@ export async function dispatchRemoteRequest(
   localEndpoint?: LocalEndpointHandlers,
   lanAdvertisement: () => LanAdvertisement | undefined = () => undefined,
   connectionSignal?: AbortSignal,
-  networkSubscribe?: LocalEndpointHandlers['subscribe']
+  networkSubscribe?: LocalEndpointHandlers['subscribe'],
+  desktopTransport = false
 ): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
@@ -144,8 +145,9 @@ export async function dispatchRemoteRequest(
       return handleAttentionViewed(localEndpoint?.attention, request as unknown as Record<string, unknown>)
     }
     if (request.op === 'subscribe') {
+      const transport = desktopTransport ? 'desktop' : networkSubscribe ? 'network' : 'local'
       return await handleSubscribe(localEndpoint?.subscribe ?? networkSubscribe,
-        request as unknown as Record<string, unknown>, fingerprint, connectionSignal, !!networkSubscribe)
+        request as unknown as Record<string, unknown>, fingerprint, connectionSignal, transport)
     }
     if (request.op === 'terminalFeed') {
       // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.

@@ -165,7 +165,7 @@ export class SubscribeEngine {
         if (remaining <= 0 || this.#hub.closed || signal?.aborted) return reply
 
         const observedCommit = this.#hub.commitSeq
-        if ((!readsHints || !this.#hub.hasPendingHints(hintPeer)) && observedCommit <= reply.seq) {
+        if ((!readsHints || !this.#hub.hasPendingHints(hintPeer, localRead)) && observedCommit <= reply.seq) {
           await this.#hub.waitForWake(remaining, signal)
         }
         if (this.#hub.closed || signal?.aborted) {
@@ -430,7 +430,7 @@ export class SubscribeEngine {
     request: SubscribeRequest, state: boolean, fresh?: boolean
   ): SubscribeHint[] {
     if (request.historyOnly || (access.scope === 'remote' && !views.has('activeRuns') && !views.has('detail'))) return []
-    const pending = this.#hub.drainHints(peer, state && access.scope === 'local', fresh)
+    const pending = this.#hub.drainHints(peer, state && access.scope === 'local', fresh, access.scope === 'local')
     if (access.scope === 'local') return pending
     const hints: SubscribeHint[] = []
     const detail = views.has('detail')

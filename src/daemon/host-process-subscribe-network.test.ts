@@ -74,6 +74,11 @@ describe('v3 subscribe on the authenticated network endpoint', () => {
       const grant = await host.service.authority.confirmLocal(pairingId, id.publicKeySHA256)
       const request = (frame: Record<string, unknown>) =>
         callTcp(status.runPort, host.service.caCertificatePEM, grant.certificatePEM, id.keyPEM, frame)
+      const network = await host.service.host.listen(0, '127.0.0.1')
+      const forwarded = { op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 0, subscriptionId: '3'.repeat(32) }
+      await expect(callTcp(network.port, host.service.caCertificatePEM, grant.certificatePEM, id.keyPEM, forwarded))
+        .resolves.toEqual({ error: 'invalid_request' })
+      await expect(request(forwarded)).resolves.toMatchObject({ subscribe: { mode: 'snapshot' } })
       const authority = host.orchestrationAuthority!
       const importSession = (sessionKey: string, cwd: string) => {
         const payload = { sessionKey, provider: 'codex', title: sessionKey, cwd, ts: Date.now() }

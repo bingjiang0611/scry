@@ -11,10 +11,12 @@ function text(value: unknown, maximum: number): value is string {
 /** Shared by the network endpoint and execution target forwarding. */
 export function parseSubscribeFrame(
   request: Record<string, unknown>,
-  transport: 'local' | 'network' | 'target'
+  transport: 'local' | 'network' | 'desktop' | 'target'
 ): SubscribeRequest | undefined {
   const keys = transport === 'target' ? BODY_KEYS
-    : [...BODY_KEYS, ...TRANSPORT_KEYS, ...(transport === 'local' ? ['detailWatch', 'trackedRunIds'] : ['subscriptionId'])]
+    : [...BODY_KEYS, ...TRANSPORT_KEYS,
+      ...(transport === 'local' ? ['detailWatch', 'trackedRunIds'] : []),
+      ...(transport === 'desktop' ? ['subscriptionId'] : [])]
   if (Object.keys(request).some((key) => !keys.includes(key))) return undefined
   const network = transport !== 'local'
   const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk, historyFormat, historyOnly, subscriptionId, trackedRunIds } = request

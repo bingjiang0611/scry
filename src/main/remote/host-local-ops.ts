@@ -69,10 +69,10 @@ export async function handleSubscribe(
   request: Record<string, unknown>,
   peer: string,
   signal?: AbortSignal,
-  network = false
+  transport: 'local' | 'network' | 'desktop' = 'local'
 ): Promise<Record<string, unknown>> {
   if (!subscribe) return { error: 'unsupported_op' }
-  const input = parseSubscribeFrame(request, network ? 'network' : 'local')
+  const input = parseSubscribeFrame(request, transport)
   if (!input) return { error: 'invalid_request' }
   const reply = await subscribe(peer, input, signal)
   return { subscribe: reply }
