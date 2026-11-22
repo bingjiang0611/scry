@@ -1,0 +1,11 @@
+# 018: Recover remote Desktop reads without guessing about writes
+
+**Status:** Accepted (documents existing behavior)
+
+Keep SSH addressing separate from the pinned Scry host identity; accept explicit coordinates, not aliases or arbitrary SSH flags. Refuse a run-protocol version mismatch rather than silently mixing protocols. Negotiate capabilities separately: older hosts may have one of fork/delete, lack trace deltas, or lack host-owned directory selection. Cached Provider metadata is not a current auth or capability proof. Scope fresh controls to the requested Provider, profile and directory. The host validates the repository, prepares the worktree and reauthorizes the directory for each explicit workbench call or continuation. After a lost reply only allowlisted read-only calls may be retried automatically.
+
+Observation time and publication sequence are separate; monotonic sequence is not a wall clock. Missing questions or terminal results mean unknown. Local attention derives from the client's connection baseline; do not present it as host evidence or send it to the host. A local-scope grant may request a recently settled run's retained trace, while a device gets no live run after settlement. Oversized history and trace responses use lossless bounded byte chunks and a separate assembled-size cap. A trace delta applies only to an exact base revision and item count; any mismatch requires a complete snapshot. Only a delta-aware snapshot carries a revision for the next update.
+
+Recording a submit is not execution. Main owns the durable pending receipt and downstream intent ID; keep any upstream phone identity separate. A lost outcome must not be retried with a new ID. Reconnect or recovery can find acceptance or fence the original ID, not resend a prompt or stop an accepted run. Keep the original diagnostic bounded and omit the payload. A missing long-poll change hint is not proof of no change. For a run started by another device, use the host run ID for stop and answer; use the bound Scry run ID for trace.
+
+See [desktop-remote.ts](../../src/shared/desktop-remote.ts), [desktop-workbench.ts](../../src/shared/desktop-workbench.ts), and [remote run policy tests](../../src/main/remote/remote-run-policy.test.ts).

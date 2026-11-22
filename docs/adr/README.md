@@ -18,6 +18,9 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [014: Side chats copy context, not native session ownership](014-conversation-ownership-and-side-chat.md)
 - [015: Give each visible run its own bounded live trace](015-scoped-live-run-traces.md)
 - [016: A stop request is not proof of Provider termination](016-provider-runtime-control-evidence.md)
+- [017: Keep device approval local and distinct from transport](017-remote-pairing-and-host-approval.md)
+- [018: Recover remote Desktop reads without guessing about writes](018-remote-desktop-protocol-evidence.md)
+- [019: Report what the App observed about its background service](019-background-service-observation.md)
 
 ## Source comment ratchet
 
