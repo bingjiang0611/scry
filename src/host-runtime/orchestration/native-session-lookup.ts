@@ -16,6 +16,22 @@ export function scopedNativeSessionKey(identity: NativeSessionIdentity): string 
   return `native:${sha256Hex(JSON.stringify([identity.provider, identity.profile, identity.cwd, identity.sessionId]))}`
 }
 
+export function deletedNativeSessionKey(sink: SessionReader, identity: NativeSessionIdentity): string | undefined {
+  const row = sink.handle.db.prepare(
+    `SELECT session_key AS key FROM orch_event
+     WHERE type = 'session.deleted' AND json_extract(payload, '$.nativeIdentity') = ?
+     ORDER BY seq DESC LIMIT 1`
+  ).get(scopedNativeSessionKey(identity)) as { key: string } | undefined
+  return row?.key
+}
+
+export function wasNativeSourceDeleted(sink: SessionReader, identity: NativeSessionIdentity): boolean {
+  return Boolean(sink.handle.db.prepare(
+    `SELECT 1 FROM orch_event
+     WHERE type = 'session.deleted' AND json_extract(payload, '$.nativeSource') = ? LIMIT 1`
+  ).get(scopedNativeSessionKey({ ...identity, profile: null })))
+}
+
 export function findNativeSession(sink: SessionReader, identity: NativeSessionIdentity): SessionProjectionRow | undefined {
   const { sessionId, provider, profile, cwd } = identity
   if (cwd !== undefined) {

@@ -196,5 +196,6 @@ export class BodyStore {
   unlinkBody(sha256: string): void {
     if (!SHA256_RE.test(sha256) || this.isPinned(sha256)) return
     rmSync(this.externalPath(sha256), { force: true })
+    if (existsSync(this.bodiesDir)) fsyncDirectory(this.bodiesDir)
   }
 }

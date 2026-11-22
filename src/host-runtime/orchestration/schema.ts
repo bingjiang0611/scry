@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 3
+export const ORCHESTRATION_SCHEMA_VERSION = 4
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 2
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -200,4 +200,16 @@ export const ORCH_DDL_V3: readonly string[] = [
   "UPDATE orch_meta SET value = '' WHERE key = 'legacy_catalog_sha256'"
 ]
 
-export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3]
+export const ORCH_DDL_V4: readonly string[] = [
+  `CREATE TABLE orch_body_erase (
+    session_key TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY (session_key, sha256)
+  )`,
+  `CREATE INDEX idx_orch_event_deleted_native
+   ON orch_event(json_extract(payload, '$.nativeIdentity')) WHERE type = 'session.deleted'`,
+  `CREATE INDEX idx_orch_event_deleted_native_source
+   ON orch_event(json_extract(payload, '$.nativeSource')) WHERE type = 'session.deleted'`
+]
+
+export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4]

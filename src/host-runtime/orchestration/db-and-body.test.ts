@@ -48,7 +48,8 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           'orch_p_run',
           'orch_p_interaction',
           'orch_outbox',
-          'orch_legacy_run'
+          'orch_legacy_run',
+          'orch_body_erase'
         ]) {
           expect(tables).toContain(required)
         }
@@ -130,7 +131,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
 
       const upgraded = openOrchestrationDatabase({ userDataDir: userData })
       try {
-        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(3)
+        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(4)
         // Old non-zero output_seq preserved; legacy V1 default 0 converted to honest NULL
         const oldRow = upgraded.db
           .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
@@ -168,7 +169,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           VALUES ('old', '/tmp/工作区', 10, 42, '旧标题');
       `)
       migrateOrchestrationDatabase(db)
-      expect(db.pragma('user_version', { simple: true })).toBe(3)
+      expect(db.pragma('user_version', { simple: true })).toBe(4)
       expect(db.prepare('SELECT session_key, cwd, rev_seq, title, catalog FROM orch_p_session').get()).toEqual({
         session_key: 'old', cwd: '/tmp/工作区', rev_seq: 42, title: '旧标题', catalog: null
       })

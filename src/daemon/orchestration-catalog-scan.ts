@@ -18,6 +18,7 @@ import {
   type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
+import { wasNativeSourceDeleted } from '../host-runtime/orchestration/native-session-lookup'
 
 interface CatalogScanOptions {
   sink: EventSink
@@ -89,6 +90,9 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
   const publish = (payload: SessionDiscoverPayload, at: number): void => {
     if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
     const existing = sink.getSession(payload.sessionKey)
+    if (!existing && payload.catalog?.nativeSessionId && wasNativeSourceDeleted(sink, {
+      sessionId: payload.catalog.nativeSessionId, provider: payload.provider, profile: null, cwd: payload.cwd
+    })) return
     if (!existing && sink.handle.db.prepare(
       "SELECT 1 FROM orch_event WHERE session_key IN (?, ?) AND cwd = ? AND type = 'session.deleted' LIMIT 1"
     ).get(payload.sessionKey, payload.catalog?.nativeSessionId ?? '', payload.cwd)) return

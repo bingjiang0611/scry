@@ -5,7 +5,7 @@ import { unavailable } from '../../shared/turn-record'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import type { LegacyRunState } from './legacy-ledger-reader'
-import { findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
+import { deletedNativeSessionKey, findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 
 /**
  * P4-1 startup repair for S2: if a previous daemon crashed between `intent_recorded` and
@@ -105,7 +105,7 @@ export function importCatalogEntries(
         const scoped = findNativeSession(sink, identity)
         const sessionKey = scoped?.sessionKey ?? ((frequencies.get(legacyKey) ?? 0) > 1 && sink.getSession(legacyKey)
           ? scopedNativeSessionKey(identity) : legacyKey)
-        if (deletedSession.get(sessionKey, sessionKey)) continue
+        if (!scoped && (deletedSession.get(sessionKey, sessionKey) || deletedNativeSessionKey(sink, identity))) continue
         const imported = previousImport.get(sessionKey) as { seq: number; payload: string } | undefined
         const previous = imported ? JSON.parse(imported.payload) as Record<string, unknown> : undefined
         const title =

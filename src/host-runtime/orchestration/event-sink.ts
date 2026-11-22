@@ -14,6 +14,7 @@ import { findNativeSession } from './native-session-lookup'
 import {
   deleteSessionInDb,
   pruneEventsInDb,
+  resumeBodyErasure,
   stopRunBypassingFenceInRegistry,
   unlinkUnreferencedExternalBodyInDb,
   verifyReplayConsistencyInDb,
@@ -196,7 +197,10 @@ export class EventSink {
 
   static open(options: EventSinkOptions): EventSink {
     const handle = openOrchestrationDatabase(options)
-    return new EventSink(handle, options)
+    const sink = new EventSink(handle, options)
+    const erasure = resumeBodyErasure(handle.db, sink.bodyStore)
+    if (erasure.error) console.warn('[scry] orchestration body erasure pending:', erasure.error)
+    return sink
   }
 
   isWriteIndeterminate(): boolean {
@@ -441,18 +445,21 @@ export class EventSink {
       return { status: 'unavailable', error: 'orchestration_write_indeterminate' }
     }
     try {
-      const { existed, unreferencedShas, redactedEvents } = deleteSessionInDb(
+      const { existed, redactedEvents } = deleteSessionInDb(
         this.handle.db,
         input,
         this.#beforeCommitHook
       )
-      if (!existed) return { status: 'not_present' }
-      this.#sessionDeleteEpoch.set(input.sessionKey, (this.#sessionDeleteEpoch.get(input.sessionKey) ?? 0) + 1)
-      for (const sha of unreferencedShas) this.bodyStore.unlinkBody(sha)
-      this.handle.enforceModes()
-      this.scheduleIdleCheckpoint()
-      this.#notifyCommitted()
-      return { status: 'deleted', deletedBodies: unreferencedShas.length, redactedEvents }
+      if (existed) {
+        this.#sessionDeleteEpoch.set(input.sessionKey, (this.#sessionDeleteEpoch.get(input.sessionKey) ?? 0) + 1)
+        this.handle.enforceModes()
+        this.scheduleIdleCheckpoint()
+        this.#notifyCommitted()
+      }
+      const erased = resumeBodyErasure(this.handle.db, this.bodyStore, input.sessionKey)
+      if (erased.error) return { status: 'unavailable', error: erased.error }
+      if (!existed && erased.completed === 0) return { status: 'not_present' }
+      return { status: 'deleted', deletedBodies: erased.erased, redactedEvents }
     } catch (error) {
       this.#writeIndeterminate = true
       return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }

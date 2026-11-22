@@ -19,6 +19,8 @@ export interface DeleteSessionInput {
   at: number
   /** Run IDs verified by the host's deletion scope before an older run had a projected key. */
   unboundRunIds?: readonly string[]
+  nativeIdentity?: string
+  nativeSource?: string
 }
 
 export type DeleteSessionOutcome =
@@ -29,14 +31,13 @@ export type DeleteSessionOutcome =
 /**
  * data §4.7: atomically emit `session.deleted` tombstone, drop projections/outbox,
  * redact historical event preview payloads to `{"redacted":true}`, and return
- * unreferenced external body sha256s for post-commit unlink.
+ * unreferenced external body sha256s for crash-safe post-commit unlink.
  */
 export function deleteSessionInDb(
   db: Database.Database,
   input: DeleteSessionInput,
   beforeCommitHook?: () => void
-): { existed: boolean; unreferencedShas: string[]; redactedEvents: number } {
-  let unreferencedShas: string[] = []
+): { existed: boolean; redactedEvents: number } {
   let redactedEvents = 0
   let existed = false
 
@@ -79,7 +80,12 @@ export function deleteSessionInDb(
       db.prepare(`DELETE FROM ${table} WHERE run_id IN (SELECT value FROM json_each(?))`).run(runIds)
     }
 
-    const tombstonePayload = canonicalJson({ sessionKey: input.sessionKey, cwd: input.cwd })
+    const tombstone = {
+      sessionKey: input.sessionKey, cwd: input.cwd,
+      ...(input.nativeIdentity ? { nativeIdentity: input.nativeIdentity } : {}),
+      ...(input.nativeSource ? { nativeSource: input.nativeSource } : {})
+    }
+    const tombstonePayload = canonicalJson(tombstone)
     const info = db
       .prepare(
         `INSERT INTO orch_event (
@@ -110,7 +116,7 @@ export function deleteSessionInDb(
       commandId: null,
       actor: input.actor,
       scope: input.scope,
-      payload: { sessionKey: input.sessionKey, cwd: input.cwd },
+      payload: tombstone,
       evidence: null,
       principal: input.actor,
       via: null,
@@ -135,12 +141,17 @@ export function deleteSessionInDb(
         }
       }
     }
-    unreferencedShas = [...candidateShas].filter((sha) => !stillReferenced.has(sha))
+    if (candidateShas.size > 0) {
+      const pendingErase = db.prepare('INSERT OR IGNORE INTO orch_body_erase (session_key, sha256) VALUES (?, ?)')
+      for (const sha of candidateShas) {
+        if (!stillReferenced.has(sha)) pendingErase.run(input.sessionKey, sha)
+      }
+    }
     beforeCommitHook?.()
   })
   tx()
 
-  return { existed, unreferencedShas, redactedEvents }
+  return { existed, redactedEvents }
 }
 
 /**
@@ -241,20 +252,51 @@ export function unlinkUnreferencedExternalBodyInDb(
   db: Database.Database,
   bodyStore: BodyStore,
   sha256: string
-): void {
-  if (bodyStore.isPinned(sha256)) return
+): 'pinned' | 'referenced' | 'erased' {
+  if (bodyStore.isPinned(sha256)) return 'pinned'
   const surviving = db
     .prepare('SELECT body FROM orch_p_run WHERE body IS NOT NULL')
     .all() as Array<{ body: string }>
   for (const row of surviving) {
     const parsed = JSON.parse(row.body) as { storage?: string; sha256?: string }
-    if (parsed.storage === 'external' && parsed.sha256 === sha256) return
+    if (parsed.storage === 'external' && parsed.sha256 === sha256) return 'referenced'
   }
   const activeOutbox = db
     .prepare("SELECT payload FROM orch_outbox WHERE state IN ('pending', 'running')")
     .all() as Array<{ payload: string }>
   for (const row of activeOutbox) {
-    if (row.payload.includes(sha256)) return
+    if (row.payload.includes(sha256)) return 'referenced'
   }
   bodyStore.unlinkBody(sha256)
+  return 'erased'
+}
+
+export function resumeBodyErasure(
+  db: Database.Database,
+  bodyStore: BodyStore,
+  sessionKey?: string
+): { completed: number; erased: number; error?: string } {
+  const rows = (sessionKey
+    ? db.prepare('SELECT session_key, sha256 FROM orch_body_erase WHERE session_key = ?').all(sessionKey)
+    : db.prepare('SELECT session_key, sha256 FROM orch_body_erase').all()
+  ) as Array<{ session_key: string; sha256: string }>
+  const clear = db.prepare('DELETE FROM orch_body_erase WHERE session_key = ? AND sha256 = ?')
+  let completed = 0
+  let erased = 0
+  let error: string | undefined
+  for (const row of rows) {
+    try {
+      const result = unlinkUnreferencedExternalBodyInDb(db, bodyStore, row.sha256)
+      if (result === 'pinned') {
+        error ??= 'orchestration_body_erase_pending'
+        continue
+      }
+      clear.run(row.session_key, row.sha256)
+      completed += 1
+      if (result === 'erased') erased += 1
+    } catch (failure) {
+      error ??= failure instanceof Error ? failure.message : String(failure)
+    }
+  }
+  return { completed, erased, ...(error ? { error } : {}) }
 }

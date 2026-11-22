@@ -4,7 +4,7 @@ import { available } from '../shared/turn-record'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { DeleteSessionOutcome } from '../host-runtime/orchestration/event-sink-maintenance'
-import { findNativeSession } from '../host-runtime/orchestration/native-session-lookup'
+import { deletedNativeSessionKey, findNativeSession, scopedNativeSessionKey } from '../host-runtime/orchestration/native-session-lookup'
 import type { SessionDiscoverPayload } from '../host-runtime/orchestration/orchestrator-commands'
 import { mapSessionRow } from '../host-runtime/orchestration/projection-mappers'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
@@ -73,14 +73,20 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
         return { status: 'unavailable', error: 'orchestration_write_indeterminate' }
       }
       const session = findProjectedNativeSession(sink, { ...ref, sessionId: ref.externalSessionId })
-      if (!session || session.cwd === null) return { status: 'not_present' }
+      const identity = {
+        sessionId: ref.externalSessionId, provider: ref.providerId, profile: ref.agentProfileId ?? null, cwd: ref.cwd
+      }
+      const sessionKey = session?.sessionKey ?? deletedNativeSessionKey(sink, identity)
+      if (!sessionKey) return { status: 'not_present' }
       return sink.deleteSession({
-        sessionKey: session.sessionKey,
-        cwd: session.cwd,
+        sessionKey,
+        cwd: session?.cwd ?? ref.cwd,
         actor: 'system',
         scope: 'system',
         at: Date.now(),
-        unboundRunIds: [...runIds]
+        unboundRunIds: [...runIds],
+        nativeIdentity: scopedNativeSessionKey(identity),
+        nativeSource: scopedNativeSessionKey({ ...identity, profile: null })
       })
     },
 
