@@ -1,9 +1,6 @@
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, type ServiceTemplateInput } from '../supervisor-templates'
 
-// Shared path and bundle layout derivation for login-start (P5 §2.3). Plain Node only:
-// Electron main supplies `app.getAppPath()` / `process.resourcesPath` / `userData`; the
-// future `scry-host` CLI derives the exact same values from bundle layout.
 
 export interface LoginStartTarget {
   executable: string
@@ -15,7 +12,6 @@ export interface LoginStartTarget {
 
 export interface LoginStartOverrides {
   isTestInstance: boolean
-  /** True only under SCRY_TEST_APP=1 when an explicit non-production label/unit was supplied. */
   testOverrideActive: boolean
   label: string
   unitName: string
@@ -42,7 +38,6 @@ export function loginStartTemplateInput(
   }
 }
 
-/** Derives the four bundle paths from the packaged executable, matching main's layout. */
 export function loginStartTargetFromBundle(
   executable: string,
   userDataDir: string,
@@ -60,20 +55,11 @@ export function loginStartTargetFromBundle(
   }
 }
 
-/**
- * macOS mounted DMG (`/Volumes/...`) or Gatekeeper App Translocation paths do not survive
- * a reboot/re-login, so installing a login service pointing there would immediately break.
- */
 export function isEphemeralMacAppPath(executable: string): boolean {
   const normalized = resolve(executable)
   return normalized.startsWith('/Volumes/') || normalized.includes('/AppTranslocation/')
 }
 
-/**
- * Test-only label/unit/directory overrides so real-machine acceptance never touches
- * `com.scry.daemon` or `scry-daemon.service`. Completely ignored unless `SCRY_TEST_APP=1`,
- * and refuses overriding to the production label/unit.
- */
 export function resolveLoginStartOverrides(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform
@@ -132,7 +118,6 @@ export function serviceFilePath(input: {
     const dir = input.serviceDirOverride ?? join(input.homeDir, 'Library', 'LaunchAgents')
     return join(dir, `${input.label}.plist`)
   }
-  // XDG Base Directory Specification: relative XDG_CONFIG_HOME paths must be ignored.
   const xdg = input.xdgConfigHome?.trim()
   const configBase = xdg && isAbsolute(xdg) ? xdg : join(input.homeDir, '.config')
   const dir = input.serviceDirOverride ?? join(configBase, 'systemd', 'user')
