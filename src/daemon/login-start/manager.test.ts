@@ -152,12 +152,10 @@ describe('login-start manager', () => {
     mkdirSync(agentsDir, { recursive: true })
     const plistPath = join(agentsDir, 'com.scry.daemon.plist')
 
-    // 1. Foreign file -> conflict, untouched
     writeFileSync(plistPath, '<plist><dict><key>Label</key><string>com.scry.daemon</string></dict></plist>')
     expect(await manager.status()).toEqual({ state: 'conflict', reason: 'login_start_foreign_service' })
     expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_foreign_service' })
 
-    // 2. Ours, different userData -> conflict with path, untouched
     const otherUserData = join(root, 'other-userData')
     writeFileSync(plistPath, renderLaunchdPlist(loginStartTemplateInput({
       executable, appPath, resourcesPath, userDataDir: otherUserData, isPackaged: true
@@ -169,7 +167,6 @@ describe('login-start manager', () => {
       ok: false, reason: 'login_start_other_userdata', otherUserDataDir: otherUserData
     })
 
-    // 3. Ours, same userData, different executable that STILL EXISTS -> conflict on status AND enable (S1)
     const otherExec = join(root, 'Other.app', 'Contents', 'MacOS', 'Scry')
     mkdirSync(join(root, 'Other.app', 'Contents', 'MacOS'), { recursive: true })
     writeFileSync(otherExec, '')
@@ -182,7 +179,6 @@ describe('login-start manager', () => {
     expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_other_app', otherExecutable: otherExec })
     expect(readFileSync(plistPath, 'utf8')).toBe(otherAppPlist)
 
-    // 4. Remove old executable (App moved) -> status() does NOT write; explicit reconcileMovedApp() rewrites preserving policy
     rmSync(otherExec)
     const movedPlist = renderLaunchdPlist(loginStartTemplateInput({
       executable: otherExec, appPath: join(root, 'Other.app', 'Contents', 'Resources', 'app.asar'),
@@ -209,7 +205,6 @@ describe('login-start manager', () => {
       systemctlAvailable: true,
       exec: async (file, args) => {
         calls.push({ file, args })
-        // S7: property order reversed compared to -p ActiveState,MainPID
         if (file === '/usr/bin/systemctl' && args[1] === 'show') return ok('MainPID=9876\nActiveState=active\n')
         if (file === '/usr/bin/loginctl') return ok('no\n')
         return ok()

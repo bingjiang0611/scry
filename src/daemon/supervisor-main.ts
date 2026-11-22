@@ -12,8 +12,6 @@ const { config: { stateDirectory }, daemonEnv: env } = plan
 const supervisorEntry = resolve(process.argv[1] ?? '')
 const daemonEntry = resolve(process.env.SCRY_DAEMON_ENTRY ?? join(dirname(supervisorEntry), 'daemon.js'))
 const executable = process.execPath
-// A stop request (from a service manager, or Ctrl-C) is forwarded to the daemon once;
-// the supervisor then waits for the daemon's exit, bounded, before it leaves itself.
 const abort = new AbortController()
 process.on('SIGTERM', () => abort.abort())
 process.on('SIGINT', () => abort.abort())

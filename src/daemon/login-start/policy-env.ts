@@ -8,8 +8,6 @@ import { EXPERIMENTAL_PROVIDERS } from '../../shared/experimental-providers'
 import { remoteHostEnabled } from '../../shared/remote-host-policy'
 import { isAgentPermissionMode } from '../../shared/runtime-types'
 
-// Non-secret remote policy environment variables forwarded into a login-start service
-// file (P5-headless-host §2.2 & decision 11). Plain Node only (no Electron dependency).
 
 export const LOGIN_START_POLICY_ENV_KEYS = [
   'SCRY_REMOTE_HOST',
@@ -36,12 +34,6 @@ export type PolicyEnvCollection =
   | { ok: true; entries: Array<[LoginStartPolicyEnvKey, string]> }
   | { ok: false; reason: string }
 
-/**
- * Validates one policy value against its real runtime reader without trimming or
- * rewriting: if the App's own env carries leading/trailing whitespace that a real reader
- * would ignore (e.g. `SCRY_REMOTE_HOST=" 1"`), writing a trimmed value into the service
- * file would silently widen policy (W2 review B1).
- */
 function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string | undefined {
   if (CONTROL.test(raw) || raw !== raw.trim() || raw.length === 0) return undefined
   switch (key) {
@@ -57,7 +49,6 @@ function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string |
       if (tokens.length === 0 || tokens.some((item) => item.length === 0 || !KNOWN_PROVIDERS.has(item.toLowerCase() as ProviderId))) {
         return undefined
       }
-      // Preserve raw spelling/case verbatim so the service file matches the App's env.
       return raw
     }
     case 'SCRY_EXPERIMENTAL_PROVIDERS': {
@@ -79,11 +70,6 @@ function validatePolicyEntry(key: LoginStartPolicyEnvKey, raw: string): string |
   }
 }
 
-/**
- * Validates the App's current environment against P5 §2.2 before writing a service file.
- * Refuses `SCRY_REMOTE_RELAY_WS` (carries a token) and any malformed/untrimmed policy
- * value; ignores diagnostic variables (`SCRY_DAEMON_SMOKE_PROVIDER`, `SCRY_RUN_TIMING`).
- */
 export function collectLoginStartPolicyEnv(env: NodeJS.ProcessEnv): PolicyEnvCollection {
   if (env.SCRY_REMOTE_RELAY_WS) return { ok: false, reason: 'login_start_secret_env' }
   const entries: Array<[LoginStartPolicyEnvKey, string]> = []
@@ -97,7 +83,6 @@ export function collectLoginStartPolicyEnv(env: NodeJS.ProcessEnv): PolicyEnvCol
   return { ok: true, entries }
 }
 
-/** Re-validates policy entries parsed from an existing service file before reusing them. */
 export function validateParsedPolicyEntries(
   entries: ReadonlyArray<{ key: string; value: string }>
 ): Array<[LoginStartPolicyEnvKey, string]> | undefined {
@@ -116,8 +101,6 @@ export function validateParsedPolicyEntries(
 function relayModeOf(env: NodeJS.ProcessEnv): BackgroundServiceRelayMode {
   if (env.SCRY_REMOTE_RELAY_ENABLED === '0') return 'disabled'
   if (env.SCRY_REMOTE_RELAY_WS) return 'custom_ws'
-  // Legacy SCRY_REMOTE_RELAY is not in supervisor's FORWARDED_ENV (daemon mode ignores
-  // it), so deriving custom_tcp here would create false config-mismatch notices.
   return 'public'
 }
 
@@ -130,10 +113,6 @@ function disabledProvidersOf(raw: string | undefined): ProviderId[] {
   return [...seen].sort()
 }
 
-/**
- * Effective non-secret remote policy derived from an environment (daemon or App).
- * Never exposes relay tokens or credentials.
- */
 export function computeEffectiveRemoteConfig(
   env: NodeJS.ProcessEnv,
   isPackaged: boolean

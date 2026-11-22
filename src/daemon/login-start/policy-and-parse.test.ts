@@ -51,7 +51,6 @@ describe('login-start policy env validation and effective remote config (B1)', (
       'SCRY_PROVIDER_MANIFEST_URL'
     ])
 
-    // W11 review #6: experimental host CLI flag is captured verbatim when set in App env, and validated strictly.
     expect(collectLoginStartPolicyEnv({ SCRY_EXPERIMENTAL_HOST_CLI: '1' })).toEqual({
       ok: true,
       entries: [['SCRY_EXPERIMENTAL_HOST_CLI', '1']]
@@ -220,7 +219,6 @@ describe('login-start bundle layout parity, strict re-render parsing (S5), XDG &
       ]
     })
     expect(parseLaunchdPlist(plist, 'com.scry.daemon.other')).toEqual({ kind: 'foreign' })
-    // S5 tampered plist cases: non-empty cleared var, extra env key, XML comment, altered directive
     expect(parseLaunchdPlist(plist.replace('<key>NODE_OPTIONS</key><string></string>', '<key>NODE_OPTIONS</key><string>--require x</string>'), 'com.scry.daemon')).toEqual({ kind: 'foreign' })
     expect(parseLaunchdPlist(plist.replace('  </dict>', '    <key>EXTRA_VAR</key><string>1</string>\n  </dict>'), 'com.scry.daemon')).toEqual({ kind: 'foreign' })
     expect(parseLaunchdPlist(`<!-- edited -->\n${plist}`, 'com.scry.daemon')).toEqual({ kind: 'foreign' })
@@ -241,7 +239,6 @@ describe('login-start bundle layout parity, strict re-render parsing (S5), XDG &
         { key: 'SCRY_EXPERIMENTAL_HOST_CLI', value: '1' }
       ]
     })
-    // S5 tampered systemd unit cases: ExecStartPre, extra Environment, comment, altered Restart
     expect(parseSystemdUnit(unit.replace('ExecStart=', 'ExecStartPre=/bin/evil\nExecStart='))).toEqual({ kind: 'foreign' })
     expect(parseSystemdUnit(unit.replace('Restart=on-abnormal', 'Environment="EXTRA=1"\nRestart=on-abnormal'))).toEqual({ kind: 'foreign' })
     expect(parseSystemdUnit(`# edited\n${unit}`)).toEqual({ kind: 'foreign' })

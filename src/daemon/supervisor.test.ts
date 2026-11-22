@@ -92,9 +92,6 @@ describe('daemon supervisor', () => {
     expect(JSON.stringify(result)).not.toContain('secret body')
   })
 
-  // A service manager stops the supervisor, not the daemon. The supervisor must hand one
-  // SIGTERM to the daemon and stay until the daemon's cleanup has run: once it exits, the
-  // service manager kills whatever is left and the cleanup is cut short.
   it('on stop forwards one SIGTERM and resolves only after the daemon has exited', async () => {
     const directory = root()
     const entry = join(directory, 'slow-stop.mjs')
@@ -126,7 +123,6 @@ describe('daemon supervisor', () => {
     const entry = join(directory, 'stuck-stop.mjs')
     const signals = join(directory, 'signals')
     const ready = join(directory, 'ready')
-    // Ignores SIGTERM and leaves by itself well after the bound, so the test leaves no process.
     writeFileSync(entry, [
       "import { appendFileSync, writeFileSync } from 'node:fs'",
       `process.on('SIGTERM', () => { appendFileSync(${JSON.stringify(signals)}, 'TERM\\n') })`,

@@ -5,7 +5,6 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-// Atomic owner-only service file I/O and systemctl show parser (plain Node).
 
 export type ServiceFileRead =
   | { kind: 'missing' }
@@ -42,14 +41,13 @@ export function writeFileAtomicPrivate(filePath: string, content: string): void 
     renameSync(temp, filePath)
   } catch (error) {
     if (fd !== undefined) {
-      try { closeSync(fd) } catch { /* ignore */ }
+      try { closeSync(fd) } catch {}
     }
-    try { unlinkSync(temp) } catch { /* ignore */ }
+    try { unlinkSync(temp) } catch {}
     throw error
   }
 }
 
-/** Parses `systemctl show -p ActiveState,MainPID` (Key=Value lines, order-independent). */
 export function parseSystemdShowProperties(stdout: string): { active: boolean; mainPid: number | null } {
   const map = new Map<string, string>()
   for (const rawLine of stdout.split(/\r?\n/)) {
@@ -68,12 +66,6 @@ export interface LaunchctlPrintInfo {
   userDataDir: string | null
 }
 
-/**
- * Extracts top-level run state and `environment.SCRY_DAEMON_USER_DATA_DIR` from
- * `launchctl print gui/<uid>/<label>` output. Tracks block nesting so nested `state`
- * (e.g. `resource coalition = { state = active }`) or `inherited environment` cannot
- * spoof ownership or run state. Fails closed to `runState: 'unknown'` on unparseable output.
- */
 export function parseLaunchctlPrint(stdout: string): LaunchctlPrintInfo {
   let depth = 0
   let inJobEnv = false

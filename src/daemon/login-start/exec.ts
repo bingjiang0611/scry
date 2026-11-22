@@ -1,8 +1,6 @@
 import { execFile } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 
-// Fixed-path, shell-free external command runner for launchctl / systemctl / loginctl
-// (P5-headless-host §2.3). Timeout bounded to 10 s.
 
 export const MACOS_LAUNCHCTL = '/bin/launchctl'
 export const LINUX_SYSTEMCTL = '/usr/bin/systemctl'

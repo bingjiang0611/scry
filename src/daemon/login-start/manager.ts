@@ -37,7 +37,6 @@ export interface LoginStartManagerDeps {
   target: LoginStartTarget
   env?: NodeJS.ProcessEnv
   runner?: CommandRunner
-  /** Production keeps Linux unavailable until real-machine verification passes (P5 §2.3). */
   allowLinux?: boolean
   systemctlAvailable?: boolean
   readServiceFile?: (path: string) => ServiceFileRead
@@ -50,9 +49,7 @@ export interface LoginStartManager {
   readonly unitName: string
   availability(): { ok: true } | { ok: false; reason: string }
   precheckEnable(): LoginStartPrecheckResult
-  /** Purely read-only status check; never mutates service files on disk. */
   status(): Promise<LoginStartStatus>
-  /** Explicit moved-App auto-rewrite: only when ours + same userData + old executable gone. */
   reconcileMovedApp(): { rewritten: true; fromExecutable: string } | { rewritten: false }
   enable(options: { daemonRunning: boolean }): Promise<LoginStartMutationResult>
   disable(options: { daemonRunning: boolean }): Promise<LoginStartMutationResult>
@@ -260,7 +257,6 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
       return { ok: false, reason: error instanceof Error ? error.message : 'login_start_render_failed' }
     }
 
-    // S1: enforce ownership + Decision 7 (never overwrite another existing App or userData).
     const ownership = inspectReadOnly()
     if (ownership.kind === 'read-error') return { ok: false, reason: `login_start_read_failed:${ownership.code}` }
     if (ownership.kind === 'conflict') return conflictResult(ownership)
@@ -271,7 +267,7 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
       try {
         if (previousRaw === undefined) unlinkSync(filePath)
         else writeFileAtomicPrivate(filePath, previousRaw)
-      } catch { /* best-effort rollback */ }
+      } catch {}
     }
 
     try {
@@ -292,8 +288,6 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
         const ownedByPrint = printInfo.userDataDir !== null && resolve(printInfo.userDataDir) === currentUserData
         const ownedLoadedJob = hadOwnedFile || ownedByPrint
         const isIdleJob = printInfo.runState === 'idle'
-        // R2 #1 & #2: verify ownership (owned file or launchd env userData) or idle state
-        // BEFORE the daemonRunning shortcut so we never claim/bootout another userData's job.
         if (!ownedLoadedJob && !isIdleJob) {
           restorePrevious()
           return { ok: false, reason: 'login_start_loaded_without_file' }
@@ -334,7 +328,6 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     }
     const started = await runner(LINUX_SYSTEMCTL, ['--user', 'start', overrides.unitName], SERVICE_COMMAND_TIMEOUT_MS)
     if (started.exitCode !== 0) {
-      // S7: roll back on start failure so the switch honestly reverts to disabled (P5 §2.8).
       if (!hadOwnedFile) {
         await runner(LINUX_SYSTEMCTL, ['--user', 'disable', overrides.unitName], SERVICE_COMMAND_TIMEOUT_MS)
       }
@@ -353,7 +346,6 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
     if (ownership.kind === 'conflict') return conflictResult(ownership)
 
     if (platform === 'darwin') {
-      // S2: when no file exists, we have no ownership proof for the fixed label — never bootout.
       if (ownership.kind === 'missing') return { ok: true }
       const unlinkErr = unlinkServiceFile()
       if (unlinkErr) return unlinkErr
@@ -389,7 +381,6 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
           if (printInfo.userDataDir !== null && resolve(printInfo.userDataDir) !== currentUserData) {
             return { ok: false, reason: 'login_start_other_userdata', otherUserDataDir: printInfo.userDataDir }
           }
-          // Already running for our userData: skip bootout (avoids ExitTimeOut=30 vs 10 s timeout).
           return { ok: true }
         }
         await runner(MACOS_LAUNCHCTL, ['bootout', macTarget], SERVICE_COMMAND_TIMEOUT_MS)

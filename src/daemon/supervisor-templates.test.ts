@@ -20,7 +20,6 @@ const mac: ServiceTemplateInput = {
   resourcesPath: '/Applications/Scry.app/Contents/Resources',
   isPackaged: true
 }
-// Every character the two formats treat specially, plus a space and Chinese text.
 const awkward = '/home/me/项目 a&b<c>"q"\\x 100%$HOME'
 const linux: ServiceTemplateInput = {
   executable: `/opt/${awkward}/scry`,
@@ -32,15 +31,11 @@ const linux: ServiceTemplateInput = {
   isPackaged: true
 }
 
-// Reads the values back the way each format defines them, so the escaping is checked by
-// its result rather than by its spelling.
 const xmlText = (value: string): string => value.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&')
 function plistEnvironment(plist: string): Record<string, string> {
   const block = plist.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/)![1]!
   return Object.fromEntries([...block.matchAll(/<key>([^<]+)<\/key><string>([^<]*)<\/string>/g)].map((match) => [match[1]!, xmlText(match[2]!)]))
 }
-// systemd: a double-quoted word with C escapes, then specifiers (%% is %); ExecStart= also
-// expands $VAR, where $$ is $. Environment= does not expand $.
 function systemdWords(line: string, command: boolean): string[] {
   return [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => {
     const unescaped = match[1]!.replace(/\\(.)/g, '$1').replaceAll('%%', '%')
