@@ -256,7 +256,8 @@ describe('createHostController (production persistence binding)', () => {
     dirs.push(dir)
     const first = await factory(dir, async () => {})
     await grant(first)
-    const submit = first.controller.submitIntent(CERT, { intentId: randomUUID(), detail: first.routing() })
+    const intentId = randomUUID()
+    const submit = first.controller.submitIntent(CERT, { intentId, detail: first.routing() })
     await first.controller.idle()
     await first.close()
 
@@ -264,7 +265,8 @@ describe('createHostController (production persistence binding)', () => {
     // and the prior settled run is still authoritatively readable.
     const second = await factory(dir, async () => {})
     expect(second.authority.sink.getRun(submit.runId)?.lifecycle).toBe('settled')
-    // The restored grant still authorizes the device.
+    expect(second.controller.intentStatus(CERT, { intentId })).toEqual({ runId: submit.runId, state: 'settled' })
+    expect(() => second.controller.intentStatus('f'.repeat(64), { intentId })).toThrow('device_not_authorized')
     expect(second.authority.sink.listEvents()).toContainEqual(expect.objectContaining({ runId: submit.runId, type: 'run.settled' }))
   })
 
