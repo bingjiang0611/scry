@@ -496,9 +496,14 @@ export class SubscribeEngine {
 
   #projectEventPayload(scope: 'local' | 'remote', event: OrchestrationEventRow): Record<string, unknown> {
     if (scope === 'local') return event.payload
-    if (typeof event.payload.promptPreview === 'string' && event.payload.promptPreview.length > PROMPT_PREVIEW_MAX_CHARS) {
-      return { ...event.payload, promptPreview: event.payload.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS) }
+    let payload = event.payload
+    if ('appRunId' in payload) {
+      payload = { ...payload }
+      delete payload.appRunId
     }
-    return event.payload
+    if (typeof payload.promptPreview === 'string' && payload.promptPreview.length > PROMPT_PREVIEW_MAX_CHARS) {
+      return { ...payload, promptPreview: payload.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS) }
+    }
+    return payload
   }
 }

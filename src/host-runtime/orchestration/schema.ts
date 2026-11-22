@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 4
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 2
+export const ORCHESTRATION_SCHEMA_VERSION = 5
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 3
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -212,4 +212,9 @@ export const ORCH_DDL_V4: readonly string[] = [
    ON orch_event(json_extract(payload, '$.nativeSource')) WHERE type = 'session.deleted'`
 ]
 
-export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4]
+export const ORCH_DDL_V5: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN app_run_id TEXT',
+  "UPDATE orch_meta SET value = '3' WHERE key = 'projection_schema_version'"
+]
+
+export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5]

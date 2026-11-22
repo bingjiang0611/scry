@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
+import { DaemonRunRuntime } from '../main/daemon-run-runtime'
+import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { upsertTraceArchiveTurn } from '../main/transcript-archive'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { cleanupTempDirs, tempDir } from './host-process.fixtures'
@@ -73,6 +76,51 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
         selection: { cwd, externalSessionId: sessionId }
       })
     } finally {
+      await daemon.dispose()
+    }
+  }, 30_000)
+
+  it('keeps the App run identity in the sidebar after authoritative settlement and restart', async () => {
+    process.env.SCRY_ORCHESTRATION = 'on'
+    let daemon = await startTestDaemon()
+    const transport = new DaemonRunTransport((request) => daemon.request(request))
+    const runtime = new DaemonRunRuntime({ transport, waitMs: 500, send: () => undefined })
+    const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
+    try {
+      const first = await surface.start({
+        providerId: 'codex', cwd: daemon.workspace, prompt: 'desktop remote write one', commandId: randomUUID()
+      })
+      await expect.poll(() => runtime.runView(first.runId)?.done, { timeout: 10_000 }).toBe(true)
+      const sink = daemon.host.orchestrationAuthority!.sink
+      const settled = sink.listEvents().find((event) => event.type === 'run.settled')
+      expect(settled?.runId).toEqual(expect.any(String))
+      expect(settled?.runId).not.toBe(first.runId)
+      const nativeSessionId = runtime.runView(first.runId)?.externalSessionId
+      expect(nativeSessionId).toEqual(expect.any(String))
+      const assertSidebar = async (runId: string): Promise<void> => {
+        const sidebar = await daemon.localOp('projectStore', 'listProjects', [])
+        expect(sidebar.result).toContainEqual(expect.objectContaining({
+          cwd: daemon.workspace,
+          sessions: expect.arrayContaining([expect.objectContaining({
+            externalSessionId: nativeSessionId, runId, lastRunOutcome: 'completed'
+          })])
+        }))
+      }
+      await assertSidebar(first.runId)
+      const next = await surface.start({
+        providerId: 'codex', cwd: daemon.workspace, expectedExternalSessionId: nativeSessionId,
+        prompt: 'desktop remote write two', commandId: randomUUID()
+      })
+      expect(next.runId).not.toBe(first.runId)
+      await expect.poll(() => runtime.runView(next.runId)?.done, { timeout: 10_000 }).toBe(true)
+      await assertSidebar(next.runId)
+      expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+      runtime.dispose()
+      await daemon.dispose()
+      daemon = await startTestDaemon({ root: daemon.root })
+      await assertSidebar(next.runId)
+    } finally {
+      runtime.dispose()
       await daemon.dispose()
     }
   }, 30_000)

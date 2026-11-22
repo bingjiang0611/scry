@@ -260,6 +260,7 @@ export function decideRunEffectResult(
           sessionKey,
           payload: {
             runId: run.runId, nativeSessionId: p.nativeSessionId ?? null, bindingId: p.bindingId ?? null,
+            ...(p.catalogRunId ? { appRunId: p.catalogRunId } : {}),
             ...(attach ? { attachNative: true, provider: run.provider, profile: run.profile } : {})
           }
         })

@@ -32,7 +32,7 @@ function displayedOutcome(value: string | undefined): AppSession['lastRunOutcome
   return undefined
 }
 
-function projectAppSession(row: SessionProjectionRow): AppSession | undefined {
+function projectAppSession(row: SessionProjectionRow, appRunId: string | null): AppSession | undefined {
   if (!row.catalog || row.cwd === null) return undefined
   const { nativeSessionId, projectCwd, preview, runtimeProvider } = row.catalog
   return {
@@ -42,7 +42,7 @@ function projectAppSession(row: SessionProjectionRow): AppSession | undefined {
     cwd: row.cwd,
     title: row.title ?? undefined,
     ts: row.ts,
-    runId: row.lastRunId ?? undefined,
+    runId: appRunId ?? undefined,
     lastRunOutcome: row.lastRunOutcome?.status === 'available'
       ? displayedOutcome(row.lastRunOutcome.value) : undefined,
     externalSessionId: nativeSessionId ?? undefined,
@@ -53,6 +53,11 @@ function projectAppSession(row: SessionProjectionRow): AppSession | undefined {
     archivedAt: row.archivedAt ?? undefined
   }
 }
+
+// Return the identifier used by the App's run lifecycle and archives when the
+// authority has recorded that exact binding.
+const nativeAppCatalog = `orch_p_session AS session
+  LEFT JOIN orch_p_run AS run ON run.run_id = session.last_run_id AND run.session_key = session.session_key`
 
 /** Local sidebar rows come from the authority. The old file is still mirrored
  * for off/shadow startup and readers that have yet to migrate. */
@@ -66,8 +71,13 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
     if (!row && canonicalCwd !== undefined && findProjectedNativeSession(sink, { ...identity, cwd: undefined })) {
       throw new Error('会话工作目录与 catalog 不一致')
     }
-    const session = row && projectAppSession(row)
-    if (!row || !session) return null
+    if (!row) return null
+    const appRun = sink.handle.db.prepare(
+      `SELECT COALESCE(run.app_run_id, session.last_run_id) AS app_run_id
+       FROM ${nativeAppCatalog} WHERE session.session_key = ?`
+    ).get(row.sessionKey) as { app_run_id: string | null }
+    const session = projectAppSession(row, appRun.app_run_id)
+    if (!session) return null
     return { session, identity: { sessionKey: row.sessionKey, ...(row.legacy ? { legacyBefore: true } : {}) } }
   }
   return {
@@ -124,10 +134,12 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
       const sink = getSink()
       if (!sink) return undefined
       const rows = sink.handle.db.prepare(
-        `SELECT * FROM orch_p_session
-         WHERE conversation_id IS NULL AND catalog IS NOT NULL ORDER BY ts DESC, session_key`
-      ).all() as Record<string, unknown>[]
-      return rows.map(mapSessionRow).map(projectAppSession).filter((row): row is AppSession => row !== undefined)
+        `SELECT session.*, COALESCE(run.app_run_id, session.last_run_id) AS app_run_id FROM ${nativeAppCatalog}
+         WHERE session.conversation_id IS NULL AND session.catalog IS NOT NULL
+         ORDER BY session.ts DESC, session.session_key`
+      ).all() as (Record<string, unknown> & { app_run_id: string | null })[]
+      return rows.map((row) => projectAppSession(mapSessionRow(row), row.app_run_id))
+        .filter((row): row is AppSession => row !== undefined)
     },
 
     beforeMirrorWrite(previous: readonly AppSession[], next: readonly AppSession[]): void {
