@@ -16,6 +16,19 @@ enum ConnectionCopy {
     static let nextPage = "读取下一页"
     static let offlineHTML = "只读 HTML 快照；不加载外部样式、脚本或图片。"
     static let noPreview = "手机不支持预览此格式。可以保存原文件，或用其他 App 打开。"
+    static let failedTitle = "没能读取文件"
+    static let accessTitle = "无法访问此文件"
+    static let accessDetail = "请在宿主上核对文件权限。"
+
+    static func denialDetail(_ error: Error) -> String? {
+      guard let host = error as? G0Transport.RunError, case let .host(code) = host else { return nil }
+      switch code {
+      case "workspace_not_authorized": return ConnectionCopy.workspaceAccessDetail
+      case "EACCES", "EPERM": return accessDetail
+      default: return nil
+      }
+    }
+
     static let noProject = "尚未确定文件所属的项目，请从会话中打开文件。"
     static let localLinkTitle = "Mac 本机链接"
     static let fileTitle = "Mac 文件"
@@ -29,6 +42,7 @@ enum ConnectionCopy {
       if let host = error as? G0Transport.RunError, case let .host(code) = host {
         switch code {
         case "ENOENT", "file_not_found": return "Mac 上未找到这个文件，请检查文件是否仍在原位置。"
+        case "workspace_not_authorized": return ConnectionCopy.workspaceAccessDetail
         case "EACCES", "EPERM": return "Mac 没有读取这个文件的权限。"
         case "not_a_regular_file": return "这是目录或特殊文件，请选择普通文件。"
         case "file_download_changed": return "文件在传输中发生变化，请重新读取。"
@@ -58,7 +72,7 @@ enum ConnectionCopy {
   static let slashCommands = "斜杠命令"
   static let refreshSlashCommands = "刷新斜杠命令"
   static let noProviderCommands = "当前 Provider 未返回可用命令"
-  static let noMatchingCommands = "没有匹配的命令"
+  static func noMatchingCommands(_ query: String) -> String { "没有与「\(query)」匹配的命令" }
   static func viewAttachment(_ name: String) -> String { "查看 \(name)" }
   static func removeAttachment(_ name: String) -> String { "移除 \(name)" }
   static let allHosts = "全部主机"
@@ -131,6 +145,7 @@ enum ConnectionCopy {
   static let cacheWriteRejected = "列表已更新，未保存到手机"
   static let cacheReadFailure = "手机缓存无法读取，正在核对主机"
   static let authorizationFailure = "访问授权已失效，请重新配对"
+  static func hostAuthorizationExpired(_ host: String) -> String { "「\(host)」的访问授权已失效" }
   static let protocolFailure = "主机暂不支持读取会话，请更新 Scry"
   static let pairAgain = "重新配对"
   static let lastRunning = "上次：运行中"
@@ -160,7 +175,15 @@ enum ConnectionCopy {
   static let historyEarlierUnavailable = "未读到 Mac 上更早的记录（不代表没有）"
   static let historyVerified = "历史快照已核对；文件 Diff 需在 Mac 查看"
   static let historyStateUnavailable = "历史状态不可用"
-  static let noReadableHistory = "这条会话没有可读取的历史记录，你仍可以在下方继续对话。"
+  static let noReadableHistory = "没有可读取的历史记录"
+  static let newSessionTitle = "新会话"
+  static let newSessionDetail = "描述要在所选项目中完成的任务。"
+  static let cameraDenied = "请在系统设置中允许 Scry 使用相机。"
+  static let cameraRestricted = "系统限制了相机访问。"
+  static let cameraUnavailable = "此设备没有可用相机，无法扫码配对。"
+  static let cameraFailed = "无法启动相机，请关闭扫描页后重试。"
+  static let cameraAccessTitle = "Scry 无法使用相机"
+  static func hostDisconnected(_ host: String) -> String { "未连接「\(host)」" }
   static let historyRefresh = "刷新会话"
   static let historyLastChecked = "上次核对"
   static let historyNotChecked = "尚未核对主机"
@@ -258,6 +281,11 @@ enum ConnectionCopy {
   static let sectionArchived = "已存档"
   static let seeAll = "查看全部"
   static let archivedEmpty = "没有已存档会话"
+  static let archivedEmptyDetail = "Mac 上存档的会话会显示在这里。"
+  static let archivedReadFailed = "没能读取已存档会话"
+  static let archivedReadFailedDetail = "这次读取失败不代表存档为空。"
+  static let archivedRefreshFailed = "没能刷新已存档会话，仍显示上次读取的结果。"
+  static let archivedReadAgain = "重新读取"
   static let archivedPolicy = "存档只隐藏会话，不删除 Mac 上的记录。"
   static let archivedSessions = "已存档会话"
   static let archivedSessionsDetail = "查看、恢复或永久删除"
@@ -302,13 +330,35 @@ enum ConnectionCopy {
   static let readingFolders = "读取文件夹…"
   static let noAuthorizedProjects = "没有已授权的项目"
   static let noAuthorizedProjectsDetail = "先在 Mac 的 Scry 中授权目录；iPhone 不能自行扩大访问范围。"
-  static let foldersUnreadable = "无法读取文件夹"
+  static let folderAccessDenied = "无法访问此文件夹"
+  static let workspaceAccessDenied = "无法访问此工作区"
+  static let workspaceAccessDetail = "请在宿主的 Scry 中核对项目授权。"
+  static let foldersUnreadable = "没能读取文件夹"
+  static let foldersUnreadableDetail = "请确认 Mac 上的 Scry 已连接，再重新读取。"
+  static let unpairedDevice = "这台 iPhone 尚未配对"
+  static let readAgain = "重新读取"
+  static let directoryEmpty = "此目录为空"
+  static let directoryReadFailed = "没能读取目录"
+  static let directoryFailureDetail = "读取失败不代表目录为空。"
+  static let directoryReadAgain = "重新读取目录"
+  static let readingDirectory = "正在读取目录…"
+  static let readingWorkspaceContent = "正在读取…"
+  static let emptyFile = "此文件为空"
+  static let workspaceClean = "没有未提交的改动"
+  static let workspaceCleanDetail = "工作区的未提交改动会显示在这里。"
+  static let workspaceDiffReadFailed = "没能读取工作区改动"
+  static let workspaceDiffReadFailedDetail = "这次读取失败不代表没有改动。"
+  static func workspaceFileReadFailed(_ name: String) -> String { "没能读取「\(name)」" }
+  static let fileReadFailedDetail = "如果文件已移动，请从目录重新打开。"
+  static let retryWorkspaceContent = "从头重新读取"
+  static let refreshProviders = "刷新 Provider"
   static let chooseProviderTitle = "选择 Provider"
   static let chooseProviderSubtitle = "仅显示主机当前可用的服务"
   static let readingProviders = "读取主机可用的 Provider…"
   static let noProviders = "没有可用的 Provider"
   static let noProvidersDetail = "先在 Mac 的 Scry 中登录或配置 Provider。"
-  static let providersUnreadable = "无法读取 Provider"
+  static let providersUnreadable = "没能读取 Provider"
+  static let providersUnreadableDetail = "请确认 Mac 上的 Scry 已连接，再刷新列表。"
   static let hostReadAt = "读取"
   // A panel that has not completed its first read has no timestamp to claim.
   static func panelProvenance(_ host: String, readAt: String?) -> String {
@@ -330,13 +380,21 @@ enum ConnectionCopy {
   static func providerLabel(_ providerId: String) -> String {
     providerNames[providerId] ?? providerId
   }
-  static let unavailableDetail = "这次读取没有返回这项数据。"
   static let moreRows = "再加载"
   static func rowsLimited(_ shown: Int) -> String { "已显示前 \(shown) 条" }
 
   // 工具面板（P3）：只读投影，动作仍在 Mac 上。
   static let toolsNote = "只读投影：数值来自 Mac 最近一次读取，操作在 Mac 上完成。"
   static func toolUnavailable(_ reason: String) -> String { "不可用 · \(reason)" }
+  static let analyticsReadFailed = "没能读取用量分析"
+  static let performanceReadFailed = "没能读取性能指标"
+  static let mcpReadFailed = "没能读取 MCP 状态"
+  static func toolReadFailedDetail(_ host: String) -> String { "未能从「\(host)」读取本次结果。" }
+  static let toolNoProvider = "没有可用的 Provider"
+  static func hostEvidenceMissing(_ evidence: String) -> String { "Mac 未提供\(evidence)" }
+  static let noRunningPerformanceModels = "当前没有运行中的模型"
+  static let noPerformanceSamples = "所选时间范围没有历史样本"
+  static let noReadablePerformanceSamples = "没有可读取的历史样本"
   static let toolMissingCapability = "Mac 未提供这项能力"
   static let toolNotOnPhone = "手机端暂未提供"
   static let toolRefresh = "刷新"
@@ -352,6 +410,8 @@ enum ConnectionCopy {
   static let analyticsByModel = "按模型"
   static let analyticsByDay = "按日"
   static let analyticsDailyCost = "每日成本"
+  static let analyticsZeroDailyCost = "已记录日期的成本为零"
+  static let analyticsNoDailyRecord = "当日无记录"
   static let analyticsDailyTokens = "每日 Token"
   static let analyticsByProvider = "按 Provider"
   static let analyticsTokenCoverage = "Token 覆盖度"
@@ -380,7 +440,9 @@ enum ConnectionCopy {
   static let mcpNoFindings = "这次扫描没有发现风险项"
   static let mcpReadOnly = "手机只读：信任与策略在 Mac 上修改。"
   static let mcpScanNote = "只有刷新会重新做一次静态只读扫描；不连接服务器，也不授权任何配置。"
-  static let mcpScanUnavailable = "这次没有可读的扫描报告"
+  static let mcpScanUnavailable = "Mac 未提供 MCP 扫描结果"
+  static let mcpRuntimeUnavailable = "Mac 未提供 MCP 运行状态"
+  static let mcpConfigurationUnavailable = "Mac 未提供 MCP 配置"
   static let mcpSeverityCritical = "严重"
   static let mcpSeverityHigh = "高"
   static let mcpSeverityMedium = "中"

@@ -4,6 +4,7 @@ import type { useDiffInspector } from '../hooks/useDiffInspector'
 import { DIFF_COPY as copy } from '../constants/diff-copy'
 import { Icon } from './primitives/Icon'
 import { TurningIcon } from './primitives/TurningIcon'
+import { EmptyState } from './primitives/EmptyState'
 import { DiffScopeMenu, type DiffHistoryNavigation } from './DiffScopeMenu'
 import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 import './diff-inspector.css'
@@ -30,12 +31,11 @@ export function DiffInspector({ state, onClose, history }: {
           inserting a row that pushes the diff down. */}
       {state.refreshing && <span className="visually-hidden" role="status">{copy.refreshing}</span>}
       <div className="diff-inspector-body" role="region" aria-label={copy.scopes[state.scope]}>
-        {state.review ? <TurnDiffReviewPanel review={state.review} onClose={onClose} history={state.scope === 'branch' ? commits : undefined} embedded /> : <div className="diff-review-empty" role="status">
-          <Icon name={state.pending ? 'clock' : 'info'} />
-          <b>{state.pending ? copy.pending : state.failure ? workspaceDiffCopy.label(state.failure)
-            : state.emptySession && state.scope === 'turn' ? copy.beforeSend : copy.missing(state.scope)}</b>
-          {state.failure && <span>{workspaceDiffCopy.detail(state.failure)}</span>}
-        </div>}
+        {state.review ? <TurnDiffReviewPanel review={state.review} onClose={onClose} history={state.scope === 'branch' ? commits : undefined} embedded /> : <EmptyState size="card" picture={state.pending ? 'clock' : 'diff'}
+          title={state.pending ? copy.pending : state.failure ? workspaceDiffCopy.label(state.failure)
+            : state.emptySession && state.scope === 'turn' ? copy.beforeSend : copy.missing(state.scope)}
+          actions={state.failure && state.cwd && (state.scope === 'workspace' || state.scope === 'branch')
+            ? [{ label: copy.refresh, icon: 'refresh', onClick: state.refresh, busy: state.refreshing }] : undefined} />}
       </div>
     </section>
   )

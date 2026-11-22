@@ -159,17 +159,156 @@ struct PlaceholderRows: View {
 }
 
 struct EmptyState: View {
+  enum Size { case page, card, row, menu }
+  struct Action {
+    let label: String
+    var primary = false
+    var refresh = false
+    var busy = false
+    var disabled = false
+    let perform: () -> Void
+  }
+
   let title: String
-  let detail: String
-  var symbol: String = "bubble.left.and.bubble.right"
+  var detail: String? = nil
+  var symbol: String? = "bubble.left.and.bubble.right"
+  var size: Size = .page
+  var picture: AnyView? = nil
+  var action: Action? = nil
+  var alternate: Action? = nil
+  var announce = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var appeared = false
+
   var body: some View {
-    VStack(spacing: 10) {
-      Image(systemName: symbol).font(.title.weight(.light)).foregroundStyle(Palette.dim2)
-      Text(title).font(Typography.headerTitle).multilineTextAlignment(.center)
-      Text(detail).font(Typography.meta).foregroundStyle(Palette.dim).multilineTextAlignment(.center)
+    Group {
+      switch size {
+      case .page:
+        VStack(spacing: 0) {
+          Spacer(minLength: 0)
+          VStack(spacing: 10) {
+            artwork
+            Text(title).font(Typography.headerTitle).accessibilityAddTraits(.isHeader)
+            if let detail { Text(detail).font(Typography.meta).foregroundStyle(Palette.dim) }
+            if action != nil || alternate != nil {
+              ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { buttons }
+                VStack(spacing: 8) { buttons }
+              }
+            }
+          }
+          Spacer(minLength: 0)
+          Spacer(minLength: 0)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 26).padding(.vertical, 24)
+      case .card, .row, .menu:
+        HStack(spacing: 8) {
+          if size == .card, picture != nil || symbol != nil {
+            artwork.frame(width: 40, height: 40)
+              .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 8))
+          }
+          Text(title).font(Typography.meta).foregroundStyle(Palette.dim2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          if size != .menu, let action { button(action, quiet: true) }
+        }
+        .frame(minHeight: size == .menu ? nil : 44)
+      }
     }
-    .frame(maxWidth: .infinity)
-    .padding(.vertical, 54).padding(.horizontal, 26)
+    .opacity(appeared ? 1 : 0)
+    .offset(y: appeared || reduceMotion ? 0 : 6)
+    .onAppear { withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.3)) { appeared = true } }
+    .onChange(of: title, initial: true) { _, title in
+      if announce { AccessibilityNotification.Announcement(title).post() }
+    }
+    .transition(.opacity.animation(.easeOut(duration: 0.18)))
+  }
+
+  @ViewBuilder private var artwork: some View {
+    Group {
+      if let picture { picture }
+      else if let symbol {
+        Image(systemName: symbol)
+          .symbolRenderingMode(.hierarchical)
+          .font(.system(size: size == .page ? 48 : 22, weight: .light))
+          .foregroundStyle(Palette.dim2)
+      }
+    }
+    .accessibilityHidden(true)
+  }
+
+  @ViewBuilder private var buttons: some View {
+    if let action { button(action) }
+    if let alternate { button(alternate, quiet: true) }
+  }
+
+  private func button(_ action: Action, quiet: Bool = false) -> some View {
+    Button {
+      if !action.busy { action.perform() }
+    } label: {
+      HStack(spacing: 6) {
+        if action.refresh {
+          Image(systemName: "arrow.clockwise")
+            .rotationEffect(.degrees(action.busy && !reduceMotion ? 360 : 0))
+            .animation(action.busy && !reduceMotion ? .linear(duration: 0.8).repeatForever(autoreverses: false) : nil, value: action.busy)
+            .accessibilityHidden(true)
+        }
+        Text(action.label)
+      }
+      .font(Typography.meta.weight(.semibold))
+      .foregroundStyle(action.primary && !quiet ? Palette.onAccent : Palette.fg)
+      .padding(.horizontal, 12).frame(minHeight: 44)
+      .background(action.primary && !quiet ? AnyShapeStyle(Palette.accentFill) : AnyShapeStyle(quiet ? Color.clear : Palette.panel2), in: Capsule())
+    }
+    .buttonStyle(.plain)
+    .disabled(action.disabled || action.busy)
+  }
+}
+
+// Small, non-interactive views of the real panels. The locked view uses sample
+// shapes only; it never takes project names or anything from protected content.
+struct EmptyStatePreview: View {
+  enum Scene { case conversation, lockedProjects, lockedFile }
+  let scene: Scene
+
+  var body: some View {
+    ZStack(alignment: .topLeading) {
+      Color.clear
+      switch scene {
+      case .conversation:
+        card(62, 22, 42, 15) { bar(34, title: true) }
+        card(75, 31, 17, 43) { bar(42, title: true); bar(48) }
+      case .lockedProjects, .lockedFile:
+        card(65, 58, 22, 16) {
+          bar(34, title: true)
+          if scene == .lockedProjects {
+            bar(42); bar(36); bar(31)
+          } else {
+            RoundedRectangle(cornerRadius: 4).fill(Palette.dim2.opacity(0.14)).frame(width: 42, height: 21)
+          }
+        }
+        card(29, 29, 75, 45) {
+          Image(systemName: "lock").font(.system(size: 14)).foregroundStyle(Palette.dim2)
+        }
+      }
+    }
+    .frame(width: 120, height: 90)
+    .accessibilityHidden(true)
+  }
+
+  private func card<Content: View>(_ width: CGFloat, _ height: CGFloat, _ x: CGFloat, _ y: CGFloat,
+                                    @ViewBuilder content: () -> Content) -> some View {
+    VStack(alignment: .leading, spacing: 4, content: content)
+      .frame(width: width, height: height)
+      .background(Palette.panel2, in: RoundedRectangle(cornerRadius: 10))
+      .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.border, lineWidth: 1))
+      .shadow(color: .black.opacity(0.06), radius: 3, y: 2)
+      .offset(x: x, y: y)
+  }
+
+  private func bar(_ width: CGFloat, title: Bool = false) -> some View {
+    Capsule().fill(Palette.dim2.opacity(title ? 0.52 : 0.28)).frame(width: width, height: title ? 5 : 4)
   }
 }
 

@@ -217,8 +217,8 @@ struct MessageComposer: View {
           if command.id != slashMatches.last?.id { Rectangle().fill(Palette.border3.opacity(0.7)).frame(height: 0.5) }
         }
       } else if !slashCommandsLoading {
-        Text(slashCommandsReason ?? (slashCommands.isEmpty ? ConnectionCopy.noProviderCommands : ConnectionCopy.noMatchingCommands))
-          .font(Typography.meta).foregroundStyle(Palette.dim)
+        EmptyState(title: slashCommandsReason ?? (slashCommands.isEmpty ? ConnectionCopy.noProviderCommands : ConnectionCopy.noMatchingCommands(text)),
+                   symbol: nil, size: .menu, announce: !slashCommands.isEmpty && slashCommandsReason == nil)
           .padding(.horizontal, 11).padding(.bottom, 10)
       }
     }

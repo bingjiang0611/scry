@@ -9,6 +9,7 @@ import { Icon } from './primitives/Icon'
 import { useAsyncAction } from '../hooks/useAsyncAction'
 import { BusyLabel } from './primitives/BusyLabel'
 import { CountProgress } from './primitives/CountProgress'
+import { EmptyState } from './primitives/EmptyState'
 import { SkeletonRows } from './primitives/Skeleton'
 import { ProviderFilterSelect } from './ProviderFilterMenu'
 
@@ -60,6 +61,7 @@ export function ArchivedChatsPanel({
   const [projectFilter, setProjectFilter] = useState<string>('all')
   const [failures, setFailures] = useState<DeleteArchivedSessionsResult['failures']>([])
   const [busy, setBusy] = useState(false)
+  const retry = useAsyncAction<'read'>()
   // Per-row unarchive / delete: the pressed button shows it, other writes wait, and a
   // failure stays on that row with a retry (these used to reject unhandled).
   const rowAction = useAsyncAction<string>()
@@ -91,10 +93,11 @@ export function ArchivedChatsPanel({
 
   if (!projects) {
     return (
-      <div className="arch-empty" role="status">
-        <b>会话索引不可用</b>
-        <span>读不到 app-sessions.json，无法列出已存档会话；修复索引后重开设置。</span>
-      </div>
+      <>
+        <div className="arch-head"><div className="settings-copy"><b>{archivedCopy.localTitle}</b></div></div>
+        <EmptyState size="card" className="arch-empty" picture="alert" title={archivedCopy.readFailed} announcement="alert"
+          actions={[{ label: archivedCopy.readAgain, icon: 'refresh', busy: retry.pending !== null, onClick: () => retry.run('read', onRefresh) }]} />
+      </>
     )
   }
 
@@ -212,18 +215,12 @@ export function ArchivedChatsPanel({
       </div>
 
       <div className="arch-list">
-        {total === 0 && (
-          <div className="arch-empty">
-            <b>{archivedCopy.localEmpty}</b>
-            <span>在左侧列表把鼠标移到会话上，点存档图标就会收进这里。</span>
-          </div>
-        )}
-        {total > 0 && matched === 0 && (
-          <div className="arch-empty">
-            <b>没有匹配的会话</b>
-            <span>当前筛选条件下没有结果；换个关键词或把筛选改回「全部」。</span>
-          </div>
-        )}
+        {total === 0 && <EmptyState size="card" className="arch-empty" picture="archive" title={archivedCopy.localEmpty} />}
+        {total > 0 && matched === 0 && <EmptyState size="card" className="arch-empty" announcement="polite"
+          title={ql ? archivedCopy.noMatches(query) : archivedCopy.noFilteredSessions}
+          actions={providerFilter !== 'all' || projectFilter !== 'all'
+            ? [{ label: archivedCopy.clearFilters, onClick: () => { setProviderFilter('all'); setProjectFilter('all') } }]
+            : [{ label: archivedCopy.clearSearch, onClick: () => setQuery('') }]} />}
         {groups.map((project) => (
           <section className="arch-group" key={project.cwd || 'none'}>
             <header className="arch-group-head">

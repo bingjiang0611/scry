@@ -193,7 +193,7 @@ export async function exerciseWorkspaceSessions(context) {
     git(target, 'add', '--', 'remote-second.txt')
     git(target, 'commit', '-m', 'clean workspace keeps session evidence')
     await selectDiffScope({ click, wait, evaluate }, 'workspace')
-    await wait(() => evaluate(`document.querySelector('.diff-review-empty')?.textContent.includes('工作区没有未提交净改动')`), 'captured zero never falls back to session')
+    await wait(() => evaluate(`document.querySelector('.diff-review-content > .empty-state')?.textContent.includes('工作区没有未提交净改动')`), 'captured zero never falls back to session')
     assert.equal(await evaluate(`document.querySelector('.diff-review-totals .add')?.textContent`), '+0')
     await selectDiffScope({ click, wait, evaluate }, 'branch')
     await wait(() => evaluate(`${pierreTreeHasText('remote-first.txt')} &&
@@ -224,7 +224,7 @@ export async function exerciseWorkspaceSessions(context) {
     if (!await evaluate(`Boolean(document.querySelector('button.pinned-summary-row'))`)) await click('[data-pinned-summary-toggle]')
     await click('button.pinned-summary-row', 'Changes')
     await wait(() => evaluate(`document.querySelector('.diff-inspector')?.dataset.diffScope === 'workspace' &&
-      document.querySelector('.diff-review-empty')?.textContent.includes('不是 Git')`), 'non-Git evidence is unavailable')
+      document.querySelector('.diff-review-content > .empty-state')?.textContent.includes('不是 Git')`), 'non-Git evidence is unavailable')
     assert.equal(await evaluate(`Boolean(document.querySelector('.diff-review-totals'))`), false, 'missing evidence is never zero')
     assert.equal(inputs().length, 4, 'read-only scope changes never start a Provider')
     await screenshot('inspector-unavailable')

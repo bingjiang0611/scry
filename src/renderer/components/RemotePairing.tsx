@@ -6,6 +6,7 @@ import { projectRemote, confirmArguments, type PendingRow, type RemotePairingVie
 import { RemoteHostPanel } from './DesktopRemote'
 import { RemoteConnectionsSettings } from './HostsView'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { ModalFrame, requestModalClose } from './Modals'
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling'
@@ -138,7 +139,9 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
             )}
           </article>
         </div>
-        {(readError || error) && <p className="remote-pairing__error" role="alert">{readError || error}</p>}
+        {readError && <EmptyState size="card" picture="alert" title={copy.remoteStatusReadFailed} announcement="alert"
+          actions={[{ label: copy.refresh, icon: 'refresh', busy: refreshing, onClick: () => { setRefreshing(true); void refresh() } }]} />}
+        {error && <p className="remote-pairing__error" role="alert">{error}</p>}
 
         {vm?.kind === 'enabled' && vm.pending.length > 0 && (
           <section className="remote-device-section">
@@ -161,7 +164,7 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
 
         {vm?.kind === 'enabled' && <section className="remote-device-section">
           <h4>{copy.authorizedDevices}</h4>
-          {vm.devices.length === 0 ? <p className="remote-pairing__empty">{copy.noAuthorizedDevices}</p> : (
+          {vm.devices.length === 0 ? <EmptyState size="card" picture="laptop" title={copy.noAuthorizedDevices} /> : (
             <ul className="remote-pairing__devices">
               {vm.devices.map((device) => (
                 <li key={device.deviceId}>

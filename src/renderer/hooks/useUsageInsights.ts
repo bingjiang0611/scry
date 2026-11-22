@@ -82,14 +82,16 @@ export function useUsageInsights(providerContextRef: MutableRefObject<ProviderCo
     analyticsRefreshQueuedRef.current = false
     const seq = ++analyticsRequestSeq.current
     setAnalyticsLoading(true)
-    setAnalyticsError(null)
     void query(rangeDays)
       .then((result) => {
         if (seq !== analyticsRequestSeq.current) return
+        if (result.status !== 'ready') {
+          setAnalyticsError(result.status === 'query_error' ? INTEGRATION_COPY.analyticsQueryError : INTEGRATION_COPY.sqliteUnavailable)
+          return
+        }
         setAnalytics(result)
-        if (result.status === 'query_error') setAnalyticsError(INTEGRATION_COPY.analyticsQueryError)
-        else if (result.status === 'unavailable') setAnalyticsError(INTEGRATION_COPY.sqliteUnavailable)
-        else loadAnalyticsCredits(result, rangeDays, seq)
+        setAnalyticsError(null)
+        loadAnalyticsCredits(result, rangeDays, seq)
       })
       .catch((error) => {
         if (seq === analyticsRequestSeq.current) setAnalyticsError(ipcErrorMessage(error))

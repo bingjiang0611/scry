@@ -5,10 +5,12 @@ import '@xterm/xterm/css/xterm.css'
 import type { ITheme } from '@xterm/xterm'
 import { type TerminalExitEvent, type TerminalRecordingSummary, type TerminalSessionDescriptor } from '@shared/terminal'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
+import { TERMINAL_EMPTY_COPY } from '../constants/copy'
 import { TerminalHistory } from './TerminalHistory'
 import { replayTerminalRecording } from '../terminal-recording-replay'
 import { defaultTerminalApi, type TerminalApi } from '../workbench-api'
-import { Button } from './primitives/Button'
 
 type TerminalStatus = 'starting' | 'running' | 'exited' | 'error' | 'readonly'
 
@@ -424,6 +426,7 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeKey, setActiveKey] = useState('')
   const [hydrated, setHydrated] = useState(false)
+  const [unverifiedRestoreTab, setUnverifiedRestoreTab] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({})
   const [recordingMessages, setRecordingMessages] = useState<Record<string, string | undefined>>({})
   const onRecordingMessage = useCallback((key: string, message: string | undefined): void => {
@@ -451,10 +454,11 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
       setHydrated(true)
     }).catch((error) => {
       if (!current) return
+      console.error('[terminal] failed to inspect existing sessions', error)
       const initial = nextTerminalTab(1)
       setTabs([initial])
       setActiveKey(initial.key)
-      setRecordingMessages({ [initial.key]: `无法查询运行中的 Shell：${terminalStartErrorMessage(error)}` })
+      setUnverifiedRestoreTab(initial.key)
       setHydrated(true)
     })
     return () => { current = false }
@@ -591,18 +595,10 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
 
       <div className="terminal-stage">
         {!hydrated ? (
-          <div className="terminal-empty">
-            <Icon name="terminal" lg />
-            <strong>正在恢复终端…</strong>
-            <span>正在检查仍由主进程持有的 Shell。</span>
-          </div>
+          <DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />
         ) : tabs.length === 0 ? (
-          <div className="terminal-empty">
-            <Icon name="terminal" lg />
-            <strong>没有打开的终端</strong>
-            <span>终端以 {machineLabel} 上的当前 macOS 用户权限运行；未绑定项目时从用户主目录启动。</span>
-            <Button onClick={addTab}>启动终端</Button>
-          </div>
+          <EmptyState size="page" picture="terminal" title={TERMINAL_EMPTY_COPY.noTerminal} description={TERMINAL_EMPTY_COPY.noTerminalDetail}
+            actions={[{ label: TERMINAL_EMPTY_COPY.start, onClick: addTab }]} />
         ) : tabs.map((tab) => (
           <TerminalPane
             key={tab.key}
@@ -623,7 +619,11 @@ export function TerminalSurface({ cwd, active, scopeId, api: injectedApi, machin
         ))}
       </div>
       {historyOpen && <TerminalHistory key={cwd ?? '~'} cwd={cwd} canOpen onOpen={openRecording} onClose={() => setHistoryOpen(false)} api={api} />}
-      <footer className="terminal-foot" role="status">{recordingMessages[activeKey] ?? `${machineLabel} Shell · 当前用户权限 · 原文录制（可能含密钥）`}</footer>
+      <footer className="terminal-foot" role="status">
+        {recordingMessages[activeKey] ?? (activeKey === unverifiedRestoreTab
+          ? <EmptyState size="row" title={TERMINAL_EMPTY_COPY.restoreUnverified} />
+          : `${machineLabel} Shell · 当前用户权限 · 原文录制（可能含密钥）`)}
+      </footer>
     </section>
   )
 }

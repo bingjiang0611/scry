@@ -50,19 +50,24 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       if (preparedContext === contextKey) return
     }
     const sequence = ++generation.current
-    setHistoryError(null)
     setHistoryLoading(true)
     void api.history(connectionId, context).then((history) => {
       if (sequence !== generation.current) return
       const parsed = historyTurns(history)
       const commit = (): void => {
         setTurns(parsed)
+        setHistoryError(null)
+        setHistoryLoading(false)
         setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
         presentedHistoryContext.current = context
       }
       if (presentedHistoryContext.current !== context && parsed.length > 0) runStructuralTransition('session', commit)
       else commit()
-    }).catch((reason) => { if (sequence === generation.current) setHistoryError(errorText(reason)) })
+    }).catch((reason) => {
+      if (sequence !== generation.current) return
+      console.error('[scry] remote transcript read failed', reason)
+      setHistoryError(errorText(reason))
+    })
       .finally(() => { if (sequence === generation.current) setHistoryLoading(false) })
     return () => { generation.current += 1 }
   }, [api, catalogReady, connectionId, connected, context, contextKey, historyRevision, providerId, sessionId])

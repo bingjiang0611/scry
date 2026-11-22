@@ -122,6 +122,7 @@ export function fixtureTransport(options) {
   },
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
+    if (context.externalSessionId === state.failHistoryFor) throw new Error('fixture remote history unavailable')
     if (context.externalSessionId === 'old-native') state.unreadRemote = false
     if (state.holdHistory) await new Promise(resolve => { window.releaseHistory = resolve })
     if (state.openingWithoutArchive) return { turns: [], hasOlder: false, source: 'trace_archive', status: 'unavailable', reason: 'trace_archive_unavailable' }

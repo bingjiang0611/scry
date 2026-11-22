@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatViewProps } from './types'
 import { Icon } from '../primitives/Icon'
+import { EmptyState } from '../primitives/EmptyState'
 import { ComposerQueue } from './ComposerQueue'
 import { ComposerInput } from './ComposerInput'
 import { ComposerControls } from './ComposerControls'
@@ -25,7 +26,7 @@ export function Composer({
   onInput, onChooseFolder, onUnbindProject = () => {}, onPickRecent, onRemoveRecent, onRetrySlash, onPickSlash,
   onSlashSel, onHideSlash, onSend, onStop, onPasteImages, onPasteClipboardImage, onRemoveDraftAttachment,
   onRemoveQueuedPrompt, onSelectAgent, onAddPiAgent, onRemovePiAgent, onRunModel, onRunEffort, onPermissionMode,
-  onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel,
+  onRescan, agentsScanning, agentsScanFailed, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel,
   onOpenRunControls
 }: Omit<ChatViewProps, 'selectedId' | 'scrollRef' | 'onSelect' | 'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'onOpenFile' | 'onAnswerQuestion' | 'focusedTurnRunId' | 'scrollNavigation' | 'onTurnRef' | 'historyWindow'>) {
   const remote = remoteHost != null
@@ -153,11 +154,8 @@ export function Composer({
                 </button>
               ))}
               {!slashLoading && slashMatches.length === 0 && (
-                <div className="slash-empty">
-                  {slashCmds.length === 0
-                    ? slashReason ?? SLASH_COMMAND_COPY.empty
-                    : SLASH_COMMAND_COPY.noMatches}
-                </div>
+                <EmptyState size="menu" className="slash-empty" announcement={slashCmds.length ? 'polite' : undefined}
+                  title={slashCmds.length === 0 ? slashReason ?? SLASH_COMMAND_COPY.empty : SLASH_COMMAND_COPY.queryEmpty(input)} />
               )}
             </div>
           </div>
@@ -192,7 +190,7 @@ export function Composer({
         />
         <ComposerControls
           agents={agents} selectedAgentId={selectedAgentId} onSelectAgent={onSelectAgent}
-          onAddPiAgent={onAddPiAgent} onRemovePiAgent={onRemovePiAgent} onRescan={onRescan}
+          onAddPiAgent={onAddPiAgent} onRemovePiAgent={onRemovePiAgent} onRescan={onRescan} agentsScanning={agentsScanning} agentsScanFailed={agentsScanFailed}
           unavailableAgentIds={unavailableAgentIds} agentScopeLabel={agentScopeLabel} agentLocked={agentLocked}
           runControls={runControls} onRunModel={onRunModel} onRunEffort={onRunEffort}
           onPermissionMode={onPermissionMode} composerMenu={composerMenu} setComposerMenu={setComposerMenu}

@@ -1,3 +1,6 @@
+import { EmptyState } from './primitives/EmptyState'
+import { WORKBENCH_EMPTY_COPY } from '../constants/copy'
+import { REMOTE_SESSION_COPY } from '../constants/remote-copy'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AgentInputAttachment, AgentQuestionResponse } from '@shared/runtime'
 import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
@@ -226,7 +229,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
   const selectedAgentId = provider ? remoteAgentId(provider) : missingAgentId ?? ''
 
   const unknownIntent = intents.find((intent) => intent.status === 'unknown')
-  const noticeError = error ?? pollError ?? historyError ?? catalogEntry?.error
+  const noticeError = error ?? pollError ?? (historyError && displayTurns.length > 0 ? REMOTE_SESSION_COPY.refreshHistoryFailed : null) ?? catalogEntry?.error
   const notice = connectionRefreshing || (connected && !noticeError && (!catalogReady || !pollFresh))
     ? { tone: 'blocked' as const, text: copy.loadingDesktopStatus }
     : !connected
@@ -269,7 +272,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
 
   const diffReview = sessionNetDiffReview(displayTurns) ?? resolveTurnDiffReview(displayTurns)
   const workspaceAvailable = projectAvailable
-  const upgradeWorkbench = <div className="surface-unavailable"><b>需要更新远端 Scry</b><span>请更新 {host}，以启用文件编辑、源代码管理和终端。</span></div>
+  const upgradeWorkbench = <EmptyState size="card" title={WORKBENCH_EMPTY_COPY.upgrade} />
   return { submission, execute, attachmentBytes, attachmentError, submit, resolveUnknown, stop, answer, loadOlderHistory, historyOlderLoading, connect, missingAgentId, agents, unavailableAgentIds, selectedAgentId, unknownIntent, noticeError, notice, diffReview, workspaceAvailable, upgradeWorkbench }
 }
 export type ExecutionState = ReturnType<typeof useRemoteChatExecution>

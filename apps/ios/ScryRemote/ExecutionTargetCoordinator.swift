@@ -55,6 +55,7 @@ final class ExecutionTargetCoordinator {
     let verifiedAt: Date?
     var id: String { scope.id + (discovery ? ":discovery" : ":sessions") }
     var summary: String {
+      if failure.requiresPairing { return ConnectionCopy.hostAuthorizationExpired(scope.label) }
       if case .target = failure { return failure.summary }
       return ConnectionCopy.hostRefreshFailure(scope.label, discovery: discovery, summary: failure.summary)
     }

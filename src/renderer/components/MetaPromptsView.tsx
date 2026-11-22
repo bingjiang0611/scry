@@ -3,6 +3,8 @@ import { filterMetaPrompts, META_PROMPT_TITLE_LIMIT, readMetaPrompts, writeMetaP
 import { ModalFrame, requestModalClose } from './Modals'
 import type { PresenceCloseReason } from '../hooks/usePresence'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { EmptyStateArtwork } from './primitives/EmptyStateArtwork'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { META_PROMPT_COPY, MODAL_COPY } from '../constants/copy'
@@ -79,15 +81,13 @@ export function MetaPromptsView({ onBack, onInsert }: {
         <div><h1>Meta Prompts</h1></div>
         <div className="mp-actions">
           <Button variant="quiet" onClick={onBack}>返回会话</Button>
-          <Button disabled={library.status !== 'ready'} onClick={() => { setNotice(null); setEditor({ prompt: null }) }}><Icon name="plus" /> 新建提示词</Button>
+          <Button variant={prompts.length ? 'primary' : 'secondary'} disabled={library.status !== 'ready'} onClick={() => { setNotice(null); setEditor({ prompt: null }) }}><Icon name="plus" /> {META_PROMPT_COPY.create}</Button>
         </div>
       </header>
       {library.status === 'error' ? (
-        <div className="mp-load-error" role="alert">
-          <Icon name="alert" /><h2>提示词库无法读取</h2><p>{library.error}</p>
-          <p>为避免覆盖原数据，当前不能新建或编辑提示词。</p>
-          <Button onClick={() => setLibrary(loadLibrary())}>重新读取</Button>
-        </div>
+        <EmptyState size="page" title={META_PROMPT_COPY.readFailed} picture="alert" announcement="alert"
+          description={META_PROMPT_COPY.readFailedDetail}
+          actions={[{ label: META_PROMPT_COPY.readAgain, intent: 'secondary', icon: 'refresh', onClick: () => setLibrary(loadLibrary()) }]} />
       ) : (
         <div className="mp-layout">
           <aside className="mp-list" aria-label="提示词列表">
@@ -102,9 +102,6 @@ export function MetaPromptsView({ onBack, onInsert }: {
                   <RowCopyButton prompt={prompt} />
                 </div>
               ))}
-              {visible.length === 0 && (
-                <div className="mp-empty"><Icon name={prompts.length === 0 ? 'terminal' : 'search'} /><strong>{prompts.length === 0 ? '还没有提示词' : '没有匹配的提示词'}</strong><p>{prompts.length === 0 ? '把第一条常用指令保存下来。' : '试试标题或正文中的关键词。'}</p></div>
-              )}
             </div>
           </aside>
           <article className="mp-detail" aria-label="提示词详情">
@@ -115,7 +112,12 @@ export function MetaPromptsView({ onBack, onInsert }: {
               </div></header>
               <pre className="mp-body">{selected.body}</pre>
               <PromptFooter key={selected.id} prompt={selected} onInsert={onInsert} />
-            </> : <div className="mp-empty mp-detail-empty"><strong>{prompts.length === 0 ? '保存常用指令，下次直接使用' : '没有可预览的提示词'}</strong>{prompts.length === 0 && <Button onClick={() => setEditor({ prompt: null })}><Icon name="plus" /> 新建提示词</Button>}</div>}
+            </> : query.trim() ? <EmptyState size="page" announcement="polite" title={META_PROMPT_COPY.noResults(query)}
+              description={META_PROMPT_COPY.noResultsDetail}
+              actions={[{ label: META_PROMPT_COPY.clearSearch, intent: 'secondary', onClick: () => { setQuery(''); searchRef.current?.focus() } }]} />
+              : <EmptyState size="page" title={META_PROMPT_COPY.libraryEmpty} description={META_PROMPT_COPY.libraryEmptyDetail}
+                picture={<EmptyStateArtwork scene="prompt-library" />}
+                actions={[{ label: META_PROMPT_COPY.create, onClick: () => { setNotice(null); setEditor({ prompt: null }) } }]} />}
           </article>
         </div>
       )}

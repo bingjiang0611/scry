@@ -41,6 +41,7 @@ final class RemoteRunStore {
     case idle
     case loading
     case loaded(G0Transport.RunDirectoryListing)
+    case denied
     case failed(String)
   }
 
@@ -1281,20 +1282,43 @@ final class RemoteRunStore {
     }
   }
 
+  #if DEBUG
+  private var archiveFixtureReadCount = 0
+  #endif
+
   // Archive is reversible and delete is not, so both return the host's verdict
   // as a message and re-read the catalog rather than projecting a local guess.
   @discardableResult func refreshArchived() async -> Bool {
     if let archivedTask { return await archivedTask.value }
-    guard let client = makeClient() else {
+    let read: (() async throws -> [G0Transport.RunSessionRef])?
+    if let client = makeClient() {
+      read = { try await client.sessions(includeArchived: true) }
+    } else {
+      #if DEBUG
+      if mockMode && ProcessInfo.processInfo.arguments.contains("-uiArchiveReadFixture") {
+        archiveFixtureReadCount += 1
+        let firstRead = archiveFixtureReadCount == 1
+        read = {
+          if firstRead { throw NSError(domain: "archive-fixture", code: 1) }
+          return []
+        }
+      } else {
+        read = nil
+      }
+      #else
+      read = nil
+      #endif
+    }
+    guard let read else {
       archivedFailure = ConnectionCopy.notPaired
-      archivedCatalog = .failed(ConnectionCopy.notPaired)
+      if !archivedCatalog.hasVisibleValue { archivedCatalog = .failed(ConnectionCopy.notPaired) }
       return false
     }
     archivedLoading = true
     archivedFailure = nil
     let task = Task { [weak self] () -> Bool in
       do {
-        let list = try await client.sessions(includeArchived: true)
+        let list = try await read()
         let archived = list.filter { ($0.archivedAt ?? 0) > 0 }
         await MainActor.run {
           guard let self else { return }
@@ -2010,11 +2034,15 @@ final class RemoteRunStore {
     _ = restoreActiveContext()
     if !force, hasCachedValue, isFresh(providersLoadedAt, within: Self.metadataFreshness) { return }
     guard providersTask == nil else { return }
+    // Retain usable choices during refresh, but do not reuse a previously empty
+    // result as proof that the current read is empty or even succeeded.
+    let retainChoices: Bool
+    if case .loaded = providers { retainChoices = true } else { retainChoices = false }
     guard let client = makeClient() else {
-      if !hasCachedValue { providers = .failed("尚未配对") }
+      if !retainChoices { providers = .failed(ConnectionCopy.unpairedDevice) }
       return
     }
-    if !hasCachedValue { providers = .loading }
+    if !retainChoices { providers = .loading }
     let requestDataGeneration = dataGeneration
     let requestConnectionRevision = connectionSuccessRevision
     providersTask = Task { [weak self] in
@@ -2058,7 +2086,7 @@ final class RemoteRunStore {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.providersTask = nil
           self.recordFailure(error, since: requestConnectionRevision)
-          if !hasCachedValue { self.providers = .failed(Self.describe(error)) }
+          if !retainChoices { self.providers = .failed(Self.describe(error)) }
         }
       }
     }
@@ -2327,7 +2355,12 @@ final class RemoteRunStore {
           guard let self, self.generation == requestGeneration,
                 self.directoriesRequestGeneration == directoriesRequest else { return }
           self.directoriesTask = nil
-          self.recordFailure(error, since: requestConnectionRevision); self.directories = .failed(Self.describe(error))
+          self.recordFailure(error, since: requestConnectionRevision)
+          if case G0Transport.RunError.host(code: "workspace_not_authorized") = error {
+            self.directories = .denied
+          } else {
+            self.directories = .failed(Self.describe(error))
+          }
         }
       }
     }

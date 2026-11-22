@@ -317,6 +317,7 @@ iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous �
 | --- | --- |
 | `src/renderer/components/primitives/Button.tsx` | variant：primary / secondary（默认）/ quiet / danger；size：md（32px，弹窗与面板）/ sm（28px，工具栏与行内）。默认 `type="button"`，表单主操作显式传 `type="submit"`；`className` 只用于测试钩子与定位，不改尺寸、颜色和圆角 |
 | `src/renderer/components/primitives/IconButton.tsx` | `label` 必填，同时生成 `aria-label` 与 `title`；size：md（32px，图标 16px）/ sm（28px，图标 14px）；`active` 只控制视觉，`aria-pressed`／`aria-expanded` 仍由调用方给出 |
+| `src/renderer/components/primitives/EmptyState.tsx` | `page` 用于大面板；`card` 用于局部卡片；`row` 继承列表密度；`menu` 只显示不可选的提示。调用方区分确认为空、无匹配、失败、无权及未取得证据；仅页面用说明。配图隐藏于读屏；搜索的无匹配可用 polite 播报。操作最多两个，紧凑区块使用 quiet。`EmptyStateSlot` 让内容立即替换空态，退出层不接收焦点或指针事件。 |
 | `src/renderer/components/primitives/Notice.tsx` | tone：info（默认）／warn／bad；layout：box／strip；size：md／sm；`action` 放一两个 sm 按钮。图标随 tone 自动给出；`role`（status／alert）由调用方决定，primitive 不隐式添加。正文里的 `<b>` 是标题样式 |
 | `src/renderer/components/primitives/Tabs.tsx` | `items` 的 `id`／`controls`／`title`／`count` 保持原 DOM 合同；自动激活，只有选中项在 Tab 顺序中；`tabRef`／`listRef`／`children` 支持动效指示条。颜色在 `aria-selected` 同一帧切换，不做颜色过渡 |
 | `src/renderer/components/primitives/Segmented.tsx` | `role="group"` + `aria-pressed`；`value` 可为字符串或数字 |

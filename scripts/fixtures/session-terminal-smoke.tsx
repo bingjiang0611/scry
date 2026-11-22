@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { unavailableWorkspaceSelection } from './workspace-selection-unavailable'
 import { App, sessionComposerDraftKey } from '../../src/renderer/App'
 import type { ProviderContext } from '../../src/shared/provider'
-import type { WorkspaceFileOpenTarget, WorkspacePathRequest } from '../../src/shared/workspace'
+import type { WorkspaceFileOpenTarget, WorkspaceListRequest, WorkspaceListResult, WorkspacePathRequest } from '../../src/shared/workspace'
 import type { TerminalDataEvent, TerminalExitEvent, TerminalRecordingRequest, TerminalSessionInfo, TerminalStartRequest } from '../../src/shared/terminal'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/motion.css'
@@ -26,6 +26,7 @@ const starts: TerminalStartRequest[] = []
 const attaches: string[] = []
 const closes: string[] = []
 const writes: string[] = []
+const workspaceReads: WorkspaceListRequest[] = []
 const dataListeners = new Set<(event: TerminalDataEvent) => void>()
 const exitListeners = new Set<(event: TerminalExitEvent) => void>()
 const sessionListeners = new Set<(event: { runId: string; sessionId: string; previousSessionId: string }) => void>()
@@ -34,7 +35,7 @@ let cwd: string | null = null
 const status = document.createElement('output')
 status.id = 'terminal-state'
 status.hidden = true
-const update = () => { status.textContent = JSON.stringify({ cwd, starts, attaches, closes, writes, pending: releaseStart != null }) }
+const update = () => { status.textContent = JSON.stringify({ cwd, starts, attaches, closes, writes, workspaceReads, pending: releaseStart != null }) }
 const projects = [
   { cwd: '/fixture/old', name: 'Old project', mtime: 1, sessions: [
     { sessionId: 'one', externalSessionId: 'one', providerId: 'claude', mtime: 1, preview: 'First conversation', count: 1 },
@@ -67,11 +68,23 @@ Object.defineProperty(window, 'scry', { value: {
     items: [{ id: `answer-${context.externalSessionId}`, runId: context.externalSessionId, ts: '2026-10-09T00:00:00Z',
       kind: 'model', stage: 'text', text: 'Open `/fixture/' + (context.externalSessionId === 'one' ? 'new' : 'old') + '/same.ts`' }]
   }], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete' }),
-  workspaceList: async () => ({ entries: [], truncated: false }),
+  workspaceList: async (request: WorkspaceListRequest): Promise<WorkspaceListResult> => {
+    if (scenario !== 'workspace-read-failure' || request.cwd !== '/fixture/old') return { entries: [], truncated: false }
+    workspaceReads.push(request)
+    update()
+    const matchingReads = workspaceReads.filter(read => read.cwd === request.cwd && read.path === request.path && read.cursor === request.cursor)
+    if (matchingReads.length === 1) throw new Error('fixture file listing unavailable')
+    const name = request.cursor ? 'second.txt' : 'first.txt'
+    return { entries: [{ name, path: name, kind: 'file', mtimeMs: 1 }], truncated: !request.cursor,
+      ...(request.cursor ? {} : { nextCursor: 'page-2' }) }
+  },
   workspaceResolveFile: async (request: WorkspacePathRequest): Promise<WorkspaceFileOpenTarget> => ({ ...request, mode: 'text' }),
   workspaceRead: async ({ cwd, path }: { cwd: string; path: string }) => ({ name: path, path, content: `${cwd}/${path}`, size: 30, mtimeMs: 1, revision: '1', language: 'text' }),
   workspaceReadKnown: async ({ cwd, path }: { cwd: string; path: string }) => ({ name: path, path, content: `${cwd}/${path}`, size: 30, mtimeMs: 1, revision: '1', language: 'text' }),
-  terminalActive: async () => [...sessions.values()],
+  terminalActive: async () => {
+    if (scenario === 'restore-failure') throw new Error('fixture terminal probe unavailable')
+    return [...sessions.values()]
+  },
   terminalStart: async (request: TerminalStartRequest) => {
     starts.push(request)
     const session = { id: `terminal-new-${starts.length}`, pid: starts.length + 1,

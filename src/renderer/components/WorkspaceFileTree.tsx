@@ -5,13 +5,17 @@ import { workspaceCopy as copy } from '../constants/workspace-copy'
 import {
   filterWorkspaceTreePaths, normalizeWorkspaceTreeQuery, workspaceTreeAncestors, workspaceTreeEntries
 } from '../workspace-tree'
+import { EmptyState } from './primitives/EmptyState'
 import './pierre-views.css'
 
-export function WorkspaceFileTree({ children, expanded, query, loading, nextCursors, onExpand, onOpen, onContext, onRename, onMore }: {
+export function WorkspaceFileTree({ children, expanded, query, loading, nextCursors, onExpand, onOpen, onContext, onRename, onMore, onClearQuery, directoryFailures, onReadDirectory }: {
   children: Record<string, WorkspaceEntry[]>
   expanded: ReadonlySet<string>
   query: string
+  onClearQuery: () => void
   loading: ReadonlySet<string>
+  directoryFailures: ReadonlyMap<string, string | undefined>
+  onReadDirectory: (path: string, cursor?: string) => void
   nextCursors: Record<string, string | undefined>
   onExpand: (entry: WorkspaceEntry, open: boolean) => void
   onOpen: (entry: WorkspaceEntry) => void
@@ -76,7 +80,12 @@ export function WorkspaceFileTree({ children, expanded, query, loading, nextCurs
       }
     }}>
     {paths.length ? <div className="pierre-file-tree"><FileTree model={model} style={{ height: '100%' }} aria-label={copy.filesLabel} /></div>
-      : <div className="workspace-empty">{copy.noFilesMatch}</div>}
+      : <EmptyState size="row" className="workspace-empty" title={copy.noFilesMatch(query)} announcement="polite"
+        actions={[{ label: copy.clearFileSearch, onClick: onClearQuery }]} />}
+    {[...directoryFailures].filter(([path]) => expanded.has(path) && entries.has(`${path}/`)).map(([path, cursor]) =>
+      <EmptyState key={path} size="row" className="workspace-node-note" announcement="alert"
+        title={copy.directoryReadFailed(entries.get(`${path}/`)?.name ?? path)}
+        actions={[{ label: copy.readFilesAgain, icon: 'refresh', busy: loading.has(path), onClick: () => onReadDirectory(path, cursor) }]} />)}
     {paths.length > 0 && pagePath && (Boolean(normalizedQuery) || expanded.has(pagePath)) && entries.has(`${pagePath}/`) && (loading.has(pagePath) || nextCursors[pagePath]) &&
       <div className="workspace-node-note">
         {loading.has(pagePath) ? copy.directoryLoading(pagePath) : <button type="button" className="workspace-load-more"

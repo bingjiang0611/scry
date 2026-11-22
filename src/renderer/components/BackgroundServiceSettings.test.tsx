@@ -94,7 +94,10 @@ describe('BackgroundServicePanel', () => {
   })
 
   it('shows read failures and action results', () => {
-    expect(render(null, { readError: 'daemon_not_running' })).toContain('读取后台服务状态失败：daemon_not_running')
+    const failed = render(null, { readError: 'daemon_not_running' })
+    expect(failed).toContain('没能读取后台服务状态')
+    expect(failed).toContain('刷新状态')
+    expect(failed).not.toContain('daemon_not_running')
     expect(render(daemon(), { result: describeActionResult('quit', { status: 'failed', reason: 'stop-timeout', message: '没有退出' }) })).toContain('没有退出')
     expect(describeActionResult('restart', { status: 'cancelled' }).text).toContain('没有被停止')
   })

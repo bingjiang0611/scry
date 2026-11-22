@@ -39,7 +39,7 @@ export async function exerciseSessionSelection(contents, scenario) {
     await click('.sb-sess[data-provider="pi"]')
     await wait(`${state}.historyReads === 1`)
     await click('#resolve-history')
-    await wait(`document.querySelector('.chat-transcript').textContent.includes('Actual live response before archival') && !document.querySelector('.chat-session-evidence-gap')`)
+    await wait(`document.querySelector('.chat-transcript').textContent.includes('Actual live response before archival') && !document.querySelector('.chat-state-slot > .empty-state[data-status]')`)
     const result = await read(state)
     if (result.activeListReads !== initialListReads + 1 || result.historyReads !== 1 || result.adoptedRuns.join(',') !== 'hidden-pi-run' || result.activeReads !== baseline || result.starts !== 0) throw new Error(`Stale sidebar selection did not restore a single authoritative read: ${JSON.stringify(result)}`)
     return { scenario, firstClickLiveContent: true, missingArchiveNotEmpty: true, authoritativeRunLookup: true, noRetryOrStart: true }
@@ -52,7 +52,7 @@ export async function exerciseSessionSelection(contents, scenario) {
     await wait(`${state}.historyReads === 1`)
     await click('#resolve-history')
     await wait(`${transcript}.textContent.includes('History for new-session') && document.body.innerText.includes('${warning}')`)
-    if (await read(`document.querySelector('.chat-session-evidence-gap') || document.body.innerText.includes('daemon_outcome_unknown')`)) {
+    if (await read(`document.querySelector('.chat-state-slot > .empty-state[data-status]') || document.body.innerText.includes('daemon_outcome_unknown')`)) {
       throw new Error('The live read failure must not be presented as a history failure')
     }
     await click('.sb-sess[data-provider="pi"]')

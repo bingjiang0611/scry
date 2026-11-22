@@ -1,4 +1,6 @@
 // 总览「会话数据」页：结构化介入、TOP TOOLS、危险审计、段落、调用明细、文件足迹与会话 diff。
+import { EmptyState } from './primitives/EmptyState'
+import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import type { ReactNode } from 'react'
 import { workspaceDiffCopy } from '@shared/constants/copy'
 import type { TraceEvent, WorkspaceDiffResult } from '@shared/trace'
@@ -330,7 +332,7 @@ export function OverviewSessionPanel({
                   )}
                 </div>
               )}
-              {structured.length === 0 && <div className="dim pad">暂无</div>}
+              {structured.length === 0 && <EmptyState size="row" className="dim pad" title={OVERVIEW_SESSION_COPY.noFileEvidence} />}
               {structured.map((f) => (
                 <button
                   type="button"
