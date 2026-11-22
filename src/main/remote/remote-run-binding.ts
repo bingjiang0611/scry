@@ -211,7 +211,9 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
         output(forwarded)
       }
     }
-    progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
+    const binding = { event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId,
+      ...(routing.agentProfileId ? { agentProfileId: routing.agentProfileId } : {}) }
+    progress(marker({ ...binding, cwd: routing.cwd }))
     if (resume) progress(marker({ event: 'session', externalSessionId: resume, resumed: true }))
     try {
       const completion = await deps.startAppRun!({
@@ -255,7 +257,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
         // A worktree start runs outside the submitted project: the device follows the run's
         // own cwd, re-announced once the prepared workspace is registered.
         onRegistered: ({ cwd }) => {
-          if (cwd !== routing.cwd) progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd }))
+          if (cwd !== routing.cwd) progress(marker({ ...binding, cwd }))
         },
         permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride,
         ...(grantScope ? { grantScope } : {})
