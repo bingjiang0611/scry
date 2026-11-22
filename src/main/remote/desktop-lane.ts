@@ -1,4 +1,3 @@
-import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
 // Persistent inner-mTLS lanes for the desktop run channel.
@@ -43,34 +42,11 @@ import { LANE_POLICY, type DesktopLaneName } from './desktop-lane-policy'
 // Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
-export interface DesktopLaneEndpoint {
-  path?: string
-  host?: string
-  port?: number
-  caPEM: string
-  certPEM: string
-  keyPEM: string
-  /** Full-page replies on the App's authenticated local history lane only. */
-  maxResponseBytes?: number
-}
+import { connectDesktopLane, MAX_RESPONSE_BYTES, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane-channel'
+export { connectDesktopLane, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane-channel'
 
-// The minimal duplex the lane needs. Tests supply a fake channel instead of TLS;
-// production uses connectDesktopLane.
-export interface DesktopLaneChannel {
-  // Resolves once the frame left this process; rejects when it did not.
-  send(frame: string): Promise<void>
-  // One reply line, bounded by the lane's response timeout.
-  receive(): Promise<string>
-  destroy(): void
-  // The listener receives the reason the channel closed, so a socket error or an
-  // oversized reply keeps its own diagnostic. Returns the remover, so a settled
-  // request leaves no listener behind.
-  onClose(listener: (reason: Error) => void): () => void
-}
+export type DesktopLaneConnector = (endpoint: DesktopLaneEndpoint, options?: { signal?: AbortSignal }) => Promise<DesktopLaneChannel>
 
-export type DesktopLaneConnector = (endpoint: DesktopLaneEndpoint) => Promise<DesktopLaneChannel>
-
-const MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 const KEEP_ALIVE_PREFIX = '{"keepAlive":true'
 // Close before the host's idle timeout (30 s on older hosts, 75 s since lanes can
 // multiplex), so a request is never written into a tunnel the host is about to drop.
@@ -88,118 +64,6 @@ function isKeepAliveReply(line: string): boolean {
 
 function laneError(message: string): Error {
   return new Error(message)
-}
-
-// A TLS 1.3 channel over a unix socket (Desktop, SSH `-L`) or a TCP endpoint
-// (tests and the loopback harness). One reply line per request.
-// A listener that accepts and never handshakes keeps `secureConnect` pending forever
-// (a daemon killed mid-restart leaves exactly that in the kernel's accept backlog).
-// Nothing is written before the handshake, so this failure is provably "not sent".
-const CONNECT_TIMEOUT_MS = 5_000
-
-export function connectDesktopLane(
-  endpoint: DesktopLaneEndpoint,
-  options: { timeoutMs?: number } = {}
-): Promise<DesktopLaneChannel> {
-  return new Promise((resolve, reject) => {
-    const hasPath = endpoint.path !== undefined
-    let socket: TLSSocket
-    try {
-      socket = tlsConnect({
-        ...(hasPath ? { path: endpoint.path as string } : { host: endpoint.host as string, port: endpoint.port as number }),
-        ca: endpoint.caPEM,
-        cert: endpoint.certPEM,
-        key: endpoint.keyPEM,
-        servername: 'scry-host',
-        minVersion: 'TLSv1.3',
-        maxVersion: 'TLSv1.3',
-        rejectUnauthorized: true
-      })
-    } catch (error) {
-      reject(error instanceof Error ? error : laneError('desktop_lane_connect_failed'))
-      return
-    }
-    const maxResponseBytes = endpoint.maxResponseBytes ?? MAX_RESPONSE_BYTES
-    // TLS can split a long UTF-8 reply across thousands of chunks. Scan each chunk
-    // once and join only when a complete reply is ready, not on every data event.
-    let parts: Buffer[] = []
-    let bufferedBytes = 0
-    let lineEnd = -1
-    let waiter: { resolve(line: string): void; reject(error: Error): void } | undefined
-    let closed: Error | undefined
-    const closeListeners = new Set<(reason: Error) => void>()
-    let resolved = false
-    const fail = (error: Error): void => {
-      if (closed) return
-      closed = error
-      clearTimeout(connectTimer)
-      // Before the handshake there is no channel to hand back: the caller waits on the
-      // connect promise itself, so that is what has to settle.
-      if (!resolved) { resolved = true; reject(error) }
-      const pending = waiter
-      waiter = undefined
-      parts = []
-      socket.destroy()
-      pending?.reject(error)
-      for (const listener of closeListeners) listener(error)
-      closeListeners.clear()
-    }
-    const settleLine = (): void => {
-      if (lineEnd < 0 || !waiter) return
-      const buffer = parts.length === 1 ? parts[0] : Buffer.concat(parts, bufferedBytes)
-      const line = buffer.toString('utf8', 0, lineEnd)
-      const rest = buffer.subarray(lineEnd + 1)
-      parts = rest.length ? [rest] : []
-      bufferedBytes = rest.length
-      lineEnd = rest.indexOf(10)
-      const pending = waiter
-      waiter = undefined
-      pending.resolve(line)
-    }
-    const connectTimer = setTimeout(
-      () => fail(laneNotSent(laneError('desktop_lane_connect_timeout'))),
-      options.timeoutMs ?? CONNECT_TIMEOUT_MS
-    )
-    // A rejected handshake is reported by the promise, not as an unhandled rejection.
-    socket.once('secureConnect', () => {
-      clearTimeout(connectTimer)
-      resolved = true
-      resolve({
-        send: frame => new Promise<void>((done, failed) => {
-          // Refusing before write is the only provable "not sent": nothing was handed
-          // to the socket. The write callback below reports the ambiguous case.
-          if (closed) { failed(laneNotSent(closed)); return }
-          socket.write(frame, error => { if (error) failed(error); else done() })
-        }),
-        receive: () => new Promise<string>((done, failed) => {
-          if (closed) { failed(closed); return }
-          if (waiter) { failed(laneError('desktop_lane_busy')); return }
-          waiter = { resolve: done, reject: failed }
-          settleLine()
-        }),
-        destroy: () => fail(laneError('desktop_lane_closed')),
-        onClose: listener => {
-          if (closed) { listener(closed); return () => undefined }
-          closeListeners.add(listener)
-          return () => { closeListeners.delete(listener) }
-        }
-      })
-    })
-    socket.on('data', (chunk: Buffer) => {
-      if (closed) return
-      if (bufferedBytes + chunk.length > maxResponseBytes) { fail(laneError('desktop_lane_response_too_large')); return }
-      if (lineEnd < 0) {
-        const end = chunk.indexOf(10)
-        if (end >= 0) lineEnd = bufferedBytes + end
-      }
-      parts.push(chunk)
-      bufferedBytes += chunk.length
-      settleLine()
-    })
-    socket.once('error', error => fail(error instanceof Error ? error : laneError('desktop_lane_socket')))
-    socket.once('end', () => fail(laneError('desktop_lane_eof')))
-    socket.once('close', () => fail(laneError('desktop_lane_closed')))
-  })
 }
 
 // A channel belongs to one tunnel path and one device certificate.
@@ -312,7 +176,12 @@ export class DesktopLanes {
       try {
         if (state.retired) throw laneError('desktop_not_connected')
         reused = state.channel !== undefined && state.endpoint === endpointIdentity(call.endpoint)
-        channel = await this.#channel(state, call.endpoint)
+        const signal = policy.abortOnCancel ? call.signal : undefined
+        channel = await this.#channel(state, call.endpoint, signal)
+        if (signal?.aborted) {
+          this.#dropChannel(state)
+          throw laneError('desktop_lane_cancelled')
+        }
         // The idle timer only runs between requests: a long poll is not idle.
         this.#clearIdle(state)
         if (!reused) trace?.mark('secure_connected')
@@ -402,13 +271,13 @@ export class DesktopLanes {
     })
   }
 
-  async #channel(state: LaneState, endpoint: DesktopLaneEndpoint): Promise<DesktopLaneChannel> {
+  async #channel(state: LaneState, endpoint: DesktopLaneEndpoint, signal?: AbortSignal): Promise<DesktopLaneChannel> {
     const identity = endpointIdentity(endpoint)
     if (state.channel && state.endpoint === identity) return state.channel
     // A new tunnel (or a new device certificate) invalidates the old channel.
     if (state.channel) this.#dropChannel(state)
     // Requests on a lane are serialized, so there is never a concurrent open.
-    const channel = await this.#connect(endpoint)
+    const channel = signal ? await this.#connect(endpoint, { signal }) : await this.#connect(endpoint)
     state.channel = channel
     state.endpoint = identity
     channel.onClose(() => { if (state.channel === channel) { state.channel = undefined; state.endpoint = undefined } })

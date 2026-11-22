@@ -12,6 +12,7 @@ import { requestOn } from './desktop-host-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { connectDesktopLane, DesktopLanes, laneWasNotSent, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
 import { verifyCSR } from './enrollment'
+import { framedRequest } from './remote-protocol'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { setPerformanceRecordingSink, type PerformanceSample } from '../performance-timing'
 
@@ -65,6 +66,39 @@ async function pendingStatus(lanes: DesktopLanes, lane: 'status' | 'bulk', endpo
 }
 
 describe('desktop lane connection bounds', () => {
+  it('closes a cancelled handshake and admits the replacement on the same subscriber lane', async () => {
+    const connected = Promise.withResolvers<import('node:net').Socket>()
+    const silent = createServer((socket) => {
+      socket.on('error', () => undefined)
+      socket.resume()
+      connected.resolve(socket)
+    })
+    const address = await new Promise<import('node:net').AddressInfo>((resolve) =>
+      silent.listen(0, '127.0.0.1', () => resolve(silent.address() as import('node:net').AddressInfo)))
+    let stalled: import('node:net').Socket | undefined
+    cleanups.push(async () => {
+      stalled?.destroy()
+      await new Promise<void>((resolve) => silent.close(() => resolve()))
+    })
+    const { endpoint } = await pairedLane()
+    const lanes = new DesktopLanes()
+    cleanups.push(() => lanes.closeAll())
+    const controller = new AbortController()
+    const request = framedRequest({ op: 'subscribe', views: ['activeRuns'], waitMs: 0 })
+    const old = lanes.request('status', 'c1', {
+      endpoint: { ...endpoint, host: address.address, port: address.port }, request: { ...request, waitMs: 20_000 },
+      replayable: true, subscriber: 'same', signal: controller.signal
+    })
+    stalled = await connected.promise
+    const closed = new Promise<void>((resolve) => stalled!.once('close', () => resolve()))
+    controller.abort()
+    await expect(old).rejects.toThrow('desktop_lane_cancelled')
+    const replacement = lanes.request('status', 'c1', { endpoint, request, replayable: true, subscriber: 'same' })
+    const finished = Promise.all([replacement, closed]).then(([reply]) => reply)
+    await expect(Promise.race([finished, pause(1_000, 'handshake still holds the lane')]))
+      .resolves.toMatchObject({ subscribe: { mode: 'snapshot' } })
+  })
+
   it('gives up on a silent listener instead of waiting forever', async () => {
     // A daemon that was killed mid-restart can still have its socket in the kernel's
     // accept backlog: connect succeeds, the handshake never starts. Nothing has been
