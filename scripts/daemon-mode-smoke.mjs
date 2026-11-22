@@ -31,13 +31,13 @@
 // No screenshot and no DOM clicking: the runner asserts run evidence, not pixels. A
 // failure exits non-zero with the step name; nothing is reported as passed unrun.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { connectCdp, createEvaluate, freePort, launch, waitForTarget } from './desktop-remote-host-smoke/harness.mjs'
 import { stopFixtureDaemon } from './b4v/fixture.mjs'
-import { readIdentity, signalVerified, verifyHolder } from './b4v/process-identity.mjs'
+import { readIdentity, readLockRecord, signalVerified, verifyHolder } from './b4v/process-identity.mjs'
 import { devTarget, parseSmokeArguments, privateCliEvidence, resolvePackagedApp } from './daemon-mode-smoke/packaged.mjs'
-import { daemonProcessEvidence } from './daemon-mode-smoke/processes.mjs'
+import { daemonProcessEvidence, readDaemonTerminalChild } from './daemon-mode-smoke/processes.mjs'
 import { checkPiHistory, seedPiHistory } from './daemon-mode-smoke/history.mjs'
 import { recordingFiles, runOutputFiles, terminalFinishExpression, terminalStartExpression } from './daemon-mode-smoke/workers.mjs'
 
@@ -221,15 +221,16 @@ try {
   // the daemon's child (the daemon owns the pty), and the recording must be readable back
   // through the App and present on disk.
   const shell = await evaluate(terminalStartExpression(workspace))
-  terminalIdentity = readIdentity(Number(shell.pid))
-  const daemonPid = JSON.parse(readFileSync(join(daemonState, 'daemon.lock'), 'utf8')).pid
+  const terminalDaemon = daemonProcessEvidence(daemonState, target)
+  terminalIdentity = readDaemonTerminalChild(terminalDaemon, Number(shell.pid))
   const finished = await evaluate(terminalFinishExpression())
   const files = recordingFiles(userDataDir, shell.id)
   results.steps.terminalRecording = {
-    ok: terminalIdentity?.ppid === daemonPid && shell.recording === 'available' && finished.exited === true &&
+    ok: terminalIdentity !== undefined && shell.recording === 'available' && finished.exited === true &&
       finished.exit?.code === 0 && finished.outputHasMarker === true && finished.recording?.state === 'complete' &&
       finished.recording?.hasMarker === true && finished.listed?.state === 'complete' && files.ok,
-    shellParent: terminalIdentity?.ppid ?? null, daemonPid, descriptor: shell.recording, exit: finished.exit,
+    shellParent: terminalIdentity?.ppid ?? null, daemonPid: terminalDaemon.daemon?.pid ?? null,
+    descriptor: shell.recording, exit: finished.exit,
     outputHasMarker: finished.outputHasMarker, recording: finished.recording, files
   }
 
@@ -237,23 +238,27 @@ try {
   if (target.packaged) results.steps.privateCli = privateCliEvidence(target, processes.daemonResources, { env: { ...process.env, HOME: home } })
 
   // 4. SIGKILL the daemon: the App must bring up a new one and a new run must settle.
-  const lockPath = join(daemonState, 'daemon.lock')
-  if (!existsSync(lockPath)) fail('daemon-lock', 'no daemon.lock before SIGKILL')
-  const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
-  process.kill(lock.pid, 'SIGKILL')
+  const lock = readLockRecord(join(daemonState, 'daemon.lock'))
+  const holder = daemonProcessEvidence(daemonState, target)
+  if (!holder.ok || holder.daemon.pid !== lock?.pid) fail('daemon-lock', JSON.stringify(holder))
+  const killed = signalVerified(lock, 'SIGKILL')
+  if (!killed.signalled) fail('daemon-kill', killed.verdict)
   results.steps.daemonKilled = { ok: true, pid: lock.pid }
-  const recovered = await until('daemon-relaunched', evaluate,
-    `window.scry.activeRuns().then(runs => runs.length >= 0)`,
-    (value) => value === true, 60_000)
-  results.steps.daemonRelaunched = { ok: recovered === true }
-  // The supervisor relaunched the daemon from the same binary and entry.
-  results.steps.daemonProcessesAfterRestart = daemonProcessEvidence(daemonState, target)
+  // A local active-runs answer can arrive before the supervisor replaces the lock.
+  await until('daemon-relaunched', evaluate,
+    `window.scry.activeRuns().then(runs => runs.length >= 0).catch(() => false)`,
+    (value) => {
+      const replacement = daemonProcessEvidence(daemonState, target)
+      results.steps.daemonProcessesAfterRestart = replacement
+      return value === true && replacement.ok && replacement.daemon.pid !== lock.pid
+    }, 60_000)
+  results.steps.daemonRelaunched = { ok: true }
   const afterRestart = await evaluate(`window.scry.start({ prompt: 'native composer complete daemon mode after restart', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
   if (!afterRestart || typeof afterRestart.runId !== 'string') fail('after-restart-start', JSON.stringify(afterRestart))
   const restartSettled = await until('after-restart-settled', evaluate,
-    `window.scry.focusedRunSnapshot().then(run => run ? { done: run.done, runId: run.runId } : null)`,
-    (value) => value && value.done === true)
-  results.steps.afterRestartSettled = { ok: true, runId: restartSettled.runId }
+    `window.scry.focusedRunSnapshot().then(run => run ? { done: run.done, runId: run.runId, error: run.error ?? null, text: run.items.filter(item => item.stage === 'text' && item.text).length } : null)`,
+    (value) => value?.done === true && value.runId === afterRestart.runId)
+  results.steps.afterRestartSettled = { ok: restartSettled.error === null && restartSettled.text > 0, ...restartSettled }
 } catch (error) {
   results.error = String(error?.message ?? error)
 } finally {

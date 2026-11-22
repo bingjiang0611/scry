@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readLaunch } from '../b4v/process-identity.mjs'
-import { checkDaemonLaunch, daemonProcessEvidence } from './processes.mjs'
+import { checkDaemonLaunch, daemonProcessEvidence, readDaemonTerminalChild } from './processes.mjs'
 import { recordingFiles, runOutputFiles } from './workers.mjs'
 
 const resources = '/opt/Scry/resources'
@@ -59,6 +59,14 @@ describe('daemonProcessEvidence finds the daemon only through its verified lock'
   it('reports both processes and the resources the daemon was given', () => {
     const evidence = daemonProcessEvidence(state, packaged, probes())
     expect(evidence).toMatchObject({ ok: true, daemon: { pid: 20, ok: true }, supervisor: { pid: 10, ok: true }, daemonResources: resources })
+  })
+
+  it('only registers a terminal process parented by the verified fixture daemon', () => {
+    const evidence = daemonProcessEvidence(state, packaged, probes())
+    const shell = { pid: 30, ppid: 20, identityKey: '30:shell' }
+    expect(readDaemonTerminalChild(evidence, shell.pid, () => shell)).toBe(shell)
+    expect(readDaemonTerminalChild(evidence, shell.pid, () => ({ ...shell, ppid: 50 }))).toBeUndefined()
+    expect(readDaemonTerminalChild({ ok: false }, shell.pid, () => shell)).toBeUndefined()
   })
 
   it('refuses a missing lock, a reused pid, and a supervisor that is not the parent', () => {
