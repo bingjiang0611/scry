@@ -111,6 +111,7 @@ export interface LlmPerformanceHistoryRow {
   providerId: ProviderId
   agentProfileId?: string
   model: string
+  modelSource?: 'antigravity_transcript'
   upstreamProvider?: string
   networkLabel: string
   failed: boolean

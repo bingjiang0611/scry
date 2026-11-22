@@ -69,6 +69,7 @@ Codex 等这次请求调用的工具全部跑完，才发出它的 usage 通知�
 
 - 沿用 `userData/usage.jsonl` 的 `kind: llm_performance` 行，不增加 DB 或 recorder 事实源。这些行不计入 billing 或 turn 数，沿用原 session 删除归属。
 - 读取最近 30 天最多 1000 轮。截断切进当前时间范围时，标题旁显示「只含最近 N 轮」。损坏行计入 `invalidLines` 后跳过。
+- Antigravity 的 ACP 响应不带实际应答模型。新轮次完成时按会话 ID、轮次时间和输出 token 总数核对 agy 本地 transcript。读取历史时，对最近最多 24 条待补样本用 Scry 归档做同样核对。只有匹配才使用实际模型（或「多模型」）；归档和日志读取各限 2 MiB，缺失或不匹配就保留原标签。不回写历史，不从 transcript 的步骤时间估算 TPS 或 TTFT。
 - 每轮仍冻结运行边界的本机网络配置线索（只保留开关，不保存地址或凭据），当前弹窗不展示。
 - 本次改动之前的 Pi/Codex 历史没有速度证据，不会出现在图上。
 
