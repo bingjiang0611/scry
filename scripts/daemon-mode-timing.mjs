@@ -137,7 +137,7 @@ const results = {
   withMcp,
   prompt: PROMPT,
   orchestration: {
-    mode: process.env.SCRY_ORCHESTRATION ?? 'on (default)',
+    mode: 'authoritative',
     fullfsync: process.env.SCRY_ORCHESTRATION_FULLFSYNC ?? 'default'
   },
   loadBefore: load(),
@@ -159,7 +159,6 @@ const measure = async (count, chunkIndex) => {
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
         // An isolated instance whose daemon serves the packaged smoke fixture.
         SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
-        ...(process.env.SCRY_ORCHESTRATION !== undefined ? { SCRY_ORCHESTRATION: process.env.SCRY_ORCHESTRATION } : {}),
         ...(process.env.SCRY_ORCHESTRATION_FULLFSYNC !== undefined ? { SCRY_ORCHESTRATION_FULLFSYNC: process.env.SCRY_ORCHESTRATION_FULLFSYNC } : {}),
         SCRY_REMOTE_HOST: '0',
         // Stage marks from the App's own main process; off by default everywhere else.
