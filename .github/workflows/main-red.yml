@@ -6,6 +6,9 @@ on:
       check-result:
         required: true
         type: string
+      check-workflow:
+        required: true
+        type: string
 
 permissions: {}
 
@@ -17,6 +20,8 @@ jobs:
     permissions:
       issues: write
       statuses: read
+      contents: read
+      actions: read
     # Both correctness workflows share the lock. Neither pending updates nor a
     # recovery should replace one another while a different update is in flight.
     concurrency:
@@ -27,6 +32,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           CHECK_RESULT: ${{ inputs.check-result }}
+          CHECK_WORKFLOW: ${{ inputs.check-workflow }}
         with:
           script: |
             const repo = context.repo
@@ -35,9 +41,6 @@ jobs:
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`
             const required = ['scry/full-suite', 'scry/remote-g0']
 
-            // This repository is public. Read public commits and Actions job metadata
-            // without granting the issue writer contents:read or actions:read.
-            const publicApi = new github.constructor({ baseUrl: process.env.GITHUB_API_URL })
             async function passed(ref) {
               const statuses = new Map()
               for await (const { data } of github.paginate.iterator(github.rest.repos.listCommitStatusesForRef, { ...repo, ref, per_page: 100 })) {
@@ -50,17 +53,17 @@ jobs:
             }
             async function follows(base, head) {
               if (base === head) return true
-              const { data } = await publicApi.rest.repos.compareCommitsWithBasehead({ ...repo, basehead: `${base}...${head}`, per_page: 1 })
+              const { data } = await github.rest.repos.compareCommitsWithBasehead({ ...repo, basehead: `${base}...${head}`, per_page: 1 })
               return data.status === 'ahead' || data.status === 'identical'
             }
             async function latestPass() {
               // No sha before this workflow was introduced can have both attestations.
-              const history = await publicApi.paginate(publicApi.rest.repos.listCommits, {
+              const history = await github.paginate(github.rest.repos.listCommits, {
                 ...repo, sha: 'main', path: '.github/workflows/main-red.yml', per_page: 100
               })
               const first = history.at(-1)?.sha
               if (!first) throw new Error('main-red workflow not found on main')
-              for await (const { data } of publicApi.paginate.iterator(publicApi.rest.repos.listCommits, { ...repo, sha: 'main', per_page: 100 })) {
+              for await (const { data } of github.paginate.iterator(github.rest.repos.listCommits, { ...repo, sha: 'main', per_page: 100 })) {
                 for (const { sha } of data) {
                   if (await passed(sha)) return sha
                   if (sha === first) return null
@@ -97,16 +100,17 @@ jobs:
             if (latest && latest !== sha && await follows(sha, latest)) return
 
             const attempt = Number(process.env.GITHUB_RUN_ATTEMPT)
-            const jobs = await publicApi.paginate(publicApi.rest.actions.listJobsForWorkflowRunAttempt, {
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
               ...repo, run_id: context.runId, attempt_number: attempt, per_page: 100
             })
             const failed = jobs.filter(job => job.conclusion === 'failure').map(job => `- ${job.name}`).join('\n')
             const body = [
               `<!-- scry-main-red: ${sha} -->`,
               `Failed commit: \`${sha}\``,
+              `Failed workflow: ${process.env.CHECK_WORKFLOW}`,
               `Run: ${runUrl}`,
               `Latest commit with both success statuses: ${latestText}`,
-              `Failed jobs:\n${failed || '- Check'}`,
+              `Failed jobs:\n${failed || '- See the run for job details'}`,
             ].join('\n\n')
             if (issue) {
               await github.rest.issues.update({ ...repo, issue_number: issue.number, body })
@@ -115,7 +119,7 @@ jobs:
                 await github.rest.issues.getLabel({ ...repo, name: label })
               } catch (error) {
                 if (error.status !== 404) throw error
-                await github.rest.issues.createLabel({ ...repo, name: label, color: 'b60205', description: 'Main correctness CI failed' })
+                await github.rest.issues.createLabel({ ...repo, name: label, color: 'b60205', description: 'A main correctness workflow failed' })
               }
               await github.rest.issues.create({ ...repo, title: 'Main is red', labels: [label], body })
             }

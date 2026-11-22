@@ -2,11 +2,8 @@
 /**
  * Publish the recorder CLI to the internal registry.
  *
- * `npm run publish:cli` publishes whatever `packages/turn-recorder-cli/package.json`
- * says, which is the public unscoped `scry-turn-recorder`. Internal delivery uses a
- * scoped name on an internal registry, and that difference used to be made by hand in a
- * temporary copy: rename the package, fix the README install line, publish. This script
- * does that step the same way every time, and refuses to publish a stale build.
+ * The source manifest is private. Stage a scoped package for the internal registry;
+ * real publication rebuilds the CLI from the verified checkout before staging.
  *
  *   node scripts/publish-cli-internal.mjs              # dry run: stage, pack list, stop
  *   node scripts/publish-cli-internal.mjs --publish    # publish and read the result back
@@ -19,7 +16,7 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkReleaseCommit } from './check-release-commit.mjs'
+import { checkReleaseCommit, cleanReleaseHead } from './check-release-commit.mjs'
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const packageRoot = join(repoRoot, 'packages', 'turn-recorder-cli')
@@ -34,9 +31,9 @@ export function internalManifest(manifest, { name = INTERNAL_PACKAGE, registry =
   // Record the registry in the published manifest, so publishing the staged copy again
   // cannot silently land on whichever registry the machine happens to be configured for.
   next.publishConfig = { ...(next.publishConfig ?? {}), registry }
-  // The lifecycle hook runs `check:cli-release`; the staged copy is published with
-  // --ignore-scripts (its `--prefix ../..` would not resolve there). Keeping the hook
-  // would advertise a gate that never runs.
+  // The source package blocks all direct publication. Only this internal copy
+  // drops those protections, after the release gate on the real publish path.
+  delete next.private
   if (next.scripts) {
     delete next.scripts.prepublishOnly
     if (Object.keys(next.scripts).length === 0) delete next.scripts
@@ -78,9 +75,14 @@ function npm(args, options = {}) {
   })
 }
 
-function publishedVersion(name, version, registry) {
+function registryArgs(registry, publishing) {
+  // npm's scope registry takes precedence over --registry.
+  return ['--registry', registry, ...(publishing ? [`--@ali:registry=${registry}`] : [])]
+}
+
+function publishedVersion(name, version, registry, publishing) {
   try {
-    return npm(['view', `${name}@${version}`, 'version', '--registry', registry]).trim()
+    return npm(['view', `${name}@${version}`, 'version', ...registryArgs(registry, publishing)]).trim()
   } catch (error) {
     // A missing version is the answer we want; anything else (auth, network) must stop us
     // rather than look like "not published yet".
@@ -108,7 +110,11 @@ function parse(argv) {
 export async function main(argv = process.argv.slice(2)) {
   const options = parse(argv)
   if (options.publish && options.packageRoot !== packageRoot) throw new Error('--source is only supported for dry runs')
-  await checkReleaseCommit({ dryRun: !options.publish })
+  if (options.publish && (options.name !== INTERNAL_PACKAGE || options.registry !== INTERNAL_REGISTRY)) {
+    throw new Error(`Publication is restricted to ${INTERNAL_PACKAGE} on ${INTERNAL_REGISTRY}`)
+  }
+  const verifiedSha = await checkReleaseCommit({ dryRun: !options.publish })
+  if (options.publish) npm(['run', 'build:cli'], { stdio: 'inherit' })
   assertBuildPresent(options.packageRoot)
   const target = await mkdtemp(join(tmpdir(), 'scry-cli-internal-'))
   try {
@@ -120,7 +126,7 @@ export async function main(argv = process.argv.slice(2)) {
     const files = (Array.isArray(packed) ? packed[0] : Object.values(packed)[0]).files ?? []
     console.log(`tarball ${files.length} files, ${files.filter((file) => file.path.startsWith('dist/')).length} under dist/`)
     if (!options.skipVerify) {
-      const existing = publishedVersion(staged.name, staged.version, options.registry)
+      const existing = publishedVersion(staged.name, staged.version, options.registry, options.publish)
       if (existing && !options.force) {
         throw new Error(`${staged.name}@${staged.version} already exists on ${options.registry} (use --force to republish a different build of the same version)`)
       }
@@ -129,12 +135,14 @@ export async function main(argv = process.argv.slice(2)) {
       console.log('dry run: nothing was published; re-run with --publish')
       return { published: false, ...staged, target }
     }
-    npm(['publish', target, '--ignore-scripts', '--registry', options.registry], { stdio: 'inherit' })
+    if (cleanReleaseHead(repoRoot) !== verifiedSha) throw new Error('HEAD changed after release verification')
+    const registry = registryArgs(options.registry, true)
+    npm(['publish', target, '--ignore-scripts', ...registry], { stdio: 'inherit' })
     if (!options.skipVerify) {
-      const landed = publishedVersion(staged.name, staged.version, options.registry)
+      const landed = publishedVersion(staged.name, staged.version, options.registry, true)
       if (landed !== staged.version) throw new Error(`published but ${staged.name}@${staged.version} does not read back (got "${landed}")`)
       console.log(`verified ${staged.name}@${landed}`)
-      console.log(npm(['view', staged.name, 'dist-tags', '--json', '--registry', options.registry]).trim())
+      console.log(npm(['view', staged.name, 'dist-tags', '--json', ...registry]).trim())
     }
     return { published: true, ...staged, target }
   } finally {

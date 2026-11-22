@@ -91,10 +91,10 @@ const SERIAL_RENDERER_UI_ORDER = [
 
 describe('main correctness records and alerts', () => {
   const mainPush = "!cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'"
-  const alertPermissions = { issues: 'write', statuses: 'read' }
-  for (const [file, id, context, alertCondition] of [
-    ['ci.yml', 'record-full-suite', 'scry/full-suite', "(needs.check.result == 'failure' || needs.record-full-suite.result == 'success')"],
-    ['remote-g0.yml', 'record-remote', 'scry/remote-g0', "needs.record-remote.result == 'success'"],
+  const alertPermissions = { issues: 'write', statuses: 'read', contents: 'read', actions: 'read' }
+  for (const [file, id, context, checkWorkflow] of [
+    ['ci.yml', 'record-full-suite', 'scry/full-suite', 'CI'],
+    ['remote-g0.yml', 'record-remote', 'scry/remote-g0', 'Remote G0 local contracts'],
   ] as const) {
     it(`${file} writes only a successful status from a non-cancelled main push with no checkout`, () => {
       const flow = workflow(file)
@@ -110,9 +110,10 @@ describe('main correctness records and alerts', () => {
       expect(job.steps[0].run).toContain(`-f context=${context} -f state=success`)
       const alert = flow.jobs['main-red']
       expect(alert.needs).toEqual(['check', id])
-      expect(alert.if).toBe(`\${{ ${mainPush} && ${alertCondition} }}`)
+      expect(alert.if).toBe(`\${{ ${mainPush} && (needs.check.result == 'failure' || needs.${id}.result == 'success') }}`)
       expect(alert.permissions).toEqual(alertPermissions)
       expect(alert.uses).toBe('./.github/workflows/main-red.yml')
+      expect(alert.with).toEqual({ 'check-result': '${{ needs.check.result }}', 'check-workflow': checkWorkflow })
     })
   }
 
@@ -127,6 +128,7 @@ describe('main correctness records and alerts', () => {
     expect(job.steps).toHaveLength(1)
     expect(job.steps[0].uses).toMatch(/^actions\/github-script@[0-9a-f]{40}$/)
     expect(job.steps[0].with?.script).not.toContain('${{')
+    expect(job.steps[0].with?.script).not.toMatch(/publicApi|new github\.constructor/)
     expect(job.steps[0].with?.script).toContain("['scry/full-suite', 'scry/remote-g0']")
   })
 
@@ -172,22 +174,24 @@ describe('main correctness records and alerts', () => {
         iterator: async function* <T, P>(fn: (params: P) => Promise<T>, params: P) { yield { data: await fn(params) } },
       })
     }
-    const dispatch = (checkResult: string, sha: string) => run(new Api(), {
+    const dispatch = (checkResult: string, sha: string, checkWorkflow = 'CI') => run(new Api(), {
       repo: { owner: 'owner', repo: 'repo' }, runId: 123, sha,
     }, { warning: (message: string) => { throw new Error(message) } }, { env: {
-      CHECK_RESULT: checkResult, GITHUB_RUN_ATTEMPT: '2', GITHUB_SERVER_URL: 'https://github.com',
+      CHECK_RESULT: checkResult, CHECK_WORKFLOW: checkWorkflow, GITHUB_RUN_ATTEMPT: '2', GITHUB_SERVER_URL: 'https://github.com',
     } })
     await dispatch('failure', first)
     const original = issue
     expect(original?.body).toContain(`Failed commit: \`${first}\``)
     expect(original?.body).toContain(`Latest commit with both success statuses: \`${previous}\``)
     expect(original?.body).toContain('/actions/runs/123/attempts/2')
+    expect(original?.body).toContain('Failed workflow: CI')
     expect(original?.body).toContain('- unit (2)')
     expect(original?.body).not.toContain('packaged-linux')
     main = second
-    await dispatch('failure', second)
+    await dispatch('failure', second, 'Remote G0 local contracts')
     expect(issue).toBe(original)
     expect(issue?.body).toContain(second)
+    expect(issue?.body).toContain('Failed workflow: Remote G0 local contracts')
     await dispatch('failure', first)
     expect(issue?.body).toContain(second)
     main = recovery
@@ -198,11 +202,32 @@ describe('main correctness records and alerts', () => {
     expect(issue).toBeUndefined()
   })
 
+  it('always runs full Remote G0 on main push even if the base has no validation record', () => {
+    const flow = workflow('remote-g0.yml')
+    const changes = source(flow.jobs.changes, 'Detect remote changes')
+    // Same commit at both ends: the diff alone would allow a skip. A main
+    // push must not use that diff as proof that its parent passed Remote G0.
+    const result = shell(changes.run!, { BASE_SHA: 'HEAD', EVENT_NAME: 'pull_request', GITHUB_OUTPUT: '/dev/stdout' })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('required=false\n')
+    const push = shell(changes.run!, { BASE_SHA: 'HEAD', EVENT_NAME: 'push', GITHUB_OUTPUT: '/dev/stdout' })
+    expect(push.status).toBe(0)
+    expect(push.stdout).toBe('required=true\n')
+    for (const id of ['transport', 'ios']) expect(flow.jobs[id].if).toBe("${{ needs.changes.outputs.required == 'true' }}")
+  })
+
+  it('documents and exposes status writer failures without issuing a false validation alert', () => {
+    const docs = readFileSync(join(root, 'docs/agent/validation-workflows.md'), 'utf8')
+    expect(docs).toContain('`record-full-suite` / `record-remote` 自身失败不会开启 `main-red`')
+    expect(docs).toContain('重跑失败的写入 job')
+    for (const [file, id] of [['ci.yml', 'record-full-suite'], ['remote-g0.yml', 'record-remote']]) {
+      expect(workflow(file).jobs[id]['continue-on-error']).toBeUndefined()
+      expect(workflow(file).jobs['main-red'].if).not.toContain(`needs.${id}.result == 'failure'`)
+    }
+  })
+
   it('gates the real release entries, not offline testing, packaging or dev installation', () => {
     const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-    const cli = JSON.parse(readFileSync(join(root, 'packages/turn-recorder-cli/package.json'), 'utf8'))
-    expect(scripts['publish:cli']).toBe('npm publish ./packages/turn-recorder-cli')
-    expect(cli.scripts.prepublishOnly).toBe('node ../../scripts/check-release-commit.mjs --npm-publish && npm --prefix ../.. run check:cli-release')
     expect(scripts['publish:cli:internal']).toBe('node scripts/publish-cli-internal.mjs')
     expect(readFileSync(join(root, 'scripts/publish-cli-internal.mjs'), 'utf8')).toContain('await checkReleaseCommit({ dryRun: !options.publish })')
     expect(scripts['install:mac']).toBe('npm run check:release-commit && npm run pack:release && node scripts/install-macos.mjs --require-release')

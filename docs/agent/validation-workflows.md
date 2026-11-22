@@ -8,8 +8,8 @@ PR 治理、维护与合入条件见 [PR 工作流运行手册](pr-workflow.md)�
 | `performance.yml` | PR、main push 与手动 dispatch 触发。changes 后并行执行 compare 与 native；Node 在同一 runner 按 A1/B1…A20/B20 交替采样并记录阶段耗时，counter 随后执行；native 顺序、各场景负载与预算不变。macOS native 只在 PR 改动冻结的 native harness（`nativeHarnessFiles`）、`performance.yml`、`validation-changes.yml` 或 cache-electron action 时在 PR 上运行；其余 App 改动在合入 main 后对父提交测量（每个 push 独立 run，不合并），也可对分支手动 dispatch 立即测量。main push 不跑 Node ABAB | `Performance Check` 汇总 changes 与两个测量 jobs；纯文档时全部跳过，`native_performance=false` 时 native 跳过，`node_performance=false` 时 compare 跳过；评论明确标明未测量（含“合入后在 main 测量”），不计为测量通过；评论不属于正确性门禁 |
 | `validation-changes.yml` | CI/Performance 共用的只读 diff；仅 README.md 与 docs/**/*.md 跳过全部验证；只改测试、Agent 指导、PR/Issue 模板、名单或 apps/ios 时 `desktop=false`；只改 recorder（`src/core/turn-recorder/**`、`src/cli/**`、`packages/turn-recorder-cli/**`）时也 `desktop=false`——这些输入仍走 node（类型检查、App build、build:cli、recorder 构件打包）、unit 四片、cli-compat 三个 Node 版本与 packaged-linux（真实打包 + Xvfb 下启动），只有 macOS renderer UI、mac 布局检查与 App 安全 smoke 被跳过；仅 apps/ios 加文档时同时 `node_performance=false`，其余 Ubuntu 验证照跑；混合任何非文档、非 iOS、非 recorder 输入均保留 macOS 门禁与 Node 性能测量；`native_performance` 仅在 `desktop=true` 且改动 native harness 路径时为 true（合同测试逐项核对 `nativeHarnessFiles`）；无法读取 diff 时失败，手动 dispatch 总是全验；main push 全验 CI 并测 native，但 `node_performance=false` | 不在触发器上过滤 required workflow，三个原有必需检查名不变；recorder 只影响 `packaged-electron` 的跳过，`required` 仍为 true，`Check` 的“跳过必须是已证明无影响”不变 |
 | `.github/actions/cache-electron/action.yml` | 仅 Electron runtime jobs 使用；按 OS/架构/锁定 Electron 版本缓存 ZIP 与校验文件，原安装器继续校验 SHA256；不缓存 node_modules、App 或编译输出，不使用宽泛 restore prefix | 不替代运行时校验，首次下载失败仍失败 |
-| `remote-g0.yml` | PR 和 main push 发出检查，main push 汇总成功后记录 `scry/remote-g0`；仅 remote/iOS/工作流的非 README 改动并行运行 transport 与 ios（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 占 3 个 macOS slot（native 改为合入后测量），remote/iOS 变化时 5 个，改动 native harness 时再加 1 个，与其他 PR 及 main push 共享 GitHub Free 的 5 个 slot）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
-| `main-red.yml` | CI 失败或任一正确性工作流写入成功状态后调用；串行维护一个打开的 `main-red` issue；同 SHA 的两项状态齐全、且 SHA 不早于失败提交时评论并关闭 | 仅告警，不是合并或发布门禁；无 checkout，仅 `issues: write` 与 `statuses: read` |
+| `remote-g0.yml` | main push 一律并行运行 transport 与 ios，成功记录 `scry/remote-g0`；PR 仍按 remote/iOS/工作流的非 README 改动决定是否运行（同一 runner、共享 DerivedData/一份 Swift 包源码缓存，依次编译 ScryRemoteG0、ScryRemote；普通 PR 占 3 个 macOS slot（native 改为合入后测量），remote/iOS 变化时 5 个，改动 native harness 时再加 1 个，与其他 PR 及 main push 共享 GitHub Free 的 5 个 slot）；transport 限 20 分钟、ios 限 30 分钟 | `Remote Check` 要求两项全部成功，或 changes 明确判定无影响且两项全部跳过；检测失败、结果缺失或任一项取消均拒绝 |
+| `main-red.yml` | `Check` 或 `Remote Check` 失败、或任一正确性工作流写入成功状态后调用；串行维护一个打开的 `main-red` issue；同 SHA 的两项状态齐全、且 SHA 不早于失败提交时评论并关闭 | 仅告警，不是合并或发布门禁；无 checkout，仅 `issues: write`、`statuses: read`、`contents: read`、`actions: read` |
 | `pr-vouch.yml` | 使用默认分支的 VOUCHED 配置，自动同步 `vouch:*` | 仅上下文，不是准入或门禁 |
 | `pr-size.yml` | 基础仓库代码读取 PR git diff，不运行 PR 内容；混合 PR 排除测试行 | 仅上下文，不按大小拒绝 PR |
 
@@ -23,11 +23,13 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 
 ## main 的全量通过记录
 
-仅非取消的 main **push** 可以在自己的 SHA 写 commit status。`Check` 成功写 `scry/full-suite: success`，`Remote Check` 成功写 `scry/remote-g0: success`。Remote 的“已证明无影响”正常计入 `Remote Check` 成功；`Performance Check` 不计入。写入任务仅有 `statuses: write`，不 checkout、不执行仓库代码、不移动 ref、不打 tag。
+仅非取消的 main **push** 可以在自己的 SHA 写 commit status。`Check` 成功写 `scry/full-suite: success`，`Remote Check` 成功写 `scry/remote-g0: success`。Remote 的“已证明无影响”跳过只用于 PR。main 每次都验证 Remote，不继承未验证父提交的状态；原本可跳过的 push 会多调度两个 macOS job（transport 上限 20 分钟、ios 上限 30 分钟），共享原有 5 个 slot。`Performance Check` 不计入。写入任务仅有 `statuses: write`，不 checkout、不执行仓库代码、不移动 ref、不打 tag。
 
 两个 context 都以最新状态为准。工作流只写成功记录，不写 `failure`：这些记录证明该 SHA 曾通过，失败诊断看 run 和 `main-red` issue。没有成功记录就是未验证，包括被更新 push 取消、被跳过和手动 dispatch。main push 原有合并并发策略不变。要为已有 SHA 补记录，重跑保留在 Actions 中的原 main push run；手动 dispatch 可诊断，不能补状态。发布条件见[版本、打包、安装与发布](verification.md#版本打包安装与发布)。
 
-`main-red` 标签留给告警自动化。issue 记录失败 SHA、对应 run attempt、失败的 jobs 和最近一个有双成功状态的 main SHA（尚无记录或查询失败时明确说明）。只有两项状态齐备的同一 SHA 能恢复告警；更旧的 run 不覆盖或关闭较新的告警。公开的 Actions job 与提交元数据用无凭据的 REST 请求读取，不扩展 job token 权限。
+`main-red` 标签留给告警自动化。issue 记录失败的 workflow、SHA、对应 run attempt、失败的 jobs 和最近一个有双成功状态的 main SHA（尚无记录或查询失败时明确说明）。只有两项状态齐备的同一 SHA 能恢复告警；更旧的 run 不覆盖或关闭较新的告警。查询和写入统一使用 job 自带 token，不添加 PAT。
+
+`record-full-suite` / `record-remote` 自身失败不会开启 `main-red`：正确性检查可能已通过，但没有记录的 SHA 仍不能发布。Actions run 会显示失败的写入 job；在原 main push run 重跑失败的写入 job，确认写入后再发布。
 
 <a id="merge-required-checks"></a>
 

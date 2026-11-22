@@ -468,6 +468,9 @@ jobs:
     permissions:
       issues: write
       statuses: read
+      contents: read
+      actions: read
     uses: ./.github/workflows/main-red.yml
     with:
       check-result: ${{ needs.check.result }}
+      check-workflow: CI

@@ -115,10 +115,10 @@ Linux 打包门禁在 ubuntu 上验证产物布局、原生模块、私有 CLI�
 
 `scry-turn-recorder` 与 Electron App 共用 turn record、Trace 聚合和 Git Diff Core，但不依赖 Electron、SQLite 或 Provider SDK。它只在本地写 `.scry/`：
 
-桌面 App 已自带同源 CLI，并固定通过 App Resources 内的绝对路径驱动 Provider/Hook；安装或更新 App 时会同步更新其私有 CLI，不依赖用户 `PATH` 中的全局版本。下面的 npm 安装仅用于没有桌面 App 的 headless/独立终端环境。
+桌面 App 已自带同源 CLI，并固定通过 App Resources 内的绝对路径驱动 Provider/Hook；安装或更新 App 时会同步更新其私有 CLI，不依赖用户 `PATH` 中的全局版本。下面的 npm 安装仅用于没有桌面 App 的 headless/独立终端环境，需要先配置 `@ali` scope 的内网 registry。
 
 ```bash
-npm install -g scry-turn-recorder@0.2.64
+npm install -g @ali/scry-turn-recorder@0.2.82
 scry doctor --workspace /path/to/workspace
 ```
 
@@ -132,14 +132,13 @@ CLI 支持 Node.js 20、22、24，运行平台为 macOS / Linux。Windows 原生
 若 npm 的系统全局目录不可写，可安装到用户目录，并确保 `~/.local/bin` 在 `PATH`：
 
 ```bash
-npm install -g --prefix "$HOME/.local" scry-turn-recorder@0.2.64
+npm install -g --prefix "$HOME/.local" @ali/scry-turn-recorder@0.2.82
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-维护者发布前运行 `npm run publish:cli`（公开名 `scry-turn-recorder`）或
-`npm run publish:cli:internal`（内网 `@ali/scry-turn-recorder`，默认 dry run，加 `-- --publish`
-才发布）。前者通过 package lifecycle 强制执行 typecheck、tests、CLI build；后者要求先跑过
-`npm run build:cli` 与 `check:cli-release`，只改包名与 registry，不会把公开名发到内网。
+独立 CLI 只通过内网 registry 分发，公开 npm 发布已禁用。
+维护者先运行 `npm run check:cli-release`，再从全量通过的 main 提交执行
+`npm run publish:cli:internal -- --publish`。不加 `-- --publish` 只做 dry run。
 见 [`docs/agent/verification.md`](./docs/agent/verification.md)。不要从陈旧 `dist` 手工发布。
 
 合同与接入约束见 [`packages/turn-recorder-cli/README.md`](./packages/turn-recorder-cli/README.md) 及 `src/shared/turn-record.ts`。
