@@ -23,7 +23,6 @@ export interface BuildIdentity {
 
 const BUILD_ID = /^[0-9a-f]{7,64}$/
 
-/** A build id from the wire, or undefined when it is not one. */
 export function buildIdOf(value: unknown): string | undefined {
   return typeof value === 'string' && BUILD_ID.test(value) ? value : undefined
 }

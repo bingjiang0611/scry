@@ -44,7 +44,7 @@
 - 保持 semicolonless、single quote、两空格的既有风格，不做无关格式清洗。
 - 复杂度留在 adapter/trust/persistence 边界；renderer 保持展示导向，recorder core 保持纯净。
 - 优先扩展现有 contract、registry、store 和 projection，不建立第二套同义状态。
-- `src/cli/` 禁止新增或改写说明性注释；既有注释可逐步清理。工具指令和许可声明保留，非显然的决策写入 [ADR](../adr/)。运行 `npm run check:source-comments` 或使用 `/delete-comment`。其他目录的注释应解释证据来源、信任边界、失败模式或为何必须如此，不逐行翻译代码。
+- `src/cli/` 和 `src/shared/` 禁止新增或改写说明性注释；既有注释可逐步清理。工具指令和许可声明保留，非显然的决策写入 [ADR](../adr/)。运行 `npm run check:source-comments` 或使用 `/delete-comment`。其他目录的注释应解释证据来源、信任边界、失败模式或为何必须如此，不逐行翻译代码。
 - fail-open 只用于不应阻断用户 Agent 的观测附加路径；权限、信任、路径和发布完整性必须 fail closed。
 - 先做最小真实修复，再考虑抽象；不要保留复杂度只因为它已经存在。
 

@@ -155,10 +155,13 @@ describe('required PR checks', () => {
   it('does not install or launch an unused Electron runtime in the build-only job', () => {
     const job = workflow('ci.yml').jobs.node
     expect(job.steps.filter(step => step.run).map(step => step.run)).toEqual([
-      'npm ci --ignore-scripts', 'npm run typecheck', 'npm run check:harness-bindings',
+      'npm ci --ignore-scripts', 'npm run typecheck', 'npm run check:source-comments -- --base HEAD^1',
+      'npm run check:harness-bindings',
       'npm run test:shell', 'npm run build', 'npm run build:cli',
       source(job, 'Package unpublished recorder with source provenance').run
     ])
+    expect(source(job, 'Reject new prose comments').if).toBe("${{ github.event_name == 'pull_request' }}")
+    expect(job.steps.find(step => step.uses === 'actions/checkout@v4')?.with?.['fetch-depth']).toBe(2)
     // Actual runtime jobs still prepare Electron and its Linux sandbox.
     expect(source(workflow('ci.yml').jobs.unit, 'Prepare Electron executable').run).toContain('sudo chmod 4755')
   })

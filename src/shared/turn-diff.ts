@@ -188,7 +188,6 @@ export interface TurnDiffSnapshot {
   diffExclude?: TurnDiffExcludeEvidence
 }
 
-/** 接入方声明排除的路径，以及因此没进 `files` 的文件数。只有路径和数量，没有正文。 */
 export interface TurnDiffExcludeEvidence {
   paths: string[]
   files: number
@@ -316,7 +315,6 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
   }
 }
 
-/** 只保留能重新校验的份数：路径非空字符串，文件数是非负整数。 */
 function normalizeDiffExcludeEvidence(value: unknown): TurnDiffExcludeEvidence | undefined {
   if (!value || typeof value !== 'object') return undefined
   const raw = value as Record<string, unknown>

@@ -33,7 +33,6 @@ describe('scry doctor schema and exit codes', () => {
     await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
     expect(JSON.parse(fresh.text()).hookScript).toBe('current')
 
-    // 模拟旧版本写下的脚本：受管标记还在，内容已经不是这个 CLI 会写的了。
     await writeFile(script, current.replace('#!/bin/sh', '#!/bin/sh\n# 旧版本残留'), { mode: 0o700 })
     // 旧脚本仍能正确采集，只是拿不到新版本的快路径：warn 但不改退出码，与 recorder.version 一致。
     const stale = captureStdout()
@@ -136,7 +135,6 @@ describe('scry doctor schema and exit codes', () => {
 
   it('静默 open 轮次报诊断警告，但不引导用户伪造中断', async () => {
     const root = await workspace()
-    // 三天前开始、没有 transcript：终态仍未知。
     await handleRecorderHook({
       provider: 'claude',
       event: 'UserPromptSubmit',

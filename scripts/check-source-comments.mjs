@@ -8,7 +8,7 @@ const cwd = fileURLToPath(new URL('..', import.meta.url))
 const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
 const paths = (...args) => git(...args).split('\0').filter(file => sourcePattern.test(file))
 const read = file => readFileSync(join(cwd, file), 'utf8')
-const scope = 'src/cli/'
+const scope = ['src/cli/', 'src/shared/']
 
 export function addedProse(file, baseline, current) {
   const remaining = new Map()
@@ -29,7 +29,7 @@ export function addedProse(file, baseline, current) {
 function run(args) {
   if (args[0] === '--inventory') {
     const totals = { files: 0, comments: 0, lines: 0, removable: 0 }
-    for (const file of paths('ls-files', '-z', '--', ...(args.length > 1 ? args.slice(1) : [scope]))) {
+    for (const file of paths('ls-files', '-z', '--', ...(args.length > 1 ? args.slice(1) : scope))) {
       const source = read(file)
       for (const comment of sourceComments(file, source)) {
         const text = commentText(source, comment)
@@ -47,10 +47,10 @@ function run(args) {
   }
   const ref = args[1] ?? git('merge-base', 'HEAD', 'origin/main').trim()
   const base = git('rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`).trim()
-  const baseline = new Set(paths('ls-tree', '-rz', '--name-only', base, '--', scope))
+  const baseline = new Set(paths('ls-tree', '-rz', '--name-only', base, '--', ...scope))
   const changed = new Set([
-    ...paths('diff', '--name-only', '-z', '--no-renames', '--diff-filter=AMT', base, '--', scope),
-    ...paths('ls-files', '-z', '--others', '--exclude-standard', '--', scope)
+    ...paths('diff', '--name-only', '-z', '--no-renames', '--diff-filter=AMT', base, '--', ...scope),
+    ...paths('ls-files', '-z', '--others', '--exclude-standard', '--', ...scope)
   ])
   let failures = 0
   for (const file of changed) {
@@ -64,7 +64,7 @@ function run(args) {
     console.error('Remove new or rewritten prose comments. Record durable decisions in docs/adr instead.')
     process.exitCode = 1
   } else {
-    console.log(`No new prose comments in ${scope} (compared with ${base.slice(0, 12)}).`)
+    console.log(`No new prose comments in ${scope.join(', ')} (compared with ${base.slice(0, 12)}).`)
   }
 }
 

@@ -6,7 +6,6 @@ import type { CliApprovalStatus, HostCliApprovalSelfReport } from './host-admin'
 // and what each of the four actions did. Every field the App could not establish is
 // `null` and is shown as unknown: a daemon that did not answer has no "0 devices".
 
-/** Who started this background service: the App directly, or the OS login service (P5 §2.1). */
 export type BackgroundServiceLaunchedBy = 'app' | 'service'
 
 /** How the background service reaches remote devices, without exposing any relay token. */
@@ -84,14 +83,12 @@ export interface BackgroundServiceOrchestrationStatus {
   h1FallbackReason?: string
 }
 
-/** What the daemon reports about itself (local op `localBackgroundService:status`). */
 export interface BackgroundServiceSelfReport {
   version: string
   pid: number
   /** Epoch milliseconds at which the daemon process started. */
   startedAt: number
   devices: BackgroundServiceDevices
-  /** Runs the daemon has not settled yet. */
   activeRuns: number
   /** Self-reported launcher; absent when started by an older App or ad-hoc script. */
   launchedBy?: BackgroundServiceLaunchedBy
@@ -118,13 +115,11 @@ export type BackgroundServiceStatus =
     startedAt: number | null
     devices: BackgroundServiceDevices | null
     activeRuns: number | null
-    /** Who started the running daemon; null when unknown. */
     launchedBy?: BackgroundServiceLaunchedBy | null
     /** On Linux, true only when systemd MainPID matches the daemon's reported supervisor pid. */
     launchedByVerified?: boolean
     /** Effective remote policy reported by the running daemon; null when unknown. */
     remoteConfig?: BackgroundServiceRemoteConfig | null
-    /** Login-start service state for this App and userDataDir (P5 §2.3). */
     loginStart?: LoginStartStatus
     /** Host CLI approval switch state; omitted unless SCRY_EXPERIMENTAL_HOST_CLI=1 (P5-5b). */
     cliApproval?: CliApprovalStatus
@@ -140,10 +135,7 @@ export type BackgroundServiceAction = 'restart' | 'quit' | 'reconnect'
 
 export type BackgroundServiceActionResult =
   | { status: 'done' }
-  // The user declined the confirmation; nothing was signalled.
   | { status: 'cancelled' }
-  // Nothing was done, or the action stopped where it failed; `reason` is a machine code
-  // and `message` the readable sentence for it.
   | { status: 'failed'; reason: string; message: string }
 
 const DAEMON_CREDENTIAL_UNAVAILABLE = 'daemon_credential_unavailable'

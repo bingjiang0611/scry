@@ -5,7 +5,6 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 describe('build identity (A5)', () => {
   it('reads the build id electron-vite defines, and nothing that is not one', () => {
-    // Unbundled there is no define at all.
     expect(scryBuildId()).toBeUndefined()
     expect(buildIdentity('1.0.0')).toEqual({ version: '1.0.0' })
     vi.stubGlobal('__SCRY_BUILD_ID__', 'c'.repeat(64))

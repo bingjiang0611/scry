@@ -9,7 +9,6 @@ export interface LlmRunningSession {
   observedAt?: string
   providerId?: ProviderId
   cwd?: string
-  /** Model of the latest completed call in this turn; unknown before the first call. */
   model?: string
   state: LlmPerformance['state']
   outputStarted: boolean
@@ -119,7 +118,6 @@ export interface LlmPerformance {
   firstTokenMs?: number
   /** Calls behind firstTokenMs; calls without an aligned first-block signal are not counted. */
   firstTokenCalls?: number
-  /** Model of the latest observed call. */
   model?: string
 }
 

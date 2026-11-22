@@ -255,7 +255,6 @@ export interface AgentQuestionPrompt {
    * 不得由 Scry 编造一条看起来像风险评估的文案。
    */
   warning?: string
-  /** Optional input hint for provider-native free-text prompts. */
   placeholder?: string
   /** Native input/editor requests have no synthetic choice list. */
   inputMode?: 'singleline' | 'multiline'

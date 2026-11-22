@@ -1,4 +1,3 @@
-// Shared DTOs and pure helpers for P5 Step 2 host CLI administration (P5-host-cli, P5-host-security §4).
 
 export const HOST_CHILD_ENV = 'SCRY_HOST_CHILD'
 export const HOST_ADMIN_RATE_LIMITS = {

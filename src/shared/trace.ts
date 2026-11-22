@@ -160,8 +160,8 @@ export interface TraceEvent {
   tool?: string
   toolUseId?: string
   parentToolUseId?: string | null
-  agentId?: string // 该事件属于哪个 subagent；主会话事件为 undefined
-  name?: string // skill / agent 名
+  agentId?: string
+  name?: string
   hookId?: string
   hookEvent?: string
   hookName?: string
@@ -203,7 +203,7 @@ export interface TraceEvent {
   contextTokens?: number // result / context_usage：Provider 当前上下文占用；cache 口径由 adapter 吸收
   contextModel?: string // contextTokens 所属模型；多模型会话不得按数组顺序猜窗口
   contextProvider?: string // contextTokens 所属 upstream provider；与 contextModel 共同绑定窗口
-  contextUsageSource?: string // 上下文证据来源，如 qoder_control / pi_rpc_assistant_usage
+  contextUsageSource?: string
   contextUsageQuality?: 'exact' | 'inferred' // 推导窗口必须显式呈现，不能冒充精确证据
   modelUsage?: ModelUsageRow[] // result：per-model 明细；context_usage：仅模型身份与窗口，不参与累计
   isError?: boolean
@@ -285,7 +285,6 @@ export function contextUsageEvidence(event: Pick<TraceEvent, 'contextTokens' | '
   }
 }
 
-// 工具名 → kind 分类
 export function classifyTool(
   toolName: string,
   input?: Record<string, unknown>
@@ -475,8 +474,6 @@ export function mcpPayloadFailed(output: unknown): boolean {
   return false
 }
 
-// 文件足迹：Claude/Qoder/Codex 使用 file_path；Pi 原生工具使用 path 和小写工具名。
-// Glob/Grep 是 pattern/path 不算「读写」，Bash/MCP 的文件操作此处统计不到（已知盲区，UI 标注）。
 const FILE_OP_TOOLS: Record<string, FileOp> = {
   read: 'read',
   write: 'write',

@@ -7,7 +7,6 @@ const EXTERNALLY_VIEWABLE_WORKSPACE_EXTENSIONS = new Set([
   'mp3', 'mp4', 'm4a', 'mov', 'wav', 'flac', 'ogg', 'webm', 'mkv', 'avi', 'zip', 'gz', 'tar', '7z', 'rar'
 ])
 
-/** Files rendered by a browser/default viewer instead of the UTF-8 editor. */
 export function canOpenWorkspaceFileExternally(path: string): boolean {
   const name = path.split(/[\\/]/).at(-1) ?? ''
   const dot = name.lastIndexOf('.')

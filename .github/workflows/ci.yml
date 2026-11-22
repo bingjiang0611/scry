@@ -41,7 +41,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
-      - name: Reject new CLI prose comments
+      - name: Reject new prose comments
         if: ${{ github.event_name == 'pull_request' }}
         run: npm run check:source-comments -- --base HEAD^1
       - name: Harness binding checks

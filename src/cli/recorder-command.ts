@@ -28,8 +28,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const managed = args.flags.has('managed')
     const daemonEnabled = !managed && process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
     const daemonTried = daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
-    // The shell fast path already saw an explicit pre-apply refusal (404 on a legacy daemon, or the
-    // version handshake): replace the owner and deliver once instead of repeating that attempt.
     const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
     let daemonUnknownDelivery = false
     const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
@@ -37,7 +35,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       event,
       workspace,
       payload,
-      // A versioned endpoint answers immediately; the timeout only bounds the applied path.
       timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
     })
     const replaceDaemon = async (): Promise<boolean> => {
@@ -45,16 +42,11 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       if (!scriptPath) return false
       return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
     }
-    // `delivered` 已应用；`not-applied` 有证据证明守护进程没收到或明确拒绝；`unknown` 可能是
-    // “已经应用但响应没回来”。只有前两种能直接落到本进程，最后一种必须排队重放，绝不重发。
     type SendOutcome = 'delivered' | 'not-applied' | 'unknown'
     const classify = (error: unknown): SendOutcome => {
-      // A completed non-2xx answer without a replacement hint is a refusal before apply only for the
-      // pre-apply statuses the daemon uses; anything else (5xx, missing ACK) may follow a partial apply.
       if (error instanceof RecorderHookRejected) {
         return error.statusCode >= 500 ? 'unknown' : 'not-applied'
       }
-      // Never connected: the request cannot have been applied.
       const code = (error as NodeJS.ErrnoException | undefined)?.code
       return code === 'ENOENT' || code === 'ECONNREFUSED' ? 'not-applied' : 'unknown'
     }
@@ -69,8 +61,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
         } catch (error) {
           outcome = classify(error)
           if (daemonRejected || outcome === 'unknown') return outcome
-          // Only a completed 404/409 proves the event was not applied; replace the owner and resend
-          // exactly once. A timeout stays unknown delivery and is never resent.
           if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return outcome
           if (!await replaceDaemon()) return 'not-applied'
           try {
@@ -84,7 +74,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       }
       const outcome = await redeliver()
       if (outcome === 'delivered') return 0
-      // The daemon may already hold this event: queue it for replay instead of applying it here.
       if (outcome === 'unknown') daemonUnknownDelivery = true
     }
     delegatedToCore = true
@@ -95,10 +84,8 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       payload,
       managed,
       queueOnly: daemonTried || daemonUnknownDelivery,
-      // This process was started by the hook script, so its parent chain is the host's chain.
       ancestryFromPid: process.ppid
     })
-    // A failed curl response is unknown delivery, not permission to stop/restart a live peer.
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
@@ -109,7 +96,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     if (!delegatedToCore && enablement?.enabled) await recordError(enablement.dataRoot, error)
     if (!quiet) process.stderr.write(`scry recorder hook: ${error instanceof Error ? error.message : String(error)}\n`)
   }
-  // Hook mode is observational and must never block the Provider.
   return 0
 }
 

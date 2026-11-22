@@ -98,7 +98,6 @@ describe('OpenCode hook delivery outcome', () => {
         return { event, payload: JSON.parse(json) as Record<string, unknown> }
       })
     const stops = accepted.filter((item) => item.event === 'Stop')
-    // 失败的那次没有写入 accepted.tsv；重试成功后才出现，且错误证据随行。
     expect(stops).toHaveLength(1)
     expect(stops[0].payload).toMatchObject({ session_id: 'delivery', error: 'stream aborted' })
 

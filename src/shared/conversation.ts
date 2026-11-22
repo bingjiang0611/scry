@@ -192,7 +192,6 @@ export interface Conversation {
   cwd: string
   revision: number
   title?: string
-  /** Present when this conversation is a side chat of a read-only source. */
   sideChat?: SideChatOrigin
   pinnedAt?: number
   archivedAt?: number

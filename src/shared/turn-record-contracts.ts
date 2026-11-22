@@ -350,13 +350,9 @@ export type TurnModelSource = 'provider_model_event' | 'usage_event'
 export type TurnRoleStatus = 'observed' | 'unobserved' | 'conflict'
 
 export interface TurnRole {
-  /** Structural role of this turn, e.g. `main`, `approval`, `guardian`, `subagent`. */
   role: string
-  /** What supplied the role, e.g. the integration or host component name. */
   source: string
-  /** Parent turn or run identity when the host knows it. */
   parentId?: string
-  /** Session this turn reviewed, for review/approval roles. */
   reviewedSessionId?: string
 }
 

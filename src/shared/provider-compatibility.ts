@@ -24,7 +24,6 @@ export interface ProviderCompatibilityRule {
   /** 版本范围，例如 `>=1.2.0 <2.0.0`；多段用 `||` 取并集。 */
   range: string
   status: Exclude<ProviderCompatibilityStatus, 'unknown'>
-  /** 面向用户的说明，例如缺失哪项证据。 */
   note?: string
 }
 
@@ -32,7 +31,6 @@ export interface ProviderCompatibilityPolicy {
   provider: ProviderId
   /** 本条策略适用的 Scry 版本范围；缺省表示所有版本。 */
   scryRange?: string
-  /** 推荐安装的 Provider CLI 版本范围。 */
   recommendedRange?: string
   /** 顺序匹配，先命中先生效。 */
   rules: ProviderCompatibilityRule[]
@@ -50,7 +48,6 @@ export interface ProviderCompatibilityAdvisory {
   /** 规整后的版本号；无法解析时为 null，此时 status 必为 unknown。 */
   observedVersion: string | null
   recommendedRange: string | null
-  /** 命中的规则范围，便于用户复核判定依据。 */
   matchedRange: string | null
   reason: string
   source: ProviderCompatibilitySource
@@ -224,7 +221,6 @@ export function resolveProviderCompatibility(args: {
   provider: ProviderId
   /** CLI 原始版本输出，可带名称/前缀。 */
   version: string | undefined | null
-  /** 当前 Scry 版本，用于挑选适用策略。 */
   scryVersion: string
 }): ProviderCompatibilityAdvisory {
   const base = { source: args.source, manifestUpdatedAt: args.manifest.updatedAt }

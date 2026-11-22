@@ -152,7 +152,6 @@ it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, the
   await new Promise<void>(resolve => legacy.listen(f.socket, resolve))
   try {
     await shell(f.script, f.env)
-    // The hook asked the legacy owner once, was explicitly refused, replaced the owner and resent.
     console.info(JSON.stringify({ versionedRequests, legacyHookRequests, rejected: await readFile(f.rejectedMarker, 'utf8'), tried: await readFile(f.marker, 'utf8') }))
     expect(versionedRequests).toBe(1)
     expect(legacyHookRequests).toBe(0)
