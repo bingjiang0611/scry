@@ -21,7 +21,6 @@ export interface CommitHookState {
   schemaVersion: 1
   hookFingerprint: string
   ackedThrough: number
-  /** Visited prefix; queueVersion 2 also includes deferred retries. Never an ACK. */
   processedThrough?: number
   queueVersion?: 2
   failure?: CommitNotificationFailure
@@ -67,8 +66,6 @@ export async function readNotificationObject<T>(path: string): Promise<T | null>
 }
 
 export async function readCommitHookAck(dataRoot: string, fingerprint: string) {
-  // Keep v1 read-only: an old App can still own it while a new CLI writes its own
-  // checkpoint. Only the exact same identity may contribute a prior ACK.
   const [isolated, legacy] = await Promise.all([
     readNotificationObject<CommitHookState>(commitHookStatePath(dataRoot, fingerprint)),
     readJson<CommitHookState>(join(dataRoot, 'notifications', 'commit-hook-state.json'))
@@ -109,7 +106,6 @@ export async function readCommitHookAck(dataRoot: string, fingerprint: string) {
 
 export async function pendingCommitFiles(dataRoot: string, state: { processedThrough: number; failure?: CommitNotificationFailure }) {
   const pending = (await recordFiles(dataRoot)).filter(file => file.sequence > state.processedThrough)
-  // A previously observed poison record remains a queue item even if its source was removed.
   const failure = state.failure
   if (failure && !pending.some(file => file.name === recordName(failure))) {
     pending.push({ name: recordName(failure), sequence: failure.sequence, recordId: failure.recordId })
@@ -148,7 +144,6 @@ export async function readDeadLetters(dataRoot: string, fingerprint: string) {
   }
   let deadLetterCount = 0
   const latest: { name: string; sequence: number }[] = []
-  // Count with bounded memory; only read the latest twenty small diagnostic bodies.
   for await (const entry of entries) {
     const parsed = entry.isFile() ? parseRecordName(entry.name) : null
     if (!parsed) continue

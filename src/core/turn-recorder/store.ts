@@ -24,15 +24,9 @@ export interface RecorderHealth {
   droppedEvents: number
   orphanEvents: number
   missingStartTerminals: number
-  /** Turns awaiting finalization: `closing`, managed, queued hooks, quarantined state. */
   pendingCount: number
   oldestPendingAgeMs: number
-  /**
-   * Open turns that have not reached `closing`, so nothing is waiting to be committed and
-   * `pendingCount` does not see them. A turn can sit here for days after its host died.
-   */
   openTurns: number
-  /** Those open turns that wrote nothing for the stale window: the ones to look at first. */
   staleOpenTurns: number
   recoveredRecords: number
 }
@@ -54,23 +48,14 @@ export async function commitRecord(
     if (await archiveJournal(dataRoot)) {
       throw new Error('pending archive must be resumed before committing another record')
     }
-    // Allocation and duplicate detection never trust a derived projection.
     const files = await recordFiles(dataRoot, { bypassIndex: true })
     const duplicate = files.find((file) => file.recordId === draft.recordId)
     if (duplicate) {
       return { status: 'duplicate' as const, record: await readRecordFile(join(dataRoot, 'records', duplicate.name)) }
     }
-    // The allocator must clear every floor that proves a sequence was already issued: the durable
-    // watermark (record files deleted by hand), the archive floor (records moved out on purpose) and
-    // the live maximum (records restored from an older backup). Duplicate detection only scans live
-    // records: archiving is therefore restricted to finalized turns (and, when a commit hook exists,
-    // acknowledged ones), which cannot be re-committed.
     const archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
     const sequence = await nextSequence(dataRoot, { liveMax: files.at(-1)?.sequence ?? 0, archivedThrough })
-    // Both the App-managed path and the standalone CLI publish here, so one convergence point keeps
-    // every committed record inside the transport envelope the receiver validates.
     const record: AgentTurnRecord = { ...applyRecordContentBudget(draft), sequence }
-    // 收缩之后仍然超出信封就拒绝提交：接收方会拒收，写进 store 只会制造一条永远传不出去的记录。
     const transportBytes = recordTransportBytes(record)
     if (transportBytes > RECORDER_TRANSPORT_MAX_BYTES) {
       throw new Error(`refusing to commit record above the transport envelope: ${transportBytes} > ${RECORDER_TRANSPORT_MAX_BYTES} bytes`)
@@ -80,15 +65,11 @@ export async function commitRecord(
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
       throw new Error(`refusing to commit invalid turn record: ${detail}`)
     }
-    // Reserve the number durably before the record exists: a crash may skip a sequence, never reuse one.
     await reserveSequence(dataRoot, sequence)
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`
-    // Publish the private snapshot first: a visible record must never race ahead of its env.
     if (uploadEnvironment !== undefined) await persistUploadEnvironment(dataRoot, record.recordId, uploadEnvironment)
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
     invalidateRecordIndex(dataRoot)
-    // 中断的写入会留下永不 rename 上屏的 `.tmp`（0 字节也算）：它们不是记录，但会被按目录枚举的
-    // 脚本读到。提交是所有写入方唯一的收敛点，所以在这里按天清理一次；失败只影响这次卫生。
     await pruneStaleTemps(dataRoot).catch(() => undefined)
     return { status: 'committed' as const, record }
   })
@@ -161,10 +142,6 @@ export async function exportRecordBundle(dataRoot: string, target: string): Prom
   }
 }
 
-/**
- * 严格读出每条正式记录。名字合规但内容读不出来的文件必须让读取失败：静默跳过等于把损坏的证据
- * 显示成“没有这条记录”。需要跑完并如实报告跳过了什么的路径用 `listRecordsReport`。
- */
 export async function listRecords(dataRoot: string): Promise<AgentTurnRecord[]> {
   const files = await recordFiles(dataRoot)
   const records: AgentTurnRecord[] = []
@@ -172,10 +149,6 @@ export async function listRecords(dataRoot: string): Promise<AgentTurnRecord[]> 
   return records
 }
 
-/**
- * 记录目录的文件名列表。`listFiles` 会把任何错误都当成空目录，而“没有记录”和“目录读不了”是两件
- * 完全不同的事：报告路径必须让后者失败。
- */
 async function recordFileNames(dataRoot: string): Promise<string[]> {
   try {
     return (await readdir(join(dataRoot, 'records'), { encoding: 'utf8' })).sort()
@@ -185,7 +158,6 @@ async function recordFileNames(dataRoot: string): Promise<string[]> {
   }
 }
 
-/** 只按文件名判断：这些文件根本不是记录（`.tmp`、手工产物），不需要读内容就能报出来。 */
 export async function skippedRecordFiles(dataRoot: string): Promise<SkippedRecordFile[]> {
   return (await recordFileNames(dataRoot))
     .filter((name) => !parseRecordName(name))
@@ -194,16 +166,9 @@ export async function skippedRecordFiles(dataRoot: string): Promise<SkippedRecor
 
 export interface SkippedRecordFile {
   name: string
-  /** `unrecognized_name`：不符合 `<20 位序号>-<recordId>.json`，例如中断留下的 `.tmp`。
-   *  `unreadable_record`：名字合规但读不出来（截断、损坏、不是合法记录）。 */
   reason: 'unrecognized_name' | 'unreadable_record'
 }
 
-/**
- * 枚举正式记录，并告诉调用方跳过了多少文件、为什么。记录目录不是只有记录：原子写盘会在同一目录里
- * 留下 `.tmp`，崩溃也可能留下半成品。报告型路径（修复、维护、诊断）必须能跑完并如实列出这些文件，
- * 而不是在第一条上崩掉。导出路径仍直接读 `recordFiles` 并让校验错误抛出，避免静默少传记录。
- */
 export async function listRecordsReport(dataRoot: string): Promise<{ records: AgentTurnRecord[]; skipped: SkippedRecordFile[] }> {
   const records: AgentTurnRecord[] = []
   const skipped: SkippedRecordFile[] = []
@@ -230,11 +195,6 @@ export async function showRecord(dataRoot: string, selector: string): Promise<Ag
   return match ? await readRecordFile(join(dataRoot, 'records', match.name)) : null
 }
 
-/**
- * Which CLI actually wrote the newest record. A workspace can easily end up with more than one
- * install — a hook pinned through `SCRY_CLI_PATH` and whatever `scry` resolves to in a shell —
- * and then upgrading one of them silently leaves recording on the other. Reads one file.
- */
 export async function lastRecordVersion(dataRoot: string): Promise<string | null> {
   const files = await recordFiles(dataRoot)
   const newest = files.at(-1)
@@ -246,11 +206,6 @@ export async function lastRecordVersion(dataRoot: string): Promise<string | null
   }
 }
 
-/**
- * Which installs are still writing. One newest record hides a split install: when a second
- * recorder keeps committing after an upgrade, the newest file shows the new version while the
- * old one still owns part of the batch. Samples the newest `limit` records and counts versions.
- */
 export async function recentRecordVersions(
   dataRoot: string,
   limit = 20
@@ -261,7 +216,6 @@ export async function recentRecordVersions(
       const record = await readRecordFile(join(dataRoot, 'records', file.name))
       counts.set(record.recorderVersion, (counts.get(record.recorderVersion) ?? 0) + 1)
     } catch {
-      // Unreadable records are `store.integrity` evidence; they cannot prove a writer version.
     }
   }
   return [...counts]
@@ -273,10 +227,8 @@ export async function verifyStore(
   dataRoot: string,
   onRecord?: (record: AgentTurnRecord) => void
 ): Promise<{ ok: boolean; records: number; errors: string[]; archivedThrough: number; maxSequence: number }> {
-  // Integrity verification always bypasses disposable projections and scans canonical filenames.
   const files = await recordFiles(dataRoot, { bypassIndex: true })
   const errors: string[] = []
-  // An archived prefix is only acceptable when an archive operation recorded the floor.
   let archivedThrough = 0
   try {
     archivedThrough = (await readArchiveState(dataRoot))?.archivedThrough ?? 0
@@ -304,8 +256,6 @@ export async function verifyStore(
       errors.push(error instanceof Error ? error.message : String(error))
       continue
     }
-    // Synchronous consumers can reuse validated records without retaining their bodies.
-    // Consumer errors must propagate, not be misreported as corrupt canonical records.
     onRecord?.(record)
   }
   return { ok: errors.length === 0, records: files.length, errors, archivedThrough, maxSequence: files.at(-1)?.sequence ?? 0 }
@@ -350,16 +300,9 @@ export async function updateHealth(
   })
 }
 
-/**
- * One greppable line that can actually locate a failure: the message, the syscall and path the
- * kernel rejected, and the first application frames of the stack. The rotating log keeps one record
- * per line, so continuations are folded into the same line instead of being emitted separately.
- */
 export function describeErrorForLog(error: unknown): string {
   if (!(error instanceof Error)) return String(error)
   const failure = error as NodeJS.ErrnoException
-  // `EPERM: operation not permitted, open '<path>'` already names both, but an Error built without
-  // a syscall still carries them on the object, and those are the fields worth logging.
   const operation = typeof failure.syscall === 'string' && typeof failure.path === 'string'
     ? ` [${failure.syscall} ${failure.path}]`
     : typeof failure.path === 'string' ? ` [${failure.path}]` : ''

@@ -17,7 +17,6 @@ interface RecordDirectoryStamp {
   ctimeNs: string
 }
 
-/** Disposable process-local projection. Canonical records remain the only persisted authority. */
 interface RecordStoreIndex {
   stamp: RecordDirectoryStamp
   entries: RecordFileEntry[]
@@ -121,29 +120,16 @@ export function invalidateRecordIndex(dataRoot: string): void {
   recordIndexCache.delete(dataRoot)
 }
 
-/**
- * 按 recordId 精确定位一条正式记录。recordId 就写在文件名里，`readRecordFile`
- * 又强校验文件名↔内容一致，所以这里只读那一个文件，不解析整个 store。
- * 语义与「全量扫描后按 recordId 过滤」等价。
- */
 export async function findRecordById(dataRoot: string, recordId: string): Promise<AgentTurnRecord | undefined> {
   const match = (await recordFiles(dataRoot)).find((file) => file.recordId === recordId)
   return match ? await readRecordFile(join(dataRoot, 'records', match.name)) : undefined
 }
 
-/**
- * 只由文件名派生的存储指纹（不读正文）。records 是 append-only 且序号严格递增，
- * 因此任何新提交都会改变 count 或 maxSequence —— 派生缓存用它判断自己是否仍然新鲜。
- * 它不是事实源，也不能替代记录本身的校验。
- */
 export async function recordStoreStamp(dataRoot: string): Promise<{ count: number; maxSequence: number }> {
   const files = await recordFiles(dataRoot)
   return { count: files.length, maxSequence: files.at(-1)?.sequence ?? 0 }
 }
 
-// Recorder 0.2.16–0.2.18 could serialize empty model events without a text field.
-// Drop only that known placeholder in the read view and mark the evidence partial;
-// canonical bytes and the strict commit validator stay untouched.
 function legacyModelSegmentsReadView(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
   const record = raw as Record<string, unknown>
@@ -180,9 +166,6 @@ function legacyModelSegmentsReadView(raw: unknown): unknown {
   }
 }
 
-// Older aggregators wrapped an unavailable residual timing result as partial.
-// Normalize only that known writer defect in the read view; canonical bytes and
-// the strict commit validator stay untouched, and no timing value is invented.
 function legacyModelTimingReadView(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
   const record = raw as Record<string, unknown>
@@ -242,15 +225,9 @@ export async function existingPath(path: string): Promise<boolean> {
 export interface RecordContentItem {
   path: string
   ref: ToolContentRef
-  /** Eviction class of this body; see `RECORD_CONTENT_PRIORITY`. */
   priority: RecordContentPriority
 }
 
-/**
- * Eviction order for one record's bodies, highest-value evidence first. The transport budget keeps
- * this order, so the raw session archive and the tool bodies a turn is judged on survive before
- * previews of files. `diff-added` is a file nothing tracked before this turn: it goes last.
- */
 export const RECORD_CONTENT_PRIORITY = [
   'transcript',
   'tool',
@@ -281,8 +258,6 @@ export function recordContentItems(record: Omit<AgentTurnRecord, 'sequence'>): R
   for (const [refIndex, ref] of (record.assistant.value?.contentRefs ?? []).entries()) {
     items.push({ path: `assistant.${refIndex}`, ref, priority: 'assistant' })
   }
-  // Existing files the turn changed, then the new files it added: a turn that creates hundreds of
-  // files must not push its own edits out of the budget.
   for (const added of [false, true]) {
     for (const [snapshotIndex, snapshot] of (record.diff.value ?? []).entries()) {
       for (const [fileIndex, file] of snapshot.files.entries()) {

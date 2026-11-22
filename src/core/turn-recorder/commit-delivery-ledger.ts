@@ -31,20 +31,9 @@ function historyPath(dataRoot: string, fingerprint: string, key: string) {
   return join(dataRoot, 'notifications', 'dead-letter-history', stableHash(fingerprint), `${key}.json`)
 }
 
-/**
- * Bounded evidence for sequence numbers the ACK crossed without any record file.
- *
- * A number can be absent for two reasons, and both leave nothing to deliver: a commit reserved it
- * and crashed before writing the record, or the record file was deleted outside
- * `scry turns archive`. The ACK may cross such a number — otherwise every later delivery stalls —
- * but the crossing must stay visible, so it is recorded here instead of being inferred as success.
- * Ranges are merged (a large hole costs one entry) and the kept sample is capped; `count` stays
- * exact so a truncated sample never implies there were only `ranges.length` holes.
- */
 export interface AbsentSequences {
   schemaVersion: 1
   hookFingerprint: string
-  /** Highest crossed sequence; the ledger is append-only and monotonic. */
   absentThrough: number
   count: number
   ranges: Array<[number, number]>
@@ -80,12 +69,9 @@ export async function readAbsentSequences(dataRoot: string, fingerprint: string)
   return raw
 }
 
-/** Durable, monotonic, range-compacted record of one crossed hole. */
 async function recordAbsent(dataRoot: string, fingerprint: string, sequence: number): Promise<void> {
   const previous = await readAbsentSequences(dataRoot, fingerprint)
   const ranges = previous ? previous.ranges.map(([from, to]) => [from, to] as [number, number]) : []
-  // Dedupe against the ledger floor, not the last kept range: when the sample is full the newest
-  // range is trimmed away, and counting it again would inflate `count`.
   if (sequence <= (previous?.absentThrough ?? 0)) return
   const last = ranges.at(-1)
   if (last && last[1] === sequence - 1) last[1] = sequence
@@ -114,8 +100,6 @@ export async function readOutcome(dataRoot: string, fingerprint: string, sequenc
   }
   if (raw.status === 'replay') {
     if (typeof raw.requestedAt !== 'string' || !Number.isFinite(Date.parse(raw.requestedAt))) throw new Error('invalid replay outcome')
-    // A dead-letter replay carries the quarantine history it must release; a lost-outcome replay
-    // has no quarantine to release, so it carries no key.
     if (raw.historyKey !== undefined) {
       if (typeof raw.historyKey !== 'string' || !/^[a-f0-9]{64}$/.test(raw.historyKey)) throw new Error('invalid replay outcome')
       const history = await readNotificationObject<CommitNotificationFailure>(historyPath(dataRoot, fingerprint, raw.historyKey))
@@ -167,8 +151,6 @@ export async function saveProgress(dataRoot: string, state: CommitHookState): Pr
   await writeJsonAtomic(commitHookStatePath(dataRoot, state.hookFingerprint), state)
 }
 
-/** One-time migration under the delivery lock. Legacy processed progress proves success
- * except for its retained dead letters; new progress always needs per-sequence receipts. */
 export async function loadDeliveryState(dataRoot: string, fingerprint: string): Promise<CommitHookState> {
   const old = await readCommitHookAck(dataRoot, fingerprint)
   const state: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: old.ackedThrough ?? 0,
@@ -192,11 +174,6 @@ export async function loadDeliveryState(dataRoot: string, fingerprint: string): 
   return state
 }
 
-/**
- * Scoped recovery cannot migrate the shared legacy queue or merge its ACK into the isolated
- * checkpoint. An operator must first run an unscoped drain, which is the only path authorized to
- * create v2 receipts and advance the shared cursor.
- */
 export async function loadScopedDeliveryState(dataRoot: string, fingerprint: string): Promise<CommitHookState> {
   const old = await readCommitHookAck(dataRoot, fingerprint)
   const legacyNeedsMerge = old.legacyAck !== null && (old.isolatedAck === null || old.legacyAck > old.isolatedAck)
@@ -212,11 +189,6 @@ export async function loadScopedDeliveryState(dataRoot: string, fingerprint: str
   }
 }
 
-/**
- * The store is readable, but the ACK cannot prove a sequence whose record file still exists.
- * This is the one delivery failure a drain may report softly: retrying cannot help, and letting
- * it escape as a thrown promise made every later drain and status query fail.
- */
 export class UnresolvedDeliveryPrefixError extends Error {
   constructor(readonly sequence: number) {
     super('missing delivery outcome in visited prefix')
@@ -233,8 +205,6 @@ async function walkAck(dataRoot: string, state: CommitHookState, floor: number, 
       state.ackedThrough = sequence
       continue
     }
-    // No receipt. A sequence that still has a record file lost its delivery result and must stay
-    // fail closed; only a sequence with no record at all is a hole with nothing left to deliver.
     live ??= new Set((await recordFiles(dataRoot, { bypassIndex: true })).map(file => file.sequence))
     if (live.has(sequence)) throw new UnresolvedDeliveryPrefixError(sequence)
     if (persistHoles) await recordAbsent(dataRoot, state.hookFingerprint, sequence)
@@ -242,8 +212,6 @@ async function walkAck(dataRoot: string, state: CommitHookState, floor: number, 
   }
 }
 
-/** ACK can only cross positively persisted success receipts; an absent sequence may also be
- * crossed, but the drain records that absence as durable evidence before the ACK moves. */
 export async function advanceAck(dataRoot: string, state: CommitHookState, floor: number): Promise<void> {
   await walkAck(dataRoot, state, floor, true)
 }
@@ -263,8 +231,6 @@ export async function requeueDeadLetters(dataRoot: string, fingerprint: string, 
   for await (const failure of deadLetters(dataRoot, fingerprint)) {
     if (sequence !== undefined && failure.sequence !== sequence) continue
     const historyKey = stableHash(failure)
-    // History first, then a durable authorized replay marker, then remove active quarantine.
-    // A crash between these steps never erases the gap or requires guessing user intent.
     await writeJsonAtomic(historyPath(dataRoot, fingerprint, historyKey), failure)
     const replay: DeliveryOutcome = { sequence: failure.sequence, recordId: failure.recordId, status: 'replay', historyKey, requestedAt: new Date(Date.now()).toISOString() }
     await saveOutcome(dataRoot, fingerprint, replay)
@@ -274,13 +240,6 @@ export async function requeueDeadLetters(dataRoot: string, fingerprint: string, 
   return requeued
 }
 
-/**
- * Explicit replay of a record whose delivery outcome was lost.
- *
- * Only the operator can authorize this: nothing in the store proves whether the record was
- * already handed over. The record and its identity are intact, so the receiver dedupes by
- * `recordId`; re-delivery is therefore safe once asked for, and the ACK may advance afterwards.
- */
 export async function requeueLostOutcome(dataRoot: string, fingerprint: string, sequence: number): Promise<boolean> {
   const file = (await recordFiles(dataRoot, { bypassIndex: true })).find(candidate => candidate.sequence === sequence)
   if (!file) return false
@@ -316,7 +275,6 @@ export async function ledgerStatus(dataRoot: string, fingerprint: string, state:
       dead.sort((a, b) => b.sequence - a.sequence)
       if (dead.length > DETAILS_LIMIT) dead.pop()
     } else if (outcome.status === 'retry' || outcome.status === 'replay') {
-      // A fifth failure remains recoverable even if publication was interrupted.
       const published = outcome.status === 'retry' && outcome.failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES
         ? await readDeadLetter(dataRoot, fingerprint, recordName(outcome)) : null
       if (outcome.status === 'retry' && published) {
@@ -336,10 +294,8 @@ export async function ledgerStatus(dataRoot: string, fingerprint: string, state:
       if (outcome.status === 'retry' && (!failure || outcome.sequence < failure.sequence)) failure = { ...outcome.failure, nextRetryAt: nextRetryAt(outcome.failure) }
     }
   }
-  // Verify the unexplained prefix lazily, stopping at the first known unresolved sequence.
   if (state.queueVersion === 2 && state.processedThrough > (state.ackedThrough ?? 0)) {
     const probe: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: state.ackedThrough ?? 0, processedThrough: state.processedThrough }
-    // Read-only: status may cross a hole to explain the prefix, but only a drain persists that.
     await walkAck(dataRoot, probe, (await readArchiveState(dataRoot))?.archivedThrough ?? 0, false)
   }
   return { notifyBacklog: fresh.length - knownBeyondProgress + retryCount,

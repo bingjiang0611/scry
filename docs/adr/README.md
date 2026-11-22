@@ -27,6 +27,8 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [023: Capture Git evidence without mutating the repository](023-recorder-git-capture-isolation.md)
 - [024: Close a recorder turn on its own evidence](024-recorder-terminal-evidence.md)
 - [025: Index recovery candidates without making the index authoritative](025-recorder-recovery-attention-index.md)
+- [026: Keep canonical records and sequence allocation independent of projections](026-recorder-record-store-durability.md)
+- [027: Advance notification ACK only across proven delivery or recorded absence](027-recorder-notification-ack.md)
 
 ## Source comment ratchet
 

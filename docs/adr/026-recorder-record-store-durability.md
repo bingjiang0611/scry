@@ -1,0 +1,13 @@
+# 026: Keep canonical records and sequence allocation independent of projections
+
+**Status:** Accepted (documents existing behavior)
+
+Managed and standalone recording share a single commit boundary. Check the transport envelope before publication; a record too large even after trimming cannot be delivered and must not be committed. Under the commit lock, allocate above the durable issued watermark, archive floor, and maximum live sequence. Reserve the sequence before publishing the record; a crash may leave a gap but must not reuse an issued number. Publish the private environment snapshot before its record. Duplicate detection scans live records; archive only finalized records and, when delivery is configured, respect its ACK boundary.
+
+Canonical filenames and bytes are authoritative. A disposable process-local index speeds up lookup; locating one record by ID scans filenames and validates only the matched body. The store stamp derived from filenames is not evidence that record bodies are valid. Integrity checks and allocation bypass it. Read and hash canonical bytes for delivery. Limit historical repairs to the read view: older writers could omit empty model segment text or label unavailable residual timing partial. Do not rewrite canonical bytes, invent timing, or weaken validation of new writes.
+
+Strict reads fail on unreadable records; maintenance reports can enumerate skipped artifacts and reasons instead. A temporary file is not a record; an unreadable file with a valid record name is a different case. Reap old temporary files at commit time; a cleanup failure must not invalidate the commit. Do not interpret a directory read error as an empty store or an unreadable record as evidence of a writer version. Consumer errors are not record corruption. Bound record bodies by evidence priority: keeping raw transcript and call evidence matters more than retaining duplicate or lower-priority patches. Prefer changes to existing files ahead of new-file patches.
+
+Archive a contiguous prefix using a durable journal. A retry must match its target and verify record and content bytes before proceeding. Resolve a pending journal before allocating another sequence. Older journals may need content references rebuilt from a verified surviving copy. An existing archive target does not establish that its directory entry survived a crash, so repeat the durability barrier before removing the source. See [ADR 008](008-turn-store-verification-and-recovery.md) for the CLI contract.
+
+See [store.ts](../../src/core/turn-recorder/store.ts), [store-index.ts](../../src/core/turn-recorder/store-index.ts), and [store-archive.ts](../../src/core/turn-recorder/store-archive.ts).

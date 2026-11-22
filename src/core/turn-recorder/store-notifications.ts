@@ -29,7 +29,6 @@ async function commitNotification(dataRoot: string, filename: string): Promise<R
   const bytes = await readFile(path)
   const record = parseRecordFile(path, bytes.toString('utf8'))
   if (!isAbsolute(record.workspace.root)) throw new Error(`record workspace root is not absolute: ${record.recordId}`)
-  // Hash the canonical bytes, not the normalized legacy read view or re-serialized JSON.
   return {
     schemaVersion: 2,
     recordPath,
@@ -51,21 +50,12 @@ export interface CommitNotificationStatus {
   retryCount?: number
   retries?: RetryDiagnostic[]
   deadLetterCount?: number
-  /** Latest twenty diagnostics; deadLetterCount can be larger. */
   deadLetters?: CommitNotificationFailure[]
-  /** Sequence numbers the ACK crossed without any record file (deleted, or reserved then crashed). */
   absentCount?: number
-  /** First kept ranges, oldest first; a large hole costs one range. Capped, so not exhaustive. */
   absentRanges?: Array<[number, number]>
-  /** True when the sample dropped ranges; `absentCount` remains exact. */
   absentTruncated?: boolean
 }
 
-/**
- * Durable ACK cursor plus backlog for the configured commit hook. `ackedThrough` is null
- * when no state file matches the current hook fingerprint, so callers can distinguish
- * "nothing acknowledged yet" from "acknowledged through sequence 0".
- */
 export async function commitNotificationStatus(dataRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<CommitNotificationStatus> {
   const fingerprint = configuredCommitHookFingerprint(env)
   const state = await readCommitHookAck(dataRoot, fingerprint)
@@ -84,13 +74,6 @@ export async function commitNotificationStatus(dataRoot: string, env: NodeJS.Pro
     ...(dead.deadLetterCount ? { processedThrough: state.processedThrough, ...dead } : {}) }
 }
 
-/**
- * Hook-path drain budget. The commit hook runs on the provider lifecycle critical path, so
- * a backlog must never be flushed synchronously: providers cap their hook at 10-15s and the
- * daemon client at 1-4s. The budget is checked between invocations, so COMMIT_HOOK_TIMEOUT_MS
- * remains the per-record circuit breaker, not the batch budget. Remaining records stay
- * pending and are picked up by the next hook, `recorder recover`, or `recorder notify-drain`.
- */
 export const HOOK_DRAIN_MAX_RECORDS = 8
 export const HOOK_DRAIN_BUDGET_MS = 1_500
 
@@ -103,19 +86,13 @@ export interface DrainOptions {
   maxRecords?: number
   budgetMs?: number
   now?: () => number
-  /** Limit delivery to one provider/session without advancing the shared ACK cursor. */
   scope?: CommitNotificationScope
 }
 
 export interface DrainResult {
   delivered: number
-  /** `null` when the delivery state itself is unreadable: the backlog is unknown, not zero. */
   pending: number | null
   truncated: boolean
-  /**
-   * False when this workspace has no activated commit callback, so nothing could be delivered.
-   * A caller must not read the zeroes above as "there was nothing to deliver".
-   */
   hookConfigured?: boolean
 }
 
@@ -130,10 +107,6 @@ export async function drainCommitNotifications(
   try {
     const hook = await configuredCommitHook(env)
     if (!hook) {
-      // No callback is a configuration fact, not an empty backlog. Report it instead of returning
-      // zeroes that read like a successful delivery, and leave the records queued on disk.
-      // `recorder.log` is machine-readable diagnostics, so this fact travels in the result and in
-      // `scry status`/`doctor`, not as a free-text line.
       const pending = await pendingCount().catch(() => null)
       return { delivered: 0, pending, truncated: false, hookConfigured: false }
     }
@@ -184,8 +157,6 @@ export async function drainCommitNotifications(
           if (result.acknowledged) {
             delivered++
             outcome = { ...file, status: 'delivered' }
-            // A normal contiguous success needs only its durable ACK. Across a gap,
-            // retain a positive receipt so missing metadata can never masquerade as success.
             if (options.scope || !freshFile || state.ackedThrough < (state.processedThrough ?? 0) || file.sequence >= firstUnresolved) {
               await saveOutcome(dataRoot, fingerprint, outcome)
             }
@@ -216,8 +187,6 @@ export async function drainCommitNotifications(
         }
       }
 
-      // Streaming retry metadata keeps memory bounded. Deferred entries consume no
-      // attempt budget; they cannot prevent later fresh records from being delivered.
       for await (const outcome of outcomes(dataRoot, fingerprint, state.ackedThrough)) {
         if (outcome.status === 'delivered') continue
         if (outcome.status === 'dead') {
@@ -242,8 +211,6 @@ export async function drainCommitNotifications(
         try {
           await advanceAck(dataRoot, state, archiveFloor)
         } catch (error) {
-          // Keep the ACK prefix that positive receipts already prove before reporting the sequence
-          // that stayed unresolved; discarding it would re-walk proven work on every later drain.
           await persistProgress()
           throw error
         }
@@ -254,8 +221,6 @@ export async function drainCommitNotifications(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'), `${new Date().toISOString()} ERROR commit notification: ${message}`).catch(() => undefined)
-    // Scoped recovery must surface corrupt checkpoints, records, and receipts instead of treating
-    // unknown identity as a non-target. The legacy unscoped path retains its soft backlog result.
     if (options.scope && !(error instanceof UnresolvedDeliveryPrefixError)) throw error
     let pending: number | null = null
     try { pending = await pendingCount() } catch {
@@ -274,8 +239,6 @@ export async function retryCommitNotifications(dataRoot: string, env: NodeJS.Pro
     if (sequence === undefined) return requeueDeadLetters(dataRoot, fingerprint)
     const dead = await requeueDeadLetters(dataRoot, fingerprint, sequence)
     if (dead > 0) return dead
-    // Not quarantined, but a record may still exist whose delivery outcome was lost. Only this
-    // explicit, operator-named sequence may be re-delivered; automatic drain stays fail closed.
     if (await requeueLostOutcome(dataRoot, fingerprint, sequence)) return 1
     throw new Error(`sequence ${sequence} is neither an active dead letter nor a record whose delivery outcome is missing`)
   })
