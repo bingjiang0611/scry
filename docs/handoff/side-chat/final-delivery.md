@@ -122,7 +122,7 @@ Node 20 的取得方式：官方 `https://nodejs.org/dist/v20.20.2/node-v20.20.2
 
 ## 相关文档
 
-- 能力与设计：[`technical-plan.md`](technical-plan.md)、[`implementation-report.md`](implementation-report.md)（历史报告，未改写）
+- 能力与设计：[原实施方案](https://github.com/bingjiang0611/scry/blob/ca74055d8f15358156db0d593d186de131caaa0f/docs/handoff/side-chat/technical-plan.md)（Git 历史）、[实现与验收记录](implementation-report.md)。
 - 交互验收：[`d1-interaction-acceptance.md`](d1-interaction-acceptance.md)、界面设计：[`d3-ui-polish.md`](d3-ui-polish.md)
 - 门禁与首次失败台账：[`release-verification.md`](release-verification.md)（本轮已校订证据表述）
 - [续作记录](https://github.com/bingjiang0611/scry/blob/11ba9c99be4ba3a0d5e27af0afe0a3f8ed44466a/docs/handoff/side-chat/continuation-checkpoint.md)（Git 历史，非当前状态）；大历史修复与后续安装验证见 [large-history-delivery.md](large-history-delivery.md)。

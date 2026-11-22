@@ -68,4 +68,4 @@ F1、F2、F3、F4、P3a、本机通道可以接受。S1 引入一个尾沿问题
 | 新旧路径共存一个版本 | 不需要，见上面更正 3 |
 | daemon 崩溃自动重启 | 同意：supervisor 退避重启，有次数上限，失败如实显示，不掩盖 |
 
-下一步：[EXECUTION-BATCH3.md](EXECUTION-BATCH3.md)。
+后续行动和证据见 [Batch 3 状态](STATUS-BATCH3.md)。

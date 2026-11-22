@@ -1,6 +1,6 @@
 # 侧边会话实现与验收报告
 
-状态：进行中，尚未达到交付条件。本文件由主 agent 维护，最后以实际检查结果更新，不把设计稿或子 agent 的自述当作验收证据。
+历史实施记录，仅对当时构建有效；交付见 [final-delivery.md](final-delivery.md)。
 
 ## 已确认合同
 
@@ -108,7 +108,7 @@ C2 首轮检查（Node 22.22.1）：`tsc` web/node、`npx vitest run` 437 files 
 
 ## C2 复核轮
 
-C2 复核的十项修复、当时失败与通过的证据由 [c2-review-round.md](c2-review-round.md) 保存；其中「仍未验证」的条目在下方 D1 阶段逐条补证。
+[C2 原始复核](https://github.com/bingjiang0611/scry/blob/ca74055d8f15358156db0d593d186de131caaa0f/docs/handoff/side-chat/c2-review-round.md)记录了隔离 App 中的创建去重、来源隔离、焦点和草稿保留；五 Provider、长历史分页和重启恢复当时未验收，后续阶段另行补证。
 
 ## D1 交互验收与当前交接
 
