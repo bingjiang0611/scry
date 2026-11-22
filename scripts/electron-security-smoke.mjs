@@ -54,7 +54,8 @@ async function main() {
   const port = await freePort()
   const userDataDir = join(temp, 'userData')
   const home = join(temp, 'home')
-  const workspace = filesOnly ? join(home, 'projects', 'dev-agent') : join(temp, 'workspace')
+  const workspaceName = process.argv.includes('--unicode-workspace') ? '中文工作区' : 'workspace'
+  const workspace = filesOnly ? join(home, 'projects', 'dev-agent') : join(temp, workspaceName)
   mkdirSync(userDataDir, { recursive: true })
   mkdirSync(home, { recursive: true })
   mkdirSync(workspace, { recursive: true })
@@ -221,7 +222,19 @@ async function main() {
     'terminalStart', 'terminalActive', 'terminalAttach', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'onTerminalData', 'onTerminalExit'
   ]) assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   if (fileHistoryOnly) return exerciseFileHistory(context())
-  if (nativeHistoryOnly) return exerciseNativeHistory(context())
+  if (nativeHistoryOnly) {
+    if (workspaceName !== 'workspace') {
+      assert.match(canonicalWorkspace, /中文工作区$/)
+      const ref = { providerId: 'pi', agentProfileId: 'pi:rotom', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
+      const first = await evaluate(`window.scry.loadSession(${JSON.stringify(ref)})`)
+      assert.ok(first, 'the imported history page must be visible')
+      assert.equal(first.projection?.legacyBefore, true, 'the production App must open the imported session projection')
+      assert.equal(typeof first.projection.sessionKey, 'string')
+      assert.ok(first.turns.some(turn => turn.userText === '手机发起的真实格式消息'))
+      console.log(JSON.stringify({ test: 'Unicode workspace projection', cwd: canonicalWorkspace, legacyBefore: true }))
+    }
+    return exerciseNativeHistory(context())
+  }
   if (performanceOnly) return exerciseProductionPerformance(context())
   if (steerOnly) return exerciseTerminalSteer(context())
   const discovered = await evaluate(`Promise.all([window.scry.detectFast(), window.scry.detect(), window.scry.providerDescriptors()]).then((groups) => groups.map((group) => group.map((item) => item.id)))`)
