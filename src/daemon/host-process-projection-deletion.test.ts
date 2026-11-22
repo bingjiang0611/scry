@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { importCatalogEntries } from '../host-runtime/orchestration/legacy-catalog-and-repair'
 import { INLINE_BODY_MAX_BYTES } from '../host-runtime/orchestration/types'
@@ -164,5 +164,59 @@ it('uses the unified conversation projection for the sidebar and the detail firs
     expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   } finally {
     await daemon.dispose()
+  }
+}, 30_000)
+
+it('includes an old empty unified conversation in the first subscription after enabling orchestration', async () => {
+  process.env.SCRY_ORCHESTRATION = 'off'
+  const old = await startTestDaemon()
+  let id: string
+  try {
+    const created = await old.localOp('conversation', 'create', [old.workspace])
+    expect(created.error).toBeUndefined()
+    id = created.result.id
+  } finally {
+    await old.dispose()
+  }
+  process.env.SCRY_ORCHESTRATION = 'on'
+  const restarted = await startTestDaemon({ root: old.root })
+  try {
+    const first = await restarted.request({
+      op: 'subscribe', views: ['sessions', 'detail'], session: { sessionKey: id }, waitMs: 0
+    })
+    expect(first.error).toBeUndefined()
+    expect(first.subscribe).toMatchObject({ mode: 'snapshot', snapshot: {
+      sessions: { rows: [expect.objectContaining({ conversationId: id })] },
+      detail: { legacyBefore: true, firstPage: { kind: 'conversation', page: { summary: { id }, turns: [] } } }
+    } })
+  } finally {
+    await restarted.dispose()
+  }
+}, 30_000)
+
+it('keeps the committed conversation ID when projecting its metadata fails', async () => {
+  process.env.SCRY_ORCHESTRATION = 'on'
+  const daemon = await startTestDaemon()
+  let id: string
+  try {
+    const sink = daemon.host.orchestrationAuthority!.sink
+    const failProjection = vi.spyOn(sink, 'execute').mockReturnValueOnce({
+      kind: 'rejected', reason: 'orchestration_write_indeterminate', sticky: false, writeReceipt: false
+    })
+    const created = await daemon.localOp('conversation', 'create', [daemon.workspace])
+    expect(failProjection).toHaveBeenCalled()
+    expect(created.error).toBeUndefined()
+    id = created.result.id
+    expect(typeof id).toBe('string')
+  } finally {
+    await daemon.dispose()
+  }
+  const recovered = await startTestDaemon({ root: daemon.root })
+  try {
+    const listed = await recovered.localOp('conversation', 'list', [recovered.workspace])
+    expect(listed.result).toMatchObject([{ id }])
+    expect(recovered.host.orchestrationAuthority!.sink.getSession(id)?.conversationId).toBe(id)
+  } finally {
+    await recovered.dispose()
   }
 }, 30_000)

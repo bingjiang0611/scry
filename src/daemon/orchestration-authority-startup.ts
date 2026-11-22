@@ -1,6 +1,7 @@
 import { open as openFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ConversationStore } from '../main/conversation-store'
+import { createConversationProjectionAccess } from './orchestration-conversation-projection'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { importCatalogEntries } from '../host-runtime/orchestration/legacy-catalog-and-repair'
@@ -212,7 +213,10 @@ export async function runAuthorityStartupSequence(options: {
     leaseOwner,
     findRecorderEvidence: createRecorderEvidenceFinder(userDataDir, sink)
   })
-  await reconcileTwoLedgersOnStartup({ sink, conversationStore: conversationStore() })
+  const managed = conversationStore()
+  await reconcileTwoLedgersOnStartup({ sink, conversationStore: managed })
+  const conversations = await managed.loadOwnership()
+  if (conversations.size) createConversationProjectionAccess(() => sink, log).importExisting(conversations.values())
 
   return { recovery, deferredPlan, importComplete, resolveImportComplete, h1DiskLastSeq }
 }

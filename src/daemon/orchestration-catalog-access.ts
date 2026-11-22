@@ -56,7 +56,7 @@ function projectAppSession(row: SessionProjectionRow): AppSession | undefined {
 
 /** Local sidebar rows come from the authority. The old file is still mirrored
  * for off/shadow startup and readers that have yet to migrate. */
-export function createOrchestrationCatalogAccess(getSink: () => EventSink | undefined) {
+export function createOrchestrationCatalogAccess(getSink: () => EventSink | undefined, log = console.warn) {
   const readDetail: ReadProjectedHistorySession = (context, canonicalCwd) => {
     const sink = getSink()
     if (!sink) return undefined
@@ -68,7 +68,7 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
   }
   return {
     readDetail,
-    ...createConversationProjectionAccess(getSink),
+    ...createConversationProjectionAccess(getSink, log),
     deleteNative(ref: AppSessionRef, runIds: ReadonlySet<string>): DeleteSessionOutcome {
       const sink = getSink()
       if (!sink) return { status: 'not_present' }

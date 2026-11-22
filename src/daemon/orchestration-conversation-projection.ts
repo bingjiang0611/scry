@@ -11,7 +11,7 @@ interface MirroredMetadata {
   archivedAt: number | null
 }
 
-export function createConversationProjectionAccess(getSink: () => EventSink | undefined) {
+export function createConversationProjectionAccess(getSink: () => EventSink | undefined, log: (message: string) => void) {
   function syncMetadata(sink: EventSink, conversation: Conversation, committed = false) {
     const { id: sessionKey, cwd } = conversation
     const current = sink.getSession(sessionKey)
@@ -39,16 +39,11 @@ export function createConversationProjectionAccess(getSink: () => EventSink | un
     const identity = { sessionKey, conversationId: sessionKey, cwd, title, provider: current?.provider ?? null }
     const display = { title, pinnedAt, archivedAt, lastRunId: current?.lastRunId ?? null, lastRunOutcome: current?.lastRunOutcome ?? null }
     const base = { commandId: `conversation-catalog:${sessionKey}:${metadata.revision}`, actor: 'system', scope: 'system' as const, at }
+    const change = !current?.conversationId && (!committed || conversation.turns.length > 0)
+      ? { type: 'session.import' as const, payload: { ...identity, ts: current?.ts ?? at, pinnedAt, archivedAt } satisfies SessionImportPayload }
+      : { type: 'session.discover' as const, payload: { ...identity, display } satisfies SessionDiscoverPayload }
     sink.runInBatchTransaction(() => {
-      const result = !current?.conversationId && (!committed || conversation.turns.length > 0)
-        ? (() => {
-          const payload: SessionImportPayload = { ...identity, ts: current?.ts ?? at, pinnedAt, archivedAt }
-          return sink.execute({ ...base, type: 'session.import', payload, payloadSha256: sha256Hex(canonicalJson(payload)) })
-        })()
-        : (() => {
-          const payload: SessionDiscoverPayload = { ...identity, display }
-          return sink.execute({ ...base, type: 'session.discover', payload, payloadSha256: sha256Hex(canonicalJson(payload)) })
-        })()
+      const result = sink.execute({ ...base, ...change, payloadSha256: sha256Hex(canonicalJson(change.payload)) })
       if (result.kind === 'rejected') throw new Error(result.reason)
       sink.setMeta(key, canonicalJson(metadata))
     })
@@ -76,7 +71,20 @@ export function createConversationProjectionAccess(getSink: () => EventSink | un
     readConversation,
     recordConversation: (conversation: Conversation) => {
       const sink = getSink()
-      if (sink) syncMetadata(sink, conversation, true)
+      if (!sink) return
+      try { syncMetadata(sink, conversation, true) }
+      catch (error) {
+        // The file and its ID are already durable. A failed SQL update is retried
+        // from that file on an authoritative read or at the next startup.
+        log(`daemon.conversation-projection ${(error as { code?: string }).code ?? 'unavailable'}`)
+      }
+    },
+    importExisting: (conversations: Iterable<Conversation>) => {
+      const sink = getSink()
+      if (!sink) return
+      sink.runInBatchTransaction(() => {
+        for (const conversation of conversations) syncMetadata(sink, conversation)
+      })
     }
   }
 }

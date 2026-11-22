@@ -83,7 +83,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     loadSessions: () => loadSessions()
   })
   let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
-  const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink)
+  const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink, log)
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
     homeDir: workspace.homeDir,
