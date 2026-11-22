@@ -141,7 +141,10 @@ const resetConversationAttention = registerConversationAttention({
 // The App's client to other hosts; the hosts it saves are the App's own state.
 const remoteAttention = createRemoteAttentionTracker((keys) => dockBadge.setRemote(keys))
 const { requireDesktopRemoteClient, getDesktopRemoteClient } = createRemoteConnections({
-  remoteAttention, publishSubscription: (update) => { win?.webContents.send('desktopRemote:update', update) }
+  remoteAttention,
+  publishSubscription: (update) => {
+    if (rendererCanReceive()) win?.webContents.send('desktopRemote:update', update)
+  }
 })
 registerDesktopClientIpc(handleTrusted, requireDesktopRemoteClient)
 

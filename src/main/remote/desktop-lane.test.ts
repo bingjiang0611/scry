@@ -211,6 +211,27 @@ describe('DesktopLanes', () => {
     lanes.closeAll()
   })
 
+  it('keeps a forwarded status subscription independent of the Desktop status lane', async () => {
+    let release!: () => void
+    const parked = new Promise<void>(resolve => { release = resolve })
+    const lanes = new DesktopLanes(fakeLaneConnector(async ({ request }) => {
+      const subscriber = (request as { subscriptionId?: string }).subscriptionId
+      if (!subscriber) await parked
+      return { subscriber: subscriber ?? 'desktop' }
+    }))
+    const request = { op: 'subscribe', views: ['sessions', 'activeRuns'] }
+    const desktop = lanes.request('status', 'c1', { endpoint, request, replayable: true })
+    try {
+      await expect(lanes.request('status', 'c1', {
+        endpoint, request: { ...request, subscriptionId: 'phone' }, subscriber: 'phone', replayable: true
+      })).resolves.toEqual({ subscriber: 'phone' })
+    } finally {
+      release()
+      await desktop
+      lanes.closeAll()
+    }
+  })
+
   it('rejects a reply without the keep-alive marker instead of falling back to one-shot', async () => {
     const script = scriptedChannel(() => '{"ok":true}')
     const connect = vi.fn(async () => script.channel)

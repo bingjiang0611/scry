@@ -41,7 +41,7 @@ export class DesktopDetailSubscription {
   async #step(): Promise<void> {
     const known = this.#cursor
     const signal = this.#abort.signal
-    const request: SubscribeRequest = { views: ['detail'], session: this.#session, waitMs: known ? 20_000 : 0, ...(known ? { known } : {}) }
+    const request: SubscribeRequest = { views: ['detail'], session: this.#session, historyOnly: true, waitMs: known ? 20_000 : 0, ...(known ? { known } : {}) }
     let raw = await this.#read(request, signal)
     if (record(raw.subscribe) && raw.subscribe.kind === 'history_chunk') {
       const assembled = await assembleByteChunks(raw.subscribe, async chunk => {

@@ -50,8 +50,9 @@ export function submitIntent(deps: SubmitDeps, peerCertSHA256: string, input: { 
   return recordIntent(deps, peerCertSHA256, input)
 }
 
-export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string }): Promise<SubmitResult> {
+export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string; knownLogId?: string }): Promise<SubmitResult> {
   deps.authorizeDevice(peer)
+  assertExpectedLog(deps.orchestration, input.knownLogId)
   const { detail, referenced } = stampAttachmentPeer(peer, input.detail)
   const scoped = deps.scopedIntentId(peer, input.intentId)
   if (referenced && !deps.ledger.intentRun(scoped)) {
@@ -63,6 +64,7 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
   // Existing receipts are compared by the ledger, even after terminal cleanup
   // removed their blobs. A lost acknowledgement must remain idempotent.
   deps.authorizeDevice(peer)
+  assertExpectedLog(deps.orchestration, input.knownLogId)
   if (deps.orchestration) {
     const auth = await deps.orchestration.submitAsync({
       peerCertSHA256: peer,
@@ -84,6 +86,12 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
     return { runId: result.runId, status: auth.status, seq: result.seq }
   }
   return recordIntent(deps, peer, { ...input, detail })
+}
+
+export function assertExpectedLog(orchestration: OrchestrationAuthorityHooks | undefined, knownLogId?: string): void {
+  if (knownLogId !== undefined && orchestration?.currentLogId?.() !== knownLogId) {
+    throw new Error('orchestration_log_changed')
+  }
 }
 
 function recordIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string }): SubmitResult {

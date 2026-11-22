@@ -286,6 +286,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
         orchestrationStatus: () => orchestrationAuthority!.status(),
         subscribe: orchestrationAuthority.createSubscribeHandler({
           ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
+          runQuestions: (runId) => pipeline.runs.get(runId)?.state.pendingQuestions,
           readFirstPage: createAuthorityDetailReader(historyChannels, (id) => catalog.conversationService().read(id)),
           scans: createDaemonCatalogScans(orchestrationAuthority.sink, options.userDataDir, workspace,
             catalog.appSessionStore, () => publishData({ kind: 'catalog_recovered' }), log)

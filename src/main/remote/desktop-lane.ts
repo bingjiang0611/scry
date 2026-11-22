@@ -224,6 +224,7 @@ export interface DesktopLaneCall {
   endpoint: DesktopLaneEndpoint
   request: unknown
   replayable: boolean
+  subscriber?: string
   signal?: AbortSignal
 }
 
@@ -238,7 +239,7 @@ export class DesktopLanes {
   }
 
   request(lane: DesktopLaneName, connectionId: string, call: DesktopLaneCall): Promise<unknown> {
-    const key = `${connectionId}\u0000${lane}`
+    const key = `${connectionId}\u0000${lane}${call.subscriber ? `:${call.subscriber}` : ''}`
     const state = this.#lanes.get(key) ?? { queue: Promise.resolve(), retired: false }
     this.#lanes.set(key, state)
     const policy = LANE_POLICY[lane]

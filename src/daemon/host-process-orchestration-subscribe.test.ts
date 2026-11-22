@@ -90,8 +90,15 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       const first = await surface.start({
         providerId: 'codex', cwd: daemon.workspace, prompt: 'desktop remote write one', commandId: randomUUID()
       })
-      await expect.poll(() => runtime.runView(first.runId)?.done, { timeout: 10_000 }).toBe(true)
       const sink = daemon.host.orchestrationAuthority!.sink
+      // The trace's completion notification can precede the durable settlement.
+      const waitForSettlement = async (runId: string, count: number) => {
+        await expect.poll(() => ({
+          done: runtime.runView(runId)?.done,
+          settlements: sink.listEvents().filter(event => event.type === 'run.settled').length
+        }), { timeout: 10_000 }).toEqual({ done: true, settlements: count })
+      }
+      await waitForSettlement(first.runId, 1)
       const settled = sink.listEvents().find((event) => event.type === 'run.settled')
       expect(settled?.runId).toEqual(expect.any(String))
       expect(settled?.runId).not.toBe(first.runId)
@@ -112,7 +119,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
         prompt: 'desktop remote write two', commandId: randomUUID()
       })
       expect(next.runId).not.toBe(first.runId)
-      await expect.poll(() => runtime.runView(next.runId)?.done, { timeout: 10_000 }).toBe(true)
+      await waitForSettlement(next.runId, 2)
       await assertSidebar(next.runId)
       expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
       runtime.dispose()

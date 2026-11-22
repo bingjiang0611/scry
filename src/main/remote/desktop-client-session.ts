@@ -49,7 +49,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
       const authorize = () => this.authorizeMobileTarget(state, input.target, input.authorizePeer)
       authorize()
       if (!HASH.test(input.phonePeerFingerprint) || !uuid(input.phoneIntentId) || !HASH.test(input.target.binding) || !HASH.test(input.payloadHash)) fail('invalid_submit')
-      if (input.request.op !== 'submit' || typeof input.request.detail !== 'string') fail('invalid_submit')
+      if ((input.request.op !== 'submit' && input.request.op !== 'submitAtLog') || typeof input.request.detail !== 'string') fail('invalid_submit')
       const workspace = workspaceFromDetail(input.request.detail)
       const existing = state.intents.find((receipt) => receipt.connectionId === item.id && receipt.origin?.phonePeerFingerprint === input.phonePeerFingerprint &&
         receipt.origin.phoneIntentId === input.phoneIntentId && receipt.origin.targetBinding === input.target.binding)
@@ -95,7 +95,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     })
   }
 
-  async mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; authorizePeer?: () => void }): Promise<unknown> {
+  async mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string; authorizePeer?: () => void }): Promise<unknown> {
     const state = await this.state()
     const item = this.connection(state, input.target.id)
     if (item.pending || targetBinding(item) !== input.target.binding) fail('execution_target_binding_changed')
@@ -104,8 +104,10 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     if (!intent) fail('unknown_intent')
     const authorize = () => this.authorizeMobileTarget(state, input.target, input.authorizePeer)
     let response: Record<string, unknown>
-    try { response = await this.requestForConnection(item.id, { op: 'intentStatus', intentId: intent.intentId }, authorize) }
-    catch (error) { if (isExplicitUnknownIntent(error)) throw error; fail('target_delivery_unknown') }
+    try { response = await this.requestForConnection(item.id, { op: input.knownLogId === undefined ? 'intentStatus' : 'intentStatusAtLog', intentId: intent.intentId,
+      ...(input.knownLogId === undefined ? {} : { knownLogId: input.knownLogId }) }, authorize) }
+    catch (error) { if (isExplicitUnknownIntent(error) || error instanceof Error && error.message === 'desktop_remote_orchestration_log_changed') throw error
+      fail('target_delivery_unknown') }
     if (record(response) && record(response.intent) && uuid(response.intent.runId)) {
       intent.runId = response.intent.runId; intent.status = 'recorded'; await this.save(state)
     }

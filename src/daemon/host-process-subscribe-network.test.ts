@@ -1,6 +1,7 @@
 import 'reflect-metadata'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { once } from 'node:events'
+import { randomUUID } from 'node:crypto'
 import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -93,6 +94,14 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
       expect(metadata).toMatchObject({ catalogSnapshot: { info: { subscribe: 1 }, projects: [{ path: workspace }] } })
       expect(metadata.catalogSnapshot).not.toHaveProperty('sessionsPage')
       const { hostId, logId, seq } = first.subscribe as { hostId: string; logId: string; seq: number }
+      const unknownIntent = randomUUID()
+      const wrongLog = 'replaced-log'
+      expect(await request({ op: 'submitAtLog', intentId: unknownIntent, knownLogId: wrongLog,
+        detail: JSON.stringify({ cwd: workspace, providerId: 'codex', prompt: '必须拒绝' })
+      })).toEqual({ error: 'orchestration_log_changed' })
+      expect(await request({ op: 'intentStatusAtLog', intentId: unknownIntent, knownLogId: wrongLog }))
+        .toEqual({ error: 'orchestration_log_changed' })
+      expect(authority.sink.listEvents().some(event => event.type === 'run.intent_recorded')).toBe(false)
       const notice = host.hostAdmin.recordNotice({
         kind: 'device_approved_via_cli', deviceLabel: '测试 iPhone', fingerprintPrefix: '0123456789abcdef'
       })
@@ -129,7 +138,26 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
         kind: 'remoteHistory', history: { historyScope: 'session',
           turns: [{ userText: '测试问题', items: [{ text: historyText }] }] }
       } } } })
+      const mobileRequest = { ...visibleDetail, historyFormat: 'turns' }
+      const mobile = await request(mobileRequest)
+      expect(mobile).toMatchObject({ subscribe: { kind: 'history_chunk', offset: 0 } })
+      const mobilePage = await assembleByteChunks(mobile.subscribe as Record<string, unknown>, async (chunk) => {
+        const reply = await request({ ...mobileRequest, chunk })
+        return reply.subscribe as Record<string, unknown>
+      }, () => { throw new Error('invalid mobile test page') })
+      expect(mobilePage).toMatchObject({ mode: 'snapshot', snapshot: { detail: {
+        firstPage: { kind: 'mobileHistory', page: {
+          turns: [{ userText: '测试问题', items: [{ kind: 'output', text: historyText }] }], offset: 0, totalTurns: 1
+        } }
+      } } })
+      const updated = update.subscribe as { seq: number }
+      const parked = vi.spyOn(authority.subscribeHub, 'waitForWake')
+      const waiting = request({ op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 5_000,
+        known: { hostId, logId, seq: updated.seq } })
+      await expect.poll(() => parked.mock.calls.length).toBeGreaterThan(0)
       await host.service.authority.revoke(grant.deviceId)
+      authority.subscribeHub.emitHostNotice(notice)
+      await expect(waiting).resolves.toEqual({ error: 'device_not_authorized' })
       expect(await request({ op: 'subscribe', views: ['sessions'], waitMs: 0 })).toEqual({ error: 'device_not_authorized' })
     } finally {
       await host.dispose()

@@ -7,7 +7,7 @@ export type ExecutionTargetWorkCall =
   | { callId: string; method: 'executionTargets'; input: Record<string, never> }
   | { callId: string; method: 'mobileRequest'; input: { target: { id: string; binding: string }; request: Record<string, unknown> } }
   | { callId: string; method: 'mobileSubmit'; input: DesktopMobileTargetSubmit }
-  | { callId: string; method: 'mobileIntentStatus'; input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string } }
+  | { callId: string; method: 'mobileIntentStatus'; input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string } }
   | { callId: string; method: 'shellOpenPath'; input: { path: string } }
   | { callId: string; method: 'shellTrashItem'; input: { path: string } }
 

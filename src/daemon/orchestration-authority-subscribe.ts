@@ -26,6 +26,7 @@ export interface AuthoritySubscribeRuntimeDeps {
   readRemoteFirstPage?: SubscribeEngineOptions['readRemoteFirstPage']
   remoteCwdAuthorizer?: SubscribeEngineOptions['remoteCwdAuthorizer']
   remoteHostNotices?: boolean
+  runQuestions?: SubscribeEngineOptions['runQuestions']
   scans?: SubscribeEngineOptions['scans']
 }
 
@@ -55,6 +56,7 @@ export function createAuthoritySubscribeHandler(
     readRemoteFirstPage: deps.readRemoteFirstPage,
     remoteCwdAuthorizer: deps.remoteCwdAuthorizer,
     remoteHostNotices: deps.remoteHostNotices,
+    runQuestions: deps.runQuestions,
     scans: deps.scans
   })
   return paginateSubscribeReplies(sink, deps, (peer, request, signal) => engine.subscribe(peer, request, signal))
@@ -77,7 +79,7 @@ export function authoritySubscribeDeps(
       const authorizedRoots = roots()
       return (cwd) => isCanonicalRemoteProjectDirectory(cwd, authorizedRoots)
     },
-    readRemoteFirstPage: (peer, session, signal) => readRemoteDetailPage(service().controller, peer, session, signal),
+    readRemoteFirstPage: (peer, session, format, signal) => readRemoteDetailPage(service().controller, peer, session, format, signal),
     remoteHostNotices: isHostCliExperimentalEnabled(process.env)
   }
 }
@@ -90,11 +92,18 @@ async function readRemoteDetailPage(
   controller: HostController,
   peer: string,
   session: SessionProjectionRow,
+  format?: SubscribeRequest['historyFormat'],
   signal?: AbortSignal
 ): Promise<SubscribeHistoryPage | null> {
   const { conversationId, cwd, provider, profile, catalog, sessionKey } = session
   const externalSessionId = catalog ? catalog.nativeSessionId : sessionKey
   if (conversationId || !cwd || !isSessionProviderId(provider) || provider === 'legacy_unknown' || !externalSessionId) return null
+  if (format === 'turns') {
+    signal?.throwIfAborted()
+    return { kind: 'mobileHistory', page: await controller.readHistoryTurnsPage(peer, {
+      providerId: provider, cwd, externalSessionId, historyScope: 'session', agentProfileId: profile, limit: 3
+    }) }
+  }
   const query: Extract<DesktopHostRead, { kind: 'history' }> = {
     kind: 'history',
     historyScope: 'session',

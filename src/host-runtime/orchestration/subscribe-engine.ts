@@ -1,5 +1,4 @@
 import type {
-  SessionCatalogMetadata,
   SubscribeActiveRunRow,
   SubscribeEventItem,
   SubscribeHistoryPage,
@@ -10,12 +9,14 @@ import type {
   SubscribeSnapshot,
   SubscribeView
 } from '../../shared/orchestration-subscribe'
+import type { AgentQuestionRequest } from '../../shared/runtime'
 import type { EventSink } from './event-sink'
 import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
 import { mapRunRow, mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
-import { projectSubscribeSession, readSessionsSnapshot, visibleCatalog } from './subscribe-sessions'
+import { deviceEventPayload, deviceHintKey, deviceOutcome, deviceTurn } from './subscribe-device-fields'
+import { projectSubscribeSession, readSessionsSnapshot } from './subscribe-sessions'
 import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type RunProjectionRow, type SessionProjectionRow } from './types'
 
 export const SUBSCRIBE_MAX_WAIT_MS = 25_000
@@ -57,7 +58,8 @@ export interface SubscribeEngineOptions {
   remoteCwdAuthorizer?: () => (canonicalCwd: string) => boolean
   remoteHostNotices?: boolean
   readFirstPage?: (session: SessionProjectionRow, signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
-  readRemoteFirstPage?: (peer: string, session: SessionProjectionRow, signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
+  readRemoteFirstPage?: (peer: string, session: SessionProjectionRow, format?: SubscribeRequest['historyFormat'], signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
+  runQuestions?: (runId: string) => AgentQuestionRequest[] | undefined
   scans?: CatalogSubscriptionScans
   sessionsPageSize?: number
   clock?: () => number
@@ -87,6 +89,7 @@ export class SubscribeEngine {
   readonly #remoteHostNotices: boolean
   readonly #readFirstPage: SubscribeEngineOptions['readFirstPage']
   readonly #readRemoteFirstPage: SubscribeEngineOptions['readRemoteFirstPage']
+  readonly #runQuestions: SubscribeEngineOptions['runQuestions']
   readonly #scans: CatalogSubscriptionScans | undefined
   readonly #sessionsPageSize: number
   readonly #clock: () => number
@@ -101,6 +104,7 @@ export class SubscribeEngine {
     this.#remoteHostNotices = options.remoteHostNotices ?? false
     this.#readFirstPage = options.readFirstPage
     this.#readRemoteFirstPage = options.readRemoteFirstPage
+    this.#runQuestions = options.runQuestions
     this.#scans = options.scans
     this.#sessionsPageSize = Math.max(1, Math.min(500, options.sessionsPageSize ?? DEFAULT_SESSIONS_PAGE_SIZE))
     this.#clock = options.clock ?? (() => Date.now())
@@ -124,7 +128,8 @@ export class SubscribeEngine {
       const waitMs = Math.min(Math.max(0, request.waitMs), SUBSCRIBE_MAX_WAIT_MS)
       const deadline = this.#clock() + waitMs
       const views = new Set<SubscribeView>(request.views)
-      const hintPeer = access.scope === 'remote' && views.has('detail') ? `${peer}:detail` : peer
+      const hintPeer = access.scope === 'remote' ? deviceHintKey(peer, request) : peer
+      const readsHints = !request.historyOnly && (access.scope === 'local' || views.has('activeRuns') || views.has('detail'))
       if (this.#scans && (views.has('sessions') || views.has('detail'))) {
         const opening = !request.known || request.known.hostId !== this.#hostId() ||
           request.known.logId !== this.#sink.getMeta('log_id')
@@ -136,12 +141,12 @@ export class SubscribeEngine {
 
       for (;;) {
         const reply = this.#evaluateOnce(hintPeer, access, views, request)
-        const readPage = access.scope === 'local' ? this.#readFirstPage
-          : this.#readRemoteFirstPage?.bind(undefined, peer)
-        if (reply.mode === 'snapshot' && request.session && reply.snapshot.detail && readPage) {
+        if (reply.mode === 'snapshot' && request.session && reply.snapshot.detail &&
+            (access.scope === 'local' ? this.#readFirstPage : this.#readRemoteFirstPage)) {
           const session = this.#detailSession(access, request.session)
           if (!session) return reply
-          const firstPage = await readPage(session, signal)
+          const firstPage = access.scope === 'local' ? await this.#readFirstPage!(session, signal)
+            : await this.#readRemoteFirstPage!(peer, session, request.historyFormat, signal)
           signal?.throwIfAborted()
           const currentAccess = this.#accessFor(peer)
           const current = this.#detailSession(currentAccess, request.session)
@@ -159,7 +164,7 @@ export class SubscribeEngine {
         if (remaining <= 0 || this.#hub.closed || signal?.aborted) return reply
 
         const observedCommit = this.#hub.commitSeq
-        if (!this.#hub.hasPendingHints(hintPeer) && observedCommit <= reply.seq) {
+        if ((!readsHints || !this.#hub.hasPendingHints(hintPeer)) && observedCommit <= reply.seq) {
           await this.#hub.waitForWake(remaining, signal)
         }
         if (this.#hub.closed || signal?.aborted) {
@@ -273,7 +278,7 @@ export class SubscribeEngine {
         ...(event.sessionKey !== null ? { sessionKey: event.sessionKey } : {}),
         ...(event.runId !== null ? { runId: event.runId } : {}),
         ...(event.cwd !== null ? { cwd: event.cwd } : {}),
-        payload: this.#projectEventPayload(access, event),
+        payload: access.scope === 'local' ? event.payload : deviceEventPayload(event.payload, access.canReadCwd),
         ...(access.scope === 'remote' ? this.#deviceProjections(access, views, event) : {}),
         ...(access.scope === 'local' && event.evidence !== null ? { evidence: event.evidence } : {})
       }
@@ -306,9 +311,9 @@ export class SubscribeEngine {
       snapshot.activeRuns = { rows: this.#readActiveRunsSnapshot(access) }
     }
     if (views.has('detail') && request.session && !(access.scope === 'local' && request.detailWatch)) {
-      snapshot.detail = this.#readDetailSnapshot(this.#detailSession(access, request.session))
+      snapshot.detail = this.#readDetailSnapshot(access, this.#detailSession(access, request.session))
     }
-    const hints = this.#drainHints(peer, access, views, request, true, !request.known)
+    const hints = request.sessionsCursor ? [] : this.#drainHints(peer, access, views, request, true, !request.known)
     return {
       hostId,
       logId,
@@ -357,6 +362,7 @@ export class SubscribeEngine {
     const session = access.scope === 'remote' && run.sessionKey ? this.#sink.getSession(run.sessionKey) : undefined
     const externalSessionId = liveMeta?.externalSessionId ??
       (session && access.canReadCwd(session.cwd) ? session.catalog?.nativeSessionId : undefined)
+    const questions = access.scope === 'remote' && liveMeta?.scryRunId ? this.#runQuestions?.(liveMeta.scryRunId) : undefined
     const promptPreview =
       access.scope === 'remote' && run.promptPreview
         ? run.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
@@ -365,6 +371,7 @@ export class SubscribeEngine {
       runId: run.runId,
       ...(localMeta?.scryRunId ? { scryRunId: localMeta.scryRunId } : {}),
       ...(access.scope === 'remote' && liveMeta?.scryRunId ? { traceRunId: liveMeta.scryRunId } : {}),
+      ...(questions?.length ? { questions } : {}),
       ...(localMeta?.admitted ? { admitted: true } : {}),
       ...(externalSessionId ? { externalSessionId } : {}),
       sessionKey: run.sessionKey,
@@ -380,7 +387,7 @@ export class SubscribeEngine {
       intentSeq: run.intentSeq,
       settledAt: run.settledAt,
       recoveredAt: run.recoveredAt,
-      outcome: run.outcome,
+      outcome: access.scope === 'remote' ? deviceOutcome(run.outcome) : run.outcome,
       revSeq: run.revSeq
     }
   }
@@ -392,7 +399,7 @@ export class SubscribeEngine {
     if (views.has('sessions') && event.sessionKey) {
       const session = this.#sink.getSession(event.sessionKey)
       if (session && access.canReadCwd(session.cwd)) {
-        result.sessionRow = projectSubscribeSession(session, access.canReadCwd)
+        result.sessionRow = projectSubscribeSession(session, access.canReadCwd, access.scope)
       } else if (event.type === 'session.deleted' || event.type === 'session.withdrawn') {
         result.sessionRow = null
       }
@@ -416,13 +423,16 @@ export class SubscribeEngine {
     return session
   }
 
-  #readDetailSnapshot(session: SessionProjectionRow | undefined): NonNullable<SubscribeSnapshot['detail']> {
+  #readDetailSnapshot(access: SubscribeAccess, session: SessionProjectionRow | undefined): NonNullable<SubscribeSnapshot['detail']> {
     if (!session) return { turns: [] }
     const db = this.#sink.handle.db
     const rows = db
       .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? ORDER BY ordinal ASC')
       .all(session.sessionKey) as Array<Record<string, unknown>>
-    const turns = rows.map(mapTurnRow)
+    const turns = rows.map(raw => {
+      const turn = mapTurnRow(raw)
+      return access.scope === 'local' ? turn : deviceTurn(turn)
+    })
     return {
       turns,
       ...(session.legacy ? { legacyBefore: true as const } : {})
@@ -433,6 +443,7 @@ export class SubscribeEngine {
     peer: string, access: SubscribeAccess, views: ReadonlySet<SubscribeView>,
     request: SubscribeRequest, state: boolean, fresh?: boolean
   ): SubscribeHint[] {
+    if (request.historyOnly || (access.scope === 'remote' && !views.has('activeRuns') && !views.has('detail'))) return []
     const pending = this.#hub.drainHints(peer, state && access.scope === 'local', fresh)
     if (access.scope === 'local') return pending
     const hints: SubscribeHint[] = []
@@ -452,14 +463,4 @@ export class SubscribeEngine {
     return hints
   }
 
-  #projectEventPayload(access: SubscribeAccess, event: OrchestrationEventRow): Record<string, unknown> {
-    if (access.scope === 'local') return event.payload
-    const payload = { ...event.payload }
-    delete payload.appRunId
-    if (typeof payload.promptPreview === 'string') payload.promptPreview = payload.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
-    if (payload.catalog && typeof payload.catalog === 'object') {
-      payload.catalog = visibleCatalog(payload.catalog as SessionCatalogMetadata, access.canReadCwd)
-    }
-    return payload
-  }
 }

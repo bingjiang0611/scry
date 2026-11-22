@@ -182,6 +182,8 @@ export abstract class DesktopRemoteClientBase {
     const promise = this.lanes.request(laneForRequest(payload, 'network'), id, {
       endpoint: { path: runPath, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM },
       request: payload,
+      ...(record(payload) && payload.op === 'subscribe' && typeof payload.subscriptionId === 'string'
+        ? { subscriber: payload.subscriptionId } : {}),
       replayable: replayableRequest(payload),
       signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal
     })

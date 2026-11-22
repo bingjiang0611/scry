@@ -1,5 +1,6 @@
+import type { RemoteHistoryTurnsPage } from './remote-history-turns'
 import type { HostAdminNotice } from './host-admin'
-import type { AgentDataUpdated, RuntimeProvider } from './runtime'
+import type { AgentDataUpdated, AgentQuestionRequest, RuntimeProvider } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
 import type { SessionHistoryPage } from './session-history'
 import type { ConversationPage } from './conversation-api'
@@ -45,6 +46,10 @@ export interface SubscribeRequest {
   session?: SubscribeSessionRef
   known?: SubscribeKnownCursor
   sessionsCursor?: string
+  /** Gateway-supplied hint cursor scope. It grants no read authority. */
+  subscriptionId?: string
+  historyFormat?: 'turns'
+  historyOnly?: true
   /** Local App detail already displays its history page. Watch the focused source. */
   detailWatch?: 'open' | 'continue'
   waitMs: number
@@ -84,6 +89,7 @@ export interface SubscribeActiveRunRow {
   scryRunId?: string
   /** Device trace address for the authorized run, as in the v2 bound marker. */
   traceRunId?: string
+  questions?: AgentQuestionRequest[]
   /** Whether canonical pipeline registered the run (local scope only). */
   admitted?: boolean
   /** Native session ID from the authorized binding or projected catalog. */
@@ -144,6 +150,7 @@ export type SubscribeHistoryPage =
   | SessionHistoryPage
   | { kind: 'conversation'; page: ConversationPage }
   | { kind: 'remoteHistory'; history: DesktopRemoteHistory }
+  | { kind: 'mobileHistory'; page: RemoteHistoryTurnsPage }
 
 export interface SubscribeSnapshot {
   sessions?: {

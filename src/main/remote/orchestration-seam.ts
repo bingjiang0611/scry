@@ -12,6 +12,7 @@ export interface OrchestrationImmediateDispatchChecks {
 }
 
 export interface OrchestrationAuthorityHooks {
+  currentLogId?(): string | undefined
   /**
    * Returns an in-memory-backed `LedgerStore` whose appends mirror asynchronously to H1
    * off the pre-first-token critical path (zero synchronous H1 file fsync on hot path).

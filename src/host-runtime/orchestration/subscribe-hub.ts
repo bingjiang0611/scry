@@ -6,6 +6,7 @@ import { SUBSCRIBE_RETAINED_WINDOW_NOTICES, type SubscribeHint } from '../../sha
 
 const DEFAULT_COALESCE_MS = 50
 const MAX_HINT_BUFFER = 512
+const MAX_HINT_CURSORS = 512
 const MAX_LIVE_RUN_META = 1_024
 
 export interface LiveRunRuntimeMeta {
@@ -224,7 +225,12 @@ export class SubscribeHub {
     // feed behaves the same, and replaying would re-show old notices and errors.
     const last = fresh ? this.#hintSeq : (this.#peerHintSeq.get(peer) ?? 0)
     const drained = this.#entries.filter((entry) => entry.seq > last).map((entry) => entry.hint)
+    this.#peerHintSeq.delete(peer)
     this.#peerHintSeq.set(peer, this.#hintSeq)
+    if (this.#peerHintSeq.size > MAX_HINT_CURSORS) {
+      const oldest = this.#peerHintSeq.keys().next().value
+      if (oldest !== undefined) this.#peerHintSeq.delete(oldest)
+    }
     if (!includeState) return drained
     const state = this.#stateHints()
     if (state.length === 0) return drained

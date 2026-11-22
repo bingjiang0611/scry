@@ -16,14 +16,14 @@ const MAX_HISTORY_SNAPSHOT = 512
 const OPS = new Set([
   'projects', 'directories', 'directoriesPage', 'providers', 'commands', 'sessions', 'sessionsPage', 'sessionAction',
   'workspace', 'fileDownload', 'history', 'historyPage', 'historyPreview', 'historyVersion', 'historyTurnsPage',
-  'subscribe', 'submit', 'intentStatus', 'poll', 'watch', 'liveRuns', 'runState', 'output', 'questions', 'answerQuestion', 'stop'
+  'subscribe', 'submit', 'submitAtLog', 'intentStatus', 'intentStatusAtLog', 'poll', 'watch', 'liveRuns', 'runState', 'output', 'questions', 'answerQuestion', 'stop'
 ])
 
 type DesktopTargetClient = {
   executionTargets(): Promise<ExecutionTargetRef[]>
   mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown>
   mobileSubmit(input: DesktopMobileTargetSubmit & { authorizePeer?: () => void }): Promise<unknown>
-  mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; authorizePeer?: () => void }): Promise<unknown>
+  mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string; authorizePeer?: () => void }): Promise<unknown>
 }
 
 export interface ExecutionTargetEnvelope {
@@ -81,12 +81,14 @@ function parseRequest(value: unknown): Record<string, unknown> {
     history: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId'], historyPage: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId', 'cursor', 'limit', 'snapshot'],
     historyPreview: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId'], historyVersion: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId'],
     historyTurnsPage: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId', 'before', 'limit', 'snapshot'],
-    submit: ['op', 'intentId', 'detail'], intentStatus: ['op', 'intentId'], poll: ['op', 'cursor'],
+    submit: ['op', 'intentId', 'detail', 'knownLogId'], submitAtLog: ['op', 'intentId', 'detail', 'knownLogId'],
+    intentStatus: ['op', 'intentId', 'knownLogId'], intentStatusAtLog: ['op', 'intentId', 'knownLogId'], poll: ['op', 'cursor'],
     watch: ['op', 'runId', 'cursor', 'outputCursor', 'waitMs'], liveRuns: ['op', 'waitMs', 'revision', 'history'],
     runState: ['op', 'runId'], output: ['op', 'runId', 'cursor'], questions: ['op', 'runId'],
     answerQuestion: ['op', 'runId', 'answerId', 'response'], stop: ['op', 'runId']
   }
   exact(value, keys[op]!)
+  if (op.endsWith('AtLog') && !text(value.knownLogId, 128)) fail('invalid_target_request')
   if (op === 'directories' && value.path !== undefined && !text(value.path, 4096)) fail('invalid_target_request')
   if (op === 'directoriesPage') {
     if (value.path !== undefined && !text(value.path, 4096) || value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) ||
@@ -97,8 +99,8 @@ function parseRequest(value: unknown): Record<string, unknown> {
   if (['history', 'historyPage', 'historyPreview', 'historyVersion', 'historyTurnsPage'].includes(op) && (!text(value.providerId, 256) || !text(value.cwd, 16_384) || !text(value.externalSessionId, 256))) fail('invalid_target_request')
   if (op === 'historyPage' && (value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 256 * 1024) || value.snapshot !== undefined && !text(value.snapshot, MAX_HISTORY_SNAPSHOT))) fail('invalid_target_request')
   if (op === 'historyTurnsPage' && (value.before !== undefined && (!integer(value.before) || value.before < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 100) || value.snapshot !== undefined && !text(value.snapshot, MAX_HISTORY_SNAPSHOT))) fail('invalid_target_request')
-  if (op === 'submit' && (!text(value.intentId, 128) || !text(value.detail, MAX_FRAME))) fail('invalid_target_request')
-  if (op === 'intentStatus' && !text(value.intentId, 128)) fail('invalid_target_request')
+  if ((op === 'submit' || op === 'submitAtLog') && (!text(value.intentId, 128) || !text(value.detail, MAX_FRAME) || value.knownLogId !== undefined && !text(value.knownLogId, 128))) fail('invalid_target_request')
+  if ((op === 'intentStatus' || op === 'intentStatusAtLog') && (!text(value.intentId, 128) || value.knownLogId !== undefined && !text(value.knownLogId, 128))) fail('invalid_target_request')
   if (op === 'poll' && (!integer(value.cursor) || value.cursor < 0)) fail('invalid_target_request')
   if (op === 'watch' && (!text(value.runId, 128) || !integer(value.cursor) || value.cursor < 0 || !integer(value.outputCursor) || value.outputCursor < 0 || !integer(value.waitMs) || value.waitMs < 0 || value.waitMs > 20_000)) fail('invalid_target_request')
   if (op === 'liveRuns' && (!integer(value.waitMs) || value.waitMs < 0 || value.waitMs > 20_000 || value.revision !== undefined && !text(value.revision, 64))) fail('invalid_target_request')
@@ -115,7 +117,7 @@ function parseRequest(value: unknown): Record<string, unknown> {
   }
   if (op === 'workspace') validateWorkspaceQuery(value.query)
   if (op === 'fileDownload') parseRemoteFileDownloadQuery(value.query)
-  if (op === 'submit') {
+  if (op === 'submit' || op === 'submitAtLog') {
     let routing: unknown
     try { routing = JSON.parse(value.detail as string) } catch { fail('invalid_target_request') }
     if (!record(routing)) fail('invalid_target_request')
@@ -154,11 +156,15 @@ export class ExecutionTargetRouter {
     const target = { id: envelope.target.id, binding: envelope.target.binding as string }
     const request = parseRequest(envelope.request)
     const op = request.op as string
+    if (op === 'subscribe') {
+      request.subscriptionId = createHash('sha256').update(peer).update(target.binding).digest('hex').slice(0, 32)
+    }
     let response: unknown
-    if (op === 'submit') {
+    if (op === 'submit' || op === 'submitAtLog') {
       response = await this.#client().mobileSubmit({ target, phonePeerFingerprint: peer, phoneIntentId: request.intentId as string, payloadHash: executionTargetPayloadHash(request), request, authorizePeer: () => this.#authorizePeer(peer) })
-    } else if (op === 'intentStatus') {
-      response = await this.#client().mobileIntentStatus({ target, phonePeerFingerprint: peer, phoneIntentId: request.intentId as string, authorizePeer: () => this.#authorizePeer(peer) })
+    } else if (op === 'intentStatus' || op === 'intentStatusAtLog') {
+      response = await this.#client().mobileIntentStatus({ target, phonePeerFingerprint: peer, phoneIntentId: request.intentId as string,
+        ...(typeof request.knownLogId === 'string' ? { knownLogId: request.knownLogId } : {}), authorizePeer: () => this.#authorizePeer(peer) })
     } else {
       response = await this.#client().mobileRequest(target, request, () => this.#authorizePeer(peer))
     }

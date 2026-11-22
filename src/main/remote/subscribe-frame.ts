@@ -1,7 +1,7 @@
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 import { SUBSCRIBE_VIEWS, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
 
-const BODY_KEYS = ['op', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet', 'chunk']
+const BODY_KEYS = ['op', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet', 'chunk', 'historyFormat', 'historyOnly']
 const TRANSPORT_KEYS = ['keepAlive', 'protocol', 'deviceLabel']
 
 function text(value: unknown, maximum: number): value is string {
@@ -14,10 +14,10 @@ export function parseSubscribeFrame(
   transport: 'local' | 'network' | 'target'
 ): SubscribeRequest | undefined {
   const keys = transport === 'target' ? BODY_KEYS
-    : [...BODY_KEYS, ...TRANSPORT_KEYS, ...(transport === 'local' ? ['detailWatch'] : [])]
+    : [...BODY_KEYS, ...TRANSPORT_KEYS, ...(transport === 'local' ? ['detailWatch'] : ['subscriptionId'])]
   if (Object.keys(request).some((key) => !keys.includes(key))) return undefined
   const network = transport !== 'local'
-  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk } = request
+  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk, historyFormat, historyOnly, subscriptionId } = request
   if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
       !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
     return undefined
@@ -44,6 +44,9 @@ export function parseSubscribeFrame(
       ...(typeof s.externalSessionId === 'string' ? { externalSessionId: s.externalSessionId } : {})
     }
   }
+  if (subscriptionId !== undefined && (typeof subscriptionId !== 'string' || !/^[a-f0-9]{32}$/.test(subscriptionId))) return undefined
+  if (historyOnly !== undefined && (!network || historyOnly !== true || !views.includes('detail'))) return undefined
+  if (historyFormat !== undefined && (!network || historyFormat !== 'turns' || !views.includes('detail'))) return undefined
   if (views.includes('detail') && !parsedSession) return undefined
   if (network && new Set(views).size !== views.length) return undefined
   if (network && sessionsCursor !== undefined && !views.includes('sessions')) return undefined
@@ -75,6 +78,9 @@ export function parseSubscribeFrame(
     views,
     waitMs: waitMs as number,
     ...(parsedSession ? { session: parsedSession } : {}),
+    ...(typeof subscriptionId === 'string' ? { subscriptionId } : {}),
+    ...(historyOnly === true ? { historyOnly } : {}),
+    ...(historyFormat === 'turns' ? { historyFormat } : {}),
     ...(parsedKnown ? { known: parsedKnown } : {}),
     ...(parsedChunk ? { chunk: parsedChunk } : {}),
     ...(detailWatch ? { detailWatch } : {}),

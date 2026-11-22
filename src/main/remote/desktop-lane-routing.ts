@@ -8,7 +8,7 @@ import { DESKTOP_WORKBENCH_READ_METHODS } from '../../shared/desktop-workbench'
 // in-flight write, and a write is never replayed after its bytes were written.
 const writeOperations = new Set([
   'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
-  'executionTargetResult', 'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit'
+  'executionTargetResult', 'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit', 'submitAtLog'
 ])
 const watchOperations = new Set(['watch'])
 const statusOperations = new Set(['liveRuns'])

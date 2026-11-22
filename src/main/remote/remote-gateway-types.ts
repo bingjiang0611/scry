@@ -1,3 +1,5 @@
+import type { RemoteHistoryTurn, RemoteHistoryTurnsPage } from '../../shared/remote-history-turns'
+export type { RemoteHistoryTurn, RemoteHistoryTurnsPage } from '../../shared/remote-history-turns'
 import type { SessionLedger } from './session-ledger'
 import type { RunOutputPage } from './run-output-log'
 import type { RemoteWorkspaceQuery, RemoteWorkspaceResult } from './remote-workspace'
@@ -113,12 +115,7 @@ export interface RemoteSessionPage {
 // `userText` is the owner/device prompt; `items` are the assistant's ordered
 // content chunks (text/reasoning/tool/tool_result), the SAME shape a live run
 // streams. This is trace-derived content, never fabricated.
-export interface RemoteHistoryTurn {
-  // Scry run id, only on structured turn pages (see history-reader pageTurn).
-  runId?: string
-  userText: string
-  items: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }[]
-}
+
 
 export type RemoteHistoryScope = 'session' | 'profile'
 
@@ -190,16 +187,6 @@ export interface RemoteHistoryTurnsPageQuery extends RemoteHistoryQuery {
   snapshot?: string
 }
 
-export interface RemoteHistoryTurnsPage {
-  turns: RemoteHistoryTurn[]
-  offset: number
-  totalTurns: number
-  hasOlder: boolean
-  snapshot: string
-  source: 'active_memory' | 'indexed_archive' | 'index_rebuild' | 'monolithic' | 'claude_transcript' | 'pi_native'
-  completeness: 'partial' | 'complete'
-  sourceWarning?: 'native_unavailable'
-}
 
 export interface RemoteHistoryTurnsPageSource {
   read(query: RemoteHistoryTurnsPageQuery): Promise<RemoteHistoryTurnsPage>

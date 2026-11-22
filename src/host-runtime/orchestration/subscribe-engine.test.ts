@@ -265,7 +265,7 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
     }
   })
 
-  it('paginates sessions via keyset cursor without skipping or duplicating on concurrent insert', async () => {
+  it.each(['local', 'remote'] as const)('paginates %s sessions without dropping a notice or duplicating on concurrent insert', async (scope) => {
     const dir = makeDir()
     const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 64 })
     const hub = new SubscribeHub()
@@ -274,7 +274,9 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       hub,
       hostId: 'host-page',
       authorizePeer: () => undefined,
-      grantScope: () => 'local',
+      grantScope: () => scope,
+      remoteCwdAuthorizer: () => cwd => cwd === '/tmp/p',
+      remoteHostNotices: true,
       sessionsPageSize: 2
     })
     try {
@@ -291,6 +293,8 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
 
       // Insert a newer session before fetching page 2
       submitRun(sink, { commandId: 'p4', runId: 'r4', sessionKey: 's4', cwd: '/tmp/p', at: 4000 })
+      const notice = { id: 'between-pages', kind: 'cli_approval_enabled' as const, ts: 4500 }
+      hub.emitHostNotice(notice)
       const page2 = await engine.subscribe(peer, {
         views: ['sessions'],
         sessionsCursor: page1.snapshot.sessions!.nextCursor,
@@ -300,6 +304,37 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       if (page2.mode !== 'snapshot') throw new Error('expected snapshot')
       expect(page2.snapshot.sessions?.rows.map((r) => r.sessionKey)).toEqual(['s1'])
       expect(page2.snapshot.sessions?.nextCursor).toBeUndefined()
+      expect(page2.hints).toBeUndefined()
+      const tail = await engine.subscribe(peer, { views: ['sessions', 'activeRuns'], waitMs: 0,
+        known: { hostId: page1.hostId, logId: page1.logId, seq: page1.seq }
+      })
+      expect(tail).toMatchObject({ hints: [{ kind: 'hostNotice', notice }] })
+    } finally {
+      hub.close()
+      sink.close()
+    }
+  })
+
+  it('delivers one host notice to both the desktop device and its forwarded subscriber', async () => {
+    const sink = EventSink.open({ userDataDir: makeDir(), fullfsync: false })
+    const hub = new SubscribeHub()
+    const engine = new SubscribeEngine({
+      sink, hub, hostId: 'host', authorizePeer: () => undefined, grantScope: () => 'remote', remoteHostNotices: true
+    })
+    try {
+      const request = { views: ['sessions', 'activeRuns'] as const, waitMs: 0 }
+      const frame = { ...request, views: [...request.views] }
+      const forwarded = { ...frame, subscriptionId: 'f'.repeat(32) }
+      const peer = 'b'.repeat(64)
+      const first = await engine.subscribe(peer, frame)
+      await engine.subscribe(peer, forwarded)
+      const known = { hostId: first.hostId, logId: first.logId, seq: first.seq }
+      const notice = { id: 'shared-notice', kind: 'cli_approval_enabled' as const, ts: 1 }
+      hub.emitHostNotice(notice)
+      const desktop = await engine.subscribe(peer, { ...frame, known })
+      const phone = await engine.subscribe(peer, { ...forwarded, known })
+      expect(desktop.hints).toEqual([{ kind: 'hostNotice', notice }])
+      expect(phone.hints).toEqual([{ kind: 'hostNotice', notice }])
     } finally {
       hub.close()
       sink.close()

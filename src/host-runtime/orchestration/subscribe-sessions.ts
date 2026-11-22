@@ -1,19 +1,13 @@
-import type { SessionCatalogMetadata, SubscribeSessionRow, SubscribeSnapshot } from '../../shared/orchestration-subscribe'
+import type { SubscribeSessionRow, SubscribeSnapshot } from '../../shared/orchestration-subscribe'
 import type { EventSink } from './event-sink'
+import { deviceOutcome, visibleCatalog } from './subscribe-device-fields'
 import { mapSessionRow } from './projection-mappers'
 import type { SessionProjectionRow } from './types'
 
-export function visibleCatalog(
-  catalog: SessionCatalogMetadata,
-  canReadCwd: (cwd: string | null) => boolean
-): SessionCatalogMetadata {
-  const { projectCwd } = catalog
-  return projectCwd && !canReadCwd(projectCwd) ? { ...catalog, projectCwd: null } : catalog
-}
-
 export function projectSubscribeSession(
   mapped: SessionProjectionRow,
-  canReadCwd: (cwd: string | null) => boolean
+  canReadCwd: (cwd: string | null) => boolean,
+  scope: 'remote' | 'local'
 ): SubscribeSessionRow {
   return {
     sessionKey: mapped.sessionKey,
@@ -26,7 +20,7 @@ export function projectSubscribeSession(
     pinnedAt: mapped.pinnedAt,
     archivedAt: mapped.archivedAt,
     lastRunId: mapped.lastRunId,
-    lastRunOutcome: mapped.lastRunOutcome,
+    lastRunOutcome: scope === 'remote' ? deviceOutcome(mapped.lastRunOutcome) : mapped.lastRunOutcome,
     activeRunId: mapped.activeRunId,
     pendingQuestions: mapped.pendingQuestions,
     legacy: mapped.legacy,
@@ -103,7 +97,7 @@ export function readSessionsSnapshot(
       hasMore = true
       break
     }
-    visible.push(projectSubscribeSession(mapSessionRow(raw), canReadCwd))
+    visible.push(projectSubscribeSession(mapSessionRow(raw), canReadCwd, scope))
   }
 
   let total: number | 'unavailable' = 'unavailable'

@@ -218,6 +218,7 @@ function buildAuthorityRuntime<
   }
 
   const hooks: OrchestrationAuthorityHooks = {
+    currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: (ledgerDirectory) => {
       const created = createAuthorityLedgerStore({
         ledgerDirectory,

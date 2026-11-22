@@ -22,7 +22,7 @@ import { catalogSnapshot, type CatalogSnapshotReply } from './host-controller-ca
 import { readToolPanel, type ToolPanelDeps } from './host-controller-tool-panel'
 import { runSessionAction, runSessionDelete, runSessionFork, type SessionActionDeps } from './host-controller-session'
 import type { OrchestrationImmediateDispatchChecks } from './orchestration-seam'
-import { resolveIntentCommand, submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
+import { assertExpectedLog, resolveIntentCommand, submitIntent, submitReceivedIntent, type SubmitDeps, type SubmitResult } from './host-controller-submit'
 import { type AgentQuestionRequest, type AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
@@ -117,12 +117,16 @@ export class HostController {
     return submitIntent(this.#deps(), peerCertSHA256, input)
   }
 
-  async submitReceivedIntent(peer: string, input: { intentId: string; detail?: string }): Promise<SubmitResult> {
+  async submitReceivedIntent(peer: string, input: { intentId: string; detail?: string; knownLogId?: string }): Promise<SubmitResult> {
     return await submitReceivedIntent(this.#deps(), peer, input)
   }
 
 
-  intentStatus(peerCertSHA256: string, input: { intentId: string }): { runId: string; state: RunLifecycle } {
+  intentStatus(peerCertSHA256: string, input: { intentId: string; knownLogId?: string }): { runId: string; state: RunLifecycle } {
+    if (input.knownLogId !== undefined) {
+      this.authorizeDevice(peerCertSHA256)
+      assertExpectedLog(this.#injected.orchestration, input.knownLogId)
+    }
     return this.#gateway.intentStatus(peerCertSHA256, input)
   }
 

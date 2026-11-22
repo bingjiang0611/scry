@@ -62,9 +62,10 @@ describe('execution target production dispatcher', () => {
     const request = { op: 'subscribe', views: ['detail'], session: { sessionKey: 'mac2-session' },
       known: { hostId: 'mac2', logId: 'log-a', seq: 9 }, waitMs: 25_000 }
     await expect(fixture.router.dispatch(peer, { op: 'target', target, request })).resolves.toHaveProperty('executionTarget', target)
-    expect(fixture.client.mobileRequest).toHaveBeenLastCalledWith(target, request, expect.any(Function))
+    expect(fixture.client.mobileRequest).toHaveBeenLastCalledWith(target,
+      { ...request, subscriptionId: expect.stringMatching(/^[a-f0-9]{32}$/) }, expect.any(Function))
     fixture.client.mobileRequest.mockClear()
-    for (const invalid of [{ detailWatch: 'open' }, { waitMs: 25_001 }, { session: { sessionKey: '' } },
+    for (const invalid of [{ subscriptionId: 'a'.repeat(32) }, { detailWatch: 'open' }, { waitMs: 25_001 }, { session: { sessionKey: '' } },
       { known: { hostId: 'mac1', logId: 'log-a', seq: -1 } }, { deviceLabel: 'spoofed' }]) {
       await expect(fixture.router.dispatch(peer, { op: 'target', target, request: { ...request, ...invalid } }))
         .rejects.toThrow('invalid_target_request')
@@ -138,5 +139,20 @@ describe('execution target production dispatcher', () => {
       target, phonePeerFingerprint: peer, phoneIntentId: request.intentId,
       payloadHash: executionTargetPayloadHash(request), request
     }))
+  })
+
+  it('passes the expected log to the actual submit and receipt routes', async () => {
+    const fixture = router()
+    const intentId = '123e4567-e89b-42d3-a456-426614174000'
+    const request = { op: 'submitAtLog', intentId, knownLogId: 'expected-log', detail: '{"cwd":"/project"}' }
+    await fixture.router.dispatch(peer, { op: 'target', target, request })
+    expect(fixture.client.mobileSubmit).toHaveBeenCalledWith(expect.objectContaining({ request }))
+    await fixture.router.dispatch(peer, { op: 'target', target,
+      request: { op: 'intentStatusAtLog', intentId, knownLogId: 'expected-log' } })
+    expect(fixture.client.mobileIntentStatus).toHaveBeenCalledWith(expect.objectContaining({
+      phoneIntentId: intentId, knownLogId: 'expected-log'
+    }))
+    await expect(fixture.router.dispatch(peer, { op: 'target', target,
+      request: { op: 'submitAtLog', intentId, detail: request.detail } })).rejects.toThrow('invalid_target_request')
   })
 })

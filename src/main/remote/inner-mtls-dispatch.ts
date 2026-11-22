@@ -19,6 +19,7 @@ export interface RemoteRequestEnvelope {
   protocol?: number
   deviceLabel?: unknown
   intentId?: string
+  knownLogId?: string
   detail?: string
   cursor?: number
   outputCursor?: number
@@ -123,13 +124,17 @@ export async function dispatchRemoteRequest(
     if (request.op === 'attachmentCommit') {
       return await controller.attachmentCommit(fingerprint, request)
     }
-    if (request.op === 'submit') {
-      if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
-      return await controller.submitReceivedIntent(fingerprint, { intentId: request.intentId, detail: request.detail })
-    }
-    if (request.op === 'intentStatus') {
-      if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
-      return { intent: controller.intentStatus(fingerprint, { intentId: request.intentId }) }
+    if (request.op === 'submit' || request.op === 'submitAtLog' ||
+        request.op === 'intentStatus' || request.op === 'intentStatusAtLog') {
+      const { intentId, knownLogId } = request
+      if (typeof intentId !== 'string' || (request.op.endsWith('AtLog') && knownLogId === undefined) ||
+          (knownLogId !== undefined && (typeof knownLogId !== 'string' || !knownLogId || knownLogId.length > 128))) {
+        return { error: 'invalid_request' }
+      }
+      if (request.op === 'submit' || request.op === 'submitAtLog') {
+        return await controller.submitReceivedIntent(fingerprint, { intentId, detail: request.detail, knownLogId })
+      }
+      return { intent: controller.intentStatus(fingerprint, { intentId, knownLogId }) }
     }
     if (request.op === 'resolveIntent') {
       if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
