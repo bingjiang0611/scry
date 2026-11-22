@@ -3,6 +3,7 @@
 状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现并通过发布门禁。**当前已安装的是 App `0.2.239` / 私有 CLI `0.2.56`**：它在 `0.2.238` 的基础上统一了对话/运行状态模型（typed `not_sent` 回执、Provider 原生终止证据、归档缺失状态不再默认成功、Provider settle 与本地收口分开、Activity 呈现失败与阻断、侧聊边界改为任何显式终止轮次、停止控制调用失败可见），合同见 **[conversation-state-model.md](../conversation-state-model.md)**。上一轮 `0.2.238` 的归档终止证据修复与字节校验见 [archive-termination-fix.md](./archive-termination-fix.md)。用户正在运行的旧实例需要自己重启才会加载新版本。`0.2.237` 源码候选（[profile-capture-fix.md](./profile-capture-fix.md)）、`0.2.235` 大历史交付（[large-history-delivery.md](./large-history-delivery.md)、[large-history-fix.md](./large-history-fix.md)、[large-history-verification.md](./large-history-verification.md)）与 `0.2.231` 记录（[final-delivery.md](./final-delivery.md)、[release-verification.md](./release-verification.md)）现在只是历史，不是当前证明。下面各节的布局、文案与默认行为仍是设计基线；其中快照边界已按上述状态模型改为任何显式终止轮次。
 
 - [技术方案](./technical-plan.md)：现有调用链、数据合同、并行边界、实施顺序与验收。
+- [PR #56](https://github.com/bingjiang0611/scry/pull/56) 的本地验证：[第一轮](local-verify/REPORT.md)、[第二轮](local-verify/REPORT-2.md)、[焦点竞态复现](local-verify/REPORT-3.md)。
 
 ## 1. 已确认的产品合同
 
