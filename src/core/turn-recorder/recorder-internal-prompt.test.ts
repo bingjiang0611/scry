@@ -18,9 +18,7 @@ describe('Codex internal prompts', () => {
   it('recognizes only the full title instruction paired with the captured-prompt separator', () => {
     expect(isCodexInternalPrompt({ prompt: titleRequest })).toBe(true)
     expect(isCodexInternalPrompt({ prompt: `  \n${titleRequest}` })).toBe(true)
-    // Same opening words, ordinary request.
     expect(isCodexInternalPrompt({ prompt: 'Generate a concise, single-line task title for the roadmap' })).toBe(false)
-    // Instruction alone, without a captured prompt.
     expect(isCodexInternalPrompt({ prompt: instruction })).toBe(false)
     // Instruction opening plus an inline mention, not the fixed separator.
     expect(isCodexInternalPrompt({ prompt: `${instruction} User prompt: /rw REQ-1` })).toBe(false)

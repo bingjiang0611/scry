@@ -191,7 +191,6 @@ it('keeps an event that arrives before its claim is applied, instead of dropping
 
 it('marks the diff partial when the deferred claim took its baseline after the turn had changed files', async () => {
   const f = await fixture(true)
-  // The turn is already running and has changed a tracked file before the claim is applied.
   await appendFile(join(f.root, 'tracked.txt'), 'changed before the baseline\n')
   await queueClaim(f)
   await applySessionCaptureHook({

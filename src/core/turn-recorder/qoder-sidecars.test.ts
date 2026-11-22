@@ -212,7 +212,6 @@ describe('Qoder native sidecar custody and attribution', () => {
     // Bytes beyond the budget were never parsed, so they cannot be claimed.
     expect(record.modelSegments?.value?.some(segment => segment.text?.includes('late child analysis'))).toBe(false)
 
-    // Partial status is preserved, and the reason names the child, the cause and how much was kept.
     expect(record.tools.status).toBe('partial')
     const reason = record.tools.omissionReason ?? ''
     const truncation = /child agent transcript exceeds the 262144 byte per-child budget \(agent child, (.+agent-child\.jsonl)\): kept (\d+) of (\d+) bytes/.exec(reason)

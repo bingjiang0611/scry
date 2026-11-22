@@ -110,7 +110,6 @@ export function registerContinuationCaptureSuite(): void {
       .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
     await sealQuietSegment(root)
 
-    // Second wake: task-2 reported, a longer stretch of work, then one more background step.
     await appendFile(transcript, `${[
       notification('prompt-3', 'task-2', 'call-41'),
       ...calls('prompt-3', 42, 12),
@@ -160,7 +159,6 @@ export function registerContinuationCaptureSuite(): void {
         role: 'continuation', source: 'recorder_background_wake', parentId: records[0].recordId
       })
     }
-    // One logical turn, four published segments, no duplicate work and nothing left pending.
     expect(await recoverRecorder(root)).toMatchObject({ recovered: 0, pending: 0 })
   })
 }

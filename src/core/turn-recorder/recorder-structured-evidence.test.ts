@@ -32,7 +32,6 @@ beforeAll(async () => {
     ...base, parent_request_set_id: 'R1', assistant_response: '需求已整理，等待确认。', timestamp: '2026-11-16T08:13:05.000Z'
   } })).toMatchObject({ status: 'committed' })
 
-  // 第二轮：同一会话的下一个提问。
   expect(await handleRecorderHook({ provider: 'qoder', workspace: root, event: 'UserPromptSubmit', payload: {
     ...base, request_set_id: 'R2', prompt: '看下当前采集工具的版本', timestamp: '2026-11-16T08:13:23.357Z'
   } })).toMatchObject({ status: 'started' })

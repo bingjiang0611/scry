@@ -135,7 +135,6 @@ function record(files: DiffFile[]): Omit<AgentTurnRecord, 'sequence'> {
 
 describe('问题 2: 引用预算按证据价值排序', () => {
   it('keeps the raw session and every tool body when a turn also touches 570 new untracked files', () => {
-    // 114 tool references (57 calls × input+output), 570 new untracked files, one raw transcript.
     const draft = record(untrackedFiles(570, 32 * 1024))
     const items = recordContentItems(draft)
     expect(items.filter((item) => item.priority === 'tool')).toHaveLength(114)

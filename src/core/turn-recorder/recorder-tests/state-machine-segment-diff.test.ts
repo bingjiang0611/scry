@@ -51,7 +51,6 @@ export function registerSegmentDiffSuite(): void {
     const firstStore = await frozen(root)
     expect(firstStore).toHaveLength(1)
 
-    // First wake: the build reported and the Agent kept working on the same question.
     await appendFile(transcript, `${[
       notification('prompt-2', 'task-1', 'call-bg-1'),
       assistantText('prompt-2', 'Build finished; applying the fix.'),

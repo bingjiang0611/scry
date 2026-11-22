@@ -86,7 +86,6 @@ describe('recorder daemon version handshake', () => {
       })
       expect((await send({ 'x-scry-client-pid': String(process.pid) }, 'client-pid-known')).statusCode).toBe(200)
       expect((await send({}, 'client-pid-absent')).statusCode).toBe(200)
-      // 非数字与 init 的 pid 都是无效传输，拒绝而不是记成“进程已退出”。
       expect((await send({ 'x-scry-client-pid': 'abc' }, 'client-pid-invalid')).statusCode).toBe(200)
       expect((await send({ 'x-scry-client-pid': '1' }, 'client-pid-init')).statusCode).toBe(400)
 

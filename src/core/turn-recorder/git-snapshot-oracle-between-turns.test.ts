@@ -27,7 +27,6 @@ async function begin(root: string, repo: string) {
   return capture
 }
 
-/** One complete turn: capture the baseline, mutate, then build the after tree. */
 async function turn(root: string, repo: string, mutate: (repo: string) => Promise<void>): Promise<OracleRun> {
   const capture = await begin(root, repo)
   try {

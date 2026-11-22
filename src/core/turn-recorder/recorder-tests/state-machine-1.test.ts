@@ -60,7 +60,6 @@ export function registerSuite1(): void {
     const orphan = JSON.parse(await readFile(join(directory, file), 'utf8'))
     expect(orphan.payload).toMatchObject({ storage: 'truncated', encoding: 'json', reasons: ['field_budget'] })
     expect(Buffer.byteLength(orphan.payload.content)).toBeLessThanOrEqual(1024)
-    // A bounded payload must stay parseable and say how much content each field lost.
     const bounded = JSON.parse(orphan.payload.content)
     expect(bounded.tool_response).toMatchObject({ storage: 'truncated', originalBytes: 6000 })
     expect(bounded.tool_response.preview.startsWith('秘秘')).toBe(true)

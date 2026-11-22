@@ -27,7 +27,6 @@ export function registerSuite5(): void {
     await handleRecorderHook(payloadFor('UserPromptSubmit'))
     await handleRecorderHook({ ...payloadFor('Stop'), payload: payload('defer-1', { timestamp: '2026-07-19T12:00:01.000Z' }) })
 
-    // 记录必须已经落盘，而投递没有在 hook 里发生。
     expect((await listRecords(join(root, '.scry'))).length).toBe(1)
     await expect(access(capture)).rejects.toMatchObject({ code: 'ENOENT' })
 

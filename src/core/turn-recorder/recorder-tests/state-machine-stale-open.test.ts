@@ -92,7 +92,6 @@ export function registerStaleOpenTurnSuite(): void {
     })
     expect(record.termination?.omissionReason).toContain('stop_reason=end_turn')
     expect(record.termination?.omissionReason).toContain('no terminal event was observed')
-    // 这条恢复要留下回执：健康计数加一，open 状态消失。
     expect((await readHealth(join(root, '.scry'))).recoveredRecords).toBe(1)
     await expect(recorderOpenTurns(join(root, '.scry'))).resolves.toEqual([])
   }, 40_000)
@@ -223,7 +222,6 @@ export function registerStaleOpenTurnSuite(): void {
     const third = await recoverRecorder(root, process.env, undefined, undefined, { expireOpen: true })
     expect(second).toEqual({ recovered: 0, pending: 0, expired: 0 })
     expect(third).toEqual({ recovered: 0, pending: 0, expired: 0 })
-    // 幂等：仍然只有一条记录，sequence 与收尾时间都没有变。
     const records = await listRecords(join(root, '.scry'))
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ recordId: record?.recordId, sequence: record?.sequence, completedAt: record?.completedAt })

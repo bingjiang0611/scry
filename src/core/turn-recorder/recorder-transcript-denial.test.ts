@@ -118,7 +118,6 @@ describe('a denied transcript read while the next prompt arrives', () => {
     expect(sealed.transcript?.omissionReason).toContain('lifecycle evidence')
     expect(sealed.termination.value?.reason).toBe('superseded_by_next_turn')
 
-    // The next turn is a normal record, and none of its calls were attributed to the sealed one.
     expect(second.status).toBe('completed')
     expect(second.generation).toBe(2)
     expect(second.user.value?.text).toBe('second prompt')

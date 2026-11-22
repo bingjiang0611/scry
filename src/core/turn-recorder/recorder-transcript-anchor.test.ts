@@ -62,7 +62,6 @@ describe('transcript anchor reuse', () => {
     const warm = await stableTranscript(path, 'anchor:2', 'claude', hash)
     const warmScan = transcriptReadStats().anchorBytesScanned
 
-    // The first call walks back over the whole window; the warm call only reads what was appended.
     expect(firstScan).toBeGreaterThan(20_000)
     expect(warmScan).toBeLessThan(firstScan / 4)
     expect(shape(warm)).toEqual(shape(await coldRead(path, hash, 'anchor:3')))
@@ -75,7 +74,6 @@ describe('transcript anchor reuse', () => {
     await writeFile(path, turn(prompt, 40) + turn('middle prompt', 40, 200))
     await stableTranscript(path, 'anchor:repeat-1', 'claude', hash)
 
-    // The user retries: the same prompt text appears a second time, later in the log.
     await writeFile(path, turn(prompt, 40) + turn('middle prompt', 40, 200) + turn(prompt, 6, 900))
     const warm = await stableTranscript(path, 'anchor:repeat-2', 'claude', hash)
     const cold = await coldRead(path, hash, 'anchor:repeat-3')
@@ -220,7 +218,6 @@ describe('transcript anchor reuse', () => {
     await writeFile(path, turn('anonymous prompt', 20))
     resetTranscriptReadStats()
     await stableTranscript(path, 'anchor:no-identity', 'claude')
-    // Without an identity the window starts at 0 and no anchor line is read.
     expect(transcriptReadStats().bytesRead).toBeGreaterThan(0)
     expect(transcriptReadStats().anchorBytesScanned).toBe(0)
   })

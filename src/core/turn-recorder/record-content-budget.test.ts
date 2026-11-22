@@ -72,7 +72,6 @@ function uploaderAccepts(recordJson: string, bodies: Map<string, string>): numbe
   return Buffer.byteLength(contentEnvelope(recordJson, contentJson))
 }
 
-// ---------------------------------------------------------------------------
 
 const bodies = new Map<string, string>()
 

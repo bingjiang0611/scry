@@ -196,7 +196,6 @@ if (JSON.parse(fs.readFileSync(${JSON.stringify(reject)}, 'utf8')).includes(noti
     expect(delivery?.detail).toMatch(/sequence 1/)
     expect(delivery?.detail).toMatch(/notify-retry --sequence 1/)
 
-    // The operator names the sequence explicitly; the record is intact and the receiver dedupes it.
     await expect(notifyRetry(f, [['sequence', '1']])).resolves.toBe(0)
     await expect(commitNotificationStatus(f.dataRoot, f.env)).resolves.toMatchObject({ ackedThrough: 2 })
     await completeTurn(f.root, 'turn-3')

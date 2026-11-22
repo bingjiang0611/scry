@@ -111,7 +111,6 @@ describe('commit hook grant', () => {
     await writeCommitHookGrant(workspace, bundle, env)
 
     const other = await fixture({ commitHook: bundleConfig })
-    // Same grant file contents, different workspace identity.
     const forged = { ...env, SCRY_GRANT_DIR: env.SCRY_GRANT_DIR }
     expect(commitHookGrantPath(other.workspace, forged)).not.toBe(grantPath)
     expect(await readCommitHookGrant(other.workspace, forged)).toBeNull()

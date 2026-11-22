@@ -78,7 +78,6 @@ describe('未跟踪文件清单策略接进真实 Git 采集', () => {
       expect(omitted).toHaveLength(UNTRACKED_PATCH_FILE_LIMIT + 1)
       expect(omitted.every((file) => file.patchReason === 'policy' && !file.patchContent)).toBe(true)
       expect(omitted.every((file) => file.path.includes('friday-88733196-extra'))).toBe(true)
-      // The tracked edit keeps its patch: policy only removes the new untracked bodies.
       const tracked = snapshot.files.find((file) => file.path.endsWith('/tracked.txt'))
       expect(tracked?.patchStatus).toBe('captured')
       expect(tracked?.patch).toContain('v3')

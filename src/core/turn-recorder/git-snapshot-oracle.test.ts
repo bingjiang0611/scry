@@ -28,7 +28,6 @@ afterAll(async () => { await removeTrackedRoots() })
 
 const scenarios: Scenario[] = [
   {
-    // O1 basic modify/add/delete.
     id: 'o1-basic',
     setup: async (repo) => {
       await writeFileAt(repo, 'keep.txt', 'keep\n')
