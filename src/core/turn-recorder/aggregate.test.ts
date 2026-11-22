@@ -12,7 +12,7 @@ describe('aggregateTurnEvidence', () => {
         version: 1, status: 'captured', repoRoot: `/repo/${Math.max(0, index - 1)}`,
         files: [], beforeAt: ts, afterAt: ts, captureMs: 1, cleanup: 'ok',
         repositoryLocation: {
-          branch: null, remote: 'https://fake-token@example.invalid/private',
+          branch: null, branchAfter: 'next-branch', remote: 'https://fake-token@example.invalid/private',
           commitBefore: 'a'.repeat(40), commitAfter: 'b'.repeat(64)
         }
       }
@@ -20,7 +20,7 @@ describe('aggregateTurnEvidence', () => {
     const diffs = aggregateTurnEvidence({ events }).diff.value!
     expect(diffs).toHaveLength(34)
     expect(diffs.filter(diff => diff.repositoryLocation)).toHaveLength(32)
-    expect(diffs[0].repositoryLocation).toEqual({ branch: null, commitBefore: 'a'.repeat(40), commitAfter: 'b'.repeat(64) })
+    expect(diffs[0].repositoryLocation).toEqual({ branch: null, branchAfter: 'next-branch', commitBefore: 'a'.repeat(40), commitAfter: 'b'.repeat(64) })
     expect(diffs[1].repositoryLocation).toBeUndefined()
     expect(diffs[33].repositoryLocation).toBeUndefined()
   })

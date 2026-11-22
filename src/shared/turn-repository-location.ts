@@ -10,6 +10,8 @@ export interface TurnRepositoryLocation {
   remote?: string
   /** Branch at turn start; null means HEAD was detached, absence means unknown. */
   branch?: string | null
+  /** Branch at turn end; null means HEAD was detached, absence means unknown. */
+  branchAfter?: string | null
   commitBefore?: string
   commitAfter?: string
 }
@@ -41,6 +43,7 @@ export function normalizeTurnRepositoryLocation(value: unknown): TurnRepositoryL
   const location: TurnRepositoryLocation = {}
   if (isRepositoryRemote(raw.remote)) location.remote = raw.remote
   if (raw.branch === null || isRepositoryBranch(raw.branch)) location.branch = raw.branch
+  if (raw.branchAfter === null || isRepositoryBranch(raw.branchAfter)) location.branchAfter = raw.branchAfter
   if (isRepositoryCommit(raw.commitBefore)) location.commitBefore = raw.commitBefore
   if (isRepositoryCommit(raw.commitAfter)) location.commitAfter = raw.commitAfter
   return Object.keys(location).length ? location : undefined

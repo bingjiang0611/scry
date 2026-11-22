@@ -11,7 +11,14 @@ const SMALL_FILE_BYTES = 4096
 const CONFIG_BYTES = 64 * 1024
 const PACKED_REFS_BYTES = 256 * 1024
 
-type StartLocation = Omit<TurnRepositoryLocation, 'commitAfter'>
+export interface GitRepositoryHead {
+  branch?: string | null
+  commit?: string
+}
+
+export interface GitRepositoryLocation extends GitRepositoryHead {
+  remote?: string
+}
 
 async function readSmallFile(path: string, limit: number, deadline: number): Promise<string | null | undefined> {
   if (Date.now() >= deadline) return undefined
@@ -73,11 +80,12 @@ function readOrigin(config: string): string | undefined {
   return undefined
 }
 
-async function readHead(gitDir: string, commonDir: string, deadline: number): Promise<StartLocation> {
+async function readHead(gitDir: string, commonDir: string, deadline: number, publish: (head: GitRepositoryHead) => void): Promise<void> {
   const head = (await readSmallFile(join(gitDir, 'HEAD'), SMALL_FILE_BYTES, deadline))?.trim()
-  if (isRepositoryCommit(head)) return { branch: null, commitBefore: head }
+  if (isRepositoryCommit(head)) return publish({ branch: null, commit: head })
   const branch = /^ref: refs\/heads\/(.+)$/.exec(head ?? '')?.[1]
-  if (!isRepositoryBranch(branch)) return {}
+  if (!isRepositoryBranch(branch)) return
+  publish({ branch })
   const ref = `refs/heads/${branch}`
   const loose = await readSmallFile(join(commonDir, ref), SMALL_FILE_BYTES, deadline)
   let commit = loose?.trim()
@@ -91,11 +99,11 @@ async function readHead(gitDir: string, commonDir: string, deadline: number): Pr
       }
     }
   }
-  return { branch, ...(isRepositoryCommit(commit) ? { commitBefore: commit } : {}) }
+  if (isRepositoryCommit(commit)) publish({ commit })
 }
 
 export async function readGitRepositoryLocation(
-  repoRoot: string, deadline: number, includeOrigin: boolean, publish: (evidence: StartLocation) => void
+  repoRoot: string, deadline: number, includeOrigin: boolean, publish: (evidence: GitRepositoryLocation) => void
 ): Promise<void> {
   if (Date.now() >= deadline) return
   let gitDir = join(repoRoot, '.git')
@@ -111,7 +119,7 @@ export async function readGitRepositoryLocation(
   if (common === undefined || (common !== null && !/^[^\u0000\r\n]+$/.test(common.trim()))) return
   const commonDir = common === null ? gitDir : resolve(gitDir, common.trim())
   await Promise.all([
-    readHead(gitDir, commonDir, deadline).then(publish),
+    readHead(gitDir, commonDir, deadline, publish),
     includeOrigin ? readSmallFile(join(commonDir, 'config'), CONFIG_BYTES, deadline).then(config => {
       const remote = config && readOrigin(config)
       if (remote) publish({ remote })
@@ -122,8 +130,8 @@ export async function readGitRepositoryLocation(
 let pending = 0
 
 /** Metadata can use time already spent capturing the diff, but never extends that wait. */
-export function sampleGitRepositoryLocation(repoRoot: string, includeOrigin: boolean): () => StartLocation {
-  const location: StartLocation = {}
+export function sampleGitRepositoryLocation(repoRoot: string, includeOrigin: boolean): () => GitRepositoryLocation {
+  const location: GitRepositoryLocation = {}
   if (pending < TURN_REPOSITORY_LOCATION_LIMITS.repositories) {
     pending++
     void readGitRepositoryLocation(repoRoot, Date.now() + 50, includeOrigin, evidence => {
@@ -133,7 +141,15 @@ export function sampleGitRepositoryLocation(repoRoot: string, includeOrigin: boo
   return () => ({ ...location })
 }
 
-export function withRepositoryLocation(snapshot: TurnDiffSnapshot, before?: StartLocation, commitAfter?: string): TurnDiffSnapshot {
-  if (!commitAfter && (!before || !Object.keys(before).length)) return snapshot
-  return { ...snapshot, repositoryLocation: { ...before, ...(commitAfter ? { commitAfter } : {}) } }
+export function withRepositoryLocation(
+  snapshot: TurnDiffSnapshot, before?: GitRepositoryLocation, after?: GitRepositoryHead
+): TurnDiffSnapshot {
+  const repositoryLocation: TurnRepositoryLocation = {
+    ...(before?.remote ? { remote: before.remote } : {}),
+    ...(before?.branch !== undefined ? { branch: before.branch } : {}),
+    ...(after?.branch !== undefined ? { branchAfter: after.branch } : {}),
+    ...(before?.commit ? { commitBefore: before.commit } : {}),
+    ...(after?.commit ? { commitAfter: after.commit } : {})
+  }
+  return Object.keys(repositoryLocation).length ? { ...snapshot, repositoryLocation } : snapshot
 }

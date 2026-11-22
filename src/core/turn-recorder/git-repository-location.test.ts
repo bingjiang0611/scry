@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { TurnRepositoryLocation } from '../../shared/turn-repository-location'
-import { normalizeGitOrigin, readGitRepositoryLocation } from './git-repository-location'
+import { normalizeTurnDiffSnapshot } from '../../shared/turn-diff'
+import { beginGitTurnDiff, finishGitTurnDiff } from './git'
+import { normalizeGitOrigin, readGitRepositoryLocation, type GitRepositoryLocation } from './git-repository-location'
 
 const exec = promisify(execFile)
 
@@ -14,7 +15,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return stdout.trim()
 }
 
-async function read(root: string): Promise<TurnRepositoryLocation> {
+async function read(root: string): Promise<GitRepositoryLocation> {
   const location = {}
   await readGitRepositoryLocation(root, Date.now() + 1000, true, fields => Object.assign(location, fields))
   return location
@@ -35,7 +36,7 @@ describe('Git repository location from disk', () => {
   it('reads the branch, loose HEAD commit and credential-free origin of a normal repository', async () => {
     await init()
     await git(root, 'remote', 'add', 'origin', 'https://alice:fake-password@EXAMPLE.invalid:443/group/repo.git?token=fake#secret')
-    expect(await read(root)).toEqual({ branch: 'feature/first', commitBefore: oid, remote: 'example.invalid/group/repo' })
+    expect(await read(root)).toEqual({ branch: 'feature/first', commit: oid, remote: 'example.invalid/group/repo' })
   })
 
   it('reads a linked worktree HEAD and resolves its packed ref and origin in the common directory', async () => {
@@ -44,19 +45,46 @@ describe('Git repository location from disk', () => {
     const linked = join(root, 'linked')
     await git(root, 'worktree', 'add', '-b', 'worktree/second', linked)
     await git(root, 'pack-refs', '--all')
-    expect(await read(linked)).toEqual({ branch: 'worktree/second', commitBefore: oid, remote: 'example.invalid/group/repo' })
+    expect(await read(linked)).toEqual({ branch: 'worktree/second', commit: oid, remote: 'example.invalid/group/repo' })
+  })
+
+  it('keeps the start branch and HEAD when the turn creates and switches to another branch', async () => {
+    await init()
+    await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/repo.git')
+    const capture = await beginGitTurnDiff(root)
+    await git(root, 'switch', '-c', 'feature/second')
+    await git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'next')
+    const commitAfter = await git(root, 'rev-parse', 'HEAD')
+    const snapshot = await finishGitTurnDiff(capture)
+    expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation).toEqual({
+      branch: 'feature/first', branchAfter: 'feature/second', commitBefore: oid, commitAfter,
+      remote: 'example.invalid/group/repo'
+    })
+  })
+
+  it('samples the actual HEAD independently of a continuation baseline tree and records detached end', async () => {
+    await init()
+    await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/repo.git')
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}')
+    const capture = await beginGitTurnDiff(root, undefined, undefined, [], false, { commit: tree, at: new Date().toISOString() })
+    await git(root, 'switch', '--detach')
+    const snapshot = await finishGitTurnDiff(capture)
+    expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation).toEqual({
+      branch: 'feature/first', branchAfter: null, commitBefore: oid, commitAfter: oid,
+      remote: 'example.invalid/group/repo'
+    })
   })
 
   it('handles a gitdir pointer without a worktree commondir', async () => {
     await init(join(root, 'metadata'))
     await writeFile(join(root, '.git'), 'gitdir: metadata\n')
-    expect(await read(root)).toEqual({ branch: 'feature/first', commitBefore: oid })
+    expect(await read(root)).toEqual({ branch: 'feature/first', commit: oid })
   })
 
   it('marks a detached HEAD and omits a missing remote', async () => {
     await init()
     await git(root, 'switch', '--detach')
-    expect(await read(root)).toEqual({ branch: null, commitBefore: oid })
+    expect(await read(root)).toEqual({ branch: null, commit: oid })
   })
 
   it('omits location in a non-Git directory or unrecognized layout', async () => {
@@ -73,10 +101,10 @@ describe('Git repository location from disk', () => {
     await writeFile(other, origin)
     await rm(config)
     await symlink(other, config)
-    expect(await read(root)).toEqual({ branch: 'feature/first', commitBefore: oid })
+    expect(await read(root)).toEqual({ branch: 'feature/first', commit: oid })
     await rm(config)
     await writeFile(config, `${origin}${'#'.repeat(65_536)}`)
-    expect(await read(root)).toEqual({ branch: 'feature/first', commitBefore: oid })
+    expect(await read(root)).toEqual({ branch: 'feature/first', commit: oid })
   })
 })
 

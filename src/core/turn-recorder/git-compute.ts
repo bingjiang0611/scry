@@ -213,10 +213,12 @@ export async function computeGitTurnDiff(
 ): Promise<TurnDiffSnapshot> {
   const started = Date.now()
   let afterAt = new Date(started).toISOString()
-  const location = !sharedAfter && capture.repoRoot ? sampleGitRepositoryLocation(capture.repoRoot, false) : undefined
-  const commitAfter = () => sharedAfter?.commitAfter ?? location?.().commitBefore
+  const location = !sharedAfter && !options.workspaceSnapshot && capture.repoRoot
+    ? sampleGitRepositoryLocation(capture.repoRoot, false) : undefined
+  let repositoryEnd = sharedAfter?.repositoryEnd
+  const readEnd = () => repositoryEnd ??= location?.()
   const located = (snapshot: TurnDiffSnapshot): TurnDiffSnapshot =>
-    withRepositoryLocation(snapshot, capture.repositoryStart, commitAfter())
+    withRepositoryLocation(snapshot, capture.repositoryStart, readEnd())
   if (!sharedAfter && capture.status === 'ready' && capture.beforeTree && capture.tempDir && capture.objectDir) {
     // A clean baseline is the start commit, so deciding "this repository did not change" costs one
     // status read instead of the whole discovery/targeted/fallback pipeline. Anything unproven takes
@@ -230,7 +232,7 @@ export async function computeGitTurnDiff(
         // for a commit baseline, so it stays the empty path the full pipeline would have filled.
         onAfter({
           tree: capture.beforeTree,
-          commitAfter: commitAfter(),
+          repositoryEnd: readEnd(),
           afterAt,
           indexFile: join(capture.tempDir, 'after.index'),
           objectDir: capture.objectDir,
@@ -440,7 +442,7 @@ export async function computeGitTurnDiff(
     }
     if (!afterTree) throw new Error('Git after tree was not created')
     if (!sharedAfter) onAfter?.({
-      tree: afterTree, commitAfter: commitAfter(), afterAt, indexFile: env.GIT_INDEX_FILE!, objectDir: capture.objectDir,
+      tree: afterTree, repositoryEnd: readEnd(), afterAt, indexFile: env.GIT_INDEX_FILE!, objectDir: capture.objectDir,
       alternateObjectDirs: capture.alternateObjectDirs, filterOverrides, collection
     })
 
