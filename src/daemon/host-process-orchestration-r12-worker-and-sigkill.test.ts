@@ -280,7 +280,6 @@ main().catch((err) => { console.error(err); process.exit(1) })
     expect(gate.prepareAndVerify('r2', 'codex', canonicalWs)).toEqual({ ok: true })
     expect(gate.rehashCount()).toBe(1)
 
-    // Change PATH so bare command resolves to binB -> must miss cache and rehash!
     currentPath = `${binB}:${process.env.PATH ?? ''}`
     expect(gate.prepareAndVerify('r3', 'codex', canonicalWs)).toEqual({ ok: true })
     expect(gate.rehashCount()).toBe(2)

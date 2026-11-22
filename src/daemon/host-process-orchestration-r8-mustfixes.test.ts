@@ -58,14 +58,11 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
     writeFileSync(configPath, '[mcp_servers.r8]\ncommand = "/bin/echo"\nargs = ["v1"]\n')
 
     const gate = new AuthorityMcpTrustGate()
-    // pi skips repo MCP trust gate (aligned with run-admission.ts:199)
     expect(gate.verify('run-pi', 'pi', canonicalWs)).toEqual({ ok: true })
 
-    // codex prepare + unchanged verify passes
     gate.prepare('run-codex', 'codex', canonicalWs)
     expect(gate.verify('run-codex', 'codex', canonicalWs)).toEqual({ ok: true })
 
-    // Mutating config between prepare and verify MUST fail closed with fingerprint change message!
     writeFileSync(configPath, '[mcp_servers.r8]\ncommand = "/bin/echo"\nargs = ["v2-mutated"]\n')
     const afterMutation = gate.verify('run-codex', 'codex', canonicalWs)
     expect(afterMutation.ok).toBe(false)
@@ -96,7 +93,6 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      // Answering a non-existent runId/questionId via hooks.onQuestionAnswer MUST throw fail-closed!
       expect(() =>
         host!.orchestrationAuthority!.hooks.onQuestionAnswer({
           peerCertSHA256: 'a'.repeat(64),

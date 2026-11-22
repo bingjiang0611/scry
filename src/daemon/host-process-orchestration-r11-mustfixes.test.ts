@@ -95,7 +95,6 @@ describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run
     mkdirSync(ws, { recursive: true, mode: 0o700 })
     const canonicalWs = realpathSync(ws)
 
-    // Create a symlink `.mcp.json` -> target file inside workspace containing a real executable (`process.execPath`).
     const targetFile = join(canonicalWs, 'real-mcp-config.json')
     writeFileSync(
       targetFile,
@@ -114,7 +113,6 @@ describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run
     const stampBefore = fileStatStamp(linkPath)
     expect(stampBefore).toContain('|T:')
 
-    // Cross-run caching: 5 distinct runs in the same workspace only hash the executable ONCE!
     const gate = new AuthorityMcpTrustGate()
     for (let i = 0; i < 5; i += 1) {
       const res = gate.prepareAndVerify(`run-${i}`, 'claude', canonicalWs)
@@ -122,7 +120,6 @@ describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run
     }
     expect(gate.rehashCount()).toBe(1)
 
-    // In-place mutation of the symlink TARGET file (symlink itself untouched) MUST change fileStatStamp and trigger rehash!
     writeFileSync(targetFile, '{broken symlink target json')
     const stampAfter = fileStatStamp(linkPath)
     expect(stampAfter).not.toBe(stampBefore)
@@ -131,7 +128,6 @@ describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run
     expect(rejected.ok).toBe(false)
     expect(gate.rehashCount()).toBe(2)
 
-    // End-to-end real daemon check with symlinked `.codex/config.toml` target mutated in place between runs:
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
     createRecentFoldersStore(userDataDir).push(canonicalWs)
@@ -166,7 +162,6 @@ describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run
       })
       expect(await waitTerminal(host.channel.socketPath, ca, device.certPEM, device.keyPEM, run1.runId)).toBe('settled')
 
-      // Mutate the symlink target in place (without touching the symlink itself) -> next run MUST fail closed!
       writeFileSync(codexTarget, unsafeToml)
       const run2 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
