@@ -2,10 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { resolve } from 'node:path'
 import { electronDependents } from './value-import-graph'
 
-// P1-2b extracts one process composition shared by Electron main and the daemon.
-// These are its first three constructors; if any reaches Electron the daemon can
-// never import the shared factory, even when the offending import is only used for
-// a path or a renderer notification.
 const ENTRIES = [
   '../main/bootstrap/session-state.ts',
   '../main/bootstrap/session-catalog.ts',

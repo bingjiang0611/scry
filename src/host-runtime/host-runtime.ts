@@ -15,14 +15,6 @@ import { observeSessionStatus } from '../main/remote/remote-workspace'
 import { archiveSessionAndStop } from '../main/session-archive'
 import type { HostRuntimeInputs } from './host-runtime-types'
 
-// The host assembly, kept out of Electron main so the same wiring can later run
-// inside the daemon. Main passes in the few inputs only it can produce (userData
-// paths, shell environment, history readers, tool panels); everything below is
-// plain data and callbacks.
-/**
- * Only a device grant is limited to archived sessions. The App's own grant keeps the
- * App's semantics: main already showed the confirmation dialog before asking.
- */
 export function sessionDeleteRequiresArchive(grantScope?: 'local' | 'remote'): boolean {
   return grantScope !== 'local'
 }
@@ -46,10 +38,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       hostId: () => runtime.remoteHostService!.hostId,
       authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
       getRun: (runId, options) => {
-        // A run leaves the registry before the ledger records it settled. The App's read
-        // that follows `run_settled` (settledTail, local grant only) still gets the run's
-        // final trace; every other read keeps the device contract: a settled run is `null`
-        // and its evidence lives in the archive.
         const state = runtime.runs.get(runId)?.state ?? (options?.departed ? runtime.runs.departedState?.(runId) : undefined)
         return state ? runtime.boundedLiveRun(state) : null
       },
@@ -81,7 +69,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, async () => {
         const started = await runtime.startAppRun({
           ...input.request,
-          // A worktree start reserves its workspace under the ledger run's identity.
           commandId: input.ledgerRunId,
           backend: 'local',
           runtimeProvider: undefined
@@ -101,7 +88,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
           ...(input.onWorkspaceProgress ? { onWorkspaceProgress: input.onWorkspaceProgress } : {}),
           onRegistered: (result) => input.onRegistered?.({ cwd: result.cwd ?? input.request.cwd! })
         })
-        // A worktree start answers once registered; its terminal receipt follows.
         return 'remoteCompletion' in started ? started.remoteCompletion : started as RemoteRunCompletion
       }).then((receipt) => receipt.result)
     }),
@@ -156,9 +142,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote') => {
         const ref = runtime.sessionRefFromRequest!(request)
         if (!ref) throw new Error('无效的远程会话删除请求')
-        // The App's own grant keeps the App's semantics: main already asked the user,
-        // so an unarchived session may be deleted. A device grant may only delete an
-        // archived session, because that is the narrower rule it has always had.
         const requireArchived = sessionDeleteRequiresArchive(grantScope)
         const authorizeArchived = (): void => {
           authorize()
@@ -177,7 +160,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       const roots = canonicalRemoteProjectRoots(runtime.knownProjectDirectories())
       const activeRuns = runtime.runs.activeStates()
       const out: RemoteSessionRef[] = []
-      // Sync realpath once per distinct cwd in this call (never stale).
       const resolved = new Map<string, string | null>()
       for (const s of runtime.appSessionStore().load()) {
         if (!s.cwd) continue

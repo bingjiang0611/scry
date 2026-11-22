@@ -36,6 +36,7 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [032: Recover managed turns from durable handoff evidence](032-recorder-managed-handoff.md)
 - [033: Keep recorder durability, authorization and observation separate](033-recorder-io-and-configuration.md)
 - [034: Test recorder optimizations against independent evidence](034-recorder-regression-oracles.md)
+- [035: Share host composition without sharing run ownership](035-host-runtime-composition.md)
 
 ## Source comment ratchet
 

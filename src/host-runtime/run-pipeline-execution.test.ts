@@ -2,11 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { createRunPipeline, type RunPipelineInputs } from './create-run-pipeline'
 import type { AgentStartRequest } from '../shared/runtime'
 
-// With SCRY_HOST_DAEMON=1 another process owns every run. The App still assembles the
-// registry and trace views other channels read, but it must never reach a Provider from
-// this process: a run started here would be invisible to the daemon's ledger and to the
-// App's own run view. These are construction assertions - they fail if the assembly can
-// still execute, not merely if a caller forgets to check.
 
 const payload: AgentStartRequest = { prompt: 'go', providerId: 'claude', cwd: '/w' }
 
@@ -39,7 +34,6 @@ function assembly(execution: 'in-process' | 'daemon') {
 describe('run pipeline execution ownership', () => {
   it('keeps the registry and trace views available when the daemon owns runs', () => {
     const { pipeline } = assembly('daemon')
-    // Other channels read these; they must still answer without an executor.
     expect(pipeline.runs.activeStates()).toEqual([])
     expect(typeof pipeline.traceOutput.ack).toBe('function')
     expect(typeof pipeline.requestRunStop).toBe('function')
@@ -48,7 +42,6 @@ describe('run pipeline execution ownership', () => {
   it('refuses to start a run in-process and never reaches a Provider', async () => {
     const { pipeline, startRun, startWorkspaceRun } = assembly('daemon')
     await expect(pipeline.startAppRun(payload)).rejects.toThrow('daemon_mode_owns_runs')
-    // A workspace preparation takes the other branch, so it is asserted separately.
     await expect(pipeline.startAppRun({ ...payload, workspace: {} } as AgentStartRequest)).rejects.toThrow('daemon_mode_owns_runs')
     expect(startRun).not.toHaveBeenCalled()
     expect(startWorkspaceRun).not.toHaveBeenCalled()
