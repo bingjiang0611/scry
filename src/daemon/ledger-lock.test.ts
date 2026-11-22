@@ -85,8 +85,6 @@ describe('daemon lock L1: PID reuse must not lock the daemon out', () => {
   it('takes over a reused pid instead of refusing to start', async () => {
     const directory = tempDir()
     await acquireDaemonLock({ directory, startedBy: 'first', pid: 5001, lister: snapshot([[5001, 'Mon Jan  1 00:00:00 2026']]) })
-    // Same pid, different start time, different program: the daemon that wrote this
-    // lock is gone and the pid now belongs to someone else.
     const next = await acquireDaemonLock({
       directory, startedBy: 'second', pid: 5002,
       lister: snapshot([[5001, 'Tue Feb  2 00:00:00 2026', 'S', '/usr/bin/other'], [5002, 'Tue Feb  2 00:00:01 2026']]),
@@ -98,14 +96,12 @@ describe('daemon lock L1: PID reuse must not lock the daemon out', () => {
   })
 
   it('can never signal the process that reused the pid', () => {
-    // Takeover is a file operation only; the module has no way to kill anyone.
     const source = readFileSync(join(__dirname, 'ledger-lock.ts'), 'utf8')
     expect(source).not.toMatch(/process\.kill|signalProcessTree/)
   })
 
   it('takes over a stale lock whose pid is this live process with a different identity', async () => {
     const directory = tempDir()
-    // A previous boot left a lock under a pid the OS has since handed to this process.
     writeFileSync(join(directory, DAEMON_LOCK_NAME), `${JSON.stringify({
       pid: process.pid,
       startedAt: 'Mon Jan  1 00:00:00 2026',
@@ -124,8 +120,6 @@ describe('daemon lock L1: PID reuse must not lock the daemon out', () => {
 
   it('takes over when a comparable start identity proves the previous holder is gone', async () => {
     const directory = tempDir()
-    // A lock whose recorded identity uses the platform's comparable format: macOS lstart
-    // comes from the kernel's absolute start time, so a different value is real evidence.
     writeFileSync(join(directory, DAEMON_LOCK_NAME), `${JSON.stringify({
       pid: 5003,
       startedAt: 'Tue Feb  2 00:00:00 2026',
@@ -184,15 +178,12 @@ describe('daemon lock L2: concurrent takeover yields one owner', () => {
   it('lets exactly one daemon replace a stale lock', async () => {
     const directory = tempDir()
     await acquireDaemonLock({ directory, startedBy: 'first', pid: 6001, lister: snapshot([[6001, 'Mon Jan  1 00:00:00 2026']]) })
-    // 6001 is now a zombie (stale), 6002 and 6003 are the two candidates.
     const lister = snapshot([
       [6001, 'Mon Jan  1 00:00:00 2026', 'Z+'],
       [6002, 'Tue Feb  2 00:00:01 2026'],
       [6003, 'Tue Feb  2 00:00:02 2026']
     ])
     let second: Promise<Awaited<ReturnType<typeof acquireDaemonLock>>> | undefined
-    // The hook runs after this daemon decided to take over and while it holds the
-    // takeover mutex: exactly the window that used to let two writers in.
     const first = await acquireDaemonLock({
       directory, startedBy: 'first-again', pid: 6002, lister,
       afterValidate: () => { second ??= acquireDaemonLock({ directory, startedBy: 'second', pid: 6003, lister }) }
