@@ -1,4 +1,4 @@
-# P3 · S3 执行清单：删除 Electron main 进程内运行时（**已执行**，2026-11-21）
+# P3 · S3 执行清单：删除 Electron main 进程内运行时（**已完成**，2026-11-22）
 
 > 本文 §1–§6 为 2026-11-20 的盘点与计划（替代 [P3-s1s3-plan.md](P3-s1s3-plan.md) 的旧盘点）；执行结果见 **§7**。
 > 维护者已决定无需再保留一个发布周期（当前没有用户），S3 直接删除进程内路径与 `SCRY_HOST_DAEMON=0` 逃生开关。
@@ -158,6 +158,13 @@
   - `--dev-side-chat-large-history-only`：`conversation:read` 返回 `daemon_outcome_unknown`。
   - `--dev-structure-only`：基线即因裸入口版本冲突失败；修正入口后跑约 10 分钟，失败于「A new child did not take composer focus」。
 - 本机无法运行：`--dev-question-only`（需 `--foreground` 与 macOS Dock）、`--dev-file-history-only`（需外部源文件参数）、`desktop-remote-host-smoke --dev`（只认 macOS 的 `Electron.app`）、全部打包冒烟与 native 性能门禁（macOS / 打包）。基准脚本（session-open、concurrent-performance、performance-soak、session-concurrency、workflow-session-open、concurrency-trace live host、daemon-mode-timing）已改为 daemon 模式，未在本机测量。
+
+### 7.7 W18 macOS 收尾（2026-11-22）
+
+- 开发和打包布局的五项重点冒烟全部通过。所有专项、UI 第 3 分片、实际 Dock、远程宿主和 daemon 重启验收通过。
+- 同一构建的 S1 原生性能门双向比较通过，八个场景分片皆有样本。daemon 并发基准通过 42 条 shell Hook、2 条生命周期 CLI 和完整归档校验。
+- 类型、严格导入和 CLI 门通过。全量 Vitest 通过 7,589 项，5 项原有跳过。一项既有的 Git 分支分页超时按原配置单跑 7/7 通过。
+- macOS 验收和已知限制见 [W18 阶段一报告](handoff/reports/W18.md)。
 
 ### 7.5 回滚
 
