@@ -4,6 +4,7 @@ import type { ScExpected, ScInlineComment, ScMutation, ScPr, ScPrList, ScRead, S
 import { ModalFrame, requestModalClose } from './Modals'
 import { Patch } from './SourceControlPatch'
 import { Notice } from './primitives/Notice'
+import { Segmented } from './primitives/Segmented'
 
 type Confirmation = { title: string; detail: string; run: () => Promise<void> }
 
@@ -255,27 +256,16 @@ export function GithubPullRequestPanelBody({
                     onChange={(event) => updateDraft({ ...draft, body: event.target.value })}
                   />
                 </label>
-                <label>
-                  审查结论
-                  <select
-                    disabled={staleDraft}
-                    value={draft.verdict}
-                    onChange={(event) =>
-                      updateDraft({
-                        ...draft,
-                        verdict: event.target.value as ScReviewDraft['verdict']
-                      })
-                    }
-                  >
-                    <option value="COMMENT">评论</option>
-                    <option value="APPROVE" disabled={pr.author === pr.account}>
-                      批准
-                    </option>
-                    <option value="REQUEST_CHANGES" disabled={pr.author === pr.account}>
-                      请求修改
-                    </option>
-                  </select>
-                </label>
+                <div>
+                  <span>审查结论</span>
+                  <Segmented<ScReviewDraft['verdict']> label="审查结论" value={draft.verdict}
+                    onChange={verdict => updateDraft({ ...draft, verdict })}
+                    options={[
+                      { value: 'COMMENT', label: '评论', disabled: staleDraft },
+                      { value: 'APPROVE', label: '批准', disabled: staleDraft || pr.author === pr.account },
+                      { value: 'REQUEST_CHANGES', label: '请求修改', disabled: staleDraft || pr.author === pr.account }
+                    ]} />
+                </div>
                 {draft.comments.map((comment, index) => (
                   <div className="sc-draft-comment" key={index}>
                     <strong>

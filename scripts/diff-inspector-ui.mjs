@@ -66,7 +66,7 @@ export async function exerciseTurnMenu({ click, key, wait, evaluate, screenshot,
   await click('.diff-scope-trigger')
   await click('[data-diff-choice="turns"]')
   await wait(() => evaluate(`document.querySelectorAll('.diff-turn-choice').length === 2`), 'both recorded turns are selectable')
-  const bounds = await evaluate(`(() => { const rect = document.querySelector('.diff-turn-menu').getBoundingClientRect();
+  const bounds = await evaluate(`(() => { const rect = document.querySelector('.diff-scope-menu').getBoundingClientRect();
     return { left: rect.left, right: rect.right, bottom: rect.bottom, width: innerWidth, height: innerHeight } })()`)
   assert.ok(bounds.left >= 0 && bounds.right <= bounds.width && bounds.bottom <= bounds.height)
   await screenshot('diff-turn-menu-dark')

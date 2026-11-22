@@ -27,6 +27,11 @@
   left: 0;
   padding: var(--space-2);
 }
+.agent-management { position: relative; }
+.workdir-value, .location-machine-select { display: grid; gap: 4px; padding: 4px 8px; }
+.workdir-value select, .location-machine-select select { min-width: 0; max-width: 100%; }
+.workdir-recent-actions > summary { padding: 8px; cursor: pointer; }
+
 .wdrecent-list {
   max-height: 200px;
   overflow-y: auto;

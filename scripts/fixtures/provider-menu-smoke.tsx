@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import type { DetectedAgent } from '../../src/renderer/env'
 import { CliPicker } from '../../src/renderer/components/CliPicker'
-import { ProviderFilterMenu } from '../../src/renderer/components/ProviderFilterMenu'
+import { ProviderFilterSelect } from '../../src/renderer/components/ProviderFilterMenu'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/codex-alignment.css'
 import '../../src/renderer/components/archived-sessions.css'
@@ -35,9 +35,8 @@ function PickerHost() {
 
 // 两个菜单不同时打开：同一时刻只有一个下拉是生产形态，也避免共享的 document 监听互相干扰。
 function FilterHost() {
-  const [open, setOpen] = useState(false)
   const [value, setValue] = useState('claude')
-  return <ProviderFilterMenu providers={['claude', 'codex', 'pi']} value={value} onChange={setValue} open={open} onOpenChange={setOpen} />
+  return <ProviderFilterSelect providers={['claude', 'codex', 'pi']} value={value} onChange={setValue} />
 }
 
 createRoot(document.querySelector('#root')!).render(
