@@ -53,6 +53,7 @@ export function deleteSessionInDb(
     if (!sessionRow && !eventRow) return
     existed = true
     db.prepare('DELETE FROM orch_meta WHERE key = ?').run(catalogFrontierKey(input.sessionKey))
+    db.prepare('DELETE FROM orch_meta WHERE key = ?').run(`conversation_catalog:${input.sessionKey}`)
 
     const runRows = db
       .prepare(

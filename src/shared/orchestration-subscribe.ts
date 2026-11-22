@@ -2,6 +2,7 @@ import type { HostAdminNotice } from './host-admin'
 import type { AgentDataUpdated, RuntimeProvider } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
 import type { SessionHistoryPage } from './session-history'
+import type { ConversationPage } from './conversation-api'
 import type { DesktopHostReadResult } from './desktop-remote'
 
 /**
@@ -133,7 +134,7 @@ export type SubscribeHint =
   | { kind: 'window'; channel: string; payload: Record<string, unknown> }
   | { kind: 'data'; event: AgentDataUpdated }
 
-export type SubscribeHistoryPage = SessionHistoryPage
+export type SubscribeHistoryPage = SessionHistoryPage | { kind: 'conversation'; page: ConversationPage }
 
 export interface SubscribeSnapshot {
   sessions?: {

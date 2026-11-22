@@ -67,6 +67,11 @@ export function isAttentionSnapshot(value: unknown): value is SessionAttentionSn
 }
 
 function isHistoryPage(value: unknown): value is SubscribeHistoryPage {
+  if (record(value) && value.kind === 'conversation') {
+    const page = value.page
+    return record(page) && record(page.summary) && typeof page.summary.id === 'string' &&
+      Array.isArray(page.turns) && Array.isArray(page.bindings)
+  }
   if (!record(value) || !Array.isArray(value.turns) || !Number.isSafeInteger(value.offset) ||
       !Number.isSafeInteger(value.totalTurns) || typeof value.hasOlder !== 'boolean' ||
       (value.completeness !== 'complete' && value.completeness !== 'partial')) return false

@@ -127,7 +127,7 @@ export class ConversationStore implements ConversationLedger {
     this.onTurnSettled = observer
   }
 
-  constructor(readonly userData: string) {
+  constructor(readonly userData: string, private readonly projectMetadata?: (conversation: Conversation) => void) {
     requireValue(isAbsolute(userData), 'userData 必须是绝对路径')
     this.directory = join(userData, 'conversations')
   }
@@ -201,6 +201,7 @@ export class ConversationStore implements ConversationLedger {
       this.ownershipGeneration += 1
       throw error
     }
+    this.projectMetadata?.(conversation)
   }
 
   /** Main holds context admission and rechecks before effects. Deletion uses the

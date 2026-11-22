@@ -9,6 +9,7 @@ import { deletedNativeSessionKey, findNativeSession, scopedNativeSessionKey } fr
 import type { SessionDiscoverPayload } from '../host-runtime/orchestration/orchestrator-commands'
 import { mapSessionRow } from '../host-runtime/orchestration/projection-mappers'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
+import { createConversationProjectionAccess } from './orchestration-conversation-projection'
 
 type NativeIdentity = { sessionId: string; providerId?: string; agentProfileId?: string; cwd: string | undefined }
 
@@ -67,6 +68,7 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
   }
   return {
     readDetail,
+    ...createConversationProjectionAccess(getSink),
     deleteNative(ref: AppSessionRef, runIds: ReadonlySet<string>): DeleteSessionOutcome {
       const sink = getSink()
       if (!sink) return { status: 'not_present' }

@@ -288,7 +288,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
           hostId: () => remoteHostService?.hostId ?? '',
           authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
           grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote',
-          readFirstPage: createAuthorityDetailReader(historyChannels),
+          readFirstPage: createAuthorityDetailReader(historyChannels, (id) => catalog.conversationService().read(id)),
           scans: createDaemonCatalogScans(orchestrationAuthority.sink, options.userDataDir, workspace,
             catalog.appSessionStore, () => publishData({ kind: 'catalog_recovered' }), log)
         })

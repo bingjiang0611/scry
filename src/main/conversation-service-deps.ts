@@ -86,6 +86,7 @@ export interface ManagedConversationStart {
 
 export interface ConversationServiceDeps {
   store: ConversationStore
+  readProjection?: ReadConversationProjection
   resolveContinuationKey: (context: { providerId: ProviderId; cwd: string; agentProfileId?: string }) => Promise<string>
   supportsHistoricalInput: (providerId: ProviderId) => boolean
   supportsHistoryReader?: (providerId: ProviderId) => boolean
@@ -105,3 +106,14 @@ export interface ConversationServiceDeps {
    */
   onTurnSettled?: (conversationId: string) => void
 }
+
+/** The daemon owns the current presentation. The ledger still owns content and bindings. */
+export type ReadConversationProjection = (conversation: Conversation) => {
+  revSeq: number
+  legacy: boolean
+  title: string | null
+  pinnedAt: number | null
+  archivedAt: number | null
+  activeRunId: string | null
+  turnOrdinals: (runIds: readonly string[]) => ReadonlyMap<string, number>
+} | null | undefined

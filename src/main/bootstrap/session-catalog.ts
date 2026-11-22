@@ -12,6 +12,7 @@ import type { RemoteRunCompletion } from '../remote/remote-run-binding'
 import type { AppRunStartOptions } from './run-frontdoor'
 import type { createWorkspaceRuntime } from './workspace-runtime'
 import type { Conversation, ConversationTurn } from '../../shared/conversation'
+import type { ReadConversationProjection } from '../conversation-service-deps'
 
 /**
  * 该轮是否就是旧入口要写的那个原生 session：run、归档与绑定三种身份都算。
@@ -42,6 +43,8 @@ export function createSessionCatalog({
   projection?: {
     read(): AppSession[] | undefined
     beforeMirrorWrite(previous: readonly AppSession[], next: readonly AppSession[]): void
+    readConversation: ReadConversationProjection
+    recordConversation(conversation: Conversation): void
   }
 }) {
   let traceCatalogRecovery: Promise<void> | null = null
@@ -93,7 +96,7 @@ export function createSessionCatalog({
   let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
   const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(userDataDir, projection?.beforeMirrorWrite)
   let conversationStoreInstance: ConversationStore | undefined
-  const conversationStore = () => conversationStoreInstance ??= new ConversationStore(userDataDir)
+  const conversationStore = () => conversationStoreInstance ??= new ConversationStore(userDataDir, projection?.recordConversation)
   async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope, deletion?: { ownerId?: string }): Promise<void> {
     const activeIds = new Set(unsettledRuns().filter((run) => run.providerId === scope.providerId &&
       run.agentProfileId === scope.agentProfileId && (run.cwd ?? '') === scope.cwd).map((run) => run.runId))
@@ -109,6 +112,7 @@ export function createSessionCatalog({
   let conversationServiceInstance: ConversationService | undefined
   const conversationService = (): ConversationService => conversationServiceInstance ??= new ConversationService({
     store: conversationStore(),
+    readProjection: projection?.readConversation,
     resolveContinuationKey: (context) => getProviderRegistry().continuationKey(context),
     forkNative: forkManagedConversation,
     supportsHistoricalInput: (providerId) => getProviderRegistry().get(providerId).historicalContext === true,

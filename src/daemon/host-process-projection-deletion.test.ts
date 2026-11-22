@@ -131,3 +131,38 @@ it('erases the private projection when an authorized unified conversation is del
     await daemon.dispose()
   }
 }, 30_000)
+
+it('uses the unified conversation projection for the sidebar and the detail first page', async () => {
+  process.env.SCRY_ORCHESTRATION = 'on'
+  const daemon = await startTestDaemon()
+  try {
+    const sink = daemon.host.orchestrationAuthority!.sink
+    const created = await daemon.localOp('conversation', 'create', [daemon.workspace])
+    expect(created.error).toBeUndefined()
+    const id = created.result.id as string
+    const session = sink.getSession(id)
+    expect(session).toMatchObject({ conversationId: id, cwd: daemon.workspace })
+    const payload = { sessionKey: id, title: '投影中的统一会话' }
+    expect(sink.execute({
+      type: 'session.rename', commandId: 'rename-unified-projection', actor: 'system', scope: 'system',
+      at: Date.now(), payload, payloadSha256: sha256Hex(canonicalJson(payload))
+    }).kind).toBe('accepted')
+    const listed = await daemon.localOp('conversation', 'list', [daemon.workspace])
+    expect(listed.result).toMatchObject([{ id, title: payload.title }])
+    const read = await daemon.localOp('conversation', 'read', [id])
+    expect(read.result).toMatchObject({ summary: { id, title: payload.title } })
+    const subscribed = await daemon.request({ op: 'subscribe', views: ['detail'], session: { sessionKey: id }, waitMs: 0 })
+    expect(subscribed.subscribe).toMatchObject({
+      mode: 'snapshot', snapshot: {
+        detail: { firstPage: { kind: 'conversation', page: { summary: { id, title: payload.title }, turns: [] } } }
+      }
+    })
+    expect(sink.deleteSession({ sessionKey: id, cwd: daemon.workspace, actor: 'system', scope: 'system', at: Date.now() }).status).toBe('deleted')
+    expect((await daemon.localOp('conversation', 'list', [daemon.workspace])).result).toEqual([])
+    expect((await daemon.localOp('conversation', 'read', [id])).error).toBeTruthy()
+    expect(sink.getSession(id)).toBeUndefined()
+    expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+  } finally {
+    await daemon.dispose()
+  }
+}, 30_000)

@@ -47,17 +47,22 @@ export function createAuthoritySubscribeHandler(
   return paginateSubscribeReplies(sink, deps, (peer, request, signal) => engine.subscribe(peer, request, signal))
 }
 
-/** Resolves the existing native history page using the projected session identity. */
+/** Resolves history using the projected session identity. */
 export function createAuthorityDetailReader(
-  historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>
+  historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>,
+  readConversation: (id: string) => Promise<import('../shared/conversation-api').ConversationPage>
 ): NonNullable<SubscribeEngineOptions['readFirstPage']> {
   const load = historyChannels['agent:loadSession'] as
     (event: undefined, context: ProviderContext) => Promise<{ page: import('../shared/orchestration-subscribe').SubscribeHistoryPage } | null>
   return async (session, signal) => {
-    const { provider, profile, cwd, sessionKey, catalog } = session
-    const externalSessionId = catalog ? catalog.nativeSessionId : sessionKey
-    if (session.conversationId || cwd === null || !externalSessionId || !isSessionProviderId(provider) || provider === 'legacy_unknown') return null
+    const { conversationId, provider, profile, cwd, sessionKey, catalog } = session
     signal?.throwIfAborted()
+    if (conversationId && conversationId === sessionKey) {
+      const page = await readConversation(conversationId)
+      return page.summary.cwd === cwd ? { kind: 'conversation', page } : null
+    }
+    const externalSessionId = catalog ? catalog.nativeSessionId : sessionKey
+    if (conversationId || cwd === null || !externalSessionId || !isSessionProviderId(provider) || provider === 'legacy_unknown') return null
     const loaded = await load(undefined, {
       providerId: provider,
       agentProfileId: profile ?? undefined,

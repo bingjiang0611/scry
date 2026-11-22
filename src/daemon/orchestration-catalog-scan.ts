@@ -97,7 +97,7 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
   const publish = (payload: SessionDiscoverPayload, at: number, observation?: ObservedTranscript | null): void => {
     if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
     const existing = sink.getSession(payload.sessionKey)
-    if (!existing && payload.catalog?.nativeSessionId && wasNativeSourceDeleted(sink, {
+    if (!existing && payload.provider && payload.catalog?.nativeSessionId && wasNativeSourceDeleted(sink, {
       sessionId: payload.catalog.nativeSessionId, provider: payload.provider, profile: null, cwd: payload.cwd
     })) return
     if (!existing && sink.handle.db.prepare(

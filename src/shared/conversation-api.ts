@@ -87,6 +87,7 @@ export interface ConversationSummary {
 
 export interface ConversationPage {
   summary: ConversationSummary
+  projection?: { sessionKey: string; revSeq: number; legacyBefore?: true }
   bindings: ConversationBinding[]
   /** Frozen source snapshot of a side chat; absent for ordinary conversations. */
   sideChat?: SideChatSnapshotPage

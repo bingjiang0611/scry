@@ -308,9 +308,10 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     case 'session.discovered': {
       db.prepare(
         `INSERT INTO orch_p_session (
-          session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by, catalog
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+          session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by, catalog, conversation_id
+        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
+          conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
           title = COALESCE(excluded.title, orch_p_session.title),
           ts = MAX(orch_p_session.ts, excluded.ts),
           catalog = COALESCE(excluded.catalog, orch_p_session.catalog),
@@ -324,7 +325,8 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.at,
         event.seq,
         event.actor,
-        p.catalog ? canonicalJson(p.catalog) : null
+        p.catalog ? canonicalJson(p.catalog) : null,
+        (p.conversationId as string | null) ?? null
       )
       if (p.display) {
         const display = p.display as Record<string, unknown>

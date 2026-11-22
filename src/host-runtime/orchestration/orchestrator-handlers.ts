@@ -409,6 +409,9 @@ export function decideCatalogChange(
     return acceptDecision(cmd, [event], [], { sessionKey })
   }
   const p = cmd.payload
+  if (p.conversationId && (cmd.actor !== 'system' || p.conversationId !== p.sessionKey)) {
+    return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+  }
   const event = makeEvent(cmd, 0, {
     type: 'session.discovered',
     stream: `session:${p.sessionKey}`,
@@ -416,6 +419,7 @@ export function decideCatalogChange(
     cwd: p.cwd,
     payload: {
       sessionKey: p.sessionKey,
+      ...(p.conversationId ? { conversationId: p.conversationId } : {}),
       provider: p.provider,
       profile: p.profile ?? null,
       cwd: p.cwd,

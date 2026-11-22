@@ -159,7 +159,8 @@ export interface SessionForkPayload {
 
 export interface SessionDiscoverPayload {
   sessionKey: string
-  provider: string
+  provider: string | null
+  conversationId?: string
   profile?: string | null
   cwd: string
   title?: string | null
