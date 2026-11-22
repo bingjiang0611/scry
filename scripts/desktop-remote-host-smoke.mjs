@@ -70,7 +70,8 @@ async function main() {
 
   // W17: daemon mode now provides full remote sessionActions/fork/delete and bridges
   // workbench openPath/trashItem via the primary Scry App, so run in default daemon mode.
-  child = launch({ spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog })
+  child = launch({ spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog,
+    env: { SCRY_EXPERIMENTAL_HOST_CLI: '1', SCRY_ORCHESTRATION: 'on' } })
   const page = await waitForTarget(cdpPort)
   assert.match(page.url, /^file:/, 'production renderer must load from a file URL')
   cdp = connectCdp(page.webSocketDebuggerUrl)
