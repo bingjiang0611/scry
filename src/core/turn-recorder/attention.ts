@@ -3,24 +3,6 @@ import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { listFiles, syncDirectory, withDirectoryLock, writeTextAtomic } from './io.js'
 
-/**
- * A flat "this session may need a recovery pass" index.
- *
- * Every recovery entry point used to walk every session directory under `runtime/<provider>/` to
- * find open turns and queued hooks, which grows with the number of finished sessions in the
- * workspace. One marker per session turns that into a single directory read.
- *
- * The marker is an index, never the authority: an open turn is still decided by `open.json` and a
- * queued hook by the inbox. Markers are written *before* the state they describe, so a crash leaves
- * a stale marker (harmless, one wasted visit) instead of a session nothing remembers. The marker
- * directory is synced when a marker is first created, so the index is as durable as the `open.json`
- * it points at; creating a marker that already exists costs one failed exclusive create and no
- * fsync. `recoverRecorder` still rebuilds the index from the session directories when it is absent
- * or periodically, which is what repairs a marker lost to disk-level corruption.
- * Publication (marker through atomic state write) and reclamation (evidence check through unlink)
- * share a short per-session filesystem lock. Index-first ordering alone cannot prevent a cleaner
- * from removing a marker while its writer has not yet published the state.
- */
 export const ATTENTION_PROVIDERS = ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const
 
 export function attentionRoot(dataRoot: string): string {
@@ -35,7 +17,6 @@ export function attentionLockPath(dataRoot: string, provider: ProviderId, sessio
   return join(dataRoot, 'locks', 'attention', provider, `${sessionKey}.lock`)
 }
 
-/** Never acquire a session/commit lock inside this lock, or hold it for Git or transcript work. */
 export function withSessionAttentionLock<T>(
   dataRoot: string,
   provider: ProviderId,
@@ -45,7 +26,6 @@ export function withSessionAttentionLock<T>(
   return withDirectoryLock(attentionLockPath(dataRoot, provider, sessionKey), action)
 }
 
-/** Caller holds the attention lock through publication of the indexed state. */
 export async function markSessionAttention(
   dataRoot: string,
   provider: ProviderId,
@@ -60,16 +40,13 @@ export async function markSessionAttention(
       return
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
-      // Already indexed: nothing to write and nothing to sync.
       if (code === 'EEXIST') return
-      // The index directory vanished between mkdir and the write; every writer recreates it.
       if (code !== 'ENOENT' || attempt === 1) throw error
       await mkdir(root, { recursive: true })
     }
   }
 }
 
-/** Caller holds the attention lock from the pending-evidence check through removal. */
 export async function clearSessionAttention(
   dataRoot: string,
   provider: ProviderId,
@@ -97,14 +74,12 @@ export async function markedSessions(dataRoot: string): Promise<MarkedSession[]>
   return result
 }
 
-/** Only a completed full reconciliation makes the index authoritative for session discovery. */
 export async function publishAttentionIndexReady(dataRoot: string): Promise<void> {
   if (!await attentionIndexPresent(dataRoot)) {
     await writeTextAtomic(join(attentionRoot(dataRoot), 'initialized'), '1\n')
   }
 }
 
-/** Writers may create the directory before legacy sessions have been indexed. */
 export async function attentionIndexPresent(dataRoot: string): Promise<boolean> {
   try {
     return (await stat(join(attentionRoot(dataRoot), 'initialized'))).isFile()

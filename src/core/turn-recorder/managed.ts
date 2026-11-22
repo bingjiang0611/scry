@@ -99,12 +99,6 @@ async function handoffForRun(root: string, runId: string): Promise<{ path: strin
 export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput): Promise<ManagedTurnResult> {
   const mode = await managedRecorderMode(input.workspace, input.env)
   if (mode.status === 'disabled') return mode
-  // 记录只保存工作区采集策略允许的正文，且保存的正文必须有本地字节；缺失的正文降级而不是抛错，
-  // 准备、提交与重试都使用这份归一化后的证据表示，去重比较才不会把降级当成不一致。
-  // A turn frozen under the full policy keeps its bodies even if the workspace config changed after
-  // it started; the policy this turn promised is the one recorded in its canonical handoff, so a
-  // later retry in another process compares against the same representation. Same precedence as
-  // commit: the prepared handoff first, then the caller, then the workspace config.
   const frozen = (await handoffForRun(
     recorderSessionRoot(mode.enablement.dataRoot, input.provider, input.sessionId),
     input.runId
@@ -118,7 +112,6 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
   assertExactText(evidence.user, input.userText, 'user')
   if (evidence.assistant.status !== 'unavailable' && evidence.assistant.quality === 'inferred' &&
     evidence.assistant.omissionReason?.includes(CONTENT_MISSING_REASON)) {
-    // 助手正文缺失时保留已降级的证据：既不放宽成 exact，也不因缺正文而拒绝提交这一轮。
     assertOptionalAssistantText(evidence.assistant)
   } else if (
     (input.provider === 'claude' || input.provider === 'qoder' || input.provider === 'opencode' || input.provider === 'pi') &&
@@ -180,8 +173,6 @@ export async function prepareManagedRecorderTurn(input: PrepareManagedTurnInput)
     const current = await readJson<RecorderOpenTurnState>(recorderOpenPath(root))
     const candidates = [
       ...(current ? [current] : []),
-      // This identity/ambiguity check is an explicit handoff, not a background poll. Include
-      // restored or legacy-writer evidence before claiming a provisional turn.
       ...(await recorderQuarantinedOpenTurns(root, { reconcile: true }))
     ]
     let matches = candidates.filter(
@@ -268,11 +259,7 @@ export async function commitHandoff(
 ): Promise<Extract<ManagedTurnResult, { status: 'committed' | 'duplicate' }>> {
   if (handoff.phase !== 'archive_committed') throw new Error('managed recorder handoff archive is not committed')
   if (!isAgentTurnRecord({ ...handoff.record, sequence: 1 })) throw new Error('managed recorder handoff contains an invalid record')
-  // 提交前最后一道不变式：引用必须在本库可解析，否则先落盘内联正文或降级。旧版本准备的 handoff
-  // 与恢复路径也走这里，所以去重比较用归一化后的表示——与本次真正要提交的记录一致。
   const { record, resolution } = await resolveRecordContentRefs(handoff.record, enablement.dataRoot)
-  // `commitRecord` 还会按传输信封收缩这份记录。同一份收缩必须发生在比较之前，否则崩溃后重放一份
-  // 超限的 handoff 会因为“存下来的记录与 handoff 不同”而报错，而不是命中 duplicate。
   const budgeted = applyRecordContentBudget(record)
   const resolvedHandoff = resolution.restored + resolution.unavailable + (budgeted === record ? 0 : 1) > 0
     ? { ...handoff, record: budgeted }
@@ -320,7 +307,6 @@ export async function commitManagedRecorderTurn(input: {
   evidence: TurnEvidence
   timing: ManagedTurnTiming
   status: AgentTurnRecord['status']
-  /** 这一轮冻结的策略；省略时用 canonical handoff 里记录的那份，再退回当前工作区配置。 */
   toolContentPolicy?: ToolContentPolicy
   env?: NodeJS.ProcessEnv
   commitNotifications?: CommitNotificationDelivery
@@ -332,15 +318,10 @@ export async function commitManagedRecorderTurn(input: {
     const duplicate = await recordById(enablement.dataRoot, input.recordId)
     const root = recorderSessionRoot(enablement.dataRoot, input.provider, input.sessionId)
     const existing = await handoffForRun(root, input.runId)
-    // Same normalisation as prepare, against the policy this turn froze. Falling back to the current
-    // workspace config would re-trim a full-policy turn when the user narrows capture mid-turn and
-    // make the retry look like different evidence.
     const frozen = existing?.handoff.toolContentPolicy ?? input.toolContentPolicy
     const keepToolOutputBody = frozen
       ? isFullToolContentPolicy(frozen)
       : duplicate
-        // 提交成功后 canonical handoff 会被清掉，这一轮冻结的策略只剩记录自己可证：full 策略的轮次
-        // 保留了工具输出正文。用它而不是当前配置比较重试，中途收窄采集策略才不会改写已有证据。
         ? recordKeepsToolBodies(duplicate)
         : isFullToolContentPolicy(enablement.config.capture)
     const protectedInput = {
@@ -360,7 +341,6 @@ export async function commitManagedRecorderTurn(input: {
     await writeJsonAtomic(existing.path, committedHandoff)
     return commitHandoff(enablement, root, committedHandoff)
   }, { waitMs: SESSION_LOCK_WAIT_MS })
-  // canonical record 此时已落盘；通知投递是下游观测，不参与本轮是否成功的判定。
   await deliverCommitNotifications(enablement.dataRoot, input.env, input.commitNotifications ?? 'await')
   return result
 }

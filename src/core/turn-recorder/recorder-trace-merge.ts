@@ -29,7 +29,6 @@ export function dedupeTraceEvents(events: TraceEvent[]): TraceEvent[] {
           }
       : event.toolUseId
       ? {
-          // 介入与被介入的工具共享 toolUseId，但不是同一个生命周期事件。
           lifecycle: event.stage === 'tool_result'
             ? 'result'
             : event.stage === 'intervention' ? 'intervention' : 'start',
@@ -44,8 +43,6 @@ export function dedupeTraceEvents(events: TraceEvent[]): TraceEvent[] {
       tool: event.tool,
       text: event.text,
       ts: event.ts,
-      // Concurrent repository snapshots can finish in the same millisecond. Their
-      // identity is the requested/resolved repository and baseline, not just stage/time.
       diff: event.turnDiff ? {
         requestedRoot: event.turnDiff.requestedRoot,
         repoRoot: event.turnDiff.repoRoot,
@@ -80,7 +77,6 @@ export function mergeTurnTraceEvents(
   const transcriptCallsAuthoritative = transcriptToolStreamComplete && transcriptHasLogicalCalls
   const transcriptHasAssistant = transcript.some((event) => event.kind === 'model' && event.stage === 'text')
   const transcriptHasUsage = transcript.some((event) => event.kind === 'harness' && event.stage === 'result')
-  // 带脚本身份的 transcript hook 运行是权威证据；此时 recorder 自己的投递事件只会重复计数。
   const transcriptHasHookRuns = transcript.some((event) => event.kind === 'hook' && event.stage !== HOOK_DELIVERY_STAGE)
   const filteredLifecycle = lifecycle.filter((event) => {
     if (transcriptCallsAuthoritative && isLogicalCallEvent(event)) return false

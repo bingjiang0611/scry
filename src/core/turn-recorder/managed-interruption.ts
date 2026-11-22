@@ -8,10 +8,6 @@ export function observedInterruptionRecordId(workspaceId: string, input: Prepare
   return stableHash({ workspace: workspaceId, provider: input.provider, sessionId: input.sessionId, managedRunId: input.runId }).slice(0, 32)
 }
 
-/** Reserve a host-observed interrupted attempt, not a fabricated Provider hook.
- * The caller must prove that its durable trace contains only local launch/diff events.
- * No Provider identity, transcript, tool evidence or Git baseline is reconstructed.
- */
 export async function reserveObservedInterruption(
   dataRoot: string,
   root: string,
@@ -31,8 +27,6 @@ export async function reserveObservedInterruption(
       .some((section) => (section?.value?.length ?? 0) > 0)
   ) return undefined
 
-  // The session lock is held by prepare. Rebuild the high-water marks too: a lost
-  // cache must never reuse a committed or crash-reserved generation.
   const state = await readJson<RecorderSessionState>(recorderStatePath(root))
   const records = (await listRecords(dataRoot)).filter((record) =>
     record.provider.id === input.provider && record.sessionId === input.sessionId)

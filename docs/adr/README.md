@@ -33,6 +33,8 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [029: Keep daemon acknowledgements and capture boundaries explicit](029-recorder-daemon-and-capture-boundaries.md)
 - [030: Reuse transcript reads without reusing unproven evidence](030-recorder-transcript-windows.md)
 - [031: Preserve full content before budgeting its preview](031-recorder-content-custody.md)
+- [032: Recover managed turns from durable handoff evidence](032-recorder-managed-handoff.md)
+- [033: Keep recorder durability, authorization and observation separate](033-recorder-io-and-configuration.md)
 
 ## Source comment ratchet
 

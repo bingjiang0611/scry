@@ -14,9 +14,7 @@ export interface HookSkipSummary {
   truncated: boolean
 }
 
-// This fixed bootstrap location is usable even when config/dataDir cannot be trusted.
 export async function recordInvalidHookConfig(workspace: string, provider: string, event: string): Promise<void> {
-  // A rejected dataDir may itself be a symlink. Diagnostics must not write through it.
   if (await hasSymlinkComponent(workspace, '.scry/logs/hook-skip.log')) return
   const safeEvent = /^[A-Za-z0-9_.:-]{1,128}$/.test(event) ? event : 'unknown'
   await appendRotatingLog(join(workspace, '.scry/logs/hook-skip.log'),
@@ -51,8 +49,6 @@ export async function readHookSkips(workspace: string): Promise<HookSkipSummary>
     if (error.code === 'ENOENT') return 0
     throw error
   })
-  // Shell only appends. CLI diagnostics rotate one generation; a machine running only failed
-  // shell hooks can exceed this soft threshold until the next CLI diagnostic invocation.
   if (size > MAX_LOG_BYTES) {
     await withDirectoryLock(join(workspace, '.scry/locks/hook-skip.lock'), async () => {
       try {
@@ -76,9 +72,7 @@ function summarizeTails(tails: Array<{ text: string; truncated: boolean }>, reas
       if (!provider || !event || !reason || !/^\d+$/.test(code ?? '') || (reasonFilter !== undefined && reason !== reasonFilter)) continue
       count++
       const timestamp = Date.parse(at)
-      // Unknown clocks must not hide failures. Future clocks also remain actionable.
       if (!Number.isFinite(timestamp) || timestamp >= recentSince) recentCount++
-      // Do not export arbitrary log text in the sanitized support bundle.
       if (Number.isFinite(timestamp) && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(at) && (!lastAt || timestamp > Date.parse(lastAt))) lastAt = at
     }
   }
@@ -90,7 +84,6 @@ export type UserHookSkipEvidence = Evidence<HookSkipSummary & {
   workspaceAttribution: 'unknown'
 }>
 
-/** C3's bootstrap log contains no workspace identity. Never merge it into workspace counters. */
 export async function readUserHookSkips(env: NodeJS.ProcessEnv = process.env): Promise<UserHookSkipEvidence> {
   const source = ['user_global_hook_skip_log']
   const stateRoot = env.XDG_STATE_HOME || (env.HOME ? join(env.HOME, '.local/state') : undefined)
@@ -102,7 +95,6 @@ export async function readUserHookSkips(env: NodeJS.ProcessEnv = process.env): P
       return unavailable('user hook diagnostics symbolic link', source)
     }
     const path = join(stateRoot, 'scry/hook-skip.log')
-    // Read-only: diagnostics must not rotate, rewrite, or claim ownership of user-global evidence.
     const summary = summarizeTails(await Promise.all([logTail(`${path}.1`), logTail(path)]), 'bridge_not_found')
     const value = { ...summary, reason: 'bridge_not_found' as const, workspaceAttribution: 'unknown' as const }
     return summary.truncated

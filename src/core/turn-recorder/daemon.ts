@@ -108,14 +108,6 @@ export async function startRecorderDaemon(args: {
   }, { waitMs: 3_000 })
 }
 
-/**
- * Hand queued inbox work to a recorder that is already running, or start one.
- *
- * A hook that has only written its ink dies not make the daemon notice it, so this is the one
- * thing a delivery does besides the durable write. It is a notification, never a wait: a daemon
- * that does not answer inside `wakeBudgetMs` still finds the entry on its own next pass, and the
- * caller never learns the recorder's outcome from here.
- */
 export async function notifyRecorderInbox(args: {
   workspace: string
   scriptPath?: string

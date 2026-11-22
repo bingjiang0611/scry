@@ -6,11 +6,6 @@ import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } fro
 import type { RecorderEnablement } from './config.js'
 import { attachCaptureBaseline, updateCaptureRepositories } from './session-capture-repositories.js'
 
-/**
- * Repositories come from the files the turn itself touches: the nearest `.git` entry at or above the
- * edited file, walking up. A worktree's gitdir pointer is the repository marker, not a path to
- * follow. The set is persisted per session so later turns baseline the same repositories.
- */
 export async function recordCaptureRepositories(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
@@ -40,10 +35,6 @@ function record(value: unknown): Record<string, unknown> | null {
 
 const PATH_KEYS = ['file_path', 'filePath', 'path']
 
-/**
- * Qoder serializes `tool_input` as a dict string with single quotes, so it is neither JSON nor an
- * object. Read the path fields it does carry instead of dropping the event.
- */
 function serializedPaths(source: string): string[] {
   const found: string[] = []
   for (const key of PATH_KEYS) {
@@ -54,7 +45,6 @@ function serializedPaths(source: string): string[] {
   return found
 }
 
-/** Absolute file paths named by Edit/Write `file_path`, or by Codex apply_patch headers. */
 export function editedAbsolutePaths(payload: Record<string, unknown>): string[] {
   const raw = payload.tool_input ?? payload.toolInput
   const toolInput = record(raw) ?? {}
@@ -75,7 +65,6 @@ export function editedAbsolutePaths(payload: Record<string, unknown>): string[] 
   return [...new Set(result)]
 }
 
-/** Walk up to the nearest `.git` entry; it may be a directory or a gitdir pointer file. */
 export async function nearestRepositoryRoot(file: string): Promise<string | undefined> {
   let current = dirname(resolve(file))
   for (;;) {

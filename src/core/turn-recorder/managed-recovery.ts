@@ -22,10 +22,6 @@ export async function reserveCanonicalJournalRecovery(
       end.value.completedAtSource !== 'recorder_observed_terminal')
   ) return undefined
 
-  // The canonical journal is written only after the Provider has terminated and contains the
-  // authoritative provider turn id plus exact evidence. If a previous recovery removed the
-  // provisional open before preparing its handoff, reserve a fresh durable generation instead of
-  // leaving the journal in a permanent front-door deadlock.
   const state = await readJson<RecorderSessionState>(recorderStatePath(root))
   const records = (await listRecords(dataRoot)).filter((record) =>
     record.provider.id === input.provider && record.sessionId === input.sessionId)
@@ -57,8 +53,6 @@ export async function reserveCanonicalJournalRecovery(
     startFingerprint: stableHash({ source: 'canonical_journal_recovery', runId: input.runId, timing: input.timing }),
     captures: []
   }
-  // Publish the recoverable open before advancing the cache. A crash between these writes leaves
-  // an identity that the next replay can still finish; commitHandoff repairs both high-water marks.
   await writeJsonAtomic(recorderOpenPath(root), open)
   await writeJsonAtomic(recorderStatePath(root), {
     ...state,
@@ -69,11 +63,6 @@ export async function reserveCanonicalJournalRecovery(
   return open
 }
 
-// 已开的轮次只有在“还有人能把它收口”时才值得阻断下一轮。没有 providerTurnId、没有 canonical handoff，
-// 并且它的 managedRunId 已不是本进程里活的 run（进程早没了），这种 provisional 状态永远不会自己
-// 收口，留着只会把该工作区+Provider 永久卡在“仍有 N 轮待恢复”。这里按与
-// cancelManagedRecorderTurn 相同的证据标准弃掉它；一旦出现真的 Provider 证据（providerTurnId
-// 或已备好的 canonical handoff），仍然 fail closed。
 async function abandonProvisionalOpenTurn(
   root: string,
   dataRoot: string,
@@ -95,12 +84,8 @@ export async function recoverManagedRecorderTurns(
   options: {
     sessionId?: string
     provider?: ProviderId
-    // 默认保守：不知道哪些 run 还活着时，不弃掉任何 open 状态（否则可能删掉正在跑的轮次）。
-    // 调用方（main）知道 run 存活情况时传入 abandonProvisional，才会清理不可恢复的 provisional 轮次。
     abandonProvisional?: boolean
-    // App 拥有的活跃轮次由原执行链收口；恢复不得重放它们，也不把它们计为 pending。
     isLiveManagedRun?: (runId: string | undefined, nativeIdentity?: Pick<RecorderOpenTurnState, 'provider' | 'sessionId' | 'providerTurnId'>) => boolean
-    // 常驻 App 走 'detach'：恢复检查在“发送前”跑，不能被仓库回调积压拖住发送。
     commitNotifications?: CommitNotificationDelivery
     commitNotificationScope?: CommitNotificationScope
   } = {}
@@ -183,7 +168,6 @@ export async function recoverManagedRecorderTurns(
       }
     }
   }
-  // agent:start 每一轮都会跑到这里；同步投递会把发送卡在“正在启动”。
   await deliverCommitNotifications(enablement.dataRoot, env, options.commitNotifications ?? 'await', options.commitNotificationScope)
   return { recovered, pending }
 }

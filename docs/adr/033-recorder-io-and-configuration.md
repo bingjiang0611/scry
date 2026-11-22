@@ -1,0 +1,13 @@
+# 033: Keep recorder durability, authorization and observation separate
+
+**Status:** Accepted (documents existing behavior)
+
+Durable publication streams large JSON strings without an extra whole-record buffer, keeping escapes and surrogate pairs equivalent to the native encoder. Sync new parent entries even when a previous attempt left them present. Cross-filesystem copies do not replace a final name; verify existing bytes. Publish the final link and sync its directory before removing the temporary name. The local wait queue does not grant filesystem ownership or cross-process fairness; expired waiters must not execute after admission. Process identity, not age alone, should establish whether an owner is gone; the existing age fallback is tracked in [#161](https://github.com/bingjiang0611/scry/issues/161).
+
+Capture configuration and callback authorization are separate. Opt-in workspaces do not record unclaimed ordinary events. Revalidate executable identity before activation, and keep automatic and host-provided provenance distinct. A callback explicitly supplied by an authorized host is recorded for later processes; a persisted host callback does not silently override the workspace's declared callback. Keep private metadata in recorder-owned storage. Recorder environment snapshots preserve only the declared capture context.
+
+Bound repository discovery by canonical scope, depth and concurrency. Admit linked worktrees only from already-discovered repositories and keep the requested spelling separate from Git's canonical location. Diagnostic frontier samples do not expand capture authority. Do not reclaim content when an unreadable record could still reference it. Temporary-file pruning stays inside the recorder data root and does not follow directory symlinks. Quotas report pressure, not permission to delete evidence. A damaged sequence watermark fails closed; legacy checkpoint floors are only migration evidence.
+
+An activity stamp is best-effort diagnostic evidence, not part of the commit. Keep missing observations distinct from zero, and keep host liveness unknown when the process table or identity cannot establish it. Compare recorded process identity and boot where available; an arbitrary reused PID or locale-sensitive process label is not sufficient. Timestamp and environment observations supply provenance, not permission to infer a closed turn.
+
+See [io.ts](../../src/core/turn-recorder/io.ts), [config.ts](../../src/core/turn-recorder/config.ts), [commit-hook-grant.ts](../../src/core/turn-recorder/commit-hook-grant.ts), and [host-process.ts](../../src/core/turn-recorder/host-process.ts).

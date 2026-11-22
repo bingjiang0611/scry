@@ -2,10 +2,6 @@ import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { readJson, writeJsonAtomic } from './io.js'
 
-// Observational only: proves a provider lifecycle hook actually reached the recorder, which
-// is the difference between "configured" and "capturing". It sits on the hook critical path,
-// so writes skip fsync and every failure is swallowed — losing an activity stamp must never
-// break a turn. Concurrent hooks race benignly (last writer wins for that provider).
 
 export interface ProviderActivityEntry {
   lastEvent: string
@@ -45,6 +41,5 @@ export async function recordProviderActivity(
     }
     await writeJsonAtomic(activityPath(dataRoot), file, { sync: false })
   } catch {
-    // fail open: activity evidence is never worth failing a turn for
   }
 }
