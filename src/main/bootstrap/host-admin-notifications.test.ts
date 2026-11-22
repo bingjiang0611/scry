@@ -51,17 +51,12 @@ describe('W11 P5-7: App & paired device host-admin notifications', () => {
 
   it('forwards hostAdmin notices through DaemonEventPump', async () => {
     const received: HostAdminNotice[] = []
-    let served = false
     const pump = new DaemonEventPump({
       source: {
-        appEvents: async () => {
-          if (!served) {
-            served = true
-            return { epoch: 'e1', cursor: 1, items: [{ kind: 'hostAdmin', notice: sampleNotice }], reset: false }
-          }
-          await new Promise((r) => setTimeout(r, 50))
-          return { epoch: 'e1', cursor: 1, items: [], reset: false }
-        }
+        subscribe: async () => ({
+          hostId: 'host', logId: 'log', seq: 1, mode: 'snapshot', snapshot: {},
+          hints: [{ kind: 'hostNotice', notice: sampleNotice }]
+        })
       },
       send: () => undefined,
       onHostAdmin: (notice) => { received.push(notice); pump.dispose() }

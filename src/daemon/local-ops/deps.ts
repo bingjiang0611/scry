@@ -1,4 +1,4 @@
-import type { AppEventFeed } from '../../main/remote/app-event-feed'
+import type { AppHint } from '../orchestration-authority-subscribe'
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import type { RunRegistry } from '../../main/run-registry'
 import type { RunControl } from '../../main/bootstrap/run-control'
@@ -32,7 +32,7 @@ export interface DaemonLocalEndpointDeps {
   history: ReturnType<typeof createHistoryRuntime>
   historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>
   conversationSend: ReturnType<typeof createDaemonConversationSend>
-  events: AppEventFeed
+  publishHint: (hint: AppHint) => void
   terminal: ReturnType<typeof createDaemonTerminalService>
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>

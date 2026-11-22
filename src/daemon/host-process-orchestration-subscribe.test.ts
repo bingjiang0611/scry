@@ -216,7 +216,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
         expect(sub).toMatchObject({ subscribe: { mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } } })
 
         const feed = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
-        expect(typeof feed.events?.epoch).toBe('string')
+        expect(feed).toEqual({ error: 'unknown_op' })
       } finally {
         await daemon.dispose()
       }

@@ -18,7 +18,7 @@ export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
 // What this daemon serves on the App's own endpoint: the App channels it answers (built
 // from the same handler factories Electron main registers, so both answer alike), the
-// run controls bound to its live runs, and the App event feed. A paired device on the
+// run controls bound to its live runs, and the App subscription. A paired device on the
 // network endpoint reaches none of it. Each group of channels lives in local-ops/.
 
 export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): LocalEndpointHandlers {
@@ -45,7 +45,6 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...backgroundServiceLocalOps(deps),
       ...deps.terminal.localOps
     }),
-    events: deps.events,
     ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),
     terminal: deps.terminal.feed,
     ...(deps.executionTargetBridge ? { executionTargetBridge: deps.executionTargetBridge } : {}),

@@ -77,7 +77,7 @@ try {
       assert.equal(query.kind, 'info')
       return { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, execution: 'canonical', hostId: identity.hostId, subscribe: 1 }
     },
-    onRunActivity: runId => orchestration.forwardAppEvent({ kind: 'run', runId }),
+    onRunActivity: runId => orchestration.publishHint({ kind: 'run', runId }),
     authorizeWorkspace: (cwd) => {
       if (cwd === authorizedCwd) return cwd
       const error = new Error('invalid_target'); error.code = 'invalid_target'; throw error

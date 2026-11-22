@@ -17,7 +17,7 @@ import type { DaemonRunTransport } from './daemon-run-transport'
 // the daemon's unread set feeds this window's badge, which says what was viewed (E1b).
 
 export interface DaemonRunEventsDeps {
-  transport: Pick<DaemonRunTransport, 'appEvents' | 'subscribe' | 'attentionViewed' | 'forward'>
+  transport: Pick<DaemonRunTransport, 'subscribe' | 'attentionViewed' | 'forward'>
   runtime: Pick<DaemonRunRuntime, 'setWakesLive' | 'deliverAfterRead'> &
     Partial<Pick<DaemonRunRuntime, 'applySubscribeSnapshot' | 'applySubscribeEvent' | 'applyRunHint' | 'setOnSessionBound'>>
   send: (channel: string, payload: unknown) => void
@@ -80,7 +80,6 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { watchDetail(k
   runtime.setOnSessionBound?.(viewFocusedSession)
   const pump = new DaemonEventPump({
     source: transport, send: deps.send, ...warn, ...(deps.waitMs !== undefined ? { waitMs: deps.waitMs } : {}),
-    subscribeMode: true,
     detailFocus: () => ({ sessionKey: watchedSession, signal: watchAbort.signal }),
     onSnapshot: async (snapshot) => {
       if (snapshot.activeRuns) await runtime.applySubscribeSnapshot?.(snapshot.activeRuns.rows)

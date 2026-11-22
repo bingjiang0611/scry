@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, localSubscription, tempDir, waitForProjectedRun } from './host-process.fixtures'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { createRecentFoldersStore } from '../main/app-store'
+import type { SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -133,22 +134,17 @@ describe('daemon host process', () => {
       expect(Array.isArray(conversations.result)).toBe(true)
       // Ledger writes the daemon can make on its own (B4-L4-2b): create, then read it back
       // and rename it, all against the daemon's store.
-      // The App's event feed (P3f): a new client starts at the present, then hears of
-      // the daemon's own data changes, which used to be dropped.
-      const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'appEvents', cursor: 0, waitMs: 0
-      })
+      // The App begins with the current snapshot and then reads daemon changes.
+      const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription())
       // It carries the current unread set as state (E1b); nothing is unread yet.
-      expect(handshake.events.items).toEqual([{ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) }])
+      expect(handshake.subscribe.hints).toEqual([{ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) }])
       const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'create', args: [workspace]
       })
       expect(create.error).toBeUndefined()
       const created = create.result as { id: string; revision: number }
-      const changed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'appEvents', epoch: handshake.events.epoch, cursor: handshake.events.cursor, waitMs: 1_000
-      })
-      expect(changed.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
+      const changed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription(handshake.subscribe, 1_000))
+      expect(changed.subscribe.hints).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
       const listed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'list', args: [workspace]
       })
@@ -184,10 +180,18 @@ describe('daemon host process', () => {
       expect(sent.result).toMatchObject({ status: 'accepted', disposition: 'created', ledger: { runId: expect.any(String) } })
       const runAuthority = host.orchestrationAuthority!
       const conversationRunId = sent.result.runId as string
-      const projectedState = await waitForProjectedRun(host.channel.socketPath, host.service.caCertificatePEM,
-        device.certPEM, device.keyPEM, conversationRunId)
-      const conversationEvidence = runAuthority.sink.listEvents().filter(event => event.runId === conversationRunId)
-      expect(projectedState, JSON.stringify(conversationEvidence)).toBe('settled')
+      let cursor = changed.subscribe
+      const runEvents: SubscribeEventItem[] = []
+      const hints: SubscribeHint[] = []
+      await expect.poll(async () => {
+        const next = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription(cursor))
+        expect(next.error).toBeUndefined()
+        cursor = next.subscribe
+        runEvents.push(...cursor.events ?? [])
+        hints.push(...cursor.hints ?? [])
+        return runEvents.some(event => event.runId === conversationRunId && event.type === 'run.settled') &&
+          hints.some(hint => hint.kind === 'data' && hint.event.kind === 'turn_recorded' && hint.event.runId === conversationRunId)
+      }, { timeout: 15_000 }).toBe(true)
       expect(runAuthority.subscribeHub.liveRunMeta(conversationRunId)?.scryRunId).toBe(conversationRunId)
       const receiptId = sent.result.ledger.runId as string
       const alias = runAuthority.sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
@@ -206,25 +210,15 @@ describe('daemon host process', () => {
       expect(afterSend.error).toBeUndefined()
       const turn = afterSend.result.turns.find((candidate: { runId: string }) => candidate.runId === sent.result.runId)
       expect(turn.delivery.status).toBe('accepted')
-      const afterRun = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'appEvents', epoch: handshake.events.epoch, cursor: changed.events.cursor, waitMs: 0
-      })
-      // E2: the run that changed is named, under the ledger id the App follows.
-      // E3: with where its evidence starts, so a window that never saw it can follow it.
-      expect(afterRun.events.items).toContainEqual({ kind: 'run', runId: sent.result.ledger.runId, intentSeq: sent.result.ledger.seq })
-      // W1: the pipeline's own window notices for this run, with the in-process payloads,
-      // which the daemon's window sink used to drop: the turn ended, the session is known.
-      const windowNotices = afterRun.events.items.filter((item: { kind: string }) => item.kind === 'window')
-      expect(windowNotices).toContainEqual({ kind: 'window', channel: 'agent:turnDone', payload: expect.objectContaining({ runId: sent.result.runId, providerId: 'codex' }) })
-      expect(windowNotices).toContainEqual({ kind: 'window', channel: 'agent:session', payload: expect.objectContaining({ runId: sent.result.runId }) })
-      // The run pipeline's own notice, which the daemon's window sink used to drop.
-      expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { runId: sent.result.runId, kind: 'turn_recorded' } })
+      expect(runEvents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'run.intent_recorded', runId: conversationRunId }),
+        expect.objectContaining({ type: 'run.session_bound', runId: conversationRunId }),
+        expect.objectContaining({ type: 'run.settled', runId: conversationRunId })
+      ]))
       // E1b: a finished run that nobody viewed is unread in the daemon. This daemon cannot
       // see the App's window, so the App says when the user viewed it, and the set clears.
-      const fresh = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'appEvents', cursor: 0, waitMs: 0
-      })
-      const unread = fresh.events.items.find((item: { kind: string }) => item.kind === 'attention')?.snapshot.unreadSessionKeys as string[]
+      const fresh = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription())
+      const unread = fresh.subscribe.hints.find((item: { kind: string }) => item.kind === 'attention')?.snapshot.unreadSessionKeys as string[]
       // A conversation turn's attention is the conversation's row, whichever native
       // session carried it (the Provider binding may change between turns).
       expect(unread).toEqual([`conversation\u0000${created.id}`])
@@ -234,12 +228,10 @@ describe('daemon host process', () => {
         })
         expect(viewed).toEqual({ viewed: true })
       }
-      const cleared = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-        op: 'appEvents', epoch: fresh.events.epoch, cursor: fresh.events.cursor, waitMs: 1_000
-      })
-      expect(cleared.events.items).toContainEqual({ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) })
+      const cleared = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription(fresh.subscribe, 1_000))
+      expect(cleared.subscribe.hints).toContainEqual({ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) })
       // The rename above is announced by the daemon itself; the App no longer stands in.
-      expect(afterRun.events.items).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
+      expect(hints).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
       // History pages are loaded by the daemon against its own catalog: a session it does
       // not know is refused by the same check the App ran in process.
       const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

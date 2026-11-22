@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RunControlHandlers } from './host-run-control'
-import type { AppEventFeed } from './app-event-feed'
 import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_LOCAL_OP_NAMES } from '../daemon-channel-gate'
 import type { SubscribeResponse, SubscribeRequest } from '../../shared/orchestration-subscribe'
 import { parseSubscribeFrame } from './subscribe-frame'
@@ -17,8 +16,6 @@ export type LocalOpHandlers = ReadonlyMap<string, LocalOpHandler>
 export interface LocalEndpointHandlers {
   runControl?: RunControlHandlers
   localOps?: LocalOpHandlers
-  // What the daemon tells its App that no run read carries (P3f).
-  events?: Pick<AppEventFeed, 'read'>
   // Authoritative orchestration subscribe handler. The network shares only this read op.
   subscribe?: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
   // The App viewed one of the daemon's unread sessions (E1b).
@@ -63,18 +60,6 @@ export function handleAttentionViewed(attention: LocalEndpointHandlers['attentio
     typeof sessionKey !== 'string' || sessionKey.length === 0 || sessionKey.length > MAX_SESSION_KEY) return { error: 'invalid_request' }
   attention.viewed(sessionKey)
   return { viewed: true }
-}
-
-const EVENT_KEYS = ['op', 'keepAlive', 'protocol', 'epoch', 'cursor', 'waitMs']
-
-/** The App's long poll on the event feed; absent on the network endpoint. */
-export async function handleAppEvents(events: LocalEndpointHandlers['events'], request: Record<string, unknown>): Promise<Record<string, unknown>> {
-  if (!events) return { error: 'unsupported_op' }
-  const { cursor, waitMs, epoch } = request
-  if (Object.keys(request).some((key) => !EVENT_KEYS.includes(key)) ||
-    !Number.isSafeInteger(cursor) || (cursor as number) < 0 || !Number.isSafeInteger(waitMs) || (waitMs as number) < 0 ||
-    (epoch !== undefined && (typeof epoch !== 'string' || epoch.length === 0 || epoch.length > 64))) return { error: 'invalid_request' }
-  return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
 }
 
 /** Bounds the subscribe frame before it reaches the authoritative reader. */

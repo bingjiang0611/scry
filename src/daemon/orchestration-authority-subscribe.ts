@@ -1,5 +1,5 @@
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
-import type { SubscribeHistoryPage, SubscribeRequest, SubscribeResponse } from '../shared/orchestration-subscribe'
+import type { SubscribeHint, SubscribeHistoryPage, SubscribeRequest, SubscribeResponse } from '../shared/orchestration-subscribe'
 import type { DesktopHostRead, DesktopRemoteHistory } from '../shared/desktop-remote'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ProviderContext } from '../shared/provider'
@@ -9,7 +9,6 @@ import { isCanonicalRemoteProjectDirectory } from '../main/remote/remote-directo
 import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { HostController } from '../main/remote/host-controller'
 import type { RemoteHostService } from '../main/remote/remote-host-service'
-import type { AppEvent } from '../main/remote/app-event-feed'
 import type { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { SubscribeEngine, type SubscribeEngineOptions } from '../host-runtime/orchestration/subscribe-engine'
@@ -30,7 +29,7 @@ export interface AuthoritySubscribeRuntimeDeps {
   scans?: SubscribeEngineOptions['scans']
 }
 
-/** Creates the volatile hint hub + commit wakeup binding for `SCRY_ORCHESTRATION=on`. */
+/** Creates the volatile hint hub and commit wakeup binding. */
 export function createAuthoritySubscribeHub(
   sink: EventSink,
   stateHints?: () => Array<{ kind: 'attention'; snapshot: SessionAttentionSnapshot }>
@@ -178,14 +177,14 @@ export function noteProgressMarkerForSubscribeHub(
   }
 }
 
-/**
- * Forwards shrunk App's volatile notices into `SubscribeHub` (`protocol §5.3`).
- * `hostAdmin` becomes `hostNotice` with exact W11 payload; `window` drops run-lifecycle notices
- * (`agent:turnDone`, `agent:session`, `agent:stopState`) that now arrive as durable run events.
- */
-export function forwardAppEventToSubscribeHub(
+export type AppHint = Exclude<SubscribeHint, { kind: 'run' | 'window' }>
+  | { kind: 'run'; runId: string }
+  | { kind: 'window'; channel: string; payload: unknown }
+
+/** Publishes volatile hints alongside durable orchestration events (protocol §5.3). */
+export function forwardAppHintToSubscribeHub(
   hub: SubscribeHub,
-  event: AppEvent,
+  event: AppHint,
   resolveCanonical: (runId: string) => string
 ): void {
   if (event.kind === 'run') {
@@ -200,7 +199,7 @@ export function forwardAppEventToSubscribeHub(
     hub.emitOAuth(event.url)
     return
   }
-  if (event.kind === 'hostAdmin') {
+  if (event.kind === 'hostNotice') {
     hub.emitHostNotice(event.notice)
     return
   }

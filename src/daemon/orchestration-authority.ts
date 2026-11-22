@@ -19,14 +19,14 @@ import {
   buildAuthorityStatus,
   createAuthoritySubscribeHandler,
   createAuthoritySubscribeHub,
-  forwardAppEventToSubscribeHub,
+  forwardAppHintToSubscribeHub,
   handleAuthorityRunProgress,
+  type AppHint,
   type AuthoritySubscribeRuntimeDeps
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
-import type { AppEvent } from '../main/remote/app-event-feed'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
 import {
@@ -50,7 +50,7 @@ export interface DaemonOrchestrationAuthority {
   readonly importComplete: Promise<void>
   readonly subscribeHub: SubscribeHub
   createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
-  forwardAppEvent(event: AppEvent): void
+  publishHint(event: AppHint): void
   observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
   status(): BackgroundServiceOrchestrationStatus
@@ -423,7 +423,7 @@ function buildAuthorityRuntime<
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
     createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
-    forwardAppEvent: (event) => forwardAppEventToSubscribeHub(subscribeHub, event, resolveCanonical),
+    publishHint: (event) => forwardAppHintToSubscribeHub(subscribeHub, event, resolveCanonical),
     observeNativeTranscript: (homeDir, run) => {
       if (!sink.handle.db.open || sink.isWriteIndeterminate()) return undefined
       const runId = resolveCanonical(run.ledgerRunId ?? run.runId)

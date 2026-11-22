@@ -10,7 +10,6 @@ const writeOperations = new Set([
   'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
   'executionTargetResult', 'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit', 'submitAtLog'
 ])
-const eventOperations = new Set(['appEvents'])
 const targetWorkOperations = new Set(['executionTargetWork'])
 // Short and idempotent: on the control lane, and replayable because it changes nothing twice.
 const idempotentControlOperations = new Set(['attentionViewed'])
@@ -58,7 +57,6 @@ export function laneForRequest(request: unknown, transport: 'local' | 'network' 
     if (Array.isArray(views) && views.includes('detail')) return 'watch'
     return transport === 'network' ? 'status' : 'events'
   }
-  if (eventOperations.has(op)) return 'events'
   if (targetWorkOperations.has(op)) return 'targetWork'
   if (op === 'desktop') {
     const kind = (request as { query?: { kind?: unknown } }).query?.kind

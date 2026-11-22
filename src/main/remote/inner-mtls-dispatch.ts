@@ -1,5 +1,5 @@
 import { handleRunControl } from './host-run-control'
-import { handleAppEvents, handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleSubscribe, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
+import { handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleSubscribe, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
 import { dispatchHistoryRequest } from './inner-mtls-history-dispatch'
@@ -142,10 +142,6 @@ export async function dispatchRemoteRequest(
     }
     if (request.op === 'attentionViewed') {
       return handleAttentionViewed(localEndpoint?.attention, request as unknown as Record<string, unknown>)
-    }
-    if (request.op === 'appEvents') {
-      // The App's own event feed (P3f); absent on the network endpoint.
-      return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
     }
     if (request.op === 'subscribe') {
       return await handleSubscribe(localEndpoint?.subscribe ?? networkSubscribe,

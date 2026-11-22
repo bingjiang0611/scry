@@ -9,10 +9,7 @@ import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-ru
 import { readDaemonTrace } from './daemon-run-trace-read'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import { assembleByteChunks } from './remote/desktop-byte-chunks'
-import type { DaemonEventReply } from './daemon-event-pump'
-import { isHostAdminNotice } from '../shared/host-admin'
-import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
-import { isAttentionSnapshot, isDataUpdated, parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
+import { parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
 
 // The App's run surface against its own daemon, over the same frames the phone
 // uses. This module only parses and types those frames: it holds no socket, no
@@ -89,8 +86,7 @@ function failure(reply: Record<string, unknown>, op?: string): Error | undefined
   if (op === 'submit' && code === 'session_run_active') return new DaemonRunRefusedError(RUN_ADMISSION_BUSY_MESSAGE)
   if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
-  // Scope unknown_op mapping strictly to the W10 execution-target bridge ops so older-daemon
-  // behavior for existing ops (such as DaemonEventPump's appEvents) stays unchanged.
+  // Only the W10 execution-target bridge maps unknown_op to an unavailable control.
   if (code === 'unsupported_op' || (code === 'unknown_op' && (op === 'executionTargetWork' || op === 'executionTargetResult'))) {
     return new DaemonRunError('daemon_run_control_unavailable')
   }
@@ -245,35 +241,6 @@ export class DaemonRunTransport {
     const reply = await this.subscribe({ views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0 })
     if (reply.mode !== 'snapshot' || !reply.snapshot.activeRuns) throw new DaemonRunError('invalid_daemon_response')
     return reply.snapshot.activeRuns.rows.find(row => row.runId === runId)?.lifecycle ?? null
-  }
-
-  /** The App's event feed (P3f): a long poll answered by the daemon on its own lane. */
-  async appEvents(input: { epoch?: string; cursor: number; waitMs: number }, signal?: AbortSignal): Promise<DaemonEventReply> {
-    const reply = await this.#call(
-      { op: 'appEvents', ...(input.epoch !== undefined ? { epoch: input.epoch } : {}), cursor: input.cursor, waitMs: input.waitMs },
-      { replayable: true, ...(signal ? { signal } : {}) }
-    )
-    const events = reply.events
-    if (!record(events) || typeof events.epoch !== 'string' || !Number.isSafeInteger(events.cursor) ||
-        !Array.isArray(events.items) || events.items.length > MAX_ITEMS) throw new DaemonRunError('invalid_daemon_response')
-    const items = events.items.flatMap((raw): DaemonEventReply['items'] => {
-      if (!record(raw)) return []
-      if (raw.kind === 'data' && isDataUpdated(raw.event)) return [{ kind: 'data', event: raw.event }]
-      if (raw.kind === 'run' && isDaemonRunId(raw.runId)) {
-        const intentSeq = Number.isSafeInteger(raw.intentSeq) && (raw.intentSeq as number) > 0 ? raw.intentSeq as number : undefined
-        return [{ kind: 'run', runId: raw.runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }]
-      }
-      if (raw.kind === 'attention' && isAttentionSnapshot(raw.snapshot)) return [{ kind: 'attention', snapshot: raw.snapshot }]
-      if (raw.kind === 'terminal') return [{ kind: 'terminal' }]
-      if (raw.kind === 'oauth' && typeof raw.url === 'string' && raw.url.length <= 8192) return [{ kind: 'oauth', url: raw.url }]
-      if (raw.kind === 'hostAdmin' && isHostAdminNotice(raw.notice)) return [{ kind: 'hostAdmin', notice: raw.notice }]
-      // Only the notices the daemon is meant to forward, never a channel it names freely.
-      if (raw.kind === 'window' && typeof raw.channel === 'string' && DAEMON_WINDOW_NOTICES.has(raw.channel) && record(raw.payload)) {
-        return [{ kind: 'window', channel: raw.channel, payload: raw.payload }]
-      }
-      return []
-    })
-    return { epoch: events.epoch, cursor: events.cursor as number, items, reset: events.reset === true }
   }
 
   /** The App viewed one of the daemon's unread sessions (E1b). Idempotent. */

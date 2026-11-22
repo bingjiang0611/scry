@@ -1,5 +1,4 @@
 import type { ConversationStore } from '../main/conversation-store'
-import type { AppEventFeed } from '../main/remote/app-event-feed'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
@@ -15,11 +14,10 @@ export async function attachHostProcessOrchestration<
   runs: RunRegistry<State, Control>
   requestRunStop: (runId: string) => boolean
   attentionSnapshot: () => SessionAttentionSnapshot
-  events: AppEventFeed
   log: (line: string) => void
 }): Promise<DaemonOrchestrationAuthority> {
-  const { options, conversationStore, runs, requestRunStop, attentionSnapshot, events, log } = input
-  const orchestrationAuthority = await attachDaemonOrchestrationAuthority({
+  const { options, conversationStore, runs, requestRunStop, attentionSnapshot, log } = input
+  return attachDaemonOrchestrationAuthority({
     userDataDir: options.userDataDir,
     env: process.env,
     conversationStore,
@@ -37,8 +35,6 @@ export async function attachHostProcessOrchestration<
       ? { mirrorRetryIntervalMs: options.orchestrationMirrorRetryIntervalMs }
       : {})
   })
-  events.setObserver((event) => orchestrationAuthority.forwardAppEvent(event))
-  return orchestrationAuthority
 }
 
 /** Bounded provider registry shutdown helper extracted from host-process.ts to stay within the 20 KB file budget. */

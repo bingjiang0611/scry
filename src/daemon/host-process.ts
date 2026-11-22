@@ -24,7 +24,8 @@ import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
 import { openLocalChannel } from './local-channel'
 import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
-import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
+import { SUBSCRIBE_RETAINED_WINDOW_NOTICES } from '../shared/orchestration-subscribe'
+import type { AppHint } from './orchestration-authority-subscribe'
 import type { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
@@ -69,11 +70,12 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
 
   const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
   // New and resynchronizing Apps receive the full unread set (E1b).
-  const events = new AppEventFeed({ state: () => [{ kind: 'attention', snapshot: session.dockBadge.snapshot() }] })
-  const publishData = (event: AgentDataUpdated): void => events.append({ kind: 'data', event })
+  let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
+  const publishHint = (hint: AppHint): void => orchestrationAuthority?.publishHint(hint)
+  const publishData = (event: AgentDataUpdated): void => publishHint({ kind: 'data', event })
   const session = createSessionState({
     setBadgeCount: () => true,
-    publishUnreadSessions: (snapshot) => events.append({ kind: 'attention', snapshot })
+    publishUnreadSessions: (snapshot) => publishHint({ kind: 'attention', snapshot })
   })
 
   let loadSessions = (): Array<{ cwd?: string }> => []
@@ -81,15 +83,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
   })
-  let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
   const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink, log)
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
     homeDir: workspace.homeDir,
     recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
-    notify: () => events.append({ kind: 'terminal' }),
-    idleMs: () => orchestrationAuthority ? Math.min(events.idleMs(), orchestrationAuthority.subscribeHub.idleMs()) : events.idleMs(),
+    notify: () => publishHint({ kind: 'terminal' }),
+    idleMs: () => orchestrationAuthority?.subscribeHub.idleMs() ?? 0,
     log,
     ...options.terminal
   })
@@ -149,12 +150,12 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
     observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
-    // The pipeline's window notices travel on the App event feed. The trace and questions
+    // The pipeline's volatile notices travel on the App subscription. The trace and questions
     // reach the App through its own run reads, so they are not sent twice (W1).
     renderer: {
       send: (channel, payload) => {
         if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated)
-        else if (DAEMON_WINDOW_NOTICES.has(channel)) events.append({ kind: 'window', channel, payload })
+        else if (SUBSCRIBE_RETAINED_WINDOW_NOTICES.has(channel)) publishHint({ kind: 'window', channel, payload })
       },
       isFocused: () => false,
       acceptsNotices: () => true
@@ -237,13 +238,12 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     runs: pipeline.runs,
     requestRunStop,
     attentionSnapshot: () => session.dockBadge.snapshot(),
-    events,
     log
   })
   orchestrationAuthority = authority
   const hostAdmin = new HostAdminStore({
     stateDirectory: remoteStateDirectory,
-    onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })
+    onNotice: (notice) => publishHint({ kind: 'hostNotice', notice })
   })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
   const service = await createHostRuntime({
@@ -260,11 +260,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
     managedLaunches: conversationSend.launches,
-    onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
+    onRunActivity: (runId) => publishHint({ kind: 'run', runId }),
     orchestration: authority.hooks,
     ...(isHostCliExperimentalEnabled(process.env) ? { listHostAdminNotices: () => hostAdmin.recentNotices() } : {}),
     localEndpoint: daemonLocalEndpoint({
-      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
+      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, publishHint, terminal,
       runs: () => pipeline.runs,
       requestRunStop,
       forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
@@ -350,7 +350,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       isShuttingDown = true
       startupManagedRecovery = Promise.resolve()
       // A parked App long poll answers now instead of holding the channel open.
-      events.close()
       authority.subscribeHub.close()
       targetBridge.close()
       // Shells end with the daemon too; their recordings are finished on the way.

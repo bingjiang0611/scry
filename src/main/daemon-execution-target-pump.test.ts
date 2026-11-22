@@ -126,7 +126,7 @@ describe('DaemonExecutionTargetPump', () => {
     await expect(transport.executionTargetWork({ waitMs: 0 })).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
     await expect(transport.executionTargetResult({ callId: 'c1', ok: true })).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
     // Existing ops (e.g. appEvents for DaemonEventPump) keep invalid_daemon_response on unknown_op.
-    await expect(transport.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
+    await expect(transport.subscribe({ views: ['activeRuns'], waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
   })
 
   it('dispatches bridged shellOpenPath and shellTrashItem to App shellOps and rejects invalid paths (W17)', async () => {

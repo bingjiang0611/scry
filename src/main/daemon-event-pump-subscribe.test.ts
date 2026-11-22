@@ -74,9 +74,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const send = vi.fn()
 
     const pump = new DaemonEventPump({
-      subscribeMode: true,
       source: {
-        appEvents: vi.fn(),
         subscribe: async (req) => {
           requests.push(req)
           const next = replies[idx++]
@@ -133,9 +131,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const onWindow = vi.fn()
 
     const pump = new DaemonEventPump({
-      subscribeMode: true,
       source: {
-        appEvents: vi.fn(),
         subscribe: async () => {
           const next = replies[idx++]
           if (!next) {
@@ -233,9 +229,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const onHostAdmin = vi.fn()
     const requests: SubscribeRequest[] = []
     const pump = new DaemonEventPump({
-      subscribeMode: true,
       source: {
-        appEvents: vi.fn(),
         subscribe: async (req) => {
           requests.push(req)
           const next = replies[idx++]

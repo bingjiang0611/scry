@@ -9,6 +9,7 @@ import { Pkcs10CertificateRequestGenerator } from '@peculiar/x509'
 import type { createDaemonHostProcess } from './host-process'
 import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import type { SubscribeKnownCursor } from '../shared/orchestration-subscribe'
 
 // How host-process.test.ts reaches a real test daemon: temporary directories, an
 // in-memory output store, the App's local enrollment and one framed socket call.
@@ -63,6 +64,13 @@ export async function call(socketPath: string, ca: string, cert: string, key: st
   for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy()
   return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
+}
+
+export function localSubscription(known?: SubscribeKnownCursor, waitMs = 0): Record<string, unknown> {
+  return {
+    op: 'subscribe', views: ['activeRuns', 'sessions'], waitMs,
+    ...(known ? { known: { hostId: known.hostId, logId: known.logId, seq: known.seq } } : {})
+  }
 }
 
 /** Observe one real daemon run using the v3 projection and cursor. */
