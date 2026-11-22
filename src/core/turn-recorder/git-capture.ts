@@ -33,6 +33,7 @@ import {
 } from 'node:os'
 
 import { checkWorkspaceCaptureLimits, WorkspaceReadUnavailable } from './git-workspace-limits.js'
+import { sampleGitRepositoryLocation, type GitRepositoryHead, type GitRepositoryLocation } from './git-repository-location.js'
 
 export interface GitTurnDiffCapture {
   beforeAt: string
@@ -43,6 +44,7 @@ export interface GitTurnDiffCapture {
   scope?: string
   requestedRoot?: string
   beforeTree?: string
+  repositoryStart?: GitRepositoryLocation
   head?: string
   branch?: string
   baselineClean?: boolean
@@ -184,6 +186,8 @@ export async function beginGitTurnDiff(
   try {
     const canonicalCwd = await realpath(cwd)
     const readEnv = workspaceSnapshot ? { ...process.env, GIT_NO_LAZY_FETCH: '1' } : undefined
+    // For a repo-root request, sample live HEAD in parallel with the existing layout and status commands.
+    const cwdLocation = workspaceSnapshot ? undefined : sampleGitRepositoryLocation(canonicalCwd, true)
     const [layoutResult, statusResult] = await Promise.allSettled([
       gitCommand(
         [
@@ -207,12 +211,16 @@ export async function beginGitTurnDiff(
     if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw || !sparsePathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
+    // The diff baseline may be a frozen tree, but location comes from the live worktree at capture start.
+    const location = repoRoot === canonicalCwd ? cwdLocation
+      : workspaceSnapshot ? undefined : sampleGitRepositoryLocation(repoRoot, true)
     if (statusResult.status === 'rejected') throw statusResult.reason
     const statusRecords = statusResult.value.split('\0').filter(Boolean)
     const headRecord = statusRecords.find((record) => record.startsWith('# branch.oid '))
     const head = headRecord?.slice('# branch.oid '.length).trim() ?? ''
     if (!head || head === '(initial)') {
-      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
+      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head',
+        repoRoot, requestedRoot, repositoryStart: location?.() }
     }
     const branchName = statusRecords.find(record => record.startsWith('# branch.head '))?.slice('# branch.head '.length)
     const branch = branchName && branchName !== '(detached)' ? branchName : undefined
@@ -272,6 +280,7 @@ export async function beginGitTurnDiff(
         beforeTree: baselineTree,
         head: baseline.commit,
         branch,
+        repositoryStart: location?.(),
         baselineClean: false,
         indexPath,
         tempDir,
@@ -299,6 +308,7 @@ export async function beginGitTurnDiff(
         beforeTree: head,
         head,
         branch,
+        repositoryStart: location?.(),
         baselineClean,
         indexPath,
         ...(indexState && !sparseCheckout ? { indexState } : {}),
@@ -337,6 +347,7 @@ export async function beginGitTurnDiff(
       beforeTree,
       head,
       branch,
+      repositoryStart: location?.(),
       baselineClean,
       indexPath,
       ...(sparseCheckout ? {} : { beforeIndex }),
@@ -361,6 +372,7 @@ export async function beginGitTurnDiff(
 }
 
 export interface GitAfterTree {
+  repositoryEnd?: GitRepositoryHead
   tree: string
   afterAt: string
   indexFile: string

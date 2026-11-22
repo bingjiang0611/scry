@@ -1,6 +1,7 @@
 import type { CreditUsageEvidence } from './credit-usage.js'
 import type { TurnDiffStatus, TurnDiffReason, DiffFile, TurnDiffCollection, DangerLevel, CompactionTrigger, WorkspaceOverlapEvidence, WorktreeBaselineReason } from './trace.js'
 import type { TurnDiffExcludeEvidence } from './turn-diff.js'
+import type { TurnRepositoryLocation } from './turn-repository-location.js'
 import type { AgentSteerEvidence, AgentImageMimeType, AgentIntervention } from './runtime.js'
 import type { ProviderId } from './provider.js'
 
@@ -152,6 +153,7 @@ export interface TurnFile {
 }
 
 export interface TurnDiffSnapshotRecord {
+  repositoryLocation?: TurnRepositoryLocation
   status: TurnDiffStatus
   reason?: TurnDiffReason
   files: DiffFile[]
