@@ -1,6 +1,6 @@
 # iOS 界面重设计交接（2026-10-25）
 
-目标：iOS（`apps/ios/ScryRemote`）的体验尽量与 Mac 端一致。设计稿已由用户确认：<https://claude.ai/artifact/WkPCeBVNnSvTDauRq84tHJ>（私有画布，执行方可能打不开；仓库内的 [mockups/](mockups/) 是同一份源码，[SPEC.md](SPEC.md) 是落地用的文字规范，以 SPEC 为准）。
+目标：iOS（`apps/ios/ScryRemote`）的体验尽量与 Mac 端一致。用户确认的设计方向见 [SPEC.md](SPEC.md)，视觉验收见 [reports/](reports/)。
 
 ## 协作方式
 
@@ -30,7 +30,7 @@
 3. **保留 README 里的诚实不变量**：「已配对」与「已连接」的区分、运行状态只在状态条出现一次、停止需要确认、未知结果不冒充失败等。
 4. 触控区域 ≥ 44pt；文字对比度 ≥ 4.5:1（大字 ≥ 3:1）；每个动画都要在「减少动态效果」打开时降级（见 SPEC 动效一节）。
 5. 不引入第三方依赖；新增 Swift 文件要同时加进 `ScryRemote.xcodeproj/project.pbxproj`（两个 target 如有需要）。
-6. 只提交本批相关改动，不做无关格式化或重构。设计稿源文件（`mockups/`）不要改。
+6. 只提交本批相关改动，不做无关格式化或重构。
 
 ## 验证（每批都要）
 

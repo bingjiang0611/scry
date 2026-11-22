@@ -2,8 +2,7 @@
 
 目标：打开 App 直接进入新建会话；左侧任务栏（现在的首页会话列表）默认收起，点 ☰ 才展开；点「新建会话」时，底部的会话框聚焦并弹出键盘。
 
-- 设计稿（用户已确认方向）：<https://claude.ai/artifact/JbcSAQAGLaVQ39Tn2mFD3g>。这是私有画布，执行方可能打不开，仓库里的 [mockups/](mockups/) 是同一份源码。
-- 落地规范：[SPEC.md](SPEC.md)。设计稿与 SPEC 不一致时，以 SPEC 为准。
+- 用户确认的设计方向和落地规范见 [SPEC.md](SPEC.md)，视觉验收见 [reports/](reports/)。
 - 进度：[STATUS.md](STATUS.md)。
 
 上一轮改版（R1–R6e）的 token、组件和已知问题见 [../ios-redesign-2026-10-25/FINAL.md](../ios-redesign-2026-10-25/FINAL.md)。本轮在它的基础上做，不重做颜色、字体、动效。
@@ -30,7 +29,7 @@
 3. 保留上一轮的诚实不变量：「已配对」与「已连接」的区分、运行状态只出现一次、有可恢复的运行时仍自动回到会话页（`resumeRecoveredRun`）、等待决定的横幅照常显示。
 4. 触控区域 ≥ 44pt，文字对比度 ≥ 4.5:1，所有动画在「减少动态效果」打开时降级（用 `Motion`，不要新写时长）。
 5. 不引入第三方依赖。新增或删除 Swift 文件要同步改 `apps/ios/ScryRemote.xcodeproj/project.pbxproj`。
-6. 只提交本批相关改动，不做无关格式化或重构。`mockups/` 不要改。
+6. 只提交本批相关改动，不做无关格式化或重构。
 
 ## 验证
 
