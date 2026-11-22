@@ -1,10 +1,9 @@
-# 侧边会话 · 设计稿
+# 侧边会话 · 历史设计说明
 
 状态：本文件保留为**历史设计提案**（当时未实现 App 功能）。功能已经实现并通过发布门禁。**当前已安装的是 App `0.2.239` / 私有 CLI `0.2.56`**：它在 `0.2.238` 的基础上统一了对话/运行状态模型（typed `not_sent` 回执、Provider 原生终止证据、归档缺失状态不再默认成功、Provider settle 与本地收口分开、Activity 呈现失败与阻断、侧聊边界改为任何显式终止轮次、停止控制调用失败可见），合同见 **[conversation-state-model.md](../conversation-state-model.md)**。上一轮 `0.2.238` 的归档终止证据修复与字节校验见 [archive-termination-fix.md](./archive-termination-fix.md)。用户正在运行的旧实例需要自己重启才会加载新版本。`0.2.237` 源码候选（[profile-capture-fix.md](./profile-capture-fix.md)）、`0.2.235` 大历史交付（[large-history-delivery.md](./large-history-delivery.md)、[large-history-fix.md](./large-history-fix.md)、[large-history-verification.md](./large-history-verification.md)）与 `0.2.231` 记录（[final-delivery.md](./final-delivery.md)、[release-verification.md](./release-verification.md)）现在只是历史，不是当前证明。下面各节的布局、文案与默认行为仍是设计基线；其中快照边界已按上述状态模型改为任何显式终止轮次。
 
-- [交互设计稿](./index.html)：独立 HTML 示例，不连接 Provider，不修改项目文件，不保存真实会话。
 - [技术方案](./technical-plan.md)：现有调用链、数据合同、并行边界、实施顺序与验收。
-- 预览：在仓库根目录运行 `python3 -m http.server 8765 --bind 127.0.0.1 --directory docs/handoff/side-chat`，访问 `http://127.0.0.1:8765/`。
+- [PR #56](https://github.com/bingjiang0611/scry/pull/56) 的本地验证：[第一轮](local-verify/REPORT.md)、[第二轮](local-verify/REPORT-2.md)、[焦点竞态复现](local-verify/REPORT-3.md)。
 
 ## 1. 已确认的产品合同
 
@@ -104,15 +103,14 @@
 
 用户已确认：侧聊只读消息快照，不要求先迁移或接管主聊；原「旧式会话首次接管需要等待」限制撤回。来源身份与运行中读取的约束见 [来源合同](./snapshot-source.md)。本轮按指定截图加入 Surface 入口，并打磨页签、快照/共享工作区说明与窄窗单列交互。当前稿不代表 App 功能已实现或真实 Provider 已通过并行验收。
 
-## 9. 本轮实际验证
+## 9. 原型历史验证
 
 | 检查 | 结果与边界 |
 | --- | --- |
-| `node --check` | 对 `prototype.js` 与 `prototype-copy.js` 通过；Node 24，本地独立设计稿 |
-| `node --test docs/handoff/side-chat/prototype.check.mjs` | 12/12 通过，0 skip；保留原 8 个状态检查，新增默认七入口、`+` 仅打开菜单、工具去重/侧聊多实例、关闭最后页签回到选择器；不是浏览器布局测试 |
+| 原型脚本语法 | Node 24 检查通过 |
+| 原型状态检查 | 12/12 通过，0 skip；包括默认七入口、`+` 仅打开菜单、工具去重/侧聊多实例、关闭最后页签回到选择器；不是浏览器布局测试 |
 | Chrome Relay 实际交互 | 在新版中分别点击 Surface 卡片和 `+` 菜单创建侧聊；仅打开菜单未增加数量；窄窗切换浅色并输入，readback 确认输入非空 |
 | 视觉检查 | 1512 × 708 CSS viewport 的深色双列入口和 820 px 原型浅色窄窗。首轮低高度布局下末排工具需滚动、空态有重复提示；改为紧凑卡片并删去重复提示后，重新打开复核七个入口与完整输入区可见 |
-| 文档/资源 | 本地 Markdown 链接与 HTML 引用资产存在；文案集中在 `prototype-copy.js`，不引入运行依赖 |
 
 设计稿内的宽度切换不是手机或真实 App 验收。未调用 Provider，未跑 App 全量测试、打包或安装。原型的历史恢复只演示当前页面内状态；长期保存是待实现的产品合同（实现与验收结果见 [final-delivery.md](./final-delivery.md)）。
 

@@ -1,6 +1,6 @@
 # 批次 D：核验与修订
 
-[原批次修改记录](D-initial.md) 原文归档。其 D1 降级规则与手验预期属于历史规格，已由下方用户选定的 VD1 方案 A 及末尾修改记录取代；D2 的已核验结论不变。
+[原批次修改记录](https://github.com/bingjiang0611/scry/blob/11ba9c99be4ba3a0d5e27af0afe0a3f8ed44466a/docs/handoff/collection-reliability-2026-10-24/reports/D-initial.md)可从 Git 历史查看。其 D1 降级规则与手验预期属于历史规格，已由下方用户选定的 VD1 方案 A 及末尾修改记录取代；D2 的已核验结论不变。
 
 ## 核验意见（审查方，2026-10-25）
 
@@ -115,7 +115,7 @@ Tests       5 failed | 4 passed (9)
 - `/tmp/scry-VD2-audit.cjs` 对比测试提交 `76e046d9`：将 helper 体回填到调用点后，去注释、格式归一化的 parseCodexRollout AST 完全相同；已有 Codex helper 声明不变；9 行注释与原文逐字匹配且各出现一次。
 - 结果在 `/tmp/scry-VD2-audit.log`：`originalCommentLinesRestored=9`、`rolloutAstIdenticalAfterInlining=true`、`existingCodexHelpersUnchanged=true`、`contractsAstIdentical=true`。
 - 拆分后 rollout / calls / contracts 分别为 19,125 / 15,532 / 13,149 字节；正常门禁通过，没有删注释压大小，也没有改 hooks 配置。
-- 同一授权下，原 D 修改记录原文移至 [D-initial.md](D-initial.md)，本页保留审查方核验意见并在末尾追加本节；历史报告中的旧 D1 预期不再是当前验收标准。
+- 本页保留核验意见和用户选择；历史报告中的旧 D1 预期不再是当前验收标准。
 
 ### 验证
 
@@ -159,7 +159,7 @@ npm run test:unit -- src/core/turn-recorder/*.test.ts src/cli/*.test.ts src/shar
 2. 先创建普通单仓库和 `src/features/auth`（无嵌套 `.git`），默认 maxDepth=2、diff 开启。完成一次真实 README 改动后，用 `turns show` 与 `doctor` 读回：没有其他缺口时 diff available，discovery 边界数保留，repositories.depth pass。
 3. 再在临时 workspace 建立真正的 `a/b/c` 子 Git 仓库，保持 maxDepth=2。新 record 仍可 available，清单不包含深层 c，discovery 边界仍保留；doctor 必须 warn 并列出 `a/b/c`。available 不表示 c 已采到。
 4. 显式把 maxDepth 改为 3 后再做一轮，检查新清单才包含 c。历史 record 不回填。不完整探测的无仓库反例可直接复跑 `repository-coverage.test.ts`，不能把 pass 当成对未扫描目录的否定结论。
-5. 原 [D-U1～D-U5](D-initial.md#用户验证待用户执行) 的隔离/原生 trust/宽限/日志步骤仍适用，但 D-U2“仅因深度而 partial”及 D-U3“旧 record 仍 partial”的描述已被本次规格取代：旧 record 保持它实际写入时的状态，新 record 按当前规则产生。
+5. 原生 trust 不跳过。OpenCode/Qoder 若进入 180 秒终态宽限，等宽限结束再 `recover` 并读回记录，不把 pending 当作成功或丢失。Qoder/Codex 的缺失 bridge 验证仅用隔离 workspace：临时移开 bridge 后对照 doctor 与支持包的 `bridge_not_found`，确认不算入 workspace hookSkips，再恢复 bridge 和重启。继承 `SCRY_RECORDER_DAEMON_TRIED=1` 时，启动脚本须清除继承值，确认本轮记录可读回。
 
 本轮没有修改 hook 模板，不新增 repair 要求；更新 CLI 后应重启对应 workspace 的 daemon 以加载新代码。此前 D2 的旧脚本尚未 repair 时，仍须按已核验 D2 流程执行。未改 fsync、trust/fingerprint、并发或扫描默认值。
 
@@ -173,4 +173,4 @@ npm run test:unit -- src/core/turn-recorder/*.test.ts src/cli/*.test.ts src/shar
 - 修复后（HEAD `11beb6c`，Linux/Node 22）：`src/core/turn-recorder` 与 `src/cli` 共 549/549 通过；`npm run typecheck` 无错误。
 - 代码：`recorder-turn-finalize.ts` 删掉了「截断即降级」的整段逻辑，`diff.discovery` 照常写入；doctor 的 warn 条件和 remediation 都改为 `nextDepth.repositories.length`，detail 里仍然写明截断目录数和探测是否不完整。符合用户选定的方案。
 - VD2：9 行注释已恢复，缩进已修正。`patch_apply_end` 分支抽成 `appendCodexPatchResult`，我逐行比对删除与新增的代码（去掉缩进后）完全一致；它用到的 `stringAt`、`outputText`、`stableHash` 在新文件中都有来源，typecheck 通过。
-- 原报告归档为 `D-initial.md`，D.md 保留了我的核验意见和用户的选择，并注明 D1 的旧降级规则已被取代，做法合适。
+- 本页的 D1 验收规则以用户选择的方案 A 为准。

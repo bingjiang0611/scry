@@ -1,6 +1,6 @@
 # L1 规范：启动即新建会话 + 左侧抽屉
 
-设计稿源码：[mockups/](mockups/)（`Main` 启动态、`Sidebar` 抽屉展开、`Typing` 新建会话聚焦、`MainDark` 启动态深色）。颜色全部用 `Theme.swift` 现有的 `Palette`，字体用 `Typography`，动效用 `Motion`，不新增 token。
+颜色全部用 `Theme.swift` 现有的 `Palette`，字体用 `Typography`，动效用 `Motion`，不新增 token。
 
 ## 1. 现状（改之前先读）
 
@@ -24,7 +24,7 @@
 
 ## 3. 新建会话页（抽屉收起）
 
-对照 `mockups/Main.dc.html`、`MainDark.dc.html`。底色 `Palette.main`。
+深浅模式的底色都使用 `Palette.main`。
 
 **顶栏**，高 48，左右 padding 6：
 - 左：侧栏按钮，44×44，SF Symbol `sidebar.left`，`Palette.fg`，无障碍标签「展开侧栏」。点了打开抽屉。
@@ -40,8 +40,6 @@
 - `focusComposer == true` 时出现后自动聚焦输入框。`MessageComposer` 的 `@FocusState` 是私有的，给它加一个可选参数（比如 `autoFocus: Bool = false`，`onAppear` 里设 `inputFocused = true`），默认值不改变现有调用方行为。
 
 ## 4. 左侧抽屉
-
-对照 `mockups/Sidebar.dc.html`。
 
 - 宽度：`min(屏幕宽 × 0.85, 340)`。从左边滑入，底色 `Palette.sidebar`，右边 0.5pt `Palette.border`，阴影 `black 10%`、半径 30、x 8。
 - 遮罩：抽屉右侧整个区域 `Color.black.opacity(0.28)`，点遮罩收起。无障碍上遮罩是一个「收起侧栏」按钮。
