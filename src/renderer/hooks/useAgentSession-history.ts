@@ -23,8 +23,11 @@ export function restoreSessionTurns(
   const snapshot = sessionTurnsWithActiveRun(sessionId, parsed, activeRun, page?.offset ?? 0)
   if (!activeRun) return snapshot
   if (page?.projection) {
-    const ids = new Set(activeRun.items.map((item) => item.id))
-    const fresh = traceDeltas.filter((item) => !ids.has(item.id))
+    const items = new Map(activeRun.items.map((item) => [item.id, item]))
+    const fresh = traceDeltas.filter((item) => {
+      const previous = items.get(item.id)
+      return !previous || item.stage === 'result_superseded' || Date.parse(item.ts) > Date.parse(previous.ts)
+    })
     return replayRunLifecycleDeltas(applyTraceBatch(snapshot, fresh, clearedRuns), lifecycleDeltas)
   }
   const local = previous.find((turn) => turn.runId === activeRun.runId)

@@ -21,3 +21,14 @@ it('installs the host timeline and applies focus events outside the snapshot', (
   expect(displayed.map((turn) => turn.runId)).toEqual(['old', 'run'])
   expect(displayed[1]?.items).toEqual([trace('shared', '宿主的内容'), trace('new', '首页读完后的内容')])
 })
+
+it('replays a result supersession received while the host page was in flight', () => {
+  const result: TraceEvent = { ...trace('result', '此前的结果'), kind: 'harness', stage: 'result' }
+  const activeRun: ActiveRun = { runId: 'run', userText: '当前问题', done: false, items: [result] }
+  const page = {
+    turns: [], offset: 0, totalTurns: 0, hasOlder: false, completeness: 'complete' as const,
+    projection: { sessionKey: 'session', activeRun }
+  }
+  const superseded: TraceEvent = { ...result, stage: 'result_superseded' }
+  expect(restoreSessionTurns([], 'session', [], activeRun, page, [superseded], [], new Set())[0]?.items).toEqual([])
+})
