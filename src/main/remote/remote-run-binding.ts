@@ -192,7 +192,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
           sawAssistantText = true
           output({ kind: 'output', text: ev.text })
         }
-        progress(marker({ event: 'result', isError: Boolean(ev.isError), ...(typeof ev.tokensIn === 'number' ? { tokensIn: ev.tokensIn } : {}), ...(typeof ev.tokensOut === 'number' ? { tokensOut: ev.tokensOut } : {}), ...(typeof ev.costUsd === 'number' ? { costUsd: ev.costUsd } : {}) }))
+        progress(marker({ event: 'result', isError: Boolean(ev.isError) }))
       }
       if (!chunk) { activity?.(); return }
       let forwarded = chunk

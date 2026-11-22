@@ -161,9 +161,7 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
           if (forwarded.text.length > 0) output(forwarded)
         }
       }
-      // Only honest, opaque lifecycle markers cross to the ledger; no transcript
-      // bytes, no secrets. Provider-canonical usage on the result event is
-      // surfaced verbatim (exact evidence), never synthesized.
+      // Only lifecycle markers cross to the dispatcher. Trace evidence keeps its own provenance.
       if (ev.stage === 'runtime:controls') { progress(marker({ event: 'started' })); return }
       if (ev.kind === 'harness' && ev.stage === 'result') {
         if (ev.isError && typeof ev.text === 'string') lastErrorText = ev.text.slice(0, 512)
@@ -173,12 +171,7 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
           sawAssistantText = true
           output({ kind: 'output', text: ev.text })
         }
-        progress(marker({
-          event: 'result', isError: Boolean(ev.isError),
-          ...(typeof ev.tokensIn === 'number' ? { tokensIn: ev.tokensIn } : {}),
-          ...(typeof ev.tokensOut === 'number' ? { tokensOut: ev.tokensOut } : {}),
-          ...(typeof ev.costUsd === 'number' ? { costUsd: ev.costUsd } : {})
-        }))
+        progress(marker({ event: 'result', isError: Boolean(ev.isError) }))
       }
     }
     const request: ProviderRunRequest = {

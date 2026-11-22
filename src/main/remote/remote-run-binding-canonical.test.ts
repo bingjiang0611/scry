@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRemoteRunBinding, type RemoteRunBindingDependencies } from './remote-run-binding'
-import { fakeRun } from './remote-run-binding-fixtures'
+import { fakeRun, result } from './remote-run-binding-fixtures'
 import type { TraceEvent } from '../../shared/trace'
 
 // The canonical seam: a submitted run is handed to the App's own run lifecycle. These
@@ -12,18 +12,21 @@ describe('remote run binding (canonical App seam: submit -> startAppRun)', () =>
   it('delegates production execution to the canonical App run lifecycle and preserves recording failure', async () => {
     const startAppRun = vi.fn(async (input: Parameters<NonNullable<import('./remote-run-binding').RemoteRunBindingDependencies['startAppRun']>>[0]) => {
       input.onTraceEvent(textEvent('canonical output'))
+      input.onTraceEvent(result(false))
       return { status: 'completed' as const, recording: 'failed' as const, error: 'archive failed' }
     })
     const output = vi.fn()
+    const progress = vi.fn()
     const start = createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-1' })
     await expect(start({
       runId: 'ledger-canonical', routing: { cwd: '/w', providerId: 'claude', prompt: 'go' },
-      progress: vi.fn(), output
+      progress, output
     })).rejects.toThrow('archive failed')
     expect(startAppRun).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'canonical-1', ledgerRunId: 'ledger-canonical', request: expect.objectContaining({ prompt: 'go', cwd: '/w' })
     }))
     expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'canonical output' })
+    expect(progress.mock.calls.map(([value]) => JSON.parse(value))).toContainEqual({ event: 'result', isError: false })
   })
 
   it('passes only the workspace selection to the canonical host lifecycle and rejects it on the legacy executor', async () => {

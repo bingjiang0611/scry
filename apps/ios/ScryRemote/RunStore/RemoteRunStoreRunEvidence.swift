@@ -95,7 +95,7 @@ extension RemoteRunStore {
         // The Provider reporting its own session id is evidence it is executing.
         if marker["event"] == "started" || marker["event"] == "session",
            lifecycle == .dispatched || lifecycle == .recorded { lifecycle = .running }
-        if marker["event"] == "result" { resultSummary = Self.resultLine(marker) }
+        if marker["event"] == "result" { resultSummary = "主机报告完成（未提供用量）" }
         if marker["event"] == "settled", let status = marker["status"],
            status == "cancelled" || status == "interrupted" || status == "stopped" {
           lifecycle = .cancelled
@@ -155,23 +155,6 @@ extension RemoteRunStore {
       else if let b = v as? Bool { out[k] = b ? "true" : "false" }
     }
     return out
-  }
-
-  static func resultLine(_ marker: [String: String]) -> String {
-    var parts: [String] = []
-    if let ti = marker["tokensIn"] { parts.append("输入 \(ti)") }
-    if let to = marker["tokensOut"] { parts.append("输出 \(to)") }
-    if let cost = marker["costUsd"] { parts.append(Self.costLabel(cost)) }
-    return parts.isEmpty ? "主机报告完成（未提供用量）" : parts.joined(separator: " · ")
-  }
-
-  // Provider cost is a binary float (e.g. 0.014948799999999998). Show four
-  // significant digits; an unparseable value is shown verbatim, not as 0.
-  static func costLabel(_ raw: String) -> String {
-    guard let value = Double(raw), value.isFinite, value >= 0 else { return "$\(raw)" }
-    if value == 0 { return "$0" }
-    if value >= 1 { return String(format: "$%.2f", value) }
-    return "$" + String(format: "%.4g", value)
   }
 
   var terminalLifecycleKnown: Bool {
