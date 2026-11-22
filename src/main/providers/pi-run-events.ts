@@ -1,7 +1,7 @@
 import type { ProviderRunRequest } from './types'
 import type { TraceEvent } from '../../shared/trace'
 import { record, serialized, bounded, type JsonRecord } from './pi-shared'
-import { classifyTool, fileOpOf, mcpPayloadFailed, parseMcp, contextCompactionOf } from '../../shared/trace'
+import { classifyTool, fileOpOf, mcpPayloadFailed, toolInvocation, contextCompactionOf } from '../../shared/trace'
 import { piEvent, piEventSequence } from './pi-rpc'
 import type { PiRpcProcess } from './pi-rpc'
 import type { PiRunState } from './pi-types'
@@ -194,18 +194,19 @@ export function attachPiEventHandlers(ctx: PiEventHandlerContext): () => void {
         const questionnaire = PiQuestionnaire.fromTool(ctx.request.runId, toolUseId, input)
         if (questionnaire) ctx.questionnaires.set(toolUseId, questionnaire)
       }
-      const classified = classifyTool(toolName, input)
-      ctx.toolNames.set(toolUseId, toolName)
+      const invocation = toolInvocation(toolName, input)
+      const classified = classifyTool(invocation.tool, invocation.input)
+      ctx.toolNames.set(toolUseId, invocation.tool)
       ctx.toolStarts.set(toolUseId, Date.now())
       ctx.request.emit(piEvent(ctx.request.runId, {
         kind: classified.kind,
         stage: `${classified.kind}:${classified.name}`,
-        tool: toolName,
+        tool: invocation.tool,
         name: classified.name,
         toolUseId,
-        input,
-        ...parseMcp(rawName, input),
-        ...fileOpOf(toolName, input)
+        input: invocation.input,
+        ...invocation.mcp,
+        ...fileOpOf(invocation.tool, invocation.input)
       }))
       return
     }
@@ -226,18 +227,18 @@ export function attachPiEventHandlers(ctx: PiEventHandlerContext): () => void {
             .map((block) => block.text).join('\n'), 4_000)
         }
       }
-      const mcp = parseMcp(rawName, record(event.args))
+      const invocation = toolInvocation(toolName, record(event.args))
       const startedAt = toolUseId ? ctx.toolStarts.get(toolUseId) : undefined
       ctx.request.emit(piEvent(ctx.request.runId, {
         kind: 'tool',
         stage: 'tool_result',
-        tool: toolName,
+        tool: invocation.tool,
         toolUseId,
         output,
         text: output,
         durationMs: startedAt == null ? undefined : Date.now() - startedAt,
-        ...mcp,
-        isError: event.isError === true || (mcp.isMcp && mcpPayloadFailed(output))
+        ...invocation.mcp,
+        isError: event.isError === true || (invocation.mcp.isMcp && mcpPayloadFailed(output))
       }))
       if (toolUseId) {
         ctx.toolNames.delete(toolUseId)

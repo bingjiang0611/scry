@@ -105,20 +105,16 @@ export function BackgroundServicePanel({
               <span className="background-service__muted">{loginStart.stateText}</span>
             </div>
             {loginStart.canToggle && onToggleLoginStart && (
-              <Button
-                variant={loginStart.enabled ? undefined : 'primary'}
-                disabled={busy !== null}
+              <button
+                type="button"
+                className="setting-switch"
+                role="switch"
+                aria-label={LOGIN_START_COPY.sectionTitle}
+                aria-checked={loginStart.enabled}
                 aria-busy={togglingOn || togglingOff || undefined}
+                disabled={busy !== null}
                 onClick={() => onToggleLoginStart(!loginStart.enabled)}
-              >
-                {togglingOn
-                  ? LOGIN_START_COPY.enablingButton
-                  : togglingOff
-                    ? LOGIN_START_COPY.disablingButton
-                    : loginStart.enabled
-                      ? LOGIN_START_COPY.disableButton
-                      : LOGIN_START_COPY.enableButton}
-              </Button>
+              ><span aria-hidden="true" /></button>
             )}
           </div>
           {loginStart.policyEnv.length > 0 && (

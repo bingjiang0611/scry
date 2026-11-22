@@ -171,7 +171,10 @@ struct HomeSessions: View {
               }
             }
         }
-        .buttonStyle(.plain).accessibilityIdentifier("home-tab-\(item.rawValue)")
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home-tab-\(item.rawValue)")
+        .accessibilityLabel("\(item.label)，标签页")
+        .accessibilityValue(tab == item ? "已选" : "未选")
         .accessibilityAddTraits(tab == item ? .isSelected : [])
       }
       Spacer(minLength: 0)

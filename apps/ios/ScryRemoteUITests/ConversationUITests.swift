@@ -173,7 +173,10 @@ final class ConversationUITests: XCTestCase {
     let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模型 ")).firstMatch
     XCTAssertGreaterThanOrEqual(model.frame.height, 44)
     model.tap()
-    app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "model-option-", "GPT-5.6")).firstMatch.tap()
+    let picker = app.buttons["model-picker"]
+    XCTAssertTrue(picker.waitForExistence(timeout: 5))
+    picker.tap()
+    app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "GPT-5.6")).firstMatch.tap()
     app.otherElements["PopoverDismissRegion"].tap()
     XCTAssertTrue((input.value as? String)?.contains("Keep evidence visible") == true)
     capture("composer-model-selected")

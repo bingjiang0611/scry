@@ -183,23 +183,23 @@ struct SidebarDrawer: View {
 
   private var header: some View {
     HStack(spacing: 0) {
-      Menu {
-        Button { targets.selectFilter(.all) } label: {
-          Label(ConnectionCopy.allHosts, systemImage: targets.homeFilter == .all ? Symbol.check : Symbol.laptop)
-        }
+      Picker(selection: filterSelection) {
+        Text(ConnectionCopy.allHosts).tag("all")
         ForEach(targets.targetScopes) { target in
-          Button { targets.selectFilter(.target(target)) } label: {
-            Label(target.label, systemImage: targets.homeFilter == .target(target) ? Symbol.check : Symbol.laptop)
-          }
+          Text(target.label).tag(target.id)
         }
-        Divider()
-        Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
-        Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
       } label: {
         hostChip
       }
+      .pickerStyle(.menu)
       .accessibilityLabel(ConnectionCopy.filterHosts)
+      .accessibilityValue(targets.filterLabel)
+
       Spacer(minLength: 4)
+      MoreMenu {
+        Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
+        Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
+      }
       Button { onCollapse() } label: {
         Image(systemName: Symbol.sidebar).font(.system(size: 22))
           .foregroundStyle(Palette.fg).frame(width: 44, height: 44).contentShape(Rectangle())
@@ -209,6 +209,20 @@ struct SidebarDrawer: View {
       .accessibilityIdentifier("sidebar-close")
     }
     .padding(.horizontal, 16).frame(minHeight: 48)
+  }
+
+  private var filterSelection: Binding<String> {
+    Binding(get: {
+      switch targets.homeFilter {
+      case .all: return "all"
+      case let .target(scope): return scope.id
+      }
+    }, set: { value in
+      if value == "all" { targets.selectFilter(.all) }
+      else if let scope = targets.targetScopes.first(where: { $0.id == value }) {
+        targets.selectFilter(.target(scope))
+      }
+    })
   }
 
   private var hostChip: some View {

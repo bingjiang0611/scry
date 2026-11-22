@@ -8,10 +8,10 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 
 ## 安装与接入
 
-如果你配置的 npm registry 已发布 `0.2.82`，可用以下命令安装。未发布时，请使用发布方提供的同版本 tarball。
+如果你配置的 npm registry 已发布 `0.2.83`，可用以下命令安装。未发布时，请使用发布方提供的同版本 tarball。
 
 ```bash
-npm install -g scry-turn-recorder@0.2.82
+npm install -g scry-turn-recorder@0.2.83
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode

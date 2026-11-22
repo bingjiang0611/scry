@@ -362,9 +362,21 @@ function parseMcporterCommand(command: string): ParsedMcp {
   return parsedMcp([...direct, ...variable].sort((a, b) => a.index - b.index).map((match) => match.call))
 }
 
+// Qoder 原生 MCP 包装器：tool_use.name 固定是 `mcp_call`，真实工具在 input.toolName
+// （`mcp__<server>__<action>`），实际参数在 input.arguments。只有这一种实测形状被识别；
+// 其他包装名没有证据，仍按普通工具记录，不按名字猜测。
+const QODER_MCP_WRAPPER = 'mcp_call'
+
+function parseWrappedMcp(input?: Record<string, unknown>): ParsedMcp {
+  const wrappedTool = input?.toolName
+  return typeof wrappedTool === 'string' ? parseDirectMcpTool(wrappedTool) : { isMcp: false }
+}
+
 // MCP 工具识别：
 // 1. Claude SDK 原生 MCP tool_use：mcp__<server>__<action>
 // 2. 本地 MCP bridge：Bash 里执行 mcporter call <server>.<action>
+// 3. Qoder 包装器：mcp_call + input.toolName
+// 三条路径共用同一个判定；历史回放也调用这里，不另写一套推断。
 export function parseMcp(
   toolName: string,
   input?: Record<string, unknown>
@@ -372,7 +384,29 @@ export function parseMcp(
   const direct = parseDirectMcpTool(toolName)
   if (direct.isMcp) return direct
   if (toolName === 'Bash' && typeof input?.command === 'string') return parseMcporterCommand(input.command)
+  if (toolName === QODER_MCP_WRAPPER) return parseWrappedMcp(input)
   return { isMcp: false }
+}
+
+export interface ToolInvocation {
+  tool: string
+  input?: Record<string, unknown>
+  mcp: ParsedMcp
+}
+
+// 一次工具调用的记录形态。Qoder 的 mcp_call 包装把真实工具名和参数藏在 input 里，
+// 在这里统一还原成与直接 MCP 调用相同的 tool/input，避免 hook、transcript、历史回放
+// 三处各写一份推断，也让同一次调用不会同时落进 tools 和 mcps。
+export function toolInvocation(toolName: string, input?: Record<string, unknown>): ToolInvocation {
+  const mcp = parseMcp(toolName, input)
+  if (toolName !== QODER_MCP_WRAPPER || !mcp.isMcp) return { tool: toolName, input, mcp }
+  const args = input?.arguments
+  return {
+    tool: mcp.mcpTool ?? toolName,
+    // 只有实测过的对象形状才解包；解不开时保留原始载荷，不把证据丢成 undefined。
+    input: args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : input,
+    mcp
+  }
 }
 
 // 旧会话归档只保存了首个 MCP 的兼容字段，但仍保留原始 shell command。

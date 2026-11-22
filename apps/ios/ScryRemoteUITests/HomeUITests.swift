@@ -56,11 +56,14 @@ final class HomeUITests: XCTestCase {
     capture("launch-new-session-focused")
   }
 
-  func testUnpairedConnectActionIsVisibleWithoutScrollingPastTools() {
+  func testUnpairedConnectActionLivesInTheActionsMenu() {
     app.launchArguments = ["-uiPreview", "-route", "home", "-drawerOpen"]
     app.launch()
-    let connect = app.buttons["连接 Mac"].firstMatch
-    XCTAssertTrue(connect.waitForExistence(timeout: 10))
+    let actions = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch
+    XCTAssertTrue(actions.waitForExistence(timeout: 10))
+    actions.tap()
+    let connect = app.buttons["连接 Mac"]
+    XCTAssertTrue(connect.waitForExistence(timeout: 5))
     XCTAssertTrue(connect.isHittable)
     connect.tap()
     XCTAssertTrue(app.buttons["扫描配对码"].waitForExistence(timeout: 5))
@@ -381,42 +384,47 @@ final class SheetUITests: XCTestCase {
     input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: expected.count))
   }
 
-  func testPopoverSelectsModelEffortAndAutomaticWithoutReplacingTheDraft() {
+  func testPickerSelectsModelEffortAndAutomaticWithoutReplacingTheDraft() {
     launch("chat")
     let input = app.descendants(matching: .any)["message-input"].firstMatch
     input.tap(); input.typeText("Keep the draft")
     app.buttons["收起键盘"].tap()
     openModel()
-    let model = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "model-option-", "GPT-5.6")).firstMatch
+    let modelPicker = app.buttons["model-picker"]
+    XCTAssertTrue(modelPicker.waitForExistence(timeout: 5))
+    modelPicker.tap()
+    let model = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "GPT-5.6")).firstMatch
     XCTAssertTrue(model.waitForExistence(timeout: 5))
     model.tap()
-    XCTAssertTrue(model.isSelected)
-    let high = app.buttons["effort-option-high"]
-    XCTAssertGreaterThanOrEqual(high.frame.width, 44)
-    XCTAssertGreaterThanOrEqual(high.frame.height, 44)
+    XCTAssertTrue(modelPicker.label.contains("GPT-5.6"))
+    let effortPicker = app.buttons["effort-picker"]
+    XCTAssertTrue(effortPicker.exists)
+    effortPicker.tap()
+    let high = app.buttons.matching(NSPredicate(format: "label == %@", "高")).firstMatch
+    XCTAssertTrue(high.waitForExistence(timeout: 5))
     high.tap()
-    XCTAssertTrue(high.isSelected)
-    app.buttons["model-option-auto"].tap()
-    XCTAssertTrue(app.buttons["model-option-auto"].isSelected)
+    XCTAssertTrue(effortPicker.label.contains("高"))
+    modelPicker.tap()
+    let automatic = app.buttons.matching(NSPredicate(format: "label == %@", "自动模型")).firstMatch
+    XCTAssertTrue(automatic.waitForExistence(timeout: 5))
+    automatic.tap()
+    XCTAssertTrue(modelPicker.label.contains("自动模型"))
     app.otherElements["PopoverDismissRegion"].tap()
     XCTAssertTrue((input.value as? String)?.contains("Keep the draft") == true)
   }
 
-  func testManyEffortsUseAScrollableListAndPassTheOriginalID() {
+  func testNativePickerOffersAllEffortsAndPassesTheOriginalID() {
     app.launchArguments = ["-uiPreview", "-uiSheetFixture", "effortsMany"]
     app.launch()
     XCTAssertTrue(app.descendants(matching: .any)["message-input"].waitForExistence(timeout: 10))
     openModel()
-    XCTAssertFalse(app.otherElements["effort-segments"].exists)
-    let list = app.descendants(matching: .any)["effort-list"].firstMatch
-    XCTAssertTrue(list.exists)
-    list.swipeUp()
-    let last = app.buttons["effort-option-最大"]
-    XCTAssertTrue(last.isHittable)
-    XCTAssertGreaterThanOrEqual(last.frame.height, 44)
+    let picker = app.buttons["effort-picker"]
+    XCTAssertTrue(picker.waitForExistence(timeout: 5))
+    picker.tap()
+    let last = app.buttons.matching(NSPredicate(format: "label == %@", "最大")).firstMatch
+    XCTAssertTrue(last.waitForExistence(timeout: 5))
     last.tap()
-    XCTAssertTrue(last.isSelected)
-    // The tall popover covers the dismissal region's center; use its exposed top-left area.
+    XCTAssertTrue(picker.label.contains("最大"))
     app.otherElements["PopoverDismissRegion"].coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)).tap()
     XCTAssertEqual(app.staticTexts["fixture-effort"].label, "最大")
   }
@@ -426,8 +434,11 @@ final class SheetUITests: XCTestCase {
     option("Agent：").tap()
     option("Qoder").tap()
     openModel()
-    XCTAssertTrue(option("Ultimate").exists)
+    let picker = app.buttons["model-picker"]
+    XCTAssertTrue(picker.waitForExistence(timeout: 5))
+    picker.tap()
+    XCTAssertTrue(option("Ultimate").waitForExistence(timeout: 5))
     XCTAssertFalse(app.staticTexts["推理强度"].exists)
-    XCTAssertFalse(app.buttons["effort-option-default"].exists)
+    XCTAssertFalse(app.buttons["effort-picker"].exists)
   }
 }

@@ -18,8 +18,10 @@ function surface(overrides: Partial<DaemonRunTransport> & { live?: ActiveRun[] }
       frames.push(request)
       if (request.method === 'steer') return { steer: { status: 'accepted', messageId: 'm-1' } }
       if (request.method === 'stopBackgroundTask') return { backgroundTask: { status: 'requested', message: '' } }
-      if (request.runId === 'run-abc-1') return { run: run('run-abc-1') }
-      return { run: null }
+    }),
+    adopt: vi.fn(async (runId: string) => {
+      frames.push({ method: 'adopt', runId })
+      return runId === 'run-abc-1' ? run(runId) : null
     }),
     liveRuns: vi.fn(async () => ({ runs: overrides.live ?? [] }))
   } as unknown as DaemonRunTransport

@@ -23,8 +23,7 @@
    In-view tabs (.tabs) switch color in the same frame instead and are not listed here. */
 :root :is(
   .surface-tab.active,
-  .settings-tab.active,
-  .theme-option.active
+  .settings-rail [role='tab'][aria-selected='true']
 ) {
   transition-duration: var(--duration-sm);
   transition-timing-function: var(--ease-out-strong);

@@ -163,8 +163,8 @@
     },
     "runControl": {
       "path": "controls",
-      "request": "{ op:'runControl', method, runId, payload }",
-      "response": "现有 run 控制结果",
+      "request": "{ op:'runControl', method, runId, payload }；adopt 可传 payload:'traceContext'",
+      "response": "adopt 返回用于分块读取 desktop trace 的上下文或 run:null；旧客户端仍读内联 run。其余控制结果不变。",
       "authorize": "已验证 peer + run 归属 + authorize(cwd)",
       "why": "run 登记表在 daemon",
       "scopes": [

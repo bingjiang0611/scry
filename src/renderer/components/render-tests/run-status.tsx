@@ -260,7 +260,7 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('本机完全访问')
   })
 
-  it('Model/Effort 浮层显示 Effort/Model 与紧凑滑杆，不渲染两侧图标', () => {
+  it('Model/Effort 浮层显示 Effort/Model 与原生下拉，不渲染两侧图标', () => {
     const html = renderToStaticMarkup(
       <ModelEffortPicker
         modelValue="ultimate"
@@ -279,10 +279,11 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(effortIndex).toBeGreaterThan(modelIndex)
     expect(html).toContain('class="model-effort-field-label">模型')
     expect(html).toContain('class="model-effort-field-label">推理强度')
-    expect(html).toContain('class="model-effort-current-effort">高')
+    expect(html).toContain('<select class="model-effort-current-effort">')
     expect(html).toContain('>Ultimate<')
-    expect(html).toContain('type="range"')
-    expect(html).toContain('aria-valuetext="高"')
+    expect(html).toContain('<option value="default">默认</option>')
+    expect(html).toContain('<option value="high" selected="">高</option>')
+    expect(html).not.toContain('type="range"')
     expect(html).not.toContain('model-effort-summary-bolt')
     expect(html).not.toContain('aria-label="重置 Effort"')
   })

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { handleRunControl } from './host-run-control'
 import { dispatchRemoteRequest } from './inner-mtls-dispatch'
 import type { HostController } from './host-controller'
+import type { ActiveRun } from '../../shared/trace'
 
 // App-only run controls over the daemon's registry. Two things matter here: the op is
 // absent on the network endpoint (not answered from another process's memory), and an
@@ -35,6 +36,19 @@ describe('daemon run control op', () => {
     expect(await handleRunControl(handlers, { method: 'adopt' })).toEqual({ steer: { status: 'rejected', message: 'runId 无效' } })
     expect(handlers.adopt).not.toHaveBeenCalled()
     expect(await handleRunControl(handlers, { method: 'adopt', runId: 'run-abc-1' })).toEqual({ run: null })
+  })
+
+  it('returns only trace context on request and preserves the legacy inline response', async () => {
+    const run: ActiveRun = {
+      runId: 'run-abc-1', cwd: '/worktree', providerId: 'pi', agentProfileId: 'pi:rotom',
+      externalSessionId: 'session-1', userText: 'prompt', items: [], done: false
+    }
+    const handlers = { ...empty, adopt: vi.fn(() => run) }
+    const request = { method: 'adopt', runId: run.runId }
+    expect(await handleRunControl(handlers, request)).toEqual({ run })
+    expect(await handleRunControl(handlers, { ...request, payload: 'traceContext' }))
+      .toEqual({ traceContext: { cwd: '/worktree', providerId: 'pi', agentProfileId: 'pi:rotom' } })
+    expect(await handleRunControl(handlers, { ...request, payload: {} })).toEqual({ error: 'invalid_request' })
   })
 
   it('is unknown on an endpoint without the handlers, and answers when they are there', async () => {

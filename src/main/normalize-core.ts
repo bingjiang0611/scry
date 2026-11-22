@@ -2,7 +2,7 @@
 // No electron/SDK runtime dependency: unit tests import these directly.
 
 import type { ModelUsageRow, TraceEvent, TraceKind } from '../shared/trace.js'
-import { classifyTool, fileOpOf, parseMcp } from '../shared/trace.js'
+import { classifyTool, fileOpOf, toolInvocation } from '../shared/trace.js'
 import { skillLifetimeKey } from '../shared/logical-calls.js'
 import { classifyDanger } from './danger.js'
 
@@ -174,21 +174,21 @@ export function normalizeBlocks(
       out.push(base(ctx, { kind: 'model', stage: 'thinking', thinking: b.thinking, parentToolUseId, messageId }))
     } else if (b.type === 'tool_use' && b.name) {
       // 路径读取与命令参数不证明 Skill 执行；只接受 Provider 明确声明的 Skill 调用。
-      const cls = classifyTool(b.name, b.input)
+      const invocation = toolInvocation(b.name, b.input)
+      const cls = classifyTool(invocation.tool, invocation.input)
       if (cls.kind === 'skill') ctx.lastSkillName = cls.name.toLowerCase()
-      const mcp = parseMcp(b.name, b.input)
-      const fo = fileOpOf(b.name, b.input)
-      const danger = classifyDanger(b.name, b.input, ctx.cwd) // P3 审计：标记危险调用（不阻塞）
+      const fo = fileOpOf(invocation.tool, invocation.input)
+      const danger = classifyDanger(invocation.tool, invocation.input, ctx.cwd) // P3 审计：标记危险调用（不阻塞）
       const event = base(ctx, {
           kind: cls.kind,
           stage: `${cls.kind}:${cls.name}`,
-          tool: b.name,
+          tool: invocation.tool,
           name: cls.name,
           toolUseId: b.id,
           parentToolUseId,
           messageId,
-          input: b.input,
-          ...mcp,
+          input: invocation.input,
+          ...invocation.mcp,
           ...fo,
           ...(danger ? { danger } : {})
         })

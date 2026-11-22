@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { classifyTool, fileOpOf, mcpPayloadFailed, parseMcp } from '../../shared/trace'
+import { classifyTool, fileOpOf, mcpPayloadFailed, toolInvocation } from '../../shared/trace'
 import { normalizeOpenCodeTool } from './opencode-errors'
 import type { OpenCodeHookTraceRecord } from './opencode-server'
 import {
@@ -238,20 +238,19 @@ export function emitOpenCodeEvent(request: ProviderRunRequest, raw: unknown, ses
     eventState(request).starts.add(toolUseId)
     if (nativeStart != null) state.toolStartedAt.set(toolUseId, nativeStart)
     const normalized = normalizeOpenCodeTool(String(part.tool ?? ''), isPartTool ? toolState.input : part.input)
-    const { toolName, input } = normalized
-    const classified = classifyTool(toolName, input)
-    const mcp = parseMcp(toolName, input)
-    if (mcp.isMcp) eventState(request).mcpByToolUseId.set(toolUseId, mcp)
+    const invocation = toolInvocation(normalized.toolName, normalized.input)
+    const classified = classifyTool(invocation.tool, invocation.input)
+    if (invocation.mcp.isMcp) eventState(request).mcpByToolUseId.set(toolUseId, invocation.mcp)
     request.emit(newEvent(request.runId, {
       kind: classified.kind,
       stage: `${classified.kind}:${classified.name}`,
-      tool: toolName,
+      tool: invocation.tool,
       name: classified.name,
       toolUseId,
       messageId,
-      input,
-      ...mcp,
-      ...fileOpOf(toolName, input)
+      input: invocation.input,
+      ...invocation.mcp,
+      ...fileOpOf(invocation.tool, invocation.input)
     }, nativeStart == null ? undefined : new Date(nativeStart).toISOString()))
   }
   const isToolResult = type === 'session.next.tool.success' || type === 'session.next.tool.failed' || (isPartTool && ['completed', 'error'].includes(status))

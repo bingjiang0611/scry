@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import type { TraceEvent } from '../../shared/trace'
+import { toolInvocation, type TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 
 describe('aggregateTurnEvidence model, call and diff evidence', () => {
@@ -105,6 +105,24 @@ describe('aggregateTurnEvidence model, call and diff evidence', () => {
     ])
     expect(evidence.skills.value).toEqual([
       expect.objectContaining({ name: 'rate-workflow', category: 'skill', order: 2 })
+    ])
+  })
+
+  it('Qoder 包装调用还原后只进 mcps，不同时算作普通工具', () => {
+    const invocation = toolInvocation('mcp_call', { toolName: 'mcp__probe__echo', arguments: { text: 'hi' } })
+    const evidence = aggregateTurnEvidence({
+      events: [{
+        id: 'wrapped', ts: '2026-01-01T00:00:00.100Z', runId: 'r', kind: 'tool', stage: 'tool:mcp_call',
+        tool: invocation.tool, name: invocation.tool, toolUseId: 'mcp-1',
+        input: invocation.input, ...invocation.mcp
+      }]
+    })
+    expect(evidence.tools.value).toEqual([])
+    expect(evidence.mcps.value).toEqual([
+      expect.objectContaining({
+        id: 'mcp-1', category: 'mcp', name: 'mcp__probe__echo',
+        mcp: { server: 'probe', action: 'echo', tool: 'mcp__probe__echo' }
+      })
     ])
   })
 

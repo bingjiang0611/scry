@@ -21,6 +21,7 @@ import { IconButton } from './primitives/IconButton'
 import { Button } from './primitives/Button'
 import { Icon } from './primitives/Icon'
 import { Tabs } from './primitives/Tabs'
+import { Segmented } from './primitives/Segmented'
 
 // The last read of each repository, so returning to this tab shows what was known
 // instead of a cold load. Keyed by the API (this machine or one remote host) and cwd,
@@ -345,8 +346,9 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
                 <small>{selection?.path}</small></div></header>
               {selection && selectedFile ? <div className="sc-diff-scroll">
                 {isStaged(selectedFile) && selectedFile.worktree !== '.' && <div className="sc-diff-switch">
-                  <button aria-pressed={selection.staged} onClick={() => void inspectFile(selection.path, true)}>暂存内容</button>
-                  <button aria-pressed={!selection.staged} onClick={() => void inspectFile(selection.path, false)}>未暂存余量</button>
+                  <Segmented label="文件差异范围" value={selection.staged ? 'staged' : 'unstaged'}
+                    onChange={scope => { void inspectFile(selection.path, scope === 'staged') }}
+                    options={[{ value: 'staged', label: '暂存内容' }, { value: 'unstaged', label: '未暂存余量' }]} />
                   <button disabled={disabled || !!repo.actionBlockers.stage} onClick={() => confirm({ ...expected, action: 'stage', paths: [selection.path], allowStagedOverwrite: true }, `${selection.path} 已有部分暂存。继续会用完整工作区版本替换此文件的 index 选择；其他文件的暂存保持不变。`)}>暂存整个文件…</button>
                 </div>}
                 {!diff ? <p role="status">读取差异…</p> : diff.status === 'available' ? <Patch diff={diff.data} path={selection.path} /> : <p role="alert">{diff.reason}</p>}

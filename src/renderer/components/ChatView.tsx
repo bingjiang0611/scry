@@ -34,6 +34,7 @@ export function ChatView(props: ChatViewProps) {
     workspaceRoots = cwd ? [cwd] : [],
     hasSelectedSession = false,
     sessionLoading = false,
+    transcriptPending = false,
     sessionCacheVisible = false,
     sessionEvidenceGap = null,
     emptyState = null,
@@ -58,6 +59,7 @@ export function ChatView(props: ChatViewProps) {
   // Only the selected session's turns or its own display cache may be rendered.
   const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : NO_TURNS
   const ownerReady = !sessionLoading && !sessionCacheVisible
+  const transcriptLoading = sessionLoading || (transcriptPending && displayedTurns.length === 0)
   const liveRunId = ownerReady && busy ? turns.find(turn => !turn.done && !turn.error)?.runId ?? null : null
   const lastLive = useRef<{ scope: string | undefined; runId: string | null }>({ scope: composerScopeKey, runId: null })
   const completedLiveRunId = ownerReady && lastLive.current.scope === composerScopeKey ? lastLive.current.runId : null
@@ -78,15 +80,15 @@ export function ChatView(props: ChatViewProps) {
     <>
       <WorkspaceFileLinkProvider workspaces={workspaceRoots} onOpen={onOpenFile}>
         <div className="body chat-body" data-screen-label="对话 · 真实 Turn transcript">
-          <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={sessionLoading && !sessionCacheVisible} data-history-autoload="scroll" data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
-            {turns.length === 0 && !sessionLoading && sessionEvidenceGap && (
+          <div className="chat chat-transcript" ref={scrollRef} tabIndex={-1} aria-label="执行时间线" aria-busy={transcriptLoading && !sessionCacheVisible} data-history-autoload="scroll" data-history-source={sessionCacheVisible ? 'preview' : 'authoritative'}>
+            {turns.length === 0 && !transcriptLoading && sessionEvidenceGap && (
               <div className="chat-session-evidence-gap" role="status" data-status={sessionEvidenceGap.status}>
                 <b>{sessionEvidenceGap.status === 'error' ? '会话历史加载失败' : sessionEvidenceGap.status === 'unavailable' ? (remote ? `这条会话没有可读的 ${remoteHost} 证据` : '这条会话没有可读的本机证据') : '这条会话的归档里没有轮次'}</b>
                 <span>{sessionEvidenceGap.detail}</span>
                 <span>{sessionEvidenceGap.status === 'error' ? '这不代表历史为空。请重新点击侧边栏中的会话加载。' : '会话仍在列表里；Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。'}</span>
               </div>
             )}
-            {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && hasSelectedSession && (
+            {turns.length === 0 && !transcriptLoading && !sessionEvidenceGap && hasSelectedSession && (
               emptyState
                 ? <div className="chat-session-evidence-gap" role="status" data-status={emptyState.status ?? 'new-side-chat'}>
                   <b>{emptyState.title}</b>
@@ -97,7 +99,7 @@ export function ChatView(props: ChatViewProps) {
                   <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
                 </div>
             )}
-            {turns.length === 0 && !sessionLoading && !sessionEvidenceGap && !hasSelectedSession && (
+            {turns.length === 0 && !transcriptLoading && !sessionEvidenceGap && !hasSelectedSession && (
               <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
                 <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1 className="zh-balanced-heading" lang="zh-CN"><ChineseHeadingText>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</ChineseHeadingText></h1></header>
               </div>
@@ -115,7 +117,7 @@ export function ChatView(props: ChatViewProps) {
             {!sessionLoading && historyWindow?.pagedOlder && !historyWindow.hasOlder && turns.length > 0 && (
               <p className="history-window-start" role="note">{HISTORY_WINDOW_COPY.exhausted(historyWindow.totalTurns)}</p>
             )}
-            {(sessionLoading || sessionCacheVisible) && (
+            {(transcriptLoading || sessionCacheVisible) && (
               sessionCacheVisible
                 ? <DelayedLoadingStatus loading className="is-quiet" title={LOADING_COPY.sessionHistoryVerifying} detail={LOADING_COPY.sessionHistoryVerifyingDetail} />
                 : <DelayedLoadingStatus loading title={LOADING_COPY.sessionHistory} detail={LOADING_COPY.sessionHistoryDetail} />

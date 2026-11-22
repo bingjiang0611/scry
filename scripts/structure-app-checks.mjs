@@ -73,7 +73,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   const closeTimes = []
   for (const theme of ['light', 'dark']) {
     await click('.sb-settings')
-    await click(`.theme-option:nth-child(${theme === 'dark' ? 1 : 2})`)
+    await click(`.settings-pane .segmented button:nth-child(${theme === 'dark' ? 2 : 1})`)
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
     check(await evaluate(`!${page} && window.nativeCaptureCalls === 0`), 'Theme was not immediate live DOM')
     await settleEntrance('.settings-modal')

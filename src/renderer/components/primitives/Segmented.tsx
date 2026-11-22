@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type SegmentedOption<T extends string | number> = { value: T; label: ReactNode; title?: string }
+export type SegmentedOption<T extends string | number> = { value: T; label: ReactNode; title?: string; disabled?: boolean }
 
 type SegmentedProps<T extends string | number> = {
   /** Accessible name of the group. */
@@ -26,6 +26,7 @@ export function Segmented<T extends string | number>({ label, value, onChange, o
           type="button"
           aria-pressed={option.value === value}
           title={option.title}
+          disabled={option.disabled}
           onClick={() => onChange(option.value)}
         >
           {option.label}

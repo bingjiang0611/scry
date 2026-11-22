@@ -5,6 +5,7 @@ import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-s
 import { DaemonClientError } from './daemon-client'
 import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
 import { readDaemonTrace } from './daemon-run-trace-read'
+import { context as desktopContext } from './remote/desktop-client-validation'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import type { DaemonEventReply } from './daemon-event-pump'
 import { isHostAdminNotice } from '../shared/host-admin'
@@ -196,14 +197,21 @@ export class DaemonRunTransport {
    * the reply is the renderer's existing result shape, and inventing one here would
    * be a second answer to the same question.
    */
-  async runControl(request: { method: 'steer' | 'stopBackgroundTask'; payload: unknown } | { method: 'adopt'; runId: string }): Promise<Record<string, unknown>> {
-    // #call turns `unsupported_op` into a named absence; every other error code stays
-    // the one the daemon sent.
-    return await this.#call({
-      op: 'runControl',
-      method: request.method,
-      ...(request.method === 'adopt' ? { runId: request.runId } : { payload: request.payload })
-    })
+  async runControl(request: { method: 'steer' | 'stopBackgroundTask'; payload: unknown }): Promise<Record<string, unknown>> {
+    return await this.#call({ op: 'runControl', ...request })
+  }
+
+  async adopt(runId: string): Promise<ActiveRun | null> {
+    // `payload` was already allowed on adopt. Older daemons ignore it and return the inline run.
+    const reply = await this.#call({ op: 'runControl', method: 'adopt', runId, payload: 'traceContext' }, { replayable: true })
+    if (reply.run === null) return null
+    if (reply.traceContext !== undefined) {
+      const read = await this.trace({ context: desktopContext(reply.traceContext), runId })
+      if (read.kind !== 'snapshot' || (read.run !== null && read.run.runId !== runId)) return fail()
+      return read.run
+    }
+    if (!record(reply.run) || reply.run.runId !== runId || !Array.isArray(reply.run.items)) return fail()
+    return reply.run as unknown as ActiveRun
   }
 
   async stop(runId: string): Promise<'requested' | 'already_requested'> {

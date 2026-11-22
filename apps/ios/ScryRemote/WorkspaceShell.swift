@@ -259,12 +259,12 @@ struct WorkspaceShell: View {
     }) {
       VStack(spacing: 0) {
         SelectionRow(title: targets.localScope.label, detail: ConnectionCopy.localExecutionHost, selected: targets.newTaskScope.isLocal) {
-          targets.selectNewTask(targets.localScope); showTargets = false
+          if targets.newTaskScope == targets.localScope || targets.beginNewTask(scope: targets.localScope) { showTargets = false }
         }
         ForEach(targets.discoveredTargets) { target in
           SelectionRow(title: target.label, detail: ConnectionCopy.throughGateway,
                        selected: target.id == targets.newTaskScope.id) {
-            targets.selectNewTask(target); showTargets = false
+            if targets.newTaskScope == target || targets.beginNewTask(scope: target) { showTargets = false }
           }
         }
       }

@@ -5,8 +5,8 @@ import { ArchivedChatsPanel, SettingsModal } from './Modals'
 describe('Settings copy density', () => {
   it('keeps theme controls without repeating their purpose or persistence', () => {
     const html = renderToStaticMarkup(<SettingsModal theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />)
-    expect(html).toContain('role="radiogroup"')
-    expect(html).toContain('aria-checked="true"')
+    expect(html).toContain('role="group" aria-label="界面主题"')
+    expect(html).toContain('aria-pressed="true">深色')
     expect(html).toContain('深色')
     expect(html).toContain('浅色')
     expect(html).not.toContain('选择 Scry 的全局界面主题')

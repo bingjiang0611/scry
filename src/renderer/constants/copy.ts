@@ -293,6 +293,7 @@ export const QUEUE_COPY = {
 
 export const LOADING_COPY = {
   sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
+  sessionAdoptFailed: '未能接回正在进行的任务。重新点击侧栏中的会话可重试。',
   sessionHistory: '正在读取会话历史…',
   sessionHistoryDetail: '会话已切换；内容将在本机证据读取完成后显示。',
   // 缓存或目录预览已经在屏幕上时，不能再说「内容将在读取完成后显示」。

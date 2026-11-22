@@ -10,7 +10,7 @@ import { useAsyncAction } from '../hooks/useAsyncAction'
 import { BusyLabel } from './primitives/BusyLabel'
 import { CountProgress } from './primitives/CountProgress'
 import { SkeletonRows } from './primitives/Skeleton'
-import { ProviderFilterMenu } from './ProviderFilterMenu'
+import { ProviderFilterSelect } from './ProviderFilterMenu'
 
 
 
@@ -199,7 +199,7 @@ export function ArchivedChatsPanel({
             aria-label="搜索已存档会话"
           />
         </label>
-        <ProviderFilterMenu providers={providers} value={providerFilter} onChange={setProviderFilter} />
+        <ProviderFilterSelect providers={providers} value={providerFilter} onChange={setProviderFilter} />
         <label className="arch-filter">
           <Icon name="folder" />
           <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} aria-label="按项目筛选">

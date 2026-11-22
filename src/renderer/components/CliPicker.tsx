@@ -1,5 +1,5 @@
 // Composer Agent 选择器：本机检测到的 Provider，以及 Pi Profile 的增删。
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
 import { providerIdForAgentId } from '@shared/runtime'
 import { AGENT_PICKER_COPY } from '../constants/agent-picker-copy'
@@ -8,7 +8,8 @@ import { basename } from '../format'
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
 import { ProviderGlyph } from './ProviderGlyph'
-import { Menu, MenuCheck, MenuItem, MenuLabel, MenuSeparator } from './primitives/Menu'
+import { Menu, MenuCheck, MenuItem, MenuLabel } from './primitives/Menu'
+import { moveMenuFocus } from './WorkdirPicker'
 
 export interface AgentProviderGroup {
   id: string
@@ -66,6 +67,15 @@ export function CliPicker({
 } & PickerOpenProps) {
   const [open, setOpen] = usePickerOpen(controlledOpen, onOpenChange)
   const menuId = useId()
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const actionsRoot = useRef<HTMLDivElement>(null)
+  const actionsTrigger = useRef<HTMLButtonElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
+  const dismissActions = (): void => {
+    if (actionsRoot.current?.contains(document.activeElement)) actionsTrigger.current?.focus()
+    setActionsOpen(false)
+  }
+  useMenuDismiss({ open: actionsOpen, close: dismissActions, rootRef: actionsRoot, triggerRef: actionsTrigger, menuRef: actionsRef })
   const pickerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -105,7 +115,7 @@ export function CliPicker({
         title={disabled ? AGENT_PICKER_COPY.switchUnavailable : AGENT_PICKER_COPY.selectNext}
         aria-expanded={open}
         aria-controls={menuId}
-        aria-haspopup="menu"
+        aria-haspopup="listbox"
       >
         <span className="agicon">
           {selectedProvider ? <ProviderGlyph provider={selectedProvider} /> : <Icon name="cube" />}
@@ -114,12 +124,10 @@ export function CliPicker({
         <Icon name={disabled ? 'lock' : 'chevronDown'} className="chev" />
       </button>
       {open && !disabled && (
-        <Menu
-          id={menuId}
-          ref={menuRef}
-          className="menu climenu"
-          label={AGENT_PICKER_COPY.menuLabel}
-          onMouseLeave={dismissMenu}
+        <div id={menuId} ref={menuRef} className="menu-surface menu climenu" role="listbox"
+          aria-label={AGENT_PICKER_COPY.menuLabel}
+          onKeyDown={event => moveMenuFocus(event, menuRef.current)}
+          onBlur={event => { if (!pickerRef.current?.contains(event.relatedTarget)) setOpen(false) }}
         >
           <div className="cltitle" role="none">
             {scopeLabel}
@@ -128,33 +136,35 @@ export function CliPicker({
           <MenuLabel>Provider</MenuLabel>
           {agents.length === 0 && <div className="dim pad" role="none">{AGENT_PICKER_COPY.empty}</div>}
           {codeAgents.map((a) => (
-            <MenuItem
+            <button type="button" className="mitem"
               key={a.id}
-              checked={a.id === selectedId}
+              role="option"
+              aria-selected={a.id === selectedId}
               data-agent-id={a.id}
               title={`${a.path}${a.version ? ' · ' + a.version : ''}`}
               disabled={unavailableIds?.has(a.id)}
-              icon={<span className="agicon"><ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} /></span>}
               onClick={() => {
                 onSelect(a.id)
                 dismissMenu()
               }}
             >
+              <MenuCheck selected={a.id === selectedId} />
+              <span className="agicon"><ProviderGlyph provider={agentGlyphProvider(a.id) ?? 'claude'} /></span>
               <span className="agent-option-name">
                 {a.name}
                 {unavailableIds?.has(a.id) && a.id !== selectedId ? ' · 不可用' : ''}
               </span>
-            </MenuItem>
+            </button>
           ))}
           {piAgents.length > 0 && <MenuLabel>Pi · Profiles</MenuLabel>}
           {piAgents.map((agent) => (
             <div className="agent-option-row" key={agent.id} role="none">
               <button
                 type="button"
-                role="menuitemradio"
+                role="option"
                 className="mitem agent-option-pick"
                 data-agent-id={agent.id}
-                aria-checked={agent.id === selectedId}
+                aria-selected={agent.id === selectedId}
                 title={agent.path}
                 disabled={unavailableIds?.has(agent.id)}
                 onClick={() => {
@@ -169,32 +179,29 @@ export function CliPicker({
                   <small>{PI_PICKER_COPY.detail(isDetectedPiProfile(agent.id), agent.version)}</small>
                 </span>
               </button>
-              {!isDetectedPiProfile(agent.id) && onRemovePi && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="agent-option-remove"
-                  title={PI_PICKER_COPY.removeTitle}
-                  aria-label={PI_PICKER_COPY.removeLabel(piProfileName(agent))}
-                  onClick={() => onRemovePi(agent.id)}
-                >
-                  <Icon name="x" />
-                </button>
-              )}
             </div>
           ))}
-          {(onAddPi || onRescan) && <MenuSeparator />}
-          {onAddPi && (
-            <MenuItem icon={<Icon name="plus" />} onClick={() => { onAddPi(); dismissMenu() }}>
-              添加 Pi Agent…
-            </MenuItem>
+        </div>
+      )}
+      {!disabled && (onAddPi || onRescan || onRemovePi && piAgents.some(agent => !isDetectedPiProfile(agent.id))) && (
+        <div className="agent-management" ref={actionsRoot}>
+          <button ref={actionsTrigger} type="button" className="clibtn" aria-label="Agent 管理"
+            aria-haspopup="menu" aria-expanded={actionsOpen}
+            onClick={() => { setOpen(false); setActionsOpen(value => !value) }}>
+            <Icon name="settings" />
+          </button>
+          {actionsOpen && (
+            <Menu ref={actionsRef} className="menu climenu" label="Agent 管理">
+              {onAddPi && <MenuItem icon={<Icon name="plus" />} onClick={() => { dismissActions(); onAddPi() }}>添加 Pi Agent…</MenuItem>}
+              {onRescan && <MenuItem icon={<Icon name="refresh" />} onClick={() => { dismissActions(); onRescan() }}>重新扫描 PATH</MenuItem>}
+              {onRemovePi && piAgents.filter(agent => !isDetectedPiProfile(agent.id)).map(agent => (
+                <MenuItem key={agent.id} icon={<Icon name="x" />} onClick={() => { dismissActions(); onRemovePi(agent.id) }}>
+                  {PI_PICKER_COPY.removeLabel(piProfileName(agent))}
+                </MenuItem>
+              ))}
+            </Menu>
           )}
-          {onRescan && (
-            <MenuItem icon={<Icon name="refresh" />} onClick={() => onRescan()}>
-              重新扫描 PATH
-            </MenuItem>
-          )}
-        </Menu>
+        </div>
       )}
     </div>
   )

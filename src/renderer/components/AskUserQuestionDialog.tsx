@@ -220,6 +220,9 @@ export function AskUserQuestionInline({
           const display = questionDisplayCopy(question.header, question.question)
           const closedChoice = question.allowCustomAnswer === false
           const options = closedChoice ? question.options : question.options.filter((option) => !isGeneratedFreeTextOption(option.label))
+          const useSelect = !question.multiSelect && options.length + Number(!closedChoice) >= 6
+          const selectedOption = options.find(option => option.label === draft.selected[0])
+          const otherLabel = request.providerId === 'pi' && request.source === 'pi_extension_ui:select' ? '输入自定义回答' : '其他'
           const selectedPreviews = options.filter(
             (option) => draft.selected.includes(option.label) && option.preview
           )
@@ -269,7 +272,33 @@ export function AskUserQuestionInline({
                   />
                 ) : (
                   <div className="question-options">
-                    {options.map((option, optionIndex) => {
+                    {useSelect ? (
+                      <>
+                        <select
+                          autoFocus={questionIndex === 0}
+                          aria-label={`${display.header || '问题'}的回答`}
+                          value={draft.useOther ? 'custom' : selectedOption ? String(options.indexOf(selectedOption)) : ''}
+                          onChange={event => {
+                            const value = event.currentTarget.value
+                            if (value === 'custom') toggleOther(question.question, false)
+                            else {
+                              const option = options[Number(value)]
+                              if (value !== '' && option) toggleOption(question.question, option.label, false)
+                            }
+                          }}
+                        >
+                          <option value="" disabled>选择回答…</option>
+                          {options.map((option, index) => {
+                            const copy = optionDisplayCopy(option.label, option.description)
+                            return <option key={option.label} value={index}>{copy.label}{copy.recommended ? '（推荐）' : ''}</option>
+                          })}
+                          {!closedChoice && <option value="custom">{otherLabel}</option>}
+                        </select>
+                        {selectedOption?.description && <p className="question-choice-description" aria-live="polite">
+                          {optionDisplayCopy(selectedOption.label, selectedOption.description).description}
+                        </p>}
+                      </>
+                    ) : options.map((option, optionIndex) => {
                       const checked = draft.selected.includes(option.label)
                       const copy = optionDisplayCopy(option.label, option.description)
                       return (
@@ -291,7 +320,7 @@ export function AskUserQuestionInline({
                         </label>
                       )
                     })}
-                    {!closedChoice && <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
+                    {!closedChoice && !useSelect && <label className={`question-option question-other ${draft.useOther ? 'selected' : ''}`}>
                       <input
                         type={question.multiSelect ? 'checkbox' : 'radio'}
                         name={`question-${request.questionId}-${questionIndex}`}
@@ -299,7 +328,7 @@ export function AskUserQuestionInline({
                         onChange={() => toggleOther(question.question, question.multiSelect)}
                       />
                       <span>
-                        <b>{request.providerId === 'pi' && request.source === 'pi_extension_ui:select' ? '输入自定义回答' : '其他'}</b>
+                        <b>{otherLabel}</b>
                         <small>输入一个不在上述选项中的回答</small>
                       </span>
                     </label>}

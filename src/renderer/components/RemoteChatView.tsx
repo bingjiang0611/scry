@@ -40,6 +40,12 @@ export type RemoteChatViewProps = FoundationState & ControlsState & Presentation
 
 export function RemoteChatView(props: RemoteChatViewProps) {
   const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, historyOlderLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface, workspaceSelection } = props
+  // An archive miss is not a session miss while the initial poll is unresolved
+  // or the host reports a live run whose trace has not arrived yet.
+  const waitingForRun = Boolean(sessionId && connected && !props.pollError && !props.catalogEntry?.error &&
+    (!pollFresh || props.foreignRun || props.currentRunStatus?.state === 'dispatched' || props.currentRunStatus?.state === 'recorded'))
+  const archiveUnavailable = Boolean(sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0 &&
+    pollFresh && !waitingForRun)
   return (
     <>
       <ChatView
@@ -62,9 +68,10 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         composerScopeKey={draftKey}
         sendBlockedReason={workspaceSelection.blockedReason ?? sendBlockedReason}
         submitting={submitting}
-        sessionLoading={historyLoading && displayTurns.length === 0}
-        sessionEvidenceGap={sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
-          ? { status: 'unavailable', detail: historyEvidence.reason ?? `${host} 未提供这条会话的归档` }
+        sessionLoading={historyLoading && displayTurns.length === 0 && !runActive}
+        transcriptPending={historyLoading || waitingForRun}
+        sessionEvidenceGap={archiveUnavailable
+          ? { status: 'unavailable', detail: historyEvidence?.reason ?? `${host} 未提供这条会话的归档` }
           : null}
         busy={pollFresh && runActive && Boolean(controlRunId)}
         draftAttachments={draftAttachments}
@@ -199,8 +206,8 @@ export function RemoteChatView(props: RemoteChatViewProps) {
           onHide={() => surface.onAction({ type: 'hide' })}
           onToggleMaximized={() => surface.onAction({ type: 'toggle-maximized' })}
           contents={{
-            overview: sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
-              ? <div className="surface-unavailable"><b>会话证据不可用</b><span>{historyEvidence.reason ?? `${host} 未提供这条会话的归档`}</span></div>
+            overview: archiveUnavailable
+              ? <div className="surface-unavailable"><b>会话证据不可用</b><span>{historyEvidence?.reason ?? `${host} 未提供这条会话的归档`}</span></div>
               : <OverviewPanel
                   turns={displayTurns} sessionId={sessionId} selected={selected} remote
                   runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}

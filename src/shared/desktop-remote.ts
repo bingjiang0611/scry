@@ -327,8 +327,8 @@ export interface DesktopRemoteAPI {
   // Explicit recovery: find an accepted submit or fence its id on the host.
   // Neither recovery nor reconnect resends the prompt or stops an accepted run.
   resolveIntent(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
-  runStatus(connectionId: string, runId: string): Promise<DesktopRemoteRunStatus>
-  liveRun(connectionId: string, context: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null>
+  runStatus(connectionId: string, runId: string, options?: { immediate?: boolean }): Promise<DesktopRemoteRunStatus>
+  liveRun(connectionId: string, context: DesktopRemoteContext, options?: { immediate?: boolean }): Promise<DesktopRemoteLiveRun | null>
   stop(connectionId: string, runId: string): Promise<void>
   answer(connectionId: string, runId: string, response: AgentQuestionResponse): Promise<void>
   files(connectionId: string, context: DesktopRemoteContext, path: string, cursor?: string): Promise<WorkspaceListResult>

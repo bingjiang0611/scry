@@ -109,7 +109,7 @@ describe('BackgroundServicePanel', () => {
         linuxLinger: 'no'
       }
     }), { onToggleLoginStart: () => {} })
-    expect(enabled).toContain('关闭登录时启动')
+    expect(enabled).toContain('role="switch" aria-label="登录时启动" aria-checked="true"')
     expect(enabled).toContain('SCRY_REMOTE_HOST=1')
     expect(enabled).toContain('当前由 App 启动；下次登录起由系统服务启动。')
     expect(enabled).toContain('loginctl enable-linger')
@@ -118,7 +118,7 @@ describe('BackgroundServicePanel', () => {
       loginStart: { state: 'unavailable', reason: 'linux_unverified' }
     }), { onToggleLoginStart: () => {} })
     expect(linuxUnavailable).toContain('linux_unverified')
-    expect(buttons(linuxUnavailable)).not.toContain('开启登录时启动')
+    expect(linuxUnavailable).not.toContain('role="switch"')
 
     const conflict = render(daemon({
       loginStart: { state: 'conflict', reason: 'login_start_other_userdata', otherUserDataDir: '/Users/other/Scry' }

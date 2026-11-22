@@ -96,7 +96,7 @@ export function WorkdirPicker({
           className="menu-surface menu wdmenu"
           role="dialog"
           aria-label="选择工作目录"
-          onKeyDown={(event) => moveMenuFocus(event, menuRef.current)}
+          onKeyDown={(event) => { if (!(event.target instanceof HTMLSelectElement)) moveMenuFocus(event, menuRef.current) }}
         >
           <WorkdirMenuItems
             cwd={cwd}
@@ -134,20 +134,25 @@ export function WorkdirMenuItems({
   onPick: (d: string) => void
   onRemove: (d: string) => void
 }) {
-  const listed = current ? recent.filter((dir) => dir !== cwd) : recent
+  const listed = recent.filter(dir => !current || dir !== cwd)
+  const paths = current && cwd ? [cwd, ...listed] : listed
   return (
     <>
-      <button
-        type="button"
-        className="mitem"
-        onClick={() => {
-          onClose()
-          onUnbind()
-        }}
-      >
-        <Icon name="message" /> 不绑定项目
-        {current && !cwd && <span className="ck"><Icon name="check" /> 当前</span>}
-      </button>
+      <label className="workdir-value">
+        <span className="mhdr">项目目录</span>
+        <select value={current ? (cwd ? String(paths.indexOf(cwd)) : 'unbound') : ''}
+          onChange={event => {
+            const value = event.currentTarget.value
+            if (value === '') return
+            onClose()
+            if (value === 'unbound') onUnbind()
+            else if (paths[Number(value)]) onPick(paths[Number(value)])
+          }}>
+          {!current && <option value="" disabled>选择项目目录…</option>}
+          <option value="unbound">不绑定项目</option>
+          {paths.map((path, index) => <option key={path} value={index}>{path}</option>)}
+        </select>
+      </label>
       <button
         type="button"
         className="mitem"
@@ -158,37 +163,21 @@ export function WorkdirMenuItems({
       >
         <Icon name="folder" /> 选择文件夹
       </button>
-      {listed.length > 0 && <div className="mhdr">最近使用</div>}
-      <div className="wdrecent-list">
-        {listed.map((d) => (
-          <div key={d} className="wdrecent-row">
-            <button
-              type="button"
-              className="mitem wdrecent-pick"
-              title={d}
-              onClick={() => {
-                onClose()
-                onPick(d)
-              }}
-            >
-              <Icon name="clock" />
-              <span className="wdrecent-copy">
-                <b>{basename(d)}</b>
-                <code>{d}</code>
-              </span>
+      {listed.length > 0 && <details className="workdir-recent-actions">
+        <summary>管理最近使用的目录</summary>
+        <div className="wdrecent-list">
+          {listed.map(dir => (
+            <button key={dir} type="button" className="mitem" title={dir}
+              aria-label={WORKDIR_PICKER_COPY.removeRecentLabel(dir)}
+              onClick={event => {
+                event.currentTarget.closest('details')?.querySelector('summary')?.focus()
+                onRemove(dir)
+              }}>
+              <Icon name="x" /><span className="wdrecent-copy"><b>{basename(dir)}</b><code>{dir}</code></span>
             </button>
-            <button
-              type="button"
-              className="wdrecent-remove"
-              title={WORKDIR_PICKER_COPY.removeRecentTitle}
-              aria-label={WORKDIR_PICKER_COPY.removeRecentLabel(d)}
-              onClick={() => onRemove(d)}
-            >
-              <Icon name="x" />
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </details>}
     </>
   )
 }

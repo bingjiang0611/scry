@@ -17,6 +17,29 @@ function transport(reply: (request: Record<string, unknown>) => unknown) {
 // about the frame and the parsed answer, not about a socket: the transport holds no
 // credential and no run state, so a bad answer must be named, never rounded up.
 describe('daemon run transport', () => {
+  it('uses the daemon-provided context to read a live snapshot without pinning an unbound session', async () => {
+    const traceContext = { providerId: 'pi', agentProfileId: 'pi:rotom', cwd: '/worktree' }
+    const run = { runId: RUN, externalSessionId: 'bound-since-lookup', items: [] }
+    const { value, calls } = transport(frame => frame.op === 'runControl'
+      ? { traceContext }
+      : { desktop: { kind: 'trace', run } })
+    await expect(value.adopt(RUN)).resolves.toEqual(run)
+    expect(calls).toEqual([
+      { request: { op: 'runControl', method: 'adopt', runId: RUN, payload: 'traceContext' }, options: { replayable: true } },
+      { request: { op: 'desktop', query: { kind: 'trace', context: traceContext, runId: RUN, images: true, byteChunks: true, settledTail: true } }, options: { replayable: true } }
+    ])
+  })
+
+  it('accepts an older daemon’s inline snapshot and does not read a trace for an absent run', async () => {
+    const run = { runId: RUN, items: [] }
+    const older = transport(() => ({ run }))
+    await expect(older.value.adopt(RUN)).resolves.toEqual(run)
+    expect(older.calls).toHaveLength(1)
+    const absent = transport(() => ({ run: null }))
+    await expect(absent.value.adopt(RUN)).resolves.toBeNull()
+    expect(absent.calls).toHaveLength(1)
+  })
+
   it('records an intent and keeps the receipt idempotent', async () => {
     const { value, calls } = transport(() => ({ runId: RUN, status: 'duplicate' }))
     await expect(value.submit({ intentId: 'intent-1', detail: '{"cwd":"/w"}' })).resolves.toEqual({
@@ -127,12 +150,12 @@ describe('daemon run transport', () => {
     // An older daemon answers unsupported_op. That is an absence, not an empty success:
     // the App must not show "sent" for a steer that never reached a run.
     const { value } = transport(() => ({ error: 'unsupported_op' }))
-    await expect(value.runControl({ method: 'adopt', runId: RUN })).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
+    await expect(value.adopt(RUN)).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
   })
 
   it('keeps a revoked grant a revoked grant, not an unavailable control', async () => {
     const { value } = transport(() => ({ error: 'device_not_authorized' }))
-    await expect(value.runControl({ method: 'adopt', runId: RUN })).rejects.toMatchObject({ reason: 'daemon_device_not_authorized' })
+    await expect(value.adopt(RUN)).rejects.toMatchObject({ reason: 'daemon_device_not_authorized' })
   })
 
   // A write whose bytes may have reached the daemon must never look like "nothing was
