@@ -186,7 +186,7 @@ const api = {
     if (runId === 'received-active-run') return { state: 'dispatched', detail: 'fixture received active task' }
     if (state.holdRunStatus) await new Promise(resolve => { window.releaseRunStatus = resolve })
     if (state.runStatusFailure) throw new Error('desktop_remote_output_capture_queue_full')
-    if (state.answerFailure && runId === firstLedger) {
+    if (state.runState === 'failed' && runId === firstLedger) {
       state.firstIntentCleared = true; state.intent = null
       return { state: 'failed', scryRunId: firstScryRun, externalSessionId: 'native-session' }
     }
@@ -215,8 +215,6 @@ const api = {
   async stop(_id, runId) { state.stopCalls.push(runId) },
   async answer(_id, runId, response) {
     state.answerCalls.push({ runId, response })
-    state.answerFailure = true
-    publishFixtureRemoteUpdate({ runs: true })
     throw new Error('remote answer rejected')
   },
   async files(id, context, path = '', cursor) {

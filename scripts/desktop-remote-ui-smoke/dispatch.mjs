@@ -21,7 +21,8 @@ export async function runDispatch({ driver }) {
   await wait('window.desktopRemoteFixture.stopCalls.length === 1', 'remote stop')
   await wait('document.querySelector(".composer-notice")?.textContent.includes("已请求停止，等待远端确认")', 'stop acknowledgement remains visible on a dispatched run')
   check((await fixture()).stopCalls[0] === '11111111-1111-4111-8111-111111111111', 'Stop did not use the ledger intent UUID')
-  const historyBeforeTerminal = (await fixture()).historyCalls.length
+  const beforeTerminal = await fixture()
+  const historyBeforeTerminal = beforeTerminal.historyCalls.length
   // The label is the native option hit area, including its radio. Pinning a
   // short transcript can shift the 16px input within that same clickable label.
   await click('.question-option')
@@ -31,12 +32,16 @@ export async function runDispatch({ driver }) {
   const afterAnswer = await fixture()
   check(afterAnswer.answerCalls.length === 1 && afterAnswer.answerCalls[0].runId === '11111111-1111-4111-8111-111111111111', 'Answer did not use the ledger intent UUID')
   check(!(await bodyText()).includes('已发送回答'), 'Failed answer was rendered as success')
+  // An answer rejection and a terminal run update are independent host events.
+  await read('window.desktopRemoteFixture.runState = "failed"; window.publishFixtureRemoteUpdate({ runs: true })')
   await wait('window.desktopRemoteFixture.firstIntentCleared === true', 'clear first intent')
   await wait(`window.desktopRemoteFixture.historyCalls.length > ${historyBeforeTerminal}`, 'terminal status refreshes canonical history')
   check(await read('document.querySelector(".composer-notice")?.textContent.includes("remote answer rejected")'), 'Successful status read erased an unrelated action error')
 
   await wait('document.querySelector(".run-status") == null', 'first run no longer blocks the composer')
   await wait('document.body.textContent.includes("archived terminal turn")', 'terminal history survives a failed final trace read')
+  check((await fixture()).traceCalls.length > beforeTerminal.traceCalls.length, 'Terminal state did not attempt the final trace read')
+  check(await read('document.querySelector(".question-inline-form") == null'), 'Retired run still showed its old question')
   await click('textarea[aria-label="描述任务"]')
   await insert('next prompt after native adoption')
   await read('window.desktopRemoteFixture.runState = "recorded"; window.desktopRemoteFixture.exposeTrace = false')

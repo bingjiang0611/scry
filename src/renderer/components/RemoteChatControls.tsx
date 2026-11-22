@@ -91,6 +91,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       return merged.changed
     }
     let tracedRevision: string | undefined
+    let refreshedTerminalIntent: string | undefined
     const readHint = async (
       runId: string, outputSeq: number | undefined, state: string, sequence: number, changed = false
     ): Promise<boolean | undefined> => {
@@ -180,6 +181,12 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         if (nextStatus.state === 'settled' || nextStatus.state === 'failed') {
           setHistoryRevision((revision) => revision + 1)
           void refreshRemoteCatalog(connectionId)
+          // runStatus retired the receipt in main. Reconcile once after this
+          // final trace read even if the host sends no further subscription event.
+          if (refreshedTerminalIntent !== activeIntent.intentId) {
+            refreshedTerminalIntent = activeIntent.intentId
+            void poll()
+          }
         }
         if (nextStatus.scryRunId) {
           intentTrace = { runId: nextStatus.scryRunId, context: effectiveContext }
