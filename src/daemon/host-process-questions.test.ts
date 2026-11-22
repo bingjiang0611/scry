@@ -68,6 +68,9 @@ describe('daemon run questions', () => {
       // The window focuses `result.runId`: a question under any other id is dropped there.
       expect(question.runId).toBe(result.runId)
       expect(opened()).toHaveLength(1)
+      const attention = sent.find(entry => entry.channel === 'agent:questionAttention')
+      expect(attention?.payload).toMatchObject({ runId: result.runId, pendingCount: 1, permissionCount: 1, inputCount: 0 })
+      expect(sent.indexOf(attention!)).toBeLessThan(sent.indexOf(opened()[0]!))
       expect(subscription.filter((entry) => entry.kind === 'open')).toEqual([{ kind: 'open', runId: result.runId, questionId: question.questionId }])
 
       // The window answers with the request it was shown (answers keyed by question text).

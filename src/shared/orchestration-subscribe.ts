@@ -20,13 +20,12 @@ export const SUBSCRIBE_VIEWS: ReadonlySet<SubscribeView> = new Set(['sessions', 
 
 /**
  * Window notices retained as volatile hints in P4-3 (`protocol §5.3`).
- * `agent:turnDone`, `agent:session`, and `agent:stopState` are superseded by durable run events.
+ * `agent:turnDone`, `agent:session`, `agent:stopState`, and `agent:questionAttention` come from the run projection.
  */
 export const SUBSCRIBE_RETAINED_WINDOW_NOTICES: ReadonlySet<string> = new Set([
   'agent:error',
   'agent:backgroundWork',
-  'agent:deleteArchivedProgress',
-  'agent:questionAttention'
+  'agent:deleteArchivedProgress'
 ])
 
 export interface SubscribeKnownCursor {

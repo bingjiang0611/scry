@@ -37,6 +37,13 @@ export async function publishQuestions(
   if (admissionPhase(cursor) !== 'admitted') return
   const runId = windowRunId(cursor)
   const pending = projected ?? await transport.questions(cursor.runId)
+  if (projected && (pending.length !== cursor.askedQuestions.size ||
+      pending.some(request => !cursor.askedQuestions.has(request.questionId)))) {
+    const permissionCount = pending.filter(request => request.questionKind === 'permission').length
+    sinks.send('agent:questionAttention', {
+      runId, pendingCount: pending.length, permissionCount, inputCount: pending.length - permissionCount
+    })
+  }
   const windowWide = !usesScopedRunDelivery(cursor)
   for (const pendingRequest of pending) {
     if (cursor.askedQuestions.has(pendingRequest.questionId)) continue
