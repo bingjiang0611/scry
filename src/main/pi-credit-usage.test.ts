@@ -86,7 +86,7 @@ describe('Pi request-level Qoder credits', () => {
   })
 
   it('rejects identity mismatch and broken ancestry instead of guessing by time or text', () => {
-    expect(() => parse([{ ...user, parentId: 'missing' }, observation()])).not.toThrow() // exact user boundary suffices
+    expect(() => parse([{ ...user, parentId: 'missing' }, observation()])).not.toThrow()
     expect(() => parse([observation('c1', 'missing')])).toThrow('incomplete')
     expect(() => piCreditRequests(JSON.stringify({ ...header, cwd: '/elsewhere' }), identity, [])).toThrow('identity')
   })

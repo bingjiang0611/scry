@@ -11,10 +11,6 @@ export interface PiCreditEntry {
   message?: { role?: string; provider?: string }
 }
 
-/** Metering is separate from assistant USD catalogue placeholders. Inspect all
- * branches: abandoned/failed requests still consumed usage. Only exact archived
- * user identities authorize attribution; copied fork observations keep their
- * old sessionId and must not be charged again. */
 export function piCreditRequests(content: string, identity: { sessionId: string; cwd: string },
   turns: Array<{ runId: string; providerTurnId?: string }>): { requests: CreditRequest[]; matched: Set<string>; incomplete: boolean } {
   const lines = content.split('\n')
@@ -24,8 +20,6 @@ export function piCreditRequests(content: string, identity: { sessionId: string;
     if (!line.trim()) continue
     try { entries.push(JSON.parse(line) as PiCreditEntry) }
     catch (error) {
-      // A live append can expose one unfinished last entry. Keep the proven
-      // prefix, but do not treat corruption within completed JSONL as valid.
       if (index !== lines.length - 1) throw error
       incomplete = true
     }
@@ -33,7 +27,6 @@ export function piCreditRequests(content: string, identity: { sessionId: string;
   return piCreditEntries(entries, identity, turns, incomplete)
 }
 
-// The file reader retains topology and metering only, never message/tool bodies.
 export function piCreditEntries(entries: PiCreditEntry[], identity: { sessionId: string; cwd: string },
   turns: Array<{ runId: string; providerTurnId?: string }>, incomplete = false): ReturnType<typeof piCreditRequests> {
   const header = entries.shift()
@@ -50,8 +43,6 @@ export function piCreditEntries(entries: PiCreditEntry[], identity: { sessionId:
     if (!turn.providerTurnId) continue
     runs.set(turn.providerTurnId, runs.has(turn.providerTurnId) ? null : turn.runId)
   }
-  // Memoize ownership, not entire ancestry arrays: long tool-heavy turns must
-  // not repeatedly traverse their growing transcript on the main thread.
   const owners = new Map<string, string | undefined>()
   const ownerOf = (entry: PiCreditEntry): string | undefined => {
     const path = new Set<string>()
@@ -60,7 +51,6 @@ export function piCreditEntries(entries: PiCreditEntry[], identity: { sessionId:
     for (;;) {
       if (owners.has(current.id)) { owner = owners.get(current.id); break }
       if (current.type === 'message' && current.message?.role === 'user') {
-        // An untracked user could be an external continuation, not a steer.
         owner = runs.get(current.id) ?? undefined
         owners.set(current.id, owner)
         break
@@ -105,8 +95,6 @@ export function piCreditEntries(entries: PiCreditEntry[], identity: { sessionId:
     const runId = ownerOf(entry)
     if (!runId) continue
     matched.add(runId)
-    // Only observations since the previous message can meter this response.
-    // Older request charges must not hide an unmetered failed/legacy response.
     let parent = entry.parentId ? byId.get(entry.parentId) : undefined
     let metered = false
     while (parent && parent.type !== 'message') {

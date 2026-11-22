@@ -1,4 +1,3 @@
-// Usage Analytics 与 canonical billing 去重 SQL / 聚合纯函数。
 import type { UsageAnalytics, UsageAnalyticsAggregate, UsageAnalyticsRangeDays } from '../shared/trace'
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
 import { officialApiCost } from './official-api-cost'
@@ -34,7 +33,6 @@ export const canonicalCostWhere = (a = 'usage_ledger', peerScope?: string): stri
 )`
 }
 
-// 现有 rollup / preflight / showback 契约都是美元金额；Credits 只在带 costUnit 的对账中展示。
 export const canonicalUsdCostWhere = (a = 'usage_ledger'): string =>
   `(${canonicalCostWhere(a)} AND ${a}.cost_unit='usd')`
 const canonicalSessionUsdCostWhere = (a: string): string =>
@@ -65,7 +63,6 @@ export const USAGE_ANALYTICS_COSTS_SQL = `SELECT
     AND ${canonicalSessionUsdCostWhere('u')}`
 
 export interface UsageAnalyticsTokenRow {
-  // Query proves no existing model/whole-turn USD cost would be double counted.
   officialCostEligible?: number
   tsStart: number
   provider: BillingProvider
@@ -249,7 +246,6 @@ export function buildUsageAnalytics(args: {
     addUsageTokenRow(targetFor(days, day), row)
     addUsageTokenRow(dailyTarget(day, row.provider), row)
   }
-  // Estimate at read time so existing history benefits without rewriting ledger evidence.
   const costs = [...args.costs]
   for (const row of args.tokens) {
     if (!row.officialCostEligible) continue

@@ -117,7 +117,6 @@ function cleanupAtomicTemps(file: string): void {
       const stat = lstatSync(path)
       if (stat.isFile() && !stat.isSymbolicLink()) unlinkSync(path)
     } catch {
-      // Another cleanup/write may have won the race.
     }
   }
 }
@@ -136,7 +135,7 @@ function writeUsageAtomic(file: string, source: string): void {
     invalidateUsageScan(file)
   } catch (error) {
     if (fd !== undefined) closeSync(fd)
-    try { unlinkSync(temp) } catch { /* temp may already have been renamed */ }
+    try { unlinkSync(temp) } catch {}
     throw error
   }
 }
@@ -187,11 +186,9 @@ export function appendUsage(
       usageScanCache.ino = stat.ino
     } else invalidateUsageScan(file)
   } catch {
-    /* usage.jsonl is best-effort; sqlite remains the structured source */
   }
 }
 
-/** Telemetry shares usage ownership/deletion, but must never count as a billing turn. */
 export async function appendLlmPerformance(
   userDataDir: string,
   context: { cwd: string; externalSessionId?: string },
@@ -210,8 +207,6 @@ export async function appendLlmPerformance(
     await handle.chmod(0o600)
     const after = await handle.stat()
     const cache = usageScanCache
-    // Telemetry has no billing contribution. Advance only a cache matching the exact pre-append
-    // file; external edits/replacements or concurrent writers force the ordinary authoritative scan.
     if (cache?.file === file && cache.endsWithNewline && cache.dev === before.dev && cache.ino === before.ino &&
       cache.size === before.size && cache.mtimeMs === before.mtimeMs && cache.ctimeMs === before.ctimeMs &&
       after.dev === before.dev && after.ino === before.ino && after.size === before.size + Buffer.byteLength(line)) {
@@ -312,8 +307,6 @@ export function deleteUsageSessionRows(args: {
         typeof row.providerId === 'string' &&
         typeof row.cwd === 'string' &&
         typeof row.externalSessionId === 'string'
-      // A run id only recovers unattributed legacy rows. Never let a corrupt archive runId
-      // override a complete, different session identity.
       const legacyScopeMatch =
         !hasCompleteIdentity &&
         row.providerId === args.providerId &&
@@ -364,7 +357,6 @@ export function usageSessionRunIds(args: {
         row.externalSessionId === args.externalSessionId && typeof row.runId === 'string' && row.runId
       ) runIds.add(row.runId)
     } catch {
-      // Corrupt rows are retained and cannot safely establish ownership.
     }
   }
   return [...runIds]
