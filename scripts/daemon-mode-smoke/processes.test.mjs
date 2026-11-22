@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readLaunch } from '../b4v/process-identity.mjs'
 import { checkDaemonLaunch, daemonProcessEvidence, readDaemonTerminalChild } from './processes.mjs'
@@ -117,18 +118,23 @@ describe('worker evidence on disk', () => {
     expect(recordingFiles(root, 'terminal-2')).toMatchObject({ ok: false })
   })
 
-  it('links the App run to the ledger run and requires its output text in the worker files', async () => {
+  it('links the App run to the persisted daemon run and requires its output text in the worker files', async () => {
     const root = userData()
-    expect(runOutputFiles(root, 'remote-run-1')).toMatchObject({ ok: false, reason: 'ledger_run_unlinked' })
-    mkdirSync(join(root, 'remote', 'ledger'), { recursive: true })
-    const bound = { seq: 1, runId: 'ledger-1', kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'remote-run-1', ledgerRunId: 'ledger-1' }) }
-    writeFileSync(join(root, 'remote', 'ledger', 'session-ledger.log'), `${JSON.stringify(bound)}\n`)
+    expect(runOutputFiles(root, 'remote-run-1')).toMatchObject({ ok: false })
+    mkdirSync(join(root, 'orchestration'))
+    const db = new DatabaseSync(join(root, 'orchestration', 'orchestration.db'))
+    db.exec(`
+      CREATE TABLE orch_p_run (run_id TEXT PRIMARY KEY, app_run_id TEXT);
+      INSERT INTO orch_p_run VALUES ('ledger-2', 'remote-run-2'), ('ledger-1', 'remote-run-1');
+    `)
+    db.close()
     expect(runOutputFiles(root, 'remote-run-1')).toMatchObject({ ok: false, reason: 'run_output_files_missing_or_empty', runId: 'ledger-1' })
     const { createHash } = await import('node:crypto')
     const key = createHash('sha256').update('ledger-1').digest('hex')
     mkdirSync(join(root, 'remote', 'output'), { recursive: true })
-    writeFileSync(join(root, 'remote', 'output', `${key}.idx`), 'i')
     writeFileSync(join(root, 'remote', 'output', `${key}.jsonl`), `${JSON.stringify({ seq: 1, runId: 'ledger-1', kind: 'tool', text: 'x', at: 1 })}\n`)
+    expect(runOutputFiles(root, 'remote-run-1')).toMatchObject({ ok: false, reason: 'run_output_files_missing_or_empty' })
+    writeFileSync(join(root, 'remote', 'output', `${key}.idx`), 'i')
     expect(runOutputFiles(root, 'remote-run-1')).toMatchObject({ ok: false, reason: 'run_output_text_missing' })
     writeFileSync(join(root, 'remote', 'output', `${key}.jsonl`), `${JSON.stringify({ seq: 1, runId: 'ledger-1', kind: 'output', text: 'hello', at: 1 })}\n`)
     expect(runOutputFiles(root, 'remote-run-1')).toMatchObject({ ok: true, runId: 'ledger-1', outputChars: 5 })

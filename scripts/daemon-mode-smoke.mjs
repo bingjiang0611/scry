@@ -70,6 +70,7 @@ const logPath = options.app && options.log === undefined ? join(root, 'daemon-mo
 let child
 let cdp
 let terminalIdentity
+let pacedAppRunId
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
@@ -160,6 +161,7 @@ try {
   })()`)
   const paced = await evaluate(`window.scry.start({ prompt: 'performance paced stream', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
   if (!paced || typeof paced.runId !== 'string') fail('stream-start', JSON.stringify(paced))
+  pacedAppRunId = paced.runId
   const streamSettled = await until('stream-settled', evaluate,
     `window.scry.focusedRunSnapshot().then(run => run && run.done ? { done: true, text: run.items.filter(i => i.stage === 'text_delta' || i.stage === 'text').reduce((sum, i) => sum + (i.text ?? '').length, 0) } : null)`,
     (value) => value && value.done === true)
@@ -172,10 +174,6 @@ try {
     ok: stream.length >= 8 && medianGap >= 80 && medianGap <= 250,
     arrivals: stream.length, medianGap, viewText: streamSettled.text
   }
-  // The streamed text went through the run output worker (beside daemon.js, in app.asar
-  // when packaged) into its files.
-  results.steps.runOutput = runOutputFiles(userDataDir, paced.runId)
-
   // 2. question -> answer (twice) -> settled
   // Questions arrive on their own channel, exactly as the chat view receives them; the
   // script answers with the id it was shown, like a user clicking a choice.
@@ -270,6 +268,9 @@ try {
   // lock and by the state directory in its environment, each signal re-verified.
   const stopped = await stopFixtureDaemon({ daemonState: join(userDataDir, 'daemon') })
   results.steps.daemonStopped = { ok: stopped.remaining.length === 0 && !stopped.processScan, ...stopped }
+  if (pacedAppRunId && results.steps.daemonStopped.ok) {
+    results.steps.runOutput = runOutputFiles(userDataDir, pacedAppRunId)
+  }
   // A shell that outlived its daemon would be ours to stop, and a defect to report.
   if (terminalIdentity && verifyHolder(terminalIdentity, readIdentity(terminalIdentity.pid)) === 'verified') {
     results.steps.terminalStopped = { ok: false, pid: terminalIdentity.pid, ...signalVerified(terminalIdentity, 'SIGKILL') }
