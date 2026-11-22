@@ -166,7 +166,7 @@ export function validateDeleteSessionResult(value: unknown): DeleteSessionResult
   if (!record(value) || typeof value.ok !== 'boolean' || !Array.isArray(value.deleted) || !Array.isArray(value.retained) || !Array.isArray(value.failed) ||
       value.deleted.some((item) => typeof item !== 'string') || value.retained.some((item) => typeof item !== 'string') ||
       value.failed.some((item) => !record(item) || !text(item.store, 256) || !text(item.error, 16_384)) ||
-      (value.cancelled !== undefined && typeof value.cancelled !== 'boolean') || (value.reason !== undefined && !['invalid_request', 'active_session', 'user_cancelled', 'partial_failure'].includes(String(value.reason)))) fail('invalid_session_delete_response')
+      (value.cancelled !== undefined && typeof value.cancelled !== 'boolean') || (value.reason !== undefined && !['invalid_request', 'active_session', 'user_cancelled', 'partial_failure', 'unavailable'].includes(String(value.reason)))) fail('invalid_session_delete_response')
   return value as unknown as DeleteSessionResult
 }
 

@@ -50,6 +50,7 @@ export interface SessionLifecycleDependencies {
   prepareConversationDeletion: (conversation: Conversation) => Promise<ConversationDeletionPreview>
   /** A Provider session's side chats, deleted with it (they live only in its panel). */
   sideChatCascade: SideChatCascade
+  deleteNativeProjection?: (ref: AppSessionRef, runIds: ReadonlySet<string>) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
   publishDataUpdated: (event: AgentDataUpdated) => void
   /** The real count of archived sessions handled so far, for the renderer to show in place. */
   publishDeleteProgress?: (progress: DeleteArchivedProgress) => void
@@ -63,6 +64,7 @@ export type SessionDeletionRequest = Omit<ProviderContext, 'providerId'> & { pro
 export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
   const { getRuns, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery, providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions, appUserDataDir, requestRunStop, prepareConversationDeletion, assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, publishDataUpdated, sideChatCascade } = deps
   const sessionSideChats = createSessionSideChats({ appSessionStore, sideChatCascade, notifyFailure: deps.notifyFailure })
+  const { deleteNativeProjection } = deps
 
   // 删除一个历史会话。工作区 .scry/ 是独立 canonical evidence，明确保留。
   // confirm / notifyFailure 由调用方决定：单条删除各弹一次系统弹窗，批量删除只在批次首尾各弹一次。
@@ -199,6 +201,12 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
           ),
           deleteAttachments: (runId) => deleteRunAttachments(userDataDir, runId),
           deleteTranscripts: () => deleteTranscriptCopies({ cwd, sessionId: externalSessionId, providerId, userDataDir }),
+          deleteProjection: deleteNativeProjection
+            ? (runIds) => {
+                options.authorize?.()
+                return deleteNativeProjection({ providerId, agentProfileId, cwd, externalSessionId }, runIds)
+              }
+            : undefined,
           deleteCatalog: () => sessionStore.remove({ providerId, agentProfileId, cwd, externalSessionId })
         })
         if (!result.ok) {

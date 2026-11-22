@@ -1,7 +1,8 @@
-import { isSessionProviderId, type AppSession } from '../main/app-store'
+import { isSessionProviderId, type AppSession, type AppSessionRef } from '../main/app-store'
 import { available } from '../shared/turn-record'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
+import type { DeleteSessionOutcome } from '../host-runtime/orchestration/event-sink-maintenance'
 import type { SessionDiscoverPayload } from '../host-runtime/orchestration/orchestrator-commands'
 import { mapSessionRow } from '../host-runtime/orchestration/projection-mappers'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
@@ -33,6 +34,24 @@ function displayedOutcome(value: string | undefined): AppSession['lastRunOutcome
  * for off/shadow startup and readers that have yet to migrate. */
 export function createOrchestrationCatalogAccess(getSink: () => EventSink | undefined) {
   return {
+    deleteNative(ref: AppSessionRef, runIds: ReadonlySet<string>): DeleteSessionOutcome {
+      const sink = getSink()
+      if (!sink) return { status: 'not_present' }
+      if (!sink.handle.db.open || sink.isWriteIndeterminate()) {
+        return { status: 'unavailable', error: 'orchestration_write_indeterminate' }
+      }
+      const session = findProjectedNativeSession(sink, { ...ref, sessionId: ref.externalSessionId })
+      if (!session || session.cwd === null) return { status: 'not_present' }
+      return sink.deleteSession({
+        sessionKey: session.sessionKey,
+        cwd: session.cwd,
+        actor: 'system',
+        scope: 'system',
+        at: Date.now(),
+        unboundRunIds: [...runIds]
+      })
+    },
+
     read(): AppSession[] | undefined {
       const sink = getSink()
       if (!sink) return undefined

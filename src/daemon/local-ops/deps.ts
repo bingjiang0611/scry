@@ -68,6 +68,7 @@ export interface DaemonLocalEndpointDeps {
  * the groups are built, read only when a call runs.
  */
 export interface DaemonSessionLinks {
+  deleteNativeProjection?: import('../../main/bootstrap/session-lifecycle').SessionLifecycleDependencies['deleteNativeProjection']
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   sessionRefFromRequest?: (value: unknown) => import('../../main/app-store').AppSessionRef | null
   changeLegacySessionMetadata?: (ref: import('../../main/app-store').AppSessionRef, change: () => boolean) => Promise<boolean>

@@ -17,6 +17,8 @@ export interface DeleteSessionInput {
   actor: string
   scope: OrchestrationScope
   at: number
+  /** Run IDs verified by the host's deletion scope before an older run had a projected key. */
+  unboundRunIds?: readonly string[]
 }
 
 export type DeleteSessionOutcome =
@@ -40,17 +42,26 @@ export function deleteSessionInDb(
 
   const tx = db.transaction(() => {
     const sessionRow = db
-      .prepare('SELECT 1 FROM orch_p_session WHERE session_key = ?')
-      .get(input.sessionKey)
+      .prepare('SELECT provider, profile, cwd FROM orch_p_session WHERE session_key = ?')
+      .get(input.sessionKey) as { provider: string | null; profile: string | null; cwd: string | null } | undefined
     const eventRow = db
-      .prepare('SELECT 1 FROM orch_event WHERE session_key = ? LIMIT 1')
+      .prepare(`SELECT 1 FROM orch_event WHERE session_key = ? AND type != 'session.deleted'
+                AND json_extract(payload, '$.redacted') IS NOT 1 LIMIT 1`)
       .get(input.sessionKey)
     if (!sessionRow && !eventRow) return
     existed = true
 
     const runRows = db
-      .prepare('SELECT run_id, body FROM orch_p_run WHERE session_key = ?')
-      .all(input.sessionKey) as Array<{ run_id: string; body: string | null }>
+      .prepare(
+        `SELECT run_id, body FROM orch_p_run WHERE session_key = ?
+           OR (session_key IS NULL AND provider IS ? AND profile IS ? AND cwd = ?
+              AND run_id IN (SELECT value FROM json_each(?)))`
+      )
+      .all(
+        input.sessionKey, sessionRow?.provider ?? null, sessionRow?.profile ?? null, sessionRow?.cwd ?? null,
+        canonicalJson(sessionRow ? input.unboundRunIds ?? [] : [])
+      ) as Array<{ run_id: string; body: string | null }>
+    const runIds = canonicalJson(runRows.map((row) => row.run_id))
     const candidateShas = new Set<string>()
     for (const r of runRows) {
       if (!r.body) continue
@@ -58,14 +69,15 @@ export function deleteSessionInDb(
       if (parsed.storage === 'external' && parsed.sha256) candidateShas.add(parsed.sha256)
     }
 
-    const redacted = db
-      .prepare("UPDATE orch_event SET payload = '{\"redacted\":true}' WHERE session_key = ? AND type != 'session.deleted'")
-      .run(input.sessionKey)
+    const redacted = db.prepare(
+      `UPDATE orch_event SET payload = '{"redacted":true}'
+       WHERE type != 'session.deleted' AND (session_key = ? OR run_id IN (SELECT value FROM json_each(?)))`
+    ).run(input.sessionKey, runIds)
     redactedEvents = redacted.changes
 
-    db.prepare(
-      'DELETE FROM orch_outbox WHERE run_id IN (SELECT run_id FROM orch_p_run WHERE session_key = ?)'
-    ).run(input.sessionKey)
+    for (const table of ['orch_outbox', 'orch_p_interaction', 'orch_p_turn', 'orch_p_run']) {
+      db.prepare(`DELETE FROM ${table} WHERE run_id IN (SELECT value FROM json_each(?))`).run(runIds)
+    }
 
     const tombstonePayload = canonicalJson({ sessionKey: input.sessionKey, cwd: input.cwd })
     const info = db

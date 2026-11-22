@@ -75,6 +75,10 @@ export function importCatalogEntries(
        AND json_extract(evidence, '$[0]') GLOB 'app-sessions:*'
      ORDER BY seq DESC LIMIT 1`
   )
+  const deletedSession = sink.handle.db.prepare(
+    `SELECT 1 FROM orch_event WHERE session_key = ? AND type = 'session.deleted'
+       AND NOT EXISTS (SELECT 1 FROM orch_p_session WHERE session_key = ?) LIMIT 1`
+  )
   const evidence = [`app-sessions:${nextSha}`]
   for (let offset = 0; offset < entries.length; offset += batchSize) {
     const chunk = entries.slice(offset, offset + batchSize)
@@ -89,6 +93,7 @@ export function importCatalogEntries(
           (typeof entry.runId === 'string' && entry.runId) ||
           ''
         if (!sessionKey) continue
+        if (deletedSession.get(sessionKey, sessionKey)) continue
         const imported = previousImport.get(sessionKey) as { seq: number; payload: string } | undefined
         const previous = imported ? JSON.parse(imported.payload) as Record<string, unknown> : undefined
         const title =

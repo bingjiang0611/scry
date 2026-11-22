@@ -86,6 +86,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // The App's terminals (P3-terminal.md). The recording worker sits beside this entry in
   // out/main, like the run output worker below.
   let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
+  const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink)
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
     homeDir: workspace.homeDir,
@@ -136,7 +137,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       : Promise.reject(new Error('daemon_catalog_start_requires_conversation')),
     homeDir: workspace.homeDir,
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
-    projection: createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink)
+    projection: catalogProjection
   })
   loadSessions = () => catalog.appSessionStore().load()
 
@@ -214,7 +215,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   await startupManagedRecovery
 
-  const sessionLinks: DaemonSessionLinks = {}
+  const sessionLinks: DaemonSessionLinks = { deleteNativeProjection: catalogProjection.deleteNative }
   const targetBridge = createAppExecutionTargetBridge({
     isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
     ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})

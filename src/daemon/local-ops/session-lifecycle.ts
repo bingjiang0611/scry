@@ -10,6 +10,7 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
   const lifecycle = createSessionLifecycle({
     getRuns: deps.runs,
     appSessionStore: catalog.appSessionStore,
+    deleteNativeProjection: deps.links.deleteNativeProjection,
     conversationStore: catalog.conversationStore,
     contextAdmission: session.contextAdmission,
     getStartupManagedRecovery: deps.startupManagedRecovery,

@@ -17,6 +17,7 @@ import { deleteSessionDataRows, resolveSessionDataRunIds, type SessionDeleteData
 
 export let db: Database.Database | null = null
 export let dbFilePath: string | null = null
+let dbUnavailable = false
 export let dataRevision = 0
 export const billingStateCacheSlot: { value?: { revision: number; value: BillingGuardianState } } = { value: undefined }
 export const statsCacheSlot: { value?: { revision: number; observedAt: number; value: DbStats } } = { value: undefined }
@@ -51,6 +52,7 @@ export function initDb(): void {
     for (const file of [dbFilePath, `${dbFilePath}-wal`, `${dbFilePath}-shm`]) {
       if (existsSync(file)) chmodSync(file, 0o600)
     }
+    dbUnavailable = false
     invalidateQueryCaches()
   } catch (e) {
     // A missing storage root is a wiring bug, not a broken SQLite: fail loudly
@@ -58,6 +60,7 @@ export function initDb(): void {
     if ((e as Error)?.message === 'storage_not_configured') throw e
     try { db?.close() } catch { /* retain the original initialization error */ }
     db = null // 降级：sqlite 不可用就不写不查，app 照常跑
+    dbUnavailable = true
     console.warn('[scry] sqlite 初始化失败，观测分析降级:', (e as Error)?.message)
   }
 }
@@ -70,7 +73,7 @@ export function deleteSessionData(args: {
 }): { status: 'deleted' | 'not_present' | 'unavailable'; runIds: string[]; deletedRows: number; error?: string } {
   if (!db) {
     const file = dbFilePath ?? storageDbFilePath()
-    return existsSync(file)
+    return dbUnavailable || existsSync(file)
       ? { status: 'unavailable', runIds: [...args.runIds], deletedRows: 0, error: 'SQLite 当前不可用，无法确认会话数据已清除' }
       : { status: 'not_present', runIds: [...args.runIds], deletedRows: 0 }
   }
@@ -96,7 +99,7 @@ export function resolveSessionRunIds(args: {
 }): { status: 'ready' | 'not_present' | 'unavailable'; runIds: string[]; conflicts: string[]; error?: string } {
   if (!db) {
     const file = dbFilePath ?? storageDbFilePath()
-    return existsSync(file)
+    return dbUnavailable || existsSync(file)
       ? { status: 'unavailable', runIds: [], conflicts: [], error: 'SQLite 当前不可用，无法校验会话 runId 归属' }
       : { status: 'not_present', runIds: [...args.runIds], conflicts: [] }
   }

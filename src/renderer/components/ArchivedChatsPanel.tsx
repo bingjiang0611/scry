@@ -40,7 +40,8 @@ const DELETE_FAILURE_LABEL: Record<NonNullable<DeleteArchivedSessionsResult['fai
   invalid_request: '缺少 Provider 会话 id，无法删除',
   active_session: '会话正在运行',
   user_cancelled: '已取消',
-  partial_failure: '部分存储删除失败，catalog 已保留供重试'
+  partial_failure: '部分存储删除失败，catalog 已保留供重试',
+  unavailable: archivedCopy.deleteUnavailable
 }
 
 export function ArchivedChatsPanel({

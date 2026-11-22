@@ -51,6 +51,7 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
  */
 export function applyEventToProjection(db: Database.Database, event: OrchestrationEventRow): void {
   const p = event.payload
+  if (p.redacted === true) return
   switch (event.type) {
     case 'run.intent_recorded': {
       db.prepare(
