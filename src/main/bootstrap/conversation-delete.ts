@@ -8,7 +8,7 @@ import type { ConversationTableDependencies } from './conversation'
 
 type DeletionDependencies = Pick<ConversationTableDependencies, 'providerContextKey' | 'contextAdmission' |
   'getStartupManagedRecovery' | 'appSessionStore' | 'conversationStore' | 'getRuns' | 'invalidateSessionHistoryLoad' | 'publishDataUpdated' |
-  'deleteOneSession' | 'resolveSessionRunIds' | 'deleteConversationHistory' | 'appUserDataDir'>
+  'deleteOneSession' | 'resolveSessionRunIds' | 'deleteConversationHistory' | 'deleteConversationProjection' | 'appUserDataDir'>
 /** The conversation table's collecting registrar: main serves it as IPC, the daemon as local ops. */
 type ChannelRegistrar = (channel: string, listener: (event: unknown, ...args: any[]) => unknown) => void
 
@@ -35,7 +35,7 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 export function registerConversationDeletionHandlers(handle: ChannelRegistrar, deps: DeletionDependencies) {
   const { providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
     getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
-    appUserDataDir } = deps
+    appUserDataDir, deleteConversationProjection } = deps
 
   function assertConversationDeletionIdle(conversation: Conversation): void {
     const runIds = new Set(conversation.turns.map(turn => turn.runId))
@@ -112,9 +112,19 @@ export function registerConversationDeletionHandlers(handle: ChannelRegistrar, d
       await deleteConversationHistory(appUserDataDir, conversation)
       result.deleted.push('frozen handoff bodies')
     } catch (error) { result.failed.push({ store: 'frozen handoff bodies', error: message(error) }) }
+    if (!result.failed.length && deleteConversationProjection) {
+      try {
+        const projection = deleteConversationProjection(conversation)
+        if (projection.status === 'deleted') result.deleted.push('orchestration')
+        if (projection.status === 'unavailable') {
+          result.reason = 'unavailable'
+          result.failed.push({ store: 'orchestration', error: projection.error ?? 'orchestration_unavailable' })
+        }
+      } catch (error) { result.failed.push({ store: 'orchestration', error: message(error) }) }
+    }
     result.retained = [...new Set(result.retained)]
     result.ok = result.failed.length === 0
-    if (!result.ok) result.reason = 'partial_failure'
+    if (!result.ok) result.reason ??= 'partial_failure'
     await conversationStore().finishDeletion(conversation.id, fingerprint, result, plan.targets.some(target => target.sharedWith.length > 0))
     publishDataUpdated({ kind: 'conversation_changed', conversationId: conversation.id })
     return result

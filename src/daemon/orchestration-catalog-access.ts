@@ -1,6 +1,7 @@
 import { isSessionProviderId, type AppSession, type AppSessionRef } from '../main/app-store'
 import type { ReadProjectedHistorySession } from '../main/bootstrap/history-catalog'
 import { available } from '../shared/turn-record'
+import type { Conversation } from '../shared/conversation'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { DeleteSessionOutcome } from '../host-runtime/orchestration/event-sink-maintenance'
@@ -88,6 +89,29 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
         nativeIdentity: scopedNativeSessionKey(identity),
         nativeSource: scopedNativeSessionKey({ ...identity, profile: null })
       })
+    },
+
+    deleteConversation(conversation: Conversation): DeleteSessionOutcome {
+      const sink = getSink()
+      if (!sink) return { status: 'not_present' }
+      if (!sink.handle.db.open || sink.isWriteIndeterminate()) {
+        return { status: 'unavailable', error: 'orchestration_write_indeterminate' }
+      }
+      const { id: sessionKey, cwd } = conversation
+      const session = sink.getSession(sessionKey)
+      if (session) {
+        if (session.cwd !== cwd) return { status: 'not_present' }
+        // Older run-created rows have no conversationId. Prove their ownership
+        // with the dispatched run IDs from the authorized conversation ledger.
+        if (session.conversationId !== sessionKey && (session.conversationId !== null || !sink.handle.db
+          .prepare('SELECT 1 FROM orch_p_run WHERE session_key = ? AND run_id IN (SELECT value FROM json_each(?)) LIMIT 1')
+          .get(sessionKey, canonicalJson(conversation.turns.map(turn => turn.runId))))) return { status: 'not_present' }
+      } else if (!sink.handle.db
+        .prepare("SELECT 1 FROM orch_event WHERE type = 'session.deleted' AND session_key = ? AND cwd = ? LIMIT 1")
+        .get(sessionKey, cwd)) {
+        return { status: 'not_present' }
+      }
+      return sink.deleteSession({ sessionKey, cwd, actor: 'system', scope: 'system', at: Date.now() })
     },
 
     read(): AppSession[] | undefined {

@@ -88,3 +88,46 @@ it('returns unavailable and preserves the retry catalog when scry.db cannot be o
     await daemon.dispose()
   }
 }, 30_000)
+
+it('erases the private projection when an authorized unified conversation is deleted', async () => {
+  process.env.SCRY_ORCHESTRATION = 'on'
+  const daemon = await startTestDaemon()
+  try {
+    const sink = daemon.host.orchestrationAuthority!.sink
+    const created = await daemon.localOp('conversation', 'create', [daemon.workspace])
+    expect(created.error).toBeUndefined()
+    const id = created.result.id as string
+    const providerId = 'codex'
+    const target = await daemon.localOp('conversation', 'preview', [id, { providerId }])
+    expect(target.error).toBeUndefined()
+    const prompt = '需要清除的正文' + 'x'.repeat(INLINE_BODY_MAX_BYTES)
+    const sent = await daemon.localOp('conversation', 'send', [{
+      providerId, conversationId: id, expectedRevision: target.result.revision,
+      expectedContinuationKey: target.result.target.continuationKey,
+      commandId: 'delete-unified-turn', prompt, selectedItems: [], confirmFresh: true
+    }])
+    expect(sent.error).toBeUndefined()
+    const runId = sent.result.runId as string
+    const body = sink.getRun(runId)?.body
+    expect(body?.storage).toBe('external')
+    expect(sink.getSession(id)).toBeDefined()
+    await expect.poll(() => sink.getRun(runId)?.lifecycle, { timeout: 10_000 }).toBe('settled')
+    const listed = await daemon.localOp('conversation', 'list', [daemon.workspace])
+    const current = (listed.result as { id: string; revision: number }[]).find(row => row.id === id)!
+    const archived = await daemon.localOp('conversation', 'update', [id, current.revision, { kind: 'archive', archived: true }])
+    expect(archived.error).toBeUndefined()
+    const preview = await daemon.localOp('conversation', 'previewDeletion', [id])
+    expect(preview.error).toBeUndefined()
+    const deleted = await daemon.localOp('conversation', 'delete', [id, preview.result.fingerprint])
+    expect(deleted.error).toBeUndefined()
+    expect(deleted.result).toMatchObject({ ok: true })
+    expect(sink.getSession(id)).toBeUndefined()
+    expect(sink.getRun(runId)).toBeUndefined()
+    expect(sink.bodyStore.hasExternalBody(body!.sha256)).toBe(false)
+    expect(sink.listOutbox().some(effect => effect.runId === runId)).toBe(false)
+    expect(sink.listEvents().filter(event => event.sessionKey === id).at(-1)).toMatchObject({ type: 'session.deleted' })
+    expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+  } finally {
+    await daemon.dispose()
+  }
+}, 30_000)

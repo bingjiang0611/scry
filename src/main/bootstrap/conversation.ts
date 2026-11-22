@@ -5,6 +5,7 @@ import type { createAppSessionStore } from '../app-store'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
 import type { ConversationService } from '../conversation-service'
 import type { ActiveRun } from '../../shared/trace'
+import type { Conversation } from '../../shared/conversation'
 import type { ContextAdmission } from '../context-admission'
 import { parseConversationTarget } from '../conversation-request'
 import { registerSideChatChannels } from './conversation-side-chat-channels'
@@ -39,6 +40,7 @@ export interface ConversationTableDependencies {
   deleteOneSession: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<{ ok: boolean; deleted: string[]; retained: string[]; failed: Array<{ store: string; error: string }>; reason?: string }>
   resolveSessionRunIds: typeof resolveSessionRunIds
   deleteConversationHistory: typeof deleteConversationHistory
+  deleteConversationProjection?: (conversation: Conversation) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
   appUserDataDir: string
   dockBadge: Pick<DockBadgeState, 'adopt'>
 }
@@ -129,7 +131,7 @@ export function conversationChannelTable(deps: ConversationTableDependencies) {
   const { prepareConversationDeletion, sideChatCascade } = registerConversationDeletionHandlers(handle, {
     providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
     getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
-    appUserDataDir
+    appUserDataDir, deleteConversationProjection: deps.deleteConversationProjection
   })
   handle('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
     if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')

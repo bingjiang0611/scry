@@ -215,7 +215,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   })
   await startupManagedRecovery
 
-  const sessionLinks: DaemonSessionLinks = { deleteNativeProjection: catalogProjection.deleteNative }
+  const sessionLinks: DaemonSessionLinks = {
+    deleteNativeProjection: catalogProjection.deleteNative, deleteConversationProjection: catalogProjection.deleteConversation
+  }
   const targetBridge = createAppExecutionTargetBridge({
     isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
     ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})

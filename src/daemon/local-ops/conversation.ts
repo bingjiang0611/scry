@@ -34,6 +34,7 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     },
     resolveSessionRunIds,
     deleteConversationHistory,
+    deleteConversationProjection: deps.links.deleteConversationProjection,
     appUserDataDir: deps.userDataDir
   })
   deps.links.prepareConversationDeletion = table.prepareConversationDeletion
