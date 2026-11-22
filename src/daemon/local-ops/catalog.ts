@@ -3,8 +3,6 @@ import type { ProviderContext } from '../../shared/provider'
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import { withoutEvent, type DaemonLocalOpGroup } from './deps'
 
-// Session catalog, project list, Provider catalog and context, session history.
-// The factories type their own arguments; the daemon passes the renderer's through.
 export const catalogLocalOps: DaemonLocalOpGroup = ({ catalog, workspace, providers, pi, session, historyChannels }) => ({
   ...catalogChannelHandlers({
     appSessionStore: catalog.appSessionStore,

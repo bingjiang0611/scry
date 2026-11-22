@@ -17,11 +17,6 @@ function readSupervisorPid(env: NodeJS.ProcessEnv): number | undefined {
   return Number.isSafeInteger(pid) && pid > 1 ? pid : undefined
 }
 
-// What only the daemon knows for the «后台服务» section (B4-S S0-1, P5 §2.2): its own
-// version, pid, start time, paired devices, unsettled runs, launcher and effective remote
-// policy. Local endpoint only, like every local op. Devices are counted from the same
-// remote:status main answers, which already leaves out the App's own local grant; remote
-// access off is reported as such.
 export const backgroundServiceLocalOps: DaemonLocalOpGroup = (deps) => {
   const remoteStatus = pairingChannelHandlers({ host: deps.remoteHost })['remote:status']
   return {

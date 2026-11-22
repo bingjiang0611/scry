@@ -10,4 +10,6 @@ Build the host only after acquiring the state-directory lock and then the user-d
 
 Forward a stop request once to the spawned child and wait for its cleanup. The 25-second wait fits inside the service managers' 30-second stop allowance. A stop is not a failed launch and must not cause a restart. After a timeout the manager owns cleanup; the supervisor does not escalate to SIGKILL. Test the time bound with a child that eventually exits on its own.
 
+Local operations reuse the App's handler factories against the daemon's own stores and run registry. They do not create a second window selection or show dialogs. The App picks folders, confirms destructive actions and presents failures; the daemon owns project authority, resolves the supplied directory again, and serializes Provider operations. Pairing still follows the shared enablement rule even when a local endpoint is running. For MCP re-auth, the daemon validates the OAuth URL before forwarding it; the App opens it only for a re-auth it requested.
+
 See [service ownership tests](../../src/daemon/login-start/manager-edge.test.ts), [user-data lock tests](../../src/daemon/lifecycle-userdata.test.ts), [supervisor tests](../../src/daemon/supervisor.test.ts), and the [service-manager design](../plans/remote-runtime-v2/P5-headless-host.md).

@@ -10,15 +10,8 @@ import {
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import type { DaemonLocalOpGroup } from './deps'
 
-// Project store writes, workspace selection, Provider context invalidation, Pi profiles,
-// from the handlers main registers (project-channels.ts, workspace-ipc.ts). This daemon
-// is the only writer of the recent folders and projects, its own workspace authorization
-// input. No pickers or dialogs here: the App picked the folder or launcher and sends the
-// path; a failed Pi handshake comes back as a result for the App's dialog.
 export const projectLocalOps: DaemonLocalOpGroup = (deps) => {
   const { workspace, providers, pi, session, history, sourceControl, providerDiscovery } = deps
-  // Paired devices see Provider metadata through this discovery; refresh failures are
-  // reported by its own onError and keep the last snapshot.
   const refreshInvalidatedMetadata = (): void => { void providerDiscovery.refreshMetadata() }
   const invalidateRemoteProviderMetadata = (providerId: ProviderId): void => {
     providerDiscovery.invalidate(providerId)
@@ -33,18 +26,14 @@ export const projectLocalOps: DaemonLocalOpGroup = (deps) => {
     ...projectStoreChannelHandlers({ projectStore: workspace.projectStore, recentStore: workspace.recentStore }),
     ...recentFolderChannelHandlers({ recentStore: workspace.recentStore }),
     ...selection,
-    // Whether a directory is a project this daemon knows, for the App's window selection
-    // and its known-project file channels: main's resolver over this daemon's stores.
     'agent:setCwd': (dir: unknown, clearIfMissing: unknown) => !namesDirectory(dir) ? null
       : clearIfMissing === true ? knownProjectDirectoryIfPresent(workspace.resolveKnownProjectDirectory, dir)
       : workspace.resolveKnownProjectDirectory(dir),
-    // The window's selection stays in the App, which selects the answer after it.
     'agent:chooseFolder': (picked: unknown) => rememberChosenFolder({
       canonicalExistingDirectory,
       invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
       rememberProject: workspace.rememberProject
     }, picked),
-    // The App filled a missing cwd with its window's selection; this process has none.
     ...providerContextChannelHandlers({
       providerRegistry: providers.providerRegistry,
       withProviderOperation: session.withProviderOperation,
@@ -57,8 +46,6 @@ export const projectLocalOps: DaemonLocalOpGroup = (deps) => {
       const path = piLauncherFromRequest(launcher)
       if (cwd !== null && cwd !== undefined && typeof cwd !== 'string') throw new Error('无效的工作目录')
       try {
-        // The handshake starts the launcher in this directory, so it must be a project
-        // this daemon authorized; main's was the window's already-validated selection.
         const probeCwd = typeof cwd === 'string' ? workspace.resolveKnownProjectDirectory(cwd) : undefined
         const agent = await addPiProfileFromLauncher({
           piProfileStore: pi.piProfileStore, providerRegistry: providers.providerRegistry, invalidateRemoteProviderMetadata
