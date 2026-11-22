@@ -146,7 +146,8 @@ function baseTurnFingerprint(turn: TraceArchiveTurn): string {
   const { turnEvidence: _turnEvidence, items, ts: _ts, ...base } = turn
   return stableHash({
     ...base,
-    items: items.filter((item) => !(item.kind === 'harness' && item.stage === 'turn_diff'))
+    // Both diffs can be added after the terminal journal and before the archive is committed.
+    items: items.filter(item => item.kind !== 'harness' || (item.stage !== 'turn_diff' && item.stage !== 'session_diff'))
   })
 }
 
