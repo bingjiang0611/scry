@@ -117,7 +117,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Seed an adopted conversation with 2 imported turns already in ConversationStore
     const seedStore = new ConversationStore(userDataDir)
     const adopted = await seedStore.create(canonicalWs, {
       target: { providerId: 'codex', continuationKey: 'codex:default' },
@@ -147,7 +146,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
         expect(sent.state).toBe('settled')
 
         const shadow = host.orchestrationShadow!
-        // Shadow MUST record ordinal=3 matching ConversationStore (NOT 1!)
         expect(shadow.mirror.sink!.getTurn(adopted.id, 1)).toBeUndefined()
         const turn3 = shadow.mirror.sink!.getTurn(adopted.id, 3)
         expect(turn3?.runId).toBe(sent.canonicalRunId)
@@ -169,7 +167,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Create a source conversation with 2 real settled turns, then fork it via ConversationStore
     let forkedId = ''
     await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
@@ -251,7 +248,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Phase 1: Conversation runs 2 turns while SCRY_ORCHESTRATION=off
     let convId = ''
     await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
@@ -279,11 +275,8 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       }
     })
 
-    // Simulate compacted/absent H1 history from pre-shadow era (conversation exists in H3 with turns 1-2,
-    // while orchestration.db starts empty with no turns for this session)
     rmSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, force: true })
 
-    // Phase 2: Enable shadow mode (first start with shadow) and send turn 3
     let turn3RunId = ''
     await withSmokeEnv('shadow', async () => {
       const host = await createDaemonHostProcess({
@@ -314,7 +307,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       }
     })
 
-    // Phase 3: Restart daemon in shadow mode and send turn 4
     await withSmokeEnv('shadow', async () => {
       const host = await createDaemonHostProcess({
         userDataDir,

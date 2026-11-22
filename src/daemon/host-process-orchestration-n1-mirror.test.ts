@@ -89,8 +89,6 @@ describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives E
         isPackaged: false,
         createOutputStore: () => new MemoryOutputStore(),
         orchestrationMirrorWriteHook: (op, seq) => {
-          // Fail 5 consecutive writes on seq >= 2 with ENOSPC, then allow subsequent writes.
-          // Old code dropped seq 2 after 5 retries and appended seq 3+, causing `ledger_log_corrupt` on restart!
           if (op === 'append' && seq >= 2 && enospcRemaining > 0) {
             enospcRemaining -= 1
             const err = Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
@@ -110,7 +108,6 @@ describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives E
       await host1.dispose()
       host1 = undefined
 
-      // Restart real daemon host2: MUST NOT throw `ledger_log_corrupt`!
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -147,8 +144,6 @@ describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives E
     let host1: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     let host2: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
-      // Tiny queue cap (2 events) so a single live run (4+ events) overflows the pending mirror queue!
-      // Old code spliced out oldest events (seq 1, 2) and wrote seq 3+, causing `ledger_log_corrupt` on restart!
       host1 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -171,7 +166,6 @@ describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives E
       await host1.dispose()
       host1 = undefined
 
-      // Restart real daemon host2: MUST boot cleanly with contiguous seq / valid snapshot!
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -217,7 +211,6 @@ describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives E
       for (let seq = 1; seq <= 120; seq += 1) {
         mirror.enqueue({ seq, at: 1_000 + seq, kind: 'run_progress', runId, detail: '{}' })
       }
-      // Track how many setImmediate ticks run concurrently with flush()
       let interleavedTicks = 0
       let flushing = true
       const tickProbe = (): void => {
@@ -229,7 +222,6 @@ describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives E
       await mirror.flush()
       flushing = false
       expect(written).toHaveLength(120)
-      // Must have yielded across multiple slices (default slice <= 32 events => >= 3 yields for 120 events)
       expect(interleavedTicks).toBeGreaterThanOrEqual(2)
       await mirror.close()
     } finally {

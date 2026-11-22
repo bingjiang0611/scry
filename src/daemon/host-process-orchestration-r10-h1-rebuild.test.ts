@@ -101,8 +101,6 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
             return
           }
           appendSeqs.push(seq)
-          // Simulate ext4 write-succeeded + fsync-ENOSPC on seq 2:
-          // the line is already on disk, then fsync throws ENOSPC.
           if (!tripped && seq === 2) {
             tripped = true
             appendFileSync(
@@ -126,7 +124,6 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
       await host1.orchestrationAuthority!.flushLegacyMirror()
 
-      // Must NOT retry append for seq 2; must rewrite via atomic snapshot (compact).
       expect(appendSeqs.filter((s) => s === 2)).toHaveLength(1)
       expect(compactCalls).toBeGreaterThanOrEqual(1)
 
@@ -180,7 +177,6 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
         mirrorWriteHook: (op, seq) => {
           if (op === 'append' && !tripped && seq === 2) {
             tripped = true
-            // Simulate partial JSONL line (no trailing newline) left by short write before ENOSPC.
             appendFileSync(logPath, '{"seq":2,"kind":"run_disp', { mode: 0o600 })
             throw makeEnospc()
           }
@@ -259,7 +255,6 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
       await host1.orchestrationAuthority!.flushLegacyMirror()
 
-      // H1 fallback is marked unavailable, yet on mode keeps working and accepts run 2.
       expect(logs.some((l) => l.includes('daemon.orchestration-h1-fallback-unavailable'))).toBe(true)
       expect(host1.orchestrationAuthority!.sink.getMeta('h1_fallback_unavailable')).toBe('1')
 
@@ -274,7 +269,6 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       await host1.dispose()
       host1 = undefined
 
-      // Corrupt H1 file on disk too before restarting in `on` mode -> must still rebuild purely from DB!
       const logPath = join(userDataDir, 'remote', 'ledger', 'session-ledger.log')
       mkdirSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, mode: 0o700 })
       writeFileSync(logPath, '{corrupt truncated line', { mode: 0o600 })
@@ -302,7 +296,6 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       await host2.dispose()
       host2 = undefined
 
-      // Now corrupt H1 again and switch back to `off` mode: must regenerate H1 from orchestration.db before booting!
       writeFileSync(logPath, '{corrupt before off fallback', { mode: 0o600 })
       process.env.SCRY_ORCHESTRATION = 'off'
       hostOff = await startHost(userDataDir, daemonDir)

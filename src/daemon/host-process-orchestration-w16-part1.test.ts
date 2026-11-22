@@ -73,7 +73,6 @@ describe('W16 Part 1: P4-2 non-blocking follow-ups (deferred overflow rebuild, a
         const ev: LedgerEvent = { seq, at: Date.now(), runId, kind: 'run_progress', detail: String(seq) }
         mirror.enqueue(ev)
       }
-      // Critical assertion: ZERO synchronous DB snapshot queries during the 3,000-event emit burst!
       expect(snapshotCalls).toBe(0)
       expect(mirror.hasPendingCompact()).toBe(true)
 
@@ -98,7 +97,6 @@ describe('W16 Part 1: P4-2 non-blocking follow-ups (deferred overflow rebuild, a
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Case: orchestration_on_active='1', R=1024, while H1 snapshot + tail advanced to 3200 during fail-open off.
     const sink = EventSink.open({ userDataDir, fullfsync: false, checkpointIntervalMs: 0 })
     sink.setMeta('orchestration_on_active', '1')
     sink.setMeta('h1_seq_reserved_until', '1024')
@@ -192,7 +190,6 @@ describe('W16 Part 1: P4-2 non-blocking follow-ups (deferred overflow rebuild, a
         h1FallbackUnavailable: false
       })
 
-      // Trip the storage fence via a commit failure.
       tripCommit = true
       await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',

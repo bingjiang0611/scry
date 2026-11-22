@@ -288,20 +288,16 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
         const shadow = host.orchestrationShadow!
         const device = await enrollLocal(host.service)
 
-        // Live turn 4 commits and settles BEFORE deferred backfill runs (deterministically paused)
         const turn4 = await sendConversationTurn(host, device, conv.id, 'live turn 4 during backfill', true)
         expect(turn4.state).toBe('settled')
         expect(shadow.mirror.sink!.getTurn(conv.id, 1)).toBeUndefined()
         expect(shadow.mirror.sink!.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
 
-        // Release deferred backfill while turn 4 already occupies ordinal 4
         releaseBackfill?.()
         await shadow.importComplete
 
-        // S1: historical backfill MUST NOT overwrite live turn 4 as session.lastRunId
         expect(shadow.mirror.sink!.getSession(conv.id)?.lastRunId).toBe(turn4.canonicalRunId)
 
-        // Live turn 5 MUST NOT collide with deferred backfill or fence
         const turn5 = await sendConversationTurn(host, device, conv.id, 'live turn 5 after backfill', false)
         expect(turn5.state).toBe('settled')
 

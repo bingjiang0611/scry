@@ -77,9 +77,6 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Pre-seed 2,048 settled runs x 4 events = 8,192 events (right at SessionLedger's MAX_EVENTS cap)
-    // directly into the daemon's real H1 ledger file BEFORE starting host1.
-    // On the old code (without compaction), the very first live submit on host1 threw `ledger_capacity_exceeded`!
     const seedLines: string[] = []
     let seq = 0
     const baseAt = Date.now() - 60_000
@@ -109,8 +106,6 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
         log: () => undefined
       })
 
-      // Live submit on real host1 crosses 8,192 events inside the daemon's real SessionLedger,
-      // triggering compaction through createLedgerStore + LegacyMirrorWorker without jamming.
       const device = await enrollLocal(host1.service)
       const sub1 = await call(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
@@ -119,14 +114,11 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
       })
       expect(await waitRunTerminal(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
 
-      // Wait for deferred import of the 2,048 seeded runs + flush mirror, then dispose host1.
       await host1.orchestrationAuthority!.importComplete
       await host1.dispose()
       host1 = undefined
       expect(existsSync(join(ledgerDir, 'session-ledger.snapshot.json'))).toBe(true)
 
-      // Restart real daemon host2 over the compacted >8,192-event ledger + orchestration.db,
-      // and verify another live submit succeeds and settles cleanly.
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -180,25 +172,21 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
       const runId = SessionLedger.newRunId()
       const evt: LedgerEvent = { seq: 1, at: Date.now(), runId, kind: 'intent_recorded', intentId: SessionLedger.newIntentId(), detail: '{}' }
       mirror.enqueue(evt)
-      // Must NOT run immediately on setImmediate (stays off pre-first-token critical path!)
       await new Promise((resolve) => setImmediate(resolve))
       await new Promise((resolve) => setTimeout(resolve, 15))
       expect(appendCalls).toBe(0)
 
-      // Bounded queue: enqueuing 100 events under maxPendingEvents=32 collapses into atomic snapshot without dropping seqs
       for (let i = 2; i <= 100; i += 1) {
         mirror.enqueue({ seq: i, at: Date.now(), runId, kind: 'run_progress', detail: String(i) })
       }
       expect(mirror.pendingCount()).toBeLessThanOrEqual(32)
 
-      // Flush writes the atomic snapshot without leaving any seq gap
       failWrites = false
       await mirror.flush()
       expect(compactCalls).toBe(1)
       expect(mirror.pendingCount()).toBe(0)
       expect(mirror.isFailedClosed()).toBe(false)
 
-      // Persistent ENOSPC on both append and compact fails closed without dropping seqs or hanging
       failWrites = true
       fakeStore.compact = () => {
         throw new Error('ENOSPC simulated compact')

@@ -13,12 +13,6 @@ import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
 afterEach(cleanupTempDirs)
 
-// In daemon mode the window's view of a run is the daemon's trace, read with `byteChunks`.
-// A live trace past the host's single-response limit (4 MiB - 1 KiB) is answered in
-// `history_chunk` pages; a reader that does not follow them stops the run's pump and the
-// window stops updating. This pins the whole path on a real daemon: the smoke Provider's
-// `performance large trace` run holds ~6 MiB of thinking (the live projection bounds tool
-// bodies only), and every block must reach `agent:trace` while the run is still live.
 
 const SINGLE_RESPONSE_LIMIT = 4 * 1024 * 1024 - 1024
 const BLOCK_BYTES = 512 * 1024
@@ -53,10 +47,8 @@ describe('daemon trace past the single-response limit', () => {
       expect(blocks.map((event) => event.thinking?.length)).toEqual(Array.from({ length: 12 }, () => BLOCK_BYTES))
       const view = runtime.runView(run.runId)
       expect(view?.done).not.toBe(true)
-      // What the daemon answered really was past the limit, not a small trace in one frame.
       expect(Buffer.byteLength(JSON.stringify(view))).toBeGreaterThan(SINGLE_RESPONSE_LIMIT)
 
-      // Reopening from another window uses the real desktop lane with its standard 4 MiB limit.
       const desktop = new DaemonRunTransport((request, options) => lanes.request(laneForRequest(request), 'reopen', {
         endpoint: daemon.endpoint, request: { protocol: REMOTE_PROTOCOL_VERSION, ...request }, replayable: options?.replayable ?? false
       }))

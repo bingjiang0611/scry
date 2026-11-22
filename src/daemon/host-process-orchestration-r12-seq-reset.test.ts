@@ -104,7 +104,6 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
       const poll1 = await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })
       expect(poll1.poll.cursor).toBeGreaterThanOrEqual(3)
 
-      // Block reservation: no per-event h1_seq_floor key; reserved ceiling R = 1024.
       expect(host1.orchestrationAuthority!.sink.getMeta('h1_seq_floor')).toBeUndefined()
       const reservedR = Number(host1.orchestrationAuthority!.sink.getMeta('h1_seq_reserved_until'))
       expect(reservedR).toBe(1024)
@@ -112,8 +111,6 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
       await host1.dispose()
       host1 = undefined
 
-      // Restart in on mode: device holding mid-stream cursor = 2 receives reset to R (1024),
-      // ZERO renumbered old events, and watch reports settled state.
       host2 = await startHost(userDataDir, daemonDir)
       const midPoll = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 2 })
       expect(midPoll.error).toBeUndefined()
