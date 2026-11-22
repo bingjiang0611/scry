@@ -101,10 +101,16 @@ export function DiffScopeMenu({ state, history }: { state: InspectorState; histo
     return () => { document.removeEventListener('pointerdown', dismiss); window.removeEventListener('resize', measure) }
   }, [open, turnsOpen])
   useEffect(() => {
-    if (open && !turnsOpen) root.current?.querySelector<HTMLButtonElement>('[aria-selected="true"], [role="option"]')?.focus()
+    if (!open) return
+    const choice = root.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+      ?? root.current?.querySelector<HTMLButtonElement>('[role="option"]')
+    choice?.focus()
   }, [open])
   useEffect(() => {
-    if (turnsOpen) submenu.current?.querySelector<HTMLElement>('input, [role="listbox"], .diff-turn-back')?.focus()
+    if (!turnsOpen) return
+    const target = submenu.current?.querySelector<HTMLElement>('input, [role="listbox"]')
+      ?? submenu.current?.querySelector<HTMLButtonElement>('.diff-turn-back')
+    target?.focus()
   }, [turnsOpen])
   const chooseScope = (scope: InspectorState['scope']): void => { state.selectScope(scope); close() }
   return <>
@@ -131,7 +137,7 @@ export function DiffScopeMenu({ state, history }: { state: InspectorState; histo
         : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
       event.preventDefault(); items[next]?.focus()
     }}>
-      <div ref={root} id={id} className="diff-scope-menu" style={position} role="menu" aria-label={copy.changes}>
+      <div ref={root} id={id} className="diff-scope-menu" style={position}>
         <div role="listbox" aria-label={copy.scopeLabel}>
           <button type="button" role="option" className="diff-scope-choice" aria-selected={state.scope === 'branch'} data-diff-choice="branch" onClick={() => chooseScope('branch')}>
             {copy.changes}{state.scope === 'branch' && <Icon name="check" />}

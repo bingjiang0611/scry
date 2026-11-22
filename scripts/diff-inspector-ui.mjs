@@ -58,8 +58,14 @@ export async function exerciseTurnMenu({ click, key, wait, evaluate, screenshot,
       oldTabs: Boolean(document.querySelector('.diff-scope-tabs, .diff-turn-picker select')) } })()`)
   assert.ok(menu.width <= 240 && menu.left >= 0 && menu.right <= menu.viewport)
   assert.equal(menu.oldTabs, false)
-  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.diff-scope-menu > button')].map(node => node.dataset.diffChoice)`), ['branch', 'workspace', 'latest', 'turns'])
-  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.diff-scope-menu > button')].map(node => node.textContent.trim())`), ['Changes', 'Uncommitted', 'Latest turn', 'Turn'])
+  const choices = await evaluate(`[...document.querySelectorAll('.diff-scope-menu [data-diff-choice]')].map(node =>
+    ({ id: node.dataset.diffChoice, label: node.textContent.trim(), role: node.getAttribute('role'), selected: node.getAttribute('aria-selected') }))`)
+  assert.deepEqual(choices, [
+    { id: 'branch', label: 'Changes', role: 'option', selected: 'false' },
+    { id: 'workspace', label: 'Uncommitted', role: 'option', selected: 'false' },
+    { id: 'latest', label: 'Latest turn', role: 'option', selected: 'true' },
+    { id: 'turns', label: 'Turn', role: null, selected: null }
+  ])
   await screenshot('diff-scope-menu-dark')
   await key('Escape', 'Escape', 27)
   assert.equal(await evaluate(`document.activeElement?.classList.contains('diff-scope-trigger')`), true)
