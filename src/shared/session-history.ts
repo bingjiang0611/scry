@@ -1,5 +1,5 @@
 import type { AgentInputAttachment } from './runtime'
-import type { TraceEvent } from './trace'
+import type { ActiveRun, TraceEvent } from './trace'
 
 // Wire-safe history projection shared by local IPC and authenticated remote reads.
 export interface LoadedSessionTurn {
@@ -18,4 +18,22 @@ export interface LoadedSessionTurn {
   stopReason?: string
   error?: string
   errorHint?: string
+}
+
+export interface SessionHistoryProjection {
+  sessionKey: string
+  legacyBefore?: true
+  activeRun: ActiveRun | null
+}
+
+export interface SessionHistoryPage {
+  turns: LoadedSessionTurn[]
+  /** Zero-based index of the first displayed turn in the full history. */
+  offset: number
+  totalTurns: number
+  hasOlder: boolean
+  /** False when a partial source cannot prove the full history. */
+  sourceComplete?: boolean
+  completeness: 'complete' | 'partial'
+  projection?: SessionHistoryProjection
 }

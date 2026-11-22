@@ -371,14 +371,7 @@ export interface SessionHistoryWindow {
   pagedOlder?: boolean
 }
 
-export interface OlderSessionPage {
-  turns: ParsedTurn[]
-  offset: number
-  totalTurns: number
-  hasOlder: boolean
-  sourceComplete?: boolean
-  completeness: 'complete' | 'partial'
-}
+export type OlderSessionPage = import('../env').SessionHistoryPage
 
 export const sessionHistoryWindowOf = (
   sessionId: string,

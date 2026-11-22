@@ -52,11 +52,8 @@ import type {
   SkillMeta
 } from '../shared/provider'
 import type { DetectedAgent as LocatedAgent } from '../main/claude-locate'
-import type {
-  LoadedSessionTurn,
-  SessionHistoryPage,
-  SessionHistoryPageRequest
-} from '../main/session-history'
+import type { LoadedSessionTurn, SessionHistoryPage } from '../shared/session-history'
+import type { SessionHistoryPageRequest } from '../main/session-history'
 import type { TraceBacklogState, TraceBatchReceipt } from '../main/trace-output'
 import type {
   WorkspaceCreateRequest,

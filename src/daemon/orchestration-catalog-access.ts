@@ -1,4 +1,5 @@
 import { isSessionProviderId, type AppSession, type AppSessionRef } from '../main/app-store'
+import type { ReadProjectedHistorySession } from '../main/bootstrap/history-catalog'
 import { available } from '../shared/turn-record'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
@@ -7,21 +8,32 @@ import type { SessionDiscoverPayload } from '../host-runtime/orchestration/orche
 import { mapSessionRow } from '../host-runtime/orchestration/projection-mappers'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
 
-type NativeIdentity = { sessionId: string; providerId?: string; agentProfileId?: string; cwd: string }
+type NativeIdentity = { sessionId: string; providerId?: string; agentProfileId?: string; cwd: string | undefined }
 
 function identityKey(session: NativeIdentity): string {
   return JSON.stringify([session.providerId ?? 'legacy_unknown', session.agentProfileId ?? null, session.cwd, session.sessionId])
 }
 
 export function findProjectedNativeSession(sink: EventSink, session: NativeIdentity): SessionProjectionRow | undefined {
-  const row = sink.handle.db.prepare(
+  const provider = session.providerId ?? 'legacy_unknown'
+  const profile = session.agentProfileId ?? null
+  // The normal case is an imported session keyed by its native id. Avoid a
+  // catalog-wide search on each reopen in a known workspace.
+  if (session.cwd !== undefined) {
+    const direct = sink.getSession(session.sessionId)
+    if (direct && !direct.conversationId && (direct.provider ?? 'legacy_unknown') === provider &&
+        direct.profile === profile && direct.cwd === session.cwd &&
+        (direct.catalog?.nativeSessionId == null || direct.catalog.nativeSessionId === session.sessionId)) return direct
+  }
+  const rows = sink.handle.db.prepare(
     `SELECT * FROM orch_p_session
-     WHERE conversation_id IS NULL AND COALESCE(provider, 'legacy_unknown') = ? AND profile IS ? AND cwd = ?
+     WHERE conversation_id IS NULL AND COALESCE(provider, 'legacy_unknown') = ? AND profile IS ?
+       AND (? IS NULL OR cwd = ?)
        AND (json_extract(catalog, '$.nativeSessionId') = ?
          OR (json_extract(catalog, '$.nativeSessionId') IS NULL AND session_key = ?))
-     ORDER BY catalog IS NULL LIMIT 1`
-  ).get(session.providerId ?? 'legacy_unknown', session.agentProfileId ?? null, session.cwd, session.sessionId, session.sessionId)
-  return row ? mapSessionRow(row as Record<string, unknown>) : undefined
+     LIMIT 2`
+  ).all(provider, profile, session.cwd ?? null, session.cwd ?? null, session.sessionId, session.sessionId) as Record<string, unknown>[]
+  return rows.length === 1 ? mapSessionRow(rows[0]) : undefined
 }
 
 function displayedOutcome(value: string | undefined): AppSession['lastRunOutcome'] {
@@ -30,10 +42,42 @@ function displayedOutcome(value: string | undefined): AppSession['lastRunOutcome
   return undefined
 }
 
+function projectAppSession(row: SessionProjectionRow): AppSession | undefined {
+  if (!row.catalog || row.cwd === null) return undefined
+  const { nativeSessionId, projectCwd, preview, runtimeProvider } = row.catalog
+  return {
+    sessionId: nativeSessionId ?? row.sessionKey,
+    providerId: isSessionProviderId(row.provider) ? row.provider : 'legacy_unknown',
+    agentProfileId: row.profile ?? undefined,
+    cwd: row.cwd,
+    title: row.title ?? undefined,
+    ts: row.ts,
+    runId: row.lastRunId ?? undefined,
+    lastRunOutcome: row.lastRunOutcome?.status === 'available'
+      ? displayedOutcome(row.lastRunOutcome.value) : undefined,
+    externalSessionId: nativeSessionId ?? undefined,
+    projectCwd: projectCwd ?? undefined,
+    runtimeProvider: runtimeProvider ?? undefined,
+    preview: preview ?? '',
+    pinnedAt: row.pinnedAt ?? undefined,
+    archivedAt: row.archivedAt ?? undefined
+  }
+}
+
 /** Local sidebar rows come from the authority. The old file is still mirrored
  * for off/shadow startup and readers that have yet to migrate. */
 export function createOrchestrationCatalogAccess(getSink: () => EventSink | undefined) {
+  const readDetail: ReadProjectedHistorySession = (context, canonicalCwd) => {
+    const sink = getSink()
+    if (!sink) return undefined
+    if (!context.externalSessionId) return null
+    const row = findProjectedNativeSession(sink, { ...context, sessionId: context.externalSessionId, cwd: canonicalCwd })
+    const session = row && projectAppSession(row)
+    if (!row || !session) return null
+    return { session, identity: { sessionKey: row.sessionKey, ...(row.legacy ? { legacyBefore: true } : {}) } }
+  }
   return {
+    readDetail,
     deleteNative(ref: AppSessionRef, runIds: ReadonlySet<string>): DeleteSessionOutcome {
       const sink = getSink()
       if (!sink) return { status: 'not_present' }
@@ -59,27 +103,7 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
         `SELECT * FROM orch_p_session
          WHERE conversation_id IS NULL AND catalog IS NOT NULL ORDER BY ts DESC, session_key`
       ).all() as Record<string, unknown>[]
-      return rows.map(mapSessionRow).flatMap((row): AppSession[] => {
-        if (!row.catalog || row.cwd === null) return []
-        const { nativeSessionId, projectCwd, preview, runtimeProvider } = row.catalog
-        return [{
-          sessionId: nativeSessionId ?? row.sessionKey,
-          providerId: isSessionProviderId(row.provider) ? row.provider : 'legacy_unknown',
-          agentProfileId: row.profile ?? undefined,
-          cwd: row.cwd,
-          title: row.title ?? undefined,
-          ts: row.ts,
-          runId: row.lastRunId ?? undefined,
-          lastRunOutcome: row.lastRunOutcome?.status === 'available'
-            ? displayedOutcome(row.lastRunOutcome.value) : undefined,
-          externalSessionId: nativeSessionId ?? undefined,
-          projectCwd: projectCwd ?? undefined,
-          runtimeProvider: runtimeProvider ?? undefined,
-          preview: preview ?? '',
-          pinnedAt: row.pinnedAt ?? undefined,
-          archivedAt: row.archivedAt ?? undefined
-        }]
-      })
+      return rows.map(mapSessionRow).map(projectAppSession).filter((row): row is AppSession => row !== undefined)
     },
 
     beforeMirrorWrite(previous: readonly AppSession[], next: readonly AppSession[]): void {

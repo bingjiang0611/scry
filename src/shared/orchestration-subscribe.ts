@@ -1,7 +1,7 @@
 import type { HostAdminNotice } from './host-admin'
 import type { AgentDataUpdated, RuntimeProvider } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
-import type { LoadedSessionTurn } from './session-history'
+import type { SessionHistoryPage } from './session-history'
 
 /**
  * Shared wire contract for P4-3 local `subscribe` (P4-orchestration-protocol.md §5).
@@ -129,14 +129,7 @@ export type SubscribeHint =
   | { kind: 'window'; channel: string; payload: Record<string, unknown> }
   | { kind: 'data'; event: AgentDataUpdated }
 
-export interface SubscribeHistoryPage {
-  turns: LoadedSessionTurn[]
-  offset: number
-  totalTurns: number
-  hasOlder: boolean
-  sourceComplete?: boolean
-  completeness: 'complete' | 'partial'
-}
+export type SubscribeHistoryPage = SessionHistoryPage
 
 export interface SubscribeSnapshot {
   sessions?: {

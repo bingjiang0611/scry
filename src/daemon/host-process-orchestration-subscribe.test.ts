@@ -61,6 +61,17 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
           externalSessionId: sessionId, preview: '来自投影的标题'
         })])
       }))
+      const selected = await daemon.localOp('sessionHistory', 'loadSession', [{
+        providerId: 'codex', cwd, externalSessionId: sessionId
+      }])
+      expect(selected.error).toBeUndefined()
+      expect(selected.result).toMatchObject({
+        page: {
+          turns: [{ userText: '问题一' }, { userText: '问题二' }],
+          projection: { sessionKey: sessionId, legacyBefore: true, activeRun: null }
+        },
+        selection: { cwd, externalSessionId: sessionId }
+      })
     } finally {
       await daemon.dispose()
     }

@@ -23,6 +23,7 @@ import { historyCopy } from '../../shared/constants/copy'
 import { readSessionArchive } from './history-archive'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { rememberSessionProjectAfterLoad } from './history-project-recency'
+import { readHistoryCatalogEntry, type ReadProjectedHistorySession } from './history-catalog'
 
 export interface LoadSessionDependencies {
   handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
@@ -37,6 +38,8 @@ export interface LoadSessionDependencies {
   resolveKnownProjectDirectory: (cwd: string) => string
   providerRegistry: Pick<ProviderRegistry, 'enrichSession'>
   getRuns: () => { unsettledStates: () => ActiveRun[]; get: (runId: string) => { control: { settled: Promise<void> } } | undefined }
+  readProjectedSession?: ReadProjectedHistorySession
+  boundedActiveRun?: (run: ActiveRun) => ActiveRun
   rememberProject: (cwd: string) => void
   homeDir: string
   userDataDir: string
@@ -83,20 +86,10 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
     const { signal } = requestController
     try {
       const requestRevision = nextLoadSessionRevision()
-      const catalogMatches = appSessionStore().load().filter((session) =>
-        session.providerId === payload.providerId && session.agentProfileId === payload.agentProfileId &&
-        (session.sessionId === payload.externalSessionId || session.externalSessionId === payload.externalSessionId)
+      const { session: catalogSession, projection, cwd, matches } = readHistoryCatalogEntry(
+        payload, resolveKnownProjectDirectory, () => appSessionStore().load(), deps.readProjectedSession
       )
-      const requestedCwd = payload.cwd?.trim()
-        ? resolveKnownProjectDirectory(payload.cwd)
-        : payload.cwd === '' ? '' : undefined
-      const catalogSession = catalogMatches.length === 1
-        ? catalogMatches[0]
-        : catalogMatches.find((session) => session.cwd === requestedCwd)
-      if (!catalogSession) throw new Error('会话不属于当前 Scry catalog 或身份不唯一')
-      perf.mark('catalog', { matches: catalogMatches.length })
-      const cwd = catalogSession.cwd ? resolveKnownProjectDirectory(catalogSession.cwd) : ''
-      if (requestedCwd !== undefined && requestedCwd !== cwd) throw new Error('会话工作目录与 catalog 不一致')
+      perf.mark('catalog', { matches })
       const fp =
         payload.providerId === 'claude' && cwd
           ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
@@ -372,6 +365,13 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       )
       perf.mark('page_hydration', { returnedTurns: page.turns.length })
       const result = pageWithHookCommands(page, hookConfig)
+      if (projection) {
+        const active = getRuns().unsettledStates().find((run) => !run.done && sessionLoadMatchesRun(run, {
+          providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
+          externalSessionId: payload.externalSessionId
+        }))
+        result.projection = { ...projection, activeRun: active ? deps.boundedActiveRun?.(active) ?? active : null }
+      }
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
       if (cwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
       return reportSelection ? { page: result, selection } : result

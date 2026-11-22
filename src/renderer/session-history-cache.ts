@@ -50,7 +50,8 @@ export class SessionHistorySnapshotCache {
     this.remove(key)
     // Only initial recent pages are cached. Expanded history and live partial
     // turns must not grow a snapshot or impersonate a current runtime.
-    if (page.offset + page.turns.length !== page.totalTurns || page.turns.some(turn => turn.done === false)) {
+    if (page.projection?.activeRun || page.offset + page.turns.length !== page.totalTurns ||
+        page.turns.some(turn => turn.done === false)) {
       this.scheduleExpiry()
       return page
     }

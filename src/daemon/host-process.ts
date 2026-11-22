@@ -223,6 +223,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations: forks } =
     createDaemonRemoteAssembly({
       userDataDir: options.userDataDir, workspace, pi, providers, session, catalog, pipeline, sourceControl, remoteRunIds, requestRunStop,
+      readProjectedHistory: catalogProjection.readDetail,
       getRemoteHostService: () => remoteHostService, setRemoteHostService: (value) => { remoteHostService = value },
       getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery, isShuttingDown: () => isShuttingDown,
       desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log
