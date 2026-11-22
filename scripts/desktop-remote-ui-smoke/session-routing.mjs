@@ -48,7 +48,7 @@ export async function runSessionRouting({ driver }) {
   check(await read('!document.querySelector(".clibtn").disabled'), 'Archiving the active remote session did not leave it for a new draft')
   check(!await read('document.querySelector(".sb-archive-toggle")'), 'Archived remote sidebar entry remains')
   await click('.sb-settings')
-  await click('.settings-tab', '已存档会话')
+  await click('.settings-rail [role="tab"]', '已存档会话')
   await wait('document.querySelector(\'[data-archived-remote-session="old-native"]\') != null', 'archived session appears in settings')
   await click('button[aria-label="取消存档：Remote renamed"]')
   await wait('!document.querySelector(\'[data-archived-remote-session="old-native"]\')', 'restored session no longer archived')
