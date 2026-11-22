@@ -21,17 +21,6 @@ export interface AuthorityLedgerStoreHandle {
   close(): Promise<void>
 }
 
-/**
- * Builds the DB-authoritative in-memory `LedgerStore` + pure downstream async `LegacyMirrorWorker`
- * used by `SCRY_ORCHESTRATION=on` (Decision H):
- * - Startup ALWAYS builds one state-only snapshot (`retainedEvents: []`) from `orchestration.db`
- *   with `lastSeq = minCursor = R` (never reading H1, never renumbering old events); stale device
- *   cursors receive the standard `reset` response.
- * - Sequence ceilings are reserved in blocks (`h1_seq_reserved_until`, default 1,024 per block),
- *   eliminating per-event `h1_seq_floor` commits (0 extra commits pre-first-token).
- * - Writes a valid H1 snapshot immediately upon entering `on` mode (even with 0 runs).
- * - If H1 writes/rewrites fail, marks `h1_fallback_unavailable` and retries periodically in-process.
- */
 export function createAuthorityLedgerStore(options: {
   ledgerDirectory: string
   sink: EventSink
@@ -40,7 +29,6 @@ export function createAuthorityLedgerStore(options: {
   mirrorMaxPendingEvents?: number
   mirrorRetryIntervalMs?: number
   seqReservationBlockSize?: number
-  /** Pre-peeked H1 disk `lastSeq` (computed async during startup when `on_active='1'`). */
   h1DiskLastSeq?: number
 }): AuthorityLedgerStoreHandle {
   const { ledgerDirectory, sink, log, mirrorWriteHook, mirrorMaxPendingEvents, mirrorRetryIntervalMs } = options
@@ -76,8 +64,6 @@ export function createAuthorityLedgerStore(options: {
 
   const mirrorTargetStore = openWrappedFileStore()
 
-  // Decision H §14.1–2 + W16 Part 1: build single state snapshot at max(R, legacyLedgerSeq, h1DiskLastSeq)
-  // without synchronous main-thread H1 parsing (peeked asynchronously in startup only when `on_active='1'`).
   const h1DiskLastSeq = Math.max(0, Math.floor(options.h1DiskLastSeq ?? 0))
   const prevReserved = readReservedSeqUntil(sink)
   const legacyLedgerSeq = Math.max(0, Math.floor(Number(sink.getMeta('legacy_ledger_seq') ?? '0') || 0))
@@ -86,7 +72,6 @@ export function createAuthorityLedgerStore(options: {
   })
   const startSeq = initialSnapshot.lastSeq
 
-  // Reserve the next block `[startSeq + 1, startSeq + blockSize]` once at startup (off pre-first-token path).
   let reservedUntil = startSeq + blockSize
   if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
     sink.setMeta('h1_seq_reserved_until', String(reservedUntil))
@@ -126,7 +111,6 @@ export function createAuthorityLedgerStore(options: {
     }
   })
 
-  // Decision H §14.3: H1 must be a valid file immediately upon entering `on` mode (even with 0 runs).
   mirror.writeInitialSnapshot(initialSnapshot)
 
   const store: LedgerStore = {
@@ -159,14 +143,10 @@ export function createAuthorityLedgerStore(options: {
       currentSnapshot = frozen
       memoryEvents = []
       currentLastSeq = Math.max(currentLastSeq, frozen.lastSeq)
-      // W9-review-2 B2: routine compaction mirrors the ledger's own pre-emit snapshot directly
-      // (consistent with the immediately following append, ZERO sync buildH1SnapshotFromDb on emit).
       mirror.enqueueCompact(frozen)
     },
     append: (event) => {
       if (sink.isWriteIndeterminate()) throw new SessionLedgerError('orchestration_write_indeterminate')
-      // Block reservation invariant (Decision H + W9-review-2 B3):
-      // NEVER emit a seq beyond persisted `h1_seq_reserved_until`.
       if (event.seq > reservedUntil) {
         persistReservedUntil(Math.max(reservedUntil + blockSize, event.seq))
         if (event.seq > reservedUntil) {
@@ -175,13 +155,11 @@ export function createAuthorityLedgerStore(options: {
       }
       memoryEvents.push(event)
       currentLastSeq = Math.max(currentLastSeq, event.seq)
-      // Proactively top up block AFTER terminal events when approaching exhaustion so pre-first-token stays 0 commits.
       const isTerminal =
         event.kind === 'run_settled' || event.kind === 'run_failed' || event.kind === 'run_cancelled'
       if (isTerminal && currentLastSeq >= reservedUntil - proactiveMargin) {
         persistReservedUntil(reservedUntil + blockSize)
       }
-      // Downstream pure mirror (Decision H): ZERO sync file fsync pre-first-token.
       mirror.enqueue(event)
     }
   }
@@ -205,7 +183,6 @@ export function createAuthorityLedgerStore(options: {
       try {
         fileStore?.close()
       } catch {
-        // Preserve clean shutdown even if H1 store was degraded.
       }
     }
   }

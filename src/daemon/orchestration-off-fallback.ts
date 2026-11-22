@@ -28,21 +28,10 @@ function probeOrchestrationOnActiveReadOnly(dbPath: string): { active: boolean; 
     try {
       db?.close()
     } catch {
-      // Preserve fail-open semantics.
     }
   }
 }
 
-/**
- * Decision H §14.4 (`off` / unset / `shadow` default-path-safe reconciliation):
- * - Fast-paths with a read-only SQLite probe (`readonly: true, fileMustExist: true, timeout: 0`)
- *   so shadow-only / never-`on` / 0-byte / corrupt DBs return in <1 ms without running
- *   `integrity_check`, migrations, `EXCLUSIVE` lock, or initializing a 0-byte file (W9-review-2 B1).
- * - Opens full `EventSink` and reconciles H1 ONLY when `orch_meta.orchestration_on_active === '1'`.
- * - Strictly fail-open: any probe or reconcile error logs and returns without touching H1.
- * - Uses `h1.describe().lastSeq` to check whether H1 lags behind DB / reserved seq ceiling `R`
- *   (rebuilt H1 snapshot always has `lastSeq >= R`).
- */
 export function reconcileH1ForOffMode(options: {
   userDataDir: string
   remoteStateDirectory: string
@@ -68,7 +57,6 @@ export function reconcileH1ForOffMode(options: {
       checkpointIntervalMs: 0
     })
 
-    // Re-check under full open in case state changed concurrently.
     if (sink.getMeta('orchestration_on_active') !== '1') return
 
     const fallbackUnavailable = sink.getMeta('h1_fallback_unavailable') === '1'
@@ -78,7 +66,6 @@ export function reconcileH1ForOffMode(options: {
     chmodSync(ledgerDirectory, 0o700)
     recoverDeadRemoteLease(ledgerDirectory, 'session-ledger.lock')
 
-    // Recover any open dispatched runs left by a crash in `on` mode before exporting to H1.
     recoverOrchestrationOnStartup({
       sink,
       leaseOwner: `daemon-off-fallback:${process.pid}`,
@@ -119,14 +106,12 @@ export function reconcileH1ForOffMode(options: {
       fileStore.close()
     }
   } catch (error) {
-    // Default path safety (N2): strictly fail-open; never block off/unset/shadow startup or touch H1.
     const msg = error instanceof Error ? error.message : String(error)
     options.log(`daemon.orchestration-off-reconcile-failed ${msg}`)
   } finally {
     try {
       sink?.close()
     } catch {
-      // Preserve fail-open semantics.
     }
   }
 }

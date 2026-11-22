@@ -18,12 +18,6 @@ import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/reco
 const SNAPSHOT_HEADER_BYTES = 512
 const LOG_TAIL_SCAN_BYTES = 1_500_000
 
-/**
- * Lightweight async peek of H1's on-disk `lastSeq` (W16 Part 1): reads only the 512 B snapshot
- * header (`"snapshot":{"version":1,"lastSeq":<N>`) and the tail of `session-ledger.log`, avoiding
- * a main-thread synchronous parse+stringify+SHA-256 of multi-megabyte snapshots (33k runs = 21 MB).
- * Strictly fail-open (corrupt/missing H1 returns 0).
- */
 async function peekH1LastSeqAsync(userDataDir: string): Promise<number> {
   const ledgerDir = join(userDataDir, 'remote', 'ledger')
   let maxSeq = 0
@@ -64,7 +58,6 @@ async function peekH1LastSeqAsync(userDataDir: string): Promise<number> {
               break
             }
           } catch {
-            // Skip truncated trailing line if any and inspect prior complete line.
           }
         }
       }
@@ -85,11 +78,6 @@ export interface AuthorityStartupResult {
   h1DiskLastSeq: number
 }
 
-/**
- * Runs P4-2 startup legacy import (only when transitioning from `off`/fresh DB, never reading a
- * degraded H1 downstream mirror once `on` mode is already active), installs Decision G observer,
- * and executes single-tx startup recovery + two-ledger reconciliation BEFORE `openLocalChannel`.
- */
 export async function runAuthorityStartupSequence(options: {
   sink: EventSink
   userDataDir: string
@@ -106,10 +94,6 @@ export async function runAuthorityStartupSequence(options: {
   let resolveImportComplete: (() => void) | undefined
   let importComplete: Promise<void> = Promise.resolve()
 
-  // B1-B3 + W16 Part 1: once `on` mode is active, orchestration.db is the sole authority and H1 is a pure
-  // downstream mirror; only peek H1's `lastSeq` asynchronously (without parsing 21 MB JSON on main thread)
-  // when `alreadyOnActive` is true to guard against fail-open `off` residual. On `off -> on`,
-  // `loadLegacyLedgerPlanAsync` already parsed H1 off-thread and updated `h1_seq_reserved_until`.
   const alreadyOnActive = sink.getMeta('orchestration_on_active') === '1'
   let h1DiskLastSeq = 0
   if (alreadyOnActive) {
@@ -119,7 +103,6 @@ export async function runAuthorityStartupSequence(options: {
     try {
       plan = await loadLegacyLedgerPlanAsync(sink, userDataDir)
     } catch (error) {
-      // If DB already has authoritative events and H1 is corrupt, fall back to DB authority.
       const hasExistingEvents =
         (sink.handle.db.prepare('SELECT COUNT(*) AS c FROM orch_event').get() as { c: number }).c > 0
       if (!hasExistingEvents) throw error
@@ -144,7 +127,6 @@ export async function runAuthorityStartupSequence(options: {
             }
           }
         } catch {
-          // Corrupt ownership is surfaced by reconcileTwoLedgersOnStartup below.
         }
         importLegacyStateIncrementally({
           sink,
@@ -176,7 +158,6 @@ export async function runAuthorityStartupSequence(options: {
     sink.setMeta('orchestration_on_active', '1')
   }
 
-  // Decision G: install before-turn-settled observer BEFORE reconcileTwoLedgersOnStartup.
   conversationStore().setBeforeTurnSettledObserver((info) => {
     if (sink.isWriteIndeterminate()) return
     const at = Date.now()
@@ -201,7 +182,6 @@ export async function runAuthorityStartupSequence(options: {
     })
   })
 
-  // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
   const recovery = recoverOrchestrationOnStartup({
     sink,
     leaseOwner,

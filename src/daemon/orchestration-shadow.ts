@@ -24,9 +24,7 @@ export interface DaemonOrchestrationShadow {
   readonly fullfsync: boolean
   readonly checkpointFullfsync: boolean
   readonly mirror: ShadowMirror
-  /** Resolves once initial (or deferred post-socket) legacy import has finished. */
   readonly importComplete: Promise<void>
-  /** Starts deferred historical backfill after `openLocalChannel` when ledger exceeds sync threshold. */
   startImport(): void
   onLedgerEvent(event: LedgerEvent, meta?: ShadowLedgerEventMeta): void
   close(): void
@@ -37,18 +35,11 @@ export interface AttachDaemonOrchestrationShadowOptions {
   env: NodeJS.ProcessEnv
   conversationStore: () => ConversationStore
   log: (line: string) => void
-  /** Test seam: inject a commit failure into the shadow EventSink. */
   beforeCommitHook?: () => void
-  /** Unimported run threshold above which historical backfill defers until after `openLocalChannel`. */
   deferredImportThreshold?: number
-  /** Test seam: pause deferred backfill after `openLocalChannel` until this promise resolves. */
   pauseDeferredBackfill?: Promise<void>
 }
 
-/**
- * Isolated daemon hook for P4-1 shadow writes + off<->shadow incremental import.
- * Kept in its own module so `src/daemon/host-process.ts` stays minimal and free of conflicts.
- */
 export function attachDaemonOrchestrationShadow(
   options: AttachDaemonOrchestrationShadowOptions
 ): DaemonOrchestrationShadow | undefined {
@@ -61,8 +52,6 @@ export function attachDaemonOrchestrationShadow(
   }
   if (mode.effective !== 'shadow') return undefined
 
-  // Maintainer decision (2026-11-19): P4-1 explicitly fixes fullfsync=OFF + checkpoint_fullfsync=ON
-  // even when env vars are unset; final fullfsync decision is deferred to P4-2.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? false
   const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
@@ -92,8 +81,6 @@ export function attachDaemonOrchestrationShadow(
 
   if (mirror.sink && !mirror.stats().failedOpen) {
     try {
-      // Parse H1 snapshot+log ONCE and reuse the plan across missing-body repair, threshold check,
-      // open-run sync import, and post-socket deferred backfill (no redundant parses).
       const plan = loadLegacyLedgerPlan(mirror.sink, options.userDataDir)
       const bodyRepair = repairMissingShadowBodies(mirror.sink, plan)
       if (bodyRepair.repaired > 0 || bodyRepair.stillMissing > 0) {
@@ -104,9 +91,6 @@ export function attachDaemonOrchestrationShadow(
       }
       const pendingCount = plan.unimportedRuns.length
       if (pendingCount > deferredThreshold) {
-        // Large ledger (> 2,000 unimported runs): synchronously import only open runs before
-        // `service.start()` so H1 `recover()` has zero invalid_target deviations, then backfill
-        // historical terminal runs in yielding batches after `openLocalChannel`.
         const openImported = importLegacyStateIncrementally({
           sink: mirror.sink,
           userDataDir: options.userDataDir,

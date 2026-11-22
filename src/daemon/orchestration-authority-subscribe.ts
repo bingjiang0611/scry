@@ -14,7 +14,6 @@ export interface AuthoritySubscribeRuntimeDeps {
   attentionSnapshot?: () => SessionAttentionSnapshot
 }
 
-/** Creates the volatile hint hub + commit wakeup binding for `SCRY_ORCHESTRATION=on`. */
 export function createAuthoritySubscribeHub(
   sink: EventSink,
   stateHints?: () => Array<{ kind: 'attention'; snapshot: SessionAttentionSnapshot }>
@@ -24,7 +23,6 @@ export function createAuthoritySubscribeHub(
   return hub
 }
 
-/** Builds the `LocalEndpointHandlers['subscribe']` function backed by `SubscribeEngine`. */
 export function createAuthoritySubscribeHandler(
   sink: EventSink,
   hub: SubscribeHub,
@@ -40,7 +38,6 @@ export function createAuthoritySubscribeHandler(
   return (peer, request, signal) => engine.subscribe(peer, request, signal)
 }
 
-/** Updates in-memory live run binding/admission metadata in `SubscribeHub` without extra SQLite fsyncs. */
 export function noteProgressMarkerForSubscribeHub(
   hub: SubscribeHub,
   canonicalRunId: string,
@@ -64,15 +61,9 @@ export function noteProgressMarkerForSubscribeHub(
       hub.noteRunSession(canonicalRunId, marker.externalSessionId)
     }
   } catch {
-    // Non-JSON progress markers do not affect subscribe metadata.
   }
 }
 
-/**
- * Forwards shrunk P4-3 volatile hints from `AppEventFeed` into `SubscribeHub` (`protocol §5.3`).
- * `hostAdmin` becomes `hostNotice` with exact W11 payload; `window` drops run-lifecycle notices
- * (`agent:turnDone`, `agent:session`, `agent:stopState`) that now arrive as durable run events.
- */
 export function forwardAppEventToSubscribeHub(
   hub: SubscribeHub,
   event: AppEvent,
@@ -107,7 +98,6 @@ export function forwardAppEventToSubscribeHub(
   }
 }
 
-/** Routes H1 run_progress markers into both `SubscribeHub` (live meta) and `AuthorityEngine` (durable events). */
 export function handleAuthorityRunProgress(
   engine: AuthorityEngine,
   hub: SubscribeHub,
@@ -147,11 +137,9 @@ export function handleAuthorityRunProgress(
       })
     }
   } catch {
-    // Opaque non-JSON progress marker; no orchestration state change needed.
   }
 }
 
-/** Builds the authoritative orchestration status self-report (Decision H + W16 fenced reporting). */
 export function buildAuthorityStatus(
   sink: EventSink,
   readH1FallbackStatus?: () => { unavailable: boolean; reason?: string }

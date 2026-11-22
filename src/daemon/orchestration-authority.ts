@@ -75,11 +75,6 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   attentionSnapshot?: () => SessionAttentionSnapshot
 }
 
-/**
- * Isolated daemon wiring for P4-2 authoritative orchestration (`SCRY_ORCHESTRATION=on`).
- * Runs off-main-thread H1 import + single-tx startup recovery + two-ledger reconciliation
- * BEFORE `openLocalChannel`, and mirrors committed events asynchronously to H1 off critical path.
- */
 export async function attachDaemonOrchestrationAuthority<
   State extends RunRegistryState,
   Control extends RunRegistryControl
@@ -89,7 +84,6 @@ export async function attachDaemonOrchestrationAuthority<
   const mode = parseOrchestrationMode(options.env)
   if (mode.effective !== 'on') return undefined
 
-  // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
   const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
@@ -177,7 +171,6 @@ function buildAuthorityRuntime<
     }
   })
 
-  // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
   const trustGate = new AuthorityMcpTrustGate()
   const subscribeHub = createAuthoritySubscribeHub(
@@ -199,7 +192,6 @@ function buildAuthorityRuntime<
           .prepare('INSERT OR IGNORE INTO orch_legacy_run (ledger_run_id, run_id) VALUES (?, ?)')
           .run(ledgerRunId, canonicalRunId)
       } catch {
-        // Ignore if mapping already present or sink fenced.
       }
     }
     ledgerToCanonical.delete(ledgerRunId)
@@ -430,7 +422,7 @@ function buildAuthorityRuntime<
       resolveImportComplete?.()
       options.conversationStore().setBeforeTurnSettledObserver(undefined)
       await legacyMirror?.close()
-      try { backingFileStore?.close() } catch { /* may already be closed */ }
+      try { backingFileStore?.close() } catch {}
       sink.close()
     }
   }
