@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# PR pushes and main pushes each keep only their newest run. A cancelled main run
+# records no status, so its SHA stays unverified; the newest push validates fully.
 concurrency:
-  group: remote-g0-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: remote-g0-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   changes:

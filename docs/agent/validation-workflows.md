@@ -23,9 +23,9 @@ size 采用上游阈值 XS <10、S <30、M <100、L <500、XL <1000、XXL ≥100
 
 ## main 的全量通过记录
 
-仅非取消的 main **push** 可以在自己的 SHA 写 commit status。`Check` 成功写 `scry/full-suite: success`，`Remote Check` 成功写 `scry/remote-g0: success`。Remote 的“已证明无影响”跳过只用于 PR。main 每次都验证 Remote，不继承未验证父提交的状态；原本可跳过的 push 会多调度两个 macOS job（transport 上限 20 分钟、ios 上限 30 分钟），共享原有 5 个 slot。`Performance Check` 不计入。写入任务仅有 `statuses: write`，不 checkout、不执行仓库代码、不移动 ref、不打 tag。
+仅非取消的 main **push** 可以在自己的 SHA 写 commit status。`Check` 成功写 `scry/full-suite: success`，`Remote Check` 成功写 `scry/remote-g0: success`。Remote 的“已证明无影响”跳过只用于 PR。main 每次都验证 Remote，不继承未验证父提交的状态；原本可跳过的 push 会多调度两个 macOS job（transport 上限 20 分钟、ios 上限 30 分钟），共享原有 5 个 slot。为免连续合入时每个 push 各积压一对 macOS job，Remote 的 main push 与 CI 一样只保留最新一次 run：被取消的 run 不写状态，其 SHA 保持未验证。`Performance Check` 不计入。写入任务仅有 `statuses: write`，不 checkout、不执行仓库代码、不移动 ref、不打 tag。
 
-两个 context 都以最新状态为准。工作流只写成功记录，不写 `failure`：这些记录证明该 SHA 曾通过，失败诊断看 run 和 `main-red` issue。没有成功记录就是未验证，包括被更新 push 取消、被跳过和手动 dispatch。main push 原有合并并发策略不变。要为已有 SHA 补记录，重跑保留在 Actions 中的原 main push run；手动 dispatch 可诊断，不能补状态。发布条件见[版本、打包、安装与发布](verification.md#版本打包安装与发布)。
+两个 context 都以最新状态为准。工作流只写成功记录，不写 `failure`：这些记录证明该 SHA 曾通过，失败诊断看 run 和 `main-red` issue。没有成功记录就是未验证，包括被更新 push 取消、被跳过和手动 dispatch。CI 与 Remote 的 main push 都只保留最新一次 run。要为已有 SHA 补记录，重跑保留在 Actions 中的原 main push run；手动 dispatch 可诊断，不能补状态。发布条件见[版本、打包、安装与发布](verification.md#版本打包安装与发布)。
 
 `main-red` 标签留给告警自动化。issue 记录失败的 workflow、SHA、对应 run attempt、失败的 jobs 和最近一个有双成功状态的 main SHA（尚无记录或查询失败时明确说明）。只有两项状态齐备的同一 SHA 能恢复告警；更旧的 run 不覆盖或关闭较新的告警。查询和写入统一使用 job 自带 token，不添加 PAT。
 

@@ -407,11 +407,15 @@ describe('required PR checks', () => {
   })
 
   it('cancels obsolete PR runs and coalesces only fully validated main CI runs', () => {
-    for (const file of ['performance.yml', 'remote-g0.yml']) {
-      const ci = workflow(file)
-      expect(ci.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}")
-      expect(ci.concurrency.group).toMatch(/github.event.pull_request.number \|\| github\.(sha|run_id)/)
-    }
+    const performance = workflow('performance.yml')
+    expect(performance.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}")
+    expect(performance.concurrency.group).toBe('performance-${{ github.event.pull_request.number || github.run_id }}')
+    // Remote runs full on every main push, so main pushes coalesce like CI instead of
+    // queueing one macOS pair per merge. A cancelled run records no status.
+    const remote = workflow('remote-g0.yml')
+    expect(remote.concurrency.group).toBe("remote-g0-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number }}")
+    expect(remote.concurrency['cancel-in-progress']).toBe(true)
+    expect(Object.keys(remote.on).sort()).toEqual(['pull_request', 'push'])
     // A coalesced main run validates everything, since its before..HEAD diff can omit
     // commits whose run was cancelled; manual dispatch keeps a unique group.
     const ci = workflow('ci.yml')
