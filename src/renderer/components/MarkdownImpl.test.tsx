@@ -239,9 +239,9 @@ describe('MarkdownImpl trust boundary', () => {
         <MarkdownImpl>{'`brief.md` [brief](brief.md) `./brief.md`'}</MarkdownImpl>
       </WorkspaceFileLinkProvider>
     )
-    expect(html.match(/<select/g)).toHaveLength(2)
-    expect(html).toContain('designs/a/brief.md')
-    expect(html).toContain('designs/b/brief.md')
+    expect(html.match(/aria-haspopup="menu"/g)).toHaveLength(2)
+    expect(html.match(/打开匹配的文件/g)).toHaveLength(4)
+    expect(html).not.toContain('<select')
     expect(html.match(/class="md-file-ref"/g)).toHaveLength(3)
   })
 

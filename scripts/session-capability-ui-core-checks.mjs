@@ -68,29 +68,22 @@ export async function exerciseSessionCapabilityCore() {
   const effortLabel = effortPopover.querySelector('.model-effort-current-effort')
   const modelLabel = currentModelButton.querySelector('.model-effort-current-model')
   const drillChevron = currentModelButton.querySelector('.chev')
-  const effortSlider = document.querySelector('#model-effort [aria-label="推理强度"]')
-  const effortDots = [...document.querySelectorAll('#model-effort .model-effort-slider-dots i')]
-  check(effortSlider?.type === 'range' && effortSlider.max === '5', 'Six-option Effort slider is incomplete')
-  check(effortDots.length === 6, 'Effort slider dots do not match Provider options')
-  const effortTop = effortDots[0].getBoundingClientRect().top
-  check(effortDots.every((dot) => Math.abs(dot.getBoundingClientRect().top - effortTop) < 1), 'Effort slider dots wrapped onto multiple rows')
+  const effortSelect = effortLabel
+  check(effortSelect.tagName === 'SELECT' && effortSelect.options.length === 6, 'Six-option Effort select is incomplete')
   check(document.querySelector('#model-effort .model-effort-summary-bolt') == null, 'Removed bolt icon is still rendered')
   check(document.querySelector('#model-effort [aria-label="重置 Effort"]') == null, 'Removed Effort reset is still rendered')
   check(effortPopover.getBoundingClientRect().width <= 260, 'Model/Effort popover is wider than the compact reference')
-  check(document.querySelector('#model-effort .model-effort-slider').getBoundingClientRect().height <= 32, 'Effort slider is taller than the compact design')
-  check(effortLabel.textContent.includes('默认'), 'Current Effort value is missing')
+  check(effortSelect.getBoundingClientRect().height <= 32, 'Effort select is taller than the compact design')
+  check(effortSelect.selectedOptions[0].textContent.includes('默认'), 'Current Effort value is missing')
   check(modelLabel.textContent.includes('Ultimate'), 'Current Model value is missing')
   check(modelLabel.getBoundingClientRect().bottom <= effortLabel.getBoundingClientRect().top + 2, 'Model and Effort rows are out of order')
   check(text('#model-effort').includes('模型') && text('#model-effort').includes('推理强度'), 'Model/Effort field labels are missing')
   check(drillChevron.getBoundingClientRect().left > modelLabel.getBoundingClientRect().right, 'Model drill-in chevron is misplaced')
 
-  const rangeValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-  check(rangeValueSetter, 'Range input value setter unavailable')
-  rangeValueSetter.call(effortSlider, '2')
-  effortSlider.dispatchEvent(new Event('input', { bubbles: true }))
-  effortSlider.dispatchEvent(new Event('change', { bubbles: true }))
+  effortSelect.selectedIndex = 2
+  effortSelect.dispatchEvent(new Event('change', { bubbles: true }))
   await waitFor(() => modelEffortTrigger.textContent.includes('Ultimate') && modelEffortTrigger.textContent.includes('高'))
-  check(document.querySelector('#model-effort [aria-label="Model 与 Effort"]') != null, 'Effort slider unexpectedly closed the popover')
+  check(document.querySelector('#model-effort [aria-label="Model 与 Effort"]') != null, 'Effort select unexpectedly closed the popover')
 
   currentModelButton.click()
   await waitFor(() => document.querySelector('#model-effort [aria-label="选择 Model"]') != null)

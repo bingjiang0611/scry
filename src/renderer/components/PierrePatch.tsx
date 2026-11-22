@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Segmented } from './primitives/Segmented'
 import { CodeView } from '@pierre/diffs/react'
 import type { ScDiff } from '@shared/source-control'
 import { diffBodyItem, parseDiffBody } from '../pierre-diff'
@@ -35,10 +36,11 @@ export function Patch({ diff, path = 'patch', onLine }: {
       event.preventDefault()
       if (validLine) onLine(commentSide, line)
     }}>
-      <select aria-label={copy.commentSide} value={commentSide} disabled={!canComment}
-        onChange={event => setCommentSide(event.target.value as 'LEFT' | 'RIGHT')}>
-        <option value="LEFT">{copy.oldVersion}</option><option value="RIGHT">{copy.newVersion}</option>
-      </select>
+      <Segmented<'LEFT' | 'RIGHT'> label={copy.commentSide} value={commentSide} onChange={setCommentSide}
+        options={[
+          { value: 'LEFT', label: copy.oldVersion, disabled: !canComment },
+          { value: 'RIGHT', label: copy.newVersion, disabled: !canComment }
+        ]} />
       <input type="number" min={1} step={1} aria-label={copy.commentNumber} placeholder={copy.commentNumber}
         value={commentLine} disabled={!canComment} onChange={event => setCommentLine(event.target.value)} />
       <button type="submit" disabled={!validLine}>{copy.commentAction}</button>

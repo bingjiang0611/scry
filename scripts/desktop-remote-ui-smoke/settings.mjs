@@ -2,9 +2,10 @@ export async function runSettings({ driver, options }) {
   const { read, wait, check, click, key, insert, capture, fixture, composerValue } = driver
   await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
   await click('.location-button'); await click('.location-menu .mitem', '管理远程访问')
-  await wait('document.querySelector(".settings-tab.active")?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null', 'manage hosts opens remote settings directly')
+  const selectedSettingsTab = '.settings-rail [role="tab"][aria-selected="true"]'
+  await wait(`document.querySelector(${JSON.stringify(selectedSettingsTab)})?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null`, 'manage hosts opens remote settings directly')
   check(await read(`${composerValue} === 'settings keeps this draft'`), 'Opening settings replaced the current draft')
-  check(await read('document.activeElement === document.querySelector(".settings-tab.active")'), 'Direct settings entry did not focus the remote tab')
+  check(await read(`document.activeElement === document.querySelector(${JSON.stringify(selectedSettingsTab)})`), 'Direct settings entry did not focus the remote tab')
   if (options.settingsOnly) {
     await wait('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")', 'phone grant in focused settings')
     await capture('remote-settings-focused')

@@ -64,10 +64,11 @@ export async function exercise(contents, { measure = false } = {}) {
 
   await mode('patch')
   await typeInto(`document.querySelector('input[aria-label="评论行号"]')`, '9')
-  await wait(`document.querySelector('.pierre-comment-target button')?.disabled === false`, 'captured keyboard comment target')
+  const commentSubmit = `document.querySelector('.pierre-comment-target button[type="submit"]')`
+  await wait(`${commentSubmit}?.disabled === false`, 'captured keyboard comment target')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
-  await wait(`document.activeElement === document.querySelector('.pierre-comment-target button')`, 'Tab reaches the comment submit button')
+  await wait(`document.activeElement === ${commentSubmit}`, 'Tab reaches the comment submit button')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
   contents.sendInputEvent({ type: 'char', keyCode: '\r' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })

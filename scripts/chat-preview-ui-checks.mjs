@@ -148,34 +148,35 @@ export async function exerciseChatPreviewDom() {
   for (const trigger of document.querySelectorAll('#composer-project .permission-mode-trigger, #composer-project .model-effort-trigger, #composer-project .composer-action-controls .clibtn')) {
     check(trigger.getBoundingClientRect().height === 32, 'Composer controls must share the compact 32px rhythm')
   }
-  // Agent 菜单与工作目录菜单共用同一套键盘语义：焦点进选项、方向键移动、Esc 关闭并退回触发器。
+  // Agent 选择列表：焦点进选项、方向键移动、Esc 关闭并退回触发器。
   // 这些行为只能在实际 DOM 里验证，静态标记看不出焦点去哪了。
   const agentPicker = document.querySelector('#agent-picker-fixture')
   const agentTrigger = agentPicker.querySelector('.clibtn')
   const agentMenu = () => agentPicker.querySelector('.climenu')
   agentTrigger.focus()
   agentTrigger.click()
-  await waitFor(() => agentMenu()?.getAttribute('role') === 'menu' && agentMenu().contains(document.activeElement))
+  await waitFor(() => agentMenu()?.getAttribute('role') === 'listbox' && agentMenu().contains(document.activeElement))
   check(agentMenu().getAttribute('aria-label') === '选择 Agent', 'Agent menu lost its accessible name')
   const firstItem = document.activeElement
-  check(firstItem.getAttribute('role') === 'menuitemradio', 'Focused Agent option is not a menu radio item')
+  check(firstItem.getAttribute('role') === 'option', 'Focused Agent row is not an option')
   firstItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
   await waitFor(() => document.activeElement !== firstItem && agentMenu().contains(document.activeElement))
-  check(document.activeElement.getAttribute('role') === 'menuitemradio', 'ArrowDown left the Agent menu items')
+  check(document.activeElement.getAttribute('role') === 'option', 'ArrowDown left the Agent options')
   document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   await waitFor(() => !agentMenu())
   check(document.activeElement === agentTrigger, 'Agent menu did not restore focus to its trigger')
   check(agentTrigger.getAttribute('aria-expanded') === 'false', 'Agent trigger still reports expanded after Escape')
   agentTrigger.click()
   await waitFor(() => agentMenu()?.contains(document.activeElement))
-  const checkedItems = [...agentMenu().querySelectorAll('[role="menuitemradio"]')].filter((item) => item.getAttribute('aria-checked') === 'true')
-  check(checkedItems.length === 1, 'Agent menu must expose exactly one checked option')
+  const selectedItems = agentMenu().querySelectorAll('[role="option"][aria-selected="true"]')
+  check(selectedItems.length === 1, 'Agent listbox must expose exactly one selected option')
+  check(selectedItems[0].querySelector('.menu-check svg'), 'Selected Agent option lost its checkmark')
   document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   await waitFor(() => !agentMenu())
   // 选中一项后菜单会关闭，焦点不能落在被卸载的按钮上（会掉到 body）。
   agentTrigger.click()
   await waitFor(() => agentMenu()?.contains(document.activeElement))
-  const pickedItem = agentMenu().querySelector('[role="menuitemradio"]:not(:disabled)')
+  const pickedItem = agentMenu().querySelector('[role="option"]:not(:disabled)')
   pickedItem.click()
   await waitFor(() => !agentMenu())
   check(document.activeElement === agentTrigger, 'Selecting an Agent option lost focus instead of returning it to the trigger')

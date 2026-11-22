@@ -37,7 +37,7 @@ function WorkspaceChoicesList({ controller }: { controller: WorkspaceSelectionCo
   if (!rows.length) return controller.editor.menu === 'workspace' && !controller.editor.query ? null
     : <p className="workspace-picker-note">{copy.empty}</p>
   return <div ref={virtual.ref} className="workspace-choice-list" style={{ maxHeight: 272 }}
-    role="menu" tabIndex={0} aria-label={copy.results} data-workspace-navigation
+    role="listbox" tabIndex={0} aria-label={copy.results} data-workspace-navigation
     aria-activedescendant={active >= virtual.start && active < virtual.end ? `${id}-${active}` : undefined}
     onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -56,7 +56,7 @@ function WorkspaceChoicesList({ controller }: { controller: WorkspaceSelectionCo
     }}>
     <div style={{ height: virtual.totalHeight, position: 'relative' }}>
       {rows.slice(virtual.start, virtual.end).map((row, index) => <button key={row.id} type="button"
-        role="menuitemradio" id={`${id}-${virtual.start + index}`} tabIndex={-1} aria-checked={row.selected}
+        role="option" id={`${id}-${virtual.start + index}`} tabIndex={-1} aria-selected={row.selected}
         aria-setsize={rows.length} aria-posinset={virtual.start + index + 1} disabled={row.disabled || validating} title={row.title}
         className={`workspace-choice${row.selected ? ' selected' : ''}${virtual.start + index === active ? ' keyboard-active' : ''}`}
         style={{ position: 'absolute', insetInline: 0, top: (virtual.start + index) * rowHeight, height: rowHeight }}
@@ -64,6 +64,7 @@ function WorkspaceChoicesList({ controller }: { controller: WorkspaceSelectionCo
         {row.secondary && <Icon name="undo" />}
         <span className="workspace-choice-name"><strong>{row.label}</strong>{row.secondary && <small>{row.secondary}</small>}</span>
         {row.note && <span className="workspace-choice-note">{row.note}</span>}
+        {row.selected && <Icon name="check" />}
       </button>)}
     </div>
   </div>
@@ -107,7 +108,7 @@ function WorkspacePicker({ controller, anchor, id }: {
     }
   }, [anchor, workspaceMenu])
   return createPortal(<div ref={panel} id={id} className="workspace-picker" style={position}
-    role="menu" aria-label={workspaceMenu ? copy.mode : copy.search} onBlur={event => {
+    role="dialog" aria-label={workspaceMenu ? copy.mode : copy.search} onBlur={event => {
       if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget) && !anchor.contains(event.relatedTarget)) close()
     }} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); anchor.focus(); return }
@@ -121,18 +122,18 @@ function WorkspacePicker({ controller, anchor, id }: {
         : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length
       buttons[next]?.focus()
     }}>
-    {workspaceMenu && <>
-      <div className="workspace-picker-label">{copy.mode}</div>
+    {workspaceMenu && <div role="listbox" aria-label={copy.mode}>
+      <div className="workspace-picker-label" aria-hidden="true">{copy.mode}</div>
       <button type="button" className={`workspace-mode-choice${mode === 'current' ? ' selected' : ''}`} data-workspace-navigation
-        role="menuitemradio" aria-checked={mode === 'current'} disabled={validating} onClick={controller.reset}>
-        <Icon name="folder" /><span>{copy.current}</span>
+        role="option" aria-selected={mode === 'current'} disabled={validating} onClick={controller.reset}>
+        <Icon name="folder" /><span>{copy.current}</span>{mode === 'current' && <Icon name="check" />}
       </button>
       <button type="button" className={`workspace-mode-choice${mode === 'newWorktree' ? ' selected' : ''}`} data-workspace-navigation
-        role="menuitemradio" aria-checked={mode === 'newWorktree'} title={copy.cleanWorktree} disabled={!choices?.head || loading || validating}
+        role="option" aria-selected={mode === 'newWorktree'} title={copy.cleanWorktree} disabled={!choices?.head || loading || validating}
         onClick={() => { void controller.chooseNewWorktree() }}>
-        <Icon name="branch" /><span>{copy.newWorktree}</span>
+        <Icon name="branch" /><span>{copy.newWorktree}</span>{mode === 'newWorktree' && <Icon name="check" />}
       </button>
-    </>}
+    </div>}
     {(!workspaceMenu || editor.query || (choices?.page.items.length ?? 0) > 6 || editor.cursor || choices?.nextCursor) &&
       <div className="workspace-ref-search">
         <Icon name="search" />
@@ -179,14 +180,14 @@ export function WorkspaceContext({ controller, cwd, isWorktree = false, onOpenRu
   return <div className="workspace-context workspace-composer-context" aria-label={copy.label}>
     <div className="workspace-context-strip">
       <button ref={workspaceAnchor} type="button" data-workspace-menu="workspace" disabled={!controller.canChange || !cwd}
-        onClick={() => toggle('workspace')} aria-haspopup="menu" aria-expanded={controller.open && controller.editor.menu === 'workspace'} aria-controls={id}
+        onClick={() => toggle('workspace')} aria-haspopup="dialog" aria-expanded={controller.open && controller.editor.menu === 'workspace'} aria-controls={id}
         title={!editable ? copy.readonly : intent?.kind === 'newWorktree' ? copy.newBranchTarget(intent.newBranch) : target ? copy.target(target) : copy.noProject}
-        aria-label={copy.change}>
+        aria-label={`${copy.change}：${modeLabel}`}>
         <Icon name={editable ? mode === 'current' ? 'folder' : 'branch' : 'lock'} /><span>{modeLabel}</span>{editable && <Icon name="chevronDown" />}
       </button>
       <button ref={refsAnchor} type="button" data-workspace-menu="refs" disabled={!controller.canChange || !cwd || mode === 'existingWorktree'}
-        onClick={() => toggle('refs')} aria-haspopup="menu" aria-expanded={controller.open && controller.editor.menu === 'refs'} aria-controls={id}
-        aria-label={copy.branch}>
+        onClick={() => toggle('refs')} aria-haspopup="dialog" aria-expanded={controller.open && controller.editor.menu === 'refs'} aria-controls={id}
+        aria-label={`${copy.branch}：${branch}`}>
         <Icon name="branch" /><span>{branch}</span>{editable && mode !== 'existingWorktree' && <Icon name="chevronDown" />}
       </button>
     </div>

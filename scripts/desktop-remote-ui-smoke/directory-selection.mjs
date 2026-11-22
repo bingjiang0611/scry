@@ -1,9 +1,14 @@
 export async function runDirectorySelection({ driver }) {
   const { read, wait, check, click, capture, pointFor, send, insert, key, formEnter, pasteImage, fixture, remoteShown, composerValue } = driver
+  const selectLocation = (selector, value) => read(`(() => {
+    const field = document.querySelector(${JSON.stringify(selector)})
+    field.value = ${JSON.stringify(value)}
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
   await click('.sb-new')
   await click('.location-button')
-  await click('[data-machine-id="local"]')
-  await click('.location-projects .mitem', '不绑定项目')
+  await selectLocation('.location-machine-select select', 'local')
+  await selectLocation('.workdir-value select', 'unbound')
   await wait('document.querySelector(".execution-location.is-remote") == null', 'returned to local composer')
   const localBefore = (await fixture()).localNewSessions
   const historyBeforeNewDraft = (await fixture()).historyCalls.length
@@ -11,40 +16,15 @@ export async function runDirectorySelection({ driver }) {
   await insert('carried draft')
   await click('.location-button')
   await wait('document.querySelector(\'[data-machine-id="fixture-connection"]\') != null', 'location menu machines')
-  const pickerGeometry = () => read(`(() => {
-    const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height } }
-    return [document.querySelector('.location-menu'), ...document.querySelectorAll('.location-machine')].map(rect)
-  })()`)
-  const hoverMachine = async (id) => {
-    const selector = '[data-machine-id="' + id + '"]'
-    const point = await pointFor(selector)
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
-    await wait('document.querySelector(' + JSON.stringify(selector) + ').classList.contains("is-shown")', 'hovered machine projects')
-    return point
-  }
-  const checkPickerHover = async () => {
-    await read('Promise.allSettled(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime < Infinity).map(animation => animation.finished))')
-    await hoverMachine('local')
-    const before = await pickerGeometry()
-    for (const id of ['fixture-connection', 'local', 'fixture-connection', 'local']) {
-      const point = await hoverMachine(id)
-      const after = await pickerGeometry()
-      check(after.every((rect, index) => Object.keys(rect).every(key => Math.abs(rect[key] - before[index][key]) < 0.5)), 'Hover moved the execution menu or machine rows: ' + JSON.stringify({ before, after }))
-      check(await read('document.elementFromPoint(' + point.x + ',' + point.y + ').closest("[data-machine-id]")?.dataset.machineId === ' + JSON.stringify(id)), 'Stationary pointer no longer hits the hovered machine')
-      check(await read('document.querySelector(\'[data-machine-id="local"]\').getAttribute("aria-checked") === "true"'), 'Hover changed the selected execution machine')
-    }
-    check((await fixture()).localNewSessions === localBefore && (await fixture()).submitInputs.length === 0, 'Hover started a session or submitted a draft')
-  }
-  await checkPickerHover()
-  await capture('location-hover-local')
-  await hoverMachine('fixture-connection')
-  await capture('location-hover-remote')
+  await selectLocation('.location-machine-select select', 'fixture-connection')
+  await wait('document.querySelector(".location-custom-directory") != null', 'selected host loads its projects')
+  check((await fixture()).localNewSessions === localBefore && (await fixture()).submitInputs.length === 0, 'Previewing a host started a session or submitted a draft')
+  check(await read('document.querySelector(".location-button").getAttribute("aria-label").includes("本机")'), 'Preview committed the execution machine')
+  await capture('location-select-remote')
   await send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false })
-  await checkPickerHover()
   check(await read('document.querySelector(".location-menu").getBoundingClientRect().top >= 0'), 'Short-window picker is clipped above the viewport')
-  await capture('location-hover-short-window')
+  await capture('location-select-short-window')
   await send('Emulation.clearDeviceMetricsOverride')
-  await click('[data-machine-id="fixture-connection"]')
   await read('window.desktopRemoteFixture.oldDirectoryHost = true; window.refreshFixtureCatalog()')
   await wait('document.querySelector(".location-custom-directory")?.disabled', 'old host capability is unavailable')
   check((await fixture()).directoryReads.length === 0, 'Old host was probed for unsupported directories')
@@ -63,7 +43,7 @@ export async function runDirectorySelection({ driver }) {
   await key('Escape')
   await wait('!document.querySelector(".remote-directory-modal") && document.activeElement?.classList.contains("location-button")', 'directory cancel restores composer context focus')
   check((await fixture()).directorySelectCalls.length === 0 && await read(composerValue) === 'carried draft', 'Cancel changed a draft or granted a directory')
-  await click('.location-button'); await click('[data-machine-id="fixture-connection"]'); await click('.location-custom-directory')
+  await click('.location-button'); await selectLocation('.location-machine-select select', 'fixture-connection'); await click('.location-custom-directory')
   await wait('document.querySelector("input[name=remotePath]")?.value === "/fixture/home" && document.querySelector(".remote-directory-body")?.getAttribute("aria-busy") === "false"', 'directory browser reopened')
   await click('input[name=remotePath]'); await read('document.querySelector("input[name=remotePath]").select()'); await insert('/missing-directory'); await formEnter()
   await wait('document.querySelector(".remote-directory-body [role=alert]")?.textContent.includes("directory_unavailable")', 'invalid remote path error')
@@ -93,7 +73,7 @@ export async function runDirectorySelection({ driver }) {
   await wait('!document.querySelector(".remote-directory-modal") && document.querySelector(".execution-location.is-remote") != null', 'custom selection changes only draft execution location')
   check((await fixture()).directoryGrants.length === 1 && (await fixture()).submitInputs.length === 0 && (await fixture()).localStarts === 0, 'Custom directory selection implicitly submitted or fell back locally')
   check(await read(composerValue) === 'carried draft', 'Custom selection lost the draft')
-  await click('.location-button'); await click('[data-machine-id="fixture-connection"]')
+  await click('.location-button'); await selectLocation('.location-machine-select select', 'fixture-connection')
   await wait('document.querySelector(\'[data-remote-project="/fixture/project-a"]\') != null', 'remote projects for selected machine')
   await click('[data-remote-project="/fixture/project-a"]')
   await wait(remoteShown, 'remote location opens the shared conversation')

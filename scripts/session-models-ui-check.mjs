@@ -62,10 +62,14 @@ export async function exerciseSessionModels(contents, screenshotPath) {
   await wait(`document.querySelector('[aria-label="选择 Model 与 Effort"]')?.disabled === false`)
   await chooseModel('model-1')
   await click('[aria-label="选择 Model 与 Effort"]')
-  await wait(`document.querySelector('[aria-label="推理强度"]') != null`)
-  await click('[aria-label="推理强度"]')
-  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' })
-  contents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' })
+  const effortField = 'select.model-effort-current-effort'
+  await wait(`document.querySelector(${JSON.stringify(effortField)})?.options.length === 2`)
+  await read(`(() => {
+    const field = document.querySelector(${JSON.stringify(effortField)})
+    field.value = 'high'
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
+  await wait(`document.querySelector(${JSON.stringify(effortField)})?.selectedOptions[0]?.textContent === 'High'`)
   await wait(`document.querySelector('.model-effort-effort')?.textContent === 'High'`)
   await click('[aria-label="选择 Model 与 Effort"]')
   await send('Conversation one')

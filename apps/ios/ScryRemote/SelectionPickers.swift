@@ -72,6 +72,8 @@ struct SelectionRow: View {
       .frame(minHeight: 56).contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .accessibilityValue(selected ? "已选" : "未选")
+    .accessibilityAddTraits(selected ? .isSelected : [])
     .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
   }
 }
