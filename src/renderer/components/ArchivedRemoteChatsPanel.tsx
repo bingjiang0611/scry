@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react'
-import type { RemoteSessionRef } from '@shared/desktop-remote'
+import type { DesktopRemoteConnection, RemoteSessionRef } from '@shared/desktop-remote'
 import { providerIdForAgentId } from '@shared/runtime'
 import { REMOTE_SESSION_COPY as copy } from '../constants/copy'
 import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
@@ -8,10 +8,16 @@ import { ModalFrame, requestModalClose } from './Modals'
 import { bridge } from './DesktopRemote'
 import { Icon } from './primitives/Icon'
 import { Button } from './primitives/Button'
+import { EmptyState } from './primitives/EmptyState'
+import { refreshDesktopConnections } from '../hooks/useDesktopConnections'
 
 type ArchivedTarget = { group: RemoteProjectGroup; session: RemoteSessionRef }
 
-export function ArchivedRemoteChatsPanel({ groups }: { groups: RemoteProjectGroup[] }) {
+export function ArchivedRemoteChatsPanel({ groups, uncheckedHosts, hostsIndex }: {
+  groups: RemoteProjectGroup[]
+  uncheckedHosts: { connection: DesktopRemoteConnection; failed: boolean; loading: boolean }[]
+  hostsIndex: 'ready' | 'failed' | 'unread'
+}) {
   const [deleting, setDeleting] = useState<ArchivedTarget | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,10 +59,11 @@ export function ArchivedRemoteChatsPanel({ groups }: { groups: RemoteProjectGrou
     }
   }
 
-  if (groups.length === 0 && !error && !deleting) return null
+  const showRemote = groups.length > 0 || uncheckedHosts.length > 0 || hostsIndex !== 'ready'
+  if (!showRemote && !error && !deleting) return null
 
-  return <section aria-labelledby={groups.length > 0 ? titleId : undefined}>
-    {groups.length > 0 && <>
+  return <section aria-labelledby={showRemote ? titleId : undefined}>
+    {showRemote && <>
       <div className="arch-head">
         <div className="settings-copy">
           <b id={titleId}>{copy.archivedTitle}</b>
@@ -64,6 +71,17 @@ export function ArchivedRemoteChatsPanel({ groups }: { groups: RemoteProjectGrou
         </div>
       </div>
       <div className="arch-list">
+        {hostsIndex !== 'ready' && <EmptyState size="card"
+          title={hostsIndex === 'failed' ? copy.archiveHostsFailed : copy.archiveHostsUnread}
+          picture={hostsIndex === 'failed' ? 'alert' : undefined}
+          announcement={hostsIndex === 'failed' ? 'alert' : undefined}
+          actions={hostsIndex === 'failed' ? [{ label: copy.archiveRefresh, icon: 'refresh', onClick: () => void refreshDesktopConnections() }] : undefined} />}
+        {uncheckedHosts.map(({ connection, failed, loading }) => <EmptyState key={connection.id} size="card"
+          title={failed ? copy.archiveReadFailed(connection.label) : copy.archiveUnread(connection.label)}
+          picture={failed ? 'alert' : undefined}
+          announcement={failed ? 'alert' : undefined}
+          actions={connection.state === 'connected' ? [{ label: copy.archiveRefresh, icon: 'refresh', busy: loading,
+            onClick: () => void refreshRemoteCatalog(connection.id) }] : undefined} />)}
         {groups.map(group => <section className="arch-group" key={group.key}>
           <header className="arch-group-head">
             <Icon name="folder" /><b>{group.name}</b><span>{group.connection.label}</span>

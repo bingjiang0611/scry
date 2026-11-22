@@ -83,6 +83,7 @@ struct HomeSessions: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Binding var expandedProjects: Set<String>
   let touching: Bool
+  let canShowEmpty: Bool
   let onOpen: (HomeSessionCatalog.Row) -> Void
   let onNewTask: (ExecutionTargetScope, String?) -> Void
   let onRowAction: (HomeSessionCatalog.Row, SessionRowAction) -> Void
@@ -182,11 +183,18 @@ struct HomeSessions: View {
     .padding(.bottom, 12)
   }
 
+  private var hasSearch: Bool { !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+  private var clearSearch: EmptyState.Action? {
+    hasSearch ? .init(label: ConnectionCopy.clearSearch, perform: { model.query = "" }) : nil
+  }
+
   private var activity: some View {
     LazyVStack(alignment: .leading, spacing: 0) {
-      if catalog.waiting.isEmpty && catalog.running.isEmpty && catalog.completed.isEmpty {
-        Text(ConnectionCopy.activityEmpty).font(Typography.rowTitle).foregroundStyle(Palette.dim)
-          .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 24)
+      if canShowEmpty && catalog.waiting.isEmpty && catalog.running.isEmpty && catalog.completed.isEmpty {
+        EmptyState(title: hasSearch ? ConnectionCopy.noActivityMatches(model.query) : ConnectionCopy.activityEmpty,
+                   symbol: hasSearch ? nil : "checkmark", size: .card, action: clearSearch, announce: hasSearch)
+          .padding(.vertical, 8)
       }
       activitySection(ConnectionCopy.homeNeedsReply, rows: catalog.waiting)
       activitySection(ConnectionCopy.sectionRunning, rows: catalog.running)
@@ -225,8 +233,11 @@ struct HomeSessions: View {
         }
       }
       section(ConnectionCopy.tabProjects, directory: true)
-      if catalog.rows.isEmpty {
-        Text(ConnectionCopy.noRecent).font(Typography.rowTitle).foregroundStyle(Palette.dim).padding(.vertical, 16)
+      if canShowEmpty && catalog.rows.isEmpty {
+        EmptyState(title: hasSearch ? ConnectionCopy.noSessionMatches(model.query) : ConnectionCopy.noRecent,
+                   symbol: hasSearch ? nil : Symbol.bubble, size: .card,
+                   action: clearSearch ?? .init(label: ConnectionCopy.newSession, perform: { onNewTask(targets.newTaskScope, nil) }),
+                   announce: hasSearch).padding(.vertical, 8)
       }
       ForEach(catalog.projects) { project in projectSection(project) }
       // No "new session" row here: the drawer header already has one, and each

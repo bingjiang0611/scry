@@ -167,7 +167,8 @@ export async function exercise(contents, { measure = false } = {}) {
   must(shadowElements > 0, 'Workspace tree shadow DOM is empty')
   await mark()
   await fill(`document.querySelector('.workspace-search input')`, 'absent-file-match')
-  await wait(`${query('[data-item-path]')}.length === 0 && document.querySelector('.workspace-empty')?.textContent.includes('没有匹配文件')`, 'no matches hide unrelated tree files')
+  const noMatch = '已加载的文件中没有与「absent-file-match」匹配的路径'
+  await wait(`${query('[data-item-path]')}.length === 0 && document.querySelector('.workspace-empty [aria-live=polite]')?.textContent === ${JSON.stringify(noMatch)}`, 'no matches in loaded files hide unrelated tree files and are announced politely')
   await record('searchNoMatch')
   await mark()
   await fill(`document.querySelector('.workspace-search input')`, ' FILE-0999 ')

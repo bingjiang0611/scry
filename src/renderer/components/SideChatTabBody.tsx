@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react'
 import type { ConversationSummary } from '@shared/conversation-api'
-import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import type { ComposerDraftStore } from '../composer-drafts'
 import { SIDE_CHAT_COPY } from '../constants/side-chat-copy'
 import type { ConversationHostChatProps } from '../conversation-chat-props'
 import type { WorkspaceFileTarget } from '../workspace-links'
-import { LoadingStatus } from './LoadingStatus'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { SideChatSurface } from './SideChatSurface'
 
 export interface SideChatTabBodyProps {
@@ -35,15 +35,14 @@ export function SideChatTabBody({ summary, loading = false, onMounted, ...rest }
   const mountedCallback = useRef(onMounted)
   mountedCallback.current = onMounted
   useEffect(() => { mountedCallback.current?.() }, [])
-  const showLoading = useDelayedFlag(!summary && loading)
   if (!summary && loading) {
     return <div className="side-chat-unavailable" aria-busy="true" data-side-chat-loading>
-      {showLoading && <LoadingStatus title={SIDE_CHAT_COPY.tabLoading} />}
+      <DelayedSkeletonRows loading rows={4} label={SIDE_CHAT_COPY.tabLoading} />
     </div>
   }
   if (!summary) {
-    return <div className="side-chat-unavailable" role="status" data-side-chat-unavailable>
-      {SIDE_CHAT_COPY.tabUnavailable}
+    return <div data-side-chat-unavailable>
+      <EmptyState size="card" picture="alert" title={SIDE_CHAT_COPY.tabUnavailable} />
     </div>
   }
   return <SideChatSurface

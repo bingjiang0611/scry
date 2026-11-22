@@ -3,12 +3,17 @@ import { activityGroups, type ActivityEntry } from '../sidebar-activity'
 import { SIDEBAR_ACTIVITY_COPY as copy } from '../constants/copy'
 import { useFlipList } from '../hooks/useFlipList'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { SIDEBAR_PROJECT_COPY } from '../constants/sidebar-copy'
 import './sidebar-activity.css'
 
 const GROUP_LIMIT = 40
 
-export function SidebarActivity({ entries, renderEntry }: {
+export function SidebarActivity({ entries, renderEntry, query = '', onClearSearch, canShowEmpty = true }: {
   entries: ActivityEntry[]
+  query?: string
+  onClearSearch?: () => void
+  canShowEmpty?: boolean
   renderEntry: (entry: ActivityEntry) => ReactNode
 }) {
   const root = useRef<HTMLDivElement>(null)
@@ -71,6 +76,9 @@ export function SidebarActivity({ entries, renderEntry }: {
     </p>)
   }
   return <div className="sb-activity" ref={root} onPointerDownCapture={() => setHeldEntries(displayed)}>
-    {children.length ? children : <div className="sb-empty">{copy.empty}</div>}
+    {children.length ? children : canShowEmpty && <EmptyState size="card" className="sb-empty"
+      title={query.trim() ? copy.noMatches(query) : copy.caughtUp} picture={query.trim() ? undefined : 'check'}
+      announcement={query.trim() ? 'polite' : undefined}
+      actions={query.trim() && onClearSearch ? [{ label: SIDEBAR_PROJECT_COPY.clearSearch, onClick: onClearSearch }] : undefined} />}
   </div>
 }

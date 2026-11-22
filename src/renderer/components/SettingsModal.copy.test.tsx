@@ -17,8 +17,9 @@ describe('Settings copy density', () => {
 
   it('keeps archive discovery and empty states without storage implementation prose', () => {
     const html = renderToStaticMarkup(<ArchivedChatsPanel projects={[]} onRefresh={async () => {}} onSessionsChanged={() => {}} />)
-    expect(html).toContain('class="arch-empty"')
-    expect(html).toContain('存档图标')
+    expect(html).toContain('没有本机已存档会话')
+    expect(html).toContain('class="empty-state arch-empty"')
+    expect(html).toContain('class="empty-state-picture" aria-hidden="true"')
     expect(html).toContain('搜索已存档会话')
     expect(html).not.toContain('存档后会话从左侧列表移出')
     expect(html).not.toContain('trace 都保留')

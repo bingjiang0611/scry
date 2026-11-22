@@ -1,4 +1,5 @@
 // 总览「每轮调用」区与单轮文件足迹：点行定位到对话，展开看耗时、介入、Hook 与文件证据。
+import { EmptyState } from './primitives/EmptyState'
 import type { MouseEvent, ReactNode } from 'react'
 import type { TraceEvent, TurnDiffSnapshot } from '@shared/trace'
 import type { FileRow } from '../format'
@@ -57,7 +58,7 @@ export function TurnFileFootprint({
           })}
         </div>
       ) : files.length === 0 ? (
-        <div className="turn-file-empty">暂无文件工具证据</div>
+        <EmptyState size="row" className="turn-file-empty" title={OVERVIEW_SESSION_COPY.noFileEvidence} />
       ) : (
         <div className="turn-file-list">
           {files.map((file) => (

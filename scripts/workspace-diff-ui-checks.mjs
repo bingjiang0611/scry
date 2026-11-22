@@ -91,11 +91,11 @@ export async function exerciseWorkspaceDiff(contents) {
   await click('#history-current-snapshot')
   await wait(`!${history}.snapshotPending && ${history}.collectedAt === '2026-10-25T00:00:00Z'`)
   await click('#diff-analytics')
-  await wait(`document.querySelector('#integration-reads')?.dataset.analytics === '1'`)
+  await wait('window.workspaceDiffIntegrationReads?.analytics === 1')
   await click('#diff-data-updated')
-  await wait(`document.querySelector('#integration-reads')?.dataset.analytics === '2'`)
-  const reads = await read(`({ ...document.querySelector('#integration-reads').dataset })`)
-  if (reads.stats !== '0' || reads.billing !== '0') {
+  await wait('window.workspaceDiffIntegrationReads?.analytics === 2')
+  const reads = await read('window.workspaceDiffIntegrationReads')
+  if (reads.stats !== 0 || reads.billing !== 0) {
     throw new Error(`Unused global queries still ran: ${JSON.stringify(reads)}`)
   }
   return { historyScopeReturn: true, historyReplyFence: true, clean: true, dirty: true, unavailable: true, timeout: true, ipcRejection: true, refreshRetainsEvidence: true, sourceTime: true, sameWorkspaceReplyOrdered: true, staleReplyRejected: true, unbound: true, nativeInput: true, analyticsStillRefreshes: true, unusedGlobalQueries: reads }

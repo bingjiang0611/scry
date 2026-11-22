@@ -52,7 +52,8 @@ describe('OverviewPanel request-level context', () => {
 
   it('keeps unavailable context explicit without extra visible explanation', () => {
     const html = render([])
-    expect(html).toContain('<div class="ctx-copy"><div class="v">暂无上下文数据</div></div>')
+    expect(html).toContain('未取得上下文占用数据')
+    expect(html).not.toContain('class="ctx-track"')
     expect(html).toContain('title="仅在 Provider 同时上报上下文占用与模型窗口时显示"')
     expect(html).not.toContain('0.0k /')
   })
@@ -86,7 +87,7 @@ describe('OverviewPanel request-level context', () => {
   it('invalidates pre-compaction usage until the next sample, then permits a decrease', () => {
     const items = [sample('first', 201600), compact]
     const afterCompact = render(items)
-    expect(afterCompact).toContain('暂无上下文数据')
+    expect(afterCompact).toContain('未取得上下文占用数据')
     expect(afterCompact).toContain('<strong class="overview-session-count">1</strong>')
     expect(render([...items, sample('after', 20000)])).toContain('<b>20.0k</b><span> / 272.0k</span>')
   })
@@ -94,7 +95,7 @@ describe('OverviewPanel request-level context', () => {
   it('does not inherit a stale percentage when the latest model window is unknown', () => {
     expect(render([
       sample('first', 201600), sample('unknown-model', 12000, { contextModel: 'new', modelUsage: [{ model: 'new' }] })
-    ])).toContain('暂无上下文数据')
+    ])).toContain('未取得上下文占用数据')
   })
 
   it('shows zero observed compactions while retaining the loaded-record scope', () => {
@@ -123,7 +124,7 @@ describe('OverviewPanel request-level context', () => {
       runtimeMetadata: { type: 'compaction_end', reason: 'manual', aborted: false, result: { tokensBefore: 201600 } }
     }
     expect(contextCompactionOf(legacy)).toEqual({ trigger: 'manual', preTokens: 201600 })
-    expect(render([sample('first', 201600), legacy])).toContain('暂无上下文数据')
+    expect(render([sample('first', 201600), legacy])).toContain('未取得上下文占用数据')
     expect(render([legacy])).toContain('<strong class="overview-session-count">1</strong>')
     for (const patch of [{ aborted: true }, { result: undefined }, { errorMessage: 'failed' }]) {
       const failed = { ...legacy, runtimeMetadata: { ...legacy.runtimeMetadata, ...patch } }

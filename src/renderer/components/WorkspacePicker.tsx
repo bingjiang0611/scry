@@ -4,6 +4,7 @@ import type { WorkspaceSelectionController } from '../hooks/useWorkspaceSelectio
 import { useFixedVirtualRows } from '../hooks/useFixedVirtualRows'
 import { workspaceCopy as copy } from '../constants/workspace-copy'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
 import './workspace-picker.css'
 
 const branchLabel = (ref: string): string => ref.replace(/^refs\/(heads|remotes)\//, '')
@@ -35,7 +36,8 @@ function WorkspaceChoicesList({ controller }: { controller: WorkspaceSelectionCo
   const rowHeight = choices?.page.kind === 'worktrees' ? 58 : 36
   const virtual = useFixedVirtualRows(rows.length, rowHeight)
   if (!rows.length) return controller.editor.menu === 'workspace' && !controller.editor.query ? null
-    : <p className="workspace-picker-note">{copy.empty}</p>
+    : <EmptyState size="menu" className="workspace-picker-note" announcement={controller.editor.query.trim() ? 'polite' : undefined}
+      title={controller.editor.query.trim() ? copy.noMatches(controller.editor.query) : copy.noBranches} />
   return <div ref={virtual.ref} className="workspace-choice-list" style={{ maxHeight: 272 }}
     role="listbox" tabIndex={0} aria-label={copy.results} data-workspace-navigation
     aria-activedescendant={active >= virtual.start && active < virtual.end ? `${id}-${active}` : undefined}
@@ -141,8 +143,8 @@ function WorkspacePicker({ controller, anchor, id }: {
           maxLength={240} disabled={validating} onChange={event => controller.changeEditor({ query: event.target.value, cursor: undefined })} />
       </div>}
     {loading ? <p role="status" className="workspace-picker-note">{copy.loading}</p>
-      : <WorkspaceChoicesList key={JSON.stringify([editor.menu, editor.query, editor.cursor])} controller={controller} />}
-    {error && <div className="workspace-picker-error" role="alert">{error}
+      : (!error || choices?.page.items.length) ? <WorkspaceChoicesList key={JSON.stringify([editor.menu, editor.query, editor.cursor])} controller={controller} /> : null}
+    {error && <div className="workspace-picker-error"><EmptyState size="menu" announcement="alert" title={copy.choicesReadFailed} />
       <button type="button" onClick={controller.refresh} disabled={loading || validating}>{copy.refresh}</button>
     </div>}
     {choices?.limited && <p className="workspace-picker-note">{copy.limited}</p>}

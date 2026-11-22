@@ -13,6 +13,8 @@ import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import type { ProjectMeta, SessionMeta } from '../env'
 import type { SessionProviderId } from '@shared/provider'
 import type { CatalogHealth } from '@shared/provider'
@@ -75,7 +77,10 @@ export const Sidebar = memo(function Sidebar({
   metaPromptsActive = false,
   catalogHealth,
   catalogHealthError,
+  projectsLoading = false,
   projectsError,
+  onChooseFolder,
+  onRetryProjects,
   onSettings,
   activeRemote = null,
   onPickRemoteSession,
@@ -126,7 +131,10 @@ export const Sidebar = memo(function Sidebar({
   catalogHealth?: CatalogHealth
   // The catalog reads themselves failed (not a damaged index): the readable reason.
   catalogHealthError?: string | null
+  projectsLoading?: boolean
   projectsError?: string | null
+  onChooseFolder?: () => void
+  onRetryProjects?: () => void
   onSettings?: () => void
   activeRemote?: ActiveRemoteLocation | null
   onPickRemoteSession?: (connectionId: string, session: RemoteSessionRef) => void
@@ -147,6 +155,8 @@ export const Sidebar = memo(function Sidebar({
     })
   }, [])
   const [q, setQ] = useState('')
+  const searchInput = useRef<HTMLInputElement>(null)
+  const clearSearch = () => { setQ(''); searchInput.current?.focus({ preventScroll: true }) }
   // 侧栏 tab 必须跨 renderer 重载保留：崩溃后主进程自动 reload 会重挂全部组件。
   const [view, setViewState] = useState<SidebarView>(() => readStoredSidebarView(browserStorage()))
   const setView = (next: SidebarView): void => {
@@ -158,6 +168,7 @@ export const Sidebar = memo(function Sidebar({
   const activity = useMemo(() => view === 'activity'
     ? sidebarActivity(projects, runningRunIds, waitingQuestionRunIds, q, showRemote ? remoteGroups : [], unreadSessionKeys) : [],
   [view, projects, runningRunIds, waitingQuestionRunIds, q, showRemote, remoteGroups, unreadSessionKeys])
+  const canShowEmpty = !projectsLoading && !catalogHealthError && !projectsError && catalogHealth?.status !== 'unavailable'
   const tabId = `${id ?? 'sidebar'}-view`
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [projectMenu, setProjectMenu] = useState<{ project: ProjectMeta; left: number; top: number } | null>(null)
@@ -220,7 +231,7 @@ export const Sidebar = memo(function Sidebar({
       </button>
       <div className="sb-search">
         <Icon name="search" />
-        <input placeholder={projectCopy.searchPlaceholder} value={q} onChange={(e) => setQ(e.target.value)} />
+        <input ref={searchInput} placeholder={projectCopy.searchPlaceholder} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (
@@ -288,17 +299,20 @@ export const Sidebar = memo(function Sidebar({
         <span ref={viewIndicatorRef} className="motion-tab-indicator" aria-hidden="true" />
       </Tabs>
       <SessionHoverProvider><div className="sb-list" role="tabpanel" id={`${tabId}-panel`} aria-labelledby={`${tabId}-${view}`} tabIndex={0}>
-        {catalogHealthError ? (
-          <div className="sb-empty" role="status" data-catalog-read-error>{projectCopy.catalogReadFailed(catalogHealthError)}</div>
-        ) : catalogHealth && catalogHealth.status !== 'ready' && (
-          <div className="sb-empty" role="status" title={catalogHealth.reason}>
-            {catalogHealth.status === 'degraded'
-              ? '会话索引已从备份恢复；下一次成功写入会修复主索引。'
-              : '会话索引不可用；请检查 app-sessions.json 与 .bak 后重试。'}
+        {!projectsError && (catalogHealthError || catalogHealth?.status === 'unavailable') ? (
+          <div data-catalog-read-error>
+            <EmptyState size="card" className="sb-empty" picture="alert" announcement="alert"
+              title={catalogHealthError ? projectCopy.catalogReadFailed : projectCopy.catalogUnavailable}
+              actions={onRetryProjects ? [{ label: projectCopy.retryProjects, onClick: onRetryProjects }] : undefined} />
           </div>
-        )}
+        ) : catalogHealth?.status === 'degraded' && <div className="sb-empty" role="status">{projectCopy.catalogDegraded}</div>}
+        {projectsLoading && projects.length === 0 && !showRemote &&
+          <DelayedSkeletonRows loading rows={4} label={projectCopy.projectsLoading} />}
+        {view === 'activity' && projectsError && <EmptyState size="card" className="sb-empty" picture="alert" announcement="alert"
+          title={projectCopy.projectsReadFailedTitle}
+          actions={onRetryProjects ? [{ label: projectCopy.retryProjects, onClick: onRetryProjects }] : undefined} />}
         {view === 'activity' ? <>
-          <SidebarActivity entries={activity} renderEntry={(entry) => entry.kind === 'conversation'
+          <SidebarActivity entries={activity} query={q} onClearSearch={clearSearch} canShowEmpty={canShowEmpty} renderEntry={(entry) => entry.kind === 'conversation'
             ? renderConversation(entry.conversation)
             : entry.kind === 'remote' ? <SidebarRemoteProjects groups={[{ ...entry.project, sessions: [entry.session] }]}
               draftStore={draftStore} layout="activity" active={activeRemote} collapsed={collapsed} onToggle={toggle}
@@ -307,7 +321,8 @@ export const Sidebar = memo(function Sidebar({
             : renderSession(entry.session.cwd ?? entry.project.cwd, entry.session, entry.project.name)}
           />
         </> : <>
-          <SidebarProjects projects={projects} projectsError={projectsError ?? null} q={q} remoteGroups={remoteGroups} showRemote={showRemote}
+          <SidebarProjects projects={projects} projectsError={projectsError ?? null} canShowEmpty={canShowEmpty} q={q} remoteGroups={remoteGroups} showRemote={showRemote}
+            onClearSearch={clearSearch} onChooseFolder={onChooseFolder} onRetryProjects={onRetryProjects}
             activeCwd={activeCwd} activeSessionId={activeSessionId} collapsed={collapsed} toggle={toggle}
             onNewProjectChat={onNewProjectChat} openProjectMenu={openProjectMenu}
             renderSession={renderSession} renderConversation={renderConversation}

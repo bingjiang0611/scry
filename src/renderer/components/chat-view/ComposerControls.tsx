@@ -15,6 +15,8 @@ type ComposerControlsProps = Pick<ChatViewProps,
   | 'onAddPiAgent'
   | 'onRemovePiAgent'
   | 'onRescan'
+  | 'agentsScanning'
+  | 'agentsScanFailed'
   | 'unavailableAgentIds'
   | 'agentScopeLabel'
   | 'agentLocked'
@@ -51,6 +53,8 @@ export function ComposerControls({
   onAddPiAgent,
   onRemovePiAgent,
   onRescan,
+  agentsScanning,
+  agentsScanFailed,
   unavailableAgentIds,
   agentScopeLabel,
   agentLocked,
@@ -98,6 +102,8 @@ export function ComposerControls({
               onAddPi={onAddPiAgent}
               onRemovePi={onRemovePiAgent}
               onRescan={onRescan}
+              scanning={agentsScanning}
+              scanFailed={agentsScanFailed}
               unavailableIds={unavailableAgentIds}
               scopeLabel={agentScopeLabel}
               disabled={agentLocked}

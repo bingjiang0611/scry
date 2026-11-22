@@ -48,7 +48,7 @@ export interface ChatViewProps {
   // Live trace is pending; this is not a composer or session-owner lock.
   transcriptPending?: boolean
   sessionCacheVisible?: boolean
-  sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
+  sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string; title?: string; retry?: () => void; retrying?: boolean } | null
   /**
    * What an empty but selected conversation is. A side chat is a new conversation with a
    * frozen source, so the generic "waiting for the host to archive" text would be wrong.
@@ -116,6 +116,8 @@ export interface ChatViewProps {
   onRunEffort: (effort: string | undefined) => void
   onPermissionMode: (mode: AgentPermissionMode) => void
   onRescan?: () => void
+  agentsScanning?: boolean
+  agentsScanFailed?: boolean
   unavailableAgentIds?: ReadonlySet<string>
   agentScopeLabel?: string
   workspaceContext?: ReactNode

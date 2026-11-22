@@ -1,3 +1,5 @@
+import { EmptyState } from './primitives/EmptyState'
+import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { useMemo, type CSSProperties } from 'react'
 import type { Turn } from '../format'
 import { deriveAgentRows, type AgentRow, type AgentRowStatus } from '../agent-panel'
@@ -63,11 +65,7 @@ export function AgentsSurface({ turns, busy }: { turns: Turn[]; busy: boolean })
       </header>
 
       {rows.length === 0 ? (
-        <div className="agents-empty">
-          <Icon name="agents" />
-          <strong>本会话尚未观测到子 Agent</strong>
-          <p>Claude Task 或 Codex 子线程出现后，会在这里按真实事件展示。</p>
-        </div>
+        <EmptyState size="card" picture="agents" title={OVERVIEW_SESSION_COPY.noSubagents} />
       ) : (
         <div className="agents-list" role="list">
           {rows.map((row) => {

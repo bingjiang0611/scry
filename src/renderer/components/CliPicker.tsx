@@ -7,6 +7,8 @@ import { PI_PICKER_COPY } from '../constants/copy'
 import { basename } from '../format'
 import type { DetectedAgent } from '../env'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { TurningIcon } from './primitives/TurningIcon'
 import { ProviderGlyph } from './ProviderGlyph'
 import { Menu, MenuCheck, MenuItem, MenuLabel } from './primitives/Menu'
 import { moveMenuFocus } from './WorkdirPicker'
@@ -46,6 +48,8 @@ export function CliPicker({
   onAddPi,
   onRemovePi,
   onRescan,
+  scanning = false,
+  scanFailed = false,
   scopeLabel = '本机 Agent',
   unavailableIds,
   disabled = false,
@@ -60,6 +64,8 @@ export function CliPicker({
   onAddPi?: () => void
   onRemovePi?: (id: string) => void
   onRescan?: () => void
+  scanning?: boolean
+  scanFailed?: boolean
   scopeLabel?: string
   // Listed but not selectable, e.g. a remote Provider the host reports unavailable.
   unavailableIds?: ReadonlySet<string>
@@ -134,7 +140,11 @@ export function CliPicker({
             <div className="dim">{sel?.name ?? '未检测到'}</div>
           </div>
           <MenuLabel>Provider</MenuLabel>
-          {agents.length === 0 && <div className="dim pad" role="none">{AGENT_PICKER_COPY.empty}</div>}
+          {(agents.length === 0 || scanFailed) && <EmptyState size="menu" className="dim pad"
+            title={scanFailed ? AGENT_PICKER_COPY.scanFailed : scanning ? AGENT_PICKER_COPY.scanning
+              : onRescan ? AGENT_PICKER_COPY.empty : AGENT_PICKER_COPY.remoteEmpty}
+            announcement={scanFailed ? 'alert' : undefined} />}
+          {agents.length === 0 && onRescan && !scanning && !scanFailed && <div className="dim pad" role="none">{AGENT_PICKER_COPY.setup}</div>}
           {codeAgents.map((a) => (
             <button type="button" className="mitem"
               key={a.id}
@@ -193,7 +203,7 @@ export function CliPicker({
           {actionsOpen && (
             <Menu ref={actionsRef} className="menu climenu" label="Agent 管理">
               {onAddPi && <MenuItem icon={<Icon name="plus" />} onClick={() => { dismissActions(); onAddPi() }}>添加 Pi Agent…</MenuItem>}
-              {onRescan && <MenuItem icon={<Icon name="refresh" />} onClick={() => { dismissActions(); onRescan() }}>重新扫描 PATH</MenuItem>}
+              {onRescan && <MenuItem disabled={scanning} icon={<TurningIcon busy={scanning} />} onClick={() => onRescan()}>重新扫描 PATH</MenuItem>}
               {onRemovePi && piAgents.filter(agent => !isDetectedPiProfile(agent.id)).map(agent => (
                 <MenuItem key={agent.id} icon={<Icon name="x" />} onClick={() => { dismissActions(); onRemovePi(agent.id) }}>
                   {PI_PICKER_COPY.removeLabel(piProfileName(agent))}

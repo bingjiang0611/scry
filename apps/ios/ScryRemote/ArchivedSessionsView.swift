@@ -20,8 +20,8 @@ struct ArchivedSessionsView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
           provenance
-          if let failure = run.archivedFailure {
-            Notice(text: "\(ConnectionCopy.panelLoadFailed)：\(failure)", warning: true)
+          if run.archivedFailure != nil, !rows.isEmpty {
+            Notice(text: ConnectionCopy.archivedRefreshFailed, warning: true)
               .padding(.top, 10)
           }
           if let failure = actions.failure {
@@ -31,24 +31,23 @@ struct ArchivedSessionsView: View {
                 .font(.system(size: 12, weight: .semibold)).frame(minHeight: 44)
             }.padding(.top, 10)
           }
-          switch run.archivedCatalog {
-          case .idle, .loading:
-            PlaceholderRows(label: ConnectionCopy.readingSessions, count: 5, rowHeight: 48).padding(.top, 8)
-          case .failed:
-            EmptyState(title: ConnectionCopy.archivedEmpty, detail: ConnectionCopy.archivedPolicy, symbol: Symbol.archive)
-              .padding(.top, 24)
-          case .empty:
-            EmptyState(title: ConnectionCopy.archivedEmpty, detail: ConnectionCopy.archivedPolicy, symbol: Symbol.archive)
-              .padding(.top, 24)
-          case let .loaded(list):
-            ForEach(list, id: \.sessionId) { session in
+          if rows.isEmpty {
+            archivePlaceholder
+          } else {
+            ForEach(rows, id: \.sessionId) { session in
               ArchivedSessionRowView(session: session,
                                      onRestore: { actions.restore(session, run: run) },
                                      onDelete: { confirmDelete = session })
                 .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
             }
-            Text(ConnectionCopy.archivedPolicy).font(.system(size: 11)).foregroundStyle(Palette.dim2)
-              .padding(.top, 12)
+          }
+          if run.archivedFailure == nil, !run.archivedLoading {
+            switch run.archivedCatalog {
+            case .empty, .loaded:
+              Text(ConnectionCopy.archivedPolicy).font(.system(size: 11)).foregroundStyle(Palette.dim2)
+                .padding(.top, 12)
+            default: EmptyView()
+            }
           }
         }
         .padding(.horizontal, 19).padding(.bottom, 24)
@@ -57,7 +56,6 @@ struct ArchivedSessionsView: View {
       .refreshable { _ = await run.refreshArchived() }
     }
     .background(Palette.main)
-    .task { _ = await run.refreshArchived() }
     .confirmationDialog(ConnectionCopy.deleteConfirmTitle, isPresented: deletePresented, titleVisibility: .visible) {
       Button(ConnectionCopy.actionDelete, role: .destructive) {
         if let session = confirmDelete {
@@ -69,6 +67,35 @@ struct ArchivedSessionsView: View {
       Button(ConnectionCopy.cancel, role: .cancel) { confirmDelete = nil }
     } message: {
       Text(ConnectionCopy.deleteConfirmBody)
+    }
+  }
+
+  @ViewBuilder private var archivePlaceholder: some View {
+    if run.archivedFailure != nil || retrying {
+      EmptyState(title: ConnectionCopy.archivedReadFailed,
+                 detail: ConnectionCopy.archivedReadFailedDetail,
+                 symbol: "exclamationmark.triangle",
+                 action: .init(label: ConnectionCopy.archivedReadAgain, refresh: true,
+                               busy: retrying || run.archivedLoading, perform: retryArchive))
+        .frame(minHeight: 240)
+    } else {
+      switch run.archivedCatalog {
+      case .empty where !run.archivedLoading:
+        EmptyState(title: ConnectionCopy.archivedEmpty, detail: ConnectionCopy.archivedEmptyDetail, symbol: Symbol.archive)
+          .frame(minHeight: 240)
+      default:
+        PlaceholderRows(label: ConnectionCopy.readingSessions, count: 5, rowHeight: 48)
+      }
+    }
+  }
+
+  @State private var retrying = false
+
+  private func retryArchive() {
+    retrying = true
+    Task {
+      _ = await run.refreshArchived()
+      retrying = false
     }
   }
 

@@ -9,6 +9,12 @@ import type {
 // Visible UX copy for the «后台服务» settings section and the run-path warning strip
 // (P5-2, DESIGN.md copy rules: verb-first actions, honest unavailable reasons, no fake zeros).
 
+export const BACKGROUND_SERVICE_READ_COPY = {
+  failed: '没能读取后台服务状态',
+  loading: '正在读取后台服务状态…',
+  refresh: '刷新状态',
+} as const
+
 export const LOGIN_START_COPY = {
   sectionTitle: '登录时启动',
   enableButton: '开启登录时启动',

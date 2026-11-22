@@ -1,10 +1,9 @@
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
 import { patchProjectSession, sessionRowKey, type SessionSaveState } from './session-save-state'
 import { actionErrorText } from './hooks/useAsyncAction'
-import { SESSION_SAVE_COPY } from './constants/copy'
+import { LOADING_COPY, SESSION_EMPTY_COPY, SESSION_SAVE_COPY } from './constants/copy'
 import { runStructuralTransition } from './structural-motion'
 import { browserStorage } from './browser-storage'
-import { LOADING_COPY } from './constants/copy'
 import { persistSessionSelection, readStoredSessionSelection } from './session-restore'
 import { workspaceRunSession } from './workspace-drafts'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
@@ -12,7 +11,7 @@ import type { ProjectMeta, SessionMeta, SessionRef } from './env'
 import type { Turn } from './format'
 import type { AppView } from './app-types'
 import type { useWorkspaceState } from './hooks/useWorkspaceState'
-import type { useAgentSession } from './hooks/useAgentSession'
+import type { useAppSessionRuntime } from './app-session-runtime'
 import type { useIntegrations } from './hooks/useIntegrations'
 import type { SessionHistorySnapshotCache } from './session-history-cache'
 import { sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
@@ -36,7 +35,7 @@ export function createSessionActions({
   queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
 }: {
   workspace: ReturnType<typeof useWorkspaceState>
-  session: ReturnType<typeof useAgentSession>
+  session: ReturnType<typeof useAppSessionRuntime>['session']
   integrations: ReturnType<typeof useIntegrations>
   setSessionLoading: Dispatch<SetStateAction<boolean>>
   sessionSelectionSeqRef: MutableRefObject<number>
@@ -222,7 +221,7 @@ export function createSessionActions({
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     const presentationPage = cachedPage ?? (switchingSession ? sessionPreviewPage(sessionId, previewText, previewRunId) : undefined)
-    setSessionEvidenceGap(null)
+    setSessionEvidenceGap(previous => !switchingSession && previous?.sessionId === sessionId && previous.status === 'error' ? previous : null)
     setSessionLoading(true)
     setSessionCacheVisible(Boolean(presentationPage?.turns.length) || (!switchingSession && session.turns.length > 0))
     setView('chat')
@@ -307,23 +306,22 @@ export function createSessionActions({
       // Confirm only an unchanged display-only installation. A focus/start/clear
       // supersedes it and must use the normal authoritative replacement.
       const cacheConfirmed = page != null && page === cachedPage && session.confirmCachedSession(sessionId, page)
-      if (!cacheConfirmed) session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
-        activeRun: null,
-        page
-      })
-      setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
+      const finishPresentation = (): void => {
+        setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
+        setSessionLoading(false)
+      }
+      // Commit authority together with the turns. Otherwise the structural flush can
+      // remove a failure state while ChatView still suppresses the replacement turns.
+      if (cacheConfirmed) finishPresentation()
+      else session.replaceWithParsedSession(sessionId, page?.turns ?? [], { activeRun: null, page }, finishPresentation)
       if (adoptionFailed) setComposerError(LOADING_COPY.sessionAdoptFailed)
     } catch (error) {
       if (isCurrent()) {
-        setSessionEvidenceGap({
-          sessionId,
-          status: 'error',
-          detail: `无法加载会话历史：${error instanceof Error ? error.message : String(error)}`
-        })
+        console.error('[Scry] session history read failed', error)
+        setSessionEvidenceGap({ sessionId, status: 'error', detail: SESSION_EMPTY_COPY.readFailedDetail })
         sessionSnapshots.delete(historyContext)
         setSessionCacheVisible(false)
         if (presentationPage) session.clearTurns()
-        setComposerError(LOADING_COPY.sessionOpenFailed(error instanceof Error ? error.message : String(error)))
       }
     } finally {
       if (isCurrent()) {

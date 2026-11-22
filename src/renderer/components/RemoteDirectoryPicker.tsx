@@ -7,6 +7,8 @@ import { ModalFrame, requestModalClose } from './Modals'
 import { Icon } from './primitives/Icon'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY, LOADING_COPY } from '../constants/copy'
+import { REMOTE_ACCESS_COPY as copy } from '../constants/remote-copy'
+import { EmptyState } from './primitives/EmptyState'
 import { useDelayedFlag } from '../hooks/useDelayedFlag'
 import { Button } from './primitives/Button'
 import { BusyLabel } from './primitives/BusyLabel'
@@ -26,6 +28,7 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
   const [loading, setLoading] = useState(true)
   const [selecting, setSelecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [failedRead, setFailedRead] = useState<{ target?: string; older?: DesktopDirectoryPage } | null>(null)
   const { connections, refreshing, error: connectionError } = useDesktopConnections()
   const connected = !refreshing && !connectionError && connections.some(item => item.id === connection.id && item.state === 'connected')
   const busy = loading || selecting
@@ -41,8 +44,12 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
       if (request !== requestId.current) return
       setPage(older ? { ...next, directories: [...older.directories, ...next.directories] } : next)
       setPath(next.current.path)
+      setFailedRead(null)
     } catch (reason) {
-      if (request === requestId.current) setError(`无法浏览 ${connection.label} 的目录：${errorText(reason)}`)
+      if (request === requestId.current) {
+        console.error('[Scry] remote directories read failed', reason)
+        setFailedRead({ target, older })
+      }
     } finally {
       if (request === requestId.current) setLoading(false)
     }
@@ -88,18 +95,23 @@ export function RemoteDirectoryPicker({ connection, initialPath, onPick, onClose
           <Button disabled={busy || !connected || !page?.parent} onClick={() => void browse(page!.parent!.path)}>上一级</Button>
           <span className="hosts-muted">{page ? LOADING_COPY.directoryCount(page.directories.length, page.total) : loading ? '' : LOADING_COPY.directoryUnread}</span>
         </div>
-        {!connected && <p role="alert" className="desktop-remote__error">{connection.label} 未连接或连接状态未知；不会改用本机选择或执行。</p>}
+        {!connected && !refreshing && <EmptyState size="card" picture="alert" announcement="alert"
+          title={connectionError ? copy.hostUnknown(connection.label) : copy.hostDisconnected(connection.label)} />}
         {error && <p role="alert" className="desktop-remote__error">{error}</p>}
         {/* The list has a fixed height; another folder's rows are shapes in that box
             (they belong to the folder being read), so nothing above or below moves. */}
         <div className="remote-directory-list" role="group" aria-label={`${connection.label} 的文件夹`}>
-          {!page && showLoading && <SkeletonRows rows={6} avatar={14} rowHeight={30} label={LOADING_COPY.reading} />}
+          {!page && showLoading && !failedRead && <SkeletonRows rows={6} avatar={14} rowHeight={30} label={LOADING_COPY.reading} />}
+          {failedRead && <EmptyState size={page ? 'card' : 'page'} picture="alert" title={copy.directoriesReadFailed}
+            description={copy.directoriesReadFailedDetail} announcement="alert"
+            actions={connected ? [{ label: copy.readAgain, intent: 'secondary', icon: 'refresh', busy: loading, disabled: selecting,
+              onClick: () => void browse(failedRead.target, failedRead.older) }] : undefined} />}
           {page?.directories.map(directory => (
             <button type="button" key={`${directory.label}:${directory.path}`} className="mitem remote-directory-entry" title={directory.path} data-remote-directory={directory.path} disabled={busy || !connected} onClick={() => void browse(directory.path)}>
               <Icon name="folder" /><span>{directory.label}</span>
             </button>
           ))}
-          {!loading && page?.total === 0 && <p className="hosts-muted">此目录没有子文件夹，可以直接选择此目录。</p>}
+          {!loading && !failedRead && page?.total === 0 && <EmptyState size="row" title={copy.subdirectoriesEmpty} />}
           {page?.hasMore && <Button disabled={!connected || (busy && !loading)} aria-busy={loading} aria-disabled={loading}
             onClick={() => { if (!loading) void browse(page.current.path, page) }}><BusyLabel busy={showLoading}>加载更多文件夹</BusyLabel></Button>}
         </div>

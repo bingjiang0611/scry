@@ -39,13 +39,23 @@ export async function runComposerHistory({ driver }) {
     await wait('document.querySelector(".slash-menu") != null', 'typing still opens command completion')
     await key('Escape')
     await wait('document.querySelector(".slash-menu") == null', 'Escape closes typed command completion')
+    await read('window.desktopRemoteFixture.failHistoryFor = "other-native"')
     await click('[data-remote-session="other-native"]')
-    await wait(`${composerValue} === '' && document.querySelector(".chat-session-evidence-gap") != null`, 'switch to an empty remote session')
+    const gap = '.chat-state-slot > .empty-state'
+    await wait(`${composerValue} === '' && document.querySelector('${gap}[data-status="error"]')?.textContent.includes('没能读取「Other history」的历史')`, 'remote history read failure is not waiting')
+    check(await read(`!document.querySelector('.chat-body').textContent.includes('fixture remote history unavailable') && !document.querySelector('${gap}[data-status="pending-evidence"]')`), 'Remote read failure leaked its raw error or presented a waiting state')
+    const failedCalls = (await fixture()).historyCalls.filter(context => context.externalSessionId === 'other-native')
+    check(failedCalls.length > 0, 'No failed remote history read was observed')
+    await read('window.desktopRemoteFixture.failHistoryFor = null')
+    await click(gap + '[data-status="error"] button')
+    await wait(`document.querySelector('${gap}[data-status="pending-evidence"]') != null`, 'successful empty history read returns to pending evidence')
+    const retriedCalls = (await fixture()).historyCalls.filter(context => context.externalSessionId === 'other-native')
+    check(retriedCalls.length === failedCalls.length + 1 && JSON.stringify(retriedCalls.at(-1)) === JSON.stringify(failedCalls.at(-1)), 'Remote history retry changed the host session context or read more than once')
     await click('textarea[aria-label="描述任务"]'); await key('ArrowUp')
     check(await read(`${composerValue} === ''`), 'History leaked from another session')
     check(await read('document.querySelector(\'[data-remote-session="old-native"]:not(.active) .sb-draft\') != null && document.querySelector(\'[data-remote-session="other-native"] .sb-draft\') == null'), 'Remote draft indicator leaked or disappeared after switching')
     await click('[data-remote-session="old-native"]')
     await wait(`${composerValue} === '/skill'`, 'return to marked remote draft')
     check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'History browsing sent a prompt')
-    return { remoteComposerHistory: { refreshDuringNavigation: true, slashRecall: true, typedSlashAndEscape: true, editedDraftPreserved: true, sessionIsolation: true, sidebarDraftPresence: true, nativeKeyboard: true } }
+    return { remoteComposerHistory: { refreshDuringNavigation: true, slashRecall: true, typedSlashAndEscape: true, editedDraftPreserved: true, sessionIsolation: true, historyFailureNotWaiting: true, readOnlyRetry: true, sidebarDraftPresence: true, nativeKeyboard: true } }
   }

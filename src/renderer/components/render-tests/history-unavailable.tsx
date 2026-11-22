@@ -24,10 +24,10 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
       }
     })
 
-    expect(html).toContain('chat-session-evidence-gap')
+    expect(html).toContain('data-empty-size="page"')
     expect(html).toContain('data-status="unavailable"')
-    expect(html).toContain('这条会话没有可读的本机证据')
-    expect(html).toContain('Provider transcript 与 Scry 归档都没有记录')
+    expect(html).toContain('未取得会话历史')
+    expect(html).toContain('Scry 没有可校验的归档可展示')
     expect(html).not.toContain('开始一次可追溯执行')
     expect(html).not.toContain('新会话 · 本机证据')
   })
@@ -52,11 +52,12 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     const html = renderWelcome({
       cwd: '/tmp/project',
       hasSelectedSession: true,
-      sessionEvidenceGap: { status: 'error', detail: '无法加载会话历史：workspace changed' }
+      sessionEvidenceGap: { status: 'error', detail: '无法加载会话历史：workspace changed', retry: () => {} }
     })
 
-    expect(html).toContain('会话历史加载失败')
-    expect(html).toContain('重新点击侧边栏中的会话加载')
+    expect(html).toContain('没能读取会话历史')
+    expect(html).toContain('重新读取')
+    expect(html).not.toContain('workspace changed')
     expect(html).not.toContain('这条会话的归档里没有轮次')
     expect(html).not.toContain('没有可读的本机证据')
     expect(html).not.toContain('正在等待本机归档')
@@ -70,7 +71,7 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
     })
 
     expect(html).toContain('data-status="empty"')
-    expect(html).toContain('这条会话的归档里没有轮次')
+    expect(html).toContain('此归档没有轮次')
     expect(html).not.toContain('开始一次可追溯执行')
   })
 
@@ -81,8 +82,8 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
       hasSelectedSession: true
     })
 
-    expect(html).toContain('这条会话暂时没有可显示的轮次')
-    expect(html).toContain('不会将它当作新会话')
+    expect(html).toContain('尚未取得会话轮次')
+    expect(html).toContain('仍在等待本机归档或运行事件')
     expect(html).not.toContain('今天想在')
     expect(html).not.toContain('welcome-hero-icon')
   })
@@ -90,8 +91,9 @@ describe('选中的历史会话读不到证据时不假装成新会话', () => {
   it('真正的新会话（无证据缺失）仍然渲染简洁 hero', () => {
     const html = renderWelcome({ cwd: '/tmp/project' })
 
-    expect(html).toContain('<h1 class="zh-balanced-heading" lang="zh-CN">今天<wbr/>想<wbr/>在<wbr/> <span>project</span> <wbr/>中构<wbr/>建<wbr/>什么？</h1>')
-    expect(html).toContain('welcome-hero-icon')
-    expect(html).not.toContain('chat-session-evidence-gap')
+    expect(html).toContain('<h2 class="empty-state-title" dir="auto">新会话</h2>')
+    expect(html).toContain('在「project」发出第一条消息')
+    expect(html).toContain('empty-state-artwork')
+    expect(html).not.toContain('data-status="unavailable"')
   })
 })

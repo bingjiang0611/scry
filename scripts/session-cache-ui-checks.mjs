@@ -136,9 +136,9 @@ export async function exerciseSessionCache(contents) {
   await select('cache-a'); await pending('cache-a')
   check(await cached('cache-a'), 'Failure control requires a real cache hit')
   await control('reject-a')
-  await wait(`document.querySelector('.chat-session-evidence-gap[data-status="error"]') != null`)
+  await wait(`document.querySelector('.chat-state-slot > .empty-state[data-status="error"]') != null`)
   check(await noTurns(), 'Failed authority response kept cached history as current evidence')
-  check(await read(`document.querySelector('.chat-transcript').textContent.includes('fixture source unavailable')`), 'Authority failure was hidden')
+  check(await read(`document.querySelector('.chat-state-slot > .empty-state[data-status="error"][role="alert"]')?.textContent.includes('没能读取会话历史') && !document.querySelector('.chat-body').textContent.includes('fixture source unavailable')`), 'Authority read failure was hidden or leaked the raw error')
   await select('cache-a'); await pending('cache-a')
   check(await read(`!document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a') &&
     Array.from(document.querySelectorAll('.transcript-turn')).every(turn => (turn.dataset.runId ?? '').startsWith('session-preview:cache-a'))`), 'Rejected cache resurrected on retry')
@@ -150,7 +150,7 @@ export async function exerciseSessionCache(contents) {
   // Native input dispatch does not await React's commit. Observe the existing
   // uncached-loading state and require the visible cache to clear while the
   // authority request is still pending; keep the no-turns and stale-response checks.
-  await wait(`document.querySelector('.chat-transcript[aria-busy="true"]') && document.querySelector('.loading-status[data-status="loading"]')`)
+  await wait(`document.querySelector('.chat-transcript[aria-busy="true"] .skeleton-rows[role="status"]')`)
   await wait(`document.querySelectorAll('.transcript-turn').length === 0`)
   check(await noTurns(), 'Deletion invalidation left a pending cached page visible')
   await control('resolve-b'); await ready('cache-b')
@@ -201,12 +201,12 @@ export async function exerciseSessionCache(contents) {
   // keeps its shell and A's page is never published under it.
   check(await targetPreview('cache-b'), 'Superseded A response replaced the newer B page')
   await control('reject-b')
-  await wait('document.querySelector(".composer-status.is-error")?.textContent.includes("fixture target unavailable")')
-  await wait(`document.querySelector('.chat-session-evidence-gap[data-status="error"]') != null`)
+  await wait(`document.querySelector('.chat-state-slot > .empty-state[data-status="error"]')?.textContent.includes('没能读取会话历史')`)
+  check(await read(`!document.querySelector('.chat-body').textContent.includes('fixture target unavailable')`), 'Session read leaked a raw error into the UI')
   check(await noTurns(), 'Failed B stranded a cached or loading page as current evidence')
   check(await read(`document.querySelector('.sb-sess[aria-current="true"]')?.textContent.includes('cache-b') &&
     !document.querySelector('.chat-transcript').textContent.includes('Authoritative cache-a')`), 'Failed B resurrected the previous session history')
-  check(await read(`document.querySelector('.chat-transcript[aria-busy="false"]') != null && !document.querySelector('.chat-session-evidence-gap[data-status="loading"]')`), 'Failed B kept a loading or cache-only timeline')
+  check(await read(`document.querySelector('.chat-transcript[aria-busy="false"]') != null && !document.querySelector('.chat-transcript .loading-status[data-status="loading"], .chat-transcript .skeleton-rows')`), 'Failed B kept a loading or cache-only timeline')
   // An empty draft disables send by itself (ComposerControls.tsx:125), so restore a real
   // draft through native input before requiring the execution control back. Nothing is
   // sent: the final starts/forks guard must stay 0.

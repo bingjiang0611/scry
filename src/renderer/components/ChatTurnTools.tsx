@@ -1,4 +1,6 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
+import { EmptyState } from './primitives/EmptyState'
+import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 
 
@@ -323,7 +325,7 @@ export function FilesSummary({
               </button>
             ))
           ) : (
-            <div className="files-empty">无净改动</div>
+            <EmptyState size="row" className="files-empty" title={OVERVIEW_SESSION_COPY.noTurnChanges} />
           )
         ) : (
           structured.length > 0 ? (
@@ -335,7 +337,7 @@ export function FilesSummary({
               </div>
             ))
           ) : (
-            <div className="files-empty">暂无文件工具证据</div>
+            <EmptyState size="row" className="files-empty" title={OVERVIEW_SESSION_COPY.noFileEvidence} />
           )
         )}
       </div>

@@ -29,7 +29,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     const html = renderToStaticMarkup(
       <ArchivedChatsPanel projects={null} onRefresh={async () => {}} onSessionsChanged={() => {}} />
     )
-    expect(html).toContain('会话索引不可用')
+    expect(html).toContain('没能读取本机存档')
+    expect(html).toContain('重新读取')
     expect(html).not.toContain('没有本机已存档会话')
   })
 
@@ -37,7 +38,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     const html = renderToStaticMarkup(
       <ArchivedChatsPanel projects={null} loading onRefresh={async () => {}} onSessionsChanged={() => {}} />
     )
-    expect(html).not.toContain('会话索引不可用')
+    expect(html).not.toContain('没能读取本机存档')
     expect(html).not.toContain('没有本机已存档会话')
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain('本机已存档会话')

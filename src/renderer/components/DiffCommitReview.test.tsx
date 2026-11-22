@@ -29,7 +29,14 @@ describe('commit and stacked review evidence', () => {
   })
   it.each([true, false])('never substitutes branch bodies or zero counts while a selected commit is pending=%s', pending => {
     const html = render(history({ pending }))
-    expect(html).toContain(pending ? '正在读取提交' : '提交差异不可用')
+    if (pending) {
+      // Pending is exposed before the delayed skeleton mounts on the client.
+      expect(html).toContain('class="diff-review-content" aria-busy="true"')
+      expect(html).not.toContain('提交差异不可用')
+    } else {
+      expect(html).toContain('提交差异不可用')
+      expect(html).not.toContain('aria-busy="true"')
+    }
     expect(html).not.toContain('WORKING BRANCH BODY')
     expect(html).not.toContain('SECOND SAVED BODY')
     expect(html).not.toContain('diff-review-totals')

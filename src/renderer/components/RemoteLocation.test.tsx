@@ -88,7 +88,8 @@ describe('saved host projection', () => {
     list.mockRejectedValue(new Error('keychain unavailable'))
     await refreshDesktopConnections()
     const html = hosts()
-    expect(html).toContain('keychain unavailable')
+    expect(html).toContain('没能读取远程主机')
+    expect(html).not.toContain('keychain unavailable')
     expect(html).not.toContain(copy.noHostsHint)
   })
 

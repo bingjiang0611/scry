@@ -24,7 +24,7 @@ enum ConversationCopy {
   static let truncated = "输出已达上限，内容被截断"
   static let newTask = "新任务"
   static let settings = "设置"
-  static let startTitle = "开始一段新会话"
+  static let startTitle = "新会话"
   static let startDetail = "你发送的消息会在这里显示；Agent 的执行状态与输出从主机实时读取，不沿用其他会话。"
   static let stopTitle = "停止这次运行？"
   static let stop = "停止运行"
@@ -39,7 +39,8 @@ enum ConversationCopy {
   static let olderHistory = "正在读取更早历史…"
   static let loadOlderHistory = "加载更早的完整历史"
   static let olderHistoryHint = "仅读取更早轮次，不会裁剪当前历史"
-  static let failedHistory = "暂时无法读取会话"
+  static let failedHistory = "没能读取会话历史"
+  static let failedHistoryDraftKept = "草稿仍在此设备上。"
   static func failedHistoryDetail(_ reason: String) -> String { reason + "\n已输入的草稿会保留。" }
   static let errorDetails = "错误详情"
   static let retryHistory = "重新读取"
