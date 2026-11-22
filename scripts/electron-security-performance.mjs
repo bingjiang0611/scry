@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { verifyNativeModalExit } from './electron-security-modal-exit.mjs'
+import { verifyNativeModalExit, waitForNativeModalEntrance } from './electron-security-modal-exit.mjs'
 
 export async function exerciseProductionPerformance(smokeContext) {
   const { evaluate, cdp, workspace, secondWorkspace } = smokeContext
@@ -74,6 +74,7 @@ export async function exerciseProductionPerformance(smokeContext) {
       }))
     })()`)
 
+    await waitForNativeModalEntrance(cdp, evaluate, '.llm-perf-modal')
     const exit = await verifyNativeModalExit(cdp, evaluate, '.llm-perf-modal', '.sb-navitem[title="LLM 性能"]')
     console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal: { ...modal, exit } }))
     cdp.close()

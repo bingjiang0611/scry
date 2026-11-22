@@ -1,5 +1,22 @@
 import assert from 'node:assert/strict'
 
+export async function waitForNativeModalEntrance(cdp, evaluate, selector) {
+  // A real hidden App needs a compositor paint to start CSS animations.
+  // Let the entrance finish without seeking or changing animation timing.
+  await cdp.send('Page.captureScreenshot', { format: 'png' })
+  const settled = await evaluate(`(async () => {
+    const deadline = performance.now() + 5000;
+    while (performance.now() < deadline) {
+      const dialog = document.querySelector(${JSON.stringify(selector)});
+      const overlay = dialog?.closest('.modal-overlay');
+      if (overlay && [...dialog.getAnimations(), ...overlay.getAnimations()].every(animation => animation.playState === 'finished')) return true;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    return false;
+  })()`)
+  assert.equal(settled, true, `Modal entrance did not finish: ${selector}`)
+}
+
 export async function verifyNativeModalExit(cdp, evaluate, selector, trigger) {
   await evaluate(`{
     const node = document.querySelector(${JSON.stringify(selector)}).closest('.modal-overlay');

@@ -1,5 +1,5 @@
 import { exerciseSideChatApp } from './structure-side-chat-checks.mjs'
-import { verifyNativeModalExit } from './electron-security-modal-exit.mjs'
+import { verifyNativeModalExit, waitForNativeModalEntrance } from './electron-security-modal-exit.mjs'
 export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   const { mkdtempSync, writeFileSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
@@ -32,12 +32,6 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     const result = await cdp.send('Page.captureScreenshot', { format: 'png' })
     writeFileSync(join(captures, `${name}.png`), Buffer.from(result.data, 'base64'))
   }
-  const settleEntrance = async selector => {
-    // A real hidden App needs a compositor paint to start composited CSS animations.
-    // Do not seek/finish animations or change production timing for screenshots.
-    await cdp.send('Page.captureScreenshot', { format: 'png' })
-    await wait(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); return node && [...node.getAnimations(), ...node.closest('.modal-overlay').getAnimations()].every(a => a.playState === 'finished'); })()`)
-  }
   const panes = `document.getAnimations().filter(a => a.id === 'scry-pane')`
   const page = `document.getAnimations().find(a => a.id === 'scry-structure')`
   const idle = () => wait(`!${page} && ${panes}.length === 0`)
@@ -60,7 +54,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await click(`.theme-option:nth-child(${theme === 'dark' ? 1 : 2})`)
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
     check(await evaluate(`!${page} && window.nativeCaptureCalls === 0`), 'Theme was not immediate live DOM')
-    await settleEntrance('.settings-modal')
+    await waitForNativeModalEntrance(cdp, evaluate, '.settings-modal')
     await capture(`${theme}-settings`)
     closeTimes.push({ theme, modal: 'settings', ...await verifyNativeModalExit(cdp, evaluate, '.settings-modal', '.sb-settings') })
     for (const [title, selector, name] of [
@@ -72,7 +66,7 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
       await click(trigger)
       await wait(`document.querySelector('${selector}') != null`)
       check(await evaluate(`document.querySelector('${selector}').getAnimations().some(a => a.effect.getTiming().duration === 250)`), 'Modal entrance timing differs in the production App')
-      await settleEntrance(selector)
+      await waitForNativeModalEntrance(cdp, evaluate, selector)
       await capture(`${theme}-${name}`)
       closeTimes.push({ theme, modal: name, ...await verifyNativeModalExit(cdp, evaluate, selector, trigger) })
     }
