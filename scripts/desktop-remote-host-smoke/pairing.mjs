@@ -45,9 +45,17 @@ export async function pairDevice({ evaluate, transport, temp, userDataDir, works
   assert.deepEqual(info.desktop, {
     kind: 'info', protocol: RUN_PROTOCOL_VERSION, hostId: invitation.hostId, execution: 'canonical',
     directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2, managedWorktrees: 1, traceDelta: 1,
-    hostAdminNotices: 1,
+    hostAdminNotices: 1, subscribe: 1,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
+  const { subscribe: snapshot } = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
+    op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 0
+  })
+  assert.equal(snapshot.hostId, invitation.hostId)
+  assert.equal(snapshot.mode, 'snapshot')
+  assert.ok(typeof snapshot.logId === 'string' && snapshot.logId.length > 0)
+  assert.ok(snapshot.snapshot.sessions.rows.some(row => row.cwd === canonicalWorkspace && row.catalog?.nativeSessionId === 'desktop-remote-bootstrap'),
+    'The v2 subscription must read the imported, authorized session')
   const workspaceChoices = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'desktop', query: { kind: 'workspaceChoices', request: { cwd: canonicalWorkspace, kind: 'branches', query: '' } }
   })
@@ -93,5 +101,5 @@ export async function pairDevice({ evaluate, transport, temp, userDataDir, works
   assert.ok(projects.projects.some(project => project.path === canonicalCustom), 'selected project must be offered through the production catalog')
   assert.deepEqual(await evaluate('window.scry.activeRuns()'), [], 'selecting a directory must not start an Agent')
   assert.equal(existsSync(join(canonicalCustom, '.scry')), false, 'selection must not create a turn record')
-  return { invitation, identity, localGrant, deviceCertPEM, info, canonicalCustom }
+  return { invitation, identity, localGrant, deviceCertPEM, info, canonicalCustom, logId: snapshot.logId }
 }

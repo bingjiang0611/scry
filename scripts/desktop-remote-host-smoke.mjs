@@ -83,9 +83,9 @@ async function main() {
   assert.equal(boundary.inviteType, 'function')
 
   const paired = await pairDevice({ evaluate, transport, temp, userDataDir, workspace, canonicalWorkspace })
-  const { invitation, identity, localGrant, deviceCertPEM, info } = paired
+  const { invitation, identity, localGrant, deviceCertPEM, info, logId } = paired
   await verifyWorkbench({ transport, invitation, identity, deviceCertPEM, canonicalWorkspace, workspace, git })
-  const runs = await verifyRuns({ transport, evaluate, invitation, identity, deviceCertPEM, canonicalWorkspace, info, temp })
+  const runs = await verifyRuns({ transport, evaluate, invitation, identity, deviceCertPEM, canonicalWorkspace, info, logId, temp })
   await verifyUnknownReceipt({ transport, evaluate, submit: runs.submit, invitation, identity, deviceCertPEM, canonicalWorkspace })
   const { activeTrace } = await verifyQuestions({ transport, evaluate, submit: runs.submit, sessionAction: runs.sessionAction, invitation, identity, deviceCertPEM, context: runs.context })
   const { records, scryEntries } = await verifyFailureAndRecords({ transport, submit: runs.submit, invitation, identity, deviceCertPEM, normalSession: runs.normalSession, workspace })
@@ -93,6 +93,7 @@ async function main() {
 
   console.log(JSON.stringify({
     historyAuthority: { unknownSessionRejected: true, legacyProfileUnavailable: true },
+    v2Subscription: { advertised: true, importedAuthorizedSession: true, sameLogDuplicate: true, replacedLogRejected: true },
     sessionActions: { hostStoreRename: true, pinUnpin: true, archiveRestore: true, archiveStopsActiveRun: true, unauthorizedWorkspaceDenied: true, revokedOwnerDenied: true, mobileArchivesRemainHidden: true },
     workbench: { realFileWrite: true, staleRevisionDenied: true, createRename: true, realGitStageCommit: true, realPtyCwdAndInput: true, cumulativeAckDuplicateSafe: true, detachedLargeOutputContinues: true, recordingCatchUp: true, staleWriterDenied: true },
     directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
