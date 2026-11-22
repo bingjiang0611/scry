@@ -21,6 +21,7 @@ export interface SubscribePumpDeps {
   retry: { initialMs: number; maxMs: number }
   sleep: (ms: number) => Promise<void>
   signal: AbortSignal
+  detailFocus?: () => { sessionKey: string | null; signal: AbortSignal }
   setLive: (live: boolean) => void
   onWarn?: (message: string, detail?: unknown) => void
   onSnapshot?: (snapshot: SubscribeSnapshot, meta: { isReset: boolean; logIdChanged: boolean }) => Promise<void> | void
@@ -44,21 +45,26 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
   let lastLogId: string | undefined
   let pause = deps.retry.initialMs
   let missed = false
+  let subscribedFocus: AbortSignal | undefined
 
   while (!deps.signal.aborted) {
+    const focus = deps.detailFocus?.()
+    const session = focus?.sessionKey ? { sessionKey: focus.sessionKey } : undefined
     let reply: SubscribeReply
     try {
       reply = await deps.subscribe(
         {
-          views: ['activeRuns', 'sessions'],
+          views: session ? ['activeRuns', 'sessions', 'detail'] : ['activeRuns', 'sessions'],
+          ...(session ? { session, detailWatch: focus?.signal === subscribedFocus && known ? 'continue' : 'open' } : {}),
           ...(known ? { known } : {}),
           waitMs: deps.waitMs,
           eventSet: 1
         },
-        deps.signal
+        focus ? AbortSignal.any([deps.signal, focus.signal]) : deps.signal
       )
     } catch (error) {
       if (deps.signal.aborted) return
+      if (focus?.signal.aborted) continue
       if (error instanceof DaemonRunError && error.reason === 'daemon_run_control_unavailable') {
         // The daemon restarted without SCRY_ORCHESTRATION=on. The App chose its run
         // mode at connect, so it must be restarted to return to the watch path.
@@ -77,6 +83,7 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     }
 
     if (deps.signal.aborted) return
+    subscribedFocus = focus?.signal
     let unknownEvents = false
     pause = deps.retry.initialMs
     deps.setLive(true)

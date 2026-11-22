@@ -9,6 +9,7 @@ interface ScanPoll {
   nextAt: number
   running: boolean
   timer?: ReturnType<typeof setTimeout>
+  retire?: ReturnType<typeof setTimeout>
 }
 
 const CATALOG_INTERVAL_MS = 30_000
@@ -35,10 +36,16 @@ export class CatalogSubscriptionScans {
       poll = { readers: 0, nextAt: Date.now() + DETAIL_INTERVAL_MS, running: false }
       this.#details.set(sessionKey, poll)
     }
+    clearTimeout(poll.retire)
+    const state = poll
     return this.#attach(
       poll, DETAIL_INTERVAL_MS, opening,
       (first) => this.#work.scanDetail(sessionKey, first),
-      () => { this.#details.delete(sessionKey) }
+      // Preserve the deadline across adjacent long polls, without scanning a closed view.
+      () => {
+        state.retire = setTimeout(() => this.#details.delete(sessionKey), DETAIL_INTERVAL_MS)
+        state.retire.unref()
+      }
     )
   }
 

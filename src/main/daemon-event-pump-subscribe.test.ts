@@ -1,10 +1,60 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonEventPump } from './daemon-event-pump'
+import { runSubscribeLoop } from './daemon-event-pump-subscribe'
 import { applySubscribeSnapshotToRuntime, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
 import type { RunCursor } from './daemon-run-cursor'
 
 describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
+  it('opens and closes the displayed detail without resetting the catalog cursor', async () => {
+    const requests: SubscribeRequest[] = []
+    const shutdown = new AbortController()
+    let focus = new AbortController()
+    let sessionKey: string | null = null
+    const setLive = vi.fn()
+    const loop = runSubscribeLoop({
+      detailFocus: () => ({ sessionKey, signal: focus.signal }),
+      signal: shutdown.signal,
+      retry: { initialMs: 1, maxMs: 1 },
+      waitMs: 1000,
+      sleep: vi.fn(async () => undefined),
+      setLive,
+      send: vi.fn(),
+      subscribe: async (req, signal) => {
+        requests.push(req)
+        if (requests.length === 1) {
+          return { hostId: 'h1', logId: 'l1', seq: 9, mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } }
+        }
+        return await new Promise((_, reject) => {
+          signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+        })
+      }
+    })
+    const changeFocus = (key: string | null) => {
+      const prior = focus
+      focus = new AbortController()
+      sessionKey = key
+      prior.abort()
+    }
+    try {
+      await vi.waitFor(() => expect(requests).toHaveLength(2))
+      changeFocus('displayed-session')
+      await vi.waitFor(() => expect(requests).toHaveLength(3))
+      expect(requests[2]).toMatchObject({
+        views: ['activeRuns', 'sessions', 'detail'], session: { sessionKey: 'displayed-session' },
+        detailWatch: 'open', known: { hostId: 'h1', logId: 'l1', seq: 9 }
+      })
+      changeFocus(null)
+      await vi.waitFor(() => expect(requests).toHaveLength(4))
+      expect(requests[3]).toMatchObject({ views: ['activeRuns', 'sessions'], known: { hostId: 'h1', logId: 'l1', seq: 9 } })
+      expect(requests[3]).not.toHaveProperty('session')
+      expect(setLive).not.toHaveBeenCalledWith(false)
+    } finally {
+      shutdown.abort()
+      await loop
+    }
+  })
+
   it('drops known cursor and pulls a fresh snapshot on an unknown event type', async () => {
     const requests: SubscribeRequest[] = []
     const replies: SubscribeReply[] = [

@@ -44,6 +44,8 @@ export interface SubscribeRequest {
   session?: SubscribeSessionRef
   known?: SubscribeKnownCursor
   sessionsCursor?: string
+  /** Local App detail already displays its history page. Watch the focused source. */
+  detailWatch?: 'open' | 'continue'
   waitMs: number
   eventSet?: number
   chunk?: { id: string; offset: number }

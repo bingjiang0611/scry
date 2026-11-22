@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SessionSaveState } from './session-save-state'
 import { AppShell } from './app-shell'
 import type { RemoteTarget } from './app-types'
@@ -50,6 +50,13 @@ export function useAppInteraction(context: AppInteractionContext) {
     markRunFinished, setWorkspaceRefreshKey, selectSessionId, loadProjects, sessionLoading, activeSessionId, draftKey
   })
   const { session, steerEvidenceByMessageId, steerCapability } = sessionRuntime
+  const detailKey = view === 'chat' && session.historyWindow?.sessionId === activeSessionId
+    ? session.historyWindow?.projectionKey : undefined
+  useEffect(() => {
+    if (!detailKey) return
+    void window.scry.watchSessionDetail?.(detailKey)
+    return () => { void window.scry.watchSessionDetail?.(null) }
+  }, [detailKey])
 
   const sidebarPane = useResizablePane({
     // The evidence-system shell deliberately resets the old 256px default once;

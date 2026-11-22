@@ -39,6 +39,7 @@ import { BACKGROUND_SERVICE_LOCAL_OPS } from './daemon-local-ops/background-serv
 export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   'agent:clipboardImage', 'agent:focusRun', 'agent:revealProject', 'agent:setCwd',
   'agent:traceAck', 'agent:traceResynchronized', 'agent:unreadSessions', 'agent:viewSessions',
+  'agent:watchSessionDetail',
   'app:copyText', 'app:performanceDiagnosticsEnabled', 'app:rendererRestart',
   // The managed conversation on screen: dock-badge view state, which main renders.
   'conversation:setViewed',

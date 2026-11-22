@@ -270,6 +270,7 @@ const api = {
   start: (request: AgentStartRequest): Promise<AgentStartResult & { commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
     ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
+  watchSessionDetail: (key: string | null): Promise<boolean> => ipcRenderer.invoke('agent:watchSessionDetail', key),
   unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
   viewSessions: (request: { viewId: string; main: boolean; sessionKeys: string[] }): Promise<boolean> => ipcRenderer.invoke('agent:viewSessions', request),
   /** 权威事件快照（忽略 done）：live trace 降级后用它重新对齐，包含终态被跳过的事件。 */

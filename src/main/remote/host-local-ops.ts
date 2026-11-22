@@ -77,7 +77,7 @@ export async function handleAppEvents(events: LocalEndpointHandlers['events'], r
   return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
 }
 
-const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet', 'chunk']
+const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'detailWatch', 'waitMs', 'eventSet', 'chunk']
 
 /** P4-3 local orchestration subscribe; absent on network endpoint and in off/shadow modes. */
 export async function handleSubscribe(
@@ -88,7 +88,7 @@ export async function handleSubscribe(
 ): Promise<Record<string, unknown>> {
   if (!subscribe) return { error: 'unsupported_op' }
   if (Object.keys(request).some((key) => !SUBSCRIBE_KEYS.includes(key))) return { error: 'invalid_request' }
-  const { views, session, known, sessionsCursor, waitMs, eventSet, chunk } = request
+  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk } = request
   if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
       !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
     return { error: 'invalid_request' }
@@ -112,6 +112,8 @@ export async function handleSubscribe(
     }
   }
   if (views.includes('detail') && !parsedSession) return { error: 'invalid_request' }
+  if (detailWatch !== undefined && (!views.includes('detail') || chunk !== undefined ||
+      (detailWatch !== 'open' && detailWatch !== 'continue'))) return { error: 'invalid_request' }
   let parsedChunk: SubscribeRequest['chunk']
   if (chunk !== undefined) {
     if (!views.includes('detail') || !chunk || typeof chunk !== 'object' || Array.isArray(chunk)) return { error: 'invalid_request' }
@@ -139,6 +141,7 @@ export async function handleSubscribe(
     ...(parsedSession ? { session: parsedSession } : {}),
     ...(parsedKnown ? { known: parsedKnown } : {}),
     ...(parsedChunk ? { chunk: parsedChunk } : {}),
+    ...(detailWatch ? { detailWatch } : {}),
     ...(sessionsCursor !== undefined ? { sessionsCursor: sessionsCursor as string } : {}),
     ...(eventSet !== undefined ? { eventSet: eventSet as number } : {})
   }, signal)

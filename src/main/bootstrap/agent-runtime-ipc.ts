@@ -46,6 +46,18 @@ export function registerAgentRuntimeHandlers({
 
   // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
   handleTrusted('agent:activeRun', async (): Promise<ActiveRun | null> => await daemon.activeRun())
+  let detailOwner: IpcMainInvokeEvent['sender'] | undefined
+  const clearDetailOwner = () => { detailOwner = undefined; daemon.watchDetail?.(null) }
+  handleTrusted('agent:watchSessionDetail', (event, key: unknown): boolean => {
+    if (key !== null && (typeof key !== 'string' || !key || key.length > 4096 || key.includes('\0'))) {
+      throw new Error('invalid_session_detail')
+    }
+    if (event.sender.id !== getWindow()?.webContents.id || !daemon.watchDetail?.(key)) return false
+    detailOwner?.removeListener('destroyed', clearDetailOwner)
+    detailOwner = key === null ? undefined : event.sender
+    detailOwner?.once('destroyed', clearDetailOwner)
+    return true
+  })
   handleTrusted('agent:unreadSessions', () => unreadSessionsAnswerWhenKnown(dockBadge, true))
   // A unified conversation shows one native session per Provider binding; none of its
   // runs is the focused run, so the view names them. Keys only: no session is read here.

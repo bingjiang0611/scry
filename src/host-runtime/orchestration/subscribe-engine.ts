@@ -133,8 +133,9 @@ export class SubscribeEngine {
         const opening = !request.known || request.known.hostId !== this.#hostId() ||
           request.known.logId !== this.#sink.getMeta('log_id')
         if (views.has('sessions')) detachCatalog = this.#scans.sessions(opening && !request.sessionsCursor)
-        if (views.has('detail') && request.session && this.#detailSession(this.#grantScope(peer), request.session)) {
-          detachDetail = this.#scans.detail(request.session.sessionKey, opening)
+        const scope = this.#grantScope(peer)
+        if (views.has('detail') && request.session && this.#detailSession(scope, request.session)) {
+          detachDetail = this.#scans.detail(request.session.sessionKey, opening || (scope === 'local' && request.detailWatch === 'open'))
         }
       }
 
@@ -306,7 +307,7 @@ export class SubscribeEngine {
     if (views.has('activeRuns')) {
       snapshot.activeRuns = { rows: this.#readActiveRunsSnapshot(scope) }
     }
-    if (views.has('detail') && request.session) {
+    if (views.has('detail') && request.session && !(scope === 'local' && request.detailWatch)) {
       snapshot.detail = this.#readDetailSnapshot(this.#detailSession(scope, request.session))
     }
     const hints = this.#hub.drainHints(peer, true, !request.known)

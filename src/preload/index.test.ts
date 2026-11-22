@@ -113,6 +113,7 @@ const invokeChannels = {
   activeRun: 'agent:activeRun',
   unreadSessions: 'agent:unreadSessions',
   viewSessions: 'agent:viewSessions',
+  watchSessionDetail: 'agent:watchSessionDetail',
   activeRuns: 'agent:activeRuns',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',

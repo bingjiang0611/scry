@@ -3,7 +3,7 @@ import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { HostAdminNotice } from '../shared/host-admin'
 import type { SubscribeEventItem, SubscribeHint, SubscribeReply, SubscribeRequest, SubscribeSnapshot } from '../shared/orchestration-subscribe'
 import { DaemonRunError } from './daemon-run-transport'
-import { runSubscribeLoop } from './daemon-event-pump-subscribe'
+import { runSubscribeLoop, type SubscribePumpDeps } from './daemon-event-pump-subscribe'
 
 // P3f: the App side of the daemon's event feed. One long poll per daemon connection, on
 // its own lane; every notice reaches the window exactly as the in-process App sent it.
@@ -35,6 +35,7 @@ export interface DaemonEventPumpDeps {
   send: (channel: string, payload: unknown) => void
   /** P4-3: switch to `subscribe` op ONLY when daemon reports subscribe=1. */
   subscribeMode?: boolean
+  detailFocus?: SubscribePumpDeps['detailFocus']
   waitMs?: number
   retry?: { initialMs: number; maxMs: number }
   sleep?: (ms: number) => Promise<void>
@@ -98,6 +99,7 @@ export class DaemonEventPump {
           retry,
           sleep,
           signal: this.#abort.signal,
+          detailFocus: this.#deps.detailFocus,
           setLive: (live) => this.#setLive(live),
           ...(this.#deps.onWarn ? { onWarn: this.#deps.onWarn } : {}),
           ...(this.#deps.onSnapshot ? { onSnapshot: this.#deps.onSnapshot } : {}),

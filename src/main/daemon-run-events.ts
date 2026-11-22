@@ -39,9 +39,21 @@ export interface DaemonRunEventsDeps {
   onHostAdmin?: (notice: HostAdminNotice) => void
 }
 
-export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): void } {
+export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { watchDetail(key: string | null): boolean; dispose(): void } {
   const { transport, runtime, dockBadge } = deps
   const useSubscribe = deps.subscribeMode === true && typeof transport.subscribe === 'function'
+  let watchedSession: string | null = null
+  let watchAbort = new AbortController()
+  const watchDetail = (key: string | null): boolean => {
+    if (!useSubscribe) return false
+    if (key !== watchedSession) {
+      const previous = watchAbort
+      watchedSession = key
+      watchAbort = new AbortController()
+      previous.abort()
+    }
+    return true
+  }
   const warn = deps.onWarn ? { onWarn: deps.onWarn } : {}
   const discovery = useSubscribe ? undefined : new DaemonRunDiscovery({
     liveRuns: () => transport.liveRuns({ waitMs: 0 }),
@@ -81,6 +93,7 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     source: transport, send: deps.send, ...warn, ...(deps.waitMs !== undefined ? { waitMs: deps.waitMs } : {}),
     ...(useSubscribe ? {
       subscribeMode: true,
+      detailFocus: () => ({ sessionKey: watchedSession, signal: watchAbort.signal }),
       onSnapshot: async (snapshot) => {
         if (snapshot.activeRuns) await runtime.applySubscribeSnapshot?.(snapshot.activeRuns.rows)
       },
@@ -115,5 +128,5 @@ export function startDaemonRunEvents(deps: DaemonRunEventsDeps): { dispose(): vo
     void transport.attentionViewed(sessionKey).catch((error) => deps.onWarn?.('daemon attention viewed failed', error))
   })
   pump.start()
-  return { dispose: () => { if (useSubscribe) runtime.setOnSessionBound?.(undefined); pump.dispose(); terminals.dispose(); dockBadge?.forgetDaemon() } }
+  return { watchDetail, dispose: () => { if (useSubscribe) runtime.setOnSessionBound?.(undefined); pump.dispose(); terminals.dispose(); dockBadge?.forgetDaemon() } }
 }

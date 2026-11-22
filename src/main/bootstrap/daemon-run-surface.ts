@@ -27,6 +27,7 @@ export interface DaemonRunSurfaceDeps {
   // (run-startup.ts) so the window selects its project and session; a daemon run is
   // announced the same way from here.
   send?: (channel: string, payload: unknown) => void
+  watchDetail?: (key: string | null) => boolean
 }
 
 export interface DaemonRunSurface {
@@ -39,6 +40,7 @@ export interface DaemonRunSurface {
   activeRuns(): Promise<ActiveRun[]>
   focusedRunSnapshot(): Promise<ActiveRun | null>
   focusRun(runId: string | null): Promise<boolean>
+  watchDetail?: (key: string | null) => boolean
   stop(runId: string): Promise<boolean>
   answerQuestion(response: AgentQuestionResponse): Promise<boolean>
   ack(receipt: TraceBatchReceipt): Promise<boolean>
@@ -154,6 +156,7 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     }
   }
   return {
+    watchDetail: deps.watchDetail,
     async start(payload, intentId) {
       const context = runContext(payload, deps.currentCwd())
       if (!context) throw new Error('daemon_run_workspace_required')
