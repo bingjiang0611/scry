@@ -458,6 +458,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           cwd: p.cwd,
           title: p.title ?? null,
           ...(p.catalog ? { catalog: p.catalog } : {}),
+          ...(p.display ? { display: p.display } : {}),
           ...(p.transcript ? { transcript: p.transcript } : {})
         },
         evidence: p.evidence ?? null

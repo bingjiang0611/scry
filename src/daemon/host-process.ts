@@ -34,6 +34,7 @@ import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
 import { createAuthorityDetailReader } from './orchestration-authority-subscribe'
 import { createDaemonCatalogScans } from './orchestration-catalog-scan'
+import { createOrchestrationCatalogAccess } from './orchestration-catalog-access'
 import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
 import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
@@ -134,7 +135,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       ? conversationSend.startAppRun(request, { managedConversation: startOptions.managedConversation })
       : Promise.reject(new Error('daemon_catalog_start_requires_conversation')),
     homeDir: workspace.homeDir,
-    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    projection: createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink)
   })
   loadSessions = () => catalog.appSessionStore().load()
 

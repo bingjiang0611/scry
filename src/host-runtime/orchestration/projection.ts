@@ -313,6 +313,21 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.actor,
         p.catalog ? canonicalJson(p.catalog) : null
       )
+      if (p.display) {
+        const display = p.display as Record<string, unknown>
+        db.prepare(
+          `UPDATE orch_p_session SET title = ?, pinned_at = ?, archived_at = ?,
+             last_run_id = ?, last_run_outcome = ?
+           WHERE session_key = ?`
+        ).run(
+          display.title,
+          display.pinnedAt,
+          display.archivedAt,
+          display.lastRunId,
+          display.lastRunOutcome ? canonicalJson(display.lastRunOutcome) : null,
+          p.sessionKey
+        )
+      }
       return
     }
 

@@ -125,7 +125,10 @@ export function mergeProjectMetas(records: ProjectRecord[], sessionProjects: Pro
   )
 }
 
-export function createAppSessionStore(userDataDir: string) {
+export function createAppSessionStore(
+  userDataDir: string,
+  beforeMirrorWrite?: (previous: readonly AppSession[], next: readonly AppSession[]) => void
+) {
   const file = join(userDataDir, 'app-sessions.json')
   let cached: { sessions: AppSession[]; primaryKey: string } | undefined
   let lastHealth: CatalogHealth = { status: 'ready', source: 'empty' }
@@ -162,6 +165,7 @@ export function createAppSessionStore(userDataDir: string) {
     // Keep activity timestamps meaningful. Only exact normalized content is a
     // no-op; later notifications with a different timestamp still persist.
     if (lastHealth.source === 'primary' && JSON.stringify(normalize(list)) === JSON.stringify(current)) return
+    beforeMirrorWrite?.(current, normalize(list))
     writeJsonRecoverable(file, list, isAppSessionArray, lastHealth.status === 'ready' ? current : undefined)
     cached = { sessions: normalize(list), primaryKey: primaryKey() }
     lastHealth = { status: 'ready', source: 'primary' }
@@ -313,7 +317,8 @@ export function createAppSessionStore(userDataDir: string) {
   }
 
   // 已存档会话从侧边栏移出，只在设置的「已存档会话」里出现。
-  const listProjects = (): ProjectMeta[] => groupByCwd(load().filter((session) => !session.archivedAt), (session) => session.ts)
+  const listProjects = (sessions = load()): ProjectMeta[] =>
+    groupByCwd(sessions.filter((session) => !session.archivedAt), (session) => session.ts)
 
   const listArchivedProjects = (): ProjectMeta[] =>
     groupByCwd(load().filter((session) => session.archivedAt), (session) => session.archivedAt ?? session.ts)

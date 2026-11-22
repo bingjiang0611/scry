@@ -161,6 +161,13 @@ export interface SessionDiscoverPayload {
   title?: string | null
   catalog?: SessionCatalogMetadata
   transcript?: Evidence<string>
+  display?: {
+    title: string | null
+    pinnedAt: number | null
+    archivedAt: number | null
+    lastRunId: string | null
+    lastRunOutcome: Evidence<string> | null
+  }
   evidence?: string[]
 }
 

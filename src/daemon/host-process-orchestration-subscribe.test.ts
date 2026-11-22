@@ -4,6 +4,7 @@ import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { upsertTraceArchiveTurn } from '../main/transcript-archive'
+import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
@@ -48,6 +49,18 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
           }
         }
       })
+      const payload = { sessionKey: sessionId, title: '来自投影的标题' }
+      expect(daemon.host.orchestrationAuthority?.sink.execute({
+        type: 'session.rename', commandId: 'rename-projected-session', scope: 'system', actor: 'system',
+        at: Date.now(), payload, payloadSha256: sha256Hex(canonicalJson(payload))
+      }).kind).toBe('accepted')
+      const sidebar = await daemon.localOp('projectStore', 'listProjects', [])
+      expect(sidebar.result).toContainEqual(expect.objectContaining({
+        cwd,
+        sessions: expect.arrayContaining([expect.objectContaining({
+          externalSessionId: sessionId, preview: '来自投影的标题'
+        })])
+      }))
     } finally {
       await daemon.dispose()
     }
