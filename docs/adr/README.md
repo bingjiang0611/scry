@@ -29,6 +29,7 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [025: Index recovery candidates without making the index authoritative](025-recorder-recovery-attention-index.md)
 - [026: Keep canonical records and sequence allocation independent of projections](026-recorder-record-store-durability.md)
 - [027: Advance notification ACK only across proven delivery or recorded absence](027-recorder-notification-ack.md)
+- [028: Retain hooks before applying them and replay at least once](028-recorder-inbox-replay.md)
 
 ## Source comment ratchet
 

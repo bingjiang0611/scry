@@ -27,7 +27,6 @@ export async function applyHookLocked(
   const taskNotification = START_EVENTS.has(input.event) && isTaskNotificationPrompt(input.payload)
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
   let open = await readJson<OpenTurnState>(openPath(root))
-  // Set when this start had to be persisted to the inbox before a fallible seal of the open turn.
   let supersededStart: string | undefined
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)
   if (input.provider === 'qoder' && input.event === 'Stop' &&
@@ -35,12 +34,8 @@ export async function applyHookLocked(
     return { status: 'duplicate' as const, reason: 'late Qoder terminal matches the last completed assistant' }
   }
   if (taskNotification && open) return recordTaskNotificationWake(enablement, root, open, input, incomingProviderTurnId)
-  // With the previous segment already sealed, this wake is new Agent work: it becomes a segment of
-  // its own, linked to the turn that asked, not a phantom turn with a prompt nobody sent.
   if (taskNotification) return openContinuationSegment({ enablement, input, sessionId })
   if (START_EVENTS.has(input.event) && subagentScopedPayload(input.payload)) {
-    // A sub-agent prompt is not a new user turn: superseding the open parent turn here would end
-    // it early and orphan every later parent event.
     if (!open) return { status: 'ignored', reason: 'sub-agent prompt has no open parent turn' }
     await storeLifecycleEvent(enablement, open, input.event, input.payload)
     return { status: 'recorded', reason: 'sub-agent turn attributed to the open parent turn' }
@@ -48,9 +43,6 @@ export async function applyHookLocked(
   if (START_EVENTS.has(input.event)) {
     const providerTurnId = incomingProviderTurnId
     const startFingerprint = startFingerprintOf(input.provider, input.event, input.payload)
-    // Qoder can emit an old ID-less Stop after a new native prompt id exists. Keep the
-    // stale-terminal fence armed for that provider even when this start has an id; the
-    // identified Stop path still bypasses the fence and can prove the new turn directly.
     let protectNextStart = input.managed !== true && STALE_TERMINAL_PROVIDERS.has(input.provider) &&
       (!providerTurnId || input.provider === 'qoder')
     const incomingManagedRunId = stringAt(input.payload, 'scry_managed_run_id')
@@ -99,23 +91,15 @@ export async function applyHookLocked(
           !open.providerTurnId &&
           !providerTurnId
         open.status = 'closing'
-        // The new prompt only proves this turn stopped converging. Its timestamp is this turn's
-        // successor, not its end, so it may set neither terminalAt nor completedAt.
         open.closingAt ??= timestampOf(input.payload)
         open.endReason ??= fallback === 'interrupted' ? 'superseded_by_next_turn' : 'provider_terminal'
         await writeJsonAtomic(openPath(root), open, { sync: false })
-        // Read the closing turn's evidence *after* this prompt is durable. Finalizing the previous
-        // turn reads a Provider file, and that read can fail (a denied `open`, a rotated file). A
-        // lost prompt is unrecoverable, a degraded previous turn is not, so the prompt is queued
-        // first and the queued copy is dropped once it is applied inline below.
         supersededStart = await queueHook(enablement, input, sessionId, new Date().toISOString(), {
           reason: 'start of a turn that supersedes an open turn',
-          // Applied below and removed; only a surviving copy belongs in the log.
           announce: false
         })
         try {
           const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
-          // A pending seal keeps the open turn; the queued start replays when it can be closed.
           if (finalized.status === 'pending') return finalized
         } catch (error) {
           await sealUnreadableTurn(enablement, open, input, fallback, error)
@@ -134,14 +118,11 @@ export async function applyHookLocked(
       undefined, undefined,
       input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
     )
-    // The prompt is now part of the published open turn; the queued copy would replay as a duplicate.
     if (supersededStart) await rm(supersededStart, { force: true })
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
     return { status: 'started' as const }
   }
   if (!open) {
-    // Shutdown between turns is normal. A Stop-hook continuation also does not prove a missing
-    // start; only an actual first terminal can provide that evidence. Keep open-turn handling below.
     if (SESSION_END_EVENTS.has(input.event) || (
       input.event === 'Stop' && STOP_HOOK_ACTIVE_PROVIDERS.has(input.provider) && input.payload.stop_hook_active === true
     )) return { status: 'duplicate' as const }
@@ -186,8 +167,6 @@ export async function applyHookLocked(
     if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
       return { status: 'duplicate' as const }
     }
-    // 子 agent 线程复用父会话 id，但带自己的 turn_id（Codex 实测：agent_id/agent_type 同时出现）。
-    // 这类事件属于当前打开的顶层轮，不能丢成 orphan；但它的终态只结束子 agent，不结束父轮。
     if (subagentScopedPayload(input.payload)) {
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
       return { status: 'recorded' as const, reason: 'sub-agent turn attributed to the open parent turn' }
@@ -199,8 +178,6 @@ export async function applyHookLocked(
   if (open.deferredTerminalEventId) {
     const identifiedForOpen = !!incomingProviderTurnId && incomingProviderTurnId === open.providerTurnId
     if (endEvent && !sessionEndEvent && !identifiedForOpen) {
-      // Another Stop in this segment restarts the silence window: a burst that keeps stopping and
-      // waking stays one segment.
       await refreshSealWindow(root, open)
       return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
     }
@@ -222,7 +199,6 @@ export async function applyHookLocked(
     delete open.deferredTerminalAt
     delete open.deferredTerminalEventId
     delete open.terminalDiffs
-    // The chain is dropped with the hold: this turn keeps its own baseline.
     for (const { capture } of open.captures) resumeAfterStorage(capture)
     delete open.frozenDiffs
     delete open.terminalIdentityConfirmedBySessionEnd
@@ -230,8 +206,6 @@ export async function applyHookLocked(
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
-  // Stale-terminal protection weighs one terminal against a possibly newer one. A session end has
-  // no such competitor: deferring it would leave the turn open for the next prompt to close.
   if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
     return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
   }
@@ -242,8 +216,6 @@ export async function applyHookLocked(
       return holdSeal(enablement, root, open, input, 'stale_terminal', terminalAt)
     }
   }
-  // A Provider that continues this turn after its Stop must not publish while its own background
-  // work is unreported: the wake's rows belong to this same burst.
   if (endEvent && !sessionEndEvent) {
     const held = await holdStopForBackgroundWork({
       enablement, input, sessionId, open, terminalAt: explicitTerminalAt ?? timestampOf(input.payload)
@@ -255,7 +227,6 @@ export async function applyHookLocked(
   }
   await storeLifecycleEvent(enablement, open, input.event, input.payload)
   if (!endEvent) {
-    // Activity inside a held segment: the silence window measures quiet, not the first Stop.
     await refreshSealWindow(root, open)
     return { status: 'recorded' as const }
   }
@@ -265,20 +236,12 @@ export async function applyHookLocked(
   open.terminalAt = terminalAt
   open.terminalAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
   open.endReason ??= sessionEndEvent ? 'session_end' : 'provider_terminal'
-  // A session end is not this turn finishing: only the Provider's own terminal event makes a
-  // superseding prompt publish the turn as completed, at the time that event reported.
   if (!sessionEndEvent) {
     open.stopObservedAt = terminalAt
     open.stopObservedAtSource = open.terminalAtSource
   }
-  // A session/process end is not a completion, and it fires while the Provider is shutting down
-  // under a tight hook budget. Pin the boundary and verdict durably here, then let recovery do
-  // transcript parsing and Git diff work: the end time is already fixed, so deferring cannot
-  // stretch it, and a killed hook leaves a closing turn that recovery still finalizes.
   if (sessionEndEvent) {
     open.terminalFallbackStatus ??= 'interrupted'
-    // The session end is what lets this turn close on the evidence it has; a separate field keeps an
-    // earlier terminal's verdict intact.
     open.sessionEndedAt ??= timestampOf(input.payload)
   }
   await writeJsonAtomic(openPath(root), open)
@@ -299,15 +262,6 @@ export function isLockTimeout(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ELOCKTIMEOUT'
 }
 
-/**
- * Publish the open turn that a new prompt supersedes even though its evidence could not be read.
- *
- * Losing the previous turn's transcript must not cost the incoming turn: the record is sealed from
- * the lifecycle evidence already stored for it, every section is marked partial with the read
- * failure as the reason, and the turn keeps its own generation so the new turn's tool calls can
- * never be attributed to it. An unsealed failure here is not fatal either — the caller opens the new
- * turn from the prompt it already persisted.
- */
 async function sealUnreadableTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   open: OpenTurnState,
@@ -327,7 +281,6 @@ async function sealUnreadableTurn(
       transcriptUnavailable: reason
     })
   } catch (sealError) {
-    // The turn stays `closing`; recovery retries it, and the incoming prompt still opens below.
     await appendRotatingLog(
       join(enablement.dataRoot, 'logs', 'recorder.log'),
       `${new Date().toISOString()} ERROR ${input.provider} ${open.sessionId} generation ${open.generation}: sealing after a read failure also failed: ${describeErrorForLog(sealError)}`
@@ -335,11 +288,6 @@ async function sealUnreadableTurn(
   }
 }
 
-/**
- * Apply a queued session-capture claim. The caller already holds the session lock, so the claim's own
- * recording must not take it again. Loaded lazily: the capture module reads its recorder state from
- * the same graph that replays this inbox.
- */
 async function applyQueuedCapture(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   entry: QueuedCaptureCommand
@@ -377,11 +325,6 @@ async function applyQueuedCapture(
   })
 }
 
-/**
- * Apply queued hooks in arrival order. Caller must hold the session lock. Delivery is
- * at-least-once: a crash between apply and unlink replays the hook, which the lifecycle
- * event ids, start fingerprints and committed-turn checks already absorb.
- */
 export async function replayQueuedHooks(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
@@ -401,21 +344,18 @@ export async function replayQueuedHooks(
     `${new Date().toISOString()} WARN inbox ${provider}/${sessionKey}/${name}: ${error instanceof Error ? error.message : String(error)}`
   ).catch(() => undefined)
   let replayed = 0
-  // Each pass is arrival-ordered. An isolated older failure cannot block later arrivals; a retry
-  // can therefore execute after them. Lifecycle deduplication, not exactly-once delivery, applies.
   for (const entry of await recorderInboxEntries(root, includeFailed)) {
     let attempts: number
     try {
       attempts = (await readInboxFailure(entry))?.attempts ?? 0
     } catch (error) {
-      // Do not overwrite an unreadable attempt counter or block the remaining files.
       await warn(entry.name, error)
       continue
     }
     if (attempts >= INBOX_MAX_ATTEMPTS) continue
     try {
       const queued = await readInboxJson<QueuedHook | QueuedCaptureCommand>(entry.path)
-      if (queued === null) continue // ENOENT only: another completed cleanup, not a lost event.
+      if (queued === null) continue
       if (queued.schemaVersion !== 1 || queued.provider !== provider ||
         typeof queued.sessionId !== 'string' || safeKey(queued.sessionId) !== sessionKey ||
         (expectedSessionId !== undefined && queued.sessionId !== expectedSessionId) ||
@@ -436,8 +376,6 @@ export async function replayQueuedHooks(
         if (!validQueuedCapture(queued, provider)) {
           throw new Error(`invalid queued recorder hook: ${entry.name}`)
         }
-        // A capture event may be queued before the claim that publishes its state, so the context is
-        // resolved from the state at apply time instead of from the entry.
         const state = queued.captureMode && !queued.capture
           ? await readCaptureState(enablement.dataRoot, provider, queued.sessionId)
           : null
@@ -445,11 +383,7 @@ export async function replayQueuedHooks(
         if (queued.captureMode && !capture) {
           throw new Error(`queued capture event has no open capture: ${entry.name}`)
         }
-        // Mirror `applySessionCaptureHook` and `handleRecorderHook` pre-filters so an external
-        // writer that publishes raw host payloads directly to the inbox cannot bypass stop fences,
-        // synthetic/title filters or Codex subagent tagging.
         if (state?.stopRequestedAt && START_EVENT_NAMES.has(queued.event)) {
-          // A new prompt arriving after `capture stop` is intentionally not recorded.
         } else {
           let payload = queued.managed
             ? queued.payload
@@ -458,7 +392,6 @@ export async function replayQueuedHooks(
             (provider === 'claude' || BACKGROUND_WAKE_PROVIDERS.has(provider)) &&
             isTaskNotificationPrompt(payload)
           if (isSynthetic(payload) && !taskNotification) {
-            // Synthetic/meta prompts are ignored identically to live hooks.
           } else if (provider === 'codex' && START_EVENTS.has(queued.event) && isCodexInternalPrompt(payload)) {
             const turnId = providerTurnIdOf(payload, provider)
             if (turnId) {
@@ -496,13 +429,11 @@ export async function replayQueuedHooks(
           await recordError(enablement.dataRoot, `inbox retries exhausted ${provider}/${sessionKey}/${entry.name}: ${error instanceof Error ? error.message : String(error)}`)
         }
       } catch (isolationError) {
-        // The source remains in place if it cannot be moved; never delete it to make progress.
         await warn(entry.name, isolationError)
       }
       await warn(entry.name, error)
       continue
     }
-    // Cleanup failure is not another failed apply. Keeping the event gives at-least-once replay.
     try {
       await rm(entry.path, { force: true })
       await rm(entry.failurePath, { force: true })

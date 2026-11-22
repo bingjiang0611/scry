@@ -29,7 +29,6 @@ export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
 export { CLOSING_TURN_EXPIRED_REASON } from './recorder-closing-window.js'
 
 export async function handleRecorderHook(input: RecorderHookInput): Promise<RecorderHookResult> {
-  // Taken before the lock wait: a hook queued after HOOK_LOCK_WAIT_MS still arrived now.
   const arrivedAt = new Date().toISOString()
   input = {
     ...input,
@@ -39,7 +38,6 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   const enablement = await resolveRecorderEnablement(input.workspace, input.env, input.capture == null && input.captureMode !== true)
   if (!enablement.enabled) {
     if (enablement.reason === 'invalid_config') {
-      // Observational hook remains fail-open even if the diagnostic directory is unwritable.
       await recordInvalidHookConfig(input.workspace, input.provider, input.event).catch(() => undefined)
     }
     return { status: 'disabled', reason: enablement.reason }
@@ -76,8 +74,6 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       }, { waitMs: HOOK_LOCK_WAIT_MS })
     } catch (error) {
       if (entered || !isLockTimeout(error)) throw error
-      // The session is busy (a long finalize, recovery or a stuck peer). The event was never applied,
-      // so queue it durably instead of dropping it; the next lock holder replays it in arrival order.
       await queueHook(enablement, input, sessionId, arrivedAt)
       return { status: 'pending', reason: 'session busy; event queued for replay' }
     }
@@ -95,8 +91,6 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
       await recordProviderActivity(enablement.dataRoot, input.provider, input.event)
       if (!input.deferDelivery) {
         const hookEnv = input.env ?? process.env
-        // Bounded on the provider critical path; the remainder waits for the next hook,
-        // `recorder recover`, or `recorder notify-drain`.
         await drainCommitNotifications(
           enablement.dataRoot,
           await activatedCommitHookEnv(enablement, hookEnv),
@@ -114,12 +108,6 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   }
 }
 
-/**
- * Resolve the CLI-side commit hook grant before draining notifications. A managed host
- * injects the entry itself, so `host-provided` is passed through untouched. Every other
- * invalid bundle fails closed: the env is returned unchanged, no entry is executed, and
- * the reason is logged. Valid bundles are fingerprinted and auto-authorized.
- */
 async function activatedCommitHookEnv(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   env: NodeJS.ProcessEnv
@@ -138,12 +126,6 @@ async function activatedCommitHookEnv(
   }
 }
 
-/**
- * Recovery passes normally visit only the sessions the attention index names. Rebuilding the index
- * from the session directories is what makes an absent index recoverable, so it runs whenever the
- * index is missing (first run, upgrade, deleted data). Explicit recovery also reconciles restored
- * or damaged indexes; daemon polls never enumerate completed history merely because time passed.
- */
 
 async function recoverySessions(
   dataRoot: string,
@@ -160,7 +142,6 @@ async function recoverySessions(
     try {
       return await reconcileAttentionIndex(dataRoot)
     } catch (error) {
-      // A partial initial index is never usable. A failed repair must not starve known work.
       if (!initialized || !await attentionIndexPresent(dataRoot)) throw error
       await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
         `${new Date().toISOString()} WARN attention rebuild: ${error instanceof Error ? error.message : String(error)}`
@@ -197,18 +178,8 @@ export async function recoverRecorder(
   probe?: RecorderRecoveryProbe,
   scope?: RecorderRecoveryScope,
   options: {
-    /**
-     * Close stale open turns that have no completion evidence of their own. Only an operator (or the
-     * App, which knows the child process exited) may assert that; a background pass never guesses.
-     */
     expireOpen?: boolean
-    /** Daemon polls use durable discovery indexes; explicit recovery retains full repair passes. */
     incremental?: boolean
-    /**
-     * Restrict forced expiry to these sessions. A workspace can hold one turn whose host cannot be
-     * proven gone; without this, that single turn would make every automatic caller drop the flag
-     * and leave all the others stuck too. Absent means the whole workspace, as before.
-     */
     expireSessions?: readonly string[]
   } = {}
 ): Promise<{ recovered: number; pending: number; expired: number }> {
@@ -225,25 +196,19 @@ export async function recoverRecorder(
   try {
     for (const item of await recoverySessions(enablement.dataRoot, scope, options.incremental)) {
       try {
-        // Hooks queued behind a busy lock must land before this pass judges the open turn.
         if ((await recorderInboxEntries(item.sessionDir)).length) {
-          // A corrupt first event must not prevent admission or later entries from replaying.
-          // This on-disk key selects exactly the same lock as a live hook with that session id.
           const sessionKey = basename(item.sessionDir)
           await withRecorderSessionKeyLock(enablement.dataRoot, item.provider, sessionKey,
             () => replayQueuedHooks(enablement, item.provider, sessionKey, true, scope?.sessionId), { waitMs: SESSION_LOCK_WAIT_MS })
         }
         const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
         if (!initial) {
-          // Nothing to recover here: the marker outlived its turn (abandoned managed turn, crash
-          // between the index write and the open write).
           await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
           continue
         }
         if (scope && (initial.provider !== scope.provider || initial.sessionId !== scope.sessionId)) {
           throw new Error(`scoped recorder recovery open identity differs from requested ${scope.provider}/${scope.sessionId}`)
         }
-        // Expiry can degrade evidence only after a real terminal boundary, never create that boundary.
         let forcedExpiry = false
         const lockProvider = scope?.provider ?? item.provider
         const lockSessionId = scope?.sessionId ?? initial.sessionId
@@ -261,8 +226,6 @@ export async function recoverRecorder(
             }
             if (open.managedByScry) return { status: 'managed' as const }
             await probe?.(open)
-            // A turn that reaches `closing` inside this pass just converged on real terminal evidence;
-            // nothing has been failing to finalize, so it must not be reported as an expiry.
             const wasAlreadyClosing = open.status === 'closing'
             if (open.status === 'open') {
               const transcript = open.transcriptPath
@@ -285,12 +248,6 @@ export async function recoverRecorder(
                 open.endReason ??= 'provider_terminal'
                 await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
               } else {
-                // Nothing terminal arrived. Providers that never write one (Qoder, Claude, OpenCode)
-                // used to stay open forever here: recovery only closed a turn whose transcript parsed
-                // a terminal status, which only Codex and Pi write. Silence alone still proves nothing
-                // — a long tool or an approval wait looks identical — so giving up needs evidence the
-                // Provider's own record shows this turn finished, or an operator saying the process is
-                // gone.
                 const stale = await staleOpenTurnVerdict({
                   root: item.sessionDir, open, transcript,
                   expireOpen: expireOpen && (!expireSessions || expireSessions.has(open.sessionId))
@@ -315,10 +272,6 @@ export async function recoverRecorder(
                 return { status: 'pending' as const, reason: 'unidentified terminal grace period is still active' }
               }
             }
-            // A closing turn already has its terminal event, so the transcript-mtime criterion that
-            // protects long-running turns does not apply: what matters is how long we have been failing
-            // to finalize it. Past the window we stop retrying forever - identity that was rotated out
-            // never comes back, and the diff baseline can no longer be attributed either way.
             const closingExpired = wasAlreadyClosing &&
               await closingTurnStalled(openPath(item.sessionDir), expiryMs)
             if (closingExpired) forcedExpiry = true
@@ -326,9 +279,6 @@ export async function recoverRecorder(
               enablement,
               open,
               { timestamp: open.closingAt ?? new Date().toISOString() },
-              // The terminal event did arrive - that is what put the turn in `closing` - so calling it
-              // interrupted would misreport the lifecycle. Only the evidence degrades. A deferred close
-              // already decided its own verdict (session end is not a completion) and keeps it.
               open.terminalFallbackStatus ?? 'completed',
               {
                 allowUnstableTranscript: true,
@@ -347,7 +297,6 @@ export async function recoverRecorder(
       } catch (error) {
         pending++
         const message = `recovery ${item.provider}/${basename(item.sessionDir)}: ${error instanceof Error ? error.message : String(error)}`
-        // Evidence remains pending, not dropped. Failure of diagnostics must not block peers.
         if (!isLockTimeout(error)) {
           await updateHealth(enablement.dataRoot, { lastError: { at: new Date().toISOString(), message } }).catch(() => undefined)
         }
@@ -372,15 +321,12 @@ export async function recoverRecorder(
     })
     return { recovered, pending, expired }
   } finally {
-    // A later session, managed recovery, or health refresh can fail after another record commits.
-    // Delivery still uses the same activation/fingerprint gate and durable notification ACK.
     await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, env), {
       ...(scope ? { scope } : {})
     })
   }
 }
 
-/** Deliver committed records outside the hook response. Bounded like the inline path was. */
 export async function drainRecorderDelivery(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env
