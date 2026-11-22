@@ -1,5 +1,7 @@
 # P4 · §7 依赖 · §8 性能 · §9 迁移与工期 · §10 测试
 
+W18 已实现 P4-4 至 P4-6，待核验。Desktop 与 iOS 走 v3 订阅。SQLite 是运行和回执的权威，历史 H1 源用于只读导入。验收见 [W18 报告](handoff/reports/W18.md)。
+
 属于 [P4 设计](P4-orchestration-design.md)。行号说明见总体设计开头。决定、评审核对与术语（原 §11–§13）在 2026-11-18 移到 [P4-orchestration-decisions](P4-orchestration-decisions.md)。
 
 ## 7. 依赖与顺序
