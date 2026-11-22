@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { connectCdp, freePort } from './electron-security-cdp.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
 import { noteMissingDaemonSamples, sampleDaemonResources } from './daemon-resource-sampling.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 
 const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
 const cycleLimit = requestedCycles !== null && Number.isSafeInteger(requestedCycles) && requestedCycles > 0 ? requestedCycles : null
@@ -372,16 +373,6 @@ try {
   console.error(output.slice(-12_000))
   throw error
 } finally {
-  if (child && child.exitCode == null) {
-    child.kill('SIGTERM')
-    await Promise.race([
-      new Promise((resolveWait) => child.once('exit', resolveWait)),
-      new Promise((resolveWait) => setTimeout(resolveWait, 2_000))
-    ])
-  }
-  if (child && child.exitCode == null) {
-    child.kill('SIGKILL')
-    await new Promise((resolveWait) => child.once('exit', resolveWait))
-  }
+  if (child) await stopOwnedDaemonApp(child, join(temp, 'userData'))
   rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }

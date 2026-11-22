@@ -11,7 +11,8 @@ import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
 import { summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
-import { stopConcurrentApp, writeConcurrentAppEntry } from './concurrent-performance-launch.mjs'
+import { writeConcurrentAppEntry } from './concurrent-performance-launch.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 import { daemonSupportFiles } from './session-open-bench-daemon.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -37,6 +38,7 @@ const files = ['scripts/concurrent-performance.mjs', 'scripts/concurrent-perform
   'scripts/concurrent-performance.config.ts', 'scripts/fixtures/concurrent-performance-provider.ts', 'scripts/native-ui-pointer.mjs',
   'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs',
   'scripts/concurrent-performance-launch.mjs', 'scripts/smoke-app-entries.mjs',
+  'scripts/owned-daemon-app.mjs', 'scripts/owned-app-processes.mjs',
   'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-bench-mode.mjs', ...daemonSupportFiles]
 const harnessHash = hash(files.map(path => readFileSync(join(root, path))).join('\0'))
 const artifactHash = () => hash(['out', 'packages/turn-recorder-cli/dist'].flatMap(dir =>
@@ -193,7 +195,7 @@ try {
   await evaluate('new Promise(r => setTimeout(r, 3000))')
   const closing = child
   child = null
-  cleanup = await stopConcurrentApp(closing, userData)
+  cleanup = await stopOwnedDaemonApp(closing, userData)
   const paintTrace = cdp.trace
   cdp.close(); cdp = null
   writeFileSync(appLog, output.join(''))
@@ -270,5 +272,5 @@ try {
   process.exitCode=1
 } finally {
   cdp?.close()
-  if(child) { const closing=child; child=null; const cleanup=await stopConcurrentApp(closing, userData); writeFileSync(join(temp,'cleanup.json'),JSON.stringify(cleanup)) }
+  if(child) { const closing=child; child=null; const cleanup=await stopOwnedDaemonApp(closing, userData); writeFileSync(join(temp,'cleanup.json'),JSON.stringify(cleanup)) }
 }

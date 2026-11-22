@@ -6,7 +6,8 @@ import { cpus, release, totalmem } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
-import { inspectOwnedApp, stopOwnedApp } from './owned-app-processes.mjs'
+import { inspectOwnedApp } from './owned-app-processes.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 import { createBoundarySampler, createOutputCapture, freePort, benchEnv, openRendererSession, openSnapshotChannel,
   readRendererMount, readSettlement, watchChildClose, writeBootstrap } from './session-concurrency-electron.mjs'
 import { performHistorySwitches, prepareHistoryTargets, waitForAdmittedTasks } from './session-concurrency-ui.mjs'
@@ -55,7 +56,7 @@ const traces = []
 const resourceWindows = []
 const rendererWindows = []
 
-// A split-across-chunks diagnostic is a normal boundary; only a complete unparseable line is malformed.
+// Only complete, unparseable lines are malformed.
 function handleLine(line) {
   logLines += 1
   const target = line.includes('[scry:resource]') ? resourceWindows
@@ -69,7 +70,7 @@ function handleLine(line) {
 }
 const capture = createOutputCapture({ onLine: handleLine })
 
-// A retained log always exists: with no App output a marker file replaces the path; a failed write is reported.
+// Record even an empty App log and report write errors.
 function flushLog() {
   const text = capture.finish()
   const appOutput = text.trim() !== ''
@@ -87,10 +88,10 @@ function diagnostics() {
   return { logLines, logTruncated: capture.truncated(), malformedDiagnosticLines, malformedSamples, logPath }
 }
 
-// stopOwnedApp revalidates identities and escalates TERM -> KILL: one attempt per child, flag first.
+// Attempt identity-checked cleanup once for both runtime processes.
 function attemptCleanup(child) {
   cleanupAttempted = true
-  return stopOwnedApp(child)
+  return stopOwnedDaemonApp(child, join(temp, 'userData'))
 }
 
 // stopOwnedApp returns once no registered process is alive, earlier than Node's 'close' (which also needs the
@@ -177,14 +178,14 @@ try {
   const outcomes = associateOutcomes(tasks, pool.outcomes)
   // Active closes here: before settlement/mount queries and before the quiet wait.
   const boundaryAfterTerminal = await boundary('after-terminal')
-  const quietFromEpochMs = Date.now()
+  const quietFromEpochMs = boundaryAfterTerminal.takenAtEpochMs
   let boundaryAfterQuiet = null
   if (scenario.quietMs > 0) {
     // Fixed post-settlement idle workload; the journal is read after shutdown.
     await new Promise(resolve => setTimeout(resolve, scenario.quietMs))
     boundaryAfterQuiet = await boundary('after-quiet')
   }
-  const quietToEpochMs = Date.now()
+  const quietToEpochMs = boundaryAfterQuiet?.takenAtEpochMs ?? quietFromEpochMs
   const boundaries = pairBoundaries({ before: boundaryBefore, afterTerminal: boundaryAfterTerminal,
     afterQuiet: boundaryAfterQuiet, quietWindowMs: scenario.quietMs })
   const finished = outcomes.filter(outcome => outcome.ok)

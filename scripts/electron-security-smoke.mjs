@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
-import { stopFixtureDaemon } from './b4v/fixture.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 import { exerciseUnified } from './electron-security-unified.mjs'
 import { exerciseTerminalSteer } from './terminal-steer-queue-smoke.mjs'
 import { exerciseOwnership } from './electron-security-ownership.mjs'
@@ -313,9 +313,11 @@ try {
   console.error('[scry] smoke failure:', error, stderr.slice(-8000))
   throw error
 } finally {
-  await stopOwnedApp(child)
-  await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') }).catch(() => {})
-  // A failed run keeps its fixture as evidence; only clean runs delete it.
+  try { await stopOwnedDaemonApp(child, join(temp, 'userData')) } catch (error) {
+    failed = true
+    process.exitCode = 1
+    console.error('[scry] smoke cleanup failed:', error)
+  }
   if (failed) console.warn(`[scry] smoke fixture kept for diagnosis: ${temp}`)
   else try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
