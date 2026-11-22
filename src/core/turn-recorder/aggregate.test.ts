@@ -4,6 +4,26 @@ import type { TraceEvent } from '../../shared/trace'
 import { aggregateTurnEvidence } from './aggregate'
 
 describe('aggregateTurnEvidence', () => {
+  it('limits location to one snapshot per repository and 32 repositories per record without dropping diffs', () => {
+    const ts = '2026-10-11T00:00:00Z'
+    const events: TraceEvent[] = Array.from({ length: 34 }, (_, index) => ({
+      id: String(index), ts, runId: 'r', kind: 'harness', stage: 'turn_diff',
+      turnDiff: {
+        version: 1, status: 'captured', repoRoot: `/repo/${Math.max(0, index - 1)}`,
+        files: [], beforeAt: ts, afterAt: ts, captureMs: 1, cleanup: 'ok',
+        repositoryLocation: {
+          branch: null, remote: 'https://fake-token@example.invalid/private',
+          commitBefore: 'a'.repeat(40), commitAfter: 'b'.repeat(64)
+        }
+      }
+    }))
+    const diffs = aggregateTurnEvidence({ events }).diff.value!
+    expect(diffs).toHaveLength(34)
+    expect(diffs.filter(diff => diff.repositoryLocation)).toHaveLength(32)
+    expect(diffs[0].repositoryLocation).toEqual({ branch: null, commitBefore: 'a'.repeat(40), commitAfter: 'b'.repeat(64) })
+    expect(diffs[1].repositoryLocation).toBeUndefined()
+    expect(diffs[33].repositoryLocation).toBeUndefined()
+  })
   it('preserves Steer admission evidence without rewriting the canonical root prompt or double counting usage', () => {
     const bytes = Buffer.from('image payload')
     const steer = { messageId: 'message-1', prompt: '补充要求', attachments: [{ kind: 'image' as const, name: 'screen.png', mimeType: 'image/png' as const, dataBase64: bytes.toString('base64') }] }

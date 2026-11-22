@@ -6,6 +6,7 @@ import { providerDangerCoverage } from '../../shared/provider.js'
 import { providerUsageResultEvents } from '../../shared/result-timing.js'
 import { HOOK_DELIVERY_STAGE, type TraceEvent } from '../../shared/trace.js'
 import { limitTurnDiffPatchBytes } from './git.js'
+import { normalizeTurnRepositoryLocation, TURN_REPOSITORY_LOCATION_LIMITS } from '../../shared/turn-repository-location.js'
 import { aggregateCallEvidence, outputSummary } from './aggregate-call-evidence.js'
 import { aggregateHooks, isRecorderHook } from './aggregate-hooks.js'
 import { captureOmissionReasons, joinOmissionReasons } from './aggregate-capture.js'
@@ -244,9 +245,14 @@ export function aggregateTurnEvidence(args: {
     })
   }
   const diffSnapshots = limitTurnDiffPatchBytes(args.events.flatMap((event) => event.turnDiff ? [event.turnDiff] : []))
+  const locatedRepositories = new Set<string>()
   const diffs = diffSnapshots.map((diff) => {
-    const { version: _version, ...record } = diff
-    return record
+    const { version: _version, repositoryLocation: rawLocation, ...record } = diff
+    const repositoryLocation = normalizeTurnRepositoryLocation(rawLocation)
+    if (!record.repoRoot || !repositoryLocation || locatedRepositories.has(record.repoRoot) ||
+        locatedRepositories.size >= TURN_REPOSITORY_LOCATION_LIMITS.repositories) return record
+    locatedRepositories.add(record.repoRoot)
+    return { ...record, repositoryLocation }
   })
   const capturedDiffs = diffs.filter((diff) => diff.status === 'captured')
   const incompletePatchReasons = new Set(diffs.flatMap((diff) => diff.files.flatMap((file) =>

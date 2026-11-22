@@ -33,6 +33,8 @@ import {
 } from 'node:os'
 
 import { checkWorkspaceCaptureLimits, WorkspaceReadUnavailable } from './git-workspace-limits.js'
+import { sampleGitRepositoryLocation } from './git-repository-location.js'
+import type { TurnRepositoryLocation } from '../../shared/turn-repository-location.js'
 
 export interface GitTurnDiffCapture {
   beforeAt: string
@@ -43,6 +45,7 @@ export interface GitTurnDiffCapture {
   scope?: string
   requestedRoot?: string
   beforeTree?: string
+  repositoryStart?: Omit<TurnRepositoryLocation, 'commitAfter'>
   /** HEAD observed by the same layout/status read that starts this capture. */
   head?: string
   branch?: string
@@ -248,12 +251,13 @@ export async function beginGitTurnDiff(
     if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw || !sparsePathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
+    const location = !workspaceSnapshot && !baseline ? sampleGitRepositoryLocation(repoRoot, true) : undefined
     if (statusResult.status === 'rejected') throw statusResult.reason
     const statusRecords = statusResult.value.split('\0').filter(Boolean)
     const headRecord = statusRecords.find((record) => record.startsWith('# branch.oid '))
     const head = headRecord?.slice('# branch.oid '.length).trim() ?? ''
     if (!head || head === '(initial)') {
-      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
+      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head', repoRoot, requestedRoot }
     }
     const branchName = statusRecords.find(record => record.startsWith('# branch.head '))?.slice('# branch.head '.length)
     const branch = branchName && branchName !== '(detached)' ? branchName : undefined
@@ -356,6 +360,7 @@ export async function beginGitTurnDiff(
         beforeTree: head,
         head,
         branch,
+        repositoryStart: location?.(),
         baselineClean,
         indexPath,
         ...(indexState && !sparseCheckout ? { indexState } : {}),
@@ -394,6 +399,7 @@ export async function beginGitTurnDiff(
       beforeTree,
       head,
       branch,
+      repositoryStart: location?.(),
       baselineClean,
       indexPath,
       ...(sparseCheckout ? {} : { beforeIndex }),
@@ -418,6 +424,7 @@ export async function beginGitTurnDiff(
 }
 
 export interface GitAfterTree {
+  commitAfter?: string
   tree: string
   afterAt: string
   indexFile: string
