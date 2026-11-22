@@ -25,3 +25,38 @@ export function focusComposerUnlessFocusMoved(
     target.current?.focus()
   }, 0)
 }
+
+/**
+ * Focus a composer that may not exist yet. A freshly created side chat mounts its body
+ * before its conversation page arrives, and the composer only renders with the page; with
+ * the daemon as the only runtime that read crosses a socket and routinely lands after the
+ * first frame, so a single-frame focus found no textarea and the caret stayed where it was.
+ * This keeps trying on each frame until the composer is there (or `waitMs` passes), and
+ * gives up as soon as anything else takes focus: that is newer intent and must win.
+ * Returns a cancel for the owner's cleanup.
+ */
+export function focusComposerWhenReady(
+  target: { current: HTMLTextAreaElement | null },
+  before: Element | null,
+  waitMs = 5_000
+): () => void {
+  const deadline = Date.now() + waitMs
+  let frame = 0
+  let cancelled = false
+  const attempt = (): void => {
+    if (cancelled) return
+    const active = document.activeElement
+    if (active != null && active !== document.body && active !== before) return
+    const textarea = target.current
+    if (textarea && !textarea.disabled) {
+      textarea.focus({ preventScroll: true })
+      return
+    }
+    if (Date.now() < deadline) frame = window.requestAnimationFrame(attempt)
+  }
+  frame = window.requestAnimationFrame(attempt)
+  return () => {
+    cancelled = true
+    window.cancelAnimationFrame(frame)
+  }
+}
