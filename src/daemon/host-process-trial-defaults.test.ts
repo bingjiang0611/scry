@@ -3,9 +3,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
-// Trial defaults on this branch (maintainer 2026-11-21): with the variables unset the
-// daemon runs orchestration in `on` mode. vitest.config.ts pins the variable off for
-// the rest of the suite, so this file unsets it explicitly.
 const savedMode = process.env.SCRY_ORCHESTRATION
 afterEach(() => {
   if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION

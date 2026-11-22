@@ -165,8 +165,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM
 
-      // 8 real runs with ~950 KB detail envelopes push session-ledger.log past COMPACT_AT_BYTES (6 MiB)
-      // and trigger routine compaction during live emit().
       const pad = 'x'.repeat(950_000)
       const runIds: string[] = []
       for (let i = 0; i < 8; i += 1) {
@@ -183,7 +181,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       await host.dispose()
       host = undefined
 
-      // H1 on disk MUST load cleanly via SessionLedger (no ledger_log_corrupt!).
       const store = new SessionLedgerFileStore(ledgerDir)
       try {
         const ledger = new SessionLedger({ store })
@@ -216,8 +213,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       handle = createAuthorityLedgerStore({ ledgerDirectory: ledgerDir, sink, log: () => undefined })
       const ledger = new SessionLedger({ store: handle.store })
 
-      // 1. Submit + dispatch run 1 in both orchestration.db and SessionLedger, then emit 8,190 progress
-      // events so SessionLedger sits at 8,192 in-memory events (exact compaction threshold).
       const detail1 = JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'run 1' })
       const sub1 = engine.submitSync({
         peerCertSHA256: peerSha,
@@ -227,15 +222,13 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       })
       expect(sub1.kind).toBe('accepted')
       if (sub1.kind !== 'accepted') throw new Error('expected accepted')
-      ledger.recordIntent({ intentId: randomUUID(), runId: sub1.runId, detail: detail1 }) // 1
-      ledger.markDispatched(sub1.runId) // 2
+      ledger.recordIntent({ intentId: randomUUID(), runId: sub1.runId, detail: detail1 })
+      ledger.markDispatched(sub1.runId)
       for (let i = 0; i < 8_190; i += 1) {
-        ledger.markProgress(sub1.runId, `p${i}`) // 3..8192
+        ledger.markProgress(sub1.runId, `p${i}`)
       }
       expect(ledger.describe().lastSeq).toBe(8_192)
 
-      // 2. Commit run 2 into orchestration.db FIRST (just like host-controller-submit.ts does), then
-      // emit intent_recorded into SessionLedger -> crosses 8,192 and triggers store.compact() BEFORE append!
       const detail2 = JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'run 2 crosses 8192' })
       const intent2 = randomUUID()
       const sub2 = engine.submitSync({
@@ -247,7 +240,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       expect(sub2.kind).toBe('accepted')
       if (sub2.kind !== 'accepted') throw new Error('expected accepted')
 
-      // Spy on orch_p_run queries during routine compact+emit: routine compaction MUST NOT call buildH1SnapshotFromDb!
       let dbRunQueriesDuringEmit = 0
       const origPrepare = sink.handle.db.prepare.bind(sink.handle.db)
       sink.handle.db.prepare = ((sql: string) => {
@@ -267,7 +259,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       await handle.close()
       handle = undefined
 
-      // H1 on disk MUST load cleanly via SessionLedger (no ledger_log_corrupt!).
       const store = new SessionLedgerFileStore(ledgerDir)
       try {
         const reloaded = new SessionLedger({ store })
@@ -300,15 +291,14 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       expect(Number(sink.getMeta('h1_seq_reserved_until'))).toBe(1024)
 
       const runId = SessionLedger.newRunId()
-      ledger.recordIntent({ intentId: SessionLedger.newIntentId(), runId, detail: '{}' }) // seq 1
-      ledger.markDispatched(runId) // seq 2
+      ledger.recordIntent({ intentId: SessionLedger.newIntentId(), runId, detail: '{}' })
+      ledger.markDispatched(runId)
       for (let s = 3; s <= 1024; s += 1) {
         ledger.markProgress(runId, `s${s}`)
       }
       expect(ledger.describe().lastSeq).toBe(1024)
       expect(Number(sink.getMeta('h1_seq_reserved_until'))).toBe(1024)
 
-      // Inject SQLITE_FULL right on the 1024 -> 1025 block-reservation write!
       const origSetMeta = sink.setMeta.bind(sink)
       sink.setMeta = ((key: string, value: string) => {
         if (key === 'h1_seq_reserved_until') {
@@ -325,7 +315,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       }
       expect(caught).toBeInstanceOf(SessionLedgerError)
       expect((caught as SessionLedgerError).code).toBe('orchestration_write_indeterminate')
-      // Seq 1025 MUST NOT have been emitted; lastSeq & persisted ceiling stay at 1024!
       expect(ledger.describe().lastSeq).toBe(1024)
       expect(Number(sink.getMeta('h1_seq_reserved_until'))).toBe(1024)
     } finally {
@@ -344,7 +333,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // 1. Seed 20 runs (80 events) and import into shadow DB (orchestration_on_active is NOT set).
     const runs20 = seedH1Runs(ledgerDir, 20, canonicalWs)
     const sink = EventSink.open({ userDataDir, fullfsync: false, checkpointIntervalMs: 0 })
     importLegacyStateIncrementally({ sink, userDataDir, reconcileOpenRuns: false, shadowOnly: true })
@@ -352,7 +340,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     expect(Number(sink.getMeta('legacy_ledger_seq'))).toBe(80)
     sink.close()
 
-    // 2. Truncate H1 back to only the first 5 runs (20 events < DB's 80!).
     const logPath = join(ledgerDir, 'session-ledger.log')
     const snapshotPath = join(ledgerDir, 'session-ledger.snapshot.json')
     const first20Lines = readFileSync(logPath, 'utf8').trim().split('\n').slice(0, 20)
@@ -364,7 +351,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await startHost(userDataDir, daemonDir)
-      // Removing the on_active gate would overwrite truncated H1 with DB's 20 runs -> MUST NOT happen!
       expect(existsSync(snapshotPath)).toBe(false)
       expect(sha256File(logPath)).toBe(truncatedSha)
 
@@ -401,7 +387,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Simulate orchestration_on_active=1 with R=1024, while a fail-open off session advanced H1 to lastSeq=2500.
     const sink = EventSink.open({ userDataDir, fullfsync: false, checkpointIntervalMs: 0 })
     sink.setMeta('orchestration_on_active', '1')
     sink.setMeta('h1_seq_reserved_until', '1024')
@@ -456,7 +441,6 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
       h1FallbackReason: 'ENOSPC'
     })
 
-    // Malformed known mode='on' still fails validation.
     const parsedBadOn = parseSelfReport({
       ...base,
       orchestration: { mode: 'on', h1FallbackUnavailable: 'yes' }

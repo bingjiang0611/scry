@@ -5,7 +5,6 @@ import { startTestDaemon } from './host-process.harness'
 
 afterEach(cleanupTempDirs)
 
-// The harness the local-op group tests share: it must reach a real daemon's App channels.
 describe('test daemon harness', () => {
   it('answers a local op from temporary userData and cleans up', async () => {
     const daemon = await startTestDaemon()

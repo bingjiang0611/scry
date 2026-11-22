@@ -9,9 +9,6 @@ import { MemoryOutputStore, cleanupTempDirs, tempDir } from './host-process.fixt
 import { generateDesktopDeviceIdentity } from '../main/remote/desktop-transport'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
-// `subscribe` is a local-endpoint op only. A paired remote desktop talking to the
-// real network InnerMtlsHost must get unsupported_op even when the daemon runs with
-// SCRY_ORCHESTRATION=on and advertises subscribe to its own App.
 const savedMode = process.env.SCRY_ORCHESTRATION
 afterEach(() => {
   if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
@@ -59,7 +56,6 @@ describe('subscribe is never exposed on the network endpoint', () => {
         op: 'subscribe', views: ['activeRuns'], waitMs: 0
       })
       expect(reply).toEqual({ error: 'unsupported_op' })
-      // Control: the same peer is otherwise served, so the refusal is specific to subscribe.
       const info = await callTcp(status.runPort, host.service.caCertificatePEM, grant.certificatePEM, id.keyPEM, {
         op: 'desktop', query: { kind: 'info' }
       })

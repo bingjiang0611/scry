@@ -56,7 +56,6 @@ describe('daemon graceful dispose cleans up pooled provider private env director
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Project stdio MCP server with an env secret triggers writePrivateMcpEnvFiles() on pooled Codex client
     writeFileSync(
       join(canonicalWs, '.codex', 'config.toml'),
       [
@@ -105,12 +104,10 @@ describe('daemon graceful dispose cleans up pooled provider private env director
       )
       expect(snapshot.error).toBeUndefined()
 
-      // Pooled Codex client created a private env directory under TMPDIR
       const createdDirs = readdirSync(privateRoot).filter((name) => name.startsWith('scry-mcp-config-'))
       expect(createdDirs.length).toBeGreaterThanOrEqual(1)
       const privateDirPaths = createdDirs.map((name) => join(privateRoot, name))
 
-      // Graceful daemon exit MUST dispose providerRegistry -> shutdown pooled client & remove private env dirs
       await host.dispose()
       host = undefined
 
@@ -144,7 +141,6 @@ describe('daemon graceful dispose cleans up pooled provider private env director
     )
 
     appServer.request.mockReset().mockResolvedValue({ data: [] })
-    // Simulate a wedged provider process whose shutdown never resolves
     appServer.shutdown.mockReset().mockReturnValue(new Promise<void>(() => {}))
 
     const savedRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
@@ -183,7 +179,6 @@ describe('daemon graceful dispose cleans up pooled provider private env director
 
       expect(elapsedMs).toBeLessThan(2_000)
       expect(logs.some((line) => line.includes('daemon.provider-dispose-timeout'))).toBe(true)
-      // Shadow DB EXCLUSIVE lock MUST already be released even though provider shutdown timed out
       const reopened = EventSink.open({ userDataDir })
       reopened.close()
     } finally {

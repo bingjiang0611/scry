@@ -14,7 +14,6 @@ import type { AgentInputAttachment } from '../shared/runtime'
 afterEach(cleanupTempDirs)
 
 function screenshot(size: number): AgentInputAttachment {
-  // The socket validates the PNG signature; the test provider does not decode pixels.
   const bytes = Buffer.alloc(size, 0x8b)
   Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes)
   return { kind: 'image', mimeType: 'image/png', name: 'screen.png', size, dataBase64: bytes.toString('base64') }
@@ -25,7 +24,6 @@ function runSurface(daemon: Awaited<ReturnType<typeof startTestDaemon>>, seen: R
     seen.push(request)
     return daemon.request(request)
   })
-  // Exercise the socket and host receipt, not the Desktop binding wait.
   const runtime = {
     async start(input: { intentId: string; detail: string }) {
       const recorded = await transport.submit(input)

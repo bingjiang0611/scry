@@ -10,21 +10,14 @@ import type { DesktopLaneEndpoint } from '../main/remote/desktop-lane'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
-// A real test daemon for one local-op group's tests (B4-L4). Test files import
-// 'reflect-metadata' first, as host-process.test.ts does: temporary userData and
-// workspace, the smoke Provider, the App's local enrollment. Pair with
-// `afterEach(cleanupTempDirs)` from host-process.fixtures and always `dispose()`.
 
 export interface TestDaemon {
   root: string
   userDataDir: string
-  /** Canonical, and already in the recent folders, as the picker would store it. */
   workspace: string
   host: Awaited<ReturnType<typeof createDaemonHostProcess>>
   endpoint: DesktopLaneEndpoint
-  /** One local-op call on the App's socket; `absent` lists argument positions left out. */
   localOp(op: string, method: string, args: unknown[], absent?: number[]): Promise<Record<string, any>>
-  /** Any other request on the same socket and grant. */
   request(request: Record<string, unknown>): Promise<Record<string, any>>
   dispose(): Promise<void>
 }
@@ -32,7 +25,6 @@ export interface TestDaemon {
 const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1', ELECTRON_ENABLE_LOGGING: '1' }
 const DEBUG_PORT = '--remote-debugging-port=0'
 
-/** `root`: start again on the userData a disposed test daemon left, as a restart would. */
 export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log'> & { root?: string } = {}): Promise<TestDaemon> {
   const { root: previous, ...hostOptions } = options
   const root = previous ?? tempDir()

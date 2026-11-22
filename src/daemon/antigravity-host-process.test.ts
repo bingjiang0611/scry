@@ -47,7 +47,6 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
 
     const fakeGeminiHome = join(root, 'gemini')
     mkdirSync(join(fakeGeminiHome, 'config'), { recursive: true, mode: 0o700 })
-    // 模拟真实 macOS 上 agy 创建的 0 字节 mcp_config.json 占位文件，验证不会误触发 JSON 解析阻断。
     writeFileSync(join(fakeGeminiHome, 'config', 'mcp_config.json'), '', 'utf8')
 
     const saved = {
@@ -61,7 +60,6 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
     process.env.GEMINI_HOME = fakeGeminiHome
 
     try {
-      // 1. 未开启实验开关时，daemon 不暴露 antigravity
       process.env.SCRY_EXPERIMENTAL_PROVIDERS = ''
       const hiddenHost = await createDaemonHostProcess({
         userDataDir: join(root, 'uh'),
@@ -83,7 +81,6 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
         await hiddenHost.dispose()
       }
 
-      // 2. 开启 SCRY_EXPERIMENTAL_PROVIDERS=antigravity 后，daemon 注册、探测并完整运行一轮
       process.env.SCRY_EXPERIMENTAL_PROVIDERS = 'antigravity'
       const host = await createDaemonHostProcess({
         userDataDir,
@@ -138,13 +135,11 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
           }]
         })
         expect(sent.error).toBeUndefined()
-        // A8（historicalContext/输入回执）延后：统一对话必须如实拒发而非假成功。
         expect(sent.result).toEqual({
           status: 'not_sent',
           reason: 'antigravity 尚未提供可验证的历史输入交接'
         })
 
-        // 正常 daemon 直发链路（op: 'submit' + 'watch'）：完整跑通 fake ACP Agent 并产出输出块。
         const submitted = await req({
           op: 'submit',
           intentId: randomUUID(),

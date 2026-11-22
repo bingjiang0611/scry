@@ -83,7 +83,6 @@ describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run
       const summary = await deferred.promise
       expect(summary.importedRuns).toBe(600)
       expect(sink.checkpointCount()).toBeGreaterThanOrEqual(1)
-      // Layer 2 EXCLUSIVE lock must be cleanly restored after worker closes!
       expect(String(sink.handle.db.pragma('locking_mode', { simple: true })).toLowerCase()).toBe('exclusive')
     } finally {
       sink.close()
