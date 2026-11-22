@@ -41,11 +41,6 @@ function sameSnapshotScope(capture: GitTurnDiffCapture, baseline: GitTurnDiffCap
     samePaths(capture.excludedPaths ?? [], baseline.excludedPaths ?? [])
 }
 
-/**
- * A compatible terminal pair owns one immutable endpoint. The turn releases its reference and
- * becomes observable first; the session owns the remaining reference until its projection and
- * cleanup finish. This is the same ownership rule as baseline clones, not deferred unowned work.
- */
 export function finishGitTurnAndSessionDiff(
   capture: GitTurnDiffCapture,
   baseline: GitTurnDiffCapture,
@@ -110,9 +105,6 @@ export function finishGitTurnAndSessionDiff(
     if (releasePeer) await releasePeer()
     throw error
   })
-  // Reserving both queues synchronously also serializes registry cancellation. The turn's
-  // finishPromise is independent, but neither capture may be disposed by a queued operation
-  // until the session has released the last dependency on the turn's objects.
   const settled = session.then(() => undefined, () => undefined)
   capture.opChain = settled
   baseline.opChain = settled
@@ -120,11 +112,6 @@ export function finishGitTurnAndSessionDiff(
   return { turn, session }
 }
 
-// 会话级净改动：拿一个「会话第一轮开始前」捕获、且贯穿整个会话存活的 baseline capture，
-// 把当前工作树快照进它自己的 object store，再 diff baseline.beforeTree → 当前树。
-// 与逐轮 finishGitTurnDiff 的关键区别：非消费式——不清理 baseline，可跨轮多次调用，
-// 每次都得到「基线 → 此刻」的真实净 diff（同一行跨轮反复改只净算一次），
-// 会话开始前已有的脏改动已折进 beforeTree 因而自然被排除。
 export function snapshotSessionNetDiff(
   baseline: GitTurnDiffCapture,
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,
@@ -134,11 +121,6 @@ export function snapshotSessionNetDiff(
     computeGitTurnDiff(baseline, deadlineMs, options, false, undefined, options.onAfter))
 }
 
-/**
- * 运行中预览：对同一个 capture 做非消费式重算，得到「基线 → 此刻」的临时净 diff。
- * 一旦终态重算已经开始（finishPromise 存在），capture 的 tempDir 归终态所有并会被消费，
- * 此时返回 null——调用方必须丢弃这条迟到预览，绝不能用它覆盖已发布的终态。
- */
 export function previewGitTurnDiff(
   capture: GitTurnDiffCapture,
   deadlineMs = TURN_DIFF_FINISH_DEADLINE_MS,

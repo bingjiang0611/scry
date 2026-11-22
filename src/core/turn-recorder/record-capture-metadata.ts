@@ -1,10 +1,6 @@
 import { partial, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
 import type { RecorderOpenTurnState } from './runtime-state.js'
 
-/**
- * A record states its own capture provenance: which claim opened the session, why, and the caller's
- * verbatim task string. Absent means ordinary recording — never "captured without a claim".
- */
 export function captureRecordMetadata(
   capture: RecorderOpenTurnState['capture']
 ): { capture?: AgentTurnRecord['capture'] } {
@@ -20,11 +16,6 @@ export function captureRecordMetadata(
   }
 }
 
-/**
- * A claim happens mid-turn, so its Git baseline cannot contain work the turn already did before the
- * claim. Say that instead of presenting the snapshot as the whole turn, and name the measured lag
- * between the turn's real prompt and the baseline when both are known.
- */
 export function applyCaptureBaselineCaveat(
   evidence: TurnEvidence,
   capture: RecorderOpenTurnState['capture'],
@@ -47,10 +38,6 @@ export function applyCaptureBaselineCaveat(
   )
 }
 
-/**
- * State what an integrator's exclusion cost the diff, from the snapshots' own evidence: the declared
- * paths that matched and how many files they removed. Only paths and counts — never file bodies.
- */
 export function applyDiffExcludeEvidence(evidence: TurnEvidence): void {
   const diffs = evidence.diff.value
   if (!diffs?.length) return

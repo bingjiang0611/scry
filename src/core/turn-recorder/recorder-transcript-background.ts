@@ -21,11 +21,6 @@ function rowText(row: Record<string, unknown>): string | undefined {
   return text || undefined
 }
 
-/**
- * The Provider's own completion row. Qoder writes it twice: as a consumed `user` row with
- * `origin.kind`, and as a queued `attachment` when the task finished while the Agent was busy.
- * Both name the task and its final status.
- */
 function notificationText(row: Record<string, unknown>): string | undefined {
   const attachment = nestedRecord(row, 'attachment')
   const queued = attachment?.commandMode === 'task-notification' ? stringAt(attachment, 'prompt') : undefined
@@ -36,12 +31,6 @@ function notificationText(row: Record<string, unknown>): string | undefined {
   return consumable ? text.trimStart() : undefined
 }
 
-/**
- * Background work that this transcript window launched and has not seen finish. The launch needs a
- * structured receipt, not intent: `run_in_background` alone only asks for it, and an Agent or a
- * human can describe a task id in text. The completion is the Provider's own `<task-notification>`
- * row, which the native transcript folds into the same turn.
- */
 export function pendingBackgroundTasks(content: string): string[] {
   const launched = new Set<string>()
   const settled = new Set<string>()
@@ -64,17 +53,12 @@ export function pendingBackgroundTasks(content: string): string[] {
     if (!text) continue
     const taskId = /<task-id>([^<>\r\n]+)<\/task-id>/.exec(text)?.[1]?.trim()
     const status = /<status>([^<>\r\n]+)<\/status>/.exec(text)?.[1]?.trim().toLowerCase()
-    // A progress notification for a running task is not its completion.
     if (taskId && status && BACKGROUND_SETTLED_STATUSES.has(status)) settled.add(taskId)
   }
   return [...launched].filter((taskId) => !settled.has(taskId))
 }
 
 
-/**
- * A turn's start row is evidence only when the transcript wrote its own clock. A row without a
- * timestamp is dated by the parser, so it cannot prove the turn started inside this window.
- */
 function ownTurnStartMs(content: string, userText: string, startedMs: number, ceilingMs: number): number | undefined {
   const wanted = userText.trim()
   for (const line of content.split('\n')) {
@@ -130,15 +114,12 @@ export async function forcedWindowTranscript(args: {
     return !Number.isFinite(ceilingMs) || startMs <= ceilingMs
   })
   if (!turn) return undefined
-  // Rows that carry an identity the open turn does not have belong to some other turn. A neighbour
-  // must never be published under this turn, however plausible its timestamps look.
   if (args.providerTurnId && turn.providerTurnId && turn.providerTurnId !== args.providerTurnId) return undefined
   if (args.requestSetId && turn.requestSetId && turn.requestSetId !== args.requestSetId) return undefined
   if (ownTurnStartMs(snapshot.content, turn.userText, startedMs, ceilingMs) === undefined) return undefined
   return {
     stable: true,
     observed: true,
-    // Content bounded by the recorder's own clock instead of the Provider's turn identity.
     complete: false,
     ...(turn.userText ? { userText: turn.userText } : {}),
     events: turn.items,
@@ -154,10 +135,6 @@ export async function forcedWindowTranscript(args: {
   }
 }
 
-/**
- * The transcript read used when there is nothing to read: no transcript path, or a forced close with
- * no window it can defend. Callers label the missing evidence; this only fixes the shape.
- */
 export function emptyTranscript(complete: boolean): TranscriptRead {
   return {
     stable: true,
@@ -168,11 +145,6 @@ export function emptyTranscript(complete: boolean): TranscriptRead {
   }
 }
 
-/**
- * Why an unmatched identity may still be closed now, or undefined when it must keep waiting. Only a
- * decision to give up (expiry) or a session end can close a turn whose identity is gone; an ordinary
- * terminal keeps waiting for the transcript to catch up.
- */
 export function unmatchedIdentityReason(open: {
   endReason?: string
   terminalIdentityConfirmedBySessionEnd?: boolean
@@ -185,7 +157,6 @@ export function unmatchedIdentityReason(open: {
     : undefined
 }
 
-/** The window a forced close may keep for this turn, if the transcript still holds any of it. */
 export async function retainedWindowTranscript(
   open: {
     provider: ProviderId
@@ -214,11 +185,6 @@ export async function retainedWindowTranscript(
   })
 }
 
-/**
- * Label the assistant evidence of a turn whose identity never matched. A retained window keeps the
- * rows but cannot claim completeness: its start is the recorder's clock, not the Provider's turn
- * identity.
- */
 export function degradeUnmatchedIdentity(evidence: TurnEvidence, reason: string, retained: boolean): void {
   if (!retained) {
     evidence.assistant = unavailable(reason)

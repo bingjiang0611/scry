@@ -16,8 +16,6 @@ function sumCostUsd(events: TraceEvent[]): number | undefined {
 
 export function usageFrom(events: TraceEvent[]): TurnUsage | undefined {
   const results = providerUsageResultEvents(events)
-  // Credits are one run-scoped snapshot, not incremental result counters. Replayed
-  // snapshots replace each other and must never be summed with USD or with a shadow.
   const credits = [...events].reverse().find((event) => event.kind === 'harness' && event.stage === 'credit_usage' &&
     !event.agentId && isCreditUsageEvidence(event.creditUsage))?.creditUsage
   if (!results.length && !credits) return undefined

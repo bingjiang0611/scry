@@ -54,7 +54,6 @@ function emptyRead(identityMatched = false): TranscriptRead {
   }
 }
 
-/** Parse only the ancestry between the bridge's before/after native entries. */
 export function parsePiTranscript(
   content: string,
   runId: string,
@@ -92,8 +91,6 @@ export function parsePiTranscript(
   if (anchor.beforeEntryId !== null && current?.id !== anchor.beforeEntryId) return emptyRead(false)
   chain.reverse()
   const user = chain.find(entry => entry.type === 'message' && entry.message?.role === 'user')
-  // Pi also starts real runs from extension-authored custom messages. Preserve
-  // those native boundaries without inventing a human prompt or another turn.
   const start = user ?? chain.find(entry => entry.type === 'custom_message')
   if (!start?.id) return emptyRead(false)
   const events: TraceEvent[] = []
@@ -118,8 +115,6 @@ export function parsePiTranscript(
   }
   let userSeen = false
   chain.forEach((entry) => {
-    // Pi compacts in place on the ancestry chain; the anchored range already proves this
-    // event belongs to the turn, so project it instead of reconstructing one from hooks.
     if (entry.type === 'compaction') {
       const preTokens = typeof entry.tokensBefore === 'number' && Number.isFinite(entry.tokensBefore) && entry.tokensBefore >= 0
         ? { preTokens: entry.tokensBefore }

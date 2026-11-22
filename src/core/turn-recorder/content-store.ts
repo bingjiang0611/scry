@@ -14,11 +14,6 @@ function digest(content: Buffer | string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-/**
- * Process-local, monotonic counters for the content-addressed writes: how many payloads were
- * hashed, how many were read back for corruption detection, and how many directory syncs those
- * verifications issued. Diagnostics only; they never change a publish decision.
- */
 const contentStoreCounters = { hashes: 0, verifies: 0, directorySyncs: 0 }
 
 export function contentStoreStats(): { hashes: number; verifies: number; directorySyncs: number } {
@@ -54,7 +49,6 @@ function assertContentBytes(existing: Buffer, expected: Buffer, sha256: string):
   if (!existing.equals(expected)) throw new Error(`${CORRUPTION_PREFIX}: ${sha256}`)
 }
 
-/** A blob exists under this address but its bytes are not what the address promises. */
 export function isContentCorruptionError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   return error.message.startsWith(CORRUPTION_PREFIX) || error.message.startsWith('recorder content integrity check failed')
@@ -72,8 +66,6 @@ export async function writeRecorderContent(
   content: string,
   encoding: ToolContentRef['encoding']
 ): Promise<ToolContentRef> {
-  // Hash the string itself: `Buffer.from` would materialize a second full copy of a large patch
-  // before the publish can start, and the publish writes the string in bounded slices.
   const length = Buffer.byteLength(content, 'utf8')
   const sha256 = digest(content)
   const path = contentPath(dataRoot, sha256)
@@ -88,17 +80,13 @@ export async function writeRecorderContent(
       return ref
     } catch (writeError) {
       if ((writeError as NodeJS.ErrnoException).code !== 'EEXIST') throw writeError
-      // Another publisher won after our read. Verify its bytes just like an existing blob.
       existing = await readFile(path)
     }
   }
-  // Incoming bytes already determine the address; compare complete payloads without hashing twice.
-  // Reuse must still sync the link: a previous publisher may have failed its final directory sync.
   await verifyAndSyncContent(path, existing, Buffer.from(content, 'utf8'), sha256)
   return ref
 }
 
-/** Publish one already-held snapshot without retaining all UTF-8 buffers or caching directory proof. */
 export async function writeRecorderContentBatch(
   dataRoot: string,
   contents: readonly string[],
@@ -106,8 +94,6 @@ export async function writeRecorderContentBatch(
 ): Promise<ToolContentRef[]> {
   const refs: ToolContentRef[] = []
   const seen = new Map<string, string>()
-  // Identical payloads in one batch are one address: hash each distinct value once instead of
-  // paying a second SHA-256 over bytes that are already known to be equal.
   const hashed = new Map<string, ToolContentRef>()
   const missing: Array<{ path: string; content: string; sha256: string }> = []
   for (const content of contents) {
@@ -147,7 +133,6 @@ export async function writeRecorderContentBatch(
   return refs
 }
 
-/** Publish one payload to every authority before exposing its reference. */
 export async function writeRecorderContentCopies(
   dataRoots: readonly [string, ...string[]],
   content: string,
@@ -172,7 +157,6 @@ export async function writeRecorderContentCopies(
   const outcomes = await writeFileAtomicExclusiveCopies(missing, bytes)
   for (const [index, outcome] of outcomes.entries()) {
     if (outcome === 'existing') {
-      // A competing publisher won after the initial read. EEXIST alone proves nothing.
       await verifyAndSyncContent(missing[index], await readFile(missing[index]), bytes, sha256)
     }
   }
@@ -266,7 +250,6 @@ export async function readRecorderContentPage(
   }
 }
 
-/** Ensure an archive owns a verified copy; an already-published target can recover without source. */
 export async function copyRecorderContent(
   sourceRoot: string,
   targetRoot: string,

@@ -56,7 +56,6 @@ function callFromEvent(
     ...(result?.text || result?.output ? { outputSummary: outputSummary(result.output ?? result.text) } : {}),
     ...(result?.isError ? { error: outputSummary(result.output ?? result.text) ?? 'tool failed' } : {}),
     ...(event.fileOp && event.filePath ? { file: { operation: event.fileOp, path: event.filePath } } : {}),
-    // 这段墙钟是等人回答，不是工具执行：标出配对介入，避免与人工等待时间重复计入。
     ...(humanWait && event.toolUseId ? { humanInterventionId: event.toolUseId } : {}),
     ...(event.isMcp
       ? {
@@ -149,12 +148,9 @@ export function aggregateCallEvidence(
   const starts = logicalEvents.filter((event) =>
     event.stage !== 'tool_result' && ['tool', 'skill', 'agent'].includes(event.kind) && !!(event.tool || event.name)
   )
-  // 介入的问题是它自己的工具请求：同一 toolUseId 的调用墙钟属于人工等待。
   const humanInterventionIds = new Set(logicalEvents
     .map((event) => event.intervention?.request.questionId)
     .filter((id): id is string => !!id))
-  // AgentTurnRecord v1 的 Tool / Skill / MCP 是互斥 evidence 容器。Agent 为兼容 v1 仍存入
-  // tools，但用 category=agent 明确分列；MCP 不能同时再进入 tools，否则总调用会重复相加。
   const toolCandidates: CallCandidate[] = starts
     .filter((event) => event.kind === 'agent' || (event.kind === 'tool' && !event.isMcp))
     .map((event) => ({
@@ -182,7 +178,6 @@ export function aggregateCallEvidence(
   const candidates = [...toolCandidates, ...skillCandidates, ...mcpCandidates]
   const omittedCallSections = limitCallDetails(candidates)
   let remainingContentBytes = toolContentPolicy?.toolContentTurnBytes ?? 128 * 1024
-  // Stable source order across mutually exclusive sections; metadata survives exhausted body budgets.
   for (const candidate of [...candidates].sort((a, b) => (a.call.order ?? 0) - (b.call.order ?? 0))) {
     for (const key of ['inputContent', 'outputContent'] as const) {
       const content = candidate.call[key]

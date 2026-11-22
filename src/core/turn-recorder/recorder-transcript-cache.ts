@@ -18,7 +18,6 @@ const transcriptSnapshotCache = new Map<string, TranscriptSnapshotCacheEntry>()
 let transcriptSnapshotCacheHits = 0
 let transcriptSnapshotCacheMisses = 0
 
-/** Process-local diagnostics used by complexity tests and the informational recovery benchmark. */
 export function transcriptSnapshotCacheStats(): { hits: number; misses: number; entries: number } {
   return { hits: transcriptSnapshotCacheHits, misses: transcriptSnapshotCacheMisses, entries: transcriptSnapshotCache.size }
 }
@@ -120,9 +119,7 @@ function transcriptLineAnchor(
 }
 
 interface AnchorScan {
-  /** Byte offset the window starts at (the newline before the anchor line, or 0). */
   offset: number
-  /** End of the last newline-terminated line; an unfinished tail must be rescanned. */
   scannedTo: number
 }
 
@@ -149,11 +146,6 @@ function rememberAnchor(key: string, entry: AnchorCacheEntry): void {
   }
 }
 
-/**
- * The newest matching anchor in [from, endOffset), read forward only. Returns -1 when that region
- * holds none. A cached anchor is a candidate, never the answer: the same prompt can be sent twice,
- * and the full backwards scan always returns the latest match.
- */
 async function latestAnchorFrom(
   path: string,
   from: number,
@@ -195,14 +187,12 @@ async function latestAnchorFrom(
   } finally {
     await handle.close()
   }
-  // A complete JSON value at EOF is an anchor too, but its line must be rescanned if appended.
   if (cursor === endOffset && pending.length && transcriptLineAnchor(pending.toString('utf8'), provider, promptHash, providerTurnId)) {
     latest = Math.max(latest, Math.max(0, pendingStart - 1))
   }
   return { offset: latest, scannedTo: pendingStart }
 }
 
-/** Read the single JSONL line a cached offset points at (the offset may be its preceding newline). */
 async function lineAtAnchor(path: string, offset: number): Promise<string | undefined> {
   const handle = await openTranscriptRead(path)
   const buffer = Buffer.allocUnsafe(8192)
@@ -219,13 +209,6 @@ async function lineAtAnchor(path: string, offset: number): Promise<string | unde
   }
 }
 
-/**
- * Reuse a previously located anchor for the same prompt identity.
- *
- * Correctness comes from re-proving every part of the claim: the path is the same file, the line at
- * the cached offset still passes the anchor test, and only bytes appended since the last scan are
- * searched for a newer match. Anything unprovable falls back to the full backwards scan.
- */
 async function anchorOffsetFor(
   path: string,
   endOffset: number,
@@ -233,8 +216,6 @@ async function anchorOffsetFor(
   promptHash?: string,
   providerTurnId?: string
 ): Promise<number> {
-  // Codex anchors are found through a forward state machine over each scanned chunk, so a single
-  // line cannot re-prove one; its scan also stops at the turn boundary, which is the same work.
   if (provider === 'codex' || !promptHash && !providerTurnId) {
     return (await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId)).offset
   }
@@ -244,14 +225,11 @@ async function anchorOffsetFor(
     let reusable = false
     try {
       const info = await statTranscript(path)
-      // Append-only growth is proven by dev/ino identity and a size that still covers what was
-      // already scanned; a replaced or truncated file cannot reuse this offset.
       if (info.dev === cached.dev && info.ino === cached.ino && info.size >= cached.size) {
         const line = await lineAtAnchor(path, cached.offset)
         reusable = line !== undefined && !!transcriptLineAnchor(line, provider, promptHash, providerTurnId)
       }
     } catch {
-      // An unreadable path falls through to the authoritative scan.
     }
     if (reusable) {
       const newer = await latestAnchorFrom(path, cached.scannedTo, endOffset, provider, promptHash, providerTurnId)
@@ -321,8 +299,6 @@ async function transcriptAnchorOffset(
         lineEnd = index
       }
       suffix = combined.subarray(0, lineEnd)
-      // NUL cannot occur in a valid JSONL record. Sparse/uninitialized prefixes are
-      // therefore a hard format boundary, not evidence that must be loaded to byte 0.
       if (matchedTurnOffset != null && suffix.includes(0)) return { offset: matchedTurnOffset, scannedTo }
       cursor = start
     }
@@ -339,7 +315,6 @@ async function transcriptAnchorOffset(
   }
 }
 
-/** Scan Pi JSONL only for native IDs; the subsequent snapshot is bounded to this turn's entry range. */
 
 async function cachedTranscriptSnapshot(args: {
   path: string
@@ -365,10 +340,6 @@ async function cachedTranscriptSnapshot(args: {
   }
   transcriptSnapshotCacheMisses++
   const read = await parseTranscriptSnapshot({ ...args, endOffset: args.endOffset ?? args.identity.size })
-  // A read that raced truncation/rotation must be retried; caching it under the stable identity
-  // would otherwise keep a recoverable turn pending for the lifetime of this process.
-  // Agent sidecars have identities independent of the root log. Do not cache a
-  // cross-file projection under only the root's identity (including missing children).
   const hasChildSources = read.events.some(event => event.kind === 'agent' || event.runtimeMetadata?.childTranscript !== undefined)
   if ((!args.stable || read.stable) && !hasChildSources) transcriptSnapshotCache.set(key, { key, read })
   while (transcriptSnapshotCache.size > TRANSCRIPT_SNAPSHOT_CACHE_LIMIT) {
@@ -401,10 +372,6 @@ export async function stableTranscript(
   sessionId?: string,
   cwd?: string,
   piTranscriptAnchor?: PiTranscriptAnchor,
-  /**
-   * Frozen end of the readable window. A captured session records this at stop time so the next
-   * prompt, written after stop, can never be parsed back into the turn that just ended.
-   */
   endOffsetLimit?: number
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
@@ -413,13 +380,7 @@ export async function stableTranscript(
       tools: false, skills: false, mcps: false, hooks: false, usage: false, files: false, errors: false
     } }
   }
-  // Recompute an exact JSONL turn anchor. Older persisted offsets were heuristic
-  // byte rewinds and may begin inside a large prompt, so they are never evidence.
   startOffset = 0
-  // Key the requested projection, not its derived byte offsets. Looking up only after locating
-  // the anchor re-scans the entire Codex rollout even on a snapshot cache hit. File identity,
-  // the frozen boundary and Pi entry IDs still invalidate the projection; child sources are
-  // deliberately never cached by cachedTranscriptSnapshot.
   const selectionKey = (identity: TranscriptSnapshotIdentity, stable = true) => transcriptSnapshotCacheKey({
     path, stable, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd,
     piTranscriptAnchor, endOffset: endOffsetLimit, identity

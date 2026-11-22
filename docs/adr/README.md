@@ -31,6 +31,8 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [027: Advance notification ACK only across proven delivery or recorded absence](027-recorder-notification-ack.md)
 - [028: Retain hooks before applying them and replay at least once](028-recorder-inbox-replay.md)
 - [029: Keep daemon acknowledgements and capture boundaries explicit](029-recorder-daemon-and-capture-boundaries.md)
+- [030: Reuse transcript reads without reusing unproven evidence](030-recorder-transcript-windows.md)
+- [031: Preserve full content before budgeting its preview](031-recorder-content-custody.md)
 
 ## Source comment ratchet
 

@@ -35,7 +35,6 @@ function parseCommits(output: string): DiffCommit[] {
   return commits
 }
 
-/** Anchored local history only. Neither pagination nor commit selection performs a fetch. */
 export async function readDiffCommits(request: DiffCommitPageRequest, deadlineMs = TURN_DIFF_BEGIN_DEADLINE_MS): Promise<DiffCommitPage> {
   const deadline = Date.now() + deadlineMs
   try {
@@ -61,7 +60,6 @@ export async function readDiffCommits(request: DiffCommitPageRequest, deadlineMs
   }
 }
 
-/** Read the selected immutable commit, never today's working files or real index. */
 export async function readDiffCommitSnapshot(request: DiffCommitSnapshotRequest, deadlineMs = TURN_DIFF_BEGIN_DEADLINE_MS): Promise<DiffCommitSnapshot> {
   const started = Date.now()
   const deadline = started + deadlineMs
@@ -74,7 +72,6 @@ export async function readDiffCommitSnapshot(request: DiffCommitSnapshotRequest,
       command(request.cwd, deadline, ['merge-base', '--end-of-options', request.commit, request.head], true),
       command(request.cwd, deadline, ['merge-base', '--end-of-options', request.commit, request.baseCommit], true)
     ])
-    // Membership is reachable(head) minus reachable(base), including side parents of a merge.
     if (headAncestor.trim() !== request.commit || baseAncestor.trim() === request.commit) throw new InvalidDiffRange('Commit is outside the captured range')
     const [metadata, rootPath, objectPath, tree] = await Promise.all([
       command(request.cwd, deadline, ['show', '--no-patch', '--no-notes', '--no-show-signature', `--format=${FORMAT}`, request.commit]),

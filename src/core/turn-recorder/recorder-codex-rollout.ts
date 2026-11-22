@@ -13,11 +13,6 @@ export function parseCodexRollout(
   content: string,
   runId: string,
   sessionIdentity?: CodexRolloutIdentity,
-  /**
-   * Cumulative usage the session had reached before this window. A turn window that starts at the
-   * turn's own `task_started` cannot see the previous cumulative frame, so the caller reads that one
-   * bounded fact forward; without it Codex deltas would report lifetime totals as this turn's usage.
-   */
   usageBaseline?: CodexUsageBaseline
 ): { recognized: boolean; turns: ParsedTranscriptTurn[]; identity: CodexRolloutIdentity } {
   const turns: ParsedTranscriptTurn[] = []
@@ -46,9 +41,6 @@ export function parseCodexRollout(
   let usageObserved = false
   let usageFinished = false
   let lastUsageFilter = new CodexUsageDeltaFilter()
-  // Codex writes the model of every request into `turn_context` and the window plus the latest
-  // request's input size into `token_count`. Both are host-authored facts, so they bind the
-  // turn's usage to a model and its context occupancy without consulting any config default.
   let turnModels = new Set<string>()
   let contextWindow: number | undefined
   let lastRequestInputTokens: number | undefined
@@ -84,8 +76,6 @@ export function parseCodexRollout(
     usageFinished = true
     if (!usageObserved) return
     const finalUsage = latestTurnCumulative ? codexTurnUsageDelta(latestTurnCumulative, turnUsageBaseline) : usage
-    // One model per turn is the only case where usage and context can be attributed; several
-    // models stay unattributed instead of picking one.
     const model = turnModels.size === 1 ? [...turnModels][0] : undefined
     const context = model && contextWindow && lastRequestInputTokens != null
     current.events.push({
@@ -248,7 +238,6 @@ export function parseCodexRollout(
       turnUsageBaseline = { ...cumulativeUsage }
       latestTurnCumulative = undefined
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
-      // 去重只在一轮之内成立：新一轮的第一帧即使和上一轮末帧相同，也是真实用量。
       lastUsageFilter = new CodexUsageDeltaFilter()
       usageObserved = false
       usageFinished = false
@@ -327,8 +316,6 @@ export function parseCodexRollout(
         cumulativeUsage = { ...latestTurnCumulative }
         usageObserved = true
       }
-      // `total_token_usage` 缺失时才会用到这些增量求和。Codex 可能把同一帧
-      // `last_token_usage` 连续广播多次，相邻同值帧必须丢掉，否则求和会高估。
       if (last && lastUsageFilter.admit(last)) {
         const add = (key: string): number => typeof last[key] === 'number' && Number.isFinite(last[key]) ? last[key] as number : 0
         usage.tokensIn += add('input_tokens')

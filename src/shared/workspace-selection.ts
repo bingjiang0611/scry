@@ -90,13 +90,9 @@ export interface WorkspacePrepareProgress {
   operationId: string
   repositoryId: string
   stage: WorkspacePrepareStage
-  /** True only once preflight checks and worktree metadata creation succeeded. */
   workspacePrepared: boolean
-  /** Present only when Git reported real checkout progress or checkout completed. */
   checkout?: WorkspaceCheckoutProgress
-  /** True only while cancelling can safely stop preparation before Provider launch. */
   cancellable: boolean
-  /** Bounded sanitized step/stderr lines for the expandable details section. */
   details: string[]
   branch?: string
   baseRef?: string

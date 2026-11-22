@@ -12,8 +12,6 @@ export function transcriptIdentity(info: { dev: number; ino: number; size: numbe
   return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs }
 }
 
-// Process-local read counters: an increment per read call, no allocation on the hot path.
-// Used to tell "parsed the whole transcript" apart from "parsed this turn's appended bytes".
 let transcriptBytesRead = 0
 let transcriptAnchorBytesScanned = 0
 
@@ -26,7 +24,6 @@ export function resetTranscriptReadStats(): void {
   transcriptAnchorBytesScanned = 0
 }
 
-/** Anchor discovery reads backwards from the end of the file; count it separately from parsing. */
 export function recordTranscriptAnchorBytes(bytes: number): void {
   transcriptAnchorBytesScanned += bytes
 }
@@ -51,9 +48,6 @@ export async function readTranscriptWindow(
 }> {
   const boundedEnd = Math.max(0, endOffset)
   const preferredStart = Math.max(0, Math.min(preferredStartOffset, boundedEnd))
-  // The start offset is captured when the user turn opens. A later byte cap would
-  // permanently erase early events from a large turn, so read the complete bounded
-  // snapshot from that authority rather than silently advancing the start cursor.
   const start = preferredStart
   const length = boundedEnd - start
   const handle = await openTranscriptRead(path)
@@ -77,7 +71,6 @@ export async function readTranscriptWindow(
   try {
     pathIdentity = transcriptIdentity(await statTranscript(path))
   } catch {
-    // A rotated-away path is unstable even when the already-open handle was still readable.
   }
   const consistent = bytesRead === length && !!before && !!after && !!pathIdentity &&
     (!expectedIdentity || sameTranscriptIdentity(before, expectedIdentity)) &&

@@ -15,16 +15,8 @@ import { readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdenti
 import { parsePiTranscript } from './recorder-pi-transcript.js'
 
 
-/** Bounded tail of the bytes before a turn window: enough for the last cumulative usage frame. */
 const CODEX_USAGE_BASELINE_BYTES = 256 * 1024
 
-/**
- * The cumulative usage the session had reached before this turn began. Codex reports per-turn usage
- * as a delta between cumulative frames, so a window that correctly starts at this turn's
- * `task_started` still needs the last frame written before it. The read is bounded and read-only;
- * when no frame is found the caller keeps the zero baseline and the delta degrades the same way it
- * already does for a session whose first window starts at byte 0.
- */
 async function codexUsageBaseline(
   path: string,
   startOffset: number,
@@ -81,8 +73,6 @@ async function codexChildRollout(parentPath: string, sessionId: string): Promise
   }
   const sameDay = await findIn(dayDir)
   if (sameDay) return sameDay
-  // Only the native YYYY/MM/DD layout authorizes a sibling-day lookup; never scan
-  // arbitrary siblings of a custom transcript directory. Symlink entries are excluded.
   if (!/[/\\]\d{4}[/\\]\d{2}[/\\]\d{2}$/.test(dayDir)) return undefined
   const monthDir = dirname(dayDir)
   try {
@@ -94,7 +84,6 @@ async function codexChildRollout(parentPath: string, sessionId: string): Promise
       if (found) return found
     }
   } catch {
-    // Missing/legacy session layout remains partial evidence, never a recorder failure.
   }
   return undefined
 }
@@ -132,8 +121,6 @@ async function codexTurnWithChildren(
       childPath = await codexChildRollout(transcriptPath, child.sessionId)
       if (!childPath) { complete = false; continue }
       const childIdentity = transcriptIdentity(await stat(childPath))
-      // Child logs contain copied ancestor history. Bound the entire traversal,
-      // not just the count of files; over-budget evidence stays explicitly partial.
       if (childIdentity.size > 16 * 1024 * 1024 || childIdentity.size > budget.remainingBytes) {
         complete = false
         continue
@@ -166,7 +153,6 @@ async function codexTurnWithChildren(
       observable.files = observable.files || nested.observable.files
       observable.errors = observable.errors || nested.observable.errors
       events.push(...nested.events.flatMap((event): TraceEvent[] => {
-        // Child text retains its scope in modelSegments; only root usage is authoritative.
         if (event.kind === 'harness' && event.stage === 'result') return []
         return [{
           ...event,
@@ -210,8 +196,6 @@ export async function parseTranscriptSnapshot(args: {
     sourceCompleteness: snapshot.truncated ? 'partial' as const : 'complete' as const
   } : undefined
   if (args.provider === 'pi') {
-    // The bounded turn window excludes the session header. Check it against the
-    // same file identity before trusting native entry IDs from that window.
     let content = snapshot.content
     if (snapshot.startOffset > 0 && snapshot.identity) {
       const header = await readTranscriptWindow(args.path, Math.min(snapshot.identity.size, 256 * 1024), 0, snapshot.identity)
@@ -231,8 +215,6 @@ export async function parseTranscriptSnapshot(args: {
   }
   if (args.provider === 'codex') {
     let sessionIdentity: CodexRolloutIdentity | undefined
-    // Turn anchoring excludes the session header. Child activity needs that identity;
-    // ordinary turns do not pay for another read. The head must match this snapshot.
     const hasChildActivity = snapshot.content.includes('"SubAgentActivity"') || snapshot.content.includes('"sub_agent_activity"')
     if (hasChildActivity && snapshot.startOffset > 0 && snapshot.identity) {
       const header = await readTranscriptWindow(args.path, Math.min(snapshot.identity.size, 256 * 1024), 0, snapshot.identity)
@@ -327,9 +309,6 @@ export async function parseTranscriptSnapshot(args: {
   let qoderSidecarObservable: TranscriptRead['observable'] | undefined
   const incompleteReasons: string[] = []
   if (args.provider === 'qoder' && turn) {
-    // Prompt text can recover display content, but is not billing identity.
-    // Only the hook's authoritative ID may select a root; let the native parser
-    // reject duplicate prompt IDs instead of promoting the first parsed UUID.
     const parsed = qoderCreditRequests(snapshot.content, args.providerTurnId || args.requestSetId ? [{
       runId: args.runId, providerTurnId: args.providerTurnId, requestSetId: args.requestSetId
     }] : [])
@@ -360,7 +339,6 @@ export async function parseTranscriptSnapshot(args: {
     complete: stable && !snapshot.truncated && qoderSidecarsComplete,
     ...(incompleteReasons.length ? { incompleteReasons } : {}),
     ...(turn?.userText ? { userText: turn.userText } : {}),
-    // 真实提问时间来自转写里的提问行；开启采集时间与 diff 基线时间另存。
     ...(turn?.startedAt ? { startedAt: turn.startedAt } : {}),
     ...(turn?.stopReason ? { stopReason: turn.stopReason } : {}),
     events,

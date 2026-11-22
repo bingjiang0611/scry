@@ -12,7 +12,6 @@ export class WorkspaceReadUnavailable extends Error {
   }
 }
 
-/** Workspace inspection has a fixed work budget; recorder captures keep their existing contract. */
 export async function checkWorkspaceCaptureLimits(input: {
   repoRoot: string
   cwd: string
@@ -41,7 +40,7 @@ export async function checkWorkspaceCaptureLimits(input: {
       : kind === '1' ? fields.slice(8).join(' ')
         : kind === '2' ? fields.slice(9).join(' ')
           : kind === 'u' ? fields.slice(10).join(' ') : undefined
-    if (kind === '2') index++ // Porcelain v2 has a second NUL-delimited rename path.
+    if (kind === '2') index++
     if (path === undefined) throw new WorkspaceReadUnavailable('workspace_index')
     const absolute = resolve(repoRoot, path)
     const inScope = relative(cwd, absolute)
