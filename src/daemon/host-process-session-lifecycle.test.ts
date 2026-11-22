@@ -8,9 +8,6 @@ import { createAppSessionStore } from '../main/app-store'
 
 afterEach(cleanupTempDirs)
 
-// B4-L4 session lifecycle: the daemon answers rename/pin/archive, the archived list and
-// purge, and single deletion with main's own lifecycle. The App asks the user first; the
-// daemon deletes only what it was told was confirmed.
 
 describe('daemon session lifecycle', () => {
   it('renames, pins, archives, lists and deletes sessions the App owns', async () => {
@@ -27,27 +24,23 @@ describe('daemon session lifecycle', () => {
       expect((await daemon.localOp('sessionLifecycle', 'setSessionPinned', [ref('native-a'), true])).result).toBe(true)
       expect(sessions().find((session) => session.externalSessionId === 'native-a')).toMatchObject({ title: 'From the App' })
       expect(sessions().find((session) => session.externalSessionId === 'native-a')?.pinnedAt).toBeTypeOf('number')
-      // main's validation, unchanged.
       expect((await daemon.localOp('sessionLifecycle', 'setSessionPinned', [ref('native-a'), 'yes'])).error).toBe('无效的置顶请求')
 
       expect((await daemon.localOp('sessionLifecycle', 'setSessionArchived', [ref('native-a'), true])).result).toBe(true)
       const archived = (await daemon.localOp('sessionStore', 'listArchivedSessions', [])).result as Array<{ sessions: unknown[] }>
       expect(archived.flatMap((project) => project.sessions)).toHaveLength(1)
 
-      // Purge needs the count the App asked about; a different count deletes nothing.
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [])).error).toBe('已存档会话删除未经确认')
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [2])).result).toMatchObject({ ok: false, reason: 'catalog_changed', deleted: 0 })
       expect(sessions().some((session) => session.externalSessionId === 'native-a')).toBe(true)
       const beforePurge = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [1])).result).toMatchObject({ ok: true, deleted: 1 })
-      // The purge's real count reaches the App's window on the event feed, in order.
       const purgeNotices = await daemon.request({ op: 'appEvents', epoch: beforePurge.events.epoch, cursor: beforePurge.events.cursor, waitMs: 0 })
       const progress = (purgeNotices.events.items as Array<{ kind: string; channel?: string; payload?: unknown }>)
         .filter((item) => item.kind === 'window' && item.channel === 'agent:deleteArchivedProgress').map((item) => item.payload)
       expect(progress).toEqual([{ done: 0, total: 1, failed: 0 }, { done: 1, total: 1, failed: 0 }])
       expect(sessions().some((session) => session.externalSessionId === 'native-a')).toBe(false)
 
-      // A single deletion; the App hears of it through the event feed.
       const handshake = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
       const deleted = await daemon.localOp('sessionLifecycle', 'deleteSession', [ref('native-b')])
       expect(deleted.error).toBeUndefined()
@@ -61,7 +54,6 @@ describe('daemon session lifecycle', () => {
   }, 30_000)
 
   it('forks through the daemon, which checks the archived boundary before the Provider is asked', async () => {
-    // The smoke Provider forks only with a calls file, which also proves whether it was asked.
     const calls = join(tempDir(), 'calls.jsonl')
     const saved = process.env.SCRY_ELECTRON_SMOKE_CALLS
     process.env.SCRY_ELECTRON_SMOKE_CALLS = calls
@@ -87,15 +79,12 @@ describe('daemon session lifecycle', () => {
   it('deletes a unified conversation the renderer previewed and confirmed', async () => {
     const daemon = await startTestDaemon()
     try {
-      // A draft that never sent: no binding, so no Provider context to fence. Deleting one
-      // used to fail on that in both modes.
       const created = (await daemon.localOp('conversation', 'create', [daemon.workspace])).result as { id: string; revision: number }
       const archived = await daemon.localOp('conversation', 'update', [created.id, created.revision, { kind: 'archive', archived: true }])
       expect(archived.error).toBeUndefined()
       const previewed = await daemon.localOp('conversation', 'previewDeletion', [created.id])
       expect(previewed.error).toBeUndefined()
       const preview = previewed.result as { fingerprint: string }
-      // A fingerprint the user did not see cleans nothing.
       expect((await daemon.localOp('conversation', 'delete', [created.id, 'f'.repeat(64)])).error).toBe('删除范围已变化，请重新预览；本次请求未执行清理')
       const deleted = await daemon.localOp('conversation', 'delete', [created.id, preview.fingerprint])
       expect(deleted.error).toBeUndefined()

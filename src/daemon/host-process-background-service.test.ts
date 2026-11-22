@@ -5,8 +5,6 @@ import { startTestDaemon } from './host-process.harness'
 
 afterEach(cleanupTempDirs)
 
-// B4-S S0-1: the «后台服务» section asks the daemon what only it knows, on the App's
-// local endpoint. Paired devices only: the App's own local grant is not a device.
 
 describe('daemon background service status (local op)', () => {
   it('reports its version, pid, start time and runs, and says when remote access is off', async () => {
@@ -20,7 +18,6 @@ describe('daemon background service status (local op)', () => {
         version: 'test',
         pid: process.pid,
         startedAt: Math.round(performance.timeOrigin),
-        // Remote access off is a state, not "0 devices".
         devices: { state: 'remote-disabled' },
         activeRuns: 0,
         remoteConfig: {
@@ -46,7 +43,6 @@ describe('daemon background service status (local op)', () => {
     process.env.SCRY_REMOTE_HOST = '1'
     const daemon = await startTestDaemon()
     try {
-      // The harness enrolled over the local socket; that grant exists and is not counted.
       const local = daemon.host.service.authority.inspectLocal().grants.filter((grant) => grant.scope === 'local')
       expect(local.length).toBeGreaterThan(0)
       const reply = await daemon.localOp('localBackgroundService', 'status', [])
@@ -101,13 +97,11 @@ describe('daemon background service status (local op)', () => {
     const offDaemon = await startTestDaemon()
     let onDaemon: Awaited<ReturnType<typeof startTestDaemon>> | undefined
     try {
-      // Flag off: status omits cliApproval, localHostAdmin refuses.
       const offStatus = await offDaemon.localOp('localBackgroundService', 'status', [])
       expect('cliApproval' in (offStatus.result as Record<string, unknown>)).toBe(false)
       expect((await offDaemon.localOp('localHostAdmin', 'setCliApproval', [true])).error).toBe('host_cli_experimental_disabled')
       await offDaemon.dispose()
 
-      // Flag on: status includes cliApproval, setCliApproval persists to host-admin.json.
       process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
       onDaemon = await startTestDaemon({ root: offDaemon.root })
       expect((await onDaemon.localOp('localBackgroundService', 'status', [])).result).toMatchObject({

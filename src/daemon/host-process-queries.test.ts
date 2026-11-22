@@ -13,9 +13,6 @@ import { knownProjectDirectory } from '../main/workspace-authorization'
 
 afterEach(cleanupTempDirs)
 
-// Read-only query channels through a real daemon's App endpoint (B4-L4): the answer
-// comes from the daemon's own userData, ledger and workspace authority, with the same
-// shape main's handler gives, and an absence stays an explicit envelope.
 
 const json = (value: unknown): unknown => JSON.parse(JSON.stringify(value))
 const withoutClock = (value: unknown): unknown => JSON.parse(JSON.stringify(value), (key, field) => key === 'collectedAt' ? undefined : field)
@@ -40,10 +37,8 @@ describe('daemon query local ops', () => {
       const scoped = await daemon.localOp('usage', 'usageStats', [context])
       expect(scoped.result).toEqual(json(readUsageStats(daemon.userDataDir, { providerId: 'claude', cwd: daemon.workspace })))
       expect(scoped.result).toMatchObject({ status: 'ready', cost: 0.5, tin: 10, tout: 20, turns: 1 })
-      // Another workspace has no rows: totals are unknown (null), never zero.
       const other = await daemon.localOp('usage', 'usageStats', [{ providerId: 'claude', cwd: join(daemon.root, 'elsewhere') }])
       expect(other.result).toMatchObject({ status: 'ready', cost: null, tin: null, tout: null, turns: 0 })
-      // The renderer may leave the context out; main then reads every row.
       const all = await daemon.localOp('usage', 'usageStats', [undefined], [0])
       expect(all.result).toEqual(json(readUsageStats(daemon.userDataDir)))
 
@@ -55,7 +50,6 @@ describe('daemon query local ops', () => {
       expect(typeof analytics.result.status).toBe('string')
       const credits = await daemon.localOp('usage', 'usageCredits', [30])
       expect(credits.result).toMatchObject({ rangeDays: 30 })
-      // Main's own range validation runs in the daemon.
       expect(await daemon.localOp('usage', 'usageAnalytics', [8])).toEqual({ error: '分析时间范围无效' })
       expect(await daemon.localOp('usage', 'usageCredits', ['30'])).toEqual({ error: '分析时间范围无效' })
     })
@@ -73,7 +67,6 @@ describe('daemon query local ops', () => {
       expect(history.result).toEqual(json(await readLlmPerformanceHistory(daemon.userDataDir)))
       expect(history.result.rows.map((row: { runId: string }) => row.runId)).toEqual(['run-1'])
       const summary = await daemon.localOp('llmPerformance', 'llmPerformanceSummary', [])
-      // No run is live in this daemon: no session to summarize, with the time it was observed.
       expect(summary.result).toEqual({ observedAt: expect.any(String), sessions: [] })
     })
   }, 30_000)
@@ -91,7 +84,6 @@ describe('daemon query local ops', () => {
       const head = git(cwd, 'rev-parse', 'HEAD')
       writeFileSync(join(cwd, 'a.txt'), 'one\ntwo\nthree\n')
 
-      // Main's table over the same authority: both processes run one implementation.
       const main = workspaceDiffChannelHandlers((dir) => knownProjectDirectory(dir, [cwd])) as Record<string, (...args: unknown[]) => Promise<unknown>>
       const diff = await daemon.localOp('workspaceDiff', 'gitDiff', [cwd])
       expect(diff.result).toMatchObject({ status: 'captured', files: [expect.objectContaining({ added: 1, deleted: 0 })] })
@@ -106,7 +98,6 @@ describe('daemon query local ops', () => {
       const commit = await daemon.localOp('workspaceDiff', 'gitCommitDiffSnapshot', [{ ...range, commit: head }])
       expect(commit.result).toMatchObject({ status: 'captured', commit: expect.objectContaining({ hash: head }) })
 
-      // A directory the daemon's project authority does not know is refused before git runs.
       const outside = join(daemon.root, 'outside')
       mkdirSync(outside)
       const refused = await daemon.localOp('workspaceDiff', 'gitDiff', [realpathSync(outside)])
@@ -118,7 +109,6 @@ describe('daemon query local ops', () => {
 
   it('answers Skills as the Provider reports them, unavailable included', async () => {
     await withDaemon(async (daemon) => {
-      // The fixture Provider has no Skill facet: an explicit unsupported envelope, not [].
       const skills = await daemon.localOp('skills', 'listSkills', [{ providerId: 'codex', cwd: daemon.workspace }])
       expect(skills.result).toMatchObject({ providerId: 'codex', state: 'unsupported', data: null, reason: expect.any(String) })
     })

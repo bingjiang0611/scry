@@ -8,9 +8,6 @@ import type { TerminalPtyFactory, TerminalPtyProcess } from '../main/terminal-ma
 
 afterEach(cleanupTempDirs)
 
-// P3-terminal: the daemon runs the App's terminals with main's handlers. Output reaches
-// the App as one feed notice plus a cursor read; the window's workspace comes with each
-// call and is re-resolved here; shells do not outlive an App that stopped reading.
 
 function echoPty() {
   const killed: number[] = []
@@ -27,7 +24,6 @@ function echoPty() {
         resize: () => undefined,
         pause: () => undefined,
         resume: () => undefined,
-        // The manager ends a PTY with destroy() when it has one, kill() otherwise.
         kill: () => { killed.push(pid); queueMicrotask(() => onExit?.({ exitCode: 0 })) },
         destroy: () => { killed.push(pid); queueMicrotask(() => onExit?.({ exitCode: 0 })) }
       } as unknown as TerminalPtyProcess
@@ -43,7 +39,6 @@ describe('daemon App terminal', () => {
     const daemon = await startTestDaemon({ terminal: { pty: pty.factory, inlineRecording: true, environment: async () => ({ SHELL: '/bin/sh' }) } })
     try {
       const handshake = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
-      // A real directory the daemon does not know: refused for that reason, not for being absent.
       const elsewhere = join(daemon.root, 'elsewhere')
       mkdirSync(elsewhere)
       const outside = await daemon.localOp('terminal', 'start', [{ cwd: elsewhere, cols: 80, rows: 24 }, elsewhere])
@@ -55,7 +50,6 @@ describe('daemon App terminal', () => {
       const { id, ownershipEpoch } = started.result as { id: string; ownershipEpoch: number }
       expect((await daemon.localOp('terminal', 'ready', [{ id, ownershipEpoch }, daemon.workspace])).result).toBe(true)
       expect((await daemon.localOp('terminal', 'write', [{ id, ownershipEpoch, data: 'echo hi' }, daemon.workspace])).result).toBe(true)
-      // Stale ownership is refused exactly as main refuses it.
       expect((await daemon.localOp('terminal', 'write', [{ id, ownershipEpoch: ownershipEpoch + 7, data: 'x' }, daemon.workspace])).result).toBe(false)
 
       const notice = await daemon.request({ op: 'appEvents', epoch: handshake.events.epoch, cursor: handshake.events.cursor, waitMs: 1_000 })
@@ -70,11 +64,9 @@ describe('daemon App terminal', () => {
         if (!text.includes('echo hi')) await new Promise((resolve) => setTimeout(resolve, 20))
       }
       expect(text).toContain('echo hi')
-      // Read past: the queue does not hand the same output twice.
       const again = await daemon.request({ op: 'terminalFeed', method: 'read', cursor })
       expect(again.terminal.events).toEqual([])
 
-      // `active` takes no renderer argument; the window workspace still follows it.
       const active = await daemon.localOp('terminal', 'active', [daemon.workspace])
       expect((active.result as Array<{ id: string }>).map((session) => session.id)).toEqual([id])
     } finally {
@@ -93,7 +85,6 @@ describe('daemon App terminal', () => {
       expect((await daemon.localOp('terminal', 'active', [daemon.workspace])).result).toEqual([])
       expect(first.result).toBeTruthy()
 
-      // A crashed App: nobody reads the feed any more.
       await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
       await daemon.localOp('terminal', 'start', [{ cwd: daemon.workspace, cols: 80, rows: 24 }, daemon.workspace])
       await new Promise((resolve) => setTimeout(resolve, 400))
