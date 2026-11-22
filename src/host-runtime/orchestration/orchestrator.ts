@@ -456,7 +456,8 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           provider: p.provider,
           profile: p.profile ?? null,
           cwd: p.cwd,
-          title: p.title ?? null
+          title: p.title ?? null,
+          ...(p.catalog ? { catalog: p.catalog } : {})
         },
         evidence: p.evidence ?? null
       })
@@ -488,6 +489,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           archivedAt: p.archivedAt ?? null,
           lastRunId: p.lastRunId ?? null,
           lastRunOutcome: sanitizedOutcome,
+          ...(p.catalog ? { catalog: p.catalog } : {}),
           parentSessionKey: p.parentSessionKey ?? null,
           rootSessionKey: p.rootSessionKey ?? null,
           lineage: p.lineage ?? null

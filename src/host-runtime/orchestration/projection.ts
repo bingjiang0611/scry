@@ -295,11 +295,12 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     case 'session.discovered': {
       db.prepare(
         `INSERT INTO orch_p_session (
-          session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+          session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by, catalog
+        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
           title = COALESCE(excluded.title, orch_p_session.title),
           ts = MAX(orch_p_session.ts, excluded.ts),
+          catalog = COALESCE(excluded.catalog, orch_p_session.catalog),
           rev_seq = excluded.rev_seq`
       ).run(
         String(p.sessionKey),
@@ -309,7 +310,8 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         (p.title as string | null) ?? null,
         event.at,
         event.seq,
-        event.actor
+        event.actor,
+        p.catalog ? canonicalJson(p.catalog) : null
       )
       return
     }
@@ -320,8 +322,8 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           session_key, conversation_id, provider, profile, cwd, title, ts,
           pinned_at, archived_at, last_run_id, last_run_outcome, active_run_id,
           pending_questions, legacy, rev_seq,
-          parent_session_key, root_session_key, lineage, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1, ?, ?, ?, ?, ?)
+          parent_session_key, root_session_key, lineage, created_by, catalog
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
           conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
           provider = COALESCE(excluded.provider, orch_p_session.provider),
@@ -333,6 +335,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           archived_at = excluded.archived_at,
           last_run_id = COALESCE(excluded.last_run_id, orch_p_session.last_run_id),
           last_run_outcome = COALESCE(excluded.last_run_outcome, orch_p_session.last_run_outcome),
+          catalog = COALESCE(excluded.catalog, orch_p_session.catalog),
           legacy = 1,
           rev_seq = excluded.rev_seq,
           parent_session_key = COALESCE(excluded.parent_session_key, orch_p_session.parent_session_key),
@@ -354,7 +357,8 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         (p.parentSessionKey as string | null) ?? null,
         (p.rootSessionKey as string | null) ?? null,
         p.lineage ? canonicalJson(p.lineage) : null,
-        event.actor
+        event.actor,
+        p.catalog ? canonicalJson(p.catalog) : null
       )
       return
     }

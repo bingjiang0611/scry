@@ -1,4 +1,5 @@
 import type { Evidence } from '../../shared/turn-record-contracts'
+import type { SessionCatalogMetadata } from '../../shared/orchestration-subscribe'
 import {
   ORCHESTRATION_EVENT_TYPES,
   type OrchestrationEventType,
@@ -158,6 +159,7 @@ export interface SessionDiscoverPayload {
   profile?: string | null
   cwd: string
   title?: string | null
+  catalog?: SessionCatalogMetadata
   evidence?: string[]
 }
 
@@ -173,6 +175,7 @@ export interface SessionImportPayload {
   archivedAt?: number | null
   lastRunId?: string | null
   lastRunOutcome?: Evidence<string> | null
+  catalog?: SessionCatalogMetadata
   parentSessionKey?: string | null
   rootSessionKey?: string | null
   lineage?: SessionLineage | null

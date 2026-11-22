@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { providerIdForAgentId, runtimeProviderForProviderId } from '../../shared/runtime'
 import { unavailable } from '../../shared/turn-record'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
@@ -107,14 +108,26 @@ export function importCatalogEntries(
           archivedAt: catalogTimestamp(entry.archivedAt),
           lastRunId: typeof entry.runId === 'string' ? entry.runId : null
         }
+        const provider = providerIdForAgentId(fields.provider ?? undefined)
+        const runtime = provider === undefined ? null : runtimeProviderForProviderId(provider)
+        const catalog = {
+          nativeSessionId: typeof entry.externalSessionId === 'string' && entry.externalSessionId
+            ? entry.externalSessionId
+            : fields.lastRunId ? null : sessionKey,
+          projectCwd: typeof entry.projectCwd === 'string' ? entry.projectCwd : null,
+          preview: typeof entry.preview === 'string' ? entry.preview.slice(0, 200) : null,
+          runtimeProvider: entry.runtimeProvider === runtime ? runtime : null
+        }
         const outcome = typeof entry.lastRunOutcome === 'string' && entry.lastRunOutcome ? entry.lastRunOutcome : undefined
         const oldOutcome = previous?.lastRunOutcome as { value?: string } | null | undefined
         // Other catalog rows can change the file hash. Compare the last imported
         // source fields so that a concurrent rename or an exact run is preserved.
         if (previous && oldOutcome?.value === outcome &&
+            canonicalJson(previous.catalog ?? null) === canonicalJson(catalog) &&
             Object.entries(fields).every(([key, value]) => previous[key] === value)) continue
         const payload = {
           ...fields,
+          catalog,
           lastRunOutcome: outcome
             ? { status: 'available' as const, quality: 'inferred' as const, source: evidence, value: outcome }
             : unavailable<string>('legacy_outcome_missing', evidence),

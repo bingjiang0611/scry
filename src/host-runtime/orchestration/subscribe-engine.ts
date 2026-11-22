@@ -359,7 +359,8 @@ export class SubscribeEngine {
         activeRunId: mapped.activeRunId,
         pendingQuestions: mapped.pendingQuestions,
         legacy: mapped.legacy,
-        revSeq: mapped.revSeq
+        revSeq: mapped.revSeq,
+        ...(mapped.catalog ? { catalog: mapped.catalog } : {})
       })
     }
 
@@ -441,7 +442,10 @@ export class SubscribeEngine {
     if (!session || !this.#isCwdVisible(scope, session.cwd)) return undefined
     if ((ref.cwd !== undefined && ref.cwd !== session.cwd) ||
         (ref.providerId !== undefined && ref.providerId !== session.provider) ||
-        (ref.agentProfileId !== undefined && ref.agentProfileId !== session.profile)) return undefined
+        (ref.agentProfileId !== undefined && ref.agentProfileId !== session.profile) ||
+        (ref.externalSessionId !== undefined && ref.externalSessionId !== (session.catalog ? session.catalog.nativeSessionId : session.sessionKey))) {
+      return undefined
+    }
     return session
   }
 

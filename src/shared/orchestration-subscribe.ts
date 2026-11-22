@@ -1,5 +1,5 @@
 import type { HostAdminNotice } from './host-admin'
-import type { AgentDataUpdated } from './runtime'
+import type { AgentDataUpdated, RuntimeProvider } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
 import type { LoadedSessionTurn } from './session-history'
 
@@ -47,6 +47,13 @@ export interface SubscribeRequest {
   eventSet?: number
 }
 
+export interface SessionCatalogMetadata {
+  nativeSessionId: string | null
+  projectCwd: string | null
+  preview: string | null
+  runtimeProvider: RuntimeProvider | null
+}
+
 export interface SubscribeSessionRow {
   sessionKey: string
   conversationId: string | null
@@ -63,6 +70,7 @@ export interface SubscribeSessionRow {
   pendingQuestions: number
   legacy: boolean
   revSeq: number
+  catalog?: SessionCatalogMetadata
 }
 
 export interface SubscribeActiveRunRow {

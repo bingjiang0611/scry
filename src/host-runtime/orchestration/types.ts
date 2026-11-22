@@ -1,4 +1,5 @@
 import type { Evidence } from '../../shared/turn-record-contracts'
+import type { SessionCatalogMetadata } from '../../shared/orchestration-subscribe'
 
 export const MAX_PAYLOAD_BYTES = 16 * 1024
 export const INLINE_BODY_MAX_BYTES = 16 * 1024
@@ -210,6 +211,7 @@ export interface SessionProjectionRow {
   pendingQuestions: number
   legacy: boolean
   revSeq: number
+  catalog: SessionCatalogMetadata | null
   /** R1 reserved columns. */
   parentSessionKey: string | null
   rootSessionKey: string | null

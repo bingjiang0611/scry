@@ -51,14 +51,15 @@ export function createAuthorityDetailReader(
   const load = historyChannels['agent:loadSession'] as
     (event: undefined, context: ProviderContext) => Promise<{ page: import('../shared/orchestration-subscribe').SubscribeHistoryPage } | null>
   return async (session, signal) => {
-    const { provider, profile, cwd, sessionKey } = session
-    if (session.conversationId || cwd === null || !isSessionProviderId(provider) || provider === 'legacy_unknown') return null
+    const { provider, profile, cwd, sessionKey, catalog } = session
+    const externalSessionId = catalog ? catalog.nativeSessionId : sessionKey
+    if (session.conversationId || cwd === null || !externalSessionId || !isSessionProviderId(provider) || provider === 'legacy_unknown') return null
     signal?.throwIfAborted()
     const loaded = await load(undefined, {
       providerId: provider,
       agentProfileId: profile ?? undefined,
       cwd,
-      externalSessionId: sessionKey
+      externalSessionId
     })
     return loaded?.page ?? null
   }

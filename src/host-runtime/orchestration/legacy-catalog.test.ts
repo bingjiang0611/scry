@@ -30,6 +30,27 @@ const entry = {
 }
 
 describe('incremental app session metadata', () => {
+  it('keeps the native id, workspace grouping and sidebar preview through projection replay', () => {
+    withCatalogTest((sink, dir) => {
+      writeFileSync(join(dir, 'app-sessions.json'), JSON.stringify([{
+        ...entry,
+        externalSessionId: 'provider-native-id',
+        projectCwd: '/tmp/项目',
+        runtimeProvider: 'codex_cli',
+        preview: '第一条消息'
+      }]))
+      expect(importCatalogEntries(sink, dir, entry.ts, 1).importedSessions).toBe(1)
+      expect(sink.getSession('legacy')).toMatchObject({
+        catalog: {
+          nativeSessionId: 'provider-native-id', projectCwd: '/tmp/项目', runtimeProvider: 'codex_cli', preview: '第一条消息'
+        },
+        title: '原会话',
+        cwd: '/tmp/工作区'
+      })
+      expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+    })
+  })
+
   it('imports field changes even with the same timestamp and imports a reverted version again', () => {
     withCatalogTest((sink, dir) => {
       const next = { ...entry, agentProfileId: 'work', cwd: '/tmp/新工作区', runId: 'newer-run', lastRunOutcome: 'failed' }

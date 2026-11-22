@@ -1,4 +1,5 @@
 import type { Evidence } from '../../shared/turn-record-contracts'
+import type { SessionCatalogMetadata } from '../../shared/orchestration-subscribe'
 import type {
   BodyDescriptor,
   CommandReceiptRow,
@@ -37,6 +38,7 @@ export function mapSessionRow(row: Record<string, unknown>): SessionProjectionRo
     pendingQuestions: Number(row.pending_questions ?? 0),
     legacy: Number(row.legacy ?? 0) === 1,
     revSeq: Number(row.rev_seq),
+    catalog: parseJson<SessionCatalogMetadata>(row.catalog as string | null),
     parentSessionKey: (row.parent_session_key as string | null) ?? null,
     rootSessionKey: (row.root_session_key as string | null) ?? null,
     lineage: parseJson<SessionLineage>(row.lineage as string | null),

@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 2
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 1
+export const ORCHESTRATION_SCHEMA_VERSION = 3
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 2
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -194,4 +194,10 @@ export const ORCH_DDL_V2: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_orch_p_run_origin_lifecycle ON orch_p_run(origin, lifecycle)`
 ]
 
-export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2]
+export const ORCH_DDL_V3: readonly string[] = [
+  'ALTER TABLE orch_p_session ADD COLUMN catalog TEXT',
+  "UPDATE orch_meta SET value = '2' WHERE key = 'projection_schema_version'",
+  "UPDATE orch_meta SET value = '' WHERE key = 'legacy_catalog_sha256'"
+]
+
+export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3]
