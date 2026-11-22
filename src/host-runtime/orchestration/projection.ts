@@ -149,6 +149,18 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       return
     }
 
+    case 'run.transcript_referenced': {
+      if (event.evidence?.length) {
+        db.prepare(
+          `UPDATE orch_p_turn SET evidence = (
+            SELECT json_group_array(value) FROM (
+              SELECT value FROM json_each(evidence) UNION SELECT value FROM json_each(?)
+            )
+          ), rev_seq = ? WHERE run_id = ?`
+        ).run(canonicalJson(event.evidence), event.seq, event.runId)
+      }
+      return
+    }
     case 'run.finalized': {
       if (typeof p.outputSeq === 'number') {
         db.prepare('UPDATE orch_p_run SET output_seq = ?, rev_seq = ? WHERE run_id = ?').run(

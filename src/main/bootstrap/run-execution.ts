@@ -192,7 +192,21 @@ export async function startRun(
       remoteResult = remoteState.remoteResult
       const { finishRemote, markTerminalAttention } = remoteState
       const settleManagedConversation = createManagedConversationSettlement({ state: runTerminalState, managedConversation, handle, cwd, runId, displayPrompt, runState, userDataDir: storageUserDataDir() })
-      const runtimePromise = startProviderAfterBaseline({ turnDiffCapture, sessionBaselineReady, markReady: () => firstTextPerf.mark('git_baseline_ready'), runProvider })
+      const runtimePromise = startProviderAfterBaseline({
+        turnDiffCapture, sessionBaselineReady, markReady: () => firstTextPerf.mark('git_baseline_ready'),
+        runProvider: async () => {
+          if (!host.observeNativeTranscript || !cwd) return runProvider()
+          const finish = await host.observeNativeTranscript({ runId, ledgerRunId: options.ledgerRunId, providerId, cwd, resume })
+          let sessionId: string | undefined
+          try {
+            const result = await runProvider()
+            sessionId = result.externalSessionId
+            return result
+          } finally {
+            await finish?.(sessionId ?? liveRunState.observedSessionId)
+          }
+        }
+      })
       const completionContext = () => ({
         state: runTerminalState,
         providerId,

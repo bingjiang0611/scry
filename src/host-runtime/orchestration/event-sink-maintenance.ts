@@ -7,6 +7,7 @@ import { canonicalJson } from './canonical-json'
 import { migrateOrchestrationDatabase } from './migrations'
 import { applyEventToProjection } from './projection'
 import { ORCHESTRATION_MIGRATIONS } from './schema'
+import { catalogFrontierKey } from './transcript-interval'
 import type { OrchestrationEventRow, OrchestrationScope } from './types'
 
 const require = createRequire(import.meta.url)
@@ -51,6 +52,7 @@ export function deleteSessionInDb(
       .get(input.sessionKey)
     if (!sessionRow && !eventRow) return
     existed = true
+    db.prepare('DELETE FROM orch_meta WHERE key = ?').run(catalogFrontierKey(input.sessionKey))
 
     const runRows = db
       .prepare(

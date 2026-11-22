@@ -69,8 +69,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   let remoteHostService: RemoteHostService | null = null
 
   const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
-  // What this daemon tells its App that no run read carries (P3f).
-  // Its unread set is state: a new or resynchronizing App gets it whole (E1b).
+  // New and resynchronizing Apps receive the full unread set (E1b).
   const events = new AppEventFeed({ state: () => [{ kind: 'attention', snapshot: session.dockBadge.snapshot() }] })
   const publishData = (event: AgentDataUpdated): void => events.append({ kind: 'data', event })
   const session = createSessionState({
@@ -83,8 +82,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
   })
-  // The App's terminals (P3-terminal.md). The recording worker sits beside this entry in
-  // out/main, like the run output worker below.
   let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
   const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink)
   const terminal = createDaemonTerminalService({
@@ -152,6 +149,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const remoteRunLedgerIds = new Map<string, string>()
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
+    observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
     // The pipeline's window notices travel on the App event feed. The trace and questions
     // reach the App through its own run reads, so they are not sent twice (W1).
     renderer: {

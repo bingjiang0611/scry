@@ -21,6 +21,7 @@ import type { RunControl } from './run-control'
 
 /** What the run pipeline needs from the process that hosts it (Electron main or the daemon). */
 export type RunHost = {
+  observeNativeTranscript?: (run: NativeTranscriptRun) => Promise<((sessionId: string | undefined) => Promise<void>) | undefined> | undefined
   providerRegistry: ProviderRegistry
   piRunDiagnostics: PiRunDiagnostics
   isShuttingDown: () => boolean
@@ -68,4 +69,12 @@ export type RunHost = {
   flushTraceSend: () => void
   runStopLifecycle: RunStopLifecycle
   runTraces: Pick<RunTraceRouter, 'settle' | 'hasDemand'>
+}
+
+export interface NativeTranscriptRun {
+  runId: string
+  ledgerRunId?: string
+  providerId: ProviderId
+  cwd: string
+  resume?: string
 }

@@ -51,6 +51,7 @@ export interface RunPipelineInputs {
   remoteRunIds: Set<string>
   remoteRunLedgerIds: Map<string, string>
   mirrorSessionTranscript: Parameters<typeof startRun>[2]['mirrorSessionTranscript']
+  observeNativeTranscript?: Parameters<typeof startRun>[2]['observeNativeTranscript']
   /**
    * Who executes runs. `'daemon'` means another process owns every run: this assembly
    * still serves the registry and trace views those channels read, but it must never
@@ -108,7 +109,8 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
       isShuttingDown: inputs.isShuttingDown,
       getCurrentCwd: inputs.getCurrentCwd,
       getStartupManagedRecovery: inputs.getStartupManagedRecovery,
-      nextRunSequence: inputs.nextRunSequence
+      nextRunSequence: inputs.nextRunSequence,
+      observeNativeTranscript: inputs.observeNativeTranscript
     })
   }
   /** 远端分发的收据台账；键是 ledger 的 runId，与本地 IPC 的命令标识互不干扰。 */

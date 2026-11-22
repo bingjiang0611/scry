@@ -1,5 +1,5 @@
-import { constants, type Dirent } from 'node:fs'
-import { open, readdir } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { runtimeProviderForProviderId } from '../shared/runtime'
 import { unavailable, type Evidence } from '../shared/turn-record'
@@ -8,13 +8,13 @@ import { trustedOwnedFile } from '../main/transcript-archive-paths'
 import { isSessionProviderId, type createAppSessionStore } from '../main/app-store'
 import type { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
 import { locatePiNativeSession, piNativeSessionDirectory } from '../main/pi-native-history'
-import { validateHeader, type NativeEntry } from '../main/pi-native-parse'
+import { matchesPiIdentity } from './orchestration-native-source'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { CatalogSubscriptionScans } from '../host-runtime/orchestration/catalog-subscription-scans'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { SessionDiscoverPayload } from '../host-runtime/orchestration/orchestrator-commands'
 import {
-  captureTranscriptInterval, readTranscriptExtent, resolveTranscriptInterval,
+  captureTranscriptInterval, catalogFrontierKey, readTranscriptExtent, resolveTranscriptInterval,
   type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
@@ -36,6 +36,30 @@ interface ObservedTranscript {
   reference?: string
 }
 
+interface StoredTranscript {
+  source: TranscriptSource
+  extent: { device: string; inode: string; mtimeNs: string; birthtimeNs: string; size: number }
+  reference?: string
+}
+
+function encodeFrontier(observed: ObservedTranscript | null): string {
+  if (!observed) return 'null'
+  const { device, inode, mtimeNs, birthtimeNs, size } = observed.extent
+  return JSON.stringify({
+    ...observed, extent: {
+      device: String(device), inode: String(inode), mtimeNs: String(mtimeNs), birthtimeNs: String(birthtimeNs), size
+    }
+  } satisfies StoredTranscript)
+}
+
+function decodeFrontier(value: string | undefined): ObservedTranscript | undefined {
+  if (!value) return undefined
+  const row = JSON.parse(value) as StoredTranscript | null
+  if (!row) return undefined
+  const { device, inode, mtimeNs, birthtimeNs, size } = row.extent
+  return { ...row, extent: { device: BigInt(device), inode: BigInt(inode), mtimeNs: BigInt(mtimeNs), birthtimeNs: BigInt(birthtimeNs), size } }
+}
+
 function sameExtent(previous: TranscriptExtent, current: TranscriptExtent): boolean {
   return previous.device === current.device && previous.inode === current.inode &&
     previous.size === current.size && previous.mtimeNs === current.mtimeNs
@@ -50,30 +74,13 @@ async function listNativeEntries(path: string): Promise<Dirent[]> {
   }
 }
 
-async function matchesPiIdentity(path: string, cwd: string, sessionId: string): Promise<boolean> {
-  const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
-  try {
-    const bytes = Buffer.allocUnsafe(16 * 1024)
-    const { bytesRead } = await file.read(bytes, 0, bytes.length, 0)
-    const line = bytes.subarray(0, bytesRead)
-    const end = line.indexOf(0x0a)
-    if (end < 0) return false
-    try {
-      validateHeader(JSON.parse(line.toString('utf8', 0, end)) as NativeEntry, { cwd, sessionId })
-      return true
-    } catch {
-      return false
-    }
-  } finally {
-    await file.close()
-  }
-}
-
 /** Watches Provider files already under authorized roots. Only metadata and evidence
  * references go to the command log. The content channel owns history pages. */
 export function createCatalogScanWork(options: CatalogScanOptions) {
   const { sink, homeDir, userDataDir } = options
   const seen = new Map<string, ObservedTranscript>()
+  const lastObservation = (sessionKey: string): ObservedTranscript | undefined =>
+    seen.get(sessionKey) ?? decodeFrontier(sink.getMeta(catalogFrontierKey(sessionKey)))
   const piRoot = join(homeDir, '.pi', 'agent', 'sessions')
   const onError = (error: unknown): void => {
     options.log(`daemon.catalog-scan ${error instanceof Error ? error.message : String(error)}`)
@@ -87,7 +94,7 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     ).get(provider, cwd, nativeSessionId, nativeSessionId) as { key: string } | undefined
     return selected?.key ?? `native:${sha256Hex(canonicalJson([provider, cwd, nativeSessionId]))}`
   }
-  const publish = (payload: SessionDiscoverPayload, at: number): void => {
+  const publish = (payload: SessionDiscoverPayload, at: number, observation?: ObservedTranscript | null): void => {
     if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
     const existing = sink.getSession(payload.sessionKey)
     if (!existing && payload.catalog?.nativeSessionId && wasNativeSourceDeleted(sink, {
@@ -97,26 +104,32 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
       "SELECT 1 FROM orch_event WHERE session_key IN (?, ?) AND cwd = ? AND type = 'session.deleted' LIMIT 1"
     ).get(payload.sessionKey, payload.catalog?.nativeSessionId ?? '', payload.cwd)) return
     const payloadSha256 = sha256Hex(canonicalJson(payload))
-    const result = sink.execute({
-      type: 'session.discover',
-      commandId: `catalog-scan:${payload.sessionKey}:${existing?.revSeq ?? 0}:${payloadSha256.slice(0, 16)}`,
-      actor: 'system',
-      scope: 'system',
-      at,
-      payload,
-      payloadSha256
+    const result = sink.runInBatchTransaction(() => {
+      const update = sink.execute({
+        type: 'session.discover',
+        commandId: `catalog-scan:${payload.sessionKey}:${existing?.revSeq ?? 0}:${payloadSha256.slice(0, 16)}`,
+        actor: 'system',
+        scope: 'system',
+        at,
+        payload,
+        payloadSha256
+      })
+      if (update.kind === 'accepted' && observation !== undefined) {
+        sink.setMeta(catalogFrontierKey(payload.sessionKey), encodeFrontier(observation))
+      }
+      return update
     })
     if (result.kind === 'accepted' && !existing) options.onDiscovered?.(payload)
   }
 
   const readSource = async (source: TranscriptSource, session: SessionDiscoverPayload): Promise<void> => {
-    const observed = seen.get(session.sessionKey)
+    const observed = lastObservation(session.sessionKey)
     const previous = observed?.source.path === source.path ? observed : undefined
     const current = await readTranscriptExtent(source)
     if (!current) {
       if (previous) {
         seen.delete(session.sessionKey)
-        publish({ ...session, transcript: unavailable('source_removed', previous.reference ? [previous.reference] : []) }, Date.now())
+        publish({ ...session, transcript: unavailable('source_removed', previous.reference ? [previous.reference] : []) }, Date.now(), null)
       }
       return
     }
@@ -139,17 +152,18 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
       transcript = await captureTranscriptInterval(source, previous?.extent, current)
     }
     seen.delete(session.sessionKey)
-    seen.set(session.sessionKey, { source, extent: current, reference: transcript.value ?? previous?.reference })
+    const observation = { source, extent: current, reference: transcript.value ?? previous?.reference }
+    seen.set(session.sessionKey, observation)
     if (seen.size > 128) seen.delete(seen.keys().next().value!)
     publish({
       ...session,
       transcript,
       ...(transcript.status === 'available' ? { evidence: transcript.source } : {})
-    }, Number(current.mtimeNs / 1_000_000n))
+    }, Number(current.mtimeNs / 1_000_000n), observation)
   }
 
   async function scanDetail(sessionKey: string, opening: boolean): Promise<void> {
-    if (!sink.handle.db.open) return
+    if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
     const session = sink.getSession(sessionKey)
     if (!session || !session.cwd || session.conversationId || (!opening && options.isActive(session))) return
     const { cwd, provider, profile } = session
@@ -158,7 +172,7 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     if (!nativeSessionId) return
     // An imported row may name a directory that has since been removed.
     if (![...options.workspaces()].includes(cwd)) return
-    const observed = seen.get(sessionKey)
+    const observed = lastObservation(sessionKey)
     const known = observed?.source.provider === provider && observed.source.nativeSessionId === nativeSessionId ? observed : undefined
     const path = known?.source.path ?? (provider === 'claude'
       ? transcriptPath(cwd, nativeSessionId, homeDir)

@@ -25,10 +25,11 @@ it('discovers an external session and reads only the appended interval when its 
   const sink = EventSink.open({ userDataDir, fullfsync: false })
   try {
     let active = false
-    const work = createCatalogScanWork({
+    const createWork = () => createCatalogScanWork({
       sink, homeDir, userDataDir, workspaces: () => [cwd],
       isActive: () => active, log: (message) => { throw new Error(message) }
     })
+    const work = createWork()
     await work.scanCatalog()
     const discovered = sink.listEvents().find((event) => event.type === 'session.discovered')!
     expect(discovered).toMatchObject({ cwd, payload: { provider: 'claude', catalog: { nativeSessionId: sessionId } } })
@@ -49,6 +50,15 @@ it('discovers an external session and reads only the appended interval when its 
     ])
     await work.scanDetail(discovered.sessionKey!, false)
     expect(sink.listEvents()).toHaveLength(2)
+    const reopened = createWork()
+    await reopened.scanCatalog()
+    expect(sink.listEvents()).toHaveLength(2)
+    const afterRestart = line('重启后的消息')
+    appendFileSync(transcript, afterRestart)
+    await reopened.scanDetail(discovered.sessionKey!, true)
+    expect(sink.listEvents().at(-1)?.evidence).toEqual([
+      `transcript:claude:${sessionId}#bytes=${end}-${end + Buffer.byteLength(afterRestart)},sha256=${sha256Hex(afterRestart)}`
+    ])
     expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   } finally {
     sink.close()

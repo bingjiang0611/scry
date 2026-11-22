@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import type { ConversationStore } from '../main/conversation-store'
+import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
+import type { Evidence } from '../shared/turn-record'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
 import { RemoteInteractionError } from '../main/remote/remote-interaction-broker'
 import type { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
@@ -22,6 +24,7 @@ import {
   type AuthoritySubscribeRuntimeDeps
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
+import { observeNativeRunTranscript, recordNativeRunTranscript } from './orchestration-run-transcript'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { AppEvent } from '../main/remote/app-event-feed'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
@@ -51,6 +54,7 @@ export interface DaemonOrchestrationAuthority {
   readonly subscribeHub: SubscribeHub
   createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
   forwardAppEvent(event: AppEvent): void
+  observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
   status(): BackgroundServiceOrchestrationStatus
   flushLegacyMirror(): Promise<void>
@@ -179,6 +183,7 @@ function buildAuthorityRuntime<
 
   // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
+  const pendingTranscripts = new Map<string, Promise<Evidence<string>>>()
   const trustGate = new AuthorityMcpTrustGate()
   const subscribeHub = createAuthoritySubscribeHub(
     sink,
@@ -379,6 +384,9 @@ function buildAuthorityRuntime<
         ...(detail ? { reason: detail } : {}),
         evidence: [step === 'cancelled' ? 'host.run_completion' : 'provider']
       })
+      const transcript = pendingTranscripts.get(canonicalRunId)
+      pendingTranscripts.delete(canonicalRunId)
+      if (transcript) void transcript.then((value) => recordNativeRunTranscript(sink, canonicalRunId, value, options.log))
       subscribeHub.noteRunTerminal(canonicalRunId)
       trustGate.delete(canonicalRunId)
       ledgerToCanonical.delete(runId)
@@ -419,6 +427,17 @@ function buildAuthorityRuntime<
     mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
     createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
     forwardAppEvent: (event) => forwardAppEventToSubscribeHub(subscribeHub, event, resolveCanonical),
+    observeNativeTranscript: (homeDir, run) => {
+      if (!sink.handle.db.open || sink.isWriteIndeterminate()) return undefined
+      const runId = resolveCanonical(run.ledgerRunId ?? run.runId)
+      return observeNativeRunTranscript(homeDir, run, (transcript) => {
+        if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
+        const current = sink.getRun(runId)
+        if (current?.lifecycle === 'dispatched' && current.cwd === run.cwd && current.provider === run.providerId) {
+          pendingTranscripts.set(runId, transcript)
+        }
+      }, options.log)
+    },
     startImport, status,
     flushLegacyMirror: async () => { await legacyMirror?.flush() },
     close: async () => {

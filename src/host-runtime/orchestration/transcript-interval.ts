@@ -18,11 +18,14 @@ export interface TranscriptExtent {
   inode: bigint
   size: number
   mtimeNs: bigint
+  birthtimeNs: bigint
 }
+
+export const catalogFrontierKey = (sessionKey: string): string => `catalog_transcript:${sessionKey}`
 
 function extent(stat: BigIntStats): TranscriptExtent | undefined {
   if (!stat.isFile() || stat.size > BigInt(Number.MAX_SAFE_INTEGER)) return undefined
-  return { device: stat.dev, inode: stat.ino, size: Number(stat.size), mtimeNs: stat.mtimeNs }
+  return { device: stat.dev, inode: stat.ino, size: Number(stat.size), mtimeNs: stat.mtimeNs, birthtimeNs: stat.birthtimeNs }
 }
 
 function isMissing(error: unknown): boolean {
@@ -82,6 +85,7 @@ export async function captureTranscriptInterval(
       return unavailable('source_removed')
     }
     if (end === start) return unavailable('no_new_transcript_bytes')
+    if (end - start > MAX_RESOLVED_BYTES) return unavailable('transcript_interval_too_large')
     const digest = await hashRange(file, start, end)
     if (!digest) return unavailable('source_removed')
     const reference = `${referencePrefix(source)}${start}-${end},sha256=${digest}`

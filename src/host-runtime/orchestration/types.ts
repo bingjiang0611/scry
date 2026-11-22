@@ -53,6 +53,7 @@ export type OrchestrationEventType =
   | 'run.question_closed'
   | 'run.provider_settled'
   | 'run.finalized'
+  | 'run.transcript_referenced'
   | 'run.settled'
   | 'run.failed'
   | 'run.cancelled'
@@ -85,6 +86,7 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'run.question_closed',
   'run.provider_settled',
   'run.finalized',
+  'run.transcript_referenced',
   'run.settled',
   'run.failed',
   'run.cancelled',

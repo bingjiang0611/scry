@@ -77,6 +77,7 @@ export type EffectResultStep =
   | 'question_closed'
   | 'provider_settled'
   | 'finalized'
+  | 'transcript_referenced'
   | 'settled'
   | 'failed'
   | 'cancelled'
@@ -90,6 +91,7 @@ export interface RunEffectResultPayload {
   detail?: string
   isError?: boolean
   providerResultRef?: string
+  transcript?: Evidence<string>
   nativeSessionId?: string
   attachNative?: true
   catalogRunId?: string

@@ -319,6 +319,15 @@ export function decideRunEffectResult(
       events.push(makeEvent(cmd, 0, { ...common, type: 'run.provider_settled', payload }))
       return acceptDecision(cmd, events, [], { runId: run.runId })
     }
+    case 'transcript_referenced': {
+      if (cmd.actor !== 'system' || !p.transcript) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      const event = makeEvent(cmd, 0, {
+        ...common,
+        type: 'run.transcript_referenced',
+        payload: { runId: run.runId, transcript: p.transcript }
+      })
+      return acceptDecision(cmd, [event], [], { runId: run.runId })
+    }
     case 'finalized': {
       if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       events.push(
