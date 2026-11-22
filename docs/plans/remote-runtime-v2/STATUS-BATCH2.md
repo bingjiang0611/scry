@@ -1,6 +1,6 @@
 # Batch 2 执行状态（执行 agent 维护）
 
-分支 `claude/remote-runtime-v2`，起点 `a0b2355b`。任务书：[EXECUTION-BATCH2.md](EXECUTION-BATCH2.md)。每完成一个任务更新一次并 push。
+分支 `claude/remote-runtime-v2`，起点 `a0b2355b`。[原任务书](https://github.com/bingjiang0611/scry/blob/77dd5a26135350a478e153a06f39f1464b3393f5/docs/plans/remote-runtime-v2/EXECUTION-BATCH2.md)仅供回查。
 
 ## 总览
 

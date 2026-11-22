@@ -1,7 +1,7 @@
 # Batch 4 状态
 
 分支 `claude/remote-runtime-v2`。任务书：[EXECUTION-BATCH4.md](EXECUTION-BATCH4.md)；起点 `66225f1`（Batch 3 收尾）。
-工作约定、停止条件、提交与 STATUS 规则沿用 [EXECUTION.md](EXECUTION.md) 第 0、1 节。
+执行阶段继承的约定见 [Batch 4 任务书](EXECUTION-BATCH4.md)；通用交付规则见[验证与交付](../../agent/verification.md)。
 
 ## 总览
 

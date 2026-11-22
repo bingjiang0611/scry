@@ -1,6 +1,6 @@
 # 交付前全局验证
 
-返回[执行状态](../STATUS.md)。按 `EXECUTION.md` §3 的顺序执行，分支 `claude/remote-runtime-v2`，HEAD `b08f9f37`，macOS arm64 / Node v24.18.0。
+返回[执行状态](../STATUS.md)。按当时 Batch 1 任务书的顺序执行，分支 `claude/remote-runtime-v2`，HEAD `b08f9f37`，macOS arm64 / Node v24.18.0。
 
 ## 结果
 
