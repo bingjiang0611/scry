@@ -119,14 +119,18 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const previousContextKey = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const preparedHistoryContext = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const appliedPreparedHistory = useRef(preparedHistory)
+  const preparedHistoryRequest = useRef(generation.current)
   useEffect(() => {
     if (!preparedHistory || appliedPreparedHistory.current === preparedHistory) return
     appliedPreparedHistory.current = preparedHistory
-    preparedHistoryContext.current = contextKey
+    // A finished handoff must not swallow the next subscription or reconnect refresh.
+    preparedHistoryContext.current = preparedHistory.status === 'loading' ? contextKey : undefined
     if (preparedHistory.status === 'loading') {
+      preparedHistoryRequest.current = generation.current
       setHistoryLoading(true)
       return
     }
+    if (preparedHistoryRequest.current !== generation.current) return
     setHistoryLoading(false)
     if (preparedHistory.status === 'error') {
       setHistoryError(preparedHistory.error)

@@ -129,6 +129,7 @@ export function useConnectedCatalogLoader(connections: readonly DesktopRemoteCon
     const unsubscribe = window.scry.onDesktopRemoteUpdate?.((update) => {
       const id = update.connectionId
       if (!ids.has(id)) return
+      if (update.catalog || update.stale) revisions.set(id, (revisions.get(id) ?? 0) + 1)
       if (update.catalog) {
         const unreadSessionKeys = remoteCatalogUnread(update.catalog, viewedSessionKey)
         publish(id, { catalog: update.catalog, loading: false, stale: false, unreadSessionKeys })
@@ -136,7 +137,20 @@ export function useConnectedCatalogLoader(connections: readonly DesktopRemoteCon
         publish(id, { ...snapshot.get(id), loading: false, stale: true })
       }
     })
-    for (const id of ids) void refreshRemoteCatalog(id)
-    return unsubscribe
+    const refreshVisible = (): void => {
+      for (const id of ids) {
+        if (document.hidden) {
+          revisions.set(id, (revisions.get(id) ?? 0) + 1)
+          const retained = snapshot.get(id)
+          if (retained) publish(id, { ...retained, stale: true })
+        } else void refreshRemoteCatalog(id)
+      }
+    }
+    refreshVisible()
+    document.addEventListener('visibilitychange', refreshVisible)
+    return () => {
+      unsubscribe?.()
+      document.removeEventListener('visibilitychange', refreshVisible)
+    }
   }, [subscribedIds])
 }

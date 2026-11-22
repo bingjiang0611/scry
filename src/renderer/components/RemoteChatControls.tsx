@@ -200,7 +200,7 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           pendingUpdate = true
           void active.then(() => {
             pendingUpdate = false
-            if (!cancelled) void poll()
+            if (!cancelled && !document.hidden) void poll()
           })
         }
         return active
@@ -210,15 +210,34 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       return request
     }
     pollRef.current = poll
+    let hiddenHistoryChanged = false
     const unsubscribe = window.scry.onDesktopRemoteUpdate?.((update) => {
       if (update.connectionId !== connectionId) return
+      if (document.hidden) {
+        hiddenHistoryChanged ||= update.history === true
+        return
+      }
       if (update.history) setHistoryRevision(revision => revision + 1)
       if (update.runs || update.stale) void poll()
     })
-    void poll()
+    const visibilityChanged = (): void => {
+      if (document.hidden) {
+        pollSequence.current += 1
+        setPollFresh(false)
+        return
+      }
+      if (hiddenHistoryChanged) {
+        hiddenHistoryChanged = false
+        setHistoryRevision(revision => revision + 1)
+      }
+      void poll()
+    }
+    document.addEventListener('visibilitychange', visibilityChanged)
+    if (!document.hidden) void poll()
     return () => {
       cancelled = true
       unsubscribe?.()
+      document.removeEventListener('visibilitychange', visibilityChanged)
       pollSequence.current += 1
       if (pollRef.current === poll) pollRef.current = undefined
     }
