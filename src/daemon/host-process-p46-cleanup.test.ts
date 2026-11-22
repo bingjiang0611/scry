@@ -49,3 +49,31 @@ it('delivers host notices through subscribe with the old App event op retired', 
     await daemon.dispose()
   }
 })
+
+it('returns the original durable receipt after pruning and restart', async () => {
+  let daemon = await startTestDaemon()
+  try {
+    const sink = daemon.host.orchestrationAuthority!.sink
+    const request = {
+      op: 'submit', intentId: randomUUID(),
+      detail: JSON.stringify({ cwd: daemon.workspace, providerId: 'codex', prompt: 'recover same receipt' })
+    }
+    const first = await daemon.request(request)
+    expect(first).toMatchObject({ status: 'recorded', runId: expect.any(String), seq: expect.any(Number) })
+    await expect.poll(() => sink.getRun(first.runId)?.lifecycle, { timeout: 10_000 }).toBe('settled')
+    expect(sink.pruneEvents({ olderThanAt: Date.now() + 1 }).deletedEvents).toBeGreaterThan(0)
+    await daemon.dispose()
+
+    daemon = await startTestDaemon({ root: daemon.root, device: daemon.device })
+    const recovered = daemon.host.orchestrationAuthority!.sink
+    await expect(daemon.request(request)).resolves.toMatchObject({
+      status: 'duplicate', runId: first.runId, seq: first.seq
+    })
+    await expect(daemon.request({ ...request, detail: request.detail.replace('same receipt', 'conflicting receipt') }))
+      .resolves.toEqual({ error: 'intent_id_conflict' })
+    expect(recovered.handle.db.prepare('SELECT COUNT(*) AS count FROM orch_p_run').get()).toEqual({ count: 1 })
+    expect(recovered.getRun(first.runId)?.lifecycle).toBe('settled')
+  } finally {
+    await daemon.dispose()
+  }
+})
