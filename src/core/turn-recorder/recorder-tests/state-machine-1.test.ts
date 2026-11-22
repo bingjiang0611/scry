@@ -17,7 +17,6 @@ export function registerSuite1(): void {
     config.capture.toolOutput = 'full'
     config.capture.toolContentFieldBytes = 1024
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
-    // OpenCode's session.idle plugin dispatches Stop, not session.idle itself.
     const input = { provider, workspace: root, event: 'Stop', payload: payload('missing-start', {
       transcript_path: join(root, 'absent-transcript.jsonl'), detail: 'provider detail'
     }) }
@@ -79,7 +78,6 @@ export function registerSuite1(): void {
     config.capture.toolOutput = 'full'
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
     const session = 'orphan-budget-legal-json'
-    // The field case: six PostToolUse and two PreToolUse stops with no open turn to belong to.
     const events = [
       ...Array.from({ length: 6 }, (_, index) => ({ event: 'PostToolUse', index, tool: 'Bash' })),
       ...Array.from({ length: 2 }, (_, index) => ({ event: 'PreToolUse', index: index + 6, tool: 'Read' }))
@@ -102,10 +100,8 @@ export function registerSuite1(): void {
       const orphan = JSON.parse(await readFile(join(directory, file), 'utf8'))
       expect(orphan.payload).toMatchObject({ storage: 'truncated', encoding: 'json', reasons: ['field_budget'] })
       expect(Buffer.byteLength(orphan.payload.content)).toBeLessThanOrEqual(8 * 1024)
-      // Every stored body parses, and each replaced field states the bytes it replaced.
       const bounded = JSON.parse(orphan.payload.content) as Record<string, unknown>
       expect(bounded.tool_response).toMatchObject({ storage: 'truncated', originalBytes: 9002 })
-      // The object structure is kept; only the oversized string inside it is replaced.
       expect(bounded.tool_input).toMatchObject({
         attempt: expect.any(Number),
         query: { storage: 'truncated', originalBytes: 6000 }
@@ -126,7 +122,6 @@ export function registerSuite1(): void {
       event: 'PostToolUse',
       payload: payload('reset', { tool_name: 'Bash', tool_use_id: 't', tool_response: 'ok', timestamp: reset })
     })
-    // Connection reset: no Stop ever arrives, and the user types again 23 minutes later.
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('reset', { prompt: 'again', timestamp: nextPrompt }) })
     const records = await listRecords(join(root, '.scry'))
     expect(records).toHaveLength(1)
@@ -146,7 +141,6 @@ export function registerSuite1(): void {
     const ended = new Date(now - 47 * 60_000).toISOString()
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('ended', { prompt: 'go', timestamp: start }) })
     const terminal = { ...base, event, payload: payload('ended', { timestamp: ended }) }
-    // The hook only persists the boundary; aggregation belongs to recovery, not to the 3s budget.
     await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
     await expect(handleRecorderHook(terminal)).resolves.toMatchObject({ status: 'pending' })
     await recoverRecorder(root)
@@ -159,7 +153,6 @@ export function registerSuite1(): void {
       quality: 'exact',
       value: { reason: 'session_end', completedAtSource: 'provider_terminal_event' }
     })
-    // A later prompt opens a new turn instead of reviving the closed one.
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('ended', { prompt: 'again', timestamp: new Date().toISOString() }) })
     expect((await listRecords(join(root, '.scry')))).toHaveLength(1)
   })
@@ -291,7 +284,6 @@ export function registerSuite1(): void {
     await handleRecorderHook({
       ...base,
       event: 'SessionEnd',
-      // Provider 时钟落后：结束时间比本轮开始还早，它不可能是真实结束点
       payload: payload('backwards', { timestamp: new Date(Date.parse(start) - 10 * 60_000).toISOString() })
     })
     await recoverRecorder(root)
@@ -322,7 +314,6 @@ export function registerSuite1(): void {
     await writeFile(configPath, JSON.stringify(config))
     const base = { provider: 'claude' as const, workspace: root }
     await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: payload('redacted', { prompt: 'test' }) })
-    // A config edit cannot downgrade a started full capture to summary-only writes.
     config.capture.toolOutput = 'summary'
     await writeFile(configPath, JSON.stringify(config))
     await handleRecorderHook({ ...base, event: 'PreToolUse', payload: payload('redacted', { tool_name: 'Bash', tool_use_id: 't', tool_input: { password: 'INPUT_SENTINEL', command: 'echo ok' } }) })

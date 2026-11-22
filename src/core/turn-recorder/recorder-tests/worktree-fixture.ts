@@ -6,10 +6,6 @@ import type { AgentTurnRecord } from '../../../shared/turn-record'
 import type { TurnDiffSnapshotRecord } from '../../../shared/turn-record-contracts'
 import { workspace, pexecFile, payload } from './fixture.test'
 
-/**
- * worktree 用例共享的夹具：一个已提交基线的 Git 工作区 + 回合开始/收尾 + 记录断言。
- * `trees/` 被忽略，新建 worktree 不会混进父仓库的回合 diff。
- */
 export async function gitWorkspace(nested = true, ignore = 'trees/\n'): Promise<string> {
   const root = await workspace()
   await pexecFile('git', ['init'], { cwd: root })
@@ -21,7 +17,6 @@ export async function gitWorkspace(nested = true, ignore = 'trees/\n'): Promise<
   await pexecFile('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'baseline'], { cwd: root })
   const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8'))
   config.capture.diff = true
-  // linked worktree 的发现只在 discover-nested-git 模式下开启（与现场一致）。
   config.repositories = nested ? { mode: 'discover-nested-git', maxDepth: 2 } : { mode: 'workspace-only' }
   await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
   return root

@@ -24,10 +24,6 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return result.stdout
 }
 
-/**
- * The Friday layout: a bare cache repository plus a `git worktree add` stage deep enough that the
- * configured discovery depth cannot reach it, with `.git` as a gitdir pointer file.
- */
 async function fridayWorkspace(): Promise<{ root: string; worktree: string; transcriptPath: string }> {
   const root = await mkdtemp(join(tmpdir(), 'scry-capture-worktree-'))
   roots.push(root)
@@ -122,7 +118,6 @@ it('discovers a deep Friday worktree from the edited file, keeps it for later tu
 
   const source = join(worktree, 'src', 'feature.ts')
   await mkdir(join(worktree, 'src'), { recursive: true })
-  // The PreToolUse that names the file arrives before the write, so the baseline is the pre-edit state.
   await hook(root, transcriptPath, 'PreToolUse', {
     hook_event_name: 'PreToolUse',
     tool_name: 'Edit',
@@ -143,10 +138,8 @@ it('discovers a deep Friday worktree from the edited file, keeps it for later tu
   const changed = snapshot.files.find((file) => file.path.endsWith('/src/feature.ts'))
   expect(changed?.change).toBe('added')
   expect(changed?.added).toBeGreaterThan(0)
-  // The commit happened during the turn; its content is still the turn's change.
   expect(changed?.patchContent?.content).toContain('+export const feature = true')
 
-  // The next turn baselines the same repository at turn start, without another tool event.
   await writeFile(transcriptPath, `${[
     { timestamp: '2026-07-19T10:00:00.000Z', type: 'session_meta', payload: { id: 'sess-9', cwd: root } },
     { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
@@ -183,7 +176,6 @@ it('reads Codex apply_patch paths and stops at the worktree gitdir pointer', asy
   ].join('\n')
   expect(editedAbsolutePaths({ tool_input: { command: patch } })).toEqual(['/work/stage3/backend/workspace/backend/server.ts'])
   expect(editedAbsolutePaths({ tool_input: { file_path: '/work/a/b.ts' } })).toEqual(['/work/a/b.ts'])
-  // Qoder sends `tool_input` as a dict string with single quotes, not a JSON object.
   expect(editedAbsolutePaths({
     tool_input: "{'file_path': '/work/stage3/backend/workspace/backend/NOTES.md', 'content': 'x'}"
   })).toEqual(['/work/stage3/backend/workspace/backend/NOTES.md'])

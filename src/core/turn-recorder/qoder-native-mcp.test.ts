@@ -5,9 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { handleRecorderHook } from './recorder'
 import { listRecords } from './store'
 
-// Qoder 1.1.93 原生 MCP 调用只保留一种形状：tool_use.name=mcp_call，
-// input.toolName 是 mcp__<server>__<action>，真实参数在 input.arguments。
-// 夹具只写字段形状，不放提示、回答或参数正文以外的内容。
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 const jsonl = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
@@ -65,13 +62,11 @@ describe('Qoder native mcp_call wrapper evidence', () => {
         id: 'mcp-1',
         category: 'mcp',
         name: 'mcp__probe__echo',
-        // 记录的参数必须是包装器内层 input.arguments，而不是 {toolName, arguments} 外壳。
         inputContent: expect.objectContaining({ content: JSON.stringify({ text: 'hi' }) }),
         mcp: { server: 'probe', action: 'echo', tool: 'mcp__probe__echo' },
         status: 'success'
       })
     ])
-    // 互斥口径：同一次调用不能既进 mcps 又进 tools。
     expect(record.tools.value ?? []).toEqual([])
   })
 

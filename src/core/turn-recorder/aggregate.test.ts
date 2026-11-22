@@ -20,7 +20,6 @@ describe('aggregateTurnEvidence', () => {
     expect(JSON.stringify(evidence.user)).not.toContain(steer.attachments[0].dataBase64)
     expect(evidence.usage.value).toMatchObject({ inputTokens: 10, outputTokens: 3 })
     expect(evidence.tools.value).toEqual([])
-    // 没有介入证据的来源不能写成“精确的零次介入”。
     expect(evidence.interventions).toMatchObject({ status: 'unavailable', quality: 'unavailable' })
     expect(evidence.interventions?.value).toBeUndefined()
   })
@@ -171,8 +170,6 @@ describe('aggregateTurnEvidence', () => {
     ]
     const evidence = aggregateTurnEvidence({ events })
 
-    // 混合证据不能整段宣称 available/exact：数组里还有 status=unknown 的运行，
-    // 否则下游会把派生的 failed=0 当成「Hook 全部成功」。分母写进 omissionReason。
     expect(evidence.hooks).toMatchObject({
       status: 'partial',
       quality: 'inferred',

@@ -57,7 +57,6 @@ function manualRecoveryTimeouts(): {
   }
 }
 
-/** 独立目录，让 daemon.log 断言只看到本条测试写下的内容。 */
 async function isolatedSocketDir(root: string): Promise<string> {
   const dir = join(tmpdir(), `${basename(root)}-d`)
   await rm(dir, { recursive: true, force: true })
@@ -159,7 +158,6 @@ describe('turn recorder daemon', () => {
 
   it('空闲退出前触发更新，装完即退出，让下一个事件跑上新版本', async () => {
     const root = await workspace()
-    // daemon.log 跟随 socket 所在目录（daemon.ts 的 daemonLog），所以这里用独立目录避免串台。
     const dir = await isolatedSocketDir(root)
     const env = { ...process.env, SCRY_RECORDER_SOCKET: join(dir, 'x.sock') }
     const calls: string[] = []
@@ -387,7 +385,6 @@ describe('turn recorder daemon', () => {
         payload: { type: 'turn_aborted', turn_id: 'callback-turn', reason: 'interrupted' }
       })}\n`)
 
-      // 全量/CLI release 门禁并行构建时 recovery + callback 可能超过 4 秒；等待可观测提交文件，不用固定 sleep。
       await expect.poll(async () => JSON.parse((await readFile(capture, 'utf8')).trim()), { timeout: 10_000 })
         .toMatchObject({ event: 'record-committed', provider: 'codex', sessionId: 'callback-session', sequence: 1 })
     } finally {

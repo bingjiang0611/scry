@@ -72,7 +72,6 @@ describe('Qoder native sidecar custody and attribution', () => {
         await symlink(outside, join(f.root, 'session'))
       }
       await writeFile(f.path, jsonl(f.parentRows))
-      // Real hooks expose this logical child call, but not its parent relation.
       for (const [event, timestamp, detail] of [
         ['PreToolUse:Read', '2026-09-09T00:00:00.200Z', { tool_input: { file_path: 'seed.txt' } }],
         ['PostToolUse:Read', '2026-09-09T00:00:00.300Z', { tool_response: 'seed' }]
@@ -106,8 +105,6 @@ describe('Qoder native sidecar custody and attribution', () => {
       await handleRecorderHook({ provider: 'qoder', workspace: f.root, event: 'UserPromptSubmit', payload: {
         ...base, request_set_id: 'R', prompt: 'inspect', timestamp: '2026-09-09T00:00:00.000Z'
       } })
-      // 真实 1.1.93 子行把 parent_tool_use_id 写成 null（或未写）；归属由父结果 agentId、
-      // 子文件名、sessionId、cwd、agentId、isSidechain 证明，不靠这一列。
       const childRows = f.childRows.map(row => {
         if (shape === 'null') return { ...row, parent_tool_use_id: null }
         const { parent_tool_use_id: _omitted, ...rest } = row
@@ -128,7 +125,6 @@ describe('Qoder native sidecar custody and attribution', () => {
       const records = await listRecords(join(f.root, '.scry'))
       expect(records).toHaveLength(1)
       const record = records[0]
-      // hook 与子文件描述同一次调用：只留一条，且带父调用 ID。
       expect(record.tools.value?.filter(tool => tool.id === 'read')).toHaveLength(1)
       expect(record.tools.value?.find(tool => tool.id === 'read')?.parentId).toBe('spawn')
       expect(record.modelSegments?.value).toEqual(expect.arrayContaining([
@@ -175,8 +171,6 @@ describe('Qoder native sidecar custody and attribution', () => {
   it('keeps the rows that fit of a 600 KB child transcript and names the truncation in the record', async () => {
     const f = await fixture()
     const lateChildText = 'late child analysis '.repeat(32 * 1024)
-    // One oversized assistant row straddles the byte budget, so the cut lands mid-line and the
-    // retained prefix must end on a row boundary rather than parsing half of it.
     const oversizeChild = jsonl([
       ...f.childRows,
       { ...f.childRows[0], type: 'assistant', uuid: 'late', parentUuid: 'cd', message: { id: 'late-answer', content: [{ type: 'text', text: lateChildText }] } }
@@ -201,7 +195,6 @@ describe('Qoder native sidecar custody and attribution', () => {
     const records = await listRecords(join(f.root, '.scry'))
     expect(records).toHaveLength(1)
     const record = records[0]
-    // The child's internal evidence inside the budget survives; the parent's answer and usage stay authoritative.
     expect(record.assistant.value?.text).toBe('root answer')
     expect(record.usage.value).toMatchObject({ inputTokens: 5, outputTokens: 2 })
     expect(record.tools.value?.filter(tool => tool.id === 'read')).toHaveLength(1)
@@ -209,7 +202,6 @@ describe('Qoder native sidecar custody and attribution', () => {
     expect(record.modelSegments?.value).toEqual(expect.arrayContaining([
       expect.objectContaining({ text: 'child answer', agentId: 'child', parentId: 'spawn' })
     ]))
-    // Bytes beyond the budget were never parsed, so they cannot be claimed.
     expect(record.modelSegments?.value?.some(segment => segment.text?.includes('late child analysis'))).toBe(false)
 
     expect(record.tools.status).toBe('partial')

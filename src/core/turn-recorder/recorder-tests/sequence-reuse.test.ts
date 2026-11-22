@@ -5,11 +5,6 @@ import { doctorCommand } from '../../../cli/doctor-command.js'
 import { commitNotificationStatus, drainCommitNotifications, listRecords } from '../store'
 import { commitAckPath, commitHook, completeTurn, workspace } from './fixture.test'
 
-/**
- * Sequence numbers are the uploader's dedupe key. Reissuing one after the operator deletes a
- * record file (without `scry turns archive`) makes the drain skip the new record: delivery only
- * walks sequences above `processedThrough`, so the reused number is silently never notified.
- */
 export function registerSuite21(): void {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -51,7 +46,6 @@ export function registerSuite21(): void {
 
     await completeTurn(f.root, 'turn-4')
 
-    // Reusing 3 would keep the drain at `processedThrough = 3`, so turn-4 would never be notified.
     expect((await listRecords(f.dataRoot)).map(record => record.sequence)).toEqual([1, 2, 4])
     await expect(drainCommitNotifications(f.dataRoot, f.env)).resolves.toMatchObject({ delivered: 1, pending: 0 })
     await expect(deliveredSequences(f.hook.capture)).resolves.toEqual([1, 2, 3, 4])
@@ -77,7 +71,6 @@ export function registerSuite21(): void {
     const env = deliveryEnv(hook)
     await mkdir(join(dataRoot, 'notifications', 'commit-hooks'), { recursive: true })
     await writeFile(commitAckPath(root, fingerprint), JSON.stringify({ schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: 3 }))
-    // An older CLI wrote no watermark, and the operator then removed the live records.
     await rm(join(dataRoot, 'sequence-watermark.json'), { force: true })
     await rm(join(dataRoot, 'records'), { recursive: true, force: true })
 

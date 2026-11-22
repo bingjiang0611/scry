@@ -26,7 +26,6 @@ vi.mock('node:fs/promises', async () => {
       if (path === probe.failStatPath) throw Object.assign(new Error('injected stat permission failure'), { code: 'EACCES' })
       if (path === probe.racePath) {
         probe.racePath = ''
-        // A competing creator wins after our absent-entry observation, before our mkdir.
         if (probe.raceKind === 'directory') await actual.mkdir(path)
         else await actual.writeFile(path, 'competing file')
         throw Object.assign(new Error('observed absent entry'), { code: 'ENOENT' })

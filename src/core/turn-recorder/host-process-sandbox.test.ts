@@ -7,8 +7,6 @@ import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } fro
 import { startSessionCapture } from './session-capture'
 import type { SessionCaptureContext } from './session-capture-contract'
 
-// 沙箱里禁止启动子进程时，Node 的 execFile 可能在返回 ChildProcess 前就同步抛出 EPERM。
-// 这里把平台事实固定下来：/proc 不可读（强制走 ps），且 ps 失败可以是同步抛出或回调报错。
 const failure = vi.hoisted(() => ({ mode: 'sync' as 'sync' | 'callback' }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
@@ -67,7 +65,6 @@ describe('sandboxed process table', () => {
       cli: {}, ancestryFromPid: process.ppid
     })
     expect(result.status).toBe('started')
-    // 读不到进程表只说明宿主状态未知：本轮照常打开，host 保持未记录。
     const open = await io.readJson<RecorderOpenTurnState>(recorderOpenPath(recorderSessionRoot(join(root, '.scry'), 'codex', 'session')))
     expect(open).toMatchObject({ generation: 1 })
     expect(open?.host).toBeUndefined()

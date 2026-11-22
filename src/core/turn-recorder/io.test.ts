@@ -42,8 +42,6 @@ describe('streamed JSON writes', () => {
   }, 60_000)
 
   it('keeps a surrogate pair intact across the slice boundary', async () => {
-    // The 4 MB slice would end after the high surrogate of the first emoji; the writer must not
-    // split it, otherwise each half would encode as a replacement character.
     const value = `${'a'.repeat(4 * 1024 * 1024 - 1)}${'😀'.repeat(8)}`
     await expect(roundTrip({ patch: value })).resolves.toBe(`${JSON.stringify({ patch: value })}\n`)
   }, 60_000)
@@ -72,8 +70,6 @@ describe('withDirectoryLock', () => {
       let active = 0
       let maxActive = 0
       const order: number[] = []
-      // A dead PID is recoverable without shortening the ownerless-lock grace
-      // period. A 1ms TTL also stole freshly created contenders before owner write.
       const action = (id: number) => withDirectoryLock(lock, async () => {
         active++
         maxActive = Math.max(maxActive, active)

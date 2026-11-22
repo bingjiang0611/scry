@@ -29,7 +29,6 @@ it('close waits for background hook delivery before releasing the workspace', as
     let closeFinished = false
     const closing = daemon.close().then(() => { closeFinished = true })
     await daemon.closed
-    // The socket is closed, but the explicitly held delivery must still own the workspace.
     await expect(vi.waitFor(() => { expect(closeFinished).toBe(true) }, { timeout: 100, interval: 10 }))
       .rejects.toThrow()
     expect(deliveryFinished).toBe(false)

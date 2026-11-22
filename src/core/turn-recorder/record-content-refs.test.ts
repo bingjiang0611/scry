@@ -68,7 +68,6 @@ describe('resolveRecordContentRefs', () => {
   it('writes the inline body back into this store when the reference has no bytes here', async () => {
     const store = await dataRoot()
     const body = '{"command":"ls -la"}'
-    // The reference was published by another authority (the App trace store): bytes are not here.
     const foreignRef = { storage: 'recorder-content-v1' as const, sha256: 'a'.repeat(64), bytes: 1, encoding: 'json' as const }
     const record = evidence([call('call-1', { ...completeBody(body), contentRef: foreignRef })])
 
@@ -78,7 +77,6 @@ describe('resolveRecordContentRefs', () => {
     const kept = resolved.record.tools.value![0].inputContent!
     expect(kept.storage).toBe('complete')
     expect(kept.contentRef?.sha256).not.toBe(foreignRef.sha256)
-    // The record's new reference resolves in this store: that is the invariant the uploader needs.
     await expect(readRecorderContent(store, kept.contentRef!)).resolves.toBe(body)
   })
 
@@ -96,7 +94,6 @@ describe('resolveRecordContentRefs', () => {
 
     const resolved = await resolveRecordContentRefs(record, store)
 
-    // The output body is gone (degraded); the inline input body gains a local reference.
     expect(resolved.resolution).toEqual({ restored: 1, unavailable: 1 })
     const output = resolved.record.tools.value![0].outputContent!
     expect(output.contentRef).toBeUndefined()
@@ -108,7 +105,6 @@ describe('resolveRecordContentRefs', () => {
     expect(resolved.record.tools.status).toBe('partial')
     expect(resolved.record.tools.quality).toBe('inferred')
     expect(resolved.record.tools.omissionReason).toContain(CONTENT_MISSING_REASON)
-    // No reference survived the degradation, so the committed record cannot point outside this store.
     const stored = await readFile(join(store, 'content', 'sha256', missing.sha256.slice(0, 2), `${missing.sha256}.bin`), 'utf8')
       .catch(() => undefined)
     expect(stored).toBeUndefined()

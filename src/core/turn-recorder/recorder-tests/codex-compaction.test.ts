@@ -5,10 +5,6 @@ import { handleRecorderHook } from '../recorder'
 import { listRecords } from '../store'
 import { workspace, payload } from './fixture.test'
 
-// Sanitized rows from the 2026-11-10 session where Codex compacted the context inside turn 5
-// and wrote only a top-level `compacted` row: no `event_msg/context_compacted`, and turn 5
-// never reached `task_complete`. Message bodies, replacement history and cwd are redacted;
-// timestamps, row types, turn IDs and ordinals are the incident's.
 const turn5 = '01a1c625-33b7-7ee2-bd86-ff91de37d6eb'
 const turn6 = '01a1c63f-d0bf-7092-8697-bd9e4d9283eb'
 

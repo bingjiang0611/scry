@@ -10,12 +10,6 @@ import {
   session, start, stop, toolUse, user
 } from './state-machine-continuation-fixture'
 
-/**
- * 按会话开启的采集（CodeLens `capture start`）如何分段。
- *
- * 宿主声明一次采集，唤醒仍然属于同一个逻辑轮：接续记录必须关联回原始提问、复用同一份采集
- * 上下文，并且不重复正文。这组用例覆盖「采集声明」与「后台通知接续」的交叉点。
- */
 export function registerContinuationCaptureSuite(): void {
   it('按会话开启模式下同样分段：唤醒后仍然只有一条接续记录且不重复正文', async () => {
     const root = await workspace()
@@ -26,7 +20,6 @@ export function registerContinuationCaptureSuite(): void {
       launchReceipt('call-bg-1', 'task-1'),
       assistantText('prompt-1', 'Captured task is running in the background.')
     ].join('\n')}\n`)
-    // A capture claim opens the turn from the transcript it points at, not from a hook prompt.
     await expect(startSessionCapture({
       workspace: root,
       provider: 'qoder',
@@ -64,15 +57,11 @@ export function registerContinuationCaptureSuite(): void {
     expect(records[1].turnRole).toMatchObject({ role: 'continuation', parentId: records[0].recordId })
     expect(records[1].assistant.value?.text).toBe('Captured task finished.')
     expect(records[1].tools.value ?? []).toEqual([])
-    // One capture, one source: the wake continues the captured session instead of looking like a
-    // second, unrelated recording of the same work.
     expect(records[1].capture).toEqual(records[0].capture)
     expect(records[1].capture).toMatchObject({ captureId: 'capture-1', source: 'manual', task: 'REQ-123' })
   })
 
   it('Qoder 后台通知按接续轮记：4 段 38/3/13/10 次调用合计 64 次不重不漏，通知文本不进 user.text', async () => {
-    // Friday 复测现场：一次提问启动后台任务，被唤醒两次，最终 Stop 收尾。旧形状卡在
-    // generation=2 / turnIndex=2 / closing，64 次工具调用只上传 38 次。
     const root = await workspace()
     const transcript = join(root, 'qoder-notification-shape.jsonl')
     const calls = (promptId: string, from: number, count: number): string[] =>
@@ -94,7 +83,6 @@ export function registerContinuationCaptureSuite(): void {
       .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
     await sealQuietSegment(root)
 
-    // First wake: task-1 reported, the Agent started the next background step and stopped again.
     await appendFile(transcript, `${[
       notification('prompt-2', 'task-1', 'call-38'),
       ...calls('prompt-2', 39, 2),
@@ -125,7 +113,6 @@ export function registerContinuationCaptureSuite(): void {
       .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
     await sealQuietSegment(root)
 
-    // Third wake: the last background task reports and this segment really ends.
     await appendFile(transcript, `${[
       notification('prompt-4', 'task-3', 'call-54'),
       ...calls('prompt-4', 55, 10),
@@ -146,7 +133,6 @@ export function registerContinuationCaptureSuite(): void {
     const ids = records.flatMap((record) => record.tools.value?.map((call) => call.id) ?? [])
     expect(ids).toHaveLength(64)
     expect(new Set(ids).size).toBe(64)
-    // The question exists once; a notification is never promoted into user text.
     expect(records[0].user).toMatchObject({ status: 'available', value: { text: 'run the whole pipeline' } })
     for (const record of records) {
       expect(record.user.value?.text ?? '').not.toContain('<task-notification>')

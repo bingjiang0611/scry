@@ -38,11 +38,9 @@ describe('recorder stale temp files', () => {
 
     expect(result).toMatchObject({ removed: 2, scanned: true })
     expect(result.bytes).toBe(Buffer.byteLength('{"partial":'))
-    // 新鲜临时文件可能属于正在写盘的进程，绝不能碰。
     expect(await readdir(records)).toEqual([`00000000000000002329-${'b'.repeat(32)}.json.4243.6f1f.tmp`])
     expect(JSON.parse(await readFile(join(dataRoot, 'runtime', 'stale-temp-prune.json'), 'utf8')).at).toBe(new Date(now).toISOString())
 
-    // 标记文件让目录遍历最多每天一次：同级调用直接跳过，不做任何扫描。
     await writeFile(join(records, `00000000000000002330-${'c'.repeat(32)}.json.4245.6f21.tmp`), '')
     const again = await pruneStaleTemps(dataRoot, { now: now + day / 2 })
     expect(again).toEqual({ removed: 0, bytes: 0, scanned: false, retained: 0 })
@@ -60,7 +58,6 @@ describe('recorder stale temp files', () => {
     await mkdir(shard, { recursive: true })
     const archived = join(dataRoot, 'archive', 'old')
     await mkdir(archived, { recursive: true })
-    // 这类目录里有几十万个文件，而且从不产生 `.tmp`：哪怕有同名的旧文件，也不该为清理去遍历它们。
     const inContent = join(shard, 'stray.tmp')
     const inArchive = join(archived, 'stray.tmp')
     await writeFile(inContent, '')
@@ -90,7 +87,6 @@ describe('recorder stale temp files', () => {
 
     expect(result).toMatchObject({ removed: 0, scanned: true })
     await expect(stat(stray)).resolves.toBeTruthy()
-    // 标记文件也不能穿过同一条链接：外部目录里不能多出任何东西。
     expect(await readdir(outside)).toEqual(['stray.tmp'])
   })
 

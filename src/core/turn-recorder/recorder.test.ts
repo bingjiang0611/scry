@@ -32,7 +32,6 @@ import { registerStopVerdictSuite } from './recorder-tests/state-machine-stop-ve
 import { registerDiffPrefilterSuite } from './recorder-tests/state-machine-diff-prefilter.test'
 import { registerStaleOpenTurnSuite } from './recorder-tests/state-machine-stale-open.test'
 
-// Keep the original single-suite worker, registration order and shared cleanup.
 describe('turn recorder state machine', () => {
   registerSuite1()
   registerSuite2()

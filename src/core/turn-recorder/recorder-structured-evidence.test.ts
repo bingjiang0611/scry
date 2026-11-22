@@ -5,11 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { handleRecorderHook } from './recorder'
 import { listRecords, type AgentTurnRecord } from './store'
 
-/**
- * 脱敏 fixture：从一次真实的 Qoder 会话截取最小片段，保留原始行结构（system informational 激活、
- * isMeta 字符串注入、被拒的 Read、hook_non_blocking_error 附件、三道题的 AskUserQuestion），
- * 业务正文全部替换成示例文本。下面的每一条断言逐项对应曾经被记录错的字段。
- */
 const fixture = new URL('../../../fixtures/recorder/qoder-structured-evidence.jsonl', import.meta.url)
 
 const SESSION = 'demo-qoder-session'
@@ -20,11 +15,9 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'scry-structured-evidence-'))
   const transcript = join(root, 'qoder-session.jsonl')
   await writeFile(join(root, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, workspaceId: 'test', capture: { diff: false } }))
-  // Transcript 是权威内容：先落盘，让每一轮都能读到完整窗口。
   await writeFile(transcript, await readFile(fixture, 'utf8'))
   const base = { session_id: SESSION, cwd: root, transcript_path: transcript }
 
-  // 第一轮：真实提问在 08:02:34.361，采集在 44 秒后才开启。
   expect(await handleRecorderHook({ provider: 'qoder', workspace: root, event: 'UserPromptSubmit', payload: {
     ...base, request_set_id: 'R1', prompt: '整理这次需求：示例购物车需求', timestamp: '2026-11-16T08:03:18.814Z'
   } })).toMatchObject({ status: 'started' })
@@ -49,7 +42,6 @@ afterAll(async () => {
 const first = (): AgentTurnRecord => records[0]!
 const second = (): AgentTurnRecord => records[1]!
 
-/** 内容采集把工具入参投影成 inputContent；结构化事实仍要能读出来。 */
 function callInput(call: { input?: unknown; inputContent?: { content?: string } }): Record<string, unknown> | undefined {
   if (call.input && typeof call.input === 'object') return call.input as Record<string, unknown>
   if (!call.inputContent?.content) return undefined
@@ -67,7 +59,6 @@ describe('structured evidence from a Qoder transcript', () => {
     expect(second().user.value?.text).toBe('看下当前采集工具的版本')
     expect(first().startedAt).toBe('2026-11-16T08:02:34.361Z')
     expect(second().startedAt).toBe('2026-11-16T08:13:23.357Z')
-    // 采集开启时间仍单独可得，不冒充提问时间。
     expect(Date.parse(second().startedAt)).toBeGreaterThan(Date.parse(first().startedAt))
   })
 
@@ -138,7 +129,6 @@ describe('structured evidence from a Qoder transcript', () => {
     expect(hooks[0]?.command).toContain('scry-gate PreToolUse qoder || true')
     expect(hooks[0]?.error).toBe('Failed with non-blocking status code: No stderr output')
     expect(hooks[1]?.error).toBe('Failed with non-blocking status code: Hook timed out after 5s')
-    // 原始记录没有 timedOut 字段：不能自己补一个“超时”结论。
     expect(hooks.every(hook => !('timedOut' in hook))).toBe(true)
     expect(second().hooks.value ?? []).toEqual([])
   })
@@ -147,7 +137,6 @@ describe('structured evidence from a Qoder transcript', () => {
     expect(first().files.value).toEqual([
       { path: '/Users/demo/codes/run/references/page-research.md', operation: 'read', status: 'rejected' }
     ])
-    // 工具总数不受新增证据影响。
     expect(first().tools.value?.map(call => call.name)).toEqual(['Bash', 'Read'])
     expect(second().tools.value?.map(call => call.name)).toEqual(['AskUserQuestion'])
   })

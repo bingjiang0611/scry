@@ -312,13 +312,10 @@ describe('managed canonical recorder', () => {
       isLiveManagedRun: (candidate) => candidate === runId
     })).resolves.toEqual({ recovered: 0, pending: 0 })
     expect(await readFile(openPath, 'utf8')).toBe(before)
-    // Unknown ownership is still fail closed; this is not permission to discard the turn.
     await expect(recoverManagedRecorderTurns(root, process.env, { provider: 'pi' }))
       .resolves.toEqual({ recovered: 0, pending: 1 })
   })
 
-  // 真实故障：Provider 进程早已消失，open/quarantined 轮次没有 providerTurnId 也没有 canonical handoff，
-  // 永远不会自己收口，却让 agent:start 永久报“精确记录仍有 N 轮待恢复”。
   it('主已不在的 provisional 轮次在授权后被弃掉，不再永久阻断', async () => {
     const root = await workspace()
     const prompt = '孤儿 provisional 轮次'
@@ -335,14 +332,11 @@ describe('managed canonical recorder', () => {
       }
     })
 
-    // 默认保守：不知道 run 存活情况时继续 pending，不得删掉可能正在跑的轮次。
     await expect(recoverManagedRecorderTurns(root)).resolves.toEqual({ recovered: 0, pending: 1 })
-    // run 还活着时不需要恢复，也不能弃掉。
     await expect(recoverManagedRecorderTurns(root, process.env, {
       abandonProvisional: true,
       isLiveManagedRun: (candidate) => candidate === 'run-pi-orphan'
     })).resolves.toEqual({ recovered: 0, pending: 0 })
-    // 主已不在：弃掉并计入 recovered，再扫一次已经干净。
     await expect(recoverManagedRecorderTurns(root, process.env, {
       abandonProvisional: true,
       isLiveManagedRun: () => false
@@ -1410,7 +1404,6 @@ describe('managed provider turn index', () => {
       providerTurnRecordIds: { 'turn-1': recordId }
     })
 
-    // 索引同鲜且不含 turn-2 → 可信否定，仍然正常开出新一轮 handoff。
     await startTurn(root, 'turn-2', '2026-07-29T13:00:00.000Z')
     await expect(replay(root, 'turn-2', 'run-2')).resolves.toMatchObject({ status: 'prepared' })
   })
@@ -1469,7 +1462,6 @@ describe('提交通知投递位置', () => {
     durationMs: 10_000
   }
 
-  // 每条通知都要起一次仓库回调进程；这里用 sleep 模拟真实回调的秒级开销。
   async function slowCommitHook(root: string): Promise<{ path: string; capture: string }> {
     const path = join(root, 'slow-commit-hook.sh')
     const capture = join(root, 'slow-commit-hook.jsonl')
@@ -1506,7 +1498,6 @@ describe('提交通知投递位置', () => {
         prompt: '/rate-workflow 1',
         timestamp: timing.startedAt
       },
-      // hook 路径自己也会投递；这里只测 managed commit 的投递位置。
       deferDelivery: true
     })
     const evidence = canonicalEvidence()
@@ -1559,7 +1550,6 @@ describe('提交通知投递位置', () => {
     const startedAt = Date.now()
     await commitOnce(root, 'run-detach', env, 'detach')
     const settleMs = Date.now() - startedAt
-    // 返回时慢回调还没跑完：这正是“7 秒的轮次显示成分钟级运行中”的修复点。
     await expect(ackedThrough(root)).resolves.toBeNull()
     expect(settleMs).toBeLessThan(1_500)
 

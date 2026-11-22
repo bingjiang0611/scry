@@ -18,11 +18,6 @@ import {
   recordTransportBytes
 } from './record-content-budget.js'
 
-/**
- * Acceptance oracle: the same rules the independent uploader applies before it sends a record
- * (`@ali/scry-uploader` 0.2.13 `src/content.ts`: contentReferences, validateContent, contentRecord).
- * Kept as a test mirror on purpose: the recorder must satisfy the receiver, not its own copy.
- */
 const MAX_DECODED_RECORD_BYTES = 16 * 1024 * 1024
 const MAX_CONTENT_BLOBS = 512
 
@@ -177,7 +172,6 @@ describe('record content budget at the shared commit boundary', () => {
   })
 
   it('measures base64 and JSON framing, not just raw bytes, when dropping bodies', () => {
-    // 2 bodies of 7 MiB stay above the envelope only because base64 inflates them past 16 MiB.
     const six = 'q'.repeat(7 * 1024 * 1024)
     const draft = withCalls([preview(six), preview(`${six}!`)])
     expect(recordTransportBytes(draft as never)).toBeGreaterThan(RECORDER_TRANSPORT_MAX_BYTES)
@@ -189,7 +183,6 @@ describe('record content budget at the shared commit boundary', () => {
   })
 
   it('drops a lost diff body to a bounded preview and keeps a reachable patch status', () => {
-    // Two 6.5 MiB patches: each is under the per-body cap, but their base64 together exceed the envelope.
     const text = `@@ -1 +1 @@\n-${'old line\n'.repeat(660_000)}+${'new line\n'.repeat(50_000)}`
     const second = `${text}\n+tail`
     expect(Buffer.byteLength(text)).toBeLessThan(RECORDER_CONTENT_MAX_BYTES)
@@ -220,7 +213,6 @@ describe('record content budget at the shared commit boundary', () => {
   })
 
   it('bounds an oversized inline diff body even when it carries no reference', () => {
-    // Quotes double under JSON escaping, so a 9 MiB body cannot fit the envelope without a reference.
     const content = '"'.repeat(9 * 1024 * 1024)
     const draft = record({
       diff: {
@@ -240,7 +232,6 @@ describe('record content budget at the shared commit boundary', () => {
     expect(Buffer.byteLength(file.patch!)).toBeLessThanOrEqual(RECORDER_INLINE_PREVIEW_BYTES)
     expect(file.patchContent!.storage).toBe('truncated')
     expect(file.patchStatus).toBe('truncated')
-    // 这个 patch 现在只剩预览，diff 分区不能再声称 exact：证据状态必须跟着实际可读范围走。
     expect(bounded.diff.status).toBe('partial')
     expect(bounded.diff.quality).not.toBe('exact')
     expect(bounded.diff.omissionReason).toContain(CONTENT_ENVELOPE_REASON)
@@ -251,7 +242,6 @@ describe('record content budget at the shared commit boundary', () => {
   it('refuses to commit a record that cannot converge inside the envelope', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-content-budget-'))
     roots.push(root)
-    // 没有引用的内联正文只能靠收缩 diff 预览来减，装不下就别写进 store：接收方会拒收。
     const text = 'z'.repeat(RECORDER_TRANSPORT_MAX_BYTES + 1024)
     const draft = record({ assistant: { status: 'available', quality: 'exact', source: ['fixture'], value: { text } } })
     expect(recordTransportBytes(draft as never)).toBeGreaterThan(RECORDER_TRANSPORT_MAX_BYTES)
@@ -261,7 +251,6 @@ describe('record content budget at the shared commit boundary', () => {
 
   it('counts the envelope wrapper even when nothing is referenced', () => {
     const draft = record({})
-    // 没有引用时仍要把外层封装算进去：接收方量的是封装，不是裸 record 字符串。
     expect(recordTransportBytes(draft as never)).toBeGreaterThan(Buffer.byteLength(JSON.stringify(draft)))
   })
 
@@ -277,7 +266,6 @@ describe('record content budget at the shared commit boundary', () => {
         }]
       }
     })
-    // Force the drop by exceeding the distinct-body cap with unrelated bodies.
     draft.tools = withCalls(Array.from({ length: RECORDER_CONTENT_MAX_REFS }, (_, index) => preview(`${index}:`.padEnd(32, 'z')))).tools
     const bounded = applyRecordContentBudget(draft as never)
     const file = bounded.diff.value![0].files[0]
@@ -345,7 +333,6 @@ describe('record content budget at the shared commit boundary', () => {
     const bodies2 = refs.map((ref) => preview('body', 4))
     for (const [index, field] of bodies2.entries()) field.contentRef = refs[index]
     const { record: committed } = await commitRecord(root, withCalls(bodies2) as never)
-    // 预算可能丢掉引用，但留下来的每一条都必须能在这个库里兑现。
     const kept = recordContentRefs(committed)
     expect(kept.length).toBeLessThan(refs.length)
     for (const ref of kept) await expect(readRecorderContent(root, ref)).resolves.toBe(bodies[refs.indexOf(ref)])

@@ -53,7 +53,6 @@ it('looks up an unchanged Codex projection before scanning its anchor; appended 
   await fs.appendFile(path, row({ type: 'task_complete', turn_id: 'cpu-turn', last_agent_message: 'done' }))
   expect((await read()).terminalStatus).toBe('completed')
   expect(transcriptReadStats().anchorBytesScanned).toBeGreaterThan(0)
-  // A frozen projection is a separate cache entry, even when the file identity is identical.
   resetTranscriptReadStats()
   await read((await fs.stat(path)).size - 1)
   expect(transcriptReadStats().anchorBytesScanned).toBeGreaterThan(0)
@@ -90,7 +89,7 @@ it('indexes legacy quarantines once, publishes new candidates index-first, and r
   expect(vi.mocked(fs.readdir).mock.calls.filter(([path]) => String(path) === join(session, 'turns'))).toHaveLength(0)
   await fs.mkdir(recorderTurnRoot(session, 103), { recursive: true })
   await fs.writeFile(join(recorderTurnRoot(session, 103), 'pending-open.json'), JSON.stringify({ ...open, generation: 103 }))
-  await recoverRecorder(root, env) // A single explicit recovery, including in a fresh CLI, repairs indexes.
+  await recoverRecorder(root, env)
   expect((await recorderQuarantinedOpenTurns(session)).map(item => item.generation).sort()).toEqual([102, 103])
 })
 

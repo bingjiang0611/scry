@@ -23,7 +23,6 @@ async function transcriptPath(): Promise<string> {
 
 const hashOf = (text: string): string => createHash('sha256').update(text).digest('hex')
 
-/** A Claude-shaped JSONL log: one user line per turn, then filler assistant/progress lines. */
 function turn(prompt: string, lines: number, from = 0): string {
   const user = JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })
   const body = Array.from({ length: lines }, (_, index) => JSON.stringify({
@@ -34,7 +33,6 @@ function turn(prompt: string, lines: number, from = 0): string {
   return [user, ...body].join('\n') + '\n'
 }
 
-/** Event ids carry a random UUID; compare everything that must be reproducible. */
 function shape(read: { events: Array<{ kind: string; stage?: string; ts: string }> }): string[] {
   return read.events.map((event) => `${event.kind}|${event.stage ?? ''}|${event.ts}`)
 }
@@ -78,7 +76,6 @@ describe('transcript anchor reuse', () => {
     const warm = await stableTranscript(path, 'anchor:repeat-2', 'claude', hash)
     const cold = await coldRead(path, hash, 'anchor:repeat-3')
     expect(shape(warm)).toEqual(shape(cold))
-    // Only the later turn's six events, not the first turn's forty plus the middle turn's.
     expect(warm.events.length).toBeLessThan(20)
   })
 
@@ -117,7 +114,6 @@ describe('transcript anchor reuse', () => {
     await writeFile(path, turn(prompt, 30) + turn('later prompt', 30, 200))
     await stableTranscript(path, 'anchor:shift-1', 'claude', hash)
 
-    // Rewrite the head so the cached offset points at a different line.
     await writeFile(path, turn('other prompt', 30) + turn(prompt, 30, 400) + turn('later prompt', 10, 700))
     resetTranscriptReadStats()
     const reread = await stableTranscript(path, 'anchor:shift-2', 'claude', hash)

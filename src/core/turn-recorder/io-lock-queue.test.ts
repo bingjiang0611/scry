@@ -104,8 +104,6 @@ it('deducts local queue time from the original native-lock timeout budget', asyn
     const first = withDirectoryLock(lock, async () => {
       entered.resolve()
       await release.promise
-      // Simulate an external owner replacing the native token: local admission
-      // must still check that owner, and cannot receive a fresh wait budget.
       await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, token: 'external-owner', createdAt: now }))
     })
     await entered.promise

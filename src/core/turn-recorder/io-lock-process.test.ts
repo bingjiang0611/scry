@@ -44,7 +44,6 @@ process.disconnect()
     expect(new Set(tokens).size).toBe(2)
     expect(await exited).toBe(0)
   } finally {
-    // Only this registered, private fixture process may be terminated on failure.
     if (child && child.exitCode === null) child.kill('SIGKILL')
     if (exited) await exited
     await rm(root, { recursive: true, force: true })

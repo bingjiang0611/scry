@@ -15,7 +15,6 @@ it.each(['incomplete value', 'valid-looking value', 'key'] as const)(
     try {
       const token = '@@scry-chunk-00000000-0000-4000-8000-000000000000@@'
       const marker = `${token}0${token}`
-      // A real large field is emitted first, so a late fallback must not append a second document.
       const value = { large: 'x'.repeat(1 << 20),
         ...(kind === 'key' ? { [marker]: 'ordinary value' }
           : { collision: kind === 'valid-looking value' ? marker : `ordinary ${token}tail` }) }

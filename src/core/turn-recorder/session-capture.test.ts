@@ -124,8 +124,6 @@ it('an opt-in workspace records nothing from ordinary hooks, and the guard claim
 
   await claim(root, transcriptPath)
   const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(recorderSessionRoot(join(root, '.scry'), 'codex', 'sess-1')))
-  // The claim continues the turn it landed in: the question the turn already asked is the start,
-  // and the earlier turn stays out.
   expect(open?.startedAt).toBe(CURRENT_TURN.startedAt)
   expect(open?.prompt).toBe(CURRENT_TURN.prompt)
   expect(open?.providerTurnId).toBe(CURRENT_TURN.id)
@@ -156,7 +154,6 @@ it('the capture-start process is the only one that sees the host callback, and i
   const received = join(root, 'received.json')
   await writeFile(hook, `#!/bin/sh\ncat >> ${JSON.stringify(received)}\nprintf '\\n' >> ${JSON.stringify(received)}\n`)
   await chmod(hook, 0o755)
-  // Friday 现场：capture start 成功、3 条记录落地，notifyBacklog=3、uploader enqueuedThrough=0。
   await expect(startSessionCapture({
     workspace: root,
     provider: 'codex',
@@ -168,8 +165,6 @@ it('the capture-start process is the only one that sees the host callback, and i
     env: { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook, SCRY_GRANT_DIR: join(root, 'grants') }
   })).resolves.toMatchObject({ status: 'started' })
 
-  // Every later delivery runs without that environment: the daemon and the receiver prove the
-  // recorded activation instead.
   const env = { PATH: '/usr/bin:/bin', SCRY_GRANT_DIR: join(root, 'grants') }
   await sessionHook(root, transcriptPath, 'Stop', stopEvent(transcriptPath))
   const records = await listRecords(join(root, '.scry'))
@@ -220,7 +215,6 @@ it('stop finishes the current turn, refuses the next one, and cannot read the ne
     context: context(transcriptPath)
   })).status).toBe('already_stopping')
 
-  // The provider writes the next turn into the transcript before this turn's Stop is delivered.
   await writeFile(transcriptPath, `${rolloutLines(root, [CURRENT_TURN, NEXT_TURN]).map((line) => JSON.stringify(line)).join('\n')}\n`)
   const applied = await sessionHook(root, transcriptPath, 'Stop', stopEvent(transcriptPath))
   expect(applied.status).toBe('accepted')
@@ -294,7 +288,6 @@ it('routes delivery by the payload session, and an unclaimed session in the same
   })
   expect(secondClaim.status).toBe('started')
 
-  // Two claims are open in one workspace, and the receiver carries no session: the payload decides.
   const preamble = { session_id: 'sess-2', hook_event_name: 'UserPromptSubmit', transcript_path: second, timestamp: '2026-07-19T12:00:06.000Z' }
   const delivered = await applySessionCaptureHook({
     workspace: root, provider: 'codex', event: 'UserPromptSubmit', dataDir: join(root, '.scry'), payload: preamble
@@ -305,7 +298,6 @@ it('routes delivery by the payload session, and an unclaimed session in the same
     payload: { session_id: 'sess-2', hook_event_name: 'Stop', transcript_path: second, timestamp: '2026-07-19T12:00:07.000Z' }
   })
 
-  // A third session in the same workspace never claimed itself.
   const unclaimed = await applySessionCaptureHook({
     workspace: root, provider: 'codex', event: 'UserPromptSubmit', dataDir: join(root, '.scry'),
     payload: { session_id: 'sess-9', hook_event_name: 'UserPromptSubmit', transcript_path: first, timestamp: '2026-07-19T12:00:08.000Z' }
@@ -321,7 +313,6 @@ it('routes delivery by the payload session, and an unclaimed session in the same
 it('a workspace that already ran scry init becomes opt-in when a session claims it', async () => {
   const root = await workspace()
   const transcriptPath = await transcript(root, [CURRENT_TURN])
-  // Exactly what `scry init` writes today: no `capture.sessions`, and other keys the user may rely on.
   await writeFile(join(root, 'scry.config.json'), JSON.stringify({
     schemaVersion: 1,
     enabled: true,
@@ -342,7 +333,6 @@ it('a workspace that already ran scry init becomes opt-in when a session claims 
   expect(config.workspaceId).toBe('already-initialised')
   expect(config.storage?.maxBytes).toBe(536870912)
 
-  // The ordinary-hook gate now applies to this workspace: an unclaimed session records nothing.
   const ordinary = await handleRecorderHook({
     workspace: root,
     event: 'UserPromptSubmit',

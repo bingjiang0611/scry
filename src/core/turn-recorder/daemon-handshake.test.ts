@@ -57,7 +57,6 @@ describe('recorder daemon version handshake', () => {
       }
       await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
       await expect(access(join(root, '.scry', 'runtime', 'pi'))).rejects.toMatchObject({ code: 'ENOENT' })
-      // The same event applies once the hook presents this recorder's version.
       await sendRecorderDaemonHook({ workspace: root, provider: 'pi', env, event: 'UserPromptSubmit', payload: { session_id: 'version-current', prompt: 'apply' } })
       await expect(access(join(root, '.scry', 'runtime', 'pi'))).resolves.toBeUndefined()
     } finally {
@@ -70,7 +69,6 @@ describe('recorder daemon version handshake', () => {
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
-      // 脚本用 x-scry-client-pid 传自己的 $$；守护进程用它还原宿主链，供 --expire-open 判断进程是否还在。
       const send = (headers: Record<string, string>, sessionId: string) => daemonRequest(socketPath(root), {
         method: 'POST',
         path: HOOK_EVENT_PATH,
@@ -95,7 +93,6 @@ describe('recorder daemon version handshake', () => {
       const known = await readOpen('client-pid-known')
       expect(known.host?.[0]?.pid).toBe(process.pid)
       expect(known.host?.length).toBeLessThanOrEqual(3)
-      // 传输没带 pid 就不编造证据：恢复只能按静默窗口决定，不会说进程已退出。
       expect((await readOpen('client-pid-absent')).host).toBeUndefined()
       expect((await readOpen('client-pid-invalid')).host).toBeUndefined()
     } finally {
@@ -107,8 +104,6 @@ describe('recorder daemon version handshake', () => {
     const root = await workspace()
     const socket = socketPath(root)
     await rm(socket, { force: true })
-    // 404 = legacy daemon without the versioned path, 409 = explicit version refusal: neither applied
-    // the event, so the hook may replace the owner and resend. A 5xx stays unknown delivery.
     for (const [statusCode, replaceDaemon] of [[404, true], [409, true], [500, false], [400, false]] as const) {
       const server = createHttpServer((request, response) => {
         request.resume()

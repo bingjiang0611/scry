@@ -65,7 +65,6 @@ describe('recorder store maintenance', () => {
     expect(plan.orphanContent).toHaveLength(1)
     expect(plan.orphanContent[0].path).toContain(orphan.sha256)
     expect(plan.staleTemps).toHaveLength(1)
-    // 枚举记录时跳过并报告非记录文件：维护不能因为一条 0 字节残渣而拒绝工作。
     expect(plan.skippedRecords).toEqual([{ name: 'abandoned.tmp', reason: 'unrecognized_name' }])
     await expect(access(contentPath(dataRoot, orphan.sha256))).resolves.toBeUndefined()
 
@@ -108,7 +107,6 @@ describe('recorder store maintenance', () => {
     const old = new Date(now - 2 * 60 * 60 * 1_000)
     const orphan = await writeRecorderContent(dataRoot, 'looks orphaned', 'utf8')
     await utimes(contentPath(dataRoot, orphan.sha256), old, old)
-    // 名字合规但读不出来的记录：不知道它引用了什么，就不能判断任何正文是孤儿。
     await writeFile(join(dataRoot, 'records', `00000000000000000009-${'ab'.repeat(16)}.json`), '{"schemaVersion":1}')
 
     const report = await maintainRecorderStore(dataRoot, config, { now, apply: true })

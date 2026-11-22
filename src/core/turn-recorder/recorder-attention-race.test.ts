@@ -45,7 +45,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...actual,
     async rm(...args: Parameters<typeof actual.rm>) {
       await actual.rm(...args)
-      // The old implementation reaches unlink instead of waiting for the publication lock.
       if (schedule.cleaning && args[0] === schedule.marker) schedule.cleanupReady?.()
     }
   }
@@ -124,7 +123,6 @@ it.each([
     }
     expect(await markedSessions(enablement.dataRoot)).toEqual(expected)
     expect(await recorderHasOpenTurn(enablement.dataRoot)).toBe(true)
-    // An active unmanaged open turn is work for the daemon, but is not pending-finalize health.
     expect((await recorderPendingHealth(enablement.dataRoot)).pendingCount).toBe(publication === 'queue' ? 1 : 0)
     if (publication === 'queue') {
       expect(await recorderInboxEntries(sessionDir)).toHaveLength(1)

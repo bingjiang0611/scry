@@ -19,10 +19,6 @@ import {
   type Scenario
 } from './git-snapshot-oracle-harness.js'
 
-// Oracle: the targeted after-tree path and the full `writeSnapshotTree` path must produce the
-// same tree, the same file evidence and the same patch bytes on the same worktree state, and
-// neither may write the user's real index or object database. A mismatch here is a correctness
-// defect in the implementation under test, not a licence to relax the assertion.
 
 afterAll(async () => { await removeTrackedRoots() })
 
@@ -42,7 +38,6 @@ const scenarios: Scenario[] = [
     }
   },
   {
-    // O3 file <-> directory replacement in the same turn.
     id: 'o3-file-directory',
     setup: async (repo) => {
       await writeFileAt(repo, 'swap', 'plain file\n')
@@ -57,7 +52,6 @@ const scenarios: Scenario[] = [
     }
   },
   {
-    // O4 symlink: retarget, add, and replace with a regular file.
     id: 'o4-symlink',
     setup: async (repo) => {
       await writeFileAt(repo, 'one.txt', 'one\n')
@@ -74,7 +68,6 @@ const scenarios: Scenario[] = [
     }
   },
   {
-    // O5 executable bit only.
     id: 'o5-mode',
     setup: async (repo) => {
       await writeFileAt(repo, 'run.sh', '#!/bin/sh\necho hi\n')
@@ -85,7 +78,6 @@ const scenarios: Scenario[] = [
     }
   },
   {
-    // O11 paths with spaces, newlines, quotes and non-UTF-8 bytes.
     id: 'o11-paths',
     setup: async (repo) => {
       await writeFileAt(repo, 'with space.txt', 'a\n')
@@ -97,13 +89,10 @@ const scenarios: Scenario[] = [
       await writeFileAt(repo, 'with space.txt', 'a2\n')
       await writeFileAt(repo, "quote\"and'.txt", 'b2\n')
       await writeFileAt(repo, 'new\nline.txt', 'c2\n')
-      // Non-ASCII path: macOS APFS rejects invalid UTF-8 file names (EILSEQ), so this covers
-      // multi-byte UTF-8 rather than raw non-UTF-8 bytes. `-z` keeps it unquoted either way.
       await writeFileAt(repo, '中文 名✨.txt', 'd\n')
     }
   },
   {
-    // O12 binary content including the NUL git uses to detect binaries.
     id: 'o12-binary',
     setup: async (repo) => {
       await writeFile(join(repo, 'blob.bin'), Buffer.from('text start\n'))
@@ -114,7 +103,6 @@ const scenarios: Scenario[] = [
     }
   },
   {
-    // O13 assume-unchanged and skip-worktree marks already on the real index.
     id: 'o13-index-marks',
     setup: async (repo) => {
       await writeFileAt(repo, 'assumed.txt', 'v1\n')
@@ -140,15 +128,6 @@ describe('git snapshot oracle: worktree shape and encoding', () => {
   }
 })
 
-/**
- * Racy-clean fixture: content with the same size and the same mtime, rewritten inside the same
- * wall-clock second as the `git add` that recorded the index entry. Git compares index stat
- * data at one-second granularity, so `update-index --refresh` cannot see the new bytes; only a
- * tree rebuilt from a cleared stat cache (the full path) hashes them.
- *
- * The window is a race with the clock, so the fixture is rebuilt until the blindness is proven
- * with the real binary before the pair is run. It never asserts a pass: it records a known defect.
- */
 async function buildStatBlindRacyRepo(label: string): Promise<string> {
   for (let attempt = 0; attempt < 25; attempt++) {
     const { repo } = await newRepoRoot(`${label}-${attempt}`)
@@ -157,7 +136,6 @@ async function buildStatBlindRacyRepo(label: string): Promise<string> {
     await commitAll(repo)
     await writeFileAt(repo, 'racy.txt', 'bbbb\n')
     await stamp(repo, 'racy.txt')
-    // Prove the stat-cached refresh is blind to the change before trusting the fixture.
     const probe = join(repo, '..', 'probe.index')
     await copyFile(join(repo, '.git', 'index'), probe)
     const env = { GIT_INDEX_FILE: probe }
@@ -205,9 +183,6 @@ describe('git snapshot oracle: linked worktree', () => {
 })
 
 describe('git snapshot oracle: the reused discovery base', () => {
-  // G1-1 publishes discovery.index as the after index only when its content already equals
-  // beforeTree. Prove that precondition directly for a clean and a dirty baseline instead of
-  // trusting the comment: `write-tree` over the surviving discovery index must yield beforeTree.
   for (const dirty of [false, true]) {
     it(`discovery.index equals beforeTree (${dirty ? 'dirty' : 'clean'} baseline)`, async () => {
       const { root, repo } = await newRepoRoot(`discovery-base-${dirty ? 'dirty' : 'clean'}`)
@@ -226,8 +201,6 @@ describe('git snapshot oracle: the reused discovery base', () => {
           GIT_OBJECT_DIRECTORY: capture.objectDir!,
           GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs ?? ''
         })).trim()
-        // Both reads need the capture's real object view: unchanged blobs may exist only in the
-        // original repository, while a dirty baseline tree may exist only in the private store.
         const expected = (await gitWith(['rev-parse', `${capture.beforeTree}^{tree}`], repo, {
           GIT_OBJECT_DIRECTORY: capture.objectDir!,
           GIT_ALTERNATE_OBJECT_DIRECTORIES: capture.alternateObjectDirs ?? ''

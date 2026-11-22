@@ -33,7 +33,6 @@ describe('diff omission codes', () => {
       omissionCodes: ['baseline_after_turn_start']
     })
     expect(state.diff.omissionReason).toContain('baseline 2000 ms after the prompt')
-    // The code and the sentence must describe the same fact, and both must pass validation.
     expect(isEvidence(state.diff)).toBe(true)
   })
 

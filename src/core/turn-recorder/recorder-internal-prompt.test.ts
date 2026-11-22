@@ -20,9 +20,7 @@ describe('Codex internal prompts', () => {
     expect(isCodexInternalPrompt({ prompt: `  \n${titleRequest}` })).toBe(true)
     expect(isCodexInternalPrompt({ prompt: 'Generate a concise, single-line task title for the roadmap' })).toBe(false)
     expect(isCodexInternalPrompt({ prompt: instruction })).toBe(false)
-    // Instruction opening plus an inline mention, not the fixed separator.
     expect(isCodexInternalPrompt({ prompt: `${instruction} User prompt: /rw REQ-1` })).toBe(false)
-    // Separator without the instruction's closing sentence.
     expect(isCodexInternalPrompt({ prompt: `Generate a concise, single-line task title of at most 36 characters\n\nUser prompt:\n/rw REQ-1` })).toBe(false)
   })
 

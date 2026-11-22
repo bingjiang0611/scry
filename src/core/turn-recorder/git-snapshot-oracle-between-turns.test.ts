@@ -14,10 +14,6 @@ import {
   type OracleRun
 } from './git-snapshot-oracle-harness.js'
 
-// Oracle part three: state that changes *between* turns. The next turn's beforeTree must be
-// rebuilt from the current worktree, never inherited from the previous turn's after tree.
-// This is the guard for cross-turn index seeding: a seed may only skip work whose stat
-// signature proves the file unchanged.
 
 afterAll(async () => { await removeTrackedRoots() })
 
@@ -49,8 +45,6 @@ describe('git snapshot oracle: state changes between turns', () => {
     const firstRun = await turn(root, repo, async (cwd) => { await writeFileAt(cwd, 'first.txt', 'aaaa2\n') })
     expect(relativeFiles(firstRun.files, repo).map((file) => file.path)).toEqual(['first.txt'])
 
-    // External edit while no turn is running: same size, mtime restored, so a stat-only seed
-    // would happily reuse the old index entry.
     await writeFileAt(repo, 'second.txt', 'cccc\n')
     await stamp(repo, 'second.txt')
 
@@ -58,11 +52,9 @@ describe('git snapshot oracle: state changes between turns', () => {
     const capture = await begin(root, repo)
     try {
       expect(capture.beforeTree).toBe(expectedTree)
-      // A working-tree tree, not a committed one: the external edit is uncommitted.
       expect(capture.beforeTree).not.toBe((await git(['rev-parse', 'HEAD'], repo)).trim())
 
       const secondRun = await finishCapture(capture, false, 20_000)
-      // Nothing changed during turn 2, so its diff is empty even though the baseline moved.
       expect(secondRun.files).toEqual([])
       expect(secondRun.tree).toBe(capture.beforeTree)
     } finally {
@@ -99,7 +91,6 @@ describe('git snapshot oracle: state changes between turns', () => {
     await commitAll(repo, 'feature change')
     await git(['checkout', '-q', 'main'], repo)
     await turn(root, repo, async (cwd) => { await writeFileAt(cwd, 'scratch.txt', 'temp\n') })
-    // Untracked files survive a checkout; remove it so the baseline is exactly the branch tree.
     await git(['clean', '-q', '-fd'], repo)
     await git(['checkout', '-q', 'feature'], repo)
     const head = (await git(['rev-parse', 'HEAD'], repo)).trim()

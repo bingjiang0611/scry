@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hostProcessChain, hostProcessState, liveHostProcesses, processTable } from './host-process'
 
-/**
- * Host evidence is an observation, never a guess: a process is "still running" only when the pid
- * names the same process it named at capture time.
- */
 
 const DEAD_PID = 999_999
 
@@ -17,7 +13,6 @@ describe('宿主进程证据', () => {
     expect(chain.length).toBeGreaterThan(0)
     expect(chain[0]?.pid).toBe(process.pid)
     expect(chain.every((entry) => entry.pid > 1)).toBe(true)
-    // 只走到宿主那一层：链再长就会碰到终端或窗口进程，它们本来就比会话活得久。
     expect(chain.length).toBeLessThanOrEqual(3)
   })
 
@@ -35,7 +30,6 @@ describe('宿主进程证据', () => {
     const self = (await processTable())!.get(process.pid)!
     expect(await liveHostProcesses([{ pid: self.pid, token: 'ticks:0' }])).toEqual([])
     expect(await liveHostProcesses([{ pid: self.pid, token: self.token }])).toHaveLength(1)
-    // 记不清启动标记时不能反过来证明“是同一个进程”，只有明确不同才排除。
     expect(await liveHostProcesses([{ pid: self.pid }])).toHaveLength(1)
   })
 

@@ -30,7 +30,6 @@ async function git(repo: string, args: string[]): Promise<string> {
 async function repo(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'scry-untracked-policy-'))
   roots.push(root)
-  // Git reports the resolved root, so the fixture compares against the same form.
   const path = join(await realpath(root), 'repo')
   await mkdir(path)
   await git(path, ['init', '-q', '-b', 'main'])
@@ -56,7 +55,6 @@ describe('未跟踪文件清单策略接进真实 Git 采集', () => {
       const snapshot = await computeGitTurnDiff(atLimit, 20_000, { completePatches: true }, false)
       expect(snapshot.status).toBe('captured')
       expect(snapshot.files).toHaveLength(UNTRACKED_PATCH_FILE_LIMIT + 1)
-      // Everything is inside the limit, so each file keeps its own body.
       expect(snapshot.files.filter((file) => file.patchStatus === 'unavailable')).toEqual([])
     } finally {
       await cleanupCapture(atLimit)
@@ -72,8 +70,6 @@ describe('未跟踪文件清单策略接进真实 Git 采集', () => {
       const snapshot = await computeGitTurnDiff(overLimit, 20_000, { completePatches: true }, false)
       expect(snapshot.status).toBe('captured')
       const omitted = snapshot.files.filter((file) => file.patchStatus === 'unavailable')
-      // Manifest stays complete: 本轮新增的每一条未跟踪文件都还在，只是不带正文。
-      // The 50 files created by the previous capture are part of this capture's baseline.
       expect(snapshot.files).toHaveLength(UNTRACKED_PATCH_FILE_LIMIT + 2)
       expect(omitted).toHaveLength(UNTRACKED_PATCH_FILE_LIMIT + 1)
       expect(omitted.every((file) => file.patchReason === 'policy' && !file.patchContent)).toBe(true)
@@ -111,7 +107,6 @@ describe('未跟踪文件清单策略接进真实 Git 采集', () => {
     const outer = await repo()
     const captureRoot = await mkdtemp(join(tmpdir(), 'scry-session-exclude-'))
     roots.push(captureRoot)
-    // Friday checks its own code out under the run directory: that repository is not the outer one.
     const run = join(outer, 'friday-88733196')
     const inner = join(run, 'stage3/backend/workspace/inner')
     await mkdir(inner, { recursive: true })
@@ -133,12 +128,10 @@ describe('未跟踪文件清单策略接进真实 Git 采集', () => {
         outerCapture, 20_000, { completePatches: true, diffExclude: [run] }, false
       )
       expect(outerSnapshot.files.map((file) => file.path)).toEqual([join(outer, 'tracked.txt')])
-      // The count and the declared path stay provable without keeping any excluded body.
       expect(outerSnapshot.diffExclude).toEqual({ paths: [run], files: 4 })
       const innerSnapshot = await computeGitTurnDiff(
         innerCapture, 20_000, { completePatches: true, diffExclude: [run] }, false
       )
-      // An ancestor outside this repository excludes nothing here.
       expect(innerSnapshot.files.map((file) => file.path)).toEqual([join(inner, 'code.py')])
       expect(innerSnapshot.diffExclude).toBeUndefined()
     } finally {

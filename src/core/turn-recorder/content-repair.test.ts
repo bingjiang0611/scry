@@ -116,7 +116,6 @@ describe('recorder content repair', () => {
     expect(report.missingItems).toEqual([
       { recordId: 'b'.repeat(32), path: 'tools.0.output', sha256: lost.ref.sha256, bytes: lost.ref.bytes }
     ])
-    // Nothing was written: the dry run is a plan, not a mutation.
     await expect(readRecorderContent(dataRoot, appOnly.ref)).rejects.toThrow()
     expect(await readdir(join(dataRoot, 'content', 'sha256'))).toEqual(before)
     expect(await Promise.all((await readdir(join(dataRoot, 'records'))).map((name) => readFile(join(dataRoot, 'records', name), 'utf8')))).toEqual(beforeRecords)
@@ -141,7 +140,6 @@ describe('recorder content repair', () => {
     const dataRoot = await tempRoot('scry-repair-store-')
     const appRoot = await tempRoot('scry-repair-app-')
     const appOnly = body('the real body')
-    // Same path, same length, different bytes: a verified read must refuse it.
     const path = join(appRoot, 'content', 'sha256', appOnly.ref.sha256.slice(0, 2), `${appOnly.ref.sha256}.bin`)
     await mkdir(join(appRoot, 'content', 'sha256', appOnly.ref.sha256.slice(0, 2)), { recursive: true })
     await writeFile(path, 'x'.repeat(appOnly.ref.bytes))
@@ -159,7 +157,6 @@ describe('recorder content repair', () => {
     const appRoot = await tempRoot('scry-repair-app-')
     const appOnly = body('the real body')
     await writeRecorderContent(appRoot, appOnly.content, 'utf8')
-    // 本库已有这个地址的文件，但字节与地址不符：这不是缺失，是损坏的证据。
     const path = join(dataRoot, 'content', 'sha256', appOnly.ref.sha256.slice(0, 2), `${appOnly.ref.sha256}.bin`)
     await mkdir(join(dataRoot, 'content', 'sha256', appOnly.ref.sha256.slice(0, 2)), { recursive: true })
     await writeFile(path, 'x'.repeat(appOnly.ref.bytes))
@@ -168,13 +165,11 @@ describe('recorder content repair', () => {
     const plan = await repairRecordContent({ dataRoot, sourceRoots: [appRoot] })
     const report = await repairRecordContent({ dataRoot, sourceRoots: [appRoot], apply: true })
 
-    // 演练与 --apply 必须给出同一个分类：损坏既不是可修复，也不是缺失。
     expect(plan).toMatchObject({ repairable: 0, repaired: 0, corrupt: 1, missing: 0, bytes: 0, applied: false })
     expect(report).toMatchObject({ repairable: 0, repaired: 0, corrupt: 1, missing: 0, bytes: 0, applied: false })
     const corruptItem = { recordId: 'f0'.repeat(16), path: 'tools.0.output', sha256: appOnly.ref.sha256, bytes: appOnly.ref.bytes }
     expect(plan.corruptItems).toEqual([corruptItem])
     expect(report.corruptItems).toEqual([corruptItem])
-    // 字节原样保留：删除或覆盖已存在的证据需要人来做。
     expect(await readFile(path, 'utf8')).toBe('x'.repeat(appOnly.ref.bytes))
   })
 
@@ -199,7 +194,6 @@ describe('recorder content repair', () => {
     const present = body('present body')
     await writeRecorderContent(dataRoot, present.content, 'utf8')
     await writeRecord(dataRoot, record(1, 'a1'.repeat(16), [content('present body')]))
-    // 写盘中辍的两种残留：永不 rename 上屏的 `.tmp`，以及名字合规但内容不完整的文件。
     const leftover = `00000000000000002328-${'a2'.repeat(16)}.json.4242.6f1e.tmp`
     const truncated = `00000000000000000002-${'a3'.repeat(16)}.json`
     await writeFile(join(dataRoot, 'records', leftover), '')
@@ -212,7 +206,6 @@ describe('recorder content repair', () => {
       { name: truncated, reason: 'unreadable_record' },
       { name: leftover, reason: 'unrecognized_name' }
     ])
-    // 跳过不等于删除：修复工具只补正文，存库卫生属于维护命令。
     expect(await readdir(join(dataRoot, 'records'))).toContain(leftover)
   })
 })

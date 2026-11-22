@@ -68,7 +68,6 @@ async function fixture(withGit = false) {
   }
 }
 
-/** Exactly what CodeLens' gate does: validate the claim, then write it to the inbox. */
 async function queueClaim(f: Awaited<ReturnType<typeof fixture>>, arrivedAt?: string) {
   const prepared = await prepareCaptureStart({
     workspace: f.root,
@@ -95,14 +94,12 @@ it('applies a queued claim and the events behind it in arrival order, once each'
   const f = await fixture()
   const { prepared, queued } = await queueClaim(f)
   expect(queued.path).toContain(join(f.sessionRoot, 'inbox'))
-  // The events are written the way the CLI writes them: capture mode, no state to name yet.
   expect(await applySessionCaptureHook({
     workspace: f.root, provider: 'codex', event: 'PostToolUse', sessionId: 'session',
     dataDir: f.dataRoot, payload: f.toolPayload, queueOnly: true, captureMode: true
   })).toMatchObject({ ack: { status: 'queued' } })
   const names = (await readdir(join(f.sessionRoot, 'inbox'))).sort()
   expect(names).toHaveLength(2)
-  // Names are the replay order: the claim that was queued first is replayed first.
   expect(names[0]).toBe(queued.path.slice(queued.path.lastIndexOf('/') + 1))
   expect(names.map(name => name.slice(15, 16))).toEqual(['-', '-'])
 
@@ -111,13 +108,11 @@ it('applies a queued claim and the events behind it in arrival order, once each'
   const open = await readJson<RecorderOpenTurnState>(f.openPath)
   expect(open?.capture?.captureId).toBe('capture')
   expect(await readdir(join(f.sessionRoot, 'inbox'))).toEqual([])
-  // The event that followed the claim in the inbox landed in the turn the claim opened.
   const events = await readdir(join(f.sessionRoot, 'turns', '00000001', 'events'))
   expect(events).toHaveLength(1)
   expect(JSON.parse(await readFile(join(f.sessionRoot, 'turns', '00000001', 'events', events[0]), 'utf8')).event)
     .toBe('PostToolUse')
 
-  // A drain that runs again finds nothing to do: the entries are gone, not replayed.
   await recoverRecorder(f.root)
   expect(await readdir(join(f.sessionRoot, 'turns', '00000001', 'events'))).toHaveLength(1)
 
@@ -139,13 +134,11 @@ it('replays an entry left behind by a crash without recording it twice', async (
   const { prepared } = await queueClaim(f)
   const entry = (await recorderInboxEntries(f.sessionRoot, false))[0]
   const original = await readFile(entry.path, 'utf8')
-  // The claim is applied but the process dies before the entry is unlinked.
   await recoverRecorder(f.root)
   expect(await readdir(join(f.sessionRoot, 'inbox'))).toEqual([])
   const restored = join(f.sessionRoot, 'inbox', entry.name)
   await writeFile(restored, original)
   await recoverRecorder(f.root)
-  // already_started: the same captureId adopts the generation it opened instead of splitting it.
   const open = await readJson<RecorderOpenTurnState>(f.openPath)
   expect(open?.generation).toBe(1)
   expect(await readdir(join(f.sessionRoot, 'inbox'))).toEqual([])
@@ -157,7 +150,6 @@ it('replays an entry left behind by a crash without recording it twice', async (
   await recoverRecorder(f.root)
   const records = await listRecords(f.dataRoot)
   expect(records).toHaveLength(1)
-  // A repeated Stop is a duplicate delivery, not a second turn.
   await applySessionCaptureHook({
     workspace: f.root, provider: 'codex', event: 'Stop', sessionId: 'session',
     dataDir: f.dataRoot, payload: f.stopPayload, queueOnly: true, captureMode: true
@@ -170,7 +162,6 @@ it('replays an entry left behind by a crash without recording it twice', async (
 it('keeps an event that arrives before its claim is applied, instead of dropping it', async () => {
   const f = await fixture()
   await queueClaim(f)
-  // No capture state yet: the event is accepted only because the claim is still queued.
   const early = await applySessionCaptureHook({
     workspace: f.root, provider: 'codex', event: 'PostToolUse', sessionId: 'session',
     dataDir: f.dataRoot, payload: f.toolPayload, queueOnly: true, captureMode: true
@@ -179,7 +170,6 @@ it('keeps an event that arrives before its claim is applied, instead of dropping
   await recoverRecorder(f.root)
   expect((await readJson<RecorderOpenTurnState>(f.openPath))?.capture?.captureId).toBe('capture')
 
-  // With no capture and no queued claim the same delivery records nothing, as before.
   const g = await fixture()
   const ignored = await applySessionCaptureHook({
     workspace: g.root, provider: 'codex', event: 'PostToolUse', sessionId: 'session',
@@ -226,7 +216,6 @@ it('orders a claim and an event written in the same millisecond by the queue, no
   expect(names[1]).toBe(event.slice(event.lastIndexOf('/') + 1))
 })
 
-/** Simulate an external guard writing straight to the advertised inbox contract, without Node CLI. */
 async function writeExternalInboxEntry(
   inbox: CaptureInboxContract,
   entry: Record<string, unknown>,
@@ -317,7 +306,6 @@ it('enforces stop fences, synthetic/title filters and PreToolUse repo discovery 
   })
   const inbox = started.transport.inbox as CaptureInboxContract
   const baseMs = Date.now()
-  // PreToolUse referencing a file in nested-repo must trigger capture repository discovery on replay.
   await writeExternalInboxEntry(inbox, {
     schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
     event: 'PreToolUse',
@@ -327,7 +315,6 @@ it('enforces stop fences, synthetic/title filters and PreToolUse repo discovery 
     },
     uploadEnvironment: {}, captureMode: true, arrivedAt: new Date(baseMs).toISOString()
   }, 1)
-  // Synthetic prompt in inbox must be ignored without superseding the open turn.
   await writeExternalInboxEntry(inbox, {
     schemaVersion: 1, kind: 'hook', provider: 'codex', sessionId: 'session',
     event: 'UserPromptSubmit',
@@ -339,7 +326,6 @@ it('enforces stop fences, synthetic/title filters and PreToolUse repo discovery 
   expect(open?.generation).toBe(1)
   expect(open?.captures.some(item => item.repository === nested)).toBe(true)
 
-  // Stop capture, close current turn, then enqueue a post-stop UserPromptSubmit: it must not open a new turn.
   await stopSessionCapture({
     workspace: f.root, provider: 'codex', sessionId: 'session', dataDir: f.dataRoot, context: f.context
   })

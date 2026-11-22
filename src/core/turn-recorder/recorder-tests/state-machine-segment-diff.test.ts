@@ -25,16 +25,9 @@ const chainStores = async (root: string): Promise<string[]> =>
 
 const exists = async (path: string): Promise<boolean> => stat(path).then(() => true, () => false)
 
-/**
- * One question, two wakes, one file per segment: every record must show only its own segment's work.
- * The baseline of a continuation is the end state the previous record published — not the turn
- * start, which would repeat earlier work, and not the wake, which would lose it.
- */
 export function registerSegmentDiffSuite(): void {
   it('同一次提问、两次唤醒、每段改一个文件：三条记录的 diff 各自只含本段改动，合起来不重不漏', async () => {
     const root = await gitWorkspace(false)
-    // The transcript lives outside the workspace, as real Provider transcripts do; otherwise every
-    // segment would also change it and the assertion would test the fixture.
     const transcript = join(await mkdtemp(join(tmpdir(), 'scry-segment-diff-')), 'qoder.jsonl')
     const hook = (event: string, payload: Record<string, unknown>) =>
       handleRecorderHook({ provider: 'qoder', event, workspace: root, payload })
@@ -63,15 +56,12 @@ export function registerSegmentDiffSuite(): void {
     await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'pending' })
     await sealQuietSegment(root)
     const secondStore = await frozen(root)
-    // The chain grows: the earlier store can still hold blobs a later segment's baseline names, so it
-    // stays until a real user prompt starts a new chain.
     expect(secondStore).toHaveLength(1)
     expect(secondStore[0].tempDir).not.toBe(firstStore[0].tempDir)
     const afterSecond = await chainStores(root)
     expect(afterSecond).toHaveLength(2)
     for (const dir of afterSecond) await expect(exists(dir)).resolves.toBe(true)
 
-    // Second wake, then a plain Stop: no new background task, so the segment publishes immediately.
     await appendFile(transcript, `${[
       notification('prompt-3', 'task-2', 'call-bg-2'),
       assistantText('prompt-3', 'Verification finished; the release is out.')
@@ -118,8 +108,6 @@ export function registerSegmentDiffSuite(): void {
     await expect(hook('Stop', stop(transcript))).resolves.toMatchObject({ status: 'pending' })
     await sealQuietSegment(root)
 
-    // third.txt does not exist yet: the file this segment edits was created by the first segment, and
-    // its blob must still resolve after the first segment's store was released.
     await appendFile(transcript, `${[
       notification('prompt-3', 'task-2', 'call-bg-2')
     ].join('\n')}\n`)
@@ -139,8 +127,6 @@ export function registerSegmentDiffSuite(): void {
     const transcript = join(await mkdtemp(join(tmpdir(), 'scry-segment-diff-dirty-')), 'qoder.jsonl')
     const hook = (event: string, payload: Record<string, unknown>) =>
       handleRecorderHook({ provider: 'qoder', event, workspace: root, payload })
-    // Dirty before the turn starts: it belongs to no segment's diff, but its content is still part of
-    // the end state the second segment is compared against.
     await writeFile(join(root, 'a.txt'), 'dirty before the turn\n')
     await writeFile(transcript, `${[
       user('prompt-1', 'fix it while the build runs', { requestSetId: 'request-1' }),

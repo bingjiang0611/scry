@@ -23,8 +23,6 @@ describe('nested Git turn diff', () => {
     config.capture.diff = true
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
 
-    // Snapshots disable repository filters. Synchronize the real Git invocation,
-    // not a filter sleep that the production trust boundary deliberately bypasses.
     const realGit = (await pexecFile('which', ['git'])).stdout.trim()
     const syncDir = join(root, 'snapshot-sync')
     const binDir = join(root, 'bin')
@@ -69,7 +67,6 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
       expect(open).toMatchObject({ status: 'open', captures: [] })
       expect(settled).toBe(false)
     } finally {
-      // An assertion failure must still release the owned Git process.
       await writeFile(releasePipe, 'release\n')
       await starting
     }
@@ -136,7 +133,6 @@ exec "$SCRY_TEST_REAL_GIT" "$@"
     expect(fullPatch).toContain('第11999行😀')
     expect(fullPatch).toContain('END-OF-FULL-PATCH')
     expect(file?.patchContent?.content).toBe(fullPatch)
-    // Reading and exporting the canonical record must keep the new single-inline shape.
     const exported = await exportRecords(dataRoot)
     expect(exported.records[0].diff.value?.[0].files[0]).toEqual(file)
     const recordPath = join(dataRoot, 'records', `${String(record.sequence).padStart(20, '0')}-${record.recordId}.json`)

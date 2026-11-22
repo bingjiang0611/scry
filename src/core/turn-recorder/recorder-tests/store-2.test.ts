@@ -26,7 +26,6 @@ export function registerSuite14(): void {
     await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 0, pending: 0 })
     expect(await readFile(legacyPath, 'utf8')).toBe(original)
 
-    // An old App remains free to own the v1 file; it must not erase the CLI checkpoint.
     const appState = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'sha256:old-app', ackedThrough: 1 })
     await writeFile(legacyPath, appState)
     await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
@@ -66,8 +65,6 @@ export function registerSuite14(): void {
     const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'a' }
     const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'b' }
     const results = await Promise.all([a, b, a].map(env => drainCommitNotifications(dataRoot, env)))
-    // The bounded lock may legitimately time out while another identity delivers.
-    // Only that diagnosed contention may defer work to an explicit recovery drain.
     if (results.some(result => result.pending > 0)) {
       expect(await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('lock timeout:')
     } else {
@@ -90,7 +87,6 @@ export function registerSuite14(): void {
     await completeTurn(root, 'no-callback')
     const dataRoot = join(root, '.scry')
     const env = { PATH: '/usr/bin:/bin' }
-    // Friday 现场：记录落地、notifyBacklog=3，但 uploader initialized=false、enqueuedThrough=0。
     await expect(drainCommitNotifications(dataRoot, env)).resolves.toEqual({
       delivered: 0, pending: 1, truncated: false, hookConfigured: false
     })
@@ -106,7 +102,6 @@ export function registerSuite14(): void {
     const lockDir = join(dataRoot, 'locks', 'commit-notification.lock')
     await mkdir(lockDir, { recursive: true })
     await writeFile(join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: 'live-test-owner' }))
-    // Advance the lock deadline, not callback timers; no sleep or real 2s wait.
     let now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now += 2_001)
     try {

@@ -144,22 +144,18 @@ describe('问题 2: 引用预算按证据价值排序', () => {
     const kept = new Set(recordContentItems(budgeted).map((item) => item.path))
     expect(kept.has('transcript')).toBe(true)
     expect([...kept].filter((path) => path.startsWith('tools.'))).toHaveLength(114)
-    // The budget is what binds: the untracked bodies are the ones that leave.
     expect(recordContentItems(budgeted).filter((item) => item.priority === 'diff-added').length)
       .toBeLessThan(570)
     expect(budgeted.transcript?.status).toBe('available')
   })
 
   it('evicts tool bodies only after every diff body is gone', () => {
-    // Above the reference cap, the 513th body must be the least valuable one still kept.
     const files = [...trackedFiles(), ...untrackedFiles(RECORDER_CONTENT_MAX_REFS, 8)]
     const budgeted = applyRecordContentBudget(record(files))
     const items = recordContentItems(budgeted)
     expect(items.filter((item) => item.priority === 'tool')).toHaveLength(114)
-    // 512 = transcript + 114 tool bodies + tracked patch + the rest of the untracked patches.
     const diffKept = items.filter((item) => item.priority.startsWith('diff-')).length
     expect(items.length).toBe(RECORDER_CONTENT_MAX_REFS)
-    // 512 = 1 transcript + 114 tool bodies + 397 diff bodies (the tracked edit and new-file patches).
     expect(diffKept).toBe(RECORDER_CONTENT_MAX_REFS - 1 - 114)
   })
 })
@@ -176,7 +172,6 @@ describe('问题 2: 未跟踪文件清单策略', () => {
     expect(policy.files).toHaveLength(files.length)
     expect(policy.files.filter((file) => file.patchStatus === 'unavailable' && file.patchReason === 'policy'))
       .toHaveLength(UNTRACKED_PATCH_FILE_LIMIT + 1)
-    // The tracked edit keeps its body; only untracked additions fall back to the manifest.
     expect(policy.files.find((file) => file.path === '/workspace/src/app.ts')?.patchStatus).toBe('captured')
   })
 

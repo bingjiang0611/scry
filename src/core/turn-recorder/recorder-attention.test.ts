@@ -25,7 +25,6 @@ const attentionDir = (root: string): string => join(dataRoot(root), 'runtime', '
 const sessionDir = (root: string, sessionId: string): string => join(dataRoot(root), 'runtime', 'claude', safeKey(sessionId))
 
 async function markers(root: string): Promise<string[]> {
-  // Readiness is directory metadata, not a session needing recovery.
   return (await readdir(attentionDir(root)).catch(() => [])).filter(name => name !== 'initialized')
 }
 
@@ -49,7 +48,6 @@ describe('recorder attention index', () => {
     const sessionId = 'crashed-before-open'
     await mkdir(attentionDir(root), { recursive: true })
     await mkdir(sessionDir(root, sessionId), { recursive: true })
-    // What a crash between the index write and the open.json write leaves behind.
     await writeFile(join(attentionDir(root), `claude__${safeKey(sessionId)}`), '')
 
     await expect(recorderHasOpenTurn(dataRoot(root))).resolves.toBe(false)
@@ -61,7 +59,6 @@ describe('recorder attention index', () => {
     const root = await fixture()
     const sessionId = 'pre-index-turn'
     await handleRecorderHook({ provider: 'claude', event: 'UserPromptSubmit', workspace: root, payload: payload(sessionId, { prompt: 'legacy workspace' }) })
-    // Simulates a workspace written by a recorder without the index.
     await rm(attentionDir(root), { recursive: true, force: true })
 
     await expect(recorderHasOpenTurn(dataRoot(root))).resolves.toBe(true)
@@ -85,7 +82,6 @@ describe('recorder attention index', () => {
     await expect(recorderHasOpenTurn(dataRoot(root))).resolves.toBe(true)
     await recoverRecorder(root)
 
-    // Replaying the queued start opens the turn, so the session stays indexed for its terminal hook.
     expect(await readdir(inbox)).toEqual([])
     await expect(recorderHasOpenTurn(dataRoot(root))).resolves.toBe(true)
     expect(await markers(root)).toEqual([`claude__${safeKey(sessionId)}`])
@@ -108,12 +104,10 @@ describe('recorder attention index', () => {
     }))
     await mkdir(attentionDir(root), { recursive: true })
     await writeFile(join(attentionDir(root), `claude__${safeKey(sessionId)}`), '')
-    // Metadata that cannot be read is evidence, not retryable work.
     await writeFile(join(failed, `${name}.failure.json`), '{ not json')
 
     await expect(recorderHasOpenTurn(dataRoot(root))).resolves.toBe(false)
     await recoverRecorder(root)
-    // The pass runs because the entry is indexed, and the entry is not silently dropped.
     expect(await readdir(failed)).toContain(name)
     expect(await markers(root)).toEqual([`claude__${safeKey(sessionId)}`])
   })

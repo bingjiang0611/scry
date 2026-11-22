@@ -30,7 +30,6 @@ export function registerSuite5(): void {
     expect((await listRecords(join(root, '.scry'))).length).toBe(1)
     await expect(access(capture)).rejects.toMatchObject({ code: 'ENOENT' })
 
-    // 响应之后由长活进程投递。
     await drainRecorderDelivery(root, env)
     const delivered = (await readFile(capture, 'utf8')).trim().split('\n')
     expect(delivered).toHaveLength(1)
@@ -47,7 +46,6 @@ export function registerSuite5(): void {
       workspace: root,
       payload: payload('claude-closing', { prompt: '这一轮会被轮转掉', transcript_path: transcript })
     })
-    // Provider 轮转掉了这一轮：终态事件到达时 transcript 里已经找不到它。
     await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '完全不同的一轮' } }) + '\n')
     await expect(handleRecorderHook({
       provider: 'claude',
@@ -58,19 +56,15 @@ export function registerSuite5(): void {
 
     const openState = join(root, '.scry', 'runtime', 'claude', safeKey('claude-closing'), 'open.json')
     expect(JSON.parse(await readFile(openState, 'utf8')).status).toBe('closing')
-    // 已经在 closing 里卡了 5 天：判据是 recorder 自己最后一次写状态的时间，不是 Provider 给的时间戳。
     const stalledAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1_000)
     await utimes(openState, stalledAt, stalledAt)
 
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
     const [record] = await listRecords(join(root, '.scry'))
-    // 终态确实到过（这才让它进 closing），所以谎报 interrupted 是错的；只有证据降级。
     expect(record.status).toBe('completed')
     expect(record.assistant.status).toBe('unavailable')
     expect(record.assistant.omissionReason).toContain('no longer contains this turn')
-    // 基线是 5 天前的，diff 不能声称属于这一轮。
     expect(record.diff.status).toBe('unavailable')
-    // transcript 被丢弃且没有 lifecycle 工具事件：不能声称「这一轮没用工具」。
     expect(record.tools.status).toBe('unavailable')
   })
 
@@ -92,7 +86,6 @@ export function registerSuite5(): void {
       payload: payload('claude-fresh-closing', { transcript_path: transcript })
     })
 
-    // 刚结束的轮次可能还会收敛（Provider 稍后补写），不该立刻放弃、更不该丢掉 diff。
     await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 0, pending: 1, expired: 0 })
     expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
   })
@@ -101,7 +94,6 @@ export function registerSuite5(): void {
     const root = await workspace()
     const transcript = join(root, 'transcript.jsonl')
     const startedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
-    // 只有用户消息并不能证明任务已经停止。
     await writeFile(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: '跑一个长任务' } }))
     await handleRecorderHook({
       provider: 'claude',
@@ -109,7 +101,6 @@ export function registerSuite5(): void {
       workspace: root,
       payload: payload('claude-expired', { prompt: '跑一个长任务', transcript_path: transcript, timestamp: startedAt })
     })
-    // transcript 已停止增长：把 mtime 推回 3 天前。
     const stoppedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000)
     await utimes(transcript, stoppedAt, stoppedAt)
 
@@ -145,7 +136,6 @@ export function registerSuite5(): void {
         timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
       })
     })
-    // Provider 把 transcript 轮转掉了：身份再也无法在其中匹配。
     await unlink(transcript)
 
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
@@ -156,7 +146,6 @@ export function registerSuite5(): void {
 
   it('静默轮次不会提前发布 diff 或丢掉开始时的基线', async () => {
     const root = await workspace()
-    // 该 fixture 的 capture.diff 为 false，这里显式打开以覆盖真实默认配置。
     const config = JSON.parse(await readFile(join(root, 'scry.config.json'), 'utf8')) as Record<string, any>
     config.capture = { ...config.capture, diff: true }
     await writeFile(join(root, 'scry.config.json'), JSON.stringify(config))
@@ -178,7 +167,6 @@ export function registerSuite5(): void {
     const before = await readFile(openState, 'utf8')
     const stoppedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000)
     await utimes(transcript, stoppedAt, stoppedAt)
-    // 尚无终态，不能靠时间提前确定文件改动的归属边界。
     await writeFile(join(root, 'later-work.ts'), 'export const later = 1\n')
 
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
@@ -197,8 +185,6 @@ export function registerSuite5(): void {
     await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'add', '.'], { cwd: root })
     await pexecFile('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '-m', 'baseline'], { cwd: root })
 
-    // Qoder does not provide a native prompt id on this path. The successor start arms stale-terminal
-    // protection for the next unidentified Stop, so that Stop can wait for transcript convergence.
     await handleRecorderHook({
       provider: 'qoder',
       event: 'UserPromptSubmit',
@@ -230,19 +216,15 @@ export function registerSuite5(): void {
     expect(capturePaths.length).toBeGreaterThan(0)
     for (const path of capturePaths) await expect(access(path)).resolves.toBeUndefined()
 
-    // This write happens after the Provider terminal boundary and must not be attributed to it.
     await writeFile(pluginConfig, 'late actor edit\n')
     await writeFile(openState, JSON.stringify({ ...deferred, deferredTerminalAt: '2000-01-01T00:00:00.000Z' }))
     await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 1, pending: 0 })
-    // The sealed segment's store is its published end state: a background wake can still continue
-    // this turn, and then this store is that segment's baseline. It is released by the next seal.
     for (const path of capturePaths) await expect(access(path)).resolves.toBeUndefined()
 
     const afterDeferred = await listRecords(join(root, '.scry'))
     const deferredRecord = afterDeferred.find((record) => record.user.value?.text === 'successor qoder turn')
     expect(deferredRecord?.diff).toMatchObject({ status: 'available', value: [expect.objectContaining({ files: [] })] })
 
-    // The next turn captures the post-boundary state as its own baseline and reports only its edit.
     await handleRecorderHook({
       provider: 'qoder',
       event: 'UserPromptSubmit',
@@ -264,7 +246,6 @@ export function registerSuite5(): void {
     expect(nextFile).toMatchObject({ path: expect.stringContaining('plugin.config.json'), added: 1, deleted: 0 })
     expect(nextFile).not.toHaveProperty('patch')
     expect(nextFile?.patchContent?.content).toContain('+next turn edit')
-    // Publishing the next segment releases the baseline it consumed.
     for (const path of capturePaths) await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' })
   }, 35_000)
 
@@ -279,7 +260,6 @@ export function registerSuite5(): void {
       workspace: root,
       payload: payload('claude-longrun', { prompt: '长任务', transcript_path: transcript, timestamp: startedAt })
     })
-    // 轮次已开了 30 小时，但 transcript 刚刚才写过：仍在工作，不能收敛。
     await appendFile(transcript, `\n${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '还在跑' }] } })}\n`)
 
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
@@ -306,7 +286,6 @@ export function registerSuite5(): void {
       workspace: root,
       payload: payload('claude-no-transcript', {
         prompt: '没有 transcript',
-        // 没有 transcript 也不允许仅按年龄判定中断。
         timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString()
       })
     })

@@ -162,13 +162,11 @@ describe('commit hook grant', () => {
     await writeFile(hostHook, '#!/bin/sh\ncat >/dev/null\nexit 0\n')
     await chmod(hostHook, 0o755)
 
-    // The capture start process carries the host environment.
     const hosted = await resolveCommitHookActivation(workspace, await config(workspace), {
       ...env, SCRY_RECORDER_COMMIT_HOOK: hostHook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'host-fingerprint'
     })
     expect(hosted.status).toBe('host-provided')
 
-    // The daemon and the hook receiver do not: the recorded activation is what delivers.
     const later = await resolveCommitHookActivation(workspace, await config(workspace), env)
     expect(later.status).toBe('trusted')
     expect(commitHookEnv(later, env).SCRY_RECORDER_COMMIT_HOOK).toBe(hostHook)

@@ -13,11 +13,9 @@ describe('turn recorder version', () => {
       publishConfig?: { registry?: string }
     }
     expect(RECORDER_VERSION).toBe(packageJson.version)
-    // README 的安装命令必须跟着版本走，否则用户会复制到过期的安装行。
     const readme = readFileSync(new URL('../../../packages/turn-recorder-cli/README.md', import.meta.url), 'utf8')
     expect(readme).toContain(`${packageJson.name}@${packageJson.version}`)
     expect(packageJson.os).toEqual(['darwin', 'linux'])
-    // 发布目标由执行者的 npm 配置或 --registry 决定，不能把某个部署方的 registry 固化进包。
     expect(packageJson.publishConfig?.registry).toBeUndefined()
   })
 })
