@@ -40,7 +40,7 @@ export function observeComposer(prompt, mode) {
     for (const event of events) {
       state.runId ??= event.runId
       if (event.runId === state.runId && event.kind === 'harness' && event.stage === 'init' && event.text === `Awaiting native turn: ${prompt}`) state.nativeTurnPending = true
-      if (event.runId === state.runId && event.kind === 'model' && ['text', 'text_delta'].includes(event.stage)) state.firstOutputReceiptAt ??= performance.now()
+      if (event.runId === state.runId && event.kind === 'model' && ['text', 'text_delta'].includes(event.stage)) state.traceOutputReceiptAt ??= performance.now()
     }
   })
   const offDone = window.scry.onTurnDone(event => {
@@ -117,7 +117,14 @@ export async function probeNativeComposer({ evaluate, wait, click, send, beginCo
       if (mode !== 'stop-immediate') await ready('visibleReadyAt')
       const stopWorkCounters = stopCounterStart ? await endCounters(stopCounterStart) : undefined
       const sendWorkCounters = await endCounters(sendCounterStart)
-      const state = await evaluate('window.__composerProbe')
+      const state = await evaluate(`(() => {
+        const state = window.__composerProbe
+        const snapshot = performance.getEntriesByName('scry:history-snapshot-output', 'mark')
+          .find(entry => entry.detail?.runId === state.runId && entry.startTime >= state.sendAt)
+        const fromSnapshot = snapshot && snapshot.startTime < (state.traceOutputReceiptAt ?? Infinity)
+        return { ...state, firstOutputReceiptAt: fromSnapshot ? snapshot.startTime : state.traceOutputReceiptAt,
+          firstOutputReceiptSource: fromSnapshot ? 'snapshot' : 'trace' }
+      })()`)
       assert.equal(state.inputTrusted, true)
       assert.equal(state.sendTrusted, true)
       assert.equal(Boolean(state.done.stopped), mode !== 'complete')
@@ -127,7 +134,8 @@ export async function probeNativeComposer({ evaluate, wait, click, send, beginCo
       samples.push({ mode, prompt, runId: state.runId, inputTrusted: state.inputTrusted, sendTrusted: state.sendTrusted, stopTrusted: state.stopTrusted,
         terminalConfirmed: true, stopped: Boolean(state.done.stopped), sendToTerminalMs: state.terminalAt - state.sendAt,
         sendToSettledVisibleMs: state.settledVisibleAt - state.sendAt, sendWorkCounters,
-        ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: state.firstOutputReceiptAt - state.sendAt, sendToFirstVisibleMs: state.firstVisibleAt - state.sendAt, sendToVisibleReadyMs: state.visibleReadyAt - state.sendAt } : {}),
+        ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: state.firstOutputReceiptAt - state.sendAt, sendToFirstVisibleMs: state.firstVisibleAt - state.sendAt, sendToVisibleReadyMs: state.visibleReadyAt - state.sendAt,
+          firstOutputReceiptSource: state.firstOutputReceiptSource, sendToTraceOutputReceiptMs: state.traceOutputReceiptAt === undefined ? undefined : state.traceOutputReceiptAt - state.sendAt } : {}),
         ...(mode !== 'complete' ? { driverStopDispatchMs: state.stopAt - state.stopReadyAt, stopToTerminalMs: state.terminalAt - state.stopAt, stopToSettledVisibleMs: state.settledVisibleAt - state.stopAt, stopWorkCounters } : {}) })
     } finally { await evaluate('window.__disposeComposerProbe()') }
   }

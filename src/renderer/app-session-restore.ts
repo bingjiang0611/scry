@@ -1,6 +1,7 @@
 import type { ProviderId } from '@shared/provider'
 import type { ActiveRun } from '@shared/trace'
 import type { ParsedTurn, SessionHistoryPage } from './env'
+import { markProjectedOutputReceipt } from './performance-monitor'
 
 type PrepareHistoryFocus = (runId: string, captureTrace?: boolean) => void | (() => void)
 
@@ -46,6 +47,7 @@ export async function restoreActiveSessionSelection(
       })
       : null
     if (effects.isCurrent && !effects.isCurrent()) return false
+    markProjectedOutputReceipt(page, activeRun.runId)
     effects.replaceWithParsedSession(args.sessionId, page?.turns ?? [], { activeRun, page })
     effects.onHistoryLoaded?.(page, page?.projection ? page.projection.activeRun : activeRun)
     return true
@@ -92,6 +94,7 @@ export async function restoreFocusedRunSelection(
       externalSessionId
     })
     if (effects.isCurrent && !effects.isCurrent()) return false
+    markProjectedOutputReceipt(page, run.runId)
     effects.replaceWithParsedSession(sessionId, page?.turns ?? [], { activeRun: run, page })
     return true
   } finally {
