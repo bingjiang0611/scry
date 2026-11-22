@@ -110,12 +110,19 @@ async function procTable(): Promise<Map<number, ProcessTableEntry> | undefined> 
 
 /** macOS and other POSIX systems: one `ps` call for the whole table. */
 async function psTable(): Promise<Map<number, ProcessTableEntry> | undefined> {
-  const stdout = await new Promise<string | undefined>((resolvePromise) => {
-    // This table has no argv: a C locale makes lstart stable without touching the host's locale.
-    execFile('ps', ['-axo', 'pid=,ppid=,lstart='], {
-      maxBuffer: 8 * 1024 * 1024, timeout: 5_000, env: { ...process.env, LC_ALL: 'C' }
-    }, (error, out) => resolvePromise(error ? undefined : String(out)))
-  })
+  let stdout: string | undefined
+  try {
+    stdout = await new Promise<string | undefined>((resolvePromise) => {
+      // This table has no argv: a C locale makes lstart stable without touching the host's locale.
+      execFile('ps', ['-axo', 'pid=,ppid=,lstart='], {
+        maxBuffer: 8 * 1024 * 1024, timeout: 5_000, env: { ...process.env, LC_ALL: 'C' }
+      }, (error, out) => resolvePromise(error ? undefined : String(out)))
+    })
+  } catch {
+    // A sandbox can reject process creation synchronously (EPERM), so the failure never reaches
+    // the callback. That is the same unreadable table as an async exec error, not a process fault.
+    return undefined
+  }
   if (!stdout) return undefined
   const table = new Map<number, ProcessTableEntry>()
   for (const line of stdout.split('\n')) {

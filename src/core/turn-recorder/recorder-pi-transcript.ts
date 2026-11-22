@@ -1,7 +1,7 @@
 import { open as openFile } from 'node:fs/promises'
 import { recordTranscriptAnchorBytes } from './recorder-transcript-io.js'
 import type { TraceEvent } from '../../shared/trace.js'
-import { classifyTool, fileOpOf, parseMcp } from '../../shared/trace.js'
+import { classifyTool, fileOpOf, toolInvocation } from '../../shared/trace.js'
 import { classifyDanger } from '../../main/danger.js'
 import type { PiTranscriptAnchor, TranscriptRead } from './recorder-contracts.js'
 import { stableHash } from './store.js'
@@ -160,20 +160,20 @@ export function parsePiTranscript(
         } else if (block.type === 'toolCall' && typeof block.id === 'string' && typeof block.name === 'string') {
           const tool = block.name === 'subagent' ? 'Agent' : block.name
           const input = block.arguments && typeof block.arguments === 'object' ? block.arguments as Record<string, unknown> : {}
-          const classified = classifyTool(tool, input)
-          const mcp = parseMcp(tool, input)
-          const file = fileOpOf(tool, input)
-          const danger = classifyDanger(tool, input)
+          const invocation = toolInvocation(tool, input)
+          const classified = classifyTool(invocation.tool, invocation.input)
+          const file = fileOpOf(invocation.tool, invocation.input)
+          const danger = classifyDanger(invocation.tool, invocation.input)
           files ||= !!file.filePath
-          mcps ||= !!mcp.mcpServer
+          mcps ||= !!invocation.mcp.mcpServer
           add(entry, index, {
             kind: classified.kind,
             stage: `${classified.kind}:${classified.name}`,
             name: classified.name,
-            tool,
+            tool: invocation.tool,
             toolUseId: block.id,
-            input,
-            ...mcp,
+            input: invocation.input,
+            ...invocation.mcp,
             ...file,
             ...(danger ? { danger } : {})
           })

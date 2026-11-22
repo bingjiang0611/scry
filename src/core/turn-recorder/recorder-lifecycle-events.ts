@@ -1,5 +1,5 @@
 import type { ProviderId } from '../../shared/provider.js'
-import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, parseMcp, type TraceEvent } from '../../shared/trace.js'
+import { HOOK_DELIVERY_STAGE, classifyTool, fileOpOf, toolInvocation, type TraceEvent } from '../../shared/trace.js'
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
 import { captureToolContent, isFullToolContentPolicy, type ToolContentPolicy } from './tool-content.js'
@@ -156,29 +156,29 @@ export function lifecycleTraceEvents(args: {
     })
   } else if (/^PreToolUse(?::|$)/.test(args.event) || args.event === 'tool.execute.before') {
     if (toolName) {
-      const cls = classifyTool(toolName, input)
-      const mcp = parseMcp(toolName, input)
-      const file = fileOpOf(toolName, input)
-      const danger = classifyDanger(toolName, input)
-      out.push(...inferredSkillEvents(toolName, input, args.runId, at, toolUseId))
+      const invocation = toolInvocation(toolName, input)
+      const cls = classifyTool(invocation.tool, invocation.input)
+      const file = fileOpOf(invocation.tool, invocation.input)
+      const danger = classifyDanger(invocation.tool, invocation.input ?? {})
+      out.push(...inferredSkillEvents(invocation.tool, invocation.input ?? {}, args.runId, at, toolUseId))
       out.push({
         id: toolUseId ?? `tool-${stableHash([args.event, args.payload]).slice(0, 16)}`,
         ts: at,
         runId: args.runId,
         kind: cls.kind,
         stage: `${cls.kind}:${cls.name}`,
-        tool: toolName,
+        tool: invocation.tool,
         name: cls.name,
         toolUseId,
         ...(agentId ? { agentId } : {}),
-        input,
+        input: invocation.input,
         ...(isFullToolContentPolicy(args.toolContentPolicy) ? {
           inputContent: captureToolContent(args.payload[['tool_input', 'toolInput', 'input'].find((key) => key in args.payload) ?? 'tool_input'], {
             source: 'lifecycle_hook', maxBytes: null,
             ...(limitations.some((item) => item.field === 'tool_input') ? { sourceCompleteness: 'partial', reasons: ['source_truncated'] } : {})
           })
         } : {}),
-        ...mcp,
+        ...invocation.mcp,
         ...file,
         ...(danger ? { danger } : {}),
         ...(limitationMetadata(limitations.filter((item) => item.field === 'tool_input'))
@@ -188,6 +188,7 @@ export function lifecycleTraceEvents(args: {
     }
   } else if (/^PostToolUse(?:Failure)?(?::|$)/.test(args.event) || args.event === 'tool.execute.after') {
     const failed = /Failure/.test(args.event) || args.payload.error != null || args.payload.is_error === true
+    const invocation = toolName ? toolInvocation(toolName, input) : undefined
     const result = isFullToolContentPolicy(args.toolContentPolicy)
       ? args.payload[['tool_response', 'toolResponse', 'output', 'result', 'error'].find((key) => key in args.payload) ?? 'tool_response']
       : args.payload.tool_response ?? args.payload.toolResponse ?? args.payload.output ?? args.payload.result ?? args.payload.error
@@ -197,7 +198,7 @@ export function lifecycleTraceEvents(args: {
       runId: args.runId,
       kind: 'tool',
       stage: 'tool_result',
-      tool: toolName,
+      tool: invocation?.tool ?? toolName,
       toolUseId,
       ...(agentId ? { agentId } : {}),
       ...(isFullToolContentPolicy(args.toolContentPolicy)

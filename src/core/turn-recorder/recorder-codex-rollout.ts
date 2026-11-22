@@ -1,4 +1,4 @@
-import { type TraceEvent, classifyTool, fileOpOf, parseMcp } from '../../shared/trace.js'
+import { type TraceEvent, classifyTool, fileOpOf, toolInvocation } from '../../shared/trace.js'
 import { type CodexRolloutIdentity, type ParsedTranscriptTurn, stringAt, nestedRecord, timestampOf, epochSecondsAt, terminalStatus, inferredSkillEvents, summarize } from './recorder-contracts.js'
 import { classifyDanger } from '../../main/danger.js'
 import { stableHash } from './store.js'
@@ -123,22 +123,22 @@ export function parseCodexRollout(
     for (let index = 0; index < calls.length; index++) {
       const call = calls[index]
       const toolUseId = calls.length === 1 ? outerId : `${outerId}:${call.suffix ?? index + 1}`
-      const cls = classifyTool(call.tool, call.input)
-      const mcp = parseMcp(call.tool, call.input)
-      const file = fileOpOf(call.tool, call.input)
-      const danger = classifyDanger(call.tool, call.input)
-      current.events.push(...inferredSkillEvents(call.tool, call.input, runId, at, toolUseId))
+      const invocation = toolInvocation(call.tool, call.input)
+      const cls = classifyTool(invocation.tool, invocation.input)
+      const file = fileOpOf(invocation.tool, invocation.input)
+      const danger = classifyDanger(invocation.tool, invocation.input ?? {})
+      current.events.push(...inferredSkillEvents(invocation.tool, invocation.input ?? {}, runId, at, toolUseId))
       current.events.push({
         id: `codex-tool-${stableHash([toolUseId, call.tool]).slice(0, 16)}`,
         ts: at,
         runId,
         kind: cls.kind,
         stage: `${cls.kind}:${cls.name}`,
-        tool: call.tool,
+        tool: invocation.tool,
         name: cls.name,
         toolUseId,
-        input: call.input,
-        ...mcp,
+        input: invocation.input,
+        ...invocation.mcp,
         ...file,
         ...(danger ? { danger } : {})
       })
