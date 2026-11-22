@@ -404,8 +404,9 @@ export async function readSubscribeTraceOnce(input: {
       ...(cursor.after ? { after: cursor.after } : {})
     })
     if (read.kind === 'snapshot' && read.run === null) {
-      const alreadyHasResult = cursor.pushed.some((e) => e.kind === 'harness' && e.stage === 'result')
-      if (input.terminal && cursor.context.externalSessionId && !alreadyHasResult) {
+      // A Provider result precedes the daemon's finalization. Diff and other
+      // evidence may have reached the archive after the last live read.
+      if (input.terminal && cursor.context.externalSessionId) {
         const archived = await input.transport.archivedRunTrace({ context: cursor.context, runId: targetId })
         if (archived) {
           // Deduplicate by event id so archive-formatted turns never re-emit already-pushed events.
