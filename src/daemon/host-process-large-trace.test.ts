@@ -7,6 +7,7 @@ import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { DaemonRunRuntime } from '../main/daemon-run-runtime'
+import { startDaemonRunEvents } from '../main/daemon-run-events'
 import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
 
 afterEach(cleanupTempDirs)
@@ -37,9 +38,11 @@ describe('daemon trace past the single-response limit', () => {
     const delivered: TraceEvent[] = []
     const warnings: unknown[] = []
     const runtime = new DaemonRunRuntime({
+      subscribeMode: true,
       transport, waitMs: 500, onWarn: (_message, error) => { warnings.push(error) },
       send: (channel, payload) => { if (channel === 'agent:trace') delivered.push(...(payload as TraceBatch).events) }
     })
+    const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     try {
       const run = await surface.start({ prompt: 'performance large trace', providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID() })
@@ -56,6 +59,7 @@ describe('daemon trace past the single-response limit', () => {
       await surface.stop(run.runId)
       expect(await until(() => runtime.runView(run.runId)?.done === true ? true : undefined, 20_000)).toBe(true)
     } finally {
+      events.dispose()
       runtime.dispose()
       await daemon.dispose()
     }

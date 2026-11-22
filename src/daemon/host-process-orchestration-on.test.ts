@@ -10,35 +10,12 @@ import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonica
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { INLINE_BODY_MAX_BYTES } from '../host-runtime/orchestration/types'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitRunTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
 function saveEnv() {
   const saved = {
@@ -90,10 +67,8 @@ describe('P4-2 daemon authoritative orchestration integration (SCRY_ORCHESTRATIO
         log: () => undefined
       })
 
-      expect(host.orchestrationShadow).toBeUndefined()
       expect(host.orchestrationAuthority).toBeDefined()
       const authority = host.orchestrationAuthority!
-      expect(authority.mode).toEqual({ requested: 'on', effective: 'on', refused: false })
 
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM

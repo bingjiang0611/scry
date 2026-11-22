@@ -6,7 +6,6 @@ import { RunRegistry } from '../../main/run-registry'
 import { AuthorityEngine } from './authority-engine'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { EventSink } from './event-sink'
-import { parseOrchestrationMode } from './mode'
 import { INLINE_BODY_MAX_BYTES } from './types'
 
 const PEER_A = 'a'.repeat(64)
@@ -19,22 +18,6 @@ async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
     rmSync(dir, { recursive: true, force: true })
   }
 }
-
-describe('P4-2 mode activation', () => {
-  it('accepts SCRY_ORCHESTRATION=on as authoritative mode, which is also the default', () => {
-    expect(parseOrchestrationMode({})).toEqual({ requested: 'on', effective: 'on', refused: false })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'shadow' })).toEqual({
-      requested: 'shadow',
-      effective: 'shadow',
-      refused: false
-    })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'on' })).toEqual({
-      requested: 'on',
-      effective: 'on',
-      refused: false
-    })
-  })
-})
 
 describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and fence', () => {
   it('persists >16 KiB body before commit, commits 2 pre-first-token tx, and enforces pre-dispatch recheck', async () => {

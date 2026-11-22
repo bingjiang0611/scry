@@ -2,7 +2,7 @@ import { admissionPhase, awaitAdmission, DaemonRunRefusedError, DEFAULT_ADMIT_BU
 import { planDelivery } from './daemon-run-delivery'
 import { PerformanceTrace } from './performance-timing'
 import { TraceOutputBridge } from './trace-output'
-import type { AgentQuestionResponse, AgentStopState } from '../shared/runtime'
+import type { AgentQuestionRequest, AgentQuestionResponse, AgentStopState } from '../shared/runtime'
 import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
@@ -75,7 +75,7 @@ export class DaemonRunRuntime {
       onSessionBound: (payload) => this.#onSessionBound?.(payload),
       publishStopState: (state: AgentStopState) => this.#deps.runTraces?.publishStopState?.(state),
       settleRunTrace: (id) => this.#deps.runTraces?.settle(id), flushBridge: () => this.#bridge.flushAll(),
-      scheduleTraceRead: (id, opts) => this.#readTraceSerialized(id, opts), syncQuestions: (cursor) => this.#publishQuestions(cursor),
+      scheduleTraceRead: (id, opts) => this.#readTraceSerialized(id, opts), syncQuestions: (cursor, questions) => this.#publishQuestions(cursor, questions),
       probeRunState: (id) => this.#deps.transport.runState(id)
     }
   }
@@ -89,7 +89,7 @@ export class DaemonRunRuntime {
     const next = previous.then(() => readSubscribeTraceOnce({
       cursor: this.#runs.get(runId), runId, disposed: this.#disposed, terminal: options?.terminal,
       transport: this.#deps.transport, apply: (read, cursor) => this.#apply(read, cursor),
-      syncQuestions: (cursor) => this.#publishQuestions(cursor), flush: () => this.#bridge.flush(), onWarn: this.#deps.onWarn
+      flush: () => this.#bridge.flush(), onWarn: this.#deps.onWarn
     }))
     this.#locks.set(runId, next.then(() => undefined, () => undefined))
     return next
@@ -378,10 +378,10 @@ export class DaemonRunRuntime {
     return plan.events.length > 0
   }
 
-  #publishQuestions(cursor: RunCursor): Promise<void> {
+  #publishQuestions(cursor: RunCursor, projected?: AgentQuestionRequest[]): Promise<void> {
     return publishQuestions(cursor, this.#deps.transport, {
       send: this.#deps.send, ...(this.#deps.runTraces ? { subscription: this.#deps.runTraces } : {})
-    })
+    }, projected)
   }
 
   /** Forget one run's cursor, e.g. after the view moved to another session. */

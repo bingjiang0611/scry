@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
 import { SessionLedger } from '../main/remote/session-ledger'
 import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { createRecentFoldersStore } from '../main/app-store'
@@ -182,23 +182,17 @@ describe('daemon host process', () => {
       })
       expect(sent.error).toBeUndefined()
       expect(sent.result).toMatchObject({ status: 'accepted', disposition: 'created', ledger: { runId: expect.any(String) } })
-      const conversationEvents: Array<{ kind: string; detail?: string }> = []
-      let conversationState = 'dispatched'
-      let conversationCursor = 0
-      // Bounded by time, not by replies: each progress marker wakes the watch, and under
-      // a parallel suite the markers can spend any reply budget before the run settles.
-      const conversationDeadline = Date.now() + 10_000
-      while (Date.now() < conversationDeadline && !['settled', 'failed'].includes(conversationState)) {
-        const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-          op: 'watch', runId: sent.result.ledger.runId, cursor: conversationCursor, outputCursor: 0, waitMs: 5_000
-        })
-        conversationState = watched.watch.state
-        conversationCursor = watched.watch.poll.cursor
-        conversationEvents.push(...watched.watch.poll.events)
-      }
-      expect(conversationState).toBe('settled')
-      const bound = conversationEvents.map((event) => event.detail ?? '').find((detail) => detail.includes('"event":"bound"'))
-      expect(JSON.parse(bound!)).toMatchObject({ ledgerRunId: sent.result.ledger.runId, scryRunId: sent.result.runId })
+      const runAuthority = host.orchestrationAuthority!
+      const conversationRunId = sent.result.runId as string
+      const projectedState = await waitForProjectedRun(host.channel.socketPath, host.service.caCertificatePEM,
+        device.certPEM, device.keyPEM, conversationRunId)
+      const conversationEvidence = runAuthority.sink.listEvents().filter(event => event.runId === conversationRunId)
+      expect(projectedState, JSON.stringify(conversationEvidence)).toBe('settled')
+      expect(runAuthority.subscribeHub.liveRunMeta(conversationRunId)?.scryRunId).toBe(conversationRunId)
+      const receiptId = sent.result.ledger.runId as string
+      const alias = runAuthority.sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
+        .get(receiptId) as { run_id: string } | undefined
+      expect(alias?.run_id ?? receiptId).toBe(conversationRunId)
       // The renderer's read(id) leaves its cursor out; over JSON that arrives as null.
       // Named as absent, the daemon's handler sees what main's does; unnamed, the null
       // is refused, which is the page read that stalled the daemon-mode conversation view.
@@ -264,25 +258,12 @@ describe('daemon host process', () => {
       })
       expect(submitted.status).toBe('recorded')
       const runId = submitted.runId as string
-      let cursor = 0
-      let outputCursor = 0
-      const events: Array<{ kind: string }> = []
-      const chunks: unknown[] = []
-      let state = 'dispatched'
-      const deadline = Date.now() + 10_000
-      while (Date.now() < deadline && state === 'dispatched') {
-        const watched = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-          op: 'watch', runId, cursor, outputCursor, waitMs: 5_000
-        })
-        state = watched.watch.state
-        cursor = watched.watch.poll.cursor
-        outputCursor = watched.watch.output.cursor
-        events.push(...watched.watch.poll.events)
-        chunks.push(...watched.watch.output.chunks)
-      }
-      expect(state).toBe('settled')
-      expect(events.some((event) => event.kind === 'run_settled')).toBe(true)
-      expect(chunks.length).toBeGreaterThan(0)
+      const ca = host.service.caCertificatePEM
+      expect(await waitForProjectedRun(host.channel.socketPath, ca, device.certPEM, device.keyPEM, runId)).toBe('settled')
+      expect(host.orchestrationAuthority?.sink.listEvents())
+        .toContainEqual(expect.objectContaining({ runId, type: 'run.settled' }))
+      const output = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'output', runId, cursor: 0 })
+      expect(output.output.chunks.length).toBeGreaterThan(0)
       await host.dispose()
       expect(existsSync(host.channel.socketPath)).toBe(false)
     } finally {

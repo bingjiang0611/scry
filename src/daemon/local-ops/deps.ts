@@ -53,11 +53,10 @@ export interface DaemonLocalEndpointDeps {
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
   hostAdmin?: import('../host-admin-store').HostAdminStore
-  // P4-2 authoritative orchestration status (Decision H): omitted unless SCRY_ORCHESTRATION=on.
+  // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
-  // P4-3 local orchestration subscribe handler: omitted unless SCRY_ORCHESTRATION=on.
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
   log?: (line: string) => void
 }

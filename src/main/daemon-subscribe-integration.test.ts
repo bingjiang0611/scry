@@ -58,13 +58,11 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const surface = createDaemonRunSurface({
       transport,
       runtime,
-      subscribeMode: true,
       currentCwd: () => daemon.workspace
     })
     const events = startDaemonRunEvents({
       transport,
       runtime,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
       },
@@ -138,7 +136,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     }
   }, 45_000)
 
-  it('off mode: keeps legacy appEvents + watch + DaemonRunDiscovery with 0 subscribe requests', async () => {
+  it('a stale off environment still delivers runs on the subscription path', async () => {
     process.env.SCRY_ORCHESTRATION = 'off'
     const daemon = await startTestDaemon()
     const ops: string[] = []
@@ -146,20 +144,20 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       ops.push(String(request.op ?? ''))
       return await daemon.request(request)
     })
-    const runtime = new DaemonRunRuntime({ transport, send: () => undefined })
+    const runtime = new DaemonRunRuntime({ transport, subscribeMode: true, send: () => undefined })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     try {
       const started = await surface.start({
-        prompt: 'off legacy path',
+        prompt: 'obsolete off setting',
         providerId: 'codex',
         cwd: daemon.workspace,
         commandId: randomUUID()
       })
       await expect.poll(() => runtime.runView(started.runId)?.done, { timeout: 10_000 }).toBe(true)
-      expect(ops.includes('appEvents')).toBe(true)
-      expect(ops.includes('watch')).toBe(true)
-      expect(ops.includes('subscribe')).toBe(false)
+      expect(ops.includes('appEvents')).toBe(false)
+      expect(ops.includes('watch')).toBe(false)
+      expect(ops.includes('subscribe')).toBe(true)
     } finally {
       events.dispose()
       runtime.dispose()
@@ -185,13 +183,11 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const surface = createDaemonRunSurface({
       transport,
       runtime,
-      subscribeMode: true,
       currentCwd: () => daemon.workspace
     })
     const events = startDaemonRunEvents({
       transport,
       runtime,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
       },
@@ -295,14 +291,15 @@ main().catch((err) => { console.error(err); process.exit(1) })
       packages: 'external'
     })
 
+    let childStderr = ''
     const spawnChildDaemon = async () => {
+      childStderr = ''
       const child = fork(childOut, [userDataDir, daemonStateDirectory], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
-      let stderr = ''
-      child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+      child.stderr?.on('data', (chunk) => { childStderr = (childStderr + String(chunk)).slice(-8000) })
       const exited = once(child, 'exit')
       const [msg] = (await Promise.race([
         once(child, 'message'),
-        exited.then(([code]) => { throw new Error(`child daemon exited ${code}: ${stderr}`) })
+        exited.then(([code]) => { throw new Error(`child daemon exited ${code}: ${childStderr}`) })
       ])) as [{ ready: boolean }]
       expect(msg.ready).toBe(true)
       return child
@@ -339,13 +336,11 @@ main().catch((err) => { console.error(err); process.exit(1) })
       const surface = createDaemonRunSurface({
         transport,
         runtime,
-        subscribeMode: true,
         currentCwd: () => workspace
       })
       events = startDaemonRunEvents({
         transport,
         runtime,
-        subscribeMode: true,
         send: () => undefined,
         waitMs: 300
       })
@@ -365,7 +360,11 @@ main().catch((err) => { console.error(err); process.exit(1) })
       expect(client.subscribeSupported).toBe(true)
 
       // App pump recovers and second run succeeds cleanly
-      const r2 = await surface.start({ prompt: 'after sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() })
+      const r2 = await surface.start({ prompt: 'after sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() }).catch(async (error) => {
+        const evidence = await transport.subscribe({ views: ['activeRuns'], waitMs: 0 })
+          .catch(() => undefined)
+        throw new Error(`post-restart start failed: ${JSON.stringify(evidence)}\n${childStderr}`, { cause: error })
+      })
       await expect.poll(() => runtime!.runView(r2.runId)?.done, { timeout: 10_000 }).toBe(true)
       await expect.poll(() => turnDone.filter((id) => id === r2.runId).length, { timeout: 3_000 }).toBe(1)
       expect(turnDone.filter((id) => id === r1.runId)).toHaveLength(1)

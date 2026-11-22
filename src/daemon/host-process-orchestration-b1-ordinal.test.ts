@@ -1,41 +1,18 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { ConversationStore } from '../main/conversation-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitRunTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  ledgerRunId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId: ledgerRunId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
 async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
   const saved = {
@@ -107,7 +84,7 @@ async function sendConversationTurn(
   return { ledgerRunId, canonicalRunId, state }
 }
 
-describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted, forked, pre-shadow, and restarted sessions', () => {
+describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted, forked, and restarted sessions', () => {
   it('uses H3 ordinal=3 for adopted conversation with 2 imported prior turns (never shadow MAX+1=1)', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
@@ -130,7 +107,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     })
     expect(adopted.turns.map((t) => t.ordinal)).toEqual([1, 2])
 
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -146,14 +123,13 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
         const sent = await sendConversationTurn(host, device, adopted.id, 'third turn after adoption', true)
         expect(sent.state).toBe('settled')
 
-        const shadow = host.orchestrationShadow!
-        // Shadow MUST record ordinal=3 matching ConversationStore (NOT 1!)
-        expect(shadow.mirror.sink!.getTurn(adopted.id, 1)).toBeUndefined()
-        const turn3 = shadow.mirror.sink!.getTurn(adopted.id, 3)
+        const authority = host.orchestrationAuthority!
+        // The projection must use the conversation’s original ordinal.
+        expect(authority.sink.getTurn(adopted.id, 1)).toBeUndefined()
+        const turn3 = authority.sink.getTurn(adopted.id, 3)
         expect(turn3?.runId).toBe(sent.canonicalRunId)
         expect(turn3?.delivery).toBe('accepted')
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         await host.dispose()
       }
@@ -213,7 +189,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       }
     })
 
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -229,20 +205,19 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
         const sent = await sendConversationTurn(host, device, forkedId, 'first dispatched turn on fork', true)
         expect(sent.state).toBe('settled')
 
-        const shadow = host.orchestrationShadow!
-        expect(shadow.mirror.sink!.getTurn(forkedId, 1)).toBeUndefined()
-        const turn3 = shadow.mirror.sink!.getTurn(forkedId, 3)
+        const authority = host.orchestrationAuthority!
+        expect(authority.sink.getTurn(forkedId, 1)).toBeUndefined()
+        const turn3 = authority.sink.getTurn(forkedId, 3)
         expect(turn3?.runId).toBe(sent.canonicalRunId)
         expect(turn3?.delivery).toBe('accepted')
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         await host.dispose()
       }
     })
   })
 
-  it('uses H3 ordinal=3 for pre-shadow conversation (turns 1-2 existed before shadow enabled) and ordinal=4 across daemon restart', async () => {
+  it('retains ordinals 3 and 4 across subsequent daemon restarts', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -251,7 +226,7 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Phase 1: Conversation runs 2 turns while SCRY_ORCHESTRATION=off
+    // Record the first two turns before the first restart.
     let convId = ''
     await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
@@ -272,20 +247,16 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
           args: [canonicalWs]
         })
         convId = (created.result as { id: string }).id
-        expect((await sendConversationTurn(host, device, convId, 'off turn 1', true)).state).toBe('settled')
-        expect((await sendConversationTurn(host, device, convId, 'off turn 2', false)).state).toBe('settled')
+        expect((await sendConversationTurn(host, device, convId, 'turn 1', true)).state).toBe('settled')
+        expect((await sendConversationTurn(host, device, convId, 'turn 2', false)).state).toBe('settled')
       } finally {
         await host.dispose()
       }
     })
 
-    // Simulate compacted/absent H1 history from pre-shadow era (conversation exists in H3 with turns 1-2,
-    // while orchestration.db starts empty with no turns for this session)
-    rmSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, force: true })
-
-    // Phase 2: Enable shadow mode (first start with shadow) and send turn 3
+    // Start a new daemon and send turn 3.
     let turn3RunId = ''
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -298,24 +269,23 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       })
       try {
         const device = await enrollLocal(host.service)
-        const sent = await sendConversationTurn(host, device, convId, 'shadow turn 3', false)
+        const sent = await sendConversationTurn(host, device, convId, 'turn 3', false)
         expect(sent.state).toBe('settled')
         turn3RunId = sent.canonicalRunId
 
-        const shadow = host.orchestrationShadow!
-        expect(shadow.mirror.sink!.getTurn(convId, 1)).toBeUndefined()
-        const turn3 = shadow.mirror.sink!.getTurn(convId, 3)
+        const authority = host.orchestrationAuthority!
+        expect(authority.sink.getTurn(convId, 1)?.delivery).toBe('accepted')
+        const turn3 = authority.sink.getTurn(convId, 3)
         expect(turn3?.runId).toBe(turn3RunId)
         expect(turn3?.delivery).toBe('accepted')
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         await host.dispose()
       }
     })
 
-    // Phase 3: Restart daemon in shadow mode and send turn 4
-    await withSmokeEnv('shadow', async () => {
+    // Restart again and send turn 4.
+    await withSmokeEnv(undefined, async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -328,16 +298,15 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       })
       try {
         const device = await enrollLocal(host.service)
-        const sent = await sendConversationTurn(host, device, convId, 'restarted shadow turn 4', false)
+        const sent = await sendConversationTurn(host, device, convId, 'turn 4 after restart', false)
         expect(sent.state).toBe('settled')
 
-        const shadow = host.orchestrationShadow!
-        expect(shadow.mirror.sink!.getTurn(convId, 3)?.runId).toBe(turn3RunId)
-        const turn4 = shadow.mirror.sink!.getTurn(convId, 4)
+        const authority = host.orchestrationAuthority!
+        expect(authority.sink.getTurn(convId, 3)?.runId).toBe(turn3RunId)
+        const turn4 = authority.sink.getTurn(convId, 4)
         expect(turn4?.runId).toBe(sent.canonicalRunId)
         expect(turn4?.delivery).toBe('accepted')
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         await host.dispose()
       }

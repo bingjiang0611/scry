@@ -220,15 +220,13 @@ describe('InnerMtlsHost lane framing and targets', () => {
       expect(submitted.status).toBe('recorded')
       const runId = submitted.runId as string
       await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1))
-      const watched = await exchange({ op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 0 })
-      expect((watched.watch as { poll: { events: unknown[] } }).poll.events.length).toBeGreaterThan(0)
-      const live = await exchange({ op: 'liveRuns', waitMs: 0 })
-      expect(live.liveRuns).toMatchObject({ runs: expect.any(Array), revision: expect.any(String) })
-      expect((await exchange({ op: 'liveRuns', waitMs: 0, revision: 7 })).error).toBe('invalid_request')
-      expect((await exchange({ op: 'liveRuns', waitMs: 0, history: { providerId: 'pi', cwd: AUTHORIZED } })).error).toBe('invalid_request')
+      const output = await exchange({ op: 'output', runId, cursor: 0 })
+      expect(output.output).toMatchObject({ cursor: expect.any(Number), chunks: expect.any(Array) })
+      expect((await exchange({ op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 0 })).error).toBe('unknown_op')
+      expect((await exchange({ op: 'liveRuns', waitMs: 0 })).error).toBe('unknown_op')
       expect(handshakes).toBe(1)
       await controller.authority.revoke(device.deviceId)
-      expect((await exchange({ op: 'liveRuns', waitMs: 0 })).error).toBe('device_not_authorized')
+      expect((await exchange({ op: 'projects' })).error).toBe('device_not_authorized')
       expect((await exchange({ op: 'historyPage', agentProfileId: null, providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'reuse', snapshot, cursor: 0 })).error).toBe('device_not_authorized')
       expect((await exchange({ op: 'submit', intentId: randomUUID(), detail: routing() })).error).toBe('device_not_authorized')
       expect(start).toHaveBeenCalledTimes(1)
@@ -248,9 +246,9 @@ describe('InnerMtlsHost lane framing and targets', () => {
       await once(socket, 'secureConnect')
       let buffer = ''
       for (let i = 0; i < 15; i++) {
-        socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'poll', cursor: 0, keepAlive: true }) + '\n')
+        socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'projects', keepAlive: true }) + '\n')
         while (!buffer.includes('\n')) buffer += ((await once(socket, 'data'))[0] as Buffer).toString('utf8')
-        expect(buffer.startsWith('{"keepAlive":true,"poll"')).toBe(true)
+        expect(buffer.startsWith('{"keepAlive":true,"projects"')).toBe(true)
         buffer = ''
       }
       await new Promise((resolve) => setImmediate(resolve))
@@ -283,11 +281,11 @@ describe('InnerMtlsHost lane framing and targets', () => {
       await once(socket, 'close')
       return lines
     }
-    const oneShot = await raw([{ op: 'poll', cursor: 0 }])
+    const oneShot = await raw([{ op: 'projects' }])
     expect(oneShot).toHaveLength(1)
-    expect(oneShot[0].startsWith('{"poll"')).toBe(true)
-    const mixed = await raw([{ op: 'poll', cursor: 0, keepAlive: true }, { op: 'poll', cursor: 0 }])
-    expect(mixed[0].startsWith('{"keepAlive":true,"poll"')).toBe(true)
+    expect(oneShot[0].startsWith('{"projects"')).toBe(true)
+    const mixed = await raw([{ op: 'projects', keepAlive: true }, { op: 'projects' }])
+    expect(mixed[0].startsWith('{"keepAlive":true,"projects"')).toBe(true)
     expect(JSON.parse(mixed[1])).toEqual({ error: 'keep_alive_required' })
   })
 })

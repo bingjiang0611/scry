@@ -174,7 +174,7 @@ describe('W16 Part 1: P4-2 non-blocking follow-ups (deferred overflow rebuild, a
         isPackaged: false,
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined,
-        orchestrationShadowBeforeCommitHook: () => {
+        orchestrationBeforeCommitHook: () => {
           if (tripCommit) throw new Error('SQLITE_IOERR simulated fence')
         }
       })

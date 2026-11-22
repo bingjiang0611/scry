@@ -26,14 +26,14 @@ it('recovers archived evidence written after a result already reached the window
   await readSubscribeTraceOnce({
     cursor, runId: cursor.runId, disposed: false, terminal: true,
     transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
-    apply, syncQuestions: async () => {}, flush
+    apply, flush
   })
   expect(apply).toHaveBeenCalledWith({ kind: 'snapshot', run: archive }, cursor)
   expect(archivedRunTrace).toHaveBeenCalledTimes(1)
   expect(flush).toHaveBeenCalledTimes(1)
 })
 
-it('reads live scope before delivering a question from a run seen after reconnect', async () => {
+it('takes a reconnected question and its conversation scope from one subscription reply', async () => {
   const cursor: RunCursor = {
     runId: 'run', lifecycle: 'dispatched', watch: 0, output: 0, pushed: [], askedQuestions: new Set(),
     answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false, sawText: false, admitted: true
@@ -43,9 +43,19 @@ it('reads live scope before delivering a question from a run seen after reconnec
   await applySubscribeEventToRuntime({
     runs: new Map([[cursor.runId, cursor]]), wakes: new RunWakes(), cursorFor: () => cursor, send: vi.fn(),
     flushBridge: vi.fn(), scheduleTraceRead, syncQuestions
-  }, { type: 'run.question_opened', stream: 'run', runId: 'run', at: 1, seq: 2, payload: {} })
-  expect(scheduleTraceRead).toHaveBeenCalledWith('run')
-  expect(syncQuestions).not.toHaveBeenCalled()
+  }, {
+    type: 'run.question_opened', stream: 'run', runId: 'run', at: 1, seq: 2, payload: {},
+    runRow: {
+      runId: 'run', isConversationRun: true, sessionKey: 'conversation', scope: 'local',
+      origin: 'local', provider: 'codex', profile: null, cwd: '/fixture', promptPreview: null,
+      lifecycle: 'dispatched', stopState: null, outputSeq: null, intentSeq: 1,
+      settledAt: null, recoveredAt: null, outcome: null, revSeq: 2,
+      questions: [{ runId: 'run', providerId: 'codex', questionId: 'q', questions: [] }]
+    }
+  })
+  expect(scheduleTraceRead).not.toHaveBeenCalled()
+  expect(cursor.scopedDelivery).toBe(true)
+  expect(syncQuestions).toHaveBeenCalledWith(cursor, [expect.objectContaining({ questionId: 'q' })])
 })
 
 it('recovers the exact segmented run outside the history page and keeps live overlap deduplicated', async () => {
@@ -81,7 +91,7 @@ it('recovers the exact segmented run outside the history page and keeps live ove
         trace: async () => ({ kind: 'snapshot', run: null }),
         archivedRunTrace: input => readDaemonArchivedRunTrace(read, input)
       },
-      apply, syncQuestions: async () => {}, flush: vi.fn()
+      apply, flush: vi.fn()
     })
     expect(apply).toHaveBeenCalledExactlyOnceWith({
       kind: 'snapshot', run: expect.objectContaining({ runId, items: [live, late], done: true })

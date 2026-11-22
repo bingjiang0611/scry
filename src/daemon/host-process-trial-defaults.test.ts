@@ -3,9 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
-// Trial defaults on this branch (maintainer 2026-11-21): with the variables unset the
-// daemon runs orchestration in `on` mode. vitest.config.ts pins the variable off for
-// the rest of the suite, so this file unsets it explicitly.
+// The former switch cannot turn off the authoritative event log.
 const savedMode = process.env.SCRY_ORCHESTRATION
 afterEach(() => {
   if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
@@ -13,7 +11,7 @@ afterEach(() => {
   cleanupTempDirs()
 })
 
-describe('branch trial defaults', () => {
+describe('authoritative daemon defaults', () => {
   it('unset SCRY_ORCHESTRATION runs the daemon in on mode (subscribe advertised)', async () => {
     delete process.env.SCRY_ORCHESTRATION
     const daemon = await startTestDaemon()
@@ -25,12 +23,12 @@ describe('branch trial defaults', () => {
     }
   }, 30_000)
 
-  it('explicit SCRY_ORCHESTRATION=off keeps the legacy path', async () => {
+  it('a stale off value does not turn off subscriptions', async () => {
     process.env.SCRY_ORCHESTRATION = 'off'
     const daemon = await startTestDaemon()
     try {
       const info = await daemon.request({ op: 'daemonInfo' })
-      expect(info.subscribe).toBeUndefined()
+      expect(info.subscribe).toBe(1)
     } finally {
       await daemon.dispose()
     }

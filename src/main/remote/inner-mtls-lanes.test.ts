@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connect } from 'node:tls'
@@ -44,7 +45,12 @@ describe('InnerMtlsHost transport lanes (ping, direct route, multiplexing)', () 
   })
 
   it('multiplexes concurrent requests by id on one lane without a long-poll blocking a ping', async () => {
-    const { identity, controller, caPEM, addr } = await laneHarness(async () => {})
+    const { identity, controller, caPEM, addr } = await laneHarness(async () => {}, async (_peer, request, signal) => {
+      const cursor = { hostId: 'fixture-host', logId: 'fixture-log', seq: 9 }
+      if (!request.known) return { mode: 'snapshot', ...cursor, snapshot: { activeRuns: { rows: [] } } }
+      await delay(request.waitMs, undefined, { signal })
+      return { mode: 'idle', ...cursor }
+    })
     const device = await pairDevice(identity, controller)
     const socket = connect({ port: addr.port, host: addr.host, ca: caPEM, cert: device.certPEM, key: device.keyPEM,
       minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
@@ -63,16 +69,16 @@ describe('InnerMtlsHost transport lanes (ping, direct route, multiplexing)', () 
     }
     try {
       // Two pipelined requests in one write: the first id switches the lane.
-      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 1, op: 'ping' }) + '\n' + JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 2, op: 'liveRuns', waitMs: 0 }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 1, op: 'ping' }) + '\n' + JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 2, op: 'subscribe', views: ['activeRuns'], waitMs: 0 }) + '\n')
       expect((await reply(1)).pong).toMatchObject({ capabilities: expect.arrayContaining(['mux']) })
-      const revision = ((await reply(2)).liveRuns as { revision: string }).revision
+      const { hostId, logId, seq } = (await reply(2)).subscribe as { hostId: string; logId: string; seq: number }
       // A long-poll that will wait, then a ping sent after it: the ping answers first.
-      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 3, op: 'liveRuns', waitMs: 1_500, revision }) + '\n')
+      socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 3, op: 'subscribe', views: ['activeRuns'], waitMs: 1_500, known: { hostId, logId, seq } }) + '\n')
       await new Promise((resolve) => setTimeout(resolve, 50))
       socket.write(JSON.stringify({ keepAlive: true, protocol: REMOTE_PROTOCOL_VERSION, id: 4, op: 'ping' }) + '\n')
       await reply(4)
       expect(lines.some((line) => line.startsWith('{"keepAlive":true,"id":3,'))).toBe(false)
-      expect((await reply(3)).liveRuns).toBeDefined()
+      expect((await reply(3)).subscribe).toBeDefined()
       expect(lines.findIndex((line) => line.includes('"id":4,'))).toBeLessThan(lines.findIndex((line) => line.includes('"id":3,')))
       // Once multiplexed, a request without an id ends the lane explicitly.
       const closed = once(socket, 'close')

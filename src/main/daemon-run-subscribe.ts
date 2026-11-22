@@ -1,4 +1,4 @@
-import type { AgentStopState } from '../shared/runtime'
+import type { AgentQuestionRequest, AgentStopState } from '../shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type {
   SubscribeActiveRunRow,
@@ -22,7 +22,7 @@ export interface SubscribeRuntimeContext {
   settleRunTrace?: (runId: string) => void
   flushBridge: () => void
   scheduleTraceRead: (runId: string, options?: { terminal?: boolean }) => Promise<void>
-  syncQuestions: (cursor: RunCursor) => Promise<void>
+  syncQuestions: (cursor: RunCursor, questions: AgentQuestionRequest[]) => Promise<void>
   /** One-shot lifecycle probe for a run a snapshot no longer lists; null = unknown run. */
   probeRunState?: (runId: string) => Promise<string | null>
 }
@@ -190,6 +190,8 @@ export async function applySubscribeSnapshotToRuntime(
       }
     }
 
+    cursor.scopedDelivery = cursor.scopedDelivery === true || row.isConversationRun === true
+    await ctx.syncQuestions(cursor, row.questions ?? [])
     if (row.externalSessionId) emitSessionBoundOnce(ctx, cursor, row.externalSessionId)
     ctx.wakes.wake(cursor.runId)
 
@@ -301,8 +303,9 @@ export async function applySubscribeEventToRuntime(
   }
 
   if (event.type === 'run.question_opened' || event.type === 'run.question_answered' || event.type === 'run.question_closed') {
-    if (cursor.scopedDelivery === undefined) void ctx.scheduleTraceRead(cursor.runId)
-    else void ctx.syncQuestions(cursor)
+    cursor.scopedDelivery = cursor.scopedDelivery === true || event.runRow?.isConversationRun === true
+    if (event.runRow?.admitted) cursor.admitted = true
+    await ctx.syncQuestions(cursor, event.runRow?.questions ?? [])
     return
   }
 
@@ -393,7 +396,6 @@ export async function readSubscribeTraceOnce(input: {
   terminal?: boolean
   transport: Pick<DaemonRunTransport, 'trace' | 'archivedRunTrace'>
   apply: (read: DesktopRemoteTraceRead, cursor: RunCursor) => boolean
-  syncQuestions: (cursor: RunCursor) => Promise<void>
   flush: () => void
   onWarn?: (message: string, detail?: unknown) => void
 }): Promise<void> {
@@ -428,7 +430,6 @@ export async function readSubscribeTraceOnce(input: {
     }
     if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
     const changed = input.apply(read, cursor)
-    if (!input.terminal) await input.syncQuestions(cursor)
     if (changed) input.flush()
   } catch (error) {
     input.onWarn?.('daemon subscribe trace read failed', error)

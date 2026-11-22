@@ -14,7 +14,7 @@ import { protocolMismatch } from './remote-protocol'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
 // Protocol constants live in inner-mtls-protocol.ts; re-exported for callers.
-export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT, WATCH_STREAM_MAX_MS, WATCH_STREAM_WAIT_MS } from './inner-mtls-protocol'
+export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT } from './inner-mtls-protocol'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
 // paired device reaches (through the outer WSS byte relay, which never sees
@@ -63,9 +63,6 @@ export interface InnerMtlsHostOptions {
 function digest(bytes: Uint8Array): string {
   return createHash('sha256').update(Buffer.from(bytes)).digest('hex')
 }
-
-// Ops a multiplexed lane answers itself (pushed streams), before request dispatch.
-const LANE_OPS = new Set(['watchStream', 'cancel'])
 
 export class InnerMtlsHost {
   #server: Server
@@ -147,7 +144,7 @@ export class InnerMtlsHost {
       }
     })
     serveInnerConnection(socket, {
-      controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,
+      certificateExpiresAt, maxFrame: this.#maxFrame,
       preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
       dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal, this.#networkSubscribe),
       timing: (parsed) => requestTiming(parsed)
@@ -178,12 +175,8 @@ export class InnerMtlsHost {
         protocol: REMOTE_PROTOCOL_VERSION
       }
     }
-    // Pushed-stream ops never reach request dispatch, so its version gate runs here.
-    if (parsed && typeof parsed.op === 'string' && LANE_OPS.has(parsed.op)) {
-      const mismatch = protocolMismatch(parsed)
-      if (mismatch) return { ...mismatch }
-    }
-    return undefined
+    const mismatch = parsed ? protocolMismatch(parsed) : undefined
+    return mismatch ? { ...mismatch } : undefined
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<{ port: number; host: string }> {

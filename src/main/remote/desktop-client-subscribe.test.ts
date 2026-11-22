@@ -33,7 +33,7 @@ it('loads the remote catalog through the status lane and keeps the first keyset 
     expect(calls[2]?.known).toEqual({ hostId: fixture.host.hostId, logId: 'stable-log', seq: 10 })
     const frames = fixture.tlsRequest.mock.calls.map(([value]) => value.request as Record<string, unknown>)
     expect(frames.some(frame => frame.op === 'sessionsPage' || frame.op === 'liveRuns')).toBe(false)
-    expect(frames.find(frame => frame.op === 'catalogSnapshot')).toMatchObject({ includeSessions: false })
+    expect(frames.find(frame => frame.op === 'catalogSnapshot')).not.toHaveProperty('includeSessions')
   } finally {
     await fixture.client.dispose()
     await rm(fixture.directory, { recursive: true, force: true })

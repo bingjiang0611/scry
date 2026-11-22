@@ -96,16 +96,13 @@ const REFUSALS: ReadonlySet<string> = new Set([
   'daemon_version_mismatch', 'daemon_device_not_authorized', 'daemon_local_grant_corrupt', 'daemon_enrollment_unavailable'
 ])
 
-/**
- * The App picks its run path once, at connect: the P4-3 subscribe path only when the
- * daemon it reached advertises `subscribe: 1` (SCRY_ORCHESTRATION=on); every other
- * daemon keeps the watch / liveRuns path unchanged.
- */
+/** The App requires the daemon’s authoritative subscription before entering run mode. */
 export async function connectForRunMode(
   client: { connect(): Promise<{ version: string }>; readonly subscribeSupported: boolean }
-): Promise<{ version: string; subscribeMode: boolean }> {
-  const { version } = await client.connect()
-  return { version, subscribeMode: client.subscribeSupported === true }
+): Promise<{ version: string }> {
+  const connected = await client.connect()
+  if (!client.subscribeSupported) throw new Error('daemon_subscribe_unavailable')
+  return connected
 }
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
@@ -201,11 +198,9 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   // The supervisor only adopted what it probed; this second connect is what loads
   // the stored grant and refuses a daemon built from other sources.
   let version: string
-  let subscribeMode = false
   try {
     const connected = await connectForRunMode(client)
     version = connected.version
-    subscribeMode = connected.subscribeMode
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {
@@ -228,7 +223,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
       if (again.status === 'unavailable' || again.status === 'version-mismatch') {
         throw new DaemonClientError('daemon_not_running')
       }
-      await client.connect()
+      await connectForRunMode(client)
     })()
     try { await reconnecting } finally { reconnecting = undefined }
   }
@@ -248,7 +243,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const runtime = new DaemonRunRuntime({
     transport,
     send: deps.send,
-    ...(subscribeMode ? { subscribeMode: true } : {}),
+    subscribeMode: true,
     ...(deps.waitMs === undefined ? {} : { waitMs: deps.waitMs }),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
     ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
@@ -257,11 +252,11 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     get: (runId) => { const run = runtime.runView(runId); return run ? { state: run } : undefined }
   })
   const surface = createDaemonRunSurface({
-    transport, runtime, subscribeMode, currentCwd: deps.currentCwd, send: deps.send,
+    transport, runtime, currentCwd: deps.currentCwd, send: deps.send,
     watchDetail: (key) => events.watchDetail(key)
   })
   const events = startDaemonRunEvents({
-    transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
+    transport, runtime, send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
     ...(deps.rendererCanReceive ? { rendererCanReceive: deps.rendererCanReceive } : {}),

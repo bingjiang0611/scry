@@ -3,7 +3,7 @@
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
 - 生产特权 IPC channel：182 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：63，一半 main 一半 daemon（`split`）：8，转发到现有 op：26，需要新增 op：85
+- 留在 main：66，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：85
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 18 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 桌面远程客户端（`desktopRemote:*`，共 32 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)
@@ -26,8 +26,8 @@
 
 | channel | 去向 | op(method) | 用户路径 | 差异与分工 | 依据 |
 |---|---|---|---|---|---|
-| `agent:activeRun` | forward | `runState` | — | 等价（同一 run 登记表） | run 状态在 daemon |
-| `agent:activeRuns` | forward | `liveRuns` | — | 等价；远程长轮询 waitMs 由 daemon 决定，本机传 0 | live run 在 daemon |
+| `agent:activeRun` | main | `—` | — | — | 按窗口焦点读取 main 持有的 daemon 订阅投影 |
+| `agent:activeRuns` | main | `—` | — | — | 直接读取 main 持有的 daemon 订阅投影 |
 | `agent:addPiProfile` | split | `piProfile:addPiProfile` | providers | main: 启动器文件选择框与握手失败提示留在 main；daemon 解析启动器、在已知项目目录里做 Pi RPC 握手并写入 profile | Provider 配置随 adapter 一起迁移 |
 | `agent:adoptActiveRun` | new-op | `runControl:adoptActiveRun` | controls | — | run 登记表在 daemon |
 | `agent:answerQuestion` | forward | `answerQuestion` | — | 等价 | 待答问题在 daemon |
@@ -40,7 +40,7 @@
 | `agent:deleteSession` | new-op | `sessionLifecycle:deleteSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:detect` | new-op | `providerCatalog:detect` | providers | — | 本机要安装路径、版本与兼容判定；远程设备的 providers 元数据不变 |
 | `agent:detectFast` | new-op | `providerCatalog:detectFast` | providers | — | 快探测只给本机 |
-| `agent:focusedRunSnapshot` | forward | `runState` | — | 等价（同一 run 登记表；只是按焦点取一条） | 权威快照在 daemon |
+| `agent:focusedRunSnapshot` | main | `—` | — | — | 按窗口焦点读取 main 持有的 daemon 订阅投影 |
 | `agent:focusRun` | main | `—` | — | — | 窗口级焦点书签 |
 | `agent:forkSession` | new-op | `sessionLifecycle:forkSession` | navigation | — | App 语义：没有 cwd 时用窗口当前工作区，空 cwd 会话照旧；设备的 sessionFork 要求非空 cwd，不复用 |
 | `agent:gitCommitDiffSnapshot` | new-op | `workspaceDiff:gitCommitDiffSnapshot` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |

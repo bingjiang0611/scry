@@ -112,7 +112,6 @@ const FORWARDED_ENV = [
   // into one timeline. Off unless the variable is set; no product behavior changes.
   'SCRY_RUN_TIMING',
   // P4 orchestration switch & measurement controls (read only by the daemon).
-  'SCRY_ORCHESTRATION',
   'SCRY_ORCHESTRATION_FULLFSYNC',
   'SCRY_ORCHESTRATION_PENDING_TTL_MS',
   // P5 Step 2 host CLI experimental switch (default off; forwards only when explicitly set).

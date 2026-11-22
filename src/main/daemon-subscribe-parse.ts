@@ -144,7 +144,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>, network = fa
         ...(typeof raw.cwd === 'string' || raw.cwd === null ? { cwd: raw.cwd as string | null } : {}),
         payload: raw.payload,
         ...(network && (record(raw.sessionRow) || raw.sessionRow === null) ? { sessionRow: raw.sessionRow as SubscribeSessionRow | null } : {}),
-        ...(network && (record(raw.runRow) || raw.runRow === null) ? { runRow: raw.runRow as SubscribeActiveRunRow | null } : {}),
+        ...((record(raw.runRow) || raw.runRow === null) ? { runRow: raw.runRow as SubscribeActiveRunRow | null } : {}),
         ...(Array.isArray(raw.evidence) ? { evidence: raw.evidence.filter((e): e is string => typeof e === 'string') } : {})
       })
     }

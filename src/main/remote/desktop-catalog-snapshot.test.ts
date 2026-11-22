@@ -2,12 +2,12 @@ import 'reflect-metadata'
 import { describe, expect, it } from 'vitest'
 import { requestOn, withPairedHost } from './desktop-host-fixtures'
 
-type Snapshot = { revision: string; info: unknown; projects: unknown[]; providers: unknown[]; sessionsPage: { sessions: unknown[]; cursor: number; total: number; hasMore: boolean; snapshot: string } }
+type Snapshot = { revision: string; info: unknown; projects: unknown[]; providers: unknown[] }
 
 // The claim is "one round trip for the catalog", so these run over the real lane
 // and count what the host actually received.
 describe('one catalog snapshot per round trip', () => {
-  it('answers info, projects, providers and the first session page together', async () => {
+  it('answers info, projects and providers in one metadata-only snapshot', async () => {
     await withPairedHost(async ({ lanes, endpoint }) => {
       const response = await requestOn(lanes, 'bulk', 'c1', { endpoint, request: { op: 'catalogSnapshot' }, replayable: true }) as { catalogSnapshot: Snapshot }
       const snapshot = response.catalogSnapshot
@@ -15,8 +15,7 @@ describe('one catalog snapshot per round trip', () => {
       expect(snapshot.info).toMatchObject({ kind: 'info', execution: 'canonical' })
       expect(Array.isArray(snapshot.projects)).toBe(true)
       expect(Array.isArray(snapshot.providers)).toBe(true)
-      expect(snapshot.sessionsPage).toMatchObject({ cursor: 0, hasMore: false })
-      expect(typeof snapshot.sessionsPage.snapshot).toBe('string')
+      expect(snapshot).not.toHaveProperty('sessionsPage')
     })
   })
 

@@ -37,7 +37,7 @@ async function callTcp(port: number, ca: string, cert: string, key: string, requ
   return JSON.parse(buffer.split('\n')[0]) as Record<string, unknown>
 }
 
-describe('v2 subscribe on the authenticated network endpoint', () => {
+describe('v3 subscribe on the authenticated network endpoint', () => {
   it('negotiates the capability and filters durable rows and volatile hints', async () => {
     process.env.SCRY_ORCHESTRATION = 'on'
     process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
@@ -83,17 +83,25 @@ describe('v2 subscribe on the authenticated network endpoint', () => {
         }).kind).toBe('accepted')
       }
       importSession('private', privateWorkspace)
+      const outdated = await request({ protocol: 2, op: 'desktop', query: { kind: 'info' } })
+      expect(outdated).toEqual({ error: 'protocol_mismatch', hostProtocol: 3, clientProtocol: 2 })
+      expect(await request({ op: 'watch', runId: randomUUID(), cursor: 0, outputCursor: 0, waitMs: 0 }))
+        .toEqual({ error: 'unknown_op' })
       const first = await request({ op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 0 })
       expect(first).toMatchObject({
         subscribe: { mode: 'snapshot', snapshot: { sessions: { total: 1, rows: [{ sessionKey: nativeSessionId, cwd: workspace }] } } }
       })
       expect(JSON.stringify(first)).not.toContain(privateWorkspace)
       const info = await request({ op: 'desktop', query: { kind: 'info' } })
-      expect(info).toMatchObject({ desktop: { kind: 'info', protocol: 2, subscribe: 1, hostAdminNotices: 1 } })
-      const metadata = await request({ op: 'catalogSnapshot', includeSessions: false })
+      expect(info).toMatchObject({ desktop: { kind: 'info', protocol: 3, subscribe: 1, hostAdminNotices: 1 } })
+      const metadata = await request({ op: 'catalogSnapshot' })
       expect(metadata).toMatchObject({ catalogSnapshot: { info: { subscribe: 1 }, projects: [{ path: workspace }] } })
       expect(metadata.catalogSnapshot).not.toHaveProperty('sessionsPage')
       const { hostId, logId, seq } = first.subscribe as { hostId: string; logId: string; seq: number }
+      const beforeIdle = performance.now()
+      const idle = await request({ op: 'subscribe', views: ['sessions', 'activeRuns'], known: { hostId, logId, seq }, waitMs: 400 })
+      expect(performance.now() - beforeIdle).toBeGreaterThanOrEqual(300)
+      expect(idle).toMatchObject({ subscribe: { mode: 'idle', seq } })
       const unknownIntent = randomUUID()
       const wrongLog = 'replaced-log'
       expect(await request({ op: 'submitAtLog', intentId: unknownIntent, knownLogId: wrongLog,

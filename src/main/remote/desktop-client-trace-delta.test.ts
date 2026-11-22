@@ -30,6 +30,7 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
     const run: ActiveRun = { runId, cwd, providerId: 'claude', externalSessionId: 'native', userText: 'task', items: [], done: false }
     const reader = createDesktopHostReader({ userDataDir: join(directory, 'user-data'), hostId: () => host.hostId, authorizeWorkspace: (path) => path, getRun: (id) => id === runId ? { ...run, items: run.items.map((item) => ({ ...item })) } : null })
     const queries: Record<string, unknown>[] = []
+    const waiting = new Promise<never>(() => {})
     const tlsRequest = vi.fn(async (input: { request: unknown }): Promise<unknown> => {
       const request = input.request as { operation?: string; requestId?: string; op?: string; query?: Record<string, unknown> }
       if (request.operation === 'pair.prove') return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.pending', pairingId, publicKeySHA256: identity.publicKeySHA256 }
@@ -39,15 +40,17 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
         return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
           certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
       }
-      if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
+      if (request.op === 'subscribe') return 'known' in request ? waiting : {
+        subscribe: { mode: 'snapshot', hostId: host.hostId, logId: 'fixture-log', seq: 1,
+          snapshot: { sessions: { rows: [], total: 0 }, activeRuns: { rows: [] } } }
+      }
       if (request.op === 'catalogSnapshot') {
         const revision = 'catalog-1'
         if ((request as { revision?: string }).revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
         return { catalogSnapshot: {
           revision,
-          info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', providerDiscovery: 2, ...(options.legacyHost ? {} : { traceDelta: 1 }) },
+          info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', subscribe: 1, providerDiscovery: 2, ...(options.legacyHost ? {} : { traceDelta: 1 }) },
           projects: [], providers: [],
-          sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'catalog' }
         } }
       }
       if (request.op !== 'desktop') return { error: 'unexpected_request' }
@@ -55,6 +58,7 @@ describe('DesktopRemoteClient trace delta negotiation', () => {
       const query = JSON.parse(JSON.stringify(request.query)) as Record<string, unknown>
       if (options.legacyHost || options.ignoresDelta) delete query.delta
       const result = await reader(parseDesktopHostRead(query))
+      if (result.kind === 'info') result.subscribe = 1
       if (options.legacyHost && result.kind === 'info') delete result.traceDelta
       const wire = JSON.parse(JSON.stringify({ desktop: result })) as { desktop: Record<string, unknown> }
       if (wire.desktop.kind === 'trace_delta') options.tamper?.(wire.desktop)

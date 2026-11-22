@@ -16,7 +16,7 @@ const MAX_HISTORY_SNAPSHOT = 512
 const OPS = new Set([
   'projects', 'directories', 'directoriesPage', 'providers', 'commands', 'sessions', 'sessionsPage', 'sessionAction',
   'workspace', 'fileDownload', 'history', 'historyPage', 'historyPreview', 'historyVersion', 'historyTurnsPage',
-  'subscribe', 'submit', 'submitAtLog', 'intentStatus', 'intentStatusAtLog', 'poll', 'watch', 'liveRuns', 'runState', 'output', 'questions', 'answerQuestion', 'stop'
+  'subscribe', 'submit', 'submitAtLog', 'intentStatusAtLog', 'output', 'answerQuestion', 'stop'
 ])
 
 type DesktopTargetClient = {
@@ -82,13 +82,11 @@ function parseRequest(value: unknown): Record<string, unknown> {
     historyPreview: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId'], historyVersion: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId'],
     historyTurnsPage: ['op', 'historyScope', 'providerId', 'cwd', 'externalSessionId', 'agentProfileId', 'before', 'limit', 'snapshot'],
     submit: ['op', 'intentId', 'detail', 'knownLogId'], submitAtLog: ['op', 'intentId', 'detail', 'knownLogId'],
-    intentStatus: ['op', 'intentId', 'knownLogId'], intentStatusAtLog: ['op', 'intentId', 'knownLogId'], poll: ['op', 'cursor'],
-    watch: ['op', 'runId', 'cursor', 'outputCursor', 'waitMs'], liveRuns: ['op', 'waitMs', 'revision', 'history'],
-    runState: ['op', 'runId'], output: ['op', 'runId', 'cursor'], questions: ['op', 'runId'],
+    intentStatusAtLog: ['op', 'intentId', 'knownLogId'], output: ['op', 'runId', 'cursor'],
     answerQuestion: ['op', 'runId', 'answerId', 'response'], stop: ['op', 'runId']
   }
   exact(value, keys[op]!)
-  if (op.endsWith('AtLog') && !text(value.knownLogId, 128)) fail('invalid_target_request')
+  if (op === 'submitAtLog' && !text(value.knownLogId, 128)) fail('invalid_target_request')
   if (op === 'directories' && value.path !== undefined && !text(value.path, 4096)) fail('invalid_target_request')
   if (op === 'directoriesPage') {
     if (value.path !== undefined && !text(value.path, 4096) || value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) ||
@@ -100,11 +98,8 @@ function parseRequest(value: unknown): Record<string, unknown> {
   if (op === 'historyPage' && (value.cursor !== undefined && (!integer(value.cursor) || value.cursor < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 256 * 1024) || value.snapshot !== undefined && !text(value.snapshot, MAX_HISTORY_SNAPSHOT))) fail('invalid_target_request')
   if (op === 'historyTurnsPage' && (value.before !== undefined && (!integer(value.before) || value.before < 0) || value.limit !== undefined && (!integer(value.limit) || value.limit < 1 || value.limit > 100) || value.snapshot !== undefined && !text(value.snapshot, MAX_HISTORY_SNAPSHOT))) fail('invalid_target_request')
   if ((op === 'submit' || op === 'submitAtLog') && (!text(value.intentId, 128) || !text(value.detail, MAX_FRAME) || value.knownLogId !== undefined && !text(value.knownLogId, 128))) fail('invalid_target_request')
-  if ((op === 'intentStatus' || op === 'intentStatusAtLog') && (!text(value.intentId, 128) || value.knownLogId !== undefined && !text(value.knownLogId, 128))) fail('invalid_target_request')
-  if (op === 'poll' && (!integer(value.cursor) || value.cursor < 0)) fail('invalid_target_request')
-  if (op === 'watch' && (!text(value.runId, 128) || !integer(value.cursor) || value.cursor < 0 || !integer(value.outputCursor) || value.outputCursor < 0 || !integer(value.waitMs) || value.waitMs < 0 || value.waitMs > 20_000)) fail('invalid_target_request')
-  if (op === 'liveRuns' && (!integer(value.waitMs) || value.waitMs < 0 || value.waitMs > 20_000 || value.revision !== undefined && !text(value.revision, 64))) fail('invalid_target_request')
-  if (['runState', 'questions', 'output', 'stop'].includes(op) && !text(value.runId, 128)) fail('invalid_target_request')
+  if (op === 'intentStatusAtLog' && (!text(value.intentId, 128) || value.knownLogId !== undefined && !text(value.knownLogId, 128))) fail('invalid_target_request')
+  if (['output', 'stop'].includes(op) && !text(value.runId, 128)) fail('invalid_target_request')
   if (op === 'output' && (!integer(value.cursor) || value.cursor < 0)) fail('invalid_target_request')
   if (op === 'answerQuestion' && (!text(value.runId, 128) || !text(value.answerId, 128) || !record(value.response))) fail('invalid_target_request')
   if (op.startsWith('history')) {
@@ -162,7 +157,7 @@ export class ExecutionTargetRouter {
     let response: unknown
     if (op === 'submit' || op === 'submitAtLog') {
       response = await this.#client().mobileSubmit({ target, phonePeerFingerprint: peer, phoneIntentId: request.intentId as string, payloadHash: executionTargetPayloadHash(request), request, authorizePeer: () => this.#authorizePeer(peer) })
-    } else if (op === 'intentStatus' || op === 'intentStatusAtLog') {
+    } else if (op === 'intentStatusAtLog') {
       response = await this.#client().mobileIntentStatus({ target, phonePeerFingerprint: peer, phoneIntentId: request.intentId as string,
         ...(typeof request.knownLogId === 'string' ? { knownLogId: request.knownLogId } : {}), authorizePeer: () => this.#authorizePeer(peer) })
     } else {

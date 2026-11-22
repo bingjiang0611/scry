@@ -9,7 +9,7 @@ import { cryptoProvider } from '@peculiar/x509'
 import { build as esbuild } from 'esbuild'
 import { createRecentFoldersStore } from '../main/app-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, tempDir, readH1Run } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -145,8 +145,8 @@ main().catch((err) => { console.error(err); process.exit(1) })
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      const watched = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
-        op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      const watched = await readH1Run(host2, msg.cert, {
+        runId, cursor: 0, outputCursor: 0, waitMs: 1_000
       })
       expect(watched.error).toBeUndefined()
       expect(['settled', 'cancelled']).toContain(watched.watch.state)

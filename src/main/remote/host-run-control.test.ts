@@ -42,7 +42,7 @@ describe('daemon run control op', () => {
     // The network endpoint builds its host without runControl; the local one with it.
     // A missing handler must not fall through to some other answer.
     const controller = { stopRun: vi.fn(), runState: vi.fn() } as unknown as HostController
-    const request = { protocol: 2, op: 'runControl', method: 'adopt', runId: 'run-abc-1' }
+    const request = { protocol: 3, op: 'runControl', method: 'adopt', runId: 'run-abc-1' }
     expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), request)).toEqual({ error: 'unsupported_op' })
     const handlers = { ...empty, adopt: vi.fn(() => null) }
     expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), request, undefined, { runControl: handlers })).toEqual({ run: null })
@@ -51,7 +51,7 @@ describe('daemon run control op', () => {
   it('rejects a frame carrying fields this op does not define', async () => {
     const controller = {} as unknown as HostController
     const handlers = { ...empty }
-    expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 2, op: 'runControl', method: 'adopt', runId: 'run-abc-1', cwd: '/etc' }, undefined, { runControl: handlers }))
+    expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 3, op: 'runControl', method: 'adopt', runId: 'run-abc-1', cwd: '/etc' }, undefined, { runControl: handlers }))
       .toEqual({ error: 'invalid_request' })
     expect(handlers.adopt).not.toHaveBeenCalled()
   })

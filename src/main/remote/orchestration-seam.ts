@@ -1,7 +1,7 @@
 import type { LedgerStore, RunLifecycle } from './session-ledger'
 
 /**
- * Pure interface seam for P4-2 authoritative orchestration (`SCRY_ORCHESTRATION=on`).
+ * Pure interface seam for P4-2 authoritative orchestration.
  * Kept in `src/main/remote/` with zero imports from `src/host-runtime/orchestration/`
  * so Electron main preserves the Layer 3 single-writer static import boundary (core §2.9).
  */

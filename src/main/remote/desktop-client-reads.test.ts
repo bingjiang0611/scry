@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { DesktopRemoteClient } from './desktop-client'
 import { REMOTE_PROTOCOL_VERSION, DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
-import { setup, ssh, encrypt, decrypt } from './desktop-client-fixtures'
+import { setup, ssh, statusRun, statusSnapshot, encrypt, decrypt } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient history, trace and session reads', () => {
   it('reads managed worktree choices through the authenticated host reader without accepting a client path result', async () => {
@@ -159,7 +159,13 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
 
   it('persists the host-confirmed native session binding for first-run receipts across client restart', async () => {
     const runId = randomUUID()
-    const fixture = await setup({ submitResponse: () => ({ runId, status: 'recorded' }) })
+    const parked = new Promise<never>(() => {})
+    const fixture = await setup({
+      submitResponse: () => ({ runId, status: 'recorded' }),
+      subscribeResponse: request => request.known ? parked : statusSnapshot(fixture.host.hostId, {
+        runs: [statusRun(runId, { externalSessionId: 'native-adopted' })]
+      })
+    })
     let reloaded: DesktopRemoteClient | undefined
     try {
       const pending = await fixture.client.pair({ label: 'Adoption', ssh, invitation: fixture.invitation })
@@ -167,11 +173,10 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       await fixture.client.submit(id, { context: { cwd: '/workspace', providerId: 'pi' }, prompt: 'new session' })
-      // One lifecycle long poll, no shadow output page.
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'dispatched', questions: [], poll: { cursor: 1, events: [{ runId, kind: 'run_progress', detail: JSON.stringify({ event: 'session', externalSessionId: 'native-adopted' }) }] } } })
       await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ externalSessionId: 'native-adopted' })
-      expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'watch'))
-        .toContainEqual([expect.objectContaining({ request: expect.objectContaining({ output: false }) })])
+      const operations = fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op)
+      expect(operations).toContain('subscribe')
+      expect(operations).not.toContain('output')
       reloaded = new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, { openTunnel: fixture.openTunnel, tlsRequest: fixture.tlsRequest })
       await expect(reloaded.intents(id)).resolves.toMatchObject([{ runId, context: { cwd: '/workspace', providerId: 'pi', externalSessionId: 'native-adopted' } }])
       expect(fixture.tlsRequest.mock.calls.filter(call => (call[0].request as { op?: string }).op === 'submit')).toHaveLength(1)
@@ -180,24 +185,28 @@ describe('DesktopRemoteClient history, trace and session reads', () => {
 
   it('resolves a device-started live run on the opened session to its bound trace identity', async () => {
     const ledgerRunId = randomUUID()
-    const fixture = await setup()
+    let runs = [statusRun(ledgerRunId, { externalSessionId: 'session-a', traceRunId: 'run-phone-1' })]
+    const parked = new Promise<never>(() => {})
+    const fixture = await setup({ subscribeResponse: request => request.known ? parked : statusSnapshot(fixture.host.hostId, { runs }) })
     try {
       const pending = await fixture.client.pair({ label: 'Live', ssh, invitation: fixture.invitation })
       const id = pending.connection.id
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       const scope = { cwd: '/workspace', providerId: 'pi', externalSessionId: 'session-a' }
-      const live = (externalSessionId: string) => ({ origin: 'remote', runId: ledgerRunId, providerId: 'pi', cwd: '/workspace', externalSessionId, prompt: 'p', state: 'running', questions: [] })
-      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r1', runs: [live('session-a')] } })
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'dispatched', questions: [], poll: { cursor: 1, events: [{ runId: ledgerRunId, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', scryRunId: 'run-phone-1' }) }] } } })
       await expect(fixture.client.liveRun(id, scope)).resolves.toEqual({ runId: ledgerRunId, origin: 'remote', state: 'running', scryRunId: 'run-phone-1' })
-      // The live set is already fresh, so the status read does not wait again.
-      expect(fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op).slice(-2)).toEqual(['liveRuns', 'watch'])
-      expect(fixture.tlsRequest.mock.calls.at(-1)?.[0].request).toMatchObject({ op: 'watch', waitMs: 0 })
-      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r2', runs: [live('session-b')] } })
+      const operations = fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op)
+      expect(operations).toContain('subscribe')
+      expect(operations).not.toContain('watch')
+      expect(operations).not.toContain('liveRuns')
+      await fixture.client.disconnect(id)
+      runs = [statusRun(ledgerRunId, { externalSessionId: 'session-b' })]
+      await fixture.client.connect(id)
       await expect(fixture.client.liveRun(id, scope)).resolves.toBeNull()
-      fixture.tlsRequest.mockResolvedValueOnce({ liveRuns: { revision: 'r3', runs: [{ ...live('session-a'), state: 'done' }] } })
-      await expect(fixture.client.liveRun(id, scope)).rejects.toThrow('invalid_live_runs_response')
+      await fixture.client.disconnect(id)
+      runs = [statusRun(ledgerRunId, { externalSessionId: 'session-a', lifecycle: 'done' })]
+      await fixture.client.connect(id)
+      await expect(fixture.client.liveRun(id, scope)).rejects.toThrow('invalid_subscribe_run')
       await expect(fixture.client.liveRun(id, { cwd: '/workspace', providerId: 'pi' })).rejects.toThrow('session_required')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })

@@ -2,8 +2,7 @@ import { handleRunControl } from './host-run-control'
 import { handleAppEvents, handleAttentionViewed, handleExecutionTargetResult, handleExecutionTargetWork, handleLocalOp, handleSubscribe, handleTerminalFeed, isLocalOp, type LocalEndpointHandlers } from './host-local-ops'
 import type { HostController } from './host-controller'
 import { executionTargetError, type ExecutionTargetRouter } from './execution-targets'
-import { historyProfileSelection } from './remote-gateway'
-import { dispatchHistoryRequest, parseLiveRunsHistory } from './inner-mtls-history-dispatch'
+import { dispatchHistoryRequest } from './inner-mtls-history-dispatch'
 import { protocolMismatch } from './remote-protocol'
 import type { LanAdvertisement } from './remote-lan-listener'
 import { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS } from './inner-mtls-protocol'
@@ -22,11 +21,6 @@ export interface RemoteRequestEnvelope {
   knownLogId?: string
   detail?: string
   cursor?: number
-  outputCursor?: number
-  waitMs?: number
-  // watch only: false asks for lifecycle evidence without the shadow output spool,
-  // 'wake' asks whether content exists without transferring it.
-  output?: boolean | 'wake'
   before?: number
   limit?: number
   snapshot?: string
@@ -41,7 +35,6 @@ export interface RemoteRequestEnvelope {
   response?: unknown
   query?: unknown
   revision?: string
-  history?: unknown
   context?: unknown
   action?: unknown
   includeArchived?: unknown
@@ -56,7 +49,6 @@ export interface RemoteRequestEnvelope {
   sha256?: string
   index?: number
   totalCount?: number
-  includeSessions?: boolean
   // sessionsPage: the catalog snapshot the phone already holds (first page only).
   known?: string
   // historyPage: 'deflate' pages the compressed form of the same snapshot bytes.
@@ -125,9 +117,9 @@ export async function dispatchRemoteRequest(
       return await controller.attachmentCommit(fingerprint, request)
     }
     if (request.op === 'submit' || request.op === 'submitAtLog' ||
-        request.op === 'intentStatus' || request.op === 'intentStatusAtLog') {
+        request.op === 'intentStatusAtLog') {
       const { intentId, knownLogId } = request
-      if (typeof intentId !== 'string' || (request.op.endsWith('AtLog') && knownLogId === undefined) ||
+      if (typeof intentId !== 'string' || (request.op === 'submitAtLog' && knownLogId === undefined) ||
           (knownLogId !== undefined && (typeof knownLogId !== 'string' || !knownLogId || knownLogId.length > 128))) {
         return { error: 'invalid_request' }
       }
@@ -139,35 +131,6 @@ export async function dispatchRemoteRequest(
     if (request.op === 'resolveIntent') {
       if (typeof request.intentId !== 'string') return { error: 'invalid_request' }
       return { intent: controller.resolveIntent(fingerprint, { intentId: request.intentId }) }
-    }
-    if (request.op === 'poll') {
-      if (!Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }
-      return { poll: controller.poll(fingerprint, { cursor: request.cursor as number }) }
-    }
-    if (request.op === 'watch') {
-      if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor) || !Number.isSafeInteger(request.outputCursor) ||
-          !Number.isSafeInteger(request.waitMs) ||
-          (request.output !== undefined && typeof request.output !== 'boolean' && request.output !== 'wake')) return { error: 'invalid_request' }
-      const watch = {
-        runId: request.runId, cursor: request.cursor as number, outputCursor: request.outputCursor as number, waitMs: request.waitMs as number,
-        ...(request.output === 'wake' ? { output: 'wake' as const } : {})
-      }
-      // `output: false` skips the shadow output spool; the reply then carries no
-      // output page at all, rather than an empty one that could read as "no content".
-      return request.output === false
-        ? { watch: await controller.watchLifecycle(fingerprint, watch) }
-        : { watch: await controller.watchRun(fingerprint, watch) }
-    }
-    if (request.op === 'liveRuns') {
-      if (!Number.isSafeInteger(request.waitMs) || (request.revision !== undefined &&
-          (typeof request.revision !== 'string' || request.revision.length > 64))) return { error: 'invalid_request' }
-      const history = parseLiveRunsHistory(request.history)
-      if (history === false) return { error: 'invalid_request' }
-      return { ...(history ? { historyScope: history.query.historyScope, ...(history.query.historyScope === 'profile' ? { historyProfile: historyProfileSelection(history.query) } : {}) } : {}), liveRuns: await controller.liveRuns(fingerprint, {
-        waitMs: request.waitMs as number,
-        ...(request.revision !== undefined ? { revision: request.revision } : {}),
-        ...(history ? { history } : {})
-      }) }
     }
     if (request.op === 'runControl') {
       // App-only: absent on the network endpoint, where the op is refused rather than
@@ -207,14 +170,6 @@ export async function dispatchRemoteRequest(
     if (request.op === 'stop') {
       if (typeof request.runId !== 'string') return { error: 'invalid_request' }
       return { stop: controller.stopRun(fingerprint, { runId: request.runId }) }
-    }
-    if (request.op === 'runState') {
-      if (typeof request.runId !== 'string') return { error: 'invalid_request' }
-      return { state: controller.runState(fingerprint, { runId: request.runId }) ?? null }
-    }
-    if (request.op === 'questions') {
-      if (typeof request.runId !== 'string') return { error: 'invalid_request' }
-      return { questions: controller.pendingQuestions(fingerprint, { runId: request.runId }) }
     }
     if (request.op === 'answerQuestion') {
       if (typeof request.runId !== 'string' || typeof request.answerId !== 'string' || !request.response || typeof request.response !== 'object') {
@@ -287,10 +242,8 @@ export async function dispatchRemoteRequest(
       // Whole-catalog read in one round trip. A known revision that still matches
       // answers `unchanged` instead of re-sending it.
       if (request.revision !== undefined && (typeof request.revision !== 'string' || request.revision.length > 64)) return { error: 'invalid_request' }
-      if (request.includeSessions !== undefined && typeof request.includeSessions !== 'boolean') return { error: 'invalid_request' }
       return { catalogSnapshot: await controller.catalogSnapshot(fingerprint, {
-        ...(typeof request.revision === 'string' ? { revision: request.revision } : {}),
-        ...(request.includeSessions === false ? { includeSessions: false } : {})
+        ...(typeof request.revision === 'string' ? { revision: request.revision } : {})
       }) }
     }
     if (request.op === 'sessions') {

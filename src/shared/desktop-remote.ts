@@ -191,7 +191,7 @@ export const DESKTOP_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 
 // Version spoken on the run channel. Both ends refuse to talk across a mismatch
 // instead of degrading: a silent half-supported protocol is worse than a refusal.
-export const REMOTE_PROTOCOL_VERSION = 2
+export const REMOTE_PROTOCOL_VERSION = 3
 
 export type DesktopHostRead =
   | { kind: 'info' }

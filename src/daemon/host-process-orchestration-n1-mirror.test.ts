@@ -9,7 +9,7 @@ import type { LedgerEvent, LedgerStore } from '../main/remote/session-ledger'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -41,29 +41,8 @@ function setOnEnv() {
   }
 }
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'recorded'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 500
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
+const waitRunTerminal = (socketPath: string, ca: string, cert: string, key: string, runId: string) =>
+  waitForProjectedRun(socketPath, ca, cert, key, runId, 500)
 
 describe('W9 Blocker N1: zero-drop, chunk-yielding LegacyMirrorWorker survives ENOSPC and queue overflow across restart', () => {
   it('survives 5 consecutive ENOSPC mirror write failures through real daemon assembly and restarts cleanly without ledger_log_corrupt', async () => {

@@ -104,7 +104,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     if (!intent) fail('unknown_intent')
     const authorize = () => this.authorizeMobileTarget(state, input.target, input.authorizePeer)
     let response: Record<string, unknown>
-    try { response = await this.requestForConnection(item.id, { op: input.knownLogId === undefined ? 'intentStatus' : 'intentStatusAtLog', intentId: intent.intentId,
+    try { response = await this.requestForConnection(item.id, { op: 'intentStatusAtLog', intentId: intent.intentId,
       ...(input.knownLogId === undefined ? {} : { knownLogId: input.knownLogId }) }, authorize) }
     catch (error) { if (isExplicitUnknownIntent(error) || error instanceof Error && error.message === 'desktop_remote_orchestration_log_changed') throw error
       fail('target_delivery_unknown') }
@@ -179,7 +179,7 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     const local = state.intents.find((item) => item.connectionId === connectionIdValue && item.intentId === intentId)
     if (!local) fail('unknown_intent')
     let response: Record<string, unknown>
-    try { response = await this.requestForConnection(connectionIdValue, { op: 'intentStatus', intentId }) }
+    try { response = await this.requestForConnection(connectionIdValue, { op: 'intentStatusAtLog', intentId }) }
     catch (error) { if (isExplicitUnknownIntent(error)) return structuredClone(local); throw error }
     return this.confirmIntent(state, local, response)
   }

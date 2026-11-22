@@ -14,6 +14,8 @@ import type { DesktopHostReadResult, DesktopRemoteHistory } from './desktop-remo
 
 export type SubscribeView = 'sessions' | 'activeRuns' | 'detail'
 
+export const SUBSCRIBE_MAX_TRACKED_RUN_IDS = 128
+
 export const SUBSCRIBE_VIEWS: ReadonlySet<SubscribeView> = new Set(['sessions', 'activeRuns', 'detail'])
 
 /**
@@ -52,6 +54,8 @@ export interface SubscribeRequest {
   historyOnly?: true
   /** Local App detail already displays its history page. Watch the focused source. */
   detailWatch?: 'open' | 'continue'
+  /** Local-only exact run projection when the bounded activeRuns snapshot omits a tracked run. */
+  trackedRunIds?: string[]
   waitMs: number
   eventSet?: number
   chunk?: { id: string; offset: number }
@@ -90,6 +94,8 @@ export interface SubscribeActiveRunRow {
   /** Device trace address for the authorized run, as in the v2 bound marker. */
   traceRunId?: string
   questions?: AgentQuestionRequest[]
+  /** Local-only routing for a unified-conversation turn. */
+  isConversationRun?: boolean
   /** Whether canonical pipeline registered the run (local scope only). */
   admitted?: boolean
   /** Native session ID from the authorized binding or projected catalog. */

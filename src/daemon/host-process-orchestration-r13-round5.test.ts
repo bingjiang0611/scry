@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createHash, randomUUID, webcrypto } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { randomUUID, webcrypto } from 'node:crypto'
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
@@ -11,7 +11,7 @@ import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { importLegacyStateIncrementally } from '../host-runtime/orchestration/legacy-import'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal } from './host-process.fixtures'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
@@ -45,34 +45,7 @@ function withOrchEnv(mode: 'on' | 'off' | undefined) {
   }
 }
 
-function sha256File(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
 
-async function waitTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const res = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    if (res.error) throw new Error(`watch error: ${res.error}`)
-    state = res.watch.state
-    cursor = res.watch.poll.cursor
-  }
-  return state
-}
 
 function startHost(userDataDir: string, daemonStateDirectory: string, log?: (line: string) => void) {
   return createDaemonHostProcess({
@@ -116,7 +89,7 @@ function seedH1Runs(ledgerDir: string, runCount: number, cwd: string): Array<{ r
 }
 
 describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
-  it('B1: 0-byte orchestration.db stays 0 bytes (never initialized into a real DB) on unset/off boot', async () => {
+  it('initializes an empty database and imports the legacy runs before admitting work', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -126,9 +99,7 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    seedH1Runs(ledgerDir, 3, canonicalWs)
-    const logPath = join(ledgerDir, 'session-ledger.log')
-    const logShaBefore = sha256File(logPath)
+    const seeded = seedH1Runs(ledgerDir, 3, canonicalWs)
 
     const orchDir = join(userDataDir, 'orchestration')
     mkdirSync(orchDir, { recursive: true, mode: 0o700 })
@@ -140,8 +111,10 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await startHost(userDataDir, daemonDir)
-      expect(statSync(dbPath).size).toBe(0)
-      expect(sha256File(logPath)).toBe(logShaBefore)
+      expect(statSync(dbPath).size).toBeGreaterThan(0)
+      const authority = host.orchestrationAuthority!
+      for (const run of seeded) expect(authority.sink.getRun(run.runId)?.lifecycle).toBe('settled')
+      expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
     } finally {
       await host?.dispose()
       restore()
@@ -334,7 +307,7 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
     }
   }, 30_000)
 
-  it('Must-Fix 1 (on_active gate): shadow DB ahead of truncated H1 does NOT overwrite H1 on unset/off boot', async () => {
+  it('promotes a shadow database with more history than the truncated H1 mirror', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -354,37 +327,26 @@ describe('W9 Round-5 Blockers B1-B3 & Must-Fixes 1, 4, 5', () => {
 
     // 2. Truncate H1 back to only the first 5 runs (20 events < DB's 80!).
     const logPath = join(ledgerDir, 'session-ledger.log')
-    const snapshotPath = join(ledgerDir, 'session-ledger.snapshot.json')
     const first20Lines = readFileSync(logPath, 'utf8').trim().split('\n').slice(0, 20)
     writeFileSync(logPath, `${first20Lines.join('\n')}\n`, { mode: 0o600 })
-    const truncatedSha = sha256File(logPath)
-    expect(existsSync(snapshotPath)).toBe(false)
 
     const restore = withOrchEnv(undefined)
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await startHost(userDataDir, daemonDir)
-      // Removing the on_active gate would overwrite truncated H1 with DB's 20 runs -> MUST NOT happen!
-      expect(existsSync(snapshotPath)).toBe(false)
-      expect(sha256File(logPath)).toBe(truncatedSha)
-
+      const authority = host.orchestrationAuthority!
+      for (const run of runs20) expect(authority.sink.getRun(run.runId)?.lifecycle).toBe('settled')
+      expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM
-      const w20 = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch',
-        runId: runs20[19]!.runId,
-        cursor: 0,
-        outputCursor: 0,
-        waitMs: 1_000
-      })
-      expect(w20.error).toBe('unknown_run')
 
       const sub = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
-        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'run 6 after truncated h1' })
+        detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'new run after truncated mirror' })
       })
-      expect(sub.seq).toBe(21)
+      expect(sub.seq).toBeGreaterThan(80)
+      expect(await waitTerminal(host.channel.socketPath, ca, device.certPEM, device.keyPEM, sub.runId)).toBe('settled')
     } finally {
       await host?.dispose()
       restore()

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { rm } from 'node:fs/promises'
-import { setup, ssh } from './desktop-client-fixtures'
+import { setup, ssh, statusRun, statusSnapshot } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
   it('sends only the managed-worktree selection and source project to the host intent', async () => {
@@ -75,27 +75,27 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
   })
 
   it('keeps missing lifecycle evidence unknown and rejects malformed state or event pages', async () => {
-    const fixture = await setup()
+    let response: unknown
+    const parked = new Promise<never>(() => {})
+    const fixture = await setup({ subscribeResponse: request => request.known ? parked : response })
     try {
       const pending = await fixture.client.pair({ label: 'Status', ssh, invitation: fixture.invitation })
       const id = pending.connection.id
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       const runId = randomUUID()
-      // The lifecycle long poll is the only evidence source; a missing, empty or
-      // unrecognized envelope is rejected rather than read as "no change".
-      for (const response of [null, {}, { watch: null }, { watch: { poll: null } }, { watch: { state: 'running', poll: { events: [], cursor: 0 } } }]) {
-        fixture.tlsRequest.mockResolvedValueOnce(response)
-        await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
+      for (const malformed of [null, {}, { subscribe: null }, { subscribe: { mode: 'snapshot' } }]) {
+        response = malformed
+        await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_daemon_response')
       }
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'settled', poll: { events: [], cursor: 0 } } })
+      response = statusSnapshot(fixture.host.hostId, { runs: [statusRun(runId, { lifecycle: 'running' })] })
+      await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_subscribe_run')
+      response = statusSnapshot(fixture.host.hostId, { runs: [statusRun(runId, { lifecycle: 'settled' })] })
       await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ state: 'settled' })
-      // No state and no evidence is unknown. The previous answer said settled, so
-      // the lifecycle did change; a window that expires with the same state is not
-      // a change and must not make the caller re-read content.
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
+      await fixture.client.disconnect(id)
+      response = statusSnapshot(fixture.host.hostId)
+      await fixture.client.connect(id)
       await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: true })
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
       await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: false })
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })

@@ -185,7 +185,7 @@ describe('daemon supervisor', () => {
     expect(daemonLaunchEnvironment({ ...base, source, launchedBy: 'app' }).SCRY_DAEMON_LAUNCHED_BY).toBe('app')
   })
 
-  it('forwards only allowlisted variables: SCRY_REMOTE_RELAY_SSH has no reader and is dropped', () => {
+  it('forwards tunables and drops retired orchestration and relay settings', () => {
     const base = { stateDirectory: '/s', userDataDir: '/u', appPath: '/a', resourcesPath: '/r', appVersion: '1', isPackaged: true, startedBy: 'x' }
     const env = daemonLaunchEnvironment({
       ...base,
@@ -200,7 +200,7 @@ describe('daemon supervisor', () => {
     })
     expect(env.HOME).toBe('/h')
     expect(env.SCRY_REMOTE_RELAY_ENABLED).toBe('0')
-    expect(env.SCRY_ORCHESTRATION).toBe('shadow')
+    expect('SCRY_ORCHESTRATION' in env).toBe(false)
     expect(env.SCRY_ORCHESTRATION_FULLFSYNC).toBe('1')
     expect('SCRY_REMOTE_RELAY_SSH' in env).toBe(false)
     expect('NODE_OPTIONS' in env).toBe(false)

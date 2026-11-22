@@ -2,7 +2,7 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { AgentRuntimeError } from '../run-outcome'
 import {
-  ADMISSION_DEADLINE_MS, expectedRestartSourceMatches, expectedSessionMatches,
+  ADMISSION_DEADLINE_MS, RUN_ADMISSION_BUSY_MESSAGE, expectedRestartSourceMatches, expectedSessionMatches,
   runConflictsWithSession, waitForCompletedRuns
 } from '../context-admission'
 import type { RunRegistry } from '../run-registry'
@@ -125,7 +125,7 @@ export async function prepareRunAdmission(
     return entry ? [{ done: run.done, settled: entry.control.settled }] : []
   })
   if (!(await waitForCompletedRuns(conflictingEntries, { admitDeadlineMs: settleDeadlineMs ?? ADMISSION_DEADLINE_MS }))) {
-    throw new AgentRuntimeError('同一会话已有一轮正在运行', {
+    throw new AgentRuntimeError(RUN_ADMISSION_BUSY_MESSAGE, {
       provider: runtimeProvider,
       stage: 'frontdoor',
       cwd,

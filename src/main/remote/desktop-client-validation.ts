@@ -58,7 +58,6 @@ export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<vo
 export interface RunStatusCursor {
   revSeq?: number
   outputSeq?: number
-  cursor: number
   scryRunId?: string
   externalSessionId?: string
   // The run's own cwd (a worktree start runs outside the submitted project).

@@ -8,7 +8,7 @@ import { createRecentFoldersStore } from '../main/app-store'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { startDeferredLegacyImport } from '../host-runtime/orchestration/legacy-import'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal } from './host-process.fixtures'
 import { AuthorityMcpTrustGate, fileStatStamp } from './orchestration-trust-gate'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
@@ -41,17 +41,6 @@ function withOrchOnEnv() {
   }
 }
 
-async function waitTerminal(socketPath: string, ca: string, cert: string, key: string, runId: string): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const res = await call(socketPath, ca, cert, key, { op: 'watch', runId, cursor, outputCursor: 0, waitMs: 5_000 })
-    state = res.watch.state
-    cursor = res.watch.poll.cursor
-  }
-  return state
-}
 
 describe('W9 Round-3 Must-Fixes 1, 2, 3: off-thread worker checkpoint, cross-run MCP cache, and symlink target stat', () => {
   it('Must-Fix 1: worker-thread WAL checkpoint runs off-main-thread during backfill and restores EXCLUSIVE locking_mode on finish', async () => {

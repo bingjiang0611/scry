@@ -7,6 +7,7 @@ import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { DaemonRunRuntime } from '../main/daemon-run-runtime'
+import { startDaemonRunEvents } from '../main/daemon-run-events'
 import { DaemonRunRefusedError } from '../main/daemon-run-admission'
 import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
 
@@ -44,7 +45,8 @@ describe('daemon same-session exclusion', () => {
     process.env.SCRY_ELECTRON_SMOKE_INPUTS = inputs
     const daemon = await startTestDaemon()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
-    const runtime = new DaemonRunRuntime({ transport, send: () => undefined, waitMs: 500 })
+    const runtime = new DaemonRunRuntime({ transport, subscribeMode: true, send: () => undefined, waitMs: 500 })
+    const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     const start = (prompt: string, extra: Record<string, unknown> = {}) => surface.start({
       prompt, providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID(), ...extra
@@ -79,6 +81,7 @@ describe('daemon same-session exclusion', () => {
       await surface.stop(first.runId)
       expect(await until(() => runtime.runView(first.runId)?.done === true ? true : undefined, 10_000)).toBe(true)
     } finally {
+      events.dispose()
       runtime.dispose()
       await daemon.dispose()
       if (saved === undefined) delete process.env.SCRY_ELECTRON_SMOKE_INPUTS

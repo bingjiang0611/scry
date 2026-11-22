@@ -6,7 +6,7 @@ import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal, readH1Page, readH1Run } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -38,18 +38,6 @@ function withOrchEnv(mode: 'on' | 'off') {
   }
 }
 
-async function waitTerminal(socketPath: string, ca: string, cert: string, key: string, runId: string): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const res = await call(socketPath, ca, cert, key, { op: 'watch', runId, cursor, outputCursor: 0, waitMs: 5_000 })
-    if (res.error) throw new Error(`watch error: ${res.error}`)
-    state = res.watch.state
-    cursor = res.watch.poll.cursor
-  }
-  return state
-}
 
 function makeEnospc(): NodeJS.ErrnoException {
   return Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
@@ -130,14 +118,14 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       expect(appendSeqs.filter((s) => s === 2)).toHaveLength(1)
       expect(compactCalls).toBeGreaterThanOrEqual(1)
 
-      const beforePoll = await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })
+      const beforePoll = readH1Page(host1, device.certPEM, { cursor: 0 })
       const maxSeqBefore = beforePoll.poll.cursor as number
       await host1.dispose()
       host1 = undefined
 
       host2 = await startHost(userDataDir, daemonDir)
-      const watched = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch', runId: sub1.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      const watched = await readH1Run(host2, device.certPEM, {
+        runId: sub1.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
       })
       expect(watched.error).toBeUndefined()
       expect(watched.watch.state).toBe('settled')
@@ -197,13 +185,13 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       })
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
       await host1.orchestrationAuthority!.flushLegacyMirror()
-      const maxSeqBefore = (await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })).poll.cursor as number
+      const maxSeqBefore = ( readH1Page(host1, device.certPEM, { cursor: 0 })).poll.cursor as number
       await host1.dispose()
       host1 = undefined
 
       host2 = await startHost(userDataDir, daemonDir)
-      const watched = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch', runId: sub1.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      const watched = await readH1Run(host2, device.certPEM, {
+        runId: sub1.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
       })
       expect(watched.error).toBeUndefined()
       expect(watched.watch.state).toBe('settled')
@@ -226,7 +214,7 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
     }
   })
 
-  it('B2 + off-mode self-heal: persistent ENOSPC degrades H1 fallback only, on mode continues, restart rebuilds from DB, and switching back to off regenerates H1 cleanly', async () => {
+  it('persistent ENOSPC degrades only the H1 mirror and successive authoritative restarts preserve all runs', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -270,7 +258,7 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'b2 run 2 during persistent enospc' })
       })
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
-      const maxSeqBefore = (await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })).poll.cursor as number
+      const maxSeqBefore = ( readH1Page(host1, device.certPEM, { cursor: 0 })).poll.cursor as number
       await host1.dispose()
       host1 = undefined
 
@@ -281,8 +269,8 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
 
       host2 = await startHost(userDataDir, daemonDir)
       for (const [intentId, runId] of [[intent1, sub1.runId], [intent2, sub2.runId]] as const) {
-        const watched = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-          op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+        const watched = await readH1Run(host2, device.certPEM, {
+          runId, cursor: 0, outputCursor: 0, waitMs: 1_000
         })
         expect(watched.error).toBeUndefined()
         expect(watched.watch.state).toBe('settled')
@@ -298,7 +286,7 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       })
       expect(sub3.seq).toBeGreaterThan(maxSeqBefore)
       expect(await waitTerminal(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, sub3.runId)).toBe('settled')
-      const maxSeqAfterOn = (await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })).poll.cursor as number
+      const maxSeqAfterOn = ( readH1Page(host2, device.certPEM, { cursor: 0 })).poll.cursor as number
       await host2.dispose()
       host2 = undefined
 
@@ -306,9 +294,9 @@ describe('W9 Blockers B1-B3: DB-authoritative H1 rebuild, atomic mirror rewrite,
       writeFileSync(logPath, '{corrupt before off fallback', { mode: 0o600 })
       process.env.SCRY_ORCHESTRATION = 'off'
       hostOff = await startHost(userDataDir, daemonDir)
-      expect(hostOff.orchestrationAuthority).toBeUndefined()
-      const watchOff = await call(hostOff.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch', runId: sub2.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      expect(hostOff.orchestrationAuthority).toBeDefined()
+      const watchOff = await readH1Run(hostOff, device.certPEM, {
+        runId: sub2.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
       })
       expect(watchOff.error).toBeUndefined()
       expect(watchOff.watch.state).toBe('settled')

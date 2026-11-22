@@ -13,7 +13,7 @@ import type { WalCheckpointSample } from '../host-runtime/orchestration/db'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { startDeferredLegacyImport } from '../host-runtime/orchestration/legacy-import'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, tempDir, readH1Page, readH1Run } from './host-process.fixtures'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
@@ -213,13 +213,12 @@ main().catch((err) => { console.error(err); process.exit(1) })
       expect(reservedAfterRestart).toBe(2048)
 
       // Old cursor 1 must receive reset to R=1024 with empty events (no renumbering).
-      const polled = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, { op: 'poll', cursor: 1 })
+      const polled = readH1Page(host2, msg.cert, { cursor: 1 })
       expect(polled.poll.events).toEqual([])
       expect(polled.poll.cursor).toBe(1024)
       expect(polled.poll.reset).toEqual({ requested: 1, availableFrom: 1024 })
 
-      const watched = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
-        op: 'watch',
+      const watched = await readH1Run(host2, msg.cert, {
         runId,
         cursor: 1,
         outputCursor: 0,

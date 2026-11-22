@@ -130,7 +130,7 @@ describe('daemon graceful dispose cleans up pooled provider private env director
     }
   })
 
-  it('closes orchestrationShadow before providerRegistry.dispose() and bounds a hanging provider shutdown', async () => {
+  it('closes orchestration before providerRegistry.dispose() and bounds a hanging provider shutdown', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -183,7 +183,7 @@ describe('daemon graceful dispose cleans up pooled provider private env director
 
       expect(elapsedMs).toBeLessThan(2_000)
       expect(logs.some((line) => line.includes('daemon.provider-dispose-timeout'))).toBe(true)
-      // Shadow DB EXCLUSIVE lock MUST already be released even though provider shutdown timed out
+      // The orchestration DB EXCLUSIVE lock must already be released even though provider shutdown timed out
       const reopened = EventSink.open({ userDataDir })
       reopened.close()
     } finally {

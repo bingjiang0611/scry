@@ -232,8 +232,11 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     expect(seen).toEqual([{ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }])
 
     // A second session must reuse the warm pool (proves the tunnel replenishes).
-    const feed = await deviceCall(relay.devicePort, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })
-    expect(feed.poll.events.map((e: { kind: string }) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
+    const projects = await deviceCall(relay.devicePort, caPEM, device.certPEM, device.keyPEM, { op: 'projects' })
+    expect(projects.projects).toEqual([])
+    const grant = controller.authority.inspectLocal().grants[0]!
+    expect(controller.poll(grant.certificateSHA256, { cursor: 0 }).events.map(event => event.kind))
+      .toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
   })
 
   it('refuses a CA-trusted but ungranted device through the relay without running the executor', async () => {

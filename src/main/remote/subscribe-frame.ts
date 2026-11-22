@@ -1,5 +1,5 @@
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
-import { SUBSCRIBE_VIEWS, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
+import { SUBSCRIBE_MAX_TRACKED_RUN_IDS, SUBSCRIBE_VIEWS, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
 
 const BODY_KEYS = ['op', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet', 'chunk', 'historyFormat', 'historyOnly']
 const TRANSPORT_KEYS = ['keepAlive', 'protocol', 'deviceLabel']
@@ -14,10 +14,10 @@ export function parseSubscribeFrame(
   transport: 'local' | 'network' | 'target'
 ): SubscribeRequest | undefined {
   const keys = transport === 'target' ? BODY_KEYS
-    : [...BODY_KEYS, ...TRANSPORT_KEYS, ...(transport === 'local' ? ['detailWatch'] : ['subscriptionId'])]
+    : [...BODY_KEYS, ...TRANSPORT_KEYS, ...(transport === 'local' ? ['detailWatch', 'trackedRunIds'] : ['subscriptionId'])]
   if (Object.keys(request).some((key) => !keys.includes(key))) return undefined
   const network = transport !== 'local'
-  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk, historyFormat, historyOnly, subscriptionId } = request
+  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk, historyFormat, historyOnly, subscriptionId, trackedRunIds } = request
   if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
       !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
     return undefined
@@ -27,6 +27,10 @@ export function parseSubscribeFrame(
   if (sessionsCursor !== undefined && (typeof sessionsCursor !== 'string' || sessionsCursor.length === 0 || sessionsCursor.length > 512)) {
     return undefined
   }
+  if (trackedRunIds !== undefined && (views.length !== 1 || views[0] !== 'activeRuns' || waitMs !== 0 ||
+      known !== undefined || sessionsCursor !== undefined || !Array.isArray(trackedRunIds) || trackedRunIds.length === 0 ||
+      trackedRunIds.length > SUBSCRIBE_MAX_TRACKED_RUN_IDS || !trackedRunIds.every(id => text(id, 256)) ||
+      new Set(trackedRunIds).size !== trackedRunIds.length)) return undefined
   let parsedSession: SubscribeRequest['session']
   if (session !== undefined) {
     if (!session || typeof session !== 'object' || Array.isArray(session)) return undefined
@@ -84,6 +88,7 @@ export function parseSubscribeFrame(
     ...(parsedKnown ? { known: parsedKnown } : {}),
     ...(parsedChunk ? { chunk: parsedChunk } : {}),
     ...(detailWatch ? { detailWatch } : {}),
+    ...(Array.isArray(trackedRunIds) ? { trackedRunIds } : {}),
     ...(sessionsCursor !== undefined ? { sessionsCursor: sessionsCursor as string } : {}),
     ...(eventSet !== undefined ? { eventSet: eventSet as number } : {})
   }

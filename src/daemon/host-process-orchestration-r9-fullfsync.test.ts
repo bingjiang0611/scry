@@ -7,7 +7,7 @@ import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { INLINE_BODY_MAX_BYTES } from '../host-runtime/orchestration/types'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -43,17 +43,6 @@ function saveEnv() {
   }
 }
 
-async function waitTerminal(socketPath: string, ca: string, cert: string, key: string, runId: string): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const res = await call(socketPath, ca, cert, key, { op: 'watch', runId, cursor, outputCursor: 0, waitMs: 5_000 })
-    state = res.watch.state
-    cursor = res.watch.poll.cursor
-  }
-  return state
-}
 
 describe('W9 Unit R9: macOS fullfsync=ON + checkpoint_fullfsync=ON + 1-commit immediate dispatch', () => {
   it('enables fullfsync=ON and checkpoint_fullfsync=ON by default in on mode, merges immediate submit+dispatch into 1 commit, and preserves trust-gate fallback', async () => {

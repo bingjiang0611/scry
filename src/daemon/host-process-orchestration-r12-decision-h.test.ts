@@ -10,7 +10,7 @@ import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { importLegacyStateIncrementally } from '../host-runtime/orchestration/legacy-import'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal, readH1Run } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -47,30 +47,6 @@ function sha256File(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
-async function waitTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const res = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    if (res.error) throw new Error(`watch error: ${res.error}`)
-    state = res.watch.state
-    cursor = res.watch.poll.cursor
-  }
-  return state
-}
 
 function startHost(
   userDataDir: string,
@@ -125,8 +101,8 @@ function seedH1Runs(ledgerDir: string, runCount: number, cwd: string): Array<{ r
   return seeded
 }
 
-describe('W9 Round-4 Decision H: default path safety (N1/N2), fresh H1 validity (N3), and fallback retry/status', () => {
-  it('N1: shadow-only data dir with >256 H1 events keeps H1 byte-for-byte untouched on off/unset boot', async () => {
+describe('Decision H: authority promotion, fail-closed startup, and compatibility mirror', () => {
+  it('promotes a shadow database and imports every subsequent legacy run before accepting new sends', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -165,42 +141,32 @@ describe('W9 Round-4 Decision H: default path safety (N1/N2), fresh H1 validity 
       )
     }
     writeFileSync(logPath, `${readFileSync(logPath, 'utf8')}${extraLines.join('\n')}\n`, { mode: 0o600 })
-    const logShaBefore = sha256File(logPath)
     expect(existsSync(snapshotPath)).toBe(false)
 
     const restore = withOrchEnv(undefined)
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await startHost(userDataDir, daemonDir)
-      expect(existsSync(snapshotPath)).toBe(false)
-      expect(sha256File(logPath)).toBe(logShaBefore)
+      const authority = host.orchestrationAuthority!
+      for (const run of [...first90, ...extraRuns]) {
+        expect(authority.sink.getRun(run.runId)?.lifecycle).toBe('settled')
+      }
+      expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
 
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM
       const lastExtra = extraRuns[extraRuns.length - 1]!
-      const watched = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch',
-        runId: lastExtra.runId,
-        cursor: 0,
-        outputCursor: 0,
-        waitMs: 1_000
+      const watched = await readH1Run(host, device.certPEM, {
+        runId: lastExtra.runId, cursor: 0, outputCursor: 0, waitMs: 1_000
       })
-      expect(watched.error).toBeUndefined()
       expect(watched.watch.state).toBe('settled')
-      const tailPoll = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'poll',
-        cursor: 476
-      })
-      expect(tailPoll.poll.cursor).toBe(480)
-      expect(tailPoll.poll.events).toHaveLength(4)
-      expect(first90.length).toBe(90)
 
       const sub = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'run 121' })
       })
-      expect(sub.seq).toBe(481)
+      expect(sub.seq).toBeGreaterThan(480)
       expect(await waitTerminal(host.channel.socketPath, ca, device.certPEM, device.keyPEM, sub.runId)).toBe('settled')
     } finally {
       await host?.dispose()
@@ -208,45 +174,38 @@ describe('W9 Round-4 Decision H: default path safety (N1/N2), fresh H1 validity 
     }
   }, 30_000)
 
-  it('N2: corrupt orchestration.db is fail-open on off/unset boot and leaves H1 byte-for-byte untouched', async () => {
+  it('rejects a corrupt authority before opening local.sock and preserves the legacy log byte for byte', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
-    const daemonDir = join(userDataDir, 'daemon')
+    const daemonDir = join(root, 'daemon')
     const ledgerDir = join(userDataDir, 'remote', 'ledger')
     const ws = join(root, 'ws-n2')
     mkdirSync(ws, { recursive: true, mode: 0o700 })
     const canonicalWs = realpathSync(ws)
-    createRecentFoldersStore(userDataDir).push(canonicalWs)
-
     const seeded = seedH1Runs(ledgerDir, 5, canonicalWs)
     const logPath = join(ledgerDir, 'session-ledger.log')
     const logShaBefore = sha256File(logPath)
 
     const orchDir = join(userDataDir, 'orchestration')
     mkdirSync(orchDir, { recursive: true, mode: 0o700 })
-    writeFileSync(join(orchDir, 'orchestration.db'), 'NOT A VALID SQLITE DATABASE CORRUPT BYTES!!!', { mode: 0o600 })
+    const db = join(orchDir, 'orchestration.db')
+    writeFileSync(db, 'NOT A VALID SQLITE DATABASE CORRUPT BYTES!!!', { mode: 0o600 })
+    const dbShaBefore = sha256File(db)
 
-    const logs: string[] = []
     const restore = withOrchEnv(undefined)
-    let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
-      host = await startHost(userDataDir, daemonDir, { log: (l) => logs.push(l) })
+      await expect(startHost(userDataDir, daemonDir)).rejects.toThrow(/database|SQLITE_NOTADB/)
+      expect(existsSync(join(daemonDir, 'local.sock'))).toBe(false)
       expect(sha256File(logPath)).toBe(logShaBefore)
-      expect(logs.some((l) => l.includes('daemon.orchestration-off-reconcile-failed'))).toBe(true)
-
-      const device = await enrollLocal(host.service)
-      const ca = host.service.caCertificatePEM
-      const watched = await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch',
-        runId: seeded[4]!.runId,
-        cursor: 0,
-        outputCursor: 0,
-        waitMs: 1_000
-      })
-      expect(watched.error).toBeUndefined()
-      expect(watched.watch.state).toBe('settled')
+      expect(sha256File(db)).toBe(dbShaBefore)
+      const store = new SessionLedgerFileStore(ledgerDir)
+      try {
+        const ledger = new SessionLedger({ store })
+        for (const run of seeded) expect(ledger.runState(run.runId)).toBe('settled')
+      } finally {
+        store.close()
+      }
     } finally {
-      await host?.dispose()
       restore()
     }
   }, 30_000)

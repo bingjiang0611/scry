@@ -173,7 +173,7 @@ export interface HostControllerDependencies {
     event: LedgerEvent,
     meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote'; answeredByPeer?: string }
   ): void
-  // Optional P4-2 authoritative orchestration seam (`SCRY_ORCHESTRATION=on`).
+  // Optional P4-2 authoritative orchestration seam.
   orchestration?: OrchestrationAuthorityHooks
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).

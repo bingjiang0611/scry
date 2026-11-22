@@ -66,9 +66,7 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
       if (deps.signal.aborted) return
       if (focus?.signal.aborted) continue
       if (error instanceof DaemonRunError && error.reason === 'daemon_run_control_unavailable') {
-        // The daemon restarted without SCRY_ORCHESTRATION=on. The App chose its run
-        // mode at connect, so it must be restarted to return to the watch path.
-        deps.onWarn?.('daemon subscribe unavailable (orchestration mode changed; restart Scry)', error)
+        deps.onWarn?.('daemon subscribe unavailable', error)
         deps.setLive(false)
         return
       }

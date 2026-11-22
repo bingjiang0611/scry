@@ -37,7 +37,7 @@ export abstract class DesktopRemoteClientHistory extends DesktopRemoteClientCata
 
   private async watchDetail(id: string, scope: DesktopRemoteContext): Promise<DesktopDetailSubscription | undefined> {
     const status = await this.statusSubscription(id)
-    if (!status || !scope.externalSessionId) return undefined
+    if (!scope.externalSessionId) return undefined
     const session = status.sessions().find(item => item.cwd === scope.cwd && item.providerId === scope.providerId &&
       item.agentProfileId === scope.agentProfileId && item.externalSessionId === scope.externalSessionId)
     if (!session) return undefined

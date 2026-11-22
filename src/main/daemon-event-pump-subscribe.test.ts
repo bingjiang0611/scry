@@ -197,7 +197,6 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       disposed: false,
       transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
       apply,
-      syncQuestions: async () => undefined,
       flush: vi.fn()
     })
     expect(archivedRunTrace).not.toHaveBeenCalled()
@@ -213,7 +212,6 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       terminal: true,
       transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
       apply,
-      syncQuestions: async () => undefined,
       flush: vi.fn()
     })
     expect(archivedRunTrace).toHaveBeenCalledExactlyOnceWith({ context: cursor.context, runId: 'r1' })

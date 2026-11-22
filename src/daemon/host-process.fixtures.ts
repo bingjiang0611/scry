@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { webcrypto } from 'node:crypto'
+import { createHash, webcrypto, X509Certificate } from 'node:crypto'
 import { connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import { once } from 'node:events'
@@ -63,4 +63,44 @@ export async function call(socketPath: string, ca: string, cert: string, key: st
   for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy()
   return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
+}
+
+/** Observe one real daemon run using the v3 projection and cursor. */
+export async function waitForProjectedRun(
+  socketPath: string, ca: string, cert: string, key: string, runId: string, waitMs = 5_000
+): Promise<string> {
+  const read = (input: Record<string, unknown>) => call(socketPath, ca, cert, key, {
+    op: 'subscribe', views: ['activeRuns'], ...input
+  })
+  let reply = await read({ waitMs: 0 })
+  let state = 'dispatched'
+  const deadline = Date.now() + 15_000
+  const terminal = new Set(['settled', 'failed', 'cancelled', 'interrupted'])
+  for (;;) {
+    if (reply.error || !reply.subscribe) throw new Error(`subscribe failed: ${JSON.stringify(reply)}`)
+    const { hostId, logId, seq, snapshot, events } = reply.subscribe
+    const row = snapshot?.activeRuns?.rows?.find((item: { runId: string }) => item.runId === runId) ??
+      events?.findLast((item: { runId?: string; runRow?: unknown }) => item.runId === runId && item.runRow)?.runRow
+    if (row) state = row.lifecycle
+    const lifecycleEvent = events?.findLast((item: { runId?: string; type: string }) =>
+      item.runId === runId && item.type.startsWith('run.') && terminal.has(item.type.slice(4)))
+    if (lifecycleEvent) state = lifecycleEvent.type.slice(4)
+    if (terminal.has(state) || Date.now() >= deadline) return state
+    reply = await read({ waitMs, known: { hostId, logId, seq } })
+  }
+}
+
+type TestHost = Awaited<ReturnType<typeof createDaemonHostProcess>>
+
+function peerFingerprint(cert: string): string {
+  return createHash('sha256').update(new X509Certificate(cert).raw).digest('hex')
+}
+
+/** Observe the H1 mirror directly for its own migration and recovery assertions. */
+export function readH1Page(host: TestHost, cert: string, input: { cursor: number }) {
+  return { poll: host.service.controller.poll(peerFingerprint(cert), input), error: undefined }
+}
+
+export async function readH1Run(host: TestHost, cert: string, input: Parameters<TestHost['service']['controller']['watchRun']>[1]) {
+  return { watch: await host.service.controller.watchRun(peerFingerprint(cert), input), error: undefined }
 }

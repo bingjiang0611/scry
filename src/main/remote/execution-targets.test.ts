@@ -65,7 +65,7 @@ describe('execution target production dispatcher', () => {
     expect(fixture.client.mobileRequest).toHaveBeenLastCalledWith(target,
       { ...request, subscriptionId: expect.stringMatching(/^[a-f0-9]{32}$/) }, expect.any(Function))
     fixture.client.mobileRequest.mockClear()
-    for (const invalid of [{ subscriptionId: 'a'.repeat(32) }, { detailWatch: 'open' }, { waitMs: 25_001 }, { session: { sessionKey: '' } },
+    for (const invalid of [{ subscriptionId: 'a'.repeat(32) }, { detailWatch: 'open' }, { trackedRunIds: ['run-private'] }, { waitMs: 25_001 }, { session: { sessionKey: '' } },
       { known: { hostId: 'mac1', logId: 'log-a', seq: -1 } }, { deviceLabel: 'spoofed' }]) {
       await expect(fixture.router.dispatch(peer, { op: 'target', target, request: { ...request, ...invalid } }))
         .rejects.toThrow('invalid_target_request')

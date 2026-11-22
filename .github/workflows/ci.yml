@@ -183,16 +183,11 @@ jobs:
         # tests/tarball checks still execute on every supported Node version.
         run: npm run check:cli-runtime
 
-  # P4-2: 覆盖 SCRY_ORCHESTRATION=shadow 与 on 两列。
   daemon-orchestration:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [shadow, on]
     env:
       QODER_SKIP_DOWNLOAD: "1"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -205,9 +200,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Daemon orchestration tests (${{ matrix.mode }})
-        env:
-          SCRY_ORCHESTRATION: ${{ matrix.mode }}
+      - name: Daemon orchestration tests
         run: npx vitest run --maxWorkers=1 src/host-runtime/orchestration src/daemon
 
   # Preserve the serial smoke order in three contiguous slices. Packaging runs

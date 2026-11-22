@@ -7,6 +7,7 @@ import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { DaemonRunRuntime } from '../main/daemon-run-runtime'
+import { startDaemonRunEvents } from '../main/daemon-run-events'
 import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
 
 afterEach(cleanupTempDirs)
@@ -34,9 +35,11 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
     const transport = new DaemonRunTransport((request) => daemon.request(request))
     const delivered: TraceEvent[] = []
     const runtime = new DaemonRunRuntime({
+      subscribeMode: true,
       transport, waitMs: 500,
       send: (channel, payload) => { if (channel === 'agent:trace') delivered.push(...(payload as TraceBatch).events) }
     })
+    const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     const start = (prompt: string, extra: Record<string, unknown> = {}) => surface.start({
       prompt, providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID(), ...extra
@@ -56,6 +59,7 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
       await surface.stop(held.runId)
       expect(await until(() => runtime.runView(held.runId)?.done === true ? true : undefined, 10_000)).toBe(true)
     } finally {
+      events.dispose()
       runtime.dispose()
       await daemon.dispose()
     }

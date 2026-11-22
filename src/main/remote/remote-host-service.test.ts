@@ -139,9 +139,9 @@ describe('RemoteHostService (lifecycle facade)', () => {
     const devices = () => { const status = service.status(); if (!status.enabled) throw new Error('remote disabled'); return status.devices }
     expect(devices()[0].deviceLabel).toBe('iPhone')
     const refreshed = await deviceCall(relay.devicePort, service.caCertificatePEM, device.certPEM, device.keyPEM, {
-      op: 'poll', cursor: 0, deviceLabel: 'iPhone 17 Pro'
+      op: 'projects', deviceLabel: 'iPhone 17 Pro'
     })
-    expect(refreshed.poll).toBeDefined()
+    expect(refreshed.projects).toBeDefined()
     expect(devices()[0].deviceLabel).toBe('iPhone 17 Pro')
     const submit = await deviceCall(relay.devicePort, service.caCertificatePEM, device.certPEM, device.keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude' }) })
     expect(submit.status).toBe('recorded')

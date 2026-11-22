@@ -40,10 +40,19 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
     const baseline = vi.fn(() => { order.push('baseline') })
     const fixture = await setup({
       attention: { baseline, catalog: () => [], viewed: () => {}, disconnect: () => {}, forget: () => {} },
-      sessionsResponse: () => {
+      subscribeResponse: request => {
+        if (request.known) return new Promise(() => {})
         order.push('sessions')
-        return { sessionsPage: { sessions: [{ sessionId: 's', externalSessionId: 'native', cwd: '/workspace', providerId: 'claude', label: 'Done', ts: 1,
-          lastRunId: 'run-1', lastRunOutcome: 'completed' }], cursor: 1, total: 1, hasMore: false, snapshot: 'baseline' } }
+        return { subscribe: { mode: 'snapshot', hostId: fixture.host.hostId, logId: 'fixture-log', seq: 1,
+          snapshot: {
+            sessions: { total: 1, rows: [{
+              sessionKey: 's', provider: 'claude', cwd: '/workspace', title: 'Done', ts: 1,
+              pinnedAt: null, archivedAt: null, pendingQuestions: 0, revSeq: 1, lastRunId: 'run-1',
+              lastRunOutcome: { value: 'completed' }, catalog: { nativeSessionId: 'native' }
+            }] },
+            activeRuns: { rows: [] }
+          }
+        } }
       }
     })
     try {
@@ -91,7 +100,7 @@ describe('DesktopRemoteClient connection and receipt lifecycle', () => {
     const baseline = vi.fn()
     const fixture = await setup({
       attention: { baseline, catalog: () => [], viewed: () => {}, disconnect: () => {}, forget: () => {} },
-      sessionsResponse: () => ({ invalid: true })
+      subscribeResponse: () => ({ invalid: true })
     })
     try {
       const pending = await fixture.client.pair({ label: 'Baseline unavailable', ssh, invitation: fixture.invitation })

@@ -217,14 +217,20 @@ describe('HostController history version joined to the live-runs long-poll', () 
   it('waits while the version is unchanged and returns as soon as it changes, re-authorizing each pass', async () => {
     let version = 'v1'
     const readHistoryVersion = vi.fn(async () => ({ version, readMode: 'indexed' as const }))
-    const { controller, deviceId } = await grantedController(async () => {}, undefined, { readHistoryVersion })
+    let changed = () => {}
+    const { controller, deviceId } = await grantedController(async () => {}, undefined, {
+      readHistoryVersion, macRuns: { list: () => [], stop: () => false, answer: () => false, subscribe: listener => {
+        changed = listener
+        return () => { changed = () => {} }
+      } }
+    })
     const query = { providerId: 'pi', cwd: AUTHORIZED, externalSessionId: 'ext' }
     const first = await controller.liveRuns(CERT, { waitMs: 10_000, history: { query } })
     expect(first.historyVersion?.version).toBe('v1')
 
     const started = Date.now()
     const waiting = controller.liveRuns(CERT, { revision: first.revision, waitMs: 10_000, history: { query, known: 'v1' } })
-    setTimeout(() => { version = 'v2' }, 50)
+    setTimeout(() => { version = 'v2'; changed() }, 50)
     expect((await waiting).historyVersion?.version).toBe('v2')
     expect(Date.now() - started).toBeLessThan(2_500)
     expect(readHistoryVersion.mock.calls.length).toBeGreaterThan(2)

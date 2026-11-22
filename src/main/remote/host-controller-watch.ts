@@ -13,12 +13,6 @@ import type { RemoteIntentRouting, MacRunSource, LiveRunRef } from './host-contr
 // of ticking. Every pass re-runs the authorized readers, so a revoked grant fails
 // the next wake-up rather than being remembered for the whole wait.
 const LIVE_RUNS_MAX_WAIT_MS = 20_000
-// Fallback tick for the live-runs long poll. Every pass also re-reads the joined
-// history version, so the tick rate is a per-device cost: at 250 ms one parked
-// phone asked for that version ~78 times in a 20 s window instead of ~20. Mac-side
-// changes arrive immediately through `MacRunSource.subscribe`; this tick only
-// bounds the cases with no notification (a mac source without a signal).
-const LIVE_RUNS_TICK_MS = 1000
 const LIVE_RUN_PROMPT_CHARS = 200
 // Below the inner host's 30-second idle timer and the device's response deadline.
 const WATCH_MAX_WAIT_MS = 20_000
@@ -67,8 +61,7 @@ export class LiveWatchers {
   #seq = 0
   #waiters = new Set<() => void>()
 
-  // Subscription to a Mac-side change signal. Undefined when the mac source has
-  // none: then the fallback tick is the only wake-up.
+  // Optional Mac-side change signal.
   #unsubscribe?: () => void
 
   constructor(deps: LiveWatcherDeps) {
@@ -138,7 +131,7 @@ export class LiveWatchers {
       if (revision !== input.revision || (historyVersion && historyVersion.version !== input.history?.known) || remaining <= 0) {
         return { revision, runs, ...(historyVersion ? { historyVersion } : {}) }
       }
-      await this.#waitForChange(Math.min(remaining, LIVE_RUNS_TICK_MS))
+      await this.#waitForChange(remaining)
     }
 }
 

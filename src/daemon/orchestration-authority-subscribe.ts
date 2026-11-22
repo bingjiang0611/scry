@@ -179,7 +179,7 @@ export function noteProgressMarkerForSubscribeHub(
 }
 
 /**
- * Forwards shrunk P4-3 volatile hints from `AppEventFeed` into `SubscribeHub` (`protocol §5.3`).
+ * Forwards shrunk App's volatile notices into `SubscribeHub` (`protocol §5.3`).
  * `hostAdmin` becomes `hostNotice` with exact W11 payload; `window` drops run-lifecycle notices
  * (`agent:turnDone`, `agent:session`, `agent:stopState`) that now arrive as durable run events.
  */

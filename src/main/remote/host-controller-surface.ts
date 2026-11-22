@@ -269,13 +269,12 @@ export class HostController {
 
   // One device round trip for the whole catalog opening a host needs, with a
   // content revision so an unchanged host answers without re-sending it.
-  async catalogSnapshot(peerCertSHA256: string, input: { revision?: string; includeSessions?: boolean }): Promise<CatalogSnapshotReply> {
+  async catalogSnapshot(peerCertSHA256: string, input: { revision?: string }): Promise<CatalogSnapshotReply> {
     return await catalogSnapshot({
       authorizeDevice: (peer) => this.authorizeDevice(peer),
       readDesktop: (peer, query) => this.readDesktop(peer, query),
       listProjects: (peer) => this.#gateway.listProjects(peer),
       listProviders: (peer) => this.#gateway.listProviders(peer),
-      listSessionsPage: (peer, query) => this.#gateway.listSessionsPage(peer, query),
       ...(this.#injected.listHostAdminNotices ? { listHostAdminNotices: this.#injected.listHostAdminNotices } : {})
     }, peerCertSHA256, input)
   }

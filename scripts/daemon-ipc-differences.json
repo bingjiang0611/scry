@@ -1,11 +1,8 @@
 {
   "schema": 1,
   "differences": {
-    "agent:activeRun": "等价（同一 run 登记表）",
-    "agent:activeRuns": "等价；远程长轮询 waitMs 由 daemon 决定，本机传 0",
     "agent:answerQuestion": "等价",
     "agent:deleteSession": "不同：本机走原生确认框且可删未归档；远程只允许已归档、confirm:false。按 grant scope 选策略；确认框留在 main，daemon 只对 scope: local 接受已确认请求",
-    "agent:focusedRunSnapshot": "等价（同一 run 登记表；只是按焦点取一条）",
     "agent:forkSession": "等价",
     "agent:renameSession": "等价",
     "agent:setSessionArchived": "等价",

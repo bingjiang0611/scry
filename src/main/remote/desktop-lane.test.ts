@@ -40,8 +40,8 @@ describe('desktop lane routing', () => {
       expect(laneForRequest({ op })).toBe('control')
       expect(replayableRequest({ op })).toBe(false)
     }
-    expect(laneForRequest({ op: 'watch' })).toBe('watch')
-    expect(laneForRequest({ op: 'liveRuns' })).toBe('status')
+    expect(laneForRequest({ op: 'subscribe', views: ['detail'] }, 'network')).toBe('watch')
+    expect(laneForRequest({ op: 'subscribe', views: ['activeRuns'] }, 'network')).toBe('status')
     // The App's event feed holds a long poll of its own; nothing may queue behind it.
     expect(laneForRequest({ op: 'subscribe', views: ['sessions', 'activeRuns'] }, 'network')).toBe('status')
     expect(laneForRequest({ op: 'subscribe', views: ['detail'] }, 'network')).toBe('watch')

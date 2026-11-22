@@ -23,7 +23,7 @@ export interface AuthorityLedgerStoreHandle {
 
 /**
  * Builds the DB-authoritative in-memory `LedgerStore` + pure downstream async `LegacyMirrorWorker`
- * used by `SCRY_ORCHESTRATION=on` (Decision H):
+ * for Decision H:
  * - Startup ALWAYS builds one state-only snapshot (`retainedEvents: []`) from `orchestration.db`
  *   with `lastSeq = minCursor = R` (never reading H1, never renumbering old events); stale device
  *   cursors receive the standard `reset` response.

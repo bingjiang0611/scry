@@ -138,10 +138,10 @@ describe('daemon run mode', () => {
     expect(result).toEqual({ status: 'unavailable', reason: 'direct_spawn_refused' })
   })
 
-  it('uses the subscribe path only when the daemon advertises it', async () => {
+  it('refuses a daemon that cannot supply the required subscription', async () => {
     const withCapability = { connect: async () => ({ version: '1.0.0' }), subscribeSupported: true }
     const without = { connect: async () => ({ version: '1.0.0' }), subscribeSupported: false }
-    expect(await connectForRunMode(withCapability)).toEqual({ version: '1.0.0', subscribeMode: true })
-    expect(await connectForRunMode(without)).toEqual({ version: '1.0.0', subscribeMode: false })
+    expect(await connectForRunMode(withCapability)).toEqual({ version: '1.0.0' })
+    await expect(connectForRunMode(without)).rejects.toThrow('daemon_subscribe_unavailable')
   })
 })

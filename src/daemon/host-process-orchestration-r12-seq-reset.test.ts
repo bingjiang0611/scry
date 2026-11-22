@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitTerminal, readH1Page, readH1Run } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -38,30 +38,6 @@ function withOrchEnv(mode: 'on' | 'off') {
   }
 }
 
-async function waitTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const res = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    if (res.error) throw new Error(`watch error: ${res.error}`)
-    state = res.watch.state
-    cursor = res.watch.poll.cursor
-  }
-  return state
-}
 
 function startHost(userDataDir: string, daemonStateDirectory: string) {
   return createDaemonHostProcess({
@@ -101,7 +77,7 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'n5 run 1' })
       })
       expect(await waitTerminal(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
-      const poll1 = await call(host1.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })
+      const poll1 = readH1Page(host1, device.certPEM, { cursor: 0 })
       expect(poll1.poll.cursor).toBeGreaterThanOrEqual(3)
 
       // Block reservation: no per-event h1_seq_floor key; reserved ceiling R = 1024.
@@ -115,14 +91,13 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
       // Restart in on mode: device holding mid-stream cursor = 2 receives reset to R (1024),
       // ZERO renumbered old events, and watch reports settled state.
       host2 = await startHost(userDataDir, daemonDir)
-      const midPoll = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: 2 })
+      const midPoll = readH1Page(host2, device.certPEM, { cursor: 2 })
       expect(midPoll.error).toBeUndefined()
       expect(midPoll.poll.events).toEqual([])
       expect(midPoll.poll.cursor).toBe(reservedR)
       expect(midPoll.poll.reset).toEqual({ requested: 2, availableFrom: reservedR })
 
-      const midWatch = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-        op: 'watch',
+      const midWatch = await readH1Run(host2, device.certPEM, {
         runId: sub1.runId,
         cursor: 2,
         outputCursor: 0,
@@ -146,7 +121,7 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
     }
   }, 30_000)
 
-  it('on -> off -> on never reuses sequence numbers and preserves all runs across mode transitions', async () => {
+  it('several authoritative restarts retain runs and avoid reusing H1 sequence numbers', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -186,7 +161,7 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
       expect(sub2.seq).toBeGreaterThan(r1)
       expect(await waitTerminal(hostOff.channel.socketPath, ca, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
       const offMaxSeq = (
-        await call(hostOff.channel.socketPath, ca, device.certPEM, device.keyPEM, { op: 'poll', cursor: r1 })
+        readH1Page(hostOff, device.certPEM, { cursor: r1 })
       ).poll.cursor as number
       expect(offMaxSeq).toBeGreaterThanOrEqual(sub2.seq)
       await hostOff.dispose()
@@ -208,8 +183,7 @@ describe('W9 Round-4 Decision H: single-snapshot reset (N5), block seq reservati
         [intent2, sub2.runId],
         [intent3, sub3.runId]
       ] as const) {
-        const w = await call(host2.channel.socketPath, ca, device.certPEM, device.keyPEM, {
-          op: 'watch',
+        const w = await readH1Run(host2, device.certPEM, {
           runId,
           cursor: 0,
           outputCursor: 0,

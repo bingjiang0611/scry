@@ -15,29 +15,6 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
 function saveOnEnv() {
   const saved = {
@@ -117,7 +94,9 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'crosses 8192 cap' })
       })
-      expect(await waitRunTerminal(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
+      expect(sub1).toMatchObject({ status: 'recorded', runId: expect.any(String) })
+      const authority1 = host1.orchestrationAuthority!
+      await expect.poll(() => authority1.sink.getRun(sub1.runId)?.lifecycle, { timeout: 10_000 }).toBe('settled')
 
       // Wait for deferred import of the 2,048 seeded runs + flush mirror, then dispose host1.
       await host1.orchestrationAuthority!.importComplete
@@ -142,7 +121,9 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'after compact restart' })
       })
-      expect(await waitRunTerminal(host2.channel.socketPath, host2.service.caCertificatePEM, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
+      expect(sub2).toMatchObject({ status: 'recorded', runId: expect.any(String) })
+      const authority2 = host2.orchestrationAuthority!
+      await expect.poll(() => authority2.sink.getRun(sub2.runId)?.lifecycle, { timeout: 10_000 }).toBe('settled')
     } finally {
       await host1?.dispose()
       await host2?.dispose()

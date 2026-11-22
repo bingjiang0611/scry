@@ -13,9 +13,10 @@ import type { AgentQuestionRequest } from '../../shared/runtime'
 import type { EventSink } from './event-sink'
 import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
-import { mapRunRow, mapTurnRow } from './projection-mappers'
+import { mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
 import { deviceEventPayload, deviceHintKey, deviceOutcome, deviceTurn } from './subscribe-device-fields'
+import { readSubscribedRuns } from './subscribe-active-runs'
 import { projectSubscribeSession, readSessionsSnapshot } from './subscribe-sessions'
 import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type RunProjectionRow, type SessionProjectionRow } from './types'
 
@@ -23,8 +24,6 @@ export const SUBSCRIBE_MAX_WAIT_MS = 25_000
 export const SUBSCRIBE_MAX_SCAN_GAP = 4_096
 export const SUBSCRIBE_MAX_EVENTS = 128
 export const SUBSCRIBE_MAX_EVENT_BYTES = 256 * 1024
-export const SUBSCRIBE_ACTIVE_RUN_RETENTION_MS = 24 * 60 * 60 * 1000
-export const SUBSCRIBE_TERMINAL_RUN_SNAPSHOT_LIMIT = 256
 const DEFAULT_SESSIONS_PAGE_SIZE = 200
 
 const SESSION_VIEW_EVENTS = new Set([
@@ -279,7 +278,9 @@ export class SubscribeEngine {
         ...(event.runId !== null ? { runId: event.runId } : {}),
         ...(event.cwd !== null ? { cwd: event.cwd } : {}),
         payload: access.scope === 'local' ? event.payload : deviceEventPayload(event.payload, access.canReadCwd),
-        ...(access.scope === 'remote' ? this.#deviceProjections(access, views, event) : {}),
+        ...(access.scope === 'remote' ? this.#deviceProjections(access, views, event)
+          : event.type.startsWith('run.question_') && event.runId
+            ? this.#localQuestionProjection(access, event.runId) : {}),
         ...(access.scope === 'local' && event.evidence !== null ? { evidence: event.evidence } : {})
       }
       const itemBytes = Buffer.byteLength(JSON.stringify(item), 'utf8')
@@ -308,12 +309,16 @@ export class SubscribeEngine {
       snapshot.sessions = readSessionsSnapshot(this.#sink.handle.db, access.canReadCwd, access.scope, this.#sessionsPageSize, request.sessionsCursor)
     }
     if (views.has('activeRuns')) {
-      snapshot.activeRuns = { rows: this.#readActiveRunsSnapshot(access) }
+      const tracked = access.scope === 'local' ? request.trackedRunIds : undefined
+      const rows = readSubscribedRuns(this.#sink, this.#clock(), tracked)
+        .filter(run => access.canReadCwd(run.cwd))
+        .map(run => this.#projectRun(run, access))
+      snapshot.activeRuns = { rows }
     }
     if (views.has('detail') && request.session && !(access.scope === 'local' && request.detailWatch)) {
       snapshot.detail = this.#readDetailSnapshot(access, this.#detailSession(access, request.session))
     }
-    const hints = request.sessionsCursor ? [] : this.#drainHints(peer, access, views, request, true, !request.known)
+    const hints = request.sessionsCursor || request.trackedRunIds ? [] : this.#drainHints(peer, access, views, request, true, !request.known)
     return {
       hostId,
       logId,
@@ -324,45 +329,15 @@ export class SubscribeEngine {
     }
   }
 
-  #readActiveRunsSnapshot(access: SubscribeAccess): SubscribeActiveRunRow[] {
-    const db = this.#sink.handle.db
-    const cutoff = this.#clock() - SUBSCRIBE_ACTIVE_RUN_RETENTION_MS
-    // Every non-terminal run is always included (a live run must never be pushed out
-    // of the snapshot by recent terminal ones); only the 24 h terminal tail is capped.
-    const live = db
-      .prepare(
-        `SELECT * FROM orch_p_run
-         WHERE lifecycle IN ('recorded', 'admitted', 'dispatched')
-         ORDER BY intent_seq DESC`
-      )
-      .all() as Array<Record<string, unknown>>
-    const recentTerminal = db
-      .prepare(
-        `SELECT * FROM orch_p_run
-         WHERE lifecycle NOT IN ('recorded', 'admitted', 'dispatched')
-           AND COALESCE(settled_at, recovered_at, 0) >= ?
-         ORDER BY intent_seq DESC
-         LIMIT ?`
-      )
-      .all(cutoff, SUBSCRIBE_TERMINAL_RUN_SNAPSHOT_LIMIT) as Array<Record<string, unknown>>
-    const rows = [...live, ...recentTerminal]
-
-    const result: SubscribeActiveRunRow[] = []
-    for (const raw of rows) {
-      const run = mapRunRow(raw)
-      if (!access.canReadCwd(run.cwd)) continue
-      result.push(this.#projectRun(run, access))
-    }
-    return result
-  }
-
   #projectRun(run: RunProjectionRow, access: SubscribeAccess): SubscribeActiveRunRow {
     const liveMeta = this.#hub.liveRunMeta(run.runId)
     const localMeta = access.scope === 'local' ? liveMeta : undefined
     const session = access.scope === 'remote' && run.sessionKey ? this.#sink.getSession(run.sessionKey) : undefined
     const externalSessionId = liveMeta?.externalSessionId ??
       (session && access.canReadCwd(session.cwd) ? session.catalog?.nativeSessionId : undefined)
-    const questions = access.scope === 'remote' && liveMeta?.scryRunId ? this.#runQuestions?.(liveMeta.scryRunId) : undefined
+    const questions = liveMeta?.scryRunId ? this.#runQuestions?.(liveMeta.scryRunId)?.filter(request =>
+      this.#sink.getInteraction(run.runId, request.questionId)?.state === 'open') : undefined
+    const conversation = access.scope === 'local' && questions?.length && run.sessionKey ? this.#sink.getSession(run.sessionKey)?.conversationId : undefined
     const promptPreview =
       access.scope === 'remote' && run.promptPreview
         ? run.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
@@ -372,6 +347,7 @@ export class SubscribeEngine {
       ...(localMeta?.scryRunId ? { scryRunId: localMeta.scryRunId } : {}),
       ...(access.scope === 'remote' && liveMeta?.scryRunId ? { traceRunId: liveMeta.scryRunId } : {}),
       ...(questions?.length ? { questions } : {}),
+      ...(conversation ? { isConversationRun: true } : {}),
       ...(localMeta?.admitted ? { admitted: true } : {}),
       ...(externalSessionId ? { externalSessionId } : {}),
       sessionKey: run.sessionKey,
@@ -390,6 +366,11 @@ export class SubscribeEngine {
       outcome: access.scope === 'remote' ? deviceOutcome(run.outcome) : run.outcome,
       revSeq: run.revSeq
     }
+  }
+
+  #localQuestionProjection(access: SubscribeAccess, runId: string): { runRow?: SubscribeActiveRunRow } {
+    const run = this.#sink.getRun(runId)
+    return run ? { runRow: this.#projectRun(run, access) } : {}
   }
 
   #deviceProjections(

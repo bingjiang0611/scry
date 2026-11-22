@@ -27,15 +27,16 @@ export interface QuestionSinks {
 }
 
 /** Publish questions the daemon now holds, and close the ones it no longer does. */
-export async function publishQuestions(cursor: RunCursor, transport: Pick<DaemonRunTransport, 'questions'>, sinks: QuestionSinks): Promise<void> {
-  // A question exists only once the daemon admitted the run, and that admission is when
-  // the window learns the run's id. Until this cursor has read it, a question would go
-  // out under the ledger id; it waits for the step that reads the admission instead.
+export async function publishQuestions(
+  cursor: RunCursor,
+  transport: Pick<DaemonRunTransport, 'questions'>,
+  sinks: QuestionSinks,
+  projected?: AgentQuestionRequest[]
+): Promise<void> {
+  // Wait for the App's run ID, as the window routes questions by that ID.
   if (admissionPhase(cursor) !== 'admitted') return
   const runId = windowRunId(cursor)
-  // A conversation run's questions go to its own view only, as in process: the window
-  // stream's main session claims the first run it hears from when it has none focused.
-  const pending = await transport.questions(cursor.runId)
+  const pending = projected ?? await transport.questions(cursor.runId)
   const windowWide = !usesScopedRunDelivery(cursor)
   for (const pendingRequest of pending) {
     if (cursor.askedQuestions.has(pendingRequest.questionId)) continue

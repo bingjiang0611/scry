@@ -169,17 +169,15 @@ it('uses the unified conversation projection for the sidebar and the detail firs
 }, 30_000)
 
 it('includes an old empty unified conversation in the first subscription after enabling orchestration', async () => {
-  process.env.SCRY_ORCHESTRATION = 'off'
   const old = await startTestDaemon()
   let id: string
   try {
-    const created = await old.localOp('conversation', 'create', [old.workspace])
-    expect(created.error).toBeUndefined()
-    id = created.result.id
+    const { ConversationStore } = await import('../main/conversation-store')
+    const store = new ConversationStore(old.userDataDir)
+    id = (await store.create(old.workspace)).id
   } finally {
     await old.dispose()
   }
-  process.env.SCRY_ORCHESTRATION = 'on'
   const restarted = await startTestDaemon({ root: old.root })
   try {
     const first = await restarted.request({

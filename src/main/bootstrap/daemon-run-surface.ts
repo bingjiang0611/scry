@@ -18,8 +18,6 @@ import { canonicalExistingDirectory } from '../workspace-authorization'
 export interface DaemonRunSurfaceDeps {
   transport: DaemonRunTransport
   runtime: DaemonRunRuntime
-  /** P4-3: read activeRuns from subscribed state instead of calling `liveRuns`. */
-  subscribeMode?: boolean
   // The workspace the App currently shows. A run started without a directory uses
   // it, exactly like the in-process App does.
   currentCwd: () => string | undefined
@@ -202,14 +200,6 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       return runs.find((run) => run.runId === focusedRunId) ?? null
     },
     async activeRuns() {
-      if (deps.subscribeMode) return runtime.activeRuns()
-      // A run this window did not start still belongs on screen: the daemon is the
-      // one authority on what is live, so its list decides, not our bookkeeping.
-      const live = await deps.transport.liveRuns({ waitMs: 0 })
-      for (const entry of live.runs) {
-        if (runtime.isTracking(entry.runId)) continue
-        await runtime.adopt(entry.runId)
-      }
       return runtime.activeRuns()
     },
     // Ignores `done`, exactly like the in-process handler: the renderer uses this to

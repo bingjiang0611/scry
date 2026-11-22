@@ -2,6 +2,8 @@ import type { AgentQuestionRequest, AgentQuestionResponse } from '../shared/runt
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
+import { RUN_ADMISSION_BUSY_MESSAGE } from './context-admission'
+import { DaemonRunRefusedError } from './daemon-run-admission'
 import { DaemonClientError } from './daemon-client'
 import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
 import { readDaemonTrace } from './daemon-run-trace-read'
@@ -81,9 +83,10 @@ export function isDaemonRunId(value: unknown): value is string {
   )
 }
 
-function failure(reply: Record<string, unknown>, op?: string): DaemonRunError | undefined {
+function failure(reply: Record<string, unknown>, op?: string): Error | undefined {
   const code = reply.error
   if (code === undefined) return undefined
+  if (op === 'submit' && code === 'session_run_active') return new DaemonRunRefusedError(RUN_ADMISSION_BUSY_MESSAGE)
   if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
   // Scope unknown_op mapping strictly to the W10 execution-target bridge ops so older-daemon
@@ -107,8 +110,7 @@ export class DaemonRunTransport {
     if (!isDaemonRunId(runId) || (reply.status !== 'recorded' && reply.status !== 'duplicate')) {
       throw new DaemonRunError('invalid_daemon_response')
     }
-    // An older daemon does not report the intent's position; the caller then falls back
-    // to the newest cursor this connection has seen.
+    // When no position is reported, the caller uses its last observed cursor.
     const seq = Number.isSafeInteger(reply.seq) && (reply.seq as number) > 0 ? reply.seq as number : undefined
     return { intentId: input.intentId, runId, status: reply.status, ...(seq !== undefined ? { seq } : {}) }
   }
@@ -116,7 +118,7 @@ export class DaemonRunTransport {
   // A recorded intent is not a dispatched run. Recovery asks this after a
   // reconnect instead of re-submitting the same prompt.
   async intentState(intentId: string): Promise<DaemonIntentState> {
-    const reply = await this.#call({ op: 'intentStatus', intentId })
+    const reply = await this.#call({ op: 'intentStatusAtLog', intentId })
     const intent = reply.intent
     if (!record(intent) || !isDaemonRunId(intent.runId) || typeof intent.state !== 'string') {
       throw new DaemonRunError('daemon_run_unknown')
@@ -240,10 +242,9 @@ export class DaemonRunTransport {
   }
 
   async runState(runId: string): Promise<string | null> {
-    const reply = await this.#call({ op: 'runState', runId }, { replayable: true })
-    if (reply.state === null) return null
-    if (!record(reply.state) || typeof reply.state.state !== 'string') throw new DaemonRunError('invalid_daemon_response')
-    return reply.state.state
+    const reply = await this.subscribe({ views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0 })
+    if (reply.mode !== 'snapshot' || !reply.snapshot.activeRuns) throw new DaemonRunError('invalid_daemon_response')
+    return reply.snapshot.activeRuns.rows.find(row => row.runId === runId)?.lifecycle ?? null
   }
 
   /** The App's event feed (P3f): a long poll answered by the daemon on its own lane. */

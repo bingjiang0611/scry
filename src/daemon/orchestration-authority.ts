@@ -31,9 +31,7 @@ import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
 import {
   parseOrchestrationFullfsync,
-  parseOrchestrationMode,
-  parsePendingTtlMs,
-  type OrchestrationModeResolution
+  parsePendingTtlMs
 } from '../host-runtime/orchestration/mode'
 import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
@@ -43,7 +41,6 @@ const MAX_LEDGER_CANONICAL_MAP = 4_096
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
-  readonly mode: OrchestrationModeResolution
   readonly fullfsync: boolean
   readonly checkpointFullfsync: boolean
   readonly sink: EventSink
@@ -76,11 +73,12 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   mirrorMaxPendingEvents?: number
   mirrorRetryIntervalMs?: number
   deferredImportThreshold?: number
+  pauseDeferredImport?: Promise<void>
   attentionSnapshot?: () => SessionAttentionSnapshot
 }
 
 /**
- * Isolated daemon wiring for P4-2 authoritative orchestration (`SCRY_ORCHESTRATION=on`).
+ * Isolated daemon wiring for P4-2 authoritative orchestration.
  * Runs off-main-thread H1 import + single-tx startup recovery + two-ledger reconciliation
  * BEFORE `openLocalChannel`, and mirrors committed events asynchronously to H1 off critical path.
  */
@@ -89,9 +87,7 @@ export async function attachDaemonOrchestrationAuthority<
   Control extends RunRegistryControl
 >(
   options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
-): Promise<DaemonOrchestrationAuthority | undefined> {
-  const mode = parseOrchestrationMode(options.env)
-  if (mode.effective !== 'on') return undefined
+): Promise<DaemonOrchestrationAuthority> {
 
   // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
@@ -125,7 +121,6 @@ export async function attachDaemonOrchestrationAuthority<
 
     return buildAuthorityRuntime({
       options,
-      mode,
       fullfsync,
       checkpointFullfsync,
       pendingTtlMs,
@@ -152,7 +147,6 @@ function buildAuthorityRuntime<
   Control extends RunRegistryControl
 >(ctx: {
   options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
-  mode: OrchestrationModeResolution
   fullfsync: boolean
   checkpointFullfsync: boolean
   pendingTtlMs: number
@@ -167,7 +161,7 @@ function buildAuthorityRuntime<
   setDeferredControl: (cancel: (() => void) | undefined) => void
   getDeferredControl: () => { deferredStarted: boolean; cancelDeferred: (() => void) | undefined; setStarted: () => void }
 }): DaemonOrchestrationAuthority {
-  const { options, mode, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
+  const { options, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
   let deferredPlan = ctx.deferredPlan
   const { importComplete, resolveImportComplete } = ctx
 
@@ -398,6 +392,7 @@ function buildAuthorityRuntime<
   }
 
   let closed = false
+  const pausedImport = options.pauseDeferredImport
   const startImport = (): void => {
     const ctrl = ctx.getDeferredControl()
     if (!deferredPlan || ctrl.deferredStarted || closed || sink.isWriteIndeterminate()) {
@@ -426,7 +421,7 @@ function buildAuthorityRuntime<
   const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink, readH1FallbackStatus)
 
   return {
-    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
+    fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
     createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
     forwardAppEvent: (event) => forwardAppEventToSubscribeHub(subscribeHub, event, resolveCanonical),
     observeNativeTranscript: (homeDir, run) => {
@@ -440,7 +435,8 @@ function buildAuthorityRuntime<
         }
       }, options.log)
     },
-    startImport, status,
+    startImport: pausedImport ? () => { void pausedImport.then(startImport) } : startImport,
+    status,
     flushLegacyMirror: async () => { await legacyMirror?.flush() },
     close: async () => {
       if (closed) return

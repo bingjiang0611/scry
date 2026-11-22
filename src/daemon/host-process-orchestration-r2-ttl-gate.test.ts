@@ -9,7 +9,7 @@ import { providerOperationKey } from '../main/provider-operation-gate'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -46,30 +46,8 @@ function setOnEnv(pendingTtlMs?: number) {
   }
 }
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string,
-  timeoutMs = 10_000
-): Promise<string> {
-  let state = 'recorded'
-  let cursor = 0
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 500
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
+const waitRunTerminal = (socketPath: string, ca: string, cert: string, key: string, runId: string) =>
+  waitForProjectedRun(socketPath, ca, cert, key, runId, 500)
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs

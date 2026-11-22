@@ -4,6 +4,7 @@ import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
+import { startDaemonRunEvents } from '../main/daemon-run-events'
 import { DaemonRunRuntime } from '../main/daemon-run-runtime'
 import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { upsertTraceArchiveTurn } from '../main/transcript-archive'
@@ -84,7 +85,8 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
     process.env.SCRY_ORCHESTRATION = 'on'
     let daemon = await startTestDaemon()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
-    const runtime = new DaemonRunRuntime({ transport, waitMs: 500, send: () => undefined })
+    const runtime = new DaemonRunRuntime({ transport, waitMs: 500, subscribeMode: true, send: () => undefined })
+    const events = startDaemonRunEvents({ transport, runtime, waitMs: 500, send: () => undefined })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     try {
       const first = await surface.start({
@@ -102,6 +104,13 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       const settled = sink.listEvents().find((event) => event.type === 'run.settled')
       expect(settled?.runId).toEqual(expect.any(String))
       expect(settled?.runId).not.toBe(first.runId)
+      const queried = await transport.subscribe({
+        views: ['activeRuns'], waitMs: 0, trackedRunIds: [settled!.runId!, randomUUID()]
+      })
+      expect(queried).toMatchObject({ mode: 'snapshot', snapshot: {
+        activeRuns: { rows: [{ runId: settled!.runId, lifecycle: 'settled' }] }
+      } })
+      expect(queried.hints).toBeUndefined()
       const nativeSessionId = runtime.runView(first.runId)?.externalSessionId
       expect(nativeSessionId).toEqual(expect.any(String))
       const assertSidebar = async (runId: string): Promise<void> => {
@@ -122,11 +131,13 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       await waitForSettlement(next.runId, 2)
       await assertSidebar(next.runId)
       expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+      events.dispose()
       runtime.dispose()
       await daemon.dispose()
       daemon = await startTestDaemon({ root: daemon.root })
       await assertSidebar(next.runId)
     } finally {
+      events.dispose()
       runtime.dispose()
       await daemon.dispose()
     }
@@ -185,7 +196,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       const netReply = await dispatchRemoteRequest(
         daemon.host.service.controller,
         'a'.repeat(64),
-        { protocol: 2, op: 'subscribe', views: ['activeRuns'], waitMs: 0 }
+        { protocol: 3, op: 'subscribe', views: ['activeRuns'], waitMs: 0 }
       )
       expect(netReply).toEqual({ error: 'unsupported_op' })
     } finally {
@@ -193,16 +204,16 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
     }
   }, 30_000)
 
-  it('omits subscribe capability and returns unsupported_op in off and shadow modes while keeping appEvents unchanged', async () => {
+  it('keeps the subscription authoritative when a former mode value is still set', async () => {
     for (const mode of ['off', 'shadow'] as const) {
       process.env.SCRY_ORCHESTRATION = mode
       const daemon = await startTestDaemon()
       try {
         const info = await daemon.request({ op: 'daemonInfo' })
-        expect(info.subscribe).toBeUndefined()
+        expect(info.subscribe).toBe(1)
 
         const sub = await daemon.request({ op: 'subscribe', views: ['activeRuns'], waitMs: 0 })
-        expect(sub).toEqual({ error: 'unsupported_op' })
+        expect(sub).toMatchObject({ subscribe: { mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } } })
 
         const feed = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
         expect(typeof feed.events?.epoch).toBe('string')
