@@ -7,7 +7,7 @@ import {
   type TurnDiffBaselineOrigin
 } from '../shared/trace.js'
 import {
-  beginGitTurnDiff,
+  beginAppGitTurnDiff,
   cancelGitTurnDiff,
   type GitTurnDiffCapture
 } from './git.js'
@@ -72,7 +72,7 @@ export class SessionDiffBaselineRegistry {
   private readonly active = new Set<SessionDiffBaseline>()
 
   constructor(
-    private readonly begin: (cwd: string) => Promise<GitTurnDiffCapture> = beginGitTurnDiff,
+    private readonly begin: (cwd: string) => Promise<GitTurnDiffCapture> = beginAppGitTurnDiff,
     private readonly cancel: (capture: GitTurnDiffCapture) => Promise<void> = cancelGitTurnDiff,
     /** 并行工作区观测，与基线同生命周期，不另建全局扫描。 */
     readonly workspace: WorkspaceOverlapTracker = new WorkspaceOverlapTracker()
