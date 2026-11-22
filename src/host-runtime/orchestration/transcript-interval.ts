@@ -68,6 +68,42 @@ async function hashRange(file: FileHandle, start: number, end: number, bytes?: B
   return hash.digest('hex')
 }
 
+// Without filesystem creation time, the first native timestamp is usable only
+// while observing the same file and within the previously captured extent.
+export async function transcriptStartsAfter(
+  source: TranscriptSource,
+  through: TranscriptExtent,
+  startedAt: bigint
+): Promise<boolean> {
+  if (through.inode <= 0n || through.mtimeNs <= startedAt || through.size === 0) return false
+  const file = await openTranscript(source)
+  if (!file) return false
+  try {
+    const observed = extent(await file.stat({ bigint: true }))
+    if (!observed || observed.device !== through.device || observed.inode !== through.inode || observed.size < through.size) {
+      return false
+    }
+    const buffer = Buffer.allocUnsafe(Math.min(16 * 1024, through.size))
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
+    const firstLine = buffer.subarray(0, bytesRead)
+    const lineEnd = firstLine.indexOf(0x0a)
+    if (lineEnd < 0) return false
+    let timestamp: unknown
+    try { timestamp = (JSON.parse(firstLine.toString('utf8', 0, lineEnd)) as { timestamp?: unknown } | null)?.timestamp }
+    catch (error) {
+      if (error instanceof SyntaxError) return false
+      throw error
+    }
+    if (typeof timestamp !== 'string') return false
+    const milliseconds = Date.parse(timestamp)
+    if (!Number.isFinite(milliseconds)) return false
+    const firstAt = BigInt(milliseconds) * 1_000_000n
+    return firstAt > startedAt && firstAt <= through.mtimeNs
+  } finally {
+    await file.close()
+  }
+}
+
 export async function captureTranscriptInterval(
   source: TranscriptSource,
   before?: TranscriptExtent,

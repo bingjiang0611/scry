@@ -34,6 +34,9 @@ import {
 
 import { checkWorkspaceCaptureLimits, WorkspaceReadUnavailable } from './git-workspace-limits.js'
 
+// Match contents of .scry directories at every depth, including the Git root.
+export const SCRY_DATA_EXCLUSION = ':(top,exclude,glob)**/.scry/**'
+
 export interface GitTurnDiffCapture {
   beforeAt: string
   captureMs: number
@@ -223,7 +226,7 @@ export async function beginGitTurnDiff(
     const readEnv = workspaceSnapshot ? { ...process.env, GIT_NO_LAZY_FETCH: '1' } : undefined
     // The recursive glob also matches the root .scry directory's contents.
     // Git add treats a literal excluded ignored directory as an explicit path.
-    const dataPathspec = options.excludeScryData ? [':(top,exclude,glob)**/.scry/**'] : []
+    const dataPathspec = options.excludeScryData ? [SCRY_DATA_EXCLUSION] : []
     // Layout 与 status 都只读同一仓库且彼此无依赖，并行启动。porcelain v2 的 branch.oid
     // 同时给出 HEAD；没有显式排除路径时，它还直接给出 baselineClean。这样常见路径只需
     // 一轮并行 Git 进程，不再串行执行 HEAD 与 status 两轮探测。

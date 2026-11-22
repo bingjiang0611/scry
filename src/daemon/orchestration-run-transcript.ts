@@ -4,7 +4,7 @@ import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import {
-  captureTranscriptInterval, readTranscriptExtent, type TranscriptExtent, type TranscriptSource
+  captureTranscriptInterval, readTranscriptExtent, transcriptStartsAfter, type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
 import { locateOwnedTranscript, verifiesNativeTranscript } from './orchestration-native-source'
 
@@ -85,15 +85,20 @@ export async function observeNativeRunTranscript(
       const through = await readTranscriptExtent(source)
       if (!through) { omit('source_removed'); return }
       const resumedHere = initial?.path === source.path && before !== undefined
-      if (!resumedHere && (resume === sessionId || through.birthtimeNs <= startedAt)) {
+      const needsTimestamp = !resumedHere && through.birthtimeNs === 0n
+      if (!resumedHere && (resume === sessionId || (!needsTimestamp && through.birthtimeNs <= startedAt))) {
         omit('transcript_frontier_unavailable')
         return
       }
       // Only the stat frontier needs to precede normal run settlement. Hashing
       // a bounded range can finish independently of the turn and its archive.
-      const capture = setImmediate().then(() => verifiesNativeTranscript(homeDir, cwd, source)).then((verified) => verified
-        ? captureTranscriptInterval(source, resumedHere ? before : undefined, through)
-        : unavailable<string>('transcript_identity_unavailable'))
+      const capture = setImmediate().then(async () => {
+        if (!await verifiesNativeTranscript(homeDir, cwd, source)) return unavailable<string>('transcript_identity_unavailable')
+        if (needsTimestamp && !await transcriptStartsAfter(source, through, startedAt)) {
+          return unavailable<string>('transcript_frontier_unavailable')
+        }
+        return captureTranscriptInterval(source, resumedHere ? before : undefined, through)
+      })
       save(capture.then(
         (transcript) => {
           // The bytes are proven. An external writer could have appended in the
