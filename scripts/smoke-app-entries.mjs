@@ -77,12 +77,15 @@ export function writeFileOpenEntry(entryPath, receiptPath) {
   writeEntryPackage(entryPath)
   writeFileSync(entryPath, `
     import { app, shell } from 'electron'
-    import { writeFileSync } from 'node:fs'
+    import { renameSync, writeFileSync } from 'node:fs'
     app.setAppPath(${JSON.stringify(repoRoot)})
     const opened = []
+    const receipt = ${JSON.stringify(receiptPath)}
     shell.openPath = async (path) => {
       opened.push(path)
-      writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify(opened))
+      // The driver reads this file from a separate process while we write it.
+      writeFileSync(receipt + '.next', JSON.stringify(opened))
+      renameSync(receipt + '.next', receipt)
       return path.endsWith('/fail.custom') ? 'fixture: no application associated' : ''
     }
     await import(${productionMain()})
