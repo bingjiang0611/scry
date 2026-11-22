@@ -143,7 +143,7 @@ export function fixtureTransport(options) {
     if (context.cwd !== (state.workspaceExecutionCwd ?? '/fixture/project-a')) throw new Error('fixture trace context mismatch: ' + context.cwd)
     if (runId === firstScryRun && state.firstIntentCleared) throw new Error('terminal trace unavailable')
     if (runId === firstScryRun) return activeRun(firstScryRun, 'native-session', 'first remote run', question)
-    if (runId === secondScryRun) return activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
+    if (runId === secondScryRun) return state.hideSecondTrace ? null : activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
     if (runId === 'run-hostui-1') {
       if (state.holdOpeningTrace) await new Promise(resolve => { window.releaseOpeningTrace = resolve })
       return activeRun('run-hostui-1', 'old-native', 'host ui continue')

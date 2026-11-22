@@ -146,7 +146,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           setForeignRun(keepIfEqual(live))
           if ((followed && live?.runId !== followed.runId) || (immediate && sessionActive && !live)) {
             // The run can finish between the opening history read and the live lookup.
-            setHistoryLoading(true)
             setHistoryRevision((revision) => revision + 1)
             void refreshRemoteCatalog(connectionId)
           }
@@ -210,7 +209,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         // Terminal status retires the main-process receipt. Refresh history even
         // if the last trace read fails, before the next poll drops that receipt.
         if (nextStatus.state === 'settled' || nextStatus.state === 'failed') {
-          if (sessionId) setHistoryLoading(true)
           setHistoryRevision((revision) => revision + 1)
           void refreshRemoteCatalog(connectionId)
         }
