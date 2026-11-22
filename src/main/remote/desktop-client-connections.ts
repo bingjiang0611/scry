@@ -1,9 +1,8 @@
 import type { DesktopRemoteCatalog, DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
 import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
-import { DesktopStatusSubscription } from './desktop-client-subscription'
 import { validateInfo } from './desktop-client-capabilities'
-import { readRemoteSessionPages } from './desktop-client-session-catalog'
+import { DesktopStatusSubscription, readRemoteSessionPages } from './desktop-client-session-catalog'
 
 export abstract class DesktopRemoteClientConnections extends DesktopRemoteClientBase {
   async list(): Promise<DesktopRemoteConnection[]> {

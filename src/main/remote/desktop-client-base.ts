@@ -9,8 +9,8 @@ import { DESKTOP_ATTACHMENT_CHUNK_BYTES, attachmentSha256, newAttachmentId, norm
 import { context, fail, record, text, uuid, hash, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
 import type { DesktopCapabilities } from './desktop-client-capabilities'
 import { isUnknownFailure, targetBinding } from './desktop-client-intent-rules'
-import type { DesktopDetailSubscription } from './desktop-client-detail-subscription'
-import type { DesktopStatusSubscription } from './desktop-client-subscription'
+import type { DesktopDetailSubscription } from './desktop-client-history'
+import type { DesktopStatusSubscription } from './desktop-client-session-catalog'
 import type { RemoteAttentionTracker } from './remote-attention'
 
 function desktopSshRequestError(error: unknown, tunnel: DesktopSshTunnel | undefined, failureSequence: number): unknown {
