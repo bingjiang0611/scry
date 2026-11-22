@@ -105,3 +105,7 @@ Provider 菜单只显示 Antigravity 名称，不把未知的账号标识当成�
 ## 新建会话不等目录刷新（2026-11-21）
 
 空会话在本机确认重置后即可发送，命令和技能目录随后刷新；打开已有会话仍等历史确认。Electron loading smoke 暂停目录刷新，验证新会话的发送按钮已可用。
+
+## 新建 Worktree 准备进度卡（2026-11-21）
+
+首次发送选择「新建 worktree」时，本地桌面与远程桌面统一在对话流内嵌 `WorktreeSetupCard`（准备工作区 → 检出文件 → 可折叠详情 + 取消按钮），并把底部输入框切为等待态。进度条严格消费 `git worktree add`（配合 `GIT_PROGRESS_DELAY=0`）的真实 stderr 输出，未收到百分比前显示不确定态而不伪造数字；取消仅在 Provider 接管前可用，并由宿主核验清理临时 worktree 与新建分支。暂不提供一键改用当前工作区，避免跨分支/脏工作区误发。验证：`npm run design:audit`、设计系统/动效/圆角守卫、`ui-contract-check.mjs`、`WorktreeSetupCard` 渲染测试、真实 Git `workspace-start` 进度与取消清理测试、远程 `remote-run-binding` 与 `DesktopRemoteClient` 进度投影测试。

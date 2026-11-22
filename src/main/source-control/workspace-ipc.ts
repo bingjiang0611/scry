@@ -42,4 +42,10 @@ export function registerWorkspaceSelectionIpc(
     const input = object(request)
     return service.validateWorkspaceBranch({ repositoryId: hash(input.repositoryId), name: text(input.name, 240) })
   })
+  handle('workspaceSelection:cancelStart', (_event, request) => {
+    const input = object(request)
+    const operationId = text(input.operationId, 36)
+    if (!operationIdPattern.test(operationId)) throw new Error('无效准备操作标识')
+    return service.cancelWorkspaceStart({ repositoryId: hash(input.repositoryId), operationId })
+  })
 }

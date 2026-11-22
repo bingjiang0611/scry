@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { WorkspaceBranchChoice, WorkspaceBranchRef, WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceIntent, WorkspaceStartStatus, WorkspaceWorktreeChoice } from '@shared/workspace-selection'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { WorkspaceBranchChoice, WorkspaceBranchRef, WorkspaceChoices, WorkspaceChoicesRequest, WorkspaceIntent, WorkspacePrepareProgress, WorkspaceStartStatus, WorkspaceWorktreeChoice } from '@shared/workspace-selection'
 import type { ScRead } from '@shared/source-control'
 import type { ComposerDraftStore } from '../composer-drafts'
 import { updateSessionComposerDraft } from '../app-model'
 import { workspaceCopy as copy } from '../constants/workspace-copy'
 import { workspaceSendLabel } from '../workspace-drafts'
+import type { WorkspaceSetupState } from '../components/chat-view/types'
 
 type Menu = 'workspace' | 'refs'
 interface Editor {
@@ -18,15 +19,17 @@ export interface WorkspaceSelectionBackend {
   read: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
   validateBranch: (request: { repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
   inspectStart?: (request: { repositoryId: string; operationId: string }) => Promise<ScRead<WorkspaceStartStatus | null>>
+  cancelStart?: (request: { repositoryId: string; operationId: string }) => Promise<boolean>
 }
 
-export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, active, busy, selectionEpoch, backend }: {
+export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, active, busy, starting = false, selectionEpoch, backend }: {
   cwd: string | null
   draftKey: string
   draftStore: ComposerDraftStore
   editable: boolean
   active: boolean
   busy: boolean
+  starting?: boolean
   selectionEpoch: number
   backend?: WorkspaceSelectionBackend
 }) {
@@ -60,6 +63,23 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
   const [inspection, setInspection] = useState<{ key: string; value: ScRead<WorkspaceStartStatus | null> }>()
   const inspected = inspection && inspection.key === statusKey ? inspection.value : undefined
   const operation = inspected?.status === 'available' ? inspected.data : undefined
+  const [liveProgress, setLiveProgress] = useState<WorkspacePrepareProgress | null>(null)
+  const [cancellingOperationId, setCancellingOperationId] = useState<string | null>(null)
+  const activeOperationId = selection && !('invalid' in selection) ? selection.operationId : null
+
+  useEffect(() => {
+    if (!active || backend || typeof window === 'undefined' || typeof window.scry?.onWorkspaceProgress !== 'function') return
+    return window.scry.onWorkspaceProgress((progress) => {
+      setLiveProgress(progress)
+    })
+  }, [active, backend])
+
+  useEffect(() => {
+    if (!starting) {
+      setCancellingOperationId(null)
+      setLiveProgress(current => (current && current.operationId === activeOperationId ? null : current))
+    }
+  }, [starting, activeOperationId])
 
   useEffect(() => {
     const sequence = ++readSequence.current
@@ -179,6 +199,42 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
     await apply({ repositoryId: choices.repositoryId, expectedRevision: choices.revision, kind: 'existingWorktree', worktreeId: tree.id })
   }
 
+  const workspaceSetup = useMemo<WorkspaceSetupState | null>(() => {
+    if (!editable || !starting || !selection || 'invalid' in selection || selection.intent.kind !== 'newWorktree') return null
+    const { operationId, intent: newIntent } = selection
+    const current = liveProgress?.operationId === operationId ? liveProgress : null
+    if (current && ['completed', 'cancelled', 'failed'].includes(current.stage)) return null
+    const progress: WorkspacePrepareProgress = current ?? {
+      operationId,
+      repositoryId: newIntent.repositoryId,
+      stage: 'preparing',
+      workspacePrepared: false,
+      cancellable: true,
+      details: [],
+      branch: newIntent.newBranch,
+      baseRef: newIntent.base.name.replace(/^refs\/(heads|remotes)\//, ''),
+      updatedAt: Date.now()
+    }
+    const cancelFn = backend?.cancelStart ?? (typeof window !== 'undefined' ? window.scry?.workspaceSelection?.cancelStart : undefined)
+    const cancelling = cancellingOperationId === operationId
+    return {
+      progress,
+      cancelling,
+      ...(cancelFn ? {
+        onCancel: () => {
+          setCancellingOperationId(operationId)
+          void cancelFn({ repositoryId: newIntent.repositoryId, operationId })
+            .then((accepted) => {
+              if (!accepted) setCancellingOperationId(currentId => currentId === operationId ? null : currentId)
+            })
+            .catch(() => {
+              setCancellingOperationId(currentId => currentId === operationId ? null : currentId)
+            })
+        }
+      } : {})
+    }
+  }, [backend?.cancelStart, cancellingOperationId, editable, liveProgress, selection, starting])
+
   return {
     sendLabel: workspaceSendLabel(selection, metadata), selection, editor, open, close, show: (menu: Menu) => {
       if (canChange) { setEditor({ key, menu, query: '' }); setError(undefined); setOpenKey(key) }
@@ -187,7 +243,7 @@ export function useWorkspaceSelection({ cwd, draftKey, draftStore, editable, act
     refresh: () => { changeEditor({ cursor: undefined }); setRefreshKey(value => value + 1) },
     nextPage: () => { if (choices?.nextCursor) changeEditor({ cursor: choices.nextCursor }) },
     firstPage: () => changeEditor({ cursor: undefined }), chooseNewWorktree, chooseBranch, chooseWorktree, reset, inspect, operation,
-    blockedReason, canChange, busy, editable
+    blockedReason, canChange, busy, editable, workspaceSetup
   }
 }
 

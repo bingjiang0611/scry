@@ -1,0 +1,245 @@
+.worktree-setup {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.worktree-setup-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
+
+.worktree-setup-heading .ico {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.worktree-setup-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--fg);
+}
+
+.worktree-setup-steps {
+  display: grid;
+  gap: 12px;
+}
+
+.worktree-setup-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
+
+.worktree-setup-step.is-done,
+.worktree-setup-step.is-active {
+  color: var(--accent);
+}
+
+.worktree-setup-step.is-pending {
+  color: var(--dim);
+  font-weight: var(--weight-regular);
+}
+
+.worktree-setup-step-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-setup-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  corner-shape: round;
+}
+
+.worktree-setup-step-icon.is-done {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.worktree-setup-step-icon.is-done .ico {
+  width: 10px;
+  height: 10px;
+}
+
+.worktree-setup-step-icon.is-pending {
+  border: 1px solid var(--border2);
+}
+
+.worktree-setup-spinner {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  corner-shape: round;
+  animation: worktree-setup-spin 0.9s linear infinite;
+}
+
+.worktree-setup-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.worktree-setup-track {
+  position: relative;
+  width: 120px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  corner-shape: round;
+  background: var(--accent-soft);
+}
+
+.worktree-setup-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-pill);
+  corner-shape: round;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform var(--duration-md) var(--ease-out);
+}
+
+.worktree-setup-track.is-indeterminate .worktree-setup-fill {
+  width: 44%;
+  transform: translateX(-100%);
+  transition: none;
+  animation: worktree-setup-indeterminate 1.2s ease-in-out infinite;
+}
+
+.worktree-setup-percent {
+  min-width: 36px;
+  text-align: right;
+  color: var(--dim);
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.worktree-setup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.worktree-setup-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+  transition: background var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
+}
+
+.worktree-setup-details-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.worktree-setup-details-toggle:focus-visible {
+  outline: 2px solid var(--selected);
+  outline-offset: 2px;
+}
+
+.worktree-setup-details-toggle .ico {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.worktree-setup-cancel {
+  color: var(--dim);
+}
+
+.worktree-setup-details {
+  padding: 12px;
+  border: 1px solid var(--border3);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+
+.worktree-setup-detail-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.worktree-setup-detail-list li {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.worktree-setup-detail-empty {
+  margin: 0;
+  line-height: 1.5;
+}
+
+@keyframes worktree-setup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes worktree-setup-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .worktree-setup-spinner,
+  .worktree-setup-track.is-indeterminate .worktree-setup-fill {
+    animation: none;
+  }
+  .worktree-setup-track.is-indeterminate .worktree-setup-fill {
+    width: 100%;
+    transform: scaleX(0.35);
+    opacity: 0.65;
+  }
+}

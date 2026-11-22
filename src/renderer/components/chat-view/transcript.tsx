@@ -2,10 +2,11 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { Turn } from '../../format'
 import { transcriptGrowthAboveEdge } from '../../chat-scroll'
 import { AssistantTurn, UserMessage } from '../ChatTurn'
+import { WorktreeSetupCard } from '../WorktreeSetupCard'
 import type { ChatViewProps } from './types'
 
 type TranscriptProps = Pick<ChatViewProps, 'turns' | 'selectedId' | 'focusedTurnRunId' | 'onTurnRef' | 'onSelect' |
-  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion'> & {
+  'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'pendingQuestions' | 'onAnswerQuestion' | 'workspaceSetup'> & {
   remote?: boolean
   liveRunId?: string | null
   completedLiveRunId?: string | null
@@ -74,7 +75,7 @@ export const ChatTranscriptTurns = memo(function ChatTranscriptTurns({ turns, fo
 const TranscriptTurn = memo(function TranscriptTurn({
   turn, index, total, windowed, initiallyVisible, focused, observeVisibility, observeSelection,
   selectedId, onTurnRef, onSelect, onOpenDiff, onForkTurn, forkableRunIds, pendingQuestions = [], onAnswerQuestion, remote = false,
-  liveRunId, completedLiveRunId, liveArrivalResetKey
+  liveRunId, completedLiveRunId, liveArrivalResetKey, workspaceSetup
 }: Omit<TranscriptProps, 'turns' | 'focusedTurnRunId'> & {
   turn: Turn; index: number; total: number; windowed: boolean; initiallyVisible: boolean; focused: boolean
   observeVisibility: (element: HTMLElement, callback: (intersecting: boolean) => void) => () => void
@@ -178,10 +179,18 @@ const TranscriptTurn = memo(function TranscriptTurn({
   >
     {mounted && <>
       <UserMessage text={turn.userText} attachments={turn.attachments} />
-      <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
-        onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
-        liveArrivalEligible={turn.runId === liveRunId}
-        footerArrivalEligible={turn.runId === liveRunId || turn.runId === completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
+      {turn.pendingStart && workspaceSetup ? (
+        <WorktreeSetupCard
+          progress={workspaceSetup.progress}
+          cancelling={workspaceSetup.cancelling}
+          onCancel={workspaceSetup.onCancel}
+        />
+      ) : (
+        <AssistantTurn turn={turn} selectedId={selectedId} onSelect={onSelect} onOpenDiff={onOpenDiff}
+          onForkTurn={!forkableRunIds || forkableRunIds.has(turn.runId) ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
+          liveArrivalEligible={turn.runId === liveRunId}
+          footerArrivalEligible={turn.runId === liveRunId || turn.runId === completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
+      )}
     </>}
   </div>
 })

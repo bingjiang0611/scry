@@ -16,6 +16,7 @@ export interface AppChatPropsContext {
   workspaceContext?: ReactNode
   workspaceSendLabel?: string
   workspaceBlockedReason?: string
+  workspaceSetup?: import('./components/chat-view/types').WorkspaceSetupState | null
   draftKey: string
   session: ReturnType<typeof useAgentSession>
   scrollRef: RefObject<HTMLDivElement>
@@ -79,7 +80,7 @@ export interface AppChatPropsContext {
 }
 
 export function createAppChatProps(context: AppChatPropsContext): ComponentProps<typeof SessionChatView> {
-  const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
+  const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, workspaceSetup, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
     composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason,
     providerCompatibilityIssue, sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability,
     steerEvidenceByMessageId, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
@@ -107,7 +108,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     runControlCatalog: integrations.runControlCatalog,
     runControlsLoading: integrations.runControlsLoading,
     runControlsReason: integrations.runControlCapability?.reason,
-    workspaceContext, workspaceSendLabel,
+    workspaceContext, workspaceSendLabel, workspaceSetup,
     sendBlockedReason: sendBlockedReason ?? workspaceBlockedReason,
     showSendBlockedReason: sessionWorkspaceMissing,
     composerError,

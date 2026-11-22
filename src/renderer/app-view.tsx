@@ -84,7 +84,8 @@ export function useAppView(context: AppViewContext) {
     cwd: workspaceCwd, draftKey, draftStore, selectionEpoch: sessionSelectionSeqRef.current,
     editable: view === 'chat' && !activeSessionId,
     active: view === 'chat' || view === 'conversation',
-    busy: sessionLoading || composerSubmitting || session.busy
+    busy: sessionLoading || composerSubmitting || session.busy,
+    starting: composerSubmitting
   })
   const sessionUsesWorktree = view === 'chat' && activeSessionId != null && projects.some(project =>
     project.sessions.some(candidate => candidate.cwd === workspaceCwd && candidate.cwd !== project.cwd &&
@@ -340,6 +341,7 @@ export function useAppView(context: AppViewContext) {
     workspaceContext,
     workspaceSendLabel: workspaceSelection.sendLabel,
     workspaceBlockedReason: workspaceSelection.blockedReason,
+    workspaceSetup: workspaceSelection.workspaceSetup,
     openLlmPerformance,
     openSkills,
     openMcp,

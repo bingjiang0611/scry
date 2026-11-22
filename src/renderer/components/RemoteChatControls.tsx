@@ -12,6 +12,8 @@ import type { FoundationState } from './RemoteChatFoundation'
 import type { RemoteChatProps } from './RemoteChat'
 import { errorText, followedLiveRunId, intentMatches, keepIfEqual, POLL_MS, QUIET_POLL_MAX_MS, remoteDraftKey } from './RemoteChatShared'
 import { createTraceReadScheduler } from './trace-read-scheduler'
+import { updateSessionComposerDraft } from '../app-model'
+import { attachmentsAfterFailedSubmit, inputAfterFailedSubmit } from '../app-model'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
 // ChatView as local sessions; only the controller differs. The host owns Provider
@@ -22,7 +24,7 @@ import { createTraceReadScheduler } from './trace-read-scheduler'
 export type ControlsState = ReturnType<typeof useRemoteChatControls>
 
 export function useRemoteChatControls(foundation: FoundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted }: Pick<RemoteChatProps, 'connectionId' | 'cwd' | 'draftStore' | 'queueStore' | 'onSessionAdopted'>) {
-  const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey } = foundation
+  const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setError, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey, pendingWorktreeRef, setPendingWorktree, releaseAttachments } = foundation
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
   // Initialize once per execution context. Refresh validates rather than silently
@@ -137,6 +139,10 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         setIntents(keepIfEqual(pending))
         if (!activeIntent?.runId) {
           setRunStatus(null)
+          if (pendingWorktreeRef.current?.runId) {
+            releaseAttachments(pendingWorktreeRef.current.attachments)
+            setPendingWorktree(null)
+          }
           // Runs started on the host UI, a phone or another desktop leave no
           // receipt here. Ask only while the catalog marks this session active,
           // or to observe the end of a run already being followed.
@@ -180,6 +186,30 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         if (nextStatus.state === 'settled' || nextStatus.state === 'failed') queueStore.settle(boundQueueKey, activeIntent.intentId)
         if (cancelled || sequence !== pollSequence.current) return
         setRunStatus(keepIfEqual<(DesktopRemoteRunStatus & { runId: string }) | null>({ ...nextStatus, runId: activeIntent.runId }))
+        const pendingWorktree = pendingWorktreeRef.current
+        if (pendingWorktree && (!pendingWorktree.runId || pendingWorktree.runId === activeIntent.runId)) {
+          const wpStage = nextStatus.workspaceProgress?.stage
+          if (nextStatus.state === 'failed' || wpStage === 'cancelled' || wpStage === 'failed') {
+            if (!nextStatus.externalSessionId && !traceViewRef.current) {
+              const restoredSelection = { ...pendingWorktree.workspace, operationId: crypto.randomUUID() }
+              draftStore.update(current => updateSessionComposerDraft(current, pendingWorktree.draftKey, draft => ({
+                ...draft,
+                input: inputAfterFailedSubmit(draft.input, pendingWorktree.prompt),
+                attachments: attachmentsAfterFailedSubmit(draft.attachments, pendingWorktree.attachments),
+                workspace: draft.workspace ?? restoredSelection
+              })))
+              if (!pendingWorktree.cancelling && wpStage !== 'cancelled') {
+                setError(nextStatus.workspaceProgress?.message ?? nextStatus.detail ?? '创建 worktree 失败')
+              }
+            } else {
+              releaseAttachments(pendingWorktree.attachments)
+            }
+            setPendingWorktree(null)
+          } else if (nextStatus.state === 'settled' || wpStage === 'completed' || Boolean(nextStatus.externalSessionId)) {
+            releaseAttachments(pendingWorktree.attachments)
+            setPendingWorktree(null)
+          }
+        }
         if (nextStatus.externalSessionId && !context.externalSessionId && !activeIntent.context.externalSessionId) {
           adoptedIntent.current = activeIntent
           adoptingSession.current = true

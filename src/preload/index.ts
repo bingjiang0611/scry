@@ -175,7 +175,8 @@ const api = {
   workspaceSelection: {
     read: request => ipcRenderer.invoke('workspaceSelection:read', request),
     inspectStart: request => ipcRenderer.invoke('workspaceSelection:inspectStart', request),
-    validateBranch: request => ipcRenderer.invoke('workspaceSelection:validateBranch', request)
+    validateBranch: request => ipcRenderer.invoke('workspaceSelection:validateBranch', request),
+    cancelStart: request => ipcRenderer.invoke('workspaceSelection:cancelStart', request)
   } satisfies WorkspaceSelectionApi,
   conversations: conversationsApi,
   workspaceList: (request: WorkspaceListRequest): Promise<WorkspaceListResult> => ipcRenderer.invoke('workspace:list', request),

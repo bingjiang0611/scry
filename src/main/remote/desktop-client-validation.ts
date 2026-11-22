@@ -1,5 +1,6 @@
 import { createHash, X509Certificate as NodeCertificate } from 'node:crypto'
 import { isRemoteProviderObservationTime, isRemoteSessionOutcome, type DesktopHostInvitation, type DesktopRemoteConnection, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopSshTarget, type RemoteProviderRef, type RemoteProjectRef, type RemoteSessionRef } from '../../shared/desktop-remote'
+import type { WorkspaceCheckoutProgress, WorkspacePrepareProgress, WorkspacePrepareStage } from '../../shared/workspace-selection'
 import { type DesktopAttachmentCapability } from './desktop-attachments'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { TraceEvent } from '../../shared/trace'
@@ -61,8 +62,52 @@ export interface RunStatusCursor {
   externalSessionId?: string
   // The run's own cwd (a worktree start runs outside the submitted project).
   cwd?: string
+  // Live worktree preparation progress emitted by the host before admission.
+  workspaceProgress?: WorkspacePrepareProgress
   // Last lifecycle state handed back to the caller, for change detection.
   state?: string
+}
+
+const WORKSPACE_PREPARE_STAGES: ReadonlySet<string> = new Set([
+  'preparing', 'checking_out', 'verifying', 'cancelling', 'cancelled', 'completed', 'failed'
+])
+
+export function parseWorkspacePrepareProgress(value: unknown): WorkspacePrepareProgress | undefined {
+  if (!record(value)) return undefined
+  if (!text(value.operationId, 64) || !hash(value.repositoryId)) return undefined
+  if (typeof value.stage !== 'string' || !WORKSPACE_PREPARE_STAGES.has(value.stage)) return undefined
+  if (typeof value.workspacePrepared !== 'boolean' || typeof value.cancellable !== 'boolean') return undefined
+  if (!Number.isFinite(value.updatedAt)) return undefined
+  let checkout: WorkspaceCheckoutProgress | undefined
+  if (value.checkout !== undefined) {
+    if (!record(value.checkout)) return undefined
+    const { completed, total, percent } = value.checkout
+    if (
+      typeof completed !== 'number' || !Number.isSafeInteger(completed) || completed < 0 ||
+      typeof total !== 'number' || !Number.isSafeInteger(total) || total <= 0 || completed > total ||
+      typeof percent !== 'number' || !Number.isSafeInteger(percent) || percent < 0 || percent > 100
+    ) return undefined
+    checkout = { completed, total, percent }
+  }
+  const details: string[] = []
+  if (Array.isArray(value.details)) {
+    for (const entry of value.details.slice(-40)) {
+      if (typeof entry === 'string' && !entry.includes('\0')) details.push(entry.slice(0, 300))
+    }
+  }
+  return {
+    operationId: value.operationId,
+    repositoryId: value.repositoryId,
+    stage: value.stage as WorkspacePrepareStage,
+    workspacePrepared: value.workspacePrepared,
+    ...(checkout ? { checkout } : {}),
+    cancellable: value.cancellable,
+    details,
+    ...(text(value.branch, 256) ? { branch: value.branch } : {}),
+    ...(text(value.baseRef, 256) ? { baseRef: value.baseRef } : {}),
+    ...(text(value.message, 512) ? { message: value.message } : {}),
+    updatedAt: Number(value.updatedAt)
+  }
 }
 
 export function fail(code: string): never { throw new Error(code) }

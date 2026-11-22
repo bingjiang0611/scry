@@ -3,6 +3,8 @@ import type { AgentQuestionRequest } from '@shared/runtime'
 import { ChatTranscriptTurns } from './chat-view/transcript'
 import { Composer } from './chat-view/Composer'
 import type { ChatViewProps, SessionChatViewProps } from './chat-view/types'
+import { UserMessage } from './ChatTurn'
+import { WorktreeSetupCard } from './WorktreeSetupCard'
 import { Icon } from './primitives/Icon'
 import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
@@ -52,12 +54,14 @@ export function ChatView(props: ChatViewProps) {
     forkableRunIds,
     onOpenFile,
     onAnswerQuestion,
+    workspaceSetup = null,
     remoteHost
   } = props
   const remote = remoteHost != null
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
   // Only the selected session's turns or its own display cache may be rendered.
   const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : NO_TURNS
+  const hasPendingTurnForSetup = Boolean(workspaceSetup && displayedTurns.some(turn => turn.pendingStart))
   const ownerReady = !sessionLoading && !sessionCacheVisible
   const transcriptLoading = sessionLoading || (transcriptPending && displayedTurns.length === 0)
   const liveRunId = ownerReady && busy ? turns.find(turn => !turn.done && !turn.error)?.runId ?? null : null
@@ -99,7 +103,7 @@ export function ChatView(props: ChatViewProps) {
                   <span>{remote ? `会话已选中；正在等待 ${remoteHost} 的归档或运行事件，不会将它当作新会话。` : '会话已选中；正在等待本机归档或运行事件，不会将它当作新会话。'}</span>
                 </div>
             )}
-            {turns.length === 0 && !transcriptLoading && !sessionEvidenceGap && !hasSelectedSession && (
+            {turns.length === 0 && !workspaceSetup && !transcriptLoading && !sessionEvidenceGap && !hasSelectedSession && (
               <div className={`unbound-empty welcome-field ${cwd ? 'bound' : ''}`}>
                 <header className="welcome-heading welcome-heading-minimal"><span className="welcome-hero-icon" aria-hidden="true"><Icon name="terminal" /></span><h1 className="zh-balanced-heading" lang="zh-CN"><ChineseHeadingText>{workspaceName ? <>今天想在 <span>{workspaceName}</span> 中构建什么？</> : '今天想构建什么？'}</ChineseHeadingText></h1></header>
               </div>
@@ -124,7 +128,19 @@ export function ChatView(props: ChatViewProps) {
             )}
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
-                liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} />
+                liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} workspaceSetup={workspaceSetup} />
+              {workspaceSetup && !hasPendingTurnForSetup && (
+                <div className="turn transcript-turn worktree-setup-turn" role="article">
+                  {(workspaceSetup.prompt || (workspaceSetup.attachments && workspaceSetup.attachments.length > 0)) && (
+                    <UserMessage text={workspaceSetup.prompt ?? ''} attachments={workspaceSetup.attachments} />
+                  )}
+                  <WorktreeSetupCard
+                    progress={workspaceSetup.progress}
+                    cancelling={workspaceSetup.cancelling}
+                    onCancel={workspaceSetup.onCancel}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

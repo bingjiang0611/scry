@@ -209,7 +209,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
   const chatProps = createAppChatProps({
-    workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason,
+    workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
     sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
     sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,

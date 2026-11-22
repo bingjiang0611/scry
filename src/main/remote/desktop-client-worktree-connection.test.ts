@@ -107,4 +107,66 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
       await expect(fixture.client.pair({ label: 'bad', ssh, invitation: malformed })).rejects.toThrow('invalid_certificate')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
+
+  it('projects host workspaceProgress markers onto runStatus and marks completed on admitted', async () => {
+    const fixture = await setup({ managedWorktrees: true })
+    try {
+      const pending = await fixture.client.pair({ label: 'Progress', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const runId = randomUUID()
+      const operationId = randomUUID()
+      fixture.tlsRequest.mockResolvedValueOnce({
+        watch: {
+          state: 'dispatched',
+          poll: {
+            cursor: 1,
+            events: [{
+              runId,
+              kind: 'run_progress',
+              detail: JSON.stringify({
+                event: 'workspaceProgress',
+                progress: {
+                  operationId,
+                  repositoryId: 'a'.repeat(64),
+                  stage: 'checking_out',
+                  workspacePrepared: true,
+                  checkout: { completed: 32, total: 64, percent: 50 },
+                  cancellable: true,
+                  details: ['工作区元数据已创建'],
+                  branch: 'scry/remote-1',
+                  baseRef: 'main',
+                  updatedAt: 1234
+                }
+              })
+            }]
+          }
+        }
+      })
+      const mid = await fixture.client.runStatus(id, runId)
+      expect(mid.workspaceProgress).toMatchObject({
+        operationId,
+        stage: 'checking_out',
+        workspacePrepared: true,
+        checkout: { completed: 32, total: 64, percent: 50 },
+        cancellable: true
+      })
+      fixture.tlsRequest.mockResolvedValueOnce({
+        watch: {
+          state: 'dispatched',
+          poll: {
+            cursor: 2,
+            events: [{
+              runId,
+              kind: 'run_progress',
+              detail: JSON.stringify({ event: 'admitted', ledgerRunId: runId, scryRunId: 'remote-run-1-0' })
+            }]
+          }
+        }
+      })
+      const admitted = await fixture.client.runStatus(id, runId)
+      expect(admitted.workspaceProgress).toMatchObject({ stage: 'completed', cancellable: false })
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
 })

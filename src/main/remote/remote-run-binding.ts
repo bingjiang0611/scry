@@ -2,6 +2,7 @@ import type { ProviderRunHandle, ProviderRunRequest } from '../providers/types'
 import type { RemoteIntentRouting } from './host-controller'
 import type { TraceEvent } from '../../shared/trace'
 import type { AgentInputAttachment, AgentQuestionRequest, AgentQuestionResponse, AgentStartRequest } from '../../shared/runtime'
+import type { WorkspacePrepareProgress } from '../../shared/workspace-selection'
 import { traceEventToOutputChunk } from './trace-output'
 import { startLegacyRemoteRun } from './remote-run-binding-legacy'
 import { claimConversationLaunch, type ConversationRunMarker, type ManagedLaunch } from './managed-launches'
@@ -68,6 +69,7 @@ export interface RemoteRunBindingDependencies<M extends ConversationRunMarker = 
     onTraceEvent(event: TraceEvent): void
     onSession?(externalSessionId: string): void
     onRegistered?(info: { cwd: string }): void
+    onWorkspaceProgress?(progress: WorkspacePrepareProgress): void
     permissionModeOverride?: AgentStartRequest['permissionMode']
     // The verified submitter's scope, forwarded so the pipeline can take the App's
     // path for a local grant instead of inferring it from `origin`.
@@ -213,6 +215,20 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
     }
     progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd: routing.cwd }))
     if (resume) progress(marker({ event: 'session', externalSessionId: resume, resumed: true }))
+    let lastWorkspaceProgressStage: WorkspacePrepareProgress['stage'] | undefined
+    let lastWorkspaceProgressAt = 0
+    let lastWorkspaceProgressPercent = -1
+    const onWorkspaceProgress = (snapshot: WorkspacePrepareProgress): void => {
+      const now = Date.now()
+      const stageChanged = snapshot.stage !== lastWorkspaceProgressStage
+      const percent = snapshot.checkout?.percent ?? -1
+      const finishedCheckout = percent >= 100 && lastWorkspaceProgressPercent < 100
+      if (!stageChanged && !finishedCheckout && (percent === lastWorkspaceProgressPercent || now - lastWorkspaceProgressAt < 200)) return
+      lastWorkspaceProgressStage = snapshot.stage
+      lastWorkspaceProgressAt = now
+      lastWorkspaceProgressPercent = percent
+      progress(marker({ event: 'workspaceProgress', progress: snapshot }))
+    }
     try {
       const completion = await deps.startAppRun!({
         runId: scryRunId,
@@ -257,6 +273,7 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
         onRegistered: ({ cwd }) => {
           if (cwd !== routing.cwd) progress(marker({ event: 'bound', ledgerRunId, scryRunId, providerId: routing.providerId, cwd }))
         },
+        ...(routing.workspace ? { onWorkspaceProgress } : {}),
         permissionModeOverride: grantScope === 'local' ? undefined : deps.permissionModeOverride,
         ...(grantScope ? { grantScope } : {})
       })

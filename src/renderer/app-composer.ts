@@ -16,6 +16,7 @@ import { attachmentsAfterSuccessfulSubmit, fileToDraftAttachment, clipboardAttac
 import { requestDockBadgePermission } from './dock-badge-permission'
 import { useAppPromptStart } from './hooks/useAppPromptStart'
 import { ipcErrorMessage } from './constants/ipc-error-copy'
+import { isWorkspaceStartCancelledError } from '@shared/workspace-selection'
 
 export interface AppComposerContext {
   view: 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
@@ -316,7 +317,7 @@ export function useAppComposer(context: AppComposerContext) {
       // overwriting anything the user typed or pasted while main was starting the Provider.
       setInput((current) => inputAfterFailedSubmit(current, originalInput))
       setDraftAttachments((current) => attachmentsAfterFailedSubmit(current, submittedAttachments))
-      setComposerError(ipcErrorMessage(error))
+      if (!isWorkspaceStartCancelledError(error)) setComposerError(ipcErrorMessage(error))
     } finally {
       draftStartPendingRef.current = false
       setComposerSubmitting(false)
