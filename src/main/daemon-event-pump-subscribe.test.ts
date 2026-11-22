@@ -11,14 +11,13 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const shutdown = new AbortController()
     let focus = new AbortController()
     let sessionKey: string | null = null
-    const setLive = vi.fn()
+    const backoff = vi.fn(async () => undefined)
     const loop = runSubscribeLoop({
       detailFocus: () => ({ sessionKey, signal: focus.signal }),
       signal: shutdown.signal,
       retry: { initialMs: 1, maxMs: 1 },
       waitMs: 1000,
-      sleep: vi.fn(async () => undefined),
-      setLive,
+      sleep: backoff,
       send: vi.fn(),
       subscribe: async (req, signal) => {
         requests.push(req)
@@ -48,7 +47,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       await vi.waitFor(() => expect(requests).toHaveLength(4))
       expect(requests[3]).toMatchObject({ views: ['activeRuns', 'sessions'], known: { hostId: 'h1', logId: 'l1', seq: 9 } })
       expect(requests[3]).not.toHaveProperty('session')
-      expect(setLive).not.toHaveBeenCalledWith(false)
+      expect(backoff).not.toHaveBeenCalled()
     } finally {
       shutdown.abort()
       await loop
