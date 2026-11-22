@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { appendFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -111,12 +111,15 @@ it('scopes colliding native history by workspace and honors a tombstone across c
   const otherCwd = realpathSync(tempDir())
   const alias = join(tempDir(), 'native-workspace-alias')
   symlinkSync(resumable[1].cwd, alias, 'dir')
-  const [foreignRun, deletedRun] = [randomUUID(), randomUUID()]
+  const movedAlias = join(tempDir(), 'moved-workspace-alias')
+  symlinkSync(otherCwd, movedAlias, 'dir')
+  const [foreignRun, deletedRun, movedRun] = [randomUUID(), randomUUID(), randomUUID()]
   const at = Date.now() - 50_000
   let seq = runIds.length * 3
   for (const [runId, cwd, resume] of [
     [foreignRun, otherCwd, resumable[0].externalSessionId],
-    [deletedRun, alias, resumable[1].externalSessionId]
+    [deletedRun, alias, resumable[1].externalSessionId],
+    [movedRun, movedAlias, resumable[0].externalSessionId]
   ]) {
     const detail = JSON.stringify({ providerId: 'codex', cwd, resume })
     const events = [
@@ -126,6 +129,8 @@ it('scopes colliding native history by workspace and honors a tombstone across c
     ]
     appendFileSync(log, events.map((event) => JSON.stringify(event)).join('\n') + '\n')
   }
+  unlinkSync(movedAlias)
+  symlinkSync(resumable[0].cwd, movedAlias, 'dir')
   const { authority, catalog, resume } = await startDuringBackfill(userDataDir)
   try {
     expect(catalog.deleteNative(resumable[1], new Set())).toMatchObject({ status: 'deleted' })
@@ -139,6 +144,7 @@ it('scopes colliding native history by workspace and honors a tombstone across c
     expect.soft(foreign).toMatchObject({ cwd: otherCwd, sessionKey: expect.stringMatching(/^native:/) })
     expect.soft(authority.sink.getSession(foreign?.sessionKey ?? '')).toMatchObject({ cwd: otherCwd })
     expect.soft(authority.sink.getRun(deletedRun)).toBeUndefined()
+    expect.soft(authority.sink.getRun(movedRun)).toMatchObject({ cwd: movedAlias, sessionKey: expect.stringMatching(/^native:/) })
     expect(catalog.readDetail(resumable[1], resumable[1].cwd)).toBeNull()
   } finally {
     await authority.close()
