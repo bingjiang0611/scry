@@ -11,11 +11,6 @@ import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
 
 afterEach(cleanupTempDirs)
 
-// B4-L4 project and workspace selection: the daemon writes the project list and the
-// recent folders (its own workspace authorization input), validates and remembers the
-// folder the App's picker chose, answers worktree selection from its source-control
-// service, and keeps Pi profiles in its userData. The App's picker and dialogs stay in
-// the App (project-daemon.ts); here the daemon gets what the App would send.
 
 describe('daemon project and workspace selection', () => {
   it('remembers a chosen folder by its canonical path, and the App sees it as a known project', async () => {
@@ -25,7 +20,6 @@ describe('daemon project and workspace selection', () => {
       mkdirSync(target)
       const link = join(daemon.root, 'chosen-link')
       symlinkSync(target, link)
-      // The App's own readers, loaded before the daemon writes: their cache must follow.
       const app = createWorkspaceRuntime({ appUserDataDir: daemon.userDataDir, loadSessions: () => [] })
       expect(app.recentStore().load()).toEqual([daemon.workspace])
       expect(() => app.resolveKnownProjectDirectory(target)).toThrow('工作目录尚未通过 Scry 目录选择器授权')
@@ -37,7 +31,6 @@ describe('daemon project and workspace selection', () => {
       expect(app.projectStore().load().map((project) => project.cwd)).toContain(realpathSync(target))
       expect(app.resolveKnownProjectDirectory(link)).toBe(realpathSync(target))
 
-      // Only an existing directory named by an absolute path; nothing is remembered otherwise.
       expect((await daemon.localOp('workspaceSelection', 'chooseFolder', ['relative/dir'])).error).toBe('无效的工作目录')
       expect((await daemon.localOp('workspaceSelection', 'chooseFolder', [42])).error).toBe('无效的工作目录')
       const file = join(daemon.root, 'a-file')
@@ -63,7 +56,6 @@ describe('daemon project and workspace selection', () => {
       expect((await daemon.localOp('projectStore', 'renameProject', [daemon.workspace, ' '])).error).toBe('项目名称必须为 1–120 个字符')
       expect((await daemon.localOp('projectStore', 'renameProject', ['relative', 'x'])).error).toBe('无效的项目目录')
 
-      // Removing a recent folder answers the list the renderer shows next.
       const other = join(daemon.root, 'other')
       mkdirSync(other)
       await daemon.localOp('workspaceSelection', 'chooseFolder', [other])
@@ -91,7 +83,6 @@ describe('daemon project and workspace selection', () => {
       const repositoryId = (read.result as { data: { repositoryId: string } }).data.repositoryId
       expect(repositoryId).toMatch(/^[a-f0-9]{64}$/)
 
-      // The repository id is only valid in the service that read it: the daemon's.
       expect((await daemon.localOp('workspaceSelection', 'validateBranch', [{ repositoryId, name: 'feature/one' }])).result)
         .toEqual({ status: 'available', data: { name: 'feature/one' } })
       expect((await daemon.localOp('workspaceSelection', 'validateBranch', [{ repositoryId, name: 'bad..name' }])).result)
@@ -101,7 +92,6 @@ describe('daemon project and workspace selection', () => {
       expect((await daemon.localOp('workspaceSelection', 'validateBranch', [{ repositoryId: 'a'.repeat(64), name: 'x' }])).result)
         .toEqual({ status: 'failed', reason: '仓库引用已过期，请重新读取工作区' })
 
-      // A directory the daemon never authorized is not read.
       const stranger = join(daemon.root, 'stranger')
       mkdirSync(stranger)
       expect((await daemon.localOp('workspaceSelection', 'read', [{ cwd: stranger, kind: 'branches' }])).result)
@@ -122,7 +112,6 @@ describe('daemon project and workspace selection', () => {
   }, 30_000)
 
   it('adds a Pi profile after the RPC handshake, reports a failed one, and removes it', async () => {
-    // The fixture set with a Pi adapter, so an added profile has a descriptor to report.
     const previous = process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS
     process.env.SCRY_ELECTRON_SMOKE_CONVERSATIONS = '1'
     const daemon = await startTestDaemon().finally(() => {
@@ -140,12 +129,10 @@ describe('daemon project and workspace selection', () => {
       chmodSync(broken, 0o755)
       const profiles = () => createPiAgentProfileStore(daemon.userDataDir).load()
 
-      // A launcher that fails the handshake is reported for the App's dialog; nothing is stored.
       const failed = await daemon.localOp('piProfile', 'addPiProfile', [broken, daemon.workspace])
       expect(failed.error).toBeUndefined()
       expect(failed.result).toMatchObject({ status: 'failed', message: expect.any(String) })
       expect(profiles()).toEqual([])
-      // The probe runs in the window's workspace only when the daemon knows that project.
       const stranger = join(daemon.root, 'stranger')
       mkdirSync(stranger)
       expect((await daemon.localOp('piProfile', 'addPiProfile', [launcher, stranger])).result)
@@ -168,7 +155,6 @@ describe('daemon project and workspace selection', () => {
   }, 30_000)
 })
 
-// Just enough of Pi's RPC mode for the add handshake: a version and the four catalog reads.
 const FAKE_PI = `#!/usr/bin/env node
 if (process.argv.includes('--version')) { process.stdout.write('9.9.9\\n'); process.exit(0) }
 let buffer = ''

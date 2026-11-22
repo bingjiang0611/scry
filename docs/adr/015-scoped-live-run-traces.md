@@ -10,6 +10,8 @@ Main, preload and renderer ship together. Do not substitute global polling when 
 
 A daemon trace response is bounded, even for a live run. The reader must follow chunk cursors instead of waiting for settlement or treating the first response as complete. The [large-trace regression](../../src/daemon/host-process-large-trace.test.ts) proves the response exceeded the single-frame limit, covers delivery before settlement, and reopens through the desktop path.
 
+A daemon question must reach the App under the same canonical run ID returned by start and used by the scoped subscription. A trace marker can arrive before the Provider names its native turn; the native Stop probe and its regression rely on delivery before the run ends. Use a time bound rather than a reply count when waiting for settlement because progress may wake the observer many times.
+
 The first remote catalog establishes a baseline without raising attention. Later catalogs can report a newly terminal fingerprint for the same run ID. If daemon notices were lost, re-read each affected view instead of assuming the incremental feed was complete.
 
 See [run-traces.ts](../../src/shared/run-traces.ts), [remote-session-attention.ts](../../src/shared/remote-session-attention.ts) and [run-trace-router.test.ts](../../src/main/run-trace-router.test.ts).

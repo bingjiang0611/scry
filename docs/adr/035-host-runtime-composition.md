@@ -14,6 +14,8 @@ App-only operations use the same handler factories as Electron main. Steering an
 
 Cache history pages in the daemon for older-page reads, but return the suggested selection to the App rather than setting it in the daemon. The App supplies its window's working directory for a native fork when needed, and the daemon resolves it again. Reuse the daemon session lifecycle and native fork operations for remote actions without replacing the remote authority checks.
 
+A daemon admission refusal must reach the App as a refusal, not a successful start followed by an unexplained failure. The same-session regression proves the rejected prompt never reached the Provider while a different session can still run. App event subscribers begin at the present and receive current unread state separately. An omitted history cursor crossing the JSON bridge must behave like an omitted cursor in-process.
+
 Test runtime imports with a graph that traverses more than the entry and with Electron main as a positive control. Erased type-only imports are not runtime edges, nor are comments that mention imports. A graph check is not a substitute for constructing the pipeline without Electron. Test execution refusal in both branches even when the read views remain available.
 
 See [host composition](../../src/host-runtime/host-runtime.ts), [execution ownership tests](../../src/host-runtime/run-pipeline-execution.test.ts), and [import-graph follow-up #163](https://github.com/bingjiang0611/scry/issues/163).

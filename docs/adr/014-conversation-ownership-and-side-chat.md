@@ -12,4 +12,6 @@ Preview and first send share the same budget. Distinguish context sent inline fr
 
 Use typed operations through preload. Creation and adoption recovery receipts are read-only; a command ID publishes at most one child. On send, `accepted` proves the host started a run; only `not_sent` lets the caller treat the original text as undelivered. Keep deletion plans fingerprinted across children and use durable tombstones with identities and hashes, not historical bodies. Use a stable child-list cursor (capture time and ID); restored tabs can validate a bounded ID set without reading the full list.
 
+Daemon sends reuse the conversation service, but record a prepared launch under the caller's authenticated grant before dispatch. Do not borrow a grant. An accepted live send exposes the ledger run for the App to follow alongside the canonical conversation run. A duplicate of a finished turn may have no live ledger run; a host-proven refusal has none. Conversation attention follows the conversation row rather than the current native binding.
+
 See [conversation.ts](../../src/shared/conversation.ts), [conversation-api.ts](../../src/shared/conversation-api.ts) and [side-chat creation tests](../../src/main/conversation-side-chat-creation.test.ts).

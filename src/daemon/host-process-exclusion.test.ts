@@ -12,13 +12,6 @@ import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
 
 afterEach(cleanupTempDirs)
 
-// B4-V `mutual-exclusion`, against a real daemon and the App's own daemon-mode start
-// path. In process a second start into a session whose run is still live is refused
-// by run admission (run-admission.ts) and `agent:start` rejects with that reason. The
-// daemon applies the same admission, but its bind marker used to be the App's whole
-// answer: the start resolved with a run id, the run then failed in admission, and the
-// window had nothing to show for it (B4-V classified it `unknown`). The App-visible
-// result must be the in-process one: the start rejects, naming the same reason.
 
 const SAME_SESSION_REFUSAL = '同一会话已有一轮正在运行'
 
@@ -38,7 +31,6 @@ async function until<T>(read: () => T | undefined, timeoutMs: number): Promise<T
 
 describe('daemon same-session exclusion', () => {
   it('refuses a second start into a live session exactly as in process, and runs a new session beside it', async () => {
-    // The smoke Provider appends every run it is asked for: the refused prompt must not be there.
     const inputs = join(tempDir(), 'inputs.jsonl')
     const saved = process.env.SCRY_ELECTRON_SMOKE_INPUTS
     process.env.SCRY_ELECTRON_SMOKE_INPUTS = inputs
@@ -58,17 +50,12 @@ describe('daemon same-session exclusion', () => {
       const same = await settle(start(samePrompt, { expectedExternalSessionId: session }))
       expect(same.ok).toBe(false)
       if (same.ok) return
-      // The in-process admission's own message. Only the message crosses the ledger, so the
-      // daemon's rejection is a DaemonRunRefusedError (`Error: …` over IPC), where in process
-      // the same refusal is an AgentRuntimeError (b4-s0-exclusion.md).
       expect(same.error).toBeInstanceOf(DaemonRunRefusedError)
       expect(same.error.message).toBe(SAME_SESSION_REFUSAL)
-      // The first run is untouched and the refused prompt never reached the Provider.
       expect(runtime.runView(first.runId)?.done).not.toBe(true)
       const asked = () => existsSync(inputs) ? readFileSync(inputs, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line).prompt) : []
       expect(asked()).not.toContain(samePrompt)
 
-      // A new session in the same workspace runs in parallel, as in process.
       const freshPrompt = `native composer complete b4v new ${randomUUID().slice(0, 8)}`
       const fresh = await start(freshPrompt, { expectedExternalSessionId: null })
       expect(await until(() => runtime.runView(fresh.runId)?.done === true ? true : undefined, 10_000)).toBe(true)
