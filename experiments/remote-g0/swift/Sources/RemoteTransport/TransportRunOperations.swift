@@ -9,7 +9,12 @@ import NIOTLS
 extension G0Transport {
   static func decodeRun(_ bytes: Data, expectedTarget: ExecutionTargetBinding? = nil, expectedProfile: HistoryProfileValue? = nil, expectedHistoryScope: String? = nil) throws -> RunResponse {
     let response = try JSONDecoder().decode(RunResponse.self, from: bytes)
-    if let error = response.error { throw RunError.host(code: error) }
+    if let error = response.error {
+      if error == "protocol_mismatch", let version = response.hostProtocol {
+        throw RunError.host(code: version > RelaySession.protocolVersion ? "protocol_upgrade_client" : "protocol_upgrade_host")
+      }
+      throw RunError.host(code: error)
+    }
     if let expectedTarget, response.executionTarget != expectedTarget { throw ProbeError.unexpectedReply }
     if let expectedProfile, response.historyProfile == nil || response.historyProfile?.agentProfileId != expectedProfile.value { throw HistoryProfileError.unverified }
     if let expectedHistoryScope, response.historyScope != expectedHistoryScope { throw HistoryProfileError.unverified }

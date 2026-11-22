@@ -187,6 +187,7 @@ extension G0Transport {
     let intent: RunIntentBody?
     let executionTarget: ExecutionTargetBinding?
     let error: String?
+    let hostProtocol: Int?
   }
   struct RunWatchBody: Decodable {
     let poll: RunPollBody; let questions: [RunQuestionRequest]; let output: RunOutputBody; let state: String?

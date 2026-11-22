@@ -7,6 +7,10 @@ extension ConnectionCopy {
 
   static func describeKnownHostError(_ code: String) -> String? {
     switch code {
+    case "protocol_upgrade_client": return "请更新 iPhone 上的 Scry，再连接这台 Mac。"
+    case "protocol_upgrade_host": return "请更新并重新打开 Mac 上的 Scry，再连接。"
+    case "protocol_mismatch": return "iPhone 和 Mac 上的 Scry 协议版本不同。请更新两端的 Scry 后重试。"
+    case "subscribe_unsupported": return "Mac 未提供所需的会话订阅。请更新并重新打开 Mac 上的 Scry。"
     case "history_profile_unavailable": return historyProfileUnavailable
     case "history_profile_required": return historyProfileUnverified
     case "execution_target_gateway_offline": return targetGatewayOffline
