@@ -105,6 +105,7 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
       this.active.set(item.id, { tunnel, serial: Promise.resolve(),
         ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}),
+        ...(capabilities.subscribe === 1 ? { subscribe: 1 as const } : {}),
         ...(capabilities.traceDelta ? { traceDelta: capabilities.traceDelta } : {}),
         ...(capabilities.managedWorktrees === 1 ? { managedWorktrees: 1 as const } : {}) })
       await this.reconcileUnknown(state, item.id)

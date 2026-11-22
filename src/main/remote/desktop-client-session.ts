@@ -13,13 +13,15 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
 
   async executionTargets(): Promise<import('../../shared/desktop-remote').ExecutionTargetRef[]> {
     const state = await this.state()
-    const targets = state.connections.filter((item) => !item.pending).map((item) => ({
-      id: item.id,
-      binding: targetBinding(item),
-      hostId: item.hostId,
-      label: item.label,
-      state: this.active.get(item.id)?.tunnel.alive === true ? 'connected' as const : 'disconnected' as const
-    }))
+    const targets = state.connections.filter((item) => !item.pending).map((item) => {
+      const active = this.active.get(item.id)
+      const connected = active?.tunnel.alive === true
+      return {
+        id: item.id, binding: targetBinding(item), hostId: item.hostId, label: item.label,
+        state: connected ? 'connected' as const : 'disconnected' as const,
+        ...(connected && active.subscribe === 1 ? { subscribe: 1 as const } : {})
+      }
+    })
     if (targets.length > 32) fail('execution_target_capacity_exceeded')
     return targets
   }
@@ -28,7 +30,9 @@ export class DesktopRemoteClientSession extends DesktopRemoteClientTrace {
     const state = await this.state()
     const item = this.connection(state, target.id)
     if (item.pending || targetBinding(item) !== target.binding) fail('execution_target_binding_changed')
-    if (!this.active.get(item.id)?.tunnel.alive) fail('desktop_not_connected')
+    const active = this.active.get(item.id)
+    if (!active?.tunnel.alive) fail('desktop_not_connected')
+    if (request.op === 'subscribe' && active.subscribe !== 1) fail('subscribe_unsupported')
     authorizePeer?.()
     const authorize = () => this.authorizeMobileTarget(state, target, authorizePeer)
     return ['stop', 'answerQuestion', 'sessionAction'].includes(String(request.op))

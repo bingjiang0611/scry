@@ -285,6 +285,7 @@ export interface ExecutionTargetRef {
   hostId: string
   label: string
   state: 'connected' | 'disconnected'
+  subscribe?: 1
 }
 export interface DesktopMobileTargetSubmit {
   target: { id: string; binding: string }

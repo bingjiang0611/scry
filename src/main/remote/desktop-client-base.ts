@@ -168,7 +168,7 @@ export abstract class DesktopRemoteClientBase {
     // Every run-channel request declares the version it speaks. The host refuses a
     // different one, so no request is ever partially understood.
     const payload = record(request) ? framedRequest(request) : request
-    const promise = this.lanes.request(laneForRequest(payload), id, {
+    const promise = this.lanes.request(laneForRequest(payload, 'network'), id, {
       endpoint: { path: runPath, caPEM: item.anchorPEM, certPEM: item.certificatePEM ?? identity.bootstrapCertPEM, keyPEM: identity.keyPEM },
       request: payload,
       replayable: replayableRequest(payload),

@@ -83,7 +83,8 @@ function validateTargetsResult(value: unknown): ExecutionTargetRef[] {
   if (value.length > MAX_TARGETS) throw new Error('execution_target_capacity_exceeded')
   if (!value.every(isTargetRef)) throw new Error('invalid_target_response')
   return value.map((item) => ({
-    id: item.id, binding: item.binding, hostId: item.hostId, label: item.label, state: item.state
+    id: item.id, binding: item.binding, hostId: item.hostId, label: item.label, state: item.state,
+    ...(item.subscribe === 1 ? { subscribe: 1 as const } : {})
   }))
 }
 

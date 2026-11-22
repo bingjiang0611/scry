@@ -12,7 +12,7 @@ const writeOperations = new Set([
 ])
 const watchOperations = new Set(['watch'])
 const statusOperations = new Set(['liveRuns'])
-const eventOperations = new Set(['appEvents', 'subscribe'])
+const eventOperations = new Set(['appEvents'])
 const targetWorkOperations = new Set(['executionTargetWork'])
 // Short and idempotent: on the control lane, and replayable because it changes nothing twice.
 const idempotentControlOperations = new Set(['attentionViewed'])
@@ -40,7 +40,7 @@ function terminalLane(op: string, request: unknown): DesktopLaneName | undefined
   return typeof method === 'string' && terminalBulkMethods.has(method) ? 'bulk' : 'terminal'
 }
 
-export function laneForRequest(request: unknown): DesktopLaneName {
+export function laneForRequest(request: unknown, transport: 'local' | 'network' = 'local'): DesktopLaneName {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
   if (typeof op !== 'string') return 'control'
   const terminal = terminalLane(op, request)
@@ -57,6 +57,11 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   if (idempotentControlOperations.has(op)) return 'control'
   if (watchOperations.has(op)) return 'watch'
   if (statusOperations.has(op)) return 'status'
+  if (op === 'subscribe') {
+    const { views } = request as { views?: unknown }
+    if (Array.isArray(views) && views.includes('detail')) return 'watch'
+    return transport === 'network' ? 'status' : 'events'
+  }
   if (eventOperations.has(op)) return 'events'
   if (targetWorkOperations.has(op)) return 'targetWork'
   if (op === 'desktop') {

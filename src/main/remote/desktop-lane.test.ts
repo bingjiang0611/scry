@@ -43,6 +43,10 @@ describe('desktop lane routing', () => {
     expect(laneForRequest({ op: 'watch' })).toBe('watch')
     expect(laneForRequest({ op: 'liveRuns' })).toBe('status')
     // The App's event feed holds a long poll of its own; nothing may queue behind it.
+    expect(laneForRequest({ op: 'subscribe', views: ['sessions', 'activeRuns'] }, 'network')).toBe('status')
+    expect(laneForRequest({ op: 'subscribe', views: ['detail'] }, 'network')).toBe('watch')
+    expect(laneForRequest({ op: 'subscribe', views: ['sessions', 'activeRuns'] })).toBe('events')
+    expect(laneForRequest({ op: 'subscribe', views: ['detail'] })).toBe('watch')
     expect(laneForRequest({ op: 'appEvents' })).toBe('events')
     // Primary App execution-target work poll takes its own lane; result replies are writes on control.
     expect(laneForRequest({ op: 'executionTargetWork' })).toBe('targetWork')

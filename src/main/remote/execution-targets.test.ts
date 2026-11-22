@@ -57,6 +57,21 @@ describe('execution target production dispatcher', () => {
     expect(fixture.client.mobileRequest).toHaveBeenCalledWith(target, { op: 'projects' }, expect.any(Function))
   })
 
+  it('forwards validated subscribe frames and excludes local-only fields', async () => {
+    const fixture = router()
+    const request = { op: 'subscribe', views: ['detail'], session: { sessionKey: 'mac2-session' },
+      known: { hostId: 'mac2', logId: 'log-a', seq: 9 }, waitMs: 25_000 }
+    await expect(fixture.router.dispatch(peer, { op: 'target', target, request })).resolves.toHaveProperty('executionTarget', target)
+    expect(fixture.client.mobileRequest).toHaveBeenLastCalledWith(target, request, expect.any(Function))
+    fixture.client.mobileRequest.mockClear()
+    for (const invalid of [{ detailWatch: 'open' }, { waitMs: 25_001 }, { session: { sessionKey: '' } },
+      { known: { hostId: 'mac1', logId: 'log-a', seq: -1 } }, { deviceLabel: 'spoofed' }]) {
+      await expect(fixture.router.dispatch(peer, { op: 'target', target, request: { ...request, ...invalid } }))
+        .rejects.toThrow('invalid_target_request')
+    }
+    expect(fixture.client.mobileRequest).not.toHaveBeenCalled()
+  })
+
   it('forwards explicit file downloads without widening the workspace browser or allowing writes', async () => {
     const fixture = router()
     const request = { op: 'fileDownload', query: { action: 'open', cwd: '/mac2/project', target: 'http://127.0.0.1:49732/bolder-v1.html?x=1' } }

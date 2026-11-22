@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DesktopMobileTargetSubmit, ExecutionTargetRef } from '../../shared/desktop-remote'
+import { parseSubscribeFrame } from './subscribe-frame'
 import { parseRemoteWorkspaceQuery } from './remote-workspace'
 import { parseRemoteFileDownloadQuery } from './remote-file-download'
 import { historyProfileSelection, historyScopeSelection } from './remote-gateway'
@@ -15,7 +16,7 @@ const MAX_HISTORY_SNAPSHOT = 512
 const OPS = new Set([
   'projects', 'directories', 'directoriesPage', 'providers', 'commands', 'sessions', 'sessionsPage', 'sessionAction',
   'workspace', 'fileDownload', 'history', 'historyPage', 'historyPreview', 'historyVersion', 'historyTurnsPage',
-  'submit', 'intentStatus', 'poll', 'watch', 'liveRuns', 'runState', 'output', 'questions', 'answerQuestion', 'stop'
+  'subscribe', 'submit', 'intentStatus', 'poll', 'watch', 'liveRuns', 'runState', 'output', 'questions', 'answerQuestion', 'stop'
 ])
 
 type DesktopTargetClient = {
@@ -67,6 +68,11 @@ function validateWorkspaceQuery(value: unknown): void {
 function parseRequest(value: unknown): Record<string, unknown> {
   if (!record(value) || typeof value.op !== 'string' || !OPS.has(value.op)) fail('invalid_target_request')
   const op = value.op
+  if (op === 'subscribe') {
+    const subscribe = parseSubscribeFrame(value, 'target')
+    if (!subscribe) fail('invalid_target_request')
+    return { op, ...subscribe }
+  }
   const keys: Record<string, string[]> = {
     projects: ['op'], providers: ['op'], sessions: ['op'],
     directories: ['op', 'path'], directoriesPage: ['op', 'path', 'cursor', 'limit', 'snapshot'],

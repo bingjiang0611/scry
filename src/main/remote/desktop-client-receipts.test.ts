@@ -134,6 +134,27 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
     }
   })
 
+  it.each([undefined, 1, 2])('only announces and forwards the negotiated subscribe version %s', async (subscribe) => {
+    const reply = { subscribe: { hostId: 'mac2', logId: 'log-1', seq: 1, mode: 'idle' } }
+    const fixture = await setup({ subscribe, subscribeResponse: reply })
+    try {
+      const paired = await fixture.client.pair({ label: 'Mac2', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(paired.connection.id)
+      await fixture.client.connect(paired.connection.id)
+      const [target] = await fixture.client.executionTargets()
+      const request = { op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 20_000 }
+      if (subscribe === 1) {
+        expect(target).toHaveProperty('subscribe', 1)
+        await expect(fixture.client.mobileRequest(target, request)).resolves.toEqual(reply)
+        expect(fixture.tlsRequest.mock.calls.filter(([value]) => (value.request as { op?: string }).op === 'subscribe')).toHaveLength(1)
+      } else {
+        expect(target).not.toHaveProperty('subscribe')
+        await expect(fixture.client.mobileRequest(target, request)).rejects.toThrow('subscribe_unsupported')
+        expect(fixture.tlsRequest.mock.calls.some(([value]) => (value.request as { op?: string }).op === 'subscribe')).toBe(false)
+      }
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
   it('rejects relayed managed-worktree submissions when the target host did not negotiate support', async () => {
     const fixture = await setup({ submitResponse: () => ({ runId: randomUUID(), status: 'recorded' }) })
     try {

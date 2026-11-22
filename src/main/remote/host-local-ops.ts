@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RunControlHandlers } from './host-run-control'
 import type { AppEventFeed } from './app-event-feed'
 import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_LOCAL_OP_NAMES } from '../daemon-channel-gate'
-import { SUBSCRIBE_VIEWS, type SubscribeResponse, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
-import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
+import type { SubscribeResponse, SubscribeRequest } from '../../shared/orchestration-subscribe'
+import { parseSubscribeFrame } from './subscribe-frame'
 
 // One App channel handler, called with the renderer's arguments as main would have.
 export type LocalOpHandler = (...args: unknown[]) => unknown
@@ -77,8 +77,6 @@ export async function handleAppEvents(events: LocalEndpointHandlers['events'], r
   return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
 }
 
-const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'detailWatch', 'waitMs', 'eventSet', 'chunk', 'deviceLabel']
-
 /** Bounds the subscribe frame before it reaches the authoritative reader. */
 export async function handleSubscribe(
   subscribe: LocalEndpointHandlers['subscribe'],
@@ -88,65 +86,9 @@ export async function handleSubscribe(
   network = false
 ): Promise<Record<string, unknown>> {
   if (!subscribe) return { error: 'unsupported_op' }
-  if (Object.keys(request).some((key) => !SUBSCRIBE_KEYS.includes(key))) return { error: 'invalid_request' }
-  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk } = request
-  if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
-      !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
-    return { error: 'invalid_request' }
-  }
-  if (!Number.isSafeInteger(waitMs) || (waitMs as number) < 0) return { error: 'invalid_request' }
-  if (eventSet !== undefined && (!Number.isSafeInteger(eventSet) || (eventSet as number) < 1)) return { error: 'invalid_request' }
-  if (sessionsCursor !== undefined && (typeof sessionsCursor !== 'string' || sessionsCursor.length === 0 || sessionsCursor.length > 512)) {
-    return { error: 'invalid_request' }
-  }
-  let parsedSession: SubscribeRequest['session']
-  if (session !== undefined) {
-    if (!session || typeof session !== 'object' || Array.isArray(session)) return { error: 'invalid_request' }
-    const s = session as Record<string, unknown>
-    if (typeof s.sessionKey !== 'string' || s.sessionKey.length === 0 || s.sessionKey.length > 4096) return { error: 'invalid_request' }
-    parsedSession = {
-      sessionKey: s.sessionKey,
-      ...(typeof s.providerId === 'string' ? { providerId: s.providerId } : {}),
-      ...(typeof s.agentProfileId === 'string' ? { agentProfileId: s.agentProfileId } : {}),
-      ...(typeof s.cwd === 'string' ? { cwd: s.cwd } : {}),
-      ...(typeof s.externalSessionId === 'string' ? { externalSessionId: s.externalSessionId } : {})
-    }
-  }
-  if (views.includes('detail') && !parsedSession) return { error: 'invalid_request' }
-  if (network && (detailWatch !== undefined || (views.includes('detail') && views.length !== 1))) return { error: 'invalid_request' }
-  if (detailWatch !== undefined && (!views.includes('detail') || chunk !== undefined ||
-      (detailWatch !== 'open' && detailWatch !== 'continue'))) return { error: 'invalid_request' }
-  let parsedChunk: SubscribeRequest['chunk']
-  if (chunk !== undefined) {
-    if (!views.includes('detail') || !chunk || typeof chunk !== 'object' || Array.isArray(chunk)) return { error: 'invalid_request' }
-    const { id, offset } = chunk as Record<string, unknown>
-    if (typeof id !== 'string' || !/^[\da-f-]{36}$/i.test(id) || typeof offset !== 'number' ||
-        offset <= 0 || offset >= DESKTOP_HISTORY_MAX_BYTES || offset % DESKTOP_HISTORY_CHUNK_BYTES !== 0) {
-      return { error: 'invalid_request' }
-    }
-    parsedChunk = { id, offset }
-  }
-  let parsedKnown: SubscribeRequest['known']
-  if (known !== undefined) {
-    if (!known || typeof known !== 'object' || Array.isArray(known)) return { error: 'invalid_request' }
-    const k = known as Record<string, unknown>
-    if (typeof k.hostId !== 'string' || k.hostId.length === 0 || k.hostId.length > 128 ||
-        typeof k.logId !== 'string' || k.logId.length === 0 || k.logId.length > 128 ||
-        !Number.isSafeInteger(k.seq) || (k.seq as number) < 0) {
-      return { error: 'invalid_request' }
-    }
-    parsedKnown = { hostId: k.hostId, logId: k.logId, seq: k.seq as number }
-  }
-  const reply = await subscribe(peer, {
-    views,
-    waitMs: waitMs as number,
-    ...(parsedSession ? { session: parsedSession } : {}),
-    ...(parsedKnown ? { known: parsedKnown } : {}),
-    ...(parsedChunk ? { chunk: parsedChunk } : {}),
-    ...(detailWatch ? { detailWatch } : {}),
-    ...(sessionsCursor !== undefined ? { sessionsCursor: sessionsCursor as string } : {}),
-    ...(eventSet !== undefined ? { eventSet: eventSet as number } : {})
-  }, signal)
+  const input = parseSubscribeFrame(request, network ? 'network' : 'local')
+  if (!input) return { error: 'invalid_request' }
+  const reply = await subscribe(peer, input, signal)
   return { subscribe: reply }
 }
 
