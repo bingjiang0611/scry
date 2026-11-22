@@ -1,5 +1,16 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
+
+export function electronSecurityTestEnvironment(temp) {
+  const home = join(temp, 'home')
+  return {
+    HOME: home,
+    SCRY_TEST_APP: '1',
+    SCRY_TEST_LOGIN_START_LABEL: `com.scry.daemon.test.${basename(temp)}`,
+    SCRY_TEST_LOGIN_START_DIR: join(home, 'LaunchAgents'),
+    SCRY_TEST_LOGIN_START_UNIT: `scry-daemon-test-${basename(temp)}.service`
+  }
+}
 
 // Which electron-security-smoke campaign `argv` selects, and whether it drives the dev
 // layout or a packaged App. Split from electron-security-smoke.mjs by responsibility

@@ -19,6 +19,7 @@ export async function exerciseQuestion(smokeContext) {
         }
         throw new Error('Timed out waiting for ' + label)
       }
+      await waitFor(() => document.hasFocus(), 'native foreground focus')
       const { runId } = await window.scry.start({
         providerId: 'codex', cwd: ${JSON.stringify(workspace)}, prompt: 'dock badge question smoke'
       })

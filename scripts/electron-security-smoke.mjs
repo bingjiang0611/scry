@@ -33,7 +33,7 @@ import { lostReplyPath, writeConversationFaultEntry, writeEntryPackage, writeFil
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
-import { electronSecurityModes } from './electron-security-modes.mjs'
+import { electronSecurityModes, electronSecurityTestEnvironment } from './electron-security-modes.mjs'
 
 const {
   steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument
@@ -134,11 +134,22 @@ async function main() {
       import { writeFileSync } from 'node:fs'
       app.setAppPath(${JSON.stringify(resolve('.'))})
       app.whenReady().then(async () => {
-        const initial = { success: app.setBadgeCount(1), nativeCount: app.getBadgeCount() }
+        let initial
         const requests = []
         let residual = null
         const setBadgeCount = app.setBadgeCount.bind(app)
+        app.once('browser-window-created', (_event, window) => {
+          window.once('ready-to-show', () => {
+            window.show()
+            window.focus()
+          })
+        })
         app.setBadgeCount = (count) => {
+          if (!initial) {
+            // Keep test service isolation. Only this fixture opts into a native Dock and window.
+            app.setActivationPolicy('regular')
+            initial = { success: setBadgeCount(1), nativeCount: app.getBadgeCount() }
+          }
           const success = setBadgeCount(count)
           requests.push({ count, success, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() })
           if (count === 0 && requests.some(request => request.count === 1) && !residual) {
@@ -149,7 +160,6 @@ async function main() {
           writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
           return success
         }
-        writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
         await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
       })
     `)
@@ -181,10 +191,9 @@ async function main() {
     ], {
       env: {
         ...process.env,
-        HOME: home,
+        ...electronSecurityTestEnvironment(temp),
         ELECTRON_ENABLE_LOGGING: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
-        SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
         SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
         ...(steerOnly ? { SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs } : {}),
