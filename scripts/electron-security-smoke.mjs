@@ -163,6 +163,8 @@ async function main() {
       env: {
         ...process.env,
         ...electronSecurityTestEnvironment(temp),
+        SHELL: process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash',
+        ZDOTDIR: home,
         ELECTRON_ENABLE_LOGGING: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
