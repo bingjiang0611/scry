@@ -115,6 +115,13 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       await expect.poll(() => hostNotices.some((n) => n.id === recorded.id), { timeout: 5_000 }).toBe(true)
       expect(hostNotices.find((n) => n.id === recorded.id)).toEqual(recorded)
 
+      // Discovery alone is not a terminal condition. Leave the test daemon
+      // open until the externally submitted run has published completion.
+      await expect.poll(() => {
+        const external = runtime.runView(extSub.runId as string)
+        return external?.done && turnDoneEvents.some((event) => event.runId === external.runId)
+      }, { timeout: 5_000 }).toBe(true)
+
       // Verify commandId landed in orch_command
       const cmdCount = (
         daemon.host.orchestrationAuthority!.sink.handle.db

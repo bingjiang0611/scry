@@ -34,19 +34,30 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
     const daemon = await startTestDaemon()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
     const delivered: TraceEvent[] = []
+    const terminalStops = new Map<string, boolean>()
     const runtime = new DaemonRunRuntime({
       subscribeMode: true,
       transport, waitMs: 500,
-      send: (channel, payload) => { if (channel === 'agent:trace') delivered.push(...(payload as TraceBatch).events) }
+      send: (channel, payload) => {
+        if (channel === 'agent:trace') delivered.push(...(payload as TraceBatch).events)
+        if (channel === 'agent:turnDone') {
+          const { runId, stopped } = payload as { runId: string; stopped?: boolean }
+          terminalStops.set(runId, stopped === true)
+        }
+      }
     })
     const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     const surface = createDaemonRunSurface({ transport, runtime, currentCwd: () => daemon.workspace })
     const start = (prompt: string, extra: Record<string, unknown> = {}) => surface.start({
       prompt, providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID(), ...extra
     })
+    // The trace can finish before the host commits its terminal projection.
+    // The native composer waits for both the view and the terminal notice.
+    const waitForTerminal = (runId: string) =>
+      until(() => runtime.runView(runId)?.done === true ? terminalStops.get(runId) : undefined, 10_000)
     try {
       const first = await start(`native composer complete ${randomUUID().slice(0, 8)}`)
-      expect(await until(() => runtime.runView(first.runId)?.done === true ? true : undefined, 10_000)).toBe(true)
+      expect(await waitForTerminal(first.runId)).toBe(false)
       const session = runtime.runView(first.runId)?.externalSessionId
       expect(session).toBeTruthy()
 
@@ -55,9 +66,10 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
       const init = await until(() => delivered.find((event) => event.runId === held.runId && event.kind === 'harness' && event.stage === 'init'), 10_000)
       expect(init?.text).toBe(`Awaiting native turn: ${prompt}`)
       expect(runtime.runView(held.runId)?.done).not.toBe(true)
+      expect(terminalStops.has(held.runId)).toBe(false)
 
       await surface.stop(held.runId)
-      expect(await until(() => runtime.runView(held.runId)?.done === true ? true : undefined, 10_000)).toBe(true)
+      expect(await waitForTerminal(held.runId)).toBe(true)
     } finally {
       events.dispose()
       runtime.dispose()
