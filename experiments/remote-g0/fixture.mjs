@@ -17,7 +17,8 @@ export async function certificates() {
   }
   try {
     for (const name of ['outer-ca', 'inner-ca', 'wrong-ca']) {
-      await openssl(['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-noenc', '-days', '1',
+      // OpenSSL and the macOS LibreSSL CLI both accept -nodes for disposable fixture keys.
+      await openssl(['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1',
         '-subj', '/CN=Scry G0 ' + name, '-keyout', name + '.key', '-out', name + '.pem',
         '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign'])
       await chmod(path(name + '.key'), 0o600)
@@ -28,7 +29,7 @@ export async function certificates() {
       ['device', 'inner-ca', 'clientAuth', 'scry-device.test'],
       ['impostor', 'wrong-ca', 'clientAuth', 'scry-device.test']
     ]) {
-      await openssl(['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-noenc',
+      await openssl(['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
         '-subj', '/CN=' + hostname, '-keyout', name + '.key', '-out', name + '.csr'])
       await chmod(path(name + '.key'), 0o600)
       await writeFile(path(name + '.ext'), `basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=${usage}\nsubjectAltName=DNS:${hostname}\n`)
