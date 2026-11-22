@@ -56,7 +56,9 @@ export async function exerciseFileHistory(smokeContext) {
     assert.ok(title.includes('designs/scry-unified-remote/brief.md'), `wrong archived target: ${title}`)
     await click(brief)
     await wait(`document.querySelector('.workspace-title b')?.textContent.includes('brief.md')`)
-    await click(`Array.from(document.querySelectorAll('.workspace-editorbar button')).find(button => button.textContent === '展开源码')`)
+    const expandSource = `Array.from(document.querySelectorAll('.workspace-editorbar button')).find(button => button.textContent === '展开源码')`
+    await wait(`Boolean(${expandSource})`)
+    await click(expandSource)
     await wait(`document.querySelector('.workspace-editor textarea')?.value === ${JSON.stringify(expected)}`)
     assert.ok(!await evaluate(`document.body.textContent.includes('文件不存在：brief.md')`))
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
