@@ -61,7 +61,11 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
     const sink = getSink()
     if (!sink) return undefined
     if (!context.externalSessionId) return null
-    const row = findProjectedNativeSession(sink, { ...context, sessionId: context.externalSessionId, cwd: canonicalCwd })
+    const identity = { ...context, sessionId: context.externalSessionId, cwd: canonicalCwd }
+    const row = findProjectedNativeSession(sink, identity)
+    if (!row && canonicalCwd !== undefined && findProjectedNativeSession(sink, { ...identity, cwd: undefined })) {
+      throw new Error('会话工作目录与 catalog 不一致')
+    }
     const session = row && projectAppSession(row)
     if (!row || !session) return null
     return { session, identity: { sessionKey: row.sessionKey, ...(row.legacy ? { legacyBefore: true } : {}) } }

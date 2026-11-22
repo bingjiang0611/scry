@@ -16,6 +16,7 @@ import { exerciseWorkspaceSessions } from './workspace-session-ui-checks.mjs'
 import { seedConversationOwnership } from './conversation-ownership-smoke.mjs'
 import { exerciseFileHistory, seedFileHistorySource } from './electron-security-file-history.mjs'
 import { exerciseNativeHistory } from './electron-security-native-history.mjs'
+import { nativeHistoryCatalog } from './electron-security-activity-history.mjs'
 import { exerciseProductionPerformance } from './electron-security-performance.mjs'
 import { exerciseFiles } from './electron-security-files.mjs'
 import { exerciseQuestion } from './electron-security-question.mjs'
@@ -96,11 +97,9 @@ async function main() {
     }
     appendFileSync(nativePath, JSON.stringify(entry('a', 'u', 'assistant', '主机重启前已有的原生回复')))
     assert.ok(statSync(nativePath).size > 64 * 1024 * 1024)
-    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
-      sessionId: nativeSessionId, externalSessionId: nativeSessionId, runId: 'remote-run-fixture-1',
-      providerId: 'pi', agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace,
-      preview: '手机会话恢复测试', ts: Date.now()
-    }]))
+    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify(
+      nativeHistoryCatalog({ nativeSessionId, canonicalWorkspace, home, nativeHistoryPerformanceOnly })
+    ))
   }
   if (fileHistoryOnly) {
     assert.equal(sourceFileHistory.turns.length, 1, 'replay one exact archived turn')

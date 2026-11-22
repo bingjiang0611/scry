@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { exerciseActivityHistory } from './electron-security-activity-history.mjs'
+import { creditSessionId, exerciseActivityHistory } from './electron-security-activity-history.mjs'
 
 export async function exerciseNativeHistory(smokeContext) {
   const { evaluate, cdp, canonicalWorkspace, home, userDataDir, nativeHistoryPerformanceOnly, nativeSessionId } = smokeContext
@@ -127,7 +127,6 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.equal(oldest.turns.length, 1)
     assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
     // Separate small session: never shrink the existing >64 MiB history workload for metering.
-    const creditSessionId = '11111111-1111-4111-8111-111111111111'
     const creditContext = { ...context, externalSessionId: creditSessionId }
     const creditNativePath = nativePath.replace(`2026-10-13_${nativeSessionId}`, `2026-10-13_${creditSessionId}`)
     writeFileSync(creditNativePath, [
@@ -145,10 +144,6 @@ export async function exerciseNativeHistory(smokeContext) {
       turns: [{ runId: 'credit-run', providerTurnId: 'credit-user', userText: 'credit history', done: true, status: 'completed', ts: Date.now(),
         items: [{ id: 'credit-result', runId: 'credit-run', kind: 'harness', stage: 'result', upstreamProvider: 'qoder', ts: new Date().toISOString() }] }]
     }))
-    const creditCatalog = JSON.parse(readFileSync(join(userDataDir, 'app-sessions.json'), 'utf8'))
-    creditCatalog.push({ sessionId: creditSessionId, externalSessionId: creditSessionId, runId: 'credit-run', providerId: 'pi',
-      agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace, preview: 'credit history', ts: Date.now() })
-    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify(creditCatalog))
     const creditHistory = await evaluate(`window.scry.loadSession(${JSON.stringify(creditContext)}, { limit: 1 })`)
     assert.equal(creditOf(creditHistory.turns[0]).value.amount, 2.5, JSON.stringify(creditOf(creditHistory.turns[0])))
     assert.deepEqual(creditOf(creditHistory.turns[0]).source, ['pi_qoder_credit_observation'])

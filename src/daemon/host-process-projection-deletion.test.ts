@@ -7,6 +7,7 @@ import { importCatalogEntries } from '../host-runtime/orchestration/legacy-catal
 import { INLINE_BODY_MAX_BYTES } from '../host-runtime/orchestration/types'
 import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
+import { createRecentFoldersStore } from '../main/app-store'
 
 const sessionId = 'old-session'
 const runId = 'legacy-unbound-run'
@@ -218,5 +219,19 @@ it('keeps the committed conversation ID when projecting its metadata fails', asy
     expect(recovered.host.orchestrationAuthority!.sink.getSession(id)?.conversationId).toBe(id)
   } finally {
     await recovered.dispose()
+  }
+}, 30_000)
+
+it('rejects an imported history request in the presentation project instead of the execution workspace', async () => {
+  const { daemon, ref } = await startLegacySession()
+  try {
+    const group = join(daemon.root, 'presentation-group')
+    mkdirSync(group)
+    const wrongCwd = realpathSync(group)
+    createRecentFoldersStore(daemon.userDataDir).push(wrongCwd)
+    const wrong = await daemon.localOp('sessionHistory', 'loadSession', [{ ...ref, cwd: wrongCwd }])
+    expect(wrong.error).toBe('会话工作目录与 catalog 不一致')
+  } finally {
+    await daemon.dispose()
   }
 }, 30_000)

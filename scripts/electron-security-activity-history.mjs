@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict'
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
+
+export const creditSessionId = '11111111-1111-4111-8111-111111111111'
+
+export function nativeHistoryCatalog({ nativeSessionId, canonicalWorkspace, home, nativeHistoryPerformanceOnly }) {
+  const context = { providerId: 'pi', agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace }
+  const native = {
+    ...context, sessionId: nativeSessionId, externalSessionId: nativeSessionId, runId: 'remote-run-fixture-1',
+    preview: '手机会话恢复测试', ts: Date.now()
+  }
+  if (nativeHistoryPerformanceOnly) return [native]
+  return [
+    { ...native, projectCwd: realpathSync(home), lastRunOutcome: 'completed' },
+    { ...context, sessionId: creditSessionId, externalSessionId: creditSessionId, runId: 'credit-run', preview: 'credit history', ts: 1 }
+  ]
+}
 
 // Real renderer/preload/main with a Pi JSONL and two temporary directories.
 // projectCwd is presentation grouping; it must never replace the session's cwd.
@@ -9,9 +24,8 @@ export async function exerciseActivityHistory({ evaluate, cdp, userDataDir, home
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
   const session = catalog.find(entry => entry.externalSessionId === nativeSessionId)
   assert.equal(session.cwd, canonicalWorkspace)
-  session.projectCwd = realpathSync(home)
-  session.lastRunOutcome = 'completed'
-  writeFileSync(catalogPath, JSON.stringify(catalog))
+  assert.equal(session.projectCwd, realpathSync(home))
+  assert.equal(session.lastRunOutcome, 'completed')
   await cdp.send('Page.reload')
 
   const wait = expression => evaluate(`(async () => {
