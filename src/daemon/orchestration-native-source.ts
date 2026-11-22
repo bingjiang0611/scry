@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { locatePiNativeSession } from '../main/pi-native-history'
 import { validateHeader, type NativeEntry } from '../main/pi-native-parse'
 import { transcriptPath, trustedOwnedFile } from '../main/transcript-archive-paths'
+import { resolveNativeTranscriptPath } from '../main/transcript-archive-mirror'
 import type { TranscriptSource } from '../host-runtime/orchestration/transcript-interval'
 
 export async function matchesPiIdentity(path: string, cwd: string, sessionId: string): Promise<boolean> {
@@ -34,6 +35,7 @@ export async function locateOwnedTranscript(
   const path = provider === 'claude' ? transcriptPath(cwd, nativeSessionId, homeDir)
     : (await locatePiNativeSession({ sessionRoot: join(homeDir, '.pi', 'agent', 'sessions'), cwd, sessionId: nativeSessionId }))?.canonical
   if (!path || !trustedOwnedFile(homeDir, path)) return undefined
+  if (provider === 'claude' && !resolveNativeTranscriptPath({ cwd, sessionId: nativeSessionId, home: homeDir })) return undefined
   if (provider === 'pi' && !(await matchesPiIdentity(path, cwd, nativeSessionId))) return undefined
   return { provider, nativeSessionId, path }
 }
