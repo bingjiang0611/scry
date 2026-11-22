@@ -1,5 +1,5 @@
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
-import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
+import type { SubscribeRequest, SubscribeResponse } from '../shared/orchestration-subscribe'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ProviderContext } from '../shared/provider'
 import { isSessionProviderId } from '../main/app-store'
@@ -8,6 +8,7 @@ import type { AuthorityEngine } from '../host-runtime/orchestration/authority-en
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { SubscribeEngine, type SubscribeEngineOptions } from '../host-runtime/orchestration/subscribe-engine'
 import { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
+import { paginateSubscribeReplies } from './orchestration-subscribe-chunks'
 
 export interface AuthoritySubscribeRuntimeDeps {
   hostId: () => string
@@ -33,7 +34,7 @@ export function createAuthoritySubscribeHandler(
   sink: EventSink,
   hub: SubscribeHub,
   deps: AuthoritySubscribeRuntimeDeps
-): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply> {
+): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse> {
   const engine = new SubscribeEngine({
     sink,
     hub,
@@ -43,7 +44,7 @@ export function createAuthoritySubscribeHandler(
     readFirstPage: deps.readFirstPage,
     scans: deps.scans
   })
-  return (peer, request, signal) => engine.subscribe(peer, request, signal)
+  return paginateSubscribeReplies(sink, deps, (peer, request, signal) => engine.subscribe(peer, request, signal))
 }
 
 /** Resolves the existing native history page using the projected session identity. */

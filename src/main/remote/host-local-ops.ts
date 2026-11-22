@@ -2,7 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { RunControlHandlers } from './host-run-control'
 import type { AppEventFeed } from './app-event-feed'
 import { DAEMON_LOCAL_OP_CHANNELS, DAEMON_LOCAL_OP_NAMES } from '../daemon-channel-gate'
-import { SUBSCRIBE_VIEWS, type SubscribeReply, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
+import { SUBSCRIBE_VIEWS, type SubscribeResponse, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
+import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 
 // One App channel handler, called with the renderer's arguments as main would have.
 export type LocalOpHandler = (...args: unknown[]) => unknown
@@ -19,7 +20,7 @@ export interface LocalEndpointHandlers {
   // What the daemon tells its App that no run read carries (P3f).
   events?: Pick<AppEventFeed, 'read'>
   // P4-3 authoritative orchestration subscribe handler (local endpoint only; omitted unless SCRY_ORCHESTRATION=on).
-  subscribe?: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply>
+  subscribe?: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
   // The App viewed one of the daemon's unread sessions (E1b).
   attention?: { viewed(sessionKey: string): void }
   // The App's terminal output and lifetime (P3-terminal.md).
@@ -76,7 +77,7 @@ export async function handleAppEvents(events: LocalEndpointHandlers['events'], r
   return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
 }
 
-const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet']
+const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet', 'chunk']
 
 /** P4-3 local orchestration subscribe; absent on network endpoint and in off/shadow modes. */
 export async function handleSubscribe(
@@ -87,7 +88,7 @@ export async function handleSubscribe(
 ): Promise<Record<string, unknown>> {
   if (!subscribe) return { error: 'unsupported_op' }
   if (Object.keys(request).some((key) => !SUBSCRIBE_KEYS.includes(key))) return { error: 'invalid_request' }
-  const { views, session, known, sessionsCursor, waitMs, eventSet } = request
+  const { views, session, known, sessionsCursor, waitMs, eventSet, chunk } = request
   if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
       !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
     return { error: 'invalid_request' }
@@ -111,6 +112,16 @@ export async function handleSubscribe(
     }
   }
   if (views.includes('detail') && !parsedSession) return { error: 'invalid_request' }
+  let parsedChunk: SubscribeRequest['chunk']
+  if (chunk !== undefined) {
+    if (!views.includes('detail') || !chunk || typeof chunk !== 'object' || Array.isArray(chunk)) return { error: 'invalid_request' }
+    const { id, offset } = chunk as Record<string, unknown>
+    if (typeof id !== 'string' || !/^[\da-f-]{36}$/i.test(id) || typeof offset !== 'number' ||
+        offset <= 0 || offset >= DESKTOP_HISTORY_MAX_BYTES || offset % DESKTOP_HISTORY_CHUNK_BYTES !== 0) {
+      return { error: 'invalid_request' }
+    }
+    parsedChunk = { id, offset }
+  }
   let parsedKnown: SubscribeRequest['known']
   if (known !== undefined) {
     if (!known || typeof known !== 'object' || Array.isArray(known)) return { error: 'invalid_request' }
@@ -127,6 +138,7 @@ export async function handleSubscribe(
     waitMs: waitMs as number,
     ...(parsedSession ? { session: parsedSession } : {}),
     ...(parsedKnown ? { known: parsedKnown } : {}),
+    ...(parsedChunk ? { chunk: parsedChunk } : {}),
     ...(sessionsCursor !== undefined ? { sessionsCursor: sessionsCursor as string } : {}),
     ...(eventSet !== undefined ? { eventSet: eventSet as number } : {})
   }, signal)

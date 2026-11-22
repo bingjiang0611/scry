@@ -2,6 +2,7 @@ import type { HostAdminNotice } from './host-admin'
 import type { AgentDataUpdated, RuntimeProvider } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
 import type { SessionHistoryPage } from './session-history'
+import type { DesktopHostReadResult } from './desktop-remote'
 
 /**
  * Shared wire contract for P4-3 local `subscribe` (P4-orchestration-protocol.md §5).
@@ -45,6 +46,7 @@ export interface SubscribeRequest {
   sessionsCursor?: string
   waitMs: number
   eventSet?: number
+  chunk?: { id: string; offset: number }
 }
 
 export interface SessionCatalogMetadata {
@@ -156,6 +158,7 @@ export type SubscribeReply =
       snapshot: SubscribeSnapshot
       hints?: SubscribeHint[]
     }
+
   | {
       hostId: string
       logId: string
@@ -171,3 +174,5 @@ export type SubscribeReply =
       mode: 'idle'
       hints?: SubscribeHint[]
     }
+
+export type SubscribeResponse = SubscribeReply | Extract<DesktopHostReadResult, { kind: 'history_chunk' }>

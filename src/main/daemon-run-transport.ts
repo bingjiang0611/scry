@@ -6,6 +6,7 @@ import { DaemonClientError } from './daemon-client'
 import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
 import { readDaemonTrace } from './daemon-run-trace-read'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
+import { assembleByteChunks } from './remote/desktop-byte-chunks'
 import type { DaemonEventReply } from './daemon-event-pump'
 import { isHostAdminNotice } from '../shared/host-admin'
 import { DAEMON_WINDOW_NOTICES } from './remote/app-event-feed'
@@ -166,11 +167,13 @@ export class DaemonRunTransport {
 
   /** P4-3 local orchestration subscribe on the events lane (active only when daemon reports subscribe=1). */
   async subscribe(input: SubscribeRequest, signal?: AbortSignal): Promise<SubscribeReply> {
-    const reply = await this.#call(
-      { op: 'subscribe', ...input },
-      { replayable: true, ...(signal ? { signal } : {}) }
-    )
-    return parseSubscribeReply(reply)
+    const request = async (chunk?: SubscribeRequest['chunk']) => {
+      const reply = await this.#call({ op: 'subscribe', ...input, ...(chunk ? { chunk } : {}) }, { replayable: true, signal })
+      return record(reply.subscribe) ? reply.subscribe : fail()
+    }
+    let subscribe = await request()
+    if (subscribe.kind === 'history_chunk') subscribe = await assembleByteChunks(subscribe, request, fail)
+    return parseSubscribeReply({ subscribe })
   }
 
   async output(input: { runId: string; cursor: number }): Promise<DaemonOutputStream> {

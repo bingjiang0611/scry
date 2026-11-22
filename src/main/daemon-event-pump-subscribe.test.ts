@@ -204,7 +204,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     pump.dispose()
     expect(onHostAdmin).toHaveBeenCalledWith(notice)
     expect(requests[2]?.known).toBeUndefined()
-    expect(requests[0]?.views).toEqual(['activeRuns'])
+    expect(requests[0]?.views).toEqual(['activeRuns', 'sessions'])
   })
 
   it('probes cursors a snapshot no longer lists and finalizes only those that ended', async () => {

@@ -25,7 +25,7 @@ import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { AppEvent } from '../main/remote/app-event-feed'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
-import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
+import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
 import {
   parseOrchestrationFullfsync,
   parseOrchestrationMode,
@@ -49,7 +49,7 @@ export interface DaemonOrchestrationAuthority {
   readonly recovery: RecoverOrchestrationSummary
   readonly importComplete: Promise<void>
   readonly subscribeHub: SubscribeHub
-  createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply>
+  createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
   forwardAppEvent(event: AppEvent): void
   startImport(): void
   status(): BackgroundServiceOrchestrationStatus

@@ -37,8 +37,7 @@ export interface SubscribePumpDeps {
 
 /**
  * P4-3 local `subscribe` loop for `DaemonEventPump` (active ONLY when daemon reports `subscribe: 1`).
- * Maintains `(hostId, logId, seq)` across reconnects, falls back to snapshot on unknown event types
- * or `logId` changes, and delivers volatile hints (`run`, `terminal`, `oauth`, W11 `hostNotice`, etc.).
+ * Maintains the cursor while connected. A reconnect or changed event set opens a new snapshot.
  */
 export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
   let known: SubscribeKnownCursor | undefined
@@ -51,9 +50,7 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
     try {
       reply = await deps.subscribe(
         {
-          // The App reads only activeRuns until the P4-4 renderer projection; asking
-          // for sessions would make every snapshot scan the whole session table.
-          views: ['activeRuns'],
+          views: ['activeRuns', 'sessions'],
           ...(known ? { known } : {}),
           waitMs: deps.waitMs,
           eventSet: 1
@@ -70,7 +67,10 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
         return
       }
       deps.setLive(false)
-      if (known !== undefined) missed = true
+      if (known !== undefined) {
+        missed = true
+        known = undefined
+      }
       await deps.sleep(pause)
       pause = Math.min(pause * 2, deps.retry.maxMs)
       continue
@@ -118,6 +118,10 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
         }
         for (const ev of reply.events) {
           await deps.onSubscribeEvent?.(ev)
+        }
+        if (reply.events.some((event) => event.type.startsWith('session.')) &&
+            !reply.hints?.some((hint) => hint.kind === 'data')) {
+          deps.send('agent:dataUpdated', { kind: 'catalog_recovered' })
         }
       }
     } else if (missed) {

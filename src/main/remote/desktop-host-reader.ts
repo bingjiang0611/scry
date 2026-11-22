@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { recordRunStage, runStageTimingEnabled } from '../run-stage-timing'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { readStoredAttachmentBytes } from '../attachment-store'
@@ -12,12 +11,10 @@ import { mergeSessionTurns } from '../session-history'
 import { readTraceArchivePageAsync, readTraceArchiveVersionAsync, readTraceArchiveTurnForHistory } from '../transcript-archive'
 import { createTraceRevisions } from './desktop-trace-delta'
 import { readDesktopArchivedTrace } from './desktop-archived-trace'
+import { cacheDesktopBytePage, desktopHistoryChunk, DESKTOP_PAGE_IDLE_MS, sweepDesktopBytePages } from './desktop-byte-pages'
 
 // Leave room for the desktop transport's outer response envelope.
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024 - 1024
-const MAX_CACHED_BYTES = DESKTOP_HISTORY_MAX_BYTES
-const MAX_CACHED_PAGES = 4
-const CHUNK_IDLE_MS = 60_000
 const PROVIDERS: readonly string[] = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity']
 
 function object(value: unknown): Record<string, unknown> {
@@ -143,24 +140,13 @@ export function createDesktopHostReader(deps: {
   // cursors fail explicitly, never as empty history.
   const pages = new Map<string, { key: string; bytes: Buffer; touched: number; image?: Pick<AgentInputAttachment, 'name' | 'mimeType'> }>()
   const traceRevisions = createTraceRevisions()
-  function chunkResult(id: string, bytes: Buffer, offset: number): DesktopHostReadResult {
-    return { kind: 'history_chunk', id, offset, totalBytes: bytes.length, data: bytes.subarray(offset, offset + DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
-  }
   function cache(key: string, bytes: Buffer, image?: Pick<AgentInputAttachment, 'name' | 'mimeType'>): string {
-    let cachedBytes = [...pages.values()].reduce((total, page) => total + page.bytes.length, 0)
-    while (pages.size >= MAX_CACHED_PAGES || cachedBytes + bytes.length > MAX_CACHED_BYTES) {
-      const id = pages.keys().next().value!
-      cachedBytes -= pages.get(id)!.bytes.length
-      pages.delete(id)
-    }
-    const id = randomUUID()
-    pages.set(id, { key, bytes, touched: Date.now(), ...(image ? { image } : {}) })
-    return id
+    return cacheDesktopBytePage(pages, { key, bytes, touched: Date.now(), ...(image ? { image } : {}) })
   }
   return async (query) => {
     const now = Date.now()
-    for (const [id, page] of pages) if (now - page.touched >= CHUNK_IDLE_MS) pages.delete(id)
-    traceRevisions.sweep(now, CHUNK_IDLE_MS)
+    sweepDesktopBytePages(pages, now)
+    traceRevisions.sweep(now, DESKTOP_PAGE_IDLE_MS)
     if (query.kind === 'info') return { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1,
       ...(deps.workspaceChoices && deps.validateWorkspaceBranch ? { managedWorktrees: 1 as const } : {}) }
     if (query.kind === 'workspaceChoices') {
@@ -219,7 +205,7 @@ export function createDesktopHostReader(deps: {
       page.touched = Date.now()
       pages.delete(query.chunk.id)
       if (query.chunk.offset + DESKTOP_HISTORY_CHUNK_BYTES < page.bytes.length) pages.set(query.chunk.id, page)
-      return chunkResult(query.chunk.id, page.bytes, query.chunk.offset)
+      return desktopHistoryChunk(query.chunk.id, page.bytes, query.chunk.offset)
     }
     if (query.kind === 'trace' && query.archive) {
       result = await readDesktopArchivedTrace(deps.userDataDir, cwd, query)
@@ -285,6 +271,6 @@ export function createDesktopHostReader(deps: {
     if (!query.byteChunks || size > DESKTOP_HISTORY_MAX_BYTES) throw new Error('desktop_evidence_response_too_large')
     const bytes = Buffer.from(serialized)
     const id = cache(chunkKey, bytes)
-    return chunkResult(id, bytes, 0)
+    return desktopHistoryChunk(id, bytes, 0)
   }
 }
