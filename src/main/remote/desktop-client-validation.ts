@@ -56,6 +56,8 @@ export interface StoredConnection {
 }
 export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1; managedWorktrees?: 1; subscribe?: 1 }
 export interface RunStatusCursor {
+  revSeq?: number
+  outputSeq?: number
   cursor: number
   scryRunId?: string
   externalSessionId?: string

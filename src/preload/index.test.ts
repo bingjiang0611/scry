@@ -172,6 +172,7 @@ const listenerChannels = {
   onQuestionClosed: 'agent:userQuestionClosed',
   onError: 'agent:error',
   onBackgroundServiceNotice: 'remote:backgroundService:notice',
+  onDesktopRemoteUpdate: 'desktopRemote:update',
   onHostAdminOpenDevices: 'remote:hostAdmin:openDevices'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 

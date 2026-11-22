@@ -23,6 +23,7 @@ export type ControlsState = ReturnType<typeof useRemoteChatControls>
 
 export function useRemoteChatControls(foundation: FoundationState, { connectionId, cwd, draftStore, queueStore, onSessionAdopted }: Pick<RemoteChatProps, 'connectionId' | 'cwd' | 'draftStore' | 'queueStore' | 'onSessionAdopted'>) {
   const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, setRunStatus, setForeignRun, foreignRunRef, setIntents, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey } = foundation
+  const subscribed = catalog?.subscribe === 1
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
   // Initialize once per execution context. Refresh validates rather than silently
@@ -105,6 +106,16 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     // live reads on the floor without waiting for a poll to return.
     // The submitted run's own context (its cwd may be a new worktree); every other run
     // is read in the view's context.
+    let tracedRevision: string | undefined
+    const readHint = async (
+      runId: string, outputSeq: number | undefined, state: string, sequence: number, changed = false
+    ): Promise<boolean | undefined> => {
+      const revision = JSON.stringify([runId, outputSeq, state])
+      if (tracedRevision === revision && !changed) return false
+      const result = await followTrace(runId, sequence, traceContextFor(runId))
+      if (result !== undefined) tracedRevision = revision
+      return result
+    }
     let intentTrace: { runId: string; context: DesktopRemoteContext } | undefined
     const traceContextFor = (runId: string): DesktopRemoteContext => intentTrace?.runId === runId ? intentTrace.context : context
     const scheduler = createTraceReadScheduler((runId) => {
@@ -149,13 +160,15 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           }
           let traceChanged: boolean | undefined
           if (live?.scryRunId) {
-            if (scheduler.decide(live.scryRunId) === 'read-now') {
+            if (subscribed) traceChanged = await readHint(live.scryRunId, live.outputSeq, live.state, sequence)
+            else if (scheduler.decide(live.scryRunId) === 'read-now') {
               traceChanged = await readNow(live.scryRunId, sequence)
               if (traceChanged === undefined) return
             }
-            scheduler.setLive(followedLiveRunId(live))
-          } else { showTrace(null); scheduler.setLive(undefined) }
-          settlePoll(JSON.stringify([pending, live]), traceChanged)
+            if (!subscribed) scheduler.setLive(followedLiveRunId(live))
+          } else { tracedRevision = undefined; showTrace(null); scheduler.setLive(undefined) }
+          if (cancelled || sequence !== pollSequence.current) return
+          if (!subscribed) settlePoll(JSON.stringify([pending, live]), traceChanged)
           setPollError(null)
           setPollFresh(true)
           return
@@ -214,37 +227,57 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
           // A run started into a worktree reads its trace in the run's own cwd/session,
           // including the tail read the scheduler may arm for it.
           intentTrace = { runId: nextStatus.scryRunId, context: effectiveContext }
-          if (scheduler.decide(nextStatus.scryRunId) === 'read-now') {
+          if (subscribed) traceChanged = await readHint(nextStatus.scryRunId, nextStatus.outputSeq, nextStatus.state, sequence, nextStatus.changed)
+          else if (scheduler.decide(nextStatus.scryRunId) === 'read-now') {
             traceChanged = await readNow(nextStatus.scryRunId, sequence)
             if (traceChanged === undefined) return
           }
           scheduler.setLive(undefined)
         } else { showTrace(null); scheduler.setLive(undefined) }
-        settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)
+        if (cancelled || sequence !== pollSequence.current) return
+        if (!subscribed) settlePoll(JSON.stringify([pending, nextStatus]), traceChanged)
         setPollError(null)
         setPollFresh(true)
       } catch (reason) {
         if (!cancelled && sequence === pollSequence.current) { setPollError(errorText(reason)); setPollFresh(false) }
       }
     }
+    let pendingUpdate = false
     const poll = (): Promise<void> => {
-      if (pollInFlight.current) return pollInFlight.current
+      const active = pollInFlight.current
+      if (active) {
+        if (subscribed && !pendingUpdate) {
+          pendingUpdate = true
+          void active.then(() => {
+            pendingUpdate = false
+            if (!cancelled) void poll()
+          })
+        }
+        return active
+      }
       const request = readPoll().finally(() => { pollInFlight.current = undefined })
       pollInFlight.current = request
       return request
     }
     pollRef.current = poll
+    const unsubscribe = subscribed ? window.scry.onDesktopRemoteUpdate?.((update) => {
+      if (update.connectionId !== connectionId) return
+      if (update.history) setHistoryRevision(revision => revision + 1)
+      if (update.runs || update.stale) void poll()
+    }) : undefined
+    if (subscribed) void poll()
     return () => {
       cancelled = true
+      unsubscribe?.()
       scheduler.dispose()
       pollSequence.current += 1
       if (pollRef.current === poll) pollRef.current = undefined
     }
-  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive, setPollInterval, showTrace, traceDelta])
+  }, [api, catalogReady, connectionId, connected, context, providerId, providerSelection, queueKey, queueStore, sessionActive, setPollInterval, showTrace, subscribed, traceDelta])
   applyPollInterval.current = useVisibilityPolling(JSON.stringify([connectionId, context, connected, catalogReady, sessionActive]), () => pollRef.current?.(), POLL_MS, () => {
     pollSequence.current += 1
     setPollFresh(false)
-  })
+  }, !subscribed)
 
   return { controlProvider, updateControls }
 }

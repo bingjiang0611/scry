@@ -78,3 +78,49 @@ it('applies visible deltas and opens a fresh snapshot on an unknown event type',
     await rm(fixture.directory, { recursive: true, force: true })
   }
 })
+
+it('uses subscribed lifecycle and the watched detail page on a capable host', async () => {
+  const runId = '94b065ce-62a4-4e78-95ea-fe94ac6862aa'
+  const opened = { cwd: '/workspace', providerId: 'codex', externalSessionId: 'one' }
+  const calls: Record<string, unknown>[] = []
+  const fixture = await setup({ subscribe: 1, subscribeResponse: (request) => {
+    calls.push(request)
+    if (request.known) return new Promise(() => {})
+    const base = { hostId: fixture.host.hostId, logId: 'stable-log', seq: 10, mode: 'snapshot' }
+    if ((request.views as string[]).includes('detail')) return { subscribe: { ...base, snapshot: {
+      detail: { turns: [], firstPage: { kind: 'remoteHistory', history: {
+        source: 'trace_archive', status: 'available', historyScope: 'session',
+        turns: [{ userText: '测试正文', items: [] }], hasOlder: false
+      } } }
+    } } }
+    return { subscribe: { ...base, snapshot: {
+      sessions: { total: 1, rows: [{ ...row('one', 10), activeRunId: runId }] },
+      activeRuns: { rows: [{
+        runId, sessionKey: 'one', origin: 'remote', provider: 'codex', profile: null, cwd: '/workspace',
+        lifecycle: 'dispatched', traceRunId: runId, intentSeq: 8, revSeq: 10, outputSeq: 3, externalSessionId: 'one'
+      }] }
+    } } }
+  } })
+  try {
+    const pending = await fixture.client.pair({ label: 'Mac2', ssh, invitation: fixture.invitation })
+    const id = pending.connection.id
+    await fixture.client.finishPairing(id)
+    await fixture.client.connect(id)
+    await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({
+      state: 'dispatched', scryRunId: runId, externalSessionId: 'one', outputSeq: 3
+    })
+    await expect(fixture.client.liveRun(id, opened)).resolves.toMatchObject({
+      runId, origin: 'remote', state: 'running', scryRunId: runId, outputSeq: 3
+    })
+    await expect(fixture.client.history(id, opened)).resolves.toMatchObject({
+      historyScope: 'session', status: 'available', turns: [{ userText: '测试正文' }]
+    })
+    await expect.poll(() => calls.some(call => (call.views as string[]).includes('detail') && Boolean(call.known))).toBe(true)
+    const frames = fixture.tlsRequest.mock.calls.map(([value]) => value.request as Record<string, unknown>)
+    expect(frames.some(frame => frame.op === 'watch' || frame.op === 'liveRuns' ||
+      (frame.op === 'desktop' && (frame.query as { kind?: string })?.kind === 'history'))).toBe(false)
+  } finally {
+    await fixture.client.dispose()
+    await rm(fixture.directory, { recursive: true, force: true })
+  }
+})

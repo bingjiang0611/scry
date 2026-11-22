@@ -83,13 +83,6 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     return this.withAttention(connectionIdValue, catalog)
   }
 
-  // Unread keys are this client's view state, derived from the host's catalog evidence
-  // on every read (cached or fresh); they are never stored in the cached catalog.
-  private withAttention(connectionIdValue: string, catalog: DesktopRemoteCatalog): DesktopRemoteCatalog {
-    const unreadSessionKeys = this.attention?.catalog(connectionIdValue, { sessions: catalog.sessions })
-    return unreadSessionKeys ? { ...catalog, unreadSessionKeys: [...unreadSessionKeys] } : catalog
-  }
-
   async providerControls(connectionIdValue: string, value: DesktopRemoteContext): Promise<RemoteProviderRef> {
     const query = context(value)
     // Capabilities come from the catalog snapshot this device just read. Without

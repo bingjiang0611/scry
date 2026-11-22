@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { DesktopRemoteClient } from '../remote/desktop-client'
+import type { DesktopRemoteUpdate } from '../../shared/desktop-remote'
 import type { RemoteAttentionTracker } from '../remote/remote-attention'
 
 // Linux 的 safeStorage 在没有可用密钥环时会退回 `basic_text`（用固定明文口令加密），
@@ -27,7 +28,10 @@ export function unsafeCredentialStorageReason(input: {
  * state, kept in its secure storage. Built on first use so an empty saved-host list never
  * initializes or unlocks the keychain during startup.
  */
-export function createRemoteConnections({ remoteAttention }: { remoteAttention: RemoteAttentionTracker }) {
+export function createRemoteConnections({ remoteAttention, publishSubscription }: {
+  remoteAttention: RemoteAttentionTracker
+  publishSubscription?: (update: DesktopRemoteUpdate) => void
+}) {
   let desktopRemoteClient: DesktopRemoteClient | null = null
   function requireDesktopSecureStorage(): typeof safeStorage {
     const unsafe = unsafeCredentialStorageReason({
@@ -44,7 +48,8 @@ export function createRemoteConnections({ remoteAttention }: { remoteAttention: 
       directory: join(app.getPath('userData'), 'desktop-connections'),
       encrypt: (value) => requireDesktopSecureStorage().encryptString(value),
       decrypt: (value) => requireDesktopSecureStorage().decryptString(value),
-      attention: remoteAttention
+      attention: remoteAttention,
+      publishSubscription
     })
     return desktopRemoteClient
   }

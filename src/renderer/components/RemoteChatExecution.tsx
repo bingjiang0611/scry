@@ -25,7 +25,7 @@ import { consumeWorkspaceDraft, type WorkspaceDraftSelection } from '../workspac
 const POLL_MS = 1500
 
 export function useRemoteChatExecution(foundation: FoundationState, presentation: PresentationState, { connectionId, draftStore, queueStore }: Pick<RemoteChatProps, 'connectionId' | 'draftStore' | 'queueStore'>) {
-  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
+  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, pollRef, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
   const { chosenModel, validEffort, validPermissionMode, displayTurns, chatNavigation, currentIntent, unknownReceiptBlocked, currentRunStatus, runActive, controlRunId, projectAvailable, contextAvailable } = presentation
   const submission = (text: string, attachments: AgentInputAttachment[] = [], workspace?: WorkspaceDraftSelection) => ({
     context, prompt: text,
@@ -80,7 +80,11 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
         setError(detail.includes('desktop_remote_attachments_unsupported') ? REMOTE_ATTACHMENTS_COPY.unsupported : detail)
         setStatus(null)
       }
-    } finally { submissionInFlight.current = false; setSubmitting(false) }
+    } finally {
+      submissionInFlight.current = false
+      setSubmitting(false)
+      if (catalog?.subscribe === 1) void pollRef.current?.()
+    }
   }
   const attachmentBytes = (attachment: AgentInputAttachment): number => attachment.size ?? Math.floor(attachment.dataBase64.length * 3 / 4)
   const attachmentError = (attachments: readonly AgentInputAttachment[]): string | null => {

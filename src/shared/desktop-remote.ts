@@ -165,6 +165,14 @@ export interface DesktopRemoteCatalog {
   // catalogs. These keys are not host evidence and are never sent to the host.
   unreadSessionKeys?: string[]
 }
+export interface DesktopRemoteUpdate {
+  connectionId: string
+  catalog?: DesktopRemoteCatalog
+  runs?: true
+  history?: true
+  stale?: true
+}
+
 export interface DesktopRemoteHistory {
   historyScope?: 'session'
   imageCounts?: Record<string, number>
@@ -263,6 +271,7 @@ export interface DesktopRemoteIntent {
 export interface DesktopRemoteRunStatus {
   state: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'unknown'
   scryRunId?: string
+  outputSeq?: number
   externalSessionId?: string
   cwd?: string
   detail?: string
@@ -279,6 +288,7 @@ export interface DesktopRemoteLiveRun {
   origin: 'remote' | 'mac'
   state: 'running' | 'waiting' | 'stopping'
   scryRunId?: string
+  outputSeq?: number
 }
 export interface ExecutionTargetRef {
   id: string

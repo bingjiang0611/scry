@@ -66,7 +66,8 @@ export function isAttentionSnapshot(value: unknown): value is SessionAttentionSn
     value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
 }
 
-function isHistoryPage(value: unknown): value is SubscribeHistoryPage {
+function isHistoryPage(value: unknown, network: boolean): value is SubscribeHistoryPage {
+  if (network) return record(value) && value.kind === 'remoteHistory' && record(value.history)
   if (record(value) && value.kind === 'conversation') {
     const page = value.page
     return record(page) && record(page.summary) && typeof page.summary.id === 'string' &&
@@ -80,7 +81,7 @@ function isHistoryPage(value: unknown): value is SubscribeHistoryPage {
     value.turns.every((turn) => record(turn) && typeof turn.userText === 'string' && Array.isArray(turn.items))
 }
 
-function parseHints(rawHints: unknown): SubscribeHint[] | undefined {
+function parseHints(rawHints: unknown, network: boolean): SubscribeHint[] | undefined {
   if (rawHints === undefined) return undefined
   if (!Array.isArray(rawHints) || rawHints.length > MAX_SUBSCRIBE_ITEMS) throw new DaemonRunError('invalid_daemon_response')
   const hints: SubscribeHint[] = []
@@ -91,7 +92,8 @@ function parseHints(rawHints: unknown): SubscribeHint[] | undefined {
         kind: 'run',
         runId: raw.runId,
         outputSeq: raw.outputSeq as number,
-        ...(typeof raw.scryRunId === 'string' ? { scryRunId: raw.scryRunId } : {}),
+        ...(typeof raw.scryRunId === 'string' && !network ? { scryRunId: raw.scryRunId } : {}),
+        ...(typeof raw.traceRunId === 'string' && network ? { traceRunId: raw.traceRunId } : {}),
         ...(raw.admitted === true ? { admitted: true } : {}),
         ...(typeof raw.cwd === 'string' ? { cwd: raw.cwd } : {}),
         ...(typeof raw.providerId === 'string' ? { providerId: raw.providerId } : {}),
@@ -121,7 +123,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>, network = fa
       !Number.isSafeInteger(sub.seq) || (sub.seq as number) < 0) {
     throw new DaemonRunError('invalid_daemon_response')
   }
-  const hints = parseHints(sub.hints)
+  const hints = parseHints(sub.hints, network)
   const base = { hostId: sub.hostId, logId: sub.logId, seq: sub.seq as number, ...(hints ? { hints } : {}) }
   if (sub.mode === 'idle') return { ...base, mode: 'idle' }
   if (sub.mode === 'events') {
@@ -168,7 +170,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>, network = fa
       snapshot.detail = {
         turns: rawSnap.detail.turns,
         ...(rawSnap.detail.legacyBefore === true ? { legacyBefore: true } : {}),
-        ...(isHistoryPage(rawSnap.detail.firstPage) ? { firstPage: rawSnap.detail.firstPage } : {})
+        ...(isHistoryPage(rawSnap.detail.firstPage, network) ? { firstPage: rawSnap.detail.firstPage } : {})
       }
     }
     return { ...base, mode: 'snapshot', snapshot }

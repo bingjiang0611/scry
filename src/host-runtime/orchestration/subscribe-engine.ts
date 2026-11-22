@@ -364,6 +364,7 @@ export class SubscribeEngine {
     return {
       runId: run.runId,
       ...(localMeta?.scryRunId ? { scryRunId: localMeta.scryRunId } : {}),
+      ...(access.scope === 'remote' && liveMeta?.scryRunId ? { traceRunId: liveMeta.scryRunId } : {}),
       ...(localMeta?.admitted ? { admitted: true } : {}),
       ...(externalSessionId ? { externalSessionId } : {}),
       sessionKey: run.sessionKey,
@@ -442,7 +443,9 @@ export class SubscribeEngine {
       if (hint.kind === 'run') {
         const run = this.#sink.getRun(hint.runId)
         if (run && access.canReadCwd(run.cwd) && (!detail || (detailSession && run.sessionKey === detailSession.sessionKey))) {
-          hints.push({ kind: 'run', runId: hint.runId, outputSeq: hint.outputSeq })
+          hints.push({ kind: 'run', runId: hint.runId, outputSeq: hint.outputSeq,
+            ...(hint.scryRunId ? { traceRunId: hint.scryRunId } : {})
+          })
         }
       }
     }

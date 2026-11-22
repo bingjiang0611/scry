@@ -3,6 +3,7 @@ import { isSupportedImageMimeType } from '../../shared/runtime'
 import type { DesktopHostRead, DesktopRemoteContext, DesktopRemoteHistory } from '../../shared/desktop-remote'
 import { DESKTOP_HISTORY_CHUNK_BYTES } from '../../shared/desktop-remote'
 import { assembleByteChunks } from './desktop-byte-chunks'
+import { DesktopDetailSubscription } from './desktop-client-detail-subscription'
 import { DesktopRemoteClientCatalog } from './desktop-client-catalog'
 import { context, fail, record, text, uuid, MAX_ITEMS, validateTurn } from './desktop-client-validation'
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES } from './desktop-attachments'
@@ -10,11 +11,56 @@ import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATT
 export abstract class DesktopRemoteClientHistory extends DesktopRemoteClientCatalog {
   async history(connectionIdValue: string, value: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory> {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 0) || snapshot !== undefined && !text(snapshot, 256)) fail('invalid_history_cursor')
-    const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', historyScope: 'session', context: context(value), byteChunks: true, images: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
+    const scope = context(value)
+    if (before === undefined && snapshot === undefined) {
+      const detail = await this.watchDetail(connectionIdValue, scope)
+      if (detail?.firstPage) return this.decodeHistory(connectionIdValue, scope, detail.firstPage)
+    }
+    const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', historyScope: 'session', context: scope, byteChunks: true, images: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
     let result = await this.desktop(connectionIdValue, query)
     if (result.kind === 'history_chunk') result = await this.assembleChunks(connectionIdValue, query, result, 'invalid_history_response')
-    const raw = result.history
-    if (result.kind !== 'history' || !record(raw) || !Array.isArray(raw.turns) || typeof raw.hasOlder !== 'boolean' || raw.source !== 'trace_archive' || !['available', 'unavailable'].includes(String(raw.status))) fail('invalid_history_response')
+    if (result.kind !== 'history') fail('invalid_history_response')
+    return this.decodeHistory(connectionIdValue, scope, result.history)
+  }
+
+  override async setViewedSession(id: string, value: DesktopRemoteContext | null): Promise<void> {
+    await super.setViewedSession(id, value)
+    if (value === null) {
+      this.detailSubscriptions.get(id)?.close()
+      this.detailSubscriptions.delete(id)
+    } else if (this.active.get(id)?.subscribe === 1) {
+      await this.watchDetail(id, context(value))
+    }
+  }
+
+  private async watchDetail(id: string, scope: DesktopRemoteContext): Promise<DesktopDetailSubscription | undefined> {
+    const status = await this.statusSubscription(id)
+    if (!status || !scope.externalSessionId) return undefined
+    const session = status.sessions().find(item => item.cwd === scope.cwd && item.providerId === scope.providerId &&
+      item.agentProfileId === scope.agentProfileId && item.externalSessionId === scope.externalSessionId)
+    if (!session) return undefined
+    const item = this.connection(await this.state(), id)
+    const reference = { sessionKey: session.sessionId, ...scope }
+    const old = this.detailSubscriptions.get(id)
+    if (old?.matches(reference)) { await old.open(); return old }
+    old?.close()
+    const watch = new DesktopDetailSubscription({
+      hostId: item.hostId,
+      session: reference,
+      read: (request, signal) => this.requestForConnection(id, { op: 'subscribe', ...request }, undefined, signal),
+      changed: () => this.publishSubscription?.({ connectionId: id, history: true })
+    })
+    this.detailSubscriptions.set(id, watch)
+    try { await watch.open() } catch (error) {
+      if (this.detailSubscriptions.get(id) === watch) this.detailSubscriptions.delete(id)
+      watch.close()
+      throw error
+    }
+    return watch
+  }
+
+  private async decodeHistory(connectionIdValue: string, value: DesktopRemoteContext, raw: unknown): Promise<DesktopRemoteHistory> {
+    if (!record(raw) || !Array.isArray(raw.turns) || typeof raw.hasOlder !== 'boolean' || raw.source !== 'trace_archive' || !['available', 'unavailable'].includes(String(raw.status))) fail('invalid_history_response')
     if (raw.historyScope !== 'session') fail('history_scope_unverified')
     if (raw.turns.length > MAX_ITEMS) fail('history_too_large')
     const turns = raw.turns.map((item) => validateTurn(item))

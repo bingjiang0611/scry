@@ -82,6 +82,8 @@ export interface SubscribeActiveRunRow {
   runId: string
   /** Canonical scryRunId bound by remote-run-binding while live (local scope only). */
   scryRunId?: string
+  /** Device trace address for the authorized run, as in the v2 bound marker. */
+  traceRunId?: string
   /** Whether canonical pipeline registered the run (local scope only). */
   admitted?: boolean
   /** Native session ID from the authorized binding or projected catalog. */
@@ -124,6 +126,7 @@ export type SubscribeHint =
       runId: string
       outputSeq: number
       scryRunId?: string
+      traceRunId?: string
       admitted?: boolean
       cwd?: string
       providerId?: string

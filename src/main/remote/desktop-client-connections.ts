@@ -1,4 +1,4 @@
-import type { DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
+import type { DesktopRemoteCatalog, DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
 import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
 import { DesktopStatusSubscription } from './desktop-client-subscription'
@@ -141,11 +141,26 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     const subscription = new DesktopStatusSubscription({
       hostId: item.hostId,
       read: (request, signal) => this.requestForConnection(id, { op: 'subscribe', ...request }, undefined, signal),
-      onChange: (change) => {
+      onChange: (change, hints) => {
         if (change.catalog && baseline) {
           this.attention?.baseline(id, subscription.sessions())
           baseline = false
         }
+        const cached = this.catalogCache.get(id)?.catalog
+        const catalog = cached && change.catalog
+          ? this.withAttention(id, { ...cached, sessions: subscription.sessions() })
+          : undefined
+        const notices = hints.flatMap(hint => hint.kind === 'hostNotice' ? [hint.notice] : [])
+        const next = catalog ?? (cached && notices.length ? this.withAttention(id, { ...cached, sessions: subscription.sessions() }) : undefined)
+        if (next && notices.length) {
+          const prior = next.hostAdminNoticeItems ?? []
+          const unique = new Map([...prior, ...notices].map(notice => [notice.id, notice]))
+          next.hostAdminNoticeItems = [...unique.values()].sort((left, right) => right.ts - left.ts).slice(0, 32)
+        }
+        this.publishSubscription?.({
+          connectionId: id, ...(next ? { catalog: next } : {}),
+          ...(change.runs ? { runs: true } : {}), ...(change.stale ? { stale: true } : {})
+        })
       }
     })
     this.statusSubscriptions.set(id, subscription)
@@ -158,6 +173,24 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     return subscription
   }
 
+  // Unread keys are this client's view state, derived from the host's catalog evidence
+  // on every read (cached or fresh); they are never stored in the cached catalog.
+  protected withAttention(connectionIdValue: string, catalog: DesktopRemoteCatalog): DesktopRemoteCatalog {
+    const unreadSessionKeys = this.attention?.catalog(connectionIdValue, { sessions: catalog.sessions })
+    return unreadSessionKeys ? { ...catalog, unreadSessionKeys: [...unreadSessionKeys] } : catalog
+  }
+
+  protected async disconnectActive(connectionIdValue: string): Promise<void> {
+    const active = this.active.get(connectionIdValue)
+    this.statusSubscriptions.get(connectionIdValue)?.close()
+    this.statusSubscriptions.delete(connectionIdValue)
+    this.detailSubscriptions.get(connectionIdValue)?.close()
+    this.detailSubscriptions.delete(connectionIdValue)
+    this.lanes.closeConnection(connectionIdValue)
+    if (!active) return
+    this.active.delete(connectionIdValue)
+    await active.tunnel.close()
+  }
   async disconnect(connectionIdValue: string): Promise<void> {
     return this.serializeLifecycle(async () => {
       const state = await this.state()

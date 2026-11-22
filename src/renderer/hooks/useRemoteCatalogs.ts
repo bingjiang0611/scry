@@ -123,12 +123,30 @@ export function useRemoteCatalogs(): Snapshot {
 // per connected host, at most every 3s; slow reads are never stacked.
 // A failed read retains history, but its error invalidates live activity badges.
 export function useConnectedCatalogLoader(connections: readonly DesktopRemoteConnection[], readError: string | null, refreshing = false): void {
-  const connectedIds = readError || refreshing ? '' : connections.filter(connection => connection.state === 'connected').map(connection => connection.id).join('\u0000')
-  const ids = connectedIds ? connectedIds.split('\u0000') : []
-  useVisibilityPolling(`remote-catalogs:${connectedIds}`, () => Promise.all(ids.map(refreshRemoteCatalog)).then(() => {}), 3000, () => {
-    for (const id of ids) {
+  const connected = readError || refreshing ? [] : connections.filter(connection => connection.state === 'connected')
+  const legacyIds = connected.filter(connection => connection.subscribe !== 1).map(connection => connection.id).join('\u0000')
+  const subscribedIds = connected.filter(connection => connection.subscribe === 1).map(connection => connection.id).join('\u0000')
+  const legacy = legacyIds ? legacyIds.split('\u0000') : []
+  useVisibilityPolling(`remote-catalogs:${legacyIds}`, () => Promise.all(legacy.map(refreshRemoteCatalog)).then(() => {}), 3000, () => {
+    for (const id of legacy) {
       revisions.set(id, (revisions.get(id) ?? 0) + 1)
       publish(id, { ...snapshot.get(id), loading: true, stale: true })
     }
-  })
+  }, legacy.length > 0)
+  useEffect(() => {
+    if (!subscribedIds) return
+    const ids = new Set(subscribedIds.split('\u0000'))
+    const unsubscribe = window.scry.onDesktopRemoteUpdate?.((update) => {
+      const id = update.connectionId
+      if (!ids.has(id)) return
+      if (update.catalog) {
+        const unreadSessionKeys = remoteCatalogUnread(update.catalog, viewedSessionKey)
+        publish(id, { catalog: update.catalog, loading: false, stale: false, unreadSessionKeys })
+      } else if (update.stale) {
+        publish(id, { ...snapshot.get(id), loading: false, stale: true })
+      }
+    })
+    for (const id of ids) void refreshRemoteCatalog(id)
+    return unsubscribe
+  }, [subscribedIds])
 }

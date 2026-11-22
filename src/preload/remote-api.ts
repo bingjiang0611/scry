@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
-import type { DesktopRemoteAPI, DesktopHostAccess } from '../shared/desktop-remote'
+import type { DesktopRemoteAPI, DesktopHostAccess, DesktopRemoteUpdate } from '../shared/desktop-remote'
 
 export const remoteApi = {
   desktopRemote: {
@@ -37,6 +37,11 @@ export const remoteApi = {
     files: (id, context, path, cursor) => ipcRenderer.invoke('desktopRemote:files', id, context, path, cursor),
     file: (id, context, path, offset, snapshot) => ipcRenderer.invoke('desktopRemote:file', id, context, path, offset, snapshot)
   } satisfies DesktopRemoteAPI,
+  onDesktopRemoteUpdate: (cb: (update: DesktopRemoteUpdate) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, update: DesktopRemoteUpdate): void => cb(update)
+    ipcRenderer.on('desktopRemote:update', listener)
+    return () => { ipcRenderer.removeListener('desktopRemote:update', listener) }
+  },
   remoteDesktopHostStatus: (): Promise<DesktopHostAccess> => ipcRenderer.invoke('remote:desktop:status'),
   remoteDesktopHostInvite: (): Promise<string> => ipcRenderer.invoke('remote:desktop:invite'),
   remoteDesktopHostDisable: (): Promise<void> => ipcRenderer.invoke('remote:desktop:disable'),

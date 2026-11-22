@@ -1,4 +1,4 @@
-import { type DesktopHostRead, type DesktopPairingResult, type DesktopRemoteCatalog, type DesktopRemoteContext, type DesktopRemoteIntent } from '../../shared/desktop-remote'
+import { type DesktopHostRead, type DesktopPairingResult, type DesktopRemoteCatalog, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopRemoteUpdate } from '../../shared/desktop-remote'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { DESKTOP_ATTACHMENT_CHUNK_BYTES, attachmentSha256, newAttachmentId, norm
 import { context, fail, record, text, uuid, hash, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
 import type { DesktopCapabilities } from './desktop-client-capabilities'
 import { isUnknownFailure, targetBinding } from './desktop-client-intent-rules'
+import type { DesktopDetailSubscription } from './desktop-client-detail-subscription'
 import type { DesktopStatusSubscription } from './desktop-client-subscription'
 import type { RemoteAttentionTracker } from './remote-attention'
 
@@ -34,7 +35,9 @@ export abstract class DesktopRemoteClientBase {
   // pairing happens once, before any lane exists.
   protected readonly lanes: DesktopLanes
   protected readonly active = new Map<string, ActiveConnection>()
+  protected readonly publishSubscription?: (update: DesktopRemoteUpdate) => void
   protected readonly attention?: RemoteAttentionTracker
+  protected readonly detailSubscriptions = new Map<string, DesktopDetailSubscription>()
   protected readonly statusSubscriptions = new Map<string, DesktopStatusSubscription>()
   protected readonly controllers = new Set<AbortController>()
   protected readonly requests = new Set<Promise<unknown>>()
@@ -52,11 +55,12 @@ export abstract class DesktopRemoteClientBase {
   protected restoration?: Promise<void>
   protected disposed = false
 
-  constructor(options: { directory: string; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string; attention?: RemoteAttentionTracker } & DesktopRemoteClientTransportDeps, deps: DesktopRemoteClientTransportDeps = {}) {
+  constructor(options: { directory: string; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string; attention?: RemoteAttentionTracker; publishSubscription?: (update: DesktopRemoteUpdate) => void } & DesktopRemoteClientTransportDeps, deps: DesktopRemoteClientTransportDeps = {}) {
     if (!text(options.directory, 4096)) fail('invalid_state_directory')
     const injected = { ...options, ...deps }
     this.directory = options.directory
     this.attention = options.attention
+    this.publishSubscription = options.publishSubscription
     this.encrypt = options.encrypt
     this.decrypt = options.decrypt
     this.transport = { generateIdentity: injected.generateIdentity ?? generateDesktopDeviceIdentity, openTunnel: injected.openTunnel ?? openDesktopSshTunnel, tlsRequest: injected.tlsRequest ?? (desktopTlsRequest as NonNullable<DesktopRemoteClientTransportDeps['tlsRequest']>) }
@@ -69,6 +73,8 @@ export abstract class DesktopRemoteClientBase {
       this.disposed = true
       for (const subscription of this.statusSubscriptions.values()) subscription.close()
       this.statusSubscriptions.clear()
+      for (const subscription of this.detailSubscriptions.values()) subscription.close()
+      this.detailSubscriptions.clear()
       for (const controller of this.controllers) controller.abort()
       await Promise.allSettled([this.statePromise])
       await Promise.allSettled([...this.requests])
@@ -215,15 +221,6 @@ export abstract class DesktopRemoteClientBase {
     } catch (error) {
       throw desktopSshRequestError(error, options.classifySshFailure ? options.tunnel : undefined, failureSequence)
     } finally { this.requests.delete(promise); this.controllers.delete(controller) }
-  }
-  protected async disconnectActive(connectionIdValue: string): Promise<void> {
-    const active = this.active.get(connectionIdValue)
-    this.statusSubscriptions.get(connectionIdValue)?.close()
-    this.statusSubscriptions.delete(connectionIdValue)
-    this.lanes.closeConnection(connectionIdValue)
-    if (!active) return
-    this.active.delete(connectionIdValue)
-    await active.tunnel.close()
   }
   async serializeLifecycle<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.lifecycle.catch(() => {})

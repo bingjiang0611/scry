@@ -4,7 +4,7 @@ import type { RemoteSessionRef } from '../../shared/desktop-remote'
 import type {
   SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint, SubscribeKnownCursor, SubscribeReply, SubscribeRequest
 } from '../../shared/orchestration-subscribe'
-import { fail, MAX_ITEMS, MAX_PAGES, record, text, validateSession } from './desktop-client-validation'
+import { fail, MAX_ITEMS, MAX_PAGES, record, text, validRunId, validateSession } from './desktop-client-validation'
 
 const WAIT_MS = 20_000
 
@@ -37,7 +37,8 @@ function sessionFromRow(raw: unknown): { key: string; session: RemoteSessionRef;
 }
 
 function isRunRow(raw: unknown): raw is SubscribeActiveRunRow {
-  return record(raw) && text(raw.runId, 128) && text(raw.cwd, 16_384) && Number.isSafeInteger(raw.revSeq) &&
+  return record(raw) && validRunId(raw.runId) && text(raw.cwd, 16_384) && Number.isSafeInteger(raw.revSeq) &&
+    (raw.traceRunId === undefined || validRunId(raw.traceRunId)) &&
     ['recorded', 'admitted', 'dispatched', 'settled', 'failed', 'cancelled', 'interrupted'].includes(String(raw.lifecycle))
 }
 
@@ -141,14 +142,17 @@ export class DesktopStatusSubscription {
     const change: StatusChange = {}
     for (const event of reply.mode === 'events' ? reply.events : []) {
       if (event.sessionKey && event.sessionRow !== undefined && (this.#sessions.get(event.sessionKey)?.seq ?? -1) <= event.seq) {
-        if (event.sessionRow === null) this.#sessions.delete(event.sessionKey)
-        else {
+        if (event.sessionRow === null) {
+          if (this.#sessions.delete(event.sessionKey)) change.catalog = true
+        } else {
           const row = sessionFromRow(event.sessionRow)
           if (row.key !== event.sessionKey) fail('invalid_subscribe_session')
           if (this.#sessions.size >= MAX_ITEMS && !this.#sessions.has(row.key)) fail('catalog_too_large')
-          this.#sessions.set(row.key, row)
+          if ((this.#sessions.get(row.key)?.seq ?? -1) < row.seq) {
+            this.#sessions.set(row.key, row)
+            change.catalog = true
+          }
         }
-        change.catalog = true
       }
       if (event.runId && event.runRow !== undefined) {
         const previous = this.#runs.get(event.runId)
@@ -166,15 +170,17 @@ export class DesktopStatusSubscription {
     for (const hint of reply.hints ?? []) {
       if (hint.kind !== 'run') continue
       const cached = this.#runs.get(hint.runId)
-      if (cached && hint.outputSeq > (cached.outputSeq ?? 0)) {
-        this.#runs.set(hint.runId, { ...cached, outputSeq: hint.outputSeq })
+      const traceRunId = validRunId(hint.traceRunId) ? hint.traceRunId : cached?.traceRunId
+      if (cached && (hint.outputSeq > (cached.outputSeq ?? 0) || traceRunId !== cached.traceRunId)) {
+        this.#runs.set(hint.runId, { ...cached, traceRunId, outputSeq: Math.max(hint.outputSeq, cached.outputSeq ?? 0) })
         change.runs = true
       }
     }
     this.#cursor = knownOf(reply)
     const recovered = this.#error !== undefined
     this.#error = undefined
-    if (recovered || change.catalog || change.runs || reply.hints?.length) this.#onChange(change, reply.hints ?? [])
+    if (recovered) { change.catalog = true; change.runs = true }
+    if (change.catalog || change.runs || reply.hints?.length) this.#onChange(change, reply.hints ?? [])
   }
 
   async #follow(): Promise<void> {

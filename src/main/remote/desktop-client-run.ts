@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteRunStatus, DesktopRemoteLiveRun } from '../../shared/desktop-remote'
 import { DesktopRemoteClientSession } from './desktop-client-session'
-import { context, fail, record, text, validRunId, MAX_PAGES, MAX_ITEMS } from './desktop-client-validation'
+import { context, fail, record, text, validRunId, MAX_PAGES, MAX_ITEMS, type RunStatusCursor } from './desktop-client-validation'
 
 // The device waits on the host instead of ticking: one watch call holds until
 // something changes, so an idle run costs one request per window, not one per
@@ -18,6 +18,57 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     if (!validRunId(runIdValue)) fail('invalid_run_id')
     const key = `${connectionIdValue}:${runIdValue}`
     const watch = this.runWatch.get(key) ?? { cursor: 0 }
+    const subscription = await this.statusSubscription(connectionIdValue)
+    let state: DesktopRemoteRunStatus['state']
+    let changed: boolean
+    if (subscription) {
+      const row = subscription.runs().get(runIdValue)
+      const lifecycle = row?.lifecycle
+      state = lifecycle === 'recorded' ? 'recorded' : lifecycle === 'admitted' || lifecycle === 'dispatched' ? 'dispatched'
+        : lifecycle === 'settled' ? 'settled' : lifecycle === 'failed' || lifecycle === 'cancelled' || lifecycle === 'interrupted'
+          ? 'failed' : 'unknown'
+      const outputSeq = row?.outputSeq ?? undefined
+      changed = state !== watch.state || row?.revSeq !== watch.revSeq ||
+        outputSeq !== watch.outputSeq || row?.traceRunId !== watch.scryRunId
+      watch.state = state
+      watch.revSeq = row?.revSeq
+      watch.outputSeq = outputSeq
+      watch.scryRunId = row?.traceRunId
+      watch.externalSessionId = row?.externalSessionId
+      watch.cwd = row?.cwd ?? undefined
+    } else {
+      const legacy = await this.readLegacyStatus(connectionIdValue, runIdValue, watch, options.waitMs ?? (this.runWatch.has(key) ? RUN_STATUS_WAIT_MS : 0))
+      state = legacy.state
+      changed = legacy.changed
+    }
+    this.runWatch.set(key, watch)
+    if (state === 'settled' || state === 'failed' || watch.externalSessionId) {
+      const stateData = await this.state()
+      const intent = stateData.intents.find((item) => item.connectionId === connectionIdValue && item.runId === runIdValue)
+      if (intent && (state === 'settled' || state === 'failed')) {
+        stateData.intents = stateData.intents.filter((item) => item.intentId !== intent.intentId)
+        await this.save(stateData)
+      } else if (intent) {
+        let contextChanged = false
+        if (!intent.context.externalSessionId && watch.externalSessionId) {
+          // Keep the host-confirmed session binding across navigation and restart.
+          // This changes no submitted prompt and never replays the original intent.
+          intent.context.externalSessionId = watch.externalSessionId
+          contextChanged = true
+        }
+        if (watch.cwd && intent.context.cwd !== watch.cwd) {
+          intent.context.cwd = watch.cwd
+          contextChanged = true
+        }
+        if (contextChanged) await this.save(stateData)
+      }
+    }
+    return { state, changed, ...(watch.outputSeq !== undefined ? { outputSeq: watch.outputSeq } : {}), ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}) }
+  }
+
+  private async readLegacyStatus(
+    connectionIdValue: string, runIdValue: string, watch: RunStatusCursor, waitMs: number
+  ): Promise<{ state: DesktopRemoteRunStatus['state']; changed: boolean }> {
     // `output: false` keeps the shadow output spool out of the lifecycle path: its
     // overflow or I/O failure must not block authoritative state. Desktop content
     // comes from canonical trace reads.
@@ -26,7 +77,6 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     let authoritativeState: string | null = null
     // The first read for this run answers now; later reads wait for a change.
     // A device that has never seen the run must not sit in a window first.
-    let waitMs = options.waitMs ?? (this.runWatch.has(key) ? RUN_STATUS_WAIT_MS : 0)
     for (let page = 0; page < MAX_PAGES; page++) {
       const response = await this.requestForConnection(connectionIdValue, { op: 'watch', runId: runIdValue, cursor: watch.cursor, outputCursor: 0, waitMs, output: false })
       if (!record(response) || !record(response.watch) || !record(response.watch.poll) || !Array.isArray(response.watch.poll.events) ||
@@ -64,29 +114,7 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     // expired without evidence is not a change.
     const changed = sawEvents || watch.state !== state
     watch.state = state
-    this.runWatch.set(key, watch)
-    if (state === 'settled' || state === 'failed' || watch.externalSessionId) {
-      const stateData = await this.state()
-      const intent = stateData.intents.find((item) => item.connectionId === connectionIdValue && item.runId === runIdValue)
-      if (intent && (state === 'settled' || state === 'failed')) {
-        stateData.intents = stateData.intents.filter((item) => item.intentId !== intent.intentId)
-        await this.save(stateData)
-      } else if (intent) {
-        let contextChanged = false
-        if (!intent.context.externalSessionId && watch.externalSessionId) {
-          // Keep the host-confirmed session binding across navigation and restart.
-          // This changes no submitted prompt and never replays the original intent.
-          intent.context.externalSessionId = watch.externalSessionId
-          contextChanged = true
-        }
-        if (watch.cwd && intent.context.cwd !== watch.cwd) {
-          intent.context.cwd = watch.cwd
-          contextChanged = true
-        }
-        if (contextChanged) await this.save(stateData)
-      }
-    }
-    return { state, changed, ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}) }
+    return { state, changed }
   }
 
   // Finds the host's live run on one opened session, whichever client started
@@ -95,6 +123,20 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
   async liveRun(connectionIdValue: string, value: DesktopRemoteContext, options: { waitMs?: number } = {}): Promise<DesktopRemoteLiveRun | null> {
     const scope = context(value)
     if (!scope.externalSessionId) fail('session_required')
+    const status = await this.statusSubscription(connectionIdValue)
+    if (status) {
+      const row = [...status.runs().values()].filter(run =>
+        (run.lifecycle === 'recorded' || run.lifecycle === 'admitted' || run.lifecycle === 'dispatched') &&
+        run.cwd === scope.cwd && run.provider === scope.providerId && (run.profile ?? undefined) === scope.agentProfileId &&
+        run.externalSessionId === scope.externalSessionId).sort((left, right) => right.intentSeq - left.intentSeq)[0]
+      if (!row) return null
+      const waiting = status.sessions().some(session => session.sessionId === row.sessionKey && (session.pendingQuestions ?? 0) > 0)
+      const origin = row.origin === 'remote' ? 'remote' : 'mac'
+      return { runId: origin === 'mac' ? row.traceRunId ?? row.runId : row.runId, origin,
+        ...(row.traceRunId ? { scryRunId: row.traceRunId } : {}),
+        state: row.stopState === 'requested' ? 'stopping' : waiting ? 'waiting' : 'running',
+        ...(row.outputSeq !== null ? { outputSeq: row.outputSeq } : {}) }
+    }
     const known = this.liveRunsRevision.get(connectionIdValue)
     // No known revision yet: answer with the current set instead of waiting for a
     // change the device could not compare against.
