@@ -8,8 +8,8 @@ import { pathToFileURL } from 'node:url'
 
 const repoRoot = resolve('.')
 
-function productionMain() {
-  return JSON.stringify(pathToFileURL('out/main/index.js').href)
+function productionMain(appPath = repoRoot) {
+  return JSON.stringify(pathToFileURL(join(appPath, 'out/main/index.js')).href)
 }
 
 // Electron takes app.getVersion() from the package.json of the app directory it was
@@ -23,6 +23,46 @@ export function writeEntryPackage(entryPath) {
   writeFileSync(join(dirname(entryPath), 'package.json'), JSON.stringify({
     name: pkg.name, version: pkg.version, private: true, type: 'module', main: basename(entryPath)
   }))
+}
+
+export function writeDockBadgeEntry(entryPath, badgeReceipt) {
+  writeEntryPackage(entryPath)
+  // Exercise startup and repeated viewing against a stale native Dock badge.
+  // Forward every call to Electron; a denied OS permission remains explicit.
+  writeFileSync(entryPath, `
+    import { app } from 'electron'
+    import { writeFileSync } from 'node:fs'
+    app.setAppPath(${JSON.stringify(repoRoot)})
+    app.whenReady().then(async () => {
+      let initial
+      const requests = []
+      let residual = null
+      const setBadgeCount = app.setBadgeCount.bind(app)
+      app.once('browser-window-created', (_event, window) => {
+        window.once('ready-to-show', () => {
+          window.show()
+          window.focus()
+        })
+      })
+      app.setBadgeCount = (count) => {
+        if (!initial) {
+          // Keep test service isolation. Only this fixture opts into a native Dock and window.
+          app.setActivationPolicy('regular')
+          initial = { success: setBadgeCount(1), nativeCount: app.getBadgeCount() }
+        }
+        const success = setBadgeCount(count)
+        requests.push({ count, success, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() })
+        if (count === 0 && requests.some(request => request.count === 1) && !residual) {
+          // The session is already read. Recreate native drift without changing unread state.
+          const restored = setBadgeCount(1)
+          residual = { success: restored, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() }
+        }
+        writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
+        return success
+      }
+      await import(${productionMain()})
+    })
+  `)
 }
 
 // Run production handlers without launching viewers or executing fixture programs.
@@ -44,14 +84,14 @@ export function writeFileOpenEntry(entryPath, receiptPath) {
 }
 
 /** Lose one fork reply after the native effect and the durable commit. */
-export function writeConversationFaultEntry(entryPath, markerPath) {
+export function writeConversationFaultEntry(entryPath, markerPath, appPath = repoRoot) {
   writeEntryPackage(entryPath)
   writeFileSync(entryPath, `
     import { app, ipcMain } from 'electron'
     import { existsSync, promises as fs, writeFileSync } from 'node:fs'
     import { join } from 'node:path'
     // The App launches its daemon from its own app path, not from this entry's directory.
-    app.setAppPath(${JSON.stringify(repoRoot)})
+    app.setAppPath(${JSON.stringify(appPath)})
     const marker = ${JSON.stringify(markerPath)}
     const handle = ipcMain.handle.bind(ipcMain)
     ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
@@ -65,7 +105,7 @@ export function writeConversationFaultEntry(entryPath, markerPath) {
       }
       return result
     })
-    await import(${productionMain()})
+    await import(${productionMain(appPath)})
   `)
 }
 
@@ -81,12 +121,12 @@ export function writeConversationFaultEntry(entryPath, markerPath) {
  * isolated window. The shipped main module is imported unchanged and the renderer gains no
  * new privilege, so the measured layout is the real one.
  */
-export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sideChatRequestsPath) {
+export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sideChatRequestsPath, appPath = repoRoot) {
   writeEntryPackage(entryPath)
   writeFileSync(entryPath, `
     import { app, ipcMain } from 'electron'
     import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, watchFile, writeFileSync } from 'node:fs'
-    app.setAppPath(${JSON.stringify(repoRoot)})
+    app.setAppPath(${JSON.stringify(appPath)})
     const counts = {}
     const lostReply = ${JSON.stringify(lostReplyPath(countsPath))}
     const lostSendReply = ${JSON.stringify(lostSendReplyPath(countsPath))}
@@ -162,7 +202,7 @@ export function writeIpcCountEntry(entryPath, countsPath, windowControlPath, sid
     })
     flush()
     ${windowControlPath ? windowControlSource(windowControlPath) : ''}
-    await import(${productionMain()})
+    await import(${productionMain(appPath)})
   `)
 }
 

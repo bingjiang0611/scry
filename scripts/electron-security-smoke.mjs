@@ -5,7 +5,6 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmS
 import { freePort, waitForTarget, connectCdp, rendererEvaluator } from './electron-security-cdp.mjs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
 import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 import { exerciseUnified } from './electron-security-unified.mjs'
@@ -29,19 +28,20 @@ import { exerciseRecording } from './electron-security-recording.mjs'
 import { exerciseRestart } from './electron-security-restart.mjs'
 import { exerciseStructureApp } from './structure-app-checks.mjs'
 import { prepareSideChatMode } from './side-chat-smoke.mjs'
-import { lostReplyPath, writeConversationFaultEntry, writeEntryPackage, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
+import { lostReplyPath, writeConversationFaultEntry, writeDockBadgeEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
+import { preparePackagedSmokeEntry } from './packaged-smoke-entry.mjs'
 import { electronSecurityModes, electronSecurityTestEnvironment } from './electron-security-modes.mjs'
 
 const {
-  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory: replaySource, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument
+  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory: replaySource, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, instrumentedPackage, packagedAppArgument
 } = electronSecurityModes(process.argv)
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 if (!dev) assertArtifactMatchesSource(appPath)
-const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
+let executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 // Keep unix socket paths under macOS's 104-byte sun_path limit in default daemon mode.
 const temp = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-es-')))
 let child
@@ -126,55 +126,23 @@ async function main() {
   if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')
   const questionEntry = join(temp, 'question-app', 'question-main.mjs')
-  if (devQuestionOnly) {
-    writeEntryPackage(questionEntry)
-    // Exercise startup and repeated viewing against a stale native Dock badge.
-    // Forward every call to Electron; a denied OS permission remains explicit.
-    writeFileSync(questionEntry, `
-      import { app } from 'electron'
-      import { writeFileSync } from 'node:fs'
-      app.setAppPath(${JSON.stringify(resolve('.'))})
-      app.whenReady().then(async () => {
-        let initial
-        const requests = []
-        let residual = null
-        const setBadgeCount = app.setBadgeCount.bind(app)
-        app.once('browser-window-created', (_event, window) => {
-          window.once('ready-to-show', () => {
-            window.show()
-            window.focus()
-          })
-        })
-        app.setBadgeCount = (count) => {
-          if (!initial) {
-            // Keep test service isolation. Only this fixture opts into a native Dock and window.
-            app.setActivationPolicy('regular')
-            initial = { success: setBadgeCount(1), nativeCount: app.getBadgeCount() }
-          }
-          const success = setBadgeCount(count)
-          requests.push({ count, success, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() })
-          if (count === 0 && requests.some(request => request.count === 1) && !residual) {
-            // The session is already read. Recreate native drift without changing unread state.
-            const restored = setBadgeCount(1)
-            residual = { success: restored, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() }
-          }
-          writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
-          return success
-        }
-        await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
-      })
-    `)
-  }
+  if (devQuestionOnly) writeDockBadgeEntry(questionEntry, badgeReceipt)
   // Every temp entry has its own app directory: the daemon supervisor refuses an App that
   // announces Electron's version instead of the build's (smoke-app-entries.mjs).
   const conversationEntry = join(temp, 'conversation-app', 'conversation-main.mjs')
-  if (unifiedConversationOnly) writeConversationFaultEntry(conversationEntry, join(temp, 'fork-reply-lost'))
+  const fixtureAppPath = instrumentedPackage ? join(temp, 'Scry.app') : null
+  const fixtureEntryRoot = fixtureAppPath ? join(packagedAppLayout(fixtureAppPath).resources, 'app.asar') : undefined
+  if (unifiedConversationOnly) writeConversationFaultEntry(conversationEntry, join(temp, 'fork-reply-lost'), fixtureEntryRoot)
   const structureEntry = join(temp, 'structure-app', 'structure-main.mjs')
   const structureIpc = join(temp, 'structure-ipc-counts.json')
-  if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc)
-  const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
+  if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc, undefined, undefined, fixtureEntryRoot)
+  const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry, appPath: fixtureEntryRoot,
     workspace: canonicalWorkspace, userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls,
     identity: smokeIdentity, largeHistory: largeHistoryOnly })
+  if (fixtureAppPath) {
+    executable = await preparePackagedSmokeEntry(appPath, fixtureAppPath,
+      unifiedConversationOnly ? conversationEntry : structureEntry, temp)
+  }
   // Every sub-mode runs the App with its daemon (S3). The fixture inputs below
   // (SCRY_ELECTRON_SMOKE_{CONVERSATIONS,SIDE_CHAT,INPUTS,CALLS,IDENTITY,READER,READS}) reach the
   // daemon's smoke Provider because this is a test instance that asked for it

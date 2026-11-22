@@ -22,12 +22,12 @@ import { exerciseSideChatLargeHistory, exerciseSideChatLargeHistoryRefusal } fro
  * The entry file, the counted IPC path and the fixture-only window control are wired here
  * so the general smoke script only has to launch the App and hand over its connection.
  */
-export async function prepareSideChatMode({ temp, entryPath, workspace, userDataDir, inputsPath, callsPath, identity, largeHistory = false }) {
+export async function prepareSideChatMode({ temp, entryPath, appPath, workspace, userDataDir, inputsPath, callsPath, identity, largeHistory = false }) {
   const ipcCountsPath = join(temp, 'side-chat-ipc-counts.json')
   const windowControlPath = join(temp, 'side-chat-window-control.json')
   // The isolated main entry imports the shipped main unchanged; it only counts IPC and, in
   // this mode, lets the run apply real native window sizes.
-  writeIpcCountEntry(entryPath, ipcCountsPath, windowControlPath, sideChatRequestsPath(ipcCountsPath))
+  writeIpcCountEntry(entryPath, ipcCountsPath, windowControlPath, sideChatRequestsPath(ipcCountsPath), appPath)
   const readsPath = join(temp, 'side-chat-reader-reads.jsonl')
   const seedPath = await prepareLargeHistorySeed({ temp, userDataDir, workspace })
   return {

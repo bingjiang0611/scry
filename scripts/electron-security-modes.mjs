@@ -39,7 +39,11 @@ export function electronSecurityModes(argv) {
   }
   const devFilesOnly = argv[2] === '--dev-files-only'
   const filesOnly = devFilesOnly || argv[2] === '--files-only'
-  const devApp = argv[2] === '--dev-steer-only' || sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || argv[2] === '--dev' || argv[2] === '--dev-performance-only'
-  const packagedAppArgument = ['--steer-only', '--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(argv[2]) ? undefined : argv[2]
-  return { steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument }
+  const instrumentedPackage = argv.includes('--packaged')
+  if (instrumentedPackage && !(sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly)) {
+    throw new Error('--packaged requires a unified, side-chat, large-history or structure scenario')
+  }
+  const devApp = !instrumentedPackage && (argv[2] === '--dev-steer-only' || sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || argv[2] === '--dev' || argv[2] === '--dev-performance-only')
+  const packagedAppArgument = instrumentedPackage || ['--steer-only', '--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(argv[2]) ? undefined : argv[2]
+  return { steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, instrumentedPackage, packagedAppArgument }
 }

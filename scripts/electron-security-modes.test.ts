@@ -10,6 +10,17 @@ it('selects archived file replay without requiring an existing user archive', ()
   })
 })
 
+it.each([
+  ['--dev-unified-conversation-only', 'unifiedConversationOnly'],
+  ['--dev-side-chat-only', 'sideChatOnly'],
+  ['--dev-side-chat-large-history-only', 'largeHistoryOnly'],
+  ['--dev-structure-only', 'structureOnly']
+])('keeps the %s scenario when selected against a packaged layout', (flag, scenario) => {
+  expect(electronSecurityModes(['node', 'smoke', flag, '--packaged'])).toMatchObject({
+    devApp: false, instrumentedPackage: true, [scenario]: true
+  })
+})
+
 it('keeps the foreground Dock smoke under the same test service and credential isolation', () => {
   expect(electronSecurityModes(['node', 'smoke', '--dev-question-only', '--foreground'])).toMatchObject({
     devQuestionOnly: true, foreground: true
