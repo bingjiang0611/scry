@@ -27,7 +27,7 @@ export function electronSecurityModes(argv) {
   const nativeHistoryPerformanceOnly = argv[2] === '--dev-pi-history-perf-only'
   const nativeHistoryOnly = argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
   const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(argv[2])
-  const sourceFileHistory = fileHistoryOnly ? JSON.parse(readFileSync(resolve(argv[3]), 'utf8')) : null
+  const sourceFileHistory = fileHistoryOnly && argv[3] ? JSON.parse(readFileSync(resolve(argv[3]), 'utf8')) : null
   const devMetaPromptsOnly = argv[2] === '--dev-meta-prompts-only'
   const devTerminalOnly = argv[2] === '--dev-terminal-only'
   const devQuestionOnly = argv[2] === '--dev-question-only'

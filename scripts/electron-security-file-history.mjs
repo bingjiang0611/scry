@@ -1,5 +1,26 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+export function seedFileHistorySource(home) {
+  const cwd = join(home, '历史回放项目')
+  const filePath = join(cwd, 'designs', 'scry-unified-remote', 'brief.md')
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, '# 归档文件链接\n\nThis text is read from the fixture workspace.\n')
+  const sessionId = 'file-link-smoke-session'
+  const runId = 'file-link-smoke-run'
+  const ts = Date.now()
+  return {
+    version: 3, cwd, sessionId, externalSessionId: sessionId, providerId: 'codex', runtimeProvider: 'codex_cli',
+    turns: [{
+      runId, ts, done: true, userText: 'Show the design brief',
+      items: [{
+        id: `${runId}-text`, runId, ts: new Date(ts).toISOString(), kind: 'model', stage: 'text',
+        text: 'Design brief: `designs/scry-unified-remote/brief.md`', filePath
+      }]
+    }]
+  }
+}
 
 export async function exerciseFileHistory(smokeContext) {
   const { sourceFileHistory, evaluate, cdp, workspace } = smokeContext

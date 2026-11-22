@@ -15,7 +15,7 @@ import { exerciseMeta } from './electron-security-meta.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseWorkspaceSessions } from './workspace-session-ui-checks.mjs'
 import { seedConversationOwnership } from './conversation-ownership-smoke.mjs'
-import { exerciseFileHistory } from './electron-security-file-history.mjs'
+import { exerciseFileHistory, seedFileHistorySource } from './electron-security-file-history.mjs'
 import { exerciseNativeHistory } from './electron-security-native-history.mjs'
 import { exerciseProductionPerformance } from './electron-security-performance.mjs'
 import { exerciseFiles } from './electron-security-files.mjs'
@@ -36,7 +36,7 @@ import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
 import { electronSecurityModes, electronSecurityTestEnvironment } from './electron-security-modes.mjs'
 
 const {
-  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument
+  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory: replaySource, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument
 } = electronSecurityModes(process.argv)
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
@@ -59,6 +59,7 @@ async function main() {
   mkdirSync(home, { recursive: true })
   mkdirSync(workspace, { recursive: true })
   const canonicalHome = realpathSync(home)
+  const sourceFileHistory = replaySource ?? (fileHistoryOnly ? seedFileHistorySource(canonicalHome) : null)
   const canonicalWorkspace = realpathSync(workspace)
   const secondWorkspace = join(home, 'performance-second-project')
   if (performanceOnly || sourceControlOnly || conversationOwnershipOnly || unifiedConversationOnly) {
