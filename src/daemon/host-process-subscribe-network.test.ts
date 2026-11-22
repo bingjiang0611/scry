@@ -7,15 +7,18 @@ import { join } from 'node:path'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { generateDesktopDeviceIdentity } from '../main/remote/desktop-transport'
-import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import { DESKTOP_HISTORY_CHUNK_BYTES, REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import { upsertTraceArchiveTurn } from '../main/transcript-archive'
+import { assembleByteChunks } from '../main/remote/desktop-byte-chunks'
+import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 
-// `subscribe` is a local-endpoint op only. A paired remote desktop talking to the
-// real network InnerMtlsHost must get unsupported_op even when the daemon runs with
-// SCRY_ORCHESTRATION=on and advertises subscribe to its own App.
 const savedMode = process.env.SCRY_ORCHESTRATION
+const savedCli = process.env.SCRY_EXPERIMENTAL_HOST_CLI
 afterEach(() => {
   if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
   else process.env.SCRY_ORCHESTRATION = savedMode
+  if (savedCli === undefined) delete process.env.SCRY_EXPERIMENTAL_HOST_CLI
+  else process.env.SCRY_EXPERIMENTAL_HOST_CLI = savedCli
   cleanupTempDirs()
 })
 
@@ -25,19 +28,32 @@ async function callTcp(port: number, ca: string, cert: string, key: string, requ
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
+  socket.setEncoding('utf8')
   socket.write(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request })}\n`)
   let buffer = ''
-  for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
+  for await (const chunk of socket) { buffer += String(chunk); if (buffer.includes('\n')) break }
   socket.destroy()
   return JSON.parse(buffer.split('\n')[0]) as Record<string, unknown>
 }
 
-describe('subscribe is never exposed on the network endpoint', () => {
-  it('a paired remote desktop gets unsupported_op in on mode', async () => {
+describe('v2 subscribe on the authenticated network endpoint', () => {
+  it('negotiates the capability and filters durable rows and volatile hints', async () => {
     process.env.SCRY_ORCHESTRATION = 'on'
+    process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
     const userDataDir = tempDir()
     const workspace = realpathSync(tempDir())
+    const privateWorkspace = realpathSync(tempDir())
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([workspace]))
+    const nativeSessionId = 'visible-native'
+    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
+      sessionId: nativeSessionId, providerId: 'codex', cwd: workspace, preview: '测试会话', ts: 1
+    }]))
+    const historyText = '分页内容'.repeat(52_000)
+    expect(upsertTraceArchiveTurn({
+      cwd: workspace, sessionId: nativeSessionId, providerId: 'codex', runtimeProvider: 'codex_cli', userDataDir,
+      turn: { runId: 'archived', userText: '测试问题', done: true, agentProfileId: null,
+        items: [{ id: 'text', kind: 'model', stage: 'text', runId: 'archived', text: historyText, ts: '2026-11-22T00:00:00.000Z' }] }
+    })).toBe(true)
     const host = await createDaemonHostProcess({
       userDataDir,
       daemonStateDirectory: tempDir(),
@@ -55,15 +71,61 @@ describe('subscribe is never exposed on the network endpoint', () => {
       const { pairingId, secret } = await host.service.authority.begin()
       await host.service.authority.prove({ pairingId, secret, csrPEM: id.csrPEM, deviceLabel: 'Mac2 subscribe' }, id.publicKeySHA256)
       const grant = await host.service.authority.confirmLocal(pairingId, id.publicKeySHA256)
-      const reply = await callTcp(status.runPort, host.service.caCertificatePEM, grant.certificatePEM, id.keyPEM, {
-        op: 'subscribe', views: ['activeRuns'], waitMs: 0
+      const request = (frame: Record<string, unknown>) =>
+        callTcp(status.runPort, host.service.caCertificatePEM, grant.certificatePEM, id.keyPEM, frame)
+      const authority = host.orchestrationAuthority!
+      const importSession = (sessionKey: string, cwd: string) => {
+        const payload = { sessionKey, provider: 'codex', title: sessionKey, cwd, ts: Date.now() }
+        expect(authority.sink.execute({
+          type: 'session.import', commandId: sessionKey, actor: 'system', scope: 'system',
+          at: Date.now(), payload, payloadSha256: sha256Hex(canonicalJson(payload))
+        }).kind).toBe('accepted')
+      }
+      importSession('private', privateWorkspace)
+      const first = await request({ op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 0 })
+      expect(first).toMatchObject({
+        subscribe: { mode: 'snapshot', snapshot: { sessions: { total: 1, rows: [{ sessionKey: nativeSessionId, cwd: workspace }] } } }
       })
-      expect(reply).toEqual({ error: 'unsupported_op' })
-      // Control: the same peer is otherwise served, so the refusal is specific to subscribe.
-      const info = await callTcp(status.runPort, host.service.caCertificatePEM, grant.certificatePEM, id.keyPEM, {
-        op: 'desktop', query: { kind: 'info' }
+      expect(JSON.stringify(first)).not.toContain(privateWorkspace)
+      const info = await request({ op: 'desktop', query: { kind: 'info' } })
+      expect(info).toMatchObject({ desktop: { kind: 'info', protocol: 2, subscribe: 1, hostAdminNotices: 1 } })
+      const { hostId, logId, seq } = first.subscribe as { hostId: string; logId: string; seq: number }
+      const notice = host.hostAdmin.recordNotice({
+        kind: 'device_approved_via_cli', deviceLabel: '测试 iPhone', fingerprintPrefix: '0123456789abcdef'
       })
-      expect(info.error).toBeUndefined()
+      expect(authority.subscribeHub.hasPendingHints(grant.certificateSHA256)).toBe(true)
+      authority.subscribeHub.emitOAuth('https://example.invalid/local-only')
+      authority.subscribeHub.emitAttention({ revision: 23, unreadSessionKeys: ['private'] })
+      authority.subscribeHub.noteRunBound('private-run', { cwd: privateWorkspace, scryRunId: 'local-run' })
+      authority.subscribeHub.noteRunOutput('private-run')
+      importSession('visible-next', workspace)
+      importSession('private-next', privateWorkspace)
+      const update = await request({
+        op: 'subscribe', views: ['sessions', 'activeRuns'], known: { hostId, logId, seq }, waitMs: 0
+      })
+      expect(update).toMatchObject({ subscribe: {
+        mode: 'events', events: [{ sessionKey: 'visible-next' }], hints: [{ kind: 'hostNotice', notice }]
+      } })
+      const detail = await request({ op: 'subscribe', views: ['detail'], session: { sessionKey: 'private' }, waitMs: 0 })
+      expect(detail).toMatchObject({ subscribe: { mode: 'snapshot', snapshot: { detail: { turns: [] } } } })
+      expect(JSON.stringify(detail)).not.toContain('firstPage')
+      const visibleDetail = { op: 'subscribe', views: ['detail'], session: { sessionKey: nativeSessionId }, waitMs: 0 }
+      const opened = await request(visibleDetail)
+      expect(opened).toMatchObject({ subscribe: { kind: 'history_chunk', offset: 0 } })
+      const firstChunk = opened.subscribe as Record<string, unknown>
+      const nextChunk = { id: firstChunk.id, offset: DESKTOP_HISTORY_CHUNK_BYTES }
+      expect(await request({ ...visibleDetail, session: { sessionKey: 'private' }, chunk: nextChunk }))
+        .toEqual({ error: 'invalid_subscribe_chunk' })
+      const full = await assembleByteChunks(firstChunk, async (chunk) => {
+        const reply = await request({ ...visibleDetail, chunk })
+        return reply.subscribe as Record<string, unknown>
+      }, () => { throw new Error('invalid test page') })
+      expect(full).toMatchObject({ mode: 'snapshot', snapshot: { detail: { firstPage: {
+        kind: 'remoteHistory', history: { historyScope: 'session',
+          turns: [{ userText: '测试问题', items: [{ text: historyText }] }] }
+      } } } })
+      await host.service.authority.revoke(grant.deviceId)
+      expect(await request({ op: 'subscribe', views: ['sessions'], waitMs: 0 })).toEqual({ error: 'device_not_authorized' })
     } finally {
       await host.dispose()
     }

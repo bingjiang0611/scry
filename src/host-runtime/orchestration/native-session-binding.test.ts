@@ -34,7 +34,7 @@ it('links a dispatched native run to the scoped legacy session on binding and co
     const engine = new SubscribeEngine({
       sink, hub, hostId: 'binding-host', authorizePeer: () => undefined,
       grantScope: (peer) => peer === 'app' ? 'local' : 'remote',
-      isRemoteCwdAuthorized: (granted) => granted === cwd
+      remoteCwdAuthorizer: () => (granted) => granted === cwd
     })
     const view = { views: ['activeRuns' as const], waitMs: 0 }
     const { hostId, logId, seq } = await engine.subscribe('app', view)

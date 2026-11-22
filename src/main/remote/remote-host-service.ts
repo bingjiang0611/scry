@@ -105,6 +105,7 @@ export class RemoteHostService {
         serverCertPEM: server.certificatePEM,
         serverKeyPEM: server.privateKeyPEM,
         caPEM: identity.caCertificatePEM,
+        networkSubscribe: deps.localEndpoint?.subscribe,
         ...(executionTargets ? { executionTargets } : {})
       })
       pairing = new PairingTransport({

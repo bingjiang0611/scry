@@ -20,9 +20,14 @@ export function canonicalRemoteProjectRoots(candidates: Iterable<string>): strin
   return [...roots].sort((a, b) => a.length - b.length || a.localeCompare(b))
 }
 
+/** Projection rows already bind a canonical cwd. Compare it with one current root snapshot. */
+export function isCanonicalRemoteProjectDirectory(cwd: string, roots: readonly string[]): boolean {
+  return isAbsolute(cwd) && roots.some((root) => isAtOrBelow(root, cwd))
+}
+
 export function resolveCanonicalRemoteProjectDirectory(cwd: string, roots: readonly string[]): string {
   const target = canonicalExistingDirectory(cwd)
-  if (!roots.some((root) => isAtOrBelow(root, target))) {
+  if (!isCanonicalRemoteProjectDirectory(target, roots)) {
     throw Object.assign(new Error('工作目录不在 Scry 已授权项目内'), { code: 'workspace_not_authorized' })
   }
   return target

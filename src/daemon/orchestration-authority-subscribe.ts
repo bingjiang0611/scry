@@ -1,12 +1,19 @@
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
-import type { SubscribeRequest, SubscribeResponse } from '../shared/orchestration-subscribe'
+import type { SubscribeHistoryPage, SubscribeRequest, SubscribeResponse } from '../shared/orchestration-subscribe'
+import type { DesktopHostRead, DesktopRemoteHistory } from '../shared/desktop-remote'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { ProviderContext } from '../shared/provider'
 import { isSessionProviderId } from '../main/app-store'
+import { assembleByteChunks } from '../main/remote/desktop-byte-chunks'
+import { isCanonicalRemoteProjectDirectory } from '../main/remote/remote-directory-browser'
+import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
+import type { HostController } from '../main/remote/host-controller'
+import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { AppEvent } from '../main/remote/app-event-feed'
 import type { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { SubscribeEngine, type SubscribeEngineOptions } from '../host-runtime/orchestration/subscribe-engine'
+import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
 import { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import { paginateSubscribeReplies } from './orchestration-subscribe-chunks'
 
@@ -16,6 +23,9 @@ export interface AuthoritySubscribeRuntimeDeps {
   grantScope: (peer: string) => 'local' | 'remote'
   attentionSnapshot?: () => SessionAttentionSnapshot
   readFirstPage?: SubscribeEngineOptions['readFirstPage']
+  readRemoteFirstPage?: SubscribeEngineOptions['readRemoteFirstPage']
+  remoteCwdAuthorizer?: SubscribeEngineOptions['remoteCwdAuthorizer']
+  remoteHostNotices?: boolean
   scans?: SubscribeEngineOptions['scans']
 }
 
@@ -42,9 +52,67 @@ export function createAuthoritySubscribeHandler(
     authorizePeer: deps.authorizePeer,
     grantScope: deps.grantScope,
     readFirstPage: deps.readFirstPage,
+    readRemoteFirstPage: deps.readRemoteFirstPage,
+    remoteCwdAuthorizer: deps.remoteCwdAuthorizer,
+    remoteHostNotices: deps.remoteHostNotices,
     scans: deps.scans
   })
   return paginateSubscribeReplies(sink, deps, (peer, request, signal) => engine.subscribe(peer, request, signal))
+}
+
+export function authoritySubscribeDeps(
+  service: () => RemoteHostService,
+  roots: () => readonly string[]
+): Pick<AuthoritySubscribeRuntimeDeps, 'hostId' | 'authorizePeer' | 'grantScope' | 'remoteCwdAuthorizer' | 'readRemoteFirstPage' | 'remoteHostNotices'> {
+  const authorizedScope = (peer: string) => {
+    const scope = service().authority.grantScope(peer)
+    if (!scope) throw new Error('device_not_authorized')
+    return scope
+  }
+  return {
+    hostId: () => service().hostId,
+    authorizePeer: (peer) => service().controller.authorizeDevicePeer(peer),
+    grantScope: authorizedScope,
+    remoteCwdAuthorizer: () => {
+      const authorizedRoots = roots()
+      return (cwd) => isCanonicalRemoteProjectDirectory(cwd, authorizedRoots)
+    },
+    readRemoteFirstPage: (peer, session, signal) => readRemoteDetailPage(service().controller, peer, session, signal),
+    remoteHostNotices: isHostCliExperimentalEnabled(process.env)
+  }
+}
+
+const invalidPage = (): never => { throw new Error('invalid_subscribe_history_page') }
+
+// Use the profile-bound device history reader. The App history loader can
+// change its selection, abort other local loads and hydrate local file URLs.
+async function readRemoteDetailPage(
+  controller: HostController,
+  peer: string,
+  session: SessionProjectionRow,
+  signal?: AbortSignal
+): Promise<SubscribeHistoryPage | null> {
+  const { conversationId, cwd, provider, profile, catalog, sessionKey } = session
+  const externalSessionId = catalog ? catalog.nativeSessionId : sessionKey
+  if (conversationId || !cwd || !isSessionProviderId(provider) || provider === 'legacy_unknown' || !externalSessionId) return null
+  const query: Extract<DesktopHostRead, { kind: 'history' }> = {
+    kind: 'history',
+    historyScope: 'session',
+    context: { providerId: provider, cwd, externalSessionId, ...(profile ? { agentProfileId: profile } : {}) },
+    byteChunks: true,
+    images: true
+  }
+  const read = (chunk?: { id: string; offset: number }) => {
+    signal?.throwIfAborted()
+    return controller.readDesktop(peer, { ...query, ...(chunk ? { chunk } : {}) })
+  }
+  const first = await read()
+  const reply = first.kind === 'history_chunk'
+    ? await assembleByteChunks(first, read, invalidPage)
+    : first
+  if (reply.kind !== 'history' || !reply.history || typeof reply.history !== 'object') return invalidPage()
+  // Only the typed host history producer above supplies these chunks.
+  return { kind: 'remoteHistory', history: reply.history as DesktopRemoteHistory }
 }
 
 /** Resolves history using the projected session identity. */
@@ -53,7 +121,7 @@ export function createAuthorityDetailReader(
   readConversation: (id: string) => Promise<import('../shared/conversation-api').ConversationPage>
 ): NonNullable<SubscribeEngineOptions['readFirstPage']> {
   const load = historyChannels['agent:loadSession'] as
-    (event: undefined, context: ProviderContext) => Promise<{ page: import('../shared/orchestration-subscribe').SubscribeHistoryPage } | null>
+    (event: undefined, context: ProviderContext) => Promise<{ page: SubscribeHistoryPage } | null>
   return async (session, signal) => {
     const { conversationId, provider, profile, cwd, sessionKey, catalog } = session
     signal?.throwIfAborted()

@@ -124,6 +124,7 @@ function parseByteChunks(query: Record<string, unknown>): { byteChunks?: true; c
 export function createDesktopHostReader(deps: {
   userDataDir: string
   hostId(): string
+  subscribe?: 1
   authorizeWorkspace(cwd: string): string
   authorizeSession?(context: DesktopRemoteContext): void
   // `departed`: also answer from a run that just left the live registry. Only an
@@ -148,6 +149,7 @@ export function createDesktopHostReader(deps: {
     sweepDesktopBytePages(pages, now)
     traceRevisions.sweep(now, DESKTOP_PAGE_IDLE_MS)
     if (query.kind === 'info') return { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1,
+      ...(deps.subscribe === 1 ? { subscribe: 1 as const } : {}),
       ...(deps.workspaceChoices && deps.validateWorkspaceBranch ? { managedWorktrees: 1 as const } : {}) }
     if (query.kind === 'workspaceChoices') {
       if (!deps.workspaceChoices) throw new Error('workspace_selection_unavailable')

@@ -19,7 +19,7 @@ export interface LocalEndpointHandlers {
   localOps?: LocalOpHandlers
   // What the daemon tells its App that no run read carries (P3f).
   events?: Pick<AppEventFeed, 'read'>
-  // P4-3 authoritative orchestration subscribe handler (local endpoint only; omitted unless SCRY_ORCHESTRATION=on).
+  // Authoritative orchestration subscribe handler. The network shares only this read op.
   subscribe?: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
   // The App viewed one of the daemon's unread sessions (E1b).
   attention?: { viewed(sessionKey: string): void }
@@ -77,14 +77,15 @@ export async function handleAppEvents(events: LocalEndpointHandlers['events'], r
   return { events: await events.read({ cursor: cursor as number, waitMs: waitMs as number, ...(epoch !== undefined ? { epoch: epoch as string } : {}) }) }
 }
 
-const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'detailWatch', 'waitMs', 'eventSet', 'chunk']
+const SUBSCRIBE_KEYS = ['op', 'keepAlive', 'protocol', 'views', 'session', 'known', 'sessionsCursor', 'detailWatch', 'waitMs', 'eventSet', 'chunk', 'deviceLabel']
 
-/** P4-3 local orchestration subscribe; absent on network endpoint and in off/shadow modes. */
+/** Bounds the subscribe frame before it reaches the authoritative reader. */
 export async function handleSubscribe(
   subscribe: LocalEndpointHandlers['subscribe'],
   request: Record<string, unknown>,
   peer: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  network = false
 ): Promise<Record<string, unknown>> {
   if (!subscribe) return { error: 'unsupported_op' }
   if (Object.keys(request).some((key) => !SUBSCRIBE_KEYS.includes(key))) return { error: 'invalid_request' }
@@ -112,6 +113,7 @@ export async function handleSubscribe(
     }
   }
   if (views.includes('detail') && !parsedSession) return { error: 'invalid_request' }
+  if (network && (detailWatch !== undefined || (views.includes('detail') && views.length !== 1))) return { error: 'invalid_request' }
   if (detailWatch !== undefined && (!views.includes('detail') || chunk !== undefined ||
       (detailWatch !== 'open' && detailWatch !== 'continue'))) return { error: 'invalid_request' }
   let parsedChunk: SubscribeRequest['chunk']

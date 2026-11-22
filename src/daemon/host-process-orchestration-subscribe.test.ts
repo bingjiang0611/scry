@@ -125,7 +125,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
     }
   }, 30_000)
 
-  it('exposes subscribe=1 on daemonInfo, streams events & W11 hostNotice on local endpoint, and rejects subscribe on network endpoint in on mode', async () => {
+  it('exposes subscribe=1 on daemonInfo, streams events and W11 hostNotice on the local endpoint and requires a configured handler', async () => {
     process.env.SCRY_ORCHESTRATION = 'on'
     const daemon = await startTestDaemon()
     try {
@@ -173,7 +173,7 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       const hints = (withNotice.subscribe?.hints ?? []) as Array<{ kind: string; notice?: { id?: string; kind?: string; deviceLabel?: string } }>
       expect(hints.some((h) => h.kind === 'hostNotice' && h.notice?.id === notice.id && h.notice?.kind === 'device_approved_via_cli' && h.notice?.deviceLabel === 'TestPhone')).toBe(true)
 
-      // Network endpoint (remote dispatch without localEndpoint) returns unsupported_op
+      // The dispatcher must leave subscribe disabled when neither handler is supplied.
       const { dispatchRemoteRequest } = await import('../main/remote/inner-mtls-dispatch')
       const netReply = await dispatchRemoteRequest(
         daemon.host.service.controller,

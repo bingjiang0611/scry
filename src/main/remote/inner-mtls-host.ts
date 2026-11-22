@@ -55,6 +55,7 @@ export interface InnerMtlsHostOptions {
   // daemon answers (local ops). Supplied on the local endpoint only; on the network
   // endpoint the ops are absent, not merely refused.
   localEndpoint?: LocalEndpointHandlers
+  networkSubscribe?: LocalEndpointHandlers['subscribe']
   // Fired when the last live TLS socket for a verified peer closes (used by local-endpoint bridges).
   onPeerDisconnected?: (fingerprint: string) => void
 }
@@ -77,12 +78,14 @@ export class InnerMtlsHost {
   #peers = new Map<string, Set<TLSSocket>>()
   #lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
   #onPeerDisconnected?: (fingerprint: string) => void
+  #networkSubscribe?: LocalEndpointHandlers['subscribe']
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
     this.#transport = options.transport ?? 'network'
     this.#info = options.info
     this.#onPeerDisconnected = options.onPeerDisconnected
+    this.#networkSubscribe = this.#transport === 'network' ? options.networkSubscribe : undefined
     this.#server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
@@ -146,7 +149,7 @@ export class InnerMtlsHost {
     serveInnerConnection(socket, {
       controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,
       preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
-      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal),
+      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal, this.#networkSubscribe),
       timing: (parsed) => requestTiming(parsed)
     })
   }

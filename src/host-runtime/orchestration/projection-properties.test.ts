@@ -86,7 +86,7 @@ it('delivers a tombstone to the remote subscriber that could see the deleted row
     const engine = new SubscribeEngine({
       sink, hub, hostId: 'host', grantScope: () => 'remote',
       authorizePeer: () => { requestCount += 1 },
-      isRemoteCwdAuthorized: cwd => cwd === visible
+      remoteCwdAuthorizer: () => cwd => cwd === visible
     })
     try {
       const views = ['sessions' as const]

@@ -32,7 +32,7 @@ import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } 
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
-import { createAuthorityDetailReader } from './orchestration-authority-subscribe'
+import { authoritySubscribeDeps, createAuthorityDetailReader } from './orchestration-authority-subscribe'
 import { createDaemonCatalogScans } from './orchestration-catalog-scan'
 import { createOrchestrationCatalogAccess } from './orchestration-catalog-access'
 import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
@@ -285,9 +285,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       ...(orchestrationAuthority ? {
         orchestrationStatus: () => orchestrationAuthority!.status(),
         subscribe: orchestrationAuthority.createSubscribeHandler({
-          hostId: () => remoteHostService?.hostId ?? '',
-          authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
-          grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote',
+          ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
           readFirstPage: createAuthorityDetailReader(historyChannels, (id) => catalog.conversationService().read(id)),
           scans: createDaemonCatalogScans(orchestrationAuthority.sink, options.userDataDir, workspace,
             catalog.appSessionStore, () => publishData({ kind: 'catalog_recovered' }), log)

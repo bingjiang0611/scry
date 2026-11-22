@@ -3,7 +3,7 @@ import type { AgentDataUpdated, RuntimeProvider } from './runtime'
 import type { SessionAttentionSnapshot } from './session-attention'
 import type { SessionHistoryPage } from './session-history'
 import type { ConversationPage } from './conversation-api'
-import type { DesktopHostReadResult } from './desktop-remote'
+import type { DesktopHostReadResult, DesktopRemoteHistory } from './desktop-remote'
 
 /**
  * Shared wire contract for P4-3 local `subscribe` (P4-orchestration-protocol.md §5).
@@ -134,7 +134,10 @@ export type SubscribeHint =
   | { kind: 'window'; channel: string; payload: Record<string, unknown> }
   | { kind: 'data'; event: AgentDataUpdated }
 
-export type SubscribeHistoryPage = SessionHistoryPage | { kind: 'conversation'; page: ConversationPage }
+export type SubscribeHistoryPage =
+  | SessionHistoryPage
+  | { kind: 'conversation'; page: ConversationPage }
+  | { kind: 'remoteHistory'; history: DesktopRemoteHistory }
 
 export interface SubscribeSnapshot {
   sessions?: {

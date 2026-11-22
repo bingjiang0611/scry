@@ -68,7 +68,8 @@ export async function dispatchRemoteRequest(
   executionTargets?: ExecutionTargetRouter,
   localEndpoint?: LocalEndpointHandlers,
   lanAdvertisement: () => LanAdvertisement | undefined = () => undefined,
-  connectionSignal?: AbortSignal
+  connectionSignal?: AbortSignal,
+  networkSubscribe?: LocalEndpointHandlers['subscribe']
 ): Promise<unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'invalid_request' }
   const request = parsed as RemoteRequestEnvelope
@@ -178,8 +179,8 @@ export async function dispatchRemoteRequest(
       return await handleAppEvents(localEndpoint?.events, request as unknown as Record<string, unknown>)
     }
     if (request.op === 'subscribe') {
-      // P4-3 local orchestration subscribe; absent on the network endpoint and in off/shadow modes.
-      return await handleSubscribe(localEndpoint?.subscribe, request as unknown as Record<string, unknown>, fingerprint, connectionSignal)
+      return await handleSubscribe(localEndpoint?.subscribe ?? networkSubscribe,
+        request as unknown as Record<string, unknown>, fingerprint, connectionSignal, !!networkSubscribe)
     }
     if (request.op === 'terminalFeed') {
       // The App's terminal output and lifetime (P3-terminal.md); absent on the network endpoint.

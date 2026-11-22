@@ -78,7 +78,7 @@ it('checks the session authority before reading the page and after awaiting it',
     })
     const engine = new SubscribeEngine({
       sink, hub, hostId: 'host', grantScope: () => 'remote', authorizePeer: () => undefined,
-      isRemoteCwdAuthorized: () => canRead, readFirstPage
+      remoteCwdAuthorizer: () => () => canRead, readRemoteFirstPage: readFirstPage
     })
     const request = { views: ['detail' as const], session: { sessionKey }, waitMs: 0 }
     await expect(engine.subscribe('remote', request)).resolves.toMatchObject({

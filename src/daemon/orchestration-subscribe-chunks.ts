@@ -6,6 +6,7 @@ import type { EventSink } from '../host-runtime/orchestration/event-sink'
 interface ChunkAuthority {
   authorizePeer(peer: string): void
   grantScope(peer: string): 'local' | 'remote'
+  remoteCwdAuthorizer?: () => (cwd: string) => boolean
 }
 
 export function paginateSubscribeReplies(
@@ -13,20 +14,29 @@ export function paginateSubscribeReplies(
   authority: ChunkAuthority,
   subscribe: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply>
 ): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse> {
-  const pages = new Map<string, DesktopBytePage & { revSeq: number }>()
+  const pages = new Map<string, DesktopBytePage & { revSeq: number; scope: 'local' | 'remote' }>()
   return async (peer, input, signal) => {
     const { chunk, ...request } = input
-    if (!request.session || !request.views.includes('detail')) return subscribe(peer, request, signal)
+    const sessionRef = request.session
+    if (!sessionRef || !request.views.includes('detail')) return subscribe(peer, request, signal)
     const now = Date.now()
     sweepDesktopBytePages(pages, now)
     const key = JSON.stringify([peer, request])
+    const authorizedSession = () => {
+      authority.authorizePeer(peer)
+      const scope = authority.grantScope(peer)
+      const session = sink.getSession(sessionRef.sessionKey)
+      if (!session || (scope === 'remote' && (!session.cwd || !authority.remoteCwdAuthorizer?.()(session.cwd)))) {
+        throw new Error('invalid_subscribe_chunk')
+      }
+      return { session, scope }
+    }
     if (chunk) {
       signal?.throwIfAborted()
-      authority.authorizePeer(peer)
       const page = pages.get(chunk.id)
-      const session = sink.getSession(request.session.sessionKey)
-      if (!page || page.key !== key || authority.grantScope(peer) !== 'local' ||
-          !session || session.revSeq !== page.revSeq || chunk.offset >= page.bytes.length) {
+      const { session, scope } = authorizedSession()
+      if (!page || page.key !== key || scope !== page.scope ||
+          session.revSeq !== page.revSeq || chunk.offset >= page.bytes.length) {
         throw new Error('invalid_subscribe_chunk')
       }
       page.touched = now
@@ -39,10 +49,9 @@ export function paginateSubscribeReplies(
     if (reply.mode !== 'snapshot' || !reply.snapshot.detail?.firstPage) return reply
     const serialized = JSON.stringify(reply)
     if (Buffer.byteLength(serialized) <= DESKTOP_HISTORY_CHUNK_BYTES) return reply
-    const session = sink.getSession(request.session.sessionKey)
-    if (!session || authority.grantScope(peer) !== 'local') throw new Error('invalid_subscribe_chunk')
+    const { session, scope } = authorizedSession()
     const bytes = Buffer.from(serialized)
-    const id = cacheDesktopBytePage(pages, { key, bytes, touched: Date.now(), revSeq: session.revSeq })
+    const id = cacheDesktopBytePage(pages, { key, bytes, touched: Date.now(), revSeq: session.revSeq, scope })
     return desktopHistoryChunk(id, bytes, 0)
   }
 }

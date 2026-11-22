@@ -5,6 +5,7 @@ import type { DesktopRemoteContext, DesktopRemoteForkSessionRequest, DesktopRemo
 import type { RemoteHostService } from '../main/remote/remote-host-service'
 import { RemoteHostService as RemoteHostServiceImpl } from '../main/remote/remote-host-service'
 import { createDesktopHostReader } from '../main/remote/desktop-host-reader'
+import { bindRemoteHistoryContext } from '../main/remote/history-context'
 import { createDesktopWorkbench } from '../main/remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from '../main/remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from '../main/remote/remote-run-binding'
@@ -44,7 +45,14 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     readDesktop: createDesktopHostReader({
       userDataDir: inputs.userDataDir,
       hostId: () => runtime.remoteHostService!.hostId,
+      ...(inputs.localEndpoint?.subscribe ? { subscribe: 1 as const } : {}),
       authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
+      authorizeSession: (context) => {
+        if (!context.externalSessionId) throw new Error('session_required')
+        bindRemoteHistoryContext({
+          ...context, externalSessionId: context.externalSessionId, historyScope: 'session'
+        }, runtime.appSessionStore().load(), runtime.resolveRemoteProjectDirectory)
+      },
       getRun: (runId, options) => {
         // A run leaves the registry before the ledger records it settled. The App's read
         // that follows `run_settled` (settledTail, local grant only) still gets the run's
