@@ -26,7 +26,7 @@ describe('daemon run transport', () => {
     await expect(value.adopt(RUN)).resolves.toEqual(run)
     expect(calls).toEqual([
       { request: { op: 'runControl', method: 'adopt', runId: RUN, payload: 'traceContext' }, options: { replayable: true } },
-      { request: { op: 'desktop', query: { kind: 'trace', context: traceContext, runId: RUN, images: true, byteChunks: true, settledTail: true } }, options: { replayable: true } }
+      { request: { op: 'desktop', query: { kind: 'trace', context: traceContext, runId: RUN, images: true, byteChunks: true } }, options: { replayable: true } }
     ])
   })
 
