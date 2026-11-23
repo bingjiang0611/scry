@@ -8,10 +8,6 @@ import { createTraceRuntime } from './bootstrap/trace-runtime'
 import { parseDesktopHostRead } from './remote/desktop-host-reader'
 import { desktopReaderFixture, removeFixtureRoots } from './remote/desktop-host-reader.fixtures'
 
-// The App reads a daemon run's trace with `byteChunks`, so a trace whose JSON is past
-// the reader's single-response limit (4 MiB - 1 KiB) comes back as `history_chunk`
-// pages. These tests drive the real host reader with a run projected by the real
-// bounded-live projection (the one the daemon's reader uses), over JSON frames.
 
 const roots: string[] = []
 afterEach(() => removeFixtureRoots(roots))
@@ -20,9 +16,6 @@ const SINGLE_RESPONSE_LIMIT = 4 * 1024 * 1024 - 1024
 const LANE_FRAME_LIMIT = 4 * 1024 * 1024
 const asJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
-// A long agentic turn: each step thinks, calls a tool and gets its output back. The
-// live projection bounds tool bodies (8 KiB per field, 128 KiB per turn) but not the
-// model's own text or thinking, nor the number of steps.
 function longRunItems(runId: string, steps: number, thinkingBytes: number): TraceEvent[] {
   const items: TraceEvent[] = []
   for (let step = 0; step < steps; step++) {
@@ -45,8 +38,6 @@ function boundedLiveRun(run: ActiveRun): ActiveRun {
   }).boundedLiveRun(run)
 }
 
-// The daemon side of one `desktop` frame: parse, read, answer; a thrown read is the
-// host's error code. Every frame crosses as JSON, as it does on the App's socket.
 function daemonOver(read: ReturnType<typeof desktopReaderFixture>['read']) {
   const calls: Array<{ request: Record<string, unknown>; replayable?: boolean; bytes: number }> = []
   const transport = new DaemonRunTransport(async (request, options) => {
@@ -72,8 +63,6 @@ describe('daemon trace read past the single-response limit', () => {
     roots.push(f.root)
     const runId = 'run-long-1'
     const bounded = largeRun(f, runId)
-    // The bound is real (tool bodies are cut to the turn budget) yet the run is still
-    // past the limit: the projection does not cap thinking, text or step count.
     expect(bounded.items.some((item) => item.outputContent?.reasons.includes('turn_budget'))).toBe(true)
     const size = Buffer.byteLength(JSON.stringify({ kind: 'trace', run: bounded, imageCount: 0 }))
     expect(size).toBeGreaterThan(SINGLE_RESPONSE_LIMIT)
@@ -86,8 +75,6 @@ describe('daemon trace read past the single-response limit', () => {
     expect(read.run).toEqual(asJson({ ...bounded, attachments: undefined }))
     expect(read.cursor).toBeUndefined()
 
-    // One page per 512 KiB, each continuation the same query plus its chunk, every
-    // frame inside the lane's response limit, every read replayable.
     expect(calls.length).toBe(Math.ceil(size / DESKTOP_HISTORY_CHUNK_BYTES))
     const first = calls[0]!.request.query as Record<string, unknown>
     expect(first).toMatchObject({ kind: 'trace', runId, byteChunks: true, images: true })
@@ -110,8 +97,6 @@ describe('daemon trace read past the single-response limit', () => {
       userText: 'long task', items: [{ id: 'first', runId, ts: 'T', kind: 'model', stage: 'text', text: 'starting' }], done: false }
     f.setRun(base)
     const { transport, calls } = daemonOver(f.read)
-    // The first read without a cursor is a plain snapshot; a read with `delta: {}`
-    // gives the cursor the next read continues from.
     const reset = await f.read(parseDesktopHostRead({ kind: 'trace', context: f.context, runId, images: true, delta: {} }))
     if (reset.kind !== 'trace' || !reset.revision) throw new Error('expected a reset snapshot')
     const after = { revision: reset.revision, count: 1 }
@@ -147,7 +132,6 @@ describe('daemon trace read past the single-response limit', () => {
     let reads = 0
     const transport = new DaemonRunTransport(async (request) => {
       const query = parseDesktopHostRead(asJson(request).query)
-      // A daemon restart between pages: the continuation names a page this reader never cut.
       if (++reads === 3 && query.kind === 'trace' && query.chunk) return { error: 'invalid_trace_chunk' }
       return asJson({ desktop: await f.read(query) })
     })
@@ -163,13 +147,11 @@ describe('daemon trace read past the single-response limit', () => {
       data: bytes.subarray(offset, offset + DESKTOP_HISTORY_CHUNK_BYTES).toString('base64'), ...overrides
     })
     const cases: Array<(offset: number) => Record<string, unknown>> = [
-      // The wrong offset, a different page id, a changed total, a short page, a non-canonical encoding.
       (offset) => page(offset === 0 ? 0 : offset + 1),
       (offset) => page(offset, offset === 0 ? {} : { id: randomUUID() }),
       (offset) => page(offset, offset === 0 ? {} : { totalBytes: bytes.length + 1 }),
       (offset) => page(offset, offset === 0 ? {} : { data: bytes.subarray(offset, offset + 10).toString('base64') }),
       (offset) => page(offset, offset === 0 ? {} : { data: `${(page(offset).data as string).slice(0, -1)}!` }),
-      // A first page that names a size past the assembled cap, or no size at all.
       () => page(0, { totalBytes: DESKTOP_HISTORY_MAX_BYTES + 1 }),
       () => page(0, { totalBytes: undefined }),
       () => page(0, { id: 'not-a-uuid' })
