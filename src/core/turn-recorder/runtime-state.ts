@@ -286,11 +286,13 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
   for (const provider of ATTENTION_PROVIDERS) {
     const providerRoot = join(dataRoot, 'runtime', provider)
     // Missing providers are empty; an interrupted/unreadable scan must not publish readiness.
-    const sessionKeys = await readdir(providerRoot).catch((error: NodeJS.ErrnoException) => {
+    const entries = await readdir(providerRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return []
       throw error
     })
-    for (const sessionKey of sessionKeys) {
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const sessionKey = entry.name
       const sessionDir = join(providerRoot, sessionKey)
       live.add(`${provider}__${sessionKey}`)
       await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
