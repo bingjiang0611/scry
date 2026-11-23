@@ -35,7 +35,6 @@ describe('concurrency trace live plan', () => {
     expect(parsed.lane).toBe('concurrency-trace-live-seed-1k')
     expect(plan.SEED_COUNT).toBe(1000)
     expect(plan.PROMPT).toBe('concurrency trace live')
-    // Defaults are the smallest wave with no reading peers.
     expect(plan.parseBenchArgs(baseArgs())).toMatchObject({ limit: 4, peers: 0, failAfterRound: null })
   })
 
@@ -80,7 +79,6 @@ describe('concurrency trace live plan', () => {
       '2:0', '2:1', '2:2', '2:3',
       '3:0', '3:1', '3:2', '3:3'
     ])
-    // A wave never mixes runs from another wave.
     for (const wave of waves) {
       expect(wave.visits.every((visit) => wave.taskIndices.includes(visit.taskIndex))).toBe(true)
       expect(wave.visits.every((visit) => visit.waveIndex === wave.waveIndex)).toBe(true)

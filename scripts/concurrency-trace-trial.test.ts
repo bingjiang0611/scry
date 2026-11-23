@@ -103,7 +103,6 @@ describe('concurrency trace trial component', () => {
         expect(result.peers[0].polls).toBe(112)
         expect(result.peers[0].attempts).toBe(112)
         expect(result.peers[0].oracleChecks).toBe(112)
-        // Every step completed, and each observed count matches the contract target.
         expect(result.steps.every((step) => step.status === 'completed')).toBe(true)
         expect(result.steps.every((step) => step.readFailures === 0 && step.clientAttempts === step.runs * result.peers.length)).toBe(true)
         expect(result.steps.every((step) => step.itemsObserved.length === step.runs
@@ -160,7 +159,6 @@ describe('concurrency trace trial component', () => {
       expect(narrow.peers[0].resetsWithCursor).toBe(0)
       expect(wide.peers[0].resetsWithCursor).toBe(96)
 
-      // Reads never overlap: the deepest observed concurrency across both cells is one call.
       expect(monitor.maxActive).toBe(1)
     } finally {
       monitor.restore()
@@ -229,7 +227,6 @@ describe('concurrency trace trial component', () => {
     if (result.status !== 'incomplete') throw new Error('unreachable')
     expect(result.error.stage).toBe('read')
     expect(result.error.step).toBe('quiet')
-    // Wave one was dispatched, nothing else: no later wave started.
     expect(result.tasks).toEqual({ total: 16, completed: 0, notStarted: 12, startedIncomplete: 4 })
     // The partial evidence of both steps is kept: seed finished, quiet stopped inside its reads.
     expect(result.steps.map((step) => `${step.step}:${step.status}`)).toEqual(['seed:completed', 'quiet:incomplete'])

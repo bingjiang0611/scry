@@ -54,7 +54,6 @@ export interface HostControllerFactoryDependencies {
   createOutputStore?(directory: string): RunOutputStore | Promise<RunOutputStore>
   attachmentStore?: DesktopAttachmentStore
   attachmentDirectory?: string
-  // Snapshot of host-authorized project directories offered to devices.
   listProjects?(): RemoteProjectRef[]
   listDirectories?(path?: string): RemoteDirectoryListing
   listProviders?(): RemoteProviderRef[]

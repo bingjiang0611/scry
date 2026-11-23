@@ -148,7 +148,6 @@ describe('deterministic concurrency trace workload', () => {
     drive(second, 40)
 
     expect(shapes(first)).toEqual(shapes(second))
-    // Ids stay run-scoped even though the work is identical.
     expect(first.items[0].id).toBe('wt:run-a:0')
     expect(second.items[0].id).toBe('wt:run-b:0')
     expect(first.items[1]).not.toBe(second.items[1])

@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `ca5cfd21`, reviewed 893 comment tokens across 79 files: all 30 direct `src/main/remote/host-*.ts` files, 31 direct `scripts/concurrency-trace-*` JS/TS files, and 18 direct `src/renderer/app-*` TS/TSX files. Removed 59 redundant notes across 29 files; comment-free emit and tool directives matched. The 18 focused suites passed all 139 distinct tests across two invocations. In the first invocation, three CLI assertions failed on an inherited experimental proxy warning in stderr; both affected suites passed after unsetting `NODE_USE_ENV_PROXY` for that invocation. No live measurement or hosted-relay run was performed.
+
 At `5d7861a0`, reviewed 469 comment tokens across 60 tracked files: the remaining direct `desktop-*` transport sources and tests, bootstrap `agent-*`, `provider-*`, `recorder-*`, `side-chat-*`, and `history-*` files, the direct project store, and renderer `composer-*` files. Removed 47 redundant notes across 20 files. Comment-free emit and tool directives matched; 10 targeted suites passed 88 tests in Electron Node mode. The review did not change transport, persistence, or composer behavior.
 
 At `b77673e2`, reviewed 334 tokens in 63 files: remote `desktop-client*`, bootstrap query/MCP/terminal channels, main recorder entry points, renderer trace/turn helpers, and sidebar and structure checks. Removed 51 redundant notes across 24 files. Comment-free emit and tool directives matched; 12 targeted suites passed 115 tests. The layout smoke scripts were not run live.

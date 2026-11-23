@@ -150,8 +150,6 @@ export function useAppInteraction(context: AppInteractionContext) {
   })
   const { pickSlash, addPastedImages, addClipboardImage, send, openTurnInChat } = composer
   // 选一个工作目录 = 只重新绑定，停在新会话空态。
-  // 曾经的行为是该目录有历史会话就直接打开最近那条（pickSession(sessions[0])），
-  // 结果“换项目”变成“被扔进一个旧对话”，绑定后的工作目录也没机会看清。
   const {
     pickRecent, unbindProject, newConversation, newConversationInProject,
     toggleProjectPin, renameProject, removeProject, pickSession, openWorkspaceRun, forkConversationTurn,

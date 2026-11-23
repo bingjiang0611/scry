@@ -101,7 +101,6 @@ describe('live lane visit measurement', () => {
     expect(record.failures.map((failure) => failure.error).join()).not.toMatch(/rounds_incomplete|endVisit/)
     expect(calls).toContain('abandon')
     expect(record.closedByAbandon).toBe(true)
-    // Failure evidence is kept: counters, last state and an after sample.
     expect(record.counters).toMatchObject({ attempts: { traceDelta: 3 } })
     expect(record.lastState).toMatchObject({ held: 1 })
     expect(record.marks.client['failure.after']).toBeDefined()

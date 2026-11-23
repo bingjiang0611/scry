@@ -129,7 +129,6 @@ describe('live lane peer pairing wiring', () => {
   })
 
   it('documents why ids must stay integers: the real validators reject the label form', () => {
-    // This is the caller bug this test guards: `peer-${i}` is a label, never an id.
     expect(() => parsePairPayload({ peerId: 'peer-0', label: 'peer-0', invitation: 'scry-desktop1:x', directory: `${STATE_ROOT}/peer-0` })).toThrow(/invalid_peer/)
     expect(() => parsePeerPayload({ peerId: 'peer-0' })).toThrow(/invalid_peer/)
     expect(parsePairPayload({ peerId: 0, label: 'peer-0', invitation: 'scry-desktop1:x', directory: `${STATE_ROOT}/peer-0` })).toMatchObject({ peerId: 0 })

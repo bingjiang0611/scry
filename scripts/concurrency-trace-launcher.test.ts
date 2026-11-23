@@ -71,7 +71,6 @@ describe('concurrency trace launcher contract', () => {
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
     expect(result.stdout).toContain('Usage: node scripts/concurrency-trace-bench.mjs')
     for (const flag of ['--limit', '--readers', '--items', '--help']) expect(result.stdout).toContain(flag)
-    // No run started: the summary prefix cannot appear.
     expect(result.stdout).not.toContain('SCRY_CONCURRENCY_TRACE_BENCH')
   })
 
@@ -119,7 +118,6 @@ describe('concurrency trace launcher contract', () => {
           expect(stderr).toContain('[scry:concurrency-trace]')
           expect(stderr).toMatch(message)
         }
-        // Neither case may print anything that looks like a measurement.
         expect(`${stdout}${stderr}`).not.toContain('SCRY_CONCURRENCY_TRACE_BENCH')
       }
     } finally {

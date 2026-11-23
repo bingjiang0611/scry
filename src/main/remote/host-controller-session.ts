@@ -12,7 +12,6 @@ export interface SessionActionDeps {
   sessionAction: HostControllerDependencies['sessionAction']
   sessionFork: HostControllerDependencies['sessionFork']
   sessionDelete: HostControllerDependencies['sessionDelete']
-  // Already part of the shared dependency object: it answers the verified scope.
   gateway: { grantScope(peer: string): 'local' | 'remote' }
 }
 

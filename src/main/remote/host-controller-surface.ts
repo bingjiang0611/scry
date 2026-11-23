@@ -93,8 +93,6 @@ export class HostController {
     return await commitAttachment(this.#deps(), peer, input)
   }
 
-  // Device-facing (inner-mTLS): submit a durable intent, then drive the
-  // dispatcher so the gated executor picks it up exactly once.
   submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): SubmitResult {
     return submitIntent(this.#deps(), peerCertSHA256, input)
   }
@@ -226,8 +224,6 @@ export class HostController {
     return await runSessionDelete(this.#deps(), peerCertSHA256, input)
   }
 
-  // Device-facing: the host session catalog this device may browse, authorized
-  // by the same verified peer certificate as every method.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
     return this.#gateway.listSessions(peerCertSHA256)
   }
@@ -236,8 +232,6 @@ export class HostController {
     return this.#gateway.listSessionsPage(peerCertSHA256, input)
   }
 
-  // One device round trip for the whole catalog opening a host needs, with a
-  // content revision so an unchanged host answers without re-sending it.
   async catalogSnapshot(peerCertSHA256: string, input: { revision?: string }): Promise<CatalogSnapshotReply> {
     return await catalogSnapshot({
       authorizeDevice: (peer) => this.authorizeDevice(peer),

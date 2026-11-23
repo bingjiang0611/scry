@@ -21,7 +21,6 @@ const temporaryDir = (): string => {
   return dir
 }
 
-/** A path to the launcher that resolves to it but is spelled through a directory symlink and a file symlink. */
 const aliasedLauncher = (): string => {
   const dir = temporaryDir()
   const aliasDir = join(dir, 'aliasdir')
@@ -61,7 +60,6 @@ describe('50k launcher CLI guard', () => {
     ].join('\n')
     const result = spawnSync(process.execPath, ['--input-type=module', '-'], { cwd: dir, input: source, encoding: 'utf8' })
     expect(result.status).toBe(0)
-    // No CLI side effect: neither the usage error nor the measured summary may appear.
     expect(result.stderr).toBe('')
     expect(result.stdout).not.toContain('SCRY_CONCURRENCY_TRACE_MAIN_50K=')
     const report = JSON.parse(result.stdout) as { argv1: string | null, runCell: string }

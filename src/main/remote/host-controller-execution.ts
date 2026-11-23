@@ -77,7 +77,6 @@ function resolveAnsweredByPeer(
   }
 }
 
-/** Projects progress and names the changed run for the App subscription. */
 export function ledgerEventObserver(
   deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent' | 'orchestration'>
 ): (event: LedgerEvent, intentSeq?: number) => void {

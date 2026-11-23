@@ -45,7 +45,6 @@ export interface HostIdentity {
   caCertificatePEM: string
   verifyCSR(csrPEM: string): Promise<VerifiedPairingCSR>
   issue: CertificateIssuer
-  // Mint a server credential the inner-mTLS host presents to devices.
   issueHostServer(): Promise<HostServerCredentials>
 }
 

@@ -1,5 +1,3 @@
-// Types of the remote host controller: device intents, live-run views and the
-// dependencies Electron main injects. Split from host-controller.ts by responsibility.
 import type { DesktopDirectoryPage, DesktopDirectoryQuery, DesktopHostRead, DesktopHostReadResult, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteProviderQuery } from '../../shared/desktop-remote'
 import type { DeleteSessionResult, McpSnapshot } from '../../shared/provider'
 import type { LlmPerformanceHistory, LlmPerformanceSummary } from '../../shared/llm-performance'
@@ -107,7 +105,6 @@ export interface HostControllerDependencies {
     list(query: Extract<DesktopDirectoryQuery, { action: 'list' }>): DesktopDirectoryPage
     select(path: string): RemoteProjectRef
   }
-  // Pairing adapters (CSR verification + certificate issuance + persistence).
   pairing: PairingDependencies
   // Durable ledger backing store (JSONL file store in production).
   ledgerStore: LedgerStore
@@ -118,7 +115,6 @@ export interface HostControllerDependencies {
   readSessionStatus?(query: RemoteSessionStatusQuery): RemoteSessionStatus
   // Mac UI runs the device may see and control. Absent => only remote runs.
   macRuns?: MacRunSource
-  // The only injected leaf: performs the real Provider run for a routed intent.
   // `output` streams the assistant's real trace CONTENT (masked, bounded) to the
   // device; distinct from the opaque lifecycle `progress` markers.
   runProvider(input: {

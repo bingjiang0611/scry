@@ -5,7 +5,6 @@ import type { SubscribeResponse, SubscribeRequest } from '../../shared/orchestra
 import { isExecutionTargetCallIds } from '../../shared/execution-target-work'
 import { parseSubscribeFrame } from './subscribe-frame'
 
-// One App channel handler, called with the renderer's arguments as main would have.
 export type LocalOpHandler = (...args: unknown[]) => unknown
 // Keyed `${op}:${method}`.
 export type LocalOpHandlers = ReadonlyMap<string, LocalOpHandler>
@@ -19,9 +18,7 @@ export interface LocalEndpointHandlers {
   localOps?: LocalOpHandlers
   // Authoritative orchestration subscribe handler. The network shares only this read op.
   subscribe?: (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
-  // The App viewed one of the daemon's unread sessions (E1b).
   attention?: { viewed(sessionKey: string): void }
-  // The App's terminal output and lifetime (P3-terminal.md).
   terminal?: {
     read(cursor?: string): unknown
     detachRenderer(): void

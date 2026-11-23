@@ -24,7 +24,6 @@ describe('main single-run trial sample', () => {
     // (:57). That is an accepted re-snapshot, so it must not be read as a dropped patch.
     expect(facts.steps.map((step) => step.reply)).toEqual(['snapshot', 'delta', 'snapshot', 'delta', 'delta', 'delta', 'delta'])
     expect(facts.steps.reduce((total, step) => total + step.changes, 0)).toBeGreaterThan(0)
-    // Cursor and items agree on every step, including the re-snapshot one.
     expect(facts.steps.every((step) => step.cursorCount === step.itemCount)).toBe(true)
     expect(facts.steps[2].changes).toBe(0)
   })

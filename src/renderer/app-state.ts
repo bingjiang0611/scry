@@ -60,7 +60,6 @@ export function useAppState() {
   const backgroundWorkByRun = useBackgroundWork()
   const [runningRunIds, setRunningRunIds] = useState<ReadonlySet<string>>(() => new Set())
   const [waitingQuestionRunIds, setWaitingQuestionRunIds] = useState<ReadonlySet<string>>(() => new Set())
-  /** Kind of the pending question of a run: a clarification is not an approval request. */
   const [questionKindsByRun, setQuestionKindsByRun] = useState<ReadonlyMap<string, AgentQuestionKind>>(() => new Map())
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<ReadonlySet<string>>(() => new Set())
   /** -1 until main's first unread snapshot arrives; background notices use it as their baseline. */

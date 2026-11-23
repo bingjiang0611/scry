@@ -113,7 +113,6 @@ describe('50k trial timed sample failure path', () => {
     trialFailure.enabled = true
     try {
       const result = runTimedSample()
-      // Nothing is dressed up as a completed sample.
       expect(result.facts).toBeNull()
       expect(result.failure).toEqual({ phase: 'reader', step: 'seed', error: 'injected reader failure' })
       // Both observed calls were recorded before the throw, with real clock reads.

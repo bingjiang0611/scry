@@ -5,9 +5,6 @@ import type { ActiveRun } from '../../shared/trace'
 import { dispatchRemoteRequest } from './inner-mtls-dispatch'
 import type { HostController } from './host-controller'
 
-// App-only run controls over the daemon's registry. Two things matter here: the op is
-// absent on the network endpoint (not answered from another process's memory), and an
-// unrecognized method is refused instead of guessed.
 
 const empty = { steer: vi.fn(async () => ({ status: 'rejected' as const, message: 'no run' })), stopBackgroundTask: vi.fn(async () => ({ status: 'rejected' as const, message: 'no task' })), adopt: vi.fn(() => null) }
 
@@ -53,7 +50,6 @@ describe('daemon run control op', () => {
 
   it('is unknown on an endpoint without the handlers, and answers when they are there', async () => {
     // The network endpoint builds its host without runControl; the local one with it.
-    // A missing handler must not fall through to some other answer.
     const controller = { stopRun: vi.fn(), runState: vi.fn() } as unknown as HostController
     const request = { protocol: 3, op: 'runControl', method: 'adopt', runId: 'run-abc-1' }
     expect(await dispatchRemoteRequest(controller, 'a'.repeat(64), request)).toEqual({ error: 'unsupported_op' })

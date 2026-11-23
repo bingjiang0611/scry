@@ -75,8 +75,6 @@ const oracleRun = (run: ActiveRun): unknown => projection({
 
 const DELIVERY_STEPS = ['seed', 'quiet', 'replace-stream', 'append'] as const
 
-// One read/follow per step, exactly as the peer would consume them, returning the last
-// delivered view.
 function deliver(runtime: ReturnType<typeof boundedRuntime>, revisions: ReturnType<typeof createTraceRevisions>, run: ActiveRun, k: number): RemoteTraceView {
   let view: RemoteTraceView | null = null
   for (const step of DELIVERY_STEPS) {
@@ -130,7 +128,6 @@ describe('concurrency trace revisions', () => {
       expect(answer.reset).toBe(true)
       cursors.set(runId, { revision: answer.revision, count: 1 })
     }
-    // Sixteen runs through one store: the eight most recently read survive.
     expect(revisions.size()).toBe(8)
 
     // Nothing has read run-lru-0 since its own read, so it really is the oldest of the
@@ -181,7 +178,6 @@ describe('concurrency trace revisions', () => {
     for (let generation = 1; generation <= 4; generation++) {
       stamp(generation)
       const answer = observe()
-      // No cursor passed: these are full snapshot generations.
       expect(answer.reset).toBe(true)
       if (generation === 1) second = { revision: answer.revision, count: run.items.length }
     }
