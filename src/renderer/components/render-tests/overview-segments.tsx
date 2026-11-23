@@ -3,7 +3,6 @@ const { describe, it, expect, renderToStaticMarkup, OverviewPanel, ev } = shared
 type Turn = shared.Turn
 
 describe('OverviewPanel 保留段：段落保留，用量报告和诊断不进总览', () => {
-  // 独立 fixture（带 skill 事件 + diag）——别加进主 fixture，否则破坏"本会话无 Skill 调用"断言
   const skillTurn: Turn = {
     runId: 'sk',
     userText: 'x',

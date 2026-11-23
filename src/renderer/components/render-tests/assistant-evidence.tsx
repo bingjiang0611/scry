@@ -183,7 +183,7 @@ it('工具脚注只在耗时数据完整时展示合计，并保留失败摘要'
   })
 it('footer 渲染出 token（蓝本 turn-footer stat 条）', () => {
     expect(html).not.toContain('$0.1234')
-    expect(html).toContain('1.5k') // in = fmtTok(tokensIn 1500)
+    expect(html).toContain('1.5k')
     expect(html).toContain('turn-footer')
   })
 it('Codex turn 头部总 Token 不重复加上已包含在 input 内的 cache read', () => {
@@ -344,7 +344,7 @@ it('turn 顶部与 footer 共用逻辑调用口径，不把 Skill 内部路径�
   })
 it('who 头渲染头像 + runid', () => {
     expect(html).toContain('Agent')
-    expect(html).toContain('run · r1') // turn.runId
+    expect(html).toContain('run · r1')
   })
 
 

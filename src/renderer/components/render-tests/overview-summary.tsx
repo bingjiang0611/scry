@@ -32,10 +32,10 @@ describe('OverviewPanel 渲染：verdict 卡 + context + top tools + 文件足�
     />
   )
   it('verdict 卡：聚合 token + 无报错无危险 → 不再写“轮次已结束”，只留指标', () => {
-    expect(html).toContain('<strong>3.0k</strong>') // 跨轮累计本会话 token（含 cache）
+    expect(html).toContain('<strong>3.0k</strong>')
     expect(html).not.toContain('$0.1234')
-    expect(html).toContain('overview-verdict ok') // 无 error/danger → ok
-    expect(html).not.toContain('轮次已结束') // 完成态不再重复总结，调用次数移到面板头部
+    expect(html).toContain('overview-verdict ok')
+    expect(html).not.toContain('轮次已结束')
     expect(html).not.toContain('overview-verdict-line')
     expect(html).toContain('输入+输出+缓存')
     expect(html).not.toContain('reasoning 单列')
@@ -213,7 +213,7 @@ it('上下文缺少占用或窗口任一字段时保持未知，不拼出假比�
   })
 it('TOP TOOLS 段：tool+mcp 合并排名 + mini-bar', () => {
     expect(html).toContain('TOP TOOLS')
-    expect(html).toContain('工具 3 · MCP 0') // 普通工具与 MCP 分开，不混入 Skill/子Agent
+    expect(html).toContain('工具 3 · MCP 0')
     expect(html).toContain('mini-bar')
     expect(html).toContain('Read')
   })

@@ -24,4 +24,6 @@ Antigravity ACP usage observed with `agy 1.5.12` counts input, cache reads, cach
 
 After a terminal notice, a visible turn can lack its result or Qoder credit evidence because the view missed live delivery. Backfill the missing terminal evidence from the archive by event ID, without overwriting events already present or treating missing billing data as zero.
 
+In the usage chart, a missing day or metric breaks the line; an isolated observation is a point. Keep observed Provider rows even when the amount is unknown. Show that a partial total is a lower bound next to the value, not solely on hover.
+
 See [credit-usage.ts](../../src/shared/credit-usage.ts), [qoder-credit-requests.ts](../../src/shared/qoder-credit-requests.ts), [llm-performance.ts](../../src/shared/llm-performance.ts), and [result-timing.ts](../../src/shared/result-timing.ts).

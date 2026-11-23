@@ -22,7 +22,6 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('暂无会话')
   })
 
-  // B4-L4：读取失败不是「没有项目」，也不是索引文件损坏；说明读失败及原因。
   it('项目列表读取失败时说明原因，不显示「暂无项目」', () => {
     const html = renderToStaticMarkup(
       <Sidebar projects={[]} projectsError="后台服务尚未提供这项功能（agent:listProjects）" activeCwd={null}
@@ -312,7 +311,6 @@ describe('Sidebar 项目分组', () => {
 
     expect(html).toContain('<div class="sb-section">置顶</div>')
     expect(html).toContain('class="sb-pinned"')
-    // 置顶按 pinnedAt 倒序，最近置顶的排最前。
     expect(html.indexOf('侧边栏置顶方案')).toBeLessThan(html.indexOf('启动需求交付流程'))
     expect(html).toContain('<span class="sb-sess-proj">rate-native</span>')
     expect(html).toContain('<span class="sb-sess-proj">scry</span>')
@@ -345,7 +343,6 @@ describe('Sidebar 项目分组', () => {
     expect(html).toContain('aria-label="置顶会话：会话一"')
     expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('aria-label="存档会话：会话一"')
-    // 操作按钮必须是会话按钮的兄弟节点：button 里不能再嵌 button。
     expect(html).toContain('</button><span class="sb-sess-acts">')
     expect(html).not.toContain('ctxmenu')
     expect(html).not.toContain('删除会话')

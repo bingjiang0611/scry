@@ -55,7 +55,6 @@ describe('Pi Profile renderer identity', () => {
     drafts = updateSessionComposerDraft(drafts, first, (draft) => ({ ...draft, input: '第一条草稿' }))
     drafts = updateSessionComposerDraft(drafts, second, (draft) => ({ ...draft, input: '第二条草稿' }))
 
-    // A → B → A restores A rather than showing B or an empty composer.
     expect(drafts.get(first)?.input).toBe('第一条草稿')
     expect(drafts.get(second)?.input).toBe('第二条草稿')
     drafts = updateSessionComposerDraft(drafts, first, (draft) => ({ ...draft, input: '' }))

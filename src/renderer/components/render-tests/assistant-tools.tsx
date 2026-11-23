@@ -119,7 +119,6 @@ it('Edit 卡展示本次工具输入的 action-level +/-，并明确不是 Git �
     expect(editHtml).toContain('>−2<')
     expect(editHtml).toContain('本次 Edit 工具输入：写入 new_string 3 行、替换掉 old_string 2 行')
     expect(editHtml).toContain('不是本轮 Git 净改动')
-    // action-level 计数不得改写卡片语义：标题仍是工具名，不冒充「本轮改动」
     expect(editHtml).not.toContain('本轮改动')
   })
 it('Edit 卡只在轮次结束且该文件真的在本轮快照里时才接到 Diff 面板', () => {
@@ -160,7 +159,6 @@ it('Edit 卡只在轮次结束且该文件真的在本轮快照里时才接到 D
     )
     expect(linked).toContain(linkTitle)
 
-    // 运行中：本轮 Diff 还没定稿，不给假入口
     const running = renderToStaticMarkup(
       <AssistantTurn
         turn={{ ...turn, done: false, items: [editEvent, diffEvent] }}
@@ -171,7 +169,6 @@ it('Edit 卡只在轮次结束且该文件真的在本轮快照里时才接到 D
     )
     expect(running).not.toContain(linkTitle)
 
-    // 该文件没有净改动：不联动，但 action-level 计数仍照实显示
     const otherFile = renderToStaticMarkup(
       <AssistantTurn
         turn={{ ...turn, items: [editEvent, { ...diffEvent, turnDiff: { ...diffEvent.turnDiff!, files: [{ path: '/repo/src/b.ts', added: 1, deleted: 0 }] } }] }}

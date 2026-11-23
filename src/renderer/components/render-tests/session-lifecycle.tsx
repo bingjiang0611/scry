@@ -155,11 +155,8 @@ it('新建会话只脱离正在运行的会话，不调用 stop', async () => {
   })
 it('只采纳本视图发起那一轮新建的原生 session id', () => {
     const starts = new Map([['run-2', 'run-1']])
-    // 本地壳 run-1 上重新发送：run-2 拿到原生 session 后必须把当前会话身份换过去。
     expect(adoptLocalStartSessionId({ runId: 'run-2', sessionId: 'native-1' }, 'run-1', starts)).toBe('native-1')
-    // 发送后用户已经切到其他会话：不能劫持当前视图。
     expect(adoptLocalStartSessionId({ runId: 'run-2', sessionId: 'native-1' }, 'other', starts)).toBeNull()
-    // 不是本视图发起的轮次，或者身份本来就一致：不动。
     expect(adoptLocalStartSessionId({ runId: 'run-9', sessionId: 'native-9' }, 'run-1', starts)).toBeNull()
     expect(adoptLocalStartSessionId({ runId: 'run-2', sessionId: 'run-1' }, 'run-1', starts)).toBeNull()
     expect(adoptLocalStartSessionId({ runId: 'run-2' }, 'run-1', starts)).toBeNull()

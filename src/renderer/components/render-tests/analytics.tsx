@@ -77,7 +77,6 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
   })
 
   it('Qoder 的模式名和未归因项在模型明细中合并为一个 Qoder 行', () => {
-    // 合并只针对可展示的已知成本；未知成本不显示的合同由 Credits 用例覆盖。
     const qoderAggregate = {
       ...aggregate,
       costUsd: 1.25,
@@ -205,7 +204,6 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       />
     )
 
-    // 缺报的指标把“已知下界”写在数值下方，不只留在 title 里。
     expect(partialHtml).toContain('<dd>1.00K<small class="usage-metric-note">已知下界：部分明细未上报</small></dd>')
     expect(partialHtml).not.toContain('≥1.00K')
     expect(partialHtml).toContain('已知下界 · 2/2 条明细有 Token')
@@ -237,7 +235,6 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
           dailyByProvider: [
             { day: '2026-08-05', provider: 'codex', ...aggregate },
             { day: '2026-08-06', provider: 'codex', ...aggregate },
-            // 有记录但没有成本证据：不能当成当天花销为 0。
             { day: '2026-08-07', provider: 'codex', ...unavailableCost },
             { day: '2026-08-08', provider: 'codex', ...aggregate },
             { day: '2026-08-09', provider: 'codex', ...aggregate }
@@ -277,7 +274,6 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     // 两天的连续观测也要有端点，否则只剩一条几乎看不见的细缝。
     expect(trendHtml.match(/usage-chart-point/g)).toHaveLength(4)
     expect(trendHtml).toContain('没有记录或没有该指标证据的日期不连线，也不按零值绘制')
-    // 只有孤立观测日时不画线，用点标记已经看到的那一天。
     expect(isolatedHtml.match(/usage-chart-point/g)).toHaveLength(2)
     expect(isolatedHtml).not.toContain('usage-chart-line')
   })
@@ -330,7 +326,6 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
     expect(smallCostHtml).toContain('&lt;$0.01')
     expect(smallCostHtml).toContain('$0.0010')
     expect(smallCostHtml).toContain('style="flex-basis:100%"')
-    // 成本未知不等于没有用量：Provider 行保留，金额显示“—”。
     const providerRowHtml = unknownHtml.split('class="usage-provider-row"')[1] ?? ''
     expect(providerRowHtml).toMatch(/<strong title="[^"]*">—<\/strong>/)
   })

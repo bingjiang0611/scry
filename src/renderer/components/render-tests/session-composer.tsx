@@ -201,14 +201,12 @@ it('斜杠菜单只展示当前输入匹配项，且标题不展示数量', () =
     expect(chatHtml).not.toContain('welcome-provider-field')
     expect(chatHtml).not.toContain('Provider 可用')
     expect(chatHtml).not.toContain('重新扫描 PATH')
-    // Provider 选择仍保留在 composer，项目选择也不在 welcome 正文重复出现。
     expect(chatHtml).toContain('data-agent-id="claude"')
     expect(chatHtml).toContain('class="provider-glyph" data-provider="claude"')
     expect(chatHtml).not.toContain('class="welcome-context"')
     expect(chatHtml).toContain('/tmp/project')
     expect(chatHtml).not.toContain('运行上下文')
     expect(chatHtml).not.toContain('最近工作目录')
-    // 双标题已收敛：composer 不再顶一个「告诉 Agent 要完成什么」
     expect(chatHtml).not.toContain('告诉 Agent 要完成什么')
     expect(chatHtml).not.toContain('welcome-composer-heading')
     expect(chatHtml).toContain('aria-label="描述任务"')
@@ -308,7 +306,6 @@ it('ChatView 渲染运行中输入队列和图片附件', () => {
     expect(chatHtml).toContain('aria-label="放大查看图片 sent.png"')
     expect(chatHtml).not.toContain('<figcaption>sent.png</figcaption>')
     expect(chatHtml).toContain('class="user-attachment"')
-    // 历史缩略图与草稿预览都按需解码：CSP 与远程图片阻断不变，只改解码时机。
     expect(chatHtml.match(/<img[^>]*loading="lazy"[^>]*decoding="async"/g)?.length).toBe(2)
     expect(chatHtml).toContain('排队')
   })
@@ -328,7 +325,6 @@ it('编辑队列消息时行内动作让位给取消编辑，并说明会自动�
     expect(editing).toContain('class="queue-item is-editing"')
     expect(editing).toContain('编辑队列第 1 条 · 发送后移到队尾 · 自动发送会先跳过这条')
     expect(editing).toContain('取消编辑')
-    // 编辑中的行不再提供行内动作，铅笔跳到下一条；「下一个」高亮跟着真实发送顺序走。
     expect(editing).not.toContain('aria-label="编辑队列第 1 条消息"')
     expect(editing).toContain('aria-label="编辑队列第 2 条消息"')
     expect(editing).toContain('class="queue-item is-next"')
@@ -341,7 +337,6 @@ it('编辑队列消息时行内动作让位给取消编辑，并说明会自动�
       movedQueuedId: 'q2',
       onEditQueuedPrompt: () => {}
     })
-    // 不静默覆盖用户正在打的字：按钮禁用并在 title 里给出原因。
     expect(blocked).toContain('输入框里已有内容：先发送或清空，再编辑队列消息')
     expect(blocked).toMatch(/class="queue-edit"[^>]*disabled/)
     expect(blocked).toContain('编辑后已移到队尾')

@@ -21,7 +21,6 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     expect(html).toContain('role="tablist" aria-label="设置分区" aria-orientation="vertical"')
     expect(html).toContain('-appearance-tab" type="button" role="tab" aria-selected="true"')
     expect(html).toContain('已存档会话')
-    // 首帧还没读到索引，不展示假的 0。
     expect(html).not.toContain('<span class="cnt">0</span>')
   })
 

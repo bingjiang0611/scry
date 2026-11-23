@@ -23,8 +23,8 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('run-status')
     expect(html).toContain('运行中')
     expect(html).toContain('可继续输入，新消息将加入队列')
-    expect(html).toMatch(/\d{2,3}:\d{2}:\d{2}/) // 已用时长（小时级长任务）
-    expect(html).not.toContain('run-status-runid') // runId 短码已下线
+    expect(html).toMatch(/\d{2,3}:\d{2}:\d{2}/)
+    expect(html).not.toContain('run-status-runid')
     expect(html).toContain('停止')
   })
 
@@ -58,7 +58,6 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('需回答 2 个问题')
     expect(html).toContain('本轮在等你的选择，回答后继续')
     expect(html).not.toContain('可继续输入，新消息将加入队列')
-    // The stop control keeps its real scope; the status does not fake completion.
     expect(html).toContain('停止本轮')
   })
 
@@ -107,7 +106,6 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
   it('Provider 未确认终止时仍算 busy：状态条如实标注，新消息进队列而不是立刻发送', () => {
     const html = renderWelcome({
       turns: [runningTurn],
-      // main 的 admission 在 providerSettled=false 时仍会拒绝新一轮，所以这里必须仍是 busy。
       busy: true,
       stopStates: {
         'run-running-abc': {
@@ -162,8 +160,6 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).not.toContain('停止')
   })
 
-  // 时间线保留已加载的数据，但长历史正文按视口挂载。这里描述 renderer
-  // 的数据范围，不冒称所有 Provider 的 main 读取都已经分页。
   it('分页历史说明时间线已加载范围，并保留取回更早轮次的入口', () => {
     const html = renderWelcome({
       turns: [runningTurn],

@@ -17,4 +17,6 @@ Scope overlap to other known Scry runs in the same canonical working directory, 
 
 Diff exclusions are caller-declared. Record only paths actually excluded and the number of omitted files, not their bodies. Absent exclusion evidence means no files were omitted by this declaration. A full patch may use durable content plus a bounded preview; an absent content reference does not establish that the full patch was captured.
 
+An Edit card's added/removed counts describe the action, not the net Git diff. Link the card to the finalized turn diff only once it exists and contains that file. Workspace-versus-HEAD and session evidence are independent. A structured footprint proves an observed tool event for that path, not authorship or the absence of other changes.
+
 See [turn-diff.ts](../../src/shared/turn-diff.ts), [turn-diff-normalize.test.ts](../../src/shared/turn-diff-normalize.test.ts), and the [evidence checklist](../agent/change-checklists.md#trace--usage--evidence-改动).

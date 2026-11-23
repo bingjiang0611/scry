@@ -11,4 +11,6 @@ Turn records are consumed by the CLI, reporting systems and older readers. Do no
 
 Aggregate tool, skill and MCP records into mutually exclusive sections, retaining the Agent category for schema-v1 compatibility. Preserve source order and metadata even after body budgets are exhausted. For hook dispatch-only evidence count the deliveries without inventing script identity, outcome or duration. Collapse equivalent successes, never individual failures, and carry a denominator for mixed or unknown results. Hook invocations sharing one tool ID may still be distinct lifecycle stages. Keep per-run credit snapshots separate from charges and never sum them with result shadows. Confirmed file access dominates repeated negative evidence for the same operation; when only negative evidence exists, retain the more informative explicit refusal. A child response is not the root answer, and admission is not another logical turn.
 
+In Overview, missing structured Skill evidence is not proof that no Skill was used. A risk observation is not proof that execution was blocked.
+
 See [turn-record-contracts.ts](../../src/shared/turn-record-contracts.ts), [turn-record.test.ts](../../src/shared/turn-record.test.ts), and the [recorder evidence limits](../../packages/turn-recorder-cli/docs/evidence-limits.md).
