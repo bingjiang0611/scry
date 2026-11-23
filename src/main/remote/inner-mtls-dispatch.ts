@@ -51,7 +51,6 @@ export interface RemoteRequestEnvelope {
   totalCount?: number
   // sessionsPage: the catalog snapshot the phone already holds (first page only).
   known?: string
-  // historyPage: 'deflate' pages the compressed form of the same snapshot bytes.
   encoding?: string
 }
 
@@ -162,7 +161,6 @@ export async function dispatchRemoteRequest(
       return handleExecutionTargetResult(localEndpoint?.executionTargetBridge, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (isLocalOp(request.op)) {
-      // App channels the daemon answers for its own App; absent on the network endpoint.
       return await handleLocalOp(localEndpoint?.localOps, request as unknown as Record<string, unknown>, fingerprint)
     }
     if (request.op === 'stop') {
@@ -180,8 +178,6 @@ export async function dispatchRemoteRequest(
       }) }
     }
     if (request.op === 'projects') {
-      // Authorized by the verified peer cert inside the controller/gateway; a
-      // revoked device gets device_not_authorized, never a stale list.
       return { projects: controller.listProjects(fingerprint) }
     }
     if (request.op === 'directories') {
@@ -245,7 +241,6 @@ export async function dispatchRemoteRequest(
       }) }
     }
     if (request.op === 'sessions') {
-      // Same owner-device authorization; display-only catalog metadata.
       return { sessions: controller.listSessions(fingerprint) }
     }
     if (request.op === 'sessionsPage') {
@@ -278,7 +273,6 @@ export async function dispatchRemoteRequest(
       return { directory: controller.desktopDirectory(fingerprint, request.query) }
     }
     if (request.op === 'output') {
-      // The assistant's real streamed output content for one run, after cursor.
       if (typeof request.runId !== 'string' || !Number.isSafeInteger(request.cursor)) return { error: 'invalid_request' }
       return { output: await controller.runOutput(fingerprint, { runId: request.runId, cursor: request.cursor as number }) }
     }

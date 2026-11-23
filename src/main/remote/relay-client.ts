@@ -166,7 +166,6 @@ export class ReverseTunnelTransport implements RelayTransport {
       if (!this.#active.has(leg)) this.#waiting.add(leg)
     })
     leg.once(this.#readyEvent, () => { this.#onSession?.(leg) })
-    // Keep the pool warm: replace a consumed/closed leg.
     leg.once('close', () => {
       this.#legs.delete(leg)
       this.#opening.delete(leg)

@@ -98,8 +98,6 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
-  // The device declares the run-channel version on every request, exactly like
-  // the desktop client and the phone do.
   const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request as Record<string, unknown> } : request
   socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
@@ -108,7 +106,6 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
   return JSON.parse(buffer.split('\n')[0])
 }
 
-// The loopback production stack: real TLS, real pairing, real controller.
 describe('InnerMtlsHost desktop reads over production mTLS', () => {
   it('downloads exact arbitrary bytes only for a current owner and the selected workspace through production mTLS', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'scry-file-mtls-')); dirs.push(cwd)

@@ -1,5 +1,3 @@
-// Wire-level constants and limits of the phone-facing inner-mTLS protocol,
-// shared by the host, its connection handler and its request dispatch.
 
 // Remote prompts may carry a small, explicitly bounded image/text attachment.
 // The relay still sees only inner-TLS ciphertext; 1.25 MiB is enough for the

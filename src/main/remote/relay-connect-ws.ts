@@ -91,8 +91,6 @@ function wsLeg(opts: RelayWSOptions): OutboundLeg {
   // Only enforce the deadline once this relay has proved it answers pings:
   // an older relay deployment never does, and its legs must keep working.
   let lastPongAt: number | undefined
-  // Last heartbeat tick, sent or skipped: a gap far beyond the interval means
-  // this process was suspended.
   let lastTickAt = 0
   const stopHeartbeat = (): void => { if (heartbeat) clearInterval(heartbeat); heartbeat = undefined }
   // Set once device bytes arrive: the relay has glued a phone to this leg.
