@@ -50,7 +50,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const [traceHealth, setTraceHealth] = useState<TraceLiveHealth>(TRACE_LIVE_HEALTHY)
   const [historyWindow, setHistoryWindow] = useState<SessionHistoryWindow | null>(null)
   const [traceCommitVersion, setTraceCommitVersion] = useState(0)
-  // 窗口需要同步可读：拼接更早一页时必须在发起前就能判定响应是否过期。
   const historyWindowRef = useRef<SessionHistoryWindow | null>(null)
   const clearedRuns = useRef<Set<string>>(new Set())
   const focusedRunIdRef = useRef<string | null>(null)
@@ -68,11 +67,9 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const flushTimeoutId = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
   const pendingStartSequenceRef = useRef(0)
-  // 事件回调需要读到当前轮次，而不是闭包里那一帧的旧值。
   const turnsRef = useRef<Turn[]>([])
   turnsRef.current = turns
 
-  // 会话切换可能漏收 result 或 Credit；终态到达时从归档补齐，不覆盖已有 live 证据。
   const backfillTerminalEvidence = useCallback((runId: string): void => {
     const turn = turnsRef.current.find((candidate) => candidate.runId === runId)
     if (!turn || !needsTerminalEvidence(turn)) return
@@ -100,8 +97,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     pendingTraceReceipts.current = []
     if (buf.length > 0) setTurns((prev) => applyTraceBatch(prev, buf, clearedRuns.current))
     committedTraceReceipts.current.push(...receipts)
-    // A separate commit marker guarantees an acknowledgement effect even when every event was a
-    // duplicate and React legitimately preserves the turns reference.
     setTraceCommitVersion((value) => value + 1)
   }, [])
 
@@ -111,7 +106,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     committedTraceReceipts.current = []
     for (const receipt of receipts) {
       void window.scry.traceAck?.(receipt).catch(() => {
-        // Main/window teardown resets the credit ledger; canonical evidence is independent.
       })
     }
   }, [traceCommitVersion])
@@ -149,9 +143,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     setRunning(false)
   }, [flushTrace])
 
-  /**
-   * 拼接更早一页历史。返回是否真的拼上了；过期或错位的响应返回 false 并保留现有时间线。
-   */
   const prependOlderTurns = useCallback((sessionId: string, page: OlderSessionPage | null): boolean => {
     if (!page) return false
     const current = historyWindowRef.current
@@ -170,9 +161,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       options: {
         activeRun?: ActiveRun | null
         preserveFocusDeltas?: boolean
-        /** main 交付的分页窗口；缺省表示这一批就是完整历史。 */
         page?: OlderSessionPage | null
-        /** Display-only cache cannot adopt traces or prove live resynchronization. */
         source?: 'cache' | 'authoritative'
       } = {}
     ): void => {
@@ -211,7 +200,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       setSelected(null)
       setPendingQuestions(runtimeState.pendingQuestions)
       setStopStates(activeRun?.stopState && runtimeState.running ? { [activeRun.runId]: activeRun.stopState } : {})
-      // An authoritative page proves trace resynchronization. An empty placeholder cannot.
       if (!cached && (options.page != null || parsed.length > 0)) {
         setTraceHealth(TRACE_LIVE_HEALTHY)
         acknowledgeTraceResync()
@@ -228,7 +216,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
 
   const confirmCachedSession = useCallback((sessionId: string, page: OlderSessionPage): boolean => {
     const cached = cachedHistoryRef.current
-    // Only the exact authority-verified page can confirm a cached installation.
     if (!cachedDisplayRef.current || cached?.sessionId !== sessionId || cached.page !== page) return false
     cachedDisplayRef.current = false
     cachedHistoryRef.current = null
@@ -284,13 +271,10 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       }
       if (clearedRuns.current.has(runId)) return
       if (focusedRunIdRef.current == null) focusedRunIdRef.current = runId
-      // 终态是权威事实：main 的焦点可能已经随会话切换移走，只要这一轮还显示在 turns 里就必须
-      // 落地，否则面板会永远停在「运行中」；只有真正聚焦的 run 才动全局 running。
       const focused = focusedRunIdRef.current === runId
       if (!focused && !turnsRef.current.some((turn) => turn.runId === runId)) return
       setTurns((prev) => replayRunLifecycleDeltas(prev, [delta]))
       setPendingQuestions((prev) => removePendingQuestion(prev, delta.event))
-      // 终态到达才能摘掉停止进度提示；它之前的每个阶段都只是请求而不是证据。
       setStopStates((prev) => clearStopState(prev, runId))
       if (focused) setRunning(false)
       backfillTerminalEvidence(runId)
@@ -308,13 +292,10 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       }
       if (receipt) pendingTraceReceipts.current.push(receipt)
       if (accepted === 0) {
-        // The batch was intentionally ignored (cleared or non-focused run), so it is already
-        // consumed and does not need a React commit barrier.
         const ignoredReceipt = pendingTraceReceipts.current.pop()
         if (ignoredReceipt) void window.scry.traceAck?.(ignoredReceipt).catch(() => {})
         return
       }
-      // 一批 trace 最多安排一次帧提交和一个兜底定时器；FIFO 顺序沿用 main 批次。
       if (rafId.current == null) rafId.current = requestAnimationFrame(flushTrace)
       if (flushTimeoutId.current == null) flushTimeoutId.current = window.setTimeout(flushTrace, 250)
     })
@@ -327,8 +308,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
           })
         : () => {}
 
-    // live 镜像降级后，用 main 的权威 run 快照重新对齐。只有真的拿到并应用了快照才确认；
-    // 拿不到（null / 抛错 / 已被清空）就保持降级，让 UI 继续如实显示落后状态。
     const offTraceHealth =
       typeof window.scry.onTraceHealth === 'function'
         ? window.scry.onTraceHealth((state) => {
@@ -356,7 +335,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     window.scry
       .activeRun()
       .then((run) => {
-        // A user selection/start or live resync supersedes this startup-only snapshot.
         if (initialFocusGeneration !== resyncGeneration.current) return
         hydratedRun = !run || run.done ? null : run
         questionSnapshot = !run || run.done ? [] : run.pendingQuestions ?? []

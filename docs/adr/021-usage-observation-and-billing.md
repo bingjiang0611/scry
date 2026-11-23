@@ -22,4 +22,6 @@ Observe raw text deltas before coalescing; snapshots and subagents do not contri
 
 Antigravity ACP usage observed with `agy 1.5.12` counts input, cache reads, cache writes and output separately; thought tokens are already included in output. ACP reports neither the actual answering model nor cost. Missing token evidence is unavailable, and reported usage from cancelled, failed or subagent turns is partial. Transcript attribution is separate: parse only complete rows in the bounded read. The timestamp has second precision; multiple candidate user inputs make attribution ambiguous even when the output counts match.
 
+After a terminal notice, a visible turn can lack its result or Qoder credit evidence because the view missed live delivery. Backfill the missing terminal evidence from the archive by event ID, without overwriting events already present or treating missing billing data as zero.
+
 See [credit-usage.ts](../../src/shared/credit-usage.ts), [qoder-credit-requests.ts](../../src/shared/qoder-credit-requests.ts), [llm-performance.ts](../../src/shared/llm-performance.ts), and [result-timing.ts](../../src/shared/result-timing.ts).
