@@ -1,5 +1,5 @@
 export async function runSettings({ driver, options }) {
-  const { read, wait, check, click, key, insert, capture, fixture, composerValue } = driver
+  const { read, wait, check, click, key, insert, capture, fixture, composerValue, formEnter } = driver
   await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
   check(await read(`${composerValue} === 'settings keeps this draft'`), 'Typed draft did not reach the composer')
   // P8 §2：连接与设备在侧栏「机器」页；位置菜单的「管理远程访问」直接跳到那里。
@@ -53,9 +53,13 @@ export async function runSettings({ driver, options }) {
   await click('.sb-new')
   await wait('document.querySelector(".location-button") != null', 'local draft reopened from the sidebar')
   check(await read(`${composerValue} === 'settings keeps this draft'`), 'Returning to the local draft lost the typed text')
-  // 侧栏入口是键盘可达的顶层导航。
-  await click('.sb-navitem', '机器')
-  await wait('document.querySelector(".machines-page") != null', 'sidebar 机器 entry reopens the page')
+  // 侧栏入口是键盘可达的顶层导航：真的焦点 + 真的 Enter 键，不是代码里点一下。
+  await read('([...document.querySelectorAll(".sb-navitem")].find(node => node.textContent.includes("机器"))).focus()')
+  check(await read('document.activeElement.textContent.includes("机器") && document.activeElement.tagName === "BUTTON"'), '机器 entry is not a focusable button')
+  // 侧栏按钮靠 Enter 的默认动作触发 click，所以要发完整的回车（rawKeyDown + char + keyUp）。
+  await formEnter()
+  await wait('document.querySelector(".machines-page") != null', 'Enter on the focused 机器 entry opens the page')
+  await wait('document.querySelector(".sb-navitem.active")?.textContent.includes("机器")', 'Keyboard-opened machines page is not marked current')
   await click('.sb-settings')
   await wait('document.querySelector(".settings-modal") != null', 'settings dialog opens from the sidebar')
   await key('Escape')
