@@ -43,6 +43,7 @@ import { attachDaemonHostAdmin } from './host-admin-runtime'
 import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
+import { HostMetricsSampler, createHostMetricsSources } from './host-metrics'
 
 export type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 
@@ -246,6 +247,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onNotice: (notice) => publishHint({ kind: 'hostNotice', notice })
   })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
+  // P8 §4: sampled only when asked. Providers stay 「其他」 until per-session roots exist.
+  const hostMetrics = new HostMetricsSampler(createHostMetricsSources({
+    platform: process.platform,
+    userDataDir: options.userDataDir,
+    workspaceRoots: () => workspace.remoteProjectRoots(),
+    providerRoots: () => [],
+    activeRuns: () => ({ active: pipeline.runs.activeStates().length, queued: 0 })
+  }))
   const listHostAdminNotices = isHostCliExperimentalEnabled(process.env) ? () => hostAdmin.recentNotices() : undefined
   const service = await createHostRuntime({
     runtime,
@@ -280,6 +289,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       hostAdmin,
       links: sessionLinks,
       orchestrationStatus: () => authority.status(),
+      hostMetrics: () => hostMetrics.read('local'),
       subscribe: authority.createSubscribeHandler({
         ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
         remoteHostNotices: listHostAdminNotices,

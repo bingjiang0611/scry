@@ -8,7 +8,7 @@ const matrix = buildMatrix(routing)
 
 describe('daemon IPC routing matrix', () => {
   it('classifies every privileged channel and only privileged channels', () => {
-    expect(matrix.channels).toBe(183)
+    expect(matrix.channels).toBe(184)
     expect(matrix.defects).toEqual([])
     expect(matrix.rows.filter((row) => row.route === 'main').length).toBeGreaterThan(0)
     expect(matrix.rows.filter((row) => row.route === 'forward').length).toBeGreaterThan(0)
@@ -54,14 +54,14 @@ describe('daemon IPC routing matrix', () => {
 
   it('fails when the preload invokes a channel the registration scan did not find', () => {
     const invoked = preloadChannels()
-    expect(invoked.size).toBe(183)
+    expect(invoked.size).toBe(184)
     const missed = buildMatrix(routing, undefined, new Set([...invoked, 'agent:registeredSomeNewWay']))
     expect(missed.defects).toEqual([{ channel: 'agent:registeredSomeNewWay', problem: expect.stringContaining('registration scan did not find it') }])
   })
 
   it('reads its own inputs instead of trusting an empty scan', () => {
     const channels = collectChannels().map((entry) => entry.channel)
-    expect(channels.length).toBe(183)
+    expect(channels.length).toBe(184)
     // Registered through a handler table and through the `handle(` parameter name; both
     // were missing from the first scan, which only matched handleTrusted('literal').
     expect(channels).toContain('sourceControl:read')
@@ -85,7 +85,7 @@ describe('daemon IPC routing matrix', () => {
     // entry registers none of them in process: each must be a channel the daemon answers
     // (the gate's local-op or forward tables), or a channel the App keeps (route main).
     const gate = gateTableChannels()
-    expect(gate.size).toBe(111)
+    expect(gate.size).toBe(112)
     const kept = new Set(routing.channels.filter((row: { route: string }) => row.route === 'main').map((row: { channel: string }) => row.channel))
     const mainSources = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const path = join(directory, entry.name)
@@ -112,7 +112,7 @@ describe('daemon IPC routing matrix', () => {
   it('documents every new op next to its channels', () => {
     const ops = readFileSync(OPS_DOC, 'utf8')
     const used = new Set(matrix.rows.filter((row: { route: string }) => row.route === 'new-op').map((row: { target: string }) => row.target.slice(0, row.target.lastIndexOf(':'))))
-    expect(used.size).toBe(24)
+    expect(used.size).toBe(25)
     for (const op of used) expect(ops).toContain(`| \`${op}\` |`)
     expect(join(OPS_DOC).endsWith('P3-ipc-ops.md')).toBe(true)
   })
