@@ -31,21 +31,18 @@ export function usageChannelHandlers(deps: { userDataDir: () => string }) {
     return rangeDays
   }
   return {
-    // B2-lite: cumulative usage aggregated from usage.jsonl.
     'agent:usageStats': (context?: ProviderContext) =>
       readUsageStats(deps.userDataDir(), context ? {
         providerId: context.providerId,
         agentProfileId: context.agentProfileId,
         cwd: context.cwd ?? ''
       } : {}),
-    // B2: cross-session SQLite analysis (tool frequency, spend per directory).
     'agent:stats': () => statsQuery(),
     'agent:usageAnalytics': (rangeDays: unknown) => usageAnalyticsQuery(usageRange(rangeDays)),
     'agent:usageCredits': (rangeDays: unknown) => usageAnalyticsWithCreditsQuery(usageRange(rangeDays))
   } satisfies ChannelHandlers
 }
 
-/** LLM performance: recorded samples, and a summary of the runs this process owns. */
 export function llmPerformanceChannelHandlers(deps: { userDataDir: () => string; activeRuns: () => ActiveRun[] }) {
   return {
     'agent:llmPerformanceHistory': () => readLlmPerformanceHistory(deps.userDataDir()),

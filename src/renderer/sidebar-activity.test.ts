@@ -93,7 +93,6 @@ describe('sidebar activity projection', () => {
     const rows = sidebarActivity(catalog, empty, empty, '', [], unread)
     expect(rows).toHaveLength(1)
     expect(rows[0].group).toBe('updates')
-    // Without unread evidence an unknown outcome is not activity at all.
     expect(sidebarActivity(catalog, empty, empty, '', [], empty)).toEqual([])
     expect(sidebarActivity(catalog, new Set(['run-a']), empty, '', [], unread)[0].group).toBe('working')
     expect(sidebarActivity(catalog, new Set(['run-a']), new Set(['run-a']), '', [], unread)[0].group).toBe('attention')

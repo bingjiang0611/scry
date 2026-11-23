@@ -30,7 +30,6 @@ function recorderFallbackSearchPath(env: Record<string, string>): string {
   return directories.filter((directory): directory is string => !!directory).join(delimiter)
 }
 
-/** Process-wide runtime source, analogous to storage configuration. */
 export function configureRecorderCliRuntime(config: RecorderCliRuntimeConfig | undefined): void {
   if (config?.requirePrivateCli && !existsSync(join(config.resourcesPath, 'bin', 'scry'))) {
     throw new Error('daemon_recorder_cli_unavailable')

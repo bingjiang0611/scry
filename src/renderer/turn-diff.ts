@@ -30,7 +30,6 @@ export interface TurnDiffReview {
   preview?: boolean
 }
 
-/** 一个 scope 当前该展示的快照，以及它是不是运行中的临时快照。 */
 export interface TurnDiffView {
   turnDiff: TurnDiffSnapshot
   preview: boolean
@@ -169,7 +168,6 @@ export interface SessionNetDiffSummary {
   files: DiffFile[]
   added: number
   deleted: number
-  /** true = 运行中的临时快照 */
   preview: boolean
   /** 基线是会话首轮前还是恢复后重锚；缺省表示这条快照没带来源标注。 */
   baseline?: TurnDiffBaselineOrigin

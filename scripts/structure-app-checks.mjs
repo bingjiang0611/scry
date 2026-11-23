@@ -118,7 +118,6 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await key('Escape')
     check(await evaluate(`document.querySelector('.surface-menu')?.dataset.state === 'exit' && document.querySelector('.surface-menu').getAnimations().some(a => a.effect.getTiming().duration === 150)`), 'Surface menu exit is not 150ms')
     await wait(`document.querySelector('.surface-menu') == null`)
-    // Chooser: with no tab open the side-chat card is the first item of the same grid.
     const currentSurface = '#right-surface-pane [data-session-surface-current="true"]'
     while (await evaluate(`document.querySelector('${currentSurface} .surface-tab-close') != null`)) {
       await click(`${currentSurface} .surface-tab-close`)

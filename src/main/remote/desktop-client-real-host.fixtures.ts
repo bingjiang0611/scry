@@ -9,7 +9,6 @@ const runRow = (runId: string, cwd: string, provider: string, seq: number): Subs
   intentSeq: seq, settledAt: null, recoveredAt: null, outcome: null, revSeq: seq
 })
 
-/** The controller fixture supplies its latest run view over authentic v3 TLS. */
 export function fixtureSubscription(hostId: string, controller: () => HostController, macRuns: () => MacRunView[]) {
   let seq = 1
   const changes = new EventEmitter()

@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `b77673e2`, reviewed 334 tokens in 63 files: remote `desktop-client*`, bootstrap query/MCP/terminal channels, main recorder entry points, renderer trace/turn helpers, and sidebar and structure checks. Removed 51 redundant notes across 24 files. Comment-free emit and tool directives matched; 12 targeted suites passed 115 tests. The layout smoke scripts were not run live.
+
 At `6ffecf72`, reviewed 440 tokens in direct bootstrap `conversation-*`, `session-*`, `project-*`, and `workspace-*` files; renderer `format-*`; scripts `electron-*` and `packaged-*`; and nine Antigravity tests plus the shared argv recorder fixture (the shared fixture overlaps earlier Provider passes). Removed 100 comments across 37 files. Comment-free emit and tool directives matched. Across 17 focused suites, all 86 distinct tests passed: 15 suites in Electron Node mode and two on Node after their initial Electron-mode failures. This was not an App smoke or package run.
 
 At `77d378f1`, reviewed all direct `run-*` and `trace-*` TypeScript files under `src/main/bootstrap/` (363 tokens), and direct `ChatTurn*`, `ConversationView*`, and `RightSurface*` TypeScript/TSX files under `src/renderer/components/` (112 tokens). Removed 49 comments across 28 files. Comment-free emit and tool directives matched; 368 targeted tests passed in Electron Node mode. A separate pass at the same pin reviewed 73 tokens in 17 Codex and Qoder test/fixture files. Removed three redundant notes without changing comment-free emit or tool directives; three targeted suites passed 130 tests.

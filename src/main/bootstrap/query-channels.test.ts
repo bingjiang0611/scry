@@ -24,7 +24,6 @@ const { appendUsage } = await import('../usage-jsonl')
 const { llmPerformanceChannelHandlers, skillChannelHandlers, usageChannelHandlers, workspaceDiffChannelHandlers } = await import('./query-channels')
 const { daemonOwnedChannels } = await import('./daemon-owned-channels')
 
-// The query tables the daemon serves as local ops (B4-L4).
 
 type Table = Record<string, (...args: unknown[]) => unknown>
 const dirs: string[] = []
@@ -61,7 +60,6 @@ describe('usage channel table', () => {
     }
     expect(db.usageAnalyticsQuery).not.toHaveBeenCalled()
     expect(db.usageAnalyticsWithCreditsQuery).not.toHaveBeenCalled()
-    // Renderer arguments never reach the ledger statistics query.
     expect(table['agent:stats']('ignored')).toEqual({ status: 'ready', args: [] })
   })
 })

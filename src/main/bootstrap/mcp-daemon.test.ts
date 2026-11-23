@@ -2,9 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gateDaemonChannel, installDaemonChannelForwarder } from '../daemon-channel-gate'
 import { deliverDaemonOAuthUrl, installMcpDaemonWindow } from './mcp-daemon'
 
-// Daemon mode: the daemon runs MCP re-auth and hands its OAuth page to the App. A feed
-// item alone must never open a browser: only during this window's own re-auth, and only
-// a URL main would have opened in process.
 
 const SAFE = 'https://auth.example.com/authorize?state=x'
 

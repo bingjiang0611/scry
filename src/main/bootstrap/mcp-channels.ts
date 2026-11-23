@@ -51,7 +51,6 @@ export function mcpChannelHandlers(deps: McpChannelDependencies) {
         )
       }
       if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
-      // A live check is registered under its own key so a person can cancel exactly it;
       // the adapter honours the signal only where MCP_LIVE_CHECK_CANCEL allows.
       const key = liveCheckKey(p.context)
       const controller = new AbortController()

@@ -4,8 +4,6 @@ import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_A
 import { fail, record } from './desktop-client-validation'
 import { protocolFailure } from './remote-protocol'
 
-// What a host declares it can do, negotiated once from `desktop info`. The
-// catalog snapshot reuses this so a device does not read capabilities twice.
 /** Host capabilities negotiated by `desktop info`, reused by the catalog snapshot. */
 export type DesktopCapabilities = ReturnType<typeof validateInfo>
 

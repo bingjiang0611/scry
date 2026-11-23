@@ -4,7 +4,6 @@ import { recordTraceItemsChange } from './turn-stream-projection'
 
 // 性能：把一批 onTrace 事件一次性合并进 turns（替代每事件一次 setState）。FIFO 保序、按 id 去重、
 // 连续 text_delta / thinking 流片段合并进上一条——语义与逐事件版完全一致，只是批量。
-// clone-on-write 只复制变动的 turn。
 // Renderer snapshots are immutable. Weak keys let old histories be collected;
 // copy indices only when identities change, not on each text/thinking fragment.
 const traceTurnIndices = new WeakMap<Turn[], Map<string, number>>()

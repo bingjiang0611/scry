@@ -54,7 +54,6 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       ...(watch.workspaceProgress ? { workspaceProgress: watch.workspaceProgress } : {}) }
   }
 
-  // Finds the host’s live run for the selected session.
   async liveRun(connectionIdValue: string, value: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null> {
     const scope = context(value)
     if (!scope.externalSessionId) fail('session_required')

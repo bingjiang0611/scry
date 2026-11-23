@@ -56,9 +56,7 @@ function sameLiveTail(event: TraceEvent, tail: LiveTailDescriptor): boolean {
 export interface TurnStreamProjection {
   /** 去掉尾部 live 文本/思考后的事件序列；只在真正发生结构变化时换引用。 */
   structuralItems: readonly TraceEvent[]
-  /** 尾部流式回复的拼接结果，随每批增量更新。 */
   liveText: string
-  /** 尾部流式思考的拼接结果，随每批增量更新。 */
   liveThinking: string
   /** 尾部第一个流式片段的事件 id，用作稳定 React key。 */
   liveKey: string

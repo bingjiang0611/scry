@@ -3,9 +3,6 @@ import { MCP_CHECK_CANCELLED } from '../../shared/provider'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { mcpChannelHandlers, type McpChannelDependencies } from './mcp-channels'
 
-// A live MCP check is registered by Provider profile and workspace, and cancelling it
-// reaches only that check. The same table runs in main and in the daemon, so the cancel
-// must find the check in whichever process holds it.
 
 function harness() {
   let release: () => void = () => undefined
@@ -38,7 +35,6 @@ describe('MCP live check cancel', () => {
     expect(await handlers['agent:cancelMcpSnapshot'](context)).toBe(true)
     expect(seen.signal?.aborted).toBe(true)
     await running
-    // Nothing is left to cancel once the check has ended.
     expect(await handlers['agent:cancelMcpSnapshot'](context)).toBe(false)
   })
 
