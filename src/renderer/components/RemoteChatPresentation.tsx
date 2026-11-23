@@ -9,10 +9,6 @@ import type { FoundationState } from './RemoteChatFoundation'
 import type { RemoteChatProps } from './RemoteChat'
 import { intentMatches, remoteControlsValid, remoteRunControlCatalog } from './RemoteChatShared'
 
-// A conversation that executes on a saved remote Scry desktop. It renders the same
-// ChatView as local sessions; only the controller differs. The host owns Provider
-// install, credentials, files and archive, so this view never falls back to local
-// runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
 export function useRemoteChatPresentation(foundation: FoundationState, controlProvider: RemoteProviderRef | undefined, { scrollRef, cwd, queueStore, surface }: Pick<RemoteChatProps, 'scrollRef' | 'cwd' | 'queueStore' | 'surface'>) {
@@ -52,12 +48,6 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
     chatNavigation.navigate(runId, target === 'event' ? event?.id : undefined)
   }
 
-  // This mounted remote context owns its scroll intent, independently of the
-  // last local/remote session. Follow late Markdown/image layout until the
-  // reader deliberately scrolls away from the latest message. The observers are
-  // bound to one concrete `.chat` element, so they must be re-bound when the
-  // presented context changes: `scrollRef` alone is a stable object and would
-  // leave the late-layout follow on an element the reader no longer sees.
   useEffect(() => {
     const history = scrollRef.current
     if (!history) return
@@ -66,9 +56,6 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
       if (chatNavigation.active.current) return
       const position = { scrollTop: history.scrollTop, scrollHeight: history.scrollHeight, clientHeight: history.clientHeight }
       const nearLatest = chatBottomStickinessAfterScroll(history, openingLatest.current)
-      // Removing a notice can grow the viewport and clamp scrollTop upward.
-      // Content may then grow before that scroll event arrives. That exact
-      // viewport clamp is not a reader scrolling away from the latest message.
       const viewportClamp = position.clientHeight > previous.clientHeight &&
         Math.abs(position.scrollTop - Math.max(0, previous.scrollHeight - position.clientHeight)) <= 1
       if (nearLatest || (position.scrollTop < previous.scrollTop && !viewportClamp)) followLatest.current = nearLatest
@@ -81,8 +68,6 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
   useLayoutEffect(() => {
     scrollChatToBottomIfNeeded(scrollRef.current, openingLatest.current || followLatest.current)
     if (!openingLatest.current || historyLoading || (sessionId && !historyEvidence && !historyError)) return
-    // History arrives asynchronously; retain the opening intent through the
-    // first loaded layout and its clamped/queued scroll event.
     const frame = requestAnimationFrame(() => {
       if (!openingLatest.current || chatNavigation.active.current) return
       scrollChatToBottomIfNeeded(scrollRef.current, true)
@@ -94,15 +79,10 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
 
   const currentIntent = intents.filter((intent) => intentMatches(intent, context)).sort((left, right) => left.createdAt - right.createdAt).at(-1) ??
     (adoptedIntent.current ? intents.find((intent) => intent.intentId === adoptedIntent.current?.intentId) : undefined)
-  // Unknown is scoped to the connection, not the opened project, Provider or session.
-  // A receipt from another context must still fence every composer on this host.
   const unknownReceiptBlocked = intents.some((intent) => intent.status === 'unknown')
-  // A previous turn's status is not evidence for the newly submitted receipt.
   const currentRunStatus = runStatus?.runId === currentIntent?.runId ? runStatus : null
-  // Same gate as the host ledger: a listed run or an unknown receipt blocks another send.
   const runActive = Boolean(foreignRun) || Boolean(currentIntent && (currentIntent.status === 'unknown' ||
     (currentIntent.runId && currentRunStatus?.state !== 'settled' && currentRunStatus?.state !== 'failed')))
-  // Stop/answer go to whichever run owns this session on the host.
   const controlRunId = currentIntent?.runId ?? foreignRun?.runId
   const projectAvailable = catalog?.projects.some((project) => project.path === cwd) ?? false
   const sessionArchived = Boolean(catalogSession?.archivedAt ?? catalog?.sessions.find(item => item.externalSessionId === sessionId && item.cwd === cwd &&
@@ -112,8 +92,6 @@ export function useRemoteChatPresentation(foundation: FoundationState, controlPr
     if (sessionArchived) queueStore.clearSession(draftKey)
   }, [sessionArchived, queueStore, draftKey])
 
-  // An unknown submission receipt blocks sending before any freshness state (main 0c124aa);
-  // otherwise stale or refreshing host evidence blocks it (batch A3).
   const sendBlockedReason = unknownReceiptBlocked
     ? copy.unknownReceiptSendBlocked
     : catalogEntry?.error || pollError

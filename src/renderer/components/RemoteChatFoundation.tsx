@@ -30,10 +30,6 @@ import { readRemoteProviderKey } from '../remote-run-controls'
 import type { RemoteChatProps } from './RemoteChat'
 import { errorText, remoteDraftKey } from './RemoteChatShared'
 
-// A conversation that executes on a saved remote Scry desktop. It renders the same
-// ChatView as local sessions; only the controller differs. The host owns Provider
-// install, credentials, files and archive, so this view never falls back to local
-// runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
 const EMPTY_DRAFT_ATTACHMENTS: ComposerDraftAttachment[] = []
@@ -91,15 +87,12 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const [historyLoading, setHistoryLoading] = useState(preparedHistory?.status === 'loading')
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
-  // The shown run and the host revision it came from; updated synchronously so
-  // the next poll continues from exactly what is displayed.
   const traceViewRef = useRef<RemoteTraceView | null>(null)
   const showTrace = useCallback((view: RemoteTraceView | null): void => {
     traceViewRef.current = view
     setActiveRun(view?.run ?? null)
   }, [])
   const [runStatus, setRunStatus] = useState<(DesktopRemoteRunStatus & { runId: string }) | null>(null)
-  // A host run on this session that this client did not submit.
   const [foreignRun, setForeignRun] = useState<DesktopRemoteLiveRun | null>(null)
   const foreignRunRef = useRef(foreignRun)
   foreignRunRef.current = foreignRun
@@ -109,7 +102,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const [pollError, setPollError] = useState<string | null>(null)
   const [pollFresh, setPollFresh] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(preparedHistory?.status === 'error' ? preparedHistory.error : null)
-  // 取更早一页的在途状态：自动续读会反复触发，重复请求拿的是同一游标。
   const [historyOlderLoading, setHistoryOlderLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [pendingWorktree, setPendingWorktreeState] = useState<PendingRemoteWorktreeSubmit | null>(null)
@@ -144,7 +136,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   useEffect(() => {
     if (!preparedHistory || appliedPreparedHistory.current === preparedHistory) return
     appliedPreparedHistory.current = preparedHistory
-    // A finished handoff must not swallow the next subscription or reconnect refresh.
     preparedHistoryContext.current = preparedHistory.status === 'loading' ? contextKey : undefined
     if (preparedHistory.status === 'loading') {
       preparedHistoryRequest.current = generation.current
@@ -192,7 +183,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const queueKey = remoteQueueKey(draftKey, providerSelection)
   const readQueue = () => queueStore.get(queueKey)
   const queue = useSyncExternalStore(queueStore.subscribe, readQueue, readQueue)
-  // 正在输入框里改写的队列条目；编辑期间它跳过自动出队。
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [movedMessageId, setMovedMessageId] = useState<string | null>(null)
   const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
@@ -225,8 +215,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     if (!connected && !connectionRefreshing) queueStore.pause(queueKey)
   }, [connected, connectionRefreshing, queueKey, queueStore])
 
-  // A new draft restores this host's Provider/profile once its catalog arrives.
-  // An existing session keeps its recorded Provider even when the host removed it.
   useEffect(() => {
     if (providerSelection || !catalog) return
     const saved = readRemoteProviderKey(connectionId)
@@ -235,8 +223,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     if (first) setProviderSelection(desktopProviderKey(first))
   }, [catalog, connectionId, providerSelection])
 
-  // Changing Provider/profile or session is a different execution context: clear
-  // transcript, run state and controls. Session adoption keeps the run it adopted.
   useEffect(() => {
     if (previousContextKey.current === contextKey) return
     previousContextKey.current = contextKey
@@ -257,8 +243,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     setForeignRun(null)
     setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
   }, [contextKey, showTrace])
-  // Controls are a separate selected-context read. A late response may only
-  // publish for the exact Provider/profile/cwd that requested it.
   useEffect(() => {
     if (!connected || !catalogReady || !provider?.available || !providerId) {
       setSelectedProvider(undefined)
@@ -276,8 +260,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
       return
     }
     let cancelled = false
-    // A same-context observation can refresh without removing known choices.
-    // Failure must discard the observation, never reuse it as current.
     if (selectedProviderContextKey !== controlContextKey) {
       setSelectedProvider(undefined)
       setSelectedProviderContextKey(undefined)
