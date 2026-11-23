@@ -6,11 +6,11 @@ import { PROMPT_PREVIEW_MAX_CHARS, USER_TEXT_PREVIEW_MAX_CHARS } from './types'
 
 const PEER_SHA_RE = /^[0-9a-f]{64}$/
 
-export interface ShadowCommitSample {
+export interface OrchestrationCommitSample {
   runId: string
   ledgerRunId: string
   commitKind: string
-  /** Full shadow hook wall time (parse + ordinal lookup + BodyStore fsync + hash + EventSink commit). */
+  /** Full projection hook wall time (parse + ordinal lookup + BodyStore fsync + hash + EventSink commit). */
   durationMs: number
   /** EventSink.execute (decide + SQLite tx + fsync) duration alone. */
   sinkDurationMs: number
@@ -20,7 +20,7 @@ export interface ShadowCommitSample {
   bodyBytes?: number
 }
 
-export interface ShadowMirrorStats {
+export interface LedgerProjectionStats {
   acceptedCommits: number
   /** Alias for acceptedCommits (only accepted commits, never rejected no-ops). */
   commits: number
@@ -31,7 +31,7 @@ export interface ShadowMirrorStats {
   importRejections: number
   missingBodies: number
   failures: number
-  /** Total shadow parity anomalies: sticky + retryable + ordinalMismatches + importRejections + missingBodies + failures. */
+  /** Total projection parity anomalies: sticky + retryable + ordinalMismatches + importRejections + missingBodies + failures. */
   deviations: number
   failedOpen: boolean
   preFirstTokenCommitsByRun: ReadonlyMap<string, number>

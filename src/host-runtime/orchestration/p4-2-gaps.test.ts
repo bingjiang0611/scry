@@ -8,7 +8,7 @@ import { openOrchestrationDatabase } from './db'
 import { EventSink } from './event-sink'
 import { loadLegacyLedgerPlan, loadLegacyLedgerPlanAsync, startDeferredLegacyImport } from './legacy-import'
 import { readLegacyLedgerAsync, readLegacyLedgerReadOnly } from './legacy-ledger-reader'
-import { ShadowMirror } from './shadow-mirror'
+import { LedgerProjectionMirror } from './ledger-projection-mirror'
 import { INLINE_BODY_MAX_BYTES, OrchestrationStoreError } from './types'
 
 function withTempDir<T>(run: (dir: string) => T): T {
@@ -249,9 +249,9 @@ describe('P4-2 gap 2: >16 KiB body durable before event reference and deleteSess
     })
   })
 
-  it('prevents ShadowMirror.flushPendingBodies from resurrecting a deleted session body file', () => {
+  it('prevents LedgerProjectionMirror.flushPendingBodies from resurrecting a deleted session body file', () => {
     withTempDir((userData) => {
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         const runId = SessionLedger.newRunId()
         const sessionKey = 'conv-shadow-del'

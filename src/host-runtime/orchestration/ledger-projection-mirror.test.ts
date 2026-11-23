@@ -9,7 +9,7 @@ import {
   parseOrchestrationFullfsync,
   parsePendingTtlMs
 } from './mode'
-import { ShadowMirror } from './shadow-mirror'
+import { LedgerProjectionMirror } from './ledger-projection-mirror'
 
 function withTempDir(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'scry-shadow-test-'))
@@ -44,14 +44,14 @@ describe('orchestration storage tunables', () => {
   })
 })
 
-describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
+describe('P4-1 LedgerProjectionMirror H1 #emit and H3 settle parity + fail-open', () => {
   it('mirrors H1 send, question, answer, settle, stop/cancel, and failure field-for-field with peer actors', () => {
     withTempDir((userData) => {
       const localPeer = 'a'.repeat(64)
       const remotePeer = 'b'.repeat(64)
       const metaByRun = new Map<string, { peerCertSHA256: string; grantScope: 'local' | 'remote' }>()
       let pendingAnsweredByPeer: string | undefined
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),
@@ -233,7 +233,7 @@ describe('P4-1 ShadowMirror H1 #emit and H3 settle parity + fail-open', () => {
   it('fails open on injected shadow write failure, counts failure, and does not affect the run', () => {
     withTempDir((userData) => {
       let injectFail = false
-      const mirror = ShadowMirror.open({
+      const mirror = LedgerProjectionMirror.open({
         userDataDir: userData,
         beforeCommitHook: () => {
           if (injectFail) {

@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { CERT, grantedController, MemoryLedgerStore, routing } from './host-controller-fixtures'
-import { ShadowMirror } from '../../host-runtime/orchestration/shadow-mirror'
+import { LedgerProjectionMirror } from '../../host-runtime/orchestration/ledger-projection-mirror'
 
 describe('P4-1 question answer peer side-channel (no peer fingerprint in persistent H1 poll)', () => {
   it('propagates answering peer to shadow answered_by via memory side-channel without leaking peer SHA in H1 poll()', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scry-q-peer-e2e-'))
-    const mirror = ShadowMirror.open({ userDataDir: dir })
+    const mirror = LedgerProjectionMirror.open({ userDataDir: dir })
     try {
       let releaseQuestion: (() => void) | undefined
       const questionOpened = new Promise<void>((resolve) => {
