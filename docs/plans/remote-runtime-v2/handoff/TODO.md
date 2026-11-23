@@ -4,22 +4,12 @@
 
 ## P6 会话与分支
 
-- [ ] **停掉 P6 会话。** 把下面这段发给它：
-
-  > P6 暂停：先做 V2 对齐（`V2-alignment.md`，任务单 W20），之后再恢复 P6。
-  >
-  > 1. 停止所有新的实现工作，不要合并到 main。
-  > 2. 把报告 `reports/W20-p6.md` 改名为 `P6.md`，第一行写「状态：暂停（等待 V2 对齐）」。报告里写清：
-  >    - P6-0 到 P6-6 每一段的提交和验收结果；
-  >    - 还没验证的项，以及 iPhone C 组受阻的原因；
-  >    - 哪些实现依赖下面三个前提，列出文件和函数。W20 会改掉这三个前提：「每一轮新起一个 Provider 进程」「提示词队列只存在前端」「谱系以会话文件为准」。
-  > 3. 提交并推送到 `feat/p6-multi-agent-orchestration`，然后结束会话。
-
-- [ ] **冻结 `feat/p6-multi-agent-orchestration`。** 15 个提交，P6-1 到 P6-6 已实现，还没合并。W20 做完之前不要合进 main。
+- [x] **P6 暂停收尾**（2026-11-23 完成）：报告改名为 `reports/P6.md`，迁移点写进 `reports/P6-resume.md`，推到 `feat/p6-multi-agent-orchestration`（`8e074006`）；PR #178 已改为草稿，标题加了「暂停」。维护者把本地那个 P6 会话关掉即可。
+- [ ] **冻结 `feat/p6-multi-agent-orchestration`。** P6-0 到 P6-6 已实现，还没合并。W20 做完之前不要合进 main，PR #178 保持草稿。注意：这个分支的 App 主进程模块数是 193，超过 192 的上限，恢复时要压回去。
 - [ ] **W20 做完后恢复 P6。**
   1. 把 main 合进这个分支。
   2. 按 W20 的几项适配：C1 常驻 ProviderSession、D1 持久队列、D3 谱系入库、D4 元数据以事件为准。
-  3. 把 [V2-alignment](../V2-alignment.md) §E 列的三条规则补进 P6 设计：提问只唤醒父会话一次、同级子任务的结果批量送达、DispatchModeLimit。
+  3. 按分支上的 `reports/P6-resume.md` 逐条迁移；把 [V2-alignment](../V2-alignment.md) §E 列的三条规则补进 P6 设计：提问只唤醒父会话一次、同级子任务的结果批量送达、DispatchModeLimit。
   4. 重新做独立评审，再走一遍 L3 验证。
 
 ## 合并与分支
