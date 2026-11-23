@@ -108,8 +108,6 @@ export async function prepareSideChatDrafts({ cdp, evaluate, check, ipcCountsPat
     await click(`${SIDE_CHAT_SURFACE} .surface-tab-close`)
     await idle()
   }
-  // The tool tab first: this is the chooser card, the same shipped surface entry a user
-  // clicks when nothing is open.
   await wait(`[...document.querySelectorAll('${SIDE_CHAT_SURFACE} .surface-card')]
     .some(node => node.querySelector('strong')?.textContent.trim() === '总览')`, 10000)
   await clickAt(`[...document.querySelectorAll('${SIDE_CHAT_SURFACE} .surface-card')]
@@ -206,7 +204,6 @@ export async function verifySideChatDrafts({ cdp, evaluate, check, ipcCountsPath
     `an unresolved first send must not be shown as a never-sent side chat: ${json(emptyState)}`)
   await capture('drafts-restored-receipt')
 
-  // A newer draft and a newer attachment belong to the user; the receipt stays separate.
   await type(CHILD_COMPOSER, NEWER_TEXT)
   await pasteImage(evaluate, check, NEWER_IMAGE)
   await wait(`document.querySelectorAll('${CHILD_PANEL} .draft-attachment').length === 1`)

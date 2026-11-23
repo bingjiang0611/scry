@@ -30,7 +30,6 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
     await controls.openChildById(childId)
   }
 
-  // Measurements the panel and the chip must keep at every supported width.
   const panelFacts = () => evaluate(`(() => {
     const surface = document.querySelector('${CHILD_PANEL} .side-chat-surface')
     const composer = document.querySelector('${CHILD_PANEL} .runtime-composer')
@@ -61,8 +60,6 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
     }
   })()`)
 
-  // 1. A wide real window keeps both panes side by side; the panel then shrinks to its
-  //    own minimum with the resizer's keyboard control.
   await resize(1400, 900, false)
   await showChild()
   const wide = await panelFacts()
@@ -111,7 +108,6 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   check(narrowSide.composerInside && narrowSide.surfaceOverflow <= 1,
     `the child composer must stay usable in the narrow window: ${json(narrowSide)}`)
   await capture('layout-narrow-window')
-  // The panel keeps its own hide control, so the conversation is always reachable again.
   // Several workbenches stay mounted for merged sessions, so the control is addressed
   // inside the current surface instead of by a document-wide attribute match.
   const hideControl = `${SIDE_CHAT_SURFACE} [aria-label="隐藏右侧工作区"]`
@@ -171,7 +167,6 @@ export async function exerciseSideChatLayout({ cdp, evaluate, check, ipcCountsPa
   await keyStroke({ key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   await idle()
 
-  // 4. Light and dark really render, and the child surface keeps readable contrast.
   const surfaceColors = async () => evaluate(`(() => {
     const surface = document.querySelector('${CHILD_PANEL} .side-chat-surface')
     const text = surface.querySelector('.chat-body, .side-chat-surface-empty') ?? surface

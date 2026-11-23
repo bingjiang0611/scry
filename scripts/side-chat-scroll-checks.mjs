@@ -43,7 +43,6 @@ export async function exerciseSideChatScroll({ cdp, evaluate, check, ipcCountsPa
       atBottom: body.scrollHeight - body.scrollTop - body.clientHeight <= 8
     }
   })()`)
-  /** Where one exact turn sits relative to the top edge right now; null when it is not loaded. */
   const offsetOfTurn = (runId) => evaluate(`(() => {
     const body = document.querySelector('${CHILD_PANEL} .chat-body .chat-transcript')
     const turn = body?.querySelector('[data-run-id="' + CSS.escape(${json(runId)}) + '"]')

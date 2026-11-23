@@ -34,7 +34,6 @@ export async function exerciseSideChatHistory({ cdp, evaluate, check, ipcCountsP
   const strip = await evaluate(`[...document.querySelectorAll('#right-surface-pane [data-side-chat-tab-id]')].map(node => node.dataset.sideChatTabId)`)
   check(strip.length > 0 && strip.length <= 8, `the tab strip must stay bounded to eight children: ${json(strip)}`)
 
-  // Open the history dialog from the chooser and walk back to the oldest child.
   while (await evaluate(`document.querySelector('${SIDE_CHAT_SURFACE} .surface-tab-close') != null`)) {
     await click(`${SIDE_CHAT_SURFACE} .surface-tab-close`)
     await idle()
@@ -67,7 +66,6 @@ export async function exerciseSideChatHistory({ cdp, evaluate, check, ipcCountsP
   check(oldestReachable, `the oldest of 201 children never became reachable: ${json(pages)}`)
   await capture('history-oldest-page')
 
-  // Reopening the oldest row by its own id opens exactly that record.
   await clickAt(`[...document.querySelectorAll('[data-side-chat-history-id]')]
     .find(node => node.dataset.sideChatHistoryId === ${json(childId)})`)
   await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`, 30000)

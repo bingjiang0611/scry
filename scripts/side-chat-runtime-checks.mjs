@@ -65,7 +65,6 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   await selectProvider('codex')
   const childTurnsBefore = (await conversation(childId)).turns.length
   await send(CHILD_COMPOSER, 'side chat hold child-only')
-  // Wait for both surfaces while the fixture holds the same run.
   await wait(`document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null &&
     document.querySelector('${childTab} [data-side-chat-tab-status]')?.textContent === '运行中'`)
   const whileChildRuns = { main: await mainBusy(), child: await childBusy(), status: await tabStatus(), activeRunId: await activeChildRun() }
@@ -88,7 +87,6 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   await wait(`document.querySelector('#main-pane .runtime-composer .run-status') != null`)
   await awaitDispatched('side chat hold parent-reverse')
   await stopMain()
-  // The child's own turn must still land even though the parent was stopped mid-flight.
   // A settled turn carries a terminal outcome; the summary's active run can lag the
   // accepted turn by a moment, so the outcome is the end state, not the absence of a run.
   const reverse = await settleTurn('side chat write reverse')
@@ -229,7 +227,6 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   await wait(`document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null`)
   const runA = await activeChildRun()
   check(runA != null, 'the first parent child never started its own run')
-  // A second parent from the sidebar, then its own child through the same real chooser.
   await click('.sb-new')
   await wait(`document.querySelector('#main-pane .runtime-composer textarea') != null`)
   await idle()
@@ -249,7 +246,6 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   check(runWhileHidden === runA, `leaving the session stopped or replaced the hidden child run: ${json({ runA, runWhileHidden })}`)
   await capture('runtime-retained-scope')
 
-  // The retained child is back, still running, when its own session is selected again.
   const parentIndex = await evaluate(`[...document.querySelectorAll('.sb-sess')].findIndex(row => row.textContent.includes('side chat parent turn'))`)
   check(parentIndex >= 0, 'the first parent row disappeared from the sidebar')
   await clickAt(`[...document.querySelectorAll('.sb-sess')][${parentIndex}]`)

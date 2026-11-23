@@ -22,7 +22,6 @@ export async function exerciseSideChatSourceDeleted({ cdp, evaluate, check, ipcC
     capture, click, clickAt, idle, wait, counts, since, seedTurns
   } = sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath, callsPath, rendererFailures, label: 'Side-chat source deleted' })
 
-  // A second parent with a short completed transcript of its own.
   const parentId = await evaluate(`window.scry.conversations.create(${json(workspace)}).then(created => created.id)`)
   const prompts = Array.from({ length: PARENT_TURNS }, (_, index) => unicodePrompt(index + 1))
   const seeded = await seedTurns(parentId, prompts)
@@ -81,7 +80,6 @@ export async function exerciseSideChatSourceDeleted({ cdp, evaluate, check, ipcC
   check(preview.targets.length > 0, `the delete preview showed no fingerprint scope: ${json(preview)}`)
   check(preview.targets.every(target => target.length > 0), `the delete preview lost its provider scope: ${json(preview)}`)
   check(preview.confirm.some(label => label.includes('确认删除')), `the preview never offered a confirmed delete: ${json(preview)}`)
-  // The scope the user confirms names the side chats that go with the parent.
   const announced = await evaluate(`Number(document.querySelector('.unified-delete [data-delete-side-chats]')?.dataset.deleteSideChats ?? 0)`)
   check(announced === CHILDREN, `the delete preview must announce every side chat it takes along: ${json({ announced, expected: CHILDREN })}`)
   await capture('source-delete-preview')

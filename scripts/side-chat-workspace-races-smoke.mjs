@@ -74,7 +74,6 @@ async function run() {
   return { ...result, evidence: 'component-fixture UI proof of the mounted hook, not App or Provider evidence' }
 }
 
-/** Native pointer clicks and on-demand answers against the mounted hook. */
 async function exercise(contents) {
   const read = (expression) => contents.executeJavaScript(expression)
   const frames = () => read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')
@@ -137,7 +136,6 @@ async function exercise(contents) {
     `the preview must be requested for the parent that clicked: ${JSON.stringify(previewPending)}`)
   await switchTo('scope-B', ['tab-B'])
   await answer('preview', preview('scope-A'))
-  // The lookup the new parent always needs is answered as the host would answer it.
   await settleList(['tab-B'], ['tab-B'])
   await wait(`document.querySelector('[data-races-tabs]').textContent === 'tab-B'`, 'B layout')
   const afterPreview = await state()

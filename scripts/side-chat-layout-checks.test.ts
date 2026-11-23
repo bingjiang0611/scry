@@ -19,7 +19,6 @@ it('restores the tested child after keyboard tab activation before composition a
   const composition = input.slice(input.indexOf('// 6. Real IME'), input.indexOf('const beforeComposition'))
   expect(composition).toMatch(/await showChild\(\)[\s\S]*?await click\(CHILD_COMPOSER\)/)
   expect(layout).toMatch(/check\(tabKeys.every[\s\S]*?await exerciseSideChatInput\(/)
-  // Step 7 lives in its own module; the composition step hands over to it.
   expect(input).toMatch(/await exerciseSideChatUntrustedText\(/)
   expect(untrusted).toContain(".chat-body .chat-transcript")
   expect(untrusted).toContain('document.elementFromPoint(point.x, point.y) !== scroller')
@@ -27,7 +26,6 @@ it('restores the tested child after keyboard tab activation before composition a
 })
 
 it('exercises late archived text after the active run clears without weakening markup checks', () => {
-  // Step 7 (and its late-record fixture) lives in the untrusted-text module.
   const input = readFileSync(new URL('./side-chat-untrusted-text-checks.mjs', import.meta.url), 'utf8')
   expect(input).toMatch(/setArchiveVisibility\(false\)[\s\S]*?fixture: archive pending[\s\S]*?setArchiveVisibility\(true\)/)
   expect(input).toContain('recorded.summary.activeRunId == null')
