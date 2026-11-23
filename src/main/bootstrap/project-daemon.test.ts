@@ -123,4 +123,32 @@ describe('project and workspace selection in daemon mode', () => {
       expect(writes.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'workspaceSelection', read: true }))
     }
   })
+
+  it('guards delegation policy switches with OS confirmation before forwarding to daemon', async () => {
+    const confirmDelegationSwitch = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const forwarder = vi.fn(async () => ({ ok: true, status: 'enabled' }))
+    const undo = [
+      installDaemonChannelForwarder(forwarder),
+      installProjectDaemonWindow({
+        pickFolder: vi.fn(async () => null),
+        pickPiLauncher: vi.fn(async () => null),
+        notifyPiFailure: vi.fn(async () => undefined),
+        windowCwd: () => '/w',
+        applyChosenFolder: vi.fn(),
+        confirmDelegationSwitch
+      })
+    ]
+    dispose = () => { for (const step of undo) step() }
+    const channel = gateDaemonChannel('delegation:setProjectPolicy', async (_event: unknown, _req: unknown) => { throw new Error('local') })
+    await expect(channel({}, { cwd: '/w', enabled: true })).resolves.toEqual({ ok: false, cancelled: true })
+    expect(forwarder).not.toHaveBeenCalled()
+
+    await expect(channel({}, { cwd: '/w', enabled: true })).resolves.toEqual({ ok: true, status: 'enabled' })
+    expect(forwarder).toHaveBeenCalledWith({
+      op: 'delegation',
+      method: 'setProjectPolicy',
+      args: [{ cwd: '/w', enabled: true }],
+      read: false
+    })
+  })
 })

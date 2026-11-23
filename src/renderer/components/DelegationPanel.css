@@ -1,0 +1,84 @@
+.delegation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.delegation-confirm-card {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 6%, var(--bg-surface));
+}
+
+.delegation-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.delegation-card-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+}
+
+.delegation-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.delegation-card-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.delegation-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.delegation-muted {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.delegation-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.delegation-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+}
+
+.delegation-switch-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.delegation-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+}

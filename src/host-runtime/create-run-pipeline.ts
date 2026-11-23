@@ -51,6 +51,7 @@ export interface RunPipelineInputs {
   remoteRunLedgerIds: Map<string, string>
   mirrorSessionTranscript: Parameters<typeof startRun>[2]['mirrorSessionTranscript']
   observeNativeTranscript?: Parameters<typeof startRun>[2]['observeNativeTranscript']
+  prepareOrchestrationTools?: Parameters<typeof startRun>[2]['prepareOrchestrationTools']
   /**
    * Who executes runs. `'daemon'` means another process owns every run: this assembly
    * still serves the registry and trace views those channels read, but it must never
@@ -119,7 +120,8 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
       getCurrentCwd: inputs.getCurrentCwd,
       getStartupManagedRecovery: inputs.getStartupManagedRecovery,
       nextRunSequence: inputs.nextRunSequence,
-      observeNativeTranscript: inputs.observeNativeTranscript
+      observeNativeTranscript: inputs.observeNativeTranscript,
+      prepareOrchestrationTools: inputs.prepareOrchestrationTools
     })
   }
     // traceRuntime already exposes runs, the stop lifecycle, the question broker and

@@ -182,7 +182,8 @@ export async function startRun(
         releaseSessionBaseline,
         interruptedState,
         canonicalLifecycle,
-        assertLegacyConversationWriteAllowed
+        assertLegacyConversationWriteAllowed,
+        prepareOrchestrationTools: host.prepareOrchestrationTools
       })
       runtimeStartup.control.setDiffPreviewDemand = setDiffPreviewDemand
       setDiffPreviewDemand?.(runTraces.hasDemand(runId))

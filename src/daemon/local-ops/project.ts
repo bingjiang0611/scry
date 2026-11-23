@@ -7,7 +7,15 @@ import {
   addPiProfileFromLauncher, piLauncherFromRequest, piProfileChannelHandlers, projectStoreChannelHandlers,
   providerContextChannelHandlers, recentFolderChannelHandlers, rememberChosenFolder, type PiProfileAddition
 } from '../../main/bootstrap/project-channels'
-import type { LocalOpHandler } from '../../main/remote/host-local-ops'
+import { localOpCaller, type LocalOpHandler } from '../../main/remote/host-local-ops'
+import type {
+  DelegationConfirmCancelRequest,
+  DelegationConfirmTaskRequest,
+  DelegationProjectPolicyRequest,
+  DelegationSessionFullAccessRequest,
+  DelegationStateQuery,
+  DelegationStopSubtasksRequest
+} from '../../shared/delegation'
 import type { DaemonLocalOpGroup } from './deps'
 
 // Project store writes, workspace selection, Provider context invalidation, Pi profiles,
@@ -67,6 +75,64 @@ export const projectLocalOps: DaemonLocalOpGroup = (deps) => {
       } catch (error) {
         return { status: 'failed', message: String((error as Error).message) }
       }
+    },
+    'delegation:getState': (rawQuery: unknown) => {
+      if (!deps.delegation) {
+        return {
+          projectDelegationEnabled: false,
+          sessionFullAccessEnabled: false,
+          tasks: [],
+          usageBreakdown: { status: 'available', unavailableCount: 0, tokens: {}, usd: {}, credits: {} }
+        }
+      }
+      const q = (rawQuery && typeof rawQuery === 'object' ? rawQuery : {}) as DelegationStateQuery
+      const cwd = typeof q.cwd === 'string' && q.cwd.trim() ? workspace.resolveKnownProjectDirectory(q.cwd) : null
+      const parentSessionKey = typeof q.parentSessionKey === 'string' && q.parentSessionKey.trim() ? q.parentSessionKey : null
+      return deps.delegation.getState({ cwd, parentSessionKey })
+    },
+    'delegation:setProjectPolicy': (rawReq: unknown) => {
+      const peer = localOpCaller()
+      if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
+      const req = rawReq as DelegationProjectPolicyRequest
+      if (!req || typeof req.cwd !== 'string' || typeof req.enabled !== 'boolean') return { ok: false, reason: 'invalid_request' }
+      const cwd = workspace.resolveKnownProjectDirectory(req.cwd)
+      return deps.delegation.setProjectPolicy(`peer:${peer}`, { cwd, enabled: req.enabled })
+    },
+    'delegation:setSessionFullAccess': (rawReq: unknown) => {
+      const peer = localOpCaller()
+      if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
+      const req = rawReq as DelegationSessionFullAccessRequest
+      if (!req || typeof req.sessionKey !== 'string' || !req.sessionKey.trim() || typeof req.enabled !== 'boolean') {
+        return { ok: false, reason: 'invalid_request' }
+      }
+      return deps.delegation.setSessionFullAccess(`peer:${peer}`, { sessionKey: req.sessionKey, enabled: req.enabled })
+    },
+    'delegation:confirmTask': async (rawReq: unknown) => {
+      const peer = localOpCaller()
+      if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
+      const req = rawReq as DelegationConfirmTaskRequest
+      if (!req || typeof req.taskId !== 'string' || typeof req.questionId !== 'string' || typeof req.approved !== 'boolean') {
+        return { ok: false, reason: 'invalid_request' }
+      }
+      return await deps.delegation.confirmTask(`peer:${peer}`, req)
+    },
+    'delegation:confirmCancelTask': (rawReq: unknown) => {
+      const peer = localOpCaller()
+      if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
+      const req = rawReq as DelegationConfirmCancelRequest
+      if (!req || typeof req.taskId !== 'string' || typeof req.questionId !== 'string' || typeof req.approved !== 'boolean') {
+        return { ok: false, reason: 'invalid_request' }
+      }
+      return deps.delegation.confirmCancelTask(`peer:${peer}`, req)
+    },
+    'delegation:stopSessionSubtasks': (rawReq: unknown) => {
+      const peer = localOpCaller()
+      if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
+      const req = rawReq as DelegationStopSubtasksRequest
+      if (!req || typeof req.parentSessionKey !== 'string' || !req.parentSessionKey.trim()) {
+        return { ok: false, reason: 'invalid_request' }
+      }
+      return deps.delegation.stopSessionSubtasks(`peer:${peer}`, req)
     }
   } as Record<string, LocalOpHandler>
 }

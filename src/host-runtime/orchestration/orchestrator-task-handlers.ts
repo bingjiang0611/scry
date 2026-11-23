@@ -92,7 +92,11 @@ export function decideTaskOrPolicyCommand(
       if (total >= limits.maxTotalPerParentRun) return stickyReject(cmd, 'limit_exceeded', { writeReceipt: true })
       if (hostAgentRuns >= limits.maxHostAgentRuns) return retryableReject('limit_exceeded')
 
-      const bodyDescriptor = p.body ? { storage: p.body.storage, sha256: p.body.sha256, bytes: p.body.bytes } : null
+      const bodyDescriptor = p.body
+        ? p.body.storage === 'inline'
+          ? { storage: 'inline' as const, sha256: p.body.sha256, bytes: p.body.bytes, inline: p.body.inline }
+          : { storage: 'external' as const, sha256: p.body.sha256, bytes: p.body.bytes }
+        : null
       const promptPreview = truncatePreview(p.promptPreview, PROMPT_PREVIEW_MAX_CHARS)
       const events: PendingOrchestrationEvent[] = [
         makeEvent(cmd, 0, {

@@ -64,6 +64,9 @@ export interface RunProviderBootstrapDependencies {
   firstTextPerf: PerformanceTrace
   mainEventId: (prefix: string, runId: string) => string
   userQuestionBroker: UserQuestionBroker
+  ledgerRunId?: string
+  sessionKey?: string
+  prepareOrchestrationTools?: import('./run-host').RunHost['prepareOrchestrationTools']
 }
 
 export function createRunProvider(deps: RunProviderBootstrapDependencies): () => Promise<{ externalSessionId?: string; providerTurnId?: string; forkTurnId?: string; stopped?: boolean; status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'; recordingFailure?: { message: string } }> {
@@ -111,7 +114,10 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     authorizeMcpExecution,
     publishQuestionOpened,
     publishQuestionClosed,
-    setProviderStartedAt
+    setProviderStartedAt,
+    ledgerRunId,
+    sessionKey,
+    prepareOrchestrationTools
   } = deps
   const runProvider = async (): Promise<{
     externalSessionId?: string
@@ -144,8 +150,21 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       throw new Error('统一对话 runId 与 Provider 投递 runId 不一致')
     }
     managedConversation?.onProviderDispatchAttempt?.()
+    const effectivePermissionMode = permissionModeOverride ?? request.permissionMode ?? 'default'
+    const preparedOrchestration = prepareOrchestrationTools
+      ? await prepareOrchestrationTools({
+          runId,
+          ledgerRunId,
+          providerId,
+          agentProfileId,
+          cwd,
+          sessionKey,
+          permissionMode: effectivePermissionMode
+        })
+      : undefined
     handle.current = providerRegistry.run(providerId, {
       runId,
+      ...(preparedOrchestration?.orchestrationTools ? { orchestrationTools: preparedOrchestration.orchestrationTools } : {}),
       prompt: runtimePrompt,
       ...(managedConversation?.historicalContext ? { historicalContext: managedConversation.historicalContext } : {}),
       ...(managedConversation?.historyReader ? { historyReader: managedConversation.historyReader } : {}),
@@ -238,6 +257,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     let result: Awaited<ProviderRunHandle['promise']>
     try {
       try { result = await handle.current!.promise } finally {
+        preparedOrchestration?.cleanup()
         if (providerId === 'pi') piRunDiagnostics.record(runId, 'main_finalization')
         steering.close()
         await steering.idle()

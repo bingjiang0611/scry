@@ -4,6 +4,14 @@ import { useMemo, type CSSProperties } from 'react'
 import type { Turn } from '../format'
 import { deriveAgentRows, type AgentRow, type AgentRowStatus } from '../agent-panel'
 import { Icon } from './primitives/Icon'
+import { useDelegationState } from '../hooks/useDelegationState'
+import {
+  DelegatedUsageBreakdown,
+  DelegationConfirmationCard,
+  DelegationSwitchesSection,
+  DelegationTaskCard,
+  StopAllSubtasksButton
+} from './DelegationPanel'
 
 const STATUS_LABEL: Record<AgentRowStatus, string> = {
   running: '运行中',
@@ -34,8 +42,22 @@ function shortId(id: string): string {
   return id.length > 18 ? `…${id.slice(-12)}` : id
 }
 
-export function AgentsSurface({ turns, busy }: { turns: Turn[]; busy: boolean }) {
+export function AgentsSurface({
+  turns,
+  busy,
+  cwd,
+  sessionKey
+}: {
+  turns: Turn[]
+  busy: boolean
+  cwd?: string | null
+  sessionKey?: string | null
+}) {
   const rows = useMemo(() => deriveAgentRows(turns, { busy }), [busy, turns])
+  const delegation = useDelegationState(cwd, sessionKey)
+  const activeDelegatedCount = delegation.state.tasks.filter(
+    (t) => !['completed', 'failed', 'cancelled', 'interrupted', 'unavailable', 'declined'].includes(t.status)
+  ).length
   const counts = useMemo(() => ({
     running: rows.filter((row) => row.status === 'running').length,
     completed: rows.filter((row) => row.status === 'completed').length,
@@ -64,7 +86,51 @@ export function AgentsSurface({ turns, busy }: { turns: Turn[]; busy: boolean })
         )}
       </header>
 
-      {rows.length === 0 ? (
+      {(cwd || sessionKey) && (
+        <div className="delegation-surface-section">
+          <DelegationSwitchesSection
+            isLocalHost={true}
+            projectDelegationEnabled={delegation.state.projectDelegationEnabled}
+            sessionFullAccessEnabled={delegation.state.sessionFullAccessEnabled}
+            onToggleProjectDelegation={(next) => { void delegation.toggleProject(next) }}
+            onToggleSessionFullAccess={(next) => { void delegation.toggleSessionFullAccess(next) }}
+          />
+          {activeDelegatedCount > 0 && (
+            <StopAllSubtasksButton
+              activeSubtaskCount={activeDelegatedCount}
+              onStopAll={() => { void delegation.stopAllSubtasks() }}
+            />
+          )}
+          {delegation.state.tasks.map((task) => {
+            if (task.status === 'awaiting_confirmation' && task.confirmationQuestionId) {
+              return (
+                <DelegationConfirmationCard
+                  key={`confirm-${task.taskId}`}
+                  kind="delegate"
+                  task={task}
+                  onRespond={(taskId, questionId, approved) => { void delegation.confirmTask(taskId, questionId, approved) }}
+                />
+              )
+            }
+            if (task.cancelConfirmationQuestionId) {
+              return (
+                <DelegationConfirmationCard
+                  key={`cancel-${task.taskId}`}
+                  kind="cancel"
+                  task={task}
+                  onRespond={(taskId, questionId, approved) => { void delegation.confirmCancelTask(taskId, questionId, approved) }}
+                />
+              )
+            }
+            return <DelegationTaskCard key={task.taskId} task={task} />
+          })}
+          {delegation.state.tasks.length > 0 && (
+            <DelegatedUsageBreakdown usage={delegation.state.usageBreakdown} />
+          )}
+        </div>
+      )}
+
+      {rows.length === 0 && delegation.state.tasks.length === 0 ? (
         <EmptyState size="card" picture="agents" title={OVERVIEW_SESSION_COPY.noSubagents} />
       ) : (
         <div className="agents-list" role="list">

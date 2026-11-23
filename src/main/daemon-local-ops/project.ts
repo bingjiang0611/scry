@@ -25,5 +25,12 @@ export const PROJECT_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:invalidateProviderContext': { op: 'providerContext', method: 'invalidateProviderContext', read: false },
   // The App's launcher picker answers first and shows a failed handshake itself.
   'agent:addPiProfile': { op: 'piProfile', method: 'addPiProfile', read: false },
-  'agent:removePiProfile': { op: 'piProfile', method: 'removePiProfile', read: false }
+  'agent:removePiProfile': { op: 'piProfile', method: 'removePiProfile', read: false },
+  // P6 multi-agent delegation: switches require OS confirmation dialog in main before forwarding.
+  'delegation:getState': { op: 'delegation', method: 'getState', read: true },
+  'delegation:setProjectPolicy': { op: 'delegation', method: 'setProjectPolicy', read: false },
+  'delegation:setSessionFullAccess': { op: 'delegation', method: 'setSessionFullAccess', read: false },
+  'delegation:confirmTask': { op: 'delegation', method: 'confirmTask', read: false },
+  'delegation:confirmCancelTask': { op: 'delegation', method: 'confirmCancelTask', read: false },
+  'delegation:stopSessionSubtasks': { op: 'delegation', method: 'stopSessionSubtasks', read: false }
 }

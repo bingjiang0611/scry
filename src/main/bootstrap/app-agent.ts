@@ -6,6 +6,7 @@ import { isRendererPerformanceSample } from '../../shared/performance'
 import { performanceRecordingEnabled } from '../performance-timing'
 import { recordRendererPerformance } from '../performance-recording'
 import { windowBackgroundColor } from '../window-chrome'
+import { confirmDelegationSwitchInMain } from '../delegation-policy-dialog'
 import { installProjectDaemonWindow } from './project-daemon'
 import type { TrustedRegistrar } from './agent-runtime-ipc'
 
@@ -56,7 +57,12 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
   }
   installProjectDaemonWindow({
     pickFolder, pickPiLauncher, notifyPiFailure, windowCwd: getCurrentCwd,
-    applyChosenFolder: (dir) => { setCurrentCwd(dir) }
+    applyChosenFolder: (dir) => { setCurrentCwd(dir) },
+    confirmDelegationSwitch: (req) => confirmDelegationSwitchInMain(
+      (win, options) => win && !win.isDestroyed() ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options),
+      getWindow() ?? undefined,
+      req
+    )
   })
 
   handleTrusted('agent:clipboardImage', () => {

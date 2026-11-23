@@ -4,6 +4,7 @@ import { remoteApi } from './remote-api'
 import { conversationsApi } from './conversations'
 import { runTracesApi } from './run-traces'
 import { backgroundServiceApi } from './background-service'
+import { delegationApi } from './delegation'
 import type { GitDiffScope, WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
 import type { DiffCommitPage, DiffCommitPageRequest, DiffCommitSnapshot, DiffCommitSnapshotRequest } from '../shared/diff-history'
 import type { SourceControlApi } from '../shared/source-control'
@@ -284,6 +285,7 @@ const api = {
   stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('agent:stop', runId),
   steer: (request: AgentSteerRequest): Promise<AgentSteerResult> => ipcRenderer.invoke('agent:steer', request),
   stopBackgroundTask: (request: { runId: string; taskId: string }): Promise<BackgroundTaskStopResult> => ipcRenderer.invoke('agent:stopBackgroundTask', request),
+  ...delegationApi,
   ...eventApi,
   ...remoteApi,
   ...runTracesApi,

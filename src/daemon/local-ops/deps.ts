@@ -58,6 +58,7 @@ export interface DaemonLocalEndpointDeps {
   // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
+  delegation?: import('../delegation-runtime').DaemonDelegationRuntime
   log?: (line: string) => void
 }
 
