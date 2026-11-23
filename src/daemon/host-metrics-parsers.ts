@@ -121,7 +121,7 @@ export function parsePsiMemory(text: string): HostMemoryPressure | null {
   return 'high'
 }
 
-/** `ps -axo pid=,ppid=,rss=,%cpu=,comm=` rows. Malformed lines are skipped. */
+/** `ps -axo pid=,ppid=,rss=,%cpu=,ucomm=` rows. Malformed lines are skipped. */
 export function parsePsTable(text: string): ProcessRow[] {
   const rows: ProcessRow[] = []
   for (const line of text.split('\n')) {

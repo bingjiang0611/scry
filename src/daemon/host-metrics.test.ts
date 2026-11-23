@@ -152,26 +152,41 @@ describe('HostMetricsSampler', () => {
 })
 
 describe('production sources', () => {
-  it('runs ps under nice with a bounded output and a bounded wait', async () => {
+  const sources = (activeRuns: () => { active: number; queued: number }, run: unknown) => createHostMetricsSources({
+    platform: 'darwin',
+    userDataDir: '/data',
+    workspaceRoots: () => ['/work'],
+    providerRoots: () => [],
+    activeRuns,
+    run: run as never,
+    readFile: () => null,
+    statfs: () => ({ totalBytes: 1, freeBytes: 1 }),
+    volumeId: () => 'v',
+    now: () => 1
+  })
+
+  it('yields to a run that is starting: ps goes under nice while runs are active', async () => {
     const run = vi.fn(async () => '  900  1  12000  0.8 node\n')
-    const created = createHostMetricsSources({
-      platform: 'darwin',
-      userDataDir: '/data',
-      workspaceRoots: () => ['/work'],
-      providerRoots: () => [],
-      activeRuns: () => ({ active: 0, queued: 0 }),
-      run: run as never,
-      readFile: () => null,
-      statfs: () => ({ totalBytes: 1, freeBytes: 1 }),
-      volumeId: () => 'v',
-      now: () => 1
-    })
-    const table = await created.processTable()
+    const table = await sources(() => ({ active: 1, queued: 0 }), run).processTable()
     expect(table).toBe('  900  1  12000  0.8 node\n')
     const [file, args, options] = run.mock.calls[0] as unknown as [string, string[], { timeoutMs: number; maxBytes: number }]
     expect(file).toBe('nice')
-    expect(args).toEqual(['-n', '10', 'ps', '-axo', 'pid=,ppid=,rss=,%cpu=,comm='])
+    expect(args).toEqual(['-n', '10', 'ps', '-axo', 'pid=,ppid=,rss=,%cpu=,ucomm='])
     expect(options.timeoutMs).toBe(2_000)
     expect(options.maxBytes).toBe(2 * 1024 * 1024)
+  })
+
+  it('still reads the queue as active work', async () => {
+    const run = vi.fn(async () => '  900  1  12000  0.8 node\n')
+    await sources(() => ({ active: 0, queued: 1 }), run).processTable()
+    expect((run.mock.calls[0] as unknown as [string])[0]).toBe('nice')
+  })
+
+  it('skips the extra nice process when nothing is running', async () => {
+    const run = vi.fn(async () => '  900  1  12000  0.8 node\n')
+    await sources(() => ({ active: 0, queued: 0 }), run).processTable()
+    const [file, args] = run.mock.calls[0] as unknown as [string, string[]]
+    expect(file).toBe('ps')
+    expect(args).toEqual(['-axo', 'pid=,ppid=,rss=,%cpu=,ucomm='])
   })
 })
