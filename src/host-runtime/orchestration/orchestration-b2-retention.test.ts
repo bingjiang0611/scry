@@ -185,3 +185,29 @@ describe('B2: retention', () => {
     })
   })
 })
+
+describe('B4: receipt growth', () => {
+  it('prunes system and effect receipts with events but keeps device, user and resolveIntent rows', () => {
+    withSink((sink) => {
+      const now = 1000 * HOUR
+      const insert = sink.handle.db.prepare(
+        `INSERT INTO orch_command (command_id, actor, type, payload_sha256, accepted_at, status, reason, result, result_seq, principal)
+         VALUES (?, ?, ?, 'x', ?, 'accepted', NULL, NULL, NULL, ?)`
+      )
+      insert.run('sys-old', 'system', 'session.discover', now - 40 * 24 * HOUR, 'system')
+      insert.run('effect-old', 'effect:native-bind', 'run.effect_result', now - 40 * 24 * HOUR, 'system')
+      insert.run('peer-old', 'peer:abc', 'run.submit', now - 40 * 24 * HOUR, 'peer:abc')
+      insert.run('user-old', 'local-user', 'run.stop', now - 40 * 24 * HOUR, 'local-user')
+      insert.run('intent-old', 'system', 'run.resolve_intent', now - 40 * 24 * HOUR, 'system')
+
+      const report = pruneOrchestrationInDb(sink.handle.db, { now, eventRetentionMs: HOUR })
+      expect(report.deletedReceipts).toBe(2)
+      const left = sink.handle.db.prepare('SELECT command_id FROM orch_command ORDER BY command_id').all()
+      expect(left).toEqual([
+        { command_id: 'intent-old' },
+        { command_id: 'peer-old' },
+        { command_id: 'user-old' }
+      ])
+    })
+  })
+})

@@ -106,7 +106,9 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     const result = sink.runInBatchTransaction(() => {
       const update = sink.execute({
         type: 'session.discover',
-        commandId: `catalog-scan:${payload.sessionKey}:${existing?.revSeq ?? 0}:${payloadSha256.slice(0, 16)}`,
+        // B4: stable per session + observed frontier, so an unchanged scan reuses its receipt
+        // instead of writing a new permanent row on every revision bump.
+        commandId: `catalog-scan:${payload.sessionKey}:${payloadSha256.slice(0, 16)}`,
         actor: 'system',
         scope: 'system',
         at,

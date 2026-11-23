@@ -58,6 +58,21 @@ it('follows a session Scry knows and reads only the appended interval when its d
     ])
     await work.scanDetail(discovered.sessionKey!, false)
     expect(sink.listEvents()).toHaveLength(base + 2)
+    // B4: one receipt per session+frontier, and none keyed on a projector revision, so a
+    // revision bump cannot spawn an extra permanent receipt.
+    const scanReceipts = sink.handle.db
+      .prepare("SELECT command_id FROM orch_command WHERE command_id LIKE 'catalog-scan:%' ORDER BY command_id")
+      .pluck()
+      .all() as string[]
+    expect(scanReceipts).toHaveLength(2)
+    for (const commandId of scanReceipts) {
+      expect(commandId).toBe(`catalog-scan:${discovered.sessionKey}:${commandId.split(':').at(-1)}`)
+      expect(commandId.split(':')).toHaveLength(3)
+    }
+    await work.scanDetail(discovered.sessionKey!, false)
+    expect(
+      sink.handle.db.prepare("SELECT COUNT(*) FROM orch_command WHERE command_id LIKE 'catalog-scan:%'").pluck().get()
+    ).toBe(2)
     const reopened = createWork()
     await reopened.scanCatalog()
     expect(sink.listEvents()).toHaveLength(base + 2)

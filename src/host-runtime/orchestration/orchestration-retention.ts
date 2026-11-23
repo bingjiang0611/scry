@@ -17,6 +17,7 @@ export interface PruneOptions {
 export interface PruneReport {
   deletedEvents: number
   deletedOutbox: number
+  deletedReceipts: number
   clearedInlineBodies: number
   queuedBodyErasures: number
   prunedThrough: number
@@ -52,6 +53,7 @@ export function pruneOrchestrationInDb(db: Database.Database, options: PruneOpti
   const report: PruneReport = {
     deletedEvents: 0,
     deletedOutbox: 0,
+    deletedReceipts: 0,
     clearedInlineBodies: 0,
     queuedBodyErasures: 0,
     prunedThrough: readMetaNumber(db, PRUNED_THROUGH_KEY),
@@ -107,6 +109,17 @@ export function pruneOrchestrationInDb(db: Database.Database, options: PruneOpti
             OR (state IN ('failed', 'voided') AND completed_at IS NOT NULL AND completed_at < ?)`
       )
       .run(now - OUTBOX_DONE_RETENTION_MS, now - OUTBOX_DEAD_RETENTION_MS).changes
+
+    // B4: device/user receipts and resolveIntent tombstones are permanent; system and effect
+    // receipts exist only to make their own commands idempotent, so they expire with the events.
+    report.deletedReceipts = db
+      .prepare(
+        `DELETE FROM orch_command
+         WHERE type != 'run.resolve_intent'
+           AND (actor = 'system' OR actor LIKE 'effect:%')
+           AND accepted_at < ?`
+      )
+      .run(cutoff).changes
 
     report.clearedInlineBodies = clearFinishedInlineBodies(db)
     report.queuedBodyErasures = queueTerminalRunBodyErasures(db, now - retentionMs)
