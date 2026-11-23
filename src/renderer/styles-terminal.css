@@ -183,8 +183,6 @@
   white-space: nowrap;
 }
 
-/* Recording history follows the shared modal layout: title left, close right,
-   footnote left of the pager buttons. */
 .terminal-history-modal .modal-head h2 {
   margin: 0;
   font-size: var(--text-base);

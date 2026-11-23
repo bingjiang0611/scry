@@ -42,7 +42,6 @@ select:focus-visible,
   border-color: var(--selected-line);
 }
 
-/* Workbench chrome */
 .sb-brand::before {
   content: 'S';
   place-items: center;

@@ -1,14 +1,10 @@
 /* PR#2：Sidebar chevron 展开/折叠 + 项目头可点 */
 
-/* 侧栏 视图 nav */
 .sb-navitem { display: flex; align-items: center; gap: 8px;
   background: transparent; font: inherit; text-align: left; cursor: pointer;
 }
 .sb-navitem:hover { color: var(--fg); }
 
-/* ============================================================
-   UI/UX system pass: right panel topbar/context ring + chat micro metrics
-   ============================================================ */
 .ov-topbar {
   position: sticky;
   top: 0;
