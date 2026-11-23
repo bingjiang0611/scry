@@ -11,7 +11,6 @@ electronLanguages:
   - zh_CN
   - zh_TW
 # SDK 是 ESM(.mjs) 且运行时要 spawn，从 asar 内 import/spawn 有坑 → 解包成真实文件。
-# 体积小(排除平台二进制后只剩 ~7MB 的 .mjs/.d.ts)。
 asarUnpack:
   - node_modules/@anthropic-ai/claude-agent-sdk/**
   # better-sqlite3 是原生模块，.node 二进制必须解包到 asar 外才能 spawn/dlopen 加载
@@ -34,11 +33,11 @@ files:
   # Native rebuild intermediates are not runtime files; keep build/Release/*.node.
   - "!node_modules/better-sqlite3/build/Release/obj/**"
   - "!node_modules/better-sqlite3/build/Release/obj.target/**"
-  # 选 B：不内嵌 SDK 自带的平台原生 claude 二进制(每个 ~216MB)，app 驱动本机已装的 claude。
+  # App 使用本机安装的 Claude CLI，不打包 SDK 自带的各平台 CLI。
   - "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/**"
   - "!node_modules/@anthropic-ai/claude-agent-sdk-linux-*/**"
   - "!node_modules/@anthropic-ai/claude-agent-sdk-win32-*/**"
-  # Qoder adapter always passes the user's external qodercli path; the SDK postinstall binary is unused (~95 MiB).
+  # The Qoder adapter uses the external qodercli; it does not need the SDK's bundled binary.
   - "!node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled/**"
 
 # App 私有 recorder CLI：Provider/Hook 固定调用 Resources/bin/scry，随 App 一起升级。
@@ -72,7 +71,6 @@ linux:
   # 与产物检查（scripts/check-packaged-app.mjs）都按这个固定文件名定位，不要改名。
   executableName: scry
   category: Development
-  # Omarchy/Arch 用 pacman 包装分发；`--dir` 仍产出 linux-unpacked 供本机 smoke 与产物检查。
   target:
     - pacman
   # Electron 用 package.json 的 desktopName 作为 app_id / WM_CLASS。
