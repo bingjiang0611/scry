@@ -426,6 +426,9 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       if (request.historyReader) mcpServers[HISTORY_READER_SERVER] = {
         type: 'http', url: request.historyReader.url, headers: { Authorization: `Bearer ${request.historyReader.token}` }
       }
+      if (request.orchestrationTools && request.orchestrationTools.kind !== 'in_process') {
+        throw new Error('Claude 编排工具通道类型不匹配')
+      }
       if (request.orchestrationTools?.kind === 'in_process') {
         mcpServers[ORCHESTRATOR_MCP_SERVER_NAME] = createClaudeOrchestratorMcpServer(request.orchestrationTools.callTool) as unknown as Record<string, unknown>
       }

@@ -21,7 +21,7 @@ import {
 import { homedir } from 'node:os'
 import { createHash, randomBytes } from 'node:crypto'
 import { HISTORY_READER_SERVER, HISTORY_READER_TOOL, historyReaderEnvironment, type HistoryReaderConnection } from '../conversation-history-reader'
-import { ORCHESTRATOR_MCP_SERVER_NAME } from './orchestrator-mcp-sdk'
+import { ORCHESTRATOR_MCP_SERVER_NAME, ORCHESTRATOR_TOOL_BASE_NAMES } from './orchestrator-mcp-sdk'
 import { join } from 'node:path'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
@@ -846,7 +846,7 @@ export function createCodexAdapter(
         command: path,
         args,
         cwd,
-        env: { ...(historyReader ? historyReaderEnvironment(env) : env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
+        env: { ...historyReaderEnvironment(env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
       })
     } catch (error) {
       mcp.dispose?.()
@@ -1182,11 +1182,17 @@ export function createCodexAdapter(
             approvalControllers.delete(controller)
           }
         }
-        if (method === 'mcpServer/elicitation/request' && params.serverName === ORCHESTRATOR_MCP_SERVER_NAME) {
-          // Verified in P6-0 Probe 3 & approved in decisions §9.2 / §9.3 #1:
-          // Scry orchestration write tools are gated by Scry's own confirmation card,
-          // so Codex's native MCP elicitation for scry_orchestrator is auto-accepted.
-          return { action: 'accept' }
+        if (
+          method === 'mcpServer/elicitation/request' &&
+          runRequest.orchestrationTools?.kind === 'codex_http' &&
+          params.serverName === ORCHESTRATOR_MCP_SERVER_NAME &&
+          params.mode !== 'url'
+        ) {
+          const meta = record(params._meta)
+          const toolName = typeof meta.toolName === 'string' ? meta.toolName : typeof params.toolName === 'string' ? params.toolName : undefined
+          if (!toolName || ORCHESTRATOR_TOOL_BASE_NAMES.has(toolName)) {
+            return { action: 'accept' }
+          }
         }
         if ((runRequest.permissionMode ?? 'default') === 'full_access') return undefined
         if (![
@@ -1678,6 +1684,9 @@ export function createCodexAdapter(
           })
 
           const access = codexAccess(runRequest.permissionMode)
+          if (runRequest.orchestrationTools && runRequest.orchestrationTools.kind !== 'codex_http') {
+            throw new Error('Codex 编排工具通道类型不匹配')
+          }
           if (runRequest.orchestrationTools?.kind === 'codex_http' &&
               Object.hasOwn(authorizedMcpServers(runRequest.mcpExecution), ORCHESTRATOR_MCP_SERVER_NAME)) {
             throw new Error('仓库 MCP 名称与 App 编排服务冲突')

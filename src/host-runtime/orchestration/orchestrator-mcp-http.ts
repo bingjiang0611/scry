@@ -7,6 +7,8 @@ import {
 
 export const ORCHESTRATOR_HTTP_MAX_BODY_BYTES = 32 * 1024
 export const ORCHESTRATOR_HTTP_MAX_CONNECTIONS = 8
+const ORCHESTRATOR_HTTP_BODY_TIMEOUT_MS = 5_000
+const ORCHESTRATOR_HTTP_REQUEST_TIMEOUT_MS = 35_000
 
 const MCP_TOOL_DEFINITIONS = [
   {
@@ -124,10 +126,17 @@ export class OrchestratorMcpHttpServer {
 
   async start(): Promise<{ url: string; port: number }> {
     if (this.#server && this.#port > 0) return { url: this.url!, port: this.#port }
-    const server = createServer((req, res) => {
-      void this.#handleRequest(req, res)
+    const server = createServer({ maxHeaderSize: 8192 }, (req, res) => {
+      void this.#handleRequest(req, res).catch(() => {
+        if (!res.headersSent) {
+          try { sendJson(res, 500, { error: 'internal_error' }) } catch { /* ignore */ }
+        }
+        req.socket?.destroy()
+      })
     })
     server.maxConnections = ORCHESTRATOR_HTTP_MAX_CONNECTIONS
+    server.headersTimeout = ORCHESTRATOR_HTTP_BODY_TIMEOUT_MS
+    server.requestTimeout = ORCHESTRATOR_HTTP_REQUEST_TIMEOUT_MS
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
       server.listen(0, '127.0.0.1', () => {
@@ -145,6 +154,7 @@ export class OrchestratorMcpHttpServer {
     this.#server = null
     this.#port = 0
     if (!server) return
+    server.closeAllConnections?.()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 
@@ -168,44 +178,65 @@ export class OrchestratorMcpHttpServer {
         sendJson(res, 403, { error: 'invalid_host' })
         return
       }
+      // Verify Bearer token BEFORE reading request body to prevent unauthenticated streaming DoS.
       const token = extractBearer(req.headers.authorization)
-      if (!token) {
+      if (!token || !this.#service.hasValidBearerToken(token)) {
         sendJson(res, 401, { error: 'unauthorized' })
         return
       }
+      const declaredLength = Number(req.headers['content-length'])
+      if (Number.isFinite(declaredLength) && declaredLength > ORCHESTRATOR_HTTP_MAX_BODY_BYTES) {
+        res.setHeader('connection', 'close')
+        sendJson(res, 413, { error: 'payload_too_large' })
+        req.resume()
+        return
+      }
 
-      const chunks: Buffer[] = []
-      let totalBytes = 0
-      let tooLarge = false
-      await new Promise<void>((resolve, reject) => {
+      const bodyResult = await new Promise<{ status: 'ok'; raw: string } | { status: 'too_large' | 'timeout' | 'aborted' }>((resolve) => {
+        const chunks: Buffer[] = []
+        let totalBytes = 0
+        let done = false
+        const finish = (outcome: { status: 'ok'; raw: string } | { status: 'too_large' | 'timeout' | 'aborted' }) => {
+          if (done) return
+          done = true
+          clearTimeout(timer)
+          resolve(outcome)
+        }
+        const timer = setTimeout(() => {
+          req.destroy()
+          finish({ status: 'timeout' })
+        }, ORCHESTRATOR_HTTP_BODY_TIMEOUT_MS)
+        timer.unref?.()
         req.on('data', (chunk: Buffer) => {
           totalBytes += chunk.length
           if (totalBytes > ORCHESTRATOR_HTTP_MAX_BODY_BYTES) {
-            tooLarge = true
+            finish({ status: 'too_large' })
             return
           }
           chunks.push(chunk)
         })
-        req.on('end', () => resolve())
-        req.on('error', reject)
+        req.on('end', () => finish({ status: 'ok', raw: Buffer.concat(chunks).toString('utf8') }))
+        req.on('aborted', () => finish({ status: 'aborted' }))
+        req.on('error', () => finish({ status: 'aborted' }))
+        req.on('close', () => { if (!req.complete) finish({ status: 'aborted' }) })
       })
-      if (tooLarge) {
-        sendJson(res, 413, { error: 'payload_too_large' })
+
+      if (bodyResult.status !== 'ok') {
+        if (bodyResult.status === 'too_large') {
+          res.setHeader('connection', 'close')
+          sendJson(res, 413, { error: 'payload_too_large' })
+          req.socket?.destroy()
+        } else if (bodyResult.status === 'timeout') {
+          if (!res.headersSent) sendJson(res, 408, { error: 'request_timeout' })
+        }
         return
       }
 
       let msg: { id?: unknown; method?: unknown; params?: Record<string, unknown> }
       try {
-        msg = JSON.parse(Buffer.concat(chunks).toString('utf8')) as typeof msg
+        msg = JSON.parse(bodyResult.raw) as typeof msg
       } catch {
         sendJson(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })
-        return
-      }
-
-      // Authenticate token on EVERY method (including initialize / tools/list)
-      const authProbe = await this.#verifyTokenOnly(token, msg)
-      if (!authProbe) {
-        sendJson(res, 401, { error: 'unauthorized' })
         return
       }
 
@@ -259,10 +290,5 @@ export class OrchestratorMcpHttpServer {
     } finally {
       this.#activeRequests -= 1
     }
-  }
-
-  async #verifyTokenOnly(token: string, msg: { method?: unknown }): Promise<boolean> {
-    if (msg.method === 'tools/call') return true // verified in tools/call directly
-    return this.#service.hasValidBearerToken(token)
   }
 }

@@ -179,6 +179,9 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     releaseProviderPrompt = prompt.release
     // Written before the attempt is recorded: a failed write sends nothing.
     mcpLaunch = qoderMcpLaunch(request.mcpExecution)
+    if (request.orchestrationTools && request.orchestrationTools.kind !== 'in_process') {
+      throw new Error('Qoder 编排工具通道类型不匹配')
+    }
     if (request.orchestrationTools?.kind === 'in_process') {
       if (Object.hasOwn(mcpLaunch.options.mcpServers, ORCHESTRATOR_MCP_SERVER_NAME) ||
         Object.hasOwn(authorizedMcpServers(request.mcpExecution), ORCHESTRATOR_MCP_SERVER_NAME)) {

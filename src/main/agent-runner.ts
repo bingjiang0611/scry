@@ -21,7 +21,7 @@ import {
 import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
 import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
 import { writePrivateMcpConfig } from './providers/private-mcp-config'
-import { ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES } from './providers/orchestrator-mcp-sdk'
+import { ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES, ORCHESTRATOR_MCP_SERVER_NAME } from './providers/orchestrator-mcp-sdk'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from './process-diagnostics'
 
 let counter = 0
@@ -396,7 +396,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
           decisionClassification: 'user_temporary' as const
         }
       }
-      if (ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES.has(toolName)) return { behavior: 'allow' as const }
+      if (Object.hasOwn(sdkMcpServers, ORCHESTRATOR_MCP_SERVER_NAME) && ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES.has(toolName)) {
+        return { behavior: 'allow' as const }
+      }
       if (permissionMode === 'full_access') return { behavior: 'allow' as const }
       const detail = permission.description ?? JSON.stringify(input).slice(0, 1_200)
       const sessionSuggestions = exactSessionPermissionSuggestions(permission.suggestions)

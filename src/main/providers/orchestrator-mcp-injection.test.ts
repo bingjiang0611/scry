@@ -30,7 +30,7 @@ describe('P6-2 provider orchestrationTools capability gate & exact-name tool all
     expect(adapter.run).not.toHaveBeenCalled()
   })
 
-  it('auto-allows only the 5 exact mcp__scry_orchestrator__<tool> names in qoderCanUseTool and still prompts for lookalikes', async () => {
+  it('auto-allows only the 5 exact mcp__scry_orchestrator__<tool> names when orchestrationTools is injected, and prompts when absent or lookalike', async () => {
     expect([...ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES].sort()).toEqual([
       'mcp__scry_orchestrator__scry_capabilities',
       'mcp__scry_orchestrator__scry_task_cancel',
@@ -42,22 +42,35 @@ describe('P6-2 provider orchestrationTools capability gate & exact-name tool all
     const requestUserInput = vi.fn(async () => ({
       runId: 'r1', questionId: 'q1', behavior: 'answered' as const, answers: {}
     }))
-    const canUse = qoderCanUseTool(
+
+    // Without orchestrationTools injected: spoofed repo MCP with exact name MUST still prompt user!
+    const canUseWithoutOrch = qoderCanUseTool(
       { runId: 'r1', prompt: 'hi', cwd: '/tmp', attachments: [], permissionMode: 'default', emit: () => {}, requestUserInput },
       (action) => action()
     )
+    await canUseWithoutOrch('mcp__scry_orchestrator__scry_capabilities', {}, {
+      signal: new AbortController().signal, toolUseID: 'tu-spoof'
+    })
+    expect(requestUserInput).toHaveBeenCalledTimes(1)
 
-    // Exact orchestration tool -> auto-allowed without prompting user
-    const allowed = await canUse('mcp__scry_orchestrator__scry_capabilities', {}, {
+    // With orchestrationTools injected: exact orchestration tool auto-allows without prompting user
+    const canUseWithOrch = qoderCanUseTool(
+      {
+        runId: 'r1', prompt: 'hi', cwd: '/tmp', attachments: [], permissionMode: 'default', emit: () => {}, requestUserInput,
+        orchestrationTools: { kind: 'in_process', callTool: async () => ({ ok: true }) }
+      },
+      (action) => action()
+    )
+    const allowed = await canUseWithOrch('mcp__scry_orchestrator__scry_capabilities', {}, {
       signal: new AbortController().signal, toolUseID: 'tu-1'
     })
     expect(allowed.behavior).toBe('allow')
-    expect(requestUserInput).not.toHaveBeenCalled()
+    expect(requestUserInput).toHaveBeenCalledTimes(1)
 
     // Unknown tool with same prefix -> NOT auto-allowed, prompts user!
-    await canUse('mcp__scry_orchestrator__evil_tool', {}, {
+    await canUseWithOrch('mcp__scry_orchestrator__evil_tool', {}, {
       signal: new AbortController().signal, toolUseID: 'tu-2'
     })
-    expect(requestUserInput).toHaveBeenCalledTimes(1)
+    expect(requestUserInput).toHaveBeenCalledTimes(2)
   })
 })
