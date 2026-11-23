@@ -10,7 +10,6 @@
 .machines-section .remote-access-header { padding-top: 8px; border-bottom: 0; }
 .machines-section .remote-access-section { padding: 0 28px 4px; }
 .machines-section .remote-access-inbound { margin: 0; padding: 0; border-top: 0; }
-.machines-section .remote-access-section > h3 { display: none; }
 
 /* 卡片 */
 .machine-card { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-faint); }

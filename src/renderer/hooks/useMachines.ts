@@ -65,6 +65,7 @@ export function latestSnapshot(read: MachineRead): HostMetricsSnapshot | null {
   return null
 }
 
+/** Test seam: read the module store without a React render. */
 export function machinesSnapshot(): MachinesState {
   return state
 }
