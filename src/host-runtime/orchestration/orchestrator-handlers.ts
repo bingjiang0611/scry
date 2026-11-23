@@ -28,6 +28,7 @@ export interface OrchestratorReadView {
   getSession(sessionKey: string): SessionProjectionRow | undefined
   getNativeSession?(identity: NativeSessionIdentity): SessionProjectionRow | undefined
   getTurnByRunId?(runId: string): TurnProjectionRow | undefined
+  getTurnByOrdinal?(sessionKey: string, ordinal: number): TurnProjectionRow | undefined
   getNextTurnOrdinal?(sessionKey: string): number
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined
   listNonTerminalChildRuns(parentRunId: string): RunProjectionRow[]

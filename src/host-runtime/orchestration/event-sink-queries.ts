@@ -38,6 +38,15 @@ export function readTurnByRunIdRaw(stmts: EventSinkStatements, runId: string): T
   return row ? mapTurnRow(row) : undefined
 }
 
+export function readTurnByOrdinalRaw(
+  stmts: EventSinkStatements,
+  sessionKey: string,
+  ordinal: number
+): TurnProjectionRow | undefined {
+  const row = stmts.readTurnByOrdinal.get(sessionKey, ordinal) as Record<string, unknown> | undefined
+  return row ? mapTurnRow(row) : undefined
+}
+
 export function readNextTurnOrdinalRaw(stmts: EventSinkStatements, sessionKey: string): number {
   const row = stmts.nextOrdinal.get(sessionKey) as { next_ordinal: number }
   return Number(row.next_ordinal)
