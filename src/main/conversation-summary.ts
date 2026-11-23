@@ -12,6 +12,7 @@ import {
 } from '../shared/conversation'
 import { readSideChatSnapshotItem } from './conversation-side-chat-snapshot'
 import type { ConversationPreview, ConversationSendRequest, ConversationSummary, ConversationTargetRequest } from '../shared/conversation-api'
+import type { ReadConversationProjection } from './conversation-service-deps'
 
 const hash = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex')
 
@@ -47,6 +48,19 @@ export function conversationSummary(conversation: Conversation, activeRunIds: Re
     ...(lastRunOutcome ? { lastRunOutcome } : {}),
     ...(activeRunIds.has(pending?.runId ?? '') ? { activeRunId: pending?.runId } : {}),
     ...(pending ? { blockedReason: pending.delivery.status === 'unknown' ? pending.delivery.reason : activeRunIds.has(pending.runId) ? '当前轮仍在投递' : '投递结果尚未确认，且没有可关联的运行；请重启核查' } : {})
+  }
+}
+
+export function withConversationProjection(
+  summary: ConversationSummary, projection: NonNullable<ReturnType<ReadConversationProjection>>
+): ConversationSummary {
+  const { pinnedAt, archivedAt, activeRunId, title, ...rest } = summary
+  return {
+    ...rest,
+    title: projection.title ?? title,
+    ...(projection.pinnedAt !== null ? { pinnedAt: projection.pinnedAt } : {}),
+    ...(projection.archivedAt !== null ? { archivedAt: projection.archivedAt } : {}),
+    ...(projection.activeRunId !== null ? { activeRunId: projection.activeRunId } : {})
   }
 }
 

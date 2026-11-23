@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 export async function exerciseRecording(smokeContext) {
-  const { evaluate, initialTargets, page, port, waitForTarget } = smokeContext
+  const { evaluate, initialTargets, page, port, waitForTarget, home } = smokeContext
+  const readyPrompt = '__SCRY_RECORDING_READY__'
+  const shellProfile = process.platform === 'darwin' ? '.zshrc' : '.bash_profile'
+  await writeFile(join(home, shellProfile), `PS1='${readyPrompt} '\n`, { flag: 'wx', mode: 0o600 })
   const recordingSmoke = await evaluate(`(async () => {
     const root = () => document.querySelector('[data-session-surface-current="true"]')
     const query = (selector) => selector.startsWith('button.sb-sess') || selector.includes('title="右侧工作区"') || selector.includes('[data-recording-id=')
@@ -35,7 +40,11 @@ export async function exerciseRecording(smokeContext) {
     let startedId = null
     await waitFor(async () => {
       startedId = (await window.scry.terminalRecordingList()).items.find((item) => item.active && !priorIds.has(item.id))?.id
-      return !!startedId && !!query('.terminal-state.running')
+      if (!startedId || !query('.terminal-state.running')) return false
+      // A PTY can echo input before its shell has finished opening the terminal.
+      // Wait for this shell's actual prompt within the existing startup budget.
+      const startPage = await window.scry.terminalRecordingRead({ id: startedId, offset: 0, limit: 4096 })
+      return startPage.data.includes(${JSON.stringify(readyPrompt)})
     })
     const disabledWhileRunning = button('回放终端录制').disabled && button('删除终端录制').disabled
     let offExit = () => {}
@@ -47,7 +56,8 @@ export async function exerciseRecording(smokeContext) {
     })
     const textarea = query('.terminal-pane:not([hidden]) .xterm-helper-textarea')
     const clipboardData = new DataTransfer()
-    clipboardData.setData('text/plain', "printf '__SCRY_RECORDING_SENTINEL__\\\\n'; exit")
+    const slash = String.fromCharCode(92)
+    clipboardData.setData('text/plain', "printf '" + slash + '137' + slash + '137SCRY_RECORDING_SENTINEL__' + slash + "n'; exit")
     textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }))
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
     const ended = await exit

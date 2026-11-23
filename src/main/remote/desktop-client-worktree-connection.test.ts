@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { rm } from 'node:fs/promises'
-import { setup, ssh } from './desktop-client-fixtures'
+import { setup, ssh, statusRun, statusSnapshot } from './desktop-client-fixtures'
 
 describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
   it('sends only the managed-worktree selection and source project to the host intent', async () => {
@@ -75,27 +75,27 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
   })
 
   it('keeps missing lifecycle evidence unknown and rejects malformed state or event pages', async () => {
-    const fixture = await setup()
+    let response: unknown
+    const parked = new Promise<never>(() => {})
+    const fixture = await setup({ subscribeResponse: request => request.known ? parked : response })
     try {
       const pending = await fixture.client.pair({ label: 'Status', ssh, invitation: fixture.invitation })
       const id = pending.connection.id
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       const runId = randomUUID()
-      // The lifecycle long poll is the only evidence source; a missing, empty or
-      // unrecognized envelope is rejected rather than read as "no change".
-      for (const response of [null, {}, { watch: null }, { watch: { poll: null } }, { watch: { state: 'running', poll: { events: [], cursor: 0 } } }]) {
-        fixture.tlsRequest.mockResolvedValueOnce(response)
-        await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_run_status_response')
+      for (const malformed of [null, {}, { subscribe: null }, { subscribe: { mode: 'snapshot' } }]) {
+        response = malformed
+        await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_daemon_response')
       }
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: 'settled', poll: { events: [], cursor: 0 } } })
+      response = statusSnapshot(fixture.host.hostId, { runs: [statusRun(runId, { lifecycle: 'running' })] })
+      await expect(fixture.client.runStatus(id, runId)).rejects.toThrow('invalid_subscribe_run')
+      response = statusSnapshot(fixture.host.hostId, { runs: [statusRun(runId, { lifecycle: 'settled' })] })
       await expect(fixture.client.runStatus(id, runId)).resolves.toMatchObject({ state: 'settled' })
-      // No state and no evidence is unknown. The previous answer said settled, so
-      // the lifecycle did change; a window that expires with the same state is not
-      // a change and must not make the caller re-read content.
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
+      await fixture.client.disconnect(id)
+      response = statusSnapshot(fixture.host.hostId)
+      await fixture.client.connect(id)
       await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: true })
-      fixture.tlsRequest.mockResolvedValueOnce({ watch: { state: null, poll: { events: [], cursor: 0 } } })
       await expect(fixture.client.runStatus(id, runId)).resolves.toEqual({ state: 'unknown', changed: false })
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
@@ -108,42 +108,40 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
-  it('projects host workspaceProgress markers onto runStatus and marks completed on admitted', async () => {
-    const fixture = await setup({ managedWorktrees: true })
+  it('projects host workspaceProgress onto runStatus and follows the completed step after admission', async () => {
+    const runId = randomUUID()
+    const operationId = randomUUID()
+    const progress = {
+      operationId,
+      repositoryId: 'a'.repeat(64),
+      stage: 'checking_out',
+      workspacePrepared: true,
+      checkout: { completed: 32, total: 64, percent: 50 },
+      cancellable: true,
+      details: ['工作区元数据已创建'],
+      branch: 'scry/remote-1',
+      baseRef: 'main',
+      updatedAt: 1234
+    }
+    // v3: the host projects its run_progress marker onto the run row, and sends the next
+    // step (admission marks it completed) as a run hint on the status subscription.
+    let releaseAdmitted!: () => void
+    const admitted = new Promise<void>(resolve => { releaseAdmitted = resolve })
+    let follows = 0
+    const fixture = await setup({
+      managedWorktrees: true,
+      subscribeResponse: request => {
+        if (!request.known) return statusSnapshot(fixture.host.hostId, { runs: [statusRun(runId, { workspaceProgress: progress })] })
+        if (follows++ > 0) return new Promise<never>(() => {})
+        return admitted.then(() => ({ subscribe: { mode: 'events', hostId: fixture.host.hostId, logId: 'fixture-log', seq: 2, events: [],
+          hints: [{ kind: 'run', runId, outputSeq: 0, workspaceProgress: { ...progress, stage: 'completed', cancellable: false } }] } }))
+      }
+    })
     try {
       const pending = await fixture.client.pair({ label: 'Progress', ssh, invitation: fixture.invitation })
       const id = pending.connection.id
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
-      const runId = randomUUID()
-      const operationId = randomUUID()
-      fixture.tlsRequest.mockResolvedValueOnce({
-        watch: {
-          state: 'dispatched',
-          poll: {
-            cursor: 1,
-            events: [{
-              runId,
-              kind: 'run_progress',
-              detail: JSON.stringify({
-                event: 'workspaceProgress',
-                progress: {
-                  operationId,
-                  repositoryId: 'a'.repeat(64),
-                  stage: 'checking_out',
-                  workspacePrepared: true,
-                  checkout: { completed: 32, total: 64, percent: 50 },
-                  cancellable: true,
-                  details: ['工作区元数据已创建'],
-                  branch: 'scry/remote-1',
-                  baseRef: 'main',
-                  updatedAt: 1234
-                }
-              })
-            }]
-          }
-        }
-      })
       const mid = await fixture.client.runStatus(id, runId)
       expect(mid.workspaceProgress).toMatchObject({
         operationId,
@@ -152,21 +150,12 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
         checkout: { completed: 32, total: 64, percent: 50 },
         cancellable: true
       })
-      fixture.tlsRequest.mockResolvedValueOnce({
-        watch: {
-          state: 'dispatched',
-          poll: {
-            cursor: 2,
-            events: [{
-              runId,
-              kind: 'run_progress',
-              detail: JSON.stringify({ event: 'admitted', ledgerRunId: runId, scryRunId: 'remote-run-1-0' })
-            }]
-          }
-        }
+      releaseAdmitted()
+      await vi.waitFor(async () => {
+        expect((await fixture.client.runStatus(id, runId)).workspaceProgress).toMatchObject({ stage: 'completed', cancellable: false })
       })
-      const admitted = await fixture.client.runStatus(id, runId)
-      expect(admitted.workspaceProgress).toMatchObject({ stage: 'completed', cancellable: false })
+      const operations = fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op)
+      expect(operations).not.toContain('watch')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 })

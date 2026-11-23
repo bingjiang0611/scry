@@ -1,11 +1,60 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
 import { DaemonEventPump } from './daemon-event-pump'
+import { runSubscribeLoop } from './daemon-event-pump-subscribe'
 import { applyRunHintToRuntime, applySubscribeEventToRuntime, applySubscribeSnapshotToRuntime, awaitSubscribeAdmission, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
 import { RunWakes } from './daemon-run-wakes'
 import type { RunCursor } from './daemon-run-cursor'
 
 describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
+  it('opens and closes the displayed detail without resetting the catalog cursor', async () => {
+    const requests: SubscribeRequest[] = []
+    const shutdown = new AbortController()
+    let focus = new AbortController()
+    let sessionKey: string | null = null
+    const backoff = vi.fn(async () => undefined)
+    const loop = runSubscribeLoop({
+      detailFocus: () => ({ sessionKey, signal: focus.signal }),
+      signal: shutdown.signal,
+      retry: { initialMs: 1, maxMs: 1 },
+      waitMs: 1000,
+      sleep: backoff,
+      send: vi.fn(),
+      subscribe: async (req, signal) => {
+        requests.push(req)
+        if (requests.length === 1) {
+          return { hostId: 'h1', logId: 'l1', seq: 9, mode: 'snapshot', snapshot: { activeRuns: { rows: [] } } }
+        }
+        return await new Promise((_, reject) => {
+          signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+        })
+      }
+    })
+    const changeFocus = (key: string | null) => {
+      const prior = focus
+      focus = new AbortController()
+      sessionKey = key
+      prior.abort()
+    }
+    try {
+      await vi.waitFor(() => expect(requests).toHaveLength(2))
+      changeFocus('displayed-session')
+      await vi.waitFor(() => expect(requests).toHaveLength(3))
+      expect(requests[2]).toMatchObject({
+        views: ['activeRuns', 'sessions', 'detail'], session: { sessionKey: 'displayed-session' },
+        detailWatch: 'open', known: { hostId: 'h1', logId: 'l1', seq: 9 }
+      })
+      changeFocus(null)
+      await vi.waitFor(() => expect(requests).toHaveLength(4))
+      expect(requests[3]).toMatchObject({ views: ['activeRuns', 'sessions'], known: { hostId: 'h1', logId: 'l1', seq: 9 } })
+      expect(requests[3]).not.toHaveProperty('session')
+      expect(backoff).not.toHaveBeenCalled()
+    } finally {
+      shutdown.abort()
+      await loop
+    }
+  })
+
   it('binds a new run while the previous run is still reading its final trace', async () => {
     const wakes = new RunWakes()
     let releaseTrace!: () => void
@@ -26,8 +75,8 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
         hints: [{ kind: 'run', runId: 'new', scryRunId: 'run-new-1', admitted: true, outputSeq: 0 }] }
     ]
     const pump = new DaemonEventPump({
-      subscribeMode: true, send,
-      source: { appEvents: vi.fn(), subscribe: async () => replies.shift() ?? end.then(() => ({ hostId: 'h', logId: 'l', seq: 2, mode: 'idle' as const })) },
+      send,
+      source: { subscribe: async () => replies.shift() ?? end.then(() => ({ hostId: 'h', logId: 'l', seq: 2, mode: 'idle' as const })) },
       onSubscribeEvent: (event) => applySubscribeEventToRuntime(ctx, event),
       onRunHint: (hint) => applyRunHintToRuntime(ctx, hint)
     })
@@ -68,9 +117,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const send = vi.fn()
 
     const pump = new DaemonEventPump({
-      subscribeMode: true,
       source: {
-        appEvents: vi.fn(),
         subscribe: async (req) => {
           requests.push(req)
           const next = replies[idx++]
@@ -127,9 +174,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const onWindow = vi.fn()
 
     const pump = new DaemonEventPump({
-      subscribeMode: true,
       source: {
-        appEvents: vi.fn(),
         subscribe: async () => {
           const next = replies[idx++]
           if (!next) {
@@ -168,18 +213,19 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       scryRunId: 'r1',
       context: { cwd: '/tmp/ws', providerId: 'codex', externalSessionId: 'sess-1' },
       lifecycle: 'dispatched',
-      watch: 0,
       output: 1,
       pushed: [resultEvent as never],
       askedQuestions: new Set(),
       answerIds: new Map(),
       resyncRequired: false,
-      pumping: false,
       stopped: false,
       sawText: true
     }
     const apply = vi.fn(() => false)
-    const archivedRunTrace = vi.fn(async () => null)
+    const archivedRunTrace = vi.fn(async () => ({
+      cwd: '/tmp/ws', providerId: 'codex' as const, externalSessionId: 'sess-1',
+      runId: 'r1', userText: 'prompt', done: true, items: [resultEvent]
+    }))
 
     // Non-terminal trailing hint after RunRegistry deleted the run: must NOT wipe cursor.pushed
     await readSubscribeTraceOnce({
@@ -188,13 +234,14 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       disposed: false,
       transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
       apply,
-      syncQuestions: async () => undefined,
       flush: vi.fn()
     })
+    expect(archivedRunTrace).not.toHaveBeenCalled()
     expect(apply).not.toHaveBeenCalled()
     expect(cursor.pushed).toHaveLength(1)
 
-    // Subsequent terminal trace read sees result already delivered: must skip archive read completely
+    // The Provider result can precede archived final evidence. On the terminal read,
+    // consult the archive once, then keep the already-delivered result deduplicated.
     await readSubscribeTraceOnce({
       cursor,
       runId: 'ledger-1',
@@ -202,11 +249,11 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
       terminal: true,
       transport: { trace: async () => ({ kind: 'snapshot', run: null }), archivedRunTrace },
       apply,
-      syncQuestions: async () => undefined,
       flush: vi.fn()
     })
-    expect(archivedRunTrace).not.toHaveBeenCalled()
+    expect(archivedRunTrace).toHaveBeenCalledExactlyOnceWith({ context: cursor.context, runId: 'r1' })
     expect(apply).not.toHaveBeenCalled()
+    expect(cursor.pushed).toEqual([resultEvent])
   })
 
   it('still delivers the hints of a reply whose events include an unknown type', async () => {
@@ -223,9 +270,7 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     const onHostAdmin = vi.fn()
     const requests: SubscribeRequest[] = []
     const pump = new DaemonEventPump({
-      subscribeMode: true,
       source: {
-        appEvents: vi.fn(),
         subscribe: async (req) => {
           requests.push(req)
           const next = replies[idx++]
@@ -242,13 +287,13 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     pump.dispose()
     expect(onHostAdmin).toHaveBeenCalledWith(notice)
     expect(requests[2]?.known).toBeUndefined()
-    expect(requests[0]?.views).toEqual(['activeRuns'])
+    expect(requests[0]?.views).toEqual(['activeRuns', 'sessions'])
   })
 
   it('probes cursors a snapshot no longer lists and finalizes only those that ended', async () => {
     const cursor = (runId: string): RunCursor => ({
-      runId, lifecycle: 'dispatched', watch: 0, output: 0, pushed: [], askedQuestions: new Set(),
-      answerIds: new Map(), resyncRequired: false, pumping: false, stopped: false
+      runId, lifecycle: 'dispatched', output: 0, pushed: [], askedQuestions: new Set(),
+      answerIds: new Map(), resyncRequired: false, stopped: false
     } as unknown as RunCursor)
     const runs = new Map<string, RunCursor>([
       ['gone', cursor('gone')], ['ended', cursor('ended')], ['racing', cursor('racing')], ['listed', cursor('listed')]

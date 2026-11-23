@@ -6,13 +6,13 @@ import { normalizeAgentStartRequest } from '../../shared/runtime-provider'
 import type { AgentStartRequest } from '../../shared/runtime'
 import type { WorkspaceStartSelection } from '../../shared/workspace-selection'
 import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-input'
-import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES } from './desktop-attachments'
+import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, MAX_REMOTE_DETAIL_CHARS } from './desktop-attachments'
+export { MAX_REMOTE_DETAIL_CHARS }
 import type { RemoteIntentAttachment, RemoteIntentRouting } from './host-controller-types'
 
 export const REMOTE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 // Mac UI run ids (`run-<base36 time>-<seq>`); never ledger-backed.
 export const MAC_RUN_ID = /^run-[0-9a-z]{1,16}-[0-9]{1,12}$/
-export const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 export const MAX_REMOTE_PROMPT_CHARS = 128_000
 export const MAX_REMOTE_ATTACHMENT_BYTES = 512 * 1024
 export const MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES = 700 * 1024
@@ -129,11 +129,11 @@ export function parseRouting(detail: string | undefined, scope: 'local' | 'remot
     throw new RemoteRunDenied('invalid_target')
   }
   if (routing.attachmentPeer !== undefined && (typeof routing.attachmentPeer !== 'string' || !SHA256.test(routing.attachmentPeer))) throw new RemoteRunDenied('invalid_target')
-  // A device may start a fresh session in a managed worktree: the selection is parsed
-  // here and prepared by the host under the ledger run's identity. An App submission
-  // has no such flow yet, so it is refused by name rather than dropped:
-  // running the plain turn instead would answer a request the user did not make.
-  if (routing.workspace !== undefined && local) throw new RemoteRunDenied('unsupported_local_request:workspace')
+  // A fresh session in a prepared workspace (switch, new or existing worktree): the
+  // selection is parsed here and prepared by the host under the ledger run's identity,
+  // for a device and for the App alike. The App must name the source directory it
+  // reviewed: a selection is only meaningful against the checkout it was made in.
+  if (routing.workspace !== undefined && local && !cwd) throw new RemoteRunDenied('unsupported_local_request:workspace')
   let workspace: WorkspaceStartSelection | undefined
   try { if (routing.workspace !== undefined) workspace = parseWorkspaceStartSelection(routing.workspace) } catch { throw new RemoteRunDenied('invalid_target') }
   // Turn boundaries (edit-last-message fork / restart) do travel, but only from the

@@ -91,8 +91,6 @@ export function formatLoginStartUnavailable(reason: string): string {
       return '不可用：仅打包版支持登录时启动（unpackaged_build）'
     case 'test_instance':
       return '不可用：测试实例默认不改动系统登录服务（test_instance）'
-    case 'daemon_mode_disabled':
-      return '不可用：后台服务模式未启用（daemon_mode_disabled）'
     case 'login_start_ephemeral_app_path':
       return '不可用：请先把 Scry 移至「应用程序」目录后再开启登录时启动（login_start_ephemeral_app_path）'
     default:

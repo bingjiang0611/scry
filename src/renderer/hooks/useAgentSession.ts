@@ -2,11 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentQuestionRequest, AgentQuestionResponse } from '@shared/runtime'
 import { useAgentStart } from './useAgentStart'
-import type { StopRequest } from '../run-stop-status'
-import { actionErrorText } from './useAsyncAction'
+import { useRunStopRequest } from './useRunStopRequest'
 import { applyTraceBatch } from '../format'
 import type { ParsedTurn, TraceBatchReceipt } from '../env'
 import type { Turn } from '../format'
+import { readTerminalEvidence, restoreSessionTurns } from './useAgentSession-history'
 import {
   acknowledgeTraceResync,
   appendMissingTraceItems,
@@ -26,7 +26,6 @@ import {
   restoredRunRuntimeState,
   sessionBusy,
   sessionHistoryWindowOf,
-  sessionTurnsWithActiveRun,
   terminalEvidenceOf,
   traceLiveHealthOf,
   TRACE_LIVE_HEALTHY,
@@ -48,7 +47,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const [selected, setSelected] = useState<TraceEvent | null>(null)
   const [pendingQuestions, setPendingQuestions] = useState<AgentQuestionRequest[]>([])
   const [stopStates, setStopStates] = useState<StopStateMap>({})
-  const [stopRequest, setStopRequest] = useState<StopRequest>()
   const [traceHealth, setTraceHealth] = useState<TraceLiveHealth>(TRACE_LIVE_HEALTHY)
   const [historyWindow, setHistoryWindow] = useState<SessionHistoryWindow | null>(null)
   const [traceCommitVersion, setTraceCommitVersion] = useState(0)
@@ -60,6 +58,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const cachedHistoryRef = useRef<{ sessionId: string; page: OlderSessionPage | null | undefined } | null>(null)
   const resyncGeneration = useRef(0)
   const focusLifecycleDeltasRef = useRef<{ runId: string; deltas: RunLifecycleDelta[] } | null>(null)
+  const focusTraceDeltasRef = useRef<{ runId: string; events: TraceEvent[] } | null>(null)
   const focusQuestionDeltasRef = useRef<{ runId: string; deltas: PendingQuestionDelta[] } | null>(null)
   const pendingStartLifecycleRef = useRef<RunLifecycleDelta[] | null>(null)
   const traceBuf = useRef<TraceEvent[]>([])
@@ -77,15 +76,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   const backfillTerminalEvidence = useCallback((runId: string): void => {
     const turn = turnsRef.current.find((candidate) => candidate.runId === runId)
     if (!turn || !needsTerminalEvidence(turn)) return
-    const { providerId, cwd, externalSessionId } = turn
-    if (!providerId || !cwd || !externalSessionId) return
-    if (typeof window.scry.turnTerminalEvidence !== 'function') return
-    void window.scry.turnTerminalEvidence({
-      providerId,
-      ...(turn.agentProfileId ? { agentProfileId: turn.agentProfileId } : {}),
-      cwd,
-      externalSessionId
-    }, runId).then((evidence) => {
+    void readTerminalEvidence(turn).then((evidence) => {
       const terminal = terminalEvidenceOf(evidence)
       if (terminal.length > 0) setTurns((prev) => appendMissingTraceItems(prev, runId, terminal))
     }).catch(() => undefined)
@@ -94,6 +85,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
   callbacksRef.current = callbacks
 
   const currentRunId = useMemo(() => currentVisibleRunId(turns), [turns])
+  const { stopRequest, stopRun } = useRunStopRequest(currentRunId)
   const busy = useMemo(() => sessionBusy(turns, { restoring, running }), [restoring, running, turns])
 
   const flushTrace = useCallback((): void => {
@@ -124,14 +116,19 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     }
   }, [traceCommitVersion])
 
-  const prepareRunFocus = useCallback((runId: string): void => {
+  const prepareRunFocus = useCallback((runId: string, captureTrace = false) => {
     cachedDisplayRef.current = false
     cachedHistoryRef.current = null
     resyncGeneration.current++
     focusedRunIdRef.current = runId
     clearedRuns.current.delete(runId)
     focusLifecycleDeltasRef.current = { runId, deltas: [] }
+    const capture = captureTrace ? { runId, events: [] as TraceEvent[] } : null
+    focusTraceDeltasRef.current = capture
     focusQuestionDeltasRef.current = { runId, deltas: [] }
+    return () => {
+      if (focusTraceDeltasRef.current === capture) focusTraceDeltasRef.current = null
+    }
   }, [])
 
   const clearTurns = useCallback((_options: { preserveRunning?: boolean } = {}): void => {
@@ -142,6 +139,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     setTurns((prev) => clearSessionTurns(prev, clearedRuns.current))
     focusedRunIdRef.current = null
     focusLifecycleDeltasRef.current = null
+    focusTraceDeltasRef.current = null
     focusQuestionDeltasRef.current = null
     setSelected(null)
     setPendingQuestions([])
@@ -179,10 +177,11 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       } = {}
     ): void => {
       const cached = options.source === 'cache'
-      if (cached) flushTrace()
+      if (cached || options.page?.projection) flushTrace()
       cachedDisplayRef.current = cached
       cachedHistoryRef.current = cached ? { sessionId, page: options.page } : null
-      const activeRun = options.activeRun && !options.activeRun.done ? options.activeRun : null
+      const run = cached ? null : options.page?.projection ? options.page.projection.activeRun : options.activeRun
+      const activeRun = run && !run.done ? run : null
       resyncGeneration.current++
       focusedRunIdRef.current = activeRun?.runId ?? null
       if (activeRun) clearedRuns.current.delete(activeRun.runId)
@@ -203,23 +202,16 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       const nextWindow = sessionHistoryWindowOf(sessionId, options.page, parsed.length)
       historyWindowRef.current = nextWindow
       setHistoryWindow(nextWindow)
+      const focus = focusTraceDeltasRef.current
+      const traceDeltas = focus && focus.runId === activeRun?.runId ? focus.events : []
       setTurns((prev) => {
         if (cached) clearSessionTurns(prev, clearedRuns.current)
-        const snapshot = sessionTurnsWithActiveRun(sessionId, parsed, activeRun, options.page?.offset ?? 0)
-        if (!activeRun) return snapshot
-        const local = prev.find((turn) => turn.runId === activeRun.runId)
-        const merged = local ? mergeActiveRun([local], activeRun)[0] : activeRun
-        return replayRunLifecycleDeltas(
-          snapshot.map((turn) => (turn.runId === activeRun.runId ? merged : turn)),
-          lifecycleDeltas
-        )
+        return restoreSessionTurns(prev, sessionId, parsed, activeRun, options.page, traceDeltas, lifecycleDeltas, clearedRuns.current)
       })
       setSelected(null)
       setPendingQuestions(runtimeState.pendingQuestions)
       setStopStates(activeRun?.stopState && runtimeState.running ? { [activeRun.runId]: activeRun.stopState } : {})
-      // 用 main 交付的权威历史整体替换了可见时间线，就等于对齐已被证明：
-      // 清除本地降级显示，并确认给 main，避免全局降级标记污染后续轮次。
-      // 空替换（占位刷新）不算证据，此时只保留原状态。
+      // An authoritative page proves trace resynchronization. An empty placeholder cannot.
       if (!cached && (options.page != null || parsed.length > 0)) {
         setTraceHealth(TRACE_LIVE_HEALTHY)
         acknowledgeTraceResync()
@@ -227,6 +219,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
       setRunning(runtimeState.running)
       if (!options.preserveFocusDeltas) {
         focusLifecycleDeltasRef.current = null
+        focusTraceDeltasRef.current = null
         focusQuestionDeltasRef.current = null
       }
     },
@@ -235,8 +228,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
 
   const confirmCachedSession = useCallback((sessionId: string, page: OlderSessionPage): boolean => {
     const cached = cachedHistoryRef.current
-    // A focus/start/clear supersedes the cached installation. Only the exact
-    // authority-verified page can confirm it without replacing the timeline.
+    // Only the exact authority-verified page can confirm a cached installation.
     if (!cachedDisplayRef.current || cached?.sessionId !== sessionId || cached.page !== page) return false
     cachedDisplayRef.current = false
     cachedHistoryRef.current = null
@@ -251,19 +243,6 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
     pendingStartLifecycleRef, pendingStartSequenceRef, focusLifecycleDeltasRef, focusQuestionDeltasRef,
     clearedRuns, prepareRunFocus, setRunning, setTurns, setPendingQuestions, setStopStates
   })
-
-  const stopRun = useCallback(async (): Promise<void> => {
-    if (!currentRunId) return
-    const runId = currentRunId
-    // Feedback from the press, not from main's first stop phase.
-    setStopRequest({ runId, status: 'sending' })
-    try {
-      await window.scry.stop(runId)
-    } catch (error) {
-      const reason = actionErrorText(error, '停止请求失败')
-      setStopRequest((current) => current?.runId === runId ? { runId, status: 'failed', reason } : current)
-    }
-  }, [currentRunId])
 
   const answerQuestion = useCallback(async (response: AgentQuestionResponse): Promise<void> => {
     if (typeof window.scry.answerQuestion !== 'function') throw new Error('当前 Scry preload 不支持回答 Claude 提问，请重启应用')
@@ -323,6 +302,7 @@ export function useAgentSession(callbacks: AgentSessionCallbacks = {}) {
         if (cachedDisplayRef.current || clearedRuns.current.has(event.runId)) continue
         if (focusedRunIdRef.current == null) focusedRunIdRef.current = event.runId
         if (focusedRunIdRef.current !== event.runId) continue
+        if (focusTraceDeltasRef.current?.runId === event.runId) focusTraceDeltasRef.current.events.push(event)
         traceBuf.current.push(event)
         accepted += 1
       }

@@ -119,13 +119,6 @@ describe('background service channels', () => {
     }
   })
 
-  it('says there is no background service with the switch off, and offers no action', async () => {
-    const { invoke } = register(undefined, false)
-    await expect(invoke('remote:backgroundService:status')).resolves.toEqual({ mode: 'in-process', userDataDir: electron.userData })
-    await expect(invoke('remote:backgroundService:quit')).resolves.toMatchObject({ status: 'failed', reason: 'daemon_mode_disabled' })
-    expect(electron.quit).not.toHaveBeenCalled()
-  })
-
   it('never reconnects on a valid grant, and restarts a stopped service without a dialog', async () => {
     const daemon = fakeDaemon({ status: 'ready' })
     const { invoke } = register(daemon, true)

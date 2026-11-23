@@ -28,7 +28,7 @@ import { type RemoteTraceView } from '../remote-trace'
 import { bridge, desktopProviderKey, historyTurns } from './DesktopRemote'
 import { readRemoteProviderKey } from '../remote-run-controls'
 import type { RemoteChatProps } from './RemoteChat'
-import { errorText, POLL_MS, remoteDraftKey } from './RemoteChatShared'
+import { errorText, remoteDraftKey } from './RemoteChatShared'
 
 // A conversation that executes on a saved remote Scry desktop. It renders the same
 // ChatView as local sessions; only the controller differs. The host owns Provider
@@ -98,16 +98,6 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     traceViewRef.current = view
     setActiveRun(view?.run ?? null)
   }, [])
-  // When the shown run's content was last read. The host long poll reports
-  // change; this floors how often a followed run without ledger events refreshes.
-  // Backoff lives outside React state: an interval step must not re-render the transcript.
-  const pollIntervalMs = useRef(POLL_MS)
-  const applyPollInterval = useRef<(intervalMs: number) => void>(() => {})
-  const setPollInterval = useCallback((intervalMs: number): void => {
-    pollIntervalMs.current = intervalMs
-    applyPollInterval.current(intervalMs)
-  }, [])
-  const lastPollKey = useRef<string | undefined>(undefined)
   const [runStatus, setRunStatus] = useState<(DesktopRemoteRunStatus & { runId: string }) | null>(null)
   // A host run on this session that this client did not submit.
   const [foreignRun, setForeignRun] = useState<DesktopRemoteLiveRun | null>(null)
@@ -150,14 +140,18 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const previousContextKey = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const preparedHistoryContext = useRef<string | undefined>(preparedHistory ? contextKey : undefined)
   const appliedPreparedHistory = useRef(preparedHistory)
+  const preparedHistoryRequest = useRef(generation.current)
   useEffect(() => {
     if (!preparedHistory || appliedPreparedHistory.current === preparedHistory) return
     appliedPreparedHistory.current = preparedHistory
-    preparedHistoryContext.current = contextKey
+    // A finished handoff must not swallow the next subscription or reconnect refresh.
+    preparedHistoryContext.current = preparedHistory.status === 'loading' ? contextKey : undefined
     if (preparedHistory.status === 'loading') {
+      preparedHistoryRequest.current = generation.current
       setHistoryLoading(true)
       return
     }
+    if (preparedHistoryRequest.current !== generation.current) return
     setHistoryLoading(false)
     if (preparedHistory.status === 'error') {
       setHistoryError(preparedHistory.error)
@@ -260,11 +254,9 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
         setPendingWorktree(null)
       }
     }
-    lastPollKey.current = undefined
-    setPollInterval(POLL_MS)
     setForeignRun(null)
     setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
-  }, [contextKey, setPollInterval, showTrace])
+  }, [contextKey, showTrace])
   // Controls are a separate selected-context read. A late response may only
   // publish for the exact Provider/profile/cwd that requested it.
   useEffect(() => {
@@ -311,7 +303,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   }, [api, catalogReady, catalog?.providerDiscovery, connected, controlsVisible, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, provider?.observedAt, provider?.metadataRevision, providerId, providerControlsRevision])
 
 
-  return { api, workbench, fileRequest, setFileRequest, workspaceDirty, setWorkspaceDirty, dispatchSurface, connections, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, setProviderSelection, sessionId, setSessionId, controls, setControls, selectedProvider, setSelectedProvider, selectedProviderContextKey, setSelectedProviderContextKey, providerControlsError, setProviderControlsError, providerControlsLoading, setProviderControlsLoading, providerControlsRevision, setProviderControlsRevision, controlsVisible, setControlsVisible, initializedControlsContext, turns, setTurns, selected, setSelected, historyEvidence, setHistoryEvidence, historyLoading, setHistoryLoading, historyRevision, setHistoryRevision, activeRun, setActiveRun, traceViewRef, showTrace, pollIntervalMs, applyPollInterval, setPollInterval, lastPollKey, runStatus, setRunStatus, foreignRun, setForeignRun, foreignRunRef, intents, setIntents, status, setStatus, error, setError, pollError, setPollError, pollFresh, setPollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, pendingWorktree, pendingWorktreeRef, setPendingWorktree, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, openingLatest, followLatest, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, catalogSession, sessionActive, traceDelta, previousContextKey, contextGeneration, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, setSlashCmds, slashReason, setSlashReason, slashLoading, setSlashLoading, slashRevision, setSlashRevision, slashSel, setSlashSel, slashHidden, setSlashHidden, submissionInFlight, slashOpen }
+  return { api, workbench, fileRequest, setFileRequest, workspaceDirty, setWorkspaceDirty, dispatchSurface, connections, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, setProviderSelection, sessionId, setSessionId, controls, setControls, selectedProvider, setSelectedProvider, selectedProviderContextKey, setSelectedProviderContextKey, providerControlsError, setProviderControlsError, providerControlsLoading, setProviderControlsLoading, providerControlsRevision, setProviderControlsRevision, controlsVisible, setControlsVisible, initializedControlsContext, turns, setTurns, selected, setSelected, historyEvidence, setHistoryEvidence, historyLoading, setHistoryLoading, historyRevision, setHistoryRevision, activeRun, setActiveRun, traceViewRef, showTrace, runStatus, setRunStatus, foreignRun, setForeignRun, foreignRunRef, intents, setIntents, status, setStatus, error, setError, pollError, setPollError, pollFresh, setPollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, pendingWorktree, pendingWorktreeRef, setPendingWorktree, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, openingLatest, followLatest, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, catalogSession, sessionActive, traceDelta, previousContextKey, contextGeneration, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, setSlashCmds, slashReason, setSlashReason, slashLoading, setSlashLoading, slashRevision, setSlashRevision, slashSel, setSlashSel, slashHidden, setSlashHidden, submissionInFlight, slashOpen }
 }
 
 export type FoundationState = ReturnType<typeof useRemoteChatFoundation>

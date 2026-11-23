@@ -11,7 +11,6 @@ import { confirmPrompt, reasonMessage } from './background-service-copy'
 const holder: DaemonLockRecord = { pid: 4242, startedAt: 's', identityKey: '4242:s', startedBy: 'supervisor:1' }
 
 interface Script {
-  daemonMode?: boolean
   connection?: BackgroundServiceConnection
   activeRuns?: number | undefined | 'throws'
   prepared?: PreparedStop
@@ -26,7 +25,6 @@ function harness(script: Script = {}) {
   const steps: string[] = []
   let holds = 0
   const deps: BackgroundServiceActionDeps = {
-    daemonMode: script.daemonMode ?? true,
     connection: async () => { steps.push('connection'); return script.connection ?? { state: 'ready' } },
     activeRuns: async () => {
       steps.push('activeRuns')
@@ -121,12 +119,6 @@ describe('restart background service', () => {
     const none = harness({ prepared: { status: 'not-running' }, credential: false })
     await restartBackgroundService(none.deps)
     expect(none.steps).toEqual(['prepare', 'credential', 'hold', 'request', 'release', 'reconnect'])
-  })
-
-  it('is unavailable with the switch off', async () => {
-    const { deps, steps } = harness({ daemonMode: false })
-    await expect(restartBackgroundService(deps)).resolves.toMatchObject({ status: 'failed', reason: 'daemon_mode_disabled' })
-    expect(steps).toEqual([])
   })
 })
 

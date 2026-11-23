@@ -25,7 +25,7 @@ import { appendCoalescedTrace, replaceTraceById } from '../live-trace'
 import { loadClaudeHookConfig, loadCodexHookConfig } from '../hook-config'
 import { isManagedRecorderProvider } from '../../core/turn-recorder/managed'
 import { resolveRecorderEnablement } from '../../core/turn-recorder/config'
-import { beginGitTurnDiff, cloneGitTurnDiffCapture } from '../git'
+import { beginAppGitTurnDiff, cloneGitTurnDiffCapture } from '../git'
 import type { createAppSessionStore } from '../app-store'
 import type { AppRunStartOptions } from './run-frontdoor'
 import { createLlmPerformanceRecorder } from './run-metrics'
@@ -291,7 +291,7 @@ export async function createLiveRunState(deps: {
     sessionDiffBaselines.observeRunWorkspace(runId, cwd)
     releaseSessionBaseline = () => sessionDiffBaselines.releaseRunWorkspace(runId)
   }
-  const initialDiffCapture = cwd ? beginGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
+  const initialDiffCapture = cwd ? beginAppGitTurnDiff(cwd) : Promise.resolve(unavailableCapture())
   let turnDiffCapture = initialDiffCapture
   let patchExcludeBasenames: string[] = []
   if (cwd) {
@@ -332,7 +332,7 @@ export async function createLiveRunState(deps: {
         .then((capture) => cloneGitTurnDiffCapture(capture))
         .catch((error) => {
           console.warn('[scry] Git baseline clone failed; falling back to a second capture:', runId, error)
-          return beginGitTurnDiff(cwd)
+          return beginAppGitTurnDiff(cwd)
         })
     }
   }

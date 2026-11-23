@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { AssistantTurn, SteerEvidenceMessage } from './components/ChatTurn'
 import { ComposerQueue } from './components/chat-view/ComposerQueue'
 import { latestSteerEvidenceForTurns } from './steer'
-import { QUEUE_COPY } from './constants/copy'
+import { QUEUE_COPY } from './constants/queue-copy'
 
 describe('Steer renderer evidence', () => {
   it.each([

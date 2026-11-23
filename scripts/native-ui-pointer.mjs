@@ -1,6 +1,6 @@
 // Serialized into isolated renderer fixtures. DOM presence is not layout readiness:
 // virtualization and viewport changes can move a target before native input arrives.
-export function nativeUiPointer(selector, { text = '', timeoutMs, scroll, captureReceipt }) {
+export function nativeUiPointer(selector, { text = '', timeoutMs, scroll, captureReceipt, confirmPoint }) {
   return new Promise((resolve, reject) => {
     let frame, previous, scrolled = false, readiness = 'no animation frame'
     // Tree SVG labels are width-truncated; their row path remains authoritative.
@@ -70,6 +70,10 @@ export function nativeUiPointer(selector, { text = '', timeoutMs, scroll, captur
         readiness = !hit ? 'target not hit' : moving ? 'finite animation active' : previous !== geometry ? 'geometry changed' : 'ready'
         if (hit && !moving && previous === geometry) {
           clearTimeout(timer)
+          if (confirmPoint && (x !== confirmPoint.x || y !== confirmPoint.y)) {
+            resolve(null)
+            return
+          }
           if (captureReceipt) {
             window.__nativeUiPointerReceipt = null
             // Disabled controls suppress click events, but must still be hit by
@@ -93,4 +97,32 @@ export function nativeUiPointer(selector, { text = '', timeoutMs, scroll, captur
     }
     frame = requestAnimationFrame(inspect)
   })
+}
+
+/** Move over the target before pressing, then recheck the hit and arm the receipt. */
+export async function aimNativeUiPointer(cdp, evaluate, selector, timeoutMs) {
+  const deadline = performance.now() + timeoutMs
+  const timeout = () => new Error(`Pointer target moved before press: ${selector}`)
+  const probe = (options) => evaluate(`(${nativeUiPointer.toString()})(${JSON.stringify(selector)}, ${JSON.stringify({
+    timeoutMs: Math.max(0, deadline - performance.now()), ...options
+  })})`)
+  const aim = async () => {
+    while (performance.now() < deadline) {
+      const point = await probe({ scroll: true, captureReceipt: false })
+      if (performance.now() >= deadline) break
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+      if (performance.now() >= deadline) break
+      const ready = await probe({ captureReceipt: true, confirmPoint: point })
+      if (ready && performance.now() < deadline) return ready
+    }
+    throw timeout()
+  }
+  let timer
+  try {
+    return await Promise.race([aim(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(timeout()), timeoutMs)
+    })])
+  } finally {
+    clearTimeout(timer)
+  }
 }

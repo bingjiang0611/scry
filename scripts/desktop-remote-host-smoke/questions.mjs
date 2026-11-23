@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { progressMarkers, tlsRequest, waitForRun } from './harness.mjs'
+import { observeRun, tlsRequest, waitForRun } from './harness.mjs'
 
 // Question lifecycle, delta reads on a live run, admission isolation and
 // archiving a running session.
@@ -11,13 +11,14 @@ export async function verifyQuestions({ transport, evaluate, submit, sessionActi
   let questionWatch
   const questionDeadline = Date.now() + 10_000
   while (Date.now() < questionDeadline) {
-    questionWatch = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'watch', runId: question.runId, cursor: 0, outputCursor: 0, waitMs: 1_000 })
-    if (questionWatch.watch?.questions?.length) break
+    questionWatch = await observeRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM,
+      keyPEM: identity.keyPEM, runId: question.runId, known: questionWatch?.known })
+    if (questionWatch.row?.questions?.length) break
   }
-  assert.ok(questionWatch?.watch?.questions?.length, 'question fixture did not reach a pending question')
-  const questionMarkers = progressMarkers(questionWatch, question.runId)
-  const questionScryRunId = questionMarkers.find(marker => marker.event === 'bound')?.scryRunId
-  const questionSession = questionMarkers.find(marker => marker.event === 'session')?.externalSessionId
+  assert.ok(questionWatch?.row?.questions?.length, 'question fixture did not reach a pending question')
+  const questionScryRunId = questionWatch.row?.traceRunId
+  const questionSession = questionWatch.row?.externalSessionId
+  assert.ok(questionScryRunId && questionSession, 'subscription omitted the pending run binding')
   const activeTrace = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'desktop', query: { kind: 'trace', context: { ...context, externalSessionId: questionSession }, runId: questionScryRunId }
   })
@@ -50,14 +51,13 @@ export async function verifyQuestions({ transport, evaluate, submit, sessionActi
   // input. Sequential submissions would not detect an admission lock leak.
   const second = await submit(randomUUID(), 'desktop remote independent session smoke')
   const secondWatch = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: second.runId, expect: 'settled' })
-  const secondSession = progressMarkers(secondWatch, second.runId).find(marker => marker.event === 'session')?.externalSessionId
+  const secondSession = secondWatch.row?.externalSessionId
   assert.match(secondSession, /^smoke-session-/)
   assert.notEqual(secondSession, questionSession)
   const stopped = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'stop', runId: question.runId })
   assert.ok(['requested', 'already_requested'].includes(stopped.stop?.status))
   const cancelled = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: question.runId })
-  const cancelMarkers = progressMarkers(cancelled, question.runId)
-  assert.ok(cancelMarkers.some((marker) => marker.event === 'settled' && ['interrupted', 'cancelled'].includes(marker.status)), JSON.stringify(cancelled))
+  assert.ok(['interrupted', 'cancelled'].includes(cancelled.row?.lifecycle), JSON.stringify(cancelled))
   const interruptedHistory = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'desktop', query: { kind: 'history', context: { ...context, externalSessionId: questionSession } }
   })
@@ -68,14 +68,15 @@ export async function verifyQuestions({ transport, evaluate, submit, sessionActi
   let archiveWatch
   const archiveDeadline = Date.now() + 10_000
   while (Date.now() < archiveDeadline) {
-    archiveWatch = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'watch', runId: archiveRun.runId, cursor: 0, outputCursor: 0, waitMs: 1_000 })
-    if (archiveWatch.watch?.questions?.length) break
+    archiveWatch = await observeRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM,
+      keyPEM: identity.keyPEM, runId: archiveRun.runId, known: archiveWatch?.known })
+    if (archiveWatch.row?.questions?.length) break
   }
-  assert.ok(archiveWatch?.watch?.questions?.length, 'archive fixture did not reach a running session')
-  const archiveNativeSession = progressMarkers(archiveWatch, archiveRun.runId).find(marker => marker.event === 'session')?.externalSessionId
+  assert.ok(archiveWatch?.row?.questions?.length, 'archive fixture did not reach a running session')
+  const archiveNativeSession = archiveWatch.row?.externalSessionId
   assert.ok(archiveNativeSession)
   assert.equal((await sessionAction({ ...context, externalSessionId: archiveNativeSession }, { kind: 'archive', archived: true })).sessionAction, true)
   const archivedRun = await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: archiveRun.runId })
-  assert.ok(progressMarkers(archivedRun, archiveRun.runId).some(marker => marker.event === 'settled' && ['interrupted', 'cancelled'].includes(marker.status)), 'archiving did not stop the owning host run')
+  assert.ok(['interrupted', 'cancelled'].includes(archivedRun.row?.lifecycle), 'archiving did not stop the owning host run')
   return { activeTrace }
 }

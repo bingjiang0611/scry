@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { measureNativeSessionOpen } from './session-open-timing.mjs'
 import { nativeInitialPageTurns } from './performance-native.mjs'
 
-// `loadTrace` names the per-open main-process trace. In-process that is the history
-// handler's own `session_history.load` with its counters; with SCRY_HOST_DAEMON=1 the
-// handler runs in the daemon, so the App main's trusted-IPC trace stands in for it and
+// `loadTrace` names the per-open main-process trace. The history handler runs in the
+// daemon (S3), so the App main's trusted-IPC trace stands in for its own
+// `session_history.load` and
 // the returned-page counters are unavailable (the page size is still asserted below
 // from the DOM and from a direct loadSession read).
 export async function measureHistory({ evaluate, wait, click, cdp, beginCounters, endCounters, metricValues, lastMetrics, sessions, iterations, turnCount, sections, cwd, traces,

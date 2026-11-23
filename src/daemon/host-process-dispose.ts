@@ -1,40 +1,23 @@
 import type { ConversationStore } from '../main/conversation-store'
-import type { AppEventFeed } from '../main/remote/app-event-feed'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
-import { reconcileH1ForOffMode } from './orchestration-off-fallback'
-import { attachDaemonOrchestrationShadow, type DaemonOrchestrationShadow } from './orchestration-shadow'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
-/** Attaches off-fallback reconciliation, shadow mode, or authoritative on-mode orchestration for host-process. */
+/** Attaches the daemon’s authoritative event log and subscription hub. */
 export async function attachHostProcessOrchestration<
   State extends RunRegistryState,
   Control extends RunRegistryControl
 >(input: {
   options: DaemonHostProcessOptions
-  remoteStateDirectory: string
   conversationStore: () => ConversationStore
   runs: RunRegistry<State, Control>
   requestRunStop: (runId: string) => boolean
   attentionSnapshot: () => SessionAttentionSnapshot
-  events: AppEventFeed
   log: (line: string) => void
-}): Promise<{
-  orchestrationShadow: DaemonOrchestrationShadow | undefined
-  orchestrationAuthority: DaemonOrchestrationAuthority | undefined
-}> {
-  const { options, remoteStateDirectory, conversationStore, runs, requestRunStop, attentionSnapshot, events, log } = input
-  reconcileH1ForOffMode({ userDataDir: options.userDataDir, remoteStateDirectory, env: process.env, log })
-  const orchestrationShadow = attachDaemonOrchestrationShadow({
-    userDataDir: options.userDataDir,
-    env: process.env,
-    conversationStore,
-    log,
-    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
-    ...(options.orchestrationShadowPauseBackfill ? { pauseDeferredBackfill: options.orchestrationShadowPauseBackfill } : {})
-  })
-  const orchestrationAuthority = await attachDaemonOrchestrationAuthority({
+}): Promise<DaemonOrchestrationAuthority> {
+  const { options, conversationStore, runs, requestRunStop, attentionSnapshot, log } = input
+  return attachDaemonOrchestrationAuthority({
     userDataDir: options.userDataDir,
     env: process.env,
     conversationStore,
@@ -42,19 +25,9 @@ export async function attachHostProcessOrchestration<
     requestRunStop,
     attentionSnapshot,
     log,
-    ...(options.orchestrationShadowBeforeCommitHook ? { beforeCommitHook: options.orchestrationShadowBeforeCommitHook } : {}),
-    ...(options.orchestrationMirrorWriteHook ? { mirrorWriteHook: options.orchestrationMirrorWriteHook } : {}),
-    ...(options.orchestrationMirrorMaxPendingEvents !== undefined
-      ? { mirrorMaxPendingEvents: options.orchestrationMirrorMaxPendingEvents }
-      : {}),
-    ...(options.orchestrationMirrorRetryIntervalMs !== undefined
-      ? { mirrorRetryIntervalMs: options.orchestrationMirrorRetryIntervalMs }
-      : {})
+    ...(options.orchestrationPauseBackfill ? { pauseDeferredImport: options.orchestrationPauseBackfill } : {}),
+    ...(options.orchestrationBeforeCommitHook ? { beforeCommitHook: options.orchestrationBeforeCommitHook } : {})
   })
-  if (orchestrationAuthority) {
-    events.setObserver((event) => orchestrationAuthority.forwardAppEvent(event))
-  }
-  return { orchestrationShadow, orchestrationAuthority }
 }
 
 /** Bounded provider registry shutdown helper extracted from host-process.ts to stay within the 20 KB file budget. */

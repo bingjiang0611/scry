@@ -3,15 +3,13 @@
   "channels": [
     {
       "channel": "agent:activeRun",
-      "route": "forward",
-      "op": "runState",
-      "why": "run 状态在 daemon"
+      "route": "main",
+      "why": "按窗口焦点读取 main 持有的 daemon 订阅投影"
     },
     {
       "channel": "agent:activeRuns",
-      "route": "forward",
-      "op": "liveRuns",
-      "why": "live run 在 daemon"
+      "route": "main",
+      "why": "直接读取 main 持有的 daemon 订阅投影"
     },
     {
       "channel": "agent:addPiProfile",
@@ -94,9 +92,8 @@
     },
     {
       "channel": "agent:focusedRunSnapshot",
-      "route": "forward",
-      "op": "runState",
-      "why": "权威快照在 daemon"
+      "route": "main",
+      "why": "按窗口焦点读取 main 持有的 daemon 订阅投影"
     },
     {
       "channel": "agent:forkSession",
@@ -429,6 +426,11 @@
       "route": "new-op",
       "op": "usage",
       "method": "usageStats"
+    },
+    {
+      "channel": "agent:watchSessionDetail",
+      "route": "main",
+      "why": "窗口维护当前会话的订阅焦点，daemon 仍校验并读取详情"
     },
     {
       "channel": "app:copyText",

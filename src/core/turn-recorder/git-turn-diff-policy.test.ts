@@ -166,3 +166,37 @@ describe('未跟踪文件清单策略接进真实 Git 采集', () => {
     }
   }, 60_000)
 })
+
+it('excludes nested Scry data from both targeted and full git capture', async () => {
+  const cwd = await repo()
+  const privateFile = join(cwd, 'sub/.scry/record.json')
+  const visibleFile = join(cwd, 'sub/ordinary.json')
+  await mkdir(join(cwd, 'sub/.scry'), { recursive: true })
+  await writeFile(privateFile, 'old private data\n')
+  await writeFile(visibleFile, 'old visible data\n')
+  await git(cwd, ['add', 'sub'])
+  await git(cwd, ['commit', '-q', '-m', 'seed files'])
+
+  const begin = () => beginGitTurnDiff(cwd, 20_000, undefined, [], false, undefined, { excludeScryData: true })
+  const targeted = await begin()
+  const full = await begin()
+  try {
+    expect(targeted.status).toBe('ready')
+    expect(full.status).toBe('ready')
+    await writeFile(privateFile, 'new private data\n')
+    await writeFile(visibleFile, 'new visible data\n')
+    const targetedDiff = await computeGitTurnDiff(targeted, 20_000, {
+      structuredPaths: [visibleFile, privateFile], completePatches: true
+    }, false)
+    const fullDiff = await computeGitTurnDiff(full, 20_000, { forceFull: true, completePatches: true }, false)
+    expect(targetedDiff.status).toBe('captured')
+    expect(targetedDiff.collection).toMatchObject({ strategy: 'targeted', candidatePathCount: 1 })
+    expect(fullDiff.status).toBe('captured')
+    expect(fullDiff.files.map(file => file.path)).toEqual([visibleFile])
+    expect(targetedDiff.files).toEqual(fullDiff.files)
+    expect(JSON.stringify(targetedDiff.files)).toContain('+new visible data')
+  } finally {
+    await cleanupCapture(targeted)
+    await cleanupCapture(full)
+  }
+}, 60_000)

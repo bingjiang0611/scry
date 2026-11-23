@@ -20,20 +20,17 @@ export function desktopReaderFixture(options: {
   const userDataDir = join(root, 'userData')
   let allowed = true
   let run: ActiveRun | null = null
-  // A run that just left the live registry (RunRegistry.departedState), and how each read asked.
-  let departed: ActiveRun | null = null
-  const runReads: Array<{ departed: boolean } | undefined> = []
   const read = createDesktopHostReader({
     userDataDir, hostId: () => 'host-fixture',
     authorizeWorkspace: (path) => { if (!allowed || path !== cwd) throw new Error('workspace_not_authorized'); return cwd },
     authorizeSession: (value) => { bindRemoteHistoryContext({ ...value, externalSessionId: value.externalSessionId!, historyScope: 'session' },
       [{ sessionId: context.externalSessionId, cwd, providerId: 'codex' }], path => path) },
-    getRun: (_runId, options) => { runReads.push(options); return run ?? (options?.departed ? departed : null) },
+    getRun: () => run,
     ...options
   })
   const context = { cwd, providerId: 'codex', externalSessionId: 'native-session' }
   return { read, context, userDataDir, root, setRun: (value: ActiveRun) => { run = value },
-    setDeparted: (value: ActiveRun) => { departed = value }, runReads, revoke: () => { allowed = false },
+    revoke: () => { allowed = false },
     // Archived turns sort by turn ts, then by the hashed turn file name. Without an
     // explicit ts, turns written in the same millisecond fall back to hash order, so
     // give each one the same deterministic time as its item.

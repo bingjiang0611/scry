@@ -73,3 +73,9 @@ export function daemonProcessEvidence(stateDirectory, target, probes = {}) {
     daemonResources: resources.status === 'available' ? resources.env.SCRY_DAEMON_RESOURCES_PATH ?? null : null
   }
 }
+
+export function readDaemonTerminalChild(daemon, pid, identityOf = readIdentity) {
+  if (!daemon.ok) return undefined
+  const terminal = identityOf(pid)
+  return terminal?.ppid === daemon.daemon.pid ? terminal : undefined
+}

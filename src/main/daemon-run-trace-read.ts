@@ -19,19 +19,18 @@ export type DaemonTraceCall = (
 
 /**
  * One canonical trace read for a live run; the delta cursor is the caller's.
- * `settledTail`: the read after `run_settled` still gets the run's final trace.
  */
 export async function readDaemonTrace(
   call: DaemonTraceCall,
-  input: { context: unknown; runId: string; after?: DesktopTraceCursor; settledTail?: boolean }
+  input: { context: unknown; runId: string; after?: DesktopTraceCursor; archive?: true }
 ): Promise<DesktopRemoteTraceRead> {
   const query = {
     kind: 'trace', context: input.context, runId: input.runId, images: true, byteChunks: true,
-    ...(input.settledTail === false ? {} : { settledTail: true }),
+    ...(input.archive ? { archive: true } : {}),
     ...(input.after ? { delta: { after: input.after } } : {})
   }
   const page = async (chunk?: { id: string; offset: number }): Promise<Record<string, unknown>> => {
-    // The host keys a page on the whole query (context, run, delta cursor, settledTail),
+    // The host keys a page on the whole query (context, run, delta cursor, archive),
     // so each continuation repeats it unchanged and adds only `chunk`. Every page is a
     // read of bytes the host already cut: a replay returns the same page, or for a page
     // the host has since dropped an explicit error, which fails this read closed.

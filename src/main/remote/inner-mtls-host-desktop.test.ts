@@ -181,18 +181,18 @@ describe('InnerMtlsHost desktop reads over production mTLS', () => {
     const other = await pairDevice(identity, controller)
     const before = controller.authority.inspectLocal().grants
     const reply = await call(addr, caPEM, device.certPEM, device.keyPEM, {
-      op: 'poll', cursor: 0, deviceLabel: 'iPhone 17 Pro', deviceId: other.deviceId
+      op: 'projects', deviceLabel: 'iPhone 17 Pro', deviceId: other.deviceId
     })
-    expect(reply.poll).toBeDefined()
+    expect(reply.projects).toBeDefined()
     const expected = before.map((grant) => grant.deviceId === device.deviceId ? { ...grant, deviceLabel: 'iPhone 17 Pro' } : grant)
     expect(controller.authority.inspectLocal().grants).toEqual(expected)
     for (const deviceLabel of ['bad\nlabel', '\u202espoof', 'x'.repeat(81), '', null, 42]) {
-      expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0, deviceLabel }))
+      expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'projects', deviceLabel }))
         .toEqual({ error: 'invalid_device_label' })
     }
     expect(controller.authority.inspectLocal().grants).toEqual(expected)
     await controller.authority.revoke(device.deviceId)
-    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0, deviceLabel: 'spoof' }))
+    expect(await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'projects', deviceLabel: 'spoof' }))
       .toEqual({ error: 'device_not_authorized' })
     expect(controller.authority.inspectLocal().grants[0].deviceLabel).toBe('iPhone 17 Pro')
     expect(start).not.toHaveBeenCalled()

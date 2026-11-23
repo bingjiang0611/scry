@@ -3,9 +3,12 @@ import type { HostAdminNotice } from '../../shared/host-admin'
 import type { AgentDataUpdated } from '../../shared/runtime'
 import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 import { SUBSCRIBE_RETAINED_WINDOW_NOTICES, type SubscribeHint } from '../../shared/orchestration-subscribe'
+import type { WorkspacePrepareProgress } from '../../shared/workspace-selection'
+import { completedWorkspaceProgress } from '../../shared/workspace-selection-input'
 
 const DEFAULT_COALESCE_MS = 50
 const MAX_HINT_BUFFER = 512
+const MAX_HINT_CURSORS_PER_DEVICE = 512
 const MAX_LIVE_RUN_META = 1_024
 
 export interface LiveRunRuntimeMeta {
@@ -16,6 +19,7 @@ export interface LiveRunRuntimeMeta {
   providerId?: string
   agentProfileId?: string
   externalSessionId?: string
+  workspaceProgress?: WorkspacePrepareProgress
 }
 
 interface HintEntry {
@@ -28,6 +32,11 @@ interface CoalesceSlot {
   lastEmittedAt: number
   pending?: SubscribeHint
   timer?: ReturnType<typeof setTimeout>
+}
+
+function deviceFingerprint(cursor: string): string {
+  const suffix = cursor.indexOf(':')
+  return suffix < 0 ? cursor : cursor.slice(0, suffix)
 }
 
 export interface SubscribeHubOptions {
@@ -49,7 +58,8 @@ export class SubscribeHub {
   readonly #now: () => number
   readonly #waiters = new Set<() => void>()
   readonly #entries: HintEntry[] = []
-  readonly #peerHintSeq = new Map<string, number>()
+  readonly #localHintSeq = new Map<string, number>()
+  readonly #deviceHintSeq = new Map<string, Map<string, number>>()
   readonly #coalesce = new Map<string, CoalesceSlot>()
   readonly #liveRunMeta = new Map<string, LiveRunRuntimeMeta>()
   #hintSeq = 0
@@ -121,7 +131,8 @@ export class SubscribeHub {
       ...(meta.cwd ? { cwd: meta.cwd } : {}),
       ...(meta.providerId ? { providerId: meta.providerId } : {}),
       ...(meta.agentProfileId ? { agentProfileId: meta.agentProfileId } : {}),
-      ...(meta.externalSessionId ? { externalSessionId: meta.externalSessionId } : {})
+      ...(meta.externalSessionId ? { externalSessionId: meta.externalSessionId } : {}),
+      ...(meta.workspaceProgress ? { workspaceProgress: meta.workspaceProgress } : {})
     }
   }
 
@@ -145,7 +156,22 @@ export class SubscribeHub {
     const meta = this.#ensureRunMeta(runId)
     if (scryRunId) meta.scryRunId = scryRunId
     meta.admitted = true
+    // A worktree start is admitted only once its workspace is ready.
+    if (meta.workspaceProgress) meta.workspaceProgress = completedWorkspaceProgress(meta.workspaceProgress)
     this.#emitUrgent(`run:${runId}`, this.#buildRunHint(runId, meta))
+  }
+
+  /**
+   * Managed-worktree preparation progress (already throttled by the run binding). Devices
+   * read it on the run row and hint; the App's own window gets it as its window notice.
+   */
+  noteRunWorkspaceProgress(runId: string, progress: WorkspacePrepareProgress): void {
+    if (this.#closed) return
+    const meta = this.#ensureRunMeta(runId)
+    meta.workspaceProgress = progress
+    this.#emitUrgent(`run:${runId}`, this.#buildRunHint(runId, meta))
+    // Only the latest step matters to a window that falls behind: keep one entry per run.
+    this.#pushEntry({ kind: 'window', channel: 'workspaceSelection:progress', payload: { ...progress } }, `workspaceProgress:${runId}`)
   }
 
   noteRunSession(runId: string, externalSessionId: string): void {
@@ -212,25 +238,41 @@ export class SubscribeHub {
     this.#pushEntry({ kind: 'data', event }, key)
   }
 
-  hasPendingHints(peer: string): boolean {
-    const last = this.#peerHintSeq.get(peer) ?? 0
+  hasPendingHints(peer: string, local = false): boolean {
+    const cursors = local ? this.#localHintSeq : this.#deviceHintSeq.get(deviceFingerprint(peer))
+    const last = cursors?.get(peer) ?? 0
     return this.#entries.some((entry) => entry.seq > last)
   }
 
   /** Drains undelivered hints for `peer`; when `includeState` is true (snapshot), prepends state hints. */
-  drainHints(peer: string, includeState: boolean, fresh = false): SubscribeHint[] {
+  drainHints(peer: string, includeState: boolean, fresh = false, local = false): SubscribeHint[] {
     // A client with no cursor (first connect, or an App restart) gets the current
     // state only, never a replay of volatile hints it never saw: the legacy appEvents
     // feed behaves the same, and replaying would re-show old notices and errors.
-    const last = fresh ? this.#hintSeq : (this.#peerHintSeq.get(peer) ?? 0)
+    const cursors = local ? this.#localHintSeq : this.#deviceCursors(deviceFingerprint(peer))
+    const last = fresh ? this.#hintSeq : (cursors.get(peer) ?? 0)
     const drained = this.#entries.filter((entry) => entry.seq > last).map((entry) => entry.hint)
-    this.#peerHintSeq.set(peer, this.#hintSeq)
+    cursors.delete(peer)
+    cursors.set(peer, this.#hintSeq)
+    if (!local && cursors.size > MAX_HINT_CURSORS_PER_DEVICE) {
+      const oldest = cursors.keys().next().value
+      if (oldest !== undefined) cursors.delete(oldest)
+    }
     if (!includeState) return drained
     const state = this.#stateHints()
     if (state.length === 0) return drained
     const hasAttentionInDrained = drained.some((h) => h.kind === 'attention')
     const filteredState = hasAttentionInDrained ? state.filter((h) => h.kind !== 'attention') : state
     return [...filteredState, ...drained]
+  }
+
+  #deviceCursors(fingerprint: string): Map<string, number> {
+    let cursors = this.#deviceHintSeq.get(fingerprint)
+    if (!cursors) {
+      cursors = new Map()
+      this.#deviceHintSeq.set(fingerprint, cursors)
+    }
+    return cursors
   }
 
   waitForWake(timeoutMs: number, signal?: AbortSignal): Promise<void> {

@@ -5,9 +5,8 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmS
 import { freePort, waitForTarget, connectCdp, rendererEvaluator } from './electron-security-cdp.mjs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { stopOwnedApp } from './owned-app-processes.mjs'
-import { stopFixtureDaemon } from './b4v/fixture.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 import { exerciseUnified } from './electron-security-unified.mjs'
 import { exerciseTerminalSteer } from './terminal-steer-queue-smoke.mjs'
 import { exerciseOwnership } from './electron-security-ownership.mjs'
@@ -15,8 +14,9 @@ import { exerciseMeta } from './electron-security-meta.mjs'
 import { exerciseSourceControlApp } from './source-control-ui-checks.mjs'
 import { exerciseWorkspaceSessions } from './workspace-session-ui-checks.mjs'
 import { seedConversationOwnership } from './conversation-ownership-smoke.mjs'
-import { exerciseFileHistory } from './electron-security-file-history.mjs'
+import { exerciseFileHistory, seedFileHistorySource } from './electron-security-file-history.mjs'
 import { exerciseNativeHistory } from './electron-security-native-history.mjs'
+import { nativeHistoryCatalog } from './electron-security-activity-history.mjs'
 import { exerciseProductionPerformance } from './electron-security-performance.mjs'
 import { exerciseFiles } from './electron-security-files.mjs'
 import { exerciseQuestion } from './electron-security-question.mjs'
@@ -29,19 +29,20 @@ import { exerciseRecording } from './electron-security-recording.mjs'
 import { exerciseRestart } from './electron-security-restart.mjs'
 import { exerciseStructureApp } from './structure-app-checks.mjs'
 import { prepareSideChatMode } from './side-chat-smoke.mjs'
-import { lostReplyPath, writeConversationFaultEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
+import { lostReplyPath, writeConversationFaultEntry, writeDockBadgeEntry, writeFileOpenEntry, writeIpcCountEntry } from './smoke-app-entries.mjs'
 
 import { defaultPackagedAppPath, electronDevLayout, packagedAppLayout } from './packaged-app-layout.mjs'
 import { assertArtifactMatchesSource } from './packaged-artifact-guard.mjs'
-import { electronSecurityModes } from './electron-security-modes.mjs'
+import { preparePackagedSmokeEntry } from './packaged-smoke-entry.mjs'
+import { electronSecurityModes, electronSecurityTestEnvironment } from './electron-security-modes.mjs'
 
 const {
-  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument
+  steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory: replaySource, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, instrumentedPackage, packagedAppArgument
 } = electronSecurityModes(process.argv)
 const dev = devApp ? electronDevLayout() : null
 const appPath = resolve(dev?.appPath || packagedAppArgument || defaultPackagedAppPath())
 if (!dev) assertArtifactMatchesSource(appPath)
-const executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
+let executable = dev ? resolve(dev.executable) : packagedAppLayout(appPath).executable
 // Keep unix socket paths under macOS's 104-byte sun_path limit in default daemon mode.
 const temp = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-es-')))
 let child
@@ -54,11 +55,13 @@ async function main() {
   const port = await freePort()
   const userDataDir = join(temp, 'userData')
   const home = join(temp, 'home')
-  const workspace = filesOnly ? join(home, 'projects', 'dev-agent') : join(temp, 'workspace')
+  const workspaceName = process.argv.includes('--unicode-workspace') ? '中文工作区' : 'workspace'
+  const workspace = filesOnly ? join(home, 'projects', 'dev-agent') : join(temp, workspaceName)
   mkdirSync(userDataDir, { recursive: true })
   mkdirSync(home, { recursive: true })
   mkdirSync(workspace, { recursive: true })
   const canonicalHome = realpathSync(home)
+  const sourceFileHistory = replaySource ?? (fileHistoryOnly ? seedFileHistorySource(canonicalHome) : null)
   const canonicalWorkspace = realpathSync(workspace)
   const secondWorkspace = join(home, 'performance-second-project')
   if (performanceOnly || sourceControlOnly || conversationOwnershipOnly || unifiedConversationOnly) {
@@ -94,11 +97,9 @@ async function main() {
     }
     appendFileSync(nativePath, JSON.stringify(entry('a', 'u', 'assistant', '主机重启前已有的原生回复')))
     assert.ok(statSync(nativePath).size > 64 * 1024 * 1024)
-    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify([{
-      sessionId: nativeSessionId, externalSessionId: nativeSessionId, runId: 'remote-run-fixture-1',
-      providerId: 'pi', agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace,
-      preview: '手机会话恢复测试', ts: Date.now()
-    }]))
+    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify(
+      nativeHistoryCatalog({ nativeSessionId, canonicalWorkspace, home, nativeHistoryPerformanceOnly })
+    ))
   }
   if (fileHistoryOnly) {
     assert.equal(sourceFileHistory.turns.length, 1, 'replay one exact archived turn')
@@ -116,60 +117,44 @@ async function main() {
     }]))
     writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([source.cwd]))
   }
-  const ownershipFixture = conversationOwnershipOnly ? seedConversationOwnership({
-    userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace)
+  const ownershipFixture = conversationOwnershipOnly ? await seedConversationOwnership({
+    userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace), executable
   }) : undefined
   const openReceipt = join(temp, 'opened-paths.json')
   // Its own app directory (smoke-app-entries.mjs): Electron reads the App version there.
   const filesEntry = join(temp, 'files-app', 'files-main.mjs')
   if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')
-  const questionEntry = join(temp, 'question-main.mjs')
-  if (devQuestionOnly) {
-    // Exercise startup and repeated viewing against a stale native Dock badge.
-    // Forward every call to Electron; a denied OS permission remains explicit.
-    writeFileSync(questionEntry, `
-      import { app } from 'electron'
-      import { writeFileSync } from 'node:fs'
-      app.setAppPath(${JSON.stringify(resolve('.'))})
-      app.whenReady().then(async () => {
-        const initial = { success: app.setBadgeCount(1), nativeCount: app.getBadgeCount() }
-        const requests = []
-        let residual = null
-        const setBadgeCount = app.setBadgeCount.bind(app)
-        app.setBadgeCount = (count) => {
-          const success = setBadgeCount(count)
-          requests.push({ count, success, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() })
-          if (count === 0 && requests.some(request => request.count === 1) && !residual) {
-            // The session is already read. Recreate native drift without changing unread state.
-            const restored = setBadgeCount(1)
-            residual = { success: restored, nativeCount: app.getBadgeCount(), dockBadge: app.dock.getBadge() }
-          }
-          writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
-          return success
-        }
-        writeFileSync(${JSON.stringify(badgeReceipt)}, JSON.stringify({ initial, requests, residual }))
-        await import(${JSON.stringify(pathToFileURL(resolve('out/main/index.js')).href)})
-      })
-    `)
-  }
-  const conversationEntry = join(temp, 'conversation-main.mjs')
-  if (unifiedConversationOnly) writeConversationFaultEntry(conversationEntry, join(temp, 'fork-reply-lost'))
-  const structureEntry = join(temp, 'structure-main.mjs')
+  const focusRequest = join(temp, 'dock-focus.request')
+  const questionEntry = join(temp, 'question-app', 'question-main.mjs')
+  if (devQuestionOnly) writeDockBadgeEntry(questionEntry, badgeReceipt, focusRequest)
+  // Every temp entry has its own app directory: the daemon supervisor refuses an App that
+  // announces Electron's version instead of the build's (smoke-app-entries.mjs).
+  const conversationEntry = join(temp, 'conversation-app', 'conversation-main.mjs')
+  const fixtureAppPath = instrumentedPackage ? join(temp, 'Scry.app') : null
+  const fixtureEntryRoot = fixtureAppPath ? join(packagedAppLayout(fixtureAppPath).resources, 'app.asar') : undefined
+  if (unifiedConversationOnly) writeConversationFaultEntry(conversationEntry, join(temp, 'fork-reply-lost'), fixtureEntryRoot)
+  const structureEntry = join(temp, 'structure-app', 'structure-main.mjs')
   const structureIpc = join(temp, 'structure-ipc-counts.json')
-  if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc)
-  const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry,
+  if (structureOnly) writeIpcCountEntry(structureEntry, structureIpc, undefined, undefined, fixtureEntryRoot)
+  const sideChatMode = (sideChatOnly || largeHistoryOnly) && await prepareSideChatMode({ temp, entryPath: structureEntry, appPath: fixtureEntryRoot,
     workspace: canonicalWorkspace, userDataDir, inputsPath: conversationInputs, callsPath: conversationCalls,
     identity: smokeIdentity, largeHistory: largeHistoryOnly })
-  // Sub-modes that rely on in-process-only fixture env hooks (SCRY_ELECTRON_SMOKE_{CONVERSATIONS,INPUTS,CALLS},
-  // not in daemon FORWARDED_ENV) keep explicit in-process mode unless caller overrides SCRY_HOST_DAEMON.
-  const inProcessOnlyFixture = steerOnly || conversationOwnershipOnly || unifiedConversationOnly || sideChatOnly || largeHistoryOnly
+  if (fixtureAppPath) {
+    executable = await preparePackagedSmokeEntry(appPath, fixtureAppPath,
+      unifiedConversationOnly ? conversationEntry : structureEntry, temp)
+  }
+  // Every sub-mode runs the App with its daemon (S3). The fixture inputs below
+  // (SCRY_ELECTRON_SMOKE_{CONVERSATIONS,SIDE_CHAT,INPUTS,CALLS,IDENTITY,READER,READS}) reach the
+  // daemon's smoke Provider because this is a test instance that asked for it
+  // (src/daemon/supervisor.ts smokeFixtureEnvironment).
   const launchApp = () => {
     child = spawn(executable, [
-      ...(devApp ? [devQuestionOnly ? questionEntry : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? conversationEntry : (structureOnly || sideChatOnly || largeHistoryOnly) ? structureEntry : resolve('.')] : []),
+      ...(devApp ? [devQuestionOnly ? dirname(questionEntry) : devFilesOnly ? dirname(filesEntry) : unifiedConversationOnly ? dirname(conversationEntry) : (structureOnly || sideChatOnly || largeHistoryOnly) ? dirname(structureEntry) : resolve('.')] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
-      '--disable-gpu',
+      // Both suites measure native modal exit with the production compositor.
+      ...(structureOnly || performanceOnly ? [] : ['--disable-gpu']),
       // An occluded fixture keeps bounded UI waits immune to Chromium background throttling.
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
@@ -177,14 +162,13 @@ async function main() {
     ], {
       env: {
         ...process.env,
-        HOME: home,
+        ...electronSecurityTestEnvironment(temp),
+        SHELL: process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash',
+        ZDOTDIR: home,
         ELECTRON_ENABLE_LOGGING: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '0',
-        SCRY_TEST_APP: foreground ? '0' : '1',
         SCRY_ELECTRON_SMOKE_PROVIDER: '1',
-        ...(inProcessOnlyFixture
-          ? { SCRY_HOST_DAEMON: process.env.SCRY_HOST_DAEMON ?? '0' }
-          : { SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }),
+        SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
         ...(steerOnly ? { SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs } : {}),
         ...(ownershipFixture ? { SCRY_ELECTRON_SMOKE_CALLS: ownershipFixture.callsFile } : {}),
         ...(unifiedConversationOnly ? { SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_ELECTRON_SMOKE_INPUTS: conversationInputs, SCRY_ELECTRON_SMOKE_CALLS: conversationCalls, SCRY_ELECTRON_SMOKE_IDENTITY: smokeIdentity } : {}),
@@ -239,7 +223,19 @@ async function main() {
     'terminalStart', 'terminalActive', 'terminalAttach', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'onTerminalData', 'onTerminalExit'
   ]) assert.ok(boundary.preloadKeys.includes(key), `preload missing ${key}`)
   if (fileHistoryOnly) return exerciseFileHistory(context())
-  if (nativeHistoryOnly) return exerciseNativeHistory(context())
+  if (nativeHistoryOnly) {
+    if (workspaceName !== 'workspace') {
+      assert.match(canonicalWorkspace, /中文工作区$/)
+      const ref = { providerId: 'pi', agentProfileId: 'pi:rotom', cwd: canonicalWorkspace, externalSessionId: nativeSessionId }
+      const first = await evaluate(`window.scry.loadSession(${JSON.stringify(ref)})`)
+      assert.ok(first, 'the imported history page must be visible')
+      assert.equal(first.projection?.legacyBefore, true, 'the production App must open the imported session projection')
+      assert.equal(typeof first.projection.sessionKey, 'string')
+      assert.ok(first.turns.some(turn => turn.userText === '手机发起的真实格式消息'))
+      console.log(JSON.stringify({ test: 'Unicode workspace projection', cwd: canonicalWorkspace, legacyBefore: true }))
+    }
+    return exerciseNativeHistory(context())
+  }
   if (performanceOnly) return exerciseProductionPerformance(context())
   if (steerOnly) return exerciseTerminalSteer(context())
   const discovered = await evaluate(`Promise.all([window.scry.detectFast(), window.scry.detect(), window.scry.providerDescriptors()]).then((groups) => groups.map((group) => group.map((item) => item.id)))`)
@@ -251,7 +247,7 @@ async function main() {
   }))`)
   assert.deepEqual(disabledCapabilities, [true, true, true, true], 'smoke must not start non-fixture providers')
   if (filesOnly) return exerciseFiles(context())
-  if (devQuestionOnly) return exerciseQuestion(context())
+  if (devQuestionOnly) return exerciseQuestion({ ...context(), focusRequest })
   if (devTerminalOnly) return exerciseDevTerminal(context())
   const surfaces = await exerciseSurfaces(context())
   const providerHistory = await exerciseProviderHistory(context())
@@ -301,9 +297,11 @@ try {
   console.error('[scry] smoke failure:', error, stderr.slice(-8000))
   throw error
 } finally {
-  await stopOwnedApp(child)
-  await stopFixtureDaemon({ daemonState: join(temp, 'userData', 'daemon') }).catch(() => {})
-  // A failed run keeps its fixture as evidence; only clean runs delete it.
+  try { await stopOwnedDaemonApp(child, join(temp, 'userData')) } catch (error) {
+    failed = true
+    process.exitCode = 1
+    console.error('[scry] smoke cleanup failed:', error)
+  }
   if (failed) console.warn(`[scry] smoke fixture kept for diagnosis: ${temp}`)
   else try {
     rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })

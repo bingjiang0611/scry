@@ -29,7 +29,7 @@ package_parent.mkdir(parents=True)
 # the package would silently compare different source/contracts.
 subprocess.run(['git', 'diff', '--exit-code', revision, '--', 'experiments/remote-g0/swift'], cwd=root, check=True)
 source = args.output / 'apps/ios/ScryRemote'
-for path in source.glob('*.swift'):
+for path in source.rglob('*.swift'):
     content = path.read_text().replace('ProcessInfo.processInfo.arguments', 'BatchFDevice.arguments')
     if path.name in ('AppModel.swift', 'RemoteRunStore.swift'):
         content = content.replace('connections: RemoteConnectionStore = RemoteConnectionStore()',
@@ -55,7 +55,7 @@ app.write_text(content)
 remaining = {'RootView', 'ChatView', 'FocusedTurnView', 'ConversationMarkdownText',
              'ConversationMarkdownInline', 'WorkspaceShell', 'SidebarDrawer', 'SettingsView',
              'NewSessionComposer'}
-for path in sorted(source.glob('*.swift')):
+for path in sorted(source.rglob('*.swift')):
     content = path.read_text()
     names = sorted(name for name in remaining if 'struct ' + name + ': View' in content)
     for name in names:
@@ -68,7 +68,7 @@ for path in sorted(source.glob('*.swift')):
         remaining.difference_update(names)
 assert not remaining, f'Missing body instrumentation: {sorted(remaining)}'
 
-store = source / 'RemoteRunStore.swift'
+store = next(source.rglob('RemoteRunStore.swift'))
 store.write_text(store.read_text() + '\n' + Path(__file__).with_suffix('.swift').read_text() +
                  '\nprivate let batchFRevision = "' + revision + '"\n')
 print('Fixture:', args.output)

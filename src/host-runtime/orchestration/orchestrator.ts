@@ -6,6 +6,7 @@ import {
 } from './orchestrator-commands'
 import {
   acceptDecision,
+  decideCatalogChange,
   decideRunEffectResult,
   makeEffect,
   makeEvent,
@@ -166,7 +167,10 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : isImmediate ? (p.leaseOwner ?? 'daemon') : null,
         claimedAt: p.shadowOnly || isImmediate ? cmd.at : null
       })
-      return acceptDecision(cmd, events, [effect], { runId: p.runId })
+      return acceptDecision(cmd, events, [effect], {
+        runId: p.runId,
+        ...(cmd.actor === 'system' && p.intentDetailSha256 ? { intentDetailSha256: p.intentDetailSha256 } : {})
+      })
     }
 
     case 'run.resolve_intent': {
@@ -444,24 +448,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
     }
 
-    case 'session.discover': {
-      const p = cmd.payload
-      const event = makeEvent(cmd, 0, {
-        type: 'session.discovered',
-        stream: `session:${p.sessionKey}`,
-        sessionKey: p.sessionKey,
-        cwd: p.cwd,
-        payload: {
-          sessionKey: p.sessionKey,
-          provider: p.provider,
-          profile: p.profile ?? null,
-          cwd: p.cwd,
-          title: p.title ?? null
-        },
-        evidence: p.evidence ?? null
-      })
-      return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
-    }
+    case 'session.discover':
+    case 'session.withdraw':
+      return decideCatalogChange(cmd, view)
 
     case 'session.import': {
       const p = cmd.payload
@@ -488,6 +477,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           archivedAt: p.archivedAt ?? null,
           lastRunId: p.lastRunId ?? null,
           lastRunOutcome: sanitizedOutcome,
+          ...(p.catalog ? { catalog: p.catalog } : {}),
           parentSessionKey: p.parentSessionKey ?? null,
           rootSessionKey: p.rootSessionKey ?? null,
           lineage: p.lineage ?? null

@@ -113,6 +113,7 @@ const invokeChannels = {
   activeRun: 'agent:activeRun',
   unreadSessions: 'agent:unreadSessions',
   viewSessions: 'agent:viewSessions',
+  watchSessionDetail: 'agent:watchSessionDetail',
   activeRuns: 'agent:activeRuns',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
@@ -172,6 +173,7 @@ const listenerChannels = {
   onQuestionClosed: 'agent:userQuestionClosed',
   onError: 'agent:error',
   onBackgroundServiceNotice: 'remote:backgroundService:notice',
+  onDesktopRemoteUpdate: 'desktopRemote:update',
   onHostAdminOpenDevices: 'remote:hostAdmin:openDevices'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 

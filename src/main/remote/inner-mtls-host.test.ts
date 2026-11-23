@@ -12,6 +12,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import { HostController, type RemoteIntentRouting, type RemoteHistoryPreview } from './host-controller'
 import { createHostController } from './host-controller-factory'
+import { createHostProjectionFixture } from './host-controller-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { InnerMtlsHost } from './inner-mtls-host'
 import { ExecutionTargetRouter } from './execution-targets'
@@ -57,11 +58,12 @@ async function harness(
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
+  const { projection, onLedgerEvent } = createHostProjectionFixture()
   const binding = await createHostController({
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('not authorized'); return cwd },
-    startRun: runProvider, gate: new ProviderOperationGate(),
+    startRun: runProvider, gate: new ProviderOperationGate(), onLedgerEvent,
     readSessionStatus: () => 'not_observed',
     createOutputStore: (directory) => new RunOutputFileStore(directory),
     ...(listCommands ? { listCommands } : {}),
@@ -80,7 +82,7 @@ async function harness(
   const host = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM, ...(executionTargets ? { executionTargets } : {}) })
   const addr = await host.listen()
   cleanups.push(() => host.close())
-  return { identity, controller, caPEM: identity.caCertificatePEM, addr, host }
+  return { identity, controller, projection, caPEM: identity.caCertificatePEM, addr, host }
 }
 
 async function pairDevice(identity: HostIdentity, controller: HostController) {
@@ -89,7 +91,7 @@ async function pairDevice(identity: HostIdentity, controller: HostController) {
   const pair = await controller.authority.begin()
   await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
   const grant = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
-  return { keyPEM, certPEM: grant.certificatePEM, deviceId: grant.deviceId }
+  return { keyPEM, certPEM: grant.certificatePEM, deviceId: grant.deviceId, fingerprint: grant.certificateSHA256 }
 }
 
 async function call(addr: { port: number; host: string }, caPEM: string, certPEM: string, keyPEM: string, request: unknown) {
@@ -131,23 +133,25 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
 
   it('authorizes a paired device by its verified peer certificate and reflects lifecycle', async () => {
     const seen: RemoteIntentRouting[] = []
-    const { identity, controller, caPEM, addr } = await harness(async ({ routing }) => { seen.push(routing) })
+    const { identity, controller, projection, caPEM, addr } = await harness(async ({ routing }) => { seen.push(routing) })
     const device = await pairDevice(identity, controller)
 
-    const submit = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'submit', intentId: randomUUID(), detail: routing({ prompt: 'go' }) })
+    const intentId = randomUUID()
+    const submit = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'submit', intentId, detail: routing({ prompt: 'go' }) })
     expect(submit.status).toBe('recorded')
     await controller.idle()
 
     expect(seen).toEqual([{ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }])
-    const feed = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'poll', cursor: 0 })
-    expect(feed.poll.events.map((e: { kind: string }) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
-    const state = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'runState', runId: submit.runId })
-    expect(state.state).toBe('settled')
+    const receipt = await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'intentStatusAtLog', intentId })
+    expect(receipt.intent).toMatchObject({ runId: submit.runId, state: 'settled' })
+    const lifecycle = projection.listEvents().filter(event => event.runId === submit.runId &&
+      ['run.intent_recorded', 'run.dispatched', 'run.settled'].includes(event.type))
+    expect(lifecycle.map(event => event.type)).toEqual(['run.intent_recorded', 'run.dispatched', 'run.settled'])
   })
 
   it('round-trips Provider permission and editor questions over the authorized device channel', async () => {
     let providerResponse: AgentQuestionResponse | undefined
-    const { identity, controller, caPEM, addr } = await harness(async ({ runId, requestUserInput }) => {
+    const { identity, controller, projection, caPEM, addr } = await harness(async ({ runId, requestUserInput }) => {
       providerResponse = await requestUserInput({
         runId: `provider-${runId}`,
         questionId: 'permission-1',
@@ -165,10 +169,12 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const submit = await call(addr, caPEM, device.certPEM, device.keyPEM, {
       op: 'submit', intentId: randomUUID(), detail: routing({ prompt: 'needs permission' })
     })
-    let questions: AgentQuestionRequest[] = []
+    const openQuestions = projection.handle.db.prepare(
+      "SELECT run_id AS runId, question_id AS questionId FROM orch_p_interaction WHERE run_id = ? AND state = 'open'")
+    let questions: unknown[] = []
     for (let attempt = 0; attempt < 20 && questions.length === 0; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 10))
-      questions = (await call(addr, caPEM, device.certPEM, device.keyPEM, { op: 'questions', runId: submit.runId })).questions ?? []
+      questions = openQuestions.all(submit.runId)
     }
     expect(questions).toEqual([expect.objectContaining({ runId: submit.runId, questionId: 'permission-1' })])
     const response = {
@@ -198,7 +204,7 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const stranger = await identity.issue({ ...verified, deviceId: randomUUID() })
     const reply = await call(addr, caPEM, stranger.certificatePEM, keyPEM, { op: 'submit', intentId: randomUUID(), detail: routing() })
     expect(reply.error).toBe('device_not_authorized')
-    expect(await call(addr, caPEM, stranger.certificatePEM, keyPEM, { op: 'poll', cursor: 0, deviceLabel: 'iPhone 17 Pro' }))
+    expect(await call(addr, caPEM, stranger.certificatePEM, keyPEM, { op: 'projects', deviceLabel: 'iPhone 17 Pro' }))
       .toEqual({ error: 'device_not_authorized' })
     expect(controller.authority.inspectLocal().grants).toEqual([])
     await controller.idle()
@@ -240,8 +246,8 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
     const grant = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
     // Works before revocation.
-    expect((await call(addr, caPEM, grant.certificatePEM, keyPEM, { op: 'poll', cursor: 0 })).poll).toBeDefined()
+    expect((await call(addr, caPEM, grant.certificatePEM, keyPEM, { op: 'projects' })).projects).toBeDefined()
     await controller.authority.revoke(grant.deviceId)
-    expect((await call(addr, caPEM, grant.certificatePEM, keyPEM, { op: 'poll', cursor: 0 })).error).toBe('device_not_authorized')
+    expect((await call(addr, caPEM, grant.certificatePEM, keyPEM, { op: 'projects' })).error).toBe('device_not_authorized')
   })
 })

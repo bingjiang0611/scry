@@ -1,6 +1,6 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { registerTrustedIpcHandler } from '../ipc-trust'
+import { registerTrustCheckedListener } from '../ipc-trust'
 import { registerConversationHandlers } from './conversation'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
@@ -28,7 +28,7 @@ function fixture() {
   }
   const conversationStore = { read: vi.fn(async (_id: string) => undefined as unknown) }
   registerConversationHandlers({
-    handleTrusted: (channel, listener) => registerTrustedIpcHandler(
+    handleTrusted: (channel, listener) => registerTrustCheckedListener(
       { handle: (name, handler) => { handlers.set(name, handler) } },
       channel, () => window, mainFrame.url, listener
     ),

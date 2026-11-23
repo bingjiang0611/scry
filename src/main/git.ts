@@ -2,13 +2,18 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { realpath } from 'node:fs/promises'
 import type { WorkspaceDiffResult } from '../shared/trace'
 import { workspaceDiffCopy } from '../shared/constants/copy'
-import { readWorkspaceNumstat } from '../core/turn-recorder/git.js'
+import { beginGitTurnDiff, readWorkspaceNumstat } from '../core/turn-recorder/git.js'
 import { readWorkspaceDiffSnapshot } from '../core/turn-recorder/git-workspace-snapshot.js'
 import type { WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
 import { registerGitDiffHistoryIpc } from './git-diff-history'
 
 // Electron 与 CLI 共用同一套 Git turn snapshot 实现。
 export * from '../core/turn-recorder/git.js'
+
+/** Both App diff lifetimes use the same recorder-data exclusion from the first snapshot. */
+export function beginAppGitTurnDiff(cwd: string) {
+  return beginGitTurnDiff(cwd, undefined, undefined, undefined, false, undefined, { excludeScryData: true })
+}
 
 export function registerGitDiffIpc(
   register: (channel: string, listener: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown) => void,

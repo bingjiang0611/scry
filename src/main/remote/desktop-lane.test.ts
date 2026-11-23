@@ -40,10 +40,14 @@ describe('desktop lane routing', () => {
       expect(laneForRequest({ op })).toBe('control')
       expect(replayableRequest({ op })).toBe(false)
     }
-    expect(laneForRequest({ op: 'watch' })).toBe('watch')
-    expect(laneForRequest({ op: 'liveRuns' })).toBe('status')
+    expect(laneForRequest({ op: 'subscribe', views: ['detail'] }, 'network')).toBe('watch')
+    expect(laneForRequest({ op: 'subscribe', views: ['activeRuns'] }, 'network')).toBe('status')
     // The App's event feed holds a long poll of its own; nothing may queue behind it.
-    expect(laneForRequest({ op: 'appEvents' })).toBe('events')
+    expect(laneForRequest({ op: 'subscribe', views: ['sessions', 'activeRuns'] }, 'network')).toBe('status')
+    expect(laneForRequest({ op: 'subscribe', views: ['detail'] }, 'network')).toBe('watch')
+    expect(laneForRequest({ op: 'subscribe', views: ['sessions', 'activeRuns'] })).toBe('events')
+    expect(laneForRequest({ op: 'subscribe', views: ['detail'] })).toBe('watch')
+    expect(laneForRequest({ op: 'subscribe', views: ['activeRuns'] })).toBe('events')
     // Primary App execution-target work poll takes its own lane; result replies are writes on control.
     expect(laneForRequest({ op: 'executionTargetWork' })).toBe('targetWork')
     expect(replayableRequest({ op: 'executionTargetWork' })).toBe(true)
@@ -205,6 +209,27 @@ describe('DesktopLanes', () => {
     releaseWatch()
     await expect(watch).resolves.toEqual({ ok: 'watch' })
     lanes.closeAll()
+  })
+
+  it('keeps a forwarded status subscription independent of the Desktop status lane', async () => {
+    let release!: () => void
+    const parked = new Promise<void>(resolve => { release = resolve })
+    const lanes = new DesktopLanes(fakeLaneConnector(async ({ request }) => {
+      const subscriber = (request as { subscriptionId?: string }).subscriptionId
+      if (!subscriber) await parked
+      return { subscriber: subscriber ?? 'desktop' }
+    }))
+    const request = { op: 'subscribe', views: ['sessions', 'activeRuns'] }
+    const desktop = lanes.request('status', 'c1', { endpoint, request, replayable: true })
+    try {
+      await expect(lanes.request('status', 'c1', {
+        endpoint, request: { ...request, subscriptionId: 'phone' }, subscriber: 'phone', replayable: true
+      })).resolves.toEqual({ subscriber: 'phone' })
+    } finally {
+      release()
+      await desktop
+      lanes.closeAll()
+    }
   })
 
   it('rejects a reply without the keep-alive marker instead of falling back to one-shot', async () => {

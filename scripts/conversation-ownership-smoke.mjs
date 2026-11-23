@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -11,7 +12,21 @@ const archiveFile = (userData, cwd, sessionId, providerTurnId, providerId = 'cod
 
 export { archiveFile as conversationFixtureArchivePath }
 
-export function seedConversationOwnership({ userData, cwd, otherCwd }) {
+/** One dispatched run in the event log, written by the production EventSink (see the seed's header). */
+async function seedDispatchedRun({ userData, runId, conversationId, cwd, executable }) {
+  const bundle = join(userData, '..', 'ownership-orchestration-seed.cjs')
+  const esbuild = await import('esbuild')
+  await esbuild.build({ entryPoints: [resolve('scripts/conversation-ownership-orchestration-seed.ts')], bundle: true,
+    platform: 'node', format: 'cjs', external: ['electron', 'better-sqlite3'], outfile: bundle, logLevel: 'silent',
+    // CommonJS so NODE_PATH finds the native SQLite binding; modules that read import.meta.url still get one.
+    define: { 'import.meta.url': '__seedModuleUrl' }, banner: { js: "const __seedModuleUrl = require('node:url').pathToFileURL(__filename).href;" } })
+  const run = spawnSync(executable, [bundle, '--user-data', userData, '--run-id', runId, '--conversation', conversationId, '--cwd', cwd], {
+    encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_PATH: resolve('node_modules') }
+  })
+  if (run.status !== 0) throw new Error(`could not seed the orchestration log: ${run.stderr || run.stdout}`)
+}
+
+export async function seedConversationOwnership({ userData, cwd, otherCwd, executable }) {
   const sessions = [
     { cwd, sessionId: 'owned-native', runId: 'owned-run', providerTurnId: 'owned-turn' },
     { cwd, sessionId: 'owned-archive', runId: 'owned-run', providerTurnId: 'owned-turn' },
@@ -50,7 +65,18 @@ export function seedConversationOwnership({ userData, cwd, otherCwd }) {
       origin: 'dispatch', items: [], commandId: 'orphan-command', intentHash: hash('isolated orphan input'),
       resumeSessionId: null, importedItems: [], omittedItems: [], delivery: { status: 'pending' } }]
   }))
-  return { userData, cwd, otherCwd, ownedPath, orphanPath, protectedPaths: [ownedPath, ...archivePaths.slice(0, 2)],
+  // A second orphan whose run the daemon had dispatched before it went away. The
+  // event log proves the first never reached a Provider, while this one may have.
+  const dispatchedId = randomUUID()
+  const dispatchedBinding = { id: randomUUID(), providerId: 'codex', continuationKey: 'isolated-smoke-home' }
+  const dispatchedPath = join(directory, `${dispatchedId}.json`)
+  writeFileSync(dispatchedPath, JSON.stringify({ version: 1, id: dispatchedId, cwd: otherCwd, revision: 1,
+    bindings: [dispatchedBinding], turns: [{ ordinal: 1, runId: 'dispatched-orphan-run', bindingId: dispatchedBinding.id,
+      origin: 'dispatch', items: [], commandId: 'dispatched-orphan-command', intentHash: hash('isolated dispatched orphan input'),
+      resumeSessionId: null, importedItems: [], omittedItems: [], delivery: { status: 'pending' } }]
+  }))
+  await seedDispatchedRun({ userData, runId: 'dispatched-orphan-run', conversationId: dispatchedId, cwd: otherCwd, executable })
+  return { userData, cwd, otherCwd, ownedPath, orphanPath, dispatchedPath, protectedPaths: [ownedPath, ...archivePaths.slice(0, 2)],
     callsFile: join(userData, 'smoke-provider-calls.jsonl') }
 }
 
@@ -152,9 +178,15 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   assert.equal(calls().length, 0, 'blocked operations must never enter the adapter')
 
   await open('orphan-candidate', otherCwd)
+  // The daemon recovers both orphans before any write (S3: there is no in-process App).
+  // The event log can prove that the pending turn never reached a Provider.
+  // The dispatched orphan remains unknown, so the resume is refused.
+  const recovered = json(orphanPath).turns[0].delivery
+  assert.deepEqual(recovered, { status: 'not_sent', reason: 'orchestration_intent_absent' }, 'only a missing orchestration intent proves not_sent')
+  assert.equal(json(fixture.dispatchedPath).turns[0].delivery.status, 'unknown', 'a dispatched orphan may have reached its Provider')
+  assert.equal(json(fixture.dispatchedPath).revision, 2)
   await deny('orphan unknown resume', start('orphan-candidate', otherCwd), /未确认投递/)
   const orphan = json(orphanPath)
-  assert.equal(orphan.turns[0].delivery.status, 'unknown', 'production startup must recover orphan pending before allowing writes')
   assert.equal(orphan.revision, 2)
   assert.equal(json(ownedPath).revision, 0, 'startup must not rewrite confirmed ownership')
 
@@ -170,18 +202,26 @@ export async function exerciseConversationOwnership(evaluate, fixture) {
   await open('control-native')
   const started = await evaluate(start('control-native', cwd, 'desktop remote write one'))
   assert.ok(started.runId)
+  // The daemon owns the run (S3): its focused snapshot keeps a finished run (done) for
+  // live-trace recovery, so "settled" is: no longer active, and no snapshot or a done one.
+  const settled = `(async () => {
+    const runId = ${JSON.stringify(started.runId)}
+    const active = await window.scry.activeRuns()
+    const snapshot = await window.scry.focusedRunSnapshot()
+    return !active.some(run => run.runId === runId) && (snapshot === null || (snapshot.runId === runId && snapshot.done === true))
+  })()`
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (calls().some(call => call.operation === 'run' && call.identity === started.runId) &&
-      await evaluate('window.scry.focusedRunSnapshot()') === null) break
+    if (calls().some(call => call.operation === 'run' && call.identity === started.runId) && await evaluate(settled)) break
     await delay(50)
   }
   assert.deepEqual(calls(), [{ operation: 'fork', identity: 'control-native' }, { operation: 'run', identity: started.runId }])
-  assert.equal(await evaluate('window.scry.focusedRunSnapshot()'), null, 'positive run must settle before fixture shutdown')
+  assert.equal(await evaluate(settled), true, 'positive run must settle before fixture shutdown')
   await verifyCompletedControl(evaluate, fixture, started.runId)
   assert.deepEqual(evidence(), originalEvidence, 'positive controls changed another conversation source')
   return { test: 'conversation ownership production IPC', blocked, providerCalls: calls(),
     completedRunId: started.runId, completedArchiveAndWorkspaceWriteVerified: true,
     positiveControls: ['unowned fork', 'unowned deletion', 'unowned resume'],
-    orphanRecovery: 'pending -> unknown, revision 1 -> 2', ownedEvidenceUnchanged: true }
+    orphanRecovery: 'pending -> not_sent (no orchestration intent), revision 1 -> 2',
+    dispatchedOrphanRecovery: 'pending -> unknown, revision 1 -> 2', ownedEvidenceUnchanged: true }
 }

@@ -62,7 +62,6 @@ export function confirmPrompt(action: BackgroundServiceAction, activeRuns: numbe
 }
 
 const REASONS: Readonly<Record<string, string>> = {
-  daemon_mode_disabled: '后台服务模式未启用（SCRY_HOST_DAEMON），Agent 运行在 App 进程内，没有后台服务可操作。',
   'lock-unreadable': '无法读取 daemon.lock，不能确认后台服务是哪个进程；没有发送任何信号。',
   'identity-unrecorded': 'daemon.lock 没有记录进程身份，不能安全地停止它；没有发送任何信号。',
   'identity-unreadable': '无法读取 daemon.lock 记录的进程身份，不能确认它就是后台服务；没有发送任何信号。',

@@ -13,10 +13,10 @@ const measuredOperations = new Set([
   'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
   'catalogSnapshot', 'commands', 'desktop', 'desktopDirectory', 'desktopWorkbench',
   'directories', 'directoriesPage', 'executionTargets', 'fileDownload', 'history',
-  'historyPage', 'historyPreview', 'historyTurnsPage', 'historyVersion', 'intentStatus',
+  'historyPage', 'historyPreview', 'historyTurnsPage', 'historyVersion', 'intentStatus', 'intentStatusAtLog',
   'liveRuns', 'output', 'poll', 'projects', 'providers', 'questions', 'resolveIntent',
   'runState', 'sessionAction', 'sessionDelete', 'sessionFork', 'sessions', 'sessionsPage',
-  'stop', 'submit', 'target', 'toolPanel', 'watch', 'workspace'
+  'stop', 'submit', 'submitAtLog', 'subscribe', 'target', 'toolPanel', 'watch', 'watchStream', 'workspace'
 ])
 
 export function remoteOperationLabel(request: unknown): string {

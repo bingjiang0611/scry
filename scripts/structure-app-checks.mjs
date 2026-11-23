@@ -1,4 +1,5 @@
 import { exerciseSideChatApp } from './structure-side-chat-checks.mjs'
+import { verifyNativeModalExit, waitForNativeModalEntrance } from './electron-security-modal-exit.mjs'
 export async function exerciseStructureApp(cdp, evaluate, options = {}) {
   const { mkdtempSync, writeFileSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
@@ -31,29 +32,6 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     const result = await cdp.send('Page.captureScreenshot', { format: 'png' })
     writeFileSync(join(captures, `${name}.png`), Buffer.from(result.data, 'base64'))
   }
-  const settleEntrance = async selector => {
-    // A real hidden App needs a compositor paint to start composited CSS animations.
-    // Do not seek/finish animations or change production timing for screenshots.
-    await cdp.send('Page.captureScreenshot', { format: 'png' })
-    await wait(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); return node && [...node.getAnimations(), ...node.closest('.modal-overlay').getAnimations()].every(a => a.playState === 'finished'); })()`)
-  }
-  const closeModal = async (selector, trigger) => {
-    await evaluate(`{
-      const node = document.querySelector(${JSON.stringify(selector)}).closest('.modal-overlay');
-      window.structureCloseStart = null; window.structureCloseEnd = null; window.structureCloseNativeEnd = false;
-      node.addEventListener('animationend', event => { if (event.target === node) window.structureCloseNativeEnd = true });
-      document.addEventListener('keydown', () => { window.structureCloseStart = performance.now() }, { once: true, capture: true });
-      const observer = new MutationObserver(() => { if (!node.isConnected) { window.structureCloseEnd = performance.now(); observer.disconnect() } });
-      observer.observe(document.body, { childList: true, subtree: true });
-    }`)
-    await key('Escape')
-    check(await evaluate(`document.querySelector(${JSON.stringify(selector)})?.closest('.modal-overlay').dataset.state === 'exit' && document.activeElement === document.querySelector(${JSON.stringify(trigger)})`), 'Exit did not immediately restore its trigger focus')
-    await cdp.send('Page.captureScreenshot', { format: 'png' })
-    await wait(`document.querySelector(${JSON.stringify(selector)}) == null && window.structureCloseEnd != null`)
-    const ms = await evaluate('window.structureCloseEnd - window.structureCloseStart')
-    check(ms <= 250, `Modal DOM exit exceeded the Step03 limit: ${ms}ms`)
-    return { ms, nativeAnimationEnd: await evaluate('window.structureCloseNativeEnd') }
-  }
   const panes = `document.getAnimations().filter(a => a.id === 'scry-pane')`
   const page = `document.getAnimations().find(a => a.id === 'scry-structure')`
   const idle = () => wait(`!${page} && ${panes}.length === 0`)
@@ -76,9 +54,9 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await click(`.settings-pane .segmented button:nth-child(${theme === 'dark' ? 2 : 1})`)
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
     check(await evaluate(`!${page} && window.nativeCaptureCalls === 0`), 'Theme was not immediate live DOM')
-    await settleEntrance('.settings-modal')
+    await waitForNativeModalEntrance(cdp, evaluate, '.settings-modal')
     await capture(`${theme}-settings`)
-    closeTimes.push({ theme, modal: 'settings', ...await closeModal('.settings-modal', '.sb-settings') })
+    closeTimes.push({ theme, modal: 'settings', ...await verifyNativeModalExit(cdp, evaluate, '.settings-modal', '.sb-settings') })
     for (const [title, selector, name] of [
       ['Skills', '.capabilities-modal--skills', 'skills'],
       ['MCP', '.capabilities-modal--mcp', 'mcp'],
@@ -88,9 +66,9 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
       await click(trigger)
       await wait(`document.querySelector('${selector}') != null`)
       check(await evaluate(`document.querySelector('${selector}').getAnimations().some(a => a.effect.getTiming().duration === 250)`), 'Modal entrance timing differs in the production App')
-      await settleEntrance(selector)
+      await waitForNativeModalEntrance(cdp, evaluate, selector)
       await capture(`${theme}-${name}`)
-      closeTimes.push({ theme, modal: name, ...await closeModal(selector, trigger) })
+      closeTimes.push({ theme, modal: name, ...await verifyNativeModalExit(cdp, evaluate, selector, trigger) })
     }
 
     if (await evaluate(`document.querySelector('.panel-pill:not(.summary-pill)').getAttribute('aria-pressed') !== 'true'`)) {

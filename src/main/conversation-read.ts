@@ -2,7 +2,7 @@ import type { ConversationPage } from '../shared/conversation-api'
 import type { LoadedSessionTurn } from '../shared/session-history'
 import type { ConversationServiceDeps } from './conversation-service-deps'
 import type { Conversation } from '../shared/conversation'
-import { conversationSummary } from './conversation-summary'
+import { conversationSummary, withConversationProjection } from './conversation-summary'
 import { sideChatPage } from './conversation-side-chat'
 
 /** One visible history page; 40 turns is the renderer's page size, not a read bound. */
@@ -18,7 +18,7 @@ type ConversationTurn = Conversation['turns'][number]
  * no history entry stays explicitly unavailable instead of being shown as empty.
  */
 export async function readConversationPage(
-  deps: Pick<ConversationServiceDeps, 'store' | 'loadTurns'>,
+  deps: Pick<ConversationServiceDeps, 'store' | 'loadTurns' | 'readProjection'>,
   active: ReadonlySet<string>,
   id: string,
   beforeOrdinal?: number
@@ -29,17 +29,23 @@ export async function readConversationPage(
   if (conversation.deletion) {
     return { summary: conversationSummary(conversation, active), bindings: structuredClone(conversation.bindings), turns: [] }
   }
+  const projection = deps.readProjection?.(conversation)
+  if (projection === null) throw new Error('找不到对话投影')
   const end = beforeOrdinal === undefined
     ? conversation.turns.length
     : Math.max(0, Math.min(beforeOrdinal, conversation.turns.length))
   const start = Math.max(0, end - CONVERSATION_PAGE_TURNS)
   const selected = conversation.turns.slice(start, end)
+  const ordinals = projection?.turnOrdinals(selected.map(turn => turn.runId))
   const history = await loadPageHistory(deps, conversation, selected)
+  const current = deps.readProjection?.(conversation)
+  if (current === null) throw new Error('找不到对话投影')
+  const storedSummary = conversationSummary(conversation, active)
   const turns = selected.map((turn: ConversationTurn) => {
     const binding = conversation.bindings.find((candidate) => candidate.id === turn.bindingId)!
     const loaded = history.get(turn.runId)
     return {
-      ordinal: turn.ordinal,
+      ordinal: ordinals?.get(turn.runId) ?? turn.ordinal,
       runId: turn.runId,
       bindingId: turn.bindingId,
       providerId: binding.providerId,
@@ -50,9 +56,10 @@ export async function readConversationPage(
     }
   })
   return {
-    summary: conversationSummary(conversation, active),
+    summary: projection ? withConversationProjection(storedSummary, projection) : storedSummary,
     bindings: structuredClone(conversation.bindings),
     turns,
+    ...(projection ? { projection: { sessionKey: conversation.id, revSeq: projection.revSeq, ...(projection.legacy ? { legacyBefore: true as const } : {}) } } : {}),
     ...(frozen ? { sideChat: frozen } : {}),
     ...(start > 0 ? { nextBeforeOrdinal: start } : {})
   }

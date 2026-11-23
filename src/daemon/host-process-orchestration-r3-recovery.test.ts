@@ -21,13 +21,11 @@ function setOnEnv() {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -37,8 +35,6 @@ function setOnEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -299,7 +295,7 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
       })
       seedDispatchedRun(sink, runId, canonicalWs, conv.id)
 
-      // Attach Decision G before-settle observer (same contract orchestration-authority wires in on mode)
+      // Attach Decision G before-settle observer (same contract orchestration-authority uses)
       const beforeSetter = (convStore as unknown as {
         setBeforeTurnSettledObserver?: (fn: (info: {
           conversationId: string

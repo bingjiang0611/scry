@@ -13,7 +13,7 @@ import type { ConversationServiceDeps } from './conversation-service-deps'
 import { sendConversationMessage } from './conversation-send'
 import { ConversationStore } from './conversation-store'
 import { assertConversationItems } from './conversation-schema'
-import { conversationSummary, missingDetails, targetRequest } from './conversation-summary'
+import { conversationSummary, missingDetails, targetRequest, withConversationProjection } from './conversation-summary'
 import { parseConversationFork, parseConversationTarget, requestObject, targetFields } from './conversation-request'
 import { forkConversation } from './conversation-fork'
 import { createSideChat, findSideChatCommand, listSideChats, previewSideChat } from './conversation-side-chat'
@@ -90,11 +90,14 @@ export class ConversationService {
     })))
     const conversations = stored
       .filter(conversation => conversation.deletion?.status !== 'complete' || conversation.deletion.retainedCopies)
-      .map((conversation) => {
-        const summary = conversationSummary(conversation, this.active)
+      .flatMap((conversation) => {
+        const projection = this.deps.readProjection?.(conversation)
+        if (projection === null && !conversation.deletion) return []
+        const storedSummary = conversationSummary(conversation, this.active)
+        const summary = projection ? withConversationProjection(storedSummary, projection) : storedSummary
         // A side chat of an adopted Provider session belongs to the adopting conversation's row.
         const adopted = summary.sideChat && adoptingConversationOf(summary.sideChat.source, stored)
-        return adopted && summary.sideChat ? { ...summary, sideChat: { ...summary.sideChat, parentConversationId: adopted.id } } : summary
+        return [adopted && summary.sideChat ? { ...summary, sideChat: { ...summary.sideChat, parentConversationId: adopted.id } } : summary]
       })
     return { conversations, ownedNativeAliases, ownedRunIds }
   }

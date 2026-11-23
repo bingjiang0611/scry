@@ -29,30 +29,33 @@ async function fixture() {
   const setCount = vi.fn()
   const badge = new DockBadgeState(setCount)
   const clearLegacyFocus = vi.fn()
-  const historyController = new AbortController()
-  const invalidateHistory = vi.fn((reason: string) => historyController.abort(new Error(reason)))
+  let daemonDown: string | null = null
   const authorize = vi.fn((path: string) => {
+    if (daemonDown) throw new Error(daemonDown)
     if (path !== first.cwd) throw new Error('unknown project')
     return path
   })
+  const readyListeners: Array<() => void> = []
   const reset = registerConversationAttention({
     handleTrusted: (channel, listener) => registerTrustedIpcHandler(
       { handle: (name, handler) => { handlers.set(name, handler) } }, channel,
       () => window, mainFrame.url, listener
     ),
-    conversationStore: () => store,
+    readConversation: (id) => store.read(id),
     resolveKnownProjectDirectory: authorize,
     getWindow: () => window,
     clearLegacyFocus,
-    invalidateSessionHistoryLoad: invalidateHistory,
-    dockBadge: badge
+    dockBadge: badge,
+    onDaemonReady: (listener) => { readyListeners.push(listener) }
   })
   const invoke = async (id: unknown, sender = event) => handlers.get('conversation:setViewed')!(sender, id)
   const mark = (id: string) => badge.markAttention(conversationAttentionKey(id), {
     windowFocused: false, sessionViewed: false, needsAttention: true
   })
   return { store, first, second, badge, invoke, mark, event, mainFrame, authorize, clearLegacyFocus,
-    reset, historyController, invalidateHistory,
+    reset,
+    setDaemonDown: (reason: string | null) => { daemonDown = reason },
+    daemonReady: () => { for (const listener of readyListeners) listener() },
     setFocused: (value: boolean) => { focused = value } }
 }
 
@@ -101,22 +104,6 @@ describe('managed conversation attention IPC', () => {
     expect(f.badge.isViewed(conversationAttentionKey(f.second.id))).toBe(false)
   })
 
-  it('cancels an older native history load before it can replace the managed viewed identity', async () => {
-    const f = await fixture()
-    let finishNativeRead!: () => void
-    const gate = new Promise<void>(resolve => { finishNativeRead = resolve })
-    const nativeLoad = (async () => {
-      await gate
-      // The production history loader checks this signal before publishing its view.
-      f.historyController.signal.throwIfAborted()
-      f.badge.view('native-session', true)
-    })()
-    await f.invoke(f.first.id)
-    const rejected = expect(nativeLoad).rejects.toThrow('managed conversation selected')
-    finishNativeRead(); await rejected
-    expect(f.badge.isViewed(conversationAttentionKey(f.first.id))).toBe(true)
-  })
-
   it('renderer loss revokes the view and late requests without deleting unread keys', async () => {
     const f = await fixture()
     await f.invoke(f.first.id)
@@ -136,6 +123,38 @@ describe('managed conversation attention IPC', () => {
     release(); await pending
     expect(f.badge.isViewed(conversationAttentionKey(f.first.id))).toBe(false)
     expect(f.badge.count).toBe(2)
+  })
+
+  it('re-applies a view the daemon could not confirm once it is ready again', async () => {
+    const f = await fixture()
+    await f.invoke(f.first.id)
+    // Switching away and back while the daemon is gone releases the old view first.
+    f.setDaemonDown('daemon_unavailable')
+    await expect(f.invoke(f.first.id)).rejects.toThrow('daemon_unavailable')
+    expect(f.badge.isViewed(conversationAttentionKey(f.first.id))).toBe(false)
+    f.setDaemonDown(null)
+    f.daemonReady()
+    // The visible conversation is viewed again, so its next turns are not counted unread.
+    await vi.waitFor(() => expect(f.badge.isViewed(conversationAttentionKey(f.first.id))).toBe(true))
+  })
+
+  it('does not re-apply a view after a newer selection or a refused directory', async () => {
+    const f = await fixture()
+    f.setDaemonDown('daemon_stopping')
+    await expect(f.invoke(f.first.id)).rejects.toThrow('daemon_stopping')
+    await f.invoke(null)
+    f.setDaemonDown(null)
+    f.daemonReady()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(f.badge.isViewed(conversationAttentionKey(f.first.id))).toBe(false)
+    // An unknown project is the daemon's answer, not its absence: nothing is retried.
+    f.setDaemonDown('未知项目')
+    await expect(f.invoke(f.second.id)).rejects.toThrow('未知项目')
+    f.setDaemonDown(null)
+    f.authorize.mockClear()
+    f.daemonReady()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(f.authorize).not.toHaveBeenCalled()
   })
 
   it('rejects untrusted senders, subframes and origins before reading the ledger', async () => {

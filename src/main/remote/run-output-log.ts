@@ -3,16 +3,14 @@
 // the phone renders the actual run output rather than only the ledger lifecycle.
 //
 // Provenance & honesty (CLAUDE.md):
-//   - This is the transcript/trace SHADOW *content*, distinct from the durable
-//     ledger (lifecycle-only, non-secret markers) and from canonical usage. It
-//     carries NO token/cost totals and must never be double-counted as usage;
-//     the ledger `result` marker remains the authority for exact usage.
+//   - This log carries trace content. Lifecycle comes from orchestration
+//     events, and usage comes from the Provider's usage evidence. Neither
+//     output chunks nor the `result` lifecycle marker supply usage totals.
 //   - Content is stored verbatim and may include credentials; every chunk remains byte-bounded.
 //   - Production injects a durable store and retains every exposed chunk.
 //     The bounded in-memory mode remains an explicit fallback for isolated uses/tests;
 //     it appends ONE truthful `truncated` marker instead of silently dropping data.
-//   - Reads are authorized upstream by the verified owner-device peer cert (the
-//     same check as poll); this module holds no trust of its own.
+//   - Reads are authorized upstream by the verified owner-device peer cert.
 
 export type OutputChunkKind = 'output' | 'reasoning' | 'tool' | 'tool_result' | 'truncated'
 

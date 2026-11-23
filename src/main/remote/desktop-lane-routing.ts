@@ -8,11 +8,8 @@ import { DESKTOP_WORKBENCH_READ_METHODS } from '../../shared/desktop-workbench'
 // in-flight write, and a write is never replayed after its bytes were written.
 const writeOperations = new Set([
   'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
-  'executionTargetResult', 'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit'
+  'executionTargetResult', 'resolveIntent', 'sessionAction', 'sessionDelete', 'sessionFork', 'stop', 'submit', 'submitAtLog'
 ])
-const watchOperations = new Set(['watch'])
-const statusOperations = new Set(['liveRuns'])
-const eventOperations = new Set(['appEvents', 'subscribe'])
 const targetWorkOperations = new Set(['executionTargetWork'])
 // Short and idempotent: on the control lane, and replayable because it changes nothing twice.
 const idempotentControlOperations = new Set(['attentionViewed'])
@@ -40,7 +37,7 @@ function terminalLane(op: string, request: unknown): DesktopLaneName | undefined
   return typeof method === 'string' && terminalBulkMethods.has(method) ? 'bulk' : 'terminal'
 }
 
-export function laneForRequest(request: unknown): DesktopLaneName {
+export function laneForRequest(request: unknown, transport: 'local' | 'network' = 'local'): DesktopLaneName {
   const op = request && typeof request === 'object' ? (request as { op?: unknown }).op : undefined
   if (typeof op !== 'string') return 'control'
   const terminal = terminalLane(op, request)
@@ -55,9 +52,11 @@ export function laneForRequest(request: unknown): DesktopLaneName {
   if (workbenchWrite(op, request)) return 'workbench'
   if (writeOperations.has(op)) return 'control'
   if (idempotentControlOperations.has(op)) return 'control'
-  if (watchOperations.has(op)) return 'watch'
-  if (statusOperations.has(op)) return 'status'
-  if (eventOperations.has(op)) return 'events'
+  if (op === 'subscribe') {
+    const { views } = request as { views?: unknown }
+    if (Array.isArray(views) && views.includes('detail')) return 'watch'
+    return transport === 'network' ? 'status' : 'events'
+  }
   if (targetWorkOperations.has(op)) return 'targetWork'
   if (op === 'desktop') {
     const kind = (request as { query?: { kind?: unknown } }).query?.kind

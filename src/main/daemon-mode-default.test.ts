@@ -2,8 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyDaemonModeDefault, assertIsolatedTestUserData, isDefaultAppUserDataDir } from './daemon-mode-default'
-import { daemonModeEnabled } from './daemon-channel-gate'
+import { applyAppStartupGuards, assertIsolatedTestUserData, isDefaultAppUserDataDir, retiredDaemonModeWarning } from './daemon-mode-default'
 import { createLoginStartManager, resolveLoginStartOverrides } from '../daemon/login-start'
 
 const electronMock = vi.hoisted(() => ({
@@ -34,35 +33,30 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-describe('daemon mode default (W15 S3 step 1)', () => {
-  it('turns daemon mode on by default for packaged, dev, and SCRY_TEST_APP=1 when unset', () => {
-    const packaged: NodeJS.ProcessEnv = {}
-    applyDaemonModeDefault(packaged, { isPackaged: true })
-    expect(daemonModeEnabled(packaged)).toBe(true)
-
-    const dev: NodeJS.ProcessEnv = {}
-    applyDaemonModeDefault(dev, { isPackaged: false })
-    expect(daemonModeEnabled(dev)).toBe(true)
-
-    const testPackaged: NodeJS.ProcessEnv = { SCRY_TEST_APP: '1' }
-    applyDaemonModeDefault(testPackaged, { isPackaged: true })
-    expect(daemonModeEnabled(testPackaged)).toBe(true)
-
-    const testDev: NodeJS.ProcessEnv = { SCRY_TEST_APP: '1' }
-    applyDaemonModeDefault(testDev, { isPackaged: false })
-    expect(daemonModeEnabled(testDev)).toBe(true)
+describe('the retired in-process switch (S3)', () => {
+  it('needs no SCRY_HOST_DAEMON at all and says nothing when it is unset or 1', () => {
+    for (const env of [{}, { SCRY_HOST_DAEMON: '1' }, { SCRY_TEST_APP: '1' }] as NodeJS.ProcessEnv[]) {
+      const warn = vi.fn()
+      applyAppStartupGuards(env, undefined, warn)
+      expect(warn).not.toHaveBeenCalled()
+      expect(retiredDaemonModeWarning(env)).toBeUndefined()
+    }
   })
 
-  it('keeps explicit SCRY_HOST_DAEMON=0 as the in-process escape hatch across all build kinds', () => {
-    for (const [env, isPackaged] of [
-      [{ SCRY_HOST_DAEMON: '0' }, true],
-      [{ SCRY_HOST_DAEMON: '0' }, false],
-      [{ SCRY_HOST_DAEMON: '0', SCRY_TEST_APP: '1' }, false],
-      [{ SCRY_HOST_DAEMON: '0', SCRY_TEST_APP: '1' }, true]
-    ] as Array<[NodeJS.ProcessEnv, boolean]>) {
-      applyDaemonModeDefault(env, { isPackaged })
-      expect(daemonModeEnabled(env)).toBe(false)
+  it('ignores an explicit SCRY_HOST_DAEMON=0 with one warning line instead of crashing', () => {
+    for (const env of [{ SCRY_HOST_DAEMON: '0' }, { SCRY_HOST_DAEMON: '0', SCRY_TEST_APP: '1' }, { SCRY_HOST_DAEMON: 'off' }] as NodeJS.ProcessEnv[]) {
+      const before = { ...env }
+      const warn = vi.fn()
+      expect(() => applyAppStartupGuards(env, undefined, warn)).not.toThrow()
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [line] = warn.mock.calls[0] as [string]
+      expect(line).toContain('SCRY_HOST_DAEMON')
+      expect(line).toContain('ignored')
+      expect(line.includes('\n')).toBe(false)
+      // Nothing reads the variable any more, so nothing is rewritten either.
+      expect(env).toEqual(before)
     }
+    expect(retiredDaemonModeWarning({ SCRY_HOST_DAEMON: 'x'.repeat(500) })!.length).toBeLessThan(200)
   })
 })
 
@@ -78,8 +72,7 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
 
     // Both unset and explicit SCRY_HOST_DAEMON=1 must refuse default userData under SCRY_TEST_APP=1.
     for (const env of [{ SCRY_TEST_APP: '1' }, { SCRY_TEST_APP: '1', SCRY_HOST_DAEMON: '1' }] as NodeJS.ProcessEnv[]) {
-      expect(() => applyDaemonModeDefault(env, {
-        isPackaged: false,
+      expect(() => applyAppStartupGuards(env, {
         userDataDir: join(macAppData, 'scry'),
         appDataDir: macAppData,
         appName: 'scry',
@@ -89,14 +82,12 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
 
     // Normal non-test builds are allowed to use default appData/<name>.
     const normalDev: NodeJS.ProcessEnv = {}
-    expect(() => applyDaemonModeDefault(normalDev, {
-      isPackaged: false,
+    expect(() => applyAppStartupGuards(normalDev, {
       userDataDir: join(macAppData, 'scry'),
       appDataDir: macAppData,
       appName: 'scry',
       platform: 'darwin'
     })).not.toThrow()
-    expect(daemonModeEnabled(normalDev)).toBe(true)
 
     // Isolated temp userData passes under SCRY_TEST_APP=1.
     expect(() => assertIsolatedTestUserData({ SCRY_TEST_APP: '1' }, {
@@ -140,12 +131,12 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
     expect(isolatedDeps.daemonStateDirectory).not.toBe(join(defaultUserData, 'daemon'))
 
     electronMock.isPackaged = false
-    const devLoginStart = createAppLoginStartManager({ daemonMode: true, env: { SCRY_TEST_APP: '1' } })
+    const devLoginStart = createAppLoginStartManager({ env: { SCRY_TEST_APP: '1' } })
     expect(devLoginStart.availability()).toEqual({ ok: false, reason: 'unpackaged_build' })
     expect(devLoginStart.canLaunchViaService()).toBe(false)
 
     electronMock.isPackaged = true
-    const packagedLoginStart = createAppLoginStartManager({ daemonMode: true, env: { SCRY_TEST_APP: '1' } })
+    const packagedLoginStart = createAppLoginStartManager({ env: { SCRY_TEST_APP: '1' } })
     expect(packagedLoginStart.availability()).toEqual({ ok: false, reason: 'test_instance' })
     expect(packagedLoginStart.canLaunchViaService()).toBe(false)
     electronMock.isPackaged = false
@@ -161,7 +152,7 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
       platform: 'darwin',
       uid: 501,
       homeDir: root,
-      daemonMode: true,
+      
       env: {
         SCRY_TEST_APP: '1',
         SCRY_TEST_LOGIN_START_LABEL: 'com.scry.daemon.test.w15',

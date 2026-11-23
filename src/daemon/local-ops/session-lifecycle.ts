@@ -6,10 +6,11 @@ import type { DaemonLocalOpGroup } from './deps'
 // main uses. No dialogs here: in daemon mode the App asked the user before it sent the
 // call (session-lifecycle-daemon.ts on the App side).
 export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
-  const { catalog, session, events } = deps
+  const { catalog, session, publishHint } = deps
   const lifecycle = createSessionLifecycle({
     getRuns: deps.runs,
     appSessionStore: catalog.appSessionStore,
+    deleteNativeProjection: deps.links.deleteNativeProjection,
     conversationStore: catalog.conversationStore,
     contextAdmission: session.contextAdmission,
     getStartupManagedRecovery: deps.startupManagedRecovery,
@@ -39,9 +40,9 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
         return deps.links.sideChatCascade.run(scope)
       }
     },
-    publishDataUpdated: (event) => events.append({ kind: 'data', event }),
+    publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
     // The archived purge's real count, forwarded to the App's window as in process.
-    publishDeleteProgress: (progress) => events.append({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
+    publishDeleteProgress: (progress) => publishHint({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
   })
   deps.links.deleteOneSession = (request, options) => lifecycle.deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof lifecycle.deleteOneSession>[1])
   deps.links.sessionRefFromRequest = (value) => lifecycle.sessionRefFromRequest(value)

@@ -12,7 +12,7 @@ vi.mock('../../main/bootstrap/trust', () => ({
 const { mcpLocalOps } = await import('./mcp')
 
 function group(url: string) {
-  const events = { append: vi.fn() }
+  const publishHint = vi.fn()
   const providerRegistry = {
     reauthenticateMcp: vi.fn(async (_context: unknown, _target: string, _execution: unknown, hooks: { openExternal(url: string): Promise<void> }) => {
       await hooks.openExternal(url)
@@ -23,22 +23,22 @@ function group(url: string) {
     providers: { providerRegistry },
     session: { withProviderOperation: async (_id: unknown, operation: () => unknown) => operation(), canonicalProviderCwd: (cwd?: string) => cwd ?? '', providerOperationGate: new ProviderOperationGate() },
     workspace: { homeDir: '/home/u' },
-    events,
+    publishHint,
     runs: () => ({ activeStates: () => [] })
   } as never)
-  return { ops, events, providerRegistry }
+  return { ops, publishHint, providerRegistry }
 }
 
 describe('daemon MCP re-auth', () => {
   it('hands a safe OAuth page to the App on the event feed', async () => {
-    const { ops, events } = group('https://auth.example.com/authorize')
+    const { ops, publishHint } = group('https://auth.example.com/authorize')
     await expect(ops['agent:reauthenticateMcp']!({ context: { providerId: 'codex', cwd: '/w' }, targetId: 'srv' })).resolves.toMatchObject({ state: 'ready' })
-    expect(events.append).toHaveBeenCalledWith({ kind: 'oauth', url: 'https://auth.example.com/authorize' })
+    expect(publishHint).toHaveBeenCalledWith({ kind: 'oauth', url: 'https://auth.example.com/authorize' })
   })
 
   it('refuses an unsafe page before anything reaches the App', async () => {
-    const { ops, events } = group('http://evil.example.com/authorize')
+    const { ops, publishHint } = group('http://evil.example.com/authorize')
     await expect(ops['agent:reauthenticateMcp']!({ context: { providerId: 'codex', cwd: '/w' }, targetId: 'srv' })).rejects.toThrow('不安全的 MCP OAuth 授权地址')
-    expect(events.append).not.toHaveBeenCalled()
+    expect(publishHint).not.toHaveBeenCalled()
   })
 })

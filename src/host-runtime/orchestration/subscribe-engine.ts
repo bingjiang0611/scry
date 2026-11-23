@@ -1,47 +1,32 @@
 import type {
   SubscribeActiveRunRow,
   SubscribeEventItem,
+  SubscribeHistoryPage,
   SubscribeReply,
   SubscribeRequest,
-  SubscribeSessionRow,
+  SubscribeHint,
+  SubscribeSessionRef,
   SubscribeSnapshot,
   SubscribeView
 } from '../../shared/orchestration-subscribe'
+import type { AgentQuestionRequest } from '../../shared/runtime'
+import type { HostAdminNotice } from '../../shared/host-admin'
 import type { EventSink } from './event-sink'
+import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
-import { mapRunRow, mapSessionRow, mapTurnRow } from './projection-mappers'
+import { mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
-import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow } from './types'
+import { deviceEventPayload, deviceHintKey, deviceOutcome, deviceTurn } from './subscribe-device-fields'
+import { readSubscribedRuns } from './subscribe-active-runs'
+import { projectSubscribeSession, readSessionsSnapshot } from './subscribe-sessions'
+import { matchesViews } from './subscribe-view-match'
+import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type RunProjectionRow, type SessionProjectionRow } from './types'
 
 export const SUBSCRIBE_MAX_WAIT_MS = 25_000
 export const SUBSCRIBE_MAX_SCAN_GAP = 4_096
 export const SUBSCRIBE_MAX_EVENTS = 128
 export const SUBSCRIBE_MAX_EVENT_BYTES = 256 * 1024
-export const SUBSCRIBE_ACTIVE_RUN_RETENTION_MS = 24 * 60 * 60 * 1000
-export const SUBSCRIBE_TERMINAL_RUN_SNAPSHOT_LIMIT = 256
 const DEFAULT_SESSIONS_PAGE_SIZE = 200
-
-const SESSION_VIEW_EVENTS = new Set([
-  'session.created',
-  'session.renamed',
-  'session.pinned',
-  'session.unpinned',
-  'session.archived',
-  'session.restored',
-  'session.deleted',
-  'session.forked',
-  'session.discovered',
-  'session.imported',
-  'turn.began',
-  'turn.delivery',
-  'run.intent_recorded',
-  'run.settled',
-  'run.failed',
-  'run.cancelled',
-  'run.interrupted',
-  'run.question_opened',
-  'run.question_closed'
-])
 
 export interface SubscribeEngineOptions {
   sink: EventSink
@@ -49,41 +34,17 @@ export interface SubscribeEngineOptions {
   hostId: string | (() => string)
   authorizePeer: (peerCertSHA256: string) => void
   grantScope: (peerCertSHA256: string) => 'local' | 'remote'
-  isRemoteCwdAuthorized?: (canonicalCwd: string) => boolean
+  remoteCwdAuthorizer?: () => (canonicalCwd: string) => boolean
+  remoteHostNotices?: () => HostAdminNotice[]
+  readFirstPage?: (session: SessionProjectionRow, signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
+  readRemoteFirstPage?: (peer: string, session: SessionProjectionRow, format?: SubscribeRequest['historyFormat'], signal?: AbortSignal) => Promise<SubscribeHistoryPage | null>
+  runQuestions?: (runId: string) => AgentQuestionRequest[] | undefined
+  scans?: CatalogSubscriptionScans
   sessionsPageSize?: number
   clock?: () => number
 }
 
-interface SessionsKeysetCursor {
-  archivedAt: number | null
-  ts: number
-  sessionKey: string
-}
-
-function encodeSessionsCursor(cursor: SessionsKeysetCursor): string {
-  return Buffer.from(JSON.stringify([cursor.archivedAt, cursor.ts, cursor.sessionKey]), 'utf8').toString('base64url')
-}
-
-function decodeSessionsCursor(raw: string): SessionsKeysetCursor | undefined {
-  try {
-    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown
-    if (!Array.isArray(parsed) || parsed.length !== 3) return undefined
-    const [archivedAt, ts, sessionKey] = parsed
-    if ((archivedAt !== null && !Number.isSafeInteger(archivedAt)) || !Number.isSafeInteger(ts) || typeof sessionKey !== 'string') {
-      return undefined
-    }
-    return { archivedAt: archivedAt as number | null, ts: ts as number, sessionKey }
-  } catch {
-    return undefined
-  }
-}
-
-function matchesViews(event: OrchestrationEventRow, views: ReadonlySet<SubscribeView>, detailSessionKey?: string): boolean {
-  if (views.has('activeRuns') && event.type.startsWith('run.')) return true
-  if (views.has('sessions') && SESSION_VIEW_EVENTS.has(event.type)) return true
-  if (views.has('detail') && detailSessionKey && event.sessionKey === detailSessionKey) return true
-  return false
-}
+type SubscribeAccess = { scope: 'local' | 'remote'; canReadCwd: (cwd: string | null) => boolean }
 
 /**
  * Orchestration-backed `subscribe` read engine (`P4-orchestration-protocol.md` §5.1–§5.5).
@@ -96,7 +57,12 @@ export class SubscribeEngine {
   readonly #hostId: () => string
   readonly #authorizePeer: (peer: string) => void
   readonly #grantScope: (peer: string) => 'local' | 'remote'
-  readonly #isRemoteCwdAuthorized: (cwd: string) => boolean
+  readonly #remoteCwdAuthorizer: NonNullable<SubscribeEngineOptions['remoteCwdAuthorizer']>
+  readonly #remoteHostNotices?: () => HostAdminNotice[]
+  readonly #readFirstPage: SubscribeEngineOptions['readFirstPage']
+  readonly #readRemoteFirstPage: SubscribeEngineOptions['readRemoteFirstPage']
+  readonly #runQuestions: SubscribeEngineOptions['runQuestions']
+  readonly #scans: CatalogSubscriptionScans | undefined
   readonly #sessionsPageSize: number
   readonly #clock: () => number
 
@@ -106,44 +72,88 @@ export class SubscribeEngine {
     this.#hostId = typeof options.hostId === 'function' ? options.hostId : () => options.hostId as string
     this.#authorizePeer = options.authorizePeer
     this.#grantScope = options.grantScope
-    this.#isRemoteCwdAuthorized = options.isRemoteCwdAuthorized ?? (() => false)
+    this.#remoteCwdAuthorizer = options.remoteCwdAuthorizer ?? (() => () => false)
+    this.#remoteHostNotices = options.remoteHostNotices
+    this.#readFirstPage = options.readFirstPage
+    this.#readRemoteFirstPage = options.readRemoteFirstPage
+    this.#runQuestions = options.runQuestions
+    this.#scans = options.scans
     this.#sessionsPageSize = Math.max(1, Math.min(500, options.sessionsPageSize ?? DEFAULT_SESSIONS_PAGE_SIZE))
     this.#clock = options.clock ?? (() => Date.now())
   }
 
+  #accessFor(peer: string): SubscribeAccess {
+    this.#authorizePeer(peer)
+    const scope = this.#grantScope(peer)
+    if (scope === 'local') return { scope, canReadCwd: () => true }
+    const allowed = this.#remoteCwdAuthorizer()
+    return { scope, canReadCwd: (cwd) => !!cwd && allowed(cwd) }
+  }
+
   async subscribe(peer: string, request: SubscribeRequest, signal?: AbortSignal): Promise<SubscribeReply> {
-    this.#hub.beginRead()
+    let access = this.#accessFor(peer)
+    const localRead = access.scope === 'local'
+    if (localRead) this.#hub.beginRead()
+    let detachCatalog: (() => void) | undefined
+    let detachDetail: (() => void) | undefined
     try {
       const waitMs = Math.min(Math.max(0, request.waitMs), SUBSCRIBE_MAX_WAIT_MS)
       const deadline = this.#clock() + waitMs
       const views = new Set<SubscribeView>(request.views)
+      const hintPeer = access.scope === 'remote' ? deviceHintKey(peer, request) : peer
+      const readsHints = !request.historyOnly && (access.scope === 'local' || views.has('activeRuns') || views.has('detail'))
+      if (this.#scans && (views.has('sessions') || views.has('detail'))) {
+        const opening = !request.known || request.known.hostId !== this.#hostId() ||
+          request.known.logId !== this.#sink.getMeta('log_id')
+        if (views.has('sessions')) detachCatalog = this.#scans.sessions(opening && !request.sessionsCursor)
+        if (views.has('detail') && request.session && this.#detailSession(access, request.session)) {
+          detachDetail = this.#scans.detail(request.session.sessionKey, opening || (access.scope === 'local' && request.detailWatch === 'open'))
+        }
+      }
 
       for (;;) {
-        this.#authorizePeer(peer)
-        const scope = this.#grantScope(peer)
-        const reply = this.#evaluateOnce(peer, scope, views, request)
+        const reply = this.#evaluateOnce(hintPeer, access, views, request)
+        if (reply.mode === 'snapshot' && request.session && reply.snapshot.detail &&
+            (access.scope === 'local' ? this.#readFirstPage : this.#readRemoteFirstPage)) {
+          const session = this.#detailSession(access, request.session)
+          if (!session) return reply
+          const firstPage = access.scope === 'local' ? await this.#readFirstPage!(session, signal)
+            : await this.#readRemoteFirstPage!(peer, session, request.historyFormat, signal)
+          signal?.throwIfAborted()
+          const currentAccess = this.#accessFor(peer)
+          const current = this.#detailSession(currentAccess, request.session)
+          if (currentAccess.scope !== access.scope || !current || current.cwd !== session.cwd ||
+              current.provider !== session.provider || current.profile !== session.profile ||
+              current.catalog?.nativeSessionId !== session.catalog?.nativeSessionId) {
+            return this.#evaluateOnce(hintPeer, currentAccess, views, { ...request, known: undefined })
+          }
+          if (firstPage) reply.snapshot.detail.firstPage = firstPage
+          return reply
+        }
         if (reply.mode !== 'idle' || (reply.hints && reply.hints.length > 0)) return reply
 
         const remaining = deadline - this.#clock()
         if (remaining <= 0 || this.#hub.closed || signal?.aborted) return reply
 
         const observedCommit = this.#hub.commitSeq
-        if (!this.#hub.hasPendingHints(peer) && observedCommit <= reply.seq) {
+        if ((!readsHints || !this.#hub.hasPendingHints(hintPeer, localRead)) && observedCommit <= reply.seq) {
           await this.#hub.waitForWake(remaining, signal)
         }
         if (this.#hub.closed || signal?.aborted) {
-          this.#authorizePeer(peer)
-          return this.#evaluateOnce(peer, this.#grantScope(peer), views, request)
+          return this.#evaluateOnce(hintPeer, this.#accessFor(peer), views, request)
         }
+        access = this.#accessFor(peer)
       }
     } finally {
-      this.#hub.endRead()
+      detachCatalog?.()
+      detachDetail?.()
+      if (localRead) this.#hub.endRead()
     }
   }
 
   #evaluateOnce(
     peer: string,
-    scope: 'local' | 'remote',
+    access: SubscribeAccess,
     views: ReadonlySet<SubscribeView>,
     request: SubscribeRequest
   ): SubscribeReply {
@@ -166,16 +176,16 @@ export class SubscribeEngine {
       currentSeq - known.seq > SUBSCRIBE_MAX_SCAN_GAP
 
     if (mustSnapshot) {
-      return this.#buildSnapshotReply(peer, scope, views, request, hostId, logId, currentSeq)
+      return this.#buildSnapshotReply(peer, access, views, request, hostId, logId, currentSeq)
     }
 
     const eventSet = request.eventSet ?? 1
     if (currentSeq > known.seq) {
-      const scan = this.#scanIncrementalEvents(scope, views, request, known.seq, currentSeq, eventSet)
+      const scan = this.#scanIncrementalEvents(access, views, request, known.seq, currentSeq, eventSet)
       if (scan.overflow) {
-        return this.#buildSnapshotReply(peer, scope, views, request, hostId, logId, currentSeq)
+        return this.#buildSnapshotReply(peer, access, views, request, hostId, logId, currentSeq)
       }
-      const hints = this.#hub.drainHints(peer, false)
+      const hints = this.#drainHints(peer, access, views, request, false)
       if (scan.events.length > 0) {
         return {
           hostId,
@@ -195,7 +205,7 @@ export class SubscribeEngine {
       }
     }
 
-    const hints = this.#hub.drainHints(peer, false)
+    const hints = this.#drainHints(peer, access, views, request, false)
     return {
       hostId,
       logId,
@@ -206,7 +216,7 @@ export class SubscribeEngine {
   }
 
   #scanIncrementalEvents(
-    scope: 'local' | 'remote',
+    access: SubscribeAccess,
     views: ReadonlySet<SubscribeView>,
     request: SubscribeRequest,
     afterSeq: number,
@@ -221,12 +231,15 @@ export class SubscribeEngine {
     const events: SubscribeEventItem[] = []
     let bytes = 0
     let scannedSeq = upToSeq
-    const detailSessionKey = request.session?.sessionKey
+    const detailRef = request.session
+    const detailSessionKey = detailRef && (
+      access.scope === 'local' || !this.#sink.getSession(detailRef.sessionKey) || this.#detailSession(access, detailRef)
+    ) ? detailRef.sessionKey : undefined
 
     for (const raw of rows) {
       const event = mapEventRow(raw)
       if (eventSet <= 1 && !ORCHESTRATION_EVENT_TYPES.has(event.type)) continue
-      if (!this.#isEventVisible(scope, event)) continue
+      if (!access.canReadCwd(event.cwd)) continue
       if (!matchesViews(event, views, detailSessionKey)) continue
 
       const item: SubscribeEventItem = {
@@ -237,8 +250,11 @@ export class SubscribeEngine {
         ...(event.sessionKey !== null ? { sessionKey: event.sessionKey } : {}),
         ...(event.runId !== null ? { runId: event.runId } : {}),
         ...(event.cwd !== null ? { cwd: event.cwd } : {}),
-        payload: this.#projectEventPayload(scope, event),
-        ...(event.evidence !== null ? { evidence: event.evidence } : {})
+        payload: access.scope === 'local' ? event.payload : deviceEventPayload(event.payload, access.canReadCwd),
+        ...(access.scope === 'remote' ? this.#deviceProjections(access, views, event)
+          : event.type.startsWith('run.question_') && event.runId
+            ? this.#localQuestionProjection(access, event.runId) : {}),
+        ...(access.scope === 'local' && event.evidence !== null ? { evidence: event.evidence } : {})
       }
       const itemBytes = Buffer.byteLength(JSON.stringify(item), 'utf8')
       if (events.length >= SUBSCRIBE_MAX_EVENTS || bytes + itemBytes > SUBSCRIBE_MAX_EVENT_BYTES) {
@@ -254,7 +270,7 @@ export class SubscribeEngine {
 
   #buildSnapshotReply(
     peer: string,
-    scope: 'local' | 'remote',
+    access: SubscribeAccess,
     views: ReadonlySet<SubscribeView>,
     request: SubscribeRequest,
     hostId: string,
@@ -263,15 +279,19 @@ export class SubscribeEngine {
   ): SubscribeReply {
     const snapshot: SubscribeSnapshot = {}
     if (views.has('sessions')) {
-      snapshot.sessions = this.#readSessionsSnapshot(scope, request.sessionsCursor)
+      snapshot.sessions = readSessionsSnapshot(this.#sink.handle.db, access.canReadCwd, access.scope, this.#sessionsPageSize, request.sessionsCursor)
     }
     if (views.has('activeRuns')) {
-      snapshot.activeRuns = { rows: this.#readActiveRunsSnapshot(scope) }
+      const tracked = access.scope === 'local' ? request.trackedRunIds : undefined
+      const rows = readSubscribedRuns(this.#sink, this.#clock(), tracked)
+        .filter(run => access.canReadCwd(run.cwd))
+        .map(run => this.#projectRun(run, access, Boolean(tracked)))
+      snapshot.activeRuns = { rows }
     }
-    if (views.has('detail') && request.session) {
-      snapshot.detail = this.#readDetailSnapshot(scope, request.session.sessionKey)
+    if (views.has('detail') && request.session && !(access.scope === 'local' && request.detailWatch)) {
+      snapshot.detail = this.#readDetailSnapshot(access, this.#detailSession(access, request.session))
     }
-    const hints = this.#hub.drainHints(peer, true, !request.known)
+    const hints = request.sessionsCursor || request.trackedRunIds ? [] : this.#drainHints(peer, access, views, request, true, !request.known)
     return {
       hostId,
       logId,
@@ -282,174 +302,127 @@ export class SubscribeEngine {
     }
   }
 
-  #readSessionsSnapshot(
-    scope: 'local' | 'remote',
-    cursorToken?: string
-  ): NonNullable<SubscribeSnapshot['sessions']> {
-    const db = this.#sink.handle.db
-    const cursor = cursorToken ? decodeSessionsCursor(cursorToken) : undefined
-    const allRows = (
-      cursor
-        ? cursor.archivedAt === null
-          ? db
-              .prepare(
-                `SELECT * FROM orch_p_session
-                 WHERE (archived_at IS NULL AND (ts < ? OR (ts = ? AND session_key > ?)))
-                    OR archived_at IS NOT NULL
-                 ORDER BY archived_at ASC, ts DESC, session_key ASC`
-              )
-              .all(cursor.ts, cursor.ts, cursor.sessionKey)
-          : db
-              .prepare(
-                `SELECT * FROM orch_p_session
-                 WHERE archived_at > ?
-                    OR (archived_at = ? AND (ts < ? OR (ts = ? AND session_key > ?)))
-                 ORDER BY archived_at ASC, ts DESC, session_key ASC`
-              )
-              .all(cursor.archivedAt, cursor.archivedAt, cursor.ts, cursor.ts, cursor.sessionKey)
-        : scope === 'local'
-          ? db
-              .prepare('SELECT * FROM orch_p_session ORDER BY archived_at ASC, ts DESC, session_key ASC LIMIT ?')
-              .all(this.#sessionsPageSize + 1)
-          : db
-              .prepare('SELECT * FROM orch_p_session ORDER BY archived_at ASC, ts DESC, session_key ASC')
-              .all()
-    ) as Array<Record<string, unknown>>
-
-    const visible: SubscribeSessionRow[] = []
-    let hasMore = false
-    for (const raw of allRows) {
-      const mapped = mapSessionRow(raw)
-      if (!this.#isCwdVisible(scope, mapped.cwd)) continue
-      if (visible.length >= this.#sessionsPageSize) {
-        hasMore = true
-        break
-      }
-      visible.push({
-        sessionKey: mapped.sessionKey,
-        conversationId: mapped.conversationId,
-        provider: mapped.provider,
-        profile: mapped.profile,
-        cwd: mapped.cwd,
-        title: mapped.title,
-        ts: mapped.ts,
-        pinnedAt: mapped.pinnedAt,
-        archivedAt: mapped.archivedAt,
-        lastRunId: mapped.lastRunId,
-        lastRunOutcome: mapped.lastRunOutcome,
-        activeRunId: mapped.activeRunId,
-        pendingQuestions: mapped.pendingQuestions,
-        legacy: mapped.legacy,
-        revSeq: mapped.revSeq
-      })
+  #projectRun(run: RunProjectionRow, access: SubscribeAccess, tracked = false): SubscribeActiveRunRow {
+    const liveMeta = this.#hub.liveRunMeta(run.runId)
+    const localMeta = access.scope === 'local' ? liveMeta : undefined
+    const recoveredAppRunId = tracked && access.scope === 'local' ? run.appRunId : undefined
+    const appRunId = localMeta?.scryRunId ?? recoveredAppRunId
+    const session = run.sessionKey && (access.scope === 'remote' || (recoveredAppRunId && !liveMeta?.externalSessionId))
+      ? this.#sink.getSession(run.sessionKey) : undefined
+    const externalSessionId = liveMeta?.externalSessionId ??
+      (session && access.canReadCwd(session.cwd) ? session.catalog?.nativeSessionId : undefined)
+    const questions = liveMeta?.scryRunId ? this.#runQuestions?.(liveMeta.scryRunId)?.filter(request =>
+      this.#sink.getInteraction(run.runId, request.questionId)?.state === 'open') : undefined
+    const conversation = access.scope === 'local' && questions?.length && run.sessionKey ? this.#sink.getSession(run.sessionKey)?.conversationId : undefined
+    const promptPreview =
+      access.scope === 'remote' && run.promptPreview
+        ? run.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
+        : run.promptPreview
+    return {
+      runId: run.runId,
+      ...(appRunId ? { scryRunId: appRunId } : {}),
+      ...(access.scope === 'remote' && liveMeta?.scryRunId ? { traceRunId: liveMeta.scryRunId } : {}),
+      ...(questions?.length ? { questions } : {}),
+      ...(conversation ? { isConversationRun: true } : {}),
+      ...(localMeta?.admitted || recoveredAppRunId ? { admitted: true } : {}),
+      ...(externalSessionId ? { externalSessionId } : {}),
+      ...(liveMeta?.workspaceProgress ? { workspaceProgress: liveMeta.workspaceProgress } : {}),
+      sessionKey: run.sessionKey,
+      scope: run.scope,
+      origin: run.origin,
+      provider: run.provider,
+      profile: run.profile,
+      cwd: run.cwd,
+      promptPreview,
+      lifecycle: run.lifecycle,
+      stopState: run.stopState,
+      outputSeq: liveMeta ? Math.max(liveMeta.outputSeq, run.outputSeq ?? 0) : run.outputSeq,
+      intentSeq: run.intentSeq,
+      settledAt: run.settledAt,
+      recoveredAt: run.recoveredAt,
+      outcome: access.scope === 'remote' ? deviceOutcome(run.outcome) : run.outcome,
+      revSeq: run.revSeq
     }
-
-    let total: number | 'unavailable' = 'unavailable'
-    if (scope === 'local') {
-      total = Number((db.prepare('SELECT COUNT(*) AS c FROM orch_p_session').get() as { c: number }).c)
-    } else {
-      const cwds = db.prepare('SELECT cwd FROM orch_p_session').all() as Array<{ cwd: string | null }>
-      total = cwds.filter((row) => this.#isCwdVisible('remote', row.cwd)).length
-    }
-
-    const last = visible[visible.length - 1]
-    const nextCursor =
-      hasMore && last
-        ? encodeSessionsCursor({ archivedAt: last.archivedAt, ts: last.ts, sessionKey: last.sessionKey })
-        : undefined
-    return { rows: visible, total, ...(nextCursor ? { nextCursor } : {}) }
   }
 
-  #readActiveRunsSnapshot(scope: 'local' | 'remote'): SubscribeActiveRunRow[] {
-    const db = this.#sink.handle.db
-    const cutoff = this.#clock() - SUBSCRIBE_ACTIVE_RUN_RETENTION_MS
-    // Every non-terminal run is always included (a live run must never be pushed out
-    // of the snapshot by recent terminal ones); only the 24 h terminal tail is capped.
-    const live = db
-      .prepare(
-        `SELECT * FROM orch_p_run
-         WHERE lifecycle IN ('recorded', 'admitted', 'dispatched')
-         ORDER BY intent_seq DESC`
-      )
-      .all() as Array<Record<string, unknown>>
-    const recentTerminal = db
-      .prepare(
-        `SELECT * FROM orch_p_run
-         WHERE lifecycle NOT IN ('recorded', 'admitted', 'dispatched')
-           AND COALESCE(settled_at, recovered_at, 0) >= ?
-         ORDER BY intent_seq DESC
-         LIMIT ?`
-      )
-      .all(cutoff, SUBSCRIBE_TERMINAL_RUN_SNAPSHOT_LIMIT) as Array<Record<string, unknown>>
-    const rows = [...live, ...recentTerminal]
+  #localQuestionProjection(access: SubscribeAccess, runId: string): { runRow?: SubscribeActiveRunRow } {
+    const run = this.#sink.getRun(runId)
+    return run ? { runRow: this.#projectRun(run, access) } : {}
+  }
 
-    const result: SubscribeActiveRunRow[] = []
-    for (const raw of rows) {
-      const run = mapRunRow(raw)
-      if (!this.#isCwdVisible(scope, run.cwd)) continue
-      const liveMeta = scope === 'local' ? this.#hub.liveRunMeta(run.runId) : undefined
-      const promptPreview =
-        scope === 'remote' && run.promptPreview
-          ? run.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS)
-          : run.promptPreview
-      result.push({
-        runId: run.runId,
-        ...(liveMeta?.scryRunId ? { scryRunId: liveMeta.scryRunId } : {}),
-        ...(liveMeta?.admitted ? { admitted: true } : {}),
-        ...(liveMeta?.externalSessionId ? { externalSessionId: liveMeta.externalSessionId } : {}),
-        sessionKey: run.sessionKey,
-        scope: run.scope,
-        origin: run.origin,
-        provider: run.provider,
-        profile: run.profile,
-        cwd: run.cwd,
-        promptPreview,
-        lifecycle: run.lifecycle,
-        stopState: run.stopState,
-        outputSeq: liveMeta ? Math.max(liveMeta.outputSeq, run.outputSeq ?? 0) : run.outputSeq,
-        intentSeq: run.intentSeq,
-        settledAt: run.settledAt,
-        recoveredAt: run.recoveredAt,
-        outcome: run.outcome,
-        revSeq: run.revSeq
-      })
+  #deviceProjections(
+    access: SubscribeAccess, views: ReadonlySet<SubscribeView>, event: OrchestrationEventRow
+  ): Pick<SubscribeEventItem, 'sessionRow' | 'runRow'> {
+    const result: Pick<SubscribeEventItem, 'sessionRow' | 'runRow'> = {}
+    if (views.has('sessions') && event.sessionKey) {
+      const session = this.#sink.getSession(event.sessionKey)
+      if (session && access.canReadCwd(session.cwd)) {
+        result.sessionRow = projectSubscribeSession(session, access.canReadCwd, access.scope)
+      } else if (event.type === 'session.deleted' || event.type === 'session.withdrawn') {
+        result.sessionRow = null
+      }
+    }
+    if ((views.has('activeRuns') || views.has('detail')) && event.runId) {
+      const run = this.#sink.getRun(event.runId)
+      if (run && access.canReadCwd(run.cwd)) result.runRow = this.#projectRun(run, access)
     }
     return result
   }
 
-  #readDetailSnapshot(scope: 'local' | 'remote', sessionKey: string): NonNullable<SubscribeSnapshot['detail']> {
-    const db = this.#sink.handle.db
-    const session = this.#sink.getSession(sessionKey)
-    if (session && !this.#isCwdVisible(scope, session.cwd)) {
-      return { turns: [] }
+  #detailSession(access: SubscribeAccess, ref: SubscribeSessionRef): SessionProjectionRow | undefined {
+    const session = this.#sink.getSession(ref.sessionKey)
+    if (!session || !access.canReadCwd(session.cwd)) return undefined
+    if ((ref.cwd !== undefined && ref.cwd !== session.cwd) ||
+        (ref.providerId !== undefined && ref.providerId !== session.provider) ||
+        (ref.agentProfileId !== undefined && ref.agentProfileId !== session.profile) ||
+        (ref.externalSessionId !== undefined && ref.externalSessionId !== (session.catalog ? session.catalog.nativeSessionId : session.sessionKey))) {
+      return undefined
     }
+    return session
+  }
+
+  #readDetailSnapshot(access: SubscribeAccess, session: SessionProjectionRow | undefined): NonNullable<SubscribeSnapshot['detail']> {
+    if (!session) return { turns: [] }
+    const db = this.#sink.handle.db
     const rows = db
       .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? ORDER BY ordinal ASC')
-      .all(sessionKey) as Array<Record<string, unknown>>
-    const turns = rows.map(mapTurnRow)
+      .all(session.sessionKey) as Array<Record<string, unknown>>
+    const turns = rows.map(raw => {
+      const turn = mapTurnRow(raw)
+      return access.scope === 'local' ? turn : deviceTurn(turn)
+    })
     return {
       turns,
-      ...(session?.legacy ? { legacyBefore: true as const } : {})
+      ...(session.legacy ? { legacyBefore: true as const } : {})
     }
   }
 
-  #isCwdVisible(scope: 'local' | 'remote', cwd: string | null): boolean {
-    if (scope === 'local') return true
-    if (!cwd) return false
-    return this.#isRemoteCwdAuthorized(cwd)
-  }
-
-  #isEventVisible(scope: 'local' | 'remote', event: OrchestrationEventRow): boolean {
-    if (scope === 'local') return true
-    if (event.type === 'session.deleted') return this.#isCwdVisible('remote', event.cwd)
-    return this.#isCwdVisible('remote', event.cwd)
-  }
-
-  #projectEventPayload(scope: 'local' | 'remote', event: OrchestrationEventRow): Record<string, unknown> {
-    if (scope === 'local') return event.payload
-    if (typeof event.payload.promptPreview === 'string' && event.payload.promptPreview.length > PROMPT_PREVIEW_MAX_CHARS) {
-      return { ...event.payload, promptPreview: event.payload.promptPreview.slice(0, PROMPT_PREVIEW_MAX_CHARS) }
+  #drainHints(
+    peer: string, access: SubscribeAccess, views: ReadonlySet<SubscribeView>,
+    request: SubscribeRequest, state: boolean, fresh?: boolean
+  ): SubscribeHint[] {
+    if (request.historyOnly || (access.scope === 'remote' && !views.has('activeRuns') && !views.has('detail'))) return []
+    const pending = this.#hub.drainHints(peer, state && access.scope === 'local', fresh, access.scope === 'local')
+    if (access.scope === 'local') return pending
+    const hints: SubscribeHint[] = []
+    const detail = views.has('detail')
+    if (state && !detail) {
+      for (const notice of this.#remoteHostNotices?.() ?? []) hints.push({ kind: 'hostNotice', notice })
     }
-    return event.payload
+    const detailSession = detail && request.session && this.#detailSession(access, request.session)
+    for (const hint of pending) {
+      if (hint.kind === 'hostNotice' && !state && !detail && this.#remoteHostNotices) hints.push(hint)
+      if (hint.kind === 'run') {
+        const run = this.#sink.getRun(hint.runId)
+        if (run && access.canReadCwd(run.cwd) && (!detail || (detailSession && run.sessionKey === detailSession.sessionKey))) {
+          hints.push({ kind: 'run', runId: hint.runId, outputSeq: hint.outputSeq,
+            ...(hint.scryRunId ? { traceRunId: hint.scryRunId } : {}),
+            ...(hint.workspaceProgress ? { workspaceProgress: hint.workspaceProgress } : {})
+          })
+        }
+      }
+    }
+    return hints
   }
+
 }

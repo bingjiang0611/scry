@@ -14,7 +14,8 @@ export const ssh = { hostname: 'desktop.example', username: 'scry', port: 22 }
 export const encrypt = (value: string): Buffer => Buffer.from(`encrypted:${Buffer.from(value).toString('base64')}`)
 export const decrypt = (value: Buffer): string => Buffer.from(value.toString().slice('encrypted:'.length), 'base64').toString()
 
-export async function setup(setupOptions: { watchState?: string | null; liveRuns?: unknown[]; catalogSnapshot?: (request: Record<string, unknown>) => unknown; projects?: unknown[]; sessionsPage?: Record<string, unknown>; submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; sessionsResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; managedWorktrees?: boolean; encrypt?: typeof encrypt; attention?: RemoteAttentionTracker } = {}) {
+export async function setup(setupOptions: { catalogSnapshot?: (request: Record<string, unknown>) => unknown; projects?: unknown[]; submitResponse?: () => unknown; intentStatusResponse?: () => unknown; resolveIntentResponse?: () => unknown; unknownIntent?: boolean; providerDiscovery?: boolean; managedWorktrees?: boolean; subscribe?: number; trackSubscribe?: boolean; subscribeResponse?: (request: Record<string, unknown>) => unknown; encrypt?: typeof encrypt; attention?: RemoteAttentionTracker } = {}) {
+  const subscribe = Object.hasOwn(setupOptions, 'subscribe') ? setupOptions.subscribe : 1
   const directory = await mkdtemp(join(tmpdir(), 'scry-desktop-client-'))
   const identity = await generateDesktopDeviceIdentity()
   const host = await ensureHostIdentity(join(directory, 'host'))
@@ -45,21 +46,16 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
       return { protocolMajor: 1, requestId: request.requestId, kind: 'pair.granted', pairingId, deviceId: grant.deviceId, certificatePEM: grant.certificatePEM,
         certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only' }
     }
-    if (phase === 'status' && request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}) } }
+    if (phase === 'status' && request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}), subscribe } }
     if (request.op === 'providers') return { providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }] }
-    // Connection-time attention baseline and later catalog pages.
-    if (request.op === 'sessionsPage') return setupOptions.sessionsResponse?.() ?? { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'baseline' } }
     if (request.op === 'submit') {
       if (setupOptions.submitResponse) return setupOptions.submitResponse()
       throw new Error('network_down')
     }
-    if (request.op === 'intentStatus' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
-    if (request.op === 'intentStatus' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
+    if (request.op === 'intentStatusAtLog' && setupOptions.intentStatusResponse) return setupOptions.intentStatusResponse()
+    if (request.op === 'intentStatusAtLog' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
     if (request.op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
-    if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
-    // Lifecycle long poll: nothing new, so a caller sees an unchanged run.
-    if (request.op === 'watch') return { watch: { state: setupOptions.watchState ?? null, questions: [], poll: { cursor: 0, minCursor: 0, events: [] } } }
-    if (request.op === 'liveRuns') return { liveRuns: { revision: 'fixture-revision', runs: setupOptions.liveRuns ?? [] } }
+    if (request.op === 'subscribe' && setupOptions.subscribeResponse) return setupOptions.subscribeResponse(request)
     // Catalog in one round trip. The fixture keeps the same answer for the same
     // revision so the unchanged path can be exercised.
     if (request.op === 'catalogSnapshot') {
@@ -68,11 +64,9 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
       if (request.revision === revision) return { catalogSnapshot: { unchanged: true, revision } }
       return { catalogSnapshot: {
         revision,
-        info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}) },
+        info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: host.hostId, execution: 'canonical', ...(setupOptions.providerDiscovery === false ? {} : { providerDiscovery: 2 }), ...(setupOptions.managedWorktrees ? { managedWorktrees: 1 } : {}), subscribe },
         projects: setupOptions.projects ?? [],
         providers: [{ id: 'claude', label: 'Claude', available: true, permissions: [{ id: 'default', label: 'Default' }] }],
-        sessionsPage: setupOptions.sessionsPage ?? (setupOptions.sessionsResponse?.() as { sessionsPage?: unknown } | undefined)?.sessionsPage ??
-          { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture-sessions-1' }
       } }
     }
     return { error: 'unexpected_request' }
@@ -81,10 +75,29 @@ export async function setup(setupOptions: { watchState?: string | null; liveRuns
   const tlsRequest = vi.fn(async (options: { path: string; request: unknown }): Promise<unknown> =>
     await handle(options.request as { operation?: string; requestId?: string; pairingId?: string; op?: string; revision?: string }))
 
-  const openLane = vi.fn(fakeLaneConnector(tlsRequest))
+  const idleStatus = new Promise<never>(() => {})
+  const defaultStatus = (request: Record<string, unknown>) => request.known ? idleStatus : {
+    subscribe: { mode: 'snapshot', hostId: host.hostId, logId: 'fixture-log', seq: 1,
+      snapshot: { sessions: { rows: [], total: 0 }, activeRuns: { rows: [] } } }
+  }
+  const openLane = vi.fn(fakeLaneConnector(options => {
+    const request = options.request as Record<string, unknown>
+    if (request.op === 'subscribe' && !setupOptions.subscribeResponse && !setupOptions.trackSubscribe) return Promise.resolve(defaultStatus(request))
+    return tlsRequest(options)
+  }))
   const openTunnel = vi.fn(async (_options: { username: string; hostname: string; port: number; pairPort: number; runPort: number }) => tunnel())
   const client = new DesktopRemoteClient({ directory, encrypt: setupOptions.encrypt ?? encrypt, decrypt, attention: setupOptions.attention }, { generateIdentity: async () => identity, openTunnel, tlsRequest, openLane })
   return { directory, host, invitation, client, openTunnel, tlsRequest, openLane, phase: () => phase, tunnelCount: () => tunnelCount,
     setTunnelFailure: (reason: NonNullable<DesktopSshTunnel['failure']>['reason']) => { tunnelFailure = { sequence: ++tunnelFailureSequence, reason } },
     dropTunnel: () => tunnelShutdowns.at(-1)!() }
+}
+
+export function statusSnapshot(hostId: string, { sessions = [], runs = [] }: { sessions?: unknown[]; runs?: unknown[] } = {}) {
+  return { subscribe: { mode: 'snapshot', hostId, logId: 'fixture-log', seq: 1,
+    snapshot: { sessions: { rows: sessions, total: sessions.length }, activeRuns: { rows: runs } } } }
+}
+
+export function statusRun(runId: string, input: Record<string, unknown> = {}) {
+  return { runId, origin: 'remote', provider: 'pi', profile: null, cwd: '/workspace',
+    lifecycle: 'dispatched', intentSeq: 1, revSeq: 1, outputSeq: null, ...input }
 }

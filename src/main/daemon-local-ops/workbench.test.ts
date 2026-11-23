@@ -11,7 +11,6 @@ import { WORKBENCH_FORWARDS, installWorkbenchWindowCwd } from './workbench'
 // paired devices already send, bound to what main's in-process handler was bound to, and
 // maps the reply back to what that handler returned.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const rows = (JSON.parse(readFileSync(join(process.cwd(), 'scripts', 'daemon-ipc-routing-workbench.json'), 'utf8')) as {
   channels: Array<{ channel: string; route: string; op: string; surface: string; method: string }>
 }).channels.filter((row) => row.route === 'forward')
@@ -107,7 +106,7 @@ describe('workbench forwards', () => {
     })
     undo.push(installDaemonRequestForwarder((request, read) => transport.forward(request, read)))
     const listener = vi.fn()
-    const gated = gateDaemonChannel('workspace:write', listener, ON) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
+    const gated = gateDaemonChannel('workspace:write', listener) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
     await expect(gated({}, { cwd: WINDOW, path: 'a.txt', content: 'x', expectedRevision: 'r' })).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
     expect(sent).toHaveLength(1)
     expect(sent[0]!.replayable).toBe(false)
@@ -118,14 +117,14 @@ describe('workbench forwards', () => {
     undo.push(installDaemonRequestForwarder(vi.fn(async () => ({ workbench: true }))))
     for (const channel of REFUSED) {
       const listener = vi.fn()
-      const gated = gateDaemonChannel(channel, listener, ON) as unknown as (event: unknown, ...args: unknown[]) => unknown
+      const gated = gateDaemonChannel(channel, listener) as unknown as (event: unknown, ...args: unknown[]) => unknown
       expect(() => gated({}, { cwd: WINDOW, path: 'a.txt' })).toThrow(`daemon_capability_unavailable:${channel}`)
       expect(listener).not.toHaveBeenCalled()
     }
     for (const channel of ['workspace:openExternal', 'workspace:trash']) {
       expect(WORKBENCH_FORWARDS[channel], channel).toBeUndefined()
       const listener = vi.fn()
-      expect(gateDaemonChannel(channel, listener, ON)).toBe(listener)
+      expect(gateDaemonChannel(channel, listener)).toBe(listener)
     }
   })
 })

@@ -311,13 +311,32 @@ describe('trace turn progress', () => {
       providerId: 'claude',
       runtimeProvider: 'claude_sdk',
       userDataDir,
-      turn: { ...base, ts: 2, items: [...base.items, diff] }
+      turn: { ...base, ts: 2, items: [...base.items, diff, { ...diff, id: 'session-diff', stage: 'session_diff' }] }
     })).toBe(true)
 
     await expect(recoverTraceTurnProgress(userDataDir)).resolves.toEqual({ recovered: 1, pending: 0, errors: [] })
     expect(readTraceArchive({
       cwd: '/repo', sessionId: 'session-rich', providerId: 'claude', userDataDir
-    })?.turns[0].items).toEqual(expect.arrayContaining([expect.objectContaining({ stage: 'turn_diff' })]))
+    })?.turns[0].items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stage: 'turn_diff' }), expect.objectContaining({ stage: 'session_diff' })
+    ]))
+  })
+
+  it('keeps distinct terminal content pending even if the archive has a later session diff', async () => {
+    const args = { userDataDir: root(), cwd: '/repo', sessionId: 'native',
+      providerId: 'codex' as const, runtimeProvider: 'codex_cli' as const }
+    const original = { runId: 'same-run', userText: 'same input', done: true, status: 'completed' as const, ts: 1 }
+    const item = { id: 'response', runId: original.runId, ts: '2026-08-01T00:00:00.000Z',
+      kind: 'model' as const, stage: 'text_delta', text: 'response from progress' }
+    await persistTraceTurnProgress({ ...args, turn: { ...original, items: [item] } })
+    expect(upsertTraceArchiveTurn({ ...args, turn: { ...original, items: [
+      { ...item, text: 'different archived response' },
+      { ...item, id: 'diff', kind: 'harness', stage: 'session_diff' }
+    ] } })).toBe(true)
+    await expect(recoverTraceTurnProgress(args.userDataDir)).resolves.toEqual({
+      recovered: 0, pending: 1, errors: ['trace turn progress conflicts with committed archive: same-run']
+    })
+    expect(readTraceArchive(args)?.turns[0].items[0]?.text).toBe('different archived response')
   })
 
   it('keeps malformed progress pending instead of deleting the only recovery evidence', async () => {

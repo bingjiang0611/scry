@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
+import { sampleDaemonResources } from './daemon-resource-sampling.mjs'
 
 // Everything that talks to the hidden measurement process: port, CDP session, fixture bootstrap, its
 // private IPC snapshot channel, stream framing. Nothing here decides pass/fail.
@@ -55,14 +56,17 @@ export async function freePort() {
 }
 
 /**
- * Timing benchmark env: observes main-process [scry:perf]/[scry:resource] and the private main
- * IPC snapshot channel with SCRY_ELECTRON_SMOKE_PROVIDER=1; keep explicit in-process mode.
+ * Timing benchmark env: the App with its daemon (S3 removed the in-process arm). It observes
+ * main-process [scry:perf]/[scry:resource] and the private main IPC snapshot channel; the
+ * daemon serves the smoke fixture.
  */
-export function inProcessBenchEnv(home, base = process.env) {
+export function benchEnv(home, base = process.env) {
+  const { SCRY_HOST_DAEMON: _retired, ...inherited } = base
   return {
-    ...base,
+    ...inherited,
     HOME: home,
-    SCRY_HOST_DAEMON: '0',
+    SCRY_DAEMON_SMOKE_PROVIDER: '1',
+    SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
     SCRY_TEST_APP: '1',
     SCRY_PERF_LOG: '1',
     ELECTRON_ENABLE_LOGGING: '1',
@@ -295,14 +299,13 @@ export function readRendererMount(evaluate, runIds) {
   })`)
 }
 
-// Two boundaries only, both inside the same main process: the fixture's own CPU/memory snapshot over
-// private IPC plus the renderer's CDP counters. Every request has a deadline, so a dead child yields an
-// unavailable sample instead of stalling the measurement.
-export function createBoundarySampler({ snapshotChannel, send }) {
+// Collect the main IPC snapshot and renderer CDP counters, then sample the
+// daemon from its verified process identity. The measurements stay separate.
+export function createBoundarySampler({ snapshotChannel, send, userData }) {
   return async label => {
     const main = await snapshotChannel.take(label)
     let renderer = null
     try { renderer = await readRendererMetrics(send) } catch (error) { renderer = { error: String(error) } }
-    return { label, takenAtEpochMs: Date.now(), main, renderer }
+    return { label, takenAtEpochMs: Date.now(), main, renderer, daemon: sampleDaemonResources(userData) }
   }
 }

@@ -26,11 +26,11 @@ final class LaneHandlerTests: XCTestCase {
     // The prefix also declares the run-channel protocol version, so the host
     // refuses a mismatch instead of guessing which fields it may read.
     XCTAssertEqual(String(decoding: try RelaySession.keepAliveRequest(request), as: UTF8.self),
-                   #"{"keepAlive":true,"protocol":2,"op":"poll","cursor":3}"#)
+                   #"{"keepAlive":true,"protocol":3,"op":"poll","cursor":3}"#)
   }
 
   func testEveryRequestDeclaresTheProtocolVersion() throws {
-    XCTAssertEqual(RelaySession.protocolVersion, 2)
+    XCTAssertEqual(RelaySession.protocolVersion, 3)
     for request in [Data("{}".utf8), Data(#"{"op":"projects"}"#.utf8), Data(#"{"op":"watch","runId":"r","waitMs":15000}"#.utf8)] {
       let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: try RelaySession.keepAliveRequest(request)) as? [String: Any])
       XCTAssertEqual(fields["protocol"] as? Int, RelaySession.protocolVersion)

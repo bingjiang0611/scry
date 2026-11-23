@@ -1,13 +1,10 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
-import { SessionLedger, type LedgerEvent, type LedgerSnapshot, type LedgerStore } from '../main/remote/session-ledger'
-import { EventSink } from '../host-runtime/orchestration/event-sink'
-import { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
 
@@ -15,42 +12,17 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
 function saveOnEnv() {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -60,13 +32,11 @@ function saveOnEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
-describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon restart and bounded replayable legacy mirror', () => {
-  it('handles >8,192 ledger events through real daemon createLedgerStore, compacts cleanly, and restarts accepting new runs', async () => {
+describe('large legacy import and live runs after restart', () => {
+  it('imports 8,192 legacy events and accepts new runs after restart', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -78,8 +48,7 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
     // Pre-seed 2,048 settled runs x 4 events = 8,192 events (right at SessionLedger's MAX_EVENTS cap)
-    // directly into the daemon's real H1 ledger file BEFORE starting host1.
-    // On the old code (without compaction), the very first live submit on host1 threw `ledger_capacity_exceeded`!
+    // in the historical ledger file before starting the first daemon.
     const seedLines: string[] = []
     let seq = 0
     const baseAt = Date.now() - 60_000
@@ -92,7 +61,9 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
       seedLines.push(JSON.stringify({ seq: ++seq, at: baseAt + i, kind: 'run_settled', runId }))
     }
     const { writeFileSync } = await import('node:fs')
-    writeFileSync(join(ledgerDir, 'session-ledger.log'), `${seedLines.join('\n')}\n`, { mode: 0o600 })
+    const legacyLog = join(ledgerDir, 'session-ledger.log')
+    const original = Buffer.from(`${seedLines.join('\n')}\n`)
+    writeFileSync(legacyLog, original, { mode: 0o600 })
 
     const restore = saveOnEnv()
     let host1: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
@@ -109,24 +80,26 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
         log: () => undefined
       })
 
-      // Live submit on real host1 crosses 8,192 events inside the daemon's real SessionLedger,
-      // triggering compaction through createLedgerStore + LegacyMirrorWorker without jamming.
+      // Live submission remains available while legacy history imports.
       const device = await enrollLocal(host1.service)
       const sub1 = await call(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'crosses 8192 cap' })
       })
-      expect(await waitRunTerminal(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, sub1.runId)).toBe('settled')
+      expect(sub1).toMatchObject({ status: 'recorded', runId: expect.any(String) })
+      const authority1 = host1.orchestrationAuthority!
+      await expect.poll(() => authority1.sink.getRun(sub1.runId)?.lifecycle, { timeout: 10_000 }).toBe('settled')
 
-      // Wait for deferred import of the 2,048 seeded runs + flush mirror, then dispose host1.
-      await host1.orchestrationAuthority!.importComplete
+      await authority1.importComplete
+      expect(authority1.sink.handle.db.prepare('SELECT COUNT(*) AS count FROM orch_p_run').get())
+        .toEqual({ count: 2_049 })
       await host1.dispose()
       host1 = undefined
-      expect(existsSync(join(ledgerDir, 'session-ledger.snapshot.json'))).toBe(true)
+      expect(existsSync(join(ledgerDir, 'session-ledger.snapshot.json'))).toBe(false)
+      expect(readFileSync(legacyLog)).toEqual(original)
 
-      // Restart real daemon host2 over the compacted >8,192-event ledger + orchestration.db,
-      // and verify another live submit succeeds and settles cleanly.
+      // The next daemon recovers the SQLite projection and accepts new work.
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -142,7 +115,9 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'after compact restart' })
       })
-      expect(await waitRunTerminal(host2.channel.socketPath, host2.service.caCertificatePEM, device.certPEM, device.keyPEM, sub2.runId)).toBe('settled')
+      expect(sub2).toMatchObject({ status: 'recorded', runId: expect.any(String) })
+      const authority2 = host2.orchestrationAuthority!
+      await expect.poll(() => authority2.sink.getRun(sub2.runId)?.lifecycle, { timeout: 10_000 }).toBe('settled')
     } finally {
       await host1?.dispose()
       await host2?.dispose()
@@ -150,67 +125,5 @@ describe('W9 Blocker 1 + Must-Fix 6: compaction past 8,192 events across daemon 
     }
   }, 30_000)
 
-  it('keeps LegacyMirrorWorker off pre-first-token path, bounded under cap, and resilient to head-of-line failures', async () => {
-    const root = tempDir()
-    const sink = EventSink.open({ userDataDir: root, checkpointIntervalMs: 0 })
-    let appendCalls = 0
-    let compactCalls = 0
-    let failWrites = true
-    const errors: string[] = []
-    const fakeStore: LedgerStore = {
-      assertAvailable: () => undefined,
-      loadAll: () => [],
-      append: () => {
-        appendCalls += 1
-        if (failWrites) throw new Error('ENOSPC simulated')
-      },
-      compact: (_snap: LedgerSnapshot) => {
-        compactCalls += 1
-      }
-    }
-    const mirror = new LegacyMirrorWorker({
-      sink,
-      ledgerStore: fakeStore,
-      createSnapshot: () => ({ version: 1, lastSeq: 100, runs: [], retainedEvents: [] }),
-      idleDelayMs: 120,
-      maxPendingEvents: 32,
-      onError: (err) => errors.push(err instanceof Error ? err.message : String(err))
-    })
-    try {
-      const runId = SessionLedger.newRunId()
-      const evt: LedgerEvent = { seq: 1, at: Date.now(), runId, kind: 'intent_recorded', intentId: SessionLedger.newIntentId(), detail: '{}' }
-      mirror.enqueue(evt)
-      // Must NOT run immediately on setImmediate (stays off pre-first-token critical path!)
-      await new Promise((resolve) => setImmediate(resolve))
-      await new Promise((resolve) => setTimeout(resolve, 15))
-      expect(appendCalls).toBe(0)
 
-      // Bounded queue: enqueuing 100 events under maxPendingEvents=32 collapses into atomic snapshot without dropping seqs
-      for (let i = 2; i <= 100; i += 1) {
-        mirror.enqueue({ seq: i, at: Date.now(), runId, kind: 'run_progress', detail: String(i) })
-      }
-      expect(mirror.pendingCount()).toBeLessThanOrEqual(32)
-
-      // Flush writes the atomic snapshot without leaving any seq gap
-      failWrites = false
-      await mirror.flush()
-      expect(compactCalls).toBe(1)
-      expect(mirror.pendingCount()).toBe(0)
-      expect(mirror.isFailedClosed()).toBe(false)
-
-      // Persistent ENOSPC on both append and compact fails closed without dropping seqs or hanging
-      failWrites = true
-      fakeStore.compact = () => {
-        throw new Error('ENOSPC simulated compact')
-      }
-      mirror.enqueue({ seq: 101, at: Date.now(), runId, kind: 'run_progress', detail: '101' })
-      await mirror.flush()
-      expect(errors.length).toBeGreaterThan(0)
-      expect(mirror.isFailedClosed()).toBe(true)
-      expect(mirror.pendingCount()).toBe(0)
-    } finally {
-      await mirror.close()
-      sink.close()
-    }
-  })
 })

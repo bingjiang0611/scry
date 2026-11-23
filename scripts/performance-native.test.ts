@@ -3,36 +3,63 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { report, workCounters } from './performance-native-report-fixture'
 import { assertSameNativeArtifact, compareNative, composerModes, exportNativeCounters, nativeBuildArtifacts, nativeCounterMetrics, nativeDiagnosticRecords, nativeHarnessFiles, nativeInitialPageTurns, nativeWorkloads, validateNative } from './performance-native.mjs'
 import { combineNativeShards } from './performance-native-run.mjs'
+import { writeSessionFixture } from './session-open-fixture.mjs'
 import { DEFAULT_LOAD_SESSION_TURNS } from '../src/main/bootstrap/history-archive'
+import { readDaemonArchivedRunTrace } from '../src/main/daemon-subscribe-parse'
+import { createDesktopHostReader, parseDesktopHostRead } from '../src/main/remote/desktop-host-reader'
+import { upsertTraceArchiveTurn } from '../src/main/transcript-archive'
 const root = new URL('..', import.meta.url).pathname
 
-const workCounters = (value: number) => Object.fromEntries(nativeCounterMetrics.map(metric => [metric, value]))
-
-function report() {
-  const errors: Array<{ scenario: string; message: string }> = []
-  return {
-    schema: 1, revision: 'fixture', harness: 'a'.repeat(64), environment: { platform: 'darwin', node: '22' }, errors,
-    results: Object.fromEntries(Object.entries(nativeWorkloads).map(([scenario, [turnCount, sections]]) => [scenario, {
-      scenario, mode: 'in-process', turnCount, sections, measurementVersion: 7, warmups: 2, iterations: 12,
-      artifactSha256: 'b'.repeat(64), benchmarkSha256: 'c'.repeat(64), platform: 'darwin/arm64', node: '22', electron: '35',
-      sqliteStats: { status: 'ready', turns: 18, readMs: 2 },
-      counterSensitivity: { baseline: workCounters(1), extra: workCounters(2), mutationControl: { baseline: 0, extra: 2 }, passed: true },
-      composerSamples: composerModes.map((mode, index) => ({ mode, prompt: `native composer ${mode} ${index}`, runId: `button-${index}`, sendWorkCounters: workCounters(1),
-        inputTrusted: true, sendTrusted: true, stopTrusted: mode !== 'complete', terminalConfirmed: true, stopped: mode !== 'complete',
-        nativeTurnKnown: mode !== 'stop-immediate', diskVerified: true, sendToTerminalMs: 50, sendToSettledVisibleMs: 60,
-        ...(mode !== 'stop-immediate' ? { sendToOutputReceiptMs: 10, sendToFirstVisibleMs: 20, sendToVisibleReadyMs: 30 } : {}),
-        ...(mode !== 'complete' ? { driverStopDispatchMs: 5, stopToTerminalMs: 10, stopToSettledVisibleMs: 20, stopWorkCounters: workCounters(1) } : {}) })),
-      startupDriverReadyMs: 500, nativeInput: { trusted: true, frameReadyMs: 20 }, cleanup: { tracked: 3 }, firstOpens: [{}, {}],
-      samples: Array.from({ length: 12 }, () => ({ totalTurns: Math.min(nativeInitialPageTurns, turnCount), completeParagraphs: sections, nativeOpenMs: 40, handlerDelayMs: 2, scriptMs: 10, domNodes: 500, workCounters: workCounters(1) })),
-      lifecycleSamples: [false, true, false, true, false, true].map(stopped => ({
-        stopped, terminalConfirmed: true, durableTurns: 1, diskVerified: true, startReceiptMs: 5, firstOutputReceiptMs: 10,
-        startToTerminalMs: 30, terminalToReadableArchiveMs: 5, ...(stopped ? { stopReceiptMs: 2, stopToTerminalMs: 10 } : {})
-      }))
-    }]))
+it('recovers a settled default-profile run after the native benchmark opens seeded history', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'scry-native-archive-test-'))
+  try {
+    const { cwd, sessions, userData } = writeSessionFixture(root, directory, ...nativeWorkloads.markdown)
+    const externalSessionId = sessions[1]
+    const context = { cwd, providerId: 'codex', externalSessionId }
+    const runId = 'retry-native-composer'
+    const text = 'Reply persisted after the run left the live registry'
+    const item = { id: 'reply', runId, ts: '2026-11-21T12:00:00.000Z', kind: 'model' as const, stage: 'text', text }
+    expect(upsertTraceArchiveTurn({ cwd, sessionId: externalSessionId, providerId: 'codex', userDataDir: userData,
+      turn: { runId, agentProfileId: null, userText: 'composer prompt', items: [item], ts: Date.parse(item.ts), done: true } })).toBe(true)
+    const readDesktop = createDesktopHostReader({
+      userDataDir: userData, hostId: () => 'native-fixture',
+      authorizeWorkspace: path => { expect(path).toBe(cwd); return cwd },
+      getRun: () => null
+    })
+    const read = (request: Record<string, unknown>) => readDesktop(parseDesktopHostRead(request.query)).then(desktop => ({ desktop }))
+    await expect(readDaemonArchivedRunTrace(read, { context, runId })).resolves.toMatchObject({
+      runId, externalSessionId, items: [{ id: item.id, text }], done: true
+    })
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
-}
+})
+
+describe('native output timing provenance', () => {
+  it('fails a receipt regression even when a renderer snapshot arrived earlier on the candidate', () => {
+    const baseline = report()
+    const candidate = structuredClone(baseline)
+    const sample = candidate.results.short.composerSamples.find(sample => sample.mode === 'complete')!
+    sample.sendToOutputReceiptMs = 8
+    sample.sendToTraceOutputReceiptMs = 400
+
+    const comparison = compareNative(baseline, candidate)
+    expect(comparison.rows).toContainEqual({
+      scenario: 'short.button.complete', metric: 'sendToTraceOutputReceiptMs.3RunMax',
+      baseline: 10, candidate: 400, ceiling: 260, status: 'regressed'
+    })
+    expect(comparison.passed).toBe(false)
+  })
+
+  it('rejects a renderer-only timing instead of comparing it with a trace receipt', () => {
+    const candidate = report()
+    candidate.results.short.composerSamples.find(sample => sample.mode === 'complete')!.sendToTraceOutputReceiptMs = undefined
+    expect(() => compareNative(report(), candidate)).toThrow('missing button sendToTraceOutputReceiptMs')
+  })
+})
 
 describe('same-artifact diagnostic identity', () => {
   it('accepts a complete repeated artifact and leaves the primary comparison unchanged', () => {
@@ -122,6 +149,13 @@ describe('interleaved scenario shards', () => {
     failed[1].errors.push({ scenario: 'short', message: 'boom' })
     expect(() => combineNativeShards(failed)).toThrow('failed native lanes cannot pass')
   })
+
+  it('reports failed execution when all native shards lack results', () => {
+    const failed = shards().map((shard, index) => ({
+      ...shard, results: {}, errors: [{ scenario: Object.keys(nativeWorkloads)[index], message: 'no native sample' }]
+    }))
+    expect(() => combineNativeShards(failed)).toThrow('failed native lanes cannot pass')
+  })
 })
 
 describe('native diagnostic evidence', () => {
@@ -187,16 +221,19 @@ describe('native performance evidence gate', () => {
     expect(missing).toEqual([])
   })
 
-  it('covers the daemon-mode modules in the harness hash and keeps daemon results out of the gate', () => {
+  it('covers the daemon-mode modules in the harness hash and keeps retired in-process results out of the gate', () => {
     expect(nativeHarnessFiles).toEqual(expect.arrayContaining([
       'scripts/session-open-bench-mode.mjs', 'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-lifecycle.mjs'
     ]))
-    const daemon = report()
-    daemon.results.short.mode = 'daemon'
-    expect(() => validateNative(daemon)).toThrow('in-process measurements only')
+    const inProcess = report()
+    inProcess.results.short.mode = 'in-process'
+    expect(() => validateNative(inProcess)).toThrow('daemon-mode measurements only')
     const unlabelled = report()
     Reflect.deleteProperty(unlabelled.results.short, 'mode')
-    expect(() => validateNative(unlabelled)).toThrow('in-process measurements only')
+    expect(() => validateNative(unlabelled)).toThrow('daemon-mode measurements only')
+    const older = report()
+    older.results.short.measurementVersion = 7
+    expect(() => validateNative(older)).toThrow()
   })
 
   it('matches the current initial-page contract without shrinking workloads or accepting lost history', () => {

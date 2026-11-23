@@ -31,6 +31,17 @@ export function boundMarker(detail: string): BoundMarker | undefined {
 }
 
 /**
+ * A unified conversation's run (a conversation or side-chat send), by the canonical id the
+ * daemon bound to its ledger run: the conversation turn's UUID, while the App's and
+ * devices' own runs are bound as `run-...` / `remote-run-...`. Such a run belongs to its conversation view, which reads it through
+ * its scoped subscription; in process it never reached the window-wide trace stream, and
+ * that stream's main pane adopts the first run it hears from.
+ */
+export function isConversationRunId(scryRunId: string | undefined, ledgerRunId: string): boolean {
+  return scryRunId !== undefined && scryRunId !== ledgerRunId && UUID.test(scryRunId)
+}
+
+/**
  * The text a run-view item appended since the copy that was delivered, when the item is
  * the same event and the new text only extends it. `undefined` means "not an append":
  * a different event, a shorter text, or a stage that does not grow.

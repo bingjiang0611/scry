@@ -14,6 +14,7 @@ import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import type { SourceControlService } from '../main/source-control/service'
 import type { DaemonSessionLinks } from './local-ops/deps'
+import type { ReadProjectedHistorySession } from '../main/bootstrap/history-catalog'
 import type { BridgedShellOps } from './app-execution-target-bridge'
 
 const unavailable = (capability: string): never => {
@@ -27,6 +28,7 @@ export interface DaemonRemoteAssemblyDeps {
   providers: ReturnType<typeof createProviderRuntime>
   session: ReturnType<typeof createSessionState>
   catalog: ReturnType<typeof createSessionCatalog>
+  readProjectedHistory: ReadProjectedHistorySession
   pipeline: ReturnType<typeof createRunPipeline>
   sourceControl: SourceControlService
   remoteRunIds: Set<string>
@@ -80,6 +82,8 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     providerRegistry: providers.providerRegistry,
     getRuns: () => pipeline.runs,
+    readProjectedSession: deps.readProjectedHistory,
+    boundedActiveRun: pipeline.boundedLiveRun,
     rememberProject: workspace.rememberProject,
     homeDir: workspace.homeDir,
     userDataDir: deps.userDataDir,
@@ -114,7 +118,6 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     getRemoteProviderDiscovery: () => providerDiscovery,
     refreshRemoteProviderSnapshot,
     configuredRemotePermissionMode,
-    remoteStartReceipts: pipeline.remoteStartReceipts,
     startAppRun: (payload: AgentStartRequest, startOptions) => pipeline.startAppRun(payload, startOptions),
     sourceControl,
     providerOperationGate: session.providerOperationGate,

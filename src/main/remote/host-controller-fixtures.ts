@@ -1,9 +1,13 @@
-import { vi } from 'vitest'
+import { afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { HostController, type HostControllerDependencies, type RemoteIntentRouting } from './host-controller'
 import type { IssuedPairingCertificate, PairingDependencies, PairingPersistence, PairingState } from './pairing'
 import type { LedgerEvent, LedgerStore } from './session-ledger'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
+import { ShadowMirror } from '../../host-runtime/orchestration/shadow-mirror'
 
 export const KEY = 'a'.repeat(64)
 export const CSR = 'b'.repeat(64)
@@ -42,6 +46,35 @@ export function pairingDeps(): PairingDependencies {
 }
 
 export type RunProvider = (input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }) => Promise<void>
+
+const projections: Array<{ mirror: ShadowMirror; directory: string }> = []
+afterEach(() => {
+  for (const { mirror, directory } of projections.splice(0)) {
+    try { mirror.close() } finally { rmSync(directory, { recursive: true, force: true }) }
+  }
+})
+
+/** Project component fixtures' transient dispatch events to real SQLite without exposing old readers. */
+export function createHostProjectionFixture() {
+  const directory = mkdtempSync(join(tmpdir(), 'scry-host-projection-'))
+  const mirror = ShadowMirror.open({ userDataDir: directory, fullfsync: false })
+  projections.push({ mirror, directory })
+  const projection = mirror.sink
+  if (!projection) throw new Error('test_projection_unavailable')
+  const events: LedgerEvent[] = []
+  const onLedgerEvent: NonNullable<HostControllerDependencies['onLedgerEvent']> = (event, meta) => {
+    events.push(event)
+    mirror.onLedgerEvent(event, meta)
+  }
+  return { projection, events, onLedgerEvent }
+}
+
+export async function grantedProjectedController(runProvider: RunProvider, extra: Partial<HostControllerDependencies> = {}) {
+  const fixture = createHostProjectionFixture()
+  for (const event of extra.ledgerStore?.loadAll() ?? []) fixture.onLedgerEvent(event)
+  const granted = await grantedController(runProvider, undefined, { ...extra, onLedgerEvent: fixture.onLedgerEvent })
+  return { ...granted, ...fixture }
+}
 
 export async function grantedController(runProvider: RunProvider, listProjects?: () => { path: string; label: string }[],
   extra: Partial<HostControllerDependencies> = {}) {

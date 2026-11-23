@@ -28,12 +28,9 @@ export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string,
   deps.authorizeDevice(peerCertSHA256)
   if (!deps.readDesktop) throw new Error('desktop_protocol_unavailable')
   const query = parseDesktopHostRead(input)
-  // `settledTail` is the App's read of a run that just settled (its final trace from the
-  // registry's short departed window). A device grant is refused, not silently downgraded:
-  // devices keep the contract that a settled run reads `null` and its evidence is in the
-  // archive. The verified grant scope decides, never the transport (pairing.grantScope).
-  if (query.kind === 'trace' && query.settledTail && deps.gateway.grantScope(peerCertSHA256) !== 'local') {
-    throw new Error('settled_tail_requires_local_grant')
+  // Exact archived run traces are local-only. The verified grant decides access.
+  if (query.kind === 'trace' && query.archive && deps.gateway.grantScope(peerCertSHA256) !== 'local') {
+    throw new Error('archive_trace_requires_local_grant')
   }
   const result = await deps.readDesktop(query)
   deps.authorizeDevice(peerCertSHA256)

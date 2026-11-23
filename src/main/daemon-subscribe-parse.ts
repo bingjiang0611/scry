@@ -1,6 +1,6 @@
 import type { AgentDataUpdated } from '../shared/runtime'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
-import type { ActiveRun, TraceEvent } from '../shared/trace'
+import type { ActiveRun } from '../shared/trace'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { isHostAdminNotice } from '../shared/host-admin'
 import {
@@ -8,13 +8,14 @@ import {
   type SubscribeActiveRunRow,
   type SubscribeEventItem,
   type SubscribeHint,
+  type SubscribeHistoryPage,
   type SubscribeReply,
   type SubscribeSessionRow,
   type SubscribeSnapshot
 } from '../shared/orchestration-subscribe'
 import { DaemonRunError, fail, record } from './daemon-run-error'
-import { assembleByteChunks } from './remote/desktop-byte-chunks'
-import type { DaemonTraceCall } from './daemon-run-trace-read'
+import { readDaemonTrace, type DaemonTraceCall } from './daemon-run-trace-read'
+import { parseWorkspacePrepareProgress } from '../shared/workspace-selection-input'
 
 const MAX_UNREAD_SESSIONS = 10_000
 const MAX_SUBSCRIBE_ITEMS = 512
@@ -31,6 +32,7 @@ export const KNOWN_SUBSCRIBE_EVENT_TYPES: ReadonlySet<string> = new Set([
   'run.question_closed',
   'run.provider_settled',
   'run.finalized',
+  'run.transcript_referenced',
   'run.settled',
   'run.failed',
   'run.cancelled',
@@ -45,6 +47,7 @@ export const KNOWN_SUBSCRIBE_EVENT_TYPES: ReadonlySet<string> = new Set([
   'session.deleted',
   'session.forked',
   'session.discovered',
+  'session.withdrawn',
   'session.imported',
   'turn.began',
   'turn.delivery',
@@ -64,23 +67,41 @@ export function isAttentionSnapshot(value: unknown): value is SessionAttentionSn
     value.unreadSessionKeys.length <= MAX_UNREAD_SESSIONS && value.unreadSessionKeys.every((key) => typeof key === 'string')
 }
 
-function parseHints(rawHints: unknown): SubscribeHint[] | undefined {
+function isHistoryPage(value: unknown, network: boolean): value is SubscribeHistoryPage {
+  if (network) return record(value) && value.kind === 'remoteHistory' && record(value.history)
+  if (record(value) && value.kind === 'conversation') {
+    const page = value.page
+    return record(page) && record(page.summary) && typeof page.summary.id === 'string' &&
+      Array.isArray(page.turns) && Array.isArray(page.bindings)
+  }
+  if (!record(value) || !Array.isArray(value.turns) || !Number.isSafeInteger(value.offset) ||
+      !Number.isSafeInteger(value.totalTurns) || typeof value.hasOlder !== 'boolean' ||
+      (value.completeness !== 'complete' && value.completeness !== 'partial')) return false
+  const offset = value.offset as number
+  return offset >= 0 && offset + value.turns.length <= (value.totalTurns as number) &&
+    value.turns.every((turn) => record(turn) && typeof turn.userText === 'string' && Array.isArray(turn.items))
+}
+
+function parseHints(rawHints: unknown, network: boolean): SubscribeHint[] | undefined {
   if (rawHints === undefined) return undefined
   if (!Array.isArray(rawHints) || rawHints.length > MAX_SUBSCRIBE_ITEMS) throw new DaemonRunError('invalid_daemon_response')
   const hints: SubscribeHint[] = []
   for (const raw of rawHints) {
     if (!record(raw) || typeof raw.kind !== 'string') continue
     if (raw.kind === 'run' && typeof raw.runId === 'string' && Number.isSafeInteger(raw.outputSeq)) {
+      const workspaceProgress = parseWorkspacePrepareProgress(raw.workspaceProgress)
       hints.push({
         kind: 'run',
         runId: raw.runId,
         outputSeq: raw.outputSeq as number,
-        ...(typeof raw.scryRunId === 'string' ? { scryRunId: raw.scryRunId } : {}),
+        ...(typeof raw.scryRunId === 'string' && !network ? { scryRunId: raw.scryRunId } : {}),
+        ...(typeof raw.traceRunId === 'string' && network ? { traceRunId: raw.traceRunId } : {}),
         ...(raw.admitted === true ? { admitted: true } : {}),
         ...(typeof raw.cwd === 'string' ? { cwd: raw.cwd } : {}),
         ...(typeof raw.providerId === 'string' ? { providerId: raw.providerId } : {}),
         ...(typeof raw.agentProfileId === 'string' ? { agentProfileId: raw.agentProfileId } : {}),
-        ...(typeof raw.externalSessionId === 'string' ? { externalSessionId: raw.externalSessionId } : {})
+        ...(typeof raw.externalSessionId === 'string' ? { externalSessionId: raw.externalSessionId } : {}),
+        ...(workspaceProgress ? { workspaceProgress } : {})
       })
     } else if (raw.kind === 'terminal') {
       hints.push({ kind: 'terminal' })
@@ -99,13 +120,13 @@ function parseHints(rawHints: unknown): SubscribeHint[] | undefined {
   return hints.length > 0 ? hints : undefined
 }
 
-export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeReply {
+export function parseSubscribeReply(reply: Record<string, unknown>, network = false): SubscribeReply {
   const sub = reply.subscribe
   if (!record(sub) || typeof sub.hostId !== 'string' || typeof sub.logId !== 'string' ||
       !Number.isSafeInteger(sub.seq) || (sub.seq as number) < 0) {
     throw new DaemonRunError('invalid_daemon_response')
   }
-  const hints = parseHints(sub.hints)
+  const hints = parseHints(sub.hints, network)
   const base = { hostId: sub.hostId, logId: sub.logId, seq: sub.seq as number, ...(hints ? { hints } : {}) }
   if (sub.mode === 'idle') return { ...base, mode: 'idle' }
   if (sub.mode === 'events') {
@@ -125,6 +146,8 @@ export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeRe
         ...(typeof raw.runId === 'string' || raw.runId === null ? { runId: raw.runId as string | null } : {}),
         ...(typeof raw.cwd === 'string' || raw.cwd === null ? { cwd: raw.cwd as string | null } : {}),
         payload: raw.payload,
+        ...(network && (record(raw.sessionRow) || raw.sessionRow === null) ? { sessionRow: raw.sessionRow as SubscribeSessionRow | null } : {}),
+        ...((record(raw.runRow) || raw.runRow === null) ? { runRow: raw.runRow as SubscribeActiveRunRow | null } : {}),
         ...(Array.isArray(raw.evidence) ? { evidence: raw.evidence.filter((e): e is string => typeof e === 'string') } : {})
       })
     }
@@ -150,7 +173,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeRe
       snapshot.detail = {
         turns: rawSnap.detail.turns,
         ...(rawSnap.detail.legacyBefore === true ? { legacyBefore: true } : {}),
-        ...(rawSnap.detail.firstPage !== undefined ? { firstPage: rawSnap.detail.firstPage } : {})
+        ...(isHistoryPage(rawSnap.detail.firstPage, network) ? { firstPage: rawSnap.detail.firstPage } : {})
       }
     }
     return { ...base, mode: 'snapshot', snapshot }
@@ -159,7 +182,7 @@ export function parseSubscribeReply(reply: Record<string, unknown>): SubscribeRe
 }
 
 /**
- * Reads a settled run's final trace from the host trace archive (`desktop` `history` read)
+ * Reads a settled run's final trace from its own archive segment
  * when the run has already left the live `RunRegistry`, replacing `settledTail`/`departedState`
  * in P4-3 `on` mode (`protocol §6` row 1).
  */
@@ -168,24 +191,7 @@ export async function readDaemonArchivedRunTrace(
   input: { context: DesktopRemoteContext; runId: string }
 ): Promise<ActiveRun | null> {
   if (!input.context.externalSessionId) return null
-  const query = { kind: 'history', context: input.context, images: true, byteChunks: true }
-  const page = async (chunk?: { id: string; offset: number }): Promise<Record<string, unknown>> => {
-    const reply = await call({ op: 'desktop', query: chunk ? { ...query, chunk } : query }, { replayable: true })
-    return record(reply.desktop) ? reply.desktop : fail()
-  }
-  let desktop = await page()
-  if (desktop.kind === 'history_chunk') desktop = await assembleByteChunks(desktop, page, fail)
-  if (desktop.kind !== 'history' || !record(desktop.history) || !Array.isArray(desktop.history.turns)) return null
-  const turn = (desktop.history.turns as Array<Record<string, unknown>>).find((item) => item.runId === input.runId)
-  if (!turn || !Array.isArray(turn.items)) return null
-  return {
-    runId: input.runId,
-    providerId: input.context.providerId as ActiveRun['providerId'],
-    ...(input.context.agentProfileId ? { agentProfileId: input.context.agentProfileId } : {}),
-    cwd: input.context.cwd,
-    externalSessionId: input.context.externalSessionId,
-    userText: typeof turn.userText === 'string' ? turn.userText : '',
-    items: turn.items as TraceEvent[],
-    done: true
-  }
+  const read = await readDaemonTrace(call, { ...input, archive: true })
+  if (read.kind !== 'snapshot' || (read.run && read.run.runId !== input.runId)) return fail()
+  return read.run
 }

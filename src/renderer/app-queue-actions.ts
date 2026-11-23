@@ -9,7 +9,7 @@ import type { WorkspaceOpenRequest } from './components/WorkspacePanel'
 import { focusComposerUnlessFocusMoved } from './composer-focus'
 import type { DraftAttachment, QueuedPrompt, SessionPromptQueues } from './app-model'
 import { appendWorkspaceReference } from './app-model'
-import { QUEUE_COPY } from './constants/copy'
+import { QUEUE_COPY } from './constants/queue-copy'
 import { activeSteerIdentityMatches, isSteerRemovalBlocked, latestSteerCapability, steerStateForMessage, updateQueuedPromptByMessageId, type RendererSteerEvidence } from './steer'
 import { workspaceReferenceToken } from './components/WorkspacePanel'
 

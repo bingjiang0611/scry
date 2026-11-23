@@ -44,12 +44,15 @@ public final class HostTransportState: @unchecked Sendable {
   private struct Persisted: Codable {
     var capabilities: [String]?
     var routes: [DirectRoute]
+    var seenHostNoticeIds: [String]?
   }
 
   private let lock = NSLock()
   private let hostId: String
   private var capabilitiesValue: Capabilities = .unknown
   private var routesValue: [DirectRoute] = []
+  private var seenHostNoticeIds: [String] = []
+  private static let hostNoticeHistoryLimit = 512
   private var cooldownUntil: [DirectRoute: UInt64] = [:]
   // Routes that completed inner mTLS on the current network. Only these are
   // dialed before the relay; an unproven route is tried in the background
@@ -94,6 +97,7 @@ public final class HostTransportState: @unchecked Sendable {
     // host costs one ping per launch to rediscover.
     if let capabilities = saved.capabilities { capabilitiesValue = .supported(Set(capabilities)) }
     routesValue = saved.routes.filter(\.isUsable)
+    seenHostNoticeIds = Array((saved.seenHostNoticeIds ?? []).suffix(Self.hostNoticeHistoryLimit))
   }
 
   private var defaultsKey: String { "scry.remote.transport.\(hostId)" }
@@ -186,15 +190,31 @@ public final class HostTransportState: @unchecked Sendable {
     for state in states { state.forgetRouteEvidence() }
   }
 
+  func recordNewHostNotices(_ notices: [G0Transport.HostAdminNotice]) -> [G0Transport.HostAdminNotice] {
+    lock.lock()
+    let unseen = notices.filter { notice in
+      guard notice.isDisplayable, !seenHostNoticeIds.contains(notice.id) else { return false }
+      seenHostNoticeIds.append(notice.id)
+      return true
+    }
+    if seenHostNoticeIds.count > Self.hostNoticeHistoryLimit {
+      seenHostNoticeIds.removeFirst(seenHostNoticeIds.count - Self.hostNoticeHistoryLimit)
+    }
+    lock.unlock()
+    if !unseen.isEmpty { save() }
+    return unseen
+  }
+
   private func save() {
     guard Self.persistence.value else { return }
     lock.lock()
-    let saved: Persisted
+    defer { lock.unlock() }
+    let capabilities: [String]?
     switch capabilitiesValue {
-    case .unknown, .legacy: saved = Persisted(capabilities: nil, routes: routesValue)
-    case let .supported(set): saved = Persisted(capabilities: set.sorted(), routes: routesValue)
+    case .unknown, .legacy: capabilities = nil
+    case let .supported(set): capabilities = set.sorted()
     }
-    lock.unlock()
+    let saved = Persisted(capabilities: capabilities, routes: routesValue, seenHostNoticeIds: seenHostNoticeIds)
     if let data = try? JSONEncoder().encode(saved) { UserDefaults.standard.set(data, forKey: defaultsKey) }
   }
 }

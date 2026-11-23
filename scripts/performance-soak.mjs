@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { freePort } from './electron-security-cdp.mjs'
+import { connectCdp, freePort } from './electron-security-cdp.mjs'
 import { defaultPackagedAppPath, packagedAppLayout } from './packaged-app-layout.mjs'
+import { noteMissingDaemonSamples, sampleDaemonResources } from './daemon-resource-sampling.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
 
 const requestedCycles = process.env.SCRY_SOAK_CYCLES === undefined ? null : Number(process.env.SCRY_SOAK_CYCLES)
 const cycleLimit = requestedCycles !== null && Number.isSafeInteger(requestedCycles) && requestedCycles > 0 ? requestedCycles : null
@@ -14,7 +15,7 @@ const cycleDelayMs = Math.max(25, Number(process.env.SCRY_SOAK_CYCLE_DELAY_MS ??
 const leakFixture = process.env.SCRY_SOAK_LEAK_FIXTURE === '1'
 const layout = packagedAppLayout(resolve(process.argv[2] || defaultPackagedAppPath()))
 const executable = layout.executable
-const temp = mkdtempSync(join(tmpdir(), 'scry-performance-soak-'))
+const temp = realpathSync(mkdtempSync('/tmp/scry-performance-soak-'))
 let child
 let output = ''
 let lineBuffer = ''
@@ -55,38 +56,6 @@ async function waitForTarget(port, timeoutMs = 30_000) {
   throw new Error(`等待 Electron CDP target 超时\n${output.slice(-4_000)}`)
 }
 
-function connectCdp(url) {
-  const socket = new WebSocket(url)
-  const pending = new Map()
-  let nextId = 1
-  const ready = new Promise((resolveReady, reject) => {
-    socket.onopen = resolveReady
-    socket.onerror = () => reject(new Error('CDP WebSocket 连接失败'))
-  })
-  socket.onmessage = (message) => {
-    const payload = JSON.parse(String(message.data))
-    const request = pending.get(payload.id)
-    if (!request) return
-    pending.delete(payload.id)
-    if (payload.error) request.reject(new Error(payload.error.message))
-    else request.resolve(payload.result)
-  }
-  socket.onclose = () => {
-    for (const request of pending.values()) request.reject(new Error('CDP WebSocket 已关闭'))
-    pending.clear()
-  }
-  return {
-    async send(method, params = {}) {
-      await ready
-      const id = nextId++
-      const response = new Promise((resolveResult, reject) => pending.set(id, { resolve: resolveResult, reject }))
-      socket.send(JSON.stringify({ id, method, params }))
-      return response
-    },
-    close() { socket.close() }
-  }
-}
-
 const percentile = (values, quantile) => {
   if (values.length === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
@@ -122,9 +91,10 @@ async function main() {
     env: {
       ...process.env,
       HOME: home,
-      // Soak benchmark: measures Electron main [scry:perf]/[scry:resource] samples against the
-      // in-process smoke provider; keep explicit mode so flipping the default does not shift baseline.
-      SCRY_HOST_DAEMON: '0',
+      // Soak benchmark: Electron main [scry:perf]/[scry:resource] samples while the daemon
+      // runs the smoke provider (S3 removed the in-process arm).
+      SCRY_DAEMON_SMOKE_PROVIDER: '1',
+      SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
       ELECTRON_ENABLE_LOGGING: '1',
       SCRY_TEST_APP: '1',
       SCRY_ELECTRON_SMOKE_PROVIDER: '1',
@@ -156,6 +126,7 @@ async function main() {
 
   const samples = []
   const cycleMeasurements = []
+  const daemonBeforeCycles = sampleDaemonResources(userDataDir)
   const startedAt = Date.now()
   let cycles = 0
   let previousSessionId = null
@@ -387,10 +358,12 @@ async function main() {
     latencySummary,
     mainTimingSummary,
     rendererSummary,
+    daemonResources: { beforeCycles: daemonBeforeCycles, afterCycles: sampleDaemonResources(userDataDir) },
     checkpoints,
     lastResource
   }
   console.log(`SCRY_PERFORMANCE_SOAK_RESULT=${JSON.stringify(report)}`)
+  noteMissingDaemonSamples('performance-soak', report.daemonResources)
   cdp.close()
 }
 
@@ -400,16 +373,6 @@ try {
   console.error(output.slice(-12_000))
   throw error
 } finally {
-  if (child && child.exitCode == null) {
-    child.kill('SIGTERM')
-    await Promise.race([
-      new Promise((resolveWait) => child.once('exit', resolveWait)),
-      new Promise((resolveWait) => setTimeout(resolveWait, 2_000))
-    ])
-  }
-  if (child && child.exitCode == null) {
-    child.kill('SIGKILL')
-    await new Promise((resolveWait) => child.once('exit', resolveWait))
-  }
+  if (child) await stopOwnedDaemonApp(child, join(temp, 'userData'))
   rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }

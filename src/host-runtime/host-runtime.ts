@@ -5,6 +5,7 @@ import type { DesktopRemoteContext, DesktopRemoteForkSessionRequest, DesktopRemo
 import type { RemoteHostService } from '../main/remote/remote-host-service'
 import { RemoteHostService as RemoteHostServiceImpl } from '../main/remote/remote-host-service'
 import { createDesktopHostReader } from '../main/remote/desktop-host-reader'
+import { bindRemoteHistoryContext } from '../main/remote/history-context'
 import { createDesktopWorkbench } from '../main/remote/desktop-workbench'
 import { listDesktopDirectories, selectDesktopDirectory } from '../main/remote/desktop-directory-picker'
 import { createRemoteRunBinding, type RemoteRunCompletion } from '../main/remote/remote-run-binding'
@@ -44,13 +45,16 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     readDesktop: createDesktopHostReader({
       userDataDir: inputs.userDataDir,
       hostId: () => runtime.remoteHostService!.hostId,
+      ...(inputs.localEndpoint?.subscribe ? { subscribe: 1 as const } : {}),
       authorizeWorkspace: (cwd) => runtime.resolveRemoteProjectDirectory(cwd),
-      getRun: (runId, options) => {
-        // A run leaves the registry before the ledger records it settled. The App's read
-        // that follows `run_settled` (settledTail, local grant only) still gets the run's
-        // final trace; every other read keeps the device contract: a settled run is `null`
-        // and its evidence lives in the archive.
-        const state = runtime.runs.get(runId)?.state ?? (options?.departed ? runtime.runs.departedState?.(runId) : undefined)
+      authorizeSession: (context) => {
+        if (!context.externalSessionId) throw new Error('session_required')
+        bindRemoteHistoryContext({
+          ...context, externalSessionId: context.externalSessionId, historyScope: 'session'
+        }, runtime.appSessionStore().load(), runtime.resolveRemoteProjectDirectory)
+      },
+      getRun: (runId) => {
+        const state = runtime.runs.get(runId)?.state
         return state ? runtime.boundedLiveRun(state) : null
       },
       workspaceChoices: (request) => runtime.sourceControl.workspaceChoices(request),
@@ -73,12 +77,12 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     gatewayLabel,
     ...(inputs.onRunActivity ? { onRunActivity: inputs.onRunActivity } : {}),
     ...(inputs.onLedgerEvent ? { onLedgerEvent: inputs.onLedgerEvent } : {}),
-    ...(inputs.orchestration ? { orchestration: inputs.orchestration } : {}),
+    orchestration: inputs.orchestration,
     ...(inputs.managedLaunches ? { onDispatchRefused: (refused) => abandonRefusedLaunch(inputs.managedLaunches!, refused) } : {}),
     startRun: createRemoteRunBinding<ManagedConversationStart>({
       permissionModeOverride: remotePermissionMode,
       ...(inputs.managedLaunches ? { managedLaunch: (runId) => inputs.managedLaunches!.take(runId) } : {}),
-      startAppRun: (input) => runtime.remoteStartReceipts.submit(`remote-${input.ledgerRunId}`, async () => {
+      startAppRun: async (input) => {
         const started = await runtime.startAppRun({
           ...input.request,
           // A worktree start reserves its workspace under the ledger run's identity.
@@ -103,7 +107,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         })
         // A worktree start answers once registered; its terminal receipt follows.
         return 'remoteCompletion' in started ? started.remoteCompletion : started as RemoteRunCompletion
-      }).then((receipt) => receipt.result)
+      }
     }),
     hasCatalogWarmPool: (providerId) => runtime.providerRegistry.hasCatalogWarmPool(providerId),
     listProjects: () => runtime.remoteProjectRoots().map((path) => ({ path, label: basename(path) || path })),
@@ -221,7 +225,6 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
         questions: run.pendingQuestions ?? [],
         stopping: Boolean(run.stopState)
       }] : []),
-      subscribe: (listener) => runtime.runs.subscribe?.(listener) ?? (() => undefined),
       stop: (runId) => runtime.requestRunStop(runId),
       answer: (response) => runtime.userQuestionBroker.answer(response)
     },

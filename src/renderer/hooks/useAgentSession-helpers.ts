@@ -362,6 +362,7 @@ export function sessionTurnsWithActiveRun(
 /** renderer 侧的历史窗口：它描述当前已挂载的是哪一段轮次，以及更早轮次是否仍可取回。 */
 export interface SessionHistoryWindow {
   sessionId: string
+  projectionKey?: string
   offset: number
   totalTurns: number
   hasOlder: boolean
@@ -371,14 +372,7 @@ export interface SessionHistoryWindow {
   pagedOlder?: boolean
 }
 
-export interface OlderSessionPage {
-  turns: ParsedTurn[]
-  offset: number
-  totalTurns: number
-  hasOlder: boolean
-  sourceComplete?: boolean
-  completeness: 'complete' | 'partial'
-}
+export type OlderSessionPage = import('../env').SessionHistoryPage
 
 export const sessionHistoryWindowOf = (
   sessionId: string,
@@ -388,6 +382,7 @@ export const sessionHistoryWindowOf = (
   page
     ? {
         sessionId,
+        projectionKey: page.projection?.sessionKey,
         offset: page.offset,
         totalTurns: page.totalTurns,
         hasOlder: page.hasOlder,

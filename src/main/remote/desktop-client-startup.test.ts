@@ -22,7 +22,7 @@ describe('DesktopRemoteClient startup restoration', () => {
     return new DesktopRemoteClient({ directory: fixture.directory, encrypt, decrypt }, fixture)
   }
 
-  it('restores a legacy paired host once after restart without submitting work', async () => {
+  it('restores an existing paired host once after restart without submitting work', async () => {
     const fixture = await pairedFixture()
     const client = reopen(fixture)
     try {
@@ -30,11 +30,9 @@ describe('DesktopRemoteClient startup restoration', () => {
       await Promise.all([client.restoreConnections(), client.restoreConnections()])
       await expect(client.list()).resolves.toMatchObject([{ id: fixture.id, state: 'connected' }])
       expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
-      // Every run-channel request declares the protocol version it speaks; the
-      // attention baseline reads the session pages right after info.
+      // Running connection restoration negotiates v3 without writing an intent.
       expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
-        { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } },
-        { protocol: REMOTE_PROTOCOL_VERSION, op: 'sessionsPage', includeArchived: true, cursor: 0, limit: 100 }
+        { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } }
       ])
     } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
@@ -153,8 +151,7 @@ describe('DesktopRemoteClient startup restoration', () => {
       await expect(client.intents(fixture.id)).resolves.toMatchObject([{ intentId: receipt.intentId, status: 'unknown' }])
       expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
         { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } },
-        { protocol: REMOTE_PROTOCOL_VERSION, op: 'sessionsPage', includeArchived: true, cursor: 0, limit: 100 },
-        { protocol: REMOTE_PROTOCOL_VERSION, op: 'intentStatus', intentId: receipt.intentId }
+        { protocol: REMOTE_PROTOCOL_VERSION, op: 'intentStatusAtLog', intentId: receipt.intentId }
       ])
     } finally { await client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })

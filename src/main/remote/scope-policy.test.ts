@@ -198,7 +198,7 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
       replaceRunId: 'run-a', replaceProviderTurnId: 'turn-a', replaceForkTurnId: 'message-a'
     })
 
-    // ...while a workspace PREPARATION still needs a flow this frame does not carry.
+    // ...while a workspace selection it cannot read is refused, not run as a plain turn.
     const second = await harness()
     const secondLocal = await enrollLocal(second.identity, second.controller)
     second.controller.submitIntent(secondLocal, {
@@ -207,6 +207,33 @@ describe('scope policy (L3: submit and sessionDelete read the verified grant)', 
     })
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(second.startRun).not.toHaveBeenCalled()
+  })
+
+  it('carries the App workspace selection to the run start, and only against a named source', async () => {
+    // The App's first send that prepares a workspace goes through the daemon like a
+    // device's: the selection reaches the run start, which prepares or refuses it.
+    const selection = {
+      operationId: '11111111-1111-4111-8111-111111111111',
+      intent: { kind: 'current', repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64), branch: { kind: 'local', name: 'refs/heads/topic', head: 'c'.repeat(40) } }
+    }
+    const { identity, controller, startRun } = await harness()
+    const local = await enrollLocal(identity, controller)
+    controller.submitIntent(local, {
+      intentId: 'local-workspace-named',
+      detail: JSON.stringify({ providerId: 'claude', cwd: AUTHORIZED, prompt: 'hello', workspace: selection })
+    })
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    expect((startRun.mock.calls[0]![0].routing as { workspace?: unknown }).workspace).toMatchObject({ operationId: selection.operationId, intent: { kind: 'current' } })
+
+    // A selection is only meaningful against the checkout it was reviewed in.
+    const unnamed = await harness()
+    const unnamedLocal = await enrollLocal(unnamed.identity, unnamed.controller)
+    unnamed.controller.submitIntent(unnamedLocal, {
+      intentId: 'local-workspace-unnamed',
+      detail: JSON.stringify({ providerId: 'claude', prompt: 'hello', workspace: selection })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(unnamed.startRun).not.toHaveBeenCalled()
   })
 
   it('carries a conversation run marker only from the App', async () => {

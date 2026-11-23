@@ -11,7 +11,7 @@ import type { DesktopRemoteForkSessionRequest } from '../shared/desktop-remote'
 import type { UserQuestionBroker } from '../main/user-question'
 import type { RemoteRunCompletion } from '../main/remote/remote-run-binding'
 import type { RemoteWorkspaceRunStart } from '../main/bootstrap/workspace-start'
-import type { SessionDeletionRequest } from '../main/bootstrap/session-deletion'
+import type { SessionDeletionRequest } from '../main/bootstrap/session-lifecycle'
 import type { HostControllerFactoryDependencies } from '../main/remote/host-controller-factory'
 import type { RemoteHostServiceDependencies } from '../main/remote/remote-host-service-deps'
 import type { RemoteRelayResolution } from '../main/bootstrap/remote-relay'
@@ -39,10 +39,7 @@ export interface RemoteStartOptions {
 export type RemoteRuns = {
   activeStates: () => ActiveRun[]
   get: (runId: string) => { state: ActiveRun } | undefined
-  // The final state of a run that just left the registry (RunRegistry.departedState).
-  departedState?: (runId: string) => ActiveRun | undefined
 }
-export type RemoteReceipts = { submit: (key: string, task: () => Promise<RemoteRunCompletion>) => Promise<{ result: RemoteRunCompletion }> }
 export type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
 
 export type RemoteHostRuntime = {
@@ -51,12 +48,11 @@ export type RemoteHostRuntime = {
   getRemoteProviderDiscovery: () => ReturnType<typeof import('../main/remote/provider-discovery').createProviderDiscovery>
   refreshRemoteProviderSnapshot: () => Promise<void>
   configuredRemotePermissionMode: () => AgentPermissionMode | undefined
-  remoteStartReceipts: RemoteReceipts
   startAppRun: (payload: AgentStartRequest, options: RemoteStartOptions) => Promise<RemoteRunCompletion | { runId: string } | RemoteWorkspaceRunStart>
   sourceControl: SourceControlService
   providerOperationGate: ProviderOperationGate
   providerRegistry: ProviderRegistry
-  runs: RemoteRuns & { subscribe?: (listener: () => void) => () => void }
+  runs: RemoteRuns
   requestRunStop: (runId: string) => boolean
   forkSessionWithAuthority?: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
   deleteOneSession?: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>
@@ -115,7 +111,7 @@ export interface HostRuntimeInputs {
   // The App event feed's run notices (P3f E2): which ledger run changed.
   onRunActivity?: (runId: string, intentSeq?: number) => void
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
-  orchestration?: HostControllerFactoryDependencies['orchestration']
+  orchestration: NonNullable<HostControllerFactoryDependencies['orchestration']>
   listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }

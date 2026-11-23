@@ -12,12 +12,28 @@ extension G0Transport {
     let executionTargets: ExecutionTargetCatalog?
     let error: String?
   }
-  struct RunSubmitRequest: Encodable { let op = "submit"; let intentId: String; let detail: String }
-  struct RunIntentStatusRequest: Encodable { let op = "intentStatus"; let intentId: String }
+  struct RunSubmitRequest: Encodable {
+    let op: String
+    let intentId: String
+    let detail: String
+    let knownLogId: String?
+    init(intentId: String, detail: String, knownLogId: String? = nil) {
+      op = knownLogId == nil ? "submit" : "submitAtLog"
+      self.intentId = intentId
+      self.detail = detail
+      self.knownLogId = knownLogId
+    }
+  }
+  struct RunIntentStatusRequest: Encodable {
+    let op = "intentStatusAtLog"
+    let intentId: String
+    let knownLogId: String?
+    init(intentId: String, knownLogId: String? = nil) {
+      self.intentId = intentId
+      self.knownLogId = knownLogId
+    }
+  }
   struct RunIntentBody: Decodable { let runId: String; let state: String }
-  struct RunPollRequest: Encodable { let op = "poll"; let cursor: Int }
-  struct RunStateRequest: Encodable { let op = "runState"; let runId: String }
-  struct RunQuestionsRequest: Encodable { let op = "questions"; let runId: String }
   struct RunAnswerQuestionRequest: Encodable {
     let op = "answerQuestion"; let runId: String; let answerId: String; let response: RunQuestionResponse
   }
@@ -67,8 +83,6 @@ extension G0Transport {
     var encoding: String? = nil
   }
   struct RunOutputRequest: Encodable { let op = "output"; let runId: String; let cursor: Int }
-  struct RunWatchRequest: Encodable { let op = "watch"; let runId: String; let cursor: Int; let outputCursor: Int; let waitMs: Int }
-  struct RunWatchStreamRequest: Encodable { let op = "watchStream"; let runId: String; let cursor: Int; let outputCursor: Int }
   struct RunStopRequest: Encodable { let op = "stop"; let runId: String }
   public struct SessionActionContext: Encodable, Sendable {
     public let cwd: String; public let providerId: String; public let externalSessionId: String; public let agentProfileId: String?
@@ -107,8 +121,6 @@ extension G0Transport {
       let agentProfileId: String?; let confirmed: Bool
     }
   }
-  struct LiveRunsHistory: Encodable { let historyScope: String = "session"; let providerId: String; let cwd: String; let externalSessionId: String; let known: String?; var agentProfileId = HistoryProfileValue(value: nil) }
-  struct LiveRunsRequest: Encodable { let op = "liveRuns"; let revision: String?; let waitMs: Int; let history: LiveRunsHistory? }
   struct HistoryProfileValue: Encodable, Equatable, Sendable {
     let value: String?
     func encode(to encoder: Encoder) throws {
@@ -140,9 +152,6 @@ extension G0Transport {
     let historyScope: String?
     let runId: String?
     let status: String?
-    let poll: RunPollBody?
-    let state: String?
-    let questions: [RunQuestionRequest]?
     let answer: RunQuestionAnswerOutcome?
     let projects: [RunProjectRef]?
     let directories: RunDirectoryListing?
@@ -158,21 +167,16 @@ extension G0Transport {
     let historyPage: RunHistoryPage?
     let historyTurnsPage: RunHistoryTurnsPage?
     let output: RunOutputBody?
-    let watch: RunWatchBody?
     let stop: RunStopBody?
     let sessionAction: Bool?
     let sessionDelete: DeleteSessionOutcome?
     let toolPanel: ToolPanelPayload?
-    let liveRuns: LiveRunsOutcome?
     let intent: RunIntentBody?
     let executionTarget: ExecutionTargetBinding?
     let error: String?
-  }
-  struct RunWatchBody: Decodable {
-    let poll: RunPollBody; let questions: [RunQuestionRequest]; let output: RunOutputBody; let state: String?
+    let hostProtocol: Int?
   }
   struct RunStopBody: Decodable { let status: String }
-  struct RunPollBody: Decodable { let events: [RunLedgerEvent]; let cursor: Int }
   struct RunOutputBody: Decodable { let chunks: [RunOutputChunk]; let cursor: Int }
 
 

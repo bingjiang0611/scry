@@ -7,7 +7,6 @@ import type { Conversation } from '../../shared/conversation'
 import {
   MAX_PENDING_TTL_MS,
   parseOrchestrationFullfsync,
-  parseOrchestrationMode,
   parsePendingTtlMs
 } from './mode'
 import { ShadowMirror } from './shadow-mirror'
@@ -32,20 +31,8 @@ function memoryLedgerStore(): LedgerStore {
   }
 }
 
-describe('P4-1 SCRY_ORCHESTRATION switch parsing', () => {
-  it('defaults to on, supports explicit off and shadow, and caps pending TTL at 60 s', () => {
-    expect(parseOrchestrationMode({})).toEqual({ requested: 'on', effective: 'on', refused: false })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: '' })).toEqual({ requested: 'on', effective: 'on', refused: false })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'bogus' })).toEqual({ requested: 'off', effective: 'off', refused: false })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'off' })).toEqual({ requested: 'off', effective: 'off', refused: false })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'shadow' })).toEqual({ requested: 'shadow', effective: 'shadow', refused: false })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'on' })).toEqual({
-      requested: 'on',
-      effective: 'on',
-      refused: false
-    })
-    expect(parseOrchestrationMode({ SCRY_ORCHESTRATION: 'bogus' })).toEqual({ requested: 'off', effective: 'off', refused: false })
-
+describe('orchestration storage tunables', () => {
+  it('parses fullfsync and caps pending TTL at 60 seconds', () => {
     expect(parseOrchestrationFullfsync({})).toBeUndefined()
     expect(parseOrchestrationFullfsync({ SCRY_ORCHESTRATION_FULLFSYNC: '1' })).toBe(true)
     expect(parseOrchestrationFullfsync({ SCRY_ORCHESTRATION_FULLFSYNC: '0' })).toBe(false)

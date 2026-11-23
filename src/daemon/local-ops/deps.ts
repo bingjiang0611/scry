@@ -1,4 +1,4 @@
-import type { AppEventFeed } from '../../main/remote/app-event-feed'
+import type { AppHint } from '../orchestration-authority-subscribe'
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import type { RunRegistry } from '../../main/run-registry'
 import type { RunControl } from '../../main/bootstrap/run-control'
@@ -32,7 +32,7 @@ export interface DaemonLocalEndpointDeps {
   history: ReturnType<typeof createHistoryRuntime>
   historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>
   conversationSend: ReturnType<typeof createDaemonConversationSend>
-  events: AppEventFeed
+  publishHint: (hint: AppHint) => void
   terminal: ReturnType<typeof createDaemonTerminalService>
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>
@@ -53,11 +53,10 @@ export interface DaemonLocalEndpointDeps {
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
   hostAdmin?: import('../host-admin-store').HostAdminStore
-  // P4-2 authoritative orchestration status (Decision H): omitted unless SCRY_ORCHESTRATION=on.
+  // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
-  // P4-3 local orchestration subscribe handler: omitted unless SCRY_ORCHESTRATION=on.
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
   log?: (line: string) => void
 }
@@ -68,6 +67,8 @@ export interface DaemonLocalEndpointDeps {
  * the groups are built, read only when a call runs.
  */
 export interface DaemonSessionLinks {
+  deleteNativeProjection?: import('../../main/bootstrap/session-lifecycle').SessionLifecycleDependencies['deleteNativeProjection']
+  deleteConversationProjection?: import('../../main/bootstrap/conversation').ConversationTableDependencies['deleteConversationProjection']
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   sessionRefFromRequest?: (value: unknown) => import('../../main/app-store').AppSessionRef | null
   changeLegacySessionMetadata?: (ref: import('../../main/app-store').AppSessionRef, change: () => boolean) => Promise<boolean>

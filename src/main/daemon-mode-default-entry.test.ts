@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The entry is the only production caller of applyDaemonModeDefault in Electron main.
+// The entry is the only production caller of applyAppStartupGuards in Electron main.
 // It must hand the real userData/appData paths to the S3 isolation guard, otherwise a
 // SCRY_TEST_APP=1 instance on the default userData would start instead of exiting.
 const electron = vi.hoisted(() => ({
@@ -39,11 +39,24 @@ describe('daemon-mode-default-entry', () => {
     expect(electron.exit).toHaveBeenCalledWith(1)
   })
 
-  it('starts a test instance with an isolated userData in daemon mode', async () => {
+  it('starts a test instance with an isolated userData', async () => {
     process.env.SCRY_TEST_APP = '1'
     electron.userData = '/tmp/scry-test-instance'
     await import('./daemon-mode-default-entry')
     expect(electron.exit).not.toHaveBeenCalled()
-    expect(process.env.SCRY_HOST_DAEMON).toBe('1')
+  })
+
+  it('starts with an explicit SCRY_HOST_DAEMON=0, warning once that it is ignored', async () => {
+    process.env.SCRY_HOST_DAEMON = '0'
+    electron.userData = '/tmp/scry-test-instance'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await import('./daemon-mode-default-entry')
+      expect(electron.exit).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toContain('SCRY_HOST_DAEMON')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

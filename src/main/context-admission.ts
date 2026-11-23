@@ -150,3 +150,5 @@ export function canRestartInterruptedLocalOnlySession(
     turn.status === 'interrupted' && turn.providerTurnId == null && turn.forkTurnId == null
   )
 }
+
+export const RUN_ADMISSION_BUSY_MESSAGE = '同一会话已有一轮正在运行'

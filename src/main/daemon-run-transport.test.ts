@@ -26,7 +26,7 @@ describe('daemon run transport', () => {
     await expect(value.adopt(RUN)).resolves.toEqual(run)
     expect(calls).toEqual([
       { request: { op: 'runControl', method: 'adopt', runId: RUN, payload: 'traceContext' }, options: { replayable: true } },
-      { request: { op: 'desktop', query: { kind: 'trace', context: traceContext, runId: RUN, images: true, byteChunks: true, settledTail: true } }, options: { replayable: true } }
+      { request: { op: 'desktop', query: { kind: 'trace', context: traceContext, runId: RUN, images: true, byteChunks: true } }, options: { replayable: true } }
     ])
   })
 
@@ -65,18 +65,6 @@ describe('daemon run transport', () => {
     await expect(value.intentState('intent-1')).rejects.toMatchObject({ reason: 'daemon_run_unknown' })
   })
 
-  it('returns the lifecycle state and cursor from one watch window', async () => {
-    const { value, calls } = transport(() => ({
-      watch: { state: 'dispatched', poll: { cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }] } }
-    }))
-    await expect(value.watch({ runId: RUN, cursor: 10, outputCursor: 0, waitMs: 15_000, output: false })).resolves.toEqual({
-      state: 'dispatched', cursor: 12, events: [{ runId: RUN, kind: 'run_dispatched' }, { runId: RUN, kind: 'run_progress', detail: '{"event":"bound"}' }],
-      // A daemon that answers without an output page has produced nothing yet.
-      output: { count: 0, cursor: 0 }
-    })
-    expect(calls[0]!.request).toEqual({ op: 'watch', runId: RUN, cursor: 10, outputCursor: 0, waitMs: 15_000, output: false })
-  })
-
   it('reads a canonical run snapshot with a delta cursor', async () => {
     const run = { runId: RUN, items: [], done: false }
     const { value, calls } = transport(() => ({ desktop: { kind: 'trace', run, cursor: { revision: 'r1', count: 3 } } }))
@@ -110,25 +98,6 @@ describe('daemon run transport', () => {
       runId: RUN, answerId: 'q1',
       response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
     })).rejects.toMatchObject({ reason: 'daemon_answer_not_delivered' })
-  })
-
-  it('declares its live-run read replayable so a dead daemon can be retried', async () => {
-    const { value, calls } = transport(() => ({ liveRuns: { revision: 'r1', runs: [] } }))
-    await value.liveRuns({ waitMs: 0 })
-    // A read changes nothing; only a write may never be replayed.
-    expect(calls[0]!.options).toEqual({ replayable: true })
-  })
-
-  it('never reports an empty paged read as complete content', async () => {
-    const { value } = transport(() => ({ output: { chunks: [], cursor: 4 } }))
-    await expect(value.output({ runId: RUN, cursor: 0 })).resolves.toEqual({ chunks: [], cursor: 4 })
-    const broken = transport(() => ({ output: { cursor: 4 } })).value
-    await expect(broken.output({ runId: RUN, cursor: 0 })).rejects.toBeInstanceOf(DaemonRunError)
-  })
-
-  it('passes the live set through with its revision', async () => {
-    const { value } = transport(() => ({ liveRuns: { revision: 'v7', runs: [{ runId: RUN, state: 'running', scryRunId: 'run-abc-1' }] } }))
-    await expect(value.liveRuns({ waitMs: 15_000 })).resolves.toEqual({ revision: 'v7', runs: [{ runId: RUN, state: 'running', scryRunId: 'run-abc-1' }] })
   })
 
   it('turns a provably unsent transport throw into a named failure', async () => {
@@ -206,29 +175,27 @@ describe('daemon run transport', () => {
     await expect(transport(() => ({ error: 'device_not_authorized' })).value.forward({ op: 'commands' }, true)).rejects.toThrow(DaemonRunError)
   })
 
-  it('reads the App event feed, keeping only notices it can name', async () => {
-    const { value, calls } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
+  it('validates and filters notices on the subscription lane', async () => {
+    const hints = [
       { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
       { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
-      { kind: 'run', runId: RUN, intentSeq: 12 },
-      // A newer daemon's notice this App does not know yet is skipped, not guessed at.
+      { kind: 'run', runId: RUN, outputSeq: 12 }
+    ]
+    const { value, calls } = transport(() => ({ subscribe: { hostId: 'h1', logId: 'l1', seq: 3, mode: 'idle', hints: [
+      ...hints,
       { kind: 'attention', snapshot: {} },
       { kind: 'run', runId: 7 },
       { kind: 'data', event: { kind: 'conversation_changed', conversationId: 7 } }
     ] } }))
-    await expect(value.appEvents({ epoch: 'e1', cursor: 1, waitMs: 20_000 })).resolves.toEqual({
-      epoch: 'e1', cursor: 3, reset: false, items: [
-        { kind: 'data', event: { kind: 'conversation_changed', conversationId: 'c1' } },
-        { kind: 'data', event: { runId: RUN, kind: 'turn_recorded' } },
-        { kind: 'run', runId: RUN, intentSeq: 12 }
-      ]
-    })
-    expect(calls[0]).toEqual({ request: { op: 'appEvents', epoch: 'e1', cursor: 1, waitMs: 20_000 }, options: { replayable: true } })
-    const reset = transport(() => ({ events: { epoch: 'e2', cursor: 0, items: [], reset: true } }))
-    await expect(reset.value.appEvents({ cursor: 0, waitMs: 0 })).resolves.toMatchObject({ reset: true })
-    expect(reset.calls[0]!.request).toEqual({ op: 'appEvents', cursor: 0, waitMs: 0 })
-    const broken = transport(() => ({ events: { cursor: 'x' } }))
-    await expect(broken.value.appEvents({ cursor: 0, waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
+    const query = { views: ['activeRuns'] as const, known: { hostId: 'h1', logId: 'l1', seq: 1 }, waitMs: 20_000 }
+    const input = { ...query, views: [...query.views] }
+    await expect(value.subscribe(input)).resolves.toEqual({ hostId: 'h1', logId: 'l1', seq: 3, mode: 'idle', hints })
+    expect(calls[0]).toEqual({ request: { op: 'subscribe', ...input }, options: { replayable: true, signal: undefined } })
+    const reset = transport(() => ({ subscribe: { hostId: 'h1', logId: 'l2', seq: 0, mode: 'snapshot', snapshot: {} } }))
+    await expect(reset.value.subscribe({ views: ['activeRuns'], waitMs: 0 })).resolves.toMatchObject({ mode: 'snapshot', logId: 'l2' })
+    expect(reset.calls[0]!.request).toEqual({ op: 'subscribe', views: ['activeRuns'], waitMs: 0 })
+    const broken = transport(() => ({ subscribe: { seq: 'x' } }))
+    await expect(broken.value.subscribe({ views: ['activeRuns'], waitMs: 0 })).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
   })
 
   it('names the arguments the renderer left out, which JSON would turn into null', async () => {
@@ -249,8 +216,8 @@ describe('daemon run transport', () => {
     const snapshot = { revision: 4, unreadSessionKeys: ['codex\u0000\u0000/w\u0000s1'] }
     const { value, calls } = transport((request) => request.op === 'attentionViewed'
       ? { viewed: true }
-      : { events: { epoch: 'e1', cursor: 1, items: [{ kind: 'attention', snapshot }, { kind: 'attention', snapshot: { revision: 'x' } }] } })
-    await expect(value.appEvents({ cursor: 0, waitMs: 0 })).resolves.toMatchObject({ items: [{ kind: 'attention', snapshot }] })
+      : { subscribe: { hostId: 'h1', logId: 'l1', seq: 1, mode: 'idle', hints: [{ kind: 'attention', snapshot }, { kind: 'attention', snapshot: { revision: 'x' } }] } })
+    await expect(value.subscribe({ views: ['activeRuns'], waitMs: 0 })).resolves.toMatchObject({ hints: [{ kind: 'attention', snapshot }] })
     await value.attentionViewed('codex\u0000\u0000/w\u0000s1')
     // Viewing is idempotent, so a lost reply may be asked again.
     expect(calls[1]).toEqual({ request: { op: 'attentionViewed', sessionKey: 'codex\u0000\u0000/w\u0000s1' }, options: { replayable: true } })
@@ -259,14 +226,15 @@ describe('daemon run transport', () => {
   })
 
   it('passes on only the window notices a daemon is meant to forward (W1)', async () => {
-    const { value } = transport(() => ({ events: { epoch: 'e1', cursor: 3, items: [
+    const { value } = transport(() => ({ subscribe: { hostId: 'h1', logId: 'l1', seq: 3, mode: 'idle', hints: [
+      { kind: 'window', channel: 'agent:error', payload: { runId: 'r1', message: 'boom' } },
       { kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } },
       // A channel outside the list, or a payload that is not an object, is not passed on.
       { kind: 'window', channel: 'workspace:openKnownExternal', payload: { path: '/etc' } },
       { kind: 'window', channel: 'agent:error', payload: 'boom' }
     ] } }))
-    await expect(value.appEvents({ epoch: 'e1', cursor: 0, waitMs: 0 })).resolves.toMatchObject({
-      items: [{ kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } }]
+    await expect(value.subscribe({ views: ['activeRuns'], waitMs: 0 })).resolves.toMatchObject({
+      hints: [{ kind: 'window', channel: 'agent:error', payload: { runId: 'r1', message: 'boom' } }]
     })
   })
 })

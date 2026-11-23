@@ -1,6 +1,8 @@
-# P5 · 无界面执行端的安全、测试与拆分（只设计）
+# P5 · 无界面执行端的安全、测试与拆分
 
-状态：设计稿，不含实现。本文接 [P5-headless-host](P5-headless-host.md)（现状、第 1 步、决定）与 [P5-host-cli](P5-host-cli.md)（第 2 步命令行与协议），章节编号连续：§4 安全分析与缓解、§6 测试、§7 拆分与顺序、§8 不做、§9 术语。缓解措施为维护者 2026-11-18 评审后采纳。
+W18 已实现订阅中的执行端管理通知及 iOS 展示，待核验。自动验证通过，iPhone 真机按维护者指示跳过。见 [W18 续报](handoff/reports/W18-3.md)。
+
+本文接 [P5-headless-host](P5-headless-host.md)（现状、第 1 步、决定）与 [P5-host-cli](P5-host-cli.md)（第 2 步命令行与协议），章节编号连续：§4 安全分析与缓解、§6 测试、§7 拆分与顺序、§8 不做、§9 术语。缓解措施为维护者 2026-11-18 评审后采纳。
 
 ## 4. 安全分析与缓解
 
@@ -113,7 +115,7 @@
 - 系统级 LaunchDaemon、root、登录前运行；自动开启 linger；改 Hyprland 或任何全局配置。
 - 非交互批准；终端里画二维码。
 - macOS `SMAppService`：plist 静态打包，带不了 userData 路径，而 daemon 必须由调用方给 userData（`src/daemon/main.ts:13-14`）。登录项带参数开 App、`ensureDaemon` 后退出也可行，但没有停止语义、与 Linux 不对称、难在临时目录测；所以用 LaunchAgent plist。
-- `daemon.log` 轮转。
+- ~~`daemon.log` 轮转~~：2026-11-21 已做。启动方打开日志前，超过 10 MiB 就轮转为 `daemon.log.1`…`.3`（`src/daemon/daemon-log.ts`）。
 - 现有 `local.sock`、`enroll.sock` 也改为 listen 前收 umask（与本设计无关，单独提）。
 
 ## 9. 建议的术语（未改 GLOSSARY）

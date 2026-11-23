@@ -40,12 +40,13 @@ public final class RelaySession: Sendable {
 
   // Run-channel protocol version. The host refuses a different one and reports
   // its own, so the UI can name the end that is behind instead of degrading.
-  static let protocolVersion = 2
+  static let protocolVersion = 3
 
   private let lanes: [Lane: RelayLane]
   private let deviceLabel: String?
   private let hostId: String
   let transport: HostTransportState
+  let deviceSubscription = G0Transport.DeviceSubscriptionState()
   private let timings: LockedValue<[RelayConnectTiming]>
   public static let timingHistoryLimit = 64
 
@@ -95,11 +96,6 @@ public final class RelaySession: Sendable {
   }
 
   // True when the host pushes run observation on a multiplexed tunnel.
-  public var supportsWatchStream: Bool {
-    if case let .supported(set) = transport.capabilities { return set.contains("mux") && set.contains("watchStream") }
-    return false
-  }
-
   func stream(_ request: Data, lane: Lane, limit: Int, onItem: @escaping @Sendable (Data) -> Void) async throws -> Data {
     guard transport.multiplexed else { throw StreamUnavailable() }
     let body = try Self.keepAliveRequest(request, deviceLabel: deviceLabel)
@@ -151,6 +147,7 @@ public final class RelaySession: Sendable {
   // Drops every tunnel (app backgrounded, network path changed). In-flight
   // replayable reads reconnect on their own; writes report an unknown outcome.
   public func reset() async {
+    await deviceSubscription.renegotiate()
     for lane in lanes.values { await lane.reset() }
   }
 
@@ -235,6 +232,7 @@ struct LaneOpenContext: Sendable {
   let lane: String
   let target: String?
   let transport: HostTransportState
+  let deviceSubscription = G0Transport.DeviceSubscriptionState()
   let deviceLabel: String?
   let record: @Sendable (RelayConnectTiming) -> Void
 }

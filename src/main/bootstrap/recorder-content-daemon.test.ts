@@ -7,7 +7,6 @@ import { installRecorderContentWindowCwd } from './recorder-content-daemon'
 // selected (agent:setCwd, kept in main). The App appends that selection to the request;
 // the daemon re-validates it against its own project authority (host-process-queries-2).
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 const REF = { sha256: 'a'.repeat(64), bytes: 4, encoding: 'utf8' }
 type Gated = (event: unknown, ...args: unknown[]) => Promise<unknown>
 
@@ -19,7 +18,7 @@ describe('recorder content in daemon mode', () => {
     const forwarded = vi.fn(async (call: { op: string; method: string; args: unknown[]; read: boolean }) => reply(call))
     const listener = vi.fn()
     undo.push(installDaemonChannelForwarder(forwarded), installRecorderContentWindowCwd(windowCwd))
-    return { forwarded, listener, read: gateDaemonChannel('agent:recorderContentPage', listener, ON) as unknown as Gated }
+    return { forwarded, listener, read: gateDaemonChannel('agent:recorderContentPage', listener) as unknown as Gated }
   }
 
   it('sends the window workspace with the request, and nothing the renderer added', async () => {
@@ -54,7 +53,7 @@ describe('recorder content in daemon mode', () => {
     const forwarded = vi.fn(async () => envelope)
     undo.push(installDaemonChannelForwarder(forwarded))
     const listener = vi.fn()
-    const list = gateDaemonChannel('agent:listCommands', listener, ON) as unknown as Gated
+    const list = gateDaemonChannel('agent:listCommands', listener) as unknown as Gated
     await expect(list({}, { providerId: 'codex', cwd: '/w' })).resolves.toBe(envelope)
     expect(forwarded).toHaveBeenCalledWith({ op: 'providerCommands', method: 'listCommands', args: [{ providerId: 'codex', cwd: '/w' }], read: true })
     expect(listener).not.toHaveBeenCalled()

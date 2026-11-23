@@ -36,3 +36,5 @@
 **MCP 参数与凭据**：W6 对应的修复已推送；`src/main/providers/private-mcp-config.ts` 与各 Provider 构造 MCP 参数、历史检索凭据的代码，改动前先读该修复的提交说明，不要把密钥重新放回命令行参数。
 
 **执行方报告的缺陷（2026-11-20）**：`src/daemon/host-process.ts` 的 `dispose()` 未调用 `providerRegistry.dispose()`（见 [reports/W6-review.md](reports/W6-review.md)），由执行方 C 随 W5 下一轮修复（该文件需先拆分）。
+| W18 | 一次做完：S3 收尾 → P4-4 → P4-5a（含 iOS 执行端通知）→ P4-5b → P4-6 | 维护者本机单执行方 | S3 已合入分支（`84ef9881`） | 每阶段阶段门通过；真机项叫维护者 | [tasks/W18-finish-s3-p4-p5.md](tasks/W18-finish-s3-p4-p5.md) |
+| W19 | W18 核验返修（6 项应修 + 10 项小问题）+ iPhone 与 mac2/mac3 真机验收 | 维护者本机单执行方 | W18（`9f874ca1`） | A 组与 C 组完成才能合入 main | [tasks/W19-w18-review-fixes.md](tasks/W19-w18-review-fixes.md) |

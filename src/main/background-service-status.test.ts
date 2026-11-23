@@ -9,7 +9,7 @@ const report = { version: '1.2.3', pid: 4242, startedAt: 1_700_000_000_000, devi
 
 function deps(extra: Partial<BackgroundServiceStatusDeps> = {}): BackgroundServiceStatusDeps {
   return {
-    daemonMode: true,
+    
     userDataDir: '/u',
     connection: async () => ({ state: 'ready' }),
     selfReport: async () => report,
@@ -20,10 +20,6 @@ function deps(extra: Partial<BackgroundServiceStatusDeps> = {}): BackgroundServi
 }
 
 describe('background service status', () => {
-  it('says there is no background service with the switch off', async () => {
-    await expect(readBackgroundServiceStatus(deps({ daemonMode: false }))).resolves.toEqual({ mode: 'in-process', userDataDir: '/u' })
-  })
-
   it('takes version, pid, uptime, paired devices and runs from the daemon while connected', async () => {
     await expect(readBackgroundServiceStatus(deps())).resolves.toEqual({
       mode: 'daemon', userDataDir: '/u', connection: { state: 'ready' }, checkedAt: 99,

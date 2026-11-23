@@ -23,9 +23,11 @@ export interface SessionSelectionTarget {
   setCurrentCwd: (cwd: string | undefined) => void
   providerContextKey: (providerId: ProviderId, cwd: string, agentProfileId?: string) => string
   providerSessionKey: (providerId: ProviderId, cwd: string, sessionId: string, agentProfileId?: string) => string
-  bumpSessionRevision: (key: string) => void
-  sessionAliasesByContext: Map<string, Map<string, string>>
-  sessionByContext: Map<string, string>
+  // The session mirror of the process that runs the sessions (the daemon). The App has
+  // none since S3: it only points its window at the session, so it leaves these out.
+  bumpSessionRevision?: (key: string) => void
+  sessionAliasesByContext?: Map<string, Map<string, string>>
+  sessionByContext?: Map<string, string>
 }
 
 export function applySessionSelection(target: SessionSelectionTarget, selection: SessionSelection): void {
@@ -34,9 +36,9 @@ export function applySessionSelection(target: SessionSelectionTarget, selection:
   target.setCurrentCwd(selection.workspaceMissing ? undefined : cwd || undefined)
   const key = target.providerContextKey(providerId, cwd, agentProfileId)
   if (!selection.loadingUnsettledRun) {
-    target.bumpSessionRevision(key)
-    target.sessionAliasesByContext.delete(key)
+    target.bumpSessionRevision?.(key)
+    target.sessionAliasesByContext?.delete(key)
   }
-  if (selection.canResume) target.sessionByContext.set(key, externalSessionId)
-  else target.sessionByContext.delete(key)
+  if (selection.canResume) target.sessionByContext?.set(key, externalSessionId)
+  else target.sessionByContext?.delete(key)
 }

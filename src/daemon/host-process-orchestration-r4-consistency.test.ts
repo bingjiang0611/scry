@@ -12,7 +12,7 @@ import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -23,13 +23,11 @@ function setOnEnv() {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -39,35 +37,11 @@ function setOnEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string,
-  timeoutMs = 10_000
-): Promise<string> {
-  let state = 'recorded'
-  let cursor = 0
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 500
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
+const waitRunTerminal = (socketPath: string, ca: string, cert: string, key: string, runId: string) =>
+  waitForProjectedRun(socketPath, ca, cert, key, runId, 500)
 
 describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
   it('Must-Fix 1 + 5a: real daemon beforeDispatch enforces real MCP trust gate fail-closed with 0 Provider calls and consistent failed state', async () => {
@@ -147,7 +121,7 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      await enrollLocal(host1.service)
+      const device = await enrollLocal(host1.service)
       const peerSha = host1.service.authority.inspectLocal().grants[0]!.certificateSHA256
       await host1.dispose()
       host1 = undefined
@@ -226,21 +200,18 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
       expect(resolved.runId).toBe(runId)
       expect(resolved.state).toBe('cancelled')
 
-      const runState = host2.service.controller.runState(peerSha, { runId })
-      expect(runState).toBe('cancelled')
+      expect(host2.service.controller.intentStatus(peerSha, { intentId })).toEqual({ runId, state: 'cancelled' })
 
-      // Decision H: on restart, device ledger is a single state snapshot at R with retainedEvents=[];
-      // stale cursor 0 receives reset (no run_failed, no renumbered old events), while runState/resolveIntent
-      // report 'cancelled' and orchestration.db preserves run.interrupted(host_restarted).
-      const polled = host2.service.controller.poll(peerSha, { cursor: 0 })
-      expect(polled.events).toEqual([])
-      expect(polled.reset).toEqual({ requested: 0, availableFrom: polled.cursor })
-      expect(polled.cursor).toBeGreaterThanOrEqual(1024)
-      expect(
-        host2.orchestrationAuthority!.sink
-          .listEvents()
-          .some((e) => e.runId === runId && e.type === 'run.interrupted' && e.payload.reason === 'host_restarted')
-      ).toBe(true)
+      const reply = await call(host2.channel.socketPath, host2.service.caCertificatePEM, device.certPEM, device.keyPEM, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
+      })
+      expect(reply.subscribe.snapshot.activeRuns.rows).toContainEqual(expect.objectContaining({
+        runId, lifecycle: 'interrupted'
+      }))
+      expect(host2.orchestrationAuthority!.sink.listEvents().filter((event) => event.runId === runId))
+        .toContainEqual(expect.objectContaining({
+          type: 'run.interrupted', payload: expect.objectContaining({ reason: 'host_restarted' })
+        }))
     } finally {
       await host1?.dispose()
       await host2?.dispose()
@@ -409,6 +380,9 @@ describe('W9 Unit R4: Must-Fixes 1, 3, 4, 5, 10b, 10c', () => {
         if (subB.kind === 'accepted') {
           const readBuf = sink.bodyStore.readBody(sink.getRun(subB.runId)!.body!)
           expect(readBuf.toString('utf8')).toBe(detailB)
+          unpin()
+          expect(sink.bodyStore.readBody(sink.getRun(subB.runId)!.body!).toString('utf8')).toBe(detailB)
+          expect(sink.handle.db.prepare('SELECT * FROM orch_body_erase').all()).toEqual([])
         }
       } finally {
         unpin()

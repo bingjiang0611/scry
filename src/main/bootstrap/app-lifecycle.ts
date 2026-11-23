@@ -3,50 +3,36 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveRendererEntryUrl } from '../renderer-security'
 import type { ActiveRun } from '../../shared/trace'
-import type { ProviderId } from '../../shared/provider'
-import { initDb, setBillingEnvProvider } from '../db'
-import { configureStorage } from '../storage-paths'
 import { configureRunStageTiming } from '../run-stage-timing'
-import { packagedRecorderCliPath, warmShellEnv, shellEnv } from '../claude-locate'
 import { ensureShellEnv } from '../shell'
-import { configureProviderEventLog } from '../provider-event-log'
 import { PerformanceTrace, performanceRecordingEnabled } from '../performance-timing'
 import { startPerformanceRecording, stopPerformanceRecording, recordResourcePerformance, recordStartupPerformance, performanceRecordingHealth } from '../performance-recording'
 import { startPerformanceResourceMonitor, type PerformanceResourceMonitor } from '../performance-resource-monitor'
-import { disposeTranscriptParser } from '../transcript-parser'
-import { enforceShutdownDeadline, settleRunsForShutdown } from '../shutdown'
+import { enforceShutdownDeadline } from '../shutdown'
 import type { DockBadgeState } from '../dock-badge'
 import type { TraceOutputBridge } from '../trace-output'
-import type { TerminalOutputBridge } from '../terminal-output'
-import type { TerminalManager } from '../terminal-manager'
 import type { RunRegistry } from '../run-registry'
 import type { RunStopLifecycle } from '../run-stop-lifecycle'
 import type { RunTraceRouter } from '../run-trace-router'
-import type { UserQuestionBroker } from '../user-question'
-import type { SessionDiffBaselineRegistry } from '../session-diff'
-import type { ConversationStore } from '../conversation-store'
-import type { ProviderRegistry } from '../providers/registry'
-import type { SourceControlService } from '../source-control/service'
-import type { RemoteHostService } from '../remote/remote-host-service'
 import type { DesktopRemoteClient } from '../remote/desktop-client'
-import { startRemoteHostIfEnabled, type RemoteHostRuntime } from './remote-host'
 import type { RunControl } from './run-control'
-import { runStartupRecovery } from './startup-recovery'
-import { appStartupWriters } from './app-startup-writers'
 import { shutdownDaemonTerminals } from './terminal-daemon'
-import { claimAppUserDataWithDialog } from './userdata-owner-dialog'
 import { applyLinuxPasswordStore } from './linux-password-store'
+
+// The App process does window, UI and OS work only. The background service (src/daemon)
+// owns userData: scry.db, the ledgers, startup recovery, Providers, terminals and paired
+// devices. Nothing here opens or recovers any of it.
 
 export function initializeAppEnvironment(__dirname: string, getWindow: () => BrowserWindow | null) {
   // scry 开发期可能从一个父 Claude Code 会话内启动，继承了 CLAUDECODE / CLAUDE_CODE_* /
-  // AI_AGENT 等环境变量，会让 SDK 驱动的 claude 子进程认证错乱（误判为嵌套会话 → Not logged in）。
-  // 启动时清掉这些继承来的变量，让 SDK 的 cli.js 以干净的用户级环境读本机登录态（Keychain/OAuth）。
+  // AI_AGENT 等环境变量；App 直接拉起的后台服务继承这里的环境，会让它的 claude 子进程认证错乱
+  // （误判为嵌套会话 → Not logged in）。启动时清掉这些继承来的变量。
   for (const k of Object.keys(process.env)) {
     if (k === 'CLAUDECODE' || k === 'AI_AGENT' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_')) {
       delete process.env[k]
     }
   }
-  // Linux 桌面入口不设置 SHELL。登录 shell 采集、Provider CLI 与终端都靠它，
+  // Linux 桌面入口不设置 SHELL。后台服务的登录 shell 采集、Provider CLI 与终端都靠它，
   // 缺失时回退到 zsh 会让 Arch/Omarchy 上的环境采集直接失败。
   ensureShellEnv()
 
@@ -71,7 +57,7 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
     })
   }
   // Linux: ask for libsecret on Hyprland or an unnamed desktop, where Chromium would pick
-  // basic_text and daemon mode would refuse every run. Fail closed without a keyring.
+  // basic_text and the App would refuse every run. Fail closed without a keyring.
   const passwordStore = applyLinuxPasswordStore(app.commandLine)
   if (passwordStore) console.info(`[scry] safeStorage: --password-store=${passwordStore} (desktop not recognised by Chromium)`)
   // Isolated automation stays hidden: showInactive still displays a native window.
@@ -88,16 +74,12 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
       win.focus()
     })
   }
-  setBillingEnvProvider(shellEnv)
   return { rendererEntryUrl, useDevelopmentRenderer, isOwnedTestApp, primaryInstance }
 }
 
 export function registerAppLifecycle({
   primaryInstance, useDevelopmentRenderer, dockBadge, createWindow, traceOutput, runs,
-  remoteHostRuntime, requireDesktopRemoteClient, setStartupManagedRecovery, conversationStore,
-  beginShutdown, getRemoteHostService, getDesktopRemoteClient, terminalOutput,
-  getTerminalManagerInstance, runStopLifecycle, sessionDiffBaselines, userQuestionBroker,
-  mirrorSessionTranscript, providerRegistry, sourceControl, runTraces
+  requireDesktopRemoteClient, beginShutdown, getDesktopRemoteClient, runStopLifecycle, runTraces
 }: {
   primaryInstance: boolean
   useDevelopmentRenderer: boolean
@@ -105,71 +87,25 @@ export function registerAppLifecycle({
   createWindow: () => void
   traceOutput: TraceOutputBridge
   runs: RunRegistry<ActiveRun, RunControl>
-  remoteHostRuntime: RemoteHostRuntime
   requireDesktopRemoteClient: () => DesktopRemoteClient
-  setStartupManagedRecovery: (recovery: Promise<void>) => void
-  conversationStore: () => ConversationStore
   beginShutdown: () => void
-  getRemoteHostService: () => RemoteHostService | null
   getDesktopRemoteClient: () => DesktopRemoteClient | null
-  terminalOutput: TerminalOutputBridge
-  getTerminalManagerInstance: () => TerminalManager | undefined
   runStopLifecycle: RunStopLifecycle
   runTraces: RunTraceRouter
-  sessionDiffBaselines: SessionDiffBaselineRegistry
-  userQuestionBroker: UserQuestionBroker
-  mirrorSessionTranscript: (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined) => Promise<void>
-  providerRegistry: ProviderRegistry
-  sourceControl: SourceControlService
 }): void {
   let performanceResourceMonitor: PerformanceResourceMonitor | null = null
 
   app.whenReady().then(async () => {
     if (!primaryInstance) return
-    const writers = appStartupWriters()
-    const startupTrace = (): PerformanceTrace => new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
-    let startupPerf = startupTrace()
-    if (writers.userDataLock) {
-      // First, before every userData writer below, including performance recording: a
-      // daemon left from a switch-on session may still own this userData (P3 case 1). The
-      // single-instance lock already ran in initializeAppEnvironment, so a second App never
-      // gets here. Cost: one lock read/write and one identity read (/proc on Linux, one
-      // `ps` on macOS), synchronous like the initDb that follows; never on an IPC path.
-      const claim = await claimAppUserDataWithDialog(app.getPath('userData'))
-      if (claim.status === 'quit') {
-        // app.exit, not app.quit: before-quit cleanup would flush stores this App never
-        // opened. Nothing was written, and the lock (if any) belongs to someone else.
-        app.exit(claim.reason === 'user-quit' ? 0 : 1)
-        return
-      }
-      if (claim.status === 'unlocked') {
-        console.warn('[scry] userData lock unavailable; starting without it (no other owner recorded)')
-      } else {
-        // Held until the process ends: `quit` fires after before-quit cleanup has settled,
-        // and `exit` covers paths that skip it. Release only removes this process's record.
-        app.once('quit', claim.release)
-        process.once('exit', claim.release)
-      }
-      // Time spent reading the dialog is the user's, not startup's.
-      if (claim.asked) startupPerf = startupTrace()
-      startupPerf.mark('userdata_owned')
-    }
+    const startupPerf = new PerformanceTrace('app.startup', { platform: process.platform }, recordStartupPerformance)
     await startPerformanceRecording(app.getPath('userData'), app.getVersion(), app.isPackaged, useDevelopmentRenderer)
     startupPerf.mark('performance_recording_ready')
-    // 双流事件日志按环境变量装配；未设置时 openProviderEventWriter() 返回 undefined。
-    configureProviderEventLog(process.env, app.getPath('userData'))
     // 首 token 分段计时（SCRY_RUN_TIMING=1 时开启）；与 daemon 写同一目录下的 NDJSON，
     // 两条链路因此可以用同一把墙钟对齐。
     configureRunStageTiming(app.getPath('userData'))
     dockBadge.sync()
-    void warmShellEnv()
-    // SQLite 是 turn 分析事实的写入前置条件；在 renderer 可发送前完成初始化，
-    // 避免快速完成的首轮落过 archive 却永久缺少 spans/usage/intervention。
-    // Storage 的路径由这里注入一次：数据库层不再问 Electron 要 userData。
-    configureStorage({ userDataDir: app.getPath('userData'), appPath: app.getAppPath() })
-    // With the switch on the daemon owns scry.db; its channels are answered there.
-    if (writers.database) initDb()
-    startupPerf.mark(writers.database ? 'database_ready' : 'database_owned_by_daemon')
+    // The daemon owns scry.db; its channels are answered there.
+    startupPerf.mark('database_owned_by_daemon')
     createWindow()
     performanceResourceMonitor = startPerformanceResourceMonitor({
       enabled: performanceRecordingEnabled(),
@@ -189,27 +125,15 @@ export function registerAppLifecycle({
       }
     })
     startupPerf.mark('window_created')
-    void startRemoteHostIfEnabled(remoteHostRuntime)
-    // Outbound restoration is independent of inbound hosting and never gates the
-    // first window. It only reconnects paired hosts; it does not submit work.
+    // Outbound restoration never gates the first window. It only reconnects paired
+    // hosts; it does not submit work.
     void requireDesktopRemoteClient().restoreConnections().catch((error) => {
       console.warn('[scry] desktop connection startup recovery failed:', error)
     })
-    if (writers.startupRecovery) {
-      setStartupManagedRecovery(runStartupRecovery({
-        userDataDir: app.getPath('userData'),
-        recorderCli: packagedRecorderCliPath() ?? process.env.SCRY_CLI_PATH,
-        startupPerf,
-        conversationStore,
-        runs
-      }))
-    } else {
-      // The daemon recovers its own userData. Record that instead of recovery stages
-      // main never ran, so the startup trace does not claim them.
-      startupPerf.mark('recovery_owned_by_daemon')
-      startupPerf.finish()
-      setStartupManagedRecovery(Promise.resolve())
-    }
+    // The daemon recovers its own userData. Record that instead of recovery stages the
+    // App never runs, so the startup trace does not claim them.
+    startupPerf.mark('recovery_owned_by_daemon')
+    startupPerf.finish()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -223,32 +147,18 @@ export function registerAppLifecycle({
     if (quitCleanupStarted) return
     beginShutdown()
     quitCleanupStarted = true
-    // Release the remote subsystem's durable leases; a restart re-acquires and
-    // replays any recorded-but-undispatched intents.
-    const remoteCleanup = Promise.all([getRemoteHostService()?.dispose(), getDesktopRemoteClient()?.dispose()]).then(() => undefined)
-    terminalOutput.close()
-    const terminalCleanup = Promise.all([
-      getTerminalManagerInstance()?.shutdown().catch((error) => {
-        console.warn('[scry] terminal shutdown failed:', (error as Error)?.message)
-      }),
-      // Daemon mode: the App's shells live in the daemon and end with the App (bounded).
-      shutdownDaemonTerminals()
-    ]).then(() => undefined)
+    // The desktop client's durable leases; a restart re-acquires them.
+    const remoteCleanup = Promise.resolve(getDesktopRemoteClient()?.dispose()).then(() => undefined)
+    // The App's shells live in the daemon and end with the App (bounded).
+    const terminalCleanup = shutdownDaemonTerminals()
     runStopLifecycle.close()
     traceOutput.close()
     // scoped 流与 legacy 桥一同关闭：订阅、额度与定时器都不留到下一个进程。
     runTraces.close()
     performanceResourceMonitor?.stop()
     performanceResourceMonitor = null
-    sessionDiffBaselines.disposeAll()
-    const controls = runs.unsettledControls()
-    const runCleanup = settleRunsForShutdown(controls, {
-      cancelQuestion: (runId) => userQuestionBroker.cancelRun(runId),
-      mirror: (run, externalSessionId) => mirrorSessionTranscript(run.providerId, run.cwd, externalSessionId),
-      disposeProviders: () => providerRegistry.dispose()
-    })
-    const cleanup = Promise.all([runCleanup, terminalCleanup, remoteCleanup, disposeTranscriptParser(), sourceControl.dispose()]).then(() => stopPerformanceRecording())
-    void enforceShutdownDeadline(cleanup, controls, () => providerRegistry.dispose()).finally(() => {
+    const cleanup = Promise.all([terminalCleanup, remoteCleanup]).then(() => stopPerformanceRecording())
+    void enforceShutdownDeadline(cleanup, [], () => undefined).finally(() => {
       quitCleanupFinished = true
       app.quit()
     })

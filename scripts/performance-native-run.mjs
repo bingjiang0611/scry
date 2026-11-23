@@ -65,12 +65,12 @@ export function combineNativeShards(shards) {
     }
     report.errors.push(...shard.errors)
   }
+  validateNative(report)
   // Revision, harness and environment can match while the built App differs: each scenario result
   // carries the digest of the artifact it measured. Mixing builds would compare two products, so
   // every merged scenario must share one build and one runtime identity.
   const identities = new Set(Object.values(report.results).map(result => JSON.stringify([result.platform, result.node, result.electron, result.artifactSha256])))
   assert.equal(identities.size, 1, 'shards were measured on different builds or runtimes')
-  validateNative(report)
   return report
 }
 

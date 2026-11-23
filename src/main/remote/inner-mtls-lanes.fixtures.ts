@@ -11,7 +11,7 @@ import { ensureHostIdentity, type HostIdentity } from './host-identity'
 import type { HostController, RemoteIntentRouting } from './host-controller'
 import { createHostController } from './host-controller-factory'
 import { RunOutputFileStore } from './run-output-file'
-import { InnerMtlsHost } from './inner-mtls-host'
+import { InnerMtlsHost, type InnerMtlsHostOptions } from './inner-mtls-host'
 import { ProviderOperationGate } from '../provider-operation-gate'
 
 // Production InnerMtlsHost + HostController over loopback for transport-level
@@ -44,7 +44,7 @@ export async function laneHarness(runProvider: (input: {
   runId: string
   routing: RemoteIntentRouting
   output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
-}) => Promise<void>) {
+}) => Promise<void>, networkSubscribe?: InnerMtlsHostOptions['networkSubscribe']) {
   const dir = mkdtempSync(join(tmpdir(), 'scry-mtls-lanes-')); dirs.push(dir)
   const identity: HostIdentity = await ensureHostIdentity(join(dir, 'identity'))
   const binding = await createHostController({
@@ -58,7 +58,7 @@ export async function laneHarness(runProvider: (input: {
   cleanups.push(() => binding.close())
   const controller: HostController = binding.controller
   const server = await identity.issueHostServer()
-  const host = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
+  const host = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM, networkSubscribe })
   const addr = await host.listen()
   cleanups.push(() => host.close())
   return { identity, controller, caPEM: identity.caCertificatePEM, addr, host }

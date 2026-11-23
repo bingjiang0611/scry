@@ -9,14 +9,14 @@ import type { WorkspaceSetupState } from './chat-view/types'
 export function useRemoteWorktreeSetup(
   foundation: Pick<
     FoundationState,
-    'api' | 'activeRun' | 'pendingWorktree' | 'pendingWorktreeRef' | 'setPendingWorktree' | 'setError' | 'setPollInterval'
+    'api' | 'activeRun' | 'pendingWorktree' | 'pendingWorktreeRef' | 'setPendingWorktree' | 'setError'
   >,
   connectionId: string,
   controlRunId: string | null | undefined,
-  currentRunStatus: DesktopRemoteRunStatus | null | undefined,
-  pollMs: number
+  // Pushed by the host status subscription; there is no poll interval to speed up.
+  currentRunStatus: DesktopRemoteRunStatus | null | undefined
 ): WorkspaceSetupState | null {
-  const { api, activeRun, pendingWorktree, pendingWorktreeRef, setPendingWorktree, setError, setPollInterval } = foundation
+  const { api, activeRun, pendingWorktree, pendingWorktreeRef, setPendingWorktree, setError } = foundation
 
   const cancelWorkspaceSetup = useCallback((): void => {
     const current = pendingWorktreeRef.current
@@ -26,14 +26,13 @@ export function useRemoteWorktreeSetup(
       : prev)
     const runId = current.runId ?? controlRunId
     if (!runId) return
-    setPollInterval(pollMs)
     void api.stop(connectionId, runId).catch((reason) => {
       setError(errorText(reason))
       setPendingWorktree(prev => prev && prev.workspace.operationId === current.workspace.operationId
         ? { ...prev, cancelling: false, cancelRequested: false }
         : prev)
     })
-  }, [api, connectionId, controlRunId, pendingWorktreeRef, pollMs, setError, setPendingWorktree, setPollInterval])
+  }, [api, connectionId, controlRunId, pendingWorktreeRef, setError, setPendingWorktree])
 
   return useMemo<WorkspaceSetupState | null>(() => {
     if (!pendingWorktree || activeRun) return null

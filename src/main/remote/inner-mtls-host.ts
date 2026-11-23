@@ -14,7 +14,7 @@ import { protocolMismatch } from './remote-protocol'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
 // Protocol constants live in inner-mtls-protocol.ts; re-exported for callers.
-export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT, WATCH_STREAM_MAX_MS, WATCH_STREAM_WAIT_MS } from './inner-mtls-protocol'
+export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT } from './inner-mtls-protocol'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
 // paired device reaches (through the outer WSS byte relay, which never sees
@@ -55,6 +55,7 @@ export interface InnerMtlsHostOptions {
   // daemon answers (local ops). Supplied on the local endpoint only; on the network
   // endpoint the ops are absent, not merely refused.
   localEndpoint?: LocalEndpointHandlers
+  networkSubscribe?: LocalEndpointHandlers['subscribe']
   // Fired when the last live TLS socket for a verified peer closes (used by local-endpoint bridges).
   onPeerDisconnected?: (fingerprint: string) => void
 }
@@ -63,11 +64,10 @@ function digest(bytes: Uint8Array): string {
   return createHash('sha256').update(Buffer.from(bytes)).digest('hex')
 }
 
-// Ops a multiplexed lane answers itself (pushed streams), before request dispatch.
-const LANE_OPS = new Set(['watchStream', 'cancel'])
-
 export class InnerMtlsHost {
   #server: Server
+  #desktopServer?: Server
+  readonly #openDesktopServer: () => Server
   #maxFrame: number
   #transport: 'local' | 'network'
   #info?: InnerMtlsHostOptions['info']
@@ -77,13 +77,20 @@ export class InnerMtlsHost {
   #peers = new Map<string, Set<TLSSocket>>()
   #lanAdvertisement: () => LanAdvertisement | undefined = () => undefined
   #onPeerDisconnected?: (fingerprint: string) => void
+  #networkSubscribe?: LocalEndpointHandlers['subscribe']
 
   constructor(options: InnerMtlsHostOptions) {
     this.#maxFrame = options.maxFrameBytes ?? DEFAULT_MAX_FRAME
     this.#transport = options.transport ?? 'network'
     this.#info = options.info
     this.#onPeerDisconnected = options.onPeerDisconnected
-    this.#server = createServer({
+    this.#networkSubscribe = this.#transport === 'network' ? options.networkSubscribe : undefined
+    this.#server = this.#makeServer(options, false)
+    this.#openDesktopServer = () => this.#makeServer(options, true)
+  }
+
+  #makeServer(options: InnerMtlsHostOptions, desktopTransport: boolean): Server {
+    const server = createServer({
       key: options.serverKeyPEM,
       cert: options.serverCertPEM,
       ca: options.caPEM,
@@ -95,11 +102,12 @@ export class InnerMtlsHost {
       // Relay legs start TLS only once device bytes arrive and direct LAN
       // peers are unauthenticated until the handshake ends: bound it.
       handshakeTimeout: 10_000
-    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets, options.localEndpoint))
-    this.#server.on('tlsClientError', (err) => {
+    }, (socket) => this.#onConnection(socket as TLSSocket, options.controller, options.executionTargets, options.localEndpoint, desktopTransport))
+    server.on('tlsClientError', (err) => {
       // Rejected handshakes are not host errors. Optional diagnostics only.
       if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] tlsClientError: ${(err as Error)?.message}`)
     })
+    return server
   }
 
   // Direct-route addresses reported to an authorized phone's ping. Set once the
@@ -116,7 +124,14 @@ export class InnerMtlsHost {
     this.#server.emit('connection', stream)
   }
 
-  #onConnection(socket: TLSSocket, controller: HostController, executionTargets?: ExecutionTargetRouter, localEndpoint?: LocalEndpointHandlers): void {
+  /** Only the loopback Desktop/SSH listener supplies this origin. Both servers verify the same grants. */
+  serveDesktop(stream: Duplex): void {
+    this.#desktopServer ??= this.#openDesktopServer()
+    this.#desktopServer.emit('connection', stream)
+  }
+
+  #onConnection(socket: TLSSocket, controller: HostController, executionTargets: ExecutionTargetRouter | undefined,
+                localEndpoint: LocalEndpointHandlers | undefined, desktopTransport: boolean): void {
     // Fail closed on anything but a fresh, fully-verified TLS 1.3 session.
     if (process.env.SCRY_INNER_MTLS_DEBUG) console.log(`[inner-mtls] onConnection authorized=${socket.authorized} authErr=${socket.authorizationError} proto=${socket.getProtocol()} reused=${socket.isSessionReused()}`)
     if (!socket.authorized || socket.getProtocol() !== 'TLSv1.3' || socket.isSessionReused()) { socket.destroy(); return }
@@ -144,9 +159,10 @@ export class InnerMtlsHost {
       }
     })
     serveInnerConnection(socket, {
-      controller, fingerprint, certificateExpiresAt, maxFrame: this.#maxFrame,
+      certificateExpiresAt, maxFrame: this.#maxFrame,
       preflight: (parsed) => this.#preflight(controller, fingerprint, parsed),
-      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint, () => this.#lanAdvertisement(), connAbort.signal),
+      dispatch: (parsed) => dispatchRemoteRequest(controller, fingerprint, parsed, executionTargets, localEndpoint,
+        () => this.#lanAdvertisement(), connAbort.signal, this.#networkSubscribe, desktopTransport),
       timing: (parsed) => requestTiming(parsed)
     })
   }
@@ -175,12 +191,8 @@ export class InnerMtlsHost {
         protocol: REMOTE_PROTOCOL_VERSION
       }
     }
-    // Pushed-stream ops never reach request dispatch, so its version gate runs here.
-    if (parsed && typeof parsed.op === 'string' && LANE_OPS.has(parsed.op)) {
-      const mismatch = protocolMismatch(parsed)
-      if (mismatch) return { ...mismatch }
-    }
-    return undefined
+    const mismatch = parsed ? protocolMismatch(parsed) : undefined
+    return mismatch ? { ...mismatch } : undefined
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<{ port: number; host: string }> {
@@ -201,7 +213,8 @@ export class InnerMtlsHost {
 
   async close(): Promise<void> {
     for (const socket of this.#connections) socket.destroy()
-    await new Promise<void>((resolve) => this.#server.close(() => resolve()))
+    const servers = this.#desktopServer ? [this.#server, this.#desktopServer] : [this.#server]
+    await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
   }
 }
 

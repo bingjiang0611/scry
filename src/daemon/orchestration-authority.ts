@@ -1,36 +1,35 @@
 import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import type { ConversationStore } from '../main/conversation-store'
+import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
+import type { Evidence } from '../shared/turn-record'
 import type { OrchestrationAuthorityHooks } from '../main/remote/orchestration-seam'
 import { RemoteInteractionError } from '../main/remote/remote-interaction-broker'
-import type { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { createConversationOrdinalResolver } from '../host-runtime/orchestration/conversation-ordinal-lookup'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { startDeferredLegacyImport, type LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
-import type { LegacyMirrorWorker } from '../host-runtime/orchestration/legacy-mirror'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
-import { runAuthorityStartupSequence } from './orchestration-authority-startup'
+import { LEGACY_H1_IMPORT_COMPLETE, runAuthorityStartupSequence } from './orchestration-authority-startup'
 import {
   buildAuthorityStatus,
   createAuthoritySubscribeHandler,
   createAuthoritySubscribeHub,
-  forwardAppEventToSubscribeHub,
+  forwardAppHintToSubscribeHub,
   handleAuthorityRunProgress,
+  type AppHint,
   type AuthoritySubscribeRuntimeDeps
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
+import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
-import type { AppEvent } from '../main/remote/app-event-feed'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
-import type { SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
+import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
 import {
   parseOrchestrationFullfsync,
-  parseOrchestrationMode,
-  parsePendingTtlMs,
-  type OrchestrationModeResolution
+  parsePendingTtlMs
 } from '../host-runtime/orchestration/mode'
 import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
@@ -40,7 +39,6 @@ const MAX_LEDGER_CANONICAL_MAP = 4_096
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
-  readonly mode: OrchestrationModeResolution
   readonly fullfsync: boolean
   readonly checkpointFullfsync: boolean
   readonly sink: EventSink
@@ -49,11 +47,11 @@ export interface DaemonOrchestrationAuthority {
   readonly recovery: RecoverOrchestrationSummary
   readonly importComplete: Promise<void>
   readonly subscribeHub: SubscribeHub
-  createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeReply>
-  forwardAppEvent(event: AppEvent): void
+  createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
+  publishHint(event: AppHint): void
+  observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
   status(): BackgroundServiceOrchestrationStatus
-  flushLegacyMirror(): Promise<void>
   close(): Promise<void>
 }
 
@@ -68,26 +66,22 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   requestRunStop: (runId: string) => boolean
   log: (line: string) => void
   beforeCommitHook?: () => void
-  mirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
-  mirrorMaxPendingEvents?: number
-  mirrorRetryIntervalMs?: number
   deferredImportThreshold?: number
+  pauseDeferredImport?: Promise<void>
   attentionSnapshot?: () => SessionAttentionSnapshot
 }
 
 /**
- * Isolated daemon wiring for P4-2 authoritative orchestration (`SCRY_ORCHESTRATION=on`).
+ * Isolated daemon wiring for P4-2 authoritative orchestration.
  * Runs off-main-thread H1 import + single-tx startup recovery + two-ledger reconciliation
- * BEFORE `openLocalChannel`, and mirrors committed events asynchronously to H1 off critical path.
+ * before opening the local channel.
  */
 export async function attachDaemonOrchestrationAuthority<
   State extends RunRegistryState,
   Control extends RunRegistryControl
 >(
   options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
-): Promise<DaemonOrchestrationAuthority | undefined> {
-  const mode = parseOrchestrationMode(options.env)
-  if (mode.effective !== 'on') return undefined
+): Promise<DaemonOrchestrationAuthority> {
 
   // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
@@ -121,7 +115,6 @@ export async function attachDaemonOrchestrationAuthority<
 
     return buildAuthorityRuntime({
       options,
-      mode,
       fullfsync,
       checkpointFullfsync,
       pendingTtlMs,
@@ -132,7 +125,6 @@ export async function attachDaemonOrchestrationAuthority<
       deferredPlan: startup.deferredPlan,
       importComplete: startup.importComplete,
       resolveImportComplete: startup.resolveImportComplete,
-      h1DiskLastSeq: startup.h1DiskLastSeq,
       setDeferredControl: (cancel) => { cancelDeferred = cancel },
       getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
@@ -148,7 +140,6 @@ function buildAuthorityRuntime<
   Control extends RunRegistryControl
 >(ctx: {
   options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
-  mode: OrchestrationModeResolution
   fullfsync: boolean
   checkpointFullfsync: boolean
   pendingTtlMs: number
@@ -159,11 +150,10 @@ function buildAuthorityRuntime<
   deferredPlan: LegacyLedgerPlan | undefined
   importComplete: Promise<void>
   resolveImportComplete: (() => void) | undefined
-  h1DiskLastSeq: number
   setDeferredControl: (cancel: (() => void) | undefined) => void
   getDeferredControl: () => { deferredStarted: boolean; cancelDeferred: (() => void) | undefined; setStarted: () => void }
 }): DaemonOrchestrationAuthority {
-  const { options, mode, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
+  const { options, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
   let deferredPlan = ctx.deferredPlan
   const { importComplete, resolveImportComplete } = ctx
 
@@ -177,20 +167,24 @@ function buildAuthorityRuntime<
     }
   })
 
-  // Track mapping between H1 in-memory ledgerRunId and canonical runId when different (conversation turns).
+  // Track mapping between the dispatcher run ID and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
+  const pendingTranscripts = new Map<string, Promise<Evidence<string>>>()
+  const transcriptWrites = createRunTranscriptWrites(sink, options.log)
   const trustGate = new AuthorityMcpTrustGate()
   const subscribeHub = createAuthoritySubscribeHub(
     sink,
     options.attentionSnapshot ? () => [{ kind: 'attention', snapshot: options.attentionSnapshot!() }] : undefined
   )
-  let legacyMirror: LegacyMirrorWorker | undefined
-  let backingFileStore: SessionLedgerFileStore | undefined
-  let syncMirrorSnapshot: (() => void) | undefined
-  let readH1FallbackStatus: (() => { unavailable: boolean; reason?: string }) | undefined
   let progressCounter = 0
 
   const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
+  const resolvePersistedCanonical = (runId: string): string => {
+    const active = ledgerToCanonical.get(runId)
+    if (active || !sink.handle.db.open) return active ?? runId
+    const alias = canonicalForAlias.get(runId) as { run_id: string } | undefined
+    return alias?.run_id ?? runId
+  }
   const trackCanonical = (ledgerRunId: string, canonicalRunId: string): void => {
     if (ledgerRunId === canonicalRunId) return
     if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
@@ -211,27 +205,30 @@ function buildAuthorityRuntime<
     }
   }
 
+  const aliasForCanonical = sink.handle.db.prepare(
+    'SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?'
+  )
+  const canonicalForAlias = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
+  const ledgerIdForSubmit = (runId: string, duplicate: boolean): string => {
+    if (duplicate) {
+      const alias = aliasForCanonical.get(runId) as { ledger_run_id: string } | undefined
+      return alias?.ledger_run_id ?? runId
+    }
+    if (UUID_V4_RE.test(runId)) return runId
+    const ledgerRunId = randomUUID()
+    trackCanonical(ledgerRunId, runId)
+    return ledgerRunId
+  }
+
+  const readSubmitReceipt = (peer: string, commandId: string) => {
+    if (sink.isWriteIndeterminate()) throw new Error('orchestration_write_indeterminate')
+    const receipt = sink.getReceipt(commandId, `peer:${peer}`) ?? sink.getReceipt(commandId, 'system')
+    return receipt?.type === 'run.submit' && receipt.status === 'accepted' ? receipt : undefined
+  }
+
   const hooks: OrchestrationAuthorityHooks = {
-    createLedgerStore: (ledgerDirectory) => {
-      const created = createAuthorityLedgerStore({
-        ledgerDirectory,
-        sink,
-        log: options.log,
-        ...(options.mirrorWriteHook ? { mirrorWriteHook: options.mirrorWriteHook } : {}),
-        ...(options.mirrorMaxPendingEvents !== undefined
-          ? { mirrorMaxPendingEvents: options.mirrorMaxPendingEvents }
-          : {}),
-        ...(options.mirrorRetryIntervalMs !== undefined
-          ? { mirrorRetryIntervalMs: options.mirrorRetryIntervalMs }
-          : {}),
-        h1DiskLastSeq: ctx.h1DiskLastSeq
-      })
-      backingFileStore = created.fileStore
-      legacyMirror = created.mirror
-      syncMirrorSnapshot = created.syncSnapshotFromDb
-      readH1FallbackStatus = created.h1FallbackStatus
-      return { store: created.store, close: created.close }
-    },
+    currentLogId: () => sink.getMeta('log_id'),
+    createLedgerStore: () => createAuthorityLedgerStore(sink),
 
     submitAsync: async (input) => {
       const immediateDispatch = input.immediateDispatch
@@ -249,12 +246,11 @@ function buildAuthorityRuntime<
         ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      if (!immediateDispatch) {
+      if (!immediateDispatch && res.kind !== 'duplicate') {
         const routing = parseLedgerIntentRouting(res.runId, input.detail)
         trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
       }
-      const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
-      trackCanonical(ledgerRunId, res.runId)
+      const ledgerRunId = ledgerIdForSubmit(res.runId, res.kind === 'duplicate')
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
@@ -274,13 +270,24 @@ function buildAuthorityRuntime<
         ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      if (!immediateDispatch) {
+      if (!immediateDispatch && res.kind !== 'duplicate') {
         const routing = parseLedgerIntentRouting(res.runId, input.detail)
         trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
       }
-      const ledgerRunId = UUID_V4_RE.test(res.runId) ? res.runId : randomUUID()
-      trackCanonical(ledgerRunId, res.runId)
+      const ledgerRunId = ledgerIdForSubmit(res.runId, res.kind === 'duplicate')
       return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
+    },
+
+    hasSubmitReceipt: (peer, commandId) => readSubmitReceipt(peer, commandId) !== undefined,
+
+    intentStatus: (peer, commandId) => {
+      const receipt = readSubmitReceipt(peer, commandId)
+      const runId = receipt?.result?.runId
+      const run = typeof runId === 'string' ? sink.getRun(runId) : undefined
+      if (!run) throw new Error('unknown_intent')
+      const state = run.lifecycle === 'admitted' ? 'dispatched'
+        : run.lifecycle === 'interrupted' ? 'cancelled' : run.lifecycle
+      return { runId: ledgerIdForSubmit(run.runId, true), state }
     },
 
     compensateSubmitFailure: (runId, reason) => {
@@ -291,7 +298,7 @@ function buildAuthorityRuntime<
     },
 
     recoveredRunLifecycle: (runId) => {
-      const run = sink.getRun(resolveCanonical(runId))
+      const run = sink.getRun(resolvePersistedCanonical(runId))
       if (!run) return undefined
       if (run.lifecycle === 'settled' || run.lifecycle === 'failed' || run.lifecycle === 'cancelled' || run.lifecycle === 'interrupted') {
         return run.lifecycle
@@ -349,7 +356,7 @@ function buildAuthorityRuntime<
       const res = engine.answerQuestion({
         peerCertSHA256: input.peerCertSHA256,
         grantScope: input.grantScope,
-        runId: resolveCanonical(input.runId),
+        runId: resolvePersistedCanonical(input.runId),
         questionId: input.questionId,
         answerId: input.answerId,
         answerSha256: input.answerSha256
@@ -373,12 +380,17 @@ function buildAuthorityRuntime<
 
     onRunTerminal: (runId, step, detail) => {
       const canonicalRunId = resolveCanonical(runId)
+      const binding = subscribeHub.liveRunMeta(canonicalRunId)
       engine.recordTerminal({
         runId: canonicalRunId,
         step,
+        ...(binding?.admitted && binding.scryRunId ? { appRunId: binding.scryRunId } : {}),
         ...(detail ? { reason: detail } : {}),
-        evidence: ['provider']
+        evidence: [step === 'cancelled' ? 'host.run_completion' : 'provider']
       })
+      const transcript = pendingTranscripts.get(canonicalRunId)
+      pendingTranscripts.delete(canonicalRunId)
+      if (transcript) transcriptWrites.enqueue(canonicalRunId, transcript)
       subscribeHub.noteRunTerminal(canonicalRunId)
       trustGate.delete(canonicalRunId)
       ledgerToCanonical.delete(runId)
@@ -388,6 +400,7 @@ function buildAuthorityRuntime<
   }
 
   let closed = false
+  const pausedImport = options.pauseDeferredImport
   const startImport = (): void => {
     const ctrl = ctx.getDeferredControl()
     if (!deferredPlan || ctrl.deferredStarted || closed || sink.isWriteIndeterminate()) {
@@ -404,7 +417,8 @@ function buildAuthorityRuntime<
     ctx.setDeferredControl(handle.cancel)
     handle.promise
       .then((s) => {
-        if (!closed) syncMirrorSnapshot?.()
+        if (closed || sink.isWriteIndeterminate() || s.legacyLedgerSeq < targetPlan.lastSeq) return
+        sink.setMeta(LEGACY_H1_IMPORT_COMPLETE, '1')
         options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`)
       })
       .catch((e) => options.log(`daemon.orchestration-on-import-failed ${e instanceof Error ? e.message : String(e)}`))
@@ -413,14 +427,25 @@ function buildAuthorityRuntime<
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
-  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink, readH1FallbackStatus)
+  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink)
 
   return {
-    mode, fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
+    fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
     createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
-    forwardAppEvent: (event) => forwardAppEventToSubscribeHub(subscribeHub, event, resolveCanonical),
-    startImport, status,
-    flushLegacyMirror: async () => { await legacyMirror?.flush() },
+    publishHint: (event) => forwardAppHintToSubscribeHub(subscribeHub, event, resolveCanonical),
+    observeNativeTranscript: (homeDir, run) => {
+      if (!sink.handle.db.open || sink.isWriteIndeterminate()) return undefined
+      const runId = resolveCanonical(run.ledgerRunId ?? run.runId)
+      return observeNativeRunTranscript(homeDir, run, (transcript) => {
+        if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
+        const current = sink.getRun(runId)
+        if (current?.lifecycle === 'dispatched' && current.cwd === run.cwd && current.provider === run.providerId) {
+          pendingTranscripts.set(runId, transcript)
+        }
+      }, options.log)
+    },
+    startImport: pausedImport ? () => { void pausedImport.then(startImport) } : startImport,
+    status,
     close: async () => {
       if (closed) return
       closed = true
@@ -429,8 +454,7 @@ function buildAuthorityRuntime<
       ctx.getDeferredControl().cancelDeferred?.()
       resolveImportComplete?.()
       options.conversationStore().setBeforeTurnSettledObserver(undefined)
-      await legacyMirror?.close()
-      try { backingFileStore?.close() } catch { /* may already be closed */ }
+      await transcriptWrites.drain()
       sink.close()
     }
   }

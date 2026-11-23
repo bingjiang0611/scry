@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { recordRunStage, runStageTimingEnabled } from '../run-stage-timing'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { readStoredAttachmentBytes } from '../attachment-store'
@@ -11,12 +10,11 @@ import type { WorkspaceChoices, WorkspaceChoicesRequest } from '../../shared/wor
 import { mergeSessionTurns } from '../session-history'
 import { readTraceArchivePageAsync, readTraceArchiveVersionAsync, readTraceArchiveTurnForHistory } from '../transcript-archive'
 import { createTraceRevisions } from './desktop-trace-delta'
+import { readDesktopArchivedTrace } from './desktop-archived-trace'
+import { cacheDesktopBytePage, desktopHistoryChunk, DESKTOP_PAGE_IDLE_MS, sweepDesktopBytePages } from './desktop-byte-pages'
 
 // Leave room for the desktop transport's outer response envelope.
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024 - 1024
-const MAX_CACHED_BYTES = DESKTOP_HISTORY_MAX_BYTES
-const MAX_CACHED_PAGES = 4
-const CHUNK_IDLE_MS = 60_000
 const PROVIDERS: readonly string[] = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity']
 
 function object(value: unknown): Record<string, unknown> {
@@ -30,6 +28,7 @@ function text(value: unknown, max: number): string {
 
 export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   const query = object(value)
+  if (query.settledTail !== undefined) throw new Error('invalid_request')
   if (query.kind === 'info') return { kind: 'info' }
   if (query.kind === 'workspaceChoices') {
     const request = object(query.request)
@@ -70,7 +69,8 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
   }
   if (query.images !== undefined && query.images !== true) throw new Error('invalid_request')
   if (query.historyScope !== undefined && (query.historyScope !== 'session' || query.kind === 'trace')) throw new Error('invalid_request')
-  if (query.settledTail !== undefined && (query.settledTail !== true || query.kind !== 'trace')) throw new Error('invalid_request')
+  if (query.archive !== undefined && (query.archive !== true || query.kind !== 'trace' || !context.externalSessionId ||
+      query.delta !== undefined)) throw new Error('invalid_request')
   const scope = query.historyScope === 'session' ? { historyScope: 'session' as const } : {}
   if (query.kind === 'trace') {
     let delta: { after?: DesktopTraceCursor } | undefined
@@ -84,7 +84,7 @@ export function parseDesktopHostRead(value: unknown): DesktopHostRead {
       }
     }
     return { kind: 'trace', context, runId: text(query.runId, 128), ...(query.images ? { images: true } : {}), ...(delta ? { delta } : {}), ...parseByteChunks(query),
-      ...(query.settledTail ? { settledTail: true } : {}) }
+      ...(query.archive ? { archive: true } : {}) }
   }
   if (query.kind === 'image') {
     if (!Number.isSafeInteger(query.index) || Number(query.index) < 0 || Number(query.index) >= DESKTOP_ATTACHMENT_MAX_COUNT) throw new Error('invalid_request')
@@ -124,11 +124,10 @@ function parseByteChunks(query: Record<string, unknown>): { byteChunks?: true; c
 export function createDesktopHostReader(deps: {
   userDataDir: string
   hostId(): string
+  subscribe?: 1
   authorizeWorkspace(cwd: string): string
   authorizeSession?(context: DesktopRemoteContext): void
-  // `departed`: also answer from a run that just left the live registry. Only an
-  // explicit `settledTail` trace read asks; image and device reads keep `null`.
-  getRun(runId: string, options?: { departed: boolean }): ActiveRun | null
+  getRun(runId: string): ActiveRun | null
   workspaceChoices?: (request: WorkspaceChoicesRequest) => Promise<ScRead<WorkspaceChoices>>
   validateWorkspaceBranch?: (request: { cwd: string; repositoryId: string; name: string }) => Promise<ScRead<{ name: string }>>
 }): (query: DesktopHostRead) => Promise<DesktopHostReadResult> {
@@ -140,25 +139,15 @@ export function createDesktopHostReader(deps: {
   // cursors fail explicitly, never as empty history.
   const pages = new Map<string, { key: string; bytes: Buffer; touched: number; image?: Pick<AgentInputAttachment, 'name' | 'mimeType'> }>()
   const traceRevisions = createTraceRevisions()
-  function chunkResult(id: string, bytes: Buffer, offset: number): DesktopHostReadResult {
-    return { kind: 'history_chunk', id, offset, totalBytes: bytes.length, data: bytes.subarray(offset, offset + DESKTOP_HISTORY_CHUNK_BYTES).toString('base64') }
-  }
   function cache(key: string, bytes: Buffer, image?: Pick<AgentInputAttachment, 'name' | 'mimeType'>): string {
-    let cachedBytes = [...pages.values()].reduce((total, page) => total + page.bytes.length, 0)
-    while (pages.size >= MAX_CACHED_PAGES || cachedBytes + bytes.length > MAX_CACHED_BYTES) {
-      const id = pages.keys().next().value!
-      cachedBytes -= pages.get(id)!.bytes.length
-      pages.delete(id)
-    }
-    const id = randomUUID()
-    pages.set(id, { key, bytes, touched: Date.now(), ...(image ? { image } : {}) })
-    return id
+    return cacheDesktopBytePage(pages, { key, bytes, touched: Date.now(), ...(image ? { image } : {}) })
   }
   return async (query) => {
     const now = Date.now()
-    for (const [id, page] of pages) if (now - page.touched >= CHUNK_IDLE_MS) pages.delete(id)
-    traceRevisions.sweep(now, CHUNK_IDLE_MS)
+    sweepDesktopBytePages(pages, now)
+    traceRevisions.sweep(now, DESKTOP_PAGE_IDLE_MS)
     if (query.kind === 'info') return { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: deps.hostId(), execution: 'canonical', traceDelta: 1,
+      ...(deps.subscribe === 1 ? { subscribe: 1 as const } : {}),
       ...(deps.workspaceChoices && deps.validateWorkspaceBranch ? { managedWorktrees: 1 as const } : {}) }
     if (query.kind === 'workspaceChoices') {
       if (!deps.workspaceChoices) throw new Error('workspace_selection_unavailable')
@@ -208,7 +197,7 @@ export function createDesktopHostReader(deps: {
     // later polls start a new snapshot instead of mixing two run states. The
     // delta cursor is part of the key, so a continuation cannot answer another base.
     const chunkKey = query.kind === 'trace'
-      ? JSON.stringify({ kind: 'trace', context, runId: query.runId, images: query.images === true, delta: query.delta, settledTail: query.settledTail })
+      ? JSON.stringify({ kind: 'trace', context, runId: query.runId, images: query.images === true, delta: query.delta, archive: query.archive })
       : JSON.stringify({ context, sessionScope, before: query.before, snapshot: query.snapshot })
     if (query.chunk) {
       const page = pages.get(query.chunk.id)
@@ -216,10 +205,12 @@ export function createDesktopHostReader(deps: {
       page.touched = Date.now()
       pages.delete(query.chunk.id)
       if (query.chunk.offset + DESKTOP_HISTORY_CHUNK_BYTES < page.bytes.length) pages.set(query.chunk.id, page)
-      return chunkResult(query.chunk.id, page.bytes, query.chunk.offset)
+      return desktopHistoryChunk(query.chunk.id, page.bytes, query.chunk.offset)
     }
-    if (query.kind === 'trace') {
-      const run = deps.getRun(query.runId, { departed: query.settledTail === true })
+    if (query.kind === 'trace' && query.archive) {
+      result = await readDesktopArchivedTrace(deps.userDataDir, cwd, query)
+    } else if (query.kind === 'trace') {
+      const run = deps.getRun(query.runId)
       if (run && (run.cwd !== cwd || run.providerId !== context.providerId ||
           (run.agentProfileId ?? '') !== (context.agentProfileId ?? '') ||
           (context.externalSessionId !== undefined && run.externalSessionId !== context.externalSessionId))) {
@@ -280,6 +271,6 @@ export function createDesktopHostReader(deps: {
     if (!query.byteChunks || size > DESKTOP_HISTORY_MAX_BYTES) throw new Error('desktop_evidence_response_too_large')
     const bytes = Buffer.from(serialized)
     const id = cache(chunkKey, bytes)
-    return chunkResult(id, bytes, 0)
+    return desktopHistoryChunk(id, bytes, 0)
   }
 }

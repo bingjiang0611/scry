@@ -5,7 +5,7 @@ import { withoutEvent, type DaemonLocalOpGroup } from './deps'
 
 // Unified conversation ledger (B4-L4-2), from the table main registers.
 export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
-  const { catalog, workspace, providers, session, history, conversationSend, events } = deps
+  const { catalog, workspace, providers, session, history, conversationSend, publishHint } = deps
   const table = conversationChannelTable({
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     providerContextKey: session.providerContextKey,
@@ -26,7 +26,7 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     // The history cache invalidated is this daemon's own; the App hears of the change
     // through the event feed.
     invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
-    publishDataUpdated: (event) => events.append({ kind: 'data', event }),
+    publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
     // Session deletion is the session-lifecycle group's; resolved per call.
     deleteOneSession: async (request, options) => {
       if (!deps.links.deleteOneSession) throw new Error('daemon_capability_unavailable:session-delete')
@@ -34,6 +34,7 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     },
     resolveSessionRunIds,
     deleteConversationHistory,
+    deleteConversationProjection: deps.links.deleteConversationProjection,
     appUserDataDir: deps.userDataDir
   })
   deps.links.prepareConversationDeletion = table.prepareConversationDeletion

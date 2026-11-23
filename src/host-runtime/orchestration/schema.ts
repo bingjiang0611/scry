@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 2
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 1
+export const ORCHESTRATION_SCHEMA_VERSION = 6
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 4
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -194,4 +194,79 @@ export const ORCH_DDL_V2: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_orch_p_run_origin_lifecycle ON orch_p_run(origin, lifecycle)`
 ]
 
-export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [ORCH_DDL_V1, ORCH_DDL_V2]
+export const ORCH_DDL_V3: readonly string[] = [
+  'ALTER TABLE orch_p_session ADD COLUMN catalog TEXT',
+  "UPDATE orch_meta SET value = '2' WHERE key = 'projection_schema_version'",
+  "UPDATE orch_meta SET value = '' WHERE key = 'legacy_catalog_sha256'"
+]
+
+export const ORCH_DDL_V4: readonly string[] = [
+  `CREATE TABLE orch_body_erase (
+    session_key TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY (session_key, sha256)
+  )`,
+  `CREATE INDEX idx_orch_event_deleted_native
+   ON orch_event(json_extract(payload, '$.nativeIdentity')) WHERE type = 'session.deleted'`,
+  `CREATE INDEX idx_orch_event_deleted_native_source
+   ON orch_event(json_extract(payload, '$.nativeSource')) WHERE type = 'session.deleted'`
+]
+
+export const ORCH_DDL_V5: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN app_run_id TEXT',
+  "UPDATE orch_meta SET value = '3' WHERE key = 'projection_schema_version'"
+]
+
+const ORCH_DDL_V6: readonly string[] = [
+  // Restore prior-history flags from discoveries of the current session generation.
+  // Already written turn ordinals and subscriber revisions remain immutable.
+  `UPDATE orch_p_session SET legacy = 1
+   WHERE legacy = 0 AND EXISTS (
+     SELECT 1 FROM orch_event AS discovery
+     WHERE discovery.session_key = orch_p_session.session_key AND discovery.type = 'session.discovered'
+       AND json_extract(discovery.payload, '$.transcript.status') = 'available'
+       AND json_extract(discovery.payload, '$.transcript.quality') = 'exact'
+       AND length(json_extract(discovery.payload, '$.transcript.value')) > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM orch_event AS retired WHERE retired.session_key = discovery.session_key
+           AND retired.seq > discovery.seq AND retired.type IN ('session.deleted', 'session.withdrawn')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM orch_event AS turn WHERE turn.session_key = discovery.session_key
+           AND turn.seq < discovery.seq AND turn.type = 'turn.began'
+           AND turn.seq > COALESCE((
+             SELECT MAX(previous.seq) FROM orch_event AS previous WHERE previous.session_key = discovery.session_key
+               AND previous.seq < discovery.seq AND previous.type IN ('session.deleted', 'session.withdrawn')
+           ), 0)
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM orch_p_turn AS projected
+         LEFT JOIN orch_p_run AS run ON run.run_id = projected.run_id
+         WHERE projected.session_key = discovery.session_key
+           AND (projected.rev_seq < discovery.seq OR (run.intent_seq < discovery.seq AND NOT EXISTS (
+             SELECT 1 FROM orch_event AS began WHERE began.run_id = projected.run_id AND began.type = 'turn.began'
+           )))
+       )
+   )`,
+  // Compaction can erase the discovery event but retains the scanner's verified frontier.
+  // Only use it for a session with no projected turns, where their order cannot be ambiguous.
+  `UPDATE orch_p_session SET legacy = 1
+   WHERE legacy = 0
+     AND NOT EXISTS (SELECT 1 FROM orch_p_turn WHERE session_key = orch_p_session.session_key)
+     AND EXISTS (
+       SELECT 1 FROM orch_meta AS frontier
+       WHERE frontier.key = 'catalog_transcript:' || orch_p_session.session_key
+         AND CASE WHEN json_valid(frontier.value) THEN
+           json_extract(frontier.value, '$.source.provider') = orch_p_session.provider
+           AND json_extract(frontier.value, '$.source.nativeSessionId') =
+             COALESCE(json_extract(orch_p_session.catalog, '$.nativeSessionId'), orch_p_session.session_key)
+           AND json_extract(frontier.value, '$.extent.size') > 0
+           AND json_extract(frontier.value, '$.reference') LIKE 'transcript:%#bytes=%,sha256=%'
+         ELSE FALSE END
+     )`,
+  "UPDATE orch_meta SET value = '4' WHERE key = 'projection_schema_version'"
+]
+
+export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6
+]

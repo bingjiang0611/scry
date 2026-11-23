@@ -70,7 +70,8 @@ async function main() {
 
   // W17: daemon mode now provides full remote sessionActions/fork/delete and bridges
   // workbench openPath/trashItem via the primary Scry App, so run in default daemon mode.
-  child = launch({ spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog })
+  child = launch({ spawn, executable, devApp, root, port: cdpPort, userDataDir, home, appendLog,
+    env: { SCRY_EXPERIMENTAL_HOST_CLI: '1' } })
   const page = await waitForTarget(cdpPort)
   assert.match(page.url, /^file:/, 'production renderer must load from a file URL')
   cdp = connectCdp(page.webSocketDebuggerUrl)
@@ -82,9 +83,9 @@ async function main() {
   assert.equal(boundary.inviteType, 'function')
 
   const paired = await pairDevice({ evaluate, transport, temp, userDataDir, workspace, canonicalWorkspace })
-  const { invitation, identity, localGrant, deviceCertPEM, info } = paired
+  const { invitation, identity, localGrant, deviceCertPEM, info, logId } = paired
   await verifyWorkbench({ transport, invitation, identity, deviceCertPEM, canonicalWorkspace, workspace, git })
-  const runs = await verifyRuns({ transport, evaluate, invitation, identity, deviceCertPEM, canonicalWorkspace, info, temp })
+  const runs = await verifyRuns({ transport, evaluate, invitation, identity, deviceCertPEM, canonicalWorkspace, info, logId, temp })
   await verifyUnknownReceipt({ transport, evaluate, submit: runs.submit, invitation, identity, deviceCertPEM, canonicalWorkspace })
   const { activeTrace } = await verifyQuestions({ transport, evaluate, submit: runs.submit, sessionAction: runs.sessionAction, invitation, identity, deviceCertPEM, context: runs.context })
   const { records, scryEntries } = await verifyFailureAndRecords({ transport, submit: runs.submit, invitation, identity, deviceCertPEM, normalSession: runs.normalSession, workspace })
@@ -92,11 +93,12 @@ async function main() {
 
   console.log(JSON.stringify({
     historyAuthority: { unknownSessionRejected: true, legacyProfileUnavailable: true },
+    v3Subscription: { advertised: true, importedAuthorizedSession: true, sameLogDuplicate: true, replacedLogRejected: true },
     sessionActions: { hostStoreRename: true, pinUnpin: true, archiveRestore: true, archiveStopsActiveRun: true, unauthorizedWorkspaceDenied: true, revokedOwnerDenied: true, mobileArchivesRemainHidden: true },
     workbench: { realFileWrite: true, staleRevisionDenied: true, createRename: true, realGitStageCommit: true, realPtyCwdAndInput: true, cumulativeAckDuplicateSafe: true, detachedLargeOutputContinues: true, recordingCatchUp: true, staleWriterDenied: true },
     directorySelection: { capability: true, browseDoesNotGrant: true, persistedCanonicalGrant: true, trailingSpaceKept: true, noAgentStart: true, revokedListAndSelectDenied: true },
     appPath, rendererUrl: page.url, hostId: invitation.hostId, pairPort: invitation.pairPort, runPort: invitation.runPort,
-    supportedScenarios: ['trusted-local invite/confirm', 'pinned TLS CSR pairing', 'canonical info', 'normal trace/archive', 'duplicate intent', 'unknown receipt intentStatus', 'explicit recovery fences late submissions', 'production recovery IPC validation', 'question cancellation', 'independent same-workspace sessions', 'canonical failed run', 'revocation'],
+    supportedScenarios: ['trusted-local invite/confirm', 'pinned TLS CSR pairing', 'canonical info', 'normal trace/archive', 'duplicate intent', 'unknown receipt intentStatusAtLog', 'explicit recovery fences late submissions', 'production recovery IPC validation', 'question cancellation', 'independent same-workspace sessions', 'canonical failed run', 'revocation'],
     fixtureArgs: { provider: 'codex', normalPrompt: 'desktop remote write one', questionPrompt: 'dock badge question smoke', failurePrompt: 'remote provider failure smoke' },
     bounded: { traceItems: activeTrace.desktop.run.items.length, archiveTurns: runs.history.desktop.history.turns.length, canonicalRecords: records.length, scryEntries: scryEntries.length }
   }))

@@ -22,18 +22,16 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 
 afterEach(cleanupTempDirs)
 
-function setOrchEnv(orchValue: string) {
+function setSmokeEnv() {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = orchValue
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -43,8 +41,6 @@ function setOrchEnv(orchValue: string) {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -83,7 +79,7 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    const restore = setOrchEnv('on')
+    const restore = setSmokeEnv()
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await createDaemonHostProcess({
@@ -113,7 +109,7 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
     }
   }, 20_000)
 
-  it('Must-Fix 5a + 5b + 5c: handles " ON " whitespace/case, emits turn.record_delivery on reconciliation, and never misjudges deferred-import settled turns as not_sent', async () => {
+  it('Must-Fix 5a + 5b + 5c: emits turn.record_delivery on reconciliation, and never misjudges deferred-import settled turns as not_sent', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -182,7 +178,7 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
     // Use whitespace + uppercase " ON " to verify Must-Fix 5a (parseOrchestrationMode in host-process.ts)!
-    const restore = setOrchEnv(' ON ')
+    const restore = setSmokeEnv()
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await createDaemonHostProcess({
@@ -270,7 +266,7 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
         workspace: { authorize: (c) => c },
         runProvider: async () => undefined,
         gate
-        // orchestration intentionally undefined (`off` / `shadow` mode!)
+        // The synthetic cleanup host has no orchestration authority.
       },
       authority: { authorizesCertificate: () => true } as never,
       ledger,
@@ -278,10 +274,8 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
       fileDownloads: { dispose: () => undefined } as never,
       interactions: new RemoteInteractionBroker(() => undefined),
       stops: new Map(),
-      live: new Map(),
       resolveAttachments: async (r) => r,
       releaseAttachments: async () => undefined,
-      notify: () => undefined
     })
     try {
       const lease = gate.acquireAuthentication(providerOperationKey('codex'))

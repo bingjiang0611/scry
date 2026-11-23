@@ -18,7 +18,10 @@ export const HARNESS_FILES = ['scripts/session-concurrency-bench.mjs', 'scripts/
   'scripts/session-concurrency-contract.mjs', 'scripts/session-concurrency-lanes.mjs',
   'scripts/session-concurrency-evidence.mjs', 'scripts/session-concurrency-electron.mjs',
   'scripts/session-concurrency-ui.mjs', 'scripts/session-concurrency-validate.mjs',
-  'scripts/session-concurrency-pool.mjs']
+  'scripts/session-concurrency-pool.mjs', 'scripts/daemon-resource-sampling.mjs',
+  'scripts/owned-daemon-app.mjs', 'scripts/owned-app-processes.mjs',
+  'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-bench-mode.mjs',
+  'scripts/b4v/fixture.mjs', 'scripts/b4v/isolation.mjs', 'scripts/b4v/process-identity.mjs']
 
 // Harness identity: every harness file's content, so editing one changes harnessSha256.
 export const harnessSha256 = root => hash(HARNESS_FILES.map(file => `${file}\0${readFileSync(join(root, file), 'utf8')}`).join('\0'))

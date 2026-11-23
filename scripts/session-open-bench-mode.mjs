@@ -5,16 +5,18 @@ import { join } from 'node:path'
 // process, no filesystem), so the choice of mode, environment and temporary root is
 // testable without an App; the daemon lifecycle lives in session-open-bench-daemon.mjs.
 //
-//   node scripts/session-open-bench.mjs [scenario]            in-process (default, CI gate)
-//   node scripts/session-open-bench.mjs [scenario] --daemon   SCRY_HOST_DAEMON=1
-export const benchModes = Object.freeze(['in-process', 'daemon'])
+//   node scripts/session-open-bench.mjs [scenario] [--daemon]   the App with its daemon
+//
+// S3 removed the in-process runtime from Electron main, so the daemon is the only mode
+// (the CI gate included); `--daemon` is accepted and changes nothing.
+export const benchModes = Object.freeze(['daemon'])
 
 /** `[scenario] [--daemon]`, in either order. Anything else is refused, never ignored. */
 export function parseBenchArguments(argv, workloads, fallbackScenario = 'markdown') {
-  let mode = 'in-process'
+  const mode = 'daemon'
   const positional = []
   for (const arg of argv) {
-    if (arg === '--daemon') mode = 'daemon'
+    if (arg === '--daemon') continue
     else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`)
     else positional.push(arg)
   }
@@ -25,10 +27,8 @@ export function parseBenchArguments(argv, workloads, fallbackScenario = 'markdow
 }
 
 /**
- * The App environment for one mode. The switch is spelled out both ways, so a shell that
- * exported SCRY_HOST_DAEMON=1 cannot silently turn the default (gated) measurement into
- * a daemon one. Daemon mode adds what the established daemon smokes use
- * (scripts/b4v/app.mjs modeEnv, scripts/daemon-mode-timing.mjs):
+ * The App environment. It adds what the established daemon smokes use
+ * (scripts/b4v/app.mjs modeEnv, scripts/daemon-mode-smoke.mjs):
  *   SCRY_DAEMON_SMOKE_PROVIDER    the daemon's own gate for the offline Codex fixture; the
  *                                 App-side SCRY_ELECTRON_SMOKE_PROVIDER is not forwarded
  *                                 to it and needs a debug port the daemon does not have.
@@ -42,18 +42,15 @@ export function benchAppEnv(mode, home) {
     HOME: home, SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
     SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi', SCRY_REMOTE_HOST: '0'
   }
-  if (mode === 'in-process') return { ...shared, SCRY_HOST_DAEMON: '0' }
-  if (mode === 'daemon') {
-    return { ...shared, SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }
-  }
+  if (mode === 'daemon') return { ...shared, SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }
   throw new Error(`Unknown bench mode: ${mode}`)
 }
 
 /**
- * Where the temporary root goes. In-process keeps os.tmpdir() (unchanged gate). The
- * daemon refuses unix socket paths over 100 bytes (daemon_socket_path_too_long), and
- * macOS' os.tmpdir() under /var/folders exceeds that, so daemon mode uses /tmp, as
- * daemon-mode-smoke and daemon-packaged-recorder-smoke do. The caller realpaths it.
+ * Where the temporary root goes. The daemon refuses unix socket paths over 100 bytes
+ * (daemon_socket_path_too_long), and macOS' os.tmpdir() under /var/folders exceeds that,
+ * so the bench uses /tmp, as daemon-mode-smoke and daemon-packaged-recorder-smoke do.
+ * The caller realpaths it.
  */
 export function benchTempBase(mode, tmp) {
   return mode === 'daemon' ? '/tmp' : tmp
@@ -74,10 +71,9 @@ export function assertDaemonSocketFits(userData) {
 }
 
 /**
- * Where each daemon-mode proof comes from. The in-process sources stay the gate's; in
- * daemon mode the history read runs in the daemon, which keeps no performance sink and
- * whose stdout the supervisor sends to a log file, so the App main's trusted-IPC trace
- * (same renderer call, one per IPC) is the per-open evidence instead.
+ * Where each proof comes from. The history read runs in the daemon, which keeps no
+ * performance sink and whose stdout the supervisor sends to a log file, so the App main's
+ * trusted-IPC trace (same renderer call, one per IPC) is the per-open evidence.
  */
 export function benchEvidenceSources(mode) {
   if (mode === 'daemon') {

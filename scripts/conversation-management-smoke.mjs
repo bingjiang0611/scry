@@ -35,11 +35,18 @@ export async function exerciseConversationManagement({ cdp, evaluate, fixture, i
   // A real legacy run produces the migration source, not a manually invented ledger.
   await evaluate(`window.scry.newSession({providerId:'codex',cwd:${json(fixture.workspace)}})`)
   const started = await evaluate(`window.scry.start({providerId:'codex',cwd:${json(fixture.workspace)},expectedExternalSessionId:null,prompt:'desktop remote write one'})`)
+  // Admission can resolve before the fixture has started. Absence from activeRuns
+  // only proves settlement after this exact run has entered the Provider.
+  const receipt = await wait(() => {
+    const last = inputs(fixture).at(-1)
+    return last?.runId === started.runId && last
+  }, 'legacy Provider receipt names the admitted run')
   await wait(() => evaluate(`window.scry.activeRuns().then(runs=>!runs.some(run=>run.runId===${json(started.runId)}))`), 'legacy source has settled')
-  const receipt = inputs(fixture).at(-1)
-  assert.equal(receipt.runId, started.runId)
-  const nativeCatalog = await evaluate('window.scry.listProjects()')
-  assert.equal(nativeCatalog.find(project => project.cwd === fixture.workspace).sessions.find(session => session.runId === started.runId)?.lastRunOutcome, 'completed', 'native completion is persisted by the real run lifecycle')
+  await wait(async () => {
+    const nativeCatalog = await evaluate('window.scry.listProjects()')
+    return nativeCatalog.find(project => project.cwd === fixture.workspace)?.sessions
+      .some(session => session.runId === started.runId && session.lastRunOutcome === 'completed')
+  }, 'native completion is persisted by the real run lifecycle')
   const source = { providerId: 'codex', cwd: fixture.workspace, externalSessionId: receipt.sessionId }
   const sourcePreview = await wait(() => evaluate(`window.scry.conversations.previewAdoption(${json(source)}).catch(error=>{
     if (String(error).includes('源 Provider 仍在执行、保存证据或删除')) return false;

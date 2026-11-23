@@ -40,6 +40,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
+      # S3: the App main entry reaches no Provider SDK, node-pty, better-sqlite3, run
+      # pipeline, ledger or non-allowlisted child_process (0 violations, no baseline).
+      - name: Main import boundary (strict)
+        run: node scripts/main-import-boundary.mjs --strict
       - name: Harness binding checks
         run: npm run check:harness-bindings
       - name: Workspace hook shell test
@@ -179,16 +183,11 @@ jobs:
         # tests/tarball checks still execute on every supported Node version.
         run: npm run check:cli-runtime
 
-  # P4-2: 在 SCRY_HOST_DAEMON=1 下覆盖 SCRY_ORCHESTRATION=shadow 与 on 两列。
   daemon-orchestration:
     needs: changes
     if: ${{ needs.changes.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [shadow, on]
     env:
       QODER_SKIP_DOWNLOAD: "1"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -201,34 +200,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Daemon orchestration tests (${{ matrix.mode }})
-        env:
-          SCRY_HOST_DAEMON: "1"
-          SCRY_ORCHESTRATION: ${{ matrix.mode }}
+      - name: Daemon orchestration tests
         run: npx vitest run --maxWorkers=1 src/host-runtime/orchestration src/daemon
-
-  # W15 / S3 Step 1: 默认已切到后台服务；保留一个 SCRY_HOST_DAEMON=0 作业覆盖逃生开关，直到 S3 删代码。
-  unit-in-process:
-    needs: changes
-    if: ${{ needs.changes.outputs.required == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      QODER_SKIP_DOWNLOAD: "1"
-      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: In-process escape-hatch tests (SCRY_HOST_DAEMON=0)
-        env:
-          SCRY_HOST_DAEMON: "0"
-        run: npm run test:in-process
 
   # Preserve the serial smoke order in three contiguous slices. Packaging runs
   # with the shortest slice. Normal PRs use these three macOS slots; native performance
@@ -322,7 +295,7 @@ jobs:
   check:
     name: Check
     if: ${{ always() }}
-    needs: [changes, node, unit, unit-coverage, cli-compat, daemon-orchestration, unit-in-process, packaged-electron, packaged-linux]
+    needs: [changes, node, unit, unit-coverage, cli-compat, daemon-orchestration, packaged-electron, packaged-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -333,7 +306,7 @@ jobs:
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           # Every job must succeed, except jobs proven unaffected, which must be skipped.
           echo "$RESULTS" | jq -e --argjson desktop '["packaged-electron"]' '
-            length == 9 and .changes.result == "success" and
+            length == 8 and .changes.result == "success" and
             (.changes.outputs as $out
               | ($out.required == "true" and ($out.desktop == "true" or $out.desktop == "false"))
                 or ($out.required == "false" and $out.desktop == "false")) and

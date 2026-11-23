@@ -1,10 +1,9 @@
 import { app } from 'electron'
-import { applyDaemonModeDefault } from './daemon-mode-default'
+import { applyAppStartupGuards } from './daemon-mode-default'
 
 // Side-effect import, kept first in src/main/index.ts (see daemon-mode-default.ts).
 try {
-  applyDaemonModeDefault(process.env, {
-    isPackaged: app.isPackaged,
+  applyAppStartupGuards(process.env, {
     userDataDir: app.getPath('userData'),
     appDataDir: app.getPath('appData'),
     appName: app.getName()

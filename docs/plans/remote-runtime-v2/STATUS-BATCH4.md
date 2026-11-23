@@ -17,6 +17,7 @@
 | B4-L4 其余能力经 daemon | 进行中（L4-0 完成） | `见 status` | [b4-l4](status/b4-l4.md)：矩阵补漏到 134 通道；开关打开时未迁移通道一律以 `daemon_capability_unavailable:<channel>` 拒绝（挂在 `registerTrustedIpcHandler`）；开关打开时 App 不再启动进程内远程宿主。能力迁移按 b4-l4「迁移顺序」进行 |
 | B4-S 切换与删除 | 方案已审（一步到位，S0 进行中） | — | [P3-b4s-plan](P3-b4s-plan.md) |
 | B4-V 验收 | 未开始 | — | |
+| W18 · S3 收尾、P4-4 到 P4-6、P5 通知 | 待核验 | `7ab2c2d9` | [W18](handoff/reports/W18.md)。iPhone 与手机跨 Mac 实测按维护者指示跳过，Linux 待核验。 |
 
 ## 执行顺序
 

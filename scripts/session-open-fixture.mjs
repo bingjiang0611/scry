@@ -80,6 +80,8 @@ export function writeSessionFixture(root, temp, turnCount, sections) {
         `### Section ${line}\n\nA **measured** history paragraph with [a link](https://example.com).\n\n- item one\n- item two\n\n\`\`\`ts\nconst value${line} = ${line}\n\`\`\`\n`).join('\n')
       return {
         runId: `${sessionId}-turn-${index}`, userText: `${sessionId} prompt ${index}`, done: true,
+        // These seeded turns belong to the same default fixture profile as new turns.
+        agentProfileId: null,
         ts: 1_700_000_000_000 + index,
         items: [{ id: `${sessionId}-text-${index}`, runId: `${sessionId}-turn-${index}`,
           ts: '2023-11-14T22:13:20.000Z', kind: 'model', stage: 'text', text: `${body}\nEND ${sessionId} ${index}` }]

@@ -1,5 +1,16 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
+
+export function electronSecurityTestEnvironment(temp) {
+  const home = join(temp, 'home')
+  return {
+    HOME: home,
+    SCRY_TEST_APP: '1',
+    SCRY_TEST_LOGIN_START_LABEL: `com.scry.daemon.test.${basename(temp)}`,
+    SCRY_TEST_LOGIN_START_DIR: join(home, 'LaunchAgents'),
+    SCRY_TEST_LOGIN_START_UNIT: `scry-daemon-test-${basename(temp)}.service`
+  }
+}
 
 // Which electron-security-smoke campaign `argv` selects, and whether it drives the dev
 // layout or a packaged App. Split from electron-security-smoke.mjs by responsibility
@@ -16,7 +27,7 @@ export function electronSecurityModes(argv) {
   const nativeHistoryPerformanceOnly = argv[2] === '--dev-pi-history-perf-only'
   const nativeHistoryOnly = argv[2] === '--dev-pi-history-only' || nativeHistoryPerformanceOnly
   const fileHistoryOnly = ['--dev-file-history-only', '--file-history-only'].includes(argv[2])
-  const sourceFileHistory = fileHistoryOnly ? JSON.parse(readFileSync(resolve(argv[3]), 'utf8')) : null
+  const sourceFileHistory = fileHistoryOnly && argv[3] ? JSON.parse(readFileSync(resolve(argv[3]), 'utf8')) : null
   const devMetaPromptsOnly = argv[2] === '--dev-meta-prompts-only'
   const devTerminalOnly = argv[2] === '--dev-terminal-only'
   const devQuestionOnly = argv[2] === '--dev-question-only'
@@ -28,7 +39,11 @@ export function electronSecurityModes(argv) {
   }
   const devFilesOnly = argv[2] === '--dev-files-only'
   const filesOnly = devFilesOnly || argv[2] === '--files-only'
-  const devApp = argv[2] === '--dev-steer-only' || sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || argv[2] === '--dev' || argv[2] === '--dev-performance-only'
-  const packagedAppArgument = ['--steer-only', '--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(argv[2]) ? undefined : argv[2]
-  return { steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, packagedAppArgument }
+  const instrumentedPackage = argv.includes('--packaged')
+  if (instrumentedPackage && !(sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly)) {
+    throw new Error('--packaged requires a unified, side-chat, large-history or structure scenario')
+  }
+  const devApp = !instrumentedPackage && (argv[2] === '--dev-steer-only' || sideChatOnly || largeHistoryOnly || structureOnly || unifiedConversationOnly || conversationOwnershipOnly || argv[2] === '--dev-source-control-only' || devMetaPromptsOnly || nativeHistoryOnly || argv[2] === '--dev-file-history-only' || devTerminalOnly || devQuestionOnly || devFilesOnly || argv[2] === '--dev' || argv[2] === '--dev-performance-only')
+  const packagedAppArgument = instrumentedPackage || ['--steer-only', '--files-only', '--performance-only', '--file-history-only', '--source-control-only'].includes(argv[2]) ? undefined : argv[2]
+  return { steerOnly, structureOnly, sideChatOnly, largeHistoryOnly, sourceControlOnly, conversationOwnershipOnly, unifiedConversationOnly, performanceOnly, nativeHistoryPerformanceOnly, nativeHistoryOnly, fileHistoryOnly, sourceFileHistory, devMetaPromptsOnly, devTerminalOnly, devQuestionOnly, foreground, devFilesOnly, filesOnly, devApp, instrumentedPackage, packagedAppArgument }
 }

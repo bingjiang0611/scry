@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as pause } from 'node:timers/promises'
 import { webcrypto } from 'node:crypto'
 import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x509'
 import { RemoteHostService } from './remote-host-service'
@@ -11,6 +12,7 @@ import { requestOn } from './desktop-host-fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { connectDesktopLane, DesktopLanes, laneWasNotSent, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane'
 import { verifyCSR } from './enrollment'
+import { framedRequest } from './remote-protocol'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import { setPerformanceRecordingSink, type PerformanceSample } from '../performance-timing'
 
@@ -29,6 +31,12 @@ afterEach(async () => {
 async function pairedLane() {
   const dir = mkdtempSync(join(tmpdir(), 'scry-lane-real-')); dirs.push(dir)
   const service = await RemoteHostService.create({
+    localEndpoint: { subscribe: async (_peer, request, signal) => {
+      const cursor = { hostId: 'fixture-host', logId: 'fixture-log', seq: 1 }
+      if (!request.known) return { mode: 'snapshot', ...cursor, snapshot: { activeRuns: { rows: [] } } }
+      await pause(request.waitMs, undefined, { signal })
+      return { mode: 'idle', ...cursor }
+    } },
     stateDirectory: dir, authorizeWorkspace: (cwd: string) => cwd, startRun: async () => {},
     gate: new ProviderOperationGate(), createOutputStore: (directory: string) => new RunOutputFileStore(directory)
   })
@@ -47,15 +55,51 @@ async function pairedLane() {
 
 const hostConnections = (samples: PerformanceSample[]) => samples.filter(sample => sample.name === 'remote.host.connection').length
 
-// The host's liveRuns waits up to 20 s while the revision is unchanged: a real
-// in-flight long poll without any test-only host hook.
-async function pendingLiveRuns(lanes: DesktopLanes, lane: 'status' | 'bulk', endpoint: DesktopLaneEndpoint, signal?: AbortSignal) {
-  const first = await requestOn(lanes, lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 0 }, replayable: true }) as { liveRuns: { revision: string } }
-  // Wrapped: an async function would otherwise wait for the whole poll.
-  return { pending: requestOn(lanes, lane, 'c1', { endpoint, request: { op: 'liveRuns', waitMs: 20_000, revision: first.liveRuns.revision }, replayable: false, ...(signal ? { signal } : {}) }) }
+async function pendingStatus(lanes: DesktopLanes, lane: 'status' | 'bulk', endpoint: DesktopLaneEndpoint, signal?: AbortSignal) {
+  const operation = { op: 'subscribe', views: ['activeRuns'] }
+  const first = await requestOn(lanes, lane, 'c1', { endpoint, request: { ...operation, waitMs: 0 }, replayable: true }) as
+    { subscribe: { hostId: string; logId: string; seq: number } }
+  const { hostId, logId, seq } = first.subscribe
+  return { pending: requestOn(lanes, lane, 'c1', { endpoint,
+    request: { ...operation, waitMs: 20_000, known: { hostId, logId, seq } },
+    replayable: false, ...(signal ? { signal } : {}) }) }
 }
 
 describe('desktop lane connection bounds', () => {
+  it('closes a cancelled handshake and admits the replacement on the same subscriber lane', async () => {
+    let accept!: (socket: import('node:net').Socket) => void
+    const connected = new Promise<import('node:net').Socket>((resolve) => { accept = resolve })
+    const silent = createServer((socket) => {
+      socket.on('error', () => undefined)
+      socket.resume()
+      accept(socket)
+    })
+    const address = await new Promise<import('node:net').AddressInfo>((resolve) =>
+      silent.listen(0, '127.0.0.1', () => resolve(silent.address() as import('node:net').AddressInfo)))
+    let stalled: import('node:net').Socket | undefined
+    cleanups.push(async () => {
+      stalled?.destroy()
+      await new Promise<void>((resolve) => silent.close(() => resolve()))
+    })
+    const { endpoint } = await pairedLane()
+    const lanes = new DesktopLanes()
+    cleanups.push(() => lanes.closeAll())
+    const controller = new AbortController()
+    const request = framedRequest({ op: 'subscribe', views: ['activeRuns'], waitMs: 0 })
+    const old = lanes.request('status', 'c1', {
+      endpoint: { ...endpoint, host: address.address, port: address.port }, request: { ...request, waitMs: 20_000 },
+      replayable: true, subscriber: 'same', signal: controller.signal
+    })
+    stalled = await connected
+    const closed = new Promise<void>((resolve) => stalled!.once('close', () => resolve()))
+    controller.abort()
+    await expect(old).rejects.toThrow('desktop_lane_cancelled')
+    const replacement = lanes.request('status', 'c1', { endpoint, request, replayable: true, subscriber: 'same' })
+    const finished = Promise.all([replacement, closed]).then(([reply]) => reply)
+    await expect(Promise.race([finished, pause(1_000, 'handshake still holds the lane')]))
+      .resolves.toMatchObject({ subscribe: { mode: 'snapshot' } })
+  })
+
   it('gives up on a silent listener instead of waiting forever', async () => {
     // A daemon that was killed mid-restart can still have its socket in the kernel's
     // accept backlog: connect succeeds, the handshake never starts. Nothing has been
@@ -155,7 +199,7 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     const lanes = new DesktopLanes()
     cleanups.push(() => lanes.closeAll())
     const controller = new AbortController()
-    const bulk = await pendingLiveRuns(lanes, 'bulk', endpoint, controller.signal)
+    const bulk = await pendingStatus(lanes, 'bulk', endpoint, controller.signal)
     const outcome = expect(bulk.pending).rejects.toThrow('desktop_lane_cancelled')
     await expect(requestOn(lanes, 'control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toHaveProperty('providers')
     controller.abort()
@@ -167,7 +211,7 @@ describe('desktop lanes over the real inner-mTLS host', () => {
     const { service, endpoint, deviceId } = await pairedLane()
     const lanes = new DesktopLanes()
     cleanups.push(() => lanes.closeAll())
-    const poll = await pendingLiveRuns(lanes, 'status', endpoint)
+    const poll = await pendingStatus(lanes, 'status', endpoint)
     const outcome = expect(poll.pending).rejects.toThrow()
     const started = Date.now()
     await service.revokeDevice(deviceId)

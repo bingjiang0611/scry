@@ -266,8 +266,8 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     await connected.connect()
     // A run-channel op: the host refuses a frame that does not declare its protocol,
     // so this is the same answer a real daemon gives the App's run surface.
-    await expect(connected.request('control', { op: 'liveRuns', waitMs: 0 }, { replayable: true }))
-      .resolves.toMatchObject({ liveRuns: { runs: [] } })
+    await expect(connected.request('control', { op: 'ping' }, { replayable: true }))
+      .resolves.toMatchObject({ pong: { serverTime: expect.any(Number), idleTimeoutMs: expect.any(Number) } })
     connected.close()
   })
 

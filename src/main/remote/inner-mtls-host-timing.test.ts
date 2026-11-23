@@ -80,7 +80,7 @@ describe('inner-mTLS host request segmentation', () => {
     try {
       await once(socket, 'secureConnect')
       let buffer = ''
-      for (const request of [{ op: 'poll', cursor: 0 }, { op: 'providers' }]) {
+      for (const request of [{ op: 'projects' }, { op: 'providers' }]) {
         socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request as object, keepAlive: true }) + '\n')
         while (!buffer.includes('\n')) buffer += ((await once(socket, 'data'))[0] as Buffer).toString('utf8')
         // Clients detect a reusable lane by this exact prefix.
@@ -91,16 +91,16 @@ describe('inner-mTLS host request segmentation', () => {
 
     expect(samples.map(sample => sample.name)).toEqual(['remote.host.connection', 'remote.host.request', 'remote.host.request'])
     expect(samples[0].checkpoints.map(point => point.stage)).toEqual(['peer_verified'])
-    const [poll, providers] = samples.slice(1)
+    const [projects, providers] = samples.slice(1)
     // Arrival, dispatch and the reply write are separate stages: a slow host
     // dispatch must not be reported as slow transport.
-    for (const sample of [poll, providers]) {
+    for (const sample of [projects, providers]) {
       expect(sample.checkpoints.map(point => point.stage)).toEqual(['frame_received', 'dispatch_settled', 'response_written'])
       expect(sample.outcome).toBe('completed')
     }
-    expect(poll.counters).toEqual({ 'op.poll': 1 })
+    expect(projects.counters).toEqual({ 'op.projects': 1 })
     expect(providers.counters).toEqual({ 'op.providers': 1 })
-    expect(JSON.stringify(samples)).not.toMatch(/authorized|project/)
+    expect(JSON.stringify(samples)).not.toMatch(/authorized\/project/)
     expect(controller.authority.inspectLocal().grants).toHaveLength(1)
   })
 })

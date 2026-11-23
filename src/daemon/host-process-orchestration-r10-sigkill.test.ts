@@ -20,13 +20,11 @@ function withOrchOnEnv() {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -36,13 +34,11 @@ function withOrchOnEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
 describe('W9 Blocker B3: real SIGKILL recovery from authoritative orchestration.db', () => {
-  it('B3: real SIGKILL immediately after submit recovers run from orchestration.db with monotonic seq, watch, and resolveIntent', async () => {
+  it('B3: real SIGKILL immediately after submit recovers run from orchestration.db with monotonic sequence, subscribe, and receipt lookup', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -70,7 +66,6 @@ async function main() {
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
 
   const [userDataDir, daemonDir] = process.argv.slice(2)
@@ -120,6 +115,10 @@ main().catch((err) => { console.error(err); process.exit(1) })
       ])) as [{ ready: boolean; socketPath: string; ca: string; cert: string; key: string }]
       expect(msg.ready).toBe(true)
 
+      const initial = await call(msg.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], waitMs: 0
+      })
+      const known = { hostId: initial.subscribe.hostId, logId: initial.subscribe.logId, seq: initial.subscribe.seq }
       const intentId = randomUUID()
       const submitted = await call(msg.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'submit',
@@ -145,16 +144,23 @@ main().catch((err) => { console.error(err); process.exit(1) })
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      const watched = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
-        op: 'watch', runId, cursor: 0, outputCursor: 0, waitMs: 1_000
+      const replayed = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], known, waitMs: 0
       })
-      expect(watched.error).toBeUndefined()
-      expect(['settled', 'cancelled']).toContain(watched.watch.state)
+      expect(replayed.subscribe).toMatchObject({ mode: 'events', logId: known.logId })
+      expect(replayed.subscribe.seq).toBeGreaterThanOrEqual(submitSeq)
+      expect(replayed.subscribe.events).toContainEqual(expect.objectContaining({ type: 'run.intent_recorded', runId }))
+
+      const observed = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
+      })
+      const run = observed.subscribe.snapshot.activeRuns.rows.find((row: { runId: string }) => row.runId === runId)
+      expect(['settled', 'interrupted']).toContain(run?.lifecycle)
 
       const resolved = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'resolveIntent', intentId
       })
-      expect(resolved.intent).toEqual({ runId, state: watched.watch.state })
+      expect(resolved.intent).toEqual({ runId, state: run.lifecycle === 'interrupted' ? 'cancelled' : 'settled' })
 
       const nextSub = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'submit',

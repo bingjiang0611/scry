@@ -22,7 +22,6 @@ import { mismatchLabels } from '../shared/build-identity'
 // section shows it as unknown; the daemon's answer is data and is checked field by field.
 
 export interface BackgroundServiceStatusDeps {
-  daemonMode: boolean
   userDataDir: string
   connection(): Promise<BackgroundServiceConnection>
   /** The daemon's own report; called only while the connection is ready. */
@@ -61,8 +60,6 @@ export function connectionFromMode(result: DaemonRunModeResult, appVersion: stri
       return { state: 'device-not-authorized' }
     case 'credential-unavailable':
       return { state: 'unavailable', reason: result.reason ? `daemon_credential_unavailable:${result.reason}` : 'daemon_credential_unavailable' }
-    case 'disabled':
-      return { state: 'unavailable', reason: 'daemon_mode_disabled' }
     default:
       return { state: 'unavailable', reason: result.reason ?? 'daemon_unavailable' }
   }
@@ -134,14 +131,10 @@ export function parseSelfReport(value: unknown): BackgroundServiceSelfReport | u
   if (report.orchestration !== undefined && report.orchestration !== null && typeof report.orchestration === 'object' && !Array.isArray(report.orchestration)) {
     const raw = report.orchestration as Partial<NonNullable<BackgroundServiceSelfReport['orchestration']>>
     if (raw.mode === 'on') {
-      if (typeof raw.h1FallbackUnavailable !== 'boolean') return undefined
       if (raw.writeIndeterminate !== undefined && typeof raw.writeIndeterminate !== 'boolean') return undefined
-      if (raw.h1FallbackReason !== undefined && typeof raw.h1FallbackReason !== 'string') return undefined
       orchestration = {
         mode: 'on',
-        ...(raw.writeIndeterminate !== undefined ? { writeIndeterminate: raw.writeIndeterminate } : {}),
-        h1FallbackUnavailable: raw.h1FallbackUnavailable,
-        ...(raw.h1FallbackReason !== undefined ? { h1FallbackReason: raw.h1FallbackReason } : {})
+        ...(raw.writeIndeterminate !== undefined ? { writeIndeterminate: raw.writeIndeterminate } : {})
       }
     }
     // Unknown orchestration.mode values are ignored rather than discarding the entire self-report.
@@ -157,7 +150,6 @@ export function parseSelfReport(value: unknown): BackgroundServiceSelfReport | u
 }
 
 export async function readBackgroundServiceStatus(deps: BackgroundServiceStatusDeps): Promise<BackgroundServiceStatus> {
-  if (!deps.daemonMode) return { mode: 'in-process', userDataDir: deps.userDataDir }
   const connection = await deps.connection()
   const checkedAt = (deps.now ?? Date.now)()
   let report: BackgroundServiceSelfReport | undefined

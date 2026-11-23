@@ -33,7 +33,6 @@ export interface LoginStartManagerDeps {
   platform?: NodeJS.Platform
   uid?: number
   homeDir?: string
-  daemonMode: boolean
   target: LoginStartTarget
   env?: NodeJS.ProcessEnv
   runner?: CommandRunner
@@ -85,7 +84,6 @@ export function createLoginStartManager(deps: LoginStartManagerDeps): LoginStart
   let lastRewrittenFrom: string | undefined
 
   const availability = (): { ok: true } | { ok: false; reason: string } => {
-    if (!deps.daemonMode) return { ok: false, reason: 'daemon_mode_disabled' }
     if (!deps.target.isPackaged) return { ok: false, reason: 'unpackaged_build' }
     if (overrides.isTestInstance && !overrides.testOverrideActive) return { ok: false, reason: 'test_instance' }
     if (platform === 'darwin') {

@@ -1,4 +1,5 @@
 import type { Evidence } from '../../shared/turn-record-contracts'
+import type { SessionCatalogMetadata } from '../../shared/orchestration-subscribe'
 import {
   ORCHESTRATION_EVENT_TYPES,
   type OrchestrationEventType,
@@ -76,6 +77,7 @@ export type EffectResultStep =
   | 'question_closed'
   | 'provider_settled'
   | 'finalized'
+  | 'transcript_referenced'
   | 'settled'
   | 'failed'
   | 'cancelled'
@@ -89,7 +91,10 @@ export interface RunEffectResultPayload {
   detail?: string
   isError?: boolean
   providerResultRef?: string
+  transcript?: Evidence<string>
   nativeSessionId?: string
+  attachNative?: true
+  catalogRunId?: string
   bindingId?: string
   questionId?: string
   questionKind?: string
@@ -154,10 +159,20 @@ export interface SessionForkPayload {
 
 export interface SessionDiscoverPayload {
   sessionKey: string
-  provider: string
+  provider: string | null
+  conversationId?: string
   profile?: string | null
   cwd: string
   title?: string | null
+  catalog?: SessionCatalogMetadata
+  transcript?: Evidence<string>
+  display?: {
+    title: string | null
+    pinnedAt: number | null
+    archivedAt: number | null
+    lastRunId: string | null
+    lastRunOutcome: Evidence<string> | null
+  }
   evidence?: string[]
 }
 
@@ -173,6 +188,7 @@ export interface SessionImportPayload {
   archivedAt?: number | null
   lastRunId?: string | null
   lastRunOutcome?: Evidence<string> | null
+  catalog?: SessionCatalogMetadata
   parentSessionKey?: string | null
   rootSessionKey?: string | null
   lineage?: SessionLineage | null
@@ -220,6 +236,7 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'session.restore'; payload: SessionTogglePayload })
   | (BaseCommand & { type: 'session.fork'; payload: SessionForkPayload })
   | (BaseCommand & { type: 'session.discover'; payload: SessionDiscoverPayload })
+  | (BaseCommand & { type: 'session.withdraw'; payload: { sessionKey: string } })
   | (BaseCommand & { type: 'session.import'; payload: SessionImportPayload })
   | (BaseCommand & { type: 'host.start'; payload: HostStartPayload })
 

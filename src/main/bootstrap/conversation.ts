@@ -1,15 +1,14 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentDataUpdated } from '../../shared/runtime'
-import { installDaemonConversationSend } from './conversation-daemon-send'
-import type { ProviderContext } from '../../shared/provider'
+import type { DeleteSessionResult, ProviderContext } from '../../shared/provider'
 import type { createAppSessionStore } from '../app-store'
 import type { ConversationStore, NativeSessionScope } from '../conversation-store'
 import type { ConversationService } from '../conversation-service'
 import type { ActiveRun } from '../../shared/trace'
+import type { Conversation } from '../../shared/conversation'
 import type { ContextAdmission } from '../context-admission'
 import { parseConversationTarget } from '../conversation-request'
 import { registerSideChatChannels } from './conversation-side-chat-channels'
-import { daemonModeEnabled } from '../daemon-channel-gate'
 import { parseConversationLegacySource, prepareConversationAdoption } from '../conversation-adoption'
 import { deleteConversationHistory } from '../conversation-history'
 import { registerConversationDeletionHandlers } from './conversation-delete'
@@ -17,9 +16,8 @@ import { resolveSessionRunIds } from '../db'
 import type { DockBadgeState } from '../dock-badge'
 import { conversationAttentionKey, sessionAttentionKey } from '../../shared/session-attention'
 
-// The conversation channels run in Electron main for the in-process App and, as local
-// ops, in the daemon for an App whose runs it owns (B4-L4). Both build this one table;
-// only how a data change is announced differs (`publishDataUpdated`).
+// The conversation channels the daemon serves its App as local ops (B4-L4). The App's
+// window parts (following a send's run) are conversation-daemon-send.ts.
 export type ConversationChannelListener = (event: unknown, ...args: never[]) => unknown
 
 export interface ConversationTableDependencies {
@@ -39,9 +37,10 @@ export interface ConversationTableDependencies {
   conversationService: () => ConversationService
   invalidateSessionHistoryLoad: (reason: string) => void
   publishDataUpdated: (event: AgentDataUpdated) => void
-  deleteOneSession: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<{ ok: boolean; deleted: string[]; retained: string[]; failed: Array<{ store: string; error: string }>; reason?: string }>
+  deleteOneSession: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   resolveSessionRunIds: typeof resolveSessionRunIds
   deleteConversationHistory: typeof deleteConversationHistory
+  deleteConversationProjection?: (conversation: Conversation) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
   appUserDataDir: string
   dockBadge: Pick<DockBadgeState, 'adopt'>
 }
@@ -132,7 +131,7 @@ export function conversationChannelTable(deps: ConversationTableDependencies) {
   const { prepareConversationDeletion, sideChatCascade } = registerConversationDeletionHandlers(handle, {
     providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
     getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
-    appUserDataDir
+    appUserDataDir, deleteConversationProjection: deps.deleteConversationProjection
   })
   handle('conversation:update', async (_event, id: unknown, revision: unknown, change: unknown) => {
     if (typeof id !== 'string' || typeof revision !== 'number') throw new Error('对话管理请求无效')
@@ -191,11 +190,9 @@ export interface ConversationBootstrapDependencies extends Omit<ConversationTabl
   getWindow: () => BrowserWindow | null
 }
 
+/** The shared table on a trusted registrar, announcing writes to one window (tests drive the table this way). */
 export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
   const publishDataUpdated = (event: AgentDataUpdated): void => { deps.getWindow()?.webContents.send('agent:dataUpdated', event) }
-  // Daemon mode: the daemon's own handlers announce their writes through its event feed
-  // (P3f); the send also needs its run followed here.
-  if (daemonModeEnabled()) installDaemonConversationSend(publishDataUpdated)
   const { handlers, prepareConversationDeletion, sideChatCascade } = conversationChannelTable({ ...deps, publishDataUpdated })
   for (const [channel, listener] of Object.entries(handlers)) deps.handleTrusted(channel, listener)
   return { prepareConversationDeletion, sideChatCascade }

@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { build as esbuild } from 'esbuild'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostAdminNotice } from '../shared/host-admin'
 import type { TraceEvent } from '../shared/trace'
 import type { TraceBatch } from './trace-output'
@@ -19,17 +19,13 @@ import { startDaemonRunEvents } from './daemon-run-events'
 import { createDaemonRunSurface } from './bootstrap/daemon-run-surface'
 import { laneForRequest } from './remote/desktop-lane'
 
-const savedMode = process.env.SCRY_ORCHESTRATION
-
 afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
+  vi.unstubAllEnvs()
   cleanupTempDirs()
 })
 
 describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
-  it('on mode: drives lifecycle via subscribe with 0 watch / 0 liveRuns / 0 settledTail / 0 appEvents, reads archive on post-settle trace, and delivers W11 hostNotice', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
+  it('drives lifecycle via subscribe with 0 watch / 0 liveRuns / 0 settledTail / 0 appEvents, reads archive on post-settle trace, and delivers W11 hostNotice', async () => {
     const daemon = await startTestDaemon()
     const ops: Array<{ op: string; settledTail?: unknown }> = []
     const deliveredTraces: TraceEvent[] = []
@@ -49,7 +45,6 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
 
     const runtime = new DaemonRunRuntime({
       transport,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:trace') deliveredTraces.push(...(payload as TraceBatch).events)
         else if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
@@ -58,13 +53,11 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const surface = createDaemonRunSurface({
       transport,
       runtime,
-      subscribeMode: true,
       currentCwd: () => daemon.workspace
     })
     const events = startDaemonRunEvents({
       transport,
       runtime,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
       },
@@ -117,6 +110,13 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       await expect.poll(() => hostNotices.some((n) => n.id === recorded.id), { timeout: 5_000 }).toBe(true)
       expect(hostNotices.find((n) => n.id === recorded.id)).toEqual(recorded)
 
+      // Discovery alone is not a terminal condition. Leave the test daemon
+      // open until the externally submitted run has published completion.
+      await expect.poll(() => {
+        const external = runtime.runView(extSub.runId as string)
+        return external?.done && turnDoneEvents.some((event) => event.runId === external.runId)
+      }, { timeout: 5_000 }).toBe(true)
+
       // Verify commandId landed in orch_command
       const cmdCount = (
         daemon.host.orchestrationAuthority!.sink.handle.db
@@ -138,8 +138,8 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     }
   }, 45_000)
 
-  it('off mode: keeps legacy appEvents + watch + DaemonRunDiscovery with 0 subscribe requests', async () => {
-    process.env.SCRY_ORCHESTRATION = 'off'
+  it('a stale off environment still delivers runs on the subscription path', async () => {
+    vi.stubEnv('SCRY_ORCHESTRATION', 'off')
     const daemon = await startTestDaemon()
     const ops: string[] = []
     const transport = new DaemonRunTransport(async (request) => {
@@ -151,15 +151,15 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const events = startDaemonRunEvents({ transport, runtime, send: () => undefined, waitMs: 500 })
     try {
       const started = await surface.start({
-        prompt: 'off legacy path',
+        prompt: 'obsolete off setting',
         providerId: 'codex',
         cwd: daemon.workspace,
         commandId: randomUUID()
       })
       await expect.poll(() => runtime.runView(started.runId)?.done, { timeout: 10_000 }).toBe(true)
-      expect(ops.includes('appEvents')).toBe(true)
-      expect(ops.includes('watch')).toBe(true)
-      expect(ops.includes('subscribe')).toBe(false)
+      expect(ops.includes('appEvents')).toBe(false)
+      expect(ops.includes('watch')).toBe(false)
+      expect(ops.includes('subscribe')).toBe(true)
     } finally {
       events.dispose()
       runtime.dispose()
@@ -167,8 +167,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     }
   }, 30_000)
 
-  it('on mode restart + logId reset: resyncs from snapshot without losing run state or emitting duplicate turnDone', async () => {
-    process.env.SCRY_ORCHESTRATION = 'on'
+  it('restart + logId reset: resyncs from snapshot without losing run state or emitting duplicate turnDone', async () => {
     let daemon = await startTestDaemon()
     const root = daemon.root
     const turnDoneEvents: Array<Record<string, unknown>> = []
@@ -177,7 +176,6 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const transport = new DaemonRunTransport(async (request) => await daemon.request(request))
     const runtime = new DaemonRunRuntime({
       transport,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
       }
@@ -185,13 +183,11 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     const surface = createDaemonRunSurface({
       transport,
       runtime,
-      subscribeMode: true,
       currentCwd: () => daemon.workspace
     })
     const events = startDaemonRunEvents({
       transport,
       runtime,
-      subscribeMode: true,
       send: (channel, payload) => {
         if (channel === 'agent:turnDone') turnDoneEvents.push(payload as Record<string, unknown>)
       },
@@ -237,7 +233,7 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
     }
   }, 45_000)
 
-  it('on mode SIGKILL + reconnect: real child daemon killed with SIGKILL, relaunched, App reconnects over subscribe cleanly', async () => {
+  it('SIGKILL + reconnect: real child daemon killed with SIGKILL, relaunched, App reconnects over subscribe cleanly', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -266,7 +262,6 @@ async function main() {
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   const [userData, daemonState] = process.argv.slice(2)
   const host = await createDaemonHostProcess({
@@ -295,14 +290,15 @@ main().catch((err) => { console.error(err); process.exit(1) })
       packages: 'external'
     })
 
+    let childStderr = ''
     const spawnChildDaemon = async () => {
+      childStderr = ''
       const child = fork(childOut, [userDataDir, daemonStateDirectory], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
-      let stderr = ''
-      child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
+      child.stderr?.on('data', (chunk) => { childStderr = (childStderr + String(chunk)).slice(-8000) })
       const exited = once(child, 'exit')
       const [msg] = (await Promise.race([
         once(child, 'message'),
-        exited.then(([code]) => { throw new Error(`child daemon exited ${code}: ${stderr}`) })
+        exited.then(([code]) => { throw new Error(`child daemon exited ${code}: ${childStderr}`) })
       ])) as [{ ready: boolean }]
       expect(msg.ready).toBe(true)
       return child
@@ -331,7 +327,6 @@ main().catch((err) => { console.error(err); process.exit(1) })
       const turnDone: string[] = []
       runtime = new DaemonRunRuntime({
         transport,
-        subscribeMode: true,
         send: (channel, payload) => {
           if (channel === 'agent:turnDone') turnDone.push(String((payload as { runId?: string }).runId ?? ''))
         }
@@ -339,13 +334,11 @@ main().catch((err) => { console.error(err); process.exit(1) })
       const surface = createDaemonRunSurface({
         transport,
         runtime,
-        subscribeMode: true,
         currentCwd: () => workspace
       })
       events = startDaemonRunEvents({
         transport,
         runtime,
-        subscribeMode: true,
         send: () => undefined,
         waitMs: 300
       })
@@ -353,6 +346,9 @@ main().catch((err) => { console.error(err); process.exit(1) })
       // First run before SIGKILL
       const r1 = await surface.start({ prompt: 'before sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() })
       await expect.poll(() => runtime!.runView(r1.runId)?.done, { timeout: 10_000 }).toBe(true)
+
+      // Capture the App notification before killing the transport that delivers it.
+      await expect.poll(() => turnDone.filter((id) => id === r1.runId).length, { timeout: 3_000 }).toBe(1)
 
       // Hard-kill child daemon with SIGKILL
       child.kill('SIGKILL')
@@ -365,7 +361,11 @@ main().catch((err) => { console.error(err); process.exit(1) })
       expect(client.subscribeSupported).toBe(true)
 
       // App pump recovers and second run succeeds cleanly
-      const r2 = await surface.start({ prompt: 'after sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() })
+      const r2 = await surface.start({ prompt: 'after sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() }).catch(async (error) => {
+        const evidence = await transport.subscribe({ views: ['activeRuns'], waitMs: 0 })
+          .catch(() => undefined)
+        throw new Error(`post-restart start failed: ${JSON.stringify(evidence)}\n${childStderr}`, { cause: error })
+      })
       await expect.poll(() => runtime!.runView(r2.runId)?.done, { timeout: 10_000 }).toBe(true)
       await expect.poll(() => turnDone.filter((id) => id === r2.runId).length, { timeout: 3_000 }).toBe(1)
       expect(turnDone.filter((id) => id === r1.runId)).toHaveLength(1)

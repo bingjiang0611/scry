@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { connect as netConnect } from 'node:net'
-import { connect as tlsConnect, type TLSSocket } from 'node:tls'
-import { once } from 'node:events'
 import { createDaemonHostProcess } from './host-process'
 import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { generateDesktopDeviceIdentity } from '../main/remote/desktop-transport'
-import { REMOTE_PROTOCOL_VERSION, type ExecutionTargetRef } from '../shared/desktop-remote'
+import type { ExecutionTargetRef } from '../shared/desktop-remote'
 import { MAX_EXECUTION_TARGET_RESULT_BYTES } from './app-execution-target-bridge'
+import { callTcp, openKeepAliveSocket } from './host-execution-targets-sockets.fixtures'
 
 const TARGET: ExecutionTargetRef = {
   id: 'conn-mac2',
@@ -31,58 +29,6 @@ async function pairRemotePhone(service: Awaited<ReturnType<typeof createDaemonHo
   await service.authority.prove({ pairingId, secret, csrPEM: id.csrPEM, deviceLabel: 'iPhone W10' }, id.publicKeySHA256)
   const grant = await service.authority.confirmLocal(pairingId, id.publicKeySHA256)
   return { keyPEM: id.keyPEM, certPEM: grant.certificatePEM, deviceId: grant.deviceId, fingerprint: grant.certificateSHA256 }
-}
-
-async function openKeepAliveSocket(socketPath: string, ca: string, cert: string, key: string) {
-  const raw = netConnect(socketPath)
-  await once(raw, 'connect')
-  const socket: TLSSocket = tlsConnect({
-    socket: raw, ca, cert, key,
-    minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
-  })
-  await once(socket, 'secureConnect')
-  let buffer = ''
-  const waiters: Array<(line: string) => void> = []
-  const lines: string[] = []
-  socket.on('data', (chunk: Buffer) => {
-    buffer += chunk.toString('utf8')
-    while (buffer.includes('\n')) {
-      const idx = buffer.indexOf('\n')
-      const line = buffer.slice(0, idx)
-      buffer = buffer.slice(idx + 1)
-      const waiter = waiters.shift()
-      if (waiter) waiter(line)
-      else lines.push(line)
-    }
-  })
-  const nextLine = () => lines.length > 0
-    ? Promise.resolve(lines.shift()!)
-    : new Promise<string>((resolve, reject) => {
-      const onEnd = () => reject(new Error('socket_closed'))
-      socket.once('close', onEnd)
-      waiters.push((line) => { socket.off('close', onEnd); resolve(line) })
-    })
-  return {
-    socket,
-    async request(req: Record<string, unknown>) {
-      socket.write(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, keepAlive: true, ...req })}\n`)
-      return JSON.parse(await nextLine()) as Record<string, any>
-    },
-    destroy() { socket.destroy() }
-  }
-}
-
-async function callTcp(port: number, ca: string, cert: string, key: string, request: Record<string, unknown>) {
-  const socket: TLSSocket = tlsConnect({
-    host: '127.0.0.1', port, ca, cert, key,
-    minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
-  })
-  await once(socket, 'secureConnect')
-  socket.write(`${JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request })}\n`)
-  let buffer = ''
-  for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
-  socket.destroy()
-  return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
 }
 
 describe('daemon execution target routing via App bridge', () => {
@@ -208,6 +154,49 @@ describe('daemon execution target routing via App bridge', () => {
     } finally {
       appPoll.destroy()
       appReply.destroy()
+      await host.dispose()
+    }
+  })
+
+  it('cancels a disconnected phone subscription at the App bridge and forwards the replacement snapshot', async () => {
+    const { host, port } = await startDaemon()
+    const ca = host.service.caCertificatePEM
+    const app = await enrollLocalWithLabel(host.service, 'Scry App 0.2.250')
+    const phone = await pairRemotePhone(host.service)
+    const local = await openKeepAliveSocket(host.channel.socketPath, ca, app.certPEM, app.keyPEM)
+    const first = await openKeepAliveSocket(port, ca, phone.certPEM, phone.keyPEM)
+    const target = { id: TARGET.id, binding: TARGET.binding }
+    const subscribe = (waitMs: number) => ({ op: 'target', target, request: {
+      op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs,
+      ...(waitMs > 0 ? { known: { hostId: 'mac2-host-id', logId: 'history', seq: 1 } } : {})
+    } })
+    try {
+      const work = local.request({ op: 'executionTargetWork', waitMs: 5_000 })
+      const orphan = first.request(subscribe(20_000)).catch(() => undefined)
+      const [old] = (await work).calls
+      expect(old.input.request).toMatchObject({ op: 'subscribe', waitMs: 20_000 })
+      first.destroy()
+      await orphan
+
+      const cancellations = { calls: [], cancelledCallIds: [old.callId] }
+      await expect(local.request({ op: 'executionTargetWork', waitMs: 1_000 })).resolves.toMatchObject(cancellations)
+      await expect(local.request({ op: 'executionTargetWork', waitMs: 0 })).resolves.toMatchObject(cancellations)
+      await expect(local.request({ op: 'executionTargetResult', callId: old.callId, ok: true, result: {} }))
+        .resolves.toMatchObject({ accepted: false })
+
+      const replacement = callTcp(port, ca, phone.certPEM, phone.keyPEM, subscribe(0))
+      const { calls: [fresh] } = await local.request({
+        op: 'executionTargetWork', waitMs: 5_000, ackCancelledCallIds: [old.callId]
+      })
+      expect(fresh).not.toMatchObject({ callId: old.callId })
+      expect(fresh.input.request).toMatchObject({ op: 'subscribe', waitMs: 0, subscriptionId: old.input.request.subscriptionId })
+      const result = { subscribe: { hostId: 'mac2-host-id', logId: 'history', seq: 2, mode: 'snapshot', snapshot: {} } }
+      await expect(local.request({ op: 'executionTargetResult', callId: fresh.callId, ok: true, result }))
+        .resolves.toMatchObject({ accepted: true })
+      await expect(replacement).resolves.toEqual({ ...result, executionTarget: target })
+    } finally {
+      first.destroy()
+      local.destroy()
       await host.dispose()
     }
   })
