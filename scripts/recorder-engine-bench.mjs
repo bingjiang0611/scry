@@ -174,7 +174,6 @@ async function record(id, title, body) {
   }
 }
 
-// --- scenarios -------------------------------------------------------------------------------
 
 async function largeRepo() {
   if (!largeRepos.has('large')) {
@@ -424,7 +423,6 @@ await record('S11', 'recovery with 1000 completed session directories', async ()
   return { stages, git: gitTotals(stages), fixture: { completedSessionDirs: 1_000 } }
 })
 
-// --- report ----------------------------------------------------------------------------------
 
 probe.stop()
 rss.stop()

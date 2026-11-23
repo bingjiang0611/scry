@@ -61,7 +61,6 @@ describe('SessionLedger', () => {
     expect(ledger.describe().events).toBe(1)
     expect(store.loadCalls).toBe(1) // recovery only; duplicate checks stay incremental
     expectCode(() => ledger.recordIntent({ intentId, runId: randomUUID(), detail: 'different' }), 'intent_payload_conflict')
-    // A fresh intent may not reuse an existing run id.
     expectCode(() => ledger.recordIntent({ intentId: randomUUID(), runId }), 'run_already_exists')
   })
 
@@ -119,7 +118,6 @@ describe('SessionLedger', () => {
     const replay = revived.recordIntent({ intentId: openIntent, runId: openRun })
     expect(replay.status).toBe('duplicate')
     expect(revived.describe().events).toBe(5)
-    // New work continues at the correct next sequence.
     const next = revived.recordIntent({ intentId: randomUUID(), runId: randomUUID() })
     expect(next.event.seq).toBe(6)
   })

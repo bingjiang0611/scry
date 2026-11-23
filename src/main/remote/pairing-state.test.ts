@@ -8,8 +8,6 @@ import type { IssuedPairingCertificate, PairingDependencies, PairingRecord, Pair
 import { PairingFileStore } from './pairing-file'
 import { pruneStalePairings } from './pairing-retention'
 
-// W3 / P5-5a release 1: reader recognizes optional `approvedVia: 'app' | 'host_cli'`
-// on `scope: 'remote'` grants and preserves it verbatim on round-trip without writing it.
 
 const ANCHOR = 'c'.repeat(64)
 const T0 = 20_000_000

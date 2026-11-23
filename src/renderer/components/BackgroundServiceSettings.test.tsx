@@ -5,8 +5,7 @@ import { describeActionResult, formatUptime } from '../background-service-view'
 import { BackgroundServicePanel } from './BackgroundServiceSettings'
 import { SettingsModal } from './Modals'
 
-// The «后台服务» section's states as the user sees them. A value main could not
-// establish is 未知; the actions offered follow the connection state.
+// Unknown values display as 未知; available actions follow the connection state.
 
 const NOW = 1_700_000_000_000
 

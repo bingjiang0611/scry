@@ -130,7 +130,6 @@ describe('production remote history reader', () => {
     const page = await readRemoteHistoryTurnsPage(args, { limit: 3 }, inactive)
     expect(page).toMatchObject({ source: 'claude_transcript', totalTurns: 1, completeness: 'complete' })
     expect(page.turns[0]).toMatchObject({ userText: 'native question', items: [{ kind: 'output', text: 'native answer' }] })
-    // A transcript-only turn has no Scry run; never invent an id for it.
     expect(page.turns[0]).not.toHaveProperty('runId')
     const run = { ...live(), providerId: 'claude' as const }
     const activePage = await readRemoteHistoryTurnsPage(args, { limit: 1 }, () => run)

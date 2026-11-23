@@ -7,9 +7,6 @@ import { PairingAuthority, validatePairingState } from './pairing'
 import type { DeviceGrant, IssuedPairingCertificate, PairingDependencies, PairingPersistence, PairingRecord, PairingState } from './pairing'
 import { PairingFileStore } from './pairing-file'
 
-// P5-host-security §4.5: finished pairing history is trimmed to the newest 16 of each
-// kind so the 64-entry tables cannot fill up, while live grants, claimable `paired`
-// records, pending invitations and the App's current local grant stay untouched.
 
 const ANCHOR = 'c'.repeat(64)
 const LOCAL_KEY = 'a'.repeat(64)
@@ -140,7 +137,6 @@ describe('pairing history cleanup (synthetic crypto adapter)', () => {
     store.value = stateOf(hostId, [lapsed, ...revoked, live])
     const authority = open()
     expect(store.commits).toBe(1)
-    // 21 stale grants: the 5 that stopped working first go, the newest 16 stay.
     const removed = [lapsed, ...revoked.slice(0, 4)]
     const kept = revoked.slice(4)
     const state = authority.inspectLocal()
@@ -197,7 +193,6 @@ describe('pairing history cleanup (synthetic crypto adapter)', () => {
       expect(checked).toEqual(state)
       for (const g of checked.grants) expect(original.grants).toContainEqual(g)
       for (const p of checked.pairings) expect(original.pairings).toContainEqual(p)
-      // Nothing left to clean: a second start-up writes nothing.
       const again = vi.spyOn(reader, 'commit')
       new PairingAuthority({ ...dependencies, store: reader }).close()
       expect(again).not.toHaveBeenCalled()
