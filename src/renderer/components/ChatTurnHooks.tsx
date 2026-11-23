@@ -1,4 +1,5 @@
 // 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
+import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { useMemo } from 'react'
 
 
@@ -154,7 +155,7 @@ export function HooksSummary({
                       </>
                     )}
                     <dt>执行结果</dt>
-                    <dd>{executionResult || '暂无结果'}</dd>
+                    <dd>{executionResult || OVERVIEW_SESSION_COPY.noHookResult}</dd>
                     <dt>最近结果</dt>
                     <dd>
                       {statusDetail}

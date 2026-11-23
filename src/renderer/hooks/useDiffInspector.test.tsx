@@ -57,7 +57,8 @@ describe('exact diff scope and evidence presentation', () => {
 
   it('unavailable evidence never renders zero totals or a clean indicator', () => {
     const markup = render(snapshot({ status: 'failed' }))
-    expect(markup).toContain('diff-review-empty')
+    expect(markup).toContain('未能采集差异')
+    expect(markup).toContain('data-empty-size="card"')
     expect(markup).not.toContain('diff-review-totals')
     expect(markup).not.toContain('本会话没有净改动')
     expect(markup).not.toContain('+0')

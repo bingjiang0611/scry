@@ -135,8 +135,10 @@ const api = {
   },
   async history(_id, context) {
     state.historyCalls.push(contextFor({ context }))
+    if (context.externalSessionId === state.failHistoryFor) throw new Error('fixture remote history unavailable')
     if (context.externalSessionId === 'old-native') state.unreadRemote = false
     if (state.holdHistory) await new Promise(resolve => { window.releaseHistory = resolve })
+    if (state.openingWithoutArchive) return { turns: [], hasOlder: false, source: 'trace_archive', status: 'unavailable', reason: 'trace_archive_unavailable' }
     if (${openingOnly || measureOpening || structureOnly}) return { turns: [{ runId: 'opening-history', userText: 'Long remote history', done: true, items: [
       { id: 'opening-answer', runId: 'opening-history', ts: '2026-10-19T12:00:00.000Z', kind: 'model', stage: 'text', text: Array.from({ length: 80 }, (_, i) => 'Remote history paragraph ' + i).join('\\n\\n') }
     ] }], hasOlder: false, source: 'trace_archive', status: 'available' }
@@ -155,8 +157,11 @@ const api = {
     if (context.cwd !== (state.workspaceExecutionCwd ?? '/fixture/project-a')) throw new Error('fixture trace context mismatch: ' + context.cwd)
     if (runId === firstScryRun && state.firstIntentCleared) throw new Error('terminal trace unavailable')
     if (runId === firstScryRun) return activeRun(firstScryRun, 'native-session', 'first remote run', question)
-    if (runId === secondScryRun) return activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
-    if (runId === 'run-hostui-1') return activeRun('run-hostui-1', 'old-native', 'host ui continue')
+    if (runId === secondScryRun) return state.hideSecondTrace ? null : activeRun(secondScryRun, 'native-session', 'second remote run', undefined, true)
+    if (runId === 'run-hostui-1') {
+      if (state.holdOpeningTrace) await new Promise(resolve => { window.releaseOpeningTrace = resolve })
+      return activeRun('run-hostui-1', 'old-native', 'host ui continue')
+    }
     return null
   },
   async intents() {
@@ -210,6 +215,9 @@ const api = {
   // Host-UI run on old-native: present only while the catalog marks it active.
   async liveRun(_id, context) {
     state.liveRunCalls++
+    if (state.holdOpeningLive) {
+      await new Promise(resolve => { window.releaseOpeningLive = resolve })
+    }
     return state.sessionActive && context.externalSessionId === 'old-native' ? { runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' } : null
   },
   async stop(_id, runId) { state.stopCalls.push(runId) },

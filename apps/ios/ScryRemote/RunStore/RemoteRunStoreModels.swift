@@ -21,6 +21,7 @@ extension RemoteRunStore {
     case idle
     case loading
     case loaded(G0Transport.RunDirectoryListing)
+    case denied
     case failed(String)
   }
 

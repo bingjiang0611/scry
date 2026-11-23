@@ -106,9 +106,9 @@ extension SessionTranscriptView {
       ForEach(completedTurns.flatMap { row in
         ConversationTurn.completed(row).withSplitPlans(blocks[row.id] ?? [:]).rows(id: row.id)
       }) { $0 }
-      Text(ConnectionCopy.noReadableHistory)
-        .font(Typography.meta).foregroundStyle(Palette.dim)
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
+      if !hasVisibleTurn && !run.historyFromCache && !run.historySyncing && run.historyRefreshError == nil {
+        EmptyState(title: ConnectionCopy.noReadableHistory, symbol: Symbol.bubble)
+      }
     case .baseUnavailable:
       // The missing record is reported once, in the status strip.
       ForEach(completedTurns.flatMap { row in
@@ -118,13 +118,13 @@ extension SessionTranscriptView {
       // A session this run is creating has no record until the run ends.
       EmptyView()
     case let .failed(reason):
-      EmptyState(title: ConversationCopy.failedHistory, detail: ConversationCopy.failedHistoryDetail(reason), symbol: "exclamationmark.triangle")
-      HistoryRetryButton(title: ConversationCopy.retryHistory) {
-        if let s = session {
+      EmptyState(title: ConversationCopy.failedHistory, detail: ConversationCopy.failedHistoryDraftKept,
+                 symbol: "exclamationmark.triangle", size: hasVisibleTurn ? .card : .page,
+                 action: session.map { s in
+        .init(label: ConversationCopy.retryHistory, refresh: true, perform: {
           run.loadHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, force: true, agentProfileId: s.agentProfileId)
-        }
-      }
-      .frame(maxWidth: .infinity)
+        })
+      })
       DisclosureGroup(ConversationCopy.errorDetails) { Text(reason).font(Typography.meta).textSelection(.enabled) }
         .font(Typography.meta).foregroundStyle(Palette.dim)
       ForEach(completedTurns.flatMap { row in

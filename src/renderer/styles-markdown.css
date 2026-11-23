@@ -181,6 +181,20 @@
   cursor: pointer;
   user-select: text;
 }
+.md-file-choices { position: relative; display: inline-block; max-width: 100%; }
+
+.md-file-choice-menu {
+  position: absolute;
+  top: 100%;
+  inset-inline-start: 0;
+  z-index: var(--layer-dropdown);
+  max-width: min(440px, 70vw);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.md-file-choice-menu .mitem { white-space: normal; overflow-wrap: anywhere; }
+
 .md-file-ref-icon {
   width: 0.92em;
   height: 0.92em;

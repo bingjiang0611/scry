@@ -2,9 +2,10 @@ export async function runSettings({ driver, options }) {
   const { read, wait, check, click, key, insert, capture, fixture, composerValue } = driver
   await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
   await click('.location-button'); await click('.location-menu .mitem', '管理远程访问')
-  await wait('document.querySelector(".settings-tab.active")?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null', 'manage hosts opens remote settings directly')
+  const selectedSettingsTab = '.settings-rail [role="tab"][aria-selected="true"]'
+  await wait(`document.querySelector(${JSON.stringify(selectedSettingsTab)})?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null`, 'manage hosts opens remote settings directly')
   check(await read(`${composerValue} === 'settings keeps this draft'`), 'Opening settings replaced the current draft')
-  check(await read('document.activeElement === document.querySelector(".settings-tab.active")'), 'Direct settings entry did not focus the remote tab')
+  check(await read(`document.activeElement === document.querySelector(${JSON.stringify(selectedSettingsTab)})`), 'Direct settings entry did not focus the remote tab')
   if (options.settingsOnly) {
     await wait('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")', 'phone grant in focused settings')
     await capture('remote-settings-focused')
@@ -22,7 +23,8 @@ export async function runSettings({ driver, options }) {
     check(await read('document.querySelector(".settings-modal") != null && document.querySelector(".hosts-add-modal")?.closest(".modal-overlay").dataset.state === "exit"'), 'Closing phone code retired the parent or skipped its exit')
     await wait('document.querySelector(".settings-modal") != null && !document.querySelector(".hosts-add-modal")', 'Closing phone code removes only the nested dialog after exit')
     await read('window.desktopRemoteFixture.phoneStatusFailure = true')
-    await wait('document.querySelector(".remote-access-inbound").textContent.includes("状态未知") && document.querySelector(".remote-access-inbound").textContent.includes("fixture phone status unavailable")', 'unread phone status stays unknown')
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("状态未知") && document.querySelector(".remote-access-inbound [role=alert]")?.textContent.includes("没能读取远程访问状态")', 'unread phone status stays unknown')
+    check(!(await read('document.querySelector(".remote-access-inbound").textContent.includes("fixture phone status unavailable")')), 'Failed phone read exposed raw diagnostics')
     check(!(await read('document.querySelector(".remote-device-section")')), 'Failed phone read claimed no devices or kept current grants')
     await read('window.desktopRemoteFixture.phoneStatusFailure = false; window.desktopRemoteFixture.relayConfigured = false')
     await wait('document.querySelector(".remote-access-inbound").textContent.includes("中继休眠") && document.querySelector(".remote-device-section") != null', 'dormant phone relay with preserved grants')

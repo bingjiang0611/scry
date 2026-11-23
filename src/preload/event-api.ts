@@ -6,6 +6,7 @@ import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { TraceBacklogState, TraceBatch, TraceBatchReceipt } from '../main/trace-output'
 import type { TerminalDataEvent, TerminalRecordingErrorEvent, TerminalExitEvent } from '../shared/terminal'
 import type { DeleteArchivedProgress } from '../shared/provider'
+import type { WorkspacePrepareProgress } from '../shared/workspace-selection'
 
 export const eventApi = {
   onBackgroundWork: (cb: (event: { runId: string; work: BackgroundWork }) => void): (() => void) => {
@@ -74,6 +75,11 @@ export const eventApi = {
     const l = (_: unknown, progress: DeleteArchivedProgress): void => cb(progress)
     ipcRenderer.on('agent:deleteArchivedProgress', l)
     return () => ipcRenderer.removeListener('agent:deleteArchivedProgress', l)
+  },
+  onWorkspaceProgress: (cb: (progress: WorkspacePrepareProgress) => void): (() => void) => {
+    const l = (_: unknown, progress: WorkspacePrepareProgress): void => cb(progress)
+    ipcRenderer.on('workspaceSelection:progress', l)
+    return () => ipcRenderer.removeListener('workspaceSelection:progress', l)
   },
   onDataUpdated: (cb: (e: AgentDataUpdated) => void): (() => void) => {
     const l = (_: unknown, e: AgentDataUpdated): void => cb(e)

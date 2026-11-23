@@ -8,8 +8,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
       <SettingsModal theme="light" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />
     )
     expect(html).toContain('class="modal settings-modal"')
-    expect(html).toContain('role="radiogroup" aria-label="界面主题"')
-    expect(html).toContain('class="theme-option active" role="radio" aria-checked="true"')
+    expect(html).toContain('role="group" aria-label="界面主题"')
+    expect(html).toContain('aria-pressed="true">浅色')
     expect(html).toContain('浅色')
     expect(html).not.toContain('立即应用到全部视图')
   })
@@ -18,8 +18,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     const html = renderToStaticMarkup(
       <SettingsModal theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />
     )
-    expect(html).toContain('class="settings-rail" aria-label="设置分区"')
-    expect(html).toContain('class="settings-tab active"')
+    expect(html).toContain('role="tablist" aria-label="设置分区" aria-orientation="vertical"')
+    expect(html).toContain('-appearance-tab" type="button" role="tab" aria-selected="true"')
     expect(html).toContain('已存档会话')
     // 首帧还没读到索引，不展示假的 0。
     expect(html).not.toContain('<span class="cnt">0</span>')
@@ -29,7 +29,8 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     const html = renderToStaticMarkup(
       <ArchivedChatsPanel projects={null} onRefresh={async () => {}} onSessionsChanged={() => {}} />
     )
-    expect(html).toContain('会话索引不可用')
+    expect(html).toContain('没能读取本机存档')
+    expect(html).toContain('重新读取')
     expect(html).not.toContain('没有本机已存档会话')
   })
 
@@ -37,7 +38,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
     const html = renderToStaticMarkup(
       <ArchivedChatsPanel projects={null} loading onRefresh={async () => {}} onSessionsChanged={() => {}} />
     )
-    expect(html).not.toContain('会话索引不可用')
+    expect(html).not.toContain('没能读取本机存档')
     expect(html).not.toContain('没有本机已存档会话')
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain('本机已存档会话')

@@ -5,7 +5,9 @@ import { defaultWorkspaceApi, type ReadOnlyWorkspaceSource, type WorkspaceApi } 
 
 export type { ReadOnlyWorkspaceSource } from '../workbench-api'
 
+import { EmptyState } from './primitives/EmptyState'
 import { Icon } from './primitives/Icon'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { TurningIcon } from './primitives/TurningIcon'
 import { WorkspaceFileTree } from './WorkspaceFileTree'
 import { workspaceCopy as copy } from '../constants/workspace-copy'
@@ -117,19 +119,24 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null)
   const [dirty, setDirty] = useState(false)
   const [query, setQuery] = useState('')
+  const searchInput = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
+  const [rootReadFailed, setRootReadFailed] = useState<{ cwd: string; cursor?: string } | null>(null)
+  const currentRootReadFailure = rootReadFailed?.cwd === cwd ? rootReadFailed : null
   const [context, setContext] = useState<{ x: number; y: number; entry?: WorkspaceEntry } | null>(null)
   const [itemDialog, setItemDialog] = useState<ItemDialog | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceEntry | null>(null)
   const [mutating, setMutating] = useState(false)
+  const [directoryFailures, setDirectoryFailures] = useState(new Map<string, string | undefined>())
   const loadSequence = useRef(new Map<string, number>())
+  const nextLoad = useRef(0)
   const initializedCwd = useRef<string | null>(null)
   const handledRefreshKey = useRef(refreshKey)
   const handledOpenRequestId = useRef<number | null>(null)
 
   const loadDirectory = useCallback(
-    async (path = '', cursor?: string, refreshing = false): Promise<void> => {
-      const sequence = (loadSequence.current.get(path) ?? 0) + 1
+    async (path = '', cursor?: string): Promise<void> => {
+      const sequence = ++nextLoad.current
       loadSequence.current.set(path, sequence)
       setLoading((current) => new Set(current).add(path))
       setError(null)
@@ -142,16 +149,23 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
           [path]: cursor ? [...(current[path] ?? []), ...result.entries] : result.entries
         }))
         setNextCursors((current) => ({ ...current, [path]: result.nextCursor }))
+        if (!path) setRootReadFailed(null)
+        else setDirectoryFailures(current => {
+          if (!current.has(path)) return current
+          const next = new Map(current)
+          next.delete(path)
+          return next
+        })
       } catch (loadError) {
         if (loadSequence.current.get(path) !== sequence) return
-        // An open folder that no longer reads during an in-place refresh is folded away,
-        // like a fresh tree would not show it; the root and explicit opens still report.
-        if (refreshing && path) {
-          setExpanded((current) => { const next = new Set(current); next.delete(path); return next })
-          setChildren((current) => { const { [path]: _gone, ...rest } = current; return rest })
+        if (!path) {
+          console.error('[scry] workspace root listing failed', loadError)
+          setRootReadFailed({ cwd, cursor })
           return
         }
-        setError(errorMessage(loadError))
+        // Keep the last successful listing, if any, and retry the exact read.
+        console.error('[Scry] workspace subdirectory listing failed', loadError)
+        setDirectoryFailures(current => new Map(current).set(path, cursor))
       } finally {
         if (loadSequence.current.get(path) === sequence) {
           setLoading((current) => {
@@ -167,9 +181,13 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
 
   // Another workspace is another tree: start empty.
   const reset = useCallback((): void => {
+    loadSequence.current.clear()
+    setLoading(new Set())
+    setDirectoryFailures(new Map())
     setChildren({})
     setExpanded(new Set())
     setNextCursors({})
+    setRootReadFailed(null)
     void loadDirectory()
   }, [loadDirectory])
 
@@ -179,7 +197,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   expandedRef.current = expanded
   const refresh = useCallback((): void => {
     void loadDirectory()
-    for (const path of [...expandedRef.current].slice(0, MAX_REFRESHED_DIRECTORIES)) void loadDirectory(path, undefined, true)
+    for (const path of [...expandedRef.current].slice(0, MAX_REFRESHED_DIRECTORIES)) void loadDirectory(path)
   }, [loadDirectory])
 
   useEffect(() => {
@@ -317,7 +335,6 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
   }
 
   const entries = children[''] ?? []
-  const normalizedQuery = query.trim().toLowerCase()
 
   const openContext = (event: MouseEvent, entry?: WorkspaceEntry): void => {
     event.preventDefault()
@@ -390,6 +407,7 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
           readPage={readOnlySource?.workspaceReadPage}
           api={api}
           onDirtyChange={setDirty}
+          onBack={() => { if (confirmLeave()) setSelected(null) }}
           onError={setError}
         />
       ) : (
@@ -397,24 +415,32 @@ export function WorkspacePanel({ cwd, active = true, refreshKey = 0, openRequest
           <div className="workspace-search">
             <Icon name="search" />
             <input
+              ref={searchInput}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onContextMenu={(event) => event.stopPropagation()}
               placeholder={copy.filterFiles}
             />
           </div>
-          {loading.has('') && entries.length === 0 ? (
-            <div className="workspace-empty">{copy.loadingFiles}</div>
-          ) : entries.length === 0 ? (
-            <div className="workspace-empty">{normalizedQuery ? copy.noFilesMatch : copy.emptyFiles}</div>
+          {currentRootReadFailure && <EmptyState size="card" picture="alert" announcement="alert"
+            title={copy.rootReadFailed} className="workspace-empty"
+            actions={[{ label: copy.readFilesAgain, icon: 'refresh', busy: loading.has(''), onClick: () => void loadDirectory('', currentRootReadFailure.cursor) }]} />}
+          {entries.length === 0 ? (
+            currentRootReadFailure ? null : !children[''] || loading.has('') ? (
+              <DelayedSkeletonRows loading={active} rows={4} label={copy.loadingFiles} />
+            ) : (
+              <EmptyState size="row" className="workspace-empty" title={copy.emptyFiles} />
+            )
           ) : (
             <WorkspaceFileTree key={cwd} children={children} expanded={expanded} query={query}
-              loading={loading} nextCursors={nextCursors} onExpand={setDirectoryExpanded}
+              onClearQuery={() => { setQuery(''); searchInput.current?.focus({ preventScroll: true }) }}
+              loading={loading} nextCursors={nextCursors} directoryFailures={directoryFailures}
+              onReadDirectory={(path, cursor) => void loadDirectory(path, cursor)} onExpand={setDirectoryExpanded}
               onOpen={openFile} onContext={openContext}
               onRename={readOnlySource ? undefined : entry => setItemDialog({ kind: 'rename', entry, value: entry.name })}
               onMore={(path, cursor) => void loadDirectory(path, cursor)} />
           )}
-          {nextCursors[''] && (
+          {nextCursors[''] && currentRootReadFailure?.cursor !== nextCursors[''] && (
             <button
               type="button"
               className="workspace-node-note workspace-load-more"

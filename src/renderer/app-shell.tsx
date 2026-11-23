@@ -1,4 +1,7 @@
 import type { AppShellProps } from './app-shell-types'
+import { EmptyState } from './components/primitives/EmptyState'
+import { DelayedSkeletonRows } from './components/primitives/Skeleton'
+import { TERMINAL_EMPTY_COPY, WORKBENCH_EMPTY_COPY } from './constants/copy'
 import { lazy, Suspense, useEffect, type ComponentProps } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/ConversationView'
@@ -96,7 +99,8 @@ export function AppShell(props: AppShellProps) {
         backgroundNotices={backgroundNotices.notices} onOpenBackgroundNotice={backgroundNotices.open} onDismissBackgroundNotice={backgroundNotices.dismiss}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo} sessionSaves={sessionSaves}
         analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth}
-        catalogHealthError={catalogHealthError} projectsError={projectsError} />
+        catalogHealthError={catalogHealthError} projectsError={projectsError} projectsLoading={!workspace.hydrated}
+        onRetryProjects={() => { void loadProjects() }} onChooseFolder={() => { void workspace.chooseFolder() }} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
         value={sidebarPane.width} collapsed={sidebarPane.collapsed} active={sidebarPane.resizing} onPointerDown={sidebarPane.startResize} onKeyDown={sidebarPane.onKeyDown} />
       <div className="main-area has-main-content" id="main-pane" aria-hidden={shellPanelMaximized || undefined} {...(shellPanelMaximized ? { inert: '' } : {})}>
@@ -127,7 +131,8 @@ export function AppShell(props: AppShellProps) {
           </> : view === 'analytics' ? <div className="main-content main-content--single"><Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView analytics={integrations.analytics} rangeDays={integrations.analyticsRange} loading={integrations.analyticsLoading} creditsPending={integrations.analyticsCreditsLoading} error={integrations.analyticsError} onRangeChange={integrations.setAnalyticsRange} onRefresh={() => integrations.loadAnalytics()} onBack={() => { changeView('chat') }} />
           </Suspense></div> : view === 'meta-prompts' ? <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div> : <>
-            <ViewChrome cwd={cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle} onTogglePanel={toggleOverviewPanel} />
+            <ViewChrome cwd={cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle}
+              onTogglePanel={chatProps.showSendBlockedReason ? undefined : toggleOverviewPanel} />
             <div className="main-content"><SessionChatView {...chatProps} /></div>
           </>}
           <PinnedSummaryHost
@@ -169,12 +174,12 @@ export function AppShell(props: AppShellProps) {
                   onOpen={(kind) => { surfacePane.restore(); handleRightSurfaceAction({ type: 'open', kind }) }} onActivate={(kind) => handleRightSurfaceAction({ type: 'activate', kind })} onClose={(kind) => handleRightSurfaceAction({ type: 'close', kind })} onHide={() => handleRightSurfaceAction({ type: 'hide' })} onToggleMaximized={() => handleRightSurfaceAction({ type: 'toggle-maximized' })}
                   contents={{
                     overview: surface.id !== currentSurface.id ? null : showSessionOverview ? <OverviewPanel turns={displayedTurns} sessionId={selectedProviderSessionId} selected={session.selected} usage={integrations.usage} stats={integrations.stats} runtimeProvider={panelRuntimeProvider} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} busy={displayedBusy} onSelect={session.setSelected} onOpenTurn={revealTurnInChat} /> : <EmptySessionOverview />,
-                    'source-control': surface.cwd ? <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={current && panelVisible && surface.state.activeId === 'source-control'} /> : <div className="surface-unavailable"><b>源代码管理不可用</b><span>先绑定本机 Git 工作区。</span></div>,
-                    files: surface.cwd ? <WorkspacePanel cwd={surface.cwd} active={current} refreshKey={workspaceRefreshKey} openRequest={workspaceOpenRequests.get(surface.id)} onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)} onAddReference={addWorkspaceReference} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })} /> : <div className="surface-unavailable"><b>文件不可用</b><span>先绑定一个工作区。</span></div>,
+                    'source-control': surface.cwd ? <SourceControlPanel key={surface.cwd} cwd={surface.cwd} active={current && panelVisible && surface.state.activeId === 'source-control'} /> : <EmptyState size="card" picture="branch" title={WORKBENCH_EMPTY_COPY.noGitProject} />,
+                    files: surface.cwd ? <WorkspacePanel cwd={surface.cwd} active={current} refreshKey={workspaceRefreshKey} openRequest={workspaceOpenRequests.get(surface.id)} onDirtyChange={(dirty) => setScopeDirty(surface.id, dirty)} onAddReference={addWorkspaceReference} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'files' })} /> : <EmptyState size="card" picture="folder" title={WORKBENCH_EMPTY_COPY.noProject} />,
                     diff: surface.id !== currentSurface.id ? null : <DiffInspector state={diffInspector} onClose={() => handleRightSurfaceAction({ type: 'close', kind: 'diff' })}
                       history={view === 'chat' && chatProps.onLoadOlderTurns ? { hasOlder: chatProps.historyWindow?.hasOlder ?? false,
                         loading: chatProps.historyOlderLoading ?? false, load: chatProps.onLoadOlderTurns } : undefined} />,
-                    terminal: <Suspense fallback={<div className="surface-unavailable"><span>正在加载终端…</span></div>}><TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={current && panelVisible && surface.state.activeId === 'terminal'} /></Suspense>,
+                    terminal: <Suspense fallback={<DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />}><TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={current && panelVisible && surface.state.activeId === 'terminal'} /></Suspense>,
                     agents: current ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null
                   }}
                 />

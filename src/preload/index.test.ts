@@ -164,6 +164,7 @@ const listenerChannels = {
   onStopState: 'agent:stopState',
   onDataUpdated: 'agent:dataUpdated',
   onDeleteArchivedProgress: 'agent:deleteArchivedProgress',
+  onWorkspaceProgress: 'workspaceSelection:progress',
   onSession: 'agent:session',
   onFocusedRun: 'agent:focusedRun',
   onRemoteSessionRecorded: 'remote:sessionRecorded',
@@ -249,7 +250,7 @@ describe('preload IPC boundary', () => {
   })
 
   it('exposes read-only workspace selection routes without arbitrary Git execution', async () => {
-    expect(Object.keys(api.workspaceSelection).sort()).toEqual(['inspectStart', 'read', 'validateBranch'])
+    expect(Object.keys(api.workspaceSelection).sort()).toEqual(['cancelStart', 'inspectStart', 'read', 'validateBranch'])
     const request = { cwd: '/workspace', kind: 'branches' as const, query: 'topic' }
     await api.workspaceSelection.read(request)
     expect(electron.invoke).toHaveBeenLastCalledWith('workspaceSelection:read', request)
@@ -259,6 +260,8 @@ describe('preload IPC boundary', () => {
     const pending = { repositoryId: name.repositoryId, operationId: 'f4826a0a-ef56-4309-8d70-e3cd76f0181c' }
     await api.workspaceSelection.inspectStart(pending)
     expect(electron.invoke).toHaveBeenLastCalledWith('workspaceSelection:inspectStart', pending)
+    await api.workspaceSelection.cancelStart(pending)
+    expect(electron.invoke).toHaveBeenLastCalledWith('workspaceSelection:cancelStart', pending)
   })
 
   it('exposes only enumerated desktop business operations, never arbitrary transport IPC', async () => {

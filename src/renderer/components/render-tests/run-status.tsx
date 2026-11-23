@@ -212,7 +212,7 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).not.toContain('<select')
   })
 
-  it('权限浮层同时说明审批方式、风险和当前选择', () => {
+  it('权限选项只显示名称，风险说明保留在工具提示和无障碍描述中', () => {
     const html = renderToStaticMarkup(
       <RunControlSelect
         ariaLabel="权限"
@@ -230,7 +230,9 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('如何批准 Agent 操作？')
     expect(html).toContain('role="listbox"')
     expect(html).toContain('class="permission-mode-option is-selected is-danger"')
-    expect(html).toContain('跳过审批并允许 Agent 直接执行操作')
+    expect(html).toContain('title="跳过审批并允许 Agent 直接执行操作"')
+    expect(html).toContain('aria-description="跳过审批并允许 Agent 直接执行操作"')
+    expect(html.replace(/<[^>]*>/g, '')).not.toMatch(/危险操作会暂停|原生审查器判断|跳过审批并允许/)
     expect(html).toContain('aria-selected="true"')
   })
 
@@ -258,7 +260,7 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(html).toContain('本机完全访问')
   })
 
-  it('Model/Effort 浮层显示 Effort/Model 与紧凑滑杆，不渲染两侧图标', () => {
+  it('Model/Effort 浮层显示 Effort/Model 与原生下拉，不渲染两侧图标', () => {
     const html = renderToStaticMarkup(
       <ModelEffortPicker
         modelValue="ultimate"
@@ -277,10 +279,11 @@ describe('ChatView 运行状态条（busy 时显式状态，不藏 placeholder �
     expect(effortIndex).toBeGreaterThan(modelIndex)
     expect(html).toContain('class="model-effort-field-label">模型')
     expect(html).toContain('class="model-effort-field-label">推理强度')
-    expect(html).toContain('class="model-effort-current-effort">高')
+    expect(html).toContain('<select class="model-effort-current-effort">')
     expect(html).toContain('>Ultimate<')
-    expect(html).toContain('type="range"')
-    expect(html).toContain('aria-valuetext="高"')
+    expect(html).toContain('<option value="default">默认</option>')
+    expect(html).toContain('<option value="high" selected="">高</option>')
+    expect(html).not.toContain('type="range"')
     expect(html).not.toContain('model-effort-summary-bolt')
     expect(html).not.toContain('aria-label="重置 Effort"')
   })

@@ -114,7 +114,7 @@ describe('project and workspace selection in daemon mode', () => {
     dispose = writes.dispose
     await writes.channel('agent:renameProject')({}, '/w', 'Name')
     expect(writes.forwarder).toHaveBeenLastCalledWith({ op: 'projectStore', method: 'renameProject', args: ['/w', 'Name'], read: false })
-    for (const channel of ['agent:setProjectPinned', 'agent:removeProject', 'agent:removeRecentFolder', 'agent:removePiProfile', 'workspaceSelection:inspectStart']) {
+    for (const channel of ['agent:setProjectPinned', 'agent:removeProject', 'agent:removeRecentFolder', 'agent:removePiProfile', 'workspaceSelection:inspectStart', 'workspaceSelection:cancelStart']) {
       await writes.channel(channel)({}, 'x')
       expect(writes.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ read: false }))
     }

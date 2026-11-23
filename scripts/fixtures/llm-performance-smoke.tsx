@@ -29,7 +29,10 @@ const historyRow = (runId: string, minutesAgo: number, model: string, speed: num
 })
 for (const [index, minutesAgo] of [30, 40, 50, 60, 70].entries()) rows.push(historyRow(`fast-${index}`, minutesAgo, 'fast-model', 60 + index, false, 1000 + index * 500))
 for (const [index, minutesAgo] of [35, 45, 55].entries()) rows.push(historyRow(`slow-${index}`, minutesAgo, 'slow-model', 20 + index))
-rows.push(historyRow('failed-fast', 42, 'fast-model', 999, true, 99_000), historyRow('unmeasured', 44, 'unmeasured-model', undefined))
+const agy = historyRow('agy', 38, '所选：gemini', undefined)
+rows.push(historyRow('failed-fast', 42, 'fast-model', 999, true, 99_000), historyRow('unmeasured', 44, 'unmeasured-model', undefined), {
+  ...agy, providerId: 'antigravity', performance: { ...agy.performance, firstOutputWaitMs: 14000, outputTokens: 40 }
+})
 rows.reverse()
 const registry = new RunRegistry<ActiveRun, { runId: string }>()
 const dataListeners = new Set<(event: { runId: string; kind: 'turn_recorded' }) => void>()
@@ -107,8 +110,8 @@ for (const [id, action] of Object.entries({
     ] as const) {
       const runId = `group-${index}`
       registry.register({
-        ...source, runId, externalSessionId: runId, providerId: 'codex', cwd: `/other-project-${index}`,
-        llmPerformance: { ...source.llmPerformance!, state, apiTokensPerSecond: tokensPerSecond, firstTokenMs }
+        ...source, runId, externalSessionId: runId, providerId: source.providerId, cwd: `/other-project-${index}`,
+        llmPerformance: { ...source.llmPerformance!, state, apiTokensPerSecond: tokensPerSecond, firstTokenMs, firstOutputWaitMs: undefined }
       }, { runId })
     }
   },

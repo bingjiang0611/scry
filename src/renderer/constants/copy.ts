@@ -18,6 +18,7 @@ export const PI_PICKER_COPY = {
 } as const
 
 export const COMPOSER_BLOCKED_COPY = {
+  missingWorkspace: '原工作目录已不存在。仍可查看历史；恢复目录并重新打开会话后才能继续发送。',
   scanning: '正在检测本机 Provider，暂不能发送',
   // App 不能替用户装 CLI；这里只给出可执行的下一步，不假装能自动修好。
   missingCli: (label: string) => `未检测到 ${label}：先在终端安装并登录该 CLI，再重新检测。草稿与附件已保留。`,
@@ -44,6 +45,15 @@ export const TURN_DIFF_REVIEW_COPY = {
 } as const
 
 export const META_PROMPT_COPY = {
+  libraryEmpty: '还没有提示词',
+  libraryEmptyDetail: '新建提示词后，就能在这里预览和编辑。',
+  create: '新建提示词',
+  noResults: (query: string) => `没有与「${query}」匹配的提示词`,
+  noResultsDetail: '试试更短的关键词。',
+  clearSearch: '清除搜索',
+  readFailed: '没能读取提示词库',
+  readFailedDetail: '这次读取失败不会改动已保存的提示词。',
+  readAgain: '重新读取',
   discardTitle: '放弃未保存的修改？',
   discardDescription: '放弃后，本次修改不会保存。',
   continueEditing: '继续编辑',
@@ -75,6 +85,35 @@ export const IMAGE_PREVIEW_COPY = {
   dimensions: (width: number, height: number) => `${width} × ${height}`
 } as const
 
+export const WORKBENCH_EMPTY_COPY = {
+  noProject: '尚未选择项目',
+  noGitProject: '尚未选择 Git 工作区',
+  remoteFilesUnavailable: '当前上下文无法读取文件',
+  historyUnavailable: '未取得会话证据',
+  diffUnavailable: '尚未取得会话改动证据',
+  upgrade: '需要更新远端 Scry',
+} as const
+
+export const TERMINAL_EMPTY_COPY = {
+  restoring: '正在恢复终端…',
+  restoreUnverified: '没能核对原有终端',
+  noTerminal: '没有打开的终端',
+  noTerminalDetail: '在当前工作区启动终端后，输出会显示在这里。',
+  start: '启动终端',
+  recordingEmpty: '此页没有录制',
+  recordingPartial: '已读取范围内没有录制，列表不完整',
+  recordingReadFailed: '没能读取终端录制',
+  recordingRefreshFailed: '没能刷新终端录制，仍显示上次读取的列表',
+  refreshRecording: '刷新录制',
+} as const
+
+export const RENDERER_FAILURE_COPY = {
+  title: '没能加载 Scry 界面',
+  detail: '若重试仍失败，请重新加载界面。',
+  retry: '重试',
+  reload: '重新加载',
+} as const
+
 export const BACKGROUND_WORK_COPY = {
   regionLabel: '后台任务',
   provider: { pi: 'Pi', qoder: 'Qoder' },
@@ -94,7 +133,7 @@ export const BACKGROUND_WORK_COPY = {
   receipt: '回执时间',
   age: (value: string) => `已观测 ${value}`,
   ageTitle: '自收到启动回执起计时，非精确进程运行时间',
-  empty: '等待后续结果',
+  empty: '尚未收到后台任务记录',
   quiet: '长时间无新进展；文件可能已写入，重试前请先核验。'
 } as const
 
@@ -104,7 +143,14 @@ export const OVERVIEW_SESSION_COPY = {
   callCount: (count: number) => `${count} 次调用`,
   turnCount: (count: number) => `${count} 轮`,
   context: '上下文占用',
-  contextUnavailable: '暂无上下文数据',
+  contextPercent: (value: number) => `上下文占用 ${value}%`,
+  contextUnavailable: '未取得上下文占用数据',
+  noSessionEvidence: '新会话暂无证据',
+  noSubagents: '本会话尚未观测到子 Agent',
+  noFileEvidence: '未捕获到文件工具证据',
+  noHookEvidence: '未捕获到 Hook 事件',
+  noHookResult: 'Provider 未上报执行结果',
+  noTurnChanges: '本轮没有净改动',
   id: 'ID',
   compact: 'Compact',
   scopeLabel: '查看压缩统计范围',
@@ -118,6 +164,16 @@ export const OVERVIEW_SESSION_COPY = {
 } as const
 
 export const WORKSPACE_EDITOR_COPY = {
+  reading: '读取文件…',
+  openFailed: (name: string) => `没能打开「${name}」`,
+  openFailedDetail: '如果文件已移动，请从文件树重新选择。',
+  accessDenied: '无法访问此文件',
+  workspaceAccessDetail: '请在宿主的 Scry 中核对项目授权。',
+  fileAccessDetail: '请在宿主上核对文件权限。',
+  backToFiles: '返回文件树',
+  openAgain: '重新打开',
+  refreshFailed: (name: string) => `没能重新读取「${name}」；仍显示当前内容`,
+  openedExternally: (name: string) => `已使用系统默认应用打开 ${name}`,
   actions: '文件操作',
   expandSource: '展开源码',
   collapseSource: '收起源码',
@@ -167,6 +223,8 @@ export const SESSION_DRAFT_LABEL = '草稿'
 export { SIDEBAR_SESSION_COPY, SIDEBAR_PROJECT_COPY } from './sidebar-copy'
 
 export const SIDEBAR_ACTIVITY_COPY = {
+  caughtUp: '暂无需要处理的任务',
+  noMatches: (query: string) => `没有与「${query}」匹配的任务`,
   navigation: '侧栏视图',
   projects: '项目',
   activity: '动态',
@@ -206,10 +264,24 @@ export const SLASH_COMMAND_COPY = {
   retry: '重试',
   refreshTitle: (host?: string) => host ? `重新读取 ${host} 的命令清单` : '重新拉取命令清单',
   empty: '命令清单为空——当前 Provider 未返回命令；可刷新或查看诊断',
-  noMatches: '无匹配命令'
+  queryEmpty: (query: string) => `没有与「${query}」匹配的命令`
 } as const
 
 // 时间线分页提示。更早轮次仍在归档里——加载只是收起，不是丢弃，文案必须说清楚。
+export const SESSION_EMPTY_COPY = {
+  firstTitle: '新会话',
+  firstDetail: '发出第一条消息后，回复和执行记录会出现在这里。',
+  firstBoundDetail: (workspace: string) => `在「${workspace}」发出第一条消息后，回复和执行记录会出现在这里。`,
+  readFailed: '没能读取会话历史',
+  readFailedDetail: '这次读取失败不会更改归档。',
+  readUnavailable: '未取得会话历史',
+  readUnavailableDetail: 'Provider 侧可能还有历史，但 Scry 没有可校验的归档可展示。',
+  archiveEmpty: '此归档没有轮次',
+  waiting: '尚未取得会话轮次',
+  waitingDetail: (host?: string) => host ? `仍在等待「${host}」的归档或运行事件。` : '仍在等待本机归档或运行事件。',
+  sideChat: '新侧聊',
+} as const
+
 export const HISTORY_WINDOW_COPY = {
   rangeLabel: '历史轮次范围',
   rangeLocal: (loaded: number, total: number) => `已加载 ${loaded} / ${total} 轮·更早轮次仍在本机归档中，未丢弃`,
@@ -223,6 +295,12 @@ export const ARCHIVED_SESSIONS_COPY = {
   localTitle: '本机已存档会话',
   deleteAllLocal: '删除全部本机会话',
   localEmpty: '没有本机已存档会话',
+  readFailed: '没能读取本机存档',
+  readAgain: '重新读取',
+  noMatches: (query: string) => `没有与「${query}」匹配的存档会话`,
+  noFilteredSessions: '所选筛选条件下没有存档会话',
+  clearSearch: '清除搜索',
+  clearFilters: '清除筛选',
   loading: '正在读取已存档会话…',
   deleting: '正在永久删除已存档会话',
   deleteUnavailable: '本地会话数据不可用，恢复后可重试'
@@ -247,60 +325,25 @@ export const QUESTIONNAIRE_COPY = {
   submitShortcut: `${shortcutModifier}↵`
 } as const
 
-// 排队消息块的全部用户可见文案。Steer 的状态文案与证据语义绑定：
-// pending/unknown 不是「稍后再试」，而是「已经交出去，不能撤销」。
-export const QUEUE_COPY = {
-  title: '等待运行',
-  hint: '当前任务结束后依次发送',
-  listLabel: (count: number) => `排队中的消息，共 ${count} 条`,
-  imagesOnly: (count: number) => `${count} 张图片`,
-  attachmentsTitle: (names: string[]) => names.join('\n'),
-  steer: 'Steer',
-  steerPending: '提交中',
-  steerRetry: '重试 Steer',
-  steerLabel: (label: string, index: number) => `${label}：队列第 ${index} 条消息`,
-  steerTitle: '不中断模型，将这条消息补充给当前任务',
-  steerTitleEnded: '当前任务已结束，Steer 仅可发送给运行中的任务',
-  steerTitleWaiting: '正在等待运行时 Steer 能力证据',
-  steerTitlePending: 'Steer 正在提交；完成前不能重复提交或移除',
-  steerTitleUnknown: (reason?: string) => `结果未知：${reason ?? '请先核对 Provider 回执'}；不能重发或移除`,
-  steerTitleRejected: (reason?: string) => `Provider 明确拒绝：${reason ?? '未提供原因'}；点击重试`,
-  steerTitleNoAttachments: '当前运行不支持 Steer 图片附件',
-  steerUnavailable: (reason: string) => `Steer 不可用：${reason}`,
-  reasonRejected: 'Provider 已拒绝',
-  reasonUnavailable: 'Steer 不可用',
-  reasonUnknown: '结果未知；暂不重发或自动出队',
-  remove: '移除排队消息',
-  removeLabel: (index: number) => `移除队列第 ${index} 条消息`,
-  removeTitlePending: 'Steer 正在提交，不能移除',
-  removeTitleUnknown: 'Steer 结果未知，确认本轮结束前不能移出等待队列',
-  dismissUnknown: '仅移出等待队列，保留未知回执；不会撤回或重发此消息',
-  dismissUnknownLabel: (index: number) => `移出等待队列第 ${index} 条消息（保留未知回执）`,
-  edit: '编辑这条消息',
-  editLabel: (index: number) => `编辑队列第 ${index} 条消息`,
-  editTitle: '把这条消息放回输入框修改；发送后移到队尾',
-  editTitleStarting: '队首消息正在启动，完成前不能编辑',
-  editTitlePending: 'Steer 正在提交，不能编辑',
-  editTitleUnknown: '结果未知的 Steer 不能编辑，先核对 Provider 回执',
-  editTitleDraft: '输入框里已有内容：先发送或清空，再编辑队列消息',
-  // 「移到队尾」和「自动发送会跳过这条」都是行为变化，必须写在用的地方。
-  editingHint: (index: number) => `编辑队列第 ${index} 条 · 发送后移到队尾 · 自动发送会先跳过这条`,
-  cancelEdit: '取消编辑',
-  editClaimed: '这条消息正在提交，完成前不能编辑',
-  editMissing: '这条消息已不在队列，已作为新消息排到队尾',
-  editedMoved: '编辑后已移到队尾'
+export const MCP_TRUST_EMPTY_COPY = {
+  scanFailed: '没能完成 MCP 扫描',
+  scanAgain: '重新扫描',
+  liveUnread: '尚未取得 MCP 实时状态',
+  refreshLive: '刷新 MCP 状态',
+  noAuthorizationGap: '已观测的 MCP 状态无授权缺口',
 } as const
 
 export const LOADING_COPY = {
   sessionOpenFailed: (detail: string) => `无法打开对话：${detail}`,
+  sessionAdoptFailed: '未能接回正在进行的任务。重新点击侧栏中的会话可重试。',
   sessionHistory: '正在读取会话历史…',
   sessionHistoryDetail: '会话已切换；内容将在本机证据读取完成后显示。',
   // 缓存或目录预览已经在屏幕上时，不能再说「内容将在读取完成后显示」。
   sessionHistoryVerifying: '正在核对会话历史…',
   sessionHistoryVerifyingDetail: '当前显示的是上次读取的内容；核对完成前暂不能发送或分支。',
   sendWaitsForHistory: '会话历史读取完成后才能发送，避免发到错误的会话',
-  skillsUnavailable: '未取得 Skill 清单，可点刷新重试',
-  mcpUnavailable: '未取得 MCP 配置，可点刷新重试',
+  skillsUnavailable: '没能读取 Skill 清单',
+  mcpUnavailable: '没能读取 MCP 配置',
   skills: '正在读取 Skill…',
   skillsSourceEmpty: '当前来源没有 Skill',
   // The Provider answered without a list (unknown/unsupported): not the same as none.

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useFirstReadyList } from '../hooks/useFirstReadyList'
-import { useDelayedFlag } from '../hooks/useDelayedFlag'
-import { LoadingStatus } from './LoadingStatus'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import type { UsageAnalytics, UsageAnalyticsBreakdownRow, UsageAnalyticsRangeDays } from '@shared/trace'
 import { Icon } from './primitives/Icon'
 import { TurningIcon } from './primitives/TurningIcon'
@@ -23,26 +23,36 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
   const [chartMetric, setChartMetric] = useState<ChartMetric>('cost')
   const [breakdownMode, setBreakdownMode] = useState<BreakdownMode>('model')
   const breakdownMotion = useFirstReadyList(Boolean(analytics?.status === 'ready'))
-  const showLoading = useDelayedFlag(loading)
-
-  if (!analytics && loading) {
-    return <main className="usage-page" aria-busy="true">{showLoading && <LoadingStatus className="usage-state" title={copy.loading} />}</main>
-  }
+  const ready = analytics?.status === 'ready' ? analytics : null
+  const staleRange = ready !== null && ready.rangeDays !== rangeDays
+  const shownPeriod = ready ? [formatDay(ready.fromDay), formatDay(ready.toDay)] as const : null
+  const period = shownPeriod && (staleRange
+    ? loading ? copy.staleRange(rangeDays, ...shownPeriod) : copy.staleRangeFailed(...shownPeriod)
+    : copy.periodDisplay(...shownPeriod))
+  const header = <header className="usage-header">
+    <div className="usage-title-group">
+      {onBack && <button className="usage-back" type="button" onClick={onBack} aria-label={copy.back} title={copy.back}><Icon name="chevronRight" /></button>}
+      <div><h1>{copy.title}</h1>{period && shownPeriod && <p title={ready ? copy.period(ready.fromDay, ready.toDay) : undefined} role={staleRange ? 'status' : undefined}>{period}</p>}</div>
+    </div>
+    <div className="usage-actions">
+      <Segmented className="usage-segmented" label={copy.rangeLabel} value={rangeDays} onChange={onRangeChange}
+        options={ranges.map(days => ({ value: days, label: copy.range(days) }))} />
+      {ready && <button className="usage-refresh" type="button" onClick={() => { if (!loading) onRefresh() }} aria-disabled={loading}
+        aria-label={copy.refresh} title={copy.refresh}><TurningIcon busy={loading && !staleRange} /></button>}
+    </div>
+  </header>
   if (!analytics || analytics.status !== 'ready') {
-    return (
-      <main className="usage-page">
-        <div className="usage-state is-error">
-          <Icon name="alert" />
-          <div><b>{copy.unavailable}</b><span>{error ?? copy.databaseUnavailable}</span></div>
-          <button type="button" onClick={onRefresh}>{copy.retry}</button>
-        </div>
-      </main>
-    )
+    const showFailure = Boolean(error) || analytics !== null || !loading
+    return <main className="usage-page" aria-busy={loading}><div className="usage-shell">
+      {header}
+      {showFailure ? <EmptyState size="page" picture="alert" title={copy.readFailed} description={copy.readFailedDetail} announcement="alert"
+        actions={[{ label: copy.retry, intent: 'secondary', onClick: onRefresh, icon: 'refresh', busy: loading }]} />
+        : <DelayedSkeletonRows loading rows={6} label={copy.loading} />}
+    </div></main>
   }
 
   // A range switch keeps the last answer on screen until the new one lands. It is
   // the previous range's data, so it is dimmed and the period line says so.
-  const staleRange = analytics.rangeDays !== rangeDays
   const totals = analytics.totals
   const providers = analytics.byProvider.filter((row) => row.usageRows > 0 || row.costKnownRows > 0 || row.qoderCredits)
   const costProviders = providers.filter((row) => row.costUsd != null).sort((a, b) => b.costUsd! - a.costUsd!)
@@ -73,37 +83,9 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
   return (
     <main className="usage-page" aria-busy={loading} data-stale-range={staleRange || undefined}>
       <div className="usage-shell">
-        <header className="usage-header">
-          <div className="usage-title-group">
-            {onBack && (
-              <button className="usage-back" type="button" onClick={onBack} aria-label={copy.back} title={copy.back}>
-                <Icon name="chevronRight" />
-              </button>
-            )}
-            <div>
-              <h1>{copy.title}</h1>
-              <p title={copy.period(analytics.fromDay, analytics.toDay)} role={staleRange ? 'status' : undefined}>
-                {staleRange
-                  ? copy.staleRange(rangeDays, formatDay(analytics.fromDay), formatDay(analytics.toDay))
-                  : copy.periodDisplay(formatDay(analytics.fromDay), formatDay(analytics.toDay))}
-              </p>
-            </div>
-          </div>
-          <div className="usage-actions">
-            <Segmented
-              className="usage-segmented"
-              label={copy.rangeLabel}
-              value={rangeDays}
-              onChange={onRangeChange}
-              options={ranges.map(days => ({ value: days, label: copy.range(days) }))}
-            />
-            <button className="usage-refresh" type="button" onClick={() => { if (!loading) onRefresh() }} aria-disabled={loading} aria-busy={loading} aria-label={copy.refresh} title={copy.refresh}>
-              <TurningIcon busy={loading && !staleRange} />
-            </button>
-          </div>
-        </header>
-
-        {error && <div className="usage-inline-error" role="status">{error}</div>}
+        {header}
+        {error && !loading && !staleRange && <EmptyState size="card" className="usage-inline-error" picture="alert"
+          title={copy.refreshFailed} announcement="alert" />}
 
         <section className="usage-overview" aria-label={copy.overview}>
           <article className="usage-cost-card" aria-label={copy.totalLabel} aria-description={totalEvidence}>
@@ -118,6 +100,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
           </article>
           <article className="usage-composition" aria-label={copy.composition}>
             <h2>{copy.composition}</h2>
+            {costProviders.length > 0 && totals.costUsd != null && totals.costUsd > 0 ? <>
             <div className="usage-composition-bar" role="img" aria-label={copy.compositionChart}>
               {costProviders.map((row) => (
                 <span key={row.provider} className={`is-${row.provider}`} title={providerLabel(row.provider)}
@@ -132,6 +115,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
                 </div>
               ))}
             </div>
+            </> : <EmptyState size="card" picture="chart" title={costProviders.length > 0 && totals.costUsd === 0 ? copy.zeroComposition : copy.noComposition} />}
           </article>
         </section>
 
@@ -159,7 +143,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
           <article className="usage-provider-panel" aria-label={copy.byProvider}>
             <div className="usage-section-head"><h2>{copy.byProvider}</h2></div>
             <div className="usage-provider-list">
-              {providerRows.length === 0 ? <div className="usage-empty-row">{copy.noProviderRecord}</div> : providerRows.map((row) => (
+              {providerRows.length === 0 ? <EmptyState size="card" className="usage-empty-row" title={copy.noProviderRecord} announcement="polite" /> : providerRows.map((row) => (
                 <div className="usage-provider-row" key={row.provider}>
                   <div className="usage-provider-main">
                     <ProviderMark provider={row.provider} />
@@ -202,7 +186,7 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
               <thead><tr><th scope="col">{breakdownMode === 'model' ? copy.model : copy.day}</th><th scope="col">{copy.costUsd}</th><th scope="col">{copy.share}</th><th scope="col">{copy.token}</th></tr></thead>
               <tbody className={breakdownMotion.className}>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={4}>{copy.noDetails}</td></tr>
+                  <tr><td colSpan={4}><EmptyState size="row" title={copy.noDetails(breakdownMode)} announcement="polite" /></td></tr>
                 ) : rows.map((row, index) => {
                   const modelRow = row as UsageAnalyticsBreakdownRow
                   const key = breakdownMode === 'model' ? `${modelRow.provider}:${modelRow.model ?? ''}` : (row as typeof analytics.byDay[number]).day

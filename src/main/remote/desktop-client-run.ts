@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteRunStatus, DesktopRemoteLiveRun } from '../../shared/desktop-remote'
 import { DesktopRemoteClientSession } from './desktop-client-session'
-import { context, fail, record, text, validRunId } from './desktop-client-validation'
+import { context, fail, parseWorkspacePrepareProgress, record, text, validRunId } from './desktop-client-validation'
 
 export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
   async runStatus(connectionIdValue: string, runIdValue: string): Promise<DesktopRemoteRunStatus> {
@@ -16,14 +16,18 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       : lifecycle === 'settled' ? 'settled' : lifecycle === 'failed' || lifecycle === 'cancelled' || lifecycle === 'interrupted'
         ? 'failed' : 'unknown'
     const outputSeq = row?.outputSeq ?? undefined
+    // The host projects live worktree preparation onto the run row before admission.
+    const workspaceProgress = parseWorkspacePrepareProgress(row?.workspaceProgress)
     const changed = state !== watch.state || row?.revSeq !== watch.revSeq ||
-      outputSeq !== watch.outputSeq || row?.traceRunId !== watch.scryRunId
+      outputSeq !== watch.outputSeq || row?.traceRunId !== watch.scryRunId ||
+      JSON.stringify(workspaceProgress) !== JSON.stringify(watch.workspaceProgress)
     watch.state = state
     watch.revSeq = row?.revSeq
     watch.outputSeq = outputSeq
     watch.scryRunId = row?.traceRunId
     watch.externalSessionId = row?.externalSessionId
     watch.cwd = row?.cwd ?? undefined
+    watch.workspaceProgress = workspaceProgress
     this.runWatch.set(key, watch)
     if (state === 'settled' || state === 'failed' || watch.externalSessionId) {
       const stateData = await this.state()
@@ -46,7 +50,8 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
         if (contextChanged) await this.save(stateData)
       }
     }
-    return { state, changed, ...(watch.outputSeq !== undefined ? { outputSeq: watch.outputSeq } : {}), ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}) }
+    return { state, changed, ...(watch.outputSeq !== undefined ? { outputSeq: watch.outputSeq } : {}), ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}),
+      ...(watch.workspaceProgress ? { workspaceProgress: watch.workspaceProgress } : {}) }
   }
 
   // Finds the host’s live run for the selected session.

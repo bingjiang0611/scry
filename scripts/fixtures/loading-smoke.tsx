@@ -15,18 +15,24 @@ document.getElementById('cache-state')!.parentElement!.style.display = 'none'
 let delay = 60
 let fail = false
 let remoteVisible = false
+let releaseCatalog: (() => void) | undefined
+let holdCatalog = false
+let pendingSession: Promise<void> | undefined
+let releaseSession: (() => void) | undefined
 const records: Array<{ kind: string; start: number; end?: number; failed?: boolean }> = []
-function request<T>(kind: string, value: () => T): Promise<T> {
+async function request<T>(kind: string, value: () => T): Promise<T> {
   const record = { kind, start: performance.now() } as (typeof records)[number]
   records.push(record)
   // Sample after the current commit without depending on a frame beating a fast read.
   if (kind === 'session') queueMicrotask(() => window.dispatchEvent(new Event('loading-fixture-session-read')))
   const rejectRead = fail
+  const readDelay = delay
+  if (kind === 'session' && pendingSession) await pendingSession
   return new Promise((resolve, reject) => setTimeout(() => {
     record.end = performance.now(); record.failed = rejectRead
     if (rejectRead) reject(new Error('fixture source unavailable'))
     else resolve(value())
-  }, delay))
+  }, readDelay))
 }
 const connection: DesktopRemoteConnection = {
   id: 'loading-remote', hostId: 'fixture-host', label: 'Fixture remote', anchorSHA256: 'fixture',
@@ -37,6 +43,10 @@ const catalog: DesktopRemoteCatalog = {
   providerEvidence: 'host_snapshot', directorySelection: true
 }
 Object.assign(window.scry, {
+  invalidateProviderContext: async () => {
+    if (holdCatalog) await new Promise<void>((resolve) => { releaseCatalog = resolve })
+    return true
+  },
   loadSession: (context: { externalSessionId?: string }) => request('session', () => page(context.externalSessionId!)),
   listSkills: () => request('skills', () => ({ state: 'ready', mode: 'read', data: [], providerId: 'claude', cwd: '/fixture/cache' })),
   mcpSnapshot: () => request('mcp', () => ({ state: 'ready', mode: 'read', data: { configured: [], runtime: [], operations: { authenticate: [] } }, providerId: 'claude', cwd: '/fixture/cache' })),
@@ -83,6 +93,11 @@ function InventoryRead({ kind, legacy }: { kind: 'skills' | 'mcp'; legacy: boole
 }
 Object.assign(window, { loadingFixture: {
   records,
+  holdSession: () => { pendingSession = new Promise<void>(resolve => { releaseSession = resolve }) },
+  releaseSession: () => { releaseSession?.(); releaseSession = undefined; pendingSession = undefined },
+  holdCatalog: () => { holdCatalog = true },
+  catalogPending: () => releaseCatalog !== undefined,
+  releaseCatalog: () => { holdCatalog = false; releaseCatalog?.(); releaseCatalog = undefined },
   inventory: (kind: 'skills' | 'mcp', legacy: boolean) => extraRoot.render(<InventoryRead key={++inventoryKey} kind={kind} legacy={legacy} />),
   startInventory: () => startInventory(),
   closeInventory: () => extraRoot.render(null),

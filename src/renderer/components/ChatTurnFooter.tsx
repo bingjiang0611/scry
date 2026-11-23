@@ -102,11 +102,3 @@ export function ToolTerminationNotice({ evidence }: { evidence: NonNullable<Trac
     </Notice>
   )
 }
-
-export function UserAllowRulesNotice({ notice }: { notice: string }) {
-  return (
-    <Notice tone="info" size="sm" role="note">
-      <span>{notice}</span>
-    </Notice>
-  )
-}

@@ -64,10 +64,11 @@ export async function exercise(contents, { measure = false } = {}) {
 
   await mode('patch')
   await typeInto(`document.querySelector('input[aria-label="评论行号"]')`, '9')
-  await wait(`document.querySelector('.pierre-comment-target button')?.disabled === false`, 'captured keyboard comment target')
+  const commentSubmit = `document.querySelector('.pierre-comment-target button[type="submit"]')`
+  await wait(`${commentSubmit}?.disabled === false`, 'captured keyboard comment target')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
-  await wait(`document.activeElement === document.querySelector('.pierre-comment-target button')`, 'Tab reaches the comment submit button')
+  await wait(`document.activeElement === ${commentSubmit}`, 'Tab reaches the comment submit button')
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
   contents.sendInputEvent({ type: 'char', keyCode: '\r' })
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
@@ -166,7 +167,8 @@ export async function exercise(contents, { measure = false } = {}) {
   must(shadowElements > 0, 'Workspace tree shadow DOM is empty')
   await mark()
   await fill(`document.querySelector('.workspace-search input')`, 'absent-file-match')
-  await wait(`${query('[data-item-path]')}.length === 0 && document.querySelector('.workspace-empty')?.textContent.includes('没有匹配文件')`, 'no matches hide unrelated tree files')
+  const noMatch = '已加载的文件中没有与「absent-file-match」匹配的路径'
+  await wait(`${query('[data-item-path]')}.length === 0 && document.querySelector('.workspace-empty [aria-live=polite]')?.textContent === ${JSON.stringify(noMatch)}`, 'no matches in loaded files hide unrelated tree files and are announced politely')
   await record('searchNoMatch')
   await mark()
   await fill(`document.querySelector('.workspace-search input')`, ' FILE-0999 ')

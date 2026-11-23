@@ -83,6 +83,7 @@ const bridge = {
   adoptActiveRun: async (runId: string) => {
     adoptedRuns.push(runId)
     update()
+    if (scenario === 'adopt-failed' && runId === hiddenRun.runId && adoptedRuns.length === 1) throw new Error('daemon_outcome_unknown')
     if (runId === previousHiddenRun.runId) return null
     return runId === hiddenRun.runId ? hiddenRun : oldRun
   },

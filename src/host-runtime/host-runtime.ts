@@ -102,6 +102,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
           grantScope: input.grantScope,
           ...(input.managedConversation ? { managedConversation: input.managedConversation } : {}),
           ...(input.onStarted ? { onStarted: input.onStarted } : {}),
+          ...(input.onWorkspaceProgress ? { onWorkspaceProgress: input.onWorkspaceProgress } : {}),
           onRegistered: (result) => input.onRegistered?.({ cwd: result.cwd ?? input.request.cwd! })
         })
         // A worktree start answers once registered; its terminal receipt follows.

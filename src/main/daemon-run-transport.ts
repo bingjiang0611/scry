@@ -1,4 +1,4 @@
-import type { AgentQuestionResponse } from '../shared/runtime'
+import type { AgentInputAttachment, AgentQuestionResponse } from '../shared/runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DesktopRemoteContext, DesktopTraceCursor, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeReply, SubscribeRequest } from '../shared/orchestration-subscribe'
@@ -8,8 +8,10 @@ import { DaemonRunRefusedError } from './daemon-run-admission'
 import { DaemonClientError } from './daemon-client'
 import { DaemonRunError, fail, record, type DaemonRunFailure } from './daemon-run-error'
 import { readDaemonTrace } from './daemon-run-trace-read'
+import { context as desktopContext } from './remote/desktop-client-validation'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import { assembleByteChunks } from './remote/desktop-byte-chunks'
+import { stageDesktopImage, type desktopImageReference } from './remote/stage-desktop-image'
 import { parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
 
 // The App's run surface against its own daemon, over the same frames the phone
@@ -65,6 +67,10 @@ function failure(reply: Record<string, unknown>, op?: string): Error | undefined
   const code = reply.error
   if (code === undefined) return undefined
   if (op === 'submit' && code === 'session_run_active') return new DaemonRunRefusedError(RUN_ADMISSION_BUSY_MESSAGE)
+  if (code === 'unknown_intent' && op === 'intentStatusAtLog') return new DaemonRunError('daemon_run_unknown')
+  if (op === 'submit' && (code === 'command_payload_conflict' || code === 'intent_payload_conflict')) {
+    return new DaemonRunError('command_payload_conflict')
+  }
   if (code === 'device_not_authorized' || code === 'execution_target_bridge_unauthorized') return new DaemonRunError('daemon_device_not_authorized')
   // An older daemon has no run controls at all: a named absence, not an empty success.
   // Only the W10 execution-target bridge maps unknown_op to an unavailable control.
@@ -90,6 +96,10 @@ export class DaemonRunTransport {
     // When no position is reported, the caller uses its last observed cursor.
     const seq = Number.isSafeInteger(reply.seq) && (reply.seq as number) > 0 ? reply.seq as number : undefined
     return { intentId: input.intentId, runId, status: reply.status, ...(seq !== undefined ? { seq } : {}) }
+  }
+
+  stageImage(reference: ReturnType<typeof desktopImageReference>, attachment: AgentInputAttachment): Promise<void> {
+    return stageDesktopImage((request) => this.#call(request), reference, attachment)
   }
 
   // A recorded intent is not a dispatched run. Recovery asks this after a
@@ -131,14 +141,23 @@ export class DaemonRunTransport {
    * the reply is the renderer's existing result shape, and inventing one here would
    * be a second answer to the same question.
    */
-  async runControl(request: { method: 'steer' | 'stopBackgroundTask'; payload: unknown } | { method: 'adopt'; runId: string }): Promise<Record<string, unknown>> {
-    // #call turns `unsupported_op` into a named absence; every other error code stays
-    // the one the daemon sent.
-    return await this.#call({
-      op: 'runControl',
-      method: request.method,
-      ...(request.method === 'adopt' ? { runId: request.runId } : { payload: request.payload })
-    })
+  async runControl(request: { method: 'steer' | 'stopBackgroundTask'; payload: unknown }): Promise<Record<string, unknown>> {
+    return await this.#call({ op: 'runControl', ...request })
+  }
+
+  async adopt(runId: string): Promise<ActiveRun | null> {
+    // `payload` was already allowed on adopt. Older daemons ignore it and return the inline run.
+    const reply = await this.#call({ op: 'runControl', method: 'adopt', runId, payload: 'traceContext' }, { replayable: true })
+    // The daemon's registry refused the takeover; the caller gets that reason, not null.
+    if (typeof reply.refused === 'string') throw new Error(reply.refused)
+    if (reply.run === null) return null
+    if (reply.traceContext !== undefined) {
+      const read = await this.trace({ context: desktopContext(reply.traceContext), runId })
+      if (read.kind !== 'snapshot' || (read.run !== null && read.run.runId !== runId)) return fail()
+      return read.run
+    }
+    if (!record(reply.run) || reply.run.runId !== runId || !Array.isArray(reply.run.items)) return fail()
+    return reply.run as unknown as ActiveRun
   }
 
   async stop(runId: string): Promise<'requested' | 'already_requested'> {

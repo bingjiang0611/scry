@@ -1,6 +1,6 @@
 # 侧聊来源与消息快照合同
 
-状态：已按用户确认改为只读来源，不要求迁移主会话；以下为待实现合同。参见 [技术方案](./technical-plan.md)。
+这是最初的只读来源设计，不要求迁移主会话；下文保留当时的术语。冻结边界后来改为最近一个**明确终止且证据完整**的轮次，不限于成功完成；现行边界见[对话状态模型](../conversation-state-model.md)。[原实施方案](https://github.com/bingjiang0611/scry/blob/ca74055d8f15358156db0d593d186de131caaa0f/docs/handoff/side-chat/technical-plan.md)可从 Git 历史查看。
 
 ## 1. 不接管主会话
 

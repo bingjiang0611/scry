@@ -12,6 +12,8 @@ import { ModalFrame, requestModalClose } from './Modals'
 import { useAsyncAction } from '../hooks/useAsyncAction'
 import { BusyLabel } from './primitives/BusyLabel'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import './hosts-view.css'
 import { Button } from './primitives/Button'
@@ -30,6 +32,7 @@ function errorText(error: unknown): string {
 export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }) {
   const { connections, loaded, refreshing, error: readError } = useDesktopConnections()
   const [adding, setAdding] = useState(false)
+  const refreshHosts = useAsyncAction<'read'>()
   const [expanded, setExpanded] = useState<string | null>(null)
   const titleId = useId()
   return (
@@ -42,19 +45,11 @@ export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (con
       </header>
       <section className="remote-access-section" aria-label={copy.outboundTitle}>
         <h3>{copy.outboundTitle}</h3>
-        {readError && (
-          <Notice tone="warn" className="hosts-alert" role="alert" action={<Button size="sm" onClick={() => void refreshDesktopConnections()}>{copy.retry}</Button>}>
-            {copy.connectionReadError(readError)}
-          </Notice>
-        )}
-        {!loaded && !readError && <p className="hosts-muted">{copy.loadingHosts}</p>}
-        {loaded && !readError && connections.length === 0 && (
-          <div className="hosts-empty">
-            <b>{copy.noHosts}</b>
-            <p>{copy.noHostsHint}</p>
-            <Button onClick={() => setAdding(true)}>{copy.addHost}</Button>
-          </div>
-        )}
+        {readError && <EmptyState size="card" picture="alert" title={copy.hostsReadFailed} announcement="alert"
+          actions={[{ label: copy.retry, icon: 'refresh', onClick: () => refreshHosts.run('read', refreshDesktopConnections), busy: refreshHosts.pending !== null }]} />}
+        {(!loaded || refreshing) && !readError && connections.length === 0 && <DelayedSkeletonRows loading rows={3} label={copy.loadingHosts} />}
+        {loaded && !refreshing && !readError && connections.length === 0 &&
+          <EmptyState size="card" picture="server" title={copy.noHosts} actions={[{ label: copy.addHost, onClick: () => setAdding(true) }]} />}
         <ul className="hosts-list">
           {connections.map((connection) => (
             <HostRow
@@ -167,8 +162,11 @@ function HostRow({
           <h4>{copy.projects}</h4>
           {state !== 'connected'
             ? <p className="hosts-muted">{entry?.catalog ? copy.cachedProjects : copy.connectForProjects}</p>
-            : !entry?.catalog && <p className="hosts-muted">{entry?.error ? copy.projectReadError(entry.error) : copy.loadingProjects}</p>}
-          {entry?.catalog && entry.catalog.projects.length === 0 && <p className="hosts-muted">{copy.noProjects}</p>}
+            : entry?.error ? <EmptyState size="card" picture="alert" title={copy.projectsReadFailed(connection.label)} announcement="alert"
+                actions={[{ label: copy.retry, icon: 'refresh', busy: entry.loading, onClick: () => void refreshRemoteCatalog(connection.id) }]} />
+              : !entry?.catalog && <DelayedSkeletonRows loading rows={3} label={copy.loadingProjects} />}
+          {state === 'connected' && !entry?.error && !entry?.stale && entry?.catalog?.projects.length === 0 &&
+            <EmptyState size="card" picture="folder" title={copy.noProjects} />}
           {entry?.catalog && entry.catalog.projects.length > 0 && (
             <ul className="hosts-projects">
               {entry.catalog.projects.map((project) => (

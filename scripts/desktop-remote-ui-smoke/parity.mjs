@@ -27,14 +27,17 @@ export async function runParity({ driver }) {
     await click('[data-remote-session="native-session"]')
     await wait('document.querySelector(".composer-notice")?.textContent.includes("继续队列") && window.desktopRemoteFixture.intent === null', 'reopened adopted queue remains paused after terminal')
     check((await fixture()).submitInputs.length === 1, 'Background reconnect automatically sent queued input')
+    await read('window.desktopRemoteFixture.hideSecondTrace = true')
     await click('.composer-notice button', '继续队列')
     await wait('window.desktopRemoteFixture.submitInputs.length === 2', 'queue drains only after explicit continuation')
     check((await fixture()).submitInputs[1].prompt === 'queued remote turn' && (await fixture()).submitInputs[1].context.externalSessionId === 'native-session', 'Queued message lost adopted native session identity')
     check((await fixture()).localStarts === 0, 'Remote queue started local Provider')
     await wait('!document.querySelector(".prompt-queue")', 'queue entry removed after acknowledged submission')
+    await wait('document.querySelector(".chat")?.getAttribute("aria-busy") === "true" && document.querySelector(".run-status") && !document.querySelector(".composer-notice")', 'running status is ready while the remote transcript is pending')
     // Cancel the view while a terminal status read is pending: the receipt is
     // retired by main, but App-owned queued work must still consume its evidence.
     await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await insert('terminal navigation race'); await key('Enter')
+    await wait('document.querySelector(".prompt-queue")?.textContent.includes("terminal navigation race")', 'running remote session accepts a queued prompt before its trace arrives')
     await read('window.releaseRunStatus = null; window.desktopRemoteFixture.holdRunStatus = true; window.desktopRemoteFixture.runState = "settled"; window.publishFixtureRemoteUpdate({ runs: true })')
     await wait('typeof window.releaseRunStatus === "function"', 'terminal read pending')
     await click('.sb-navitem', '分析')

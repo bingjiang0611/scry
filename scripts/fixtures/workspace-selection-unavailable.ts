@@ -6,5 +6,6 @@ const unavailable = { status: 'unavailable', reason: '此离线夹具没有 Git 
 export const unavailableWorkspaceSelection: WorkspaceSelectionApi = {
   read: async () => unavailable,
   validateBranch: async () => unavailable,
-  inspectStart: async () => unavailable
+  inspectStart: async () => unavailable,
+  cancelStart: async () => false
 }

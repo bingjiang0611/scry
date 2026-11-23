@@ -14,7 +14,7 @@ export async function runRouting({ driver, localBefore }) {
   await click('.location-button')
   await wait('document.querySelector(".location-menu") != null', 'remote draft picker reopened')
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-  check(await read('document.activeElement?.getAttribute("data-machine-id") === "fixture-connection"'), 'Remote picker initial focus moved to local machine')
+  check(await read('document.activeElement?.matches(".location-machine-select select") && document.activeElement.value === "fixture-connection"'), 'Remote picker initial focus moved to local machine')
   check(await read('document.querySelector(".location-custom-directory") != null'), 'Remote picker initial focus replaced remote projects with local folders')
   await key('Escape')
   const afterNew = await fixture()

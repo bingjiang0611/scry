@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatViewProps } from './types'
 import { Icon } from '../primitives/Icon'
+import { EmptyState } from '../primitives/EmptyState'
 import { ComposerQueue } from './ComposerQueue'
 import { ComposerInput } from './ComposerInput'
 import { ComposerControls } from './ComposerControls'
@@ -16,7 +17,7 @@ export function Composer({
   turns, textareaRef, cwd, recent, agents, selectedAgentId, agentLocked = false,
   hasSelectedSession = false,
   runControls, runControlCatalog, runControlsLoading = false, runControlsReason = null, input, composerScopeKey,
-  sendBlockedReason = null, composerError = null, detectionIssue = null, detectionRetrying = false, onRetryDetection,
+  sendBlockedReason = null, showSendBlockedReason = false, composerError = null, detectionIssue = null, detectionRetrying = false, onRetryDetection,
   submitting = false, sessionLoading = false, sessionCacheVisible = false, sessionEvidenceGap = null, busy,
   queueWhileBusy = true, draftAttachments, queuedPrompts, steerCapability = null, steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(), onSteerQueuedPrompt, editingQueuedId = null, movedQueuedId = null,
@@ -25,16 +26,17 @@ export function Composer({
   onInput, onChooseFolder, onUnbindProject = () => {}, onPickRecent, onRemoveRecent, onRetrySlash, onPickSlash,
   onSlashSel, onHideSlash, onSend, onStop, onPasteImages, onPasteClipboardImage, onRemoveDraftAttachment,
   onRemoveQueuedPrompt, onSelectAgent, onAddPiAgent, onRemovePiAgent, onRunModel, onRunEffort, onPermissionMode,
-  onRescan, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel,
+  onRescan, agentsScanning, agentsScanFailed, unavailableAgentIds, agentScopeLabel, renderLocationPicker, remoteHost, composerNotice = null, workspaceContext, workspaceSendLabel, workspaceSetup = null,
   onOpenRunControls
 }: Omit<ChatViewProps, 'selectedId' | 'scrollRef' | 'onSelect' | 'onOpenDiff' | 'onForkTurn' | 'forkableRunIds' | 'onOpenFile' | 'onAnswerQuestion' | 'focusedTurnRunId' | 'scrollNavigation' | 'onTurnRef' | 'historyWindow'>) {
   const remote = remoteHost != null
+  const workspaceSetupActive = workspaceSetup != null
   const sessionOwnerLoading = sessionLoading || sessionCacheVisible
   const resettingNewConversation = sessionLoading && !hasSelectedSession
   // New conversation clears the visible session synchronously, while main may still be
   // invalidating Provider context. Do not make the project picker wait for that background
   // work; historical-session loading remains hidden because it already has a session id.
-  const showWorkdirPicker = !cwd || (turns.length === 0 && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionOwnerLoading || resettingNewConversation) && !sessionEvidenceGap)
+  const showWorkdirPicker = !cwd || (turns.length === 0 && !workspaceSetupActive && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionOwnerLoading || resettingNewConversation) && !sessionEvidenceGap)
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
@@ -92,10 +94,10 @@ export function Composer({
       description: option.description
     }))
   ]
-  const queueing = busy && queueWhileBusy
-  const sendActionLabel = submitting ? workspaceCopy.starting : queueing ? workspaceCopy.queue : workspaceSendLabel ?? workspaceCopy.send
+  const queueing = busy && queueWhileBusy && !workspaceSetupActive
+  const sendActionLabel = workspaceSetupActive ? workspaceCopy.creatingWorktree : submitting ? workspaceCopy.starting : queueing ? workspaceCopy.queue : workspaceSendLabel ?? workspaceCopy.send
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
-  const composerStatus = composerError ?? detectionIssue ?? (hasDraft ? sendBlockedReason : null)
+  const composerStatus = composerError ?? (showSendBlockedReason ? sendBlockedReason : detectionIssue ?? (hasDraft ? sendBlockedReason : null))
 
   // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
@@ -153,11 +155,8 @@ export function Composer({
                 </button>
               ))}
               {!slashLoading && slashMatches.length === 0 && (
-                <div className="slash-empty">
-                  {slashCmds.length === 0
-                    ? slashReason ?? SLASH_COMMAND_COPY.empty
-                    : SLASH_COMMAND_COPY.noMatches}
-                </div>
+                <EmptyState size="menu" className="slash-empty" announcement={slashCmds.length ? 'polite' : undefined}
+                  title={slashCmds.length === 0 ? slashReason ?? SLASH_COMMAND_COPY.empty : SLASH_COMMAND_COPY.queryEmpty(input)} />
               )}
             </div>
           </div>
@@ -180,7 +179,7 @@ export function Composer({
           onPasteImages={onPasteImages} onPasteClipboardImage={onPasteClipboardImage}
           onRemoveDraftAttachment={onRemoveDraftAttachment} onRetryDetection={onRetryDetection}
           detectionRetrying={detectionRetrying} showWorkdirPicker={showWorkdirPicker}
-          sendBlockedReason={sendBlockedReason} composerError={composerError}
+          sendBlockedReason={sendBlockedReason} composerStatus={composerStatus} composerError={composerError}
           detectionIssue={detectionIssue} sessionLoading={sessionOwnerLoading}
           stopStatus={stopStatus} backgroundStatus={backgroundStatus}
           runStartedAt={runStartedAt} editingQueuedIndex={editingQueuedIndex}
@@ -188,18 +187,18 @@ export function Composer({
           slashMatches={slashMatches} slashSel={slashSel} promptHistory={promptHistory}
           historyNavigation={historyNavigation} promptHistoryRef={promptHistoryRef}
           composerScopeKey={composerScopeKey} onHideSlash={onHideSlash} onSlashSel={onSlashSel}
-          onPickSlash={onPickSlash}
+          onPickSlash={onPickSlash} workspaceSetupActive={workspaceSetupActive}
         />
         <ComposerControls
           agents={agents} selectedAgentId={selectedAgentId} onSelectAgent={onSelectAgent}
-          onAddPiAgent={onAddPiAgent} onRemovePiAgent={onRemovePiAgent} onRescan={onRescan}
+          onAddPiAgent={onAddPiAgent} onRemovePiAgent={onRemovePiAgent} onRescan={onRescan} agentsScanning={agentsScanning} agentsScanFailed={agentsScanFailed}
           unavailableAgentIds={unavailableAgentIds} agentScopeLabel={agentScopeLabel} agentLocked={agentLocked}
           runControls={runControls} onRunModel={onRunModel} onRunEffort={onRunEffort}
           onPermissionMode={onPermissionMode} composerMenu={composerMenu} setComposerMenu={setComposerMenu}
           onOpenRunControls={onOpenRunControls}
           modelValue={modelValue} modelOptions={modelOptions} effortOptions={effortOptions}
           permissionOptions={permissionOptions} loading={runControlsLoading}
-          composerStatus={composerStatus} submitting={submitting} sessionLoading={sessionOwnerLoading}
+          composerStatus={composerStatus} submitting={submitting || workspaceSetupActive} sessionLoading={sessionOwnerLoading}
           input={input} draftAttachments={draftAttachments} sendBlockedReason={sendBlockedReason}
           sendActionLabel={sendActionLabel} queueing={queueing} resetPromptHistory={resetPromptHistory}
           onSend={onSend} runControlCatalog={runControlCatalog}

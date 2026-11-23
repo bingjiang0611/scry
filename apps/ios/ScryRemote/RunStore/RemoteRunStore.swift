@@ -303,6 +303,8 @@ final class RemoteRunStore {
   static let metadataFreshness: TimeInterval = 5 * 60
   #if DEBUG
   var mockMode = false
+  // Fixture: the first archived-catalog read fails, the retry confirms an empty list.
+  var archiveFixtureReadCount = 0
   // Fixture: the host reports a permission the restored choice no longer names.
   var forcedStalePermission =
     ProcessInfo.processInfo.arguments.contains("-uiForceStalePermission")

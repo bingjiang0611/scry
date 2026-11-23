@@ -1,3 +1,6 @@
+import { EmptyState } from './primitives/EmptyState'
+import { WORKBENCH_EMPTY_COPY } from '../constants/copy'
+import { REMOTE_SESSION_COPY } from '../constants/remote-copy'
 import { lazy, Suspense } from 'react'
 import { providerIdForAgentId, runtimeProviderForAgentId } from '@shared/runtime'
 import type { AgentModelRef, AgentPermissionMode } from '@shared/runtime'
@@ -9,7 +12,9 @@ import { SourceControlPanel } from './SourceControlPanel'
 import { AgentsSurface } from './AgentsSurface'
 import { TurnDiffReviewPanel } from './TurnDiffReviewPanel'
 import { clipboardAttachmentToDraft, fileToDraftAttachment, type ComposerDraftAttachment } from '../composer-drafts'
-import { QUEUE_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
+import { TERMINAL_EMPTY_COPY } from '../constants/copy'
+import { QUEUE_COPY } from '../constants/queue-copy'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import { ChatView } from './ChatView'
 import { defaultOption, desktopProviderKey, RemoteFiles } from './DesktopRemote'
@@ -39,7 +44,14 @@ export type RemoteChatViewProps = FoundationState & ControlsState & Presentation
 }
 
 export function RemoteChatView(props: RemoteChatViewProps) {
-  const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, historyOlderLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface, workspaceSelection } = props
+  const { api, workbench, fileRequest, setFileRequest, setWorkspaceDirty, dispatchSurface, connected, host, catalog, setProviderSelection, sessionId, setSessionId, controls, providerControlsError, setProviderControlsRevision, selected, setSelected, historyEvidence, historyLoading, historyOlderLoading, activeRun, setError, pollFresh, submitting, generation, provider, providerId, context, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, slashReason, slashLoading, setSlashRevision, slashSel, setSlashSel, setSlashHidden, slashOpen, controlProvider, updateControls, runControlCatalog, validPermissionMode, displayTurns, chatNavigation, openTurnInChat, runActive, controlRunId, sessionArchived, sendBlockedReason, submit, stop, answer, loadOlderHistory, agents, unavailableAgentIds, selectedAgentId, notice, diffReview, workspaceAvailable, upgradeWorkbench, connectionId, cwd, queueStore, onDraftInput, scrollRef, textareaRef, renderLocationPicker, onSessionAdopted, surface, workspaceSelection, workspaceSetup } = props
+  // An archive miss is not a session miss while the initial poll is unresolved
+  // or the host reports a live run whose trace has not arrived yet.
+  const waitingForRun = Boolean(sessionId && connected && !props.pollError && !props.catalogEntry?.error &&
+    (!pollFresh || props.foreignRun || props.currentRunStatus?.state === 'dispatched' || props.currentRunStatus?.state === 'recorded'))
+  const historyFailed = Boolean(sessionId && displayTurns.length === 0 && props.historyError !== null && (!waitingForRun || historyLoading))
+  const archiveUnavailable = Boolean(sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0 &&
+    pollFresh && !waitingForRun)
   return (
     <>
       <ChatView
@@ -62,10 +74,19 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         composerScopeKey={draftKey}
         sendBlockedReason={workspaceSelection.blockedReason ?? sendBlockedReason}
         submitting={submitting}
-        sessionLoading={historyLoading && displayTurns.length === 0}
-        sessionEvidenceGap={sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
-          ? { status: 'unavailable', detail: historyEvidence.reason ?? `${host} 未提供这条会话的归档` }
-          : null}
+        sessionLoading={historyLoading && displayTurns.length === 0 && !runActive}
+        transcriptPending={historyLoading || waitingForRun}
+        sessionEvidenceGap={historyFailed
+          ? { status: 'error', title: REMOTE_SESSION_COPY.readHistoryFailed(props.catalogSession?.label),
+              detail: REMOTE_SESSION_COPY.readHistoryFailedDetail(host),
+              retry: connected && props.catalogReady && providerId ? () => {
+                props.preparedHistoryContext.current = undefined
+                props.setHistoryRevision(revision => revision + 1)
+              } : undefined,
+              retrying: historyLoading }
+          : archiveUnavailable
+            ? { status: 'unavailable', detail: historyEvidence?.reason ?? `${host} 未提供这条会话的归档` }
+            : null}
         busy={pollFresh && runActive && Boolean(controlRunId)}
         draftAttachments={draftAttachments}
         queuedPrompts={queue.prompts}
@@ -175,6 +196,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
           ? <WorkspaceContext controller={workspaceSelection} cwd={cwd} onOpenRun={() => undefined} />
           : undefined}
         workspaceSendLabel={workspaceSelection.sendLabel}
+        workspaceSetup={workspaceSetup}
         renderLocationPicker={renderLocationPicker}
         remoteHost={host}
         composerNotice={notice ?? (providerControlsError || (controlProvider && !controlProvider.available)
@@ -199,8 +221,8 @@ export function RemoteChatView(props: RemoteChatViewProps) {
           onHide={() => surface.onAction({ type: 'hide' })}
           onToggleMaximized={() => surface.onAction({ type: 'toggle-maximized' })}
           contents={{
-            overview: sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0
-              ? <div className="surface-unavailable"><b>会话证据不可用</b><span>{historyEvidence.reason ?? `${host} 未提供这条会话的归档`}</span></div>
+            overview: archiveUnavailable
+              ? <EmptyState size="card" picture="overview" title={WORKBENCH_EMPTY_COPY.historyUnavailable} />
               : <OverviewPanel
                   turns={displayTurns} sessionId={sessionId} selected={selected} remote
                   runtimeProvider={runtimeProviderForAgentId(providerId)} usage={null} stats={null}
@@ -214,12 +236,12 @@ export function RemoteChatView(props: RemoteChatViewProps) {
                     onDirtyChange={(dirty) => { setWorkspaceDirty(dirty); surface.onDirtyChange?.(dirty) }}
                     onAddReference={(entry) => onDraftInput(draftKey, `${input}${input && !input.endsWith(' ') ? ' ' : ''}${workspaceReferenceToken(entry)} `)} />
                 : <RemoteFiles api={api} connectionId={connectionId} context={context} onClose={() => dispatchSurface({ type: 'close', kind: 'files' })} />
-              : <div className="surface-unavailable"><b>文件不可用</b><span>{sendBlockedReason ?? '当前上下文不可读取文件。'}</span></div>,
+              : <EmptyState size="card" picture="folder" title={WORKBENCH_EMPTY_COPY.remoteFilesUnavailable} />,
             'source-control': catalog?.workbench === 1 ? <SourceControlPanel cwd={cwd} api={workbench.sourceControl} active={surface.state.visible && surface.state.activeId === 'source-control'} /> : upgradeWorkbench,
-            terminal: catalog?.workbench === 1 ? <Suspense fallback={<div className="surface-unavailable">正在加载终端…</div>}><TerminalSurface cwd={cwd} scopeId={surface.scopeId} api={workbench.terminal} machineLabel={host} active={surface.state.visible && surface.state.activeId === 'terminal'} /></Suspense> : upgradeWorkbench,
+            terminal: catalog?.workbench === 1 ? <Suspense fallback={<DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />}><TerminalSurface cwd={cwd} scopeId={surface.scopeId} api={workbench.terminal} machineLabel={host} active={surface.state.visible && surface.state.activeId === 'terminal'} /></Suspense> : upgradeWorkbench,
             agents: <AgentsSurface turns={displayTurns} busy={pollFresh && runActive} />,
             diff: diffReview ? <TurnDiffReviewPanel review={diffReview} onClose={() => dispatchSurface({ type: 'close', kind: 'diff' })} />
-              : <div className="surface-unavailable"><b>本会话还没有可审阅的改动</b><span>某一轮产生 Git 净改动后，这里会显示真实会话改动。</span></div>
+              : <EmptyState size="card" picture="diff" title={WORKBENCH_EMPTY_COPY.diffUnavailable} />
           }}
         />, surface.target
       )}

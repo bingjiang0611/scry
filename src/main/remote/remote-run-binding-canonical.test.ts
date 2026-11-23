@@ -138,4 +138,75 @@ describe('remote run binding (canonical App seam: submit -> startAppRun)', () =>
     expect(activity).toHaveBeenCalledTimes(1)
     expect(output).toHaveBeenCalledWith({ kind: 'output', text: 'visible' })
   })
+
+  it('forwards workspace preparation progress into remote ledger markers and validates them on the client', async () => {
+    const { parseWorkspacePrepareProgress } = await import('./desktop-client-validation')
+    const workspace = {
+      operationId: '22222222-2222-4222-8222-222222222222',
+      intent: {
+        kind: 'newWorktree' as const,
+        repositoryId: 'a'.repeat(64),
+        expectedRevision: 'b'.repeat(64),
+        base: { kind: 'local' as const, name: 'refs/heads/main', head: 'c'.repeat(40) },
+        newBranch: 'scry/remote-wt'
+      }
+    }
+    const progress = vi.fn()
+    const startAppRun = vi.fn(async (input: Parameters<NonNullable<RemoteRunBindingDependencies['startAppRun']>>[0]) => {
+      input.onWorkspaceProgress?.({
+        operationId: workspace.operationId,
+        repositoryId: workspace.intent.repositoryId,
+        stage: 'preparing',
+        workspacePrepared: false,
+        cancellable: true,
+        details: ['准备分支 scry/remote-wt'],
+        branch: 'scry/remote-wt',
+        baseRef: 'main',
+        updatedAt: 100
+      })
+      input.onWorkspaceProgress?.({
+        operationId: workspace.operationId,
+        repositoryId: workspace.intent.repositoryId,
+        stage: 'checking_out',
+        workspacePrepared: true,
+        checkout: { completed: 50, total: 100, percent: 50 },
+        cancellable: true,
+        details: ['工作区元数据已创建'],
+        branch: 'scry/remote-wt',
+        baseRef: 'main',
+        updatedAt: 200
+      })
+      input.onWorkspaceProgress?.({
+        operationId: workspace.operationId,
+        repositoryId: workspace.intent.repositoryId,
+        stage: 'checking_out',
+        workspacePrepared: true,
+        checkout: { completed: 100, total: 100, percent: 100 },
+        cancellable: true,
+        details: ['工作区元数据已创建'],
+        branch: 'scry/remote-wt',
+        baseRef: 'main',
+        updatedAt: 210
+      })
+      return { status: 'completed' as const, recording: 'committed' as const }
+    })
+    await createRemoteRunBinding({ startAppRun, nextScryRunId: () => 'canonical-wt-progress' })({
+      runId: 'ledger-wt-progress',
+      routing: { cwd: '/source', providerId: 'claude', prompt: 'go', workspace },
+      progress,
+      output: vi.fn()
+    })
+    const markers = progress.mock.calls
+      .map(call => JSON.parse(call[0] as string) as Record<string, unknown>)
+      .filter(item => item.event === 'workspaceProgress')
+    expect(markers).toHaveLength(3)
+    const parsed = parseWorkspacePrepareProgress(markers[2]?.progress)
+    expect(parsed).toMatchObject({
+      operationId: workspace.operationId,
+      stage: 'checking_out',
+      workspacePrepared: true,
+      checkout: { completed: 100, total: 100, percent: 100 }
+    })
+    expect(parseWorkspacePrepareProgress({ stage: 'checking_out' })).toBeUndefined()
+  })
 })

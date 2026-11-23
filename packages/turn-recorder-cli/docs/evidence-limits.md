@@ -16,5 +16,21 @@
 - 强制收尾（`recover --expire-open`）只认进程证据：静默满 30 分钟 + 记录过的宿主进程链全部确认不存在，才把轮次收成 `interrupted` 并标 `estimated`，原因写明按恢复收尾。宿主仍在跑、或根本没有进程证据（旧轮次、旧钩子脚本、进程表读不到）一律保持 open，静默不算「已结束」的证据。`--session <id>` 可重复，只对指定会话强制收尾。
 - 记录 `startedAt` 取 transcript 里本轮提问行的时间，不取开启采集的时间；接续段取自己的 wake 时间。开启采集时间与 diff 基线时间各自保留，不能互相顶替。
 - Recorder 只保证**新生成**记录使用当前口径,不会重写历史记录。
+
+## Diff 快照的仓库位置
+
+Recorder 合同在 `diff.value[].repositoryLocation` 增加可选对象。内部字段也都可选；缺失表示未观测，不影响原 diff 的状态。schema 版本不变。
+
+| 字段 | 含义 | 上限 |
+| --- | --- | --- |
+| `remote` | 本地 Git config 中首个 `origin` URL 的规范仓库标识：`host[:port]/path`。主机小写，去掉协议、默认端口、用户信息、查询、片段和末尾 `.git`。本地路径或无法安全解析的 URL 不写。 | 1024 UTF-8 字节 |
+| `branch` | 采集开始时的分支名，不带 `refs/heads/`；游离 HEAD 写 `null`，读不到不写。 | 255 UTF-8 字节 |
+| `branchAfter` | 采集结束时的分支名；格式、`null` 和缺失语义与 `branch` 相同。即使与开头相同也可写。 | 255 UTF-8 字节 |
+| `commitBefore` | 采集开始时的完整提交号。不把基线树或事后重建的基线当成当时的 HEAD。 | 40 或 64 个小写十六进制字符 |
+| `commitAfter` | 采集结束时的完整提交号，即使与开始相同也可写。 | 40 或 64 个小写十六进制字符 |
+
+起始位置独立于 diff 基线：接续轮在该段采集开始时重新读 Git；`baseline_after_turn_start` 表示迟启采集，起始字段只代表采集开启时，不能还原原始提问时的位置。
+
+每条记录最多给 32 个不同的仓库根各附一次位置；重复快照和超过上限的仓库仍保留原 diff。读取不启进程、不等待额外 I/O；只读已知 Git 文件布局。支持 loose ref、`packed-refs` 和 worktree/gitdir 指针，不追踪 Git config include、不应用 URL 重写规则、不读取其他 ref 后端。超过读取预算、读失败或无法确认的字段留空。
 - 会话捕获记录里的 `source` 与 `client` 是两件事：`source` 是谁要求采集，`client` 是这轮发生在哪个客户端里（例如 `source=friday` + `client=3eye`）。`client` 缺失只表示没观测到，不能读成“不在任何客户端里”；它只能是 `[a-z0-9][a-z0-9-]{0,31}` 形式的标识，不是自由文案。
 - `diff` 为 `partial` 时，`omissionReason` 是给人读的句子，`omissionCodes` 是同一批原因的封闭枚举（`baseline_after_turn_start` / `continuation_no_baseline` / `diff_exclude` / `untracked_limit` / `patch_policy` / `patch_budget` / `patch_deadline` / `patch_git_error` / `patch_truncated` / `patch_unavailable`）。平台与测试按码判断，不从句子解析；旧记录没有该字段表示只有文案。

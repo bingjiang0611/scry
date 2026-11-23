@@ -14,6 +14,7 @@ import { SubscribeEngine, type SubscribeEngineOptions } from '../host-runtime/or
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
 import { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import { paginateSubscribeReplies } from './orchestration-subscribe-chunks'
+import { parseWorkspacePrepareProgress } from '../shared/workspace-prepare-progress'
 
 export interface AuthoritySubscribeRuntimeDeps {
   hostId: () => string
@@ -169,6 +170,9 @@ export function noteProgressMarkerForSubscribeHub(
       )
     } else if (marker.event === 'session' && typeof marker.externalSessionId === 'string') {
       hub.noteRunSession(canonicalRunId, marker.externalSessionId)
+    } else if (marker.event === 'workspaceProgress') {
+      const progress = parseWorkspacePrepareProgress(marker.progress)
+      if (progress) hub.noteRunWorkspaceProgress(canonicalRunId, progress)
     }
   } catch {
     // Non-JSON progress markers do not affect subscribe metadata.

@@ -9,6 +9,8 @@ import { DaemonRunTransport } from '../main/daemon-run-transport'
 import { DaemonRunRuntime } from '../main/daemon-run-runtime'
 import { startDaemonRunEvents } from '../main/daemon-run-events'
 import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
+import { DesktopLanes, laneForRequest } from '../main/remote/desktop-lane'
+import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
 afterEach(cleanupTempDirs)
 
@@ -34,6 +36,7 @@ async function until<T>(read: () => T | undefined, timeoutMs: number): Promise<T
 describe('daemon trace past the single-response limit', () => {
   it('delivers a live run whose trace the daemon answers in chunks', async () => {
     const daemon = await startTestDaemon()
+    const lanes = new DesktopLanes()
     const transport = new DaemonRunTransport((request) => daemon.request(request))
     const delivered: TraceEvent[] = []
     const warnings: unknown[] = []
@@ -55,10 +58,20 @@ describe('daemon trace past the single-response limit', () => {
       // What the daemon answered really was past the limit, not a small trace in one frame.
       expect(Buffer.byteLength(JSON.stringify(view))).toBeGreaterThan(SINGLE_RESPONSE_LIMIT)
 
+      // Reopening from another window uses the real desktop lane with its standard 4 MiB limit.
+      const desktop = new DaemonRunTransport((request, options) => lanes.request(laneForRequest(request), 'reopen', {
+        endpoint: daemon.endpoint, request: { protocol: REMOTE_PROTOCOL_VERSION, ...request }, replayable: options?.replayable ?? false
+      }))
+      const reopened = await createDaemonRunSurface({ transport: desktop, runtime, currentCwd: () => daemon.workspace }).adopt(run.runId)
+      expect(reopened).toMatchObject({ runId: run.runId, userText: 'performance large trace', done: false })
+      expect(reopened?.items.filter(event => event.stage === 'thinking').map(event => event.thinking?.length))
+        .toEqual(Array.from({ length: 12 }, () => BLOCK_BYTES))
+
       await surface.stop(run.runId)
       expect(await until(() => runtime.runView(run.runId)?.done === true ? true : undefined, 20_000)).toBe(true)
     } finally {
       events.dispose()
+      lanes.closeAll()
       runtime.dispose()
       await daemon.dispose()
     }

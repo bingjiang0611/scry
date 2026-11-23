@@ -16,6 +16,7 @@ export interface AppChatPropsContext {
   workspaceContext?: ReactNode
   workspaceSendLabel?: string
   workspaceBlockedReason?: string
+  workspaceSetup?: import('./components/chat-view/types').WorkspaceSetupState | null
   draftKey: string
   session: ReturnType<typeof useAgentSession>
   scrollRef: RefObject<HTMLDivElement>
@@ -29,11 +30,13 @@ export interface AppChatPropsContext {
   sessionLoading: boolean
   activeSessionId: string | null
   sendBlockedReason: string | null | undefined
+  sessionWorkspaceMissing: boolean
   composerError: string | null
   providerSendBlockedReason: string | null
   providerCompatibilityIssue: string | null | undefined
   sessionCacheVisible: boolean
   activeEvidenceGap: SessionEvidenceGap | null
+  retryHistory?: () => void
   draftAttachments: DraftAttachment[]
   queuedPrompts: QueuedPrompt[]
   steerCapability: import('@shared/runtime').AgentSteerCapability | null
@@ -78,9 +81,9 @@ export interface AppChatPropsContext {
 }
 
 export function createAppChatProps(context: AppChatPropsContext): ComponentProps<typeof SessionChatView> {
-  const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
-    composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, composerError, providerSendBlockedReason,
-    providerCompatibilityIssue, sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability,
+  const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, workspaceSetup, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
+    composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason,
+    providerCompatibilityIssue, sessionCacheVisible, activeEvidenceGap, retryHistory, draftAttachments, queuedPrompts, steerCapability,
     steerEvidenceByMessageId, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
     stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,
@@ -106,8 +109,9 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     runControlCatalog: integrations.runControlCatalog,
     runControlsLoading: integrations.runControlsLoading,
     runControlsReason: integrations.runControlCapability?.reason,
-    workspaceContext, workspaceSendLabel,
+    workspaceContext, workspaceSendLabel, workspaceSetup,
     sendBlockedReason: sendBlockedReason ?? workspaceBlockedReason,
+    showSendBlockedReason: sessionWorkspaceMissing,
     composerError,
     detectionIssue: integrations.agentsScanError ?? providerSendBlockedReason ?? providerCompatibilityIssue,
     detectionRetrying: integrations.detectionRetrying,
@@ -115,7 +119,8 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     submitting: composerSubmitting || switchingAgent,
     sessionLoading,
     sessionCacheVisible,
-    sessionEvidenceGap: activeEvidenceGap,
+    sessionEvidenceGap: activeEvidenceGap ? { ...activeEvidenceGap, retry: retryHistory,
+      retrying: activeEvidenceGap.status === 'error' && sessionLoading } : null,
     busy: session.busy,
     draftAttachments,
     queuedPrompts,
@@ -142,9 +147,9 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     focusedTurnRunId,
     scrollNavigation: chatNavigation,
     onSelect: session.setSelected,
-    onOpenDiff: openTurnDiffReview,
-    onForkTurn: forkConversationTurn,
-    onOpenFile: openWorkspaceFile,
+    onOpenDiff: sessionWorkspaceMissing ? undefined : openTurnDiffReview,
+    onForkTurn: sessionWorkspaceMissing ? undefined : forkConversationTurn,
+    onOpenFile: sessionWorkspaceMissing ? undefined : openWorkspaceFile,
     onAnswerQuestion: session.answerQuestion,
     onInput: value => {
       setInput(value)
@@ -175,7 +180,9 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     onRunModel: integrations.setRunModel,
     onRunEffort: integrations.setRunEffort,
     onPermissionMode: integrations.setPermissionMode,
-    onRescan: integrations.rescan
+    onRescan: integrations.rescan,
+    agentsScanning: integrations.agentsScanning,
+    agentsScanFailed: Boolean(integrations.agentsScanError)
   }
   return chatProps
 }

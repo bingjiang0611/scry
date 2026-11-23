@@ -10,6 +10,13 @@ export const sourceControlStatusNames = {
 } satisfies Record<ScOperation['status'], string>
 
 export const sourceControlFileCopy = {
+  readingRepository: '正在读取仓库…',
+  repositoryReadFailed: '没能读取仓库状态',
+  refreshRepository: '刷新仓库',
+  clean: '没有未提交的改动',
+  chooseFile: '选择文件查看差异',
+  readingDiff: '正在读取差异…',
+  diffReadFailed: '没能读取此文件的 Git 差异',
   include: (path: string) => `纳入本次提交 ${path}`,
   staged: '已暂存 · 将纳入提交',
   partiallyStaged: '部分已暂存 · 保留原有选择',
@@ -21,7 +28,7 @@ export const sourceControlFileCopy = {
 export const sourceControlOperationCopy = {
   title: '操作证据 · 不自动重放',
   slow: (action: string): string => `仍在${action}，比平时久；可以先浏览其他页面，结果会记在操作记录里。`,
-  empty: '本仓库没有本机操作记录。',
+  empty: '尚无 Git 操作记录',
   label: (op: ScOperation) => `${sourceControlActionNames[op.action]} · ${sourceControlStatusNames[op.status]}${op.acknowledged ? ' · 已人工核查' : ''}`,
   viewPr: '查看 PR',
   reviewId: (id: number) => `review ID ${id}`,
@@ -30,6 +37,16 @@ export const sourceControlOperationCopy = {
   acknowledgeTitle: '确认已人工核查',
   acknowledgeDetail: '结果仍保留为 unknown。仅解除后续操作阻断，不重试、不回滚、不宣称成功。请先在 Git/GitHub 确认现场。'
 }
+
+export const pullRequestReadCopy = {
+  listFailed: '没能读取 PR 列表',
+  prFailed: '没能读取此 PR',
+  listEmpty: '没有开放的 PR',
+  listPartial: '已读取范围内没有开放 PR，列表不完整',
+  checksUnavailable: '未取得检查结果；这不等于满足分支规则',
+  noWriteAccess: '当前账号没有此仓库的写入权限',
+  refresh: '刷新',
+} as const
 
 export const sourceControlRepositoryCopy = {
   title: '仓库详情',

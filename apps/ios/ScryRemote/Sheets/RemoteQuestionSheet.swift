@@ -82,15 +82,32 @@ struct RemoteQuestionSheet: View {
                               multiple: true)
                   }
                   .buttonStyle(.plain)
+                  .accessibilityLabel(option.label)
+                  .accessibilityValue((selections[question.question] ?? []).contains(option.label) ? SheetCopy.optionSelected : SheetCopy.optionNotSelected)
+                  .accessibilityHint(SheetCopy.toggleOption)
                   .accessibilityAddTraits((selections[question.question] ?? []).contains(option.label) ? .isSelected : [])
                 }
+              } else if question.options.count >= 6 {
+                Picker(SheetCopy.chooseOption, selection: textBinding(question.question)) {
+                  Text(SheetCopy.chooseOption).tag("")
+                  ForEach(question.options, id: \.label) { option in
+                    Text(option.label).tag(option.label)
+                  }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("question-picker-\(index)")
+                if let selected = selectedOption(for: question) {
+                  selectedOptionPreview(selected)
+                }
               } else {
-                // Every option visible at once, one tap to choose (as on the Mac).
+                // Short option lists stay visible at once, one tap to choose.
                 ForEach(question.options, id: \.label) { option in
                   Button { answers[question.question] = option.label } label: {
                     optionRow(option, selected: answers[question.question] == option.label, multiple: false)
                   }
                   .buttonStyle(.plain)
+                  .accessibilityLabel(option.label)
+                  .accessibilityValue(answers[question.question] == option.label ? SheetCopy.optionSelected : SheetCopy.optionNotSelected)
                   .accessibilityAddTraits(answers[question.question] == option.label ? .isSelected : [])
                 }
               }
@@ -134,6 +151,29 @@ struct RemoteQuestionSheet: View {
 
   private func textBinding(_ key: String) -> Binding<String> {
     Binding(get: { answers[key] ?? "" }, set: { answers[key] = $0 })
+  }
+
+  private func selectedOption(for question: G0Transport.RunQuestionPrompt) -> G0Transport.RunQuestionOption? {
+    guard let answer = answers[question.question], !answer.isEmpty else { return nil }
+    return question.options.first { $0.label == answer }
+  }
+
+  private func selectedOptionPreview(_ option: G0Transport.RunQuestionOption) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(option.label).font(Typography.rowTitle.weight(.medium)).foregroundStyle(Palette.fg)
+      if !option.description.isEmpty {
+        Text(option.description).font(Typography.meta).foregroundStyle(Palette.dim2)
+      }
+      if let preview = option.preview, !preview.isEmpty {
+        Text(preview).font(Typography.codeBlock).foregroundStyle(Palette.dim2)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 14).padding(.vertical, 12)
+    .background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.accent, lineWidth: 1))
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(option.label)，\(SheetCopy.optionSelected)")
   }
 
   private func optionRow(_ option: G0Transport.RunQuestionOption, selected: Bool, multiple: Bool) -> some View {

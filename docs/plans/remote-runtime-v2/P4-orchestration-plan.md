@@ -78,12 +78,14 @@ W18 已实现 P4-4 至 P4-6，待核验。Desktop 与 iOS 走 v3 订阅。SQLite
 | P4-3 | 本机订阅：App 切换（§6 第 1 行）；`AppEventFeed` 缩小并接 P5 通知；重测 | 1.25 | P4-2 |
 | P4-4 | 会话目录与详情 projection；导入 `app-sessions.json` 元数据（决定 E，增量）；`catalog.scan` 触发；transcript 区间引用；首屏快照；renderer 读 projection；删除会话的清除与墓碑 | 2 | P4-3 |
 | P4-5a | `subscribe` 作为 v2 能力：Desktop、iOS、执行目标转发、keyset 分页、逐行授权；真机验证 | 2 | P4-4 |
-| P4-5b | 升 v3，只删旧 op（宿主、Desktop、iOS、转发白名单）；删除开关 | 0.5 | P4-5a 真机通过、S3 |
+| P4-5b | 升 v3，只删旧 op（宿主、Desktop、iOS、转发白名单）；删除开关 | 0.5 | P4-5a 真机通过、S3、本机运行不再依赖待删查询 |
 | P4-6 | 清理：删除 H1 文件与镜像、`CommandReceipts`、`AppEventFeed` 的持久类、`result` 标记里的数字，改正 `run-output-log.ts:7-9` 注释 | 0.5 | P4-5b |
 
 **合计约 12 周（11–13），不含 S3**；等维护者安装真机客户端的时间不计入。首稿 8.5 周；增加的部分：P4-2 +1 周（复核、TTL、证据恢复、两本账对账、放行停止）；P4-4 +0.5 周（扫描触发、清除与墓碑）；协议拆成 5a/5b 并加转发与真机轮 +1 周；P4-0/P4-1 各 +0.5 周（迁移执行器、正文、增量导入、CI 作业、首轮测量）；P4-3 +0.25 周。落在评审 10–12 周的上沿，主要因为协议拆两段要多一轮真机验证。
 
 **发布顺序。** 先在 iPhone 安装包含 `3d705db8` 的 v2 过渡版，再把宿主升级到 v3。见 [v3 发布说明](handoff/release-v3.md)。
+
+**P4-5b 开工条件：本机运行不再依赖待删查询**（`runState`、`intentStatus`）。条件原文与 v3 下的满足方式见 [合并记录](handoff/reports/merge-main-2026-11-23.md#p4-5b-开工条件)。
 
 **开关与 off↔on（B4）。** `SCRY_ORCHESTRATION=off|shadow|on` 只由 daemon 读，存在于 P4-1 到 P4-5b 之间。S3 之后 App 只走 daemon（进程内路径与 `SCRY_HOST_DAEMON=0` 均已删除）；经由当前 daemon 的 off↔on 往返规则保持：
 

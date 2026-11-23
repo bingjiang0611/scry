@@ -74,15 +74,15 @@ describe('tool panel shaping', () => {
     const running: LlmPerformanceSummary = {
       observedAt: '2026-10-21T12:00:00.000Z',
       sessions: [
-        { key: 'a', runId: 'r1', state: 'streaming', outputStarted: true, model: 'opus', tokensPerSecond: 40 },
-        { key: 'b', runId: 'r2', state: 'waiting', outputStarted: false, model: 'opus' }
+        { key: 'a', runId: 'r1', providerId: 'antigravity', state: 'streaming', outputStarted: true, model: 'opus', tokensPerSecond: 40, firstOutputWaitMs: 1500 },
+        { key: 'b', runId: 'r2', providerId: 'antigravity', state: 'waiting', outputStarted: false, model: 'opus' }
       ]
     }
     const history: LlmPerformanceHistory = { rows: [], invalidLines: 2, truncated: false }
     const panel = shapeLlmPanel(history, running, 7)
     expect(panel.llm?.running.models).toHaveLength(1)
     expect(panel.llm?.running.models[0].sessions).toBe(2)
-    expect(panel.llm?.running.models[0].tokensPerSecond).toBe(40)
+    expect(panel.llm?.running.models[0]).toMatchObject({ providerId: 'antigravity', tokensPerSecond: 40, firstOutputWaitMs: 1500 })
     expect(panel.llm?.running.models[0].states.sort()).toEqual(['streaming', 'waiting'])
     expect(panel.llm?.history.rows).toEqual([])
     expect(panel.llm?.history.invalidLines).toBe(2)
@@ -97,11 +97,10 @@ describe('tool panel shaping', () => {
     expect(panel.llm?.history.rows).toHaveLength(TOOL_PANEL_HISTORY_ROWS)
     expect(panel.llm?.history.truncated).toBe(true)
     expect(panel.llm?.history.cappedAt).toBe(TOOL_PANEL_HISTORY_ROWS)
-    const withoutPerformance = { ...(rows[0] as Record<string, unknown>), performance: {} } as never
-    const missing = shapeLlmPanel({ rows: [withoutPerformance], invalidLines: 0, truncated: false },
+    const agy = { ...(rows[0] as Record<string, unknown>), providerId: 'antigravity', performance: { firstOutputWaitMs: 14000 } } as never
+    const missing = shapeLlmPanel({ rows: [agy], invalidLines: 0, truncated: false },
       { observedAt: 'now', sessions: [] })
-    expect(missing.llm?.history.rows[0].speed).toBeNull()
-    expect(missing.llm?.history.rows[0].firstTokenMs).toBeNull()
+    expect(missing.llm?.history.rows[0]).toMatchObject({ providerId: 'antigravity', speed: null, firstTokenMs: null, firstOutputWaitMs: 14000 })
   })
 
   it('shapes MCP findings without leaking evidence paths or key names', () => {

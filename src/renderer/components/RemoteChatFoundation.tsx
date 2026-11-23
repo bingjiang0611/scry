@@ -5,8 +5,20 @@ import { type WorkspaceOpenRequest } from './WorkspacePanel'
 import { createRemoteWorkbench } from '../remote-workbench'
 import type { RightSurfaceAction } from '../right-surface'
 import type { DesktopRemoteContext, DesktopRemoteHistory, DesktopRemoteIntent, DesktopRemoteRunStatus, DesktopRemoteLiveRun, RemoteProviderRef } from '@shared/desktop-remote'
+import type { WorkspaceStartSelection } from '@shared/workspace-selection'
 import type { Turn } from '../format'
 import { updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment } from '../composer-drafts'
+
+export interface PendingRemoteWorktreeSubmit {
+  draftKey: string
+  prompt: string
+  attachments: ComposerDraftAttachment[]
+  workspace: WorkspaceStartSelection
+  intentId?: string
+  runId?: string
+  cancelling?: boolean
+  cancelRequested?: boolean
+}
 
 import { remoteQueueKey } from '../remote-prompt-queue'
 import type { SlashCmd } from '@shared/trace'
@@ -100,6 +112,15 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   // 取更早一页的在途状态：自动续读会反复触发，重复请求拿的是同一游标。
   const [historyOlderLoading, setHistoryOlderLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [pendingWorktree, setPendingWorktreeState] = useState<PendingRemoteWorktreeSubmit | null>(null)
+  const pendingWorktreeRef = useRef<PendingRemoteWorktreeSubmit | null>(null)
+  const setPendingWorktree = useCallback((next: PendingRemoteWorktreeSubmit | null | ((current: PendingRemoteWorktreeSubmit | null) => PendingRemoteWorktreeSubmit | null)): void => {
+    setPendingWorktreeState((current) => {
+      const resolved = typeof next === 'function' ? next(current) : next
+      pendingWorktreeRef.current = resolved
+      return resolved
+    })
+  }, [])
   const [connecting, setConnecting] = useState(false)
   const [resolvingIntentId, setResolvingIntentId] = useState<string | null>(null)
   const [unknownReceiptError, setUnknownReceiptError] = useState<string | null>(null)
@@ -224,7 +245,15 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     contextGeneration.current += 1
     const preserveAdoptedRun = adoptingSession.current
     adoptingSession.current = false
-    if (!preserveAdoptedRun) { adoptedIntent.current = undefined; showTrace(null); setRunStatus(null) }
+    if (!preserveAdoptedRun) {
+      adoptedIntent.current = undefined
+      showTrace(null)
+      setRunStatus(null)
+      if (pendingWorktreeRef.current) {
+        releaseAttachments(pendingWorktreeRef.current.attachments)
+        setPendingWorktree(null)
+      }
+    }
     setForeignRun(null)
     setStatus(null); setError(null); setPollError(null); setHistoryError(null); setHistoryEvidence(null); setTurns([])
   }, [contextKey, showTrace])
@@ -274,7 +303,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   }, [api, catalogReady, catalog?.providerDiscovery, connected, controlsVisible, connectionId, controlContextKey, cwd, provider?.agentProfileId, provider?.available, provider?.observedAt, provider?.metadataRevision, providerId, providerControlsRevision])
 
 
-  return { api, workbench, fileRequest, setFileRequest, workspaceDirty, setWorkspaceDirty, dispatchSurface, connections, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, setProviderSelection, sessionId, setSessionId, controls, setControls, selectedProvider, setSelectedProvider, selectedProviderContextKey, setSelectedProviderContextKey, providerControlsError, setProviderControlsError, providerControlsLoading, setProviderControlsLoading, providerControlsRevision, setProviderControlsRevision, controlsVisible, setControlsVisible, initializedControlsContext, turns, setTurns, selected, setSelected, historyEvidence, setHistoryEvidence, historyLoading, setHistoryLoading, historyRevision, setHistoryRevision, activeRun, setActiveRun, traceViewRef, showTrace, runStatus, setRunStatus, foreignRun, setForeignRun, foreignRunRef, intents, setIntents, status, setStatus, error, setError, pollError, setPollError, pollFresh, setPollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, openingLatest, followLatest, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, catalogSession, sessionActive, traceDelta, previousContextKey, contextGeneration, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, setSlashCmds, slashReason, setSlashReason, slashLoading, setSlashLoading, slashRevision, setSlashRevision, slashSel, setSlashSel, slashHidden, setSlashHidden, submissionInFlight, slashOpen }
+  return { api, workbench, fileRequest, setFileRequest, workspaceDirty, setWorkspaceDirty, dispatchSurface, connections, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, setProviderSelection, sessionId, setSessionId, controls, setControls, selectedProvider, setSelectedProvider, selectedProviderContextKey, setSelectedProviderContextKey, providerControlsError, setProviderControlsError, providerControlsLoading, setProviderControlsLoading, providerControlsRevision, setProviderControlsRevision, controlsVisible, setControlsVisible, initializedControlsContext, turns, setTurns, selected, setSelected, historyEvidence, setHistoryEvidence, historyLoading, setHistoryLoading, historyRevision, setHistoryRevision, activeRun, setActiveRun, traceViewRef, showTrace, runStatus, setRunStatus, foreignRun, setForeignRun, foreignRunRef, intents, setIntents, status, setStatus, error, setError, pollError, setPollError, pollFresh, setPollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, pendingWorktree, pendingWorktreeRef, setPendingWorktree, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, openingLatest, followLatest, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, catalogSession, sessionActive, traceDelta, previousContextKey, contextGeneration, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, draftKey, input, draftAttachments, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, slashCmds, setSlashCmds, slashReason, setSlashReason, slashLoading, setSlashLoading, slashRevision, setSlashRevision, slashSel, setSlashSel, slashHidden, setSlashHidden, submissionInFlight, slashOpen }
 }
 
 export type FoundationState = ReturnType<typeof useRemoteChatFoundation>

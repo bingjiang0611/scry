@@ -131,6 +131,7 @@
         "src/renderer/App.tsx",
         "src/renderer/app-state.ts",
         "src/renderer/app-interaction.tsx",
+        "src/renderer/hooks/useAppPanes.ts",
         "src/renderer/app-view.tsx",
         "src/renderer/app-shell.tsx",
         "src/renderer/hooks/useBackgroundNoticeOpening.ts",

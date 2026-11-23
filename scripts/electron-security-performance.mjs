@@ -60,10 +60,10 @@ export async function exerciseProductionPerformance(smokeContext) {
         const summary = await window.scry.llmPerformanceSummary()
         const history = await window.scry.llmPerformanceHistory()
         const dialog = document.querySelector('.llm-perf-modal')
-        if (summary.sessions.length === 0 && history.rows.length === 2 && dialog?.querySelector('.llm-perf-empty')?.textContent === '还没有数据') {
+        if (summary.sessions.length === 0 && history.rows.length === 2 && dialog?.querySelector('.llm-perf-mrow')?.textContent.includes('未成功')) {
           if (!history.rows.every(row => row.failed && row.performance.firstOutputWaitMs != null && row.performance.networkConfiguration && row.performance.tokenTimingSource !== 'provider_api'))
             throw new Error('Failed rounds lost evidence or fabricated API timing')
-          if (dialog.querySelector('.llm-perf-mrow, .llm-perf-interval')) throw new Error('Stopped rounds were drawn as speed')
+          if (dialog.querySelector('.llm-perf-interval') || !Array.from(dialog.querySelectorAll('.llm-perf-reading')).every(node => node.textContent === '—')) throw new Error('Stopped rounds were drawn as performance')
           return { historyRounds: history.rows.length, networkSources: history.rows.map(row => row.performance.networkConfiguration.source) }
         }
         await new Promise(resolve => setTimeout(resolve, 50))

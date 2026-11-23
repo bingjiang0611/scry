@@ -1,3 +1,5 @@
+import { EmptyState } from './components/primitives/EmptyState'
+import { OVERVIEW_SESSION_COPY } from './constants/copy'
 import type { ActiveRun, TraceEvent } from '@shared/trace'
 import type { AgentForkSessionRequest, AgentInputAttachment, AgentStartRequest, RuntimeProvider } from '@shared/runtime'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
@@ -59,12 +61,7 @@ export function sessionEvidenceGapAfterLoad(
 }
 
 export function EmptySessionOverview() {
-  return (
-    <div className="surface-unavailable">
-      <b>新会话暂无证据</b>
-      <span>发送第一条消息后，这里会显示当前会话的调用、文件与用量。</span>
-    </div>
-  )
+  return <EmptyState size="card" picture="overview" title={OVERVIEW_SESSION_COPY.noSessionEvidence} />
 }
 
 export function failedSlashCatalog<T, V>(
@@ -404,7 +401,6 @@ export async function applyProviderCatalogRefresh(effects: ProviderCatalogRefres
 interface NewConversationEffects {
   clearTurns: (options?: { preserveRunning?: boolean }) => void
   newSession: () => Promise<boolean>
-  refreshProviderCatalogs?: () => Promise<void> | void
   setActiveSessionId: (sessionId: string | null) => void
   setView: (view: AppView) => void
   focusComposer: () => void
@@ -438,7 +434,6 @@ export async function applyNewConversationEffects(effects: NewConversationEffect
   effects.setActiveSessionId(null)
   effects.setView('chat')
   effects.focusComposer()
-  await effects.refreshProviderCatalogs?.()
 }
 
 export function addRunningRunId(previous: ReadonlySet<string>, runId: string, terminal: ReadonlySet<string>): ReadonlySet<string> {

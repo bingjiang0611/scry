@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { creditSessionId, exerciseActivityHistory } from './electron-security-activity-history.mjs'
+import { exerciseMissingWorkspaceHistory } from './electron-security-missing-workspace.mjs'
 
 export async function exerciseNativeHistory(smokeContext) {
   const { evaluate, cdp, canonicalWorkspace, home, userDataDir, nativeHistoryPerformanceOnly, nativeSessionId } = smokeContext
@@ -248,7 +249,9 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.equal(savedTurns.filter(turn => turn.agentProfileId === 'pi:default').length, 23)
     assert.equal(savedTurns.filter(turn => turn.agentProfileId === 'pi:rotom').length, 23)
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
-    console.log('Pi native history: real UI/IPC verifies named-Profile native restore, mixed/unknown Profile history, archive-only 55-turn pagination/reopen and unchanged provenance without Provider execution')
+    await exerciseMissingWorkspaceHistory({ evaluate, cdp, wait, segmentDir, nativePath, nativeSessionId, canonicalWorkspace, context })
+    assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
+    console.log('Pi native history: verified regular and missing-workspace UI/IPC reopening, native history, archive paging and restoration without Provider execution')
     cdp.close()
     return
 }

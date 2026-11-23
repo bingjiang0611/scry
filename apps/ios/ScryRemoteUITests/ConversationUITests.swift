@@ -117,6 +117,16 @@ final class ConversationUITests: XCTestCase {
     XCTAssertTrue(app.buttons["项目文件与 Diff"].exists)
   }
 
+  func testUnauthorizedWorkspaceIsNotAnEmptyDirectory() {
+    launch("transcript", extra: ["-uiWorkspaceFixture", "-uiWorkspaceDenied"])
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "更多选项")).firstMatch.tap()
+    app.buttons["项目文件与 Diff"].tap()
+    XCTAssertTrue(app.staticTexts["无法访问此文件夹"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["请在宿主的 Scry 中核对项目授权。"].exists)
+    XCTAssertFalse(app.staticTexts["此目录为空"].exists)
+    XCTAssertFalse(app.buttons["重新读取目录"].exists)
+  }
+
   func testToolAndReasoningDisclosure() {
     launch("transcript")
     // R3 retains each tool's disclosure inside a new contiguous-call group.
@@ -173,7 +183,10 @@ final class ConversationUITests: XCTestCase {
     let model = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模型 ")).firstMatch
     XCTAssertGreaterThanOrEqual(model.frame.height, 44)
     model.tap()
-    app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "model-option-", "GPT-5.6")).firstMatch.tap()
+    let picker = app.buttons["model-picker"]
+    XCTAssertTrue(picker.waitForExistence(timeout: 5))
+    picker.tap()
+    app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "GPT-5.6")).firstMatch.tap()
     app.otherElements["PopoverDismissRegion"].tap()
     XCTAssertTrue((input.value as? String)?.contains("Keep evidence visible") == true)
     capture("composer-model-selected")

@@ -37,7 +37,8 @@ describe('Meta Prompts view', () => {
 
   it('does not present corrupt storage as empty or allow overwriting it', () => {
     const html = renderLibrary('invalid json')
-    expect(html).toContain('提示词库无法读取')
+    expect(html).toContain('没能读取提示词库')
+    expect(html).toContain('role="alert"')
     expect(html).toContain('disabled=""')
     expect(html).not.toContain('0 条提示词')
     expect(html).not.toContain('还没有提示词')

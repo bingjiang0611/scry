@@ -1,10 +1,16 @@
 # 批次 E：核验与修订
 
-[原批次修改记录](E-initial.md) 原文归档。E1/E3 的旧行为与手验预期以本页核验意见及后续修订为准；E2 已核验，M3 放弃已接受。
+[原批次修改记录与失败证据](https://github.com/bingjiang0611/scry/blob/11ba9c99be4ba3a0d5e27af0afe0a3f8ed44466a/docs/handoff/collection-reliability-2026-10-24/reports/E-initial.md)可从 Git 历史查看。E1/E3 的旧行为与手验预期以本页核验意见及后续修订为准；E2 已核验，M3 放弃已接受。
 
 ## 核验意见（审查方，2026-10-26）
 
-**结论：E2 已核验；M3 放弃接受；E1 需修改（VE1：协议不匹配被当成「可能已送达」）；E3 需修改（VE2：短暂故障也会被永久死信）。**
+**首轮结论：E2 已核验；M3 放弃接受；E1 需修改（VE1：协议不匹配被当成「可能已送达」）；E3 需修改（VE2：短暂故障也会被永久死信）。**
+
+### 旧 uploader 的行为（2026-10-25 确认）
+
+旧回调返回 0 时正常只把 `recordId`、`sequence` 等标识入队，还没有保存正文；显式关闭上传或部分不可重试错误也可能返回 0。因而旧 ACK **既不证明正文已接管，也不证明已上传**。即使 worker 已在 outbox 保存正文，旧版仍会回源校验；若原记录已归档，校验失败仍可阻止发送。对这种旧安装，归档前要先确认接管和归档后可发送，不能只看 ACK 或 outbox 是否存在。
+
+后续合同要求回调在返回 0 前校验并持久化完整正文，且接管不等于服务端接收。对外部 uploader 的 U1–U4 实现，本仓库当时只做了[报告审阅](uploader-review.md)，未独立复跑。正式合同见 [Recorder 集成文档](../../../../packages/turn-recorder-cli/docs/integrations-and-updates.md)；原任务书和出处见 [Git 历史](https://github.com/bingjiang0611/scry/blob/ca74055d8f15358156db0d593d186de131caaa0f/docs/handoff/collection-reliability-2026-10-24/E.md)。
 
 ### 复跑
 
@@ -53,7 +59,7 @@ H3 → 需修改（VE1）；M4（E2）→ 已核验；M2（E3）→ 需修改（
 
 | 顺序 | 提交 | 内容 |
 |---|---|---|
-| 0 | `4ba8148e` | 纯拆分：callback 执行提取到 `commit-hook-process.ts`；原报告归档为 `E-initial.md`。18 个声明/注释不变（`/tmp/scry-VE-split-audit.log`）。 |
+| 0 | `4ba8148e` | 纯拆分：callback 执行提取到 `commit-hook-process.ts`。18 个声明/注释不变（`/tmp/scry-VE-split-audit.log`）。 |
 | 1 | `d71c88a7` | VE1 红测：`src/cli/hook-http-outcome.test.ts`。 |
 | 2 | `44f4ed00` | VE1 修复。 |
 | 3 | `d837ed22` | VE2 红测：`commit-delivery.test.ts`。 |

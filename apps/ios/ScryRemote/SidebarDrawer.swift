@@ -94,6 +94,13 @@ struct SidebarDrawer: View {
     // open already has rows; this view never fetches on its own schedule.
   }
 
+  private var catalogVerified: Bool {
+    !targets.visibleScopes.isEmpty && targets.visibleScopes.allSatisfy {
+      if case .verified = targets.store(for: $0).catalogEvidence { return true }
+      return false
+    }
+  }
+
   private var mainColumn: some View {
     VStack(spacing: 0) {
       header
@@ -112,6 +119,7 @@ struct SidebarDrawer: View {
           }
           if !run.hasConnection { notPairedEmpty }
           HomeSessions(expandedProjects: $expandedProjects, touching: touchingSessions,
+                       canShowEmpty: run.hasConnection && failure == nil && !refreshing && catalogVerified,
                        onOpen: open, onNewTask: onNewSession,
                        onRowAction: handle,
                        onOpenTool: { onCollapse(); model.route = .toolPanel($0) })
@@ -172,7 +180,7 @@ struct SidebarDrawer: View {
         Button { model.query = "" } label: {
           Image(systemName: "xmark.circle.fill").font(Typography.reply).foregroundStyle(Palette.dim2)
             .frame(width: 44, height: 44)
-        }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.clearSearch)
+        }.buttonStyle(.plain).accessibilityLabel(ConnectionCopy.clearSearch).accessibilityIdentifier("home-search-clear")
       }
     }
     .padding(.leading, 12).frame(minHeight: 38)
@@ -183,23 +191,23 @@ struct SidebarDrawer: View {
 
   private var header: some View {
     HStack(spacing: 0) {
-      Menu {
-        Button { targets.selectFilter(.all) } label: {
-          Label(ConnectionCopy.allHosts, systemImage: targets.homeFilter == .all ? Symbol.check : Symbol.laptop)
-        }
+      Picker(selection: filterSelection) {
+        Text(ConnectionCopy.allHosts).tag("all")
         ForEach(targets.targetScopes) { target in
-          Button { targets.selectFilter(.target(target)) } label: {
-            Label(target.label, systemImage: targets.homeFilter == .target(target) ? Symbol.check : Symbol.laptop)
-          }
+          Text(target.label).tag(target.id)
         }
-        Divider()
-        Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
-        Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
       } label: {
         hostChip
       }
+      .pickerStyle(.menu)
       .accessibilityLabel(ConnectionCopy.filterHosts)
+      .accessibilityValue(targets.filterLabel)
+
       Spacer(minLength: 4)
+      MoreMenu {
+        Button { model.route = .pair } label: { Label(ConnectionCopy.connectMac, systemImage: Symbol.link) }
+        Button { model.route = .settings } label: { Label(ConnectionCopy.settings, systemImage: Symbol.gear) }
+      }
       Button { onCollapse() } label: {
         Image(systemName: Symbol.sidebar).font(.system(size: 22))
           .foregroundStyle(Palette.fg).frame(width: 44, height: 44).contentShape(Rectangle())
@@ -209,6 +217,20 @@ struct SidebarDrawer: View {
       .accessibilityIdentifier("sidebar-close")
     }
     .padding(.horizontal, 16).frame(minHeight: 48)
+  }
+
+  private var filterSelection: Binding<String> {
+    Binding(get: {
+      switch targets.homeFilter {
+      case .all: return "all"
+      case let .target(scope): return scope.id
+      }
+    }, set: { value in
+      if value == "all" { targets.selectFilter(.all) }
+      else if let scope = targets.targetScopes.first(where: { $0.id == value }) {
+        targets.selectFilter(.target(scope))
+      }
+    })
   }
 
   private var hostChip: some View {
@@ -333,13 +355,9 @@ struct SidebarDrawer: View {
   }
 
   private var notPairedEmpty: some View {
-    VStack(spacing: 0) {
-      EmptyState(title: ConnectionCopy.noMac, detail: ConnectionCopy.pairInstructions, symbol: Symbol.laptop)
-      Button { model.route = .pair } label: {
-        Text(ConnectionCopy.connectMac).font(Typography.rowTitle.weight(.semibold)).foregroundStyle(Palette.main)
-          .padding(.horizontal, 22).frame(minHeight: 46).background(Palette.fg, in: Capsule())
-      }
-    }.padding(.top, 24)
+    EmptyState(title: ConnectionCopy.unpairedDevice, symbol: Symbol.laptop, size: .card,
+               action: .init(label: ConnectionCopy.connectMac, perform: { model.route = .pair }))
+      .padding(.horizontal, 16).padding(.vertical, 12)
   }
 
   private func sectionTitle(_ title: String) -> some View {

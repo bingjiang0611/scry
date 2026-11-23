@@ -66,7 +66,7 @@ export async function exerciseOverlays(contents) {
     await click(css('.sb-settings'))
     await wait(`${modalIn('.settings-modal')}?.effect.getTiming().duration === 250`)
     check(await read(`${modalIn('.settings-modal')}.effect.getKeyframes().some(frame => frame.transform?.includes('0.97') && frame.transform.includes('6px'))`), 'Missing real modal scale/translation entrance')
-    await click(css(`.theme-option:nth-child(${theme === 'dark' ? 1 : 2})`))
+    await click(css(`.settings-pane .segmented button:nth-child(${theme === 'dark' ? 2 : 1})`))
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
     await close('.settings-modal', '.sb-settings')
     for (const [title, selector] of [['Skills', '.capabilities-modal--skills'], ['MCP', '.capabilities-modal--mcp'], ['LLM 性能', '.llm-perf-modal']]) {

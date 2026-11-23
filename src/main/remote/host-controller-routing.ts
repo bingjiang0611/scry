@@ -19,7 +19,7 @@ export const MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES = 700 * 1024
 export const ATTACHMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 export const SHA256 = /^[a-f0-9]{64}$/
 
-export function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[] {
+function parseAttachments(value: unknown, local: boolean): RemoteIntentAttachment[] {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > DESKTOP_ATTACHMENT_MAX_COUNT) throw new RemoteRunDenied('invalid_target')
   let total = 0
@@ -41,7 +41,9 @@ export function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[]
       return { kind: 'image', name: item.name, mimeType: item.mimeType, dataBase64: '', size: item.size as number, attachmentId: item.attachmentId, sha256: item.sha256 as string, index: item.index as number, totalCount: item.totalCount as number, intentId: item.intentId }
     }
     const bytes = decodedBase64ByteLength(item.dataBase64)
-    if (bytes == null || bytes > MAX_REMOTE_ATTACHMENT_BYTES || item.size !== bytes) throw new RemoteRunDenied('invalid_target')
+    // The verified local App is bounded by the full intent detail limit. The
+    // smaller inline limits apply only to paired devices, which can upload chunks.
+    if (bytes == null || item.size !== bytes || (!local && bytes > MAX_REMOTE_ATTACHMENT_BYTES)) throw new RemoteRunDenied('invalid_target')
     if (item.kind === 'image' && !isSupportedImageMimeType(item.mimeType)) throw new RemoteRunDenied('invalid_target')
     if (item.kind === 'text') {
       if (!item.mimeType.startsWith('text/') && item.mimeType !== 'application/json' && item.mimeType !== 'application/xml') {
@@ -51,7 +53,7 @@ export function parseRemoteAttachments(value: unknown): RemoteIntentAttachment[]
       catch { throw new RemoteRunDenied('invalid_target') }
     }
     total += bytes
-    if (total > MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES) throw new RemoteRunDenied('invalid_target')
+    if (!local && total > MAX_REMOTE_ATTACHMENTS_TOTAL_BYTES) throw new RemoteRunDenied('invalid_target')
     return { kind: item.kind, name: item.name, mimeType: item.mimeType, dataBase64: item.dataBase64, size: bytes }
   })
 }
@@ -73,9 +75,9 @@ const CONVERSATION_ID = /^[A-Za-z0-9._:-]{1,128}$/
  * daemon holds in memory. Only the App's own grant may carry it: a device naming one
  * would claim another client's prepared history and run id.
  */
-function parseConversationMarker(value: unknown, options: { cwdOptional?: boolean }): RemoteIntentRouting['conversation'] {
+function parseConversationMarker(value: unknown, local: boolean): RemoteIntentRouting['conversation'] {
   if (value === undefined) return undefined
-  if (!options.cwdOptional || !value || typeof value !== 'object' || Array.isArray(value)) throw new RemoteRunDenied('invalid_target')
+  if (!local || !value || typeof value !== 'object' || Array.isArray(value)) throw new RemoteRunDenied('invalid_target')
   const marker = value as Record<string, unknown>
   if (Object.keys(marker).some((key) => key !== 'conversationId' && key !== 'runId' && key !== 'ordinal') ||
     typeof marker.conversationId !== 'string' || !CONVERSATION_ID.test(marker.conversationId) ||
@@ -90,18 +92,19 @@ function parseConversationMarker(value: unknown, options: { cwdOptional?: boolea
   }
 }
 
-function unnamedCwd(options: { cwdOptional?: boolean }): string {
-  if (options.cwdOptional) return ''
+function unnamedCwd(local: boolean): string {
+  if (local) return ''
   throw new RemoteRunDenied('invalid_target')
 }
 
 /**
- * `cwdOptional` is for the App's own submits: the App may send into its current
+ * A verified local grant is for the App's own submits: the App may send into its current
  * workspace without naming a directory (an empty session, a brand-new project).
  * A device submit still must name one - there is no App-side current directory to
  * fall back to, and guessing one would grant a workspace the user never opened.
  */
-export function parseRouting(detail: string | undefined, options: { cwdOptional?: boolean } = {}): RemoteIntentRouting {
+export function parseRouting(detail: string | undefined, scope: 'local' | 'remote' = 'remote'): RemoteIntentRouting {
+  const local = scope === 'local'
   if (typeof detail !== 'string' || detail.length === 0 || detail.length > MAX_REMOTE_DETAIL_CHARS) throw new RemoteRunDenied('invalid_target')
   let parsed: unknown
   try { parsed = JSON.parse(detail) } catch { throw new RemoteRunDenied('invalid_target') }
@@ -109,7 +112,7 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
   const routing = parsed as Record<string, unknown>
   if (typeof routing.providerId !== 'string') throw new RemoteRunDenied('invalid_target')
   if (routing.cwd !== undefined && typeof routing.cwd !== 'string') throw new RemoteRunDenied('invalid_target')
-  const cwd = typeof routing.cwd === 'string' ? routing.cwd : unnamedCwd(options)
+  const cwd = typeof routing.cwd === 'string' ? routing.cwd : unnamedCwd(local)
   if (routing.prompt !== undefined && (typeof routing.prompt !== 'string' || routing.prompt.length > MAX_REMOTE_PROMPT_CHARS)) {
     throw new RemoteRunDenied('invalid_target')
   }
@@ -130,13 +133,13 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
   // selection is parsed here and prepared by the host under the ledger run's identity,
   // for a device and for the App alike. The App must name the source directory it
   // reviewed: a selection is only meaningful against the checkout it was made in.
-  if (routing.workspace !== undefined && options.cwdOptional && !cwd) throw new RemoteRunDenied('unsupported_local_request:workspace')
+  if (routing.workspace !== undefined && local && !cwd) throw new RemoteRunDenied('unsupported_local_request:workspace')
   let workspace: WorkspaceStartSelection | undefined
   try { if (routing.workspace !== undefined) workspace = parseWorkspaceStartSelection(routing.workspace) } catch { throw new RemoteRunDenied('invalid_target') }
   // Turn boundaries (edit-last-message fork / restart) do travel, but only from the
   // App, and through the App's own schema: the shared normalizer is the single place
   // that decides whether a boundary is trustworthy.
-  const boundary = options.cwdOptional && (routing.forkLastTurn !== undefined || routing.restartLastTurn !== undefined)
+  const boundary = local && (routing.forkLastTurn !== undefined || routing.restartLastTurn !== undefined)
     ? normalizeAgentStartRequest({
         prompt: typeof routing.prompt === 'string' ? routing.prompt : '',
         providerId: routing.providerId as AgentStartRequest['providerId'],
@@ -147,8 +150,8 @@ export function parseRouting(detail: string | undefined, options: { cwdOptional?
         ...(routing.restartLastTurn === undefined ? {} : { restartLastTurn: routing.restartLastTurn as never })
       })
     : undefined
-  const conversation = parseConversationMarker(routing.conversation, options)
-  const attachments = parseRemoteAttachments(routing.attachments)
+  const conversation = parseConversationMarker(routing.conversation, local)
+  const attachments = parseAttachments(routing.attachments, local)
   if (routing.prompt !== undefined && typeof routing.prompt !== 'string') throw new RemoteRunDenied('invalid_target')
   if (routing.prompt === '' && attachments.length === 0) throw new RemoteRunDenied('invalid_target')
   return {

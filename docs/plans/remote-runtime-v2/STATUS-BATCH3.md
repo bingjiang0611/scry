@@ -1,6 +1,6 @@
 # Batch 3 状态
 
-分支 `claude/remote-runtime-v2`。任务书：[EXECUTION-BATCH3.md](EXECUTION-BATCH3.md)；核验结论：[REVIEW-BATCH2.md](REVIEW-BATCH2.md)。
+分支 `claude/remote-runtime-v2`。[原任务书](https://github.com/bingjiang0611/scry/blob/77dd5a26135350a478e153a06f39f1464b3393f5/docs/plans/remote-runtime-v2/EXECUTION-BATCH3.md)仅供回查；核验结论：[REVIEW-BATCH2.md](REVIEW-BATCH2.md)。
 起点 `577995b`。
 
 ## 总览

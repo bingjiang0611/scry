@@ -33,7 +33,7 @@ export function useAppView(context: AppViewContext) {
     loadProjects, projects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, conversationProjection,
     sessionEvidenceGap, setConversationError, setConversationAgent, setLogicalConversation, remoteWorkspaceDirty, setRemoteWorkspaceDirty,
     remoteTarget, sidebarPane, surfacePane, rightSurfaces, rightSurface,
-    hasSurfaceContext, terminalOpen, remoteSurface, remotePanelVisible, remoteSurfaceKey, currentSurface, dispatchRightSurface,
+    hasSurfaceContext, terminalOpen, sessionWorkspaceMissing, remoteSurface, remotePanelVisible, remoteSurfaceKey, currentSurface, dispatchRightSurface,
     setTurnDiffSelection, setWorkspaceDirty, setSettingsTab, newConversation, unbindProject, pickRecent,
     turnDiffSelection, taRef, setSlashHidden, workspaceRefreshKey } = context
 
@@ -69,7 +69,7 @@ export function useAppView(context: AppViewContext) {
   }
   const mountedSurfaces = rightSurfaces.surfaces.some((surface) => surface.id === currentSurface.id)
     ? rightSurfaces.surfaces : [...rightSurfaces.surfaces, currentSurface]
-  const rightPanelMounted = hasSurfaceContext || rightSurface.visible || terminalOpen || rightSurfaces.surfaces.length > 0
+  const rightPanelMounted = !sessionWorkspaceMissing && (hasSurfaceContext || rightSurface.visible || terminalOpen || rightSurfaces.surfaces.length > 0)
   const panelVisible = rightPanelMounted && (view === 'chat' || view === 'conversation') && rightSurface.visible && !surfacePane.collapsed
   const shellPanelMounted = rightPanelMounted || view === 'remote'
   const shellPanelVisible = view === 'remote' ? remotePanelVisible : panelVisible
@@ -84,7 +84,8 @@ export function useAppView(context: AppViewContext) {
     cwd: workspaceCwd, draftKey, draftStore, selectionEpoch: sessionSelectionSeqRef.current,
     editable: view === 'chat' && !activeSessionId,
     active: view === 'chat' || view === 'conversation',
-    busy: sessionLoading || composerSubmitting || session.busy
+    busy: sessionLoading || composerSubmitting || session.busy,
+    starting: composerSubmitting
   })
   const sessionUsesWorktree = view === 'chat' && activeSessionId != null && projects.some(project =>
     project.sessions.some(candidate => candidate.cwd === workspaceCwd && candidate.cwd !== project.cwd &&
@@ -340,6 +341,7 @@ export function useAppView(context: AppViewContext) {
     workspaceContext,
     workspaceSendLabel: workspaceSelection.sendLabel,
     workspaceBlockedReason: workspaceSelection.blockedReason,
+    workspaceSetup: workspaceSelection.workspaceSetup,
     openLlmPerformance,
     openSkills,
     openMcp,

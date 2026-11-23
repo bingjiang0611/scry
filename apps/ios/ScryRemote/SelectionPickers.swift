@@ -72,6 +72,8 @@ struct SelectionRow: View {
       .frame(minHeight: 56).contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .accessibilityValue(selected ? "已选" : "未选")
+    .accessibilityAddTraits(selected ? .isSelected : [])
     .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
   }
 }
@@ -82,6 +84,7 @@ struct ProjectPickerSheet: View {
   let onChoose: (G0Transport.RunProjectRef) -> Void
   @Namespace private var directoryTransition
   @State private var pendingDirectory: G0Transport.RunProjectRef?
+  @State private var retrying = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private func browse(_ directory: G0Transport.RunProjectRef?) {
@@ -109,10 +112,19 @@ struct ProjectPickerSheet: View {
     }
   }
 
+  private var readFailure: some View {
+    EmptyState(title: ConnectionCopy.foldersUnreadable, detail: ConnectionCopy.foldersUnreadableDetail,
+               symbol: "exclamationmark.triangle", action: .init(label: ConnectionCopy.readAgain, refresh: true,
+               busy: retrying, perform: {
+                 browse(pendingDirectory)
+                 if case .loading = run.directories { retrying = true }
+               })).frame(minHeight: 290)
+  }
+
   var body: some View {
     SelectionSheet(title: ConnectionCopy.chooseFolderTitle, subtitle: ConnectionCopy.chooseFolderSubtitle, onRefresh: {
       if case let .loaded(listing) = run.directories { browse(listing.current) }
-      else { browse(nil) }
+      else if !retrying { browse(nil) }
     }) {
       switch run.directories {
       case .idle:
@@ -122,7 +134,7 @@ struct ProjectPickerSheet: View {
         readingPlaceholder
           .task { if case .idle = run.directories { run.loadDirectories() } }
       case .loading:
-        readingPlaceholder
+        if retrying { readFailure } else { readingPlaceholder }
       case let .loaded(listing):
         VStack(alignment: .leading, spacing: 0) {
           if let current = listing.current {
@@ -159,7 +171,7 @@ struct ProjectPickerSheet: View {
             Text(ConnectionCopy.subfolders).font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.dim)
               .padding(.top, 8).padding(.bottom, 4)
             if listing.directories.isEmpty {
-              Text(ConnectionCopy.noSubfolders).font(.system(size: 14)).foregroundStyle(Palette.dim).padding(.vertical, 18)
+              EmptyState(title: ConnectionCopy.noSubfolders, symbol: nil, size: .row)
             } else {
               ForEach(listing.directories, id: \.path) { ref in
                 FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path,
@@ -168,7 +180,8 @@ struct ProjectPickerSheet: View {
             }
           } else if listing.directories.isEmpty {
             EmptyState(title: ConnectionCopy.noAuthorizedProjects, detail: ConnectionCopy.noAuthorizedProjectsDetail,
-                       symbol: Symbol.folder)
+                       symbol: nil, picture: AnyView(EmptyStatePreview(scene: .lockedProjects)),
+                       action: .init(label: ConnectionCopy.back, perform: { dismiss() }))
           } else {
             ForEach(listing.directories, id: \.path) { ref in
               FolderBrowseRow(ref: ref, selected: run.chosen?.path == ref.path,
@@ -176,9 +189,17 @@ struct ProjectPickerSheet: View {
             }
           }
         }
-      case let .failed(reason):
-        EmptyState(title: ConnectionCopy.foldersUnreadable, detail: reason, symbol: "exclamationmark.triangle")
+      case .denied:
+        EmptyState(title: ConnectionCopy.folderAccessDenied, detail: ConnectionCopy.workspaceAccessDetail,
+                   symbol: nil, picture: AnyView(EmptyStatePreview(scene: .lockedProjects)),
+                   action: .init(label: ConnectionCopy.back, perform: { browse(nil) }))
+          .frame(minHeight: 290)
+      case .failed:
+        readFailure
       }
+    }
+    .onChange(of: run.directories) { _, state in
+      if case .loading = state {} else { retrying = false }
     }
   }
 }
@@ -205,6 +226,16 @@ struct ProviderPickerSheet: View {
   @Environment(RemoteRunStore.self) var run
   @Environment(\.dismiss) private var dismiss
   let onChoose: (G0Transport.RunProviderRef) -> Void
+  @State private var retrying = false
+
+  private var readFailure: some View {
+    EmptyState(title: ConnectionCopy.providersUnreadable, detail: ConnectionCopy.providersUnreadableDetail,
+               symbol: "exclamationmark.triangle", action: .init(label: ConnectionCopy.refreshProviders, refresh: true,
+               busy: retrying, perform: {
+                 run.loadProviders(force: true)
+                 if case .loading = run.providers { retrying = true }
+               })).frame(minHeight: 224)
+  }
 
   private var readingPlaceholder: some View {
     PlaceholderRows(label: ConnectionCopy.readingProviders, count: 4, rowHeight: 56, icon: false, detail: true, horizontalPadding: 0)
@@ -212,13 +243,13 @@ struct ProviderPickerSheet: View {
 
   var body: some View {
     SelectionSheet(title: ConnectionCopy.chooseProviderTitle, subtitle: ConnectionCopy.chooseProviderSubtitle,
-                   onRefresh: { run.loadProviders(force: true) }) {
+                   onRefresh: { if !retrying { run.loadProviders(force: true) } }) {
       switch run.providers {
       case .idle:
         readingPlaceholder
           .task { if case .idle = run.providers { run.loadProviders() } }
       case .loading:
-        readingPlaceholder
+        if retrying { readFailure } else { readingPlaceholder }
       case let .loaded(list):
         VStack(spacing: 0) {
           ForEach(list, id: \.selectionId) { ref in
@@ -231,10 +262,14 @@ struct ProviderPickerSheet: View {
           }
         }
       case .empty:
-        EmptyState(title: ConnectionCopy.noProviders, detail: ConnectionCopy.noProvidersDetail, symbol: Symbol.agent)
-      case let .failed(reason):
-        EmptyState(title: ConnectionCopy.providersUnreadable, detail: reason, symbol: "exclamationmark.triangle")
+        EmptyState(title: ConnectionCopy.noProviders, detail: ConnectionCopy.noProvidersDetail, symbol: Symbol.agent,
+                   action: .init(label: ConnectionCopy.refreshProviders, refresh: true, perform: { run.loadProviders(force: true) }))
+      case .failed:
+        readFailure
       }
+    }
+    .onChange(of: run.providers) { _, state in
+      if case .loading = state {} else { retrying = false }
     }
   }
 }

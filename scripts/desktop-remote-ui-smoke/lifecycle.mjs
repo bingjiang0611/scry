@@ -12,10 +12,19 @@ export async function runLifecycle({ driver }) {
     await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'archived remote session removed from sidebar')
     check(!await read('document.querySelector(".sb-archive-toggle")'), 'Sidebar still exposes archived remote sessions')
     await click('.sb-settings')
-    await click('.settings-tab', '已存档会话')
+    await click('.settings-rail [role="tab"]', '已存档会话')
     await wait('document.querySelector(\'[data-archived-remote-session="old-native"]\') != null', 'archived remote session listed in settings')
     check(await read('document.querySelector(".arch-head .arch-danger")?.textContent.includes("本机")'), 'Local bulk deletion does not name its scope')
     await capture('remote-archived-settings')
+    const archiveBadge = `[...document.querySelectorAll('.settings-rail [role="tab"]')].find(tab => tab.textContent.includes('已存档会话'))?.querySelector('.tab-count')`
+    const retainedArchive = `document.querySelector('[data-archived-remote-session="old-native"]') != null`
+    const archiveProblem = `.arch-list .empty-state[role="alert"]`
+    await read('window.desktopRemoteFixture.catalogFailure = true; window.refreshFixtureCatalog()')
+    await wait(`document.querySelector('${archiveProblem}')?.textContent.includes('没能读取「Fixture desktop」的存档')`, 'remote archive read failure shown in settings')
+    check(await read(`${retainedArchive} && !(${archiveBadge}) && !document.querySelector('.settings-modal').textContent.includes('fixture catalog unavailable')`), 'Unread remote archive lost cached rows, leaked its raw error, or claimed an authoritative count')
+    await read('window.desktopRemoteFixture.catalogFailure = false')
+    await click(archiveProblem + ' button')
+    await wait(`!document.querySelector('${archiveProblem}') && ${retainedArchive} && Boolean(${archiveBadge})`, 'safe catalog retry restored the confirmed archived count')
     await read('window.desktopRemoteFixture.connected = false; window.refreshFixtureConnections()')
     await wait('document.querySelector(\'button[aria-label="取消存档：Remote renamed"]\')?.disabled', 'offline restore disabled')
     check(await read('document.querySelector(\'button[aria-label="删除 Scry 副本"]\')?.disabled'), 'Offline deletion remained enabled')
@@ -28,7 +37,7 @@ export async function runLifecycle({ driver }) {
     await click('button[aria-label="存档会话：Remote renamed"]')
     await wait('!document.querySelector(\'[data-remote-session="old-native"]\')', 'restored session can be archived again')
     await click('.sb-settings')
-    await click('.settings-tab', '已存档会话')
+    await click('.settings-rail [role="tab"]', '已存档会话')
     await wait('document.querySelector(\'[data-archived-remote-session="old-native"]\') != null', 'rearchived remote session in settings')
     await click('button[aria-label="删除 Scry 副本"]')
     await wait('Array.from(document.querySelectorAll(".modal-head")).some(node => node.textContent.includes("Fixture desktop"))', 'delete confirmation names remote host')
@@ -46,5 +55,5 @@ export async function runLifecycle({ driver }) {
     const calls = (await fixture()).deletions
     check(calls.length === 2 && calls.every(call => call.id === 'fixture-connection' && call.request.externalSessionId === 'old-native' && call.request.cwd === '/fixture/project-a' && call.request.confirmed === true), 'Deletion used the wrong remote authority')
     check((await fixture()).localStarts === 0 && (await fixture()).submitInputs.length === 0, 'Session operations sent a task')
-    return { remoteSessionLifecycle: { forkBoundary: true, forkSelection: true, archiveRequired: true, settingsArchiveList: true, noSidebarArchiveEntry: true, restoreToSidebar: true, offlineDisabled: true, deleteConfirmation: true, cancelNoWrite: true, failureVisible: true, noAutomaticRetry: true, hostIdentity: true, noTaskSent: true } }
+    return { remoteSessionLifecycle: { forkBoundary: true, forkSelection: true, archiveRequired: true, settingsArchiveList: true, archiveFailureNotZero: true, noSidebarArchiveEntry: true, restoreToSidebar: true, offlineDisabled: true, deleteConfirmation: true, cancelNoWrite: true, failureVisible: true, noAutomaticRetry: true, hostIdentity: true, noTaskSent: true } }
   }

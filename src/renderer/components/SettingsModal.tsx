@@ -4,12 +4,16 @@ import type { ProjectMeta } from '../env'
 
 
 import { Icon } from './primitives/Icon'
+import { Tabs } from './primitives/Tabs'
+import { Segmented } from './primitives/Segmented'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
 import { MODAL_COPY } from '../constants/copy'
 
 
 import { ArchivedRemoteChatsPanel } from './ArchivedRemoteChatsPanel'
 import { useRemoteProjectGroups } from './SidebarRemoteProjects'
+import { useDesktopConnections } from '../hooks/useDesktopConnections'
+import { useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import './archived-sessions.css'
 import { RemotePairing } from './RemotePairing'
 import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
@@ -41,7 +45,7 @@ export function SettingsModal({
   initialTab?: SettingsTab
 }) {
   const titleId = useId()
-  const initialTabRef = useRef<HTMLButtonElement>(null)
+  const initialTabRef = useRef<HTMLButtonElement | null>(null)
   const [tab, setTab] = useState<SettingsTab>(initialTab)
   // loading = 还没读到索引；unavailable = 读取失败。两者都不能当成 0 个已存档会话，
   // 也不能互相冒充：加载中显示成「索引不可用」等于报告一个没发生的失败。
@@ -57,8 +61,18 @@ export function SettingsModal({
     void refreshArchived()
   }, [refreshArchived])
   const remoteArchived = useRemoteProjectGroups('', true)
-  const archivedCount = archived.status !== 'available' ? undefined : archived.projects.reduce((sum, project) => sum + project.sessions.length, 0)
-    + remoteArchived.reduce((sum, group) => sum + group.sessions.length, 0)
+  const remoteHosts = useDesktopConnections()
+  const catalogs = useRemoteCatalogs()
+  const uncheckedHosts = remoteHosts.connections.flatMap(connection => {
+    const entry = catalogs.get(connection.id)
+    if (connection.state === 'connected' && entry?.catalog && !entry.error && !entry.stale) return []
+    return [{ connection, failed: Boolean(entry?.error), loading: Boolean(entry?.loading) }]
+  })
+  const hostsIndex = remoteHosts.error ? 'failed' : !remoteHosts.loaded || remoteHosts.refreshing ? 'unread' : 'ready'
+  const archivedCount = archived.status !== 'available' || hostsIndex !== 'ready' || uncheckedHosts.length
+    ? undefined
+    : archived.projects.reduce((sum, project) => sum + project.sessions.length, 0)
+      + remoteArchived.reduce((sum, group) => sum + group.sessions.length, 0)
   return (
     <ModalFrame labelledBy={titleId} initialFocusRef={initialTabRef} className="settings-modal" onClose={onClose}>
       <div className="modal-head">
@@ -66,85 +80,32 @@ export function SettingsModal({
         <ModalCloseButton onClick={() => requestModalClose()} aria-label={MODAL_COPY.closeSettings} />
       </div>
       <div className="settings-shell">
-        <nav className="settings-rail" aria-label="设置分区">
-          <button
-            ref={initialTab === 'appearance' ? initialTabRef : undefined}
-            type="button"
-            className={`settings-tab ${tab === 'appearance' ? 'active' : ''}`}
-            aria-current={tab === 'appearance' ? 'page' : undefined}
-            onClick={() => setTab('appearance')}
-          >
-            <Icon name="settings" /> 外观
-          </button>
-          <button
-            type="button"
-            ref={initialTab === 'archived' ? initialTabRef : undefined}
-            className={`settings-tab ${tab === 'archived' ? 'active' : ''}`}
-            aria-current={tab === 'archived' ? 'page' : undefined}
-            onClick={() => setTab('archived')}
-          >
-            <Icon name="archive" /> 已存档会话
-            {archivedCount != null && <span className="cnt">{archivedCount}</span>}
-          </button>
-          <button
-            type="button"
-            ref={initialTab === 'remote' ? initialTabRef : undefined}
-            className={`settings-tab ${tab === 'remote' ? 'active' : ''}`}
-            aria-current={tab === 'remote' ? 'page' : undefined}
-            onClick={() => setTab('remote')}
-          >
-            <Icon name="globe" /> {remoteCopy.settingsTab}
-          </button>
-          <button
-            type="button"
-            ref={initialTab === 'service' ? initialTabRef : undefined}
-            className={`settings-tab ${tab === 'service' ? 'active' : ''}`}
-            aria-current={tab === 'service' ? 'page' : undefined}
-            onClick={() => setTab('service')}
-          >
-            <Icon name="server" /> 后台服务
-          </button>
-        </nav>
-        <div className="settings-pane">
+        <Tabs<SettingsTab>
+          className="settings-rail"
+          label="设置分区"
+          orientation="vertical"
+          value={tab}
+          onChange={setTab}
+          tabRef={(value, node) => { if (value === initialTab) initialTabRef.current = node }}
+          items={[
+            { value: 'appearance', label: <><Icon name="settings" /> 外观</> },
+            { value: 'archived', label: <><Icon name="archive" /> 已存档会话</>, count: archivedCount },
+            { value: 'remote', label: <><Icon name="globe" /> {remoteCopy.settingsTab}</> },
+            { value: 'service', label: <><Icon name="server" /> 后台服务</> }
+          ].map(item => ({ ...item, value: item.value as SettingsTab, id: `${titleId}-${item.value}-tab`, controls: `${titleId}-pane` }))}
+        />
+        <div className="settings-pane" role="tabpanel" id={`${titleId}-pane`} aria-labelledby={`${titleId}-${tab}-tab`}>
           {tab === 'appearance' ? (
             <div className="settings-body">
               <div className="settings-copy">
                 <b>外观</b>
               </div>
-              <div className="theme-options" role="radiogroup" aria-label="界面主题">
-                <button
-                  type="button"
-                  className={`theme-option ${theme === 'dark' ? 'active' : ''}`}
-                  role="radio"
-                  aria-checked={theme === 'dark'}
-                  onClick={() => onThemeChange('dark')}
-                >
-                  <span className="theme-preview dark" aria-hidden="true">
-                    <span />
-                    <i />
-                  </span>
-                  <span className="theme-option-copy">
-                    <b>深色</b>
-                  </span>
-                  <span className="theme-check" aria-hidden="true"><Icon name="check" /></span>
-                </button>
-                <button
-                  type="button"
-                  className={`theme-option ${theme === 'light' ? 'active' : ''}`}
-                  role="radio"
-                  aria-checked={theme === 'light'}
-                  onClick={() => onThemeChange('light')}
-                >
-                  <span className="theme-preview light" aria-hidden="true">
-                    <span />
-                    <i />
-                  </span>
-                  <span className="theme-option-copy">
-                    <b>浅色</b>
-                  </span>
-                  <span className="theme-check" aria-hidden="true"><Icon name="check" /></span>
-                </button>
-              </div>
+              <Segmented<AppTheme>
+                label="界面主题"
+                value={theme}
+                onChange={onThemeChange}
+                options={[{ value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]}
+              />
             </div>
           ) : tab === 'archived' ? (
             <div className="arch-sections">
@@ -154,7 +115,7 @@ export function SettingsModal({
                 onRefresh={refreshArchived}
                 onSessionsChanged={onSessionsChanged}
               />
-              <ArchivedRemoteChatsPanel groups={remoteArchived} />
+              <ArchivedRemoteChatsPanel groups={remoteArchived} uncheckedHosts={uncheckedHosts} hostsIndex={hostsIndex} />
             </div>
           ) : tab === 'service' ? (
             <BackgroundServiceSettings />

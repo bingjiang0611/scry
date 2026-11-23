@@ -39,7 +39,7 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
           hasVerdictLine: document.querySelector('.overview-verdict-line') != null,
           callCountLabel: document.querySelector('.overview-panel-title em')?.textContent ?? '',
           expectedTurnColumns: ${expectedTurnColumns},
-          contextTrackHeight: document.querySelector('.ctx-track').getBoundingClientRect().height,
+          contextUnknown: !document.querySelector('.ctx-track') && document.querySelector('.ctx-copy').textContent.trim() === '未取得上下文占用数据',
           leadFontSize: getComputedStyle(document.querySelector('.overview-metric.lead > strong')).fontSize,
           metricLabelTransform: getComputedStyle(document.querySelector('.overview-metric.lead + .overview-metric > span')).textTransform,
           metricCount: document.querySelectorAll('.overview-metric').length,
@@ -51,7 +51,7 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
         const image = await contents.capturePage({ x: 0, y: 0, width, height: 650 })
         require('node:fs').writeFileSync(screenshotPath, image.toPNG())
       }
-      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.turnColumns !== geometry.expectedTurnColumns || geometry.truncatedTurnLabels.length > 0 || geometry.turnRowRadius !== '12px' || geometry.turnRowBackground === 'rgba(0, 0, 0, 0)' || geometry.turnChipRadius !== '8px' || geometry.hasRealDataLabel || geometry.hasVerdictLine || geometry.callCountLabel !== '2 次调用' || geometry.contextTrackHeight !== 6 || geometry.leadFontSize !== '24px' || geometry.metricLabelTransform !== 'none' || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
+      if (geometry.headerHeight > 48 || geometry.contextGap > 16 || geometry.sessionGap > 16 || geometry.tabsGap > 12 || geometry.firstTurnTop > 460 || geometry.overflow || geometry.columns !== 2 || geometry.turnColumns !== geometry.expectedTurnColumns || geometry.truncatedTurnLabels.length > 0 || geometry.turnRowRadius !== '12px' || geometry.turnRowBackground === 'rgba(0, 0, 0, 0)' || geometry.turnChipRadius !== '8px' || geometry.hasRealDataLabel || geometry.hasVerdictLine || geometry.callCountLabel !== '2 次调用' || !geometry.contextUnknown || geometry.leadFontSize !== '24px' || geometry.metricLabelTransform !== 'none' || geometry.metricCount !== 3 || geometry.hasInputOutput || geometry.hasTitleSubtitle || geometry.hasTurnFootnote) {
         throw new Error('Overview density ' + theme + '/' + width + ': ' + JSON.stringify(geometry))
       }
       results.push({ theme, width, ...geometry })

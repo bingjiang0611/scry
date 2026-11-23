@@ -1,4 +1,5 @@
 import { type ToolContent, isToolContent } from './tool-content.js'
+import { normalizeTurnRepositoryLocation, type TurnRepositoryLocation } from './turn-repository-location.js'
 
 
 // P2 Files & Diff（RFC §8.4）：最终 git diff 的每文件增删（绝对路径），与工具足迹对照。
@@ -151,6 +152,7 @@ export function normalizeWorkspaceOverlap(value: unknown): WorkspaceOverlapEvide
 }
 
 export interface TurnDiffSnapshot {
+  repositoryLocation?: TurnRepositoryLocation
   version: 1
   status: TurnDiffStatus
   reason?: TurnDiffReason
@@ -296,6 +298,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
         : undefined
   const workspaceOverlap = normalizeWorkspaceOverlap(raw.workspaceOverlap)
   const diffExclude = normalizeDiffExcludeEvidence(raw.diffExclude)
+  const repositoryLocation = normalizeTurnRepositoryLocation(raw.repositoryLocation)
   return {
     version: 1,
     status: raw.status as TurnDiffStatus,
@@ -312,7 +315,8 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
     ...(baseline ? { baseline } : {}),
     ...(worktreeBaseline ? { baselineSource: 'worktree-creation-reflog' as const, ...worktreeBaseline } : {}),
     ...(workspaceOverlap ? { workspaceOverlap } : {}),
-    ...(diffExclude ? { diffExclude } : {})
+    ...(diffExclude ? { diffExclude } : {}),
+    ...(repositoryLocation ? { repositoryLocation } : {})
   }
 }
 

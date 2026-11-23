@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { rm } from 'node:fs/promises'
 import { setup, ssh, statusRun, statusSnapshot } from './desktop-client-fixtures'
 
@@ -105,6 +105,57 @@ describe('DesktopRemoteClient managed worktree and receipt recovery', () => {
     try {
       const malformed = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: fixture.host.hostId, anchorPEM: 'not pem', pairPort: 1, runPort: 2, pairingId: randomUUID(), secret: 'secret', expiresAt: Date.now() + 1000 })).toString('base64url')}`
       await expect(fixture.client.pair({ label: 'bad', ssh, invitation: malformed })).rejects.toThrow('invalid_certificate')
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
+  })
+
+  it('projects host workspaceProgress onto runStatus and follows the completed step after admission', async () => {
+    const runId = randomUUID()
+    const operationId = randomUUID()
+    const progress = {
+      operationId,
+      repositoryId: 'a'.repeat(64),
+      stage: 'checking_out',
+      workspacePrepared: true,
+      checkout: { completed: 32, total: 64, percent: 50 },
+      cancellable: true,
+      details: ['工作区元数据已创建'],
+      branch: 'scry/remote-1',
+      baseRef: 'main',
+      updatedAt: 1234
+    }
+    // v3: the host projects its run_progress marker onto the run row, and sends the next
+    // step (admission marks it completed) as a run hint on the status subscription.
+    let releaseAdmitted!: () => void
+    const admitted = new Promise<void>(resolve => { releaseAdmitted = resolve })
+    let follows = 0
+    const fixture = await setup({
+      managedWorktrees: true,
+      subscribeResponse: request => {
+        if (!request.known) return statusSnapshot(fixture.host.hostId, { runs: [statusRun(runId, { workspaceProgress: progress })] })
+        if (follows++ > 0) return new Promise<never>(() => {})
+        return admitted.then(() => ({ subscribe: { mode: 'events', hostId: fixture.host.hostId, logId: 'fixture-log', seq: 2, events: [],
+          hints: [{ kind: 'run', runId, outputSeq: 0, workspaceProgress: { ...progress, stage: 'completed', cancellable: false } }] } }))
+      }
+    })
+    try {
+      const pending = await fixture.client.pair({ label: 'Progress', ssh, invitation: fixture.invitation })
+      const id = pending.connection.id
+      await fixture.client.finishPairing(id)
+      await fixture.client.connect(id)
+      const mid = await fixture.client.runStatus(id, runId)
+      expect(mid.workspaceProgress).toMatchObject({
+        operationId,
+        stage: 'checking_out',
+        workspacePrepared: true,
+        checkout: { completed: 32, total: 64, percent: 50 },
+        cancellable: true
+      })
+      releaseAdmitted()
+      await vi.waitFor(async () => {
+        expect((await fixture.client.runStatus(id, runId)).workspaceProgress).toMatchObject({ stage: 'completed', cancellable: false })
+      })
+      const operations = fixture.tlsRequest.mock.calls.map(call => (call[0].request as { op?: string }).op)
+      expect(operations).not.toContain('watch')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 })

@@ -178,8 +178,8 @@ describe('terminal surface tabs', () => {
     const html = renderToStaticMarkup(createElement(TerminalSurface, { cwd: '/repo', active: true }))
 
     expect(html).toContain('role="tablist"')
-    expect(html).toContain('正在恢复终端')
-    expect(html).toContain('正在检查仍由主进程持有的 Shell')
+    // The skeleton is delayed on the client, but busy state is synchronous.
+    expect(html).toContain('class="terminal-stage" aria-busy="true"')
     expect(html).not.toContain('role="tabpanel"')
     expect(html).toContain('aria-label="回放终端录制"')
     expect(html).toContain('aria-label="删除终端录制"')

@@ -145,8 +145,12 @@ export async function qoderSidecarEvents(args: {
     }
     const childRows = rows(content)
     const header = childRows[0]
+    // Qoder 1.1.93 的子行把 parent_tool_use_id 写成 null：归属由父结果里的 agentId、
+    // 子文件名 agent-<id>.jsonl、sessionId、cwd、agentId 与 isSidechain 共同证明。
+    // 字段有值时必须等于父调用 ID；指向别的调用的子文件宁可不收，也不能挂错父。
     const scoped = (row: Row | undefined): boolean => !!row && row.sessionId === sessionId &&
-      row.cwd === cwd && row.agentId === binding.agentId && row.parent_tool_use_id === binding.parentToolUseId &&
+      row.cwd === cwd && row.agentId === binding.agentId &&
+      (row.parent_tool_use_id == null || row.parent_tool_use_id === binding.parentToolUseId) &&
       row.isSidechain === true && row.isReplay !== true && !row.forkedFrom
     if (!header || header.type !== 'user' || header.isDelegatedTask !== true || !scoped(header) ||
         childRows.some(row => !row || (row.type === 'user' || row.type === 'assistant') && !scoped(row))) {

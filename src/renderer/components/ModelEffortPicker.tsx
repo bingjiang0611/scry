@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Icon } from './primitives/Icon'
+import { EmptyState } from './primitives/EmptyState'
 import { usePickerOpen, type PickerOpenProps, type RunControlSelectOption } from './picker-state'
 import { groupModelOptions, type ModelPickerOption } from './model-picker-options'
 import { useOpenPresence } from '../hooks/usePresence'
@@ -46,9 +47,7 @@ export function ModelEffortPicker({
   const modelLabel = selectedModel ? COPY.qualified(selectedModel.providerId, selectedModel.label) : COPY.automatic
   const selectedEffort = effortOptions.find((option) => option.value === effortValue) ?? effortOptions[0]
   const effortLabel = selectedEffort?.label ?? COPY.defaultEffort
-  const effortIndex = Math.max(0, effortOptions.findIndex((option) => option.value === effortValue))
-  const effortProgress = effortOptions.length > 1 ? `${effortIndex / (effortOptions.length - 1) * 100}%` : '100%'
-  const effortStyle = { '--effort-progress': effortProgress } as CSSProperties
+
   const groups = useMemo(() => listView ? groupModelOptions(modelOptions, query) : [], [listView, modelOptions, query])
   const resultCount = groups.reduce((count, group) => count + group.options.filter((option) => option.value !== '').length, 0)
 
@@ -193,31 +192,21 @@ export function ModelEffortPicker({
                     <span className="model-effort-current-model">{modelLabel}</span>
                     <Icon name="chevronRight" className="chev" />
                   </button>
-                  <div className="model-effort-strength">
+                  <label className="model-effort-strength">
                     <span className="model-effort-field-label">{COPY.effort}</span>
-                    <span className="model-effort-current-effort">{effortLabel}</span>
-                  </div>
-                </div>
-                <div className="model-effort-slider" style={effortStyle}>
-                  <input
-                    type="range"
-                    min="0"
-                    max={Math.max(0, effortOptions.length - 1)}
-                    step="1"
-                    value={effortIndex}
-                    aria-label={COPY.effort}
-                    aria-valuetext={effortLabel}
-                    disabled={effortOptions.length <= 1}
-                    onChange={(event) => {
-                      const option = effortOptions[Number(event.target.value)]
-                      if (option && !option.disabled) onEffortChange(option.value)
-                    }}
-                  />
-                  <div className="model-effort-slider-dots" aria-hidden="true">
-                    {effortOptions.map((option, index) => (
-                      <i className={index <= effortIndex ? 'active' : ''} key={option.value} />
-                    ))}
-                  </div>
+                    <select
+                      className="model-effort-current-effort"
+                      value={selectedEffort?.value ?? ''}
+                      disabled={effortOptions.length <= 1}
+                      onChange={event => onEffortChange(event.currentTarget.value)}
+                    >
+                      {effortOptions.map(option => (
+                        <option key={option.value} value={option.value} disabled={option.disabled} title={option.description}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </>
             ) : (
@@ -276,9 +265,10 @@ export function ModelEffortPicker({
                     ) : group.options.map(renderOption)
                   ))}
                 </div>
-                <div className="model-effort-search-status" role="status">
-                  {groups.length === 0 ? COPY.empty : COPY.count(resultCount)}
-                </div>
+                {groups.length === 0
+                  ? <EmptyState size="menu" className="model-effort-search-status" announcement={query.trim() ? 'polite' : undefined}
+                    title={query.trim() ? COPY.noMatches(query) : COPY.noModels} />
+                  : <div className="model-effort-search-status" role="status">{COPY.count(resultCount)}</div>}
               </>
             )}
           </div>

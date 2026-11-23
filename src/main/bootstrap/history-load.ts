@@ -86,10 +86,14 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
     const { signal } = requestController
     try {
       const requestRevision = nextLoadSessionRevision()
-      const { session: catalogSession, projection, cwd, matches } = readHistoryCatalogEntry(
+      const { session: catalogSession, projection, cwd, matches, workspaceMissing } = readHistoryCatalogEntry(
         payload, resolveKnownProjectDirectory, () => appSessionStore().load(), deps.readProjectedSession
       )
       perf.mark('catalog', { matches })
+      const enrich = (turns: ParsedTurn[]) => workspaceMissing ? turns : providerRegistry.enrichSession(
+        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
+        turns
+      )
       const fp =
         payload.providerId === 'claude' && cwd
           ? resolveTranscriptPath({ cwd, sessionId: payload.externalSessionId, userDataDir })
@@ -210,7 +214,8 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         ...(payload.agentProfileId !== undefined ? { agentProfileId: payload.agentProfileId } : {}),
         cwd,
         externalSessionId: payload.externalSessionId,
-        canResume: appSessionCanResume(catalogSession),
+        canResume: !workspaceMissing && appSessionCanResume(catalogSession),
+        workspaceMissing,
         loadingUnsettledRun: getRuns().unsettledStates().some((run) => sessionLoadMatchesRun(run, {
           providerId: payload.providerId,
           agentProfileId: payload.agentProfileId,
@@ -223,10 +228,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       const historyContext = { userDataDir }
       const mergedHistory = nativeTurns ?? mergeSessionTurns(turns, archived, historyContext, { hydrateAttachments: false })
       perf.mark('merge_turns', { mergedTurns: mergedHistory.length })
-      const merged: LoadedSessionTurn[] = nativeTurns ?? await providerRegistry.enrichSession(
-        { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-        mergedHistory
-      )
+      const merged: LoadedSessionTurn[] = nativeTurns ?? await enrich(mergedHistory)
       if (archivePage && !archivePage.sourceComplete && merged.length) {
         const last = merged[merged.length - 1]
         last.errorHint = [last.errorHint, historyCopy.incompleteArchive]
@@ -239,7 +241,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
       perf.mark('merge', { mergedTurns: merged.length })
       signal.throwIfAborted()
       const hookConfig =
-        cwd && payload.providerId === 'claude'
+        workspaceMissing ? null : cwd && payload.providerId === 'claude'
           ? loadClaudeHookConfig(cwd, homeDir)
           : payload.providerId === 'codex'
             ? cwd ? loadCodexHookConfig(cwd, homeDir) : null
@@ -259,7 +261,8 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
           archiveSnapshotTotalTurns: archivePage?.totalTurns ?? archived?.turns.length ?? 0
         } : {}),
         ...(nativeSnapshot ? { nativeHydrator: (runIds) => nativeSnapshot!.hydrate(runIds) } : {}),
-        hookConfig
+        hookConfig,
+        ...(workspaceMissing ? { missingWorkspaceCwd: cwd } : {})
       })
       const unhydratedPage: SessionHistoryPage = archivePage && !nativeTurns
         ? {
@@ -348,10 +351,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
             }
           }
         }
-        const enriched = await providerRegistry.enrichSession(
-          { providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd, externalSessionId: payload.externalSessionId },
-          selectedPage.turns as ParsedTurn[]
-        )
+        const enriched = await enrich(selectedPage.turns as ParsedTurn[])
         if (requestRevision !== getLoadSessionRevision()) return null
         selectedPage = { ...selectedPage, turns: enriched as LoadedSessionTurn[] }
       }
@@ -364,7 +364,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         historyContext
       )
       perf.mark('page_hydration', { returnedTurns: page.turns.length })
-      const result = pageWithHookCommands(page, hookConfig)
+      const result = pageWithHookCommands(workspaceMissing ? { ...page, workspaceMissing: true } : page, hookConfig)
       if (projection) {
         const active = getRuns().unsettledStates().find((run) => !run.done && sessionLoadMatchesRun(run, {
           providerId: payload.providerId, agentProfileId: payload.agentProfileId, cwd,
@@ -373,7 +373,7 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         result.projection = { ...projection, activeRun: active ? deps.boundedActiveRun?.(active) ?? active : null }
       }
       perf.finish({ totalTurns: page.totalTurns, returnedTurns: result.turns.length })
-      if (cwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
+      if (!workspaceMissing && cwd) rememberSessionProjectAfterLoad(payload.providerId, cwd, rememberProject)
       return reportSelection ? { page: result, selection } : result
     } catch (error) {
       perf.finish(undefined, signal.aborted ? 'cancelled' : 'error')

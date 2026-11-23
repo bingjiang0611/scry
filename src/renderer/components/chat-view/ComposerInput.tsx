@@ -3,8 +3,10 @@ import type { RefObject } from 'react'
 import type { ChatViewProps } from './types'
 import { WorkdirPicker } from '../WorkdirPicker'
 import { Icon } from '../primitives/Icon'
-import { QUEUE_COPY, RUN_STOP_COPY } from '../../constants/copy'
+import { RUN_STOP_COPY } from '../../constants/copy'
+import { QUEUE_COPY } from '../../constants/queue-copy'
 import { CONVERSATION_COPY } from '../../constants/conversation-copy'
+import { workspaceCopy } from '../../constants/workspace-copy'
 import { RunElapsed } from './RunElapsed'
 import { imageFilesFromClipboardData, composerEnterConfirmsIme, navigateComposerHistory } from './composer-utils'
 import { Notice } from '../primitives/Notice'
@@ -39,6 +41,7 @@ type ComposerInputProps = Pick<ChatViewProps,
   input: string
   draftAttachments: ChatViewProps['draftAttachments']
   sendBlockedReason: string | null
+  composerStatus: string | null
   composerError: string | null
   detectionIssue: string | null
   sessionLoading: boolean
@@ -59,6 +62,7 @@ type ComposerInputProps = Pick<ChatViewProps,
   historyNavigation: { scopeKey?: string; history: string[]; position: number } | null
   promptHistoryRef: { current: { scopeKey?: string; history: string[]; position: number } | null }
   composerScopeKey?: string
+  workspaceSetupActive?: boolean
 }
 
 export function ComposerInput({
@@ -87,6 +91,7 @@ export function ComposerInput({
   detectionRetrying,
   showWorkdirPicker,
   sendBlockedReason,
+  composerStatus,
   composerError,
   detectionIssue,
   sessionLoading,
@@ -103,13 +108,13 @@ export function ComposerInput({
   historyNavigation,
   promptHistoryRef,
   composerScopeKey,
+  workspaceSetupActive = false,
   onHideSlash,
   onSlashSel,
   onPickSlash
 }: ComposerInputProps) {
   const compositionActiveRef = useRef(false)
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
-  const composerStatus = composerError ?? detectionIssue ?? (input.trim() || draftAttachments.length > 0 ? sendBlockedReason : null)
   return <>
         {draftAttachments.length > 0 && (
           <div className="draft-attachments" aria-label="已粘贴图片">
@@ -156,7 +161,7 @@ export function ComposerInput({
             {composerNotice.text}
           </Notice>
         )}
-        {busy && (
+        {busy && !workspaceSetupActive && (
           <div className="run-status" role="status" aria-live="polite" data-stop-tone={stopStatus.tone} data-background-waiting={backgroundStatus?.waiting || undefined}>
             <span className="run-status-left">
               <i className="run-status-dot" aria-hidden="true" />
@@ -190,12 +195,14 @@ export function ComposerInput({
             </button>
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          className="input"
-          aria-label="描述任务"
-          aria-describedby={composerStatus ? 'composer-status' : undefined}
-          value={input}
+        <div className={workspaceSetupActive ? 'composer-input-field is-worktree-waiting' : 'composer-input-field'}>
+          <textarea
+            ref={textareaRef}
+            className="input"
+            aria-label="描述任务"
+            aria-describedby={composerStatus ? 'composer-status' : undefined}
+            value={input}
+            disabled={workspaceSetupActive}
           onChange={(event) => {
             resetPromptHistory()
             onInput(event.target.value)
@@ -302,6 +309,12 @@ export function ComposerInput({
             }
           }}
         />
+          {workspaceSetupActive && (
+            <span className="composer-waiting-placeholder" aria-hidden="true">
+              {workspaceCopy.waitingForWorktreeSetup}
+            </span>
+          )}
+        </div>
         {composerStatus && (
           <div
             id="composer-status"

@@ -18,6 +18,16 @@ import type { SessionHistoryWindow, TraceLiveHealth } from '../../hooks/useAgent
 import type { ComposerDraftStore } from '../../composer-drafts'
 import type { RendererSteerEvidence } from '../../steer'
 import type { StopRequest } from '../../run-stop-status'
+import type { WorkspacePrepareProgress } from '@shared/workspace-selection'
+import type { AgentInputAttachment } from '@shared/runtime'
+
+export interface WorkspaceSetupState {
+  progress: WorkspacePrepareProgress
+  prompt?: string
+  attachments?: AgentInputAttachment[]
+  cancelling?: boolean
+  onCancel?: () => void
+}
 
 export interface ChatViewProps {
   turns: Turn[]
@@ -38,14 +48,17 @@ export interface ChatViewProps {
   input: string
   composerScopeKey?: string
   sendBlockedReason?: string | null
+  showSendBlockedReason?: boolean
   composerError?: string | null
   detectionIssue?: string | null
   detectionRetrying?: boolean
   onRetryDetection?: () => void
   submitting?: boolean
   sessionLoading?: boolean
+  // Live trace is pending; this is not a composer or session-owner lock.
+  transcriptPending?: boolean
   sessionCacheVisible?: boolean
-  sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string } | null
+  sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string; title?: string; retry?: () => void; retrying?: boolean } | null
   /**
    * What an empty but selected conversation is. A side chat is a new conversation with a
    * frozen source, so the generic "waiting for the host to archive" text would be wrong.
@@ -113,10 +126,13 @@ export interface ChatViewProps {
   onRunEffort: (effort: string | undefined) => void
   onPermissionMode: (mode: AgentPermissionMode) => void
   onRescan?: () => void
+  agentsScanning?: boolean
+  agentsScanFailed?: boolean
   unavailableAgentIds?: ReadonlySet<string>
   agentScopeLabel?: string
   workspaceContext?: ReactNode
   workspaceSendLabel?: string
+  workspaceSetup?: WorkspaceSetupState | null
   renderLocationPicker?: (menu: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
   remoteHost?: string
   composerNotice?: { text: string; tone: 'blocked' | 'error' | 'info'; action?: { label: string; onClick: () => void; disabled?: boolean } } | null

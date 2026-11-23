@@ -1,9 +1,7 @@
 # D3 · 两处 UI 正确性收尾
 
 状态：源码 0.2.227，功能 WIP 未提交、未推送、未升版本、未安装（日常实例仍是 0.2.229）。本文件只记录 D3 这两处
-UI 问题的实际结果；整体交付状态仍以 [implementation-report.md](implementation-report.md) 与
-[continuation-checkpoint.md](continuation-checkpoint.md) 为准，`implementation-report.md` 已达 20,000B 手写文件门限，
-因此本轮记录单独成文。
+UI 问题的历史结果；整体交付见 [final-delivery.md](final-delivery.md)。
 
 ## 1. 未决发送的原文只能“保存”、不能查看（阻塞）
 

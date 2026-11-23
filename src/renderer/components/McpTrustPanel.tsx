@@ -7,6 +7,8 @@ import { isMcpGuardReport } from '@shared/mcpguard-report'
 import { ANTIGRAVITY_COPY } from '../constants/antigravity-copy'
 import { Icon } from './primitives/Icon'
 import { Notice } from './primitives/Notice'
+import { EmptyState } from './primitives/EmptyState'
+import { MCP_TRUST_EMPTY_COPY as copyEmpty } from '../constants/copy'
 
 type TrustTone = 'ok' | 'warn' | 'bad' | 'muted'
 
@@ -231,25 +233,22 @@ export function McpTrustPanel({
       .slice(0, 10)
   }, [report])
 
-  const acceptReport = (parsed: unknown, prefix: string): void => {
-    if (!isMcpGuardReport(parsed)) {
-      setError(`${prefix}失败：不是 mcpguard scan JSON`)
+  const acceptReport = (parsed: unknown): void => {
+    if (!isMcpGuardReport(parsed) || !onReportChange) {
+      setError(copyEmpty.scanFailed)
       return
     }
-    if (onReportChange) onReportChange(parsed)
-    else setError(`${prefix}失败：面板未连接报告状态`)
+    onReportChange(parsed)
+    setError(null)
   }
 
   const scanReport = async (): Promise<void> => {
-    if (!onScan) {
-      setError('扫描失败：面板未连接 mcpguard 扫描器')
-      return
-    }
-    setError(null)
+    if (!onScan || scanning) return
     try {
-      acceptReport(await onScan(), '扫描')
+      acceptReport(await onScan())
     } catch (err) {
-      setError(`扫描失败：${err instanceof Error ? err.message : 'mcpguard 扫描异常'}`)
+      console.error('[Scry] MCP scan failed', err)
+      setError(copyEmpty.scanFailed)
     }
   }
 
@@ -279,7 +278,8 @@ export function McpTrustPanel({
           <Icon name="refresh" /> {scanning ? '扫描中…' : '扫描当前 MCP'}
         </button>
       </div>
-      {error && <div className="mcp-trust-error">{error}</div>}
+      {error && <EmptyState size="card" picture="alert" title={error} announcement="alert"
+        actions={onScan ? [{ label: copyEmpty.scanAgain, icon: 'refresh', busy: scanning, onClick: () => void scanReport() }] : undefined} />}
 
       <details className="billing-details" open>
         <summary>
@@ -301,15 +301,13 @@ export function McpTrustPanel({
           </div>
         ))}
         {missingAuth.length === 0 && failedLive.length === 0 && pendingLive.length === 0 && mcpLive.length > 0 && (
-          <div className="dim pad2">当前捕获的 MCP live 状态无授权缺口。</div>
+          <EmptyState size="row" className="dim pad2" title={copyEmpty.noAuthorizationGap} />
         )}
-        {mcpLive.length === 0 && <div className="dim pad2">{runtimeName} 暂无逐项 MCP live 状态；可发起会话或刷新后重试。</div>}
+        {mcpLive.length === 0 && <EmptyState size="row" className="dim pad2" title={copyEmpty.liveUnread}
+          actions={onRefreshLive ? [{ label: copyEmpty.refreshLive, icon: 'refresh', busy: refreshing, onClick: () => void onRefreshLive() }] : undefined} />}
         {runtimeProvider === 'antigravity_acp' && (
           <>
             <div className="psrc">{ANTIGRAVITY_COPY.residualRiskNotice}</div>
-            <div className="psrc">{ANTIGRAVITY_COPY.accountUnverifiedDetail}</div>
-            <div className="psrc">{ANTIGRAVITY_COPY.tosNotice}</div>
-            <div className="psrc">{ANTIGRAVITY_COPY.processScopeNotice}</div>
           </>
         )}
         {configuredButSilent.length > 0 && (

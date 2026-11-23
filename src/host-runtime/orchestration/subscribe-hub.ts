@@ -3,6 +3,8 @@ import type { HostAdminNotice } from '../../shared/host-admin'
 import type { AgentDataUpdated } from '../../shared/runtime'
 import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 import { SUBSCRIBE_RETAINED_WINDOW_NOTICES, type SubscribeHint } from '../../shared/orchestration-subscribe'
+import type { WorkspacePrepareProgress } from '../../shared/workspace-selection'
+import { completedWorkspaceProgress } from '../../shared/workspace-prepare-progress'
 
 const DEFAULT_COALESCE_MS = 50
 const MAX_HINT_BUFFER = 512
@@ -17,6 +19,7 @@ export interface LiveRunRuntimeMeta {
   providerId?: string
   agentProfileId?: string
   externalSessionId?: string
+  workspaceProgress?: WorkspacePrepareProgress
 }
 
 interface HintEntry {
@@ -128,7 +131,8 @@ export class SubscribeHub {
       ...(meta.cwd ? { cwd: meta.cwd } : {}),
       ...(meta.providerId ? { providerId: meta.providerId } : {}),
       ...(meta.agentProfileId ? { agentProfileId: meta.agentProfileId } : {}),
-      ...(meta.externalSessionId ? { externalSessionId: meta.externalSessionId } : {})
+      ...(meta.externalSessionId ? { externalSessionId: meta.externalSessionId } : {}),
+      ...(meta.workspaceProgress ? { workspaceProgress: meta.workspaceProgress } : {})
     }
   }
 
@@ -152,7 +156,22 @@ export class SubscribeHub {
     const meta = this.#ensureRunMeta(runId)
     if (scryRunId) meta.scryRunId = scryRunId
     meta.admitted = true
+    // A worktree start is admitted only once its workspace is ready.
+    if (meta.workspaceProgress) meta.workspaceProgress = completedWorkspaceProgress(meta.workspaceProgress)
     this.#emitUrgent(`run:${runId}`, this.#buildRunHint(runId, meta))
+  }
+
+  /**
+   * Managed-worktree preparation progress (already throttled by the run binding). Devices
+   * read it on the run row and hint; the App's own window gets it as its window notice.
+   */
+  noteRunWorkspaceProgress(runId: string, progress: WorkspacePrepareProgress): void {
+    if (this.#closed) return
+    const meta = this.#ensureRunMeta(runId)
+    meta.workspaceProgress = progress
+    this.#emitUrgent(`run:${runId}`, this.#buildRunHint(runId, meta))
+    // Only the latest step matters to a window that falls behind: keep one entry per run.
+    this.#pushEntry({ kind: 'window', channel: 'workspaceSelection:progress', payload: { ...progress } }, `workspaceProgress:${runId}`)
   }
 
   noteRunSession(runId: string, externalSessionId: string): void {

@@ -19,20 +19,15 @@ struct CatalogRefreshBanner: View {
   let onDetails: () -> Void
 
   private var title: String { summary ?? failure.summary }
+  private var retryLabel: String { failure.requiresPairing ? ConnectionCopy.pairAgain : ConnectionCopy.retry }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
-      HStack(alignment: .top, spacing: 8) {
-        Image(systemName: "exclamationmark.circle").font(Typography.rowTitle.weight(.medium)).foregroundStyle(Palette.warn).padding(.top, 1)
-        VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(Typography.groupLabel)
-          Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(Typography.meta)
-        }
+      EmptyState(title: title, symbol: failure.requiresPairing ? "lock" : "exclamationmark.triangle", size: .card,
+                 action: .init(label: retryLabel, refresh: !failure.requiresPairing, busy: refreshing, perform: onRetry))
+      HStack {
+        Text(ConnectionCopy.lastFullRefresh(lastFullRefresh)).font(Typography.meta)
         Spacer(minLength: 4)
-      }
-      HStack(spacing: 16) {
-        Button(failure.requiresPairing ? ConnectionCopy.pairAgain : ConnectionCopy.retry, action: onRetry)
-          .font(Typography.meta.weight(.semibold)).frame(minWidth: 44, minHeight: 44).disabled(refreshing)
         Button(ConnectionCopy.details, action: onDetails).font(Typography.meta.weight(.medium))
           .frame(minWidth: 44, minHeight: 44)
       }

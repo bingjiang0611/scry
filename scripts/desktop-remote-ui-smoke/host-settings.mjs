@@ -6,11 +6,17 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   // measuring it, or the transition can move the target before native input.
   await wait('document.querySelector(".unbound-empty.bound") != null && document.querySelector(".location-button") != null', 'remote new draft location picker')
   await click('.location-button')
-  await wait('document.querySelector(\'[data-machine-id="local"]\') != null', 'local machine option')
-  await click('[data-machine-id="local"]')
-  await wait('[...document.querySelectorAll(".location-menu .mitem")].some(node => node.textContent.includes("不绑定项目"))', 'local projects column')
-  await read('[...document.querySelectorAll(".location-menu .mitem")].find(node => node.textContent.includes("不绑定项目")).setAttribute("data-local-unbound", "")')
-  await click('[data-local-unbound]')
+  await wait('document.querySelector(\'.location-machine-select option[value="local"]\') != null', 'local machine option')
+  await read(`(() => {
+    const field = document.querySelector('.location-machine-select select')
+    field.value = 'local'
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
+  await read(`(() => {
+    const field = document.querySelector('.workdir-value select')
+    field.value = 'unbound'
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
   await wait(`!(${remoteShown})`, 'local location leaves the remote conversation')
   await click('.sb-new')
   await wait(`window.desktopRemoteFixture.localNewSessions === ${localBefore + 1}`, 'local new-session route remains intact')
@@ -18,9 +24,7 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   check((await fixture()).localStarts === 0, 'New-session selection started an unrequested local model')
 
   await click('.sb-settings')
-  // By its name, not its position: «后台服务» (B4-S S0-1) now follows «远程访问» in the rail.
-  await read('[...document.querySelectorAll(".settings-rail button")].find(node => node.textContent.trim() === "远程访问").setAttribute("data-remote-settings-tab", "")')
-  await click('[data-remote-settings-tab]')
+  await click('.settings-rail [role="tab"]', '远程访问')
   await wait('document.querySelector(".remote-pairing")?.textContent.includes("Fixture iPhone")', 'inbound device grant')
   check(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture desktop")'), 'Remote settings omitted saved host')
   check(!(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')

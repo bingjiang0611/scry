@@ -27,6 +27,8 @@ export interface SessionHistoryProjection {
 }
 
 export interface SessionHistoryPage {
+  /** The recorded workspace no longer exists: history is readable, the session is not resumable. */
+  workspaceMissing?: true
   turns: LoadedSessionTurn[]
   /** Zero-based index of the first displayed turn in the full history. */
   offset: number

@@ -3,8 +3,8 @@ import XCTest
 // Regressions for three composer dead-ends found on a real device:
 //   1. the folder sheet stayed on “读取文件夹…” because `.idle` never asked the host,
 //   2. a blocked send showed a grey arrow with no reason and an unusable “retry”,
-//   3. the model list was laid out at full content height and only clipped, so a
-//      drag rubber-banded and rows above the fold could not be selected.
+//   3. the model selection used a custom clipped list instead of a native picker,
+//      making the current/default choice hard to discover and select.
 // Fixtures never touch a relay or a Provider.
 final class ComposerDeadEndUITests: XCTestCase {
   private var app: XCUIApplication!
@@ -29,7 +29,7 @@ final class ComposerDeadEndUITests: XCTestCase {
     // The listing must replace the reading state; the regression was an endless
     // spinner because the sheet never issued a request.
     let listed = app.buttons["scry"].waitForExistence(timeout: 10) ||
-      app.staticTexts["无法读取文件夹"].waitForExistence(timeout: 10)
+      app.staticTexts["没能读取文件夹"].waitForExistence(timeout: 10)
     XCTAssertTrue(listed, "folder sheet never left 读取文件夹…")
     XCTAssertFalse(app.staticTexts["读取文件夹…"].exists)
   }
@@ -47,21 +47,16 @@ final class ComposerDeadEndUITests: XCTestCase {
     XCTAssertTrue(reason.waitForNonExistence(timeout: 15), "恢复默认设置 left the send blocked")
   }
 
-  func testModelListScrollsAndAutomaticModelIsSelectable() {
+  func testNativeModelPickerExposesAutomaticModel() {
     launch("transcript", extra: ["-uiMockManyModels"])
     app.buttons["model-effort-control"].tap()
-    let auto = app.buttons["model-option-auto"]
+    let picker = app.buttons["model-picker"]
+    XCTAssertTrue(picker.waitForExistence(timeout: 10))
+    picker.tap()
+    let auto = app.buttons["自动模型"]
     XCTAssertTrue(auto.waitForExistence(timeout: 10))
-    // Drag the list itself, the way the device gesture did.
-    let list = app.scrollViews.firstMatch
-    if list.exists {
-      list.swipeUp()
-      list.swipeDown()
-      list.swipeDown()
-    }
-    XCTAssertTrue(auto.isHittable, "自动模型 never became hittable")
     auto.tap()
-    XCTAssertTrue(app.buttons["model-effort-control"].label.contains("自动模型"),
-                  "selecting 自动模型 must stick; chip was \(app.buttons["model-effort-control"].label)")
+    XCTAssertTrue(picker.label.contains("自动模型"),
+                  "selecting 自动模型 must stick; picker was \(picker.label)")
   }
 }

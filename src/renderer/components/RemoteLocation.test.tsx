@@ -76,7 +76,7 @@ describe('saved host projection', () => {
 
   it('opens the remote settings tab without claiming unread devices or access are ready', () => {
     const html = renderToStaticMarkup(<SettingsModal initialTab="remote" theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />)
-    expect(html).toContain(`class="settings-tab active" aria-current="page"`)
+    expect(html).toContain(`-remote-tab" type="button" role="tab" aria-selected="true"`)
     expect(html).toContain(`class="remote-connections-settings"`)
     expect(html).toContain(copy.loadingDesktopStatus)
     expect(html).not.toContain(copy.noAuthorizedDevices)
@@ -88,7 +88,8 @@ describe('saved host projection', () => {
     list.mockRejectedValue(new Error('keychain unavailable'))
     await refreshDesktopConnections()
     const html = hosts()
-    expect(html).toContain('keychain unavailable')
+    expect(html).toContain('没能读取远程主机')
+    expect(html).not.toContain('keychain unavailable')
     expect(html).not.toContain(copy.noHostsHint)
   })
 

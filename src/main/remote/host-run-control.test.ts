@@ -38,6 +38,19 @@ describe('daemon run control op', () => {
     expect(await handleRunControl(handlers, { method: 'adopt', runId: 'run-abc-1' })).toEqual({ run: null })
   })
 
+  it('returns only trace context on request and preserves the legacy inline response', async () => {
+    const run: ActiveRun = {
+      runId: 'run-abc-1', cwd: '/worktree', providerId: 'pi', agentProfileId: 'pi:rotom',
+      externalSessionId: 'session-1', userText: 'prompt', items: [], done: false
+    }
+    const handlers = { ...empty, adopt: vi.fn(() => run) }
+    const request = { method: 'adopt', runId: run.runId }
+    expect(await handleRunControl(handlers, request)).toEqual({ run })
+    expect(await handleRunControl(handlers, { ...request, payload: 'traceContext' }))
+      .toEqual({ traceContext: { cwd: '/worktree', providerId: 'pi', agentProfileId: 'pi:rotom' } })
+    expect(await handleRunControl(handlers, { ...request, payload: {} })).toEqual({ error: 'invalid_request' })
+  })
+
   it('is unknown on an endpoint without the handlers, and answers when they are there', async () => {
     // The network endpoint builds its host without runControl; the local one with it.
     // A missing handler must not fall through to some other answer.

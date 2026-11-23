@@ -27,15 +27,19 @@ async function exerciseProviderMenus() {
   await frame()
   const picker = must(document.querySelector('#picker-fixture'), 'picker fixture')
   const filter = must(document.querySelector('#filter-fixture'), 'filter fixture')
-  const rows = await go('rows', () => picker.querySelectorAll('[role="menuitemradio"]'))
-  const checked = [...rows].filter((row) => row.getAttribute('aria-checked') === 'true')
-  if (rows.length !== 6) throw new Error('expected 6 provider rows, got ' + rows.length)
+  const rows = await go('rows', () => picker.querySelectorAll('[role="option"]'))
+  const checked = [...rows].filter((row) => row.getAttribute('aria-selected') === 'true')
+  if (rows.length !== 7) throw new Error('expected 7 provider rows, got ' + rows.length)
   if (checked.length !== 1 || checked[0].dataset.agentId !== 'pi:rotom') {
     throw new Error('single checked row expected on pi:rotom, got ' + checked.map((row) => row.dataset.agentId))
   }
   if (picker.textContent.includes('当前')) throw new Error('trailing 当前 chip still rendered')
+  const antigravity = must(picker.querySelector('[data-agent-id="antigravity"]'), 'Antigravity row')
+  if (antigravity.textContent.trim() !== 'Antigravity' || /账号未验证|条款提示|运行边界/.test(picker.textContent + antigravity.title)) {
+    throw new Error('Antigravity must show only the provider name, without account or implementation notices')
+  }
 
-  const glyphs = [...picker.querySelectorAll('[role="menuitemradio"] .agicon .provider-glyph')]
+  const glyphs = [...picker.querySelectorAll('[role="option"] .agicon .provider-glyph')]
   if (glyphs.length !== rows.length) throw new Error('every row needs a brand glyph, got ' + glyphs.length + '/' + rows.length)
   const brands = glyphs.map((glyph) => {
     const box = glyph.getBoundingClientRect()
@@ -51,7 +55,7 @@ async function exerciseProviderMenus() {
       pathLength: [...(svg?.querySelectorAll('path') ?? [])].reduce((total, node) => total + (node.getAttribute('d')?.length ?? 0), 0)
     }
   })
-  const expected = ['claude', 'codex', 'qoder', 'opencode', 'pi', 'pi']
+  const expected = ['claude', 'codex', 'qoder', 'opencode', 'antigravity', 'pi', 'pi']
   brands.forEach((brand, index) => {
     if (brand.provider !== expected[index]) throw new Error('row ' + index + ' glyph provider ' + brand.provider + ', expected ' + expected[index])
     // 真实品牌图形：有 viewBox 与真实路径，尺寸来自样式表而不是默认 300x150。
@@ -62,7 +66,8 @@ async function exerciseProviderMenus() {
   const claude = brands[0]
   if (claude.color !== 'rgb(217, 119, 87)') throw new Error('claude brand color ' + claude.color)
   for (const brand of brands.slice(1)) {
-    if (brand.color !== 'rgb(244, 246, 250)') throw new Error(brand.provider + ' brand color ' + brand.color)
+    const expectedColor = brand.provider === 'antigravity' ? 'rgb(156, 156, 150)' : 'rgb(244, 246, 250)'
+    if (brand.color !== expectedColor) throw new Error(brand.provider + ' brand color ' + brand.color)
   }
 
   const firstRow = rows[0]
@@ -90,11 +95,11 @@ async function exerciseProviderMenus() {
   // Esc 关闭菜单并把焦点还给触发按钮。
   stage = 'escape'
   const trigger = must(picker.querySelector('button[aria-haspopup]'), 'picker trigger')
-  const menu = must(picker.querySelector('[role="menu"]'), 'picker menu')
-  menu.focus()
+  const menu = must(picker.querySelector('[role="listbox"]'), 'picker menu')
+  checked[0].focus()
   menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   await frame()
-  if (picker.querySelector('[role="menu"]')) throw new Error('Escape did not close the picker menu')
+  if (picker.querySelector('[role="listbox"]')) throw new Error('Escape did not close the picker menu')
   if (document.activeElement !== trigger) {
     const active = document.activeElement
     throw new Error('focus was not restored to the picker trigger; active=' + (active ? active.tagName + '.' + active.className : 'none') + ' trigger=' + trigger.tagName + '.' + trigger.className)
@@ -103,47 +108,31 @@ async function exerciseProviderMenus() {
   // 选中另一个 Provider：选择交给拥有者，菜单自行关闭。
   trigger.click()
   await frame()
-  const reopened = must(picker.querySelector('[role="menu"]'), 'reopened picker menu')
+  const reopened = must(picker.querySelector('[role="listbox"]'), 'reopened picker menu')
   must(reopened.querySelector('[data-agent-id="codex"]'), 'codex row').click()
   await frame()
-  if (picker.querySelector('[role="menu"]')) throw new Error('selecting a provider did not close the menu')
+  if (picker.querySelector('[role="listbox"]')) throw new Error('selecting a provider did not close the menu')
   if (picker.querySelector('button[aria-label], button').textContent.includes('Rotom')) throw new Error('trigger still shows the previous provider')
   // 选中即关闭：焦点不能掉到 body，要回到触发按钮（与 Esc 路径一致）。
   if (document.activeElement !== trigger) throw new Error('picking a provider lost focus instead of returning it to the trigger')
 
-  // 归档筛选：同一套单选语义，触发按钮显示当前值。
   stage = 'filter'
-  const filterTrigger = must(filter.querySelector('.arch-provider-trigger'), 'filter trigger')
-  if (filter.querySelector('[role="menu"]')) throw new Error('the filter menu must start closed')
-  filterTrigger.click()
+  const field = must(filter.querySelector('select'), 'provider filter')
+  if (field.options.length !== 4) throw new Error('expected All and three Providers')
+  if (field.selectedOptions[0].textContent !== 'Claude Code') throw new Error('incorrect initial Provider value')
+  field.focus()
+  field.value = 'codex'
+  field.dispatchEvent(new Event('change', { bubbles: true }))
   await frame()
-  const filterRows = filter.querySelectorAll('[role="menuitemradio"]')
-  const filterChecked = [...filterRows].filter((row) => row.getAttribute('aria-checked') === 'true')
-  if (filterRows.length !== 4) throw new Error('expected 4 filter rows (all + 3 providers), got ' + filterRows.length)
-  if (filterChecked.length !== 1 || filterChecked[0].dataset.providerOption !== 'claude') {
-    throw new Error('filter must check exactly claude, got ' + filterChecked.map((row) => row.dataset.providerOption))
-  }
-  // 触发按钮显示 PROVIDER_LABELS 里的正式名称，不是 provider id。
-  if (filterTrigger.textContent.trim() !== 'Claude Code') throw new Error('filter trigger label ' + filterTrigger.textContent.trim())
-  const filterBrands = [...filter.querySelectorAll('.arch-provider-menu .provider-glyph')].map((glyph) => glyph.dataset.provider)
-  if (filterBrands.join(',') !== 'claude,codex,pi') throw new Error('filter brand glyphs ' + filterBrands.join(','))
-  // “全部 Provider”不是某个品牌，不能冒充成 Provider 图标。
-  if (filter.querySelector('.arch-provider-menu [role="menuitemradio"]').querySelector('.provider-glyph')) {
-    throw new Error('the all-providers row must not show a brand glyph')
-  }
-  must(filter.querySelector('[data-provider-option="codex"]'), 'filter codex row').click()
-  await frame()
-  if (filter.querySelector('[role="menu"]')) throw new Error('filter menu stayed open after picking a provider')
-  if (filterTrigger.textContent.trim() !== 'Codex') throw new Error('filter trigger label after picking: ' + filterTrigger.textContent.trim())
-  if (document.activeElement !== filterTrigger) throw new Error('picking a filter option lost focus instead of returning it to the trigger')
-  if (filterTrigger.getAttribute('aria-expanded') !== 'false') throw new Error('filter trigger still reports expanded after picking')
+  if (field.selectedOptions[0].textContent !== 'Codex') throw new Error('filter did not display Codex')
+  if (document.activeElement !== field) throw new Error('changing the filter lost field focus')
 
   return {
     metrics,
     rows: rows.length,
     brands: brands.map((brand) => brand.provider + ':' + brand.width + 'x' + brand.height + ':' + brand.color),
-    filterRows: filterRows.length,
-    filterTrigger: filterTrigger.textContent.trim()
+    filterRows: field.options.length,
+    filterValue: field.selectedOptions[0].textContent
   }
 }
 

@@ -4,7 +4,7 @@ export async function exerciseListStructure({ read, check, wait, click, settle, 
   for (const theme of ['dark', 'light']) {
     await read(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
     await click('#list-analytics')
-    await wait("document.querySelector('.usage-state')")
+    await wait("document.querySelector('.usage-page[aria-busy=true]')")
     await arm("a.animationName==='row-in' && node.closest('.usage-breakdown')")
     await click('#list-resolve')
     const stagger = await captured()

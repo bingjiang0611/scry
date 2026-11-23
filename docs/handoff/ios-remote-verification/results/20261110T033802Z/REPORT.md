@@ -12,7 +12,7 @@
 
 ## 判定
 
-- Verdict：**fail**（`SUMMARY.md` / `acceptance.json`）。唯一失败的必需规则是 `R7-offline-fast`（2 个样本都判出 `hostOffline=true`，但最慢 3478 ms > 3000 ms）；`R5-direct` 为 blocked（环境前提不成立）。
+- Verdict：**fail**（见 [规则判定](acceptance.json)）。唯一失败的必需规则是 `R7-offline-fast`（2 个样本都判出 `hostOffline=true`，但最慢 3478 ms > 3000 ms）；`R5-direct` 为 blocked（环境前提不成立）。
 - 通过的必需规则：`R1-checks`（`ios-checks` 已按 TASK 记为已知基线）、`R2-netbench-clean`（两个场景 `failures=0`）、`R3-transport`（两个场景都 `multiplexed` 且 5 个能力齐全、`legacyHost=false`）、`R4-relay-only`、`R5b-no-blocking-unproven-route`（两个场景 `phase=open` 的失败直连尝试均为 0）、`R6-catalog`（两个场景刷新都 **3/3 confirmed**）。
 
 ## 每条未通过的规则
@@ -20,7 +20,7 @@
 | 规则 | 现象（含证据文件） | 根因 | 已尝试的修复 | 需要的决定或负责人 |
 |---|---|---|---|---|
 | R7-offline-fast | `wifi-relay` offline-probe 2765.9 ms、`wifi-auto` 3478.0 ms，两者 `hostOffline=true`（`netbench-wifi-relay.jsonl`、`netbench-wifi-auto.jsonl`）；跨本轮所有运行，probe 落在 2.05–3.48 s，**分类每次都正确** | 探测耗时 = 中继升级 + relay 的 600 ms 宽限，而不是重试。`I3-relay-path` 显示这条出境路径上 `upgrade` 中位 1561.9 ms、`upgradeExcludingWait` 中位 961.9 ms；`prewarm()` 并行开 control/bulk 两条 lane 并等**两条都结束**（历史诊断里两条 lane 的 `totalMs` 分别是 2.45 s 与 3.27 s），所以探测值取的是较慢那条。3000 ms 的预算正好落在这条路径的抖动区间内 | 修好了分类缺陷（见修复提交 `a6b2b687`：内层 TLS 把中继的 4001 关闭报成 `uncleanShutdown`，导致 `hostOffline=false` 并重试）。另外试过让 `prewarm()` 在收到 4001 时 `cancelAll()` 提前返回，并写了 NIO 夹具测试；实测该测试在修复版上仍耗时 1209 ms——`RelayLane.usableConnection()` 等的是被保存的 `opening` Task（结构化并发的取消不会打断它），所以这个改动**不成立**，已整体回滚，没有提交 | 需要维护者定：要么让 lane 打开对取消有响应（改 `RelayLane` 生命周期，风险高于本轮范围），要么把 R7 的 3000 ms 改成相对中继升级耗时的表达（例如 `upgrade P50 + 600 ms + 余量`）。本报告不放宽规则 |
-| R5-direct | `SUMMARY.md`：`blocked — the Mac advertised no LAN/overlay address`；两个场景 `routes=relay`、`directRoutes=[]` | 环境前提不成立：Mac 不在手机所在的局域网。第一轮暴露的缺陷（VPN/点对点/`/32` 地址被广播、未确认的直连挡在打开路径上）本轮已按要求消除：host 现在什么都不广播（没有可广播的地址），手机也没有任何直连尝试 | 无（TASK 明确：Mac 不在同一 Wi-Fi 时 R5 判 blocked） | 需要一台与手机同 Wi-Fi 的 Mac 才能判定 R5 |
+| R5-direct | [规则判定](acceptance.json)：`blocked — the Mac advertised no LAN/overlay address`；两个场景 `routes=relay`、`directRoutes=[]` | 环境前提不成立：Mac 不在手机所在的局域网。第一轮暴露的缺陷（VPN/点对点/`/32` 地址被广播、未确认的直连挡在打开路径上）本轮已按要求消除：host 现在什么都不广播（没有可广播的地址），手机也没有任何直连尝试 | 无（TASK 明确：Mac 不在同一 Wi-Fi 时 R5 判 blocked） | 需要一台与手机同 Wi-Fi 的 Mac 才能判定 R5 |
 
 > 核验者注（后续轮次）：上表 R7 一行的"需要维护者决定"已被取代。第三轮（`results/20261110T084031Z`）在不改门限的前提下修复了两处原因：relay 只在 10 s 内有 host leg 活动时才等宽限（`ce3f5fe`），手机任一 lane 收到 `4001` 即返回（`d3ee35a`，用独立任务等待而非 task group，因此不受上面"取消不生效"的限制）；离线答复降到 1.37 / 1.86 s，R7 通过。本行原始数据保持不变。
 
@@ -82,5 +82,5 @@ relay 路径探针（10 样本，本轮未部署）：中位 `total` 1562.1 ms�
 
 ## 最终判定
 
-- `summarize.mjs` Verdict：**fail**。`R7-offline-fast` 失败（`hostOffline=true` 但最慢 3478 ms > 3000 ms），`R5-direct` blocked（Mac 不在手机所在局域网），其余必需规则全部 pass。规则表全文见同目录 `SUMMARY.md`。
+- `summarize.mjs` Verdict：**fail**。`R7-offline-fast` 失败（`hostOffline=true` 但最慢 3478 ms > 3000 ms），`R5-direct` blocked（Mac 不在手机所在局域网），其余必需规则全部 pass。规则表全文见 [acceptance.json](acceptance.json)，场景统计见 [summary.json](summary.json)。
 - 一句话：第二轮的三个规则缺陷与 host 广播缺陷都已按预期消除——`R3`（mux + 全部能力）、`R5b`（0 次失败直连）、`R6`（3/3 confirmed）都通过，auto 与 relay 的冷开差距消失；唯一没通过的是 `R7` 的 3000 ms 时间预算，它是这条出境 relay 路径的升级耗时加 relay 的 600 ms 宽限，而不是判断错误。

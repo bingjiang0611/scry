@@ -39,7 +39,8 @@ struct ChatView: View {
       ConversationScrollView(revision: "\(completedTurns.count)-\(run.output.count)-\(run.lifecycle)", followLatestRequest: latestReadRequest) {
             if !hasTurn {
               EmptyState(title: ConversationCopy.startTitle,
-                         detail: ConversationCopy.startDetail)
+                         detail: ConversationCopy.startDetail, symbol: nil,
+                         picture: AnyView(EmptyStatePreview(scene: .conversation)))
             } else {
               ForEach(completedTurns.flatMap { row in
                 ConversationTurn.completed(row).withSplitPlans(splitPlans[row.id] ?? [:]).rows(id: row.id)

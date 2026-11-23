@@ -21,6 +21,9 @@ import { IconButton } from './primitives/IconButton'
 import { Button } from './primitives/Button'
 import { Icon } from './primitives/Icon'
 import { Tabs } from './primitives/Tabs'
+import { Segmented } from './primitives/Segmented'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 
 // The last read of each repository, so returning to this tab shows what was known
 // instead of a cold load. Keyed by the API (this machine or one remote host) and cwd,
@@ -306,8 +309,10 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
       {cachedAt !== null && repo && <Notice tone={freshReadFailed ? 'warn' : 'info'} className="sc-notice sc-cached" role="status">{freshReadFailed
         ? `显示的是 ${readTime(cachedAt)} 读取的状态；重新读取失败，不能写入，可点刷新重试。`
         : `显示的是 ${readTime(cachedAt)} 读取的状态，正在刷新；刷新完成前不能写入。`}</Notice>}
-      {!state && <p role="status" className="sc-empty">正在读取仓库…</p>}
-      {state && state.status !== 'available' && <div className="sc-empty"><h3>无法读取仓库</h3><p>{state.reason}</p><p>读取失败不代表没有变更。</p></div>}
+      {!state && <DelayedSkeletonRows loading={active} rows={4} label={sourceControlFileCopy.readingRepository} />}
+      {state && state.status !== 'available' && <EmptyState size="card" className="sc-empty" picture="alert" announcement="alert"
+        title={sourceControlFileCopy.repositoryReadFailed}
+        actions={[{ label: sourceControlFileCopy.refreshRepository, icon: 'refresh', disabled: busy, busy: refreshing, onClick: manualRefresh }]} />}
       {repo && primary && expected && <>
         <Tabs
           className="sc-tabs"
@@ -327,7 +332,7 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
             <section className="sc-file-pane" aria-label="本次提交范围">
               <header><strong>文件</strong><span>已选 {scope.length} / {repo.files.length}</span></header>
               <p className="sc-selection-help">勾选要提交的文件，点击文件查看差异</p>
-              {!repo.files.length && <p className="sc-empty">没有未提交的改动。</p>}
+              {!repo.files.length && <EmptyState size="row" className="sc-empty" title={sourceControlFileCopy.clean} />}
               {repo.files.map(file => <SourceControlFileRow key={file.path} file={file} buttonId={`${dialogId}-${file.path}`}
                 selected={selection?.path === file.path} included={isStaged(file) || selected.includes(file.path)}
                 busy={locked} unstageDisabled={disabled || !!repo.actionBlockers.unstage}
@@ -345,12 +350,15 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
                 <small>{selection?.path}</small></div></header>
               {selection && selectedFile ? <div className="sc-diff-scroll">
                 {isStaged(selectedFile) && selectedFile.worktree !== '.' && <div className="sc-diff-switch">
-                  <button aria-pressed={selection.staged} onClick={() => void inspectFile(selection.path, true)}>暂存内容</button>
-                  <button aria-pressed={!selection.staged} onClick={() => void inspectFile(selection.path, false)}>未暂存余量</button>
+                  <Segmented label="文件差异范围" value={selection.staged ? 'staged' : 'unstaged'}
+                    onChange={scope => { void inspectFile(selection.path, scope === 'staged') }}
+                    options={[{ value: 'staged', label: '暂存内容' }, { value: 'unstaged', label: '未暂存余量' }]} />
                   <button disabled={disabled || !!repo.actionBlockers.stage} onClick={() => confirm({ ...expected, action: 'stage', paths: [selection.path], allowStagedOverwrite: true }, `${selection.path} 已有部分暂存。继续会用完整工作区版本替换此文件的 index 选择；其他文件的暂存保持不变。`)}>暂存整个文件…</button>
                 </div>}
-                {!diff ? <p role="status">读取差异…</p> : diff.status === 'available' ? <Patch diff={diff.data} path={selection.path} /> : <p role="alert">{diff.reason}</p>}
-              </div> : <p className="sc-empty">点击文件名，检查实际 Git 差异。</p>}
+                {!diff ? <DelayedSkeletonRows loading rows={4} label={sourceControlFileCopy.readingDiff} />
+                  : diff.status === 'available' ? <Patch diff={diff.data} path={selection.path} />
+                    : <EmptyState size="row" announcement="alert" title={sourceControlFileCopy.diffReadFailed} />}
+              </div> : repo.files.length > 0 ? <EmptyState size="row" className="sc-empty" title={sourceControlFileCopy.chooseFile} /> : null}
             </section>
           </div>
         </div>

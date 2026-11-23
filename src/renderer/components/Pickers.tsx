@@ -130,6 +130,8 @@ export function RunControlSelect({
                 type="button"
                 role="option"
                 aria-selected={isSelected}
+                title={option.description}
+                aria-description={option.description}
                 className={`permission-mode-option${isSelected ? ' is-selected' : ''}${option.value === 'full_access' ? ' is-danger' : ''}`}
                 key={option.value}
                 disabled={option.disabled}
@@ -141,10 +143,7 @@ export function RunControlSelect({
                 }}
               >
                 <Icon name={optionIcon} className="permission-mode-icon" />
-                <span className="permission-mode-copy">
-                  <strong>{option.label}</strong>
-                  {option.description && <span>{option.description}</span>}
-                </span>
+                <strong className="permission-mode-label">{option.label}</strong>
                 {isSelected && <Icon name="check" className="permission-mode-check" />}
               </button>
             )

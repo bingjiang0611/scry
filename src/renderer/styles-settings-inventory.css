@@ -5,36 +5,22 @@
   display: grid;
 }
 
-.settings-rail {
-  display: flex;
+.tabs.settings-rail {
   flex-direction: column;
+  justify-content: flex-start;
   border-right: 1px solid var(--border);
+  border-bottom: 0;
 }
 
-.settings-tab {
-  display: flex;
-  align-items: center;
+.settings-rail [role='tab'] {
+  justify-content: flex-start;
   gap: 8px;
-  padding: 8px 12px;
   border: 0;
-  background: transparent;
-  font: var(--text-sm)/1 var(--font-ui);
+  padding: 8px 12px;
   text-align: left;
-  cursor: pointer;
-  transition: background-color var(--duration-hover) var(--ease-out), color var(--duration-hover) var(--ease-out);
 }
 
-.settings-tab:hover {
-  background: var(--panel3);
-  color: var(--fg);
-}
-
-.settings-tab .cnt {
-  margin-left: auto;
-  color: var(--dim2);
-  font: var(--text-xs)/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
+.settings-rail .tab-count { margin-left: auto; }
 
 .settings-pane {
   min-width: 0;

@@ -37,6 +37,12 @@ export async function startWorkspaceRun(payload: AgentStartRequest, options: App
     if (!remote && selected && cwd !== canonicalExistingDirectory(selected)) throw new Error('发送前项目已切换；请确认保留的草稿后再发送')
     timing.mark('source_authorized')
     let remoteCompletion: Promise<RemoteRunCompletion> | undefined
+    const startOptions = options.stopSignal || options.onWorkspaceProgress
+      ? {
+          ...(options.stopSignal ? { signal: options.stopSignal } : {}),
+          ...(options.onWorkspaceProgress ? { onProgress: options.onWorkspaceProgress } : {})
+        }
+      : undefined
     const result = await deps.sourceControl.startWorkspace({
       ...request, cwd, workspace: request.workspace, commandId: request.commandId
     }, async (workspace, runId, admit) => {
@@ -62,7 +68,7 @@ export async function startWorkspaceRun(payload: AgentStartRequest, options: App
         })
         void remoteCompletion.catch((error) => { if (!registered) reject(error) })
       })
-    }, remote ? options.runId : undefined)
+    }, remote ? options.runId : undefined, ...(startOptions ? [startOptions] : []))
     timing.mark('run_registered')
     timing.finish()
     if (remote) {

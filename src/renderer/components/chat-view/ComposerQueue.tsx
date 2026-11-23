@@ -3,7 +3,7 @@ import type { ChatViewProps } from './types'
 import { useFlipList } from '../../hooks/useFlipList'
 import { Icon } from '../primitives/Icon'
 import { canDismissUnknownSteer, isSteerRemovalBlocked, steerStateForMessage } from '../../steer'
-import { QUEUE_COPY } from '../../constants/copy'
+import { QUEUE_COPY } from '../../constants/queue-copy'
 
 type ComposerQueueProps = Pick<ChatViewProps,
   'queuedPrompts'

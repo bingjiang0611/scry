@@ -19,9 +19,12 @@ export function namesDirectory(dir: unknown): dir is string {
  * or its refusal. A request that names no directory is refused here with the error main's
  * resolver gives it, without a round trip.
  */
-export async function daemonKnownProjectDirectory(cwd: unknown): Promise<string> {
+export function daemonKnownProjectDirectory(cwd: unknown): Promise<string>
+export function daemonKnownProjectDirectory(cwd: unknown, clearIfMissing: boolean): Promise<string | null>
+export async function daemonKnownProjectDirectory(cwd: unknown, clearIfMissing = false): Promise<string | null> {
   if (!namesDirectory(cwd)) throw new Error('无效的工作目录')
-  const resolved = await callDaemonChannel('agent:setCwd', [cwd])
+  const resolved = await callDaemonChannel('agent:setCwd', clearIfMissing ? [cwd, true] : [cwd])
+  if (resolved === null && clearIfMissing) return null
   if (typeof resolved !== 'string' || !isAbsolute(resolved)) throw new Error('invalid_daemon_response')
   return resolved
 }
@@ -38,11 +41,12 @@ export interface DaemonWindowSelection {
  * slow daemon reply cannot overwrite a later selection. A refusal leaves the selection as
  * it was and does not hold up the next call.
  */
-export function daemonSetCwdHandler(window: DaemonWindowSelection): (event: unknown, dir: unknown) => Promise<string | null> {
+export function daemonSetCwdHandler(window: DaemonWindowSelection): (event: unknown, dir: unknown, clearIfMissing?: boolean) => Promise<string | null> {
   let previous: Promise<unknown> = Promise.resolve()
-  return (_event, dir) => {
+  return (_event, dir, clearIfMissing) => {
     const next = previous.then(async () => {
-      const cwd = namesDirectory(dir) ? await daemonKnownProjectDirectory(dir) : undefined
+      const selected = namesDirectory(dir) ? await daemonKnownProjectDirectory(dir, clearIfMissing === true) : null
+      const cwd = selected ?? undefined
       if (cwd !== window.getCurrentCwd()) window.invalidateSessionHistoryLoad('workspace changed')
       window.setCurrentCwd(cwd)
       return cwd ?? null

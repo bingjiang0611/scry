@@ -1,5 +1,6 @@
 import { createHash, X509Certificate as NodeCertificate } from 'node:crypto'
 import { isRemoteProviderObservationTime, isRemoteSessionOutcome, type DesktopHostInvitation, type DesktopRemoteConnection, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopSshTarget, type RemoteProviderRef, type RemoteProjectRef, type RemoteSessionRef } from '../../shared/desktop-remote'
+import type { WorkspacePrepareProgress } from '../../shared/workspace-selection'
 import { type DesktopAttachmentCapability } from './desktop-attachments'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { TraceEvent } from '../../shared/trace'
@@ -62,9 +63,13 @@ export interface RunStatusCursor {
   externalSessionId?: string
   // The run's own cwd (a worktree start runs outside the submitted project).
   cwd?: string
+  // Live worktree preparation progress emitted by the host before admission.
+  workspaceProgress?: WorkspacePrepareProgress
   // Last lifecycle state handed back to the caller, for change detection.
   state?: string
 }
+
+export { parseWorkspacePrepareProgress } from '../../shared/workspace-prepare-progress'
 
 export function fail(code: string): never { throw new Error(code) }
 export function submitFailure(error: unknown): string {

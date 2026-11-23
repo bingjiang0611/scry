@@ -7,7 +7,7 @@ import type { ActiveRun, TraceEvent } from '../shared/trace'
 import type { DesktopRemoteContext } from '../shared/desktop-remote'
 import type { SubscribeActiveRunRow, SubscribeEventItem, SubscribeHint } from '../shared/orchestration-subscribe'
 import { usesScopedRunDelivery, view, type RunCursor } from './daemon-run-cursor'
-import { DaemonRunTransport } from './daemon-run-transport'
+import { DaemonRunError, type DaemonRunTransport, type DaemonSubmitResult } from './daemon-run-transport'
 import { RunWakes } from './daemon-run-wakes'
 import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-run-questions'
 import type { RunTraceRouter } from './run-trace-router'
@@ -62,6 +62,7 @@ export class DaemonRunRuntime {
   #subCtx(): SubscribeRuntimeContext {
     return {
       runs: this.#runs, wakes: this.#wakes, cursorFor: (id) => this.#cursorFor(id), send: this.#deps.send,
+      isDisposed: () => this.#disposed, onWarn: this.#deps.onWarn,
       onSessionBound: (payload) => this.#onSessionBound?.(payload),
       publishStopState: (state: AgentStopState) => this.#deps.runTraces?.publishStopState?.(state),
       settleRunTrace: (id) => this.#deps.runTraces?.settle(id), flushBridge: () => this.#bridge.flushAll(),
@@ -107,11 +108,29 @@ export class DaemonRunRuntime {
 
   async start(input: DaemonStartInput): Promise<DaemonStartReceipt> {
     const stamp = new PerformanceTrace('daemon.run.firstText', input.context ? { provider: input.context.providerId } : {})
-    const receipt = await this.#deps.transport.submit({ intentId: input.intentId, detail: input.detail })
+    const { intentId, detail } = input
+    let receipt: DaemonSubmitResult
+    let recovered = false
+    try {
+      receipt = await this.#deps.transport.submit({ intentId, detail })
+    } catch (error) {
+      if (!(error instanceof DaemonRunError) || error.reason !== 'daemon_outcome_unknown') throw error
+      // The submit may have been recorded. Read its receipt; never dispatch it again.
+      try {
+        const recorded = await this.#deps.transport.intentState(intentId)
+        receipt = { intentId, runId: recorded.runId, status: 'recorded' }
+        recovered = true
+      } catch (cause) {
+        throw Object.assign(new DaemonRunError('daemon_submit_unknown'), { cause })
+      }
+    }
     stamp.mark('submitted')
     this.#track(receipt.runId, input.context, stamp, input.userText)
     const tracked = this.#runs.get(receipt.runId)!
-    if (receipt.status === 'duplicate' && (!tracked.scryRunId || admissionPhase(tracked) === 'pending')) {
+    // A duplicate, or a receipt recovered after a lost reply, may have bound or been
+    // refused while this window was not following it: read its projection row so the
+    // normal binding and admission path decides, instead of focusing on the receipt alone.
+    if ((receipt.status === 'duplicate' || recovered) && (!tracked.scryRunId || admissionPhase(tracked) === 'pending')) {
       const current = await this.#deps.transport.runProjection(receipt.runId)
       // One tracked row is a receipt lookup, not the window's full active set.
       if (current) await applySubscribeSnapshotToRuntime({ ...this.#subCtx(), probeRunState: undefined }, [current])

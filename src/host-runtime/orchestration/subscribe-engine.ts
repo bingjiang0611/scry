@@ -19,6 +19,7 @@ import type { SubscribeHub } from './subscribe-hub'
 import { deviceEventPayload, deviceHintKey, deviceOutcome, deviceTurn } from './subscribe-device-fields'
 import { readSubscribedRuns } from './subscribe-active-runs'
 import { projectSubscribeSession, readSessionsSnapshot } from './subscribe-sessions'
+import { matchesViews } from './subscribe-view-match'
 import { ORCHESTRATION_EVENT_TYPES, PROMPT_PREVIEW_MAX_CHARS, type OrchestrationEventRow, type RunProjectionRow, type SessionProjectionRow } from './types'
 
 export const SUBSCRIBE_MAX_WAIT_MS = 25_000
@@ -26,29 +27,6 @@ export const SUBSCRIBE_MAX_SCAN_GAP = 4_096
 export const SUBSCRIBE_MAX_EVENTS = 128
 export const SUBSCRIBE_MAX_EVENT_BYTES = 256 * 1024
 const DEFAULT_SESSIONS_PAGE_SIZE = 200
-
-const SESSION_VIEW_EVENTS = new Set([
-  'session.created',
-  'session.renamed',
-  'session.pinned',
-  'session.unpinned',
-  'session.archived',
-  'session.restored',
-  'session.deleted',
-  'session.withdrawn',
-  'session.forked',
-  'session.discovered',
-  'session.imported',
-  'turn.began',
-  'turn.delivery',
-  'run.intent_recorded',
-  'run.settled',
-  'run.failed',
-  'run.cancelled',
-  'run.interrupted',
-  'run.question_opened',
-  'run.question_closed'
-])
 
 export interface SubscribeEngineOptions {
   sink: EventSink
@@ -67,13 +45,6 @@ export interface SubscribeEngineOptions {
 }
 
 type SubscribeAccess = { scope: 'local' | 'remote'; canReadCwd: (cwd: string | null) => boolean }
-
-function matchesViews(event: OrchestrationEventRow, views: ReadonlySet<SubscribeView>, detailSessionKey?: string): boolean {
-  if (views.has('activeRuns') && event.type.startsWith('run.')) return true
-  if (views.has('sessions') && SESSION_VIEW_EVENTS.has(event.type)) return true
-  if (views.has('detail') && detailSessionKey && event.sessionKey === detailSessionKey) return true
-  return false
-}
 
 /**
  * Orchestration-backed `subscribe` read engine (`P4-orchestration-protocol.md` §5.1–§5.5).
@@ -355,6 +326,7 @@ export class SubscribeEngine {
       ...(conversation ? { isConversationRun: true } : {}),
       ...(localMeta?.admitted || recoveredAppRunId ? { admitted: true } : {}),
       ...(externalSessionId ? { externalSessionId } : {}),
+      ...(liveMeta?.workspaceProgress ? { workspaceProgress: liveMeta.workspaceProgress } : {}),
       sessionKey: run.sessionKey,
       scope: run.scope,
       origin: run.origin,
@@ -444,7 +416,8 @@ export class SubscribeEngine {
         const run = this.#sink.getRun(hint.runId)
         if (run && access.canReadCwd(run.cwd) && (!detail || (detailSession && run.sessionKey === detailSession.sessionKey))) {
           hints.push({ kind: 'run', runId: hint.runId, outputSeq: hint.outputSeq,
-            ...(hint.scryRunId ? { traceRunId: hint.scryRunId } : {})
+            ...(hint.scryRunId ? { traceRunId: hint.scryRunId } : {}),
+            ...(hint.workspaceProgress ? { workspaceProgress: hint.workspaceProgress } : {})
           })
         }
       }

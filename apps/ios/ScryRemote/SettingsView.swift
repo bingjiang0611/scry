@@ -51,7 +51,10 @@ struct SettingsView: View {
         .listRowBackground(Palette.panel2)
 
         Section {
-          Button { showArchived = true } label: {
+          Button {
+            showArchived = true
+            Task { _ = await run.refreshArchived() }
+          } label: {
             HStack(spacing: 12) {
               Image(systemName: Symbol.archive).font(.system(size: 17)).frame(width: 22)
               VStack(alignment: .leading, spacing: 3) {

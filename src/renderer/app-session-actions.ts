@@ -1,10 +1,9 @@
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react'
 import { patchProjectSession, sessionRowKey, type SessionSaveState } from './session-save-state'
 import { actionErrorText } from './hooks/useAsyncAction'
-import { SESSION_SAVE_COPY } from './constants/copy'
+import { LOADING_COPY, SESSION_EMPTY_COPY, SESSION_SAVE_COPY } from './constants/copy'
 import { runStructuralTransition } from './structural-motion'
 import { browserStorage } from './browser-storage'
-import { LOADING_COPY } from './constants/copy'
 import { persistSessionSelection, readStoredSessionSelection } from './session-restore'
 import { workspaceRunSession } from './workspace-drafts'
 import type { ProviderContext, ProviderId, SessionProviderId } from '@shared/provider'
@@ -12,7 +11,7 @@ import type { ProjectMeta, SessionMeta, SessionRef } from './env'
 import type { Turn } from './format'
 import type { AppView } from './app-types'
 import type { useWorkspaceState } from './hooks/useWorkspaceState'
-import type { useAgentSession } from './hooks/useAgentSession'
+import type { useAppSessionRuntime } from './app-session-runtime'
 import type { useIntegrations } from './hooks/useIntegrations'
 import type { SessionHistorySnapshotCache } from './session-history-cache'
 import { sessionMatchesSelection, sessionSelectionChanged } from './session-selection'
@@ -30,13 +29,13 @@ const SAVED_STATUS_MS = 1200
 export function createSessionActions({
   workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
   resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
-  draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
+  draftContextRef, setSessionEvidenceGap, setMissingWorkspaceSessionId, setSessionPromptQueues, setComposerError,
   confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
   setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
   queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
 }: {
   workspace: ReturnType<typeof useWorkspaceState>
-  session: ReturnType<typeof useAgentSession>
+  session: ReturnType<typeof useAppSessionRuntime>['session']
   integrations: ReturnType<typeof useIntegrations>
   setSessionLoading: Dispatch<SetStateAction<boolean>>
   sessionSelectionSeqRef: MutableRefObject<number>
@@ -48,6 +47,7 @@ export function createSessionActions({
   taRef: RefObject<HTMLTextAreaElement>
   draftContextRef: MutableRefObject<{ providerId: ProviderId; agentProfileId: string | undefined; cwd: string | null }>
   setSessionEvidenceGap: Dispatch<SetStateAction<SessionEvidenceGap | null>>
+  setMissingWorkspaceSessionId: (sessionId: string | null) => void
   setSessionPromptQueues: Dispatch<SetStateAction<SessionPromptQueues>>
   setComposerError: Dispatch<SetStateAction<string | null>>
   confirmWorkspaceTransition: () => boolean
@@ -123,6 +123,8 @@ export function createSessionActions({
     // Queued send intents are still reset below; restoring a draft never sends it.
     runStructuralTransition('session', () => {
       setSessionLoading(true)
+      // The previous selection no longer owns cleanup once this draft takes over.
+      setSessionCacheVisible(false)
       setSessionEvidenceGap(null)
       selectSessionId(null)
       setSessionPromptQueues((current) => {
@@ -142,7 +144,6 @@ export function createSessionActions({
       await applyNewConversationEffects({
         clearTurns: session.clearTurns,
         newSession: () => window.scry.newSession(integrations.providerContext),
-        refreshProviderCatalogs,
         setActiveSessionId: selectSessionId,
         setView,
         focusComposer: () => focusComposerUnlessFocusMoved(taRef, focusBefore),
@@ -150,12 +151,15 @@ export function createSessionActions({
       })
     } catch (error) {
       if (isCurrent()) setComposerError(`无法新建会话：${error instanceof Error ? error.message : String(error)}`)
+      return
     } finally {
       if (isCurrent()) {
         setSessionLoading(false)
         focusComposerUnlessFocusMoved(taRef, focusBefore)
       }
     }
+    // Reset is authoritative; refreshing commands and skills is not a send prerequisite.
+    if (isCurrent()) void refreshProviderCatalogs()
   }
 
   const newConversationInProject = async (projectCwd: string): Promise<void> => {
@@ -217,7 +221,7 @@ export function createSessionActions({
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     const presentationPage = cachedPage ?? (switchingSession ? sessionPreviewPage(sessionId, previewText, previewRunId) : undefined)
-    setSessionEvidenceGap(null)
+    setSessionEvidenceGap(previous => !switchingSession && previous?.sessionId === sessionId && previous.status === 'error' ? previous : null)
     setSessionLoading(true)
     setSessionCacheVisible(Boolean(presentationPage?.turns.length) || (!switchingSession && session.turns.length > 0))
     setView('chat')
@@ -234,11 +238,13 @@ export function createSessionActions({
     try {
       // Sidebar activity is a display cache, not proof that no live run exists.
       const activeRunsRequest = window.scry.activeRuns()
-      const [, activeRuns] = await Promise.all([
-        window.scry.setCwd(projectCwd || null),
+      const [selectedCwd, activeRuns] = await Promise.all([
+        window.scry.setCwd(projectCwd || null, true),
         activeRunsRequest
       ])
       if (!isCurrent()) return
+      const workspaceMissing = Boolean(projectCwd) && selectedCwd === null
+      setMissingWorkspaceSessionId(workspaceMissing ? sessionId : null)
       const runId = activeRunForSession(
         activeRuns,
         projectCwd,
@@ -246,16 +252,27 @@ export function createSessionActions({
         providerId,
         agentProfileId
       )?.runId ?? knownRunId
+      let adoptionFailed = false
       if (
-        await restoreActiveSessionSelection(
+        !workspaceMissing && await restoreActiveSessionSelection(
           { runId, sessionId, externalSessionId, cwd: projectCwd, providerId, agentProfileId },
           {
             prepareRunFocus: session.prepareRunFocus,
-            adoptActiveRun: (targetRunId) => window.scry.adoptActiveRun(targetRunId),
+            adoptActiveRun: async (targetRunId) => {
+              try {
+                return await window.scry.adoptActiveRun(targetRunId)
+              } catch (error) {
+                // An unreadable live run is not evidence that saved history is unreadable.
+                console.warn('[Scry] active run adoption failed', error)
+                adoptionFailed = true
+                return null
+              }
+            },
             loadSession: (context) => window.scry.loadSession(context),
             replaceWithParsedSession: session.replaceWithParsedSession,
             onHistoryLoaded: (page, activeRun) => {
               if (!isCurrent()) return
+              if (page?.workspaceMissing) setMissingWorkspaceSessionId(sessionId)
               setSessionCacheVisible(false)
               if (page && activeRun?.done !== false) sessionSnapshots.put(historyContext, page, cacheRevision)
               else sessionSnapshots.delete(historyContext)
@@ -271,7 +288,10 @@ export function createSessionActions({
       const focusRequest = window.scry.focusRun(null)
       if (!externalSessionId) {
         await focusRequest
-        if (isCurrent()) setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
+        if (isCurrent()) {
+          setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, null))
+          if (adoptionFailed) setComposerError(LOADING_COPY.sessionAdoptFailed)
+        }
         return
       }
       const [loadedPage] = await Promise.all([
@@ -279,28 +299,29 @@ export function createSessionActions({
         focusRequest
       ])
       if (!isCurrent()) return
+      if (loadedPage?.workspaceMissing) setMissingWorkspaceSessionId(sessionId)
       setSessionCacheVisible(false)
       const page = loadedPage ? sessionSnapshots.put(historyContext, loadedPage, cacheRevision) : null
       if (!page) sessionSnapshots.delete(historyContext)
       // Confirm only an unchanged display-only installation. A focus/start/clear
       // supersedes it and must use the normal authoritative replacement.
       const cacheConfirmed = page != null && page === cachedPage && session.confirmCachedSession(sessionId, page)
-      if (!cacheConfirmed) session.replaceWithParsedSession(sessionId, page?.turns ?? [], {
-        activeRun: null,
-        page
-      })
-      setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
+      const finishPresentation = (): void => {
+        setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
+        setSessionLoading(false)
+      }
+      // Commit authority together with the turns. Otherwise the structural flush can
+      // remove a failure state while ChatView still suppresses the replacement turns.
+      if (cacheConfirmed) finishPresentation()
+      else session.replaceWithParsedSession(sessionId, page?.turns ?? [], { activeRun: null, page }, finishPresentation)
+      if (adoptionFailed) setComposerError(LOADING_COPY.sessionAdoptFailed)
     } catch (error) {
       if (isCurrent()) {
-        setSessionEvidenceGap({
-          sessionId,
-          status: 'error',
-          detail: `无法加载会话历史：${error instanceof Error ? error.message : String(error)}`
-        })
+        console.error('[Scry] session history read failed', error)
+        setSessionEvidenceGap({ sessionId, status: 'error', detail: SESSION_EMPTY_COPY.readFailedDetail })
         sessionSnapshots.delete(historyContext)
         setSessionCacheVisible(false)
         if (presentationPage) session.clearTurns()
-        setComposerError(LOADING_COPY.sessionOpenFailed(error instanceof Error ? error.message : String(error)))
       }
     } finally {
       if (isCurrent()) {

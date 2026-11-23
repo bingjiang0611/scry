@@ -172,7 +172,7 @@ try {
         }
         const selection = []
         win.setSize(1200, 900)
-        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly || piPermissionOnly || terminalScoped ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || piCommandsOnly || modelsOnly || terminalsOnly || piPermissionOnly || terminalScoped ? [] : ['repeat-pending', 'late-startup-loading', 'provider-switch', 'same-provider', 'late-startup', 'rapid-switch', 'focused-event', 'new-draft', 'stale-live', 'stale-run', 'adopt-failed'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-selection.html'))}, { query: { scenario } })
           selection.push(await (${fixtureSources.exerciseSessionSelection})(win.webContents, scenario))
         }
@@ -187,7 +187,7 @@ try {
           sessionModels = await (${fixtureSources.exerciseSessionModels})(win.webContents, ${JSON.stringify(process.env.SCRY_CAPABILITIES_UI_SCREENSHOT ?? '')})
         }
         const sessionTerminals = []
-        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly || skipTerminals ? [] : ['restored', 'pending'])}) {
+        for (const scenario of ${JSON.stringify(overviewOnly || selectionOnly || piCommandsOnly || modelsOnly || piPermissionOnly || skipTerminals ? [] : ['restored', 'pending', 'restore-failure', 'workspace-read-failure'])}) {
           await win.loadFile(${JSON.stringify(join(temp, 'session-terminal.html'))}, { query: { scenario } })
           sessionTerminals.push(await (${fixtureSources.exerciseSessionTerminals})(win.webContents, scenario, ${JSON.stringify(specialSources.pointer)}))
         }

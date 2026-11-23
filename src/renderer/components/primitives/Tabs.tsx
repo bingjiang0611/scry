@@ -20,6 +20,7 @@ type TabsProps<T extends string> = {
   items: readonly TabItem<T>[]
   /** Hook class for placement and UI checks; never for restyling the tabs. */
   className?: string
+  orientation?: 'horizontal' | 'vertical'
   listRef?: Ref<HTMLDivElement>
   /** Lets a caller measure tabs, e.g. for a moving selection indicator. */
   tabRef?: (value: T, node: HTMLButtonElement | null) => void
@@ -42,10 +43,14 @@ export function nextTabIndex(key: string, current: number, count: number): numbe
  * focus and selection, and only the selected tab is in the Tab order. Selection
  * color switches in the same frame as aria-selected; there is no color tween.
  */
-export function Tabs<T extends string>({ label, value, onChange, items, className, listRef, tabRef, children }: TabsProps<T>) {
+export function Tabs<T extends string>({ label, value, onChange, items, className, orientation = 'horizontal', listRef, tabRef, children }: TabsProps<T>) {
   const nodes = useRef(new Map<T, HTMLButtonElement>())
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
-    const index = nextTabIndex(event.key, items.findIndex(item => item.value === value), items.length)
+    const key = orientation === 'vertical'
+      ? ({ ArrowUp: 'ArrowLeft', ArrowDown: 'ArrowRight', Home: 'Home', End: 'End' } as Record<string, string>)[event.key]
+      : event.key
+    if (!key) return
+    const index = nextTabIndex(key, items.findIndex(item => item.value === value), items.length)
     if (index < 0) return
     event.preventDefault()
     const next = items[index].value
@@ -53,7 +58,7 @@ export function Tabs<T extends string>({ label, value, onChange, items, classNam
     nodes.current.get(next)?.focus()
   }
   return (
-    <div ref={listRef} className={className ? `tabs ${className}` : 'tabs'} role="tablist" aria-label={label} onKeyDown={move}>
+    <div ref={listRef} className={className ? `tabs ${className}` : 'tabs'} role="tablist" aria-label={label} aria-orientation={orientation === 'vertical' ? orientation : undefined} onKeyDown={move}>
       {items.map(item => (
         <button
           key={item.value}

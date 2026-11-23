@@ -27,11 +27,15 @@ extension RemoteRunStore {
     _ = restoreActiveContext()
     if !force, hasCachedValue, isFresh(providersLoadedAt, within: Self.metadataFreshness) { return }
     guard providersTask == nil else { return }
+    // Retain usable choices during refresh, but do not reuse a previously empty
+    // result as proof that the current read is empty or even succeeded.
+    let retainChoices: Bool
+    if case .loaded = providers { retainChoices = true } else { retainChoices = false }
     guard let client = makeClient() else {
-      if !hasCachedValue { providers = .failed("尚未配对") }
+      if !retainChoices { providers = .failed(ConnectionCopy.unpairedDevice) }
       return
     }
-    if !hasCachedValue { providers = .loading }
+    if !retainChoices { providers = .loading }
     let requestDataGeneration = dataGeneration
     let requestConnectionRevision = connectionSuccessRevision
     providersTask = Task { [weak self] in
@@ -75,7 +79,7 @@ extension RemoteRunStore {
           guard let self, self.dataGeneration == requestDataGeneration else { return }
           self.providersTask = nil
           self.recordFailure(error, since: requestConnectionRevision)
-          if !hasCachedValue { self.providers = .failed(Self.describe(error)) }
+          if !retainChoices { self.providers = .failed(Self.describe(error)) }
         }
       }
     }

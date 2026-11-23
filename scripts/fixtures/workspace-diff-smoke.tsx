@@ -10,6 +10,8 @@ import '../../src/renderer/styles.css'
 import '../../src/renderer/motion.css'
 
 const reads = { stats: 0, billing: 0, analytics: 0 }
+// Sample calls directly: React may batch away the render for two identical failures.
+Object.assign(window, { workspaceDiffIntegrationReads: reads })
 let dataUpdated: (() => void) | undefined
 let mode = 'clean'
 let release: ((value: WorkspaceDiffResult) => void) | undefined
@@ -66,7 +68,6 @@ function Fixture() {
     <section id="diff-overview">
       <OverviewPanel turns={[{ runId: 'fixture', userText: '', done: true, items: [] }]} selected={null} usage={null} stats={null} gitDiff={integrations.gitDiff} gitDiffRefreshing={integrations.gitDiffRefreshing} onSelect={() => undefined} />
     </section>
-    <output id="integration-reads" data-stats={reads.stats} data-billing={reads.billing} data-analytics={reads.analytics} />
     <pre id="diff-report">{buildSessionReport([], integrations.gitDiff)}</pre>
   </>
 }

@@ -25,7 +25,7 @@ const catalog: DesktopRemoteCatalog = {
 
 function Groups({ archived = false }: { archived?: boolean }) {
   const groups = useRemoteProjectGroups('', archived)
-  return archived ? <ArchivedRemoteChatsPanel groups={groups} /> : <pre>{JSON.stringify(groups)}</pre>
+  return archived ? <ArchivedRemoteChatsPanel groups={groups} uncheckedHosts={[]} hostsIndex="ready" /> : <pre>{JSON.stringify(groups)}</pre>
 }
 
 beforeEach(() => {
@@ -34,6 +34,18 @@ beforeEach(() => {
 })
 
 describe('remote archive location', () => {
+  it('distinguishes an unread host from a failed archive read and withholds technical errors', () => {
+    const unknown = renderToStaticMarkup(<ArchivedRemoteChatsPanel groups={[]} hostsIndex="ready"
+      uncheckedHosts={[{ connection: { ...connection, state: 'disconnected' }, failed: false, loading: false }]} />)
+    expect(unknown).toContain('尚未核对「Mac A」的存档')
+    expect(unknown).not.toContain('刷新存档')
+    const failed = renderToStaticMarkup(<ArchivedRemoteChatsPanel groups={[]} hostsIndex="ready"
+      uncheckedHosts={[{ connection, failed: true, loading: false }]} />)
+    expect(failed).toContain('没能读取「Mac A」的存档')
+    expect(failed).toContain('刷新存档')
+    expect(renderToStaticMarkup(<ArchivedRemoteChatsPanel groups={[]} hostsIndex="ready" uncheckedHosts={[]} />)).toBe('')
+  })
+
   it('excludes archived sessions and archived-only projects from sidebar groups and recency', () => {
     const html = renderToStaticMarkup(<Groups />)
     expect(html).toContain('Live session')

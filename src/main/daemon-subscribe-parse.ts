@@ -15,6 +15,7 @@ import {
 } from '../shared/orchestration-subscribe'
 import { DaemonRunError, fail, record } from './daemon-run-error'
 import { readDaemonTrace, type DaemonTraceCall } from './daemon-run-trace-read'
+import { parseWorkspacePrepareProgress } from '../shared/workspace-prepare-progress'
 
 const MAX_UNREAD_SESSIONS = 10_000
 const MAX_SUBSCRIBE_ITEMS = 512
@@ -88,6 +89,7 @@ function parseHints(rawHints: unknown, network: boolean): SubscribeHint[] | unde
   for (const raw of rawHints) {
     if (!record(raw) || typeof raw.kind !== 'string') continue
     if (raw.kind === 'run' && typeof raw.runId === 'string' && Number.isSafeInteger(raw.outputSeq)) {
+      const workspaceProgress = parseWorkspacePrepareProgress(raw.workspaceProgress)
       hints.push({
         kind: 'run',
         runId: raw.runId,
@@ -98,7 +100,8 @@ function parseHints(rawHints: unknown, network: boolean): SubscribeHint[] | unde
         ...(typeof raw.cwd === 'string' ? { cwd: raw.cwd } : {}),
         ...(typeof raw.providerId === 'string' ? { providerId: raw.providerId } : {}),
         ...(typeof raw.agentProfileId === 'string' ? { agentProfileId: raw.agentProfileId } : {}),
-        ...(typeof raw.externalSessionId === 'string' ? { externalSessionId: raw.externalSessionId } : {})
+        ...(typeof raw.externalSessionId === 'string' ? { externalSessionId: raw.externalSessionId } : {}),
+        ...(workspaceProgress ? { workspaceProgress } : {})
       })
     } else if (raw.kind === 'terminal') {
       hints.push({ kind: 'terminal' })

@@ -64,9 +64,14 @@ export async function handleRunControl(handlers: RunControlHandlers, request: Ru
     if (typeof request.runId !== 'string' || request.runId.length === 0 || request.runId.length > 256) {
       return { steer: rejected('runId 无效') }
     }
+    if (request.payload !== undefined && request.payload !== 'traceContext') return { error: 'invalid_request' }
     const adopted = handlers.adopt(request.runId)
     if (adopted && 'refused' in adopted) return { run: null, refused: adopted.refused }
-    return { run: adopted }
+    if (request.payload === undefined) return { run: adopted } // Older desktop clients still expect the inline snapshot.
+    if (adopted === null) return { run: null }
+    // No trace or attachments in this reply. The desktop trace reader handles large snapshots.
+    // Omit the provider session id: it can become bound between this lookup and that read.
+    return { traceContext: { cwd: adopted.cwd, providerId: adopted.providerId, agentProfileId: adopted.agentProfileId } }
   }
   return { error: 'invalid_request' }
 }

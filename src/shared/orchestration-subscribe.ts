@@ -5,6 +5,7 @@ import type { SessionAttentionSnapshot } from './session-attention'
 import type { SessionHistoryPage } from './session-history'
 import type { ConversationPage } from './conversation-api'
 import type { DesktopHostReadResult, DesktopRemoteHistory } from './desktop-remote'
+import type { WorkspacePrepareProgress } from './workspace-selection'
 
 /**
  * Shared wire contract for orchestration `subscribe` (P4-orchestration-protocol.md §5).
@@ -25,7 +26,9 @@ export const SUBSCRIBE_VIEWS: ReadonlySet<SubscribeView> = new Set(['sessions', 
 export const SUBSCRIBE_RETAINED_WINDOW_NOTICES: ReadonlySet<string> = new Set([
   'agent:error',
   'agent:backgroundWork',
-  'agent:deleteArchivedProgress'
+  'agent:deleteArchivedProgress',
+  // Managed worktree preparation progress for the App's own first send.
+  'workspaceSelection:progress'
 ])
 
 export interface SubscribeKnownCursor {
@@ -99,6 +102,8 @@ export interface SubscribeActiveRunRow {
   admitted?: boolean
   /** Native session ID from the authorized binding or projected catalog. */
   externalSessionId?: string
+  /** Live managed-worktree preparation before admission (volatile, not persisted). */
+  workspaceProgress?: WorkspacePrepareProgress
   sessionKey: string | null
   scope: 'local' | 'remote' | 'system'
   origin: string
@@ -143,6 +148,7 @@ export type SubscribeHint =
       providerId?: string
       agentProfileId?: string
       externalSessionId?: string
+      workspaceProgress?: WorkspacePrepareProgress
     }
   | { kind: 'terminal' }
   | { kind: 'oauth'; url: string }

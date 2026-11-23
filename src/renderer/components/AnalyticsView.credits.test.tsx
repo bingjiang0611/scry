@@ -150,6 +150,22 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(JSON.stringify(data)).toBe(before)
   })
 
+  it('shows Antigravity branding without treating missing cost as zero', () => {
+    const row = { ...aggregate, costUsd: null, costKnownRows: 0 }
+    const data: UsageAnalytics = {
+      status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
+      days: ['2026-09-09'], totals: row,
+      byProvider: [{ ...row, provider: 'antigravity', model: null }],
+      byModel: [], byDay: [], dailyByProvider: []
+    }
+    const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
+      error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
+    expect(html).toContain('usage-provider-mark is-antigravity')
+    expect(html).toContain('>Antigravity</b>')
+    expect(html).toMatch(/<strong title="成本不可用[^\"]*">—<\/strong>/)
+    expect(html).not.toContain('$0.00')
+  })
+
   it('先显示账本快照时把 Credit 标为正在计算，而不是不可用', () => {
     const data: UsageAnalytics = {
       status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,

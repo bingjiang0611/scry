@@ -217,8 +217,8 @@ struct MessageComposer: View {
           if command.id != slashMatches.last?.id { Rectangle().fill(Palette.border3.opacity(0.7)).frame(height: 0.5) }
         }
       } else if !slashCommandsLoading {
-        Text(slashCommandsReason ?? (slashCommands.isEmpty ? ConnectionCopy.noProviderCommands : ConnectionCopy.noMatchingCommands))
-          .font(Typography.meta).foregroundStyle(Palette.dim)
+        EmptyState(title: slashCommandsReason ?? (slashCommands.isEmpty ? ConnectionCopy.noProviderCommands : ConnectionCopy.noMatchingCommands(text)),
+                   symbol: nil, size: .menu, announce: !slashCommands.isEmpty && slashCommandsReason == nil)
           .padding(.horizontal, 11).padding(.bottom, 10)
       }
     }
@@ -232,7 +232,6 @@ struct MessageComposer: View {
         Button { showPhotos = true } label: { Label(ConnectionCopy.photoLibrary, systemImage: Symbol.photo) }
         Button { showFiles = true } label: { Label(ConnectionCopy.textOrCodeFile, systemImage: Symbol.file) }
       }
-      if !permissionOptions.isEmpty { permissionItems }
     } label: {
       Image(systemName: Symbol.plus)
         .font(Typography.rowTitle)
@@ -242,22 +241,7 @@ struct MessageComposer: View {
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain).disabled(disabled)
-    .accessibilityLabel(ConnectionCopy.attachmentAndPermission(permissionLabel))
-  }
-
-  @ViewBuilder private var permissionItems: some View {
-    Section(ConnectionCopy.permissionMenu(permissionLabel)) {
-      if permissionOptions.count == 1 {
-        Button {} label: { Label(ConnectionCopy.permissionLocked(permissionLabel), systemImage: "lock.fill") }
-          .disabled(true)
-      } else {
-        ForEach(permissionOptions, id: \.id) { option in
-          Button { onPermission?(option.id) } label: {
-            Label(option.label, systemImage: selectedPermission == option.id ? Symbol.check : Symbol.shield)
-          }
-        }
-      }
-    }
+    .accessibilityLabel(ConnectionCopy.attachmentMenu)
   }
 
   @ViewBuilder private func contextControl(_ label: String) -> some View {
@@ -274,10 +258,24 @@ struct MessageComposer: View {
   }
 
   private var permissionControl: some View {
-    Menu { permissionItems } label: {
-      Text(permissionLabel).font(Typography.meta.weight(.medium)).foregroundStyle(Palette.dim)
-        .lineLimit(1).frame(minHeight: 44)
-    }.disabled(disabled || permissionOptions.isEmpty)
+    Picker(ConnectionCopy.permissionMenu(permissionLabel), selection: permissionSelection) {
+      ForEach(permissionOptions, id: \.id) { option in
+        Text(option.label).tag(option.id)
+      }
+    }
+    .pickerStyle(.menu)
+    .font(Typography.meta.weight(.medium))
+    .foregroundStyle(Palette.dim)
+    .lineLimit(1)
+    .frame(minHeight: 44)
+    .disabled(disabled || permissionOptions.isEmpty)
+    .accessibilityLabel(ConnectionCopy.permissionMenu(permissionLabel))
+    .accessibilityValue(permissionLabel)
+    .accessibilityIdentifier("permission-control")
+  }
+
+  private var permissionSelection: Binding<String> {
+    Binding(get: { selectedPermission }, set: { onPermission?($0) })
   }
 
   @ViewBuilder private var keyboardControl: some View {

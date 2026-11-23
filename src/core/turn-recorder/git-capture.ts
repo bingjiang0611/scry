@@ -33,6 +33,7 @@ import {
 } from 'node:os'
 
 import { checkWorkspaceCaptureLimits, WorkspaceReadUnavailable } from './git-workspace-limits.js'
+import { sampleGitRepositoryLocation, type GitRepositoryHead, type GitRepositoryLocation } from './git-repository-location.js'
 
 // Match contents of .scry directories at every depth, including the Git root.
 export const SCRY_DATA_EXCLUSION = ':(top,exclude,glob)**/.scry/**'
@@ -46,6 +47,7 @@ export interface GitTurnDiffCapture {
   scope?: string
   requestedRoot?: string
   beforeTree?: string
+  repositoryStart?: GitRepositoryLocation
   /** HEAD observed by the same layout/status read that starts this capture. */
   head?: string
   branch?: string
@@ -227,6 +229,8 @@ export async function beginGitTurnDiff(
     // The recursive glob also matches the root .scry directory's contents.
     // Git add treats a literal excluded ignored directory as an explicit path.
     const dataPathspec = options.excludeScryData ? [SCRY_DATA_EXCLUSION] : []
+    // For a repo-root request, sample live HEAD in parallel with the existing layout and status commands.
+    const cwdLocation = workspaceSnapshot ? undefined : sampleGitRepositoryLocation(canonicalCwd, true)
     // Layout 与 status 都只读同一仓库且彼此无依赖，并行启动。porcelain v2 的 branch.oid
     // 同时给出 HEAD；没有显式排除路径时，它还直接给出 baselineClean。这样常见路径只需
     // 一轮并行 Git 进程，不再串行执行 HEAD 与 status 两轮探测。
@@ -255,12 +259,16 @@ export async function beginGitTurnDiff(
     if (inside !== 'true' || !repoRoot || !commonDirRaw || !indexPathRaw || !sparsePathRaw) {
       return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'not_git' }
     }
+    // The diff baseline may be a frozen tree, but location comes from the live worktree at capture start.
+    const location = repoRoot === canonicalCwd ? cwdLocation
+      : workspaceSnapshot ? undefined : sampleGitRepositoryLocation(repoRoot, true)
     if (statusResult.status === 'rejected') throw statusResult.reason
     const statusRecords = statusResult.value.split('\0').filter(Boolean)
     const headRecord = statusRecords.find((record) => record.startsWith('# branch.oid '))
     const head = headRecord?.slice('# branch.oid '.length).trim() ?? ''
     if (!head || head === '(initial)') {
-      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head' }
+      return { beforeAt, captureMs: Date.now() - started, status: 'unavailable', reason: 'no_head',
+        repoRoot, requestedRoot, repositoryStart: location?.() }
     }
     const branchName = statusRecords.find(record => record.startsWith('# branch.head '))?.slice('# branch.head '.length)
     const branch = branchName && branchName !== '(detached)' ? branchName : undefined
@@ -336,6 +344,7 @@ export async function beginGitTurnDiff(
         beforeTree: baselineTree,
         head: baseline.commit,
         branch,
+        repositoryStart: location?.(),
         baselineClean: false,
         indexPath,
         tempDir,
@@ -366,6 +375,7 @@ export async function beginGitTurnDiff(
         beforeTree: head,
         head,
         branch,
+        repositoryStart: location?.(),
         baselineClean,
         indexPath,
         ...(indexState && !sparseCheckout ? { indexState } : {}),
@@ -404,6 +414,7 @@ export async function beginGitTurnDiff(
       beforeTree,
       head,
       branch,
+      repositoryStart: location?.(),
       baselineClean,
       indexPath,
       ...(sparseCheckout ? {} : { beforeIndex }),
@@ -428,6 +439,7 @@ export async function beginGitTurnDiff(
 }
 
 export interface GitAfterTree {
+  repositoryEnd?: GitRepositoryHead
   tree: string
   afterAt: string
   indexFile: string

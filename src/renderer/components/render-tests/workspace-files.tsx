@@ -1,7 +1,16 @@
 import * as shared from './shared'
+import { workspaceReadDenial } from '../WorkspaceDialogs'
 const { describe, it, expect, renderToStaticMarkup, appendWorkspaceReference, pathContains, WorkspacePanel, workspaceReferenceToken, resolveWorkspaceOps, workspaceOpsHostLabel } = shared
 
 describe('工作区文件面板', () => {
+  it('只把明确的授权或文件权限拒绝归为无权访问', () => {
+    expect(workspaceReadDenial(new Error("Error invoking remote method 'workspace:read': Error: workspace_not_authorized")))
+      .toContain('项目授权')
+    expect(workspaceReadDenial(new Error('EACCES: permission denied'))).toContain('文件权限')
+    expect(workspaceReadDenial(new Error('directory_unavailable'))).toBeNull()
+    expect(workspaceReadDenial(new Error('ECONNRESET'))).toBeNull()
+  })
+
   it('提供文件树入口、筛选与可恢复删除语义', () => {
     const html = renderToStaticMarkup(
       <WorkspacePanel cwd="/tmp/project" onClose={() => {}} onAddReference={() => {}} />

@@ -7,7 +7,9 @@ import {
   projectBackgroundService,
   type BackgroundServiceNotice
 } from '../background-service-view'
-import { CLI_APPROVAL_COPY, LOGIN_START_COPY } from '../constants/background-service-copy'
+import { BACKGROUND_SERVICE_READ_COPY, CLI_APPROVAL_COPY, LOGIN_START_COPY } from '../constants/background-service-copy'
+import { EmptyState } from './primitives/EmptyState'
+import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { useCopyFeedback } from '../hooks/useCopyFeedback'
 import type { RendererPlatform } from '../platform'
@@ -77,8 +79,10 @@ export function BackgroundServicePanel({
           {busy === 'reading' ? '读取中…' : '刷新'}
         </Button>
       </div>
-      {readError && <p className="background-service__notice bad" role="alert">读取后台服务状态失败：{readError}</p>}
-      {!view && !readError && <p className="background-service__muted">读取中…</p>}
+      {readError && <EmptyState size="card" picture="alert" title={BACKGROUND_SERVICE_READ_COPY.failed} announcement="alert"
+        actions={[{ label: BACKGROUND_SERVICE_READ_COPY.refresh, icon: 'refresh', busy: busy === 'reading',
+          disabled: busy !== null && busy !== 'reading', onClick: onRefresh }]} />}
+      {!view && !readError && <DelayedSkeletonRows loading rows={3} label={BACKGROUND_SERVICE_READ_COPY.loading} />}
       {view?.notice && (
         <p className={`background-service__notice ${view.notice.tone}`} role={view.notice.tone === 'info' ? undefined : 'status'}>
           {view.notice.text}
@@ -105,20 +109,16 @@ export function BackgroundServicePanel({
               <span className="background-service__muted">{loginStart.stateText}</span>
             </div>
             {loginStart.canToggle && onToggleLoginStart && (
-              <Button
-                variant={loginStart.enabled ? undefined : 'primary'}
-                disabled={busy !== null}
+              <button
+                type="button"
+                className="setting-switch"
+                role="switch"
+                aria-label={LOGIN_START_COPY.sectionTitle}
+                aria-checked={loginStart.enabled}
                 aria-busy={togglingOn || togglingOff || undefined}
+                disabled={busy !== null}
                 onClick={() => onToggleLoginStart(!loginStart.enabled)}
-              >
-                {togglingOn
-                  ? LOGIN_START_COPY.enablingButton
-                  : togglingOff
-                    ? LOGIN_START_COPY.disablingButton
-                    : loginStart.enabled
-                      ? LOGIN_START_COPY.disableButton
-                      : LOGIN_START_COPY.enableButton}
-              </Button>
+              ><span aria-hidden="true" /></button>
             )}
           </div>
           {loginStart.policyEnv.length > 0 && (
@@ -206,7 +206,7 @@ export function BackgroundServiceSettings(): JSX.Element {
       setReadError(null)
     } catch (error) {
       if (!mounted.current) return
-      setStatus(null)
+      console.error('[Scry] background service status read failed', error)
       setReadError(ipcErrorMessage(error))
     }
   }, [])

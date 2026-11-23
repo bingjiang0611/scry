@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm'
 import { canOpenWorkspaceFileExternally } from '@shared/workspace'
 import { remarkWorkspaceFileDirectories, resolveWorkspaceFileTargets, type WorkspaceFileTarget } from '../workspace-links'
 import { Icon } from './primitives/Icon'
+import { Menu, MenuItem } from './primitives/Menu'
+import { useMenuDismiss } from './picker-state'
 import { createIncrementalMarkdownPlugin } from '../markdown-incremental'
 import { ChineseHeadingText, TypographyText, hasChineseText, isChineseProse } from '../typography'
 
@@ -107,6 +109,35 @@ export function WorkspaceFileLinkProvider({
   return <WorkspaceFileLinkContext.Provider value={value}>{children}</WorkspaceFileLinkContext.Provider>
 }
 
+function WorkspaceFileChoices({ targets, reference, onOpen, children }: {
+  targets: WorkspaceFileTarget[]
+  reference: string
+  onOpen: (target: WorkspaceFileTarget) => void
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLSpanElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  useMenuDismiss({ open, close: () => setOpen(false), rootRef: root, triggerRef: trigger, menuRef: menu })
+  const label = `${reference} · 打开匹配的文件`
+    return <span className="md-file-choices" ref={root}>
+      <button type="button" className="md-file-ref" title={label} aria-label={label}
+        ref={trigger} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        {children}<Icon name="chevronDown" />
+      </button>
+      {open && <Menu ref={menu} className="md-file-choice-menu" label={label} onBlur={event => {
+        if (!root.current?.contains(event.relatedTarget)) setOpen(false)
+      }}>
+        {targets.map((target, index) => (
+          <MenuItem key={index} onClick={() => { setOpen(false); trigger.current?.focus(); onOpen(target) }}>
+            {target.path.startsWith('/') ? target.path : `${target.cwd}/${target.path}`}
+          </MenuItem>
+        ))}
+      </Menu>}
+    </span>
+}
+
 function WorkspaceFileAction({ targets, reference, title, onOpen, children }: {
   targets: WorkspaceFileTarget[]
   reference: string
@@ -114,18 +145,8 @@ function WorkspaceFileAction({ targets, reference, title, onOpen, children }: {
   onOpen: (target: WorkspaceFileTarget) => void
   children: ReactNode
 }) {
-  if (targets.length > 1) {
-    const label = `${reference} · 多个匹配，请选择完整路径`
-    return <select className="md-file-ref" title={label} aria-label={label} defaultValue="" onChange={(event) => {
-      onOpen(targets[Number(event.currentTarget.value)])
-      event.currentTarget.value = ''
-    }}>
-      <option value="" disabled>{label}</option>
-      {targets.map((target, index) => <option key={index} value={index}>
-        {target.path.startsWith('/') ? target.path : `${target.cwd}/${target.path}`}
-      </option>)}
-    </select>
-  }
+  if (targets.length > 1) return <WorkspaceFileChoices targets={targets} reference={reference} onOpen={onOpen}>{children}</WorkspaceFileChoices>
+
   return <button type="button" className="md-file-ref" title={title} aria-label={title} onClick={(event) => {
     const selection = window.getSelection()
     // Chromium also clicks a button after dragging its selectable text. Keep the selection

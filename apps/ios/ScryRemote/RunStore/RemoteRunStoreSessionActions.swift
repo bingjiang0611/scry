@@ -30,16 +30,35 @@ extension RemoteRunStore {
   // as a message and re-read the catalog rather than projecting a local guess.
   @discardableResult func refreshArchived() async -> Bool {
     if let archivedTask { return await archivedTask.value }
-    guard let client = makeClient() else {
+    let read: (() async throws -> [G0Transport.RunSessionRef])?
+    if let client = makeClient() {
+      read = { try await client.sessions(includeArchived: true) }
+    } else {
+      #if DEBUG
+      if mockMode && ProcessInfo.processInfo.arguments.contains("-uiArchiveReadFixture") {
+        archiveFixtureReadCount += 1
+        let firstRead = archiveFixtureReadCount == 1
+        read = {
+          if firstRead { throw NSError(domain: "archive-fixture", code: 1) }
+          return []
+        }
+      } else {
+        read = nil
+      }
+      #else
+      read = nil
+      #endif
+    }
+    guard let read else {
       archivedFailure = ConnectionCopy.notPaired
-      archivedCatalog = .failed(ConnectionCopy.notPaired)
+      if !archivedCatalog.hasVisibleValue { archivedCatalog = .failed(ConnectionCopy.notPaired) }
       return false
     }
     archivedLoading = true
     archivedFailure = nil
     let task = Task { [weak self] () -> Bool in
       do {
-        let list = try await client.sessions(includeArchived: true)
+        let list = try await read()
         let archived = list.filter { ($0.archivedAt ?? 0) > 0 }
         await MainActor.run {
           guard let self else { return }

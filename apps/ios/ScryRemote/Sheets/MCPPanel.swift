@@ -15,7 +15,7 @@ extension ToolPanelView {
           if let runtime = mcp.runtime {
             Text("\(runtime.count)").font(.system(size: 11)).foregroundStyle(Palette.dim2)
           } else {
-            Text(ConnectionCopy.unavailable).font(.system(size: 11)).foregroundStyle(Palette.dim2)
+            Text(ConnectionCopy.mcpRuntimeUnavailable).font(.system(size: 11)).foregroundStyle(Palette.dim2)
           }
         }
         if let runtime = mcp.runtime, !runtime.isEmpty {
@@ -30,12 +30,10 @@ extension ToolPanelView {
           }
         }
       }
-      VStack(alignment: .leading, spacing: 6) {
-        Text(ConnectionCopy.mcpPolicy).font(.system(size: 11, weight: .bold)).tracking(0.6)
-          .foregroundStyle(Palette.dim)
-        if mcp.configured.isEmpty {
-          Text(ConnectionCopy.unavailable).font(.system(size: 12)).foregroundStyle(Palette.dim2)
-        } else {
+      if !mcp.configured.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Text(ConnectionCopy.mcpPolicy).font(.system(size: 11, weight: .bold)).tracking(0.6)
+            .foregroundStyle(Palette.dim)
           ForEach(mcp.configured, id: \.name) { entry in
             HStack(spacing: 6) {
               VStack(alignment: .leading, spacing: 2) {
@@ -56,7 +54,7 @@ extension ToolPanelView {
         Text(ConnectionCopy.rowsLimited(mcp.configured.count)).font(.system(size: 10)).foregroundStyle(Palette.dim2)
       }
     } else {
-      Notice(text: ConnectionCopy.unavailable, warning: true)
+      EmptyState(title: ConnectionCopy.mcpConfigurationUnavailable, symbol: nil, size: .row)
     }
   }
 
@@ -106,7 +104,7 @@ extension ToolPanelView {
           }
         }
       } else {
-        Text(mcp.scanUnavailable ?? ConnectionCopy.mcpScanUnavailable)
+        Text(ConnectionCopy.mcpScanUnavailable)
           .font(.system(size: 12)).foregroundStyle(Palette.dim2)
       }
     }

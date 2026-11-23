@@ -171,8 +171,11 @@ export class DesktopStatusSubscription {
       if (hint.kind !== 'run') continue
       const cached = this.#runs.get(hint.runId)
       const traceRunId = validRunId(hint.traceRunId) ? hint.traceRunId : cached?.traceRunId
-      if (cached && (hint.outputSeq > (cached.outputSeq ?? 0) || traceRunId !== cached.traceRunId)) {
-        this.#runs.set(hint.runId, { ...cached, traceRunId, outputSeq: Math.max(hint.outputSeq, cached.outputSeq ?? 0) })
+      // Worktree preparation progress is volatile: the newest hint replaces the cached step.
+      const workspaceProgress = hint.workspaceProgress ?? cached?.workspaceProgress
+      if (cached && (hint.outputSeq > (cached.outputSeq ?? 0) || traceRunId !== cached.traceRunId || workspaceProgress !== cached.workspaceProgress)) {
+        this.#runs.set(hint.runId, { ...cached, traceRunId, outputSeq: Math.max(hint.outputSeq, cached.outputSeq ?? 0),
+          ...(workspaceProgress ? { workspaceProgress } : {}) })
         change.runs = true
       }
     }

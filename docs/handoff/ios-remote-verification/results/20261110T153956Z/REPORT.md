@@ -10,7 +10,7 @@
 
 ## 判定
 
-`summarize.mjs` 的 Verdict：**fail**（规则表全文见同目录 `SUMMARY.md`）。
+`summarize.mjs` 的 Verdict：**fail**（规则表见 [acceptance.json](acceptance.json)，场景统计见 [summary.json](summary.json)）。
 
 | 规则 | 必需 | 结果 | 摘要 |
 |---|---|---|---|
@@ -73,6 +73,6 @@ relay 探针（本机 → `wss://scry-relay-pages.pages.dev`）：中位 dns 2.1
 
 ## 产物与可复现命令
 
-- 全部原始证据：`docs/handoff/ios-remote-verification/results/20261110T153956Z/`（`checks.json`、`acceptance.json`、`SUMMARY.md`、`*.jsonl`、`logs/`、`logs/evidence-*.txt`）。
+- 全部原始证据：`docs/handoff/ios-remote-verification/results/20261110T153956Z/`（`checks.json`、`acceptance.json`、`summary.json`、`*.jsonl`、`logs/`、`logs/evidence-*.txt`）。
 - 本次运行使用的阶段序列：
   `env` → `checks`（提交 `8ec746a5` 之后重跑）→ `install-mac`（手工打包替代，见 `logs/evidence-install-mac-manual-pack.txt`）→ `build-ios` → `install-ios` → `relay-probe mac` → `netbench wifi-relay -netBenchRoute=relay -netBenchRounds=5` → `netbench wifi-auto -netBenchRounds=5` → `netbench wifi-relay2 -netBenchRoute=relay -netBenchRounds=5`（控制实验）→ `summarize`。

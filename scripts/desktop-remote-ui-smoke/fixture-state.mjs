@@ -1,7 +1,7 @@
 export function fixtureState(options) {
   const { unknownReceiptOnly, structureOnly } = options
   return `const state = {
-  historyPrompts: ['older remote prompt', 'latest remote prompt'],
+  historyPrompts: ['older remote prompt', 'latest remote prompt'], failHistoryFor: null,
   historyCalls: [], traceCalls: [], submitInputs: [], stopCalls: [], answerCalls: [], commandCalls: [], sessionActions: [], viewedSessionCalls: [],
   listCalls: 0, catalogCalls: 0, remoteStatusCalls: 0, runStatusCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
   providerControlsFailure: null, legacyProviderHost: false, oldWorktreeHost: false, workspaceExecutionCwd: null,

@@ -17,6 +17,8 @@ export interface SubscribeRuntimeContext {
   wakes: RunWakes
   cursorFor: (runId: string) => RunCursor | undefined
   send: (channel: string, payload: unknown) => void
+  isDisposed?: () => boolean
+  onWarn?: (message: string, detail?: unknown) => void
   onSessionBound?: (payload: Record<string, unknown>) => void
   publishStopState?: (state: AgentStopState) => void
   settleRunTrace?: (runId: string) => void
@@ -103,11 +105,8 @@ async function finalizeTerminalCursor(
     ctx.wakes.wake(cursor.runId)
   }
 
-  if (cursor.settledNotified) {
-    cursor.lifecycle = lifecycle
-    cursor.stopped = true
-    return
-  }
+  // A duplicate notice must not mark the run done before its final trace is delivered.
+  if (cursor.settledNotified) return
   cursor.settledNotified = true
 
   // Read any remaining trace items (from live registry or archive fallback)
@@ -115,6 +114,7 @@ async function finalizeTerminalCursor(
   if (cursor.context && admitted) {
     await ctx.scheduleTraceRead(cursor.runId, { terminal: true })
   }
+  if (ctx.isDisposed?.()) return
   ctx.flushBridge()
 
   const canonicalId = cursor.scryRunId ?? cursor.runId
@@ -315,7 +315,11 @@ export async function applySubscribeEventToRuntime(
         : typeof event.payload.reason === 'string'
           ? event.payload.reason
           : undefined
-    await finalizeTerminalCursor(ctx, cursor, lifecycle, reason)
+    // The final read is serialized behind this run's trace reads, not behind the
+    // global event feed. Other runs can now receive their bind and admission hints.
+    void finalizeTerminalCursor(ctx, cursor, lifecycle, reason).catch((error) => {
+      ctx.onWarn?.('daemon subscribe terminal delivery failed', error)
+    })
   }
 }
 
@@ -350,7 +354,7 @@ export function applyRunHintToRuntime(
   const shouldReadTrace =
     cursor.context !== undefined &&
     cursor.admitted === true &&
-    !cursor.stopped &&
+    !cursor.stopped && !cursor.settledNotified &&
     (hint.outputSeq > cursor.output || cursor.latest === undefined)
   if (shouldReadTrace) {
     cursor.output = Math.max(cursor.output, hint.outputSeq)

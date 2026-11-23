@@ -127,7 +127,12 @@ extension RemoteRunStore {
           guard let self, self.generation == requestGeneration,
                 self.directoriesRequestGeneration == directoriesRequest else { return }
           self.directoriesTask = nil
-          self.recordFailure(error, since: requestConnectionRevision); self.directories = .failed(Self.describe(error))
+          self.recordFailure(error, since: requestConnectionRevision)
+          if case G0Transport.RunError.host(code: "workspace_not_authorized") = error {
+            self.directories = .denied
+          } else {
+            self.directories = .failed(Self.describe(error))
+          }
         }
       }
     }

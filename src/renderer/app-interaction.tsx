@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { SessionSaveState } from './session-save-state'
 import { AppShell } from './app-shell'
 import type { RemoteTarget } from './app-types'
@@ -15,7 +15,7 @@ import { useChatNavigation } from './hooks/useChatNavigation'
 import { useRemoteWorkbench } from './hooks/useRemoteWorkbench'
 import type { SessionRef } from './env'
 import type { SettingsTab } from './components/Modals'
-import { useResizablePane } from './hooks/useResizablePane'
+import { APP_PANE_LIMITS, useAppPanes, useSessionDetailWatch } from './hooks/useAppPanes'
 import { applyProviderCatalogRefresh, resetQueuedPromptControl, updateSessionPromptQueue, type DraftAttachment } from './app-model'
 import { scrollChatToBottomIfNeeded } from './chat-scroll'
 import { retainProtectedSteerPrompts } from './steer'
@@ -24,10 +24,6 @@ import { useAppSessionRuntime } from './app-session-runtime'
 import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
-const SIDEBAR_MIN = 190
-const SIDEBAR_MAX = 260
-const PANEL_MIN = 360
-const PANEL_MAX = 960
 const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 type AppInteractionContext = { state: ReturnType<typeof import('./app-state').useAppState> }
 export function useAppInteraction(context: AppInteractionContext) {
@@ -44,36 +40,15 @@ export function useAppInteraction(context: AppInteractionContext) {
     setWorkspaceOpenRequests, workspaceOpenSequenceRef, confirmWorkspaceTransition, draftContextRef, draftAttachments,
     sessionPromptQueues, setSessionPromptQueues, queuedPrompts, setQueuedPrompts, editingQueuedPromptId, setEditingQueuedPromptId,
     movedQueuedPromptId, setMovedQueuedPromptId, releaseDraft, setInput, setDraftAttachments, providerSendBlockedReason,
-    sendBlockedReason, providerCompatibilityIssue } = state
+    sendBlockedReason, sessionWorkspaceMissing, setMissingWorkspaceSessionId, providerCompatibilityIssue } = state
   const sessionRuntime = useAppSessionRuntime({
     activeSessionIdRef, localDraftOwnersRef, integrations, setSessionDrafts, setSessionPromptQueues, migrateRightSurface,
     markRunFinished, setWorkspaceRefreshKey, selectSessionId, loadProjects, sessionLoading, activeSessionId, draftKey
   })
   const { session, steerEvidenceByMessageId, steerCapability } = sessionRuntime
-  const detailKey = view === 'chat' && session.historyWindow?.sessionId === activeSessionId
-    ? session.historyWindow?.projectionKey : undefined
-  useEffect(() => {
-    if (!detailKey) return
-    void window.scry.watchSessionDetail?.(detailKey)
-    return () => { void window.scry.watchSessionDetail?.(null) }
-  }, [detailKey])
-
-  const sidebarPane = useResizablePane({
-    // The evidence-system shell deliberately resets the old 256px default once;
-    // subsequent user resizing is still persisted under this geometry version.
-    id: 'sidebar-evidence-system',
-    defaultWidth: 230,
-    min: SIDEBAR_MIN,
-    max: SIDEBAR_MAX,
-    side: 'left'
-  })
-  const surfacePane = useResizablePane({
-    id: 'right-surface-panel',
-    defaultWidth: 520,
-    min: PANEL_MIN,
-    max: PANEL_MAX,
-    side: 'right'
-  })
+  useSessionDetailWatch(view === 'chat' && session.historyWindow?.sessionId === activeSessionId
+    ? session.historyWindow?.projectionKey : undefined)
+  const { sidebarPane, surfacePane } = useAppPanes()
   const [turnDiffSelection, setTurnDiffSelection] = useDiffReviewSelection(currentSurface.id)
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
@@ -164,7 +139,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     openWorkspaceRun: (target, sessionId, runId) => openWorkspaceRun(target, sessionId, runId),
     view, cwd, setCwd, loadProjects, sessionSelectionSeqRef, viewRef, setView, switchingAgentRef, movedQueuedPromptId, EMPTY_DRAFT_ATTACHMENTS,
     draftStore, draftKey, session, integrations, chatNavigation, scrollRef, taRef,
-    selectedProviderSessionId, sessionLoading, sendBlockedReason, setComposerError, setComposerSubmitting,
+    selectedProviderSessionId, sessionLoading, sendBlockedReason, sessionWorkspaceMissing, setComposerError, setComposerSubmitting,
     setInput, setDraftAttachments, clearDraftAttachments, setSlashHidden, setSlashSel,
     slash: { slashCmds, slashReason, slashLoading, slashSel, setSlashSel, slashHidden, setSlashHidden, slashToken, slashOpen, retrySlash, refreshSlashCatalog },
     draftStartPendingRef, activeSessionIdRef, cwdRef, draftContextRef, localDraftOwnersRef, localRunIdsRef, localStartsRef,
@@ -184,7 +159,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   } = createSessionActions({
     workspace, session, integrations, setSessionLoading, sessionSelectionSeqRef, sessionNavigationSeqRef,
     resetPromptQueueControl, shouldStickToBottomRef, selectSessionId, setView, taRef,
-    draftContextRef, setSessionEvidenceGap, setSessionPromptQueues, setComposerError,
+    draftContextRef, setSessionEvidenceGap, setMissingWorkspaceSessionId, setSessionPromptQueues, setComposerError,
     confirmWorkspaceTransition, cwdRef, activeSessionIdRef, sessionLoading, sessionSnapshots,
     setSessionCacheVisible, requestChatBottom, selectedProviderSessionId, clearSessionPromptQueue,
     queueKeyRef, setArchiveUndo, archiveUndo, refreshProviderCatalogs, setSessionSaves
@@ -198,7 +173,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
     loadProjects, projects, recent, chooseFolder, removeRecentFolder, confirmWorkspaceTransition, logicalConversation, setConversationError, setConversationAgent, setLogicalConversation,
     remoteWorkspaceDirty, setRemoteWorkspaceDirty, remoteTarget, setRemoteTarget, setRemoteAdoptedSession,
-    remoteSurfaces, remoteSurfaceKey, remotePanelVisible, remoteSurface, rightSurface, hasSurfaceContext, terminalOpen, surfacePane,
+    remoteSurfaces, remoteSurfaceKey, remotePanelVisible, remoteSurface, rightSurface, hasSurfaceContext, terminalOpen, sessionWorkspaceMissing, surfacePane,
     sidebarPane, rightSurfaces, currentSurface, dispatchRightSurface, setTurnDiffSelection, setWorkspaceDirty, turnDiffSelection, taRef, setSlashHidden,
     viewRef, conversationProjection, sessionEvidenceGap, workspaceRefreshKey,
     setSettingsTab, newConversation, unbindProject, pickRecent, setSessionLoading
@@ -215,11 +190,19 @@ export function useAppInteraction(context: AppInteractionContext) {
   })
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
+  const retryHistory = activeEvidenceGap?.status === 'error' && activeSessionId
+    ? projects.flatMap(project => project.sessions.map(row => ({ cwd: row.cwd ?? project.cwd, row })))
+        .find(entry => entry.row.sessionId === activeSessionId && entry.cwd === cwd)
+    : undefined
   const chatProps = createAppChatProps({
-    workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason,
+    workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
-    sessionLoading, activeSessionId, sendBlockedReason, composerError, providerSendBlockedReason, providerCompatibilityIssue,
+    sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
     sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
+    retryHistory: retryHistory ? () => {
+      const { row } = retryHistory
+      void pickSession(retryHistory.cwd, row.sessionId, row.providerId, row.externalSessionId, row.runId, row.agentProfileId)
+    } : undefined,
     steerInFlightRef: steerInFlightRef.current, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
     stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,
@@ -294,10 +277,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     setShowMcp,
     integrations,
     session,
-    sidebarMin: SIDEBAR_MIN,
-    sidebarMax: SIDEBAR_MAX,
-    panelMin: PANEL_MIN,
-    panelMax: PANEL_MAX,
+    ...APP_PANE_LIMITS,
     openTurnInChat,
     addWorkspaceReference,
     summary: pinnedSummary,

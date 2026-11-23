@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ProviderId } from '../../shared/provider'
-import { canonicalExistingDirectory } from '../../main/workspace-authorization'
+import { canonicalExistingDirectory, knownProjectDirectoryIfPresent } from '../../main/workspace-authorization'
 import { registerWorkspaceSelectionIpc } from '../../main/source-control/workspace-ipc'
 import { namesDirectory } from '../../main/bootstrap/known-project-daemon'
 import {
@@ -35,7 +35,9 @@ export const projectLocalOps: DaemonLocalOpGroup = (deps) => {
     ...selection,
     // Whether a directory is a project this daemon knows, for the App's window selection
     // and its known-project file channels: main's resolver over this daemon's stores.
-    'agent:setCwd': (dir: unknown) => namesDirectory(dir) ? workspace.resolveKnownProjectDirectory(dir) : null,
+    'agent:setCwd': (dir: unknown, clearIfMissing: unknown) => !namesDirectory(dir) ? null
+      : clearIfMissing === true ? knownProjectDirectoryIfPresent(workspace.resolveKnownProjectDirectory, dir)
+      : workspace.resolveKnownProjectDirectory(dir),
     // The window's selection stays in the App, which selects the answer after it.
     'agent:chooseFolder': (picked: unknown) => rememberChosenFolder({
       canonicalExistingDirectory,
