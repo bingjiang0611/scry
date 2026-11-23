@@ -1,13 +1,6 @@
 import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { recordRunStage } from '../run-stage-timing'
 
-// G1->G2 bridge: turns a durably-recorded remote intent into exactly one
-// executor invocation and maps its outcome back to truthful ledger lifecycle
-// events. This is the seam where the real host executor (RunRegistry + a
-// Provider adapter) plugs in; here it is an injected interface so the invariants
-// are testable without the production Electron surface.
-//
-// Invariants (CLAUDE.md 生命周期 / truthful state):
 //   - Exactly one dispatch per intent. The durable recorded->dispatched ledger
 //     transition IS the fence: markDispatched is strictly-once, so a concurrent
 //     pump or a crash-replay cannot double-invoke the executor.
@@ -47,7 +40,6 @@ export interface RemoteExecutor {
 export interface RemoteDispatcherDependencies {
   ledger: SessionLedger
   executor: RemoteExecutor
-  // Absent => the output callback is a no-op and only the lifecycle is observable.
   outputSink?: RemoteOutputSink
   /** P4-2 authoritative pre-dispatch recheck + fence commit before executor runs. */
   beforeDispatch?(

@@ -26,7 +26,6 @@ describe('session-open bench mode', () => {
       SCRY_REMOTE_HOST: '0', SCRY_DISABLED_PROVIDERS: 'claude,qoder,opencode,pi', SCRY_ELECTRON_SMOKE_PROVIDER: '1'
     })
     expect(daemon).not.toHaveProperty('SCRY_HOST_DAEMON')
-    // Codex only, no side-chat/conversation sets.
     expect(daemon).not.toHaveProperty('SCRY_ELECTRON_SMOKE_SIDE_CHAT')
     expect(daemon).not.toHaveProperty('SCRY_ELECTRON_SMOKE_CONVERSATIONS')
     expect(() => benchAppEnv('in-process', '/tmp/x/home')).toThrow('Unknown bench mode')

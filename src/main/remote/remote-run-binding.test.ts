@@ -14,7 +14,6 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     // Native defaults preserved: no silent approval-mode escalation.
     expect(calls[0].permissionMode).toBeUndefined()
     expect(calls[0].model).toBeUndefined()
-    // A brand-new session does not resume anything.
     expect(calls[0].resume).toBeUndefined()
 
     const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
@@ -145,7 +144,6 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     await start({ runId: 'ledger-r', routing: { cwd: '/w', providerId: 'qoder', prompt: 'more', resume: ' ext-existing ' }, progress, output: () => {} })
 
     expect(calls[0]).toMatchObject({ prompt: 'more', cwd: '/w', resume: 'ext-existing' })
-    // Never create an unopenable pending catalog row for a resumed conversation.
     expect(onRunStarted).not.toHaveBeenCalled()
     expect(onRunSession).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'more', scryRunId: 'scry-r', externalSessionId: 'ext-existing', agentProfileId: undefined })
     expect(onRunArchive).toHaveBeenCalledWith(expect.objectContaining({
@@ -164,12 +162,8 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const onRunArchive = vi.fn()
     const start = createRemoteRunBinding({ run, nextScryRunId: () => 'scry-cat', onRunStarted, onRunSession, onRunArchive })
     await start({ runId: 'ledger-cat', routing: { cwd: '/w', providerId: 'qoder', agentProfileId: 'p', prompt: '  hi  ' }, progress: () => {}, output: () => {} })
-    // Pending catalog entry at bind (visible on the Mac before the session id).
     expect(onRunStarted).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', agentProfileId: 'p' })
-    // Resolved to the Provider's REAL resumable session id.
     expect(onRunSession).toHaveBeenCalledWith({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', externalSessionId: 'ext-abc', agentProfileId: 'p' })
-    // Durable archive on terminal: real accumulated events + status, keyed by the
-    // Provider session id so the Mac can OPEN the transcript.
     expect(onRunArchive).toHaveBeenCalledTimes(1)
     const archive = onRunArchive.mock.calls[0][0]
     expect(archive).toMatchObject({ providerId: 'qoder', cwd: '/w', prompt: 'hi', scryRunId: 'scry-cat', externalSessionId: 'ext-abc', status: 'completed' })

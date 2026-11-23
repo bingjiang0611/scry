@@ -22,12 +22,9 @@ import type { RemoteExecutionOutcome } from './remote-dispatcher'
 //   - The canonical start callback is invoked exactly once with a freshly minted
 //     scry runId. The ledgerRunId <-> scryRunId correlation is emitted as the
 //     FIRST progress marker so the device can join the two ids.
-//   - `admitted` follows once the canonical pipeline registered the run, so a reader
-//     can tell a run refused at admission from one that started and then failed.
 //   - Native Provider clarification, editor, and permission prompts are routed
 //     through the authenticated remote interaction broker. The binding never
 //     synthesizes an approval or substitutes an empty answer.
-//   - The canonical host run result reports terminal failures and cancellations.
 
 export interface RemoteRunTrace {
   providerId: string
@@ -54,12 +51,9 @@ export interface RemoteRunCompletion {
 // `M` is the conversation launch payload the host passes through (ManagedConversationStart
 // in the daemon); the binding itself only reads its two ids.
 export interface RemoteRunBindingDependencies<M extends ConversationRunMarker = ConversationRunMarker> {
-  // Production enters startAppRun. The optional provider seam below is only for
-  // focused protocol tests and older isolated callers.
   startAppRun?(input: {
     runId: string
     ledgerRunId: string
-    /** Always `'remote'`: this run arrived through the ledger. */
     origin: 'remote'
     request: AgentStartRequest
     providerPrompt?: string
@@ -80,7 +74,6 @@ export interface RemoteRunBindingDependencies<M extends ConversationRunMarker = 
   }): Promise<RemoteRunCompletion>
   // Daemon mode: claims the launch a conversation intent names (managed-launches.ts).
   managedLaunch?(runId: string): ManagedLaunch<M> | undefined
-  // Legacy seam retained for focused binding tests. Production provides startAppRun.
   run?(providerId: string, request: ProviderRunRequest): ProviderRunHandle
   permissionModeOverride?: AgentStartRequest['permissionMode']
   // scry runId minting; overridable for deterministic tests.
@@ -158,9 +151,6 @@ export function createRemoteRunBinding<M extends ConversationRunMarker = Convers
   const nextScryRunId = deps.nextScryRunId ?? (() => `remote-run-${Date.now().toString(36)}-${(seq++).toString(36)}`)
   return async function startRemoteRun(input: RemoteRunInput): Promise<RemoteExecutionOutcome> {
     if (deps.startAppRun) return startCanonicalRemoteRun(input)
-    // The provider seam below exists only for focused protocol tests; production
-    // always supplies startAppRun. Kept in its own module so the canonical path stays
-    // readable (and this file under the size budget).
     return startLegacyRemoteRun(deps, nextScryRunId(), input)
   }
 

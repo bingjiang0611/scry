@@ -24,8 +24,6 @@ describe('remoteProviderEntry', () => {
   })
 
   it('never publishes a failed control probe as an available entry without permissions', () => {
-    // The phone treats a missing permission list as "Provider default", so this
-    // shape made it submit Pi with `default`, which Pi rejects at run start.
     const failed = capabilityUnavailable<AgentRunControlCatalog>(context, 'unknown', 'probe timed out')
     expect(remoteProviderEntry({ descriptor: pi, profile: rotom, controls: failed, previous: [] }))
       .toEqual({ id: 'pi', label: 'Pi · Rotom', available: false, agentProfileId: 'pi:rotom' })

@@ -59,7 +59,6 @@ export function lanAddresses(table: InterfaceTable): string[] {
       out.add(entry.address)
     }
   }
-  // LAN before overlay, deterministic order, bounded.
   return [...out].sort((x, y) => Number(x.startsWith('100.')) - Number(y.startsWith('100.')) || x.localeCompare(y)).slice(0, 4)
 }
 

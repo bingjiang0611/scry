@@ -4,9 +4,6 @@ import { join } from 'node:path'
 // Which App runtime the native session-open bench drives. Pure decisions only (no
 // process, no filesystem), so the choice of mode, environment and temporary root is
 // testable without an App; the daemon lifecycle lives in session-open-bench-daemon.mjs.
-//
-//   node scripts/session-open-bench.mjs [scenario] [--daemon]   the App with its daemon
-//
 // S3 removed the in-process runtime from Electron main, so the daemon is the only mode
 // (the CI gate included); `--daemon` is accepted and changes nothing.
 export const benchModes = Object.freeze(['daemon'])

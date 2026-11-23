@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `ac822209`, reviewed 821 comment tokens across 63 tracked files: the 54 direct `src/main/remote/remote-*.ts` sources and tests, and nine direct `scripts/session-open-*` JS/TS files. Removed 144 redundant or stale comments across 32 files. Comment-free emit and tool directives matched. The 12 focused remote suites passed 117 tests in Electron Node mode, and the two session-open helper suites passed 11 tests on Node. No live remote or session-open benchmark was run.
+
 At `ca5cfd21`, reviewed 893 comment tokens across 79 files: all 30 direct `src/main/remote/host-*.ts` files, 31 direct `scripts/concurrency-trace-*` JS/TS files, and 18 direct `src/renderer/app-*` TS/TSX files. Removed 59 redundant notes across 29 files; comment-free emit and tool directives matched. The 18 focused suites passed all 139 distinct tests across two invocations. In the first invocation, three CLI assertions failed on an inherited experimental proxy warning in stderr; both affected suites passed after unsetting `NODE_USE_ENV_PROXY` for that invocation. No live measurement or hosted-relay run was performed.
 
 At `5d7861a0`, reviewed 469 comment tokens across 60 tracked files: the remaining direct `desktop-*` transport sources and tests, bootstrap `agent-*`, `provider-*`, `recorder-*`, `side-chat-*`, and `history-*` files, the direct project store, and renderer `composer-*` files. Removed 47 redundant notes across 20 files. Comment-free emit and tool directives matched; 10 targeted suites passed 88 tests in Electron Node mode. The review did not change transport, persistence, or composer behavior.

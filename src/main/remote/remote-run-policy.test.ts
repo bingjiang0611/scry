@@ -22,10 +22,8 @@ describe('RemoteRunPolicy', () => {
     if (decision.ok) {
       expect(decision.cwd).toBe(AUTHORIZED)
       expect(decision.providerKey).toBe(providerOperationKey('claude'))
-      // While the operation lease is held, authentication is blocked (mutual exclusion).
       expect(gate.acquireAuthentication(decision.providerKey).ok).toBe(false)
       decision.release()
-      // After release, authentication can proceed.
       const auth = gate.acquireAuthentication(decision.providerKey)
       expect(auth.ok).toBe(true)
     }
@@ -72,7 +70,6 @@ describe('GatedExecutor', () => {
     const gated = new GatedExecutor({ policy, resolveTarget: () => target(), base })
     await gated.execute(input())
     expect(ran).toBe(1)
-    // Lease released: authentication is free again.
     expect(gate.acquireAuthentication(providerOperationKey('claude')).ok).toBe(true)
   })
 

@@ -5,8 +5,6 @@ import { RemoteGatewayError } from './remote-gateway-types'
 import { MAX_CATALOG_ITEMS, MAX_CATALOG_PAGE, sessionRefs } from './remote-gateway-sanitizers'
 
 // The device session catalog: one immutable snapshot per page walk, so a stale cursor
-// is refused instead of silently returning different content. Kept beside the other
-// gateway faces rather than inside the class.
 const SESSION_SNAPSHOT_TTL_MS = 30_000
 const MAX_SESSION_SNAPSHOTS = 32
 

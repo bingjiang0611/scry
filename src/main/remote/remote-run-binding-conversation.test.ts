@@ -63,7 +63,6 @@ describe('remote run binding: conversation runs', () => {
     await expect(start({ runId: 'ledger-1', routing, progress: vi.fn(), output: vi.fn(), grantScope: 'local' }))
       .rejects.toThrow('conversation_start_unavailable')
     expect(startAppRun).not.toHaveBeenCalled()
-    // A host without a launch registry refuses the marker the same way.
     await expect(createRemoteRunBinding({ startAppRun })({ runId: 'ledger-2', routing, progress: vi.fn(), output: vi.fn() }))
       .rejects.toThrow('conversation_start_unavailable')
   })

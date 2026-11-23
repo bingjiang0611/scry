@@ -12,7 +12,6 @@ class MemoryLedgerStore implements LedgerStore {
   append(event: LedgerEvent): void { this.log.push({ ...event }) }
 }
 
-// A controllable executor whose completion the test resolves explicitly.
 function deferredExecutor() {
   const calls: string[] = []
   const gates = new Map<string, { resolve(): void; reject(e: Error): void; input: RemoteExecutorInput }>()

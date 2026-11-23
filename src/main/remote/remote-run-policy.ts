@@ -8,9 +8,6 @@ import type { RemoteExecutor, RemoteExecutorInput, RemoteExecutionOutcome } from
 // the production ProviderOperationGate and workspace-authorization contract
 // rather than inventing a parallel one, and fails closed.
 //
-// This module does not itself execute a Provider; it decides and leases. The
-// real executor (RunRegistry + a Provider adapter) plugs in behind GatedExecutor
-// and is only reached once the policy has authorized the run.
 
 export interface WorkspaceAuthorizer {
   // Return the canonical directory, or throw if it is not a known, authorized

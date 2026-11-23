@@ -40,7 +40,6 @@ describe('remote catalog single flight', () => {
     release()
     const results = await Promise.all([first, second])
     expect(results[0]).toEqual(results[1])
-    // A later refresh is a new read: capability state must never be reused.
     await listProviderControls(context, PEER, query)
     expect(selected).toHaveBeenCalledTimes(2)
   })
@@ -55,7 +54,6 @@ describe('remote catalog single flight', () => {
     const pi = listProviderControls(context, PEER, { detail: 'selected', providerId: 'pi', cwd: '/workspace' })
     const codex = listProviderControls(context, PEER, { detail: 'selected', providerId: 'codex', cwd: '/workspace' })
     expect(selected).toHaveBeenCalledTimes(1)
-    // Only the listed, available Provider may be resolved.
     await expect(codex).rejects.toThrow('provider_not_authorized')
     release()
     await pi

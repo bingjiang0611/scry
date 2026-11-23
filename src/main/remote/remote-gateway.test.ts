@@ -150,12 +150,9 @@ describe('RemoteGateway', () => {
     const page = await gw.pollOutput(CERT, { runId, cursor: 0 })
     expect(page.chunks.map((c) => c.kind)).toEqual(['output', 'tool'])
     expect(page.chunks[0].text).toBe('Hello from the agent')
-    // Strictly-after-cursor paging.
     const after = await gw.pollOutput(CERT, { runId, cursor: page.chunks[0].seq })
     expect(after.chunks.map((c) => c.kind)).toEqual(['tool'])
-    // Unknown run => honest empty page at the same cursor, never fabricated.
     await expect(gw.pollOutput(CERT, { runId: randomUUID(), cursor: 0 })).resolves.toEqual({ chunks: [], cursor: 0 })
-    // Revoked device loses output access like every other op.
     await authority.revoke(deviceId)
     await expect(gw.pollOutput(CERT, { runId, cursor: 0 })).rejects.toMatchObject({ code: 'device_not_authorized' })
   })
@@ -205,8 +202,6 @@ describe('RemoteGateway', () => {
     expect(ledger.describe().events).toBe(2)
   })
 
-  // A lost submit receipt used to leave the phone with only one recovery: resend
-  // the whole intent (prompt + base64 image). Reconciliation is now a read.
   it('reconciles a lost receipt by intent id without resending, scoped to the device', () => {
     const firstCert = '1'.repeat(64)
     const secondCert = '2'.repeat(64)
@@ -216,7 +211,6 @@ describe('RemoteGateway', () => {
     const submitted = gw.submitIntent(firstCert, { intentId, detail: 'with attachment' })
     ledger.markDispatched(submitted.runId)
     expect(gw.intentStatus(firstCert, { intentId })).toEqual({ runId: submitted.runId, state: 'dispatched' })
-    // Another device cannot probe this device's intent ids.
     expectCode(() => gw.intentStatus(secondCert, { intentId }), 'unknown_intent')
     expectCode(() => gw.intentStatus('3'.repeat(64), { intentId }), 'device_not_authorized')
     expect(ledger.describe().events).toBe(2)
@@ -241,7 +235,6 @@ describe('RemoteGateway', () => {
     const { authority } = await grantedAuthority()
     const { gw, ledger } = gateway(authority)
     const submit = gw.submitIntent(CERT, { intentId: randomUUID() })
-    // The trusted host executor drives the ledger directly; the device only reads.
     ledger.markDispatched(submit.runId)
     ledger.markSettled(submit.runId)
     const kinds = gw.poll(CERT, { cursor: 0 }).events.map((e) => e.kind)

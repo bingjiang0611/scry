@@ -30,11 +30,9 @@ describe('RemoteGateway runMeta bounded eviction', () => {
       ledger
     })
 
-    // 1. Submit 1 active (dispatched) run first — oldest entry in Map
     const active = gw.submitIntent(CERT, { intentId: randomUUID() })
     ledger.markDispatched(active.runId)
 
-    // 2. Submit and settle 4,100 subsequent runs -> exceeds MAX_TRACKED_RUN_META (4096)
     const settledIds: string[] = []
     for (let i = 0; i < 4_100; i += 1) {
       const sub = gw.submitIntent(CERT, { intentId: randomUUID() })
@@ -43,11 +41,9 @@ describe('RemoteGateway runMeta bounded eviction', () => {
       settledIds.push(sub.runId)
     }
 
-    // Active run MUST still be retained even though it was the oldest entry
     expect(gw.runMeta(active.runId)).toEqual({ peerCertSHA256: CERT, grantScope: 'local' })
     expect(gw.runScope(active.runId)).toBe('local')
 
-    // Earliest settled runs MUST have been evicted to stay within the 4,096 cap
     expect(gw.runMeta(settledIds[0])).toBeUndefined()
     expect(gw.runMeta(settledIds[settledIds.length - 1])).toEqual({ peerCertSHA256: CERT, grantScope: 'local' })
   })
