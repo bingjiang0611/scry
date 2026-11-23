@@ -234,7 +234,6 @@ async function reconcileVanishedCursors(ctx: SubscribeRuntimeContext, rows: Subs
   }
 }
 
-/** Applies one durable orchestration event from `subscribe` directly to `DaemonRunRuntime`. */
 export async function applySubscribeEventToRuntime(
   ctx: SubscribeRuntimeContext,
   event: SubscribeEventItem

@@ -13,8 +13,6 @@ import { answerQuestion, publishQuestions, type QuestionSinks } from './daemon-r
 import type { RunTraceRouter } from './run-trace-router'
 import { applyRunHintToRuntime, applySubscribeEventToRuntime, applySubscribeSnapshotToRuntime, awaitSubscribeAdmission, readSubscribeTraceOnce, type SubscribeRuntimeContext } from './daemon-run-subscribe'
 
-// The App's run view driven by the daemon: turns daemon frames into renderer trace,
-// question, and lifecycle events without inventing progress.
 
 // How long a start waits for the daemon to bind a canonical run id. A run that has
 // not bound by then is still recorded; the caller gets the ledger id and `bound:
@@ -44,8 +42,6 @@ export interface DaemonRunRuntimeDeps {
   admitBudgetMs?: number
   bridge?: TraceOutputBridge
   onWarn?: (message: string, detail?: unknown) => void
-  // P3f W2: the App's run-level subscriptions (RunTraceRouter). A view that subscribes to
-  // one run (the conversation view) reads this, not the window-wide trace stream.
   runTraces?: Pick<RunTraceRouter, 'route' | 'settle'> & Partial<Pick<RunTraceRouter, 'publishStopState'>> & NonNullable<QuestionSinks['subscription']>
 }
 
@@ -110,7 +106,6 @@ export class DaemonRunRuntime {
 
   readonly #wakes = new RunWakes()
 
-  /** The batching bridge, so `agent:traceAck` credits the same delivery state. */
   get bridge(): TraceOutputBridge { return this.#bridge }
 
   async start(input: DaemonStartInput): Promise<DaemonStartReceipt> {
@@ -156,15 +151,12 @@ export class DaemonRunRuntime {
     return { ...receipt, runId: bound ?? receipt.runId, bound: bound !== undefined }
   }
 
-  /** Follow a conversation run already recorded by the daemon. */
   async follow(input: { runId: string }): Promise<{ runId: string; bound: boolean }> {
     this.#track(input.runId)
     const bound = await this.#awaitBound(input.runId)
     return { runId: bound ?? input.runId, bound: bound !== undefined }
   }
 
-  // Synchronous on purpose: a start answers right after its bind, exactly as before
-  // this was shared, so nothing it awaits moves.
   #track(runId: string, context?: DesktopRemoteContext, stamp?: PerformanceTrace, userText?: string): void {
     // A duplicate submit is the same logical run: keep its existing cursor rather
     // than restarting the trace from zero.
@@ -192,7 +184,6 @@ export class DaemonRunRuntime {
     deliver()
   }
 
-  /** Whether this window already follows this run, named by either id. */
   isTracking(runId: string): boolean { return this.#cursorFor(runId) !== undefined }
 
   /**
@@ -212,7 +203,6 @@ export class DaemonRunRuntime {
     return undefined
   }
 
-  /** The latest authoritative run state this window has read, per run id. */
   activeRuns(): ActiveRun[] {
     return [...this.#runs.values()].flatMap((cursor) => {
       const current = view(cursor)
@@ -248,7 +238,6 @@ export class DaemonRunRuntime {
     })
   }
 
-  /** Authoritative snapshot for a resynchronising view. */
   async snapshot(runId: string, context: DesktopRemoteContext): Promise<ActiveRun | null> {
     const read = await this.#deps.transport.trace({ context, runId })
     if (read.kind !== 'snapshot') return null
@@ -265,8 +254,6 @@ export class DaemonRunRuntime {
   }
 
   async stop(runId: string): Promise<boolean> {
-    // The window names the run it shows (the canonical id); the daemon stops and
-    // questions the ledger run that id was dispatched under.
     const cursor = this.#cursorFor(runId)
     await this.#deps.transport.stop(cursor?.runId ?? runId)
     if (cursor) cursor.lifecycle = 'stopping'
@@ -274,15 +261,12 @@ export class DaemonRunRuntime {
   }
 
   async answerQuestion(response: AgentQuestionResponse): Promise<boolean> {
-    // The renderer answers with the id it was shown, which is the canonical run id the
-    // Provider used; the daemon names pending questions by its own ledger run.
     return await answerQuestion(this.#cursorFor(response.runId), response, this.#deps.transport)
   }
 
   // The stamp ends when text first reaches the renderer; that is the number the user
   // waits for, and the stages before it say which hop spent the time.
   #delivered(cursor: RunCursor, event: TraceEvent): void {
-    // Conversation events reach only the run's scoped view.
     if (!usesScopedRunDelivery(cursor)) this.#bridge.push(event)
     this.#deps.runTraces?.route(event)
     if (cursor.sawText || cursor.stamp === undefined) return

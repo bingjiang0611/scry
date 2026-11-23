@@ -39,7 +39,6 @@ describe('recording failure evidence (L3: the daemon frame is the whole message)
     const view = runtime.runView(CANONICAL)
     runtime.dispose()
     expect(view).toMatchObject({ error: policy.rendererError.message, errorHint: failed.errorHint, done: true })
-    // The wording is the same one the in-process path puts in front of the user.
     expect(view?.error).toContain('但 Scry 精确记录不完整')
   })
 })

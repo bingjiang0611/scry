@@ -42,7 +42,6 @@ describe('daemon run lifecycle (stopping a run reaches done)', () => {
     await runtime.applySubscribeEvent(runEvent('run.cancelled', RUN))
     await runtime.terminalDelivered(RUN)
     expect(runtime.runView(CANONICAL)).toMatchObject({ runId: CANONICAL, done: true })
-    // A finished run is not offered as live work any more.
     expect(runtime.activeRuns()).toEqual([])
     runtime.dispose()
   })

@@ -141,7 +141,6 @@ describe('DaemonEventPump subscribe mode (P4-3 protocol §5.2)', () => {
     expect(onSubscribeEvent).not.toHaveBeenCalled()
     expect(requests[0]?.known).toBeUndefined()
     expect(requests[1]?.known).toEqual({ hostId: 'h1', logId: 'l1', seq: 5 })
-    // After encountering unknown event type `task.requested`, known was dropped to force snapshot
     expect(requests[2]?.known).toBeUndefined()
     expect(onSnapshot.mock.calls[1]?.[1]).toMatchObject({ isReset: true, logIdChanged: false })
   })
