@@ -27,7 +27,6 @@ export function linuxPasswordStoreSwitch(input: {
   env: NodeJS.ProcessEnv
 }): LinuxPasswordStore | undefined {
   if (input.platform !== 'linux' || input.hasPasswordStoreSwitch) return undefined
-  // A colon-separated list in priority order (XDG Desktop Entry spec).
   const desktops = (input.env.XDG_CURRENT_DESKTOP ?? '').split(':').map((value) => value.trim()).filter(Boolean)
   if (desktops.length > 0) {
     // KDE listed anywhere keeps kwallet; Chromium would have found it.
@@ -41,7 +40,6 @@ export function linuxPasswordStoreSwitch(input: {
   return 'gnome-libsecret'
 }
 
-/** The two `app.commandLine` methods the wiring uses; a fake in tests. */
 export interface PasswordStoreCommandLine {
   hasSwitch(name: string): boolean
   appendSwitch(name: string, value?: string): void

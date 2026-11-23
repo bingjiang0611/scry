@@ -3,9 +3,6 @@ import { gateDaemonChannel, installDaemonChannelForwarder } from '../daemon-chan
 import { resetProviderSession } from './startup-channels'
 import { viewNothingAfterDaemonNewSession } from './new-session-daemon'
 
-// agent:newSession: the sidebar's "new session". In daemon mode it was refused with the
-// raw IPC wrapper; the daemon now resets the context it runs and the window keeps its
-// own part, viewing no session.
 
 
 describe('new session', () => {

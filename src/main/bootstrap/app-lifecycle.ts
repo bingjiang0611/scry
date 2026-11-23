@@ -32,8 +32,6 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
       delete process.env[k]
     }
   }
-  // Linux 桌面入口不设置 SHELL。后台服务的登录 shell 采集、Provider CLI 与终端都靠它，
-  // 缺失时回退到 zsh 会让 Arch/Omarchy 上的环境采集直接失败。
   ensureShellEnv()
 
   const packagedRendererEntryUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
@@ -56,8 +54,6 @@ export function initializeAppEnvironment(__dirname: string, getWindow: () => Bro
       app.setAccessibilitySupportFeatures(['nativeAPIs', 'webContents', 'extendedProperties', 'html', 'screenReader'])
     })
   }
-  // Linux: ask for libsecret on Hyprland or an unnamed desktop, where Chromium would pick
-  // basic_text and the App would refuse every run. Fail closed without a keyring.
   const passwordStore = applyLinuxPasswordStore(app.commandLine)
   if (passwordStore) console.info(`[scry] safeStorage: --password-store=${passwordStore} (desktop not recognised by Chromium)`)
   // Isolated automation stays hidden: showInactive still displays a native window.
@@ -104,7 +100,6 @@ export function registerAppLifecycle({
     // 两条链路因此可以用同一把墙钟对齐。
     configureRunStageTiming(app.getPath('userData'))
     dockBadge.sync()
-    // The daemon owns scry.db; its channels are answered there.
     startupPerf.mark('database_owned_by_daemon')
     createWindow()
     performanceResourceMonitor = startPerformanceResourceMonitor({

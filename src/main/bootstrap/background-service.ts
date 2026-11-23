@@ -97,19 +97,15 @@ export function createDaemonLoginStartBridge() {
 
 export function registerBackgroundServiceHandlers(input: {
   handleTrusted: TrustedRegistrar
-  /** The App's daemon client. */
   daemon: LazyDaemonRunSurface
   getWindow: () => BrowserWindow | null
   /** Shared login-start manager (also used by appDaemonModeDeps for service launch). */
   loginStart?: LoginStartManager
-  /** Reads the latest service-launch fallback warning, if any. */
   serviceLaunchFallback?: () => BackgroundServiceRuntimeNotice['serviceLaunchFallback']
   /** Subscribes to service-launch fallback changes so the run path gets notified immediately. */
   onServiceLaunchFallback?: (listener: (fallback: BackgroundServiceRuntimeNotice['serviceLaunchFallback']) => void) => void
   env?: NodeJS.ProcessEnv
-  /** Optional process-identity reader override for tests (W15 S2). */
   readProcessIdentity?: (pid: number) => Promise<ProcessRow | undefined>
-  /** Optional stop-deps override for tests (W15 S1/S2). */
   stopDepsOverride?: Partial<BackgroundServiceStopDeps>
 }): void {
   const { daemon } = input
@@ -195,7 +191,6 @@ export function registerBackgroundServiceHandlers(input: {
     quitApp: () => { setImmediate(() => app.quit()) }
   }
 
-  // One action at a time: a second click while a stop or login-start change is in flight is refused by name.
   let busy = false
   const exclusive = (run: () => Promise<BackgroundServiceActionResult>) => async (): Promise<BackgroundServiceActionResult> => {
     if (busy) return { status: 'failed', reason: 'action_in_progress', message: reasonMessage('action_in_progress') }

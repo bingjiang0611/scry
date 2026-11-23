@@ -40,7 +40,6 @@ export function catalogChannelHandlers(deps: {
   } satisfies ChannelHandlers
 }
 
-/** Installed Provider discovery and the descriptors the composer renders. */
 export function providerDetectionChannelHandlers(deps: {
   smokeProviderEnabled: boolean
   smokeDetectedAgents: DetectedAgent[]

@@ -39,7 +39,6 @@ function fakeDaemon(ready: Record<string, unknown>) {
     restart: vi.fn(async () => ({ status: 'ready' })),
     holdLaunches: vi.fn(() => () => undefined),
     onOutcome: vi.fn((listener: (result: unknown) => void) => { listeners.push(listener); return () => undefined }),
-    /** What the lazy surface reports after connecting on its own. */
     emit: (result: Record<string, unknown>) => { for (const listener of listeners) listener(result) }
   }
 }
@@ -98,7 +97,6 @@ describe('background service channels', () => {
         connection: { state: 'version-mismatch', running: '1.0.0', expected: '2.0.0' },
         version: '1.0.0', pid: null, startedAt: null, devices: null, activeRuns: null
       })
-      // A mismatched daemon is never asked anything.
       expect(forwarded).not.toHaveBeenCalled()
     } finally {
       uninstall()
@@ -135,7 +133,6 @@ describe('background service channels', () => {
     const { win } = register(daemon, true)
     electron.showMessageBox.mockResolvedValueOnce({ response: MISMATCH_RESTART_BUTTON })
     daemon.emit({ status: 'version-mismatch', running: '1.0.0', expected: '2.0.0', action: 'restart_daemon' })
-    // No daemon.lock in this userData: the action has nothing to signal and reconnects.
     await vi.waitFor(() => expect(daemon.restart).toHaveBeenCalledTimes(1))
     expect(electron.showMessageBox).toHaveBeenCalledExactlyOnceWith(win, versionMismatchPrompt('1.0.0', '2.0.0'))
     daemon.emit({ status: 'version-mismatch', running: 'unknown', expected: '2.0.0', action: 'restart_daemon' })
@@ -201,7 +198,6 @@ describe('background service channels', () => {
       serviceLaunchFallback: () => fallback
     })
 
-    // S4: runtimeNotice reads current notice from memory without touching daemon.ready().
     await expect(invoke('remote:backgroundService:runtimeNotice')).resolves.toEqual({ serviceLaunchFallback: fallback })
     expect(daemon.ready).not.toHaveBeenCalled()
     await expect(invoke('remote:backgroundService:runtimeNotice', 'extra')).rejects.toThrow('invalid_request')
@@ -209,7 +205,6 @@ describe('background service channels', () => {
       handlers.get('remote:backgroundService:runtimeNotice')!({ ...event, sender: {} } as unknown as IpcMainInvokeEvent)
     )).rejects.toThrow('非可信 renderer')
 
-    // S8: confirmed enable calls native dialog then loginStart.enable; cancel skips enable; disable skips dialog.
     electron.showMessageBox.mockResolvedValueOnce({ response: CONFIRM_BUTTON })
     await expect(invoke('remote:backgroundService:setLoginStart', true)).resolves.toEqual({ status: 'done' })
     expect(electron.showMessageBox).toHaveBeenCalledTimes(1)
