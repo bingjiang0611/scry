@@ -74,7 +74,6 @@ describe('desktop trace revisions', () => {
     expect(revisions.observe(RUN, items, { revision: first.revision, count: 1 })).toMatchObject({ reset: false, changes: [] })
     expect(revisions.observe(RUN, items, { revision: first.revision, count: 2 }).reset).toBe(true)
     expect(revisions.observe(RUN, items, { revision: 'other-epoch:1', count: 1 }).reset).toBe(true)
-    // Thirty-three later revisions push the first one out of the bounded history.
     for (let index = 0; index < 33; index++) { items.push(event({ text: String(index) })); revisions.observe(RUN, items) }
     expect(revisions.observe(RUN, items, { revision: first.revision, count: 1 }).reset).toBe(true)
     // Forgetting a finished run starts a new epoch.

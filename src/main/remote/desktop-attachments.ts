@@ -194,7 +194,6 @@ export function attachmentSha256(attachment: AgentInputAttachment): string { ret
 /** Upper bound on a remote intent detail: the prompt plus inline attachment data. */
 export const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 
-// Staging a desktop image: references carry metadata only, bytes go in chunks.
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

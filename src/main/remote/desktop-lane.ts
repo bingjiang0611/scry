@@ -32,14 +32,11 @@ import { remoteOperationCounters, remoteRequestTrace } from './remote-request-ti
 //   - Only a reply starting with `{"keepAlive":true,` proves the host keeps the
 //     tunnel open. Anything else is a protocol mismatch, never a silent fallback
 //     to one-shot requests.
-// What a lane proved about a failed request lives in desktop-lane-phase.ts: the phase
-// decides whether a caller may resend (see the retry rules above).
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 
 export type { DesktopLaneName } from './desktop-lane-policy'
 import { LANE_POLICY, type DesktopLaneName } from './desktop-lane-policy'
-// Which lane a request takes, and whether it may be replayed (desktop-lane-routing.ts).
 export { laneForRequest, replayableRequest } from './desktop-lane-routing'
 
 import { connectDesktopLane, MAX_RESPONSE_BYTES, type DesktopLaneChannel, type DesktopLaneEndpoint } from './desktop-lane-channel'
@@ -66,7 +63,6 @@ function laneError(message: string): Error {
   return new Error(message)
 }
 
-// A channel belongs to one tunnel path and one device certificate.
 function endpointIdentity(endpoint: DesktopLaneEndpoint): string {
   return JSON.stringify([endpoint.path ?? '', endpoint.host ?? '', endpoint.port ?? 0, endpoint.certPEM, endpoint.maxResponseBytes ?? MAX_RESPONSE_BYTES])
 }
@@ -188,7 +184,6 @@ export class DesktopLanes {
       } catch (error) {
         if (!state.retired && !call.signal?.aborted && notSentRetries++ < MAX_NOT_SENT_RETRIES) continue
         trace?.finish(counters(reused), 'error')
-        // The channel never opened: no request byte was written.
         if (state.retired) throw laneError('desktop_not_connected')
         throw laneNotSent(error instanceof Error ? error : laneError('desktop_lane_connect_failed'))
       }
@@ -205,7 +200,6 @@ export class DesktopLanes {
         if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
         if (state.retired) throw laneError('desktop_not_connected')
-        // The write itself failed: part of the frame may have reached the host.
         throw laneOutcomeUnknown(error instanceof Error ? error : laneError('desktop_lane_not_sent'))
       }
       let line: string
@@ -217,7 +211,6 @@ export class DesktopLanes {
         // read may try once more; a write reports an unproven outcome.
         if (!state.retired && !call.signal?.aborted && call.replayable && lostReplays++ < MAX_LOST_REPLAYS) continue
         trace?.finish(counters(reused), 'error')
-        // Bytes were written and no reply arrived: the outcome is unknown, not a loss.
         throw laneOutcomeUnknown(error instanceof Error ? error : laneError('desktop_lane_lost'))
       }
       trace?.mark('first_byte')
@@ -274,7 +267,6 @@ export class DesktopLanes {
   async #channel(state: LaneState, endpoint: DesktopLaneEndpoint, signal?: AbortSignal): Promise<DesktopLaneChannel> {
     const identity = endpointIdentity(endpoint)
     if (state.channel && state.endpoint === identity) return state.channel
-    // A new tunnel (or a new device certificate) invalidates the old channel.
     if (state.channel) this.#dropChannel(state)
     // Requests on a lane are serialized, so there is never a concurrent open.
     const channel = signal ? await this.#connect(endpoint, { signal }) : await this.#connect(endpoint)

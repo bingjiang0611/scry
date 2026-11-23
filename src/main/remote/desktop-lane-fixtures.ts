@@ -1,6 +1,5 @@
 import { laneNotSent, type DesktopLaneChannel, type DesktopLaneConnector, type DesktopLaneEndpoint } from './desktop-lane'
 
-// Test-only lane channels. Production uses connectDesktopLane over TLS.
 
 function requestOf(frame: string): Record<string, unknown> {
   const { keepAlive: _keepAlive, ...request } = JSON.parse(frame) as Record<string, unknown>
@@ -42,7 +41,6 @@ export function fakeLaneConnector(handler: (options: { path: string; request: un
     }
     return {
       send: async frame => {
-        // A closed fake channel refuses before writing: that is the provable "not sent".
         if (closed) throw laneNotSent(closed)
         void handler({ path: endpoint.path ?? '', request: requestOf(frame) }).then(
           value => {

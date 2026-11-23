@@ -117,7 +117,6 @@ describe('desktop authenticated evidence source', () => {
     expect(delta).toMatchObject({ kind: 'trace_delta', base: reset.revision, count: 3, imageCount: 0, run: { runId, done: true },
       changes: [{ index: 1, item: { text: 'edited in place' } }, { index: 2, item: item(2) }] })
     expect(delta.kind === 'trace_delta' && 'items' in delta.run).toBe(false)
-    // A stale count is never patched: the host answers a full reset.
     expect(await f.read({ kind: 'trace', context: f.context, runId, delta: { after: { revision: reset.revision, count: 5 } } })).toMatchObject({ kind: 'trace', reset: true })
     // Authorization runs before any delta work.
     await expect(f.read({ kind: 'trace', context: { ...f.context, providerId: 'claude' }, runId, delta: { after: { revision: reset.revision, count: 2 } } })).rejects.toThrow('run_context_mismatch')
@@ -240,7 +239,6 @@ describe('desktop authenticated evidence source', () => {
     }
     const image = { kind: 'image', context, runId: 'run-image', providerTurnId: 'native-turn', index: 0 }
     expect(parseDesktopHostRead(image)).toEqual(image)
-    // Reject the retired field on every read kind.
     const tail = { kind: 'trace', context, runId: 'run-live', settledTail: true }
     for (const query of [...[true, 'true', 1, null, false, {}].map(settledTail => ({ ...tail, settledTail })),
       { ...image, settledTail: true }, { ...chunked, settledTail: true }]) {

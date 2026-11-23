@@ -103,7 +103,6 @@ describe('side-chat IPC trust and source authorization', () => {
     expect(current.conversations.readSideChatSnapshot).toHaveBeenCalledWith(conversationId, undefined)
     await current.invoke('conversation:readSideChatSnapshot', conversationId, '3:120')
     expect(current.conversations.readSideChatSnapshot).toHaveBeenCalledWith(conversationId, '3:120')
-    // Shape errors are refused synchronously by the trusted handler wrapper.
     expect(() => current.invoke('conversation:readSideChatSnapshot', { id: conversationId }))
       .toThrow('统一对话 ID 无效')
     expect(() => current.invoke('conversation:readSideChatSnapshot', conversationId, { offset: 1 }))
@@ -168,7 +167,6 @@ describe('side-chat IPC trust and source authorization', () => {
       .rejects.toThrow('分页大小')
     await expect(current.invoke('conversation:listSideChats', { source: conversation, extra: true }))
       .rejects.toThrow('字段不受支持')
-    // A selected-id summary lookup stays bounded and typed before the service runs.
     await expect(current.invoke('conversation:listSideChats', { source: conversation,
       ids: Array.from({ length: 9 }, (_, index) => `child-${index}`) })).rejects.toThrow('8 个 ID')
     await expect(current.invoke('conversation:listSideChats', { source: conversation, ids: [42] }))

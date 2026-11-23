@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `5d7861a0`, reviewed 469 comment tokens across 60 tracked files: the remaining direct `desktop-*` transport sources and tests, bootstrap `agent-*`, `provider-*`, `recorder-*`, `side-chat-*`, and `history-*` files, the direct project store, and renderer `composer-*` files. Removed 47 redundant notes across 20 files. Comment-free emit and tool directives matched; 10 targeted suites passed 88 tests in Electron Node mode. The review did not change transport, persistence, or composer behavior.
+
 At `b77673e2`, reviewed 334 tokens in 63 files: remote `desktop-client*`, bootstrap query/MCP/terminal channels, main recorder entry points, renderer trace/turn helpers, and sidebar and structure checks. Removed 51 redundant notes across 24 files. Comment-free emit and tool directives matched; 12 targeted suites passed 115 tests. The layout smoke scripts were not run live.
 
 At `6ffecf72`, reviewed 440 tokens in direct bootstrap `conversation-*`, `session-*`, `project-*`, and `workspace-*` files; renderer `format-*`; scripts `electron-*` and `packaged-*`; and nine Antigravity tests plus the shared argv recorder fixture (the shared fixture overlaps earlier Provider passes). Removed 100 comments across 37 files. Comment-free emit and tool directives matched. Across 17 focused suites, all 86 distinct tests passed: 15 suites in Electron Node mode and two on Node after their initial Electron-mode failures. This was not an App smoke or package run.

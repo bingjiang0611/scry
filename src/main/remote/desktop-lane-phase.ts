@@ -9,7 +9,6 @@
 // the provable case with this helper; everything else counts as possibly written.
 const NOT_SENT = 'desktopLaneNotSent'
 
-/** Bytes provably never left this process: the frame was refused before any write. */
 export function laneNotSent(error: Error): Error {
   Object.defineProperty(error, NOT_SENT, { value: true, enumerable: false })
   return error

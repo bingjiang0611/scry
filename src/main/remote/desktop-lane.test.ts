@@ -10,7 +10,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// A channel whose replies the test scripts per frame.
 function scriptedChannel(reply: (request: Record<string, unknown>) => string | Error | Promise<string | Error>) {
   const frames: Record<string, unknown>[] = []
   let closed: Error | undefined
@@ -48,7 +47,6 @@ describe('desktop lane routing', () => {
     expect(laneForRequest({ op: 'subscribe', views: ['sessions', 'activeRuns'] })).toBe('events')
     expect(laneForRequest({ op: 'subscribe', views: ['detail'] })).toBe('watch')
     expect(laneForRequest({ op: 'subscribe', views: ['activeRuns'] })).toBe('events')
-    // Primary App execution-target work poll takes its own lane; result replies are writes on control.
     expect(laneForRequest({ op: 'executionTargetWork' })).toBe('targetWork')
     expect(replayableRequest({ op: 'executionTargetWork' })).toBe(true)
     expect(laneForRequest({ op: 'executionTargetResult' })).toBe('control')
@@ -182,7 +180,6 @@ describe('DesktopLanes', () => {
     await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).resolves.toEqual({ echo: 'providers' })
     await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'projects' }, replayable: true })).resolves.toEqual({ echo: 'projects' })
     expect(connect).toHaveBeenCalledTimes(1)
-    // The keep-alive marker is transport framing and is not part of the reply.
     expect(handler.mock.calls.map(([call]) => call.request)).toEqual([{ op: 'providers' }, { op: 'projects' }])
     // A new channel shows its handshake stage; a reused one goes straight to the write.
     expect(samples.map(sample => sample.name)).toEqual(['remote.client.request', 'remote.client.request'])
@@ -239,7 +236,6 @@ describe('DesktopLanes', () => {
     const samples: PerformanceSample[] = []
     setPerformanceRecordingSink(sample => samples.push(sample))
     await expect(lanes.request('control', 'c1', { endpoint, request: { op: 'providers' }, replayable: true })).rejects.toThrow('desktop_protocol_mismatch')
-    // A failed request still ends its trace, as an error.
     expect(samples.map(sample => sample.outcome)).toEqual(['error'])
     expect(script.frames).toHaveLength(1)
     expect(script.closed()).toBe(true)

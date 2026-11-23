@@ -1,8 +1,6 @@
 import type { DesktopLaneName } from './desktop-lane'
 import { DESKTOP_WORKBENCH_READ_METHODS } from '../../shared/desktop-workbench'
 
-// Which lane each request takes (see the lane list in desktop-lane.ts), and which
-// requests may be replayed after a lost reply.
 
 // Writes stay on the control lane: cancelling a large read must never tear down an
 // in-flight write, and a write is never replayed after its bytes were written.
@@ -13,7 +11,6 @@ const writeOperations = new Set([
 const targetWorkOperations = new Set(['executionTargetWork'])
 // Short and idempotent: on the control lane, and replayable because it changes nothing twice.
 const idempotentControlOperations = new Set(['attentionViewed'])
-// `desktop` carries its own kind; history/trace/image reads are the large ones.
 const bulkDesktopKinds = new Set(['history', 'trace', 'trace_delta', 'image_chunk'])
 
 // `desktopWorkbench` carries its own method: file writes, Git/PR mutations, drafts and
@@ -62,7 +59,6 @@ export function laneForRequest(request: unknown, transport: 'local' | 'network' 
     const kind = (request as { query?: { kind?: unknown } }).query?.kind
     return typeof kind === 'string' && bulkDesktopKinds.has(kind) ? 'bulk' : 'control'
   }
-  // Long reads and paged payloads: history, trace pages, downloads, file reads.
   return 'bulk'
 }
 

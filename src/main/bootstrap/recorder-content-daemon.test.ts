@@ -3,9 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DAEMON_LOCAL_OP_NAMES, gateDaemonChannel, installDaemonChannelForwarder } from '../daemon-channel-gate'
 import { installRecorderContentWindowCwd } from './recorder-content-daemon'
 
-// Daemon mode: recorder content is read in the daemon, for the workspace this window
-// selected (agent:setCwd, kept in main). The App appends that selection to the request;
-// the daemon re-validates it against its own project authority (host-process-queries-2).
 
 const REF = { sha256: 'a'.repeat(64), bytes: 4, encoding: 'utf8' }
 type Gated = (event: unknown, ...args: unknown[]) => Promise<unknown>
@@ -36,7 +33,6 @@ describe('recorder content in daemon mode', () => {
   })
 
   it('sends a trace read without a workspace as main reads it: the empty bucket', async () => {
-    // In process an app-trace read with no selection reads the '' bucket; the daemon does the same.
     const { forwarded, read } = gated(() => undefined)
     await read({}, { source: 'app-trace', ref: REF })
     expect(forwarded.mock.calls[0]![0].args).toEqual([{ source: 'app-trace', ref: REF }, ''])

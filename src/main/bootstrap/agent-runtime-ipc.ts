@@ -93,8 +93,6 @@ export function registerAgentRuntimeHandlers({
     return daemon.answerQuestion(response as AgentQuestionResponse)
   })
 
-  // Recorder content for this window's selection is the daemon's local op; the App
-  // appends the selection and checks it again after the reply.
   installRecorderContentWindowCwd(getCurrentCwd)
 
   // trace live 镜像的消费确认：renderer 完成批量 state commit 后归还精确批次额度。

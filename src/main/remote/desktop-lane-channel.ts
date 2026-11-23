@@ -105,7 +105,6 @@ export function connectDesktopLane(
       () => fail(laneNotSent(new Error('desktop_lane_connect_timeout'))),
       options.timeoutMs ?? CONNECT_TIMEOUT_MS
     )
-    // A rejected handshake is reported by the promise, not as an unhandled rejection.
     socket.once('secureConnect', () => {
       if (closed) return
       clearTimeout(connectTimer)

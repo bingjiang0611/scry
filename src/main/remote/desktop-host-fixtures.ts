@@ -18,7 +18,6 @@ cryptoProvider.set(webcrypto as unknown as PeculiarCrypto)
 export interface PairedHost {
   service: RemoteHostService
   lanes: DesktopLanes
-  // What a real desktop client reads from its pairing state.
   endpoint: { host: string; port: number; caPEM: string; certPEM: string; keyPEM: string }
   fingerprint: string
   deviceId: string
