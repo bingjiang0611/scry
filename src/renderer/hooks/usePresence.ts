@@ -73,13 +73,7 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     onCloseRef.current(closeReason.current)
   }, [clearExit])
   finishRef.current = finish
-  // Exits that end on a native timer or animationend commit the parent's close synchronously.
-  // Left to React, that close is a default-priority update. A trigger click landing before it
-  // renders queues a sync-priority reopen; the sync render skips the pending close and keeps
-  // the parent open, so the same exiting instance stays mounted, inert and closed for good,
-  // and the trigger stops working. The pointerdown guard above cannot help, because a
-  // finished exit has already left pendingExits. (macOS CI: the delete dialog stuck in exit,
-  // jobs 131767009947 and 131460326299.)
+  // Commit the close before a synchronous reopen can preserve the inert instance.
   const finishCommitted = useCallback((): void => { flushSync(finish) }, [finish])
   const ref = useCallback<RefCallback<HTMLElement>>(node => { nodeRef.current = node }, [])
   const requestClose = useCallback((reason: PresenceCloseReason): void => {
@@ -122,9 +116,6 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
       node?.removeEventListener('animationend', onAnimationEnd)
       node?.removeEventListener('animationstart', onAnimationStart)
     }
-    // The fallback only runs when animationend never arrives (dropped or late compositor
-    // frames). It has to leave real headroom for the animation itself: a software-composited
-    // CI runner delivered animationstart ~165ms after the close and finished at ~296ms.
     armFallback()
     if (pendingExits.size === 0) {
       document.addEventListener('pointerdown', onNextInteraction, true)

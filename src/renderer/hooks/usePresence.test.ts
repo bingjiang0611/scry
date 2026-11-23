@@ -49,7 +49,6 @@ afterEach(() => {
 })
 
 describe('overlay presence lifecycle', () => {
-  // A deferred close followed by a sync reopen keeps the same exiting instance mounted for good.
   it.each(['animationend', 'fallback timer'] as const)('commits the parent close synchronously when the exit ends on its %s', path => {
     const synchronous: boolean[] = []
     const p = mount(vi.fn(() => { synchronous.push(harness.syncDepth > 0) }))
@@ -91,7 +90,6 @@ describe('overlay presence lifecycle', () => {
     const longer: StubAnimation = { playState: 'running', effect: { getComputedTiming: () => ({ endTime: 320 }) } }
     p.node.animations = [longer]
     p.requestClose('button')
-    // CI removed one node 53ms after its animation start because a shorter animation ended first.
     p.node.dispatchEvent(new Event('animationend'))
     expect(p.onClose).not.toHaveBeenCalled()
     longer.playState = 'finished'
@@ -125,7 +123,6 @@ describe('overlay presence lifecycle', () => {
     vi.advanceTimersByTime(199)
     expect(p.onClose).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(1)
-    // animationend still finishes first once the compositor completes the exit.
     p.node.dispatchEvent(new Event('animationend'))
     expect(p.onClose).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
