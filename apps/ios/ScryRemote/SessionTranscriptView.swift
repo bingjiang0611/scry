@@ -303,13 +303,17 @@ struct SessionTranscriptView: View {
     return ForEach(turn.withSplitPlans(splitPlans[live.runId] ?? [:]).rows(id: live.runId)) { $0 }
   }
 
+  private var isDelegatedChildSession: Bool {
+    sessionIdentity.map(run.isDelegatedChildSession) == true
+  }
+
   private var footer: some View {
     VStack(alignment: .leading, spacing: 5) {
       MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: !run.hasConnection ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
-                      disabled: !run.hasConnection,
-                      sendDisabled: runBusy || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      sendBlockReason: runBusy || run.controlsReady ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable),
+                      placeholder: isDelegatedChildSession ? "委派子会话为只读，不能直接发送消息" : !run.hasConnection ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
+                      disabled: !run.hasConnection || isDelegatedChildSession,
+                      sendDisabled: isDelegatedChildSession || runBusy || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      sendBlockReason: isDelegatedChildSession ? "委派子会话为只读，不能直接发送消息" : (runBusy || run.controlsReady ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable)),
                       contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue,
@@ -327,7 +331,7 @@ struct SessionTranscriptView: View {
                                            agentProfileId: s.agentProfileId, force: true)
                         }
                       }) {
-        guard let s = session else { return }
+        guard !isDelegatedChildSession, let s = session else { return }
         if run.submitFollowUp(prompt: draft, providerId: s.providerId, agentProfileId: s.agentProfileId,
                              cwd: s.cwd, resume: s.externalSessionId, attachments: attachments.map(\.wireValue)) {
           composer.wrappedValue = .init()

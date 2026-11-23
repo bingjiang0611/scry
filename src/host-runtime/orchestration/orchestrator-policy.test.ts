@@ -96,9 +96,9 @@ describe('P4-0 transition tables & effect policy', () => {
 })
 
 describe('P4-0 multi-agent reservations (core §2.10 R1-R12)', () => {
-  it('excludes reserved task.* events from P4 whitelist and rejects agent: actors retryably', () => {
-    for (const reserved of RESERVED_TASK_EVENT_TYPES) {
-      expect(ORCHESTRATION_EVENT_TYPES.has(reserved as never)).toBe(false)
+  it('activates P6 task.* events in the whitelist and rejects agent: run.submit retryably', () => {
+    for (const taskEvt of RESERVED_TASK_EVENT_TYPES) {
+      expect(ORCHESTRATION_EVENT_TYPES.has(taskEvt as never)).toBe(true)
     }
 
     const agentCmd: OrchestrationCommand = {
@@ -213,7 +213,7 @@ describe('P4-0 multi-agent reservations (core §2.10 R1-R12)', () => {
       }).ok
     ).toBe(true)
 
-    expect(decodeOrchestrationEvent({ type: 'task.requested', payload: {} })).toEqual({
+    expect(decodeOrchestrationEvent({ type: 'unknown.future_event', payload: {} })).toEqual({
       ok: false,
       reason: 'unknown_event_type'
     })

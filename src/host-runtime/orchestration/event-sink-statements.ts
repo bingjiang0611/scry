@@ -17,6 +17,14 @@ export interface EventSinkStatements {
   activeRunCount: Database.Statement
   listNonTerminalChildRuns: Database.Statement
   listNonTerminalChildRunsBySession: Database.Statement
+  readTask: Database.Statement
+  listTasksByParentRun: Database.Statement
+  listTasksByParentSession: Database.Statement
+  countNonTerminalTasksByParentRun: Database.Statement
+  countTotalTasksByParentRun: Database.Statement
+  countNonTerminalTasksBySession: Database.Statement
+  countNonTerminalAgentRuns: Database.Statement
+  readDelegationPolicy: Database.Statement
 }
 
 export function prepareEventSinkStatements(db: Database.Database): EventSinkStatements {
@@ -73,6 +81,25 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
       `SELECT * FROM orch_p_run
        WHERE session_key = ? AND parent_run_id IS NOT NULL
          AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
+    ),
+    readTask: db.prepare('SELECT * FROM orch_p_task WHERE task_id = ?'),
+    listTasksByParentRun: db.prepare('SELECT * FROM orch_p_task WHERE parent_run_id = ? ORDER BY created_at ASC, task_id ASC'),
+    listTasksByParentSession: db.prepare('SELECT * FROM orch_p_task WHERE parent_session_key = ? ORDER BY created_at ASC, task_id ASC'),
+    countNonTerminalTasksByParentRun: db.prepare(
+      `SELECT COUNT(*) AS count FROM orch_p_task
+       WHERE parent_run_id = ? AND status NOT IN ('declined', 'completed', 'failed', 'cancelled', 'interrupted', 'unavailable')`
+    ),
+    countTotalTasksByParentRun: db.prepare('SELECT COUNT(*) AS count FROM orch_p_task WHERE parent_run_id = ?'),
+    countNonTerminalTasksBySession: db.prepare(
+      `SELECT COUNT(*) AS count FROM orch_p_task
+       WHERE parent_session_key = ? AND status NOT IN ('declined', 'completed', 'failed', 'cancelled', 'interrupted', 'unavailable')`
+    ),
+    countNonTerminalAgentRuns: db.prepare(
+      `SELECT COUNT(*) AS count FROM orch_p_run
+       WHERE origin = 'agent' AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
+    ),
+    readDelegationPolicy: db.prepare(
+      'SELECT enabled FROM orch_p_delegation_policy WHERE scope_kind = ? AND scope_key = ?'
     )
   }
 }

@@ -74,6 +74,13 @@ export type OrchestrationEventType =
   | 'turn.delivery'
   | 'effect.voided'
   | 'host.started'
+  | 'task.requested'
+  | 'task.declined'
+  | 'task.child_bound'
+  | 'task.settled'
+  | 'task.cancel_requested'
+  | 'delegation.project_policy_set'
+  | 'delegation.session_full_access_set'
 
 export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = [
   'run.intent_recorded',
@@ -106,7 +113,14 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'turn.began',
   'turn.delivery',
   'effect.voided',
-  'host.started'
+  'host.started',
+  'task.requested',
+  'task.declined',
+  'task.child_bound',
+  'task.settled',
+  'task.cancel_requested',
+  'delegation.project_policy_set',
+  'delegation.session_full_access_set'
 ]
 
 export const ORCHESTRATION_EVENT_TYPES: ReadonlySet<OrchestrationEventType> = new Set(
@@ -147,6 +161,9 @@ export type StickyRejectionReason =
   | 'illegal_transition'
   | 'invalid_target'
   | 'resolved_absent'
+  | 'delegated_session_read_only'
+  | 'active_subtasks_present'
+  | 'limit_exceeded'
 
 export type RetryableRejectionReason =
   | 'session_run_active'
@@ -157,6 +174,72 @@ export type RetryableRejectionReason =
   | 'orchestration_write_indeterminate'
   | 'agent_commands_unsupported'
   | 'session_deleted_during_prepare'
+  | 'caller_not_active'
+  | 'delegation_disabled'
+  | 'full_access_not_enabled'
+  | 'limit_exceeded'
+  | 'permission_mode_escalation_denied'
+  | 'task_not_found'
+  | 'capability_denied'
+  | 'provider_unavailable'
+
+export type TaskStatus =
+  | 'awaiting_confirmation'
+  | 'declined'
+  | 'queued'
+  | 'starting'
+  | 'running'
+  | 'waiting_interaction'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'unavailable'
+
+export const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  'declined',
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'unavailable'
+])
+
+export function isTerminalTaskStatus(status: TaskStatus): boolean {
+  return TERMINAL_TASK_STATUSES.has(status)
+}
+
+export interface TaskProjectionRow {
+  taskId: string
+  parentSessionKey: string
+  parentRunId: string
+  actor: string
+  principal: string
+  via: string | null
+  commandId: string
+  childSessionKey: string | null
+  childRunId: string | null
+  provider: string
+  profile: string | null
+  cwd: string
+  status: TaskStatus
+  stateVersion: number
+  permissionMode: string
+  permissionModeSource: 'inherited' | 'requested'
+  title: string | null
+  role: string | null
+  targetModel: string | null
+  targetEffort: string | null
+  isolation: 'shared' | 'worktree'
+  confirmationQuestionId: string | null
+  cancelConfirmationQuestionId: string | null
+  body: BodyDescriptor | null
+  summary: Evidence<string> | null
+  reason: string | null
+  createdAt: number
+  settledAt: number | null
+  revSeq: number
+}
 
 export type RejectionReason = StickyRejectionReason | RetryableRejectionReason
 

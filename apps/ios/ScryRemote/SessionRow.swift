@@ -37,6 +37,11 @@ struct SessionRowView: View {
           .font(Typography.rowTitle).foregroundStyle(openable && !completed ? Palette.fg : Palette.dim)
           .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
           .conversationElement(session.label.isEmpty ? nil : destinationIdentity.map(ConversationTransition.Element.sessionTitle))
+        if session.isDelegatedChild {
+          Text("子会话").font(Typography.meta).foregroundStyle(Palette.dim2)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Palette.dim2.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+        }
         stateBadge
         if showsProject {
           Text(projectName(session.cwd)).font(Typography.meta).foregroundStyle(Palette.dim2)

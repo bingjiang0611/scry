@@ -8,7 +8,28 @@ import { migrateOrchestrationDatabase } from './migrations'
 import { applyEventToProjection } from './projection'
 import { ORCHESTRATION_MIGRATIONS } from './schema'
 import { catalogFrontierKey } from './transcript-interval'
+import type { OrchestrationDbHandle, WalCheckpointResult, WalCheckpointSample } from './db'
 import type { OrchestrationEventRow, OrchestrationScope } from './types'
+
+export function executeWalCheckpoint(
+  handle: OrchestrationDbHandle,
+  mode: 'passive' | 'truncate',
+  onSample?: (sample: WalCheckpointSample) => void
+): { result: WalCheckpointResult; ok: boolean } {
+  const walBytesBefore = handle.walFileBytes()
+  const started = performance.now()
+  try {
+    const result = mode === 'truncate' ? handle.checkpointTruncate() : handle.checkpointPassive()
+    const durationMs = Number((performance.now() - started).toFixed(2))
+    onSample?.({
+      mode, durationMs, walBytesBefore, walBytesAfter: handle.walFileBytes(),
+      result, executor: 'main', threadId: 0
+    })
+    return { result, ok: true }
+  } catch {
+    return { result: { busy: 1, log: 0, checkpointed: 0 }, ok: false }
+  }
+}
 
 const require = createRequire(import.meta.url)
 
@@ -204,7 +225,7 @@ export function verifyReplayConsistencyInDb(
     for (const evt of events) {
       applyEventToProjection(mem, evt)
     }
-    const tables = ['orch_p_session', 'orch_p_turn', 'orch_p_run', 'orch_p_interaction'] as const
+    const tables = ['orch_p_session', 'orch_p_turn', 'orch_p_run', 'orch_p_interaction', 'orch_p_task', 'orch_p_delegation_policy'] as const
     for (const table of tables) {
       const actual = canonicalJson(db.prepare(`SELECT * FROM ${table}`).all())
       const replayed = canonicalJson(mem.prepare(`SELECT * FROM ${table}`).all())

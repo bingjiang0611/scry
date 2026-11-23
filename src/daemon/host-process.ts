@@ -31,6 +31,8 @@ import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
+import { createHostDelegationRuntime, prepareHostRunOrchestration } from './delegation-host-wiring'
+import type { DaemonDelegationRuntime } from './delegation-runtime'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
 import { authoritySubscribeDeps, createAuthorityDetailReader } from './orchestration-authority-subscribe'
 import { createDaemonCatalogScans } from './orchestration-catalog-scan'
@@ -71,6 +73,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
   // New and resynchronizing Apps receive the full unread set (E1b).
   let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
+  let delegationRuntime: DaemonDelegationRuntime | undefined
   const publishHint = (hint: AppHint): void => orchestrationAuthority?.publishHint(hint)
   const publishData = (event: AgentDataUpdated): void => publishHint({ kind: 'data', event })
   const session = createSessionState({
@@ -150,6 +153,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
     observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
+    prepareOrchestrationTools: prepareHostRunOrchestration(() => delegationRuntime),
     // The pipeline's volatile notices travel on the App subscription. The trace and questions
     // reach the App through its own run reads, so they are not sent twice (W1).
     renderer: {
@@ -241,6 +245,15 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     log
   })
   orchestrationAuthority = authority
+  delegationRuntime = createHostDelegationRuntime({
+    authority,
+    pipeline,
+    userDataDir: options.userDataDir,
+    authorizeDirectory: workspace.resolveKnownProjectDirectory,
+    requestRunStop,
+    onTaskChanged: () => publishData({ kind: 'catalog_recovered' }),
+    log
+  })
   const hostAdmin = new HostAdminStore({
     stateDirectory: remoteStateDirectory,
     onNotice: (notice) => publishHint({ kind: 'hostNotice', notice })
@@ -280,6 +293,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       hostAdmin,
       links: sessionLinks,
       orchestrationStatus: () => authority.status(),
+      delegation: delegationRuntime,
       subscribe: authority.createSubscribeHandler({
         ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
         remoteHostNotices: listHostAdminNotices,
@@ -363,6 +377,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       await service.dispose()
       // Close shadow first so pending bodies flush and the EXCLUSIVE SQLite lock releases
       // immediately even if a pooled provider process is slow to exit; bound provider dispose.
+      await delegationRuntime?.close()
       await authority.close()
       await disposeProviderRegistryBounded(providers.providerRegistry, options.providerDisposeTimeoutMs ?? 5_000, log)
     }

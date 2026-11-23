@@ -88,6 +88,7 @@ export class ProviderRegistry {
       throw new Error(`${providerId} 尚未提供可验证的历史输入交接`)
     }
     if (request.historyReader && !adapter.historyReader) throw new Error(`${providerId} 尚未提供可验证的历史检索工具`)
+    if (request.orchestrationTools && !adapter.orchestrationTools) throw new Error(`${providerId} 尚未提供可验证的编排工具`)
     return adapter.run({
       ...request,
       ...(this.runControlsEnabled

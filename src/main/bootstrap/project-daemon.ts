@@ -1,5 +1,7 @@
 import { isAbsolute } from 'node:path'
 import { installDaemonChannelGuard, installDaemonChannelResultHandler } from '../daemon-channel-gate'
+import type { DelegationSwitchConfirmRequest } from '../delegation-policy-dialog'
+import type { DelegationProjectPolicyRequest, DelegationSessionFullAccessRequest } from '../../shared/delegation'
 import type { PiProfileAddition } from './project-channels'
 
 // Daemon mode: the daemon validates and remembers the chosen folder and stores Pi
@@ -20,6 +22,8 @@ export interface ProjectDaemonWindow {
   windowCwd(): string | undefined
   /** Select the folder the daemon validated and remembered, as agent:setCwd does. */
   applyChosenFolder(dir: string): void
+  /** Native OS confirmation dialog for P6 delegation policy switches (security §S2). */
+  confirmDelegationSwitch?: (req: DelegationSwitchConfirmRequest) => Promise<boolean>
 }
 
 function invalidDaemonResponse(): never {
@@ -54,6 +58,36 @@ export function installProjectDaemonWindow(window: ProjectDaemonWindow): () => v
         return null
       }
       return invalidDaemonResponse()
+    }),
+    // B3 / P6 security §S2: OS confirmation guards are always installed (fail-closed if callback absent)
+    // and never trust renderer-supplied targetLabel or providerFullAccessCopy.
+    installDaemonChannelGuard('delegation:setProjectPolicy', async (args) => {
+      if (!window.confirmDelegationSwitch) return { result: { ok: false, reason: 'guard_required' } }
+      const raw = args[0] as DelegationProjectPolicyRequest | undefined
+      if (!raw || typeof raw.cwd !== 'string' || !raw.cwd.trim() || typeof raw.enabled !== 'boolean') {
+        return { result: { ok: false, reason: 'invalid_request' } }
+      }
+      const confirmed = await window.confirmDelegationSwitch({
+        switchKind: 'project_delegation',
+        nextEnabled: raw.enabled,
+        targetLabel: raw.cwd
+      })
+      return confirmed ? { args: [{ cwd: raw.cwd, enabled: raw.enabled }] } : { result: { ok: false, cancelled: true } }
+    }),
+    installDaemonChannelGuard('delegation:setSessionFullAccess', async (args) => {
+      if (!window.confirmDelegationSwitch) return { result: { ok: false, reason: 'guard_required' } }
+      const raw = args[0] as DelegationSessionFullAccessRequest | undefined
+      if (!raw || typeof raw.sessionKey !== 'string' || !raw.sessionKey.trim() || typeof raw.enabled !== 'boolean') {
+        return { result: { ok: false, reason: 'invalid_request' } }
+      }
+      const confirmed = await window.confirmDelegationSwitch({
+        switchKind: 'session_full_access',
+        nextEnabled: raw.enabled,
+        targetLabel: raw.sessionKey
+      })
+      return confirmed
+        ? { args: [{ sessionKey: raw.sessionKey, enabled: raw.enabled }] }
+        : { result: { ok: false, cancelled: true } }
     })
   ]
   return () => { for (const step of undo) step() }

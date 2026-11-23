@@ -52,6 +52,10 @@ export function RemoteChatView(props: RemoteChatViewProps) {
   const historyFailed = Boolean(sessionId && displayTurns.length === 0 && props.historyError !== null && (!waitingForRun || historyLoading))
   const archiveUnavailable = Boolean(sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0 &&
     pollFresh && !waitingForRun)
+  const isDelegatedChild = props.session?.lineageKind === 'delegated' || props.catalogSession?.lineageKind === 'delegated'
+  const effectiveSendBlockedReason = isDelegatedChild
+    ? '委派子会话为只读，不能直接发送消息'
+    : (workspaceSelection.blockedReason ?? sendBlockedReason)
   return (
     <>
       <ChatView
@@ -72,7 +76,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         runControlsReason={provider && runControlCatalog.models.length === 0 ? `${host} 未提供模型列表；使用 Provider 默认模型` : null}
         input={input}
         composerScopeKey={draftKey}
-        sendBlockedReason={workspaceSelection.blockedReason ?? sendBlockedReason}
+        sendBlockedReason={effectiveSendBlockedReason}
         submitting={submitting}
         sessionLoading={historyLoading && displayTurns.length === 0 && !runActive}
         transcriptPending={historyLoading || waitingForRun}
@@ -239,7 +243,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
               : <EmptyState size="card" picture="folder" title={WORKBENCH_EMPTY_COPY.remoteFilesUnavailable} />,
             'source-control': catalog?.workbench === 1 ? <SourceControlPanel cwd={cwd} api={workbench.sourceControl} active={surface.state.visible && surface.state.activeId === 'source-control'} /> : upgradeWorkbench,
             terminal: catalog?.workbench === 1 ? <Suspense fallback={<DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />}><TerminalSurface cwd={cwd} scopeId={surface.scopeId} api={workbench.terminal} machineLabel={host} active={surface.state.visible && surface.state.activeId === 'terminal'} /></Suspense> : upgradeWorkbench,
-            agents: <AgentsSurface turns={displayTurns} busy={pollFresh && runActive} />,
+            agents: <AgentsSurface turns={displayTurns} busy={pollFresh && runActive} isLocalHost={false} />,
             diff: diffReview ? <TurnDiffReviewPanel review={diffReview} onClose={() => dispatchSurface({ type: 'close', kind: 'diff' })} />
               : <EmptyState size="card" picture="diff" title={WORKBENCH_EMPTY_COPY.diffUnavailable} />
           }}

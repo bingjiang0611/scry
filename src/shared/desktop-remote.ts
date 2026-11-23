@@ -81,6 +81,9 @@ export interface RemoteSessionRef {
   /** Host-persisted terminal evidence. Absence is unknown, not success. */
   lastRunId?: string
   lastRunOutcome?: import('./turn-record').AgentTurnRecord['status']
+  /** P6-5: optional lineage metadata for read-only delegated child sessions. */
+  parentSessionKey?: string | null
+  lineageKind?: 'fork' | 'side_chat' | 'delegated' | null
 }
 export function isRemoteSessionOutcome(value: unknown): value is NonNullable<RemoteSessionRef['lastRunOutcome']> {
   return value === 'completed' || value === 'failed' || value === 'cancelled' || value === 'interrupted'

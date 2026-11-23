@@ -1,4 +1,5 @@
-import type { AgentQuestionRequest, AgentIntervention } from '../../shared/runtime'
+import type { AgentQuestionRequest, AgentIntervention, AgentPermissionMode } from '../../shared/runtime'
+import type { OrchestrationToolsAttachment } from '../providers/types'
 import type { RunRendererSink } from './trace-runtime'
 import type { ActiveRun, TraceEvent } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
@@ -22,6 +23,17 @@ import type { RunControl } from './run-control'
 /** What the run pipeline needs from the process that hosts it (Electron main or the daemon). */
 export type RunHost = {
   observeNativeTranscript?: (run: NativeTranscriptRun) => Promise<((sessionId: string | undefined) => Promise<void>) | undefined> | undefined
+  prepareOrchestrationTools?: (run: {
+    runId: string
+    ledgerRunId?: string
+    providerId: ProviderId
+    agentProfileId?: string
+    cwd?: string
+    sessionKey?: string
+    permissionMode: AgentPermissionMode
+    isRemoteRun?: boolean
+    grantScope?: 'local' | 'remote'
+  }) => Promise<{ orchestrationTools?: OrchestrationToolsAttachment; cleanup: () => void }>
   providerRegistry: ProviderRegistry
   piRunDiagnostics: PiRunDiagnostics
   isShuttingDown: () => boolean

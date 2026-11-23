@@ -21,6 +21,7 @@ import {
 import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
 import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
 import { writePrivateMcpConfig } from './providers/private-mcp-config'
+import { ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES, ORCHESTRATOR_MCP_SERVER_NAME } from './providers/orchestrator-mcp-sdk'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from './process-diagnostics'
 
 let counter = 0
@@ -339,12 +340,21 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     return child
   }
   options.strictMcpConfig = true
-  // The SDK would put these configs (headers, stdio env, history-reader token) on the
-  // CLI argv; pass them as a private file instead, removed when this run ends.
-  options.mcpServers = {}
+  // Keep in-process SDK MCP servers (type === 'sdk') in options.mcpServers so they never
+  // enter --mcp-config; write all external MCP configs to a private 0600 file instead.
+  const sdkMcpServers: Record<string, unknown> = {}
+  const fileMcpServers: Record<string, unknown> = {}
+  for (const [name, cfg] of Object.entries(opts.mcpServers ?? {})) {
+    if (cfg && typeof cfg === 'object' && (cfg as { type?: unknown }).type === 'sdk') {
+      sdkMcpServers[name] = cfg
+    } else {
+      fileMcpServers[name] = cfg
+    }
+  }
+  options.mcpServers = sdkMcpServers
   let mcpConfig: ReturnType<typeof writePrivateMcpConfig>
   try {
-    mcpConfig = writePrivateMcpConfig(opts.mcpServers ?? {})
+    mcpConfig = writePrivateMcpConfig(fileMcpServers as Record<string, Record<string, unknown>>)
   } catch (error) {
     // Nothing spawned and no input attempted: a failed handle keeps that evidence.
     return { promise: Promise.reject(error), interrupt: () => {}, forceKill: () => {}, getSessionId: () => undefined }
@@ -385,6 +395,9 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
           updatedInput: { ...input, answers: response.answers },
           decisionClassification: 'user_temporary' as const
         }
+      }
+      if (Object.hasOwn(sdkMcpServers, ORCHESTRATOR_MCP_SERVER_NAME) && ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES.has(toolName)) {
+        return { behavior: 'allow' as const }
       }
       if (permissionMode === 'full_access') return { behavior: 'allow' as const }
       const detail = permission.description ?? JSON.stringify(input).slice(0, 1_200)

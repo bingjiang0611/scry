@@ -21,6 +21,7 @@ import {
 import { homedir } from 'node:os'
 import { createHash, randomBytes } from 'node:crypto'
 import { HISTORY_READER_SERVER, HISTORY_READER_TOOL, historyReaderEnvironment, type HistoryReaderConnection } from '../conversation-history-reader'
+import { ORCHESTRATOR_MCP_SERVER_NAME, ORCHESTRATOR_TOOL_BASE_NAMES } from './orchestrator-mcp-sdk'
 import { join } from 'node:path'
 import { mcpPayloadFailed, parseMcp, type McpLiveStatus, type TraceEvent } from '../../shared/trace'
 import { resolveRuntimeCliBin, runtimeCliEnv, shellEnv } from '../claude-locate'
@@ -845,7 +846,7 @@ export function createCodexAdapter(
         command: path,
         args,
         cwd,
-        env: { ...(historyReader ? historyReaderEnvironment(env) : env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
+        env: { ...historyReaderEnvironment(env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
       })
     } catch (error) {
       mcp.dispose?.()
@@ -988,6 +989,7 @@ export function createCodexAdapter(
     runtimeProvider: 'codex_cli',
     historicalContext: true,
     historyReader: true,
+    orchestrationTools: true,
     continuationKey: (context) => {
       const env = runtimeEnvironment()
       const sourceHome = sourceHomeFor(env)
@@ -1178,6 +1180,18 @@ export function createCodexAdapter(
           } finally {
             if (timer) clearTimeout(timer)
             approvalControllers.delete(controller)
+          }
+        }
+        if (
+          method === 'mcpServer/elicitation/request' &&
+          runRequest.orchestrationTools?.kind === 'codex_http' &&
+          params.serverName === ORCHESTRATOR_MCP_SERVER_NAME &&
+          params.mode !== 'url'
+        ) {
+          const meta = record(params._meta)
+          const toolName = typeof meta.toolName === 'string' ? meta.toolName : typeof params.toolName === 'string' ? params.toolName : undefined
+          if (!toolName || ORCHESTRATOR_TOOL_BASE_NAMES.has(toolName)) {
+            return { action: 'accept' }
           }
         }
         if ((runRequest.permissionMode ?? 'default') === 'full_access') return undefined
@@ -1670,6 +1684,26 @@ export function createCodexAdapter(
           })
 
           const access = codexAccess(runRequest.permissionMode)
+          if (runRequest.orchestrationTools && runRequest.orchestrationTools.kind !== 'codex_http') {
+            throw new Error('Codex 编排工具通道类型不匹配')
+          }
+          if (runRequest.orchestrationTools?.kind === 'codex_http' &&
+              Object.hasOwn(authorizedMcpServers(runRequest.mcpExecution), ORCHESTRATOR_MCP_SERVER_NAME)) {
+            throw new Error('仓库 MCP 名称与 App 编排服务冲突')
+          }
+          const threadConfig = runRequest.orchestrationTools?.kind === 'codex_http'
+            ? {
+                config: {
+                  mcp_servers: {
+                    [ORCHESTRATOR_MCP_SERVER_NAME]: {
+                      url: runRequest.orchestrationTools.url,
+                      http_headers: { Authorization: `Bearer ${runRequest.orchestrationTools.bearerToken}` },
+                      tool_timeout_sec: 30
+                    }
+                  }
+                }
+              }
+            : {}
           const thread = runRequest.resume
             ? await request<CodexThreadResponse>(
                 'thread/resume',
@@ -1678,6 +1712,7 @@ export function createCodexAdapter(
                   cwd: runRequest.cwd,
                   excludeTurns: true,
                   ...access,
+                  ...threadConfig,
                   ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,
@@ -1691,6 +1726,7 @@ export function createCodexAdapter(
                 {
                   cwd: runRequest.cwd,
                   ...access,
+                  ...threadConfig,
                   ...(runRequest.model ? { model: runRequest.model.id } : {})
                 },
                 runRequest.cwd,

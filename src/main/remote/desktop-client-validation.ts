@@ -221,6 +221,8 @@ export function validateSession(value: unknown): RemoteSessionRef {
       (value.externalSessionId !== undefined && !text(value.externalSessionId, 256)) || (value.agentProfileId !== undefined && !text(value.agentProfileId, 256)) ||
       (value.pinnedAt !== undefined && (!Number.isSafeInteger(value.pinnedAt) || Number(value.pinnedAt) <= 0)) || (value.archivedAt !== undefined && (!Number.isSafeInteger(value.archivedAt) || Number(value.archivedAt) <= 0)) ||
       (value.isActive !== undefined && typeof value.isActive !== 'boolean') || (value.pendingQuestions !== undefined && (!Number.isSafeInteger(value.pendingQuestions) || Number(value.pendingQuestions) < 0)) ||
-      (value.lastRunId !== undefined && !text(value.lastRunId, 128)) || (value.lastRunOutcome !== undefined && !isRemoteSessionOutcome(value.lastRunOutcome))) fail('invalid_catalog_response')
+      (value.lastRunId !== undefined && !text(value.lastRunId, 128)) || (value.lastRunOutcome !== undefined && !isRemoteSessionOutcome(value.lastRunOutcome)) ||
+      (value.parentSessionKey !== undefined && !text(value.parentSessionKey, 4096)) ||
+      (value.lineageKind !== undefined && value.lineageKind !== 'fork' && value.lineageKind !== 'side_chat' && value.lineageKind !== 'delegated')) fail('invalid_catalog_response')
   return value as unknown as RemoteSessionRef
 }

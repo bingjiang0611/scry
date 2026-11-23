@@ -180,7 +180,7 @@ export function AppShell(props: AppShellProps) {
                       history={view === 'chat' && chatProps.onLoadOlderTurns ? { hasOlder: chatProps.historyWindow?.hasOlder ?? false,
                         loading: chatProps.historyOlderLoading ?? false, load: chatProps.onLoadOlderTurns } : undefined} />,
                     terminal: <Suspense fallback={<DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />}><TerminalSurface cwd={surface.cwd} scopeId={surface.id} active={current && panelVisible && surface.state.activeId === 'terminal'} /></Suspense>,
-                    agents: current ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} /> : null
+                    agents: current ? <AgentsSurface turns={displayedTurns} busy={displayedBusy} cwd={surface.cwd} sessionKey={view === 'conversation' ? logicalConversation?.id ?? null : activeSessionId} /> : null
                   }}
                 />
               </div>

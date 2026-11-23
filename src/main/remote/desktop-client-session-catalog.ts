@@ -31,7 +31,11 @@ function sessionFromRow(raw: unknown): { key: string; session: RemoteSessionRef;
     ...(raw.archivedAt !== null ? { archivedAt: raw.archivedAt } : {}),
     isActive: typeof raw.activeRunId === 'string', pendingQuestions: raw.pendingQuestions,
     ...(typeof raw.lastRunId === 'string' ? { lastRunId: raw.lastRunId } : {}),
-    ...(typeof outcome === 'string' ? { lastRunOutcome: outcome } : {})
+    ...(typeof outcome === 'string' ? { lastRunOutcome: outcome } : {}),
+    ...(typeof raw.parentSessionKey === 'string' && raw.parentSessionKey ? { parentSessionKey: raw.parentSessionKey } : {}),
+    ...(raw.lineageKind === 'fork' || raw.lineageKind === 'side_chat' || raw.lineageKind === 'delegated'
+      ? { lineageKind: raw.lineageKind }
+      : {})
   })
   return { key: raw.sessionKey, session, seq: Number(raw.revSeq) }
 }

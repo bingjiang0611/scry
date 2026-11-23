@@ -39,7 +39,9 @@ import {
 import { livePrompt, QoderStderrTail, qoderExecutable, qoderMcpLaunch, qoderOptions, signalProcessTree, type QoderMcpLaunch } from './qoder-launch'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
+import { authorizedMcpServers } from '../mcp-config'
 import { qoderCanUseTool } from './qoder-run-permissions'
+import { createQoderOrchestratorMcpServer, ORCHESTRATOR_MCP_SERVER_NAME } from './orchestrator-mcp-sdk'
 import { newId } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
 import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
@@ -177,6 +179,19 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     releaseProviderPrompt = prompt.release
     // Written before the attempt is recorded: a failed write sends nothing.
     mcpLaunch = qoderMcpLaunch(request.mcpExecution)
+    if (request.orchestrationTools && request.orchestrationTools.kind !== 'in_process') {
+      throw new Error('Qoder 编排工具通道类型不匹配')
+    }
+    if (request.orchestrationTools?.kind === 'in_process') {
+      if (Object.hasOwn(mcpLaunch.options.mcpServers, ORCHESTRATOR_MCP_SERVER_NAME) ||
+        Object.hasOwn(authorizedMcpServers(request.mcpExecution), ORCHESTRATOR_MCP_SERVER_NAME)) {
+        throw new Error('仓库 MCP 名称与 App 编排服务冲突')
+      }
+      mcpLaunch.options.mcpServers = {
+        ...mcpLaunch.options.mcpServers,
+        [ORCHESTRATOR_MCP_SERVER_NAME]: createQoderOrchestratorMcpServer(request.orchestrationTools.callTool)
+      }
+    }
     // The CLI consumes this stream as soon as the transport starts, so the
     // attempt observation must precede query(), not the transcript read.
     history.attempting(outgoingText)

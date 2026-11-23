@@ -7,6 +7,7 @@ import {
   normalizeAgentQuestionRequest
 } from '../../shared/runtime'
 import type { ProviderRunRequest } from './types'
+import { ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES } from './orchestrator-mcp-sdk'
 
 type QoderWaitForUser = <T>(action: () => Promise<T>) => Promise<T>
 
@@ -52,6 +53,9 @@ export function qoderCanUseTool(request: ProviderRunRequest, waitForUser: QoderW
         updatedInput: { ...input, answers: response.answers },
         decisionClassification: 'user_temporary' as const
       }
+    }
+    if (request.orchestrationTools?.kind === 'in_process' && ORCHESTRATOR_AUTO_ALLOW_TOOL_NAMES.has(toolName)) {
+      return { behavior: 'allow' as const }
     }
     if ((request.permissionMode ?? 'default') === 'full_access') return { behavior: 'allow' as const }
     const sessionSuggestions = exactSessionPermissionSuggestions(permission.suggestions)

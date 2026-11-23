@@ -32,6 +32,9 @@ struct ChatView: View {
   }
   private var hasTurn: Bool { !completedTurns.isEmpty || run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
   private var runBusy: Bool { run.isBusy }
+  private var isDelegatedChildSession: Bool {
+    run.activeSessionIdentity.map(run.isDelegatedChildSession) == true
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -166,10 +169,10 @@ struct ChatView: View {
   private var footer: some View {
     VStack(alignment: .leading, spacing: 6) {
       MessageComposer(text: composer.text, attachments: composer.attachments,
-                      placeholder: !paired ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
-                      disabled: !paired,
-                      sendDisabled: runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      sendBlockReason: runBusy || run.chosen == nil || run.controlsReady ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable),
+                      placeholder: isDelegatedChildSession ? "委派子会话为只读，不能直接发送消息" : !paired ? ConversationCopy.connectedInput : runBusy ? ConversationCopy.busyInput : ConversationCopy.followUpInput,
+                      disabled: !paired || isDelegatedChildSession,
+                      sendDisabled: isDelegatedChildSession || runBusy || run.chosen == nil || !run.controlsReady || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      sendBlockReason: isDelegatedChildSession ? "委派子会话为只读，不能直接发送消息" : (runBusy || run.chosen == nil || run.controlsReady ? nil : (run.providerControlsNotice ?? ConnectionCopy.providerControlsUnavailable)),
                       contextLocked: true,
                       modelOptions: run.modelOptions, selectedModelId: run.chosenModelId,
                       modelSelectionIssue: run.modelSelectionIssue,
@@ -186,6 +189,7 @@ struct ChatView: View {
                                            agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
                       }) {
+        guard !isDelegatedChildSession else { return }
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
         let currentDraft = composer

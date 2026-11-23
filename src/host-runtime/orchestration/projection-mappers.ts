@@ -11,6 +11,8 @@ import type {
   RunProjectionRow,
   SessionLineage,
   SessionProjectionRow,
+  TaskProjectionRow,
+  TaskStatus,
   TurnAuthor,
   TurnDeliveryState,
   TurnProjectionRow
@@ -119,5 +121,39 @@ export function mapReceiptRow(row: Record<string, unknown>): CommandReceiptRow {
     principal: String(row.principal),
     via: (row.via as string | null) ?? null,
     actorRunId: (row.actor_run_id as string | null) ?? null
+  }
+}
+
+export function mapTaskRow(row: Record<string, unknown>): TaskProjectionRow {
+  return {
+    taskId: String(row.task_id),
+    parentSessionKey: String(row.parent_session_key),
+    parentRunId: String(row.parent_run_id),
+    actor: String(row.actor),
+    principal: String(row.principal),
+    via: (row.via as string | null) ?? null,
+    commandId: String(row.command_id),
+    childSessionKey: (row.child_session_key as string | null) ?? null,
+    childRunId: (row.child_run_id as string | null) ?? null,
+    provider: String(row.provider),
+    profile: (row.profile as string | null) ?? null,
+    cwd: String(row.cwd),
+    status: String(row.status) as TaskStatus,
+    stateVersion: Number(row.state_version ?? 1),
+    permissionMode: String(row.permission_mode),
+    permissionModeSource: String(row.permission_mode_source) as 'inherited' | 'requested',
+    title: (row.title as string | null) ?? null,
+    role: (row.role as string | null) ?? null,
+    targetModel: (row.target_model as string | null) ?? null,
+    targetEffort: (row.target_effort as string | null) ?? null,
+    isolation: (row.isolation === 'worktree' ? 'worktree' : 'shared'),
+    confirmationQuestionId: (row.confirmation_question_id as string | null) ?? null,
+    cancelConfirmationQuestionId: (row.cancel_confirmation_question_id as string | null) ?? null,
+    body: parseJson<BodyDescriptor>(row.body as string | null),
+    summary: parseJson<Evidence<string>>(row.summary as string | null),
+    reason: (row.reason as string | null) ?? null,
+    createdAt: Number(row.created_at),
+    settledAt: row.settled_at === null ? null : Number(row.settled_at),
+    revSeq: Number(row.rev_seq)
   }
 }

@@ -13,6 +13,7 @@ import { getEffectPolicy } from './effect-policy'
 import { findNativeSession } from './native-session-lookup'
 import {
   deleteSessionInDb,
+  executeWalCheckpoint,
   pruneEventsInDb,
   resumeBodyErasure,
   stopRunBypassingFenceInRegistry,
@@ -22,18 +23,22 @@ import {
   type DeleteSessionOutcome
 } from './event-sink-maintenance'
 import {
+  buildOrchestratorReadView,
   listAllEventsRaw,
   listAllOutboxRaw,
-  listNonTerminalChildRunsBySessionRaw,
-  listNonTerminalChildRunsRaw,
+  listTasksByParentRunRaw,
+  listTasksByParentSessionRaw,
+  readDelegationPolicyEnabledRaw,
   readInteractionRaw,
   readNextTurnOrdinalRaw,
   readReceiptRaw,
   readRunRaw,
   readSessionRaw,
+  readTaskRaw,
   readTurnByRunIdRaw,
   readTurnRaw
 } from './event-sink-queries'
+import { readDelegationLimits, type DelegationLimits } from './delegation-limits'
 import { prepareEventSinkStatements, type EventSinkStatements } from './event-sink-statements'
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
 import { applyEventToProjection } from './projection'
@@ -46,6 +51,7 @@ import {
   type OutboxEffectRow,
   type RunProjectionRow,
   type SessionProjectionRow,
+  type TaskProjectionRow,
   type TurnProjectionRow
 } from './types'
 
@@ -59,6 +65,8 @@ export interface EventSinkOptions extends OpenOrchestrationDbOptions {
   checkpointIntervalMs?: number
   /** Test seam invoked inside the commit transaction immediately before SQLite commits. */
   beforeCommitHook?: () => void
+  /** Optional delegation limits override (defaults to readDelegationLimits()). */
+  delegationLimits?: DelegationLimits
 }
 
 export interface EventSinkTxExtras {
@@ -87,7 +95,9 @@ export class EventSink {
   #workerCheckpointActive = false
   #onCheckpoint?: (sample: WalCheckpointSample) => void
   #onCommit?: (seq: number) => void
+  #commitListeners = new Set<(seq: number) => void>()
   #sessionDeleteEpoch = new Map<string, number>()
+  #delegationLimits: DelegationLimits
   #stmts: EventSinkStatements
 
   private constructor(handle: OrchestrationDbHandle, options: EventSinkOptions) {
@@ -98,6 +108,7 @@ export class EventSink {
     this.#isProviderAuthenticating = options.isProviderAuthenticating ?? (() => false)
     this.#checkpointIntervalMs = options.checkpointIntervalMs ?? 500
     this.#beforeCommitHook = options.beforeCommitHook
+    this.#delegationLimits = options.delegationLimits ?? readDelegationLimits()
     this.#stmts = prepareEventSinkStatements(handle.db)
     this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
   }
@@ -110,14 +121,21 @@ export class EventSink {
     this.#onCommit = observer
   }
 
+  addCommitListener(listener: (seq: number) => void): () => void {
+    this.#commitListeners.add(listener)
+    return () => { this.#commitListeners.delete(listener) }
+  }
+
   #maxSeqStatement: { get(): unknown } | undefined
 
   #notifyCommitted(): void {
-    if (!this.#onCommit || !this.handle.db.open) return
+    if ((!this.#onCommit && this.#commitListeners.size === 0) || !this.handle.db.open) return
     try {
       this.#maxSeqStatement ??= this.handle.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM orch_event')
       const row = this.#maxSeqStatement.get() as { seq: number }
-      this.#onCommit(Number(row.seq))
+      const seq = Number(row.seq)
+      this.#onCommit?.(seq)
+      for (const listener of [...this.#commitListeners]) listener(seq)
     } catch {
       // Observer notification must never break commit semantics.
     }
@@ -155,32 +173,11 @@ export class EventSink {
   checkpointTruncate(): WalCheckpointResult { return this.runCheckpoint('truncate') }
 
   private runCheckpoint(mode: 'passive' | 'truncate'): WalCheckpointResult {
-    if (this.#writeIndeterminate || !this.handle.db.open) {
-      return { busy: 0, log: 0, checkpointed: 0 }
-    }
-    if (this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
-    const walBytesBefore = this.handle.walFileBytes()
-    const started = performance.now()
-    try {
-      const result = mode === 'truncate' ? this.handle.checkpointTruncate() : this.handle.checkpointPassive()
-      const durationMs = Number((performance.now() - started).toFixed(2))
-      this.#checkpointCount += 1
-      this.#onCheckpoint?.({
-        mode,
-        durationMs,
-        walBytesBefore,
-        walBytesAfter: this.handle.walFileBytes(),
-        result,
-        executor: 'main',
-        threadId: 0
-      })
-      return result
-    } catch {
-      return { busy: 1, log: 0, checkpointed: 0 }
-    }
+    if (this.#writeIndeterminate || !this.handle.db.open) return { busy: 0, log: 0, checkpointed: 0 }
+    if (this.#checkpointTimer) { clearTimeout(this.#checkpointTimer); this.#checkpointTimer = null }
+    const { result, ok } = executeWalCheckpoint(this.handle, mode, this.#onCheckpoint)
+    if (ok) this.#checkpointCount += 1
+    return result
   }
 
   getSessionDeleteEpoch(sessionKey: string): number {
@@ -225,23 +222,21 @@ export class EventSink {
   }
 
   private createReadView(): OrchestratorReadView {
-    return {
-      isActorAuthorized: (actor) => actor.startsWith('effect:') || this.#authorizedActors.has(actor),
-      getReceipt: (commandId, actor) => readReceiptRaw(this.#stmts, commandId, actor),
-      getRun: (runId) => readRunRaw(this.#stmts, runId),
-      getSession: (sessionKey) => readSessionRaw(this.#stmts, sessionKey),
-      getNativeSession: (identity) => findNativeSession(this, identity),
-      getTurnByRunId: (runId) => readTurnByRunIdRaw(this.#stmts, runId),
-      getNextTurnOrdinal: (sessionKey) => readNextTurnOrdinalRaw(this.#stmts, sessionKey),
-      getInteraction: (runId, questionId) => readInteractionRaw(this.#stmts, runId, questionId),
-      listNonTerminalChildRuns: (parentRunId) => listNonTerminalChildRunsRaw(this.#stmts, parentRunId),
-      listNonTerminalChildRunsBySession: (sessionKey) => listNonTerminalChildRunsBySessionRaw(this.#stmts, sessionKey),
-      hasActiveRunForSession: (sessionKey) => Boolean(this.#stmts.hasActiveSessionRun.get(sessionKey)),
-      activeRunCount: () => (this.#stmts.activeRunCount.get() as { count: number }).count,
-      maxActiveRuns: () => this.#maxActiveRuns,
-      isProviderAuthenticating: (provider, profile) => this.#isProviderAuthenticating(provider, profile)
-    }
+    return buildOrchestratorReadView(this.#stmts, {
+      authorizedActors: this.#authorizedActors,
+      maxActiveRuns: this.#maxActiveRuns,
+      delegationLimits: this.#delegationLimits,
+      isProviderAuthenticating: (provider, profile) => this.#isProviderAuthenticating(provider, profile),
+      getNativeSession: (identity) => findNativeSession(this, identity)
+    })
   }
+
+  getTask(taskId: string): TaskProjectionRow | undefined { return readTaskRaw(this.#stmts, taskId) }
+  listTasksByParentRun(parentRunId: string): TaskProjectionRow[] { return listTasksByParentRunRaw(this.#stmts, parentRunId) }
+  listTasksByParentSession(sessionKey: string): TaskProjectionRow[] { return listTasksByParentSessionRaw(this.#stmts, sessionKey) }
+  isProjectDelegationEnabled(cwd: string): boolean { return readDelegationPolicyEnabledRaw(this.#stmts, 'project', cwd) }
+  isSessionFullAccessEnabled(sessionKey: string): boolean { return readDelegationPolicyEnabledRaw(this.#stmts, 'session', sessionKey) }
+  countNonTerminalAgentRuns(): number { return (this.#stmts.countNonTerminalAgentRuns.get() as { count: number }).count }
 
   execute(command: OrchestrationCommand, txExtras?: EventSinkTxExtras): DecisionResult {
     if (this.#writeIndeterminate) {

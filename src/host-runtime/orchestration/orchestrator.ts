@@ -15,7 +15,12 @@ import {
   type DecisionResult,
   type OrchestratorReadView
 } from './orchestrator-handlers'
-import { isTerminalRunLifecycle } from './run-transitions'
+import {
+  appendL4ParentEndVoidEvents,
+  decideRunStop,
+  decideSessionStopSubtasks,
+  decideTaskOrPolicyCommand
+} from './orchestrator-task-handlers'
 import {
   DEFAULT_PENDING_TTL_MS,
   PROMPT_PREVIEW_MAX_CHARS,
@@ -24,7 +29,6 @@ import {
   isPeerActor,
   isValidP4Actor,
   type PendingOrchestrationEvent,
-  type PendingOutboxEffect,
   type RejectionReason,
   type RetryableRejectionReason,
   type StickyRejectionReason
@@ -38,7 +42,10 @@ const STICKY_REASONS: ReadonlySet<StickyRejectionReason> = new Set([
   'command_payload_conflict',
   'illegal_transition',
   'invalid_target',
-  'resolved_absent'
+  'resolved_absent',
+  'delegated_session_read_only',
+  'active_subtasks_present',
+  'limit_exceeded'
 ])
 
 const RETRYABLE_REASONS: ReadonlySet<RetryableRejectionReason> = new Set([
@@ -48,7 +55,16 @@ const RETRYABLE_REASONS: ReadonlySet<RetryableRejectionReason> = new Set([
   'device_not_authorized',
   'grant_revoked',
   'orchestration_write_indeterminate',
-  'agent_commands_unsupported'
+  'agent_commands_unsupported',
+  'session_deleted_during_prepare',
+  'caller_not_active',
+  'delegation_disabled',
+  'full_access_not_enabled',
+  'limit_exceeded',
+  'permission_mode_escalation_denied',
+  'task_not_found',
+  'capability_denied',
+  'provider_unavailable'
 ])
 
 export function isStickyRejection(reason: RejectionReason): reason is StickyRejectionReason {
@@ -59,14 +75,35 @@ export function isRetryableRejection(reason: RejectionReason): reason is Retryab
   return RETRYABLE_REASONS.has(reason as RetryableRejectionReason)
 }
 
+const AGENT_ALLOWED_COMMANDS = new Set<OrchestrationCommand['type']>([
+  'task.request',
+  'task.cancel_request'
+])
+
+const PEER_ONLY_COMMANDS = new Set<OrchestrationCommand['type']>([
+  'delegation.set_project_policy',
+  'delegation.set_session_full_access',
+  'task.confirm',
+  'task.confirm_cancel',
+  'session.stop_subtasks'
+])
+
 /**
  * Pure synchronous orchestrator decision function (core §2.1).
  * Performs zero I/O; reads only `view` and returns events, effects, and receipt.
  */
 export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): DecisionResult {
-  // R2: P4 does not execute agent: commands; reject retryably without leaving a receipt.
-  if (isAgentActor(cmd.actor)) return retryableReject('agent_commands_unsupported')
-  if (!isValidP4Actor(cmd.actor) || !view.isActorAuthorized(cmd.actor)) {
+  if (isAgentActor(cmd.actor)) {
+    if (PEER_ONLY_COMMANDS.has(cmd.type) || cmd.type === 'question.answer') {
+      return retryableReject('device_not_authorized')
+    }
+    if (!AGENT_ALLOWED_COMMANDS.has(cmd.type)) {
+      return retryableReject('agent_commands_unsupported')
+    }
+    if (!cmd.principal || !isPeerActor(cmd.principal) || !view.isActorAuthorized(cmd.principal)) {
+      return retryableReject('device_not_authorized')
+    }
+  } else if (!isValidP4Actor(cmd.actor) || !view.isActorAuthorized(cmd.actor)) {
     return retryableReject('device_not_authorized')
   }
 
@@ -81,6 +118,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
   switch (cmd.type) {
     case 'run.submit': {
       const p = cmd.payload
+      if (p.sessionKey && isPeerActor(cmd.actor)) {
+        const targetSession = view.getSession(p.sessionKey)
+        if (targetSession?.lineage?.kind === 'delegated') {
+          return stickyReject(cmd, 'delegated_session_read_only', { writeReceipt: true })
+        }
+      }
       if (p.sessionKey && !p.historicalBackfill && view.hasActiveRunForSession(p.sessionKey)) {
         return retryableReject('session_run_active')
       }
@@ -190,95 +233,20 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       })
     }
 
-    case 'run.stop': {
-      const target = view.getRun(cmd.payload.runId)
-      if (!target) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      if (isTerminalRunLifecycle(target.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+    case 'run.stop':
+      return decideRunStop(cmd, view)
 
-      const events: PendingOrchestrationEvent[] = [
-        makeEvent(cmd, 0, {
-          type: 'run.stop_requested',
-          stream: `run:${target.runId}`,
-          sessionKey: target.sessionKey,
-          runId: target.runId,
-          cwd: target.cwd,
-          payload: { runId: target.runId, ...(cmd.payload.reason ? { reason: cmd.payload.reason } : {}) }
-        })
-      ]
-      const shadowOnly = Boolean(cmd.payload.shadowOnly)
-      const effects: PendingOutboxEffect[] = [
-        makeEffect(cmd, 0, {
-          kind: 'provider.run.stop',
-          runId: target.runId,
-          payload: { runId: target.runId, ...(shadowOnly ? { shadowOnly: true } : {}) },
-          state: shadowOnly ? 'done' : 'pending',
-          leaseOwner: shadowOnly ? 'shadow:no-dispatch' : null,
-          claimedAt: shadowOnly ? cmd.at : null
-        })
-      ]
-      const visited = new Set<string>([target.runId])
-      const queue = [target.runId]
-      while (queue.length > 0) {
-        const parentId = queue.shift()!
-        for (const child of view.listNonTerminalChildRuns(parentId)) {
-          if (visited.has(child.runId)) continue
-          visited.add(child.runId)
-          queue.push(child.runId)
-          events.push(
-            makeEvent(cmd, events.length, {
-              type: 'run.stop_requested',
-              stream: `run:${child.runId}`,
-              sessionKey: child.sessionKey,
-              runId: child.runId,
-              cwd: child.cwd,
-              payload: { runId: child.runId, cascadeRoot: target.runId }
-            })
-          )
-          effects.push(
-            makeEffect(cmd, effects.length, {
-              kind: 'provider.run.stop',
-              runId: child.runId,
-              payload: { runId: child.runId, cascadeRoot: target.runId, ...(shadowOnly ? { shadowOnly: true } : {}) },
-              state: shadowOnly ? 'done' : 'pending',
-              leaseOwner: shadowOnly ? 'shadow:no-dispatch' : null,
-              claimedAt: shadowOnly ? cmd.at : null
-            })
-          )
-        }
+    case 'session.stop_subtasks':
+      return decideSessionStopSubtasks(cmd, view)
+
+    case 'run.effect_result': {
+      const result = decideRunEffectResult(cmd, view)
+      if (result.kind === 'accepted' && ['settled', 'failed', 'cancelled', 'interrupted'].includes(cmd.payload.step)) {
+        const parentRun = view.getRun(cmd.payload.runId)
+        if (parentRun) appendL4ParentEndVoidEvents(cmd, parentRun, view, result.events)
       }
-      return acceptDecision(cmd, events, effects, { runId: target.runId, cascadedCount: events.length - 1 })
+      return result
     }
-
-    case 'session.stop_subtasks': {
-      if (!isPeerActor(cmd.actor)) return retryableReject('device_not_authorized')
-      const children = view.listNonTerminalChildRunsBySession(cmd.payload.sessionKey)
-      const events: PendingOrchestrationEvent[] = []
-      const effects: PendingOutboxEffect[] = []
-      for (const child of children) {
-        events.push(
-          makeEvent(cmd, events.length, {
-            type: 'run.stop_requested',
-            stream: `run:${child.runId}`,
-            sessionKey: child.sessionKey,
-            runId: child.runId,
-            cwd: child.cwd,
-            payload: { runId: child.runId, cascadeRoot: child.parentRunId ?? cmd.payload.sessionKey }
-          })
-        )
-        effects.push(
-          makeEffect(cmd, effects.length, {
-            kind: 'provider.run.stop',
-            runId: child.runId,
-            payload: { runId: child.runId },
-            state: 'pending'
-          })
-        )
-      }
-      return acceptDecision(cmd, events, effects, { sessionKey: cmd.payload.sessionKey, stoppedCount: events.length })
-    }
-
-    case 'run.effect_result':
-      return decideRunEffectResult(cmd, view)
 
     case 'turn.record_delivery': {
       const p = cmd.payload
@@ -328,6 +296,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       const p = cmd.payload
       const interaction = view.getInteraction(p.runId, p.questionId)
       if (!interaction) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      if (interaction.source === 'scry_orchestrator') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       if (interaction.state !== 'open') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       const run = view.getRun(p.runId)
       const events = [
@@ -432,6 +401,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
     case 'session.restore': {
       const existing = view.getSession(cmd.payload.sessionKey)
       if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      if (cmd.type === 'session.archive' && (view.countNonTerminalTasksBySession?.(existing.sessionKey) ?? 0) > 0) {
+        return stickyReject(cmd, 'active_subtasks_present', { writeReceipt: true })
+      }
       const typeMap = {
         'session.pin': 'session.pinned',
         'session.unpin': 'session.unpinned',
@@ -495,5 +467,14 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       })
       return acceptDecision(cmd, [event], [], { leaseOwner: cmd.payload.leaseOwner })
     }
+
+    case 'delegation.set_project_policy':
+    case 'delegation.set_session_full_access':
+    case 'task.request':
+    case 'task.cancel_request':
+    case 'task.confirm':
+    case 'task.confirm_cancel':
+    case 'task.settle':
+      return decideTaskOrPolicyCommand(cmd, view)
   }
 }

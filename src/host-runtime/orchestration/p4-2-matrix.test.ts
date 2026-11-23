@@ -225,12 +225,10 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
             }
           }
         }
-        for (const reserved of RESERVED_TASK_EVENT_TYPES) {
-          expect(decodeOrchestrationEvent({ type: reserved, payload: {} })).toEqual({
-            ok: false,
-            reason: 'unknown_event_type'
-          })
-        }
+        expect(decodeOrchestrationEvent({ type: 'unknown.future_event', payload: {} })).toEqual({
+          ok: false,
+          reason: 'unknown_event_type'
+        })
 
         // Negative controls (plan §10): each security/correctness invariant fails if its check flips
         expect(

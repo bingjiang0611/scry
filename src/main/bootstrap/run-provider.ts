@@ -64,6 +64,11 @@ export interface RunProviderBootstrapDependencies {
   firstTextPerf: PerformanceTrace
   mainEventId: (prefix: string, runId: string) => string
   userQuestionBroker: UserQuestionBroker
+  ledgerRunId?: string
+  sessionKey?: string
+  isRemoteRun?: boolean
+  grantScope?: 'local' | 'remote'
+  prepareOrchestrationTools?: import('./run-host').RunHost['prepareOrchestrationTools']
 }
 
 export function createRunProvider(deps: RunProviderBootstrapDependencies): () => Promise<{ externalSessionId?: string; providerTurnId?: string; forkTurnId?: string; stopped?: boolean; status?: 'completed' | 'failed' | 'cancelled' | 'interrupted'; recordingFailure?: { message: string } }> {
@@ -111,7 +116,12 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     authorizeMcpExecution,
     publishQuestionOpened,
     publishQuestionClosed,
-    setProviderStartedAt
+    setProviderStartedAt,
+    ledgerRunId,
+    sessionKey,
+    isRemoteRun,
+    grantScope,
+    prepareOrchestrationTools
   } = deps
   const runProvider = async (): Promise<{
     externalSessionId?: string
@@ -144,8 +154,25 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       throw new Error('统一对话 runId 与 Provider 投递 runId 不一致')
     }
     managedConversation?.onProviderDispatchAttempt?.()
-    handle.current = providerRegistry.run(providerId, {
-      runId,
+    const effectivePermissionMode = permissionModeOverride ?? request.permissionMode ?? 'default'
+    const preparedOrchestration = prepareOrchestrationTools
+      ? await prepareOrchestrationTools({
+          runId,
+          ledgerRunId,
+          providerId,
+          agentProfileId,
+          cwd,
+          sessionKey,
+          permissionMode: effectivePermissionMode,
+          isRemoteRun,
+          grantScope
+        })
+      : undefined
+    let result: Awaited<ProviderRunHandle['promise']>
+    try {
+      handle.current = providerRegistry.run(providerId, {
+        runId,
+        ...(preparedOrchestration?.orchestrationTools ? { orchestrationTools: preparedOrchestration.orchestrationTools } : {}),
       prompt: runtimePrompt,
       ...(managedConversation?.historicalContext ? { historicalContext: managedConversation.historicalContext } : {}),
       ...(managedConversation?.historyReader ? { historyReader: managedConversation.historyReader } : {}),
@@ -228,15 +255,13 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
         return response
       }
     })
-    if (stopSignal?.aborted) requestStop()
-    if (!handle.current?.steer) emit({
-      id: mainEventId('steer-capability', runId), ts: new Date().toISOString(), runId,
-      kind: 'harness', stage: 'runtime:steer_capability',
-      steerCapability: { status: 'unavailable', reason: `${providerId} 当前接入未提供已验证的原生 Steer；消息仍按队列发送。` }
-    })
-    if (interrupted()) handle.current?.interrupt()
-    let result: Awaited<ProviderRunHandle['promise']>
-    try {
+      if (stopSignal?.aborted) requestStop()
+      if (!handle.current?.steer) emit({
+        id: mainEventId('steer-capability', runId), ts: new Date().toISOString(), runId,
+        kind: 'harness', stage: 'runtime:steer_capability',
+        steerCapability: { status: 'unavailable', reason: `${providerId} 当前接入未提供已验证的原生 Steer；消息仍按队列发送。` }
+      })
+      if (interrupted()) handle.current?.interrupt()
       try { result = await handle.current!.promise } finally {
         if (providerId === 'pi') piRunDiagnostics.record(runId, 'main_finalization')
         steering.close()
@@ -255,6 +280,8 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       })
       await ingestion.idle()
       throw error
+    } finally {
+      preparedOrchestration?.cleanup()
     }
     emit({
       id: mainEventId('provider-ended', runId),

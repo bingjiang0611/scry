@@ -134,6 +134,10 @@ extension G0Transport {
     // that has none — never ran a turn, older host, unfinished run — sends
     // nothing. Absence is unknown, never success, and it outlives app restarts.
     public let lastRunOutcome: String?
+    // P6-5: optional lineage metadata for read-only delegated child sessions (nil on older hosts).
+    public let parentSessionKey: String?
+    public let lineageKind: String?
+    public var isDelegatedChild: Bool { lineageKind == "delegated" }
     // Wire vocabulary of `lastRunOutcome`, the same four values the Mac accepts
     // (`isRemoteSessionOutcome` in src/shared/desktop-remote.ts).
     public enum TurnOutcome: String, Sendable, Equatable {
@@ -142,11 +146,13 @@ extension G0Transport {
     public var turnOutcome: TurnOutcome? { lastRunOutcome.flatMap(TurnOutcome.init(rawValue:)) }
     public init(sessionId: String, externalSessionId: String? = nil, providerId: String, agentProfileId: String? = nil,
                 cwd: String, label: String, ts: Double, pinnedAt: Double? = nil, isActive: Bool? = nil,
-                archivedAt: Double? = nil, lastRunOutcome: String? = nil) {
+                archivedAt: Double? = nil, lastRunOutcome: String? = nil,
+                parentSessionKey: String? = nil, lineageKind: String? = nil) {
       self.sessionId = sessionId; self.externalSessionId = externalSessionId; self.providerId = providerId
       self.agentProfileId = agentProfileId; self.cwd = cwd; self.label = label; self.ts = ts; self.pinnedAt = pinnedAt
       self.isActive = isActive; self.archivedAt = archivedAt
       self.lastRunOutcome = lastRunOutcome
+      self.parentSessionKey = parentSessionKey; self.lineageKind = lineageKind
     }
   }
   public struct RunSessionPage: Sendable, Equatable, Codable {

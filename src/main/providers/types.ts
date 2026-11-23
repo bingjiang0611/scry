@@ -124,6 +124,8 @@ export interface ProviderRunRequest {
   historicalContext?: ProviderHistoricalContext
   /** Main-owned, run-scoped retrieval authority; never accepted from renderer input. */
   historyReader?: import('../conversation-history-reader').HistoryReaderConnection
+  /** P6 orchestration MCP attachment (in-process SDK for Claude/Qoder; thread-level HTTP bearer for Codex). */
+  orchestrationTools?: OrchestrationToolsAttachment
   historyBudget?: Pick<import('../conversation-handoff-budget').HandoffBudgetInput, 'contextUsage' | 'modelContextWindow'>
   /** Main opt-in for native receipts on first / history-free inputs as well. */
   trackInputReceipt?: true
@@ -224,6 +226,10 @@ export interface SessionEvidenceFacet {
   enrich(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]>
 }
 
+export type OrchestrationToolsAttachment =
+  | { kind: 'in_process'; callTool: (toolName: string, args: unknown) => Promise<unknown> }
+  | { kind: 'codex_http'; url: string; bearerToken: string }
+
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
@@ -246,6 +252,8 @@ export interface ProviderAdapter {
   readonly catalogWarmPool?: true
   /** Adapter checks the actual reader is active before submitting model input. */
   readonly historyReader?: true
+  /** Adapter supports P6 orchestration MCP injection without argv or env credential exposure. */
+  readonly orchestrationTools?: true
   readonly forkLastTurn?: ForkLastTurnFacet
   readonly forkSession?: ForkSessionFacet
   readonly skills?: SkillsFacet
