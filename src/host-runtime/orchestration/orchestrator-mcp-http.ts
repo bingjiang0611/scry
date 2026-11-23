@@ -62,7 +62,7 @@ const MCP_TOOL_DEFINITIONS = [
           additionalProperties: false
         },
         permissionMode: { type: 'string', enum: ['default', 'auto_accept_edits', 'auto_review', 'full_access'] },
-        isolation: { type: 'string', enum: ['shared'] },
+        isolation: { type: 'string', enum: ['shared', 'worktree'] },
         mode: { type: 'string', enum: ['async', 'wait'] },
         timeoutMs: { type: 'integer', minimum: 0, maximum: 20_000 },
         clientRequestId: { type: 'string' }

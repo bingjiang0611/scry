@@ -46,12 +46,14 @@ function hashFileState(fullPath: string): string {
 export function computeExtendedRepoConfigFingerprint(
   provider: string,
   cwd: string,
-  baseTrustFingerprint: string
+  baseTrustFingerprint: string,
+  baselineCwd?: string
 ): string {
   const canonical = canonicalPath(cwd)
+  const scopeCanonical = baselineCwd ? canonicalPath(baselineCwd) : canonical
   const files = PROVIDER_PROJECT_SETTINGS_FILES[provider] ?? []
   const h = createHash('sha256')
-  h.update(`v1\0${provider}\0${canonical}\0${baseTrustFingerprint}\0`)
+  h.update(`v1\0${provider}\0${scopeCanonical}\0${baseTrustFingerprint}\0`)
   for (const rel of files) {
     h.update(`${rel}=${hashFileState(join(canonical, rel))}\0`)
   }

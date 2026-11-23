@@ -37,7 +37,7 @@ const delegateSchema = {
   role: z.string().optional(),
   target: z.object({ model: z.string().optional(), effort: z.string().optional() }).strict().optional(),
   permissionMode: z.enum(['default', 'auto_accept_edits', 'auto_review', 'full_access']).optional(),
-  isolation: z.enum(['shared']).optional(),
+  isolation: z.enum(['shared', 'worktree']).optional(),
   mode: z.enum(['async', 'wait']).optional(),
   timeoutMs: z.number().int().min(0).max(20_000).optional(),
   clientRequestId: z.string()

@@ -14,13 +14,13 @@ import { AgentRepoBaselineStore, computeExtendedRepoConfigFingerprint } from '..
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { DelegationCredentialStore } from '../host-runtime/orchestration/delegation-credentials'
 import { aggregateDelegatedUsage, buildTaskSummaryEvidence, type ChildUsageSample } from '../host-runtime/orchestration/delegation-evidence'
-import { evaluatePreDispatchRecheck } from '../host-runtime/orchestration/orchestrator-commands'
 import { DelegationService } from '../host-runtime/orchestration/delegation-service'
 import { OrchestratorMcpHttpServer } from '../host-runtime/orchestration/orchestrator-mcp-http'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { isTerminalTaskStatus } from '../host-runtime/orchestration/types'
 import {
   toDelegatedTaskView,
+  verifyDelegatedChildPreDispatch,
   type ChildRunDispatchInput,
   type ChildRunDispatchOutcome,
   type DaemonDelegationRuntimeOptions,
@@ -53,6 +53,7 @@ export class DaemonDelegationRuntime {
   readonly #hasLocalSubscriber: () => boolean
   readonly #requestRunStop: (runId: string) => boolean
   readonly #dispatchChildRun: (input: ChildRunDispatchInput) => Promise<ChildRunDispatchOutcome>
+  readonly #prepareChildWorktree?: DaemonDelegationRuntimeOptions['prepareChildWorktree']
   readonly #readChildUsage?: (childRunId: string) => ChildUsageSample | undefined
   readonly #onTaskChanged?: () => void
   readonly #clock: () => number
@@ -69,6 +70,7 @@ export class DaemonDelegationRuntime {
     this.#hasLocalSubscriber = options.hasLocalSubscriber
     this.#requestRunStop = options.requestRunStop
     this.#dispatchChildRun = options.dispatchChildRun
+    this.#prepareChildWorktree = options.prepareChildWorktree
     this.#readChildUsage = options.readChildUsage
     this.#onTaskChanged = options.onTaskChanged
     this.#clock = options.clock ?? (() => Date.now())
@@ -270,36 +272,38 @@ export class DaemonDelegationRuntime {
     const task = this.#sink.getTask(req.taskId)
     if (!task) return { ok: false, reason: 'task_not_found' }
 
-    // Pre-dispatch recheck (security §S3 / D15 / B6): fail closed if trust fingerprint cannot be read.
-    let baselineOk: { ok: boolean } = { ok: false }
-    try {
-      const baseFp = this.#currentTrustFingerprint(task.provider, task.cwd)
-      const extFp = computeExtendedRepoConfigFingerprint(task.provider, task.cwd, baseFp)
-      baselineOk = this.#baselineStore.verifyAgentRun(task.provider, task.cwd, extFp)
-    } catch {
-      baselineOk = { ok: false }
+    // P6-4: prepare isolated git worktree when requested, and verify its repo config content fingerprint
+    // against the source cwd's user-run baseline (D7 / security §S3).
+    let executionCwd = task.cwd
+    let worktreeCleanup: (() => Promise<void>) | undefined
+    if (task.isolation === 'worktree') {
+      if (!this.#prepareChildWorktree) {
+        this.#recordChildRunStep(childRunId, 'failed', 'worktree_unavailable')
+        this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, 'worktree_unavailable'), 'worktree_unavailable')
+        return { ok: false, status: 'failed', reason: 'worktree_unavailable' }
+      }
+      try {
+        const preparedWt = await this.#prepareChildWorktree({ sourceCwd: task.cwd, taskId: task.taskId })
+        executionCwd = preparedWt.cwd
+        worktreeCleanup = preparedWt.cleanup
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'worktree_prepare_failed'
+        this.#recordChildRunStep(childRunId, 'failed', reason)
+        this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, 'worktree_prepare_failed'), reason)
+        return { ok: false, status: 'failed', reason }
+      }
     }
-    const parentRun = this.#sink.getRun(task.parentRunId)
-    const parentTerminal = !parentRun || ['settled', 'failed', 'cancelled', 'interrupted'].includes(parentRun.lifecycle)
-    const parentStopRequested = parentRun?.stopState === 'requested'
-    const fullAccessViolation =
-      task.permissionMode === 'full_access' && !this.#sink.isSessionFullAccessEnabled(task.parentSessionKey)
-    const recheck = evaluatePreDispatchRecheck({
-      actor: task.actor,
-      principal: task.principal,
-      cwdMatches: true,
-      workspaceAuthorized: true,
-      grantValid: true,
-      operationGateAcquired: true,
-      trustGatePassed: true,
-      callerRunTerminal: parentTerminal,
-      callerRunStopRequested: parentStopRequested,
-      agentCredentialRevoked: !this.#credentials.verifyRun(task.parentRunId),
-      permissionCeilingViolated: fullAccessViolation,
-      projectDelegationDisabled: !this.#sink.isProjectDelegationEnabled(task.cwd),
-      repoFingerprintMatchesUserRun: baselineOk.ok
+
+    const recheck = verifyDelegatedChildPreDispatch({
+      sink: this.#sink,
+      credentials: this.#credentials,
+      baselineStore: this.#baselineStore,
+      currentTrustFingerprint: this.#currentTrustFingerprint,
+      task,
+      executionCwd
     })
     if (!recheck.ok) {
+      await worktreeCleanup?.().catch(() => undefined)
       // B4: transition child run to terminal failed so orch_p_run does not leak maxHostAgentRuns quota.
       this.#recordChildRunStep(childRunId, 'failed', recheck.reason)
       this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, recheck.reason), recheck.reason)
@@ -310,7 +314,7 @@ export class DaemonDelegationRuntime {
     this.#recordChildRunStep(childRunId, 'admitted_and_dispatched')
     const prompt = task.body ? this.#sink.bodyStore.readBody(task.body).toString('utf8') : (task.title ?? '')
     this.#activeChildRunIds.add(childRunId)
-    void this.#runAndSettleChild({ task, childRunId, childSessionKey, prompt })
+    void this.#runAndSettleChild({ task, childRunId, childSessionKey, executionCwd, prompt })
     return { ok: true, status: 'running' }
   }
 

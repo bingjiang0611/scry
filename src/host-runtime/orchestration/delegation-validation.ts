@@ -22,6 +22,7 @@ export interface ParsedDelegateArgs {
   targetModel: string | null
   targetEffort: string | null
   permissionMode?: AgentPermissionMode
+  isolation: 'shared' | 'worktree'
   mode?: 'async' | 'wait'
   timeoutMs?: unknown
 }
@@ -43,9 +44,10 @@ export function parseDelegateArgs(
   if (args.role !== undefined && (typeof args.role !== 'string' || args.role.length > MAX_TITLE_CHARS)) {
     return { ok: false, code: 'invalid_request', message: 'role must be <= 120 chars' }
   }
-  if (args.isolation !== undefined && args.isolation !== 'shared') {
-    return { ok: false, code: 'capability_denied', message: 'Only isolation="shared" is supported in the first slice' }
+  if (args.isolation !== undefined && args.isolation !== 'shared' && args.isolation !== 'worktree') {
+    return { ok: false, code: 'invalid_request', message: 'isolation must be "shared" or "worktree"' }
   }
+  const isolation: 'shared' | 'worktree' = args.isolation === 'worktree' ? 'worktree' : 'shared'
   let targetModel: string | null = null
   let targetEffort: string | null = null
   if (args.target !== undefined) {
@@ -71,6 +73,7 @@ export function parseDelegateArgs(
       targetModel,
       targetEffort,
       permissionMode: args.permissionMode as AgentPermissionMode | undefined,
+      isolation,
       mode: args.mode as 'async' | 'wait' | undefined,
       timeoutMs: args.timeoutMs
     }

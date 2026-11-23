@@ -5,11 +5,15 @@ import type { OrchestrationToolsAttachment } from '../main/providers/types'
 import type { ChildUsageSample } from '../host-runtime/orchestration/delegation-evidence'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { TaskProjectionRow } from '../host-runtime/orchestration/types'
+import { computeExtendedRepoConfigFingerprint, type AgentRepoBaselineStore } from '../host-runtime/orchestration/agent-repo-baseline'
+import type { DelegationCredentialStore } from '../host-runtime/orchestration/delegation-credentials'
+import { evaluatePreDispatchRecheck, type PreDispatchRecheckResult } from '../host-runtime/orchestration/orchestrator-commands'
 
 export interface ChildRunDispatchInput {
   task: TaskProjectionRow
   childRunId: string
   childSessionKey: string
+  executionCwd: string
   prompt: string
 }
 
@@ -44,6 +48,7 @@ export interface DaemonDelegationRuntimeOptions {
   hasLocalSubscriber: () => boolean
   requestRunStop: (runId: string) => boolean
   dispatchChildRun: (input: ChildRunDispatchInput) => Promise<ChildRunDispatchOutcome>
+  prepareChildWorktree?: (input: { sourceCwd: string; taskId: string }) => Promise<{ cwd: string; cleanup?: () => Promise<void> }>
   readArchiveFinalMessage?: (childRunId: string) => Evidence<string> | undefined
   readChildUsage?: (childRunId: string) => ChildUsageSample | undefined
   onTaskChanged?: () => void
@@ -77,4 +82,43 @@ export function toDelegatedTaskView(row: TaskProjectionRow): DelegatedTaskView {
       : null,
     reason: row.reason
   }
+}
+
+export function verifyDelegatedChildPreDispatch(deps: {
+  sink: EventSink
+  credentials: DelegationCredentialStore
+  baselineStore: AgentRepoBaselineStore
+  currentTrustFingerprint: (provider: string, cwd: string) => string
+  task: TaskProjectionRow
+  executionCwd: string
+}): PreDispatchRecheckResult {
+  const { sink, credentials, baselineStore, currentTrustFingerprint, task, executionCwd } = deps
+  let baselineOk: { ok: boolean } = { ok: false }
+  try {
+    const baseFp = currentTrustFingerprint(task.provider, executionCwd)
+    const extFp = computeExtendedRepoConfigFingerprint(task.provider, executionCwd, baseFp, task.cwd)
+    baselineOk = baselineStore.verifyAgentRun(task.provider, task.cwd, extFp)
+  } catch {
+    baselineOk = { ok: false }
+  }
+  const parentRun = sink.getRun(task.parentRunId)
+  const parentTerminal = !parentRun || ['settled', 'failed', 'cancelled', 'interrupted'].includes(parentRun.lifecycle)
+  const parentStopRequested = parentRun?.stopState === 'requested'
+  const fullAccessViolation =
+    task.permissionMode === 'full_access' && !sink.isSessionFullAccessEnabled(task.parentSessionKey)
+  return evaluatePreDispatchRecheck({
+    actor: task.actor,
+    principal: task.principal,
+    cwdMatches: true,
+    workspaceAuthorized: true,
+    grantValid: true,
+    operationGateAcquired: true,
+    trustGatePassed: true,
+    callerRunTerminal: parentTerminal,
+    callerRunStopRequested: parentStopRequested,
+    agentCredentialRevoked: !credentials.verifyRun(task.parentRunId),
+    permissionCeilingViolated: fullAccessViolation,
+    projectDelegationDisabled: !sink.isProjectDelegationEnabled(task.cwd),
+    repoFingerprintMatchesUserRun: baselineOk.ok
+  })
 }

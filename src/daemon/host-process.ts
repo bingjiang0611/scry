@@ -248,6 +248,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   delegationRuntime = createHostDelegationRuntime({
     authority,
     pipeline,
+    userDataDir: options.userDataDir,
+    authorizeDirectory: workspace.resolveKnownProjectDirectory,
     requestRunStop,
     onTaskChanged: () => publishData({ kind: 'catalog_recovered' }),
     log

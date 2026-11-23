@@ -6,6 +6,7 @@ import type { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import type { RunHost } from '../main/bootstrap/run-host'
 import { DaemonDelegationRuntime } from './delegation-runtime'
+import { createDelegatedWorktreePreparer } from './delegation-worktree'
 
 export function prepareHostRunOrchestration(
   getRuntime: () => DaemonDelegationRuntime | undefined
@@ -29,6 +30,8 @@ export function prepareHostRunOrchestration(
 export interface HostDelegationWiringDeps {
   authority: DaemonOrchestrationAuthority
   pipeline: ReturnType<typeof createRunPipeline>
+  userDataDir: string
+  authorizeDirectory: (dir: string) => string
   requestRunStop: (runId: string) => boolean
   onTaskChanged: () => void
   log: (line: string) => void
@@ -48,12 +51,16 @@ export function createHostDelegationRuntime(deps: HostDelegationWiringDeps): Dae
     // B2 / P6 security §S7: require an active local App subscribe reader, not the 30s terminal idle window.
     hasLocalSubscriber: () => deps.authority.subscribeHub.hasActiveLocalSubscriber(),
     requestRunStop: deps.requestRunStop,
+    prepareChildWorktree: createDelegatedWorktreePreparer({
+      userDataDir: deps.userDataDir,
+      authorizeDirectory: deps.authorizeDirectory
+    }),
     dispatchChildRun: async (input) => {
       const permissionMode = input.task.permissionMode as AgentPermissionMode
       const req: AgentStartRequest = {
         providerId: input.task.provider as ProviderId,
         prompt: input.prompt,
-        cwd: input.task.cwd,
+        cwd: input.executionCwd,
         permissionMode,
         ...(input.task.profile ? { agentProfileId: input.task.profile } : {}),
         ...(input.task.targetModel ? { model: { id: input.task.targetModel } } : {}),

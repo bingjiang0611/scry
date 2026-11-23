@@ -180,7 +180,7 @@ export class DelegationService {
   async #handleDelegate(caller: DelegationCallerContext, args: Record<string, unknown>): Promise<DelegationToolResponse> {
     const parsed = parseDelegateArgs(args)
     if (!parsed.ok) return fail(parsed.code, parsed.message)
-    const { task, clientRequestId, title, role, targetModel, targetEffort, permissionMode, mode, timeoutMs } = parsed.value
+    const { task, clientRequestId, title, role, targetModel, targetEffort, permissionMode, isolation, mode, timeoutMs } = parsed.value
 
     const sessionFullAccess = this.#sink.isSessionFullAccessEnabled(caller.sessionKey)
     const perm = resolveDelegatedPermissionMode({
@@ -206,7 +206,7 @@ export class DelegationService {
     const body = this.#sink.bodyStore.prepareBody(task)
     const payloadHash = sha256Hex(canonicalJson({
       task, title, role, targetModel, targetEffort,
-      permissionMode: perm.mode, permissionModeSource: perm.source, isolation: 'shared'
+      permissionMode: perm.mode, permissionModeSource: perm.source, isolation
     }))
 
     const taskId = randomUUID()
@@ -233,7 +233,7 @@ export class DelegationService {
         targetEffort,
         permissionMode: perm.mode,
         permissionModeSource: perm.source,
-        isolation: 'shared',
+        isolation,
         body,
         promptPreview: task,
         confirmationQuestionId
