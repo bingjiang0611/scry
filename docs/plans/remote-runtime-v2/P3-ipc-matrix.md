@@ -97,7 +97,7 @@
 | `app:rendererRestart` | main | `—` | — | — | 窗口行为 |
 | `app:reportRendererPerformance` | main | `—` | — | — | renderer 自报指标 |
 | `app:setTheme` | main | `—` | — | — | 窗口主题 |
-| `hostMetrics:read` | new-op | `hostMetrics:read` | resources-shell | — | 机器页「本机」资源（P8 §5）：只有 daemon 能跑 ps，main 不允许引入 child_process；返回值含 PID，只在本机 grant 下发 |
+| `hostMetrics:read` | new-op | `localHostMetrics:read` | resources-shell | — | 机器页「本机」资源（P8 §5）：只有 daemon 能跑 ps，main 不允许引入 child_process；返回值含 PID，只在本机 grant 下发 |
 | `remote:backgroundService:quit` | main | `—` | — | — | 原生二次确认框、向 daemon.lock 登记且身份复核一致的进程发 SIGTERM、app.quit；撤销或停止中 App 无法调用 daemon op |
 | `remote:backgroundService:reconnect` | main | `—` | — | — | §13.2 链路：本机 grant 已被撤销，App 不能再调用 daemon 的任何 op；确认框、按身份停止、删除被拒的本机凭据、重新入网都在 App |
 | `remote:backgroundService:restart` | main | `—` | — | — | 版本不一致时 App 不与 daemon 通话；确认框、按身份停止与启动对应版本的后台服务都在 App |

@@ -12,7 +12,7 @@ describe('host metrics on a real daemon', () => {
   it('answers a complete snapshot for the App, with the local PID', async () => {
     const daemon = await startTestDaemon()
     try {
-      const reply = await daemon.localOp('hostMetrics', 'read', [])
+      const reply = await daemon.localOp('localHostMetrics', 'read', [])
       expect(reply.error).toBeUndefined()
       const snapshot = reply.result
       expect(typeof snapshot.sampledAt).toBe('number')
@@ -38,10 +38,31 @@ describe('host metrics on a real daemon', () => {
   it('serves a second read inside the cache window from the cached sample', async () => {
     const daemon = await startTestDaemon()
     try {
-      const first = await daemon.localOp('hostMetrics', 'read', [])
-      const second = await daemon.localOp('hostMetrics', 'read', [])
+      const first = await daemon.localOp('localHostMetrics', 'read', [])
+      const second = await daemon.localOp('localHostMetrics', 'read', [])
       expect(second.result.sampledAt).toBe(first.result.sampledAt)
       expect(first.result.sampledAt).toBeGreaterThan(Date.now() - HOST_METRICS_CACHE_MS - 60_000)
+    } finally {
+      await daemon.dispose()
+    }
+  })
+
+  it('answers a paired device with the redacted remote scope only', async () => {
+    const daemon = await startTestDaemon()
+    try {
+      const reply = await daemon.request({ op: 'hostMetrics' })
+      expect(reply.error).toBeUndefined()
+      const serialized = JSON.stringify(reply.hostMetrics)
+      // P8 §5: no PID, no process name, no path, no volume name.
+      expect(serialized).not.toContain('"pid"')
+      expect(serialized).not.toContain(process.pid.toString())
+      expect(serialized).not.toContain(daemon.root)
+      expect(serialized).not.toMatch(/\/(Users|private|tmp|var)\//)
+      for (const disk of reply.hostMetrics.disks) expect(Object.keys(disk).sort()).toEqual(['freeBytes', 'role', 'totalBytes'])
+      for (const provider of reply.hostMetrics.providers ?? []) {
+        expect(Object.keys(provider).sort()).toEqual(['cpuPercent', 'processes', 'providerId', 'rssBytes'])
+      }
+      expect(reply.hostMetrics.sampledAt).toBeGreaterThan(0)
     } finally {
       await daemon.dispose()
     }
@@ -51,7 +72,7 @@ describe('host metrics on a real daemon', () => {
     const daemon = await startTestDaemon()
     try {
       // The op takes no argument at all: a caller cannot ask for another scope.
-      const reply = await daemon.localOp('hostMetrics', 'read', [{ scope: 'remote' }])
+      const reply = await daemon.localOp('localHostMetrics', 'read', [{ scope: 'remote' }])
       expect(reply.error).toBe('invalid_request')
     } finally {
       await daemon.dispose()

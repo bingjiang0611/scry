@@ -273,6 +273,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onRunActivity: (runId) => publishHint({ kind: 'run', runId }),
     orchestration: authority.hooks,
     ...(listHostAdminNotices ? { listHostAdminNotices } : {}),
+    readHostMetrics: () => hostMetrics.read('remote'),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, publishHint, terminal,
       runs: () => pipeline.runs,

@@ -725,7 +725,7 @@
     {
       "channel": "hostMetrics:read",
       "route": "new-op",
-      "op": "hostMetrics",
+      "op": "localHostMetrics",
       "method": "read",
       "why": "机器页「本机」资源（P8 §5）：只有 daemon 能跑 ps，main 不允许引入 child_process；返回值含 PID，只在本机 grant 下发"
     }

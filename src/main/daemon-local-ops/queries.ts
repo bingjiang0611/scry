@@ -22,7 +22,7 @@ export const QUERY_LOCAL_OPS: DaemonLocalOpTable = {
   // request (recorder-content-daemon.ts) and the daemon re-validates it.
   'agent:recorderContentPage': { op: 'recorderContent', method: 'recorderContentPage', read: true },
   // P8 host metrics: only the daemon may run `ps` (main has no child_process).
-  'hostMetrics:read': { op: 'hostMetrics', method: 'read', read: true }
+  'hostMetrics:read': { op: 'localHostMetrics', method: 'read', read: true }
 }
 
 export const QUERY_FORWARDS: DaemonForwardTable = {}

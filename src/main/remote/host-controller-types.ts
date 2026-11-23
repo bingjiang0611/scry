@@ -190,6 +190,11 @@ export interface HostControllerDependencies {
   gate?: ProviderOperationGate
   attachmentStore?: DesktopAttachmentStore
   attachmentDirectory?: string
+  /**
+   * P8 §5: this machine's资源汇总 for a remote reader. The answer MUST already be the
+   * remote scope (the daemon samples with redaction); this layer never adds local detail.
+   */
+  readHostMetrics?(): Promise<import('../../shared/host-metrics').HostMetricsSnapshot>
   // P5-7: recent sanitized host CLI admin notices (present only when SCRY_EXPERIMENTAL_HOST_CLI=1).
   listHostAdminNotices?(): HostAdminNotice[]
 }

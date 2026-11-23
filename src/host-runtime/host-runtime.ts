@@ -75,6 +75,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     relayAdvertisement: relay.relayAdvertisement,
     ...(runtime.desktopRemoteClient ? { desktopRemoteClient: runtime.desktopRemoteClient } : {}),
     gatewayLabel,
+    ...(inputs.readHostMetrics ? { readHostMetrics: inputs.readHostMetrics } : {}),
     ...(inputs.onRunActivity ? { onRunActivity: inputs.onRunActivity } : {}),
     ...(inputs.onLedgerEvent ? { onLedgerEvent: inputs.onLedgerEvent } : {}),
     orchestration: inputs.orchestration,

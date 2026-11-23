@@ -271,7 +271,7 @@
         "local"
       ]
     },
-    "hostMetrics": {
+    "localHostMetrics": {
       "path": "resources-shell",
       "request": "{ op:'hostMetrics', method:'read', args: [] }（这个 op 没有参数；scope 由调用方的 grant 决定，不由参数决定）",
       "response": "HostMetricsSnapshot（P8 §5）：sampledAt、uptimeSec、cpu{percent,cores,load1}、memory{totalBytes,usedBytes,pressure,swapUsedBytes}、disks[{role,totalBytes,freeBytes}]、scry{daemon{cpuPercent,rssBytes,pid?},providers[]|null}、runs{active,queued}。采不到的字段为 null；remote scope 不含 PID",
