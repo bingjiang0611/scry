@@ -44,7 +44,6 @@ describe('OverviewPanel request-level context', () => {
     { quality: undefined, description: '旧记录：证据质量未标记' }
   ])('shows only the live token ratio while retaining $quality evidence in the tooltip', ({ quality, description }) => {
     const html = render([sample('current', 2100, { contextUsageQuality: quality })])
-    // 已用量与窗口总量分开渲染以便用字级区分主次，可见文本仍是「已用 / 窗口」。
     expect(html).toContain('<div class="ctx-copy"><div class="v"><b>2.1k</b><span> / 272.0k</span></div></div>')
     expect(html).toContain(`title="上下文 · ultimate · 已占 1% · 残余 269.9k · ${description} · 随请求用量上报更新，非逐 token"`)
     expect(html).toContain('aria-label="上下文占用 1%"')

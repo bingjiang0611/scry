@@ -50,7 +50,6 @@ function errorMessageFromOutput(output: string | undefined, content?: ToolConten
   try {
     detail = nestedErrorMessage(JSON.parse(output)) ?? output
   } catch {
-    // 非 JSON 输出直接作为 Provider 的原始错误证据展示。
   }
   const normalized = detail
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')

@@ -1,4 +1,3 @@
-// 总览的 HOOKS 面板：会话级 Hook 汇总与逐次执行明细。
 import { EmptyState } from './primitives/EmptyState'
 import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import type { ReactNode } from 'react'

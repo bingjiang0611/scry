@@ -1,6 +1,5 @@
 import { EmptyState } from './primitives/EmptyState'
 import { useCopyFeedback } from '../hooks/useCopyFeedback'
-// 右栏纵览：会话 verdict 卡 + context 占用 + 每轮调用 + 文件与 diff 证据。
 import { memo, useId, useState, type CSSProperties, type MouseEvent } from 'react'
 import { useSampledTurns } from '../hooks/useSampledTurns'
 import type { TraceEvent, DbStats, WorkspaceDiffResult } from '@shared/trace'
@@ -20,8 +19,6 @@ export { TurnFileFootprint } from './OverviewTurnCalls'
 export { turnCallRowsFromMap } from './overview-turn-calls'
 export { logicalCallEventsForTurn } from '../format'
 
-// TOP TOOLS 排名：合并普通工具 + MCP（按 server 汇总），取前 6，配 mini-bar。
-// 纯组件内聚合，不动 format.ts 的聚合函数（那些有测试，面板没有）。
 
 function formatOverviewCost(value: number): string {
   if (value > 0 && value < 0.01) return '<$0.01'
@@ -139,7 +136,6 @@ function OverviewPanelBody({
     judge,
   } = useOverviewPanelModel({ turns, runtimeProvider, busy, gitDiff })
 
-  // 点调用/文件行 → 选中第一条匹配事件（右下「详情」展开它的入参/结果/文件，定位到那次调用）
   const jumpTo = (pred: (e: TraceEvent) => boolean): void => {
     const ev = all.find(pred)
     if (ev) onSelect(ev)
@@ -170,12 +166,10 @@ function OverviewPanelBody({
             <span>{OVERVIEW_SESSION_COPY.context}</span>
             <b>{ctx ? `${ctx.pct}%` : '—'}</b>
           </div>
-          {/* 占用用横向刻度表达：长度比环直接可比，高度也回到一行。 */}
           {ctx && <div className="ctx-track" role="img"
             style={{ '--p': Math.min(ctx.pct, 100) } as CSSProperties}
             aria-label={OVERVIEW_SESSION_COPY.contextPercent(ctx.pct)}><span /></div>}
           <div className="ctx-copy">
-            {/* 显示用量是主证据，窗口总量是参照：同一行内用字级区分，文本内容保持原样。 */}
             <div className="v">{ctx
               ? <><b>{fmtTok(ctx.used)}</b><span> / {fmtTok(ctx.win)}</span></>
               : <EmptyState size="card" title={OVERVIEW_SESSION_COPY.contextUnavailable} />}</div>

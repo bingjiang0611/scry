@@ -1,4 +1,3 @@
-// 每轮调用证据的聚合与明细渲染：工具/Skill/MCP/子 Agent 计数、耗时明细与文件足迹。
 import type { MouseEvent, ReactNode } from 'react'
 import type { AgentIntervention } from '@shared/runtime'
 import type { DiffFile, TraceEvent, TurnDiffSnapshot } from '@shared/trace'
@@ -215,5 +214,3 @@ export function renderTurnCallDetail(kind: 'mcp' | 'skill', items: TurnCallItem[
     </div>
   )
 }
-
-// 调用方已排除空值：空值且无归档引用才由 OVERVIEW_TOOL_ERROR_COPY.notReported 说明。

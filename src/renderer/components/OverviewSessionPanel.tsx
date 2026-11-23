@@ -1,4 +1,3 @@
-// 总览「会话数据」页：结构化介入、TOP TOOLS、危险审计、段落、调用明细、文件足迹与会话 diff。
 import { EmptyState } from './primitives/EmptyState'
 import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import type { ReactNode } from 'react'
