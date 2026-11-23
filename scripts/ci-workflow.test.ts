@@ -50,7 +50,6 @@ function gate(file: string, results: Record<string, unknown>) {
   return shell(job.steps[0].run!, { RESULTS: JSON.stringify(results) }).status
 }
 
-// Preserve all smoke invocations and their historical order across shards.
 const SERIAL_RENDERER_UI_ORDER = [
   'node scripts/desktop-remote-ui-smoke.mjs --session-opening-only',
   'node scripts/desktop-remote-ui-smoke.mjs --structure-only',
@@ -110,7 +109,6 @@ describe('required PR checks', () => {
       expect(gate(file, { ...success, changes: { result: 'success', outputs: { required: 'true' } } })).not.toBe(0)
       expect(gate(file, { ...success, changes: { result: 'success', outputs: { required: 'unknown' } } })).not.toBe(0)
       expect(gate(file, { ...noDesktop, changes: changes('true', 'unknown') })).not.toBe(0)
-      // desktop=true without required=true is contradictory, never a skip.
       expect(gate(file, { ...skipped, changes: changes('false', 'true') })).not.toBe(0)
       for (const key of desktopJobs) expect(jobs[key].if).toBe(`\${{ needs.changes.outputs.${desktopOutput} == 'true' }}`)
     })
@@ -162,7 +160,6 @@ describe('required PR checks', () => {
     ])
     expect(source(job, 'Reject new prose comments').if).toBe("${{ github.event_name == 'pull_request' }}")
     expect(job.steps.find(step => step.uses === 'actions/checkout@v4')?.with?.['fetch-depth']).toBe(2)
-    // Actual runtime jobs still prepare Electron and its Linux sandbox.
     expect(source(workflow('ci.yml').jobs.unit, 'Prepare Electron executable').run).toContain('sudo chmod 4755')
   })
 
@@ -276,7 +273,6 @@ describe('required PR checks', () => {
     expect(ci.concurrency['cancel-in-progress']).toBe("${{ github.event_name != 'workflow_dispatch' }}")
     expect(Object.keys(ci.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     const detect = load(readFileSync(join(root, '.github/workflows/validation-changes.yml'), 'utf8')) as { jobs: { changes: { steps: Step[] } } }
-    // Main pushes validate every CI gate; scripts/ci-changes.test.ts runs this script for each event.
     const run = detect.jobs.changes.steps.find(step => step.name === 'Detect executable changes')!.run!
     expect(run).toContain(`if [ "$EVENT_NAME" = push ]; then\n  printf 'required=true\\ndesktop=true\\n`)
     expect(run).toContain('if [ "$EVENT_NAME" = workflow_dispatch ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then')

@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-# 解析软链接，拿到 Resources/bin/scry 的真实位置。
 self=$0
 while [ -L "$self" ]; do
   base=$(CDPATH= cd "$(dirname "$self")" && pwd -P)

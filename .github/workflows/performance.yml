@@ -270,7 +270,6 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          # Every job must succeed, except jobs proven unaffected, which must be skipped.
           # native_performance implies desktop; a main push runs native without the Node comparison.
           echo "$RESULTS" | jq -e '
             length == 3 and .changes.result == "success" and

@@ -308,7 +308,6 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          # Every job must succeed, except jobs proven unaffected, which must be skipped.
           echo "$RESULTS" | jq -e --argjson desktop '["packaged-electron"]' '
             length == 8 and .changes.result == "success" and
             (.changes.outputs as $out

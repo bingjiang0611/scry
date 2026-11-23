@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-# 解析软链接，拿到 Resources/bin/scry-host 的真实位置（P5-host-cli §3.1）。
 self=$0
 while [ -L "$self" ]; do
   base=$(CDPATH= cd "$(dirname "$self")" && pwd -P)
