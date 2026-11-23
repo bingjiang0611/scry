@@ -37,7 +37,7 @@
 
 ## Contextual reviews with follow-ups
 
-At `77d378f1`, reviewed all direct `run-*` and `trace-*` TypeScript files under `src/main/bootstrap/` (363 tokens), and direct `ChatTurn*`, `ConversationView*`, and `RightSurface*` TypeScript/TSX files under `src/renderer/components/` (112 tokens). Removed 49 comments across 28 files. Comment-free emit and tool directives matched; 368 targeted tests passed in Electron Node mode. Reviews of 73 tokens in 17 Codex and Qoder test/fixture files at the same pin remain separate from this cleanup.
+At `77d378f1`, reviewed all direct `run-*` and `trace-*` TypeScript files under `src/main/bootstrap/` (363 tokens), and direct `ChatTurn*`, `ConversationView*`, and `RightSurface*` TypeScript/TSX files under `src/renderer/components/` (112 tokens). Removed 49 comments across 28 files. Comment-free emit and tool directives matched; 368 targeted tests passed in Electron Node mode. A separate pass at the same pin reviewed 73 tokens in 17 Codex and Qoder test/fixture files. Removed three redundant notes without changing comment-free emit or tool directives; three targeted suites passed 130 tests.
 
 At `5099e791`, reviewed 159 comments in 15 direct remote pairing, enrollment, history and session files; 21 in three bootstrap window and remote-connection files; 21 in 12 renderer archive, settings and background-service files; and 63 in direct workspace and recorder JS/TS scripts. Removed or consolidated 15 comments across eight files, with unchanged comment-free emit and tool directives. Six focused suites passed 42 tests. The combined run that included the recorder measurement suite was stopped by the outer timeout; it did not establish a benchmark result.
 

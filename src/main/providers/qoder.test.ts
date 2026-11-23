@@ -477,7 +477,6 @@ describe('Qoder provider adapter', () => {
       expect(mcpServerStatus).not.toHaveBeenCalled()
       expect(sdk.close.mock.calls.length).toBe(closesBefore + 1)
 
-      // Already cancelled before it starts: no Qoder process is started at all.
       const queriesBefore = sdk.query.mock.calls.length
       await expect(adapter.mcp!.snapshot({ providerId: 'qoder', cwd: '/repo' }, true, execution, controller.signal))
         .resolves.toMatchObject({ state: 'unknown' })

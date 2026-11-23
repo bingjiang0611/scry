@@ -211,7 +211,6 @@ describe('Qoder managed historical input', () => {
     })
     const handle = startRun([])
 
-    // The run outcome stays a failure: acceptance never relabels a failed turn.
     await expect(handle.promise).resolves.toMatchObject({ status: 'failed' })
     expect(handle.getInputReceipt?.()).toEqual(expect.objectContaining({
       status: 'accepted',

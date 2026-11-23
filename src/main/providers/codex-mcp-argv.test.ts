@@ -157,7 +157,6 @@ describe('Codex MCP configuration on the app-server argv', () => {
     const directory = dirname(file!)
     expect(basename(directory)).toMatch(new RegExp(`^scry-mcp-config-${process.pid}-[A-Za-z0-9]{6}$`))
 
-    // A live owner keeps its file; a crashed owner's leftover is removed.
     expect(await sweepStalePrivateMcpConfigs(privateRoot, () => false)).toBe(0)
     const crashed = join(privateRoot, basename(directory).replace(`-${process.pid}-`, '-999999-'))
     renameSync(directory, crashed)
