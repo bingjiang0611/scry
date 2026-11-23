@@ -18,6 +18,8 @@ An unavailable stream is degraded but does not prove skipped events. Trace loadi
 
 A daemon trace response is bounded, even for a live run. The reader must follow chunk cursors instead of waiting for settlement or treating the first response as complete. The [large-trace regression](../../src/daemon/host-process-large-trace.test.ts) proves the response exceeded the single-frame limit, covers delivery before settlement, and reopens through the desktop path.
 
+Use subscription notices to wake a run's pending admission read instead of occupying a watch lane per run. A notice arriving during a read survives to its following wait; starting the next read consumes notices it can cover. Keep waits bounded and re-read if notices may have been lost.
+
 A daemon question must reach the App under the same canonical run ID returned by start and used by the scoped subscription. A trace marker can arrive before the Provider names its native turn; the native Stop probe and its regression rely on delivery before the run ends. Use a time bound rather than a reply count when waiting for settlement because progress may wake the observer many times.
 
 The first remote catalog establishes a baseline without raising attention. Later catalogs can report a newly terminal fingerprint for the same run ID. If daemon notices were lost, re-read each affected view instead of assuming the incremental feed was complete.

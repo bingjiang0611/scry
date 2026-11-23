@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RunWakes } from './daemon-run-wakes'
 
-// P3f E2: a run reads when the daemon says it changed, instead of each run holding a
-// long poll on the one watch lane. A wake must never be lost between a read and the
-// wait after it, and no wait may be unbounded.
-
 const settled = async (promise: Promise<unknown>): Promise<boolean> => {
   let done = false
   void promise.then(() => { done = true })
@@ -24,10 +20,9 @@ describe('run wakes', () => {
 
   it('keeps a wake that arrives while the run is reading, so the next wait returns at once', async () => {
     const wakes = new RunWakes()
-    wakes.consume('run-a') // the read starts
-    wakes.wake('run-a') // the daemon changes the run during that read
+    wakes.consume('run-a')
+    wakes.wake('run-a')
     expect(await settled(wakes.wait('run-a', 10_000))).toBe(true)
-    // Consumed by the next read: the wait after that one waits again.
     wakes.consume('run-a')
     expect(await settled(wakes.wait('run-a', 10_000))).toBe(false)
     wakes.wake('run-a')

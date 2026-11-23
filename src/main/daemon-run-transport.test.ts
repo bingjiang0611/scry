@@ -13,9 +13,6 @@ function transport(reply: (request: Record<string, unknown>) => unknown) {
   return { value, calls }
 }
 
-// The App speaks to its own daemon over the phone's frames. Each assertion here is
-// about the frame and the parsed answer, not about a socket: the transport holds no
-// credential and no run state, so a bad answer must be named, never rounded up.
 describe('daemon run transport', () => {
   it('uses the daemon-provided context to read a live snapshot without pinning an unbound session', async () => {
     const traceContext = { providerId: 'pi', agentProfileId: 'pi:rotom', cwd: '/worktree' }
@@ -46,7 +43,6 @@ describe('daemon run transport', () => {
       intentId: 'intent-1', runId: RUN, status: 'duplicate'
     })
     expect(calls[0]!.request).toEqual({ op: 'submit', intentId: 'intent-1', detail: '{"cwd":"/w"}' })
-    // A submit is replayable: a lost acknowledgement must not create a second run.
     expect(calls[0]!.options).toEqual({ replayable: true })
   })
 
@@ -78,13 +74,11 @@ describe('daemon run transport', () => {
   })
 
   it('reads the daemon receipt an accepted answer really returns', async () => {
-    // The daemon answers with its ledger receipt ({status}), not a bare `true`.
     const accepted = transport(() => ({ answer: { status: 'answered' } }))
     await expect(accepted.value.answerQuestion({
       runId: RUN, answerId: 'q1',
       response: { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} }
     })).resolves.toBe(true)
-    // A receipt the App cannot read is still not a delivery.
     const unreadable = transport(() => ({ answer: { status: 'unknown' } })).value
     await expect(unreadable.answerQuestion({
       runId: RUN, answerId: 'q1',
@@ -101,9 +95,6 @@ describe('daemon run transport', () => {
   })
 
   it('turns a provably unsent transport throw into a named failure', async () => {
-    // Previously any throw was "not running", which let the caller replay a write whose
-    // reply was merely lost. The phase is now part of the error, and only the provable
-    // "nothing was written" case stays retryable.
     const value = new DaemonRunTransport(vi.fn(async () => { throw laneNotSent(new Error('desktop_not_connected')) }))
     await expect(value.runState(RUN)).rejects.toMatchObject({ reason: 'daemon_not_running' })
   })
@@ -116,8 +107,6 @@ describe('daemon run transport', () => {
   })
 
   it('names a daemon that does not serve run controls at all', async () => {
-    // An older daemon answers unsupported_op. That is an absence, not an empty success:
-    // the App must not show "sent" for a steer that never reached a run.
     const { value } = transport(() => ({ error: 'unsupported_op' }))
     await expect(value.adopt(RUN)).rejects.toMatchObject({ reason: 'daemon_run_control_unavailable' })
   })
@@ -127,8 +116,6 @@ describe('daemon run transport', () => {
     await expect(value.adopt(RUN)).rejects.toMatchObject({ reason: 'daemon_device_not_authorized' })
   })
 
-  // A write whose bytes may have reached the daemon must never look like "nothing was
-  // sent": that is what made the App replay a start and create a second run.
   it('keeps a provably unsent request retryable', async () => {
     const value = new DaemonRunTransport(vi.fn(async () => { throw laneNotSent(new Error('desktop_lane_not_sent')) }))
     await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_not_running' })
@@ -140,8 +127,6 @@ describe('daemon run transport', () => {
   })
 
   it('fails closed on a transport error it cannot classify', async () => {
-    // Guessing "not sent" here would replay a write. An unclassified failure is an
-    // unknown outcome, which the caller must reconcile, never resend.
     const value = new DaemonRunTransport(vi.fn(async () => { throw new Error('socket hang up') }))
     await expect(value.stop(RUN)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
   })
@@ -160,7 +145,6 @@ describe('daemon run transport', () => {
       .rejects.toThrow('daemon_capability_unavailable:sessionStore:listSessions')
     await expect(transport(() => ({ error: 'device_not_authorized' })).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
       .rejects.toThrow(DaemonRunError)
-    // An answer without a result is not an empty success.
     await expect(transport(() => ({})).value.localOp({ op: 'sessionStore', method: 'listSessions', args: [], read: true }))
       .rejects.toThrow('invalid_daemon_response')
   })
@@ -199,15 +183,11 @@ describe('daemon run transport', () => {
   })
 
   it('names the arguments the renderer left out, which JSON would turn into null', async () => {
-    // The preload always passes its optional parameters; an omitted one is undefined,
-    // which a JSON array carries as null. The daemon must see what main would have seen.
     const { value, calls } = transport(() => ({ result: { ok: true } }))
     await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', undefined], read: true })
-    // In memory the array still holds undefined; the lane's JSON makes it null.
     expect(calls[0]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', undefined], absent: [1] })
     await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', 5], read: true })
     expect(calls[1]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', 5] })
-    // A real null is the renderer's own value and travels as one.
     await value.localOp({ op: 'conversation', method: 'read', args: ['conv-1', null], read: true })
     expect(calls[2]!.request).toStrictEqual({ op: 'conversation', method: 'read', args: ['conv-1', null] })
   })
@@ -219,7 +199,6 @@ describe('daemon run transport', () => {
       : { subscribe: { hostId: 'h1', logId: 'l1', seq: 1, mode: 'idle', hints: [{ kind: 'attention', snapshot }, { kind: 'attention', snapshot: { revision: 'x' } }] } })
     await expect(value.subscribe({ views: ['activeRuns'], waitMs: 0 })).resolves.toMatchObject({ hints: [{ kind: 'attention', snapshot }] })
     await value.attentionViewed('codex\u0000\u0000/w\u0000s1')
-    // Viewing is idempotent, so a lost reply may be asked again.
     expect(calls[1]).toEqual({ request: { op: 'attentionViewed', sessionKey: 'codex\u0000\u0000/w\u0000s1' }, options: { replayable: true } })
     const refused = transport(() => ({ error: 'invalid_request' }))
     await expect(refused.value.attentionViewed('k')).rejects.toMatchObject({ reason: 'invalid_daemon_response' })
@@ -229,7 +208,6 @@ describe('daemon run transport', () => {
     const { value } = transport(() => ({ subscribe: { hostId: 'h1', logId: 'l1', seq: 3, mode: 'idle', hints: [
       { kind: 'window', channel: 'agent:error', payload: { runId: 'r1', message: 'boom' } },
       { kind: 'window', channel: 'agent:turnDone', payload: { runId: 'r1', stopped: false } },
-      // A channel outside the list, or a payload that is not an object, is not passed on.
       { kind: 'window', channel: 'workspace:openKnownExternal', payload: { path: '/etc' } },
       { kind: 'window', channel: 'agent:error', payload: 'boom' }
     ] } }))
