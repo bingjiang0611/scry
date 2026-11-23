@@ -10,7 +10,6 @@ import {
   type ProviderCompatibilitySource
 } from '../shared/provider-compatibility'
 
-/** 一小时内复用已取到的 manifest。 */
 export const MANIFEST_TTL_MS = 60 * 60_000
 /** 拉取失败后的静默期：失败不应变成每次探测都重试的网络抖动源。 */
 export const MANIFEST_RETRY_MS = 5 * 60_000
@@ -126,7 +125,6 @@ export class ProviderCompatibilityStore {
     return this.#manifest
   }
 
-  /** 最近一次拉取失败的原因；null 表示没有失败。诊断用，不影响判定。 */
   get lastError(): string | null {
     return this.#lastError
   }
@@ -214,7 +212,6 @@ export class ProviderCompatibilityStore {
       if (text.length > MANIFEST_MAX_BYTES) return null
       return parseCompatibilityManifest(JSON.parse(text) as unknown)
     } catch {
-      // 缓存是加速手段，不是证据：读不出来就当没有。
       return null
     }
   }

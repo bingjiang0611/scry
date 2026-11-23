@@ -11,7 +11,6 @@
  */
 
 interface Lease {
-  /** 队尾：新请求挂在它后面。 */
   tail: Promise<void>
   /** 引用计数：归零才回收，避免长寿 Map 把每个访问过的工作区都留住。 */
   holders: number

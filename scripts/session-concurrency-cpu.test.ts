@@ -109,7 +109,6 @@ describe('report honesty for process CPU, GC and remote readers', () => {
     expect(validateConcurrencyReport(report)).toBe(true)
     expect(report.lanes.processCpu.status).toBe('measured')
     expect(report.lanes.quietProcessCpu.status).toBe('unavailable')
-    // The real non-quiet path: the builder must survive a lane built from an undefined quiet pair.
     const nonQuiet = minimalReport({ quietProcessCpu: summarizeProcessCpu(undefined) })
     expect(nonQuiet.lanes.quietProcessCpu).toMatchObject({ status: 'unavailable' })
     expect(validateConcurrencyReport(nonQuiet)).toBe(true)

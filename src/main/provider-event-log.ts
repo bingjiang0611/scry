@@ -21,11 +21,9 @@ export const PROVIDER_EVENT_LOG_ENV = 'SCRY_PROVIDER_EVENT_LOG'
 export type ProviderEventStream = 'native' | 'canonical'
 
 export interface ProviderEventLogLimits {
-  /** 单个字符串值的字符上限。 */
   maxValueChars: number
   /** 单个对象/数组保留的字段数上限。 */
   maxFields: number
-  /** 结构深度上限。 */
   maxDepth: number
   /** 缓冲达到该字节数即落盘。 */
   flushBytes: number
@@ -33,13 +31,9 @@ export interface ProviderEventLogLimits {
   flushRecords: number
   /** 单个日志分片的字节上限。 */
   maxFileBytes: number
-  /** 每个线程保留的分片数量上限。 */
   maxFiles: number
-  /** 日志根目录的总字节上限。 */
   maxTotalBytes: number
-  /** 分片保留时长。 */
   retentionMs: number
-  /** 两次清理之间的最小间隔。 */
   sweepIntervalMs: number
 }
 
@@ -167,11 +161,8 @@ export interface ProviderEventWriterSummary {
 export interface ProviderEventWriter {
   /** 记录一条事件。永不抛错，永不阻塞调用方。 */
   record(stream: ProviderEventStream, type: string, payload: unknown): void
-  /** 把缓冲写入磁盘。 */
   flush(): Promise<void>
-  /** 写出收尾摘要并落盘。 */
   close(): Promise<ProviderEventWriterSummary>
-  /** 当前计数，用于诊断与测试。 */
   summary(): ProviderEventWriterSummary
 }
 
@@ -369,13 +360,11 @@ export class ProviderEventLog {
 
 let configured: ProviderEventLog | null = null
 
-/** 在主进程启动时按环境变量装配；未启用时保持 null。 */
 export function configureProviderEventLog(env: NodeJS.ProcessEnv, defaultRoot: string): ProviderEventLog | null {
   configured = ProviderEventLog.fromEnvironment(env, defaultRoot)
   return configured
 }
 
-/** 取得当前进程的日志；未启用时返回 undefined，调用方用可选链跳过。 */
 export function openProviderEventWriter(thread: string): ProviderEventWriter | undefined {
   return configured?.writer(thread)
 }

@@ -13,9 +13,6 @@ export const finite = value => typeof value === 'number' && Number.isFinite(valu
 export const round = value => Math.round(value * 10) / 10
 export const unavailable = reason => ({ status: 'unavailable', reason })
 
-// Renderer attribution for this slice. No production observer exists, and the two candidate
-// shortcuts are not commit proofs: useAgentSession also acknowledges ignored batches immediately,
-// and DOM mutations cannot attribute a commit to one specific trace batch.
 export const RENDERER_COMMIT_UNAVAILABLE = 'no trusted per-batch React commit signal is observable without adding a production observer: '
   + 'useAgentSession acknowledges ignored batches without a React commit, and transcript DOM mutations cannot attribute a commit to a batch'
 

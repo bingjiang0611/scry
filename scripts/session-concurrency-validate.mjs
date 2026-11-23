@@ -39,7 +39,6 @@ export function validateConcurrencyReport(report) {
       assert.equal(pool.completed, report.workload.tasks, 'a measured batch completes every task')
       assert.deepEqual(pool.notStarted, [], 'a measured batch leaves no task unstarted')
     } else {
-      // Fewer completions than tasks is exactly what must not be reported as measured.
       assert.equal(report.status, 'incomplete', 'an incomplete batch cannot yield a measured report')
     }
   }
@@ -64,7 +63,6 @@ export function validateConcurrencyReport(report) {
   if (report.lanes.archive.status === 'measured') {
     assert.ok(report.lanes.archive.diskVerifiedRuns > 0, 'a measured archive lane needs verified runs')
   }
-  // Commit latency is unobservable in this slice; a measured commit claim would be unsupported.
   assert.equal(report.lanes.rendererCommit.status, 'unavailable', 'no trusted commit signal exists in this slice')
   assert.equal(report.lanes.rendererCommit.reason, RENDERER_COMMIT_UNAVAILABLE)
   assert.equal(report.lanes.providerProcess.status, 'unavailable', 'in-process fixture cannot claim Provider process CPU')

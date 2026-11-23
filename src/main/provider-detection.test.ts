@@ -161,7 +161,6 @@ describe('Provider 完整探测结果组装', () => {
     expect(probeStoredPiProfile).toHaveBeenCalledOnce()
   })
 
-  // 回归：截图里的发送失败。发现层保留历史 id（Pi · Rotom），但统一对话发送必须用已登记 Profile，
   // 而两者是同一个 canonical 启动器时才映射；不合并 id，存储 Profile 条目继续保留。
   it('reports the registered profile of a detected legacy Pi id on the same canonical launcher', async () => {
     const launcher = '/Users/example/.local/bin/rotom'
@@ -295,7 +294,6 @@ describe('Provider 完整探测结果组装', () => {
     })
   })
 
-  // 真实实例回归：adapter 描述自己时往往还不知道版本，本机真实版本只有 CLI 探测这一步有。
   // 用 descriptor 的空版本算出来的 advisory 永远是 unknown，等于这套判定在真机上从不生效。
   it('用探测到的真实 CLI 版本重算兼容性，而不是沿用 descriptor 的空版本结论', async () => {
     const base = descriptor('qoder', 'Qoder', 'qoder_cli', 'Qoder Agent SDK')

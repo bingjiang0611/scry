@@ -194,7 +194,6 @@ export async function exerciseSessionSelection(contents, scenario) {
     throw new Error(`${scenario}: stale startup recovery disturbed selection: ${JSON.stringify(result)}`)
   }
   if (await read(`document.body.innerText.includes('workspace changed')`)) throw new Error(`${scenario}: workspace error visible`)
-  // Switch back to the running session, including within the same Provider/profile.
   await click('.sb-sess.running')
   await wait(`${state}.historyReads === ${result.historyReads + 1}`)
   await click('#resolve-history')

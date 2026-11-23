@@ -104,7 +104,6 @@ export class WorkspaceOverlapTracker {
     }
   }
 
-  /** 进程退出或测试重置：不保留任何跨会话的观测声明。 */
   disposeAll(): void {
     this.active.clear()
     this.cwds.clear()

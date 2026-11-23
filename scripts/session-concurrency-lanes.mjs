@@ -43,7 +43,6 @@ export function summarizeResources(windows, phase) {
     sampledAt: { first: perWindow[0].sampledAt, last: perWindow.at(-1).sampledAt },
     processesPerWindow: distribution(perWindow.map(window => window.processes)),
     workingSetBytesPerWindow: distribution(perWindow.map(window => window.workingSetBytes)),
-    // Windows are kept for memory, process counts and event-loop time only.
     cpuPercent: unavailable('percentCPUUsage is measured since the previous getAppMetrics() call and this harness takes its own '
       + 'boundary snapshots between production 5000 ms windows, so no percentage can be tied to a fixed window'),
     main: {

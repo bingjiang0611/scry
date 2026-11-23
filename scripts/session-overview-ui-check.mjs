@@ -19,7 +19,6 @@ export async function exerciseOverviewDensity(contents, screenshotPath) {
   try {
     for (const theme of ['dark', 'light']) for (const width of [380, 340, 535]) {
       await contents.executeJavaScript(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}; document.querySelector('#overview').style.width = '${width}px'`)
-      // 组内列宽下限 88px：窄面板降到两列，宽面板回到四列，都不截断标签。
       const expectedTurnColumns = width >= 500 ? 4 : width >= 360 ? 3 : 2
       const geometry = await contents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect();

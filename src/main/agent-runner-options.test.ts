@@ -604,7 +604,6 @@ describe('双流事件日志与审批 warning', () => {
     const native = lines.filter((line) => line.stream === 'native').map((line) => line.type)
     const canonical = lines.filter((line) => line.stream === 'canonical').map((line) => line.type)
 
-    // 原生侧保留 assistant 与 result；stream_event 是瞬时白名单，被计数但不落盘。
     expect(native).toEqual(['assistant', 'result'])
     expect(canonical).toContain('model/text')
     expect(canonical).not.toContain('model/text_delta')

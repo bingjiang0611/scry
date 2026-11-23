@@ -37,7 +37,6 @@ export async function exerciseSidebarPerformance({ webContents, pointer, read, w
   webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
   webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
   await wait(`document.querySelector('.session-hover-card') == null`)
-  // A focused card is open before ownership transfers to a different hovered row.
   await read(`document.querySelector('.sb-sess-row:nth-child(4) .sb-sess').focus()`)
   await wait(`document.querySelector('.session-hover-heading strong')?.textContent === 'Question 3'`)
   const transferPoint = await read(`(${pointer.toString()})('.sb-sess-row:nth-child(6) .sb-sess', { timeoutMs: 8000, scroll: false })`)

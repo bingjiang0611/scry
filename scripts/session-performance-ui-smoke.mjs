@@ -144,7 +144,6 @@ async function exercise(webContents, pointer, controls) {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   })()`)
   await wait(`document.querySelector('[data-run-id="turn-0"]').dataset.virtualized === 'true'`)
-  // Keyboard focus on a retained shell makes its full interactive content available.
   await read(`document.querySelector('[data-run-id="turn-0"]').focus()`)
   await wait(`document.querySelector('[data-run-id="turn-0"]:not([data-virtualized]) .turn-assistant') != null`)
   await read(`document.querySelector('[data-run-id="turn-119"]').scrollIntoView({ block: 'end' })`)
