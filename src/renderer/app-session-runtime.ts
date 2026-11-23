@@ -35,8 +35,6 @@ export function useAppSessionRuntime(context: AppSessionRuntimeContext) {
     onTurnDone: (event) => {
       const previousSessionId = activeSessionIdRef.current
       const draftOwner = localDraftOwnersRef.current.get(event.runId)
-      // Some Providers surface their native session id only with turn:done. Preserve
-      // drafts (and queued follow-ups) even if the user switched away before then.
       if (event.sessionId && draftOwner) {
         const capturedKey = sessionComposerDraftKey({ ...draftOwner, sessionId: event.sessionId })
         migrateRightSurface(draftOwner.key, capturedKey)
@@ -107,8 +105,6 @@ export function useAppSessionRuntime(context: AppSessionRuntimeContext) {
   }, [steerEvidenceByMessageId])
   useEffect(() => {
     if (activeSessionId == null || sessionLoading || integrations.hasSessionModel) return
-    // Restore legacy/remote sessions from Scry's recorded request, not observed
-    // token usage or the latest global preference. Explicit local choices win.
     const recorded = recordedSessionModel(session.turns)
     if (recorded) integrations.restoreSessionModel(draftKey, recorded)
   }, [activeSessionId, draftKey, integrations.hasSessionModel, integrations.restoreSessionModel, session.turns, sessionLoading])
