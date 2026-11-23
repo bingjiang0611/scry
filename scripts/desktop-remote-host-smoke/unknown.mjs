@@ -5,8 +5,6 @@ import { detail, submitWithUnknownTransport, tlsRequest, waitForRun } from './ha
 // The exactly-once/unknown branch: a dropped receipt is resolved through
 // intentStatus or an explicit recovery fence, never by resending the prompt.
 export async function verifyUnknownReceipt({ transport, evaluate, submit, invitation, identity, deviceCertPEM, canonicalWorkspace }) {
-  // A dropped receipt is resolved through intentStatus, never by sending a new
-  // intent id. This is the canonical exactly-once/unknown branch.
   const unknownIntentId = randomUUID()
   await submitWithUnknownTransport({
     port: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM,

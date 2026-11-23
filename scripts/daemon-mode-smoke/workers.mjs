@@ -59,7 +59,6 @@ export function terminalFinishExpression() {
 
 const sizeOf = (path) => { try { const stat = lstatSync(path); return stat.isFile() ? stat.size : -1 } catch { return -1 } }
 
-/** What the recording worker left in userData/terminal-recordings for this terminal. */
 export function recordingFiles(userDataDir, id) {
   const directory = join(userDataDir, 'terminal-recordings')
   let names

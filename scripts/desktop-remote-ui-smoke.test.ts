@@ -22,7 +22,6 @@ function unboundNames(): { actual: string[]; control: string[] } {
     }
     return getSourceFile(file, languageVersion, onError, shouldCreateNewSourceFile)
   }
-  // Check all original modules and the deliberately broken control in one program.
   // Two complete TypeScript programs duplicate dependency analysis and timed out in CI.
   const diagnostics = ts.createProgram([...files, control], options, host).getSemanticDiagnostics()
     .filter(diagnostic => diagnostic.code === 2304 || diagnostic.code === 2552)

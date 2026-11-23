@@ -1,10 +1,8 @@
 export async function runRouting({ driver, localBefore }) {
   const { read, wait, check, click, key, insert, capture, fixture, bodyText, remoteShown, sendDisabled, composerValue } = driver
-  // New conversation stays on the current machine and project.
   const beforeNewProject = await read('document.querySelector(".execution-location.is-remote").closest(".tb-thread").getAttribute("title")')
   check(beforeNewProject === '/fixture/project-a', 'Remote project changed before New conversation: ' + beforeNewProject)
   await click('.sb-new')
-  // A new session restores this host/profile's model and permission, not defaults.
   await wait('!document.querySelector(".clibtn").disabled && !document.body.textContent.includes("second remote run") && document.querySelector(".model-effort-model")?.textContent === "claude / Alpha Remembered" && document.querySelector(".permission-mode-trigger .rc-value")?.textContent === "Full access · Fixture desktop"', 'new draft restores remote model and permission')
   check(await read(remoteShown), 'New conversation left the remote machine')
   const newConversationLocation = await read('document.querySelector(".location-button").getAttribute("aria-label")')

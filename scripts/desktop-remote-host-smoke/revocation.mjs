@@ -4,8 +4,6 @@ import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { tlsRequest } from './harness.mjs'
 
-// Revocation over a valid TLS connection: local client state cannot short-circuit
-// this negative check.
 export async function verifyRevocation({ transport, evaluate, sessionAction, sessionContext, localGrant, invitation, identity, deviceCertPEM, userDataDir, temp }) {
   // Receiver revocation is tested after valid TLS; local client state cannot
   // short-circuit this negative check.

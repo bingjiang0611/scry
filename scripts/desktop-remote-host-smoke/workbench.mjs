@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tlsRequest } from './harness.mjs'
 
-// Real host filesystem, Git and PTY work over the device channel.
 export async function verifyWorkbench({ transport, invitation, identity, deviceCertPEM, canonicalWorkspace, workspace, git }) {
   // Real production desktop operations: temporary host filesystem, Git and PTY.
   const workbench = async (surface, method, args, cwd = canonicalWorkspace) => {

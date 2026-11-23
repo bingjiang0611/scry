@@ -1,6 +1,5 @@
 export async function runHostSettings({ driver, localBefore, submissionsBefore }) {
   const { read, wait, check, click, key, insert, capture, fixture, remoteShown, formEnter, contents } = driver
-  // Back to this Mac: a new draft picks the local machine; local new sessions stay intact.
   await click('.sb-new')
   // The old session also has a location button. Wait for the new draft before
   // measuring it, or the transition can move the target before native input.
@@ -36,7 +35,6 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   await wait('document.querySelectorAll(".hosts-projects li").length === 3', 'host projects listed')
   await capture('remote-hosts')
 
-  // Editing changes routing only. Cancel, validation, storage failure and double-submit use real DOM input.
   await click('.hosts-address-summary button')
   await wait('document.activeElement?.name === "hostname"', 'address editor initial focus')
   check(await read('document.querySelector(\'input[name="hostname"]\').value === "fixture.invalid" && document.querySelector(\'input[name="username"]\').value === "fixture" && document.querySelector(\'input[name="port"]\').value === "22"'), 'Address editor did not prefill the saved target')

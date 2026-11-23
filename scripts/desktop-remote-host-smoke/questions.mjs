@@ -2,8 +2,6 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { observeRun, tlsRequest, waitForRun } from './harness.mjs'
 
-// Question lifecycle, delta reads on a live run, admission isolation and
-// archiving a running session.
 export async function verifyQuestions({ transport, evaluate, submit, sessionAction, invitation, identity, deviceCertPEM, context }) {
   // The fixture has a real question lifecycle. Stop while its question is open;
   // no synthetic answer is injected and the terminal status must be observed.
@@ -25,9 +23,6 @@ export async function verifyQuestions({ transport, evaluate, submit, sessionActi
   assert.equal(activeTrace.desktop.run.done, false)
   assert.equal(activeTrace.desktop.run.runId, questionScryRunId)
   assert.ok(activeTrace.desktop.run.pendingQuestions.length > 0)
-  // Delta reads on the production live run: a cursor-less read is a reset
-  // snapshot; continuing from it returns only metadata and changed indices;
-  // a foreign context is still rejected on the delta path.
   const activeQuery = { kind: 'trace', context: { ...context, externalSessionId: questionSession }, runId: questionScryRunId }
   const deltaReset = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { ...activeQuery, delta: {} } })
   assert.equal(deltaReset.desktop.kind, 'trace')
@@ -39,7 +34,6 @@ export async function verifyQuestions({ transport, evaluate, submit, sessionActi
   assert.equal(deltaNext.desktop.base, after.revision)
   assert.equal('items' in deltaNext.desktop.run, false)
   assert.ok(deltaNext.desktop.changes.every((change) => change.index < deltaNext.desktop.count))
-  // Same run id under another Agent profile: the full read and the delta read share one authorization result.
   const foreignQuery = { ...activeQuery, context: { ...activeQuery.context, agentProfileId: 'another-profile' } }
   const foreignFull = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: foreignQuery })
   const foreignDelta = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'desktop', query: { ...foreignQuery, delta: { after } } })

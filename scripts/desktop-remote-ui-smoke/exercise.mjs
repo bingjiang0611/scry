@@ -58,7 +58,6 @@ export async function exercise(contents, pointer, capture, options) {
     }
   }
   if (options.scenario === 'hosts') {
-    // Host management used to inherit the runtime's third authorized project.
     // Seed it through the fixture bridge; native selection/no-send remains in runtime.
     // Keep catalogRevision at zero so the later reconnect still proves fresh v2 data.
     await read('window.scry.desktopRemote.selectDirectory("fixture-connection", "/fixture/home/custom").then(() => window.refreshFixtureCatalog())')

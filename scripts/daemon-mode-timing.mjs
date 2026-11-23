@@ -38,7 +38,6 @@ const withMcp = args.includes('--with-mcp')
 if (mode === 'in-process') throw new Error('in-process mode was removed with S3: the App always runs Agents in its daemon')
 if (mode !== 'daemon') throw new Error(`unknown mode: ${mode}`)
 
-// 20 deltas 150 ms apart: a stream whose steady state is observable in both modes,
 // instead of one burst that any path can only deliver as a single lump.
 const PROMPT = 'performance paced stream'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -157,7 +156,6 @@ const measure = async (count, chunkIndex) => {
     child = launch({
       spawn, executable: electron, devApp: true, root, port, userDataDir, home,
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
-        // An isolated instance whose daemon serves the packaged smoke fixture.
         SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
         ...(process.env.SCRY_ORCHESTRATION_FULLFSYNC !== undefined ? { SCRY_ORCHESTRATION_FULLFSYNC: process.env.SCRY_ORCHESTRATION_FULLFSYNC } : {}),
         SCRY_REMOTE_HOST: '0',
@@ -172,7 +170,6 @@ const measure = async (count, chunkIndex) => {
     const evaluate = createEvaluate(cdp)
     await evaluate(`window.scry.setCwd(${JSON.stringify(workspace)})`)
     // One subscription for the whole instance: every text event is stamped where the user
-    // sees it arrive, and the stamp costs the renderer nothing at measurement time.
     await evaluate(`(() => {
       window.__timing = { events: [], done: null }
       window.scry.onTrace((events) => {

@@ -78,7 +78,6 @@ export function resolvePackagedApp(argument, { platform = process.platform, sour
   }
 }
 
-/** The development target the smoke used before S0-5; same expectation shape. */
 export function devTarget(root, platform = process.platform) {
   const executable = realpathSync(resolve(root, electronDevLayout({ platform }).executable))
   return { ok: true, packaged: false, executable, appPath: root, entryDirectory: join(root, 'out', 'main') }
