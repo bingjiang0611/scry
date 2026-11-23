@@ -25,7 +25,6 @@ describe('run pipeline has no Electron runtime dependency', () => {
     })
   }
 
-  // The checker must be able to fail: Electron main imports it directly.
   it('detects Electron in Electron main', () => {
     expect(electronDependents(MAIN_ENTRY).electron.some((entry) => entry.startsWith(MAIN_ENTRY))).toBe(true)
   })

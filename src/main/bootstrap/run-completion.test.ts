@@ -36,7 +36,6 @@ async function fixture() {
   const record = vi.spyOn(store, 'record')
   const send = vi.fn()
   const notifyChanged = vi.fn()
-  // The pipeline only ever sees a sink; the fake window is this test's own capture.
   const renderer = { send, isFocused: () => false }
   const runState: ActiveRun = { runId: 'run-1', userText: 'question', done: false, items: [] }
   let observedSessionId: string | undefined

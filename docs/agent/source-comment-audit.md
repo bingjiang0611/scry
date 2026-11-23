@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `77d378f1`, reviewed all direct `run-*` and `trace-*` TypeScript files under `src/main/bootstrap/` (363 tokens), and direct `ChatTurn*`, `ConversationView*`, and `RightSurface*` TypeScript/TSX files under `src/renderer/components/` (112 tokens). Removed 49 comments across 28 files. Comment-free emit and tool directives matched; 368 targeted tests passed in Electron Node mode. Reviews of 73 tokens in 17 Codex and Qoder test/fixture files at the same pin remain separate from this cleanup.
+
 At `5099e791`, reviewed 159 comments in 15 direct remote pairing, enrollment, history and session files; 21 in three bootstrap window and remote-connection files; 21 in 12 renderer archive, settings and background-service files; and 63 in direct workspace and recorder JS/TS scripts. Removed or consolidated 15 comments across eight files, with unchanged comment-free emit and tool directives. Six focused suites passed 42 tests. The combined run that included the recorder measurement suite was stopped by the outer timeout; it did not establish a benchmark result.
 
 At `2b150281`, reviewed 332 lexical comment tokens in all 25 direct `scripts/side-chat-*` JS/TS files. Removed 37 redundant notes across 15 files. Comment-free emit, embedded program text and tool directives were unchanged; three targeted suites passed nine tests. The same pin covers a read-only review of 340 tokens in the 20 direct `inner-*` and `relay-*` TS files under `src/main/remote/`. Subsequently removed 29 redundant or historical tokens across 12 of those files. Comment-free emit and tool directives matched. The seven focused suites passed all 36 tests across Node and Electron runs; two SQLite-dependent suites initially failed under Node with projection setup errors. The local SQLite module requires Electron ABI 146, not Node ABI 127; all 13 tests in those two suites passed with Electron in Node mode. These checks use loopback and fixtures, not a deployed relay.
@@ -45,7 +47,7 @@ At `0714c3a4`, reviewed 515 lexical comment tokens in all 28 Swift files under `
 
 ## Inventory and remaining work
 
-At `424ce862`, the parser found 13,497 comment tokens in 2,619 tracked JS/TS files, excluding `docs/`, `third-party/`, `fixtures/`, and `experiments/`. There are 16,749 physical comment-only lines before exemptions. These include retained and unreviewed comments, so the count is not a deletion estimate. `src/main/` (7,475 prose tokens), `scripts/` (4,180), and `src/renderer/` (1,625) are the largest remaining pools; parts of those pools are already reviewed. Swift, CSS, shell and config sources are not covered by this TypeScript inventory.
+At `77d378f1`, the parser found 12,853 comment tokens in 2,624 tracked JS/TS files, including 21 tool directives and 16,080 physical comment-only lines after the parser's directive allowance. The command below excludes the root `docs/`, `third-party/`, `fixtures/`, and `experiments/` directories; nested fixture sources such as `scripts/fixtures/` are still counted. `src/main/` (7,030 prose tokens), `scripts/` (4,059), and `src/renderer/` (1,541) are the largest pools. They include both retained and unreviewed prose and are not estimates of either unreviewed comments or deletable lines. Swift, CSS, shell and config sources are not covered by this inventory.
 
 ```sh
 node scripts/check-source-comments.mjs --inventory -- . ':!docs/' ':!third-party/' ':!fixtures/' ':!experiments/'

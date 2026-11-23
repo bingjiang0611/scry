@@ -8,8 +8,6 @@ import type { DockBadgeState } from '../dock-badge'
 import { updateRunAttachmentOwner } from '../attachment-store'
 import { storageUserDataDir } from '../storage-paths'
 
-// `notifyChanged` is the live-run change signal: binding a native session id
-// changes what a paired device reads in the live-run set.
 type SessionRuns = { isViewed: (runId: string) => boolean; notifyChanged?: () => void }
 export function createSessionPublisher(deps: {
   runState: ActiveRun

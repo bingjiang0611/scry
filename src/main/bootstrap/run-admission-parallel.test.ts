@@ -46,7 +46,6 @@ async function fixture(): Promise<Fixture> {
   await mkdir(join(root, 'workspace'))
   const cwd = await realpath(join(root, 'workspace'))
   receipts.userData = userData
-  // Storage is injected now: the pipeline reads the root here, not from Electron.
   configureStorage({ userDataDir: userData, appPath: userData })
   return {
     root, userData, cwd,
@@ -59,7 +58,6 @@ async function fixture(): Promise<Fixture> {
   }
 }
 
-/** 注册一个「仍在运行」的 run，等价于生产里已经登记但尚未收口的一轮。 */
 function registerRun(current: Fixture, input: {
   runId: string; providerId?: ProviderId; sessionId?: string
   /** 已对 UI 报完成（done）但收尾 Promise 尚未 resolve 的形态。 */
@@ -195,7 +193,6 @@ describe('parallel run admission in one workspace', () => {
     await beginTurn(current, first, 'run-first')
     await beginTurn(current, second, 'run-second')
     registerRun(current, { runId: 'run-first', sessionId: 'native-first' })
-    // 兄弟仍在运行（未收口）时，不同原生身份的第二个 child 必须能启动。
     await expect(admit(current, { conversation: { conversationId: second, runId: 'run-second', target: piTarget } }))
       .resolves.toMatchObject({ resume: undefined })
     expect(current.runs.unsettledStates().map((run) => run.runId)).toEqual(['run-first'])

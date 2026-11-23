@@ -1,4 +1,3 @@
-// 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { OVERVIEW_SESSION_COPY } from '../constants/copy'
 import { useMemo } from 'react'
 
@@ -248,5 +247,3 @@ export function HooksSummary({
     </details>
   )
 }
-
-// 蓝本 .turn-footer：in / out / cache·r / cache·w / dur / api / tools / files / err，分组用 .sep 隔。

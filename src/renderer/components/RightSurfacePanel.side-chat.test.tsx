@@ -51,7 +51,6 @@ describe('surface chooser with the side-chat entry', () => {
     expect(onSelect).not.toHaveBeenCalled()
     expect(html).not.toContain('role="menu"')
     expect(html).toContain('aria-haspopup="menu"')
-    // No child body and no child tab exist before any creation happens.
     expect(html).not.toContain('data-side-chat-panel')
     expect(html).not.toContain('data-side-chat-tab-id')
   })

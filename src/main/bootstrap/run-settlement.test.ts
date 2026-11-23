@@ -115,7 +115,6 @@ describe('run settlement', () => {
     expect(run.events).not.toContain('registry-removed')
     run.releaseFinalization()
     await vi.waitFor(() => expect(run.events).toContain('registry-removed'))
-    // Finalization closed: the run owns nothing, and it left the registry last.
     expect(run.runState.localFinalizing).toBe(false)
     expect(run.events.indexOf('traces-settled')).toBeLessThan(run.events.indexOf('registry-removed'))
     expect(run.events).toContain('questions-cancelled')
@@ -151,7 +150,6 @@ describe('run settlement', () => {
         throw new Error('settle bookkeeping failed')
       }
       run.provider.resolve({ ok: true })
-      // The failure is reported as a settlement failure, and local finalization still runs.
       await vi.waitFor(() => expect(run.deps.remote.finishRemote)
         .toHaveBeenCalledWith('failed', 'settle bookkeeping failed'))
       run.releaseFinalization()
@@ -218,7 +216,6 @@ describe('run settlement', () => {
       // keep a registration for a run the Provider already ended.
       expect(run.deps.remoteRunIds.has('run-1')).toBe(false)
       expect(run.deps.remoteRunLedgerIds.has('run-1')).toBe(false)
-      // Ownership and `localFinalizing` keep blocking: the local side never closed the run.
       expect(run.events).not.toContain('registry-removed')
       expect(run.runState.localFinalizing).toBe(true)
     } finally {
@@ -250,7 +247,6 @@ describe('run settlement', () => {
     run.provider.resolve({ ok: true })
     run.releaseFinalization()
     await vi.waitFor(() => expect(run.events).toContain('registry-removed'))
-    // Nothing authoritative was reported, so the fallback says exactly that.
     expect(await run.remote.remoteResult).toEqual({
       status: 'failed',
       recording: 'failed',

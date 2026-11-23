@@ -1,4 +1,3 @@
-// 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 
@@ -99,5 +98,3 @@ export function RecorderContentPager({ label, contentRef, source, remote = false
     </div>
   )
 }
-
-// 蓝本 .tool-card：状态(check/x) · 工具名 · op(R/W/E) · arg · meta(dur/tok/danger) · chev；点开内联展开 tool-detail。

@@ -13,7 +13,6 @@ import { Notice } from './primitives/Notice'
 
 export type RightSurfaceContents = Readonly<Partial<Record<RightSurfaceKind, ReactNode>>>
 
-/** One open side-chat instance as the tab strip shows it. */
 export interface SideChatTabView {
   conversationId: string
   /** Full title; the strip truncates it visually and keeps this accessible. */

@@ -1,4 +1,3 @@
-// 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { useId, useMemo, useState } from 'react'
 
 

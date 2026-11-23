@@ -21,9 +21,7 @@ import { ConversationViewBody } from './ConversationViewBody'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { useConversationSessionsViewed } from '../conversation-viewed-sessions'
 
-// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
 const message = ipcErrorMessage
-/** No turn of a side chat can create a native fork; the backend refuses it as well. */
 const NO_FORKABLE_RUNS: ReadonlySet<string> = new Set()
 
 /**
@@ -269,8 +267,6 @@ export function ConversationView({ conversation, draftStore, chatProps, initialA
     busyRef.current = true
     try { await submission.submit(resendContent(pending)) } finally { busyRef.current = false }
   }
-  // A side chat owns no native continuation of the source, so it never offers a fork
-  // action that main would reject anyway.
   const forkUnsupported = Boolean(conversation.sideChat)
   const forkableRunIds = useMemo(() => forkableRunIdsOf(conversation, page), [conversation, page])
   const fork = async (turn?: Turn, original?: ConversationForkRequest): Promise<void> => {

@@ -16,7 +16,6 @@ import { ipcErrorMessage } from '../constants/ipc-error-copy'
 import { Button } from './primitives/Button'
 import { Notice } from './primitives/Notice'
 
-// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
 const message = ipcErrorMessage
 
 export function ConversationViewBody({

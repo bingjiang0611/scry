@@ -81,7 +81,6 @@ describe('bounded live projection cache', () => {
     expect(second.length).toBe(1)
     expect(second[0]).not.toBe(first[0])
     expect(second[0].text).toBe('hello')
-    // The earlier snapshot is a copy: the in-place tail merge cannot rewrite it.
     expect(first[0].text).toBe('hel')
     expect(asJson(second)).toEqual(asJson(oracle(state)))
   })
@@ -181,7 +180,6 @@ describe('bounded live projection cache', () => {
     expect(after.map((item) => item.stage)).toEqual(['result_superseded', 'result'])
     expect(after[1].isError).toBe(true)
     expect(after[1].text).toBe('second result')
-    // The snapshot taken before the failure still shows what that reader saw.
     expect(warm.map((item) => item.stage)).toEqual(['result', 'result'])
     expect(asJson(after)).toEqual(asJson(oracle(state)))
   })
