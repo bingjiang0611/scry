@@ -106,6 +106,18 @@ export function tombstonedSessionKey(
   return row?.session_key
 }
 
+/** B2: tombstone lookup by session key, used where the native id is not the session key. */
+export function isSessionKeyTombstoned(
+  source: { handle: { db: Database.Database } },
+  sessionKey: string
+): boolean {
+  return Boolean(
+    source.handle.db
+      .prepare('SELECT 1 FROM orch_binding WHERE session_key = ? AND deleted_at IS NOT NULL LIMIT 1')
+      .get(sessionKey)
+  )
+}
+
 /** True when any profile of this provider+cwd identity has a tombstone. */
 export function anySourceTombstone(
   source: { handle: { db: Database.Database } },

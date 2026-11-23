@@ -68,7 +68,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         const meta = new Map(metaRows.map((r) => [r.key, r.value]))
         expect(meta.get('log_id')).toMatch(/^[0-9a-f-]{36}$/i)
         expect(meta.get('pruned_through')).toBe('0')
-        expect(meta.get('projection_schema_version')).toBe('5')
+        expect(meta.get('projection_schema_version')).toBe('6')
         expect(meta.get('legacy_ledger_seq')).toBe('0')
         expect(meta.has('legacy_catalog_sha256')).toBe(true)
 
@@ -174,7 +174,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         session_key: 'old', cwd: '/tmp/工作区', rev_seq: 42, title: '旧标题', catalog: null
       })
       const meta = db.prepare('SELECT value FROM orch_meta WHERE key = ?').pluck()
-      expect(meta.get('projection_schema_version')).toBe('5')
+      expect(meta.get('projection_schema_version')).toBe('6')
       expect(meta.get('legacy_catalog_sha256')).toBe('')
       expect(meta.get('log_id')).toBe('before')
     } finally {

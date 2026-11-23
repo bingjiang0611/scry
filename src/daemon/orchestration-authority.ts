@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
+import { maybeStartOrchestrationMaintenance } from './orchestration-maintenance'
+import { observeAuthorityNativeTranscript } from './orchestration-native-transcript'
 import type { ConversationStore } from '../main/conversation-store'
 import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
 import type { Evidence } from '../shared/turn-record'
@@ -71,6 +73,8 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   deferredImportThreshold?: number
   pauseDeferredImport?: Promise<void>
   attentionSnapshot?: () => SessionAttentionSnapshot
+  /** Retention timer; `null` disables it. */
+  maintenanceIntervalMs?: number | null
 }
 
 /**
@@ -433,28 +437,28 @@ function buildAuthorityRuntime<
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
-  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink)
+  const maintenance = maybeStartOrchestrationMaintenance({
+    sink,
+    log: options.log,
+    ...(options.maintenanceIntervalMs === undefined ? {} : { intervalMs: options.maintenanceIntervalMs })
+  })
 
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
     createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
     publishHint: (event) => forwardAppHintToSubscribeHub(subscribeHub, event, resolveCanonical),
-    observeNativeTranscript: (homeDir, run) => {
-      if (!sink.handle.db.open || sink.isWriteIndeterminate()) return undefined
-      const runId = resolveCanonical(run.ledgerRunId ?? run.runId)
-      return observeNativeRunTranscript(homeDir, run, (transcript) => {
-        if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
-        const current = sink.getRun(runId)
-        if (current?.lifecycle === 'dispatched' && current.cwd === run.cwd && current.provider === run.providerId) {
-          pendingTranscripts.set(runId, transcript)
-        }
-      }, options.log)
-    },
+    observeNativeTranscript: (homeDir, run) =>
+      observeAuthorityNativeTranscript(
+        { sink, resolveCanonical, pendingTranscripts, log: options.log },
+        homeDir,
+        run
+      ),
     startImport: pausedImport ? () => { void pausedImport.then(startImport) } : startImport,
-    status,
+    status: () => buildAuthorityStatus(sink),
     close: async () => {
       if (closed) return
       closed = true
+      maintenance?.stop()
       subscribeHub.close()
       sink.setCommitObserver(undefined)
       ctx.getDeferredControl().cancelDeferred?.()

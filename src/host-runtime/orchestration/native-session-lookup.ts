@@ -2,12 +2,15 @@ import { sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import {
   anySourceTombstone,
+  isSessionKeyTombstoned,
   lookupBoundSessionKey,
   tombstonedSessionKey,
   type NativeIdentityKey
 } from './native-session-bindings'
 import { mapSessionRow } from './projection-mappers'
 import { OrchestrationStoreError, type SessionProjectionRow } from './types'
+
+export { isSessionKeyTombstoned }
 
 export interface NativeSessionIdentity {
   sessionId: string

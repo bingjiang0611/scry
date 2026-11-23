@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 7
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 5
+export const ORCHESTRATION_SCHEMA_VERSION = 8
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -305,6 +305,25 @@ const ORCH_DDL_V7: readonly string[] = [
   "UPDATE orch_meta SET value = '5' WHERE key = 'projection_schema_version'"
 ]
 
+/**
+ * B2: dispatch-ledger metadata was read back out of `run.intent_recorded` events, which made the
+ * event log a durable index that pruning could never touch. It now lives on the run projection.
+ */
+const ORCH_DDL_V8: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN intent_command_id TEXT',
+  'ALTER TABLE orch_p_run ADD COLUMN intent_at INTEGER',
+  'ALTER TABLE orch_p_run ADD COLUMN intent_detail_sha256 TEXT',
+  `UPDATE orch_p_run SET
+     intent_command_id = (SELECT command_id FROM orch_event WHERE type = 'run.intent_recorded' AND run_id = orch_p_run.run_id),
+     intent_at = (SELECT at FROM orch_event WHERE type = 'run.intent_recorded' AND run_id = orch_p_run.run_id),
+     intent_detail_sha256 = (
+       SELECT json_extract(payload, '$.intentDetailSha256') FROM orch_event
+       WHERE type = 'run.intent_recorded' AND run_id = orch_p_run.run_id
+         AND json_extract(payload, '$.intentDetailSha256') IS NOT NULL
+     )`,
+  "UPDATE orch_meta SET value = '6' WHERE key = 'projection_schema_version'"
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
-  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8
 ]

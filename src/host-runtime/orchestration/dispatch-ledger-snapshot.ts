@@ -9,7 +9,6 @@ import { h1DetailDigest } from './authority-dispatch'
 import type { EventSink } from './event-sink'
 
 const UUID_V4_LOWER = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-const SHA256_LOWER = /^[0-9a-f]{64}$/
 
 function toDeterministicUuidV4(seed: string): string {
   const bytes = Buffer.from(createHash('sha256').update(seed).digest().subarray(0, 16))
@@ -81,30 +80,25 @@ export function buildDispatchLedgerSnapshot(sink: EventSink): LedgerSnapshot {
     }
   }
 
-  // Load intent metadata (command_id, at, intentDetailSha256) from run.intent_recorded events.
-  const intentEvents = db
-    .prepare("SELECT seq, at, run_id, command_id, payload FROM orch_event WHERE type = 'run.intent_recorded' ORDER BY seq ASC")
-    .all() as Array<{ seq: number; at: number; run_id: string | null; command_id: string | null; payload: string }>
-  const intentMetaByRun = new Map<
-    string,
-    { seq: number; at: number; commandId: string | null; detailSha256?: string }
-  >()
-  for (const ev of intentEvents) {
-    if (!ev.run_id) continue
-    let detailSha256: string | undefined
-    try {
-      const parsed = JSON.parse(ev.payload) as { intentDetailSha256?: unknown }
-      if (typeof parsed.intentDetailSha256 === 'string' && SHA256_LOWER.test(parsed.intentDetailSha256)) {
-        detailSha256 = parsed.intentDetailSha256
-      }
-    } catch {
-      // Ignore malformed payload.
-    }
-    intentMetaByRun.set(ev.run_id, {
-      seq: Number(ev.seq),
-      at: Number(ev.at),
-      commandId: ev.command_id,
-      detailSha256
+  // B2: intent metadata is projected onto the run row, so pruning the event log cannot lose it.
+  const intentMetaByRun = new Map<string, { seq: number; at: number; commandId: string | null; detailSha256?: string }>()
+  for (const row of db
+    .prepare(
+      `SELECT run_id, intent_seq, intent_at, intent_command_id, intent_detail_sha256 FROM orch_p_run
+       WHERE intent_at IS NOT NULL`
+    )
+    .all() as Array<{
+    run_id: string
+    intent_seq: number
+    intent_at: number
+    intent_command_id: string | null
+    intent_detail_sha256: string | null
+  }>) {
+    intentMetaByRun.set(row.run_id, {
+      seq: Number(row.intent_seq),
+      at: Number(row.intent_at),
+      commandId: row.intent_command_id,
+      ...(row.intent_detail_sha256 ? { detailSha256: row.intent_detail_sha256 } : {})
     })
   }
 

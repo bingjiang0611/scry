@@ -61,8 +61,9 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         `INSERT INTO orch_p_run (
           run_id, session_key, owner_actor, scope, origin, provider, profile, cwd,
           prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body,
-          settled_at, recovered_at, outcome, rev_seq, parent_run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'recorded', NULL, NULL, ?, ?, NULL, NULL, NULL, ?, ?)`
+          settled_at, recovered_at, outcome, rev_seq, parent_run_id,
+          intent_command_id, intent_at, intent_detail_sha256
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'recorded', NULL, NULL, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)`
       ).run(
         event.runId,
         event.sessionKey,
@@ -76,7 +77,10 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.seq,
         p.body ? canonicalJson(p.body) : null,
         event.seq,
-        (p.parentRunId as string | null) ?? null
+        (p.parentRunId as string | null) ?? null,
+        event.commandId,
+        event.at,
+        typeof p.intentDetailSha256 === 'string' ? p.intentDetailSha256 : null
       )
       ensureSessionForRun(db, event, p)
       return

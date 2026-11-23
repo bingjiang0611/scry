@@ -17,7 +17,7 @@ import {
   type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
-import { wasNativeSourceDeleted } from '../host-runtime/orchestration/native-session-lookup'
+import { isSessionKeyTombstoned, wasNativeSourceDeleted } from '../host-runtime/orchestration/native-session-lookup'
 import { isWithdrawableSession } from '../host-runtime/orchestration/orchestrator-handlers'
 
 interface CatalogScanOptions {
@@ -100,9 +100,8 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     if (!existing && payload.provider && payload.catalog?.nativeSessionId && wasNativeSourceDeleted(sink, {
       sessionId: payload.catalog.nativeSessionId, provider: payload.provider, profile: null, cwd: payload.cwd
     })) return
-    if (!existing && sink.handle.db.prepare(
-      "SELECT 1 FROM orch_event WHERE session_key IN (?, ?) AND cwd = ? AND type = 'session.deleted' LIMIT 1"
-    ).get(payload.sessionKey, payload.catalog?.nativeSessionId ?? '', payload.cwd)) return
+    // B2: tombstones come from the binding table so a pruned event log cannot resurrect a session.
+    if (!existing && isSessionKeyTombstoned(sink, payload.sessionKey)) return
     const payloadSha256 = sha256Hex(canonicalJson(payload))
     const result = sink.runInBatchTransaction(() => {
       const update = sink.execute({

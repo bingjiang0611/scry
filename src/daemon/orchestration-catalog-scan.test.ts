@@ -187,6 +187,13 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
     if (mode !== 'new projection') {
       const savedRevision = sink.getSession(sessionKey)?.revSeq
       sink.handle.db.prepare('UPDATE orch_p_session SET legacy = 0 WHERE session_key = ?').run(sessionKey)
+      // Reconstruct a real v5 database so reopening exercises the V6–V8 migrations.
+      sink.handle.db.exec(`
+        DROP TABLE IF EXISTS orch_binding;
+        ALTER TABLE orch_p_run DROP COLUMN intent_command_id;
+        ALTER TABLE orch_p_run DROP COLUMN intent_at;
+        ALTER TABLE orch_p_run DROP COLUMN intent_detail_sha256;
+      `)
       sink.handle.db.pragma('user_version = 5')
       sink.close()
       sink = open()
