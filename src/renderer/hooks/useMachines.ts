@@ -1,7 +1,10 @@
 // 机器页的数据入口（P8 §6）：打开页面读一次，手动刷新再读一次，不轮询。
 // 静态检查禁止 renderer 出现远程轮询循环，所以这里只提供一次性读取。
-import { useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { HostMetricsSnapshot } from '@shared/host-metrics'
+
+/** 旧宿主不声明 hostMetrics 能力时 Desktop 客户端抛出的错误码。 */
+const HOST_METRICS_UNSUPPORTED = 'desktop_host_metrics_unsupported'
 
 export type MachineRead =
   | { status: 'unread' }
@@ -40,6 +43,19 @@ function subscribe(listener: () => void): () => void {
 
 export function useMachines(): MachinesState {
   return useSyncExternalStore(subscribe, () => state, () => state)
+}
+
+/**
+ * 页头「x 秒前更新」的时钟。只让这一个标签重渲染，不读任何数据：
+ * 没有它，标签会停在打开页面那一刻的秒数，等于写错时间。
+ */
+export function useSampleAge(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
 }
 
 /** 最近一次成功读取的快照；读不到时是 null，界面据此决定显示数字还是原因。 */
@@ -97,7 +113,8 @@ async function readTarget(connectionId: string): Promise<void> {
     set({ targets: new Map(state.targets).set(connectionId, { read: { status: 'ready', snapshot } }), updatedAt: snapshot.sampledAt })
   } catch (reason) {
     const detail = detailOf(reason)
-    const unsupported = detail.includes('desktop_host_metrics_unsupported')
+    // 宿主明确拒绝能力位时，客户端抛的就是这个码；用等值比较，别把其他报错也读成「请升级」。
+    const unsupported = detail === HOST_METRICS_UNSUPPORTED
     set({ targets: new Map(state.targets).set(connectionId, { read: { status: 'failed', detail, stale }, ...(unsupported ? { unsupported: true } : {}) }) })
   }
 }

@@ -30,7 +30,8 @@ describe('host metrics on a real daemon', () => {
       expect(snapshot.scry.daemon.pid).toBe(process.pid)
       expect(snapshot.scry.daemon.rssBytes).toBeGreaterThan(0)
       expect(snapshot.scry.providers === null || Array.isArray(snapshot.scry.providers)).toBe(true)
-      expect(snapshot.runs).toEqual({ active: expect.any(Number), queued: expect.any(Number) })
+      // 排队数在编排投影里，第一版没接：null 而不是 0。
+      expect(snapshot.runs).toEqual({ active: expect.any(Number), queued: null })
     } finally {
       await daemon.dispose()
     }

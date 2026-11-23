@@ -4,7 +4,7 @@ import {
   createHostMetricsSources,
   type HostMetricsSources
 } from './host-metrics'
-import { HOST_METRICS_CACHE_MS, HOST_METRICS_MIN_INTERVAL_MS, type HostMetricsSnapshot } from '../shared/host-metrics'
+import { HOST_METRICS_CACHE_MS, HOST_METRICS_MAX_BYTES, HOST_METRICS_MIN_INTERVAL_MS, hostMetricsWithinBound, type HostMetricsSnapshot } from '../shared/host-metrics'
 
 // A machine whose every read is a fixture: what the sampler does with the reads is
 // the subject, not the operating system.
@@ -52,6 +52,22 @@ Pages purgeable: 50.`,
 }
 
 describe('HostMetricsSampler', () => {
+  it('keeps a crowded host inside the 8 KiB protocol bound', async () => {
+    // 最坏情况：Provider 行已经堆到上限、四个盘、每台机器的字段都填满。
+    const providers = Array.from({ length: 40 }, (_, index) => `  90${index}  9000  4294967296  ${index}.5  provider${index}\n`).join('')
+    const src = sources({
+      processTable: async () => `  9000  1  1  0.1  scry\n${providers}`,
+      diskRoots: () => ['/data', '/work', '/work/a', '/work/b'].map((path, index) => ({ role: index === 0 ? 'data' as const : 'workspace' as const, path })),
+      statfs: () => ({ totalBytes: 1_000_000_000_000, freeBytes: 500_000_000_000 }),
+      volumeId: (path) => path,
+      providerRoots: () => Array.from({ length: 40 }, (_, index) => ({ providerId: `provider-${index}-with-a-long-name`, pid: 900 + index }))
+    })
+    const sampler = new HostMetricsSampler(src)
+    const reading = await sampler.read('remote')
+    expect(hostMetricsWithinBound(reading)).toBe(true)
+    expect(Buffer.byteLength(JSON.stringify(reading), 'utf8')).toBeLessThanOrEqual(HOST_METRICS_MAX_BYTES)
+  })
+
   it('assembles every field from the injected reads', async () => {
     const src = sources() as never as HostMetricsSources & { setCpu: (a: number, b: number) => void }
     const sampler = new HostMetricsSampler(src)
@@ -152,7 +168,7 @@ describe('HostMetricsSampler', () => {
 })
 
 describe('production sources', () => {
-  const sources = (activeRuns: () => { active: number; queued: number }, run: unknown) => createHostMetricsSources({
+  const sources = (activeRuns: () => { active: number; queued: number | null }, run: unknown) => createHostMetricsSources({
     platform: 'darwin',
     userDataDir: '/data',
     workspaceRoots: () => ['/work'],
@@ -180,6 +196,13 @@ describe('production sources', () => {
     const run = vi.fn(async () => '  900  1  12000  0.8 node\n')
     await sources(() => ({ active: 0, queued: 1 }), run).processTable()
     expect((run.mock.calls[0] as unknown as [string])[0]).toBe('nice')
+  })
+
+  it('runs the commands in the C locale so %cpu keeps a dot', async () => {
+    const run = vi.fn(async () => '  900  1  12000  0.8 node\n')
+    await sources(() => ({ active: 0, queued: null }), run).processTable()
+    const [, , options] = run.mock.calls[0] as unknown as [string, string[], { env?: Record<string, string> }]
+    expect(options.env?.LC_ALL).toBe('C')
   })
 
   it('skips the extra nice process when nothing is running', async () => {

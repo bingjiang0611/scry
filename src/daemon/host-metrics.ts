@@ -26,7 +26,7 @@ import {
 
 /** One bounded command run: at most `maxBytes` of output, killed at `timeoutMs`. */
 export interface HostMetricsCommand {
-  run(file: string, args: string[], options: { timeoutMs: number; maxBytes: number }): Promise<string | null>
+  run(file: string, args: string[], options: HostMetricsCommandOptions): Promise<string | null>
   readFile(path: string): string | null
 }
 
@@ -63,7 +63,18 @@ export interface HostMetricsSources {
   activeRuns(): { active: number; queued: number | null }
 }
 
+export interface HostMetricsCommandOptions {
+  timeoutMs: number
+  maxBytes: number
+  /** Extra environment for the child process; merged over the daemon's own. */
+  env?: Record<string, string>
+}
+
 const COMMAND_TIMEOUT_MS = 2_000
+// LC_ALL=C：否则 `ps` 的 %cpu 在逗号小数点语言环境下变成 "1,5"，
+// 解析正则只认点号，整行会被丢掉。
+const COMMAND_LOCALE = { LC_ALL: 'C' }
+const smallOutput = { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: 64 * 1024, env: COMMAND_LOCALE }
 const PROCESS_TABLE_MAX_BYTES = 2 * 1024 * 1024
 // ucomm 只给可执行名（不含参数、不含完整路径），正是 Provider 归属需要的字段；
 // 比 comm 少一次路径解析，单次采样实测省约 10 ms。
@@ -91,9 +102,10 @@ export class HostMetricsSampler {
   async read(scope: HostMetricsScope): Promise<HostMetricsSnapshot> {
     const sources = this.#sources
     const startedAt = sources.now()
-    if (this.#cached && startedAt - this.#sampledAt < HOST_METRICS_CACHE_MS) return this.#project(scope)
-    // A refresh loop cannot make the machine pay more than one sample per 2 s.
-    if (this.#cached && startedAt - this.#sampledAt < HOST_METRICS_MIN_INTERVAL_MS) return this.#project(scope)
+    // 缓存 5 秒；设计的「两次采样至少隔 2 秒」在这里一并成立，取两者较大值，
+    // 免得写一个永远被缓存抢先的假分支。
+    const minAgeMs = Math.max(HOST_METRICS_CACHE_MS, HOST_METRICS_MIN_INTERVAL_MS)
+    if (this.#cached && startedAt - this.#sampledAt < minAgeMs) return this.#project(scope)
     const previousCpu = this.#cpu ?? sources.cpuTimes()
     if (!this.#cpu) await sources.sleep(HOST_METRICS_COLD_CPU_GAP_MS)
     const currentCpu = sources.cpuTimes()
@@ -251,15 +263,15 @@ export function createHostMetricsSources(options: HostMetricsSourceOptions): Hos
     totalBytes: totalmem,
     memoryText: async () => platform === 'linux'
       ? readFile('/proc/meminfo')
-      : await run('vm_stat', [], { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: PROCESS_TABLE_MAX_BYTES }),
+      : await run('vm_stat', [], { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: PROCESS_TABLE_MAX_BYTES, env: COMMAND_LOCALE }),
     pressureText: async () => platform === 'linux'
       ? readFile('/proc/pressure/memory')
-      : await run('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: 64 * 1024 }),
+      : await run('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], smallOutput),
     swapText: async () => platform === 'linux'
       ? null
-      : await run('sysctl', ['-n', 'vm.swapusage'], { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: 64 * 1024 }),
+      : await run('sysctl', ['-n', 'vm.swapusage'], smallOutput),
     processTable: async () => {
-      const limits = { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: PROCESS_TABLE_MAX_BYTES }
+      const limits = { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: PROCESS_TABLE_MAX_BYTES, env: COMMAND_LOCALE }
       const runs = options.activeRuns()
       // 有运行在跑（或排队；排队数未知时按有算）时降优先级，采样不和它抢 CPU。
       // 没有运行时直接调用 ps，省掉一次 nice 进程：实测单次采样省约 8 ms。
@@ -299,9 +311,12 @@ function defaultVolumeId(path: string): string | null {
   }
 }
 
-function runCommand(file: string, args: string[], options: { timeoutMs: number; maxBytes: number }): Promise<string | null> {
+function runCommand(file: string, args: string[], options: HostMetricsCommandOptions): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(file, args, { timeout: options.timeoutMs, maxBuffer: options.maxBytes, encoding: 'utf8' }, (error, stdout) => {
+    execFile(file, args, {
+      timeout: options.timeoutMs, maxBuffer: options.maxBytes, encoding: 'utf8',
+      env: { ...process.env, ...options.env }
+    }, (error, stdout) => {
       // A timeout and a missing executable both mean "not read this time": null.
       if (error && !stdout) return resolve(null)
       resolve(stdout)

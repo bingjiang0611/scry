@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from 'react'
 import type { HostMetricsSnapshot } from '@shared/host-metrics'
 import { MACHINES_COPY as copy } from '../constants/machines-copy'
 import { formatSampleAge, hostSummary, runsText } from '../machines-view-model'
-import { ensureMachinesRead, latestSnapshot, refreshMachines, useMachines } from '../hooks/useMachines'
+import { ensureMachinesRead, latestSnapshot, refreshMachines, useMachines, useSampleAge } from '../hooks/useMachines'
 import { useDesktopConnections } from '../hooks/useDesktopConnections'
 import { MachineDiskList, MachineFacts, MachineMeters, MachineSampleLine, ScryUsageLine, ScryUsageTable } from './MachineMeters'
 import { RemoteConnectionsSettings } from './HostsView'
@@ -22,7 +22,7 @@ export function MachinesView({ onNewSession }: { onNewSession: (connectionId: st
   const connections = useDesktopConnections()
   const ids = connections.connections.map((connection) => connection.id).join(',')
   useEffect(() => { ensureMachinesRead(ids ? ids.split(',') : []) }, [ids])
-  const now = Date.now()
+  const now = useSampleAge()
   return (
     <section className="machines-page" aria-label={copy.title}>
       <header className="machines-head">
@@ -61,7 +61,7 @@ function LocalMachineCard(): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const detailsId = useId()
   const snapshot: HostMetricsSnapshot | null = latestSnapshot(read)
-  const now = Date.now()
+  const now = useSampleAge()
   const refresh = (): void => { void refreshMachines([]) }
   return (
     <article className="machine-card machine-card--local">

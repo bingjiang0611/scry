@@ -3,13 +3,13 @@
 import type { DesktopRemoteConnection } from '@shared/desktop-remote'
 import { MACHINES_COPY as copy } from '../constants/machines-copy'
 import { formatSampleAge, targetNotice, type TargetNotice, type TargetNoticeKind } from '../machines-view-model'
-import { latestSnapshot, refreshTargetMetrics, useMachines } from '../hooks/useMachines'
+import { latestSnapshot, refreshTargetMetrics, useMachines, useSampleAge } from '../hooks/useMachines'
 import { MachineMeters, ScryUsageLine } from './MachineMeters'
 import { Button } from './primitives/Button'
 
 export function TargetMetrics({ connection }: { connection: DesktopRemoteConnection }): JSX.Element | null {
   const state = useMachines().targets.get(connection.id)
-  const now = Date.now()
+  const now = useSampleAge()
   const retry = <Button size="sm" onClick={() => void refreshTargetMetrics(connection.id)}>{copy.targetRetry}</Button>
   if (connection.state !== 'connected') {
     return <Notice notice={targetNotice({ kind: 'offline' })} />
