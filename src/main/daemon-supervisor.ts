@@ -1,9 +1,3 @@
-// App-side supervision of the local daemon: probe, adopt, launch, wait for ready.
-//
-// The daemon is a separate process on purpose - it keeps serving paired devices and
-// runs while the App is closed - so this supervisor never owns killing it. Every
-// step is injected, because the interesting behaviour is the ordering (never launch a
-// second daemon, never treat "still starting" as ready) and the version rule.
 import { sameBuild, type BuildIdentity } from '../shared/build-identity'
 import type { DaemonProbeInfo } from './daemon-client'
 

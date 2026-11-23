@@ -37,7 +37,7 @@
 
 ## Contextual reviews with follow-ups
 
-At `c8751c5c`, reviewed 1,119 comment tokens across 161 direct `src/main/` TypeScript files: `daemon-[a-z]*`, `run-*`, `trace-*`, `normalize-*`, `session-*`, `managed-*`, `db-*`, `dock-*`, `terminal-*`, `process-*`, `git-*`, and `context-*`. This counts 52 zero-token siblings and excludes descendants. Removed 91 standalone comments across 38 files; ambiguous repeats and follow-up candidates remain. Comment-free emit and tool directives matched; 18 targeted suites passed 205 tests in Electron Node mode.
+At `c8751c5c`, reviewed 1,119 comment tokens across 161 direct `src/main/` TypeScript files: `daemon-[a-z]*`, `run-*`, `trace-*`, `normalize-*`, `session-*`, `managed-*`, `db-*`, `dock-*`, `terminal-*`, `process-*`, `git-*`, and `context-*`. This counts 52 zero-token siblings and excludes descendants. Removed 91 standalone comments across 38 files in the first pass. Moved the supervisor lifetime decision into [ADR 039](../adr/039-daemon-service-lifecycle.md) and tracked the turn-diff test evidence gap in [#186](https://github.com/bingjiang0611/scry/issues/186). Other ambiguous repeats and follow-up candidates remain. Comment-free emit and tool directives matched; 18 targeted suites passed 205 tests in Electron Node mode.
 
 At `2546e40a`, reviewed 950 comment tokens across the direct main conversation, side-chat, and background-service files and the direct renderer `side-chat-*` files. The separate `conversation-side-chat.fixture.ts` file has no comment tokens. Removed 136 redundant or stale comments across 51 files. Comment-free emit and tool directives matched; all 30 affected suites passed 226 tests in Electron Node mode. No live provider or desktop UI was run.
 

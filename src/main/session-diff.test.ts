@@ -696,7 +696,6 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     const terminal = await finishGitTurnDiff(turnCapture)
     expect(terminal.status).toBe('captured')
 
-    // capture 已被消费；即使 seal 之外也不该再产出预览。
     const before = events.length
     await previewer.notifyChange()
     expect(events.length).toBe(before)
