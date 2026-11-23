@@ -194,7 +194,6 @@ describe('模型目录跨进程缓存', () => {
     const cold = resolveRunControlDisplay(new Map(), { providerId: 'pi', agentProfileId: 'pi:default', cwd: '/repo' }, stored)
     expect(cold.capability).toBeNull()
     expect(cold.loading).toBe(true)
-    // 从未读过目录时只能显示占位目录；此时仍 fail closed，不猜测 Provider 能力。
     expect(cold.controls.permissionMode).toBe('default')
     expect(runControlSendBlockedReason('pi', cold.capability, cold.loading, cold.controls)).toBe(
       '运行权限能力尚未确认，暂不能发送'
